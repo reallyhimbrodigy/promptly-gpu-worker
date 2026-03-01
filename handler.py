@@ -16,38 +16,27 @@ def download_file(url, dest):
             f.write(chunk)
     size_mb = os.path.getsize(dest) / (1024 * 1024)
     print(f"[download] {os.path.basename(dest)}: {size_mb:.1f}MB")
-    return dest
 
 
 def handler(job):
     """
-    RunPod serverless handler for FFmpeg GPU rendering.
-
-    Input (job["input"]):
-    {
-        "clip_urls": ["https://...clip_0.mp4", ...],
-        "sfx_urls": ["https://...whoosh.mp3", ...],
-        "watermark_url": "https://...watermark.png",
-        "ffmpeg_args": "ffmpeg -y -hwaccel cuda ... {CLIP_0} ... {OUTPUT}",
-        "upload_url": "https://supabase.../storage/v1/object/..."
-    }
-
-    The Render worker uploads clip files to Supabase temp storage,
-    builds the FFmpeg command with placeholder paths, and sends it here.
-    This handler downloads the clips, runs FFmpeg with GPU encoding,
-    and uploads the rendered output back to Supabase.
+    RunPod serverless handler for FFmpeg rendering.
+    
+    Receives clip URLs, an FFmpeg command with placeholders, 
+    and a signed upload URL. Downloads clips, runs FFmpeg, 
+    uploads the result.
     """
     try:
         input_data = job["input"]
-        clip_urls = input_data["clip_urls"]
-        ffmpeg_args_str = input_data["ffmpeg_args"]
-        upload_url = input_data["upload_url"]
+        clip_urls = input_data.get("clip_urls", [])
+        ffmpeg_args_str = input_data.get("ffmpeg_args", "")
+        upload_url = input_data.get("upload_url", "")
         sfx_urls = input_data.get("sfx_urls", [])
         watermark_url = input_data.get("watermark_url", None)
 
         work_dir = tempfile.mkdtemp(prefix="promptly-render-")
         print(f"[worker] Work dir: {work_dir}")
-        print(f"[worker] Downloading {len(clip_urls)} clips, {len(sfx_urls)} sfx...")
+        print(f"[worker] Clips: {len(clip_urls)}, SFX: {len(sfx_urls)}, Watermark: {watermark_url is not None}")
 
         # Download all clip files
         clip_paths = []
@@ -59,7 +48,7 @@ def handler(job):
         # Download SFX files
         sfx_paths = []
         for i, url in enumerate(sfx_urls):
-            ext = url.split(".")[-1].split("?")[0]
+            ext = url.split(".")[-1].split("?")[0][:4]
             path = os.path.join(work_dir, f"sfx_{i}.{ext}")
             download_file(url, path)
             sfx_paths.append(path)
@@ -72,7 +61,7 @@ def handler(job):
 
         output_path = os.path.join(work_dir, "output.mp4")
 
-        # Replace placeholders in FFmpeg command with local paths
+        # Replace placeholders with local paths
         ffmpeg_cmd = ffmpeg_args_str
         for i, path in enumerate(clip_paths):
             ffmpeg_cmd = ffmpeg_cmd.replace(f"{{CLIP_{i}}}", path)
@@ -82,7 +71,7 @@ def handler(job):
             ffmpeg_cmd = ffmpeg_cmd.replace("{WATERMARK}", watermark_path)
         ffmpeg_cmd = ffmpeg_cmd.replace("{OUTPUT}", output_path)
 
-        print(f"[ffmpeg] Running: {ffmpeg_cmd[:300]}...")
+        print(f"[ffmpeg] Command (first 300 chars): {ffmpeg_cmd[:300]}")
         start_time = time.time()
 
         result = subprocess.run(
@@ -107,16 +96,12 @@ def handler(job):
         output_size = os.path.getsize(output_path) / (1024 * 1024)
         print(f"[ffmpeg] Output: {output_size:.1f}MB")
 
-        # Upload rendered video to the pre-signed Supabase URL
-        print(f"[upload] Uploading to Supabase...")
+        # Upload to Supabase
+        print(f"[upload] Uploading {output_size:.1f}MB to Supabase...")
         with open(output_path, 'rb') as f:
-            upload_resp = requests.put(
-                upload_url,
-                data=f,
-                headers={"Content-Type": "video/mp4"}
-            )
-            upload_resp.raise_for_status()
-        print(f"[upload] Done.")
+            resp = requests.put(upload_url, data=f, headers={"Content-Type": "video/mp4"})
+            resp.raise_for_status()
+        print(f"[upload] Done (status {resp.status_code})")
 
         # Cleanup
         shutil.rmtree(work_dir, ignore_errors=True)
@@ -128,7 +113,6 @@ def handler(job):
         }
 
     except Exception as e:
-        print(f"[error] {str(e)}")
         import traceback
         traceback.print_exc()
         return {"error": str(e)}
