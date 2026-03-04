@@ -92,10 +92,9 @@ def handler(job):
         elapsed = time.time() - start_time
         print(f"[ffmpeg] Exit: {result.returncode}, Time: {elapsed:.1f}s")
 
-        # Log stderr (FFmpeg outputs everything here)
+        # Log stderr tail for diagnostics
         if result.stderr:
             stderr_lines = result.stderr.strip().split("\n")
-            # Log last 30 lines to avoid flooding
             tail = stderr_lines[-30:] if len(stderr_lines) > 30 else stderr_lines
             for line in tail:
                 print(f"[ffmpeg] {line}")
