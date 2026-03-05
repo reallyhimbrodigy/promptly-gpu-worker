@@ -26,6 +26,7 @@ def handler(job):
         sfx_urls = input_data.get("sfx_urls", [])
         watermark_url = input_data.get("watermark_url", None)
         font_url = input_data.get("font_url", None)
+        captions_url = input_data.get("captions_url", None)
 
         work_dir = tempfile.mkdtemp(prefix="promptly-")
         print(f"[worker] Work dir: {work_dir}")
@@ -62,6 +63,13 @@ def handler(job):
             print(f"[worker] font_path={font_path}")
             print(f"[worker] font exists={os.path.exists(font_path)}")
 
+        # Download captions file
+        captions_path = None
+        if captions_url:
+            captions_path = os.path.join(work_dir, "captions.ass")
+            download_file(captions_url, captions_path)
+            print(f"[download] captions.ass: {os.path.getsize(captions_path) / 1024:.1f}KB")
+
         output_path = os.path.join(work_dir, "output.mp4")
 
         # Build FFmpeg command — replace placeholders with local paths
@@ -74,6 +82,8 @@ def handler(job):
             ffmpeg_cmd = ffmpeg_cmd.replace("{WATERMARK}", watermark_path)
         if font_path:
             ffmpeg_cmd = ffmpeg_cmd.replace("{FONT_PATH}", font_path)
+        if captions_path:
+            ffmpeg_cmd = ffmpeg_cmd.replace("{CAPTIONS_PATH}", captions_path)
         ffmpeg_cmd = ffmpeg_cmd.replace("{OUTPUT}", output_path)
 
         print(f"[worker] FONT_PATH still in cmd: {'{FONT_PATH}' in ffmpeg_cmd}")
