@@ -5,6 +5,7 @@ import requests
 import tempfile
 import time
 import shutil
+import shlex
 
 
 def download_file(url, dest):
@@ -98,7 +99,7 @@ def handler(job):
         # Run FFmpeg
         print(f"[ffmpeg] Running...")
         start_time = time.time()
-        result = subprocess.run(ffmpeg_cmd, shell=True, capture_output=True, text=True)
+        result = subprocess.run(shlex.split(ffmpeg_cmd), shell=False, capture_output=True, text=True)
         elapsed = time.time() - start_time
         print(f"[ffmpeg] Exit: {result.returncode}, Time: {elapsed:.1f}s")
 
