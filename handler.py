@@ -94,6 +94,24 @@ def handler(job):
         first_line = ver.stdout.split("\n")[0] if ver.stdout else "unknown"
         print(f"[worker] FFmpeg: {first_line}")
 
+        # Probe each clip before render
+        for i, path in enumerate(clip_paths):
+            probe = subprocess.run(
+                [
+                    "ffprobe",
+                    "-v",
+                    "error",
+                    "-show_entries",
+                    "format=duration:stream=codec_name,width,height,r_frame_rate,nb_frames",
+                    "-of",
+                    "csv=p=0",
+                    path,
+                ],
+                capture_output=True,
+                text=True,
+            )
+            print(f"[probe] clip_{i}: {probe.stdout.strip()}")
+
         # Build FFmpeg command — handle both array (new) and string (legacy) formats
         if isinstance(ffmpeg_args_input, list):
             # NEW FORMAT: args as JSON array — no shell escaping needed
