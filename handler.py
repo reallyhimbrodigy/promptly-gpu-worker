@@ -18,11 +18,27 @@ def download_file(url, dest):
     print(f"[download] {os.path.basename(dest)}: {size_mb:.1f}MB")
 
 
+def replace_placeholders(value, clip_paths, sfx_paths, watermark_path, font_path, captions_path, output_path):
+    """Replace {CLIP_0}, {FONT_PATH}, etc. in a string."""
+    for i, path in enumerate(clip_paths):
+        value = value.replace(f"{{CLIP_{i}}}", path)
+    for i, path in enumerate(sfx_paths):
+        value = value.replace(f"{{SFX_{i}}}", path)
+    if watermark_path:
+        value = value.replace("{WATERMARK}", watermark_path)
+    if font_path:
+        value = value.replace("{FONT_PATH}", font_path)
+    if captions_path:
+        value = value.replace("{CAPTIONS_PATH}", captions_path)
+    value = value.replace("{OUTPUT}", output_path)
+    return value
+
+
 def handler(job):
     try:
         input_data = job["input"]
         clip_urls = input_data.get("clip_urls", [])
-        ffmpeg_args_str = input_data.get("ffmpeg_args", "")
+        ffmpeg_args_input = input_data.get("ffmpeg_args", "")
         upload_url = input_data.get("upload_url", "")
         sfx_urls = input_data.get("sfx_urls", [])
         watermark_url = input_data.get("watermark_url", None)
@@ -73,33 +89,39 @@ def handler(job):
 
         output_path = os.path.join(work_dir, "output.mp4")
 
-        # Build FFmpeg command — replace placeholders with local paths
-        ffmpeg_cmd = ffmpeg_args_str
-        for i, path in enumerate(clip_paths):
-            ffmpeg_cmd = ffmpeg_cmd.replace(f"{{CLIP_{i}}}", path)
-        for i, path in enumerate(sfx_paths):
-            ffmpeg_cmd = ffmpeg_cmd.replace(f"{{SFX_{i}}}", path)
-        if watermark_path:
-            ffmpeg_cmd = ffmpeg_cmd.replace("{WATERMARK}", watermark_path)
-        if font_path:
-            ffmpeg_cmd = ffmpeg_cmd.replace("{FONT_PATH}", font_path)
-        if captions_path:
-            ffmpeg_cmd = ffmpeg_cmd.replace("{CAPTIONS_PATH}", captions_path)
-        ffmpeg_cmd = ffmpeg_cmd.replace("{OUTPUT}", output_path)
-
-        print(f"[worker] FONT_PATH still in cmd: {'{FONT_PATH}' in ffmpeg_cmd}")
-        print(f"[worker] cmd first 300 chars: {ffmpeg_cmd[:300]}")
-        print(f"[worker] FFmpeg cmd length: {len(ffmpeg_cmd)} chars")
-
         # Check FFmpeg version
         ver = subprocess.run(["ffmpeg", "-version"], capture_output=True, text=True)
         first_line = ver.stdout.split("\n")[0] if ver.stdout else "unknown"
         print(f"[worker] FFmpeg: {first_line}")
 
-        # Run FFmpeg
-        print(f"[ffmpeg] Running...")
-        start_time = time.time()
-        result = subprocess.run(shlex.split(ffmpeg_cmd), shell=False, capture_output=True, text=True)
+        # Build FFmpeg command — handle both array (new) and string (legacy) formats
+        if isinstance(ffmpeg_args_input, list):
+            # NEW FORMAT: args as JSON array — no shell escaping needed
+            print(f"[worker] FFmpeg args format: array ({len(ffmpeg_args_input)} elements)")
+            ffmpeg_cmd_list = [
+                replace_placeholders(arg, clip_paths, sfx_paths, watermark_path, font_path, captions_path, output_path)
+                for arg in ffmpeg_args_input
+            ]
+            print(f"[worker] FONT_PATH still in cmd: {any('{FONT_PATH}' in a for a in ffmpeg_cmd_list)}")
+            print(f"[worker] cmd first 300 chars: {' '.join(ffmpeg_cmd_list)[:300]}")
+            print(f"[worker] FFmpeg cmd length: {sum(len(a) for a in ffmpeg_cmd_list)} chars")
+
+            print(f"[ffmpeg] Running...")
+            start_time = time.time()
+            result = subprocess.run(ffmpeg_cmd_list, capture_output=True, text=True)
+
+        else:
+            # LEGACY FORMAT: string command — use shlex.split for parsing
+            print(f"[worker] FFmpeg args format: string ({len(ffmpeg_args_input)} chars)")
+            ffmpeg_cmd = replace_placeholders(ffmpeg_args_input, clip_paths, sfx_paths, watermark_path, font_path, captions_path, output_path)
+            print(f"[worker] FONT_PATH still in cmd: {'{FONT_PATH}' in ffmpeg_cmd}")
+            print(f"[worker] cmd first 300 chars: {ffmpeg_cmd[:300]}")
+            print(f"[worker] FFmpeg cmd length: {len(ffmpeg_cmd)} chars")
+
+            print(f"[ffmpeg] Running...")
+            start_time = time.time()
+            result = subprocess.run(shlex.split(ffmpeg_cmd), capture_output=True, text=True)
+
         elapsed = time.time() - start_time
         print(f"[ffmpeg] Exit: {result.returncode}, Time: {elapsed:.1f}s")
 
@@ -122,10 +144,6 @@ def handler(job):
         output_size = os.path.getsize(output_path)
         output_size_mb = output_size / (1024 * 1024)
         print(f"[ffmpeg] Output: {output_size_mb:.1f}MB")
-
-        # Validate minimum size
-        if output_size < 2 * 1024 * 1024:
-            return {"error": f"Output too small ({output_size} bytes), likely corrupted"}
 
         # Upload
         with open(output_path, 'rb') as f:
