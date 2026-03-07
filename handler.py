@@ -18,12 +18,14 @@ def download_file(url, dest):
     print(f"[download] {os.path.basename(dest)}: {size_mb:.1f}MB")
 
 
-def replace_placeholders(value, clip_paths, sfx_paths, watermark_path, font_path, captions_path, output_path):
-    """Replace {CLIP_0}, {FONT_PATH}, etc. in a string."""
+def replace_placeholders(value, clip_paths, sfx_paths, broll_paths, watermark_path, font_path, captions_path, output_path):
+    """Replace {CLIP_0}, {BROLL_0}, {FONT_PATH}, etc. in a string."""
     for i, path in enumerate(clip_paths):
         value = value.replace(f"{{CLIP_{i}}}", path)
     for i, path in enumerate(sfx_paths):
         value = value.replace(f"{{SFX_{i}}}", path)
+    for i, path in enumerate(broll_paths):
+        value = value.replace(f"{{BROLL_{i}}}", path)
     if watermark_path:
         value = value.replace("{WATERMARK}", watermark_path)
     if font_path:
@@ -41,13 +43,14 @@ def handler(job):
         ffmpeg_args_input = input_data.get("ffmpeg_args", "")
         upload_url = input_data.get("upload_url", "")
         sfx_urls = input_data.get("sfx_urls", [])
+        broll_urls = input_data.get("broll_urls", [])
         watermark_url = input_data.get("watermark_url", None)
         font_url = input_data.get("font_url", None)
         captions_url = input_data.get("captions_url", None)
 
         work_dir = tempfile.mkdtemp(prefix="promptly-")
         print(f"[worker] Work dir: {work_dir}")
-        print(f"[worker] Clips: {len(clip_urls)}, SFX: {len(sfx_urls)}")
+        print(f"[worker] Clips: {len(clip_urls)}, SFX: {len(sfx_urls)}, B-roll: {len(broll_urls)}")
 
         # Download clips
         clip_paths = []
@@ -63,6 +66,16 @@ def handler(job):
             path = os.path.join(work_dir, f"sfx_{i}.{ext}")
             download_file(url, path)
             sfx_paths.append(path)
+
+        # Download b-roll clips
+        broll_paths = []
+        for i, url in enumerate(broll_urls):
+            path = os.path.join(work_dir, f"broll_{i}.mp4")
+            download_file(url, path)
+            broll_paths.append(path)
+
+        if broll_paths:
+            print(f"[worker] Downloaded {len(broll_paths)} b-roll clips")
 
         # Download watermark
         watermark_path = None
@@ -117,7 +130,7 @@ def handler(job):
             # NEW FORMAT: args as JSON array — no shell escaping needed
             print(f"[worker] FFmpeg args format: array ({len(ffmpeg_args_input)} elements)")
             ffmpeg_cmd_list = [
-                replace_placeholders(arg, clip_paths, sfx_paths, watermark_path, font_path, captions_path, output_path)
+                replace_placeholders(arg, clip_paths, sfx_paths, broll_paths, watermark_path, font_path, captions_path, output_path)
                 for arg in ffmpeg_args_input
             ]
             print(f"[worker] FONT_PATH still in cmd: {any('{FONT_PATH}' in a for a in ffmpeg_cmd_list)}")
@@ -131,7 +144,7 @@ def handler(job):
         else:
             # LEGACY FORMAT: string command — use shlex.split for parsing
             print(f"[worker] FFmpeg args format: string ({len(ffmpeg_args_input)} chars)")
-            ffmpeg_cmd = replace_placeholders(ffmpeg_args_input, clip_paths, sfx_paths, watermark_path, font_path, captions_path, output_path)
+            ffmpeg_cmd = replace_placeholders(ffmpeg_args_input, clip_paths, sfx_paths, broll_paths, watermark_path, font_path, captions_path, output_path)
             print(f"[worker] FONT_PATH still in cmd: {'{FONT_PATH}' in ffmpeg_cmd}")
             print(f"[worker] cmd first 300 chars: {ffmpeg_cmd[:300]}")
             print(f"[worker] FFmpeg cmd length: {len(ffmpeg_cmd)} chars")
