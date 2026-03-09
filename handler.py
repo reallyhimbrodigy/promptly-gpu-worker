@@ -1,4 +1,31 @@
-import runpod
+import sys
+print(f"[startup] Python {sys.version}", flush=True)
+
+try:
+    import runpod
+    print("[startup] runpod OK", flush=True)
+except Exception as e:
+    print(f"[startup] runpod FAILED: {e}", flush=True)
+
+try:
+    from deepgram import DeepgramClient, PrerecordedOptions
+    print("[startup] deepgram OK", flush=True)
+except Exception as e:
+    print(f"[startup] deepgram FAILED: {e}", flush=True)
+
+try:
+    import google.generativeai as genai
+    print("[startup] google.generativeai OK", flush=True)
+except Exception as e:
+    print(f"[startup] google.generativeai FAILED: {e}", flush=True)
+
+try:
+    import anthropic
+    print("[startup] anthropic OK", flush=True)
+except Exception as e:
+    print(f"[startup] anthropic FAILED: {e}", flush=True)
+
+print("[startup] all import checks done", flush=True)
 import subprocess
 import os
 import requests
@@ -7,9 +34,6 @@ import time
 import shutil
 import json
 import re
-import anthropic
-import google.generativeai as genai
-from deepgram import DeepgramClient, PrerecordedOptions
 
 
 def handler(job):
