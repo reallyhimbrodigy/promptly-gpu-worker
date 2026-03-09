@@ -6,6 +6,7 @@ import tempfile
 import time
 import shutil
 import shlex
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 def download_file(url, dest):
@@ -16,6 +17,28 @@ def download_file(url, dest):
             f.write(chunk)
     size_mb = os.path.getsize(dest) / (1024 * 1024)
     print(f"[download] {os.path.basename(dest)}: {size_mb:.1f}MB")
+
+
+def download_file_task(args):
+    """Wrapper for parallel downloads. Returns (key, path) on success."""
+    url, dest, label = args
+    download_file(url, dest)
+    return (label, dest)
+
+
+def download_all_parallel(tasks, max_workers=8):
+    """
+    Download all files in parallel.
+    tasks: list of (url, dest_path, label) tuples
+    Returns dict of {label: path}
+    """
+    results = {}
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(download_file_task, task): task for task in tasks}
+        for future in as_completed(futures):
+            label, path = future.result()
+            results[label] = path
+    return results
 
 
 def replace_placeholders(value, clip_paths, sfx_paths, broll_paths, watermark_path, font_path, captions_path, output_path):
@@ -52,52 +75,59 @@ def handler(job):
         print(f"[worker] Work dir: {work_dir}")
         print(f"[worker] Clips: {len(clip_urls)}, SFX: {len(sfx_urls)}, B-roll: {len(broll_urls)}")
 
-        # Download clips
-        clip_paths = []
-        for i, url in enumerate(clip_urls):
-            path = os.path.join(work_dir, f"clip_{i}.mp4")
-            download_file(url, path)
-            clip_paths.append(path)
+        # Build all download tasks upfront
+        download_tasks = []
 
-        # Download SFX
-        sfx_paths = []
+        for i, url in enumerate(clip_urls):
+            dest = os.path.join(work_dir, f"clip_{i}.mp4")
+            download_tasks.append((url, dest, f"clip_{i}"))
+
         for i, url in enumerate(sfx_urls):
             ext = url.split(".")[-1].split("?")[0][:4]
-            path = os.path.join(work_dir, f"sfx_{i}.{ext}")
-            download_file(url, path)
-            sfx_paths.append(path)
+            dest = os.path.join(work_dir, f"sfx_{i}.{ext}")
+            download_tasks.append((url, dest, f"sfx_{i}"))
 
-        # Download b-roll clips
-        broll_paths = []
         for i, url in enumerate(broll_urls):
-            path = os.path.join(work_dir, f"broll_{i}.mp4")
-            download_file(url, path)
-            broll_paths.append(path)
+            dest = os.path.join(work_dir, f"broll_{i}.mp4")
+            download_tasks.append((url, dest, f"broll_{i}"))
+
+        if watermark_url:
+            dest = os.path.join(work_dir, "watermark.png")
+            download_tasks.append((watermark_url, dest, "watermark"))
+
+        if font_url:
+            dest = os.path.join(work_dir, "Montserrat-Black.ttf")
+            download_tasks.append((font_url, dest, "font"))
+
+        if captions_url:
+            dest = os.path.join(work_dir, "captions.ass")
+            download_tasks.append((captions_url, dest, "captions"))
+
+        # Download everything in parallel
+        print(f"[worker] Downloading {len(download_tasks)} files in parallel...")
+        dl_start = time.time()
+        downloaded = download_all_parallel(download_tasks)
+        dl_elapsed = time.time() - dl_start
+        print(f"[worker] All downloads complete in {dl_elapsed:.1f}s")
+
+        # Reconstruct ordered path lists from download results
+        clip_paths = [downloaded[f"clip_{i}"] for i in range(len(clip_urls))]
+        sfx_paths = [downloaded[f"sfx_{i}"] for i in range(len(sfx_urls))]
+        broll_paths = [downloaded[f"broll_{i}"] for i in range(len(broll_urls))]
+        watermark_path = downloaded.get("watermark", None)
+        font_path = downloaded.get("font", None)
+        captions_path = downloaded.get("captions", None)
 
         if broll_paths:
             print(f"[worker] Downloaded {len(broll_paths)} b-roll clips")
 
-        # Download watermark
-        watermark_path = None
-        if watermark_url:
-            watermark_path = os.path.join(work_dir, "watermark.png")
-            download_file(watermark_url, watermark_path)
-
-        # Download font
-        font_path = None
-        if font_url:
-            font_path = os.path.join(work_dir, "Montserrat-Black.ttf")
-            download_file(font_url, font_path)
+        if font_path:
             print(f"[worker] Font downloaded: {font_path}")
             print(f"[worker] font_url={font_url}")
             print(f"[worker] font_path={font_path}")
             print(f"[worker] font exists={os.path.exists(font_path)}")
 
-        # Download captions file
-        captions_path = None
-        if captions_url:
-            captions_path = os.path.join(work_dir, "captions.ass")
-            download_file(captions_url, captions_path)
+        if captions_path:
             print(f"[download] captions.ass: {os.path.getsize(captions_path) / 1024:.1f}KB")
 
         output_path = os.path.join(work_dir, "output.mp4")
@@ -112,12 +142,9 @@ def handler(job):
             probe = subprocess.run(
                 [
                     "ffprobe",
-                    "-v",
-                    "error",
-                    "-show_entries",
-                    "format=duration:stream=codec_name,width,height,r_frame_rate,nb_frames",
-                    "-of",
-                    "csv=p=0",
+                    "-v", "error",
+                    "-show_entries", "format=duration:stream=codec_name,width,height,r_frame_rate,nb_frames",
+                    "-of", "csv=p=0",
                     path,
                 ],
                 capture_output=True,
@@ -125,9 +152,8 @@ def handler(job):
             )
             print(f"[probe] clip_{i}: {probe.stdout.strip()}")
 
-        # Build FFmpeg command — handle both array (new) and string (legacy) formats
+        # Build FFmpeg command - handle both array (new) and string (legacy) formats
         if isinstance(ffmpeg_args_input, list):
-            # NEW FORMAT: args as JSON array — no shell escaping needed
             print(f"[worker] FFmpeg args format: array ({len(ffmpeg_args_input)} elements)")
             ffmpeg_cmd_list = [
                 replace_placeholders(arg, clip_paths, sfx_paths, broll_paths, watermark_path, font_path, captions_path, output_path)
@@ -142,7 +168,6 @@ def handler(job):
             result = subprocess.run(ffmpeg_cmd_list, capture_output=True, text=True)
 
         else:
-            # LEGACY FORMAT: string command — use shlex.split for parsing
             print(f"[worker] FFmpeg args format: string ({len(ffmpeg_args_input)} chars)")
             ffmpeg_cmd = replace_placeholders(ffmpeg_args_input, clip_paths, sfx_paths, broll_paths, watermark_path, font_path, captions_path, output_path)
             print(f"[worker] FONT_PATH still in cmd: {'{FONT_PATH}' in ffmpeg_cmd}")
@@ -176,14 +201,19 @@ def handler(job):
         output_size_mb = output_size / (1024 * 1024)
         print(f"[ffmpeg] Output: {output_size_mb:.1f}MB")
 
-        # Upload
+        # Upload result
         with open(output_path, 'rb') as f:
             resp = requests.put(upload_url, data=f, headers={"Content-Type": "video/mp4"})
             resp.raise_for_status()
         print(f"[upload] Done")
 
         shutil.rmtree(work_dir, ignore_errors=True)
-        return {"status": "success", "render_time": round(elapsed, 1), "output_size_mb": round(output_size_mb, 1)}
+        return {
+            "status": "success",
+            "render_time": round(elapsed, 1),
+            "output_size_mb": round(output_size_mb, 1),
+            "download_time": round(dl_elapsed, 1),
+        }
 
     except Exception as e:
         import traceback
