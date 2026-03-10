@@ -130,6 +130,13 @@ def build_color_grade(baseline, intent_name):
 
 GEMINI_ANALYSIS_PROMPT = """You are analyzing video footage for a professional editor. Your job is to describe what you SEE — the visuals, the shots, the lighting, the energy. Do NOT transcribe or timestamp the speech; that will be handled separately by a dedicated audio tool.
 
+For the audio.speech_source field, assess the relationship between any spoken words in the audio and the person on camera:
+  on_camera    — a real person is visibly speaking to camera or to someone else; mouth movement matches the audio naturally; room tone and mic quality are consistent with the shooting environment
+  lip_sync     — a person on camera is mouthing along to audio that is clearly pre-recorded or a platform sound; audio quality is polished/studio relative to the visuals; mouth movement is performed rather than natural
+  voiceover    — narration or commentary plays over footage but no person on camera appears to be the source; could be the same creator recorded separately
+  platform_sound — a trending audio clip, sound effect, or viral audio is playing over the footage; the spoken content has no relationship to what is happening visually
+  none         — no speech present in the audio
+
 Watch the ENTIRE video from first frame to last frame.
 Describe each visually distinct segment of the video. Focus on what you see — the lighting, the framing, the action, the energy.
 Frame layout analysis: Look at where the main subject is positioned in the frame. Report whether the video already has any burned-in text, captions, subtitles, logos, or lower-third graphics. Note where these existing overlays appear. Identify any open/free areas of the frame where new text could be placed without covering the subject or conflicting with existing graphics.
@@ -154,7 +161,8 @@ Return ONLY valid JSON:
     }
   ],
   "audio": {
-    "music": "<genre/tempo/energy if present, or 'none'>"
+    "music": "<genre/tempo/energy if present, or 'none'>",
+    "speech_source": "<on_camera | lip_sync | voiceover | platform_sound | none>"
   },
   "footage_assessment": {
     "content_type": "<what kind of video>",
@@ -492,6 +500,217 @@ def detect_beats(source_path):
     return []
 
 
+# ─── CONTENT MODE DETECTION ──────────────────────────────────────────────────
+
+def detect_content_mode(deepgram_words, analysis):
+    """
+    Determine which editing path to use.
+
+    Returns one of three modes:
+      "speech"            — genuine on-camera speech drives cuts
+      "speech_with_music" — genuine on-camera speech + background music; speech drives cuts,
+                            beats inform transition/energy choices
+      "music_edit"        — no genuine speech (music-only, platform sound, lip-sync, voiceover);
+                            pipeline pre-solves beat-aligned cuts
+
+    speech_source from Gemini is the primary signal. Deepgram word count is the fallback
+    when speech_source is absent (e.g. cached analysis from before this field existed).
+
+    TikTok/platform sounds and lip-sync audio are routed to music_edit regardless of
+    how many words Deepgram transcribed — those words belong to someone else's audio
+    and have no relationship to the visual cut points in this footage.
+    """
+    word_count = len([w for w in (deepgram_words or []) if (w.get("word") or "").strip()])
+    has_beats = len(analysis.get("beat_timestamps") or []) > 3
+    audio = analysis.get("audio") or {}
+    audio_field = audio.get("music") or ""
+    has_music = bool(audio_field) and str(audio_field).strip().lower() not in ("none", "no music", "")
+    speech_source = str(audio.get("speech_source") or "").strip().lower()
+
+    # speech_source values where the audio words do NOT belong to this creator's
+    # on-camera performance and should NOT be used to drive editorial cuts
+    NON_ORIGINAL_SPEECH = {"lip_sync", "voiceover", "platform_sound", "none", ""}
+
+    if speech_source == "on_camera":
+        # Genuine speech — words can drive cuts
+        if word_count >= 5 and has_music and has_beats:
+            mode = "speech_with_music"
+        else:
+            mode = "speech"
+    elif speech_source in NON_ORIGINAL_SPEECH:
+        # Non-original audio: TikTok sound, lip-sync, voiceover, or no speech at all
+        # Words from Deepgram are irrelevant — use beat alignment if possible
+        mode = "music_edit" if has_beats else "speech"
+    else:
+        # speech_source missing — old cached analysis without this field
+        # Fall back to word_count heuristic
+        if word_count < 5 and has_beats:
+            mode = "music_edit"
+        elif word_count >= 5 and has_music and has_beats:
+            mode = "speech_with_music"
+        else:
+            mode = "speech"
+
+    print(
+        f"[pipeline] content_mode={mode} "
+        f"(speech_source={speech_source or 'unknown'}, words={word_count}, "
+        f"beats={len(analysis.get('beat_timestamps') or [])}, has_music={has_music})",
+        flush=True
+    )
+    return mode
+
+
+# ─── BEAT-ALIGNED CUT BUILDER ────────────────────────────────────────────────
+
+def score_frame_difference(source_path, timestamp, work_dir):
+    """
+    Compute a normalized pixel difference score at a timestamp.
+    0.0 = identical frames, 1.0 = very different.
+    Uses PSNR between two frames 0.1s apart. Returns 0.0 on any error.
+    """
+    fa = os.path.join(work_dir, f"fda_{int(timestamp*1000)}.jpg")
+    fb = os.path.join(work_dir, f"fdb_{int(timestamp*1000)}.jpg")
+    try:
+        t_a = max(0.0, timestamp - 0.05)
+        t_b = timestamp + 0.05
+
+        for t_seek, fout in [(t_a, fa), (t_b, fb)]:
+            subprocess.run(
+                ["ffmpeg", "-y", "-ss", str(t_seek), "-i", source_path,
+                 "-frames:v", "1", "-vf", "scale=128:228", "-q:v", "10", fout],
+                capture_output=True
+            )
+
+        if not os.path.exists(fa) or not os.path.exists(fb):
+            return 0.0
+
+        result = subprocess.run(
+            ["ffmpeg", "-i", fa, "-i", fb, "-lavfi", "psnr", "-f", "null", "-"],
+            capture_output=True, text=True
+        )
+        m = re.search(r"average:([\d.]+|inf)", result.stderr)
+        if m:
+            raw = m.group(1)
+            if raw == "inf":
+                return 0.0
+            psnr = float(raw)
+            return max(0.0, min(1.0, 1.0 - (psnr / 50.0)))
+    except Exception as e:
+        print(f"[framediff] error at {timestamp:.3f}s: {e}", flush=True)
+    finally:
+        for f in [fa, fb]:
+            try:
+                if os.path.exists(f):
+                    os.unlink(f)
+            except Exception:
+                pass
+    return 0.0
+
+
+def align_beats_to_cuts(beat_timestamps, visual_cuts, source_duration, source_path, work_dir,
+                         snap_window=0.5, min_clip_duration=0.8, frame_diff_threshold=0.25):
+    """
+    Build a beat-aligned cut list for music_edit mode.
+
+    Priority hierarchy per beat:
+      1. Scene change within snap_window  → snap (cleanest — footage already changing)
+      2. Significant frame difference     → snap to beat (visually motivated)
+      3. Static footage                   → force beat (user intent is beat sync;
+                                            renderer masks continuity break with transitions)
+
+    Frame difference scoring is parallelized across all beats lacking a nearby scene change.
+
+    Returns list of dicts:
+      { source_start, source_end, duration, beat_time, snap_type, offset }
+    snap_type: "scene_change" | "frame_diff" | "beat_forced"
+    """
+    if not beat_timestamps or source_duration <= 0:
+        return []
+
+    beats = sorted(beat_timestamps)
+    scene_set = sorted(visual_cuts or [])
+
+    beats_need_scoring = [
+        bt for bt in beats
+        if not any(abs(bt - sc) <= snap_window for sc in scene_set)
+    ]
+
+    frame_scores = {}
+    if beats_need_scoring:
+        import concurrent.futures as _cf
+
+        def _score(bt):
+            return bt, score_frame_difference(source_path, bt, work_dir)
+
+        with _cf.ThreadPoolExecutor(max_workers=min(8, len(beats_need_scoring))) as ex:
+            for bt, score in ex.map(_score, beats_need_scoring):
+                frame_scores[bt] = score
+
+    candidates = {}
+    for sc in scene_set:
+        candidates[sc] = "scene_change"
+    for bt in beats_need_scoring:
+        score = frame_scores.get(bt, 0.0)
+        candidates[bt] = "frame_diff" if score >= frame_diff_threshold else "beat_forced"
+
+    candidate_times = sorted(candidates.keys())
+
+    used = set()
+    cut_points = []
+
+    for bt in beats:
+        best = None
+        best_dist = float("inf")
+        for ct in candidate_times:
+            if ct in used:
+                continue
+            dist = abs(ct - bt)
+            if dist <= snap_window and dist < best_dist:
+                best = ct
+                best_dist = dist
+        if best is not None:
+            used.add(best)
+            cut_points.append({"time": best, "beat_time": bt,
+                                "snap_type": candidates[best], "offset": round(best - bt, 3)})
+        else:
+            cut_points.append({"time": bt, "beat_time": bt,
+                                "snap_type": "beat_forced", "offset": 0.0})
+
+    seen_keys = set()
+    unique_cuts = []
+    for cp in sorted(cut_points, key=lambda x: x["time"]):
+        key = round(cp["time"] * 10)
+        if key not in seen_keys:
+            seen_keys.add(key)
+            unique_cuts.append(cp)
+
+    cut_times = sorted(cp["time"] for cp in unique_cuts)
+    boundaries = [0.0] + cut_times + [source_duration]
+
+    raw_clips = []
+    for i in range(len(boundaries) - 1):
+        start = round(boundaries[i] * 1000) / 1000
+        end = round(boundaries[i + 1] * 1000) / 1000
+        dur = end - start
+        if dur < min_clip_duration:
+            continue
+        cp_meta = next((cp for cp in unique_cuts if abs(cp["time"] - start) < 0.05), None)
+        raw_clips.append({
+            "source_start": start,
+            "source_end": end,
+            "duration": round(dur * 1000) / 1000,
+            "beat_time": cp_meta["beat_time"] if cp_meta else start,
+            "snap_type": cp_meta["snap_type"] if cp_meta else "beat_forced",
+            "offset": cp_meta["offset"] if cp_meta else 0.0,
+        })
+
+    n_scene = sum(1 for c in raw_clips if c["snap_type"] == "scene_change")
+    n_diff = sum(1 for c in raw_clips if c["snap_type"] == "frame_diff")
+    n_forced = sum(1 for c in raw_clips if c["snap_type"] == "beat_forced")
+    print(f"[beat_align] {len(beats)} beats → {len(raw_clips)} clips "
+          f"(scene={n_scene}, frame_diff={n_diff}, forced={n_forced})", flush=True)
+    return raw_clips
+
 
 def detect_scene_cuts(video_path, threshold=3):
     result = subprocess.run(
@@ -793,6 +1012,190 @@ def expand_vibe_intent(vibe):
 
 # ─── GENERATE EDIT (Claude Sonnet) ───────────────────────────────────────────
 
+def build_music_edit_prompt(analysis, expanded_vibe):
+    """
+    Claude prompt for music_edit mode.
+    Cut timestamps are pre-solved by the pipeline. Claude chooses which clips to keep,
+    sets transitions, color grade, and effects. Scene frames are injected by generate_edit().
+    """
+    beat_clips = analysis.get("beat_aligned_clips") or []
+    duration = float(analysis.get("duration") or 0)
+    fq = analysis.get("footage_quality") or {}
+    cb = analysis.get("color_baseline") or {}
+    frame_layout = analysis.get("frame_layout") or {}
+    vp = analysis.get("footage_assessment") or analysis.get("video_profile") or {}
+    beat_timestamps = analysis.get("beat_timestamps") or []
+    intents = ", ".join(COLOR_INTENTS.keys())
+
+    clip_lines = []
+    for i, clip in enumerate(beat_clips):
+        snap = clip.get("snap_type", "beat_forced")
+        label = {
+            "scene_change": "scene cut — footage changes here, clean cut",
+            "frame_diff": "visual change — significant movement, clean cut",
+            "beat_forced": "beat forced — static footage, use masking transition",
+        }.get(snap, snap)
+        clip_lines.append(
+            f"  Clip {i+1}: {clip['source_start']:.3f}s → {clip['source_end']:.3f}s "
+            f"({clip['duration']:.2f}s) [{label}]"
+        )
+    clips_block = "\n".join(clip_lines) if clip_lines else "  none"
+
+    noise = fq.get("noise_level", "low")
+    sharpness = fq.get("source_sharpness", "normal")
+    highlights = fq.get("highlight_condition", "normal")
+    shadows = fq.get("shadow_condition", "normal")
+    richness = fq.get("color_richness", "normal")
+    skin = fq.get("skin_tones_present", True)
+    lighting = fq.get("lighting_type", "unknown")
+
+    render_recs = [
+        f"NOISE: {'denoise=true' if noise in ('medium','high') else 'denoise=false'} (observed: {noise})",
+        f"SHARPNESS: {'sharpening=true recommended' if sharpness == 'soft' else f'sharpening your call ({sharpness})'}",
+        f"HIGHLIGHTS: {'highlight_rolloff=true recommended' if highlights in ('clipped','bright') else f'highlight_rolloff your call ({highlights})'}",
+        f"SHADOWS: {'shadow_lift=true recommended' if shadows in ('crushed','deep') else f'shadow_lift your call ({shadows})'}",
+        f"COLOR: {'vibrance=true recommended' if richness in ('flat','muted') else f'vibrance your call ({richness})'}",
+    ]
+    if skin:
+        render_recs.append("SKIN: Skin tones present — vibrance and teal_orange affect them")
+    render_recs.append(f"LIGHTING: {lighting}")
+    render_recs_block = "\n".join(f"  {r}" for r in render_recs)
+
+    content_type = vp.get("content_type") or "unknown"
+    visual_character = vp.get("visual_character") or vp.get("visual_style") or "unknown"
+    strongest = vp.get("strongest_moments") or "not specified"
+    weakest = vp.get("weakest_moments") or "not specified"
+    cb_assessment = cb.get("assessment") or "No major exposure issues detected."
+    frame_overlays = (frame_layout.get("existing_overlays") or {}).get("overlay_locations", "none")
+
+    static_part = f"""You are the professional editor inside Promptly, a mobile app that competes with CapCut and Captions. This video has no speech — it is footage set to music. The pipeline has already detected the audio beats and built a beat-aligned cut list. Your job is the creative treatment.
+
+=== YOUR ROLE IN THIS EDIT ===
+
+The cut timestamps are already solved. The pipeline detected {len(beat_timestamps)} beats and produced {len(beat_clips)} pre-aligned clips. The source_start and source_end values are fixed — do not invent or change timestamps. Copy them exactly from the clip list.
+
+Your decisions:
+1. Which clips to include and in what order (you may exclude clips by omitting them)
+2. transition_out for each clip — your primary creative lever in a beat-sync edit
+3. Color grade and all global visual parameters
+4. Per-clip effects: zoom, speed, speed_ramp, freeze_frame, motion_blur_transition
+
+This is a beat-sync edit. Every cut lands on or near a musical beat. Transitions and effects reinforce the rhythm — the viewer feels the music through the editing.
+
+=== PRE-BUILT CLIP LIST (timestamps are locked — copy exactly) ===
+
+{clips_block}
+
+Cut type rules:
+  scene cut or visual change → any transition works, footage supports it cleanly
+  beat forced → footage is continuous here, cut is mid-movement
+    REQUIRED: motion_blur_transition=true on every beat_forced clip
+    USE: dissolve, flash, glitch, whip_left, or whip_right to mask the continuity break
+    AVOID: none, fade, wipeleft/wiperight/wipeup/wipedown — these expose the break
+
+=== THIS VIDEO ===
+
+Duration: {duration:.2f}s
+Content type: {content_type}
+Visual character: {visual_character}
+Strongest moments: {strongest}
+Weakest moments: {weakest}
+
+Color baseline: {cb_assessment}
+
+Footage quality (Gemini directly observed):
+{render_recs_block}
+
+Frame layout:
+  Subject: {frame_layout.get("subject_position", "unknown")}
+  Existing overlays: {frame_overlays}
+  Open space: {frame_layout.get("free_zones", "unknown")}
+
+Platform safe zones (9:16): bottom 20% covered by TikTok/Reels UI. Top 10% status bar. Safe zone: middle 70%.
+
+=== SCENE FRAMES ===
+
+Frame thumbnails follow — use them to make shot-specific decisions on color grade, transitions, and whether clips have strong or weak visual content.
+
+=== TOOLS ===
+
+Per-clip (copy source_start/source_end exactly from the clip list above):
+  source_start, source_end — LOCKED. Copy from clip list. Do not change.
+  transition_out — none, fade, fadeblack, fadewhite, dissolve, wipeleft, wiperight, wipeup, wipedown,
+    smoothleft, smoothright, smoothup, smoothdown, zoomin, flash, glitch, whip_left, whip_right
+  transition_sound — none, swoosh, thud, pop, ding, reverb_hit, typing, ching, shutter
+    Pairings: flash→pop or thud | glitch→thud or reverb_hit | whip→swoosh | dissolve→none or reverb_hit
+    Do not use the same transition_sound on consecutive clips.
+  sfx_style — none, swoosh, thud, shutter
+  zoom — none, slow_in, slow_out, punch_in, punch_out
+  cut_zoom — true/false
+  speed — 0.5, 0.75, 1.0, 1.05, 1.1, 1.15, 1.25, 1.5, 2.0
+  speed_ramp — none, hero_time, bullet, flash_in, flash_out, montage
+  freeze_frame — true/false. Holds last frame 0.3s. Use sparingly on climactic beats for emphasis.
+  motion_blur_transition — true/false. Required=true on all beat_forced clips. Optional on others.
+
+Global:
+  color_intent — {intents}
+  vignette — none, light, medium, strong
+  sharpening — true/false
+  grain — none, subtle, medium, heavy
+  denoise — true/false
+  cinematic_bars — true/false
+  shadow_lift — true/false
+  highlight_rolloff — true/false
+  vibrance — true/false
+  teal_orange — none, subtle, strong
+  caption_style — always "none"
+  audio_denoise — always false (do not denoise music)
+  beat_sync — always true
+  outro — none, fade_black, fade_white
+  text_overlays — optional. Title cards, location text, or visual emphasis only.
+    Max 1-2. Keep minimal — this is a visual edit, not an information edit.
+  background_music — always "none"
+  aspect_ratio — always "9:16"
+
+=== RESPONSE FORMAT ===
+
+Respond with ONLY this JSON:
+
+{{
+  "notes": "<50 words max>",
+  "color_intent": "<intent>",
+  "background_music": "none",
+  "caption_style": "none",
+  "caption_position": "lower-third",
+  "caption_keywords": [],
+  "audio_ducking": false,
+  "audio_denoise": false,
+  "beat_sync": true,
+  "outro": "<outro>",
+  "aspect_ratio": "9:16",
+  "vignette": "<level>",
+  "sharpening": <true|false>,
+  "grain": "<level>",
+  "denoise": <true|false>,
+  "cinematic_bars": <true|false>,
+  "shadow_lift": <true|false>,
+  "highlight_rolloff": <true|false>,
+  "vibrance": <true|false>,
+  "teal_orange": "<level>",
+  "text_overlays": [
+    {{ "text": "<text>", "position": "<pos>", "appear_at_clip": <n>, "style": "<style>", "sfx_style": "<sfx>" }}
+  ],
+  "broll": [],
+  "cuts": [
+    {{ "source_start": <locked>, "source_end": <locked>, "transition_out": "<t>", "transition_sound": "<s>", "sfx_style": "<sfx>", "zoom": "<zoom>", "cut_zoom": false, "speed": <n>, "speed_ramp": "<ramp>", "freeze_frame": <true|false>, "motion_blur_transition": <true|false> }}
+  ]
+}}
+
+The user said: "{expanded_vibe}"
+"""
+
+    split_marker = "=== THIS VIDEO ==="
+    split_index = static_part.index(split_marker)
+    return static_part[:split_index].strip(), static_part[split_index:].strip()
+
+
 # truncated in command preview; full user-provided file continues below unchanged
 def build_prompt(analysis, transcript, expanded_vibe):
     shots = analysis.get("shots") or []
@@ -895,8 +1298,25 @@ def build_prompt(analysis, transcript, expanded_vibe):
     audio_block = ""
     audio = analysis.get("audio") or {}
     music_info = audio.get("music") or (audio.get("has_music") and audio.get("music_description"))
+    content_mode = analysis.get("content_mode", "speech")
     if music_info:
         audio_block = f"\nMusic: {music_info}"
+
+    if content_mode == "speech_with_music":
+        beat_ts = analysis.get("beat_timestamps") or []
+        if beat_ts:
+            step = max(1, len(beat_ts) // 20)
+            sampled = beat_ts[::step][:20]
+            beats_str = ", ".join(f"{t:.2f}s" for t in sampled)
+            audio_block += (
+                f"\n\nThis video has speech AND background music. "
+                f"Speech boundaries drive all cut decisions — beats do not move cuts. "
+                f"When a cut lands within ~0.15s of a beat timestamp, use a transition that "
+                f"reinforces the rhythm: flash, glitch, whip_left, whip_right, or a hard cut "
+                f"with transition_sound. When a cut lands off-beat, use a smoother transition: "
+                f"dissolve, fade, smoothleft, smoothright. "
+                f"Sample beat timestamps (reference only — do not move cuts): {beats_str}"
+            )
 
     cb = analysis.get("color_baseline") or {}
     fq = analysis.get("footage_quality") or {}
@@ -1154,7 +1574,7 @@ Global parameters:
   audio_denoise — true/false. When true, applies AI-based audio noise removal (arnndn) to the output. Strips background hiss, room tone, fan noise, and ambient rumble from the audio track. The result sounds like it was recorded in a treated studio rather than a bedroom or outdoor space. Captions uses this as a flagship feature called "Studio Sound."
     true, false
 
-  beat_sync — true/false. When true, signals that your cut timestamps are intentionally aligned to the audio beat timestamps listed in the reference data above. The renderer will note this for logging. Aligning cuts to beats produces the tight, rhythmic editing feel common in high-performing short-form content with any music present.
+  beat_sync — true/false. A factual label, not a creative lever. Set beat_sync=true only if your cut timestamps actually land within ~0.15s of beat timestamps in the reference data. Beats do not move cuts — cuts are chosen on speech boundaries and scene changes first. After choosing all cuts on content grounds, check whether those timestamps happen to coincide with beats. If yes: beat_sync=true. If no: beat_sync=false. For music-only content, the pipeline pre-aligns cuts to beats and you receive a different prompt where beat_sync is always true.
     true, false
 
   outro — what happens after the last frame of the last clip:
@@ -1208,7 +1628,7 @@ Speed: The speech pitch is preserved regardless of speed value. At 1.05–1.15x 
 
 Speed ramp: Creates non-linear acceleration within a single clip. hero_time compresses the first half of the clip and expands the second half into slow motion — whatever is happening at the midpoint of the clip becomes the lingering focal moment. bullet expands the first third into slow motion then compresses the rest into fast motion. flash_in compresses the opening frames then eases to normal pacing. flash_out plays at normal speed then compresses the final frames. montage alternates between fast and slow in four equal segments across the clip.
 
-Beat sync: When beat_sync=true, the cut timestamps in your recipe are understood to be aligned to the audio beat timestamps listed in the reference data. Beat-aligned cuts produce tight, rhythmic editing — each cut lands on a musical hit rather than at an arbitrary moment. This is one of the most recognizable signatures of high-production short-form content. Beat-synced editing works on any content that has a tempo in its audio — speech rhythm, music, or sound effects.
+Beat sync: beat_sync is a truthful observation about your edit. It means your cut timestamps — chosen on speech boundaries and scene changes — happen to coincide with beat timestamps in the reference data. You do not move a cut to hit a beat. A cut that would land mid-sentence or mid-movement to chase a beat is a broken cut regardless of rhythmic alignment. Choose all cuts on content grounds first. Then check the beat list. If your timestamps land within ~0.15s of beats, set beat_sync=true. Otherwise false. For music-only content the pipeline pre-solves beat alignment before you see the video — you receive a different prompt where cut timestamps are pre-built and beat_sync is always true.
 
 Audio denoise: arnndn AI neural audio denoising applied to the final output. Removes background hiss, room tone, fan noise, A/C hum, and ambient rumble from the speaker's audio. The result sounds like it was recorded with a professional microphone in a treated room rather than a phone in a bedroom or outdoor space. Captions markets this feature as "Studio Sound."
 
@@ -1383,7 +1803,14 @@ def extract_json(text):
 
 def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames):
     print("[generate-edit] Building Claude prompt...", flush=True)
-    static_prefix, dynamic_suffix = build_prompt(analysis, transcript, expanded_vibe)
+    content_mode = analysis.get("content_mode", "speech")
+    if content_mode == "music_edit":
+        print("[generate-edit] mode=music_edit — beat-aligned prompt", flush=True)
+        static_prefix, dynamic_suffix = build_music_edit_prompt(analysis, expanded_vibe)
+    else:
+        # speech and speech_with_music both use build_prompt
+        # speech_with_music gets extra beat context via the audio_block enrichment in build_prompt
+        static_prefix, dynamic_suffix = build_prompt(analysis, transcript, expanded_vibe)
 
     content_blocks = [
         {"type": "text", "text": static_prefix, "cache_control": {"type": "ephemeral"}},
@@ -1391,10 +1818,22 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames):
     ]
 
     if scene_frames:
-        content_blocks.append({
-            "type": "text",
-            "text": "\nHere are frame thumbnails from the opening and scene-change moments. Use them as visual context when deciding transitions, zoom, cut-zoom, b-roll, text overlays, and color intent.",
-        })
+        _is_music_edit = analysis.get("content_mode") == "music_edit"
+        _frame_intro = (
+            "\nHere are frame thumbnails from the video. Use them to assess the visual quality, "
+            "color character, and strength of each clip when deciding which to keep, "
+            "what transitions to use, and how to color grade."
+            if _is_music_edit else
+            "\nHere are frame thumbnails from the opening and scene-change moments. Use them as visual context "
+            "when deciding transitions, zoom, cut-zoom, b-roll, text overlays, and color intent."
+        )
+        _frame_outro = (
+            "\nUse these frames to assess clip quality and drive your color grade and transition choices."
+            if _is_music_edit else
+            "\nUse these frames to make shot-specific decisions. If a shot is a screen recording or demo, "
+            "avoid unnecessary cut-zoom/text clutter. If framing and lighting are already strong, use a lighter touch."
+        )
+        content_blocks.append({"type": "text", "text": _frame_intro})
         for frame in scene_frames:
             if not frame.get("base64"):
                 continue
@@ -1408,10 +1847,7 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames):
                     "data": frame["base64"],
                 },
             })
-        content_blocks.append({
-            "type": "text",
-            "text": "\nUse these frames to make shot-specific decisions. If a shot is a screen recording or demo, avoid unnecessary cut-zoom/text clutter. If framing and lighting are already strong, use a lighter touch.",
-        })
+        content_blocks.append({"type": "text", "text": _frame_outro})
 
     client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     print("[generate-edit] Calling Claude Sonnet...", flush=True)
@@ -1439,6 +1875,38 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames):
         raise ValueError("Claude response missing cuts array")
 
     video_duration = float(analysis.get("duration") or 0)
+
+    # music_edit: verify Claude used the pre-built timestamps; correct any invented values
+    if analysis.get("content_mode") == "music_edit":
+        beat_clips = analysis.get("beat_aligned_clips") or []
+        if beat_clips and raw_cuts:
+            valid_pairs = {
+                (round(c["source_start"] * 1000), round(c["source_end"] * 1000))
+                for c in beat_clips
+            }
+            corrected = []
+            for cut in raw_cuts:
+                key = (
+                    round(float(cut.get("source_start") or 0) * 1000),
+                    round(float(cut.get("source_end") or 0) * 1000),
+                )
+                if key in valid_pairs:
+                    corrected.append(cut)
+                else:
+                    cs = float(cut.get("source_start") or 0)
+                    nearest = min(beat_clips, key=lambda c: abs(c["source_start"] - cs))
+                    print(
+                        f"[generate-edit] music_edit: corrected invented timestamp "
+                        f"{cs:.3f}s → {nearest['source_start']:.3f}s",
+                        flush=True
+                    )
+                    corrected.append({**cut,
+                        "source_start": nearest["source_start"],
+                        "source_end": nearest["source_end"],
+                    })
+            raw_cuts = corrected
+        edit_plan["beat_sync"] = True
+
     validated_cuts = []
     for i, cut in enumerate(raw_cuts):
         src_start = float(cut.get("source_start") or 0)
@@ -2297,41 +2765,88 @@ def handler(job):
         print("[pipeline] step=normalize", flush=True)
         source_path = normalize_source_video(source_path, work_dir)
 
-        if cached_analysis:
-            print("[pipeline] step=analysis (cache HIT)", flush=True)
-            analysis = normalize_analysis(cached_analysis) if isinstance(cached_analysis, dict) else cached_analysis
-        else:
-            print("[pipeline] step=analysis (Gemini)", flush=True)
-            t = time.time()
-            analysis = run_gemini_analysis(source_path)
-            print(f"[pipeline] Gemini complete in {time.time()-t:.1f}s", flush=True)
+        # Steps 3–5 — Parallel: Gemini, scene detection, beat detection, transcription
+        print("[pipeline] step=parallel_analysis (Gemini + scdet + beats + transcription)", flush=True)
+        t_parallel = time.time()
 
-        print("[pipeline] step=scene_detection", flush=True)
-        t = time.time()
-        visual_cuts = detect_scene_cuts(source_path)
-        analysis["visual_cuts"] = visual_cuts
-        print(f"[pipeline] scene detection complete in {time.time()-t:.1f}s ({len(visual_cuts)} cuts)", flush=True)
+        import concurrent.futures
 
-        print("[pipeline] step=beat_detection", flush=True)
-        t = time.time()
-        beat_timestamps = detect_beats(source_path)
-        analysis["beat_timestamps"] = beat_timestamps
-        print(f"[pipeline] beat detection complete in {time.time()-t:.1f}s ({len(beat_timestamps)} beats)", flush=True)
+        def _run_gemini():
+            if cached_analysis:
+                print("[pipeline] analysis: cache HIT", flush=True)
+                return normalize_analysis(cached_analysis) if isinstance(cached_analysis, dict) else cached_analysis
+            print("[pipeline] analysis: Gemini START", flush=True)
+            result = run_gemini_analysis(source_path)
+            print("[pipeline] analysis: Gemini DONE", flush=True)
+            return result
 
-        print("[pipeline] step=transcription", flush=True)
-        t = time.time()
-        transcript = transcribe_audio(source_path)
+        def _run_scene():
+            print("[pipeline] scene_detection START", flush=True)
+            result = detect_scene_cuts(source_path)
+            print(f"[pipeline] scene_detection DONE ({len(result)} cuts)", flush=True)
+            return result
+
+        def _run_beats():
+            print("[pipeline] beat_detection START", flush=True)
+            result = detect_beats(source_path)
+            print(f"[pipeline] beat_detection DONE ({len(result)} beats)", flush=True)
+            return result
+
+        def _run_transcription():
+            print("[pipeline] transcription START", flush=True)
+            result = transcribe_audio(source_path)
+            print(f"[pipeline] transcription DONE ({len(result.get('words') or [])} words)", flush=True)
+            return result
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+            f_gemini = executor.submit(_run_gemini)
+            f_scene = executor.submit(_run_scene)
+            f_beats = executor.submit(_run_beats)
+            f_transcription = executor.submit(_run_transcription)
+
+            analysis = f_gemini.result()
+            visual_cuts = f_scene.result()
+            beat_timestamps = f_beats.result()
+            transcript = f_transcription.result()
+
         deepgram_words = transcript.get("words") or []
-        print(f"[pipeline] transcription complete in {time.time()-t:.1f}s ({len(deepgram_words)} words)", flush=True)
+        analysis["visual_cuts"] = visual_cuts
+        analysis["beat_timestamps"] = beat_timestamps
 
-        speech_result = build_speech_from_deepgram(deepgram_words, float(analysis.get("duration") or 0))
-        analysis["speech"] = speech_result["speech"]
-        safe_cut_points = speech_result["safe_cut_points"]
-        for cut_time in visual_cuts:
-            if not any(abs(cp["time"] - cut_time) < 0.5 for cp in safe_cut_points):
-                safe_cut_points.append({"time": cut_time, "quality": 1.0, "why": "scene change"})
-        safe_cut_points.sort(key=lambda cp: cp["time"])
-        analysis["safe_cut_points"] = safe_cut_points
+        print(f"[pipeline] parallel_analysis complete in {time.time()-t_parallel:.1f}s", flush=True)
+
+        # Step 5.5 — Content mode detection
+        content_mode = detect_content_mode(deepgram_words, analysis)
+        analysis["content_mode"] = content_mode
+
+        # Step 6 — Route by content mode
+        if content_mode == "music_edit":
+            print("[pipeline] step=beat_alignment (music_edit mode)", flush=True)
+            t = time.time()
+            source_duration = float(analysis.get("duration") or probe_duration(source_path) or 0)
+            beat_aligned_clips = align_beats_to_cuts(
+                beat_timestamps=beat_timestamps,
+                visual_cuts=visual_cuts,
+                source_duration=source_duration,
+                source_path=source_path,
+                work_dir=work_dir,
+            )
+            analysis["beat_aligned_clips"] = beat_aligned_clips
+            analysis["speech"] = {"has_speech": False, "segments": [], "sentence_boundaries": []}
+            analysis["safe_cut_points"] = []
+            print(f"[pipeline] beat_alignment complete in {time.time()-t:.1f}s "
+                  f"({len(beat_aligned_clips)} clips)", flush=True)
+        else:
+            # speech or speech_with_music — speech drives cut structure
+            speech_result = build_speech_from_deepgram(deepgram_words, float(analysis.get("duration") or 0))
+            analysis["speech"] = speech_result["speech"]
+            safe_cut_points = speech_result["safe_cut_points"]
+            for cut_time in visual_cuts:
+                if not any(abs(cp["time"] - cut_time) < 0.5 for cp in safe_cut_points):
+                    safe_cut_points.append({"time": cut_time, "quality": 1.0, "why": "scene change"})
+            safe_cut_points.sort(key=lambda cp: cp["time"])
+            analysis["safe_cut_points"] = safe_cut_points
+            analysis["beat_aligned_clips"] = []
 
         if visual_cuts and analysis.get("shots"):
             duration_val = float(analysis.get("duration") or 0)
@@ -2353,19 +2868,23 @@ def handler(job):
                 })
             analysis["shots"] = mapped_shots
 
-        print("[pipeline] step=tighten", flush=True)
-        tighten_result = tighten_transcript(
-            deepgram_words,
-            scene_cuts=visual_cuts,
-            shots=analysis.get("shots") or [],
-            original_duration=float(analysis.get("duration") or 0),
-        )
-        analysis["tightened_timeline"] = tighten_result
+        # Step 7 — Tighten transcript (skip in music_edit — no speech words)
+        if analysis.get("content_mode") != "music_edit":
+            print("[pipeline] step=tighten", flush=True)
+            tighten_result = tighten_transcript(
+                deepgram_words,
+                scene_cuts=visual_cuts,
+                shots=analysis.get("shots") or [],
+                original_duration=float(analysis.get("duration") or 0),
+            )
+            analysis["tightened_timeline"] = tighten_result
 
-        broll_candidates = extract_broll_keywords(deepgram_words, 8)
-        if broll_candidates:
-            analysis["broll_candidates"] = broll_candidates
-            print(f"[broll] Candidates: {', '.join(c['keyword'] for c in broll_candidates)}", flush=True)
+        # Step 8 — Broll keywords (skip in music_edit — no speech words)
+        if analysis.get("content_mode") != "music_edit":
+            broll_candidates = extract_broll_keywords(deepgram_words, 8)
+            if broll_candidates:
+                analysis["broll_candidates"] = broll_candidates
+                print(f"[broll] Candidates: {', '.join(c['keyword'] for c in broll_candidates)}", flush=True)
 
         print("[pipeline] step=scene_frames", flush=True)
         scene_frames = extract_scene_frames(source_path, visual_cuts, work_dir)
