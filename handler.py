@@ -36,6 +36,77 @@ import json
 import re
 
 
+def measure_video(source_path):
+    import subprocess, json, re
+
+    measurements = {}
+
+    probe = subprocess.run([
+        "ffprobe", "-v", "quiet", "-print_format", "json",
+        "-show_streams", "-show_format", source_path
+    ], capture_output=True, text=True)
+    probe_data = json.loads(probe.stdout)
+    video_stream = next((s for s in probe_data["streams"] if s["codec_type"] == "video"), {})
+    measurements["width"] = video_stream.get("width", 1080)
+    measurements["height"] = video_stream.get("height", 1920)
+    measurements["fps"] = eval(video_stream.get("r_frame_rate", "30/1"))
+    measurements["duration"] = float(probe_data["format"].get("duration", 0))
+    measurements["bitrate_kbps"] = int(probe_data["format"].get("bit_rate", 0)) // 1000
+
+    luma = subprocess.run([
+        "ffmpeg", "-i", source_path, "-vf",
+        "scale=320:-1,signalstats=stat=tout+brng+vrep",
+        "-frames:v", "30", "-f", "null", "-"
+    ], capture_output=True, text=True)
+    yavg_values = re.findall(r"YAVG=(\d+\.?\d*)", luma.stderr)
+    if yavg_values:
+        mean_luma = sum(float(v) for v in yavg_values) / len(yavg_values)
+        measurements["mean_luma"] = round(mean_luma, 1)
+        measurements["luma_min"] = round(min(float(v) for v in yavg_values), 1)
+        measurements["luma_max"] = round(max(float(v) for v in yavg_values), 1)
+        measurements["contrast_ratio"] = round(measurements["luma_max"] / max(measurements["luma_min"], 1), 2)
+    else:
+        measurements["mean_luma"] = 128.0
+        measurements["contrast_ratio"] = 1.0
+
+    subprocess.run([
+        "ffmpeg", "-i", source_path,
+        "-vf", "scale=160:-1,extractplanes=y+u+v,split=3[y][u][v];"
+               "[y]signalstats[ys];[u]signalstats[us];[v]signalstats[vs]",
+        "-frames:v", "30", "-f", "null", "-"
+    ], capture_output=True, text=True)
+    subprocess.run([
+        "ffmpeg", "-i", source_path,
+        "-vf", "scale=160:-1,signalstats=stat=tout",
+        "-frames:v", "1", "-f", "null", "-"
+    ], capture_output=True, text=True)
+
+    noise = subprocess.run([
+        "ffmpeg", "-i", source_path,
+        "-vf", "scale=320:-1,noise=alls=0,signalstats",
+        "-frames:v", "10", "-f", "null", "-"
+    ], capture_output=True, text=True)
+    vrep_values = re.findall(r"VREP=(\d+\.?\d*)", noise.stderr)
+    measurements["noise_level"] = round(sum(float(v) for v in vrep_values) / len(vrep_values), 2) if vrep_values else 0.0
+
+    sharp = subprocess.run([
+        "ffmpeg", "-i", source_path,
+        "-vf", "scale=320:-1,signalstats=stat=brng",
+        "-frames:v", "10", "-f", "null", "-"
+    ], capture_output=True, text=True)
+    brng_values = re.findall(r"BRNG=(\d+\.?\d*)", sharp.stderr)
+    measurements["out_of_range_pct"] = round(sum(float(v) for v in brng_values) / len(brng_values), 3) if brng_values else 0.0
+
+    subprocess.run([
+        "ffmpeg", "-i", source_path,
+        "-vf", "scale=320:-1,mestimate,metadata=print:file=-",
+        "-frames:v", "30", "-f", "null", "-"
+    ], capture_output=True, text=True)
+    measurements["has_motion"] = measurements["bitrate_kbps"] > 3000
+
+    return measurements
+
+
 def handler(job):
     input_data = job["input"]
     work_dir = None
@@ -112,7 +183,7 @@ Return only valid JSON. No markdown, no explanation."""
         transcript_text = ""
         sentence_boundaries = []
         try:
-            dg = DeepgramClient(os.environ["DEEPGRAM_API_KEY"])
+            dg = DeepgramClient(api_key=os.environ["DEEPGRAM_API_KEY"])
             with open(source_path, "rb") as f:
                 payload = {"buffer": f.read()}
             options = PrerecordedOptions(model="nova-3", smart_format=True, utterances=True, punctuate=True, diarize=False)
@@ -126,6 +197,11 @@ Return only valid JSON. No markdown, no explanation."""
             print(f"[pipeline] transcription complete in {time.time()-t:.1f}s: {len(transcript_text)} chars")
         except Exception as e:
             print(f"[pipeline] transcription failed (non-fatal): {e}")
+
+        print(f"[pipeline] step=measure_video")
+        t = time.time()
+        video_measurements = measure_video(source_path)
+        print(f"[pipeline] measurements complete in {time.time()-t:.1f}s: {json.dumps(video_measurements)}")
 
         # Step 5 — Expand vibe with Claude Haiku
         print(f"[pipeline] step=vibe_expansion")
@@ -143,30 +219,68 @@ Return only valid JSON. No markdown, no explanation."""
         # Step 6 — Generate edit recipe with Claude Sonnet
         print(f"[pipeline] step=edit_recipe")
         t = time.time()
-        duration = analysis.get("duration", 30)
-        recipe_prompt = f"""You are a professional video editor. Generate an edit recipe for this video.
+        duration = video_measurements["duration"]
+        recipe_prompt = f"""You are a professional video colorist and editor. Generate a precise edit recipe based on real video measurements.
 
-VIDEO DURATION: {duration}s
+VIDEO MEASUREMENTS (from actual pixel analysis):
+- Duration: {video_measurements['duration']}s
+- Resolution: {video_measurements['width']}x{video_measurements['height']}
+- Mean luma (brightness): {video_measurements['mean_luma']} / 255 (128 = perfect exposure)
+- Contrast ratio: {video_measurements['contrast_ratio']} (1.0 = flat, 3.0+ = punchy)
+- Noise level (VREP): {video_measurements['noise_level']} (0 = clean, higher = noisy/compressed)
+- Out-of-range pixels: {video_measurements['out_of_range_pct']}% (>5% means blown highlights or crushed blacks)
+- Has significant motion: {video_measurements['has_motion']}
+- Bitrate: {video_measurements['bitrate_kbps']} kbps
+
 VIBE: {expanded_vibe}
 TRANSCRIPT: {transcript_text[:2000] if transcript_text else "No speech detected"}
-ANALYSIS: {json.dumps(analysis, indent=2)[:3000]}
+ANALYSIS: {json.dumps(analysis, indent=2)[:2000]}
 
-Return ONLY a JSON object with this exact structure:
+Based on the measurements above, decide which enhancements this specific video needs and at what precise strength. Do NOT apply filters the video doesn't need.
+
+AVAILABLE FILTERS (include only what's needed, omit the rest):
+
+color_grade (FFmpeg eq filter — all values are multipliers/offsets, not 0-255):
+  brightness: -1.0 to 1.0 (0 = no change. If mean_luma=100, video is dark; if mean_luma=160, video is bright)
+  contrast: 0.5 to 2.0 (1.0 = no change)
+  saturation: 0.5 to 2.0 (1.0 = no change)
+  gamma: 0.5 to 2.0 (1.0 = no change, lower lifts shadows)
+
+sharpen (FFmpeg unsharp filter, omit if video is already sharp):
+  luma_amount: 0.0 to 2.0 (0.5 = subtle, 1.0 = moderate, 2.0 = strong)
+  luma_size: 3 or 5 (kernel size, use 5 for most cases)
+
+denoise (FFmpeg hqdn3d filter, only if noise_level > 2 or video looks grainy):
+  spatial: 0.5 to 4.0 (strength of spatial denoising)
+  temporal: 3.0 to 10.0 (strength of temporal denoising, higher = smoother)
+
+stabilize: true or false (only if has_motion=true AND vibe calls for smooth/cinematic look)
+
+color_temperature (FFmpeg colortemperature filter, omit if color looks neutral):
+  temperature: 1000 to 40000 (6500 = neutral, lower = warmer, higher = cooler)
+
+vignette (FFmpeg vignette filter, omit if not cinematic vibe):
+  angle: 0.1 to 0.8 (strength, 0.3 = subtle, 0.6 = strong)
+
+Return ONLY a JSON object:
 {{
-  "clips": [
-    {{"source_start": <float>, "source_end": <float>, "speed": 1.0}}
-  ],
-  "overlays": [
-    {{"type": "text", "text": "<ascii only, no emojis>", "start_time": <float>, "end_time": <float>, "x": "(w-text_w)/2", "y": "h*0.15", "fontsize": 52, "fontcolor": "white", "bordercolor": "black", "borderw": 3}}
-  ],
-  "color_grade": {{"brightness": 0, "contrast": 1.0, "saturation": 1.0, "gamma": 1.0}},
-  "audio": {{"original_volume": 1.0}},
-  "notes": "<50 words max>"
+  "clips": [{{"source_start": <float>, "source_end": <float>, "speed": 1.0}}],
+  "overlays": [{{"type": "text", "text": "<ascii only>", "start_time": <float>, "end_time": <float>, "x": "(w-text_w)/2", "y": "h*0.15", "fontsize": 52, "fontcolor": "white", "bordercolor": "black", "borderw": 3}}],
+  "color_grade": {{"brightness": <float>, "contrast": <float>, "saturation": <float>, "gamma": <float>}},
+  "sharpen": {{"luma_amount": <float>, "luma_size": <int>}},
+  "denoise": {{"spatial": <float>, "temporal": <float>}},
+  "stabilize": <bool>,
+  "color_temperature": {{"temperature": <int>}},
+  "vignette": {{"angle": <float>}},
+  "audio": {{"original_volume": <float 0-1>}},
+  "notes": "<50 words, explain what you applied and why based on the measurements>"
 }}
 
 Rules:
-- Clips must be sequential, no overlaps, total duration <= {duration}s
-- overlay text must be ASCII only — no emojis, no special characters
+- Omit any filter key you are not applying (don't include it with null or 0)
+- color_grade brightness is NOT 0-255, it is -1.0 to 1.0
+- Clips must be sequential, total duration <= {video_measurements['duration']}s
+- overlay text must be ASCII only, no emojis
 - Return only JSON, no markdown"""
 
         sonnet_resp = client.messages.create(
@@ -185,9 +299,21 @@ Rules:
         t = time.time()
         clips = recipe.get("clips", [])
         if not clips:
-            clips = [{"source_start": 0, "source_end": duration, "speed": 1.0}]
+            clips = [{"source_start": 0, "source_end": video_measurements['duration'], "speed": 1.0}]
 
         cmd = ["ffmpeg", "-y"]
+
+        do_stabilize = recipe.get("stabilize", False)
+        if do_stabilize:
+            stab_vectors = os.path.join(work_dir, "stab.trf")
+            detect_cmd = [
+                "ffmpeg", "-i", source_path,
+                "-vf", f"vidstabdetect=stepsize=6:shakiness=8:accuracy=9:result={stab_vectors}",
+                "-f", "null", "-"
+            ]
+            subprocess.run(detect_cmd, capture_output=True)
+            print(f"[pipeline] stabilization detect complete")
+
         for clip in clips:
             cmd += ["-ss", str(clip["source_start"]), "-to", str(clip["source_end"]), "-i", source_path]
 
@@ -201,11 +327,51 @@ Rules:
         a_inputs = "".join(f"[{i}:a]" for i in range(n))
         filter_parts.append(f"{v_inputs}concat=n={n}:v=1:a=0[vconcat]")
         filter_parts.append(f"{a_inputs}concat=n={n}:v=0:a=1[aconcat]")
+        last_v = "vconcat"
+
+        if do_stabilize and os.path.exists(stab_vectors):
+            filter_parts.append(f"[{last_v}]vidstabtransform=input={stab_vectors}:smoothing=10[vstab]")
+            last_v = "vstab"
 
         cb = recipe.get("color_grade", {})
-        eq = f"eq=brightness={cb.get('brightness',0)}:contrast={cb.get('contrast',1)}:saturation={cb.get('saturation',1)}:gamma={cb.get('gamma',1)}"
-        filter_parts.append(f"[vconcat]{eq}[vgraded]")
-        last_v = "vgraded"
+        if cb:
+            brightness = max(-1.0, min(1.0, float(cb.get("brightness", 0))))
+            contrast = max(0.5, min(2.0, float(cb.get("contrast", 1))))
+            saturation = max(0.5, min(2.0, float(cb.get("saturation", 1))))
+            gamma = max(0.5, min(2.0, float(cb.get("gamma", 1))))
+            filter_parts.append(
+                f"[{last_v}]eq=brightness={brightness}:contrast={contrast}"
+                f":saturation={saturation}:gamma={gamma}[vgraded]"
+            )
+            last_v = "vgraded"
+
+        ct = recipe.get("color_temperature", {})
+        if ct and ct.get("temperature"):
+            temp = max(1000, min(40000, int(ct["temperature"])))
+            filter_parts.append(f"[{last_v}]colortemperature=temperature={temp}[vtemp]")
+            last_v = "vtemp"
+
+        sh = recipe.get("sharpen", {})
+        if sh and sh.get("luma_amount"):
+            amount = max(0.0, min(2.0, float(sh["luma_amount"])))
+            size = int(sh.get("luma_size", 5))
+            if size % 2 == 0:
+                size += 1
+            filter_parts.append(f"[{last_v}]unsharp={size}:{size}:{amount}:3:3:0[vsharp]")
+            last_v = "vsharp"
+
+        dn = recipe.get("denoise", {})
+        if dn and dn.get("spatial"):
+            spatial = max(0.5, min(4.0, float(dn["spatial"])))
+            temporal = max(3.0, min(10.0, float(dn.get("temporal", 6.0))))
+            filter_parts.append(f"[{last_v}]hqdn3d={spatial}:{spatial}:{temporal}:{temporal}[vdenoise]")
+            last_v = "vdenoise"
+
+        vg = recipe.get("vignette", {})
+        if vg and vg.get("angle"):
+            angle = max(0.1, min(0.8, float(vg["angle"])))
+            filter_parts.append(f"[{last_v}]vignette=angle={angle}[vvignette]")
+            last_v = "vvignette"
 
         for i, overlay in enumerate(recipe.get("overlays", [])):
             raw_text = overlay.get("text", "")
