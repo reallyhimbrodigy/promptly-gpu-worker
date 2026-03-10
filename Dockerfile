@@ -2,17 +2,28 @@ FROM runpod/base:0.6.2-cuda12.2.0
 
 RUN apt-get update && apt-get install -y \
     ffmpeg \
+    build-essential \
+    pkg-config \
+    python3-dev \
+    libaubio-dev \
+    libavcodec-dev \
+    libavformat-dev \
+    libavutil-dev \
+    libswresample-dev \
+    libsndfile1-dev \
+    libsamplerate0-dev \
     && rm -rf /var/lib/apt/lists/*
 
 RUN python3 -m pip install \
+    numpy \
+    aubio \
+    && python3 -m pip install \
     runpod \
     requests \
     anthropic \
     google-generativeai \
     deepgram-sdk \
-    httpx \
-    aubio \
-    numpy
+    httpx
 
 COPY handler.py .
 COPY src/assets/sounds/ /assets/sounds/
