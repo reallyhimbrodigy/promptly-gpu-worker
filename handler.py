@@ -189,18 +189,142 @@ def run_gemini_analysis(source_path):
     response = model.generate_content([gemini_file, GEMINI_ANALYSIS_PROMPT])
 
     raw = response.text.strip()
-    raw = re.sub(r"^```json\s*", "", raw)
-    raw = re.sub(r"```$", "", raw)
+    raw = re.sub(r"^```(?:json)?\s*\n?", "", raw, flags=re.IGNORECASE)
+    raw = re.sub(r"\n?```\s*$", "", raw)
     raw = raw.strip()
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError:
+        print(f"[analyze] Direct JSON parse failed, attempting repair...", flush=True)
         try:
-            raw2 = re.sub(r",(\s*[}\]])", r"\1", raw)
-            parsed = json.loads(raw2)
+            parsed = repair_and_parse_json(raw)
+            print(f"[analyze] JSON repair succeeded", flush=True)
         except Exception:
             raise RuntimeError(f"Failed to parse Gemini JSON: {raw[:500]}")
     return normalize_analysis(parsed)
+
+
+def repair_and_parse_json(s):
+    # Remove trailing commas before } or ]
+    s = re.sub(r",(\s*[}\]])", r"\1", s)
+    braces = brackets = 0
+    in_string = escaped = False
+    for ch in s:
+        if escaped:
+            escaped = False
+            continue
+        if ch == "\\":
+            escaped = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            braces += 1
+        elif ch == "}":
+            braces -= 1
+        elif ch == "[":
+            brackets += 1
+        elif ch == "]":
+            brackets -= 1
+    if in_string:
+        s += '"'
+    if braces > 0 or brackets > 0:
+        last_good = max(s.rfind("}"), s.rfind("]"), s.rfind(","))
+        if last_good > len(s) * 0.5:
+            s = s[:last_good + 1]
+            s = re.sub(r",\s*$", "", s)
+        while brackets > 0:
+            s += "]"
+            brackets -= 1
+        while braces > 0:
+            s += "}"
+            braces -= 1
+    return json.loads(s)
+
+
+def _apply_timestamp_multiplier(parsed, multiplier, label, skip_duration=False):
+    import copy
+    fixed = copy.deepcopy(parsed)
+    original_duration = parsed.get("duration")
+    if not skip_duration and isinstance(fixed.get("duration"), (int, float)):
+        fixed["duration"] *= multiplier
+    for shot in (fixed.get("shots") or []):
+        if isinstance(shot.get("start"), (int, float)):
+            shot["start"] *= multiplier
+        if isinstance(shot.get("end"), (int, float)):
+            shot["end"] *= multiplier
+    speech = fixed.get("speech") or {}
+    for seg in (speech.get("segments") or []):
+        if isinstance(seg.get("start"), (int, float)):
+            seg["start"] *= multiplier
+        if isinstance(seg.get("end"), (int, float)):
+            seg["end"] *= multiplier
+    for sb in (speech.get("sentence_boundaries") or []):
+        if isinstance(sb.get("time"), (int, float)):
+            sb["time"] *= multiplier
+        if isinstance(sb.get("end_time"), (int, float)):
+            sb["end_time"] *= multiplier
+        if isinstance(sb.get("pause_after"), (int, float)) and sb["pause_after"] < 0.5:
+            sb["pause_after"] *= multiplier
+        if isinstance(sb.get("pause_duration"), (int, float)) and sb["pause_duration"] < 0.5:
+            sb["pause_duration"] *= multiplier
+    for cp in (fixed.get("cut_points") or []) + (fixed.get("safe_cut_points") or []):
+        if isinstance(cp.get("time"), (int, float)):
+            cp["time"] *= multiplier
+    for h in (fixed.get("highlights") or []) + (fixed.get("peak_moments") or []):
+        if isinstance(h.get("time"), (int, float)):
+            h["time"] *= multiplier
+    result_duration = original_duration if skip_duration else fixed.get("duration")
+    print(f"[analyze] {label}: duration={result_duration}", flush=True)
+    return fixed
+
+
+def normalize_timestamps(parsed):
+    duration = float(parsed.get("duration") or 0)
+    all_ts = []
+    non_dur_ts = []
+    if duration > 0:
+        all_ts.append(duration)
+    for shot in (parsed.get("shots") or []):
+        for k in ("start", "end"):
+            if isinstance(shot.get(k), (int, float)):
+                all_ts.append(shot[k])
+                non_dur_ts.append(shot[k])
+    for cp in (parsed.get("cut_points") or []) + (parsed.get("safe_cut_points") or []):
+        if isinstance(cp.get("time"), (int, float)):
+            all_ts.append(cp["time"])
+            non_dur_ts.append(cp["time"])
+    if not all_ts:
+        return parsed
+    max_ts = max(all_ts)
+    max_non_dur = max(non_dur_ts) if non_dur_ts else 0
+    if max_ts < 2.0 and len(all_ts) > 2:
+        print(f"[analyze] TIMESTAMP UNIT FIX: max={max_ts:.3f} — converting minutes→seconds (×60)", flush=True)
+        return _apply_timestamp_multiplier(parsed, 60, "minutes→seconds")
+    if duration > 5 and len(non_dur_ts) > 2 and max_non_dur < 1.5 and max_non_dur < duration * 0.05:
+        print(f"[analyze] TIMESTAMP SCALE FIX: duration={duration}s but max event={max_non_dur:.3f} — scaling by duration", flush=True)
+        return _apply_timestamp_multiplier(parsed, duration, "normalized→seconds", skip_duration=True)
+    # overshoot check across all fields
+    max_all = 0.0
+    speech = parsed.get("speech") or {}
+    for seg in (speech.get("segments") or []):
+        max_all = max(max_all, float(seg.get("start") or 0), float(seg.get("end") or 0))
+    for sb in (speech.get("sentence_boundaries") or []):
+        max_all = max(max_all, float(sb.get("time") or 0))
+    for shot in (parsed.get("shots") or []):
+        max_all = max(max_all, float(shot.get("start") or 0), float(shot.get("end") or 0))
+    for cp in (parsed.get("cut_points") or []) + (parsed.get("safe_cut_points") or []):
+        max_all = max(max_all, float(cp.get("time") or 0))
+    for h in (parsed.get("highlights") or []) + (parsed.get("peak_moments") or []):
+        max_all = max(max_all, float(h.get("time") or 0))
+    if duration > 0 and max_all > duration * 1.1:
+        factor = duration / max_all
+        print(f"[analyze] TIMESTAMP OVERSHOOT FIX: duration={duration}s max={max_all:.3f}s — scaling ×{factor:.4f}", flush=True)
+        return _apply_timestamp_multiplier(parsed, factor, "overshoot→scaled", skip_duration=True)
+    return parsed
 
 
 def normalize_analysis(parsed):
@@ -210,8 +334,13 @@ def normalize_analysis(parsed):
         parsed["safe_cut_points"] = []
     if not parsed.get("peak_moments"):
         parsed["peak_moments"] = []
+    if not parsed.get("highlights"):
+        parsed["highlights"] = []
     if parsed.get("footage_assessment") and not parsed.get("video_profile"):
         parsed["video_profile"] = parsed["footage_assessment"]
+
+    # Normalize timestamps (minutes/seconds/overshoot fixes — mirrors JS parseAnalysisResponse)
+    parsed = normalize_timestamps(parsed)
 
     duration = float(parsed.get("duration") or 0)
     shots_raw = parsed.get("shots") or []
@@ -227,6 +356,9 @@ def normalize_analysis(parsed):
             "description":   s.get("action") or s.get("visual") or f"Shot {i+1}",
             "score":         float(s.get("energy") or 0.5),
         })
+    if not shots:
+        shots = [{"start": 0, "end": duration, "description": "Full video", "score": 0.5,
+                  "visual": "", "action": "", "energy": 0.5, "editing_value": ""}]
 
     raw_cb = parsed.get("color_baseline") or {}
     color_baseline = {
@@ -237,6 +369,7 @@ def normalize_analysis(parsed):
         "gamma":             float(raw_cb["gamma"]) if isinstance(raw_cb.get("gamma"), (int, float)) else 1,
         "color_temperature": raw_cb.get("color_temperature") if raw_cb.get("color_temperature") in ["warm", "cool", "neutral"] else "neutral",
     }
+    print(f"[analyze] Color baseline: b={color_baseline['brightness']}, c={color_baseline['contrast']}, s={color_baseline['saturation']}, g={color_baseline['gamma']}, temp={color_baseline['color_temperature']}", flush=True)
 
     raw_fl = parsed.get("frame_layout") or {}
     frame_layout = {
@@ -249,15 +382,19 @@ def normalize_analysis(parsed):
         "free_zones": raw_fl.get("free_zones") or "unknown",
     }
 
+    safe_cut_points = parsed.get("cut_points") or parsed.get("safe_cut_points") or []
+    peak_moments = parsed.get("highlights") or parsed.get("peak_moments") or []
     vp = parsed.get("video_profile") or parsed.get("footage_assessment") or {}
+
+    print(f"[analyze] Analysis complete: {duration}s, {len(shots)} shots, {len(safe_cut_points)} cut points, {len((parsed.get('speech') or {}).get('segments') or [])} speech segments", flush=True)
 
     return {
         "duration":        duration,
         "shots":           shots,
         "speech":          parsed.get("speech") or {"has_speech": False, "segments": [], "sentence_boundaries": []},
         "audio":           parsed.get("audio") or {},
-        "safe_cut_points": parsed.get("safe_cut_points") or [],
-        "peak_moments":    parsed.get("peak_moments") or [],
+        "safe_cut_points": safe_cut_points,
+        "peak_moments":    peak_moments,
         "video_profile":   vp,
         "frame_layout":    frame_layout,
         "color_baseline":  color_baseline,
@@ -381,7 +518,7 @@ MULTI_WORD_FILLER = [["you","know"],["i","mean"],["kind","of"],["sort","of"]]
 
 
 def normalize_token(raw):
-    return re.sub(r"[^a-z]", "", str(raw or "").lower().replace("'","").replace('"',""))
+    return re.sub(r"[^a-z]", "", str(raw or "").lower().replace("'", "").replace('"', ""))
 
 
 def detect_filler_words(words):
@@ -580,14 +717,13 @@ def build_prompt(analysis, transcript, expanded_vibe):
     speech = analysis.get("speech") or {}
     speech_parts = []
     if speech.get("has_speech"):
-        if speech.get("speaker_style"):
-            speech_parts.append(f"Speaker: {speech.get('speaker_style')}")
+        if speech.get("speaker_style") or speech.get("overall_delivery"):
+            speech_parts.append(f"Speaker: {speech.get('speaker_style') or speech.get('overall_delivery')}")
         for seg in (speech.get("segments") or []):
-            seg_line = f"[{seg['start']:.2f}s – {seg['end']:.2f}s] \"{seg.get('text','')}\""
-            if seg.get("emotion") or seg.get("energy_level"):
-                seg_line += f" ({seg.get('emotion','neutral')}, energy {seg.get('energy_level',0.5):.1f})"
-            if seg.get("notes"):
-                seg_line += f"\n    {seg['notes']}"
+            seg_line = f"[{seg['start']:.2f}s – {seg['end']:.2f}s] \"{seg.get('text','')}\" ({seg.get('emotion','neutral')}, energy {float(seg.get('energy_level',0.5)):.1f})"
+            notes = seg.get("notes") or seg.get("delivery_notes")
+            if notes:
+                seg_line += f"\n    {notes}"
             speech_parts.append(seg_line)
     speech_block = "\n".join(speech_parts)
 
@@ -608,30 +744,70 @@ def build_prompt(analysis, transcript, expanded_vibe):
         key=lambda b: float(b.get("time") or 0)
     )
     if sentence_boundaries:
-        speech_boundaries_block = "\n".join(
-            f"  {float(b['time']):.2f}s — pause {float(b.get('pause_after',0)):.3f}s"
-            for b in sentence_boundaries
-        )
+        sb_lines = []
+        for b in sentence_boundaries:
+            t = float(b.get("time") or 0)
+            pause = float(b.get("pause_after") or 0)
+            # Find preceding segment text (mirrors JS buildPrompt)
+            seg = next(
+                (s for s in (speech.get("segments") or [])
+                 if float(s.get("end") or 0) >= t - 0.05 and float(s.get("end") or 0) <= t + 0.6),
+                None
+            )
+            prev_text = f', preceding text: "{seg["text"]}"' if seg and seg.get("text") else ""
+            sb_lines.append(f"  {t:.2f}s — pause {pause:.3f}s{prev_text}")
+        speech_boundaries_block = "\n".join(sb_lines)
     else:
         speech_boundaries_block = "  none"
+
+    # highlights block (mirrors JS highlightsBlock)
+    highlights_block = ""
+    highlights = analysis.get("peak_moments") or []
+    if highlights:
+        sorted_h = sorted(highlights, key=lambda h: -(h.get("importance") or 0))
+        highlights_block = "\nHighlights:\n" + "\n".join(
+            f"  {float(h.get('time',0)):.2f}s — {h.get('what') or h.get('description','')} ({float(h.get('importance',0.5)):.1f})"
+            for h in sorted_h
+        )
 
     tightened = analysis.get("tightened_timeline") or {}
     if tightened and (tightened.get("segments") or []):
         original_duration = float(analysis.get("duration") or 0)
         tightened_duration = sum(max(0, s.get("end",0) - s.get("start",0)) for s in tightened["segments"])
         seg_text = ", ".join(f"{s.get('start',0):.2f}s-{s.get('end',0):.2f}s" for s in tightened["segments"])
-        tightened_block = f"Tightened timeline (dead air and filler words already removed):\n  Original: {original_duration:.2f}s -> Tightened: {tightened_duration:.2f}s (removed {tightened.get('removedSeconds',0):.2f}s)\n  Keep segments: {seg_text}"
+        tightened_block = f"Tightened timeline (dead air and filler words already removed):\n  Original: {original_duration:.2f}s → Tightened: {tightened_duration:.2f}s (removed {float(tightened.get('removedSeconds',0)):.2f}s)\n  Keep segments: {seg_text}"
     else:
         original_duration = float(analysis.get("duration") or 0)
-        tightened_block = f"Tightened timeline:\n  Original: {original_duration:.2f}s -> no changes\n  Keep segments: none"
+        tightened_block = None  # use fallback in template
 
     broll_candidates = analysis.get("broll_candidates") or []
     broll_candidates_block = ""
     if broll_candidates:
-        broll_candidates_block = "B-roll candidates:\n" + "\n".join(
+        broll_candidates_block = "\n".join(
             f"  - {c['keyword']} @ {float(c.get('timestamp',0)):.2f}s"
             for c in broll_candidates[:6]
         )
+
+
+    # profileBlock (mirrors JS)
+    vp = analysis.get("video_profile") or {}
+    profile_parts = []
+    if vp.get("content_type"):
+        profile_parts.append(f"Type: {vp['content_type']}")
+    if vp.get("visual_character") or vp.get("visual_style"):
+        profile_parts.append(f"Look: {vp.get('visual_character') or vp.get('visual_style')}")
+    if vp.get("strongest_moments"):
+        profile_parts.append(f"Best parts: {vp['strongest_moments']}")
+    if vp.get("weakest_moments"):
+        profile_parts.append(f"Weakest parts: {vp['weakest_moments']}")
+    profile_block = "\n" + "\n".join(profile_parts) if profile_parts else ""
+
+    # audioBlock (mirrors JS)
+    audio_block = ""
+    audio = analysis.get("audio") or {}
+    music_info = audio.get("music") or (audio.get("has_music") and audio.get("music_description"))
+    if music_info:
+        audio_block = f"\nMusic: {music_info}"
 
     cb = analysis.get("color_baseline") or {}
     frame_layout = analysis.get("frame_layout") or {
@@ -639,15 +815,22 @@ def build_prompt(analysis, transcript, expanded_vibe):
         "existing_overlays": {"has_burned_captions": False, "has_text_graphics": False, "overlay_locations": "none detected"},
         "free_zones": "unknown",
     }
-    vp = analysis.get("video_profile") or {}
     content_type = vp.get("content_type") or "unknown"
-    visual_character = vp.get("visual_character") or "unknown"
+    visual_character = vp.get("visual_character") or vp.get("visual_style") or "unknown"
     strongest_moments = vp.get("strongest_moments") or "not specified"
     weakest_moments = vp.get("weakest_moments") or "not specified"
     frame_overlay_locations = (frame_layout.get("existing_overlays") or {}).get("overlay_locations") or "none detected"
     has_burned_captions = bool((frame_layout.get("existing_overlays") or {}).get("has_burned_captions"))
     duration = float(analysis.get("duration") or 0)
+    tightened_duration_val = sum(max(0, s.get("end",0) - s.get("start",0)) for s in (tightened.get("segments") or [])) if tightened else duration
     intents = ", ".join(COLOR_INTENTS.keys())
+
+    tightened_fallback = (
+        f"Tightened timeline (dead air and filler words already removed):\n"
+        f"  Original: {duration:.2f}s → Tightened: {tightened_duration_val:.2f}s "
+        f"(removed {float((tightened or {}).get('removedSeconds', 0)):.2f}s)\n"
+        f"  Keep segments: none"
+    )
 
     full_prompt = f"""You are the professional editor inside Promptly, a mobile app that competes with CapCut and Captions. Users upload raw talking-head footage and receive back a fully edited short-form video (TikTok, Instagram Reels, YouTube Shorts) in under 90 seconds. You produce the edit recipe — every creative decision about how this video gets cut, graded, and polished.
 
@@ -866,7 +1049,7 @@ Duration: {duration:.2f}s
 Content type: {content_type}
 Visual character: {visual_character}
 Strongest moments: {strongest_moments}
-Weakest moments: {weakest_moments}
+Weakest moments: {weakest_moments}{profile_block}{audio_block}
 
 Color baseline (measured from the raw footage):
   {cb.get("assessment") or "No major exposure or white-balance issues detected."}
@@ -902,12 +1085,15 @@ Scene changes detected by FFmpeg (reliable visual cut timestamps):
 
 Speech boundaries detected by Deepgram (timestamps where sentences end with a natural pause):
 {speech_boundaries_block}
+{highlights_block}
 
-{tightened_block}
+{tightened_block if tightened_block else tightened_fallback}
 
 These are reference points for choosing your cuts. Scene change timestamps produce visually clean cuts because the image is already changing at that frame. Speech boundary timestamps produce audio-clean cuts because the speaker is pausing naturally. Cutting at other timestamps is valid when the footage calls for it — the pipeline will force keyframes at your chosen timestamps to ensure frame-perfect extraction.
 
-{broll_candidates_block}
+B-roll keyword candidates from transcript:
+{broll_candidates_block if broll_candidates_block else "  none"}
+
 """
 
     split_marker = "=== WHO THE USER IS ==="
@@ -990,6 +1176,11 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames):
         messages=[{"role": "user", "content": content_blocks}],
     )
     print(f"[generate-edit] Claude complete in {time.time()-t:.1f}s", flush=True)
+    usage = getattr(response, "usage", None) or {}
+    cache_write = getattr(usage, "cache_creation_input_tokens", None) or (usage.get("cache_creation_input_tokens") if isinstance(usage, dict) else 0) or 0
+    cache_read  = getattr(usage, "cache_read_input_tokens",     None) or (usage.get("cache_read_input_tokens")     if isinstance(usage, dict) else 0) or 0
+    inp         = getattr(usage, "input_tokens",                None) or (usage.get("input_tokens")                if isinstance(usage, dict) else 0) or 0
+    print(f"[claude] Cache: write={cache_write} read={cache_read} input={inp}", flush=True)
 
     response_text = response.content[0].text
     print(f"[generate-edit] RAW RESPONSE:\n{response_text}\n[generate-edit] END RESPONSE", flush=True)
@@ -1052,9 +1243,23 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames):
     if "clips" in edit_plan:
         del edit_plan["clips"]
 
+    # target_duration (mirrors JS)
+    if final_cuts:
+        edit_plan["target_duration"] = final_cuts[-1]["source_end"] - final_cuts[0]["source_start"]
+
+    # coverage ratio warning (mirrors JS)
+    video_duration = float(analysis.get("duration") or 0)
+    if video_duration > 0:
+        total_clip_duration = sum(max(0, c["source_end"] - c["source_start"]) for c in final_cuts)
+        coverage_ratio = total_clip_duration / video_duration
+        if coverage_ratio < 0.3:
+            print(f"[generate-edit] WARNING: Claude's clips only cover {coverage_ratio*100:.0f}% of the video ({total_clip_duration:.1f}s of {video_duration:.1f}s)", flush=True)
+
     print(f"[generateEdit] Final cuts ({len(final_cuts)} clips):", flush=True)
     for cut in final_cuts:
         print(f"  {cut['source_start']} -> {cut['source_end']} [{cut['transition_out']}]", flush=True)
+    cg = edit_plan["color_grade"]
+    print(f"  Created {len(final_cuts)} cuts, intent={intent}, color: brightness={cg['brightness']} contrast={cg['contrast']} sat={cg['saturation']} gamma={cg['gamma']} temp={cg['color_temperature']}", flush=True)
 
     return edit_plan
 
@@ -1228,10 +1433,14 @@ def build_video_filter_chain(color_grade, source_res):
     s = clamp(float(color_grade.get("saturation") or 1), 0.5, 2.0)
     g = clamp(float(color_grade.get("gamma") or 1), 0.5, 2.0)
     eq_parts = []
-    if b != 0:   eq_parts.append(f"brightness={b}")
-    if c != 1:   eq_parts.append(f"contrast={c}")
-    if s != 1:   eq_parts.append(f"saturation={s}")
-    if g != 1:   eq_parts.append(f"gamma={g}")
+    if b != 0:
+        eq_parts.append(f"brightness={b}")
+    if c != 1:
+        eq_parts.append(f"contrast={c}")
+    if s != 1:
+        eq_parts.append(f"saturation={s}")
+    if g != 1:
+        eq_parts.append(f"gamma={g}")
     if eq_parts:
         filters.append(f"eq={':'.join(eq_parts)}")
     temp = color_grade.get("color_temperature") or "neutral"
@@ -1445,9 +1654,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
         vignette = str(edit_plan.get("vignette") or "none").lower()
         vignette_filter = None
-        if vignette == "light":    vignette_filter = "vignette=angle=PI/4"
-        elif vignette == "medium": vignette_filter = "vignette=angle=PI/5"
-        elif vignette == "strong": vignette_filter = "vignette=angle=PI/6"
+        if vignette == "light":
+            vignette_filter = "vignette=angle=PI/4"
+        elif vignette == "medium":
+            vignette_filter = "vignette=angle=PI/5"
+        elif vignette == "strong":
+            vignette_filter = "vignette=angle=PI/6"
 
         outro_filter = None
         outro = edit_plan.get("outro") or "none"
@@ -1547,10 +1759,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             style = str(overlay.get("style") or "callout")
             char_count = len(text)
             base_size = 72 if style == "title" else (64 if style == "cta" else 56)
-            if char_count <= 18:       font_size = base_size
-            elif char_count <= 25:     font_size = round(base_size * 0.85)
-            elif char_count <= 35:     font_size = round(base_size * 0.70)
-            else:                      font_size = round(base_size * 0.60)
+            if char_count <= 18:
+                font_size = base_size
+            elif char_count <= 25:
+                font_size = round(base_size * 0.85)
+            elif char_count <= 35:
+                font_size = round(base_size * 0.70)
+            else:
+                font_size = round(base_size * 0.60)
             pos = str(overlay.get("position") or "center")
             y_expr = "250" if pos == "top" else ("(h-th)/2" if pos == "center" else str(max(0, 1920-350)))
             anim_in = 0.4 if style == "cta" else 0.3
