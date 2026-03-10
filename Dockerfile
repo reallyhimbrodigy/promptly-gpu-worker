@@ -16,6 +16,7 @@ RUN apt-get update && apt-get install -y \
 
 RUN python3 -m pip install \
     numpy \
+    && python3 -m pip install --no-build-isolation \
     aubio \
     && python3 -m pip install \
     runpod \
