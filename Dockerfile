@@ -10,7 +10,11 @@ RUN python3 -m pip install \
     anthropic \
     google-generativeai \
     deepgram-sdk \
-    httpx
+    httpx \
+    aubio \
+    numpy
 
 COPY handler.py .
+COPY src/assets/sounds/ /assets/sounds/
+COPY src/assets/fonts/  /assets/fonts/
 CMD python3 -u /handler.py

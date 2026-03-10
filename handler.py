@@ -47,6 +47,8 @@ print("[startup] all import checks done", flush=True)
 
 # Download arnndn noise-reduction model if not present (used by audio_denoise feature)
 _RNNOISE_MODEL_PATH = "/usr/share/rnnoise/bd.rnnn"
+SFX_SOUNDS_DIR    = os.path.join(os.path.dirname(__file__), "assets", "sounds")
+OVERLAY_FONT_PATH = os.path.join(os.path.dirname(__file__), "assets", "fonts", "Montserrat-Black.ttf")
 if not os.path.exists(_RNNOISE_MODEL_PATH):
     try:
         os.makedirs(os.path.dirname(_RNNOISE_MODEL_PATH), exist_ok=True)
@@ -2022,6 +2024,82 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames):
     return edit_plan
 
 
+# ─── SFX HELPERS ─────────────────────────────────────────────────────────────
+
+_SFX_BASE_VOLUMES = {
+    "shutter":    0.66,
+    "swoosh":     0.62,
+    "thud":       0.56,
+    "pop":        0.72,
+    "ding":       0.66,
+    "typing":     0.60,
+    "reverb_hit": 0.58,
+    "ching":      0.72,
+}
+
+_TEXT_SFX_BASE_VOLUMES = {
+    "pop":        0.64,
+    "ding":       0.60,
+    "ching":      0.66,
+    "typing":     0.58,
+    "reverb_hit": 0.56,
+    "shutter":    0.62,
+    "swoosh":     0.52,
+    "thud":       0.54,
+}
+
+_SFX_ALIASES = {
+    "whoosh":    "swoosh",
+    "boom":      "thud",
+    "cashier":   "ching",
+    "cash":      "ching",
+    "money":     "ching",
+    "rise":      "reverb_hit",
+    "click":     "pop",
+    "impact":    "thud",
+    "slide":     "swoosh",
+    "snap":      "pop",
+    "glitch":    "swoosh",
+    "tape_stop": "reverb_hit",
+    "drop":      "thud",
+}
+
+
+def normalize_sfx_style(style):
+    key = str(style or "").strip().lower()
+    if not key or key == "none":
+        return "none"
+    return _SFX_ALIASES.get(key, key)
+
+
+def get_sfx_path(sound_name):
+    normalized = normalize_sfx_style(sound_name)
+    if normalized == "none":
+        return None
+    candidate = os.path.join(SFX_SOUNDS_DIR, f"{normalized}.mp3")
+    if os.path.exists(candidate):
+        return candidate
+    print(f"[sfx] Sound file not found: {candidate}", flush=True)
+    return None
+
+
+def get_sfx_volume(sound_name, timestamp, speech_segments, is_text_overlay=False):
+    normalized = normalize_sfx_style(sound_name)
+    if is_text_overlay:
+        base = _TEXT_SFX_BASE_VOLUMES.get(normalized, 0.56)
+        duck = 0.80
+    else:
+        base = _SFX_BASE_VOLUMES.get(normalized, 0.60)
+        duck = 0.75
+    segs = speech_segments or []
+    during_speech = any(
+        float(seg.get("start") or 0) <= timestamp <= float(seg.get("end") or 0)
+        for seg in segs
+    )
+    vol = base * duck if during_speech else base
+    return round(vol, 3)
+
+
 # ─── FFMPEG RENDER ────────────────────────────────────────────────────────────
 
 TRANSITION_DURATION = 0.3
@@ -2276,20 +2354,6 @@ def build_video_filter_chain(color_grade, source_res, edit_plan=None):
     return ",".join(filters) if filters else "null"
 
 
-def get_output_clip_ranges(cuts, effective_durations):
-    ranges = []
-    cursor = 0.0
-    for i, cut in enumerate(cuts):
-        dur = effective_durations[i] if i < len(effective_durations) else (float(cut["source_end"]) - float(cut["source_start"]))
-        start = round(cursor*1000)/1000
-        end   = round((cursor+dur)*1000)/1000
-        ranges.append({"start": start, "end": end})
-        overlap = TRANSITION_DURATION if i < len(cuts)-1 and not is_hard_cut(cut.get("transition_out")) else 0
-        cursor = round((end - overlap)*1000)/1000
-    return ranges
-
-
-
 def project_words_to_output(transcript, cuts, effective_durations):
     words = transcript.get("words") or []
     projected = []
@@ -2418,7 +2482,26 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     return ass_path
 
 
-def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, work_dir):
+def get_output_clip_ranges(cuts, effective_durations):
+    """
+    Return list of {"start": float, "end": float} for each clip's position
+    in the output timeline, accounting for transition overlap.
+    """
+    ranges = []
+    cursor = 0.0
+    for i, cut in enumerate(cuts):
+        dur   = effective_durations[i] if i < len(effective_durations) else 0.0
+        start = round(cursor * 1000) / 1000
+        end   = round((cursor + dur) * 1000) / 1000
+        ranges.append({"start": start, "end": end})
+        transition = str(cut.get("transition_out") or "none").lower()
+        td      = TRANSITION_DURATION if transition not in ("none", "clean_cut", "") else 0.0
+        overlap = td if i < len(cuts) - 1 else 0.0
+        cursor  = round((end - overlap) * 1000) / 1000
+    return ranges
+
+
+def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, work_dir, speech_segments=None):
     n = len(cuts)
     source_res = probe_resolution(source_path)
     kf_timestamps = [float(c["source_start"]) for c in cuts]
@@ -2547,6 +2630,65 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             a_chain.append(f"afade=t=out:st={fade_start:.3f}:d=1.0")
         audio_filters.append(f"[{i}:a]{','.join(a_chain)}[a{i}]")
 
+    # ── SFX collection ───────────────────────────────────────────────────────
+    sfx_input_args   = []
+    sfx_filter_strs  = []
+    sfx_audio_labels = []
+    extra_input_index = n
+
+    _speech_segs = speech_segments or (edit_plan.get("analysis_data") or {}).get("speech", {}).get("segments") or []
+
+    _running = effective_durations[0]
+    _transition_times = []
+    for _i in range(n - 1):
+        _transition = str(cuts[_i].get("transition_out") or "none").lower()
+        _td = TRANSITION_DURATION if _transition not in ("none", "clean_cut", "") else 0.0
+        _event_time = max(0.0, _running - 0.15)
+        _transition_times.append(_event_time)
+        _running = _running + effective_durations[_i + 1] - _td
+
+    for _i in range(n - 1):
+        _sound_style = normalize_sfx_style(cuts[_i].get("transition_sound") or cuts[_i].get("sfx_style") or "none")
+        if _sound_style == "none":
+            continue
+        _sound_path = get_sfx_path(_sound_style)
+        if not _sound_path:
+            continue
+        _event_time = _transition_times[_i]
+        _offset_ms  = max(0, round(_event_time * 1000))
+        _vol        = get_sfx_volume(_sound_style, _event_time, _speech_segs, is_text_overlay=False)
+        _label      = f"[snd{_i}]"
+        sfx_input_args  += ["-i", _sound_path]
+        sfx_filter_strs.append(
+            f"[{extra_input_index}:a]volume={_vol:.3f},adelay={_offset_ms}|{_offset_ms}{_label}"
+        )
+        sfx_audio_labels.append(_label)
+        print(f"[sfx] transition {_i}: {_sound_style} vol={_vol:.3f} at {_event_time:.3f}s", flush=True)
+        extra_input_index += 1
+
+    _clip_ranges = get_output_clip_ranges(cuts, effective_durations)
+    for _i, _overlay in enumerate(edit_plan.get("text_overlays") or []):
+        _clip_idx = int(_overlay.get("appear_at_clip") or 0) - 1
+        if _clip_idx < 0 or _clip_idx >= len(_clip_ranges):
+            continue
+        _sfx_style = normalize_sfx_style(_overlay.get("sfx_style") or "none")
+        if _sfx_style == "none":
+            continue
+        _sound_path = get_sfx_path(_sfx_style)
+        if not _sound_path:
+            continue
+        _ts        = max(0.0, float(_clip_ranges[_clip_idx].get("start") or 0) + 0.02)
+        _offset_ms = round(_ts * 1000)
+        _vol       = get_sfx_volume(_sfx_style, _ts, _speech_segs, is_text_overlay=True)
+        _label     = f"[txtsnd{_i}]"
+        sfx_input_args  += ["-i", _sound_path]
+        sfx_filter_strs.append(
+            f"[{extra_input_index}:a]volume={_vol:.3f},adelay={_offset_ms}|{_offset_ms}{_label}"
+        )
+        sfx_audio_labels.append(_label)
+        print(f"[sfx] text_overlay {_i}: {_sfx_style} vol={_vol:.3f} at {_ts:.3f}s", flush=True)
+        extra_input_index += 1
+
     transition_filters = []
     tl_video = "v0"
     tl_audio = "a0"
@@ -2659,8 +2801,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             end_t = max(start + 0.8, end)
             alpha_expr = f"if(lt(t\\,{(start+anim_in):.3f})\\,(t-{start:.3f})/{anim_in}\\,if(lt(t\\,{(end_t-anim_out):.3f})\\,1\\,if(lt(t\\,{end_t:.3f})\\,({end_t:.3f}-t)/{anim_out}\\,0)))"
             out_label = f"[video_overlay_{i}]"
+            _font_clause = (
+                f":fontfile='{OVERLAY_FONT_PATH}'"
+                if os.path.exists(OVERLAY_FONT_PATH)
+                else ""
+            )
             post_filters.append(
                 f"{video_out}drawtext=text='{text}':fontsize={font_size}:fontcolor=white"
+                f"{_font_clause}"
                 f":x=(w-tw)/2:y={y_expr}:alpha='{alpha_expr}'"
                 f":borderw=5:bordercolor=black:enable='between(t\\,{start:.3f}\\,{end_t:.3f})'{out_label}"
             )
@@ -2676,6 +2824,16 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         video_out = bars_label
 
     audio_out = f"[{tl_audio}]"
+
+    if sfx_audio_labels:
+        _n_inputs   = len(sfx_audio_labels) + 1
+        _sfx_inputs = audio_out + "".join(sfx_audio_labels)
+        post_filters.append(
+            f"{_sfx_inputs}amix=inputs={_n_inputs}:duration=first:dropout_transition=2[audio_sfx_mixed]"
+        )
+        audio_out = "[audio_sfx_mixed]"
+        print(f"[sfx] Mixed {len(sfx_audio_labels)} SFX track(s) into audio", flush=True)
+
     audio_denoise = bool(edit_plan.get("audio_denoise"))
     arnndn_filter = ""
     if audio_denoise:
@@ -2694,7 +2852,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     )
     audio_out = "[final_audio]"
 
-    filter_complex = ";".join(video_filters + audio_filters + transition_filters + post_filters)
+    filter_complex = ";".join(video_filters + audio_filters + transition_filters + sfx_filter_strs + post_filters)
 
     encode_args = [
         "-c:v","libx264","-preset","veryfast","-crf","26",
@@ -2708,6 +2866,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     args = (
         ["-y","-threads","1"]
         + input_args
+        + sfx_input_args
         + ["-filter_complex", filter_complex, "-map", video_out, "-map", audio_out]
         + encode_args
         + [output_path]
