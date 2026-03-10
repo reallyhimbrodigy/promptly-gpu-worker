@@ -163,6 +163,15 @@ Return ONLY valid JSON:
     "saturation": <0.0 to 3.0, 1.0 if good>,
     "gamma": <0.1 to 3.0, 1.0 if good>,
     "color_temperature": "<neutral | warm | cool>"
+  },
+  "footage_quality": {
+    "noise_level": "<none | low | medium | high> — visible pixel noise/grain in flat areas like walls, skin, sky. 'high' means clearly visible noise at normal viewing distance. 'medium' means visible on close inspection. 'low' means clean. Use 'high' for dark/indoor/poorly lit phone footage.",
+    "source_sharpness": "<soft | normal | sharp> — how crisp the image edges and fine details are. 'soft' means the footage looks slightly blurry or out-of-focus. 'normal' means standard phone camera sharpness. 'sharp' means highly detailed, crisp edges.",
+    "highlight_condition": "<clipped | bright | normal | dark> — state of the brightest parts of the image. 'clipped' means areas are blown out to pure white with no detail. 'bright' means highlights are near-clipping but detail is preserved. 'normal' means balanced. 'dark' means underexposed.",
+    "shadow_condition": "<crushed | deep | normal | lifted> — state of the darkest parts of the image. 'crushed' means shadows go to pure black with no visible detail. 'deep' means shadows are rich and dark but still have detail. 'normal' means balanced. 'lifted' means shadows are already elevated/faded.",
+    "color_richness": "<flat | muted | normal | vivid> — overall color saturation and punch of the footage. 'flat' means very little color. 'muted' means colors present but subdued. 'normal' means typical phone camera colors. 'vivid' means already highly saturated.",
+    "skin_tones_present": <true|false>,
+    "lighting_type": "<natural_outdoor | natural_indoor | studio | mixed | unknown> — dominant light source type"
   }
 }
 
@@ -210,38 +219,23 @@ def repair_and_parse_json(s):
     braces = brackets = 0
     in_string = escaped = False
     for ch in s:
-        if escaped:
-            escaped = False
-            continue
-        if ch == "\\":
-            escaped = True
-            continue
-        if ch == '"':
-            in_string = not in_string
-            continue
-        if in_string:
-            continue
-        if ch == "{":
-            braces += 1
-        elif ch == "}":
-            braces -= 1
-        elif ch == "[":
-            brackets += 1
-        elif ch == "]":
-            brackets -= 1
+        if escaped:        escaped = False; continue
+        if ch == '\\':     escaped = True;  continue
+        if ch == '"':      in_string = not in_string; continue
+        if in_string:      continue
+        if ch == '{':      braces += 1
+        elif ch == '}':    braces -= 1
+        elif ch == '[':    brackets += 1
+        elif ch == ']':    brackets -= 1
     if in_string:
         s += '"'
     if braces > 0 or brackets > 0:
-        last_good = max(s.rfind("}"), s.rfind("]"), s.rfind(","))
+        last_good = max(s.rfind('}'), s.rfind(']'), s.rfind(','))
         if last_good > len(s) * 0.5:
             s = s[:last_good + 1]
             s = re.sub(r",\s*$", "", s)
-        while brackets > 0:
-            s += "]"
-            brackets -= 1
-        while braces > 0:
-            s += "}"
-            braces -= 1
+        while brackets > 0: s += ']'; brackets -= 1
+        while braces > 0:   s += '}'; braces -= 1
     return json.loads(s)
 
 
@@ -252,31 +246,23 @@ def _apply_timestamp_multiplier(parsed, multiplier, label, skip_duration=False):
     if not skip_duration and isinstance(fixed.get("duration"), (int, float)):
         fixed["duration"] *= multiplier
     for shot in (fixed.get("shots") or []):
-        if isinstance(shot.get("start"), (int, float)):
-            shot["start"] *= multiplier
-        if isinstance(shot.get("end"), (int, float)):
-            shot["end"] *= multiplier
+        if isinstance(shot.get("start"), (int, float)): shot["start"] *= multiplier
+        if isinstance(shot.get("end"),   (int, float)): shot["end"]   *= multiplier
     speech = fixed.get("speech") or {}
     for seg in (speech.get("segments") or []):
-        if isinstance(seg.get("start"), (int, float)):
-            seg["start"] *= multiplier
-        if isinstance(seg.get("end"), (int, float)):
-            seg["end"] *= multiplier
+        if isinstance(seg.get("start"), (int, float)): seg["start"] *= multiplier
+        if isinstance(seg.get("end"),   (int, float)): seg["end"]   *= multiplier
     for sb in (speech.get("sentence_boundaries") or []):
-        if isinstance(sb.get("time"), (int, float)):
-            sb["time"] *= multiplier
-        if isinstance(sb.get("end_time"), (int, float)):
-            sb["end_time"] *= multiplier
-        if isinstance(sb.get("pause_after"), (int, float)) and sb["pause_after"] < 0.5:
+        if isinstance(sb.get("time"),     (int, float)): sb["time"]     *= multiplier
+        if isinstance(sb.get("end_time"), (int, float)): sb["end_time"] *= multiplier
+        if isinstance(sb.get("pause_after"),    (int, float)) and sb["pause_after"] < 0.5:
             sb["pause_after"] *= multiplier
         if isinstance(sb.get("pause_duration"), (int, float)) and sb["pause_duration"] < 0.5:
             sb["pause_duration"] *= multiplier
     for cp in (fixed.get("cut_points") or []) + (fixed.get("safe_cut_points") or []):
-        if isinstance(cp.get("time"), (int, float)):
-            cp["time"] *= multiplier
+        if isinstance(cp.get("time"), (int, float)): cp["time"] *= multiplier
     for h in (fixed.get("highlights") or []) + (fixed.get("peak_moments") or []):
-        if isinstance(h.get("time"), (int, float)):
-            h["time"] *= multiplier
+        if isinstance(h.get("time"), (int, float)): h["time"] *= multiplier
     result_duration = original_duration if skip_duration else fixed.get("duration")
     print(f"[analyze] {label}: duration={result_duration}", flush=True)
     return fixed
@@ -286,19 +272,15 @@ def normalize_timestamps(parsed):
     duration = float(parsed.get("duration") or 0)
     all_ts = []
     non_dur_ts = []
-    if duration > 0:
-        all_ts.append(duration)
+    if duration > 0: all_ts.append(duration)
     for shot in (parsed.get("shots") or []):
         for k in ("start", "end"):
             if isinstance(shot.get(k), (int, float)):
-                all_ts.append(shot[k])
-                non_dur_ts.append(shot[k])
+                all_ts.append(shot[k]); non_dur_ts.append(shot[k])
     for cp in (parsed.get("cut_points") or []) + (parsed.get("safe_cut_points") or []):
         if isinstance(cp.get("time"), (int, float)):
-            all_ts.append(cp["time"])
-            non_dur_ts.append(cp["time"])
-    if not all_ts:
-        return parsed
+            all_ts.append(cp["time"]); non_dur_ts.append(cp["time"])
+    if not all_ts: return parsed
     max_ts = max(all_ts)
     max_non_dur = max(non_dur_ts) if non_dur_ts else 0
     if max_ts < 2.0 and len(all_ts) > 2:
@@ -382,6 +364,24 @@ def normalize_analysis(parsed):
         "free_zones": raw_fl.get("free_zones") or "unknown",
     }
 
+    raw_fq = parsed.get("footage_quality") or {}
+    valid_noise       = {"none", "low", "medium", "high"}
+    valid_sharpness   = {"soft", "normal", "sharp"}
+    valid_highlight   = {"clipped", "bright", "normal", "dark"}
+    valid_shadow      = {"crushed", "deep", "normal", "lifted"}
+    valid_richness    = {"flat", "muted", "normal", "vivid"}
+    valid_lighting    = {"natural_outdoor", "natural_indoor", "studio", "mixed", "unknown"}
+    footage_quality = {
+        "noise_level":       raw_fq.get("noise_level", "low") if raw_fq.get("noise_level") in valid_noise else "low",
+        "source_sharpness":  raw_fq.get("source_sharpness", "normal") if raw_fq.get("source_sharpness") in valid_sharpness else "normal",
+        "highlight_condition": raw_fq.get("highlight_condition", "normal") if raw_fq.get("highlight_condition") in valid_highlight else "normal",
+        "shadow_condition":  raw_fq.get("shadow_condition", "normal") if raw_fq.get("shadow_condition") in valid_shadow else "normal",
+        "color_richness":    raw_fq.get("color_richness", "normal") if raw_fq.get("color_richness") in valid_richness else "normal",
+        "skin_tones_present": bool(raw_fq.get("skin_tones_present", True)),
+        "lighting_type":     raw_fq.get("lighting_type", "unknown") if raw_fq.get("lighting_type") in valid_lighting else "unknown",
+    }
+    print(f"[analyze] Footage quality: noise={footage_quality['noise_level']} sharpness={footage_quality['source_sharpness']} highlights={footage_quality['highlight_condition']} shadows={footage_quality['shadow_condition']} richness={footage_quality['color_richness']} lighting={footage_quality['lighting_type']}", flush=True)
+
     safe_cut_points = parsed.get("cut_points") or parsed.get("safe_cut_points") or []
     peak_moments = parsed.get("highlights") or parsed.get("peak_moments") or []
     vp = parsed.get("video_profile") or parsed.get("footage_assessment") or {}
@@ -398,6 +398,7 @@ def normalize_analysis(parsed):
         "video_profile":   vp,
         "frame_layout":    frame_layout,
         "color_baseline":  color_baseline,
+        "footage_quality": footage_quality,
         "metadata":        parsed.get("metadata") or {},
         "visual_cuts":     [],
     }
@@ -518,7 +519,7 @@ MULTI_WORD_FILLER = [["you","know"],["i","mean"],["kind","of"],["sort","of"]]
 
 
 def normalize_token(raw):
-    return re.sub(r"[^a-z]", "", str(raw or "").lower().replace("'", "").replace('"', ""))
+    return re.sub(r"[^a-z]", "", str(raw or "").lower().replace("'","").replace('"',""))
 
 
 def detect_filler_words(words):
@@ -792,14 +793,11 @@ def build_prompt(analysis, transcript, expanded_vibe):
     # profileBlock (mirrors JS)
     vp = analysis.get("video_profile") or {}
     profile_parts = []
-    if vp.get("content_type"):
-        profile_parts.append(f"Type: {vp['content_type']}")
+    if vp.get("content_type"):     profile_parts.append(f"Type: {vp['content_type']}")
     if vp.get("visual_character") or vp.get("visual_style"):
         profile_parts.append(f"Look: {vp.get('visual_character') or vp.get('visual_style')}")
-    if vp.get("strongest_moments"):
-        profile_parts.append(f"Best parts: {vp['strongest_moments']}")
-    if vp.get("weakest_moments"):
-        profile_parts.append(f"Weakest parts: {vp['weakest_moments']}")
+    if vp.get("strongest_moments"): profile_parts.append(f"Best parts: {vp['strongest_moments']}")
+    if vp.get("weakest_moments"):   profile_parts.append(f"Weakest parts: {vp['weakest_moments']}")
     profile_block = "\n" + "\n".join(profile_parts) if profile_parts else ""
 
     # audioBlock (mirrors JS)
@@ -810,6 +808,7 @@ def build_prompt(analysis, transcript, expanded_vibe):
         audio_block = f"\nMusic: {music_info}"
 
     cb = analysis.get("color_baseline") or {}
+    fq = analysis.get("footage_quality") or {}
     frame_layout = analysis.get("frame_layout") or {
         "subject_position": "unknown",
         "existing_overlays": {"has_burned_captions": False, "has_text_graphics": False, "overlay_locations": "none detected"},
@@ -820,6 +819,69 @@ def build_prompt(analysis, transcript, expanded_vibe):
     strongest_moments = vp.get("strongest_moments") or "not specified"
     weakest_moments = vp.get("weakest_moments") or "not specified"
     frame_overlay_locations = (frame_layout.get("existing_overlays") or {}).get("overlay_locations") or "none detected"
+
+    # Build render recommendations from Gemini's direct observations
+    render_recs = []
+
+    noise = fq.get("noise_level", "low")
+    sharpness = fq.get("source_sharpness", "normal")
+    highlights = fq.get("highlight_condition", "normal")
+    shadows = fq.get("shadow_condition", "normal")
+    richness = fq.get("color_richness", "normal")
+    skin = fq.get("skin_tones_present", True)
+    lighting = fq.get("lighting_type", "unknown")
+
+    # Noise → denoise
+    if noise in ("medium", "high"):
+        render_recs.append(f"NOISE: {noise}-level noise observed directly — denoise=true (renderer will apply calibrated hqdn3d strength for {noise} noise)")
+    else:
+        render_recs.append(f"NOISE: Clean footage (noise_level={noise}) — denoise=false")
+
+    # Sharpness → sharpening
+    if sharpness == "soft":
+        render_recs.append(f"SHARPNESS: Source is soft — sharpening=true (renderer will apply strong unsharp for soft footage)")
+    elif sharpness == "normal":
+        render_recs.append(f"SHARPNESS: Normal sharpness — sharpening=true applies a calibrated subtle pass; false leaves it as-is")
+    else:
+        render_recs.append(f"SHARPNESS: Source is already sharp — sharpening=false (renderer would apply only minimal pass, but it's not needed)")
+
+    # Highlights → highlight_rolloff
+    if highlights == "clipped":
+        render_recs.append(f"HIGHLIGHTS: Blown out/clipped — highlight_rolloff=true (renderer will apply hard rolloff curve for clipped footage)")
+    elif highlights == "bright":
+        render_recs.append(f"HIGHLIGHTS: Near-clipping — highlight_rolloff=true (renderer will apply soft rolloff for bright footage)")
+    else:
+        render_recs.append(f"HIGHLIGHTS: {highlights} — highlight_rolloff=false unless a filmic look is intended")
+
+    # Shadows → shadow_lift
+    if shadows == "crushed":
+        render_recs.append(f"SHADOWS: Crushed to pure black — shadow_lift=true (renderer will apply high lift for crushed shadows)")
+    elif shadows == "deep":
+        render_recs.append(f"SHADOWS: Deep and rich — shadow_lift=false preserves the look; true applies a low lift if the vibe is faded/editorial")
+    elif shadows == "lifted":
+        render_recs.append(f"SHADOWS: Already elevated in raw footage — shadow_lift=false (additional lift will look washed out)")
+    else:
+        render_recs.append(f"SHADOWS: Balanced — shadow_lift is purely a stylistic choice")
+
+    # Color richness → vibrance
+    if richness == "flat":
+        render_recs.append(f"COLOR: Color-flat footage — vibrance=true (renderer will apply high vibrance for flat footage)" + (" — skin tones present, vibrance protects them" if skin else ""))
+    elif richness == "muted":
+        render_recs.append(f"COLOR: Muted colors — vibrance=true (renderer applies medium vibrance for muted footage)" + (" — skin tones present, vibrance protects them" if skin else ""))
+    elif richness == "vivid":
+        render_recs.append(f"COLOR: Already vivid — vibrance=false (boosting vivid footage produces neon/artificial results)")
+    else:
+        render_recs.append(f"COLOR: Normal color richness — vibrance=false unless the vibe calls for more punch")
+
+    # Lighting type context (informational only)
+    if lighting == "natural_indoor":
+        render_recs.append(f"LIGHTING: Indoor natural light observed")
+    elif lighting == "natural_outdoor":
+        render_recs.append(f"LIGHTING: Outdoor natural light observed")
+    elif lighting == "studio":
+        render_recs.append(f"LIGHTING: Studio lighting observed")
+
+    render_recs_block = "\n".join(f"  {r}" for r in render_recs)
     has_burned_captions = bool((frame_layout.get("existing_overlays") or {}).get("has_burned_captions"))
     duration = float(analysis.get("duration") or 0)
     tightened_duration_val = sum(max(0, s.get("end",0) - s.get("start",0)) for s in (tightened.get("segments") or [])) if tightened else duration
@@ -943,18 +1005,52 @@ Each clip in your recipe has these parameters:
     punch_out — quick zoom out at the start of the clip
 
   cut_zoom — simulates a multi-camera shoot from a single take:
-    true — alternates between normal and slightly zoomed-in framing at sentence boundaries within the clip
+    true — alternates between normal and slightly zoomed-in framing at sentence boundaries within the clip, creating the appearance of camera angle changes
     false — single continuous framing for the whole clip
 
-  speed — playback speed multiplier. Values above 1.0 speed up the clip and shorten its duration. Audio pitch is preserved.
+  speed — playback speed multiplier. Values above 1.0 speed up the clip and shorten its duration. Values below 1.0 slow it down. Audio pitch is preserved.
     0.5, 0.75, 1.0, 1.05, 1.1, 1.15, 1.25, 1.5, 2.0
+
+  speed_ramp — a non-linear speed curve applied within a single clip. The clip accelerates or decelerates across its duration, creating the signature CapCut speed-ramp effect. Works independently of the speed multiplier (speed sets the base tempo; speed_ramp shapes how it moves through that tempo over time).
+    none — constant speed throughout the clip
+    hero_time — starts fast, slams into slow motion at the emotional peak of the clip. The slow portion lingers on whatever is happening at that moment
+    bullet — slow-motion intro, then rockets to fast speed through the rest of the clip. Builds anticipation then releases it
+    flash_in — instant fast at the start, eases down to normal speed. Creates an urgent, high-energy opening
+    flash_out — normal speed, then accelerates hard at the end. Propels the viewer into the next clip
+    montage — alternating fast/slow bursts across the clip duration. High visual energy, works best on action or movement content
 
 Global parameters:
   color_intent — sets the overall color character of the video.
     {intents}
 
-  vignette — darkens the edges of the frame:
+  vignette — darkens the edges of the frame, drawing the eye toward the center:
     none, light, medium, strong
+
+  sharpening — true/false. When true, the renderer measures the source sharpness Gemini observed and applies the calibrated unsharp filter strength for that footage. Counteracts compression softness and produces the clean, high-definition look of professionally shot content.
+    true, false
+
+  grain — adds film grain texture to the entire video. Transforms flat digital footage into something that looks like it was shot on film or with a high-end camera. Often used to make color-graded footage feel intentional and textured rather than processed. Pairs well with faded, vintage, cinematic, and moody color intents.
+    none, subtle, medium, heavy
+
+  denoise — true/false. When true, the renderer applies the calibrated denoising strength for the noise level Gemini observed. Cleans the base before the color grade so grading applies to clean pixels rather than noise.
+    true, false
+
+  cinematic_bars — adds horizontal black bars at the top and bottom of the frame (2.35:1 letterbox format). Creates an immediate cinematic, movie-like look on 9:16 vertical video. Narrows the visible frame vertically, which draws the eye to the center subject. The bars are permanently visible.
+    true, false
+
+  shadow_lift — true/false. When true, the renderer applies the calibrated shadow lift amount for the shadow condition Gemini observed. Raises the black point so shadows never crush to pure black. Creates a faded, elevated look where dark areas glow softly.
+    true, false
+
+  highlight_rolloff — true/false. When true, the renderer applies the calibrated rolloff curve for the highlight condition Gemini observed. Prevents blown-out whites and preserves detail in bright areas like windows, skin, and lights.
+    true, false
+
+  vibrance — true/false. When true, the renderer applies the calibrated vibrance boost for the color richness Gemini observed. Boosts under-saturated colors while protecting skin tones and already-vivid colors from over-processing.
+    true, false
+
+  teal_orange — applies the most recognizable cinematic color grade: shadows pushed toward teal/blue-green, skin tones pushed warm toward orange. Creates depth and contrast between the subject and background. Common in action films, music videos, and high-production TikTok content.
+    none — no teal-orange split
+    subtle — light push, adds depth without being obvious
+    strong — pronounced split, a defining color statement
 
   caption_style — word-by-word captions synchronized to the speaker's voice:
     none, standard, bold_centered, minimal_bottom, animated_word, bold_white, bold_yellow, keyword_pop, box_caption
@@ -962,7 +1058,9 @@ Global parameters:
   caption_position — where captions are placed vertically: top, center, lower-third, bottom
 
   outro — what happens after the last frame of the last clip:
-    none, fade_black, fade_white
+    none — video ends immediately on the last frame
+    fade_black — last clip gradually fades to black
+    fade_white — last clip gradually fades to white
 
   background_music — always "none"
   aspect_ratio — always "9:16"
@@ -971,43 +1069,65 @@ Text overlays — text graphics displayed on specific clips:
   text — plain text only, no emojis
   position — top, center, or bottom
   appear_at_clip — which clip number the text appears on
-  style — title, callout, or cta
-  sfx_style — none, pop, ding, typing, ching, reverb_hit, shutter
+  style — title (large, bold), callout (medium, emphasized), or cta (call-to-action styling)
+  sfx_style — sound that plays when the text appears:
+    none — silent appearance
+    pop — quick bright snap
+    ding — clean single-note bell
+    typing — rapid keyboard clicks, gives text a "being typed" feel
+    ching — cash register sound
+    reverb_hit — impact with reverb tail
+    shutter — camera shutter click
 
 B-roll — stock footage clips overlaid briefly on the main video:
   keyword — search term for Pexels stock video API
   timestamp — when in the source video timeline the overlay starts (seconds)
   duration — how long the overlay is visible (1-3 seconds)
 
-=== HOW THESE TOOLS LOOK ON TIKTOK / REELS / SHORTS ===
+=== HOW THESE TOOLS LOOK AND SOUND ===
 
-Transitions on short-form: On a phone screen in a vertical feed, transitions are visible for 0.3 seconds. Dissolves read as a smooth scene change. Wipes and slides read as energetic forward motion. Hard cuts (none) read as raw, fast-paced editing — the dominant style on TikTok. Fade-to-black between clips reads as a dramatic pause or topic shift. Fadewhite between clips creates a bright white flash on the phone screen — in dark environments this is physically jarring to viewers. Wipedown moves in the same direction as the TikTok/Reels scroll gesture, which visually mimics swiping away from the video. Zoomin is one of the more visually aggressive transitions — it reads as high energy and hype, and pairs with content that has a strong reveal or punchline at the cut point. Most professionally edited short-form content uses a mix of hard cuts and 1-2 transitions placed at the moments where the content shifts — the rest are clean cuts.
+Transitions: On a phone screen, transitions occupy the 0.3-second window between clips. dissolve briefly shows both clips layered. fade passes through opacity to black or white. wipeleft/wiperight/wipeup/wipedown slides the incoming clip over the outgoing one. smoothleft/smoothright/smoothup/smoothdown are the same wipes with eased motion curves. zoomin magnifies the outgoing clip while revealing the incoming clip beneath it. fadeblack/fadewhite pass through a solid color between clips — fadewhite produces a bright white flash visible at full brightness on phone screens.
 
-Transition sounds on short-form: On phone speakers, short percussive sounds (shutter, swoosh, thud, pop) cut through clearly because they have energy in the mid-to-high frequency range where phone speakers perform best. The shutter click pairs with cut-zoom framing changes and hard cuts. The swoosh pairs with wipe and slide transitions. The thud pairs with reveals and emphasis moments. The reverb_hit adds weight to a moment through its reverb tail. The typing sound gives text overlays a "being typed in real time" feel. The ding is a clean notification bell. The ching is a cash register sound that pairs with money-related moments. Transition sounds are audible during the 0.3-second transition window — if the speaker is talking through the transition, the sound competes with the voice.
+Transition sounds: These are short audio accents timed to the transition frame. swoosh is a fast air-swipe. thud is a punchy impact. shutter is a camera click. pop is a bright snap. ding is a single-note bell. reverb_hit is an impact with a tail that lingers. typing is rapid keyboard clicks. ching is a cash register sound. The sound plays during the 0.3-second transition window and blends with any audio already playing.
 
-Zoom on short-form: On a 1080px phone screen, a slow_in zoom across a 5-10 second clip creates a gradual tightening that draws the viewer closer to the subject. Viewers don't consciously notice it but it adds visual motion to an otherwise static talking-head shot. Punch_in and punch_out create an abrupt framing change at the start of the clip — this reads as intentional emphasis only when the content at that frame is worth emphasizing. If the speaker isn't changing energy or topic at that moment, the punch looks like a glitch or encoding error. On screen recordings or product demos, any zoom effect crops the UI content and makes text harder to read.
+Zoom: slow_in gradually scales the clip from 100% to 110% across its full duration — the subject slowly fills more of the frame. slow_out does the reverse. punch_in jumps quickly to 115% at the first 10 frames then holds. punch_out jumps quickly to 85% at the first 10 frames then holds. All zoom modes crop the edges of the frame to maintain 1080x1920.
 
-Cut-zoom on short-form: Cut-zoom is the technique that makes a single-camera talking-head video look like it was shot with two cameras. On TikTok and Reels, this is one of the most recognizable markers of a professionally edited talking-head video. It works on clips where a person is speaking to camera from a relatively fixed position. On clips with physical movement, screen recordings, or product demos, the framing jumps look unnatural because the content within the frame is also moving.
+Cut-zoom: At each sentence boundary within the clip, the framing alternates between normal and slightly zoomed-in. On a 1080px screen this creates the visual effect of a two-camera shoot from a single angle.
 
-Speed on short-form: Speed manipulation is one of the most effective editing techniques on TikTok and Reels. There are two distinct ways speed is used:
+Speed: The speech pitch is preserved regardless of speed value. At 1.05–1.15x the change is imperceptible to most viewers. At 1.25x+ the motion is visibly faster. At 0.75x and below the motion is visibly slower and the voice lowers slightly in tempo.
 
-Pacing adjustment: Speed changes between 1.0x and 1.15x are imperceptible to viewers on talking-head content — the speech sounds natural but the pacing feels tighter.
+Speed ramp: Creates non-linear acceleration within a single clip. hero_time compresses the first half of the clip and expands the second half into slow motion — whatever is happening at the midpoint of the clip becomes the lingering focal moment. bullet expands the first third into slow motion then compresses the rest into fast motion. flash_in compresses the opening frames then eases to normal pacing. flash_out plays at normal speed then compresses the final frames. montage alternates between fast and slow in four equal segments across the clip.
 
-Speed ramps for entertainment: A popular editing style on TikTok is visibly speeding up and slowing down parts of a talking-head video. The speed-up typically goes on the setup or filler portion of a sentence. The slow-down goes on the payoff — the punchline, the key word, the reveal, the emotional beat. The contrast between fast and slow is what makes it entertaining.
+Color grade: color_intent is combined with the measured color baseline of the footage by the rendering system. The resulting grade is applied uniformly across all clips.
 
-Color grading on short-form: The color_intent you choose gets combined with the measured baseline by the rendering system. Footage that is already well-exposed and well-colored needs less adjustment. Footage that is flat, washed out, or has a strong color cast benefits from stronger grading.
+Vignette: A cosine-curve darkening applied radially from the center outward. light, medium, and strong control the angle of the falloff — stronger values begin the darkening closer to the center of the frame.
 
-Vignette on short-form: On TikTok and Reels, vignette is not part of the standard visual language — top-performing creators and professional TikTok editors do not use it. CapCut does not apply vignette in any of its templates. On videos with burned-in text near the edges of the frame, vignette darkens that text.
+Sharpening: true/false. When true, the renderer reads the source_sharpness Gemini observed and selects the unsharp strength automatically — soft footage gets strong sharpening (1.2 luma strength), normal footage gets moderate (0.6), already-sharp footage gets a minimal pass (0.3). You cannot set the strength — only whether it runs.
 
-Captions on short-form: Captions are one of the highest-impact elements on short-form platforms. Bold styles (bold_white, bold_yellow) are the most common on TikTok. Keyword_pop highlights key words in color, which draws the eye to important terms. Minimal_bottom places small text in the bottom zone of the frame — on TikTok and Reels this zone is where the platform renders the creator's username and caption text, so minimal_bottom captions overlap with platform UI and become hard to read.
+Grain: Temporal uniform luma noise added on top of the final grade. subtle=noise strength 4, medium=9, heavy=16. The grain is animated frame-to-frame, producing living texture rather than a static overlay.
 
-Text overlays on short-form: Text overlays on TikTok and Reels serve as visual hooks — they give the viewer something to read in the first 1-2 seconds before they've decided whether to listen to the audio. The most effective text overlays use the speaker's own words from the transcript rather than a rewritten summary. On a 1080px screen, 2-4 words at title size are readable at a glance. Longer text requires the viewer to actively read, which competes with watching the video.
+Denoise: true/false. When true, the renderer reads the noise_level Gemini observed and selects the hqdn3d strength automatically — high noise gets heavy denoising (5:5:8:8), medium noise gets moderate (3:3:5:5), low noise gets light (2:2:3:3). You cannot set the strength — only whether it runs.
 
-B-roll on short-form: B-roll on TikTok and Reels appears as a brief full-screen overlay that replaces the main video for 1-3 seconds. It works as a visual illustration of something the speaker is describing. During the opening seconds of a video, the speaker's face and energy are what keep viewers from scrolling — covering the speaker with stock footage in those seconds removes the human connection.
+Shadow lift: true/false. When true, the renderer reads the shadow_condition Gemini observed and selects the black-point lift automatically — crushed shadows get a high lift (9%), deep shadows get medium (5%), normal shadows get subtle (4%), already-lifted shadows get minimal (2%). You cannot set the level — only whether it runs.
 
-Outro on short-form: Because these platforms auto-loop, the transition from the last frame of the video to the first frame is a visible edit point. A hard cut ending (outro: none) loops seamlessly if the first and last frames are visually similar. Fade-to-black creates a beat of black screen on each loop. Fade-to-white creates a bright white flash on each loop — on a phone screen in a dark environment, this flash is physically uncomfortable and becomes more noticeable with each loop.
+Highlight rolloff: true/false. When true, the renderer reads the highlight_condition Gemini observed and selects the rolloff curve automatically — clipped footage gets a hard rolloff (compressed from 60% up), bright footage gets a soft rolloff (from 75%), normal footage gets a gentle touch (from 82%). You cannot set the curve — only whether it runs.
+
+Vibrance: true/false. When true, the renderer reads the color_richness Gemini observed and selects the saturation multiplier automatically — flat footage gets 1.35x, muted gets 1.22x, normal gets 1.12x, already-vivid footage gets 1.06x. You cannot set the strength — only whether it runs.
+
+Teal-orange: A colorbalance split where shadows are pushed toward blue-green and highlights/midtones are pushed warm toward orange. subtle produces a perceptible but natural-looking depth split. strong produces an unmistakable stylized grade where shadows are clearly teal and warm areas are clearly orange.
+
+Cinematic bars: Two filled black rectangles drawn at the top and bottom of the 1080x1920 frame. The visible image area is narrowed to a 1080x459 horizontal band in the center of the frame, matching a 2.35:1 aspect ratio. The bars are composited on top of all other elements including captions and text overlays.
+
+Captions: Rendered as ASS subtitle burn-in synchronized to word-level Deepgram timestamps. bold_white and bold_yellow use large outlined text. animated_word highlights each word as it is spoken. keyword_pop colorizes words from the caption_keywords list. box_caption draws a filled rectangle behind each word group.
+
+Text overlays: drawtext rendered at the clip's output timecode. style title is 72px, callout is 56px, cta is 64px with a fade-in/out animation of 0.3–0.4 seconds. All text is white with a 5px black border.
+
+B-roll: Stock footage clips from Pexels placed as full-frame overlays at the specified source timestamp. Overlays replace the main video for their full duration.
+
+Outro: fade_black and fade_white apply a 1-second fade on the last clip's video and audio. The fade begins 1 second before the end of the last clip.
 
 The "notes" field must be 50 words maximum. Be ruthlessly brief.
+
 
 === RESPONSE FORMAT ===
 
@@ -1024,6 +1144,14 @@ Respond with ONLY this JSON object:
   "outro": "<outro>",
   "aspect_ratio": "9:16",
   "vignette": "<level>",
+  "sharpening": <true|false>,
+  "grain": "<level>",
+  "denoise": <true|false>,
+  "cinematic_bars": <true|false>,
+  "shadow_lift": <true|false>,
+  "highlight_rolloff": <true|false>,
+  "vibrance": <true|false>,
+  "teal_orange": "<level>",
   "text_overlays": [
     {{ "text": "<text>", "position": "<position>", "appear_at_clip": <clip number>, "style": "<style>", "sfx_style": "<sfx>" }}
   ],
@@ -1031,7 +1159,7 @@ Respond with ONLY this JSON object:
     {{ "keyword": "<search term>", "timestamp": <seconds>, "duration": <1-3> }}
   ],
   "cuts": [
-    {{ "source_start": <n>, "source_end": <n>, "transition_out": "<transition>", "transition_sound": "<sound>", "sfx_style": "<sfx>", "zoom": "<zoom>", "cut_zoom": <true|false>, "speed": <n> }}
+    {{ "source_start": <n>, "source_end": <n>, "transition_out": "<transition>", "transition_sound": "<sound>", "sfx_style": "<sfx>", "zoom": "<zoom>", "cut_zoom": <true|false>, "speed": <n>, "speed_ramp": "<ramp>" }}
   ]
 }}
 
@@ -1054,6 +1182,9 @@ Weakest moments: {weakest_moments}{profile_block}{audio_block}
 Color baseline (measured from the raw footage):
   {cb.get("assessment") or "No major exposure or white-balance issues detected."}
   Brightness: {cb.get("brightness", 0)}, Contrast: {cb.get("contrast", 1)}, Saturation: {cb.get("saturation", 1)}, Gamma: {cb.get("gamma", 1)}, Temperature: {cb.get("color_temperature", "neutral")}
+
+Footage quality (Gemini directly observed the video — these are facts about the source material, not estimates):
+{render_recs_block}
 
 Frame layout:
   Subject: {frame_layout.get("subject_position", "unknown")}
@@ -1215,14 +1346,46 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames):
     edit_plan.setdefault("text_overlays", [])
     edit_plan.setdefault("vignette", "none")
     edit_plan.setdefault("broll", [])
+    edit_plan.setdefault("sharpening", False)
+    edit_plan.setdefault("grain", "none")
+    edit_plan.setdefault("denoise", False)
+    edit_plan.setdefault("cinematic_bars", False)
+    edit_plan.setdefault("shadow_lift", False)
+    edit_plan.setdefault("highlight_rolloff", False)
+    edit_plan.setdefault("vibrance", False)
+    edit_plan.setdefault("teal_orange", "none")
     edit_plan["background_music"] = "none"
     edit_plan["audio_ducking"] = False
+
+    # Hard coerce quality-correction fields to bool — Claude may return string "true"/"false"
+    # Intensity is derived from footage_quality in the renderer; Claude only enables/disables.
+    for bool_field in ("sharpening", "denoise", "shadow_lift", "highlight_rolloff", "vibrance", "cinematic_bars"):
+        v = edit_plan.get(bool_field)
+        if isinstance(v, str):
+            edit_plan[bool_field] = v.strip().lower() in ("true", "1", "yes")
+        else:
+            edit_plan[bool_field] = bool(v)
+
+    # Hard coerce stylistic enum fields — clamp to allowed values
+    valid_grain      = {"none", "subtle", "medium", "heavy"}
+    valid_teal       = {"none", "subtle", "strong"}
+    valid_vignette   = {"none", "light", "medium", "strong"}
+    if edit_plan.get("grain") not in valid_grain:
+        edit_plan["grain"] = "none"
+    if edit_plan.get("teal_orange") not in valid_teal:
+        edit_plan["teal_orange"] = "none"
+    if edit_plan.get("vignette") not in valid_vignette:
+        edit_plan["vignette"] = "none"
 
     final_cuts = []
     for clip_entry in validated_cuts:
         transition = str(clip_entry.get("transition_out") or "").lower()
         transition_out = "none" if not transition or transition == "clean_cut" else transition
         speed = max(0.25, min(4.0, float(clip_entry.get("speed") or 1.0)))
+        valid_ramps = {"none","hero_time","bullet","flash_in","flash_out","montage"}
+        speed_ramp = str(clip_entry.get("speed_ramp") or "none").lower()
+        if speed_ramp not in valid_ramps:
+            speed_ramp = "none"
         final_cuts.append({
             "source_start":    clip_entry["source_start"],
             "source_end":      clip_entry["source_end"],
@@ -1232,6 +1395,7 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames):
             "zoom":            clip_entry.get("zoom") or "none",
             "cut_zoom":        bool(clip_entry.get("cut_zoom")),
             "speed":           speed,
+            "speed_ramp":      speed_ramp,
             "speed_segments":  [],
         })
 
@@ -1426,27 +1590,110 @@ def is_hard_cut(transition):
     return not t or t == "none" or t == "clean_cut"
 
 
-def build_video_filter_chain(color_grade, source_res):
+def build_video_filter_chain(color_grade, source_res, edit_plan=None):
+    ep = edit_plan or {}
+    fq = (ep.get("analysis_data") or {}).get("footage_quality") or {}
     filters = []
+
+    # ── 1. Denoise — calibrated to Gemini-observed noise level ──────────────────
+    if ep.get("denoise"):
+        noise = fq.get("noise_level", "low")
+        # hqdn3d: luma_spatial:chroma_spatial:luma_temporal:chroma_temporal
+        denoise_params = {
+            "none":   "1:1:2:2",    # minimal pass just in case
+            "low":    "2:2:3:3",    # light denoising
+            "medium": "3:3:5:5",    # medium — visible noise, indoor footage
+            "high":   "5:5:8:8",    # heavy — dark/noisy phone footage
+        }.get(noise, "2:2:3:3")
+        filters.append(f"hqdn3d={denoise_params}")
+        print(f"[render] denoise: noise_level={noise} → hqdn3d={denoise_params}", flush=True)
+
+    # ── 2. Color grade (eq: brightness/contrast/saturation/gamma) ───────────────
     b = clamp(float(color_grade.get("brightness") or 0), -0.3, 0.3)
     c = clamp(float(color_grade.get("contrast") or 1), 0.5, 2.0)
     s = clamp(float(color_grade.get("saturation") or 1), 0.5, 2.0)
     g = clamp(float(color_grade.get("gamma") or 1), 0.5, 2.0)
     eq_parts = []
-    if b != 0:
-        eq_parts.append(f"brightness={b}")
-    if c != 1:
-        eq_parts.append(f"contrast={c}")
-    if s != 1:
-        eq_parts.append(f"saturation={s}")
-    if g != 1:
-        eq_parts.append(f"gamma={g}")
+    if b != 0:   eq_parts.append(f"brightness={b:.4f}")
+    if c != 1:   eq_parts.append(f"contrast={c:.4f}")
+    if s != 1:   eq_parts.append(f"saturation={s:.4f}")
+    if g != 1:   eq_parts.append(f"gamma={g:.4f}")
     if eq_parts:
         filters.append(f"eq={':'.join(eq_parts)}")
+
+    # ── 3. Color temperature ─────────────────────────────────────────────────────
     temp = color_grade.get("color_temperature") or "neutral"
     temp_filter = TEMPERATURE_FILTERS.get(temp)
     if temp_filter:
         filters.append(temp_filter)
+
+    # ── 4. Shadow lift — calibrated to Gemini-observed shadow condition ──────────
+    if ep.get("shadow_lift"):
+        shadow_cond = fq.get("shadow_condition", "normal")
+        # curves: raise black point. More crushed shadows → more lift needed
+        lift_curves = {
+            "crushed": "curves=r='0/0.09 1/1':g='0/0.09 1/1':b='0/0.09 1/1'",   # high lift
+            "deep":    "curves=r='0/0.05 1/1':g='0/0.05 1/1':b='0/0.05 1/1'",   # medium lift
+            "normal":  "curves=r='0/0.04 1/1':g='0/0.04 1/1':b='0/0.04 1/1'",   # subtle lift
+            "lifted":  "curves=r='0/0.02 1/1':g='0/0.02 1/1':b='0/0.02 1/1'",   # minimal — already lifted
+        }.get(shadow_cond, "curves=r='0/0.04 1/1':g='0/0.04 1/1':b='0/0.04 1/1'")
+        filters.append(lift_curves)
+        print(f"[render] shadow_lift: shadow_condition={shadow_cond} → lift applied", flush=True)
+
+    # ── 5. Highlight rolloff — calibrated to Gemini-observed highlight condition ─
+    if ep.get("highlight_rolloff"):
+        hl_cond = fq.get("highlight_condition", "normal")
+        # curves: compress top of tonal range. More clipped → harder rolloff
+        rolloff_curves = {
+            "clipped": "curves=r='0/0 0.6/0.58 0.85/0.80 1/0.88':g='0/0 0.6/0.58 0.85/0.80 1/0.88':b='0/0 0.6/0.58 0.85/0.80 1/0.88'",
+            "bright":  "curves=r='0/0 0.75/0.72 1/0.95':g='0/0 0.75/0.72 1/0.95':b='0/0 0.75/0.72 1/0.95'",
+            "normal":  "curves=r='0/0 0.82/0.80 1/0.97':g='0/0 0.82/0.80 1/0.97':b='0/0 0.82/0.80 1/0.97'",
+            "dark":    "curves=r='0/0 0.88/0.87 1/0.98':g='0/0 0.88/0.87 1/0.98':b='0/0 0.88/0.87 1/0.98'",
+        }.get(hl_cond, "curves=r='0/0 0.82/0.80 1/0.97':g='0/0 0.82/0.80 1/0.97':b='0/0 0.82/0.80 1/0.97'")
+        filters.append(rolloff_curves)
+        print(f"[render] highlight_rolloff: highlight_condition={hl_cond} → rolloff applied", flush=True)
+
+    # ── 6. Vibrance — calibrated to Gemini-observed color richness ───────────────
+    if ep.get("vibrance"):
+        richness = fq.get("color_richness", "normal")
+        # More flat/muted → bigger boost needed. Already vivid → minimal touch only
+        vibrance_hue = {
+            "flat":   "hue=s=1.35",   # large boost for color-flat footage
+            "muted":  "hue=s=1.22",   # medium boost for muted footage
+            "normal": "hue=s=1.12",   # subtle boost for normal footage
+            "vivid":  "hue=s=1.06",   # near-nothing for already-vivid footage
+        }.get(richness, "hue=s=1.12")
+        filters.append(vibrance_hue)
+        print(f"[render] vibrance: color_richness={richness} → {vibrance_hue}", flush=True)
+
+    # ── 7. Teal-orange split grade (stylistic — Claude controls level) ───────────
+    teal_orange = str(ep.get("teal_orange") or "none").lower()
+    if teal_orange == "subtle":
+        filters.append("colorbalance=rs=-0.08:gs=0.04:bs=0.10:rm=0.04:gm=0:bm=-0.04:rh=0.05:gh=0.01:bh=-0.05")
+    elif teal_orange == "strong":
+        filters.append("colorbalance=rs=-0.16:gs=0.06:bs=0.18:rm=0.07:gm=0:bm=-0.07:rh=0.09:gh=0.02:bh=-0.09")
+
+    # ── 8. Sharpening — calibrated to Gemini-observed source sharpness ───────────
+    if ep.get("sharpening"):
+        src_sharp = fq.get("source_sharpness", "normal")
+        # Softer source needs more aggressive unsharp. Already-sharp source gets minimal pass
+        unsharp_params = {
+            "soft":   "unsharp=7:7:1.2:5:5:0.0",   # strong sharpening for soft footage
+            "normal": "unsharp=5:5:0.6:3:3:0.0",   # moderate for normal footage
+            "sharp":  "unsharp=3:3:0.3:3:3:0.0",   # minimal pass for already-sharp footage
+        }.get(src_sharp, "unsharp=5:5:0.6:3:3:0.0")
+        filters.append(unsharp_params)
+        print(f"[render] sharpening: source_sharpness={src_sharp} → {unsharp_params}", flush=True)
+
+    # ── 9. Film grain (stylistic — Claude controls level) ────────────────────────
+    grain = str(ep.get("grain") or "none").lower()
+    if grain == "subtle":
+        filters.append("noise=c0s=4:c0f=t+u")
+    elif grain == "medium":
+        filters.append("noise=c0s=9:c0f=t+u")
+    elif grain == "heavy":
+        filters.append("noise=c0s=16:c0f=t+u")
+
     return ",".join(filters) if filters else "null"
 
 
@@ -1604,7 +1851,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         raise RuntimeError(f"Pre-split mismatch: expected {n}, got {len(clip_files)}")
 
     color_grade = edit_plan.get("color_grade") or {}
-    color_filter_str = build_video_filter_chain(color_grade, source_res)
+    color_filter_str = build_video_filter_chain(color_grade, source_res, edit_plan)
     has_burned_captions = bool(
         (edit_plan.get("analysis_data") or {})
         .get("frame_layout", {})
@@ -1654,12 +1901,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
         vignette = str(edit_plan.get("vignette") or "none").lower()
         vignette_filter = None
-        if vignette == "light":
-            vignette_filter = "vignette=angle=PI/4"
-        elif vignette == "medium":
-            vignette_filter = "vignette=angle=PI/5"
-        elif vignette == "strong":
-            vignette_filter = "vignette=angle=PI/6"
+        if vignette == "light":    vignette_filter = "vignette=angle=PI/4"
+        elif vignette == "medium": vignette_filter = "vignette=angle=PI/5"
+        elif vignette == "strong": vignette_filter = "vignette=angle=PI/6"
 
         outro_filter = None
         outro = edit_plan.get("outro") or "none"
@@ -1669,6 +1913,38 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             outro_filter = f"fade=t=out:st={fade_start:.3f}:d=1.0:color={fade_color}"
 
         v_chain = ["settb=AVTB","fps=30"]
+
+        # Speed ramp: non-linear setpts curve across the clip
+        speed_ramp = str(cut.get("speed_ramp") or "none").lower()
+        if speed_ramp != "none" and speed_ramp in {"hero_time","bullet","flash_in","flash_out","montage"}:
+            # All ramps use expr-based setpts applied AFTER constant speed
+            # N = frame number, TB = 1/30, total_frames already computed above
+            tf = max(1, total_frames)
+            if speed_ramp == "hero_time":
+                # Fast start (0.5x duration = 2x speed), slow end (0.5x duration = 0.4x speed)
+                # setpts: first half compressed, second half expanded
+                expr = f"if(lt(N\\,{tf//2})\\,PTS*0.5\\,{tf//2}*TB/30+({tf//2}*TB+(N-{tf//2})*TB)*2.5)"
+                v_chain.append(f"setpts='if(lt(N\\,{tf//2})\\,PTS*0.5\\,{tf//4*1.0/30:.6f}+(PTS-{tf//2*1.0/30:.6f})*2.5)'")
+            elif speed_ramp == "bullet":
+                # Slow start (0.4x speed first third), fast rest (1.4x)
+                v_chain.append(f"setpts='if(lt(N\\,{tf//3})\\,PTS*2.5\\,{tf//3*2.5/30:.6f}+(PTS-{tf//3*1.0/30:.6f})*0.7)'")
+            elif speed_ramp == "flash_in":
+                # Fast at start, eases to normal
+                v_chain.append(f"setpts='if(lt(N\\,{tf//3})\\,PTS*0.4\\,{tf//3*0.4/30:.6f}+(PTS-{tf//3*1.0/30:.6f})*1.0)'")
+            elif speed_ramp == "flash_out":
+                # Normal speed, then fast at end
+                v_chain.append(f"setpts='if(lt(N\\,{tf*2//3})\\,PTS*1.0\\,{tf*2//3*1.0/30:.6f}+(PTS-{tf*2//3*1.0/30:.6f})*0.4)'")
+            elif speed_ramp == "montage":
+                # Alternating fast/slow every quarter
+                q = tf // 4
+                v_chain.append(
+                    f"setpts='if(lt(N\\,{q})\\,PTS*0.5"
+                    f"\\,if(lt(N\\,{2*q})\\,{q*0.5/30:.6f}+(PTS-{q*1.0/30:.6f})*2.0"
+                    f"\\,if(lt(N\\,{3*q})\\,{q*0.5/30+q*2.0/30:.6f}+(PTS-{2*q*1.0/30:.6f})*0.5"
+                    f"\\,{q*0.5/30+q*2.0/30+q*0.5/30:.6f}+(PTS-{3*q*1.0/30:.6f})*2.0)))'"
+                )
+            v_chain.append("fps=30")
+
         if speed != 1.0:
             v_chain.append(f"setpts={1.0/speed:.4f}*PTS")
             v_chain.append("fps=30")
@@ -1759,14 +2035,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             style = str(overlay.get("style") or "callout")
             char_count = len(text)
             base_size = 72 if style == "title" else (64 if style == "cta" else 56)
-            if char_count <= 18:
-                font_size = base_size
-            elif char_count <= 25:
-                font_size = round(base_size * 0.85)
-            elif char_count <= 35:
-                font_size = round(base_size * 0.70)
-            else:
-                font_size = round(base_size * 0.60)
+            if char_count <= 18:       font_size = base_size
+            elif char_count <= 25:     font_size = round(base_size * 0.85)
+            elif char_count <= 35:     font_size = round(base_size * 0.70)
+            else:                      font_size = round(base_size * 0.60)
             pos = str(overlay.get("position") or "center")
             y_expr = "250" if pos == "top" else ("(h-th)/2" if pos == "center" else str(max(0, 1920-350)))
             anim_in = 0.4 if style == "cta" else 0.3
@@ -1780,6 +2052,17 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 f":borderw=5:bordercolor=black:enable='between(t\\,{start:.3f}\\,{end_t:.3f})'{out_label}"
             )
             video_out = out_label
+
+    # Cinematic bars (2.35:1 letterbox on 9:16 — horizontal black bars top and bottom)
+    if edit_plan.get("cinematic_bars"):
+        # On 1080x1920, 2.35:1 crop height = 1080/2.35 = 459px. Bar height = (1920-459)/2 = 730px
+        bar_h = int((1920 - int(1080 / 2.35)) / 2)
+        bars_label = f"[video_bars]"
+        post_filters.append(
+            f"{video_out}drawbox=x=0:y=0:w=1080:h={bar_h}:color=black:t=fill,"
+            f"drawbox=x=0:y={1920-bar_h}:w=1080:h={bar_h}:color=black:t=fill{bars_label}"
+        )
+        video_out = bars_label
 
     audio_out = f"[{tl_audio}]"
     post_filters.append(
