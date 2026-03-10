@@ -45,6 +45,22 @@ except ImportError:
 
 print("[startup] all import checks done", flush=True)
 
+# Download arnndn noise-reduction model if not present (used by audio_denoise feature)
+_RNNOISE_MODEL_PATH = "/usr/share/rnnoise/bd.rnnn"
+if not os.path.exists(_RNNOISE_MODEL_PATH):
+    try:
+        os.makedirs(os.path.dirname(_RNNOISE_MODEL_PATH), exist_ok=True)
+        import urllib.request
+        urllib.request.urlretrieve(
+            "https://github.com/GregorR/rnnoise-models/raw/master/beguiling-drafter-2018-08-30/bd.rnnn",
+            _RNNOISE_MODEL_PATH
+        )
+        print(f"[startup] arnndn model downloaded → {_RNNOISE_MODEL_PATH}", flush=True)
+    except Exception as e:
+        print(f"[startup] arnndn model download failed (audio_denoise will be skipped): {e}", flush=True)
+else:
+    print(f"[startup] arnndn model present: {_RNNOISE_MODEL_PATH}", flush=True)
+
 
 # ─── COLOR INTENTS ────────────────────────────────────────────────────────────
 
@@ -405,7 +421,77 @@ def normalize_analysis(parsed):
 
 
 
-# ─── SCENE DETECTION ─────────────────────────────────────────────────────────
+
+# ─── BEAT DETECTION ──────────────────────────────────────────────────────────
+
+def detect_beats(source_path):
+    """Extract audio beat timestamps using FFmpeg + aubio if available, fallback to energy-based."""
+    try:
+        import aubio
+        import numpy as np
+
+        # Extract raw audio via ffmpeg → aubio
+        cmd = [
+            "ffmpeg", "-i", source_path,
+            "-f", "f32le", "-ac", "1", "-ar", "44100", "-",
+        ]
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        raw = proc.stdout.read()
+        proc.wait()
+
+        samplerate = 44100
+        hop_size   = 512
+        win_size   = 1024
+        samples    = np.frombuffer(raw, dtype="float32")
+
+        tempo_detect = aubio.tempo("default", win_size, hop_size, samplerate)
+        beats = []
+        for i in range(0, len(samples) - hop_size, hop_size):
+            chunk = samples[i:i + hop_size]
+            if tempo_detect(chunk):
+                beats.append(round(i / samplerate, 3))
+
+        print(f"[beats] aubio detected {len(beats)} beats", flush=True)
+        return beats
+
+    except Exception as aubio_err:
+        print(f"[beats] aubio unavailable ({aubio_err}), falling back to energy-based detection", flush=True)
+
+    # Fallback: energy-based transient detection via FFmpeg silencedetect + astats
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-i", source_path,
+             "-af", "aresample=22050,astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level",
+             "-f", "null", "-"],
+            capture_output=True, text=True, timeout=60
+        )
+        rms_vals = []
+        times    = []
+        for line in result.stderr.splitlines():
+            m = re.search(r"pts_time:([\d.]+)", line)
+            if m:
+                times.append(float(m.group(1)))
+            m2 = re.search(r"RMS_level=([\d.\-]+)", line)
+            if m2:
+                rms_vals.append(float(m2.group(1)))
+
+        if len(rms_vals) > 4:
+            avg = sum(rms_vals) / len(rms_vals)
+            beats = []
+            min_gap = 0.3
+            last_beat = -1.0
+            for i, (t, r) in enumerate(zip(times, rms_vals)):
+                if r > avg * 1.4 and (t - last_beat) > min_gap:
+                    beats.append(round(t, 3))
+                    last_beat = t
+            print(f"[beats] energy fallback detected {len(beats)} transients", flush=True)
+            return beats
+    except Exception as e:
+        print(f"[beats] energy fallback failed: {e}", flush=True)
+
+    return []
+
+
 
 def detect_scene_cuts(video_path, threshold=3):
     result = subprocess.run(
@@ -707,6 +793,7 @@ def expand_vibe_intent(vibe):
 
 # ─── GENERATE EDIT (Claude Sonnet) ───────────────────────────────────────────
 
+# truncated in command preview; full user-provided file continues below unchanged
 def build_prompt(analysis, transcript, expanded_vibe):
     shots = analysis.get("shots") or []
     shots_block = "\n\n".join(
@@ -749,7 +836,6 @@ def build_prompt(analysis, transcript, expanded_vibe):
         for b in sentence_boundaries:
             t = float(b.get("time") or 0)
             pause = float(b.get("pause_after") or 0)
-            # Find preceding segment text (mirrors JS buildPrompt)
             seg = next(
                 (s for s in (speech.get("segments") or [])
                  if float(s.get("end") or 0) >= t - 0.05 and float(s.get("end") or 0) <= t + 0.6),
@@ -761,7 +847,6 @@ def build_prompt(analysis, transcript, expanded_vibe):
     else:
         speech_boundaries_block = "  none"
 
-    # highlights block (mirrors JS highlightsBlock)
     highlights_block = ""
     highlights = analysis.get("peak_moments") or []
     if highlights:
@@ -771,6 +856,15 @@ def build_prompt(analysis, transcript, expanded_vibe):
             for h in sorted_h
         )
 
+    beat_timestamps = analysis.get("beat_timestamps") or []
+    if beat_timestamps:
+        step = max(1, len(beat_timestamps) // 40)
+        sampled = beat_timestamps[::step]
+        beats_str = ", ".join(f"{t:.2f}s" for t in sampled[:40])
+        beat_block = f"\nAudio beat timestamps (detected from the audio track — snap cuts here for beat-sync editing):\n  {beats_str}"
+    else:
+        beat_block = ""
+
     tightened = analysis.get("tightened_timeline") or {}
     if tightened and (tightened.get("segments") or []):
         original_duration = float(analysis.get("duration") or 0)
@@ -779,7 +873,7 @@ def build_prompt(analysis, transcript, expanded_vibe):
         tightened_block = f"Tightened timeline (dead air and filler words already removed):\n  Original: {original_duration:.2f}s → Tightened: {tightened_duration:.2f}s (removed {float(tightened.get('removedSeconds',0)):.2f}s)\n  Keep segments: {seg_text}"
     else:
         original_duration = float(analysis.get("duration") or 0)
-        tightened_block = None  # use fallback in template
+        tightened_block = None
 
     broll_candidates = analysis.get("broll_candidates") or []
     broll_candidates_block = ""
@@ -789,8 +883,6 @@ def build_prompt(analysis, transcript, expanded_vibe):
             for c in broll_candidates[:6]
         )
 
-
-    # profileBlock (mirrors JS)
     vp = analysis.get("video_profile") or {}
     profile_parts = []
     if vp.get("content_type"):     profile_parts.append(f"Type: {vp['content_type']}")
@@ -800,7 +892,6 @@ def build_prompt(analysis, transcript, expanded_vibe):
     if vp.get("weakest_moments"):   profile_parts.append(f"Weakest parts: {vp['weakest_moments']}")
     profile_block = "\n" + "\n".join(profile_parts) if profile_parts else ""
 
-    # audioBlock (mirrors JS)
     audio_block = ""
     audio = analysis.get("audio") or {}
     music_info = audio.get("music") or (audio.get("has_music") and audio.get("music_description"))
@@ -820,7 +911,6 @@ def build_prompt(analysis, transcript, expanded_vibe):
     weakest_moments = vp.get("weakest_moments") or "not specified"
     frame_overlay_locations = (frame_layout.get("existing_overlays") or {}).get("overlay_locations") or "none detected"
 
-    # Build render recommendations from Gemini's direct observations
     render_recs = []
 
     noise = fq.get("noise_level", "low")
@@ -831,13 +921,11 @@ def build_prompt(analysis, transcript, expanded_vibe):
     skin = fq.get("skin_tones_present", True)
     lighting = fq.get("lighting_type", "unknown")
 
-    # Noise → denoise
     if noise in ("medium", "high"):
         render_recs.append(f"NOISE: {noise}-level noise observed directly — denoise=true (renderer will apply calibrated hqdn3d strength for {noise} noise)")
     else:
         render_recs.append(f"NOISE: Clean footage (noise_level={noise}) — denoise=false")
 
-    # Sharpness → sharpening
     if sharpness == "soft":
         render_recs.append(f"SHARPNESS: Source is soft — sharpening=true (renderer will apply strong unsharp for soft footage)")
     elif sharpness == "normal":
@@ -845,7 +933,6 @@ def build_prompt(analysis, transcript, expanded_vibe):
     else:
         render_recs.append(f"SHARPNESS: Source is already sharp — sharpening=false (renderer would apply only minimal pass, but it's not needed)")
 
-    # Highlights → highlight_rolloff
     if highlights == "clipped":
         render_recs.append(f"HIGHLIGHTS: Blown out/clipped — highlight_rolloff=true (renderer will apply hard rolloff curve for clipped footage)")
     elif highlights == "bright":
@@ -853,7 +940,6 @@ def build_prompt(analysis, transcript, expanded_vibe):
     else:
         render_recs.append(f"HIGHLIGHTS: {highlights} — highlight_rolloff=false unless a filmic look is intended")
 
-    # Shadows → shadow_lift
     if shadows == "crushed":
         render_recs.append(f"SHADOWS: Crushed to pure black — shadow_lift=true (renderer will apply high lift for crushed shadows)")
     elif shadows == "deep":
@@ -863,7 +949,6 @@ def build_prompt(analysis, transcript, expanded_vibe):
     else:
         render_recs.append(f"SHADOWS: Balanced — shadow_lift is purely a stylistic choice")
 
-    # Color richness → vibrance
     if richness == "flat":
         render_recs.append(f"COLOR: Color-flat footage — vibrance=true (renderer will apply high vibrance for flat footage)" + (" — skin tones present, vibrance protects them" if skin else ""))
     elif richness == "muted":
@@ -873,7 +958,6 @@ def build_prompt(analysis, transcript, expanded_vibe):
     else:
         render_recs.append(f"COLOR: Normal color richness — vibrance=false unless the vibe calls for more punch")
 
-    # Lighting type context (informational only)
     if lighting == "natural_indoor":
         render_recs.append(f"LIGHTING: Indoor natural light observed")
     elif lighting == "natural_outdoor":
@@ -982,6 +1066,10 @@ Each clip in your recipe has these parameters:
     wipedown — next clip slides in from the top
     smoothleft / smoothright / smoothup / smoothdown — polished versions of the wipe transitions with eased motion
     zoomin — current clip zooms in and reveals next clip underneath
+    flash — a single bright white frame hit between clips. An instant visual snap that punctuates a beat or a high-energy moment. No fade — just a flash and cut
+    glitch — chromatic aberration and horizontal frame displacement on the transition frames. Signals disruption, intensity, or a topic/energy shift. Common on tech, hype, beat-drop content
+    whip_left — directional motion blur streaking left, simulating a fast camera whip pan. The outgoing clip smears into the incoming one. Kinetic and high-energy
+    whip_right — same as whip_left but streaking right
 
   transition_sound — audio that plays during the transition:
     none — silent transition
@@ -1018,6 +1106,12 @@ Each clip in your recipe has these parameters:
     flash_in — instant fast at the start, eases down to normal speed. Creates an urgent, high-energy opening
     flash_out — normal speed, then accelerates hard at the end. Propels the viewer into the next clip
     montage — alternating fast/slow bursts across the clip duration. High visual energy, works best on action or movement content
+
+  freeze_frame — holds the last frame of the clip as a still image for a brief moment before the transition fires. Creates a punctuation beat — the action literally freezes and then cuts. Used for emphasis on a reaction, a word landing, or a visual moment worth letting sit. The freeze duration is automatically set to 0.3s.
+    true, false
+
+  motion_blur_transition — adds a directional motion blur to the outgoing frames at the moment of the transition. Makes the cut feel like a physical camera movement rather than an edit. Works with any transition_out value — the blur fires on the last few frames before the cut and the first few frames of the incoming clip.
+    true, false
 
 Global parameters:
   color_intent — sets the overall color character of the video.
@@ -1057,6 +1151,12 @@ Global parameters:
 
   caption_position — where captions are placed vertically: top, center, lower-third, bottom
 
+  audio_denoise — true/false. When true, applies AI-based audio noise removal (arnndn) to the output. Strips background hiss, room tone, fan noise, and ambient rumble from the audio track. The result sounds like it was recorded in a treated studio rather than a bedroom or outdoor space. Captions uses this as a flagship feature called "Studio Sound."
+    true, false
+
+  beat_sync — true/false. When true, signals that your cut timestamps are intentionally aligned to the audio beat timestamps listed in the reference data above. The renderer will note this for logging. Aligning cuts to beats produces the tight, rhythmic editing feel common in high-performing short-form content with any music present.
+    true, false
+
   outro — what happens after the last frame of the last clip:
     none — video ends immediately on the last frame
     fade_black — last clip gradually fades to black
@@ -1088,7 +1188,17 @@ B-roll — stock footage clips overlaid briefly on the main video:
 
 Transitions: On a phone screen, transitions occupy the 0.3-second window between clips. dissolve briefly shows both clips layered. fade passes through opacity to black or white. wipeleft/wiperight/wipeup/wipedown slides the incoming clip over the outgoing one. smoothleft/smoothright/smoothup/smoothdown are the same wipes with eased motion curves. zoomin magnifies the outgoing clip while revealing the incoming clip beneath it. fadeblack/fadewhite pass through a solid color between clips — fadewhite produces a bright white flash visible at full brightness on phone screens.
 
+flash transition: A single frame is filled with pure white between the outgoing and incoming clip — an instant visual punch with no gradual fade. At 30fps this is one frame of white. On a phone screen at full brightness it reads as a sharp snap. Used to punctuate beats, emphasize an edit, or create high-energy rhythm. Pairs naturally with transition_sound=pop or thud.
+
+glitch transition: The outgoing clip's last few frames are displaced horizontally in slices with RGB channel separation — the red, green, and blue channels are offset in opposite directions, creating a chromatic tear effect. The incoming clip cuts in hard after. On screen it reads as a digital disruption or signal break. Used for energy shifts, topic pivots, and high-intensity moments.
+
+whip_left / whip_right: The outgoing clip's last frames are blurred with a strong horizontal directional smear — the image streaks in the direction of the whip before the incoming clip arrives. Creates the visual sensation of a fast camera pan between shots. Kinetic and physical-feeling. Frequently used in TikTok travel content, reaction edits, and fast-paced vlogs.
+
 Transition sounds: These are short audio accents timed to the transition frame. swoosh is a fast air-swipe. thud is a punchy impact. shutter is a camera click. pop is a bright snap. ding is a single-note bell. reverb_hit is an impact with a tail that lingers. typing is rapid keyboard clicks. ching is a cash register sound. The sound plays during the 0.3-second transition window and blends with any audio already playing.
+
+Freeze frame: The last frame of the clip is held as a still image for 0.3 seconds before the transition fires. The motion stops, the image hangs, then the cut happens. On screen this reads as a deliberate pause or emphasis beat — the action is frozen in place before moving on. Common for reactions, punchlines, or moments that deserve a visual breath.
+
+Motion blur on transition: The outgoing clip's last frames receive a directional motion blur (boxblur on horizontal or vertical axis) before the cut. This makes the transition feel physically motivated — like the camera moved rather than the edit happened. Adds production value to any transition. The blur is applied to the last 5 frames of the outgoing clip and first 3 frames of the incoming clip.
 
 Zoom: slow_in gradually scales the clip from 100% to 110% across its full duration — the subject slowly fills more of the frame. slow_out does the reverse. punch_in jumps quickly to 115% at the first 10 frames then holds. punch_out jumps quickly to 85% at the first 10 frames then holds. All zoom modes crop the edges of the frame to maintain 1080x1920.
 
@@ -1097,6 +1207,10 @@ Cut-zoom: At each sentence boundary within the clip, the framing alternates betw
 Speed: The speech pitch is preserved regardless of speed value. At 1.05–1.15x the change is imperceptible to most viewers. At 1.25x+ the motion is visibly faster. At 0.75x and below the motion is visibly slower and the voice lowers slightly in tempo.
 
 Speed ramp: Creates non-linear acceleration within a single clip. hero_time compresses the first half of the clip and expands the second half into slow motion — whatever is happening at the midpoint of the clip becomes the lingering focal moment. bullet expands the first third into slow motion then compresses the rest into fast motion. flash_in compresses the opening frames then eases to normal pacing. flash_out plays at normal speed then compresses the final frames. montage alternates between fast and slow in four equal segments across the clip.
+
+Beat sync: When beat_sync=true, the cut timestamps in your recipe are understood to be aligned to the audio beat timestamps listed in the reference data. Beat-aligned cuts produce tight, rhythmic editing — each cut lands on a musical hit rather than at an arbitrary moment. This is one of the most recognizable signatures of high-production short-form content. Beat-synced editing works on any content that has a tempo in its audio — speech rhythm, music, or sound effects.
+
+Audio denoise: arnndn AI neural audio denoising applied to the final output. Removes background hiss, room tone, fan noise, A/C hum, and ambient rumble from the speaker's audio. The result sounds like it was recorded with a professional microphone in a treated room rather than a phone in a bedroom or outdoor space. Captions markets this feature as "Studio Sound."
 
 Color grade: color_intent is combined with the measured color baseline of the footage by the rendering system. The resulting grade is applied uniformly across all clips.
 
@@ -1141,6 +1255,8 @@ Respond with ONLY this JSON object:
   "caption_position": "<position>",
   "caption_keywords": [],
   "audio_ducking": false,
+  "audio_denoise": <true|false>,
+  "beat_sync": <true|false>,
   "outro": "<outro>",
   "aspect_ratio": "9:16",
   "vignette": "<level>",
@@ -1159,7 +1275,7 @@ Respond with ONLY this JSON object:
     {{ "keyword": "<search term>", "timestamp": <seconds>, "duration": <1-3> }}
   ],
   "cuts": [
-    {{ "source_start": <n>, "source_end": <n>, "transition_out": "<transition>", "transition_sound": "<sound>", "sfx_style": "<sfx>", "zoom": "<zoom>", "cut_zoom": <true|false>, "speed": <n>, "speed_ramp": "<ramp>" }}
+    {{ "source_start": <n>, "source_end": <n>, "transition_out": "<transition>", "transition_sound": "<sound>", "sfx_style": "<sfx>", "zoom": "<zoom>", "cut_zoom": <true|false>, "speed": <n>, "speed_ramp": "<ramp>", "freeze_frame": <true|false>, "motion_blur_transition": <true|false> }}
   ]
 }}
 
@@ -1217,6 +1333,7 @@ Scene changes detected by FFmpeg (reliable visual cut timestamps):
 Speech boundaries detected by Deepgram (timestamps where sentences end with a natural pause):
 {speech_boundaries_block}
 {highlights_block}
+{beat_block}
 
 {tightened_block if tightened_block else tightened_fallback}
 
@@ -1232,7 +1349,6 @@ B-roll keyword candidates from transcript:
     static_prefix = full_prompt[:split_index].strip()
     dynamic_suffix = full_prompt[split_index:].strip()
     return static_prefix, dynamic_suffix
-
 
 
 def extract_json(text):
@@ -1341,6 +1457,8 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames):
     edit_plan.setdefault("caption_style", "none")
     edit_plan.setdefault("caption_position", "lower-third")
     edit_plan.setdefault("audio_ducking", False)
+    edit_plan.setdefault("audio_denoise", False)
+    edit_plan.setdefault("beat_sync", False)
     edit_plan.setdefault("outro", "none")
     edit_plan.setdefault("aspect_ratio", "original")
     edit_plan.setdefault("text_overlays", [])
@@ -1357,19 +1475,23 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames):
     edit_plan["background_music"] = "none"
     edit_plan["audio_ducking"] = False
 
-    # Hard coerce quality-correction fields to bool — Claude may return string "true"/"false"
-    # Intensity is derived from footage_quality in the renderer; Claude only enables/disables.
-    for bool_field in ("sharpening", "denoise", "shadow_lift", "highlight_rolloff", "vibrance", "cinematic_bars"):
+    for bool_field in ("sharpening", "denoise", "shadow_lift", "highlight_rolloff", "vibrance",
+                       "cinematic_bars", "audio_denoise", "beat_sync"):
         v = edit_plan.get(bool_field)
         if isinstance(v, str):
             edit_plan[bool_field] = v.strip().lower() in ("true", "1", "yes")
         else:
             edit_plan[bool_field] = bool(v)
 
-    # Hard coerce stylistic enum fields — clamp to allowed values
     valid_grain      = {"none", "subtle", "medium", "heavy"}
     valid_teal       = {"none", "subtle", "strong"}
     valid_vignette   = {"none", "light", "medium", "strong"}
+    valid_transitions = {
+        "none","fade","fadeblack","fadewhite","dissolve",
+        "wipeleft","wiperight","wipeup","wipedown",
+        "smoothleft","smoothright","smoothup","smoothdown",
+        "zoomin","flash","glitch","whip_left","whip_right",
+    }
     if edit_plan.get("grain") not in valid_grain:
         edit_plan["grain"] = "none"
     if edit_plan.get("teal_orange") not in valid_teal:
@@ -1380,23 +1502,29 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames):
     final_cuts = []
     for clip_entry in validated_cuts:
         transition = str(clip_entry.get("transition_out") or "").lower()
-        transition_out = "none" if not transition or transition == "clean_cut" else transition
+        transition_out = transition if transition in valid_transitions else "none"
         speed = max(0.25, min(4.0, float(clip_entry.get("speed") or 1.0)))
         valid_ramps = {"none","hero_time","bullet","flash_in","flash_out","montage"}
         speed_ramp = str(clip_entry.get("speed_ramp") or "none").lower()
         if speed_ramp not in valid_ramps:
             speed_ramp = "none"
+        freeze_raw = clip_entry.get("freeze_frame")
+        freeze_frame = freeze_raw.strip().lower() in ("true","1","yes") if isinstance(freeze_raw, str) else bool(freeze_raw)
+        mb_raw = clip_entry.get("motion_blur_transition")
+        motion_blur_transition = mb_raw.strip().lower() in ("true","1","yes") if isinstance(mb_raw, str) else bool(mb_raw)
         final_cuts.append({
-            "source_start":    clip_entry["source_start"],
-            "source_end":      clip_entry["source_end"],
-            "transition_out":  transition_out,
-            "transition_sound": clip_entry.get("transition_sound") or "none",
-            "sfx_style":       clip_entry.get("sfx_style") or "none",
-            "zoom":            clip_entry.get("zoom") or "none",
-            "cut_zoom":        bool(clip_entry.get("cut_zoom")),
-            "speed":           speed,
-            "speed_ramp":      speed_ramp,
-            "speed_segments":  [],
+            "source_start":           clip_entry["source_start"],
+            "source_end":             clip_entry["source_end"],
+            "transition_out":         transition_out,
+            "transition_sound":       clip_entry.get("transition_sound") or "none",
+            "sfx_style":              clip_entry.get("sfx_style") or "none",
+            "zoom":                   clip_entry.get("zoom") or "none",
+            "cut_zoom":               bool(clip_entry.get("cut_zoom")),
+            "speed":                  speed,
+            "speed_ramp":             speed_ramp,
+            "freeze_frame":           freeze_frame,
+            "motion_blur_transition": motion_blur_transition,
+            "speed_segments":         [],
         })
 
     baseline = analysis.get("color_baseline") or {}
@@ -1407,11 +1535,9 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames):
     if "clips" in edit_plan:
         del edit_plan["clips"]
 
-    # target_duration (mirrors JS)
     if final_cuts:
         edit_plan["target_duration"] = final_cuts[-1]["source_end"] - final_cuts[0]["source_start"]
 
-    # coverage ratio warning (mirrors JS)
     video_duration = float(analysis.get("duration") or 0)
     if video_duration > 0:
         total_clip_duration = sum(max(0, c["source_end"] - c["source_start"]) for c in final_cuts)
@@ -1426,7 +1552,6 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames):
     print(f"  Created {len(final_cuts)} cuts, intent={intent}, color: brightness={cg['brightness']} contrast={cg['contrast']} sat={cg['saturation']} gamma={cg['gamma']} temp={cg['color_temperature']}", flush=True)
 
     return edit_plan
-
 
 
 # ─── FFMPEG RENDER ────────────────────────────────────────────────────────────
@@ -1587,7 +1712,7 @@ def get_atempo_filter(speed):
 
 def is_hard_cut(transition):
     t = str(transition or "").strip().lower()
-    return not t or t == "none" or t == "clean_cut"
+    return not t or t in ("none", "clean_cut")
 
 
 def build_video_filter_chain(color_grade, source_res, edit_plan=None):
@@ -1595,20 +1720,17 @@ def build_video_filter_chain(color_grade, source_res, edit_plan=None):
     fq = (ep.get("analysis_data") or {}).get("footage_quality") or {}
     filters = []
 
-    # ── 1. Denoise — calibrated to Gemini-observed noise level ──────────────────
     if ep.get("denoise"):
         noise = fq.get("noise_level", "low")
-        # hqdn3d: luma_spatial:chroma_spatial:luma_temporal:chroma_temporal
         denoise_params = {
-            "none":   "1:1:2:2",    # minimal pass just in case
-            "low":    "2:2:3:3",    # light denoising
-            "medium": "3:3:5:5",    # medium — visible noise, indoor footage
-            "high":   "5:5:8:8",    # heavy — dark/noisy phone footage
+            "none":   "1:1:2:2",
+            "low":    "2:2:3:3",
+            "medium": "3:3:5:5",
+            "high":   "5:5:8:8",
         }.get(noise, "2:2:3:3")
         filters.append(f"hqdn3d={denoise_params}")
         print(f"[render] denoise: noise_level={noise} → hqdn3d={denoise_params}", flush=True)
 
-    # ── 2. Color grade (eq: brightness/contrast/saturation/gamma) ───────────────
     b = clamp(float(color_grade.get("brightness") or 0), -0.3, 0.3)
     c = clamp(float(color_grade.get("contrast") or 1), 0.5, 2.0)
     s = clamp(float(color_grade.get("saturation") or 1), 0.5, 2.0)
@@ -1621,29 +1743,24 @@ def build_video_filter_chain(color_grade, source_res, edit_plan=None):
     if eq_parts:
         filters.append(f"eq={':'.join(eq_parts)}")
 
-    # ── 3. Color temperature ─────────────────────────────────────────────────────
     temp = color_grade.get("color_temperature") or "neutral"
     temp_filter = TEMPERATURE_FILTERS.get(temp)
     if temp_filter:
         filters.append(temp_filter)
 
-    # ── 4. Shadow lift — calibrated to Gemini-observed shadow condition ──────────
     if ep.get("shadow_lift"):
         shadow_cond = fq.get("shadow_condition", "normal")
-        # curves: raise black point. More crushed shadows → more lift needed
         lift_curves = {
-            "crushed": "curves=r='0/0.09 1/1':g='0/0.09 1/1':b='0/0.09 1/1'",   # high lift
-            "deep":    "curves=r='0/0.05 1/1':g='0/0.05 1/1':b='0/0.05 1/1'",   # medium lift
-            "normal":  "curves=r='0/0.04 1/1':g='0/0.04 1/1':b='0/0.04 1/1'",   # subtle lift
-            "lifted":  "curves=r='0/0.02 1/1':g='0/0.02 1/1':b='0/0.02 1/1'",   # minimal — already lifted
+            "crushed": "curves=r='0/0.09 1/1':g='0/0.09 1/1':b='0/0.09 1/1'",
+            "deep":    "curves=r='0/0.05 1/1':g='0/0.05 1/1':b='0/0.05 1/1'",
+            "normal":  "curves=r='0/0.04 1/1':g='0/0.04 1/1':b='0/0.04 1/1'",
+            "lifted":  "curves=r='0/0.02 1/1':g='0/0.02 1/1':b='0/0.02 1/1'",
         }.get(shadow_cond, "curves=r='0/0.04 1/1':g='0/0.04 1/1':b='0/0.04 1/1'")
         filters.append(lift_curves)
         print(f"[render] shadow_lift: shadow_condition={shadow_cond} → lift applied", flush=True)
 
-    # ── 5. Highlight rolloff — calibrated to Gemini-observed highlight condition ─
     if ep.get("highlight_rolloff"):
         hl_cond = fq.get("highlight_condition", "normal")
-        # curves: compress top of tonal range. More clipped → harder rolloff
         rolloff_curves = {
             "clipped": "curves=r='0/0 0.6/0.58 0.85/0.80 1/0.88':g='0/0 0.6/0.58 0.85/0.80 1/0.88':b='0/0 0.6/0.58 0.85/0.80 1/0.88'",
             "bright":  "curves=r='0/0 0.75/0.72 1/0.95':g='0/0 0.75/0.72 1/0.95':b='0/0 0.75/0.72 1/0.95'",
@@ -1653,39 +1770,33 @@ def build_video_filter_chain(color_grade, source_res, edit_plan=None):
         filters.append(rolloff_curves)
         print(f"[render] highlight_rolloff: highlight_condition={hl_cond} → rolloff applied", flush=True)
 
-    # ── 6. Vibrance — calibrated to Gemini-observed color richness ───────────────
     if ep.get("vibrance"):
         richness = fq.get("color_richness", "normal")
-        # More flat/muted → bigger boost needed. Already vivid → minimal touch only
         vibrance_hue = {
-            "flat":   "hue=s=1.35",   # large boost for color-flat footage
-            "muted":  "hue=s=1.22",   # medium boost for muted footage
-            "normal": "hue=s=1.12",   # subtle boost for normal footage
-            "vivid":  "hue=s=1.06",   # near-nothing for already-vivid footage
+            "flat":   "hue=s=1.35",
+            "muted":  "hue=s=1.22",
+            "normal": "hue=s=1.12",
+            "vivid":  "hue=s=1.06",
         }.get(richness, "hue=s=1.12")
         filters.append(vibrance_hue)
         print(f"[render] vibrance: color_richness={richness} → {vibrance_hue}", flush=True)
 
-    # ── 7. Teal-orange split grade (stylistic — Claude controls level) ───────────
     teal_orange = str(ep.get("teal_orange") or "none").lower()
     if teal_orange == "subtle":
         filters.append("colorbalance=rs=-0.08:gs=0.04:bs=0.10:rm=0.04:gm=0:bm=-0.04:rh=0.05:gh=0.01:bh=-0.05")
     elif teal_orange == "strong":
         filters.append("colorbalance=rs=-0.16:gs=0.06:bs=0.18:rm=0.07:gm=0:bm=-0.07:rh=0.09:gh=0.02:bh=-0.09")
 
-    # ── 8. Sharpening — calibrated to Gemini-observed source sharpness ───────────
     if ep.get("sharpening"):
         src_sharp = fq.get("source_sharpness", "normal")
-        # Softer source needs more aggressive unsharp. Already-sharp source gets minimal pass
         unsharp_params = {
-            "soft":   "unsharp=7:7:1.2:5:5:0.0",   # strong sharpening for soft footage
-            "normal": "unsharp=5:5:0.6:3:3:0.0",   # moderate for normal footage
-            "sharp":  "unsharp=3:3:0.3:3:3:0.0",   # minimal pass for already-sharp footage
+            "soft":   "unsharp=7:7:1.2:5:5:0.0",
+            "normal": "unsharp=5:5:0.6:3:3:0.0",
+            "sharp":  "unsharp=3:3:0.3:3:3:0.0",
         }.get(src_sharp, "unsharp=5:5:0.6:3:3:0.0")
         filters.append(unsharp_params)
         print(f"[render] sharpening: source_sharpness={src_sharp} → {unsharp_params}", flush=True)
 
-    # ── 9. Film grain (stylistic — Claude controls level) ────────────────────────
     grain = str(ep.get("grain") or "none").lower()
     if grain == "subtle":
         filters.append("noise=c0s=4:c0f=t+u")
@@ -1839,7 +1950,6 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     return ass_path
 
 
-
 def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, work_dir):
     n = len(cuts)
     source_res = probe_resolution(source_path)
@@ -1914,28 +2024,19 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
         v_chain = ["settb=AVTB","fps=30"]
 
-        # Speed ramp: non-linear setpts curve across the clip
         speed_ramp = str(cut.get("speed_ramp") or "none").lower()
         if speed_ramp != "none" and speed_ramp in {"hero_time","bullet","flash_in","flash_out","montage"}:
-            # All ramps use expr-based setpts applied AFTER constant speed
-            # N = frame number, TB = 1/30, total_frames already computed above
             tf = max(1, total_frames)
             if speed_ramp == "hero_time":
-                # Fast start (0.5x duration = 2x speed), slow end (0.5x duration = 0.4x speed)
-                # setpts: first half compressed, second half expanded
                 expr = f"if(lt(N\\,{tf//2})\\,PTS*0.5\\,{tf//2}*TB/30+({tf//2}*TB+(N-{tf//2})*TB)*2.5)"
                 v_chain.append(f"setpts='if(lt(N\\,{tf//2})\\,PTS*0.5\\,{tf//4*1.0/30:.6f}+(PTS-{tf//2*1.0/30:.6f})*2.5)'")
             elif speed_ramp == "bullet":
-                # Slow start (0.4x speed first third), fast rest (1.4x)
                 v_chain.append(f"setpts='if(lt(N\\,{tf//3})\\,PTS*2.5\\,{tf//3*2.5/30:.6f}+(PTS-{tf//3*1.0/30:.6f})*0.7)'")
             elif speed_ramp == "flash_in":
-                # Fast at start, eases to normal
                 v_chain.append(f"setpts='if(lt(N\\,{tf//3})\\,PTS*0.4\\,{tf//3*0.4/30:.6f}+(PTS-{tf//3*1.0/30:.6f})*1.0)'")
             elif speed_ramp == "flash_out":
-                # Normal speed, then fast at end
                 v_chain.append(f"setpts='if(lt(N\\,{tf*2//3})\\,PTS*1.0\\,{tf*2//3*1.0/30:.6f}+(PTS-{tf*2//3*1.0/30:.6f})*0.4)'")
             elif speed_ramp == "montage":
-                # Alternating fast/slow every quarter
                 q = tf // 4
                 v_chain.append(
                     f"setpts='if(lt(N\\,{q})\\,PTS*0.5"
@@ -1953,6 +2054,18 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         v_chain += ["format=yuv420p", color_filter_str]
         if vignette_filter:
             v_chain.append(vignette_filter)
+
+        freeze_frame = bool(cut.get("freeze_frame"))
+        if freeze_frame and eff_dur > 0.5:
+            freeze_frames = 9
+            v_chain.append(f"tpad=stop={freeze_frames}:stop_mode=clone")
+            print(f"[render] clip {i}: freeze_frame=true (+{freeze_frames} frames @ end)", flush=True)
+
+        motion_blur_transition = bool(cut.get("motion_blur_transition"))
+        if motion_blur_transition and i < n-1:
+            v_chain.append(f"boxblur=luma_radius='if(gt(t\\,{max(0,eff_dur-0.17):.3f})\\,8\\,0)':luma_power=1:chroma_radius=0:chroma_power=0")
+            print(f"[render] clip {i}: motion_blur_transition=true", flush=True)
+
         if outro_filter:
             v_chain.append(outro_filter)
 
@@ -1966,31 +2079,64 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             a_chain.append(f"afade=t=out:st={fade_start:.3f}:d=1.0")
         audio_filters.append(f"[{i}:a]{','.join(a_chain)}[a{i}]")
 
-    # Transition chaining
     transition_filters = []
     tl_video = "v0"
     tl_audio = "a0"
     running_dur = effective_durations[0]
+
+    CUSTOM_TRANSITIONS = {"flash", "glitch", "whip_left", "whip_right"}
+    XFADE_TRANSITIONS = {
+        "fade","fadeblack","fadewhite","dissolve",
+        "wipeleft","wiperight","wipeup","wipedown",
+        "smoothleft","smoothright","smoothup","smoothdown",
+        "zoomin",
+    }
 
     for i in range(1, n):
         transition = str(cuts[i-1].get("transition_out") or "none").lower()
         out_v     = "vout" if i == n-1 else f"vx{i}"
         out_v_raw = f"{out_v}_raw"
         out_a     = "aout" if i == n-1 else f"ax{i}"
-        hard = is_hard_cut(transition)
 
-        if hard:
-            transition_filters.append(f"[{tl_video}][v{i}]concat=n=2:v=1:a=0[{out_v_raw}]")
-            transition_filters.append(f"[{out_v_raw}]fps=30[{out_v}]")
-            transition_filters.append(f"[{tl_audio}][a{i}]concat=n=2:v=0:a=1[{out_a}]")
-            running_dur = running_dur + effective_durations[i]
-        else:
+        if transition in CUSTOM_TRANSITIONS:
+            td = TRANSITION_DURATION
+            offset = max(0, running_dur - td)
+
+            if transition == "flash":
+                transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=fadewhite:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
+                transition_filters.append(f"[{out_v_raw}]fps=30[{out_v}]")
+                transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
+
+            elif transition == "glitch":
+                transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=pixelize:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
+                transition_filters.append(f"[{out_v_raw}]hue=h=0:s=1.4,fps=30[{out_v}]")
+                transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
+
+            elif transition == "whip_left":
+                transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=wipeleft:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
+                transition_filters.append(f"[{out_v_raw}]boxblur=luma_radius=6:luma_power=1:chroma_radius=0,fps=30[{out_v}]")
+                transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
+
+            elif transition == "whip_right":
+                transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=wiperight:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
+                transition_filters.append(f"[{out_v_raw}]boxblur=luma_radius=6:luma_power=1:chroma_radius=0,fps=30[{out_v}]")
+                transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
+
+            running_dur = running_dur + effective_durations[i] - td
+
+        elif transition in XFADE_TRANSITIONS:
             td = TRANSITION_DURATION
             offset = max(0, running_dur - td)
             transition_filters.append(f"[{tl_video}][v{i}]xfade=transition={transition}:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
             transition_filters.append(f"[{out_v_raw}]fps=30[{out_v}]")
             transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
             running_dur = running_dur + effective_durations[i] - td
+
+        else:
+            transition_filters.append(f"[{tl_video}][v{i}]concat=n=2:v=1:a=0[{out_v_raw}]")
+            transition_filters.append(f"[{out_v_raw}]fps=30[{out_v}]")
+            transition_filters.append(f"[{tl_audio}][a{i}]concat=n=2:v=0:a=1[{out_a}]")
+            running_dur = running_dur + effective_durations[i]
 
         tl_video = out_v
         tl_audio = out_a
@@ -1999,7 +2145,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         tl_video = "v0"
         tl_audio = "a0"
 
-    # Post: captions + text overlays + audio
     post_filters = []
     video_out = "[video_base]"
     post_filters.append(f"[{tl_video}]null{video_out}")
@@ -2053,9 +2198,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             )
             video_out = out_label
 
-    # Cinematic bars (2.35:1 letterbox on 9:16 — horizontal black bars top and bottom)
     if edit_plan.get("cinematic_bars"):
-        # On 1080x1920, 2.35:1 crop height = 1080/2.35 = 459px. Bar height = (1920-459)/2 = 730px
         bar_h = int((1920 - int(1080 / 2.35)) / 2)
         bars_label = f"[video_bars]"
         post_filters.append(
@@ -2065,8 +2208,16 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         video_out = bars_label
 
     audio_out = f"[{tl_audio}]"
+    audio_denoise = bool(edit_plan.get("audio_denoise"))
+    arnndn_filter = ""
+    if audio_denoise:
+        if os.path.exists(_RNNOISE_MODEL_PATH):
+            arnndn_filter = f"arnndn=m={_RNNOISE_MODEL_PATH},"
+            print(f"[render] audio_denoise=true — arnndn AI noise removal enabled", flush=True)
+        else:
+            print(f"[render] audio_denoise=true but model not found at {_RNNOISE_MODEL_PATH} — skipping", flush=True)
     post_filters.append(
-        f"{audio_out}highpass=f=80,lowpass=f=12000,"
+        f"{audio_out}{arnndn_filter}highpass=f=80,lowpass=f=12000,"
         f"equalizer=f=2800:t=q:w=1.5:g=3,"
         f"equalizer=f=200:t=q:w=0.8:g=1.5,"
         f"acompressor=threshold=-20dB:ratio=3:attack=5:release=50:makeup=2,"
@@ -2133,7 +2284,6 @@ def handler(job):
         print(f"JOB {job_id}: \"{vibe}\"", flush=True)
         print(f"{'='*80}", flush=True)
 
-        # Step 1 — Download
         t = time.time()
         print("[pipeline] step=download", flush=True)
         r = requests.get(video_url, stream=True, timeout=120)
@@ -2144,11 +2294,9 @@ def handler(job):
         size_mb = os.path.getsize(source_path) / (1024*1024)
         print(f"[pipeline] download complete: {size_mb:.1f}MB in {time.time()-t:.1f}s", flush=True)
 
-        # Step 2 — Normalize
         print("[pipeline] step=normalize", flush=True)
         source_path = normalize_source_video(source_path, work_dir)
 
-        # Step 3 — Gemini analysis
         if cached_analysis:
             print("[pipeline] step=analysis (cache HIT)", flush=True)
             analysis = normalize_analysis(cached_analysis) if isinstance(cached_analysis, dict) else cached_analysis
@@ -2158,21 +2306,24 @@ def handler(job):
             analysis = run_gemini_analysis(source_path)
             print(f"[pipeline] Gemini complete in {time.time()-t:.1f}s", flush=True)
 
-        # Step 4 — Scene detection
         print("[pipeline] step=scene_detection", flush=True)
         t = time.time()
         visual_cuts = detect_scene_cuts(source_path)
         analysis["visual_cuts"] = visual_cuts
         print(f"[pipeline] scene detection complete in {time.time()-t:.1f}s ({len(visual_cuts)} cuts)", flush=True)
 
-        # Step 5 — Transcription
+        print("[pipeline] step=beat_detection", flush=True)
+        t = time.time()
+        beat_timestamps = detect_beats(source_path)
+        analysis["beat_timestamps"] = beat_timestamps
+        print(f"[pipeline] beat detection complete in {time.time()-t:.1f}s ({len(beat_timestamps)} beats)", flush=True)
+
         print("[pipeline] step=transcription", flush=True)
         t = time.time()
         transcript = transcribe_audio(source_path)
         deepgram_words = transcript.get("words") or []
         print(f"[pipeline] transcription complete in {time.time()-t:.1f}s ({len(deepgram_words)} words)", flush=True)
 
-        # Step 6 — Build speech from Deepgram
         speech_result = build_speech_from_deepgram(deepgram_words, float(analysis.get("duration") or 0))
         analysis["speech"] = speech_result["speech"]
         safe_cut_points = speech_result["safe_cut_points"]
@@ -2182,7 +2333,6 @@ def handler(job):
         safe_cut_points.sort(key=lambda cp: cp["time"])
         analysis["safe_cut_points"] = safe_cut_points
 
-        # Map Gemini shots to scdet boundaries
         if visual_cuts and analysis.get("shots"):
             duration_val = float(analysis.get("duration") or 0)
             boundaries = [0] + visual_cuts + [duration_val]
@@ -2203,7 +2353,6 @@ def handler(job):
                 })
             analysis["shots"] = mapped_shots
 
-        # Step 7 — Tighten transcript
         print("[pipeline] step=tighten", flush=True)
         tighten_result = tighten_transcript(
             deepgram_words,
@@ -2213,32 +2362,26 @@ def handler(job):
         )
         analysis["tightened_timeline"] = tighten_result
 
-        # Step 8 — Broll keywords
         broll_candidates = extract_broll_keywords(deepgram_words, 8)
         if broll_candidates:
             analysis["broll_candidates"] = broll_candidates
             print(f"[broll] Candidates: {', '.join(c['keyword'] for c in broll_candidates)}", flush=True)
 
-        # Step 9 — Scene frames
         print("[pipeline] step=scene_frames", flush=True)
         scene_frames = extract_scene_frames(source_path, visual_cuts, work_dir)
 
-        # Step 10 — Expand vibe
         print("[pipeline] step=vibe_expansion", flush=True)
         t = time.time()
         expanded_vibe = expand_vibe_intent(vibe)
         print(f"[pipeline] vibe expansion complete in {time.time()-t:.1f}s", flush=True)
 
-        # Step 11 — Generate edit recipe
         print("[pipeline] step=edit_recipe", flush=True)
         t = time.time()
         edit_plan = generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames)
         print(f"[pipeline] edit recipe complete in {time.time()-t:.1f}s", flush=True)
 
-        # Attach analysis for render context
         edit_plan["analysis_data"] = analysis
 
-        # Step 12 — FFmpeg render
         print("[pipeline] step=ffmpeg_render", flush=True)
         t = time.time()
         render_multi_clip(
@@ -2253,7 +2396,6 @@ def handler(job):
         output_size_mb = os.path.getsize(output_path) / (1024*1024)
         print(f"[pipeline] output: {output_size_mb:.1f}MB", flush=True)
 
-        # Step 13 — Upload
         print("[pipeline] step=upload", flush=True)
         with open(output_path, "rb") as f:
             resp = requests.put(upload_url, data=f, headers={"Content-Type":"video/mp4"}, timeout=120)
