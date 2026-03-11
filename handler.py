@@ -3233,10 +3233,31 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
 # ─── MAIN HANDLER ─────────────────────────────────────────────────────────────
 
+def send_progress(job_id, step, pct, message, app_url):
+    """
+    POST progress update to the JS server. Non-fatal — never raises.
+    step: short machine key e.g. 'download', 'analysis', 'render'
+    pct:  integer 0-100
+    message: human-readable string shown to the user
+    """
+    if not app_url:
+        return
+    try:
+        requests.post(
+            f"{app_url}/api/runpod-progress",
+            json={"job_id": job_id, "step": step, "pct": pct, "message": message},
+            timeout=3,
+        )
+    except Exception:
+        pass  # progress updates are best-effort only
+
+
 def handler(job):
     input_data = job["input"]
     work_dir = None
     try:
+        app_url = os.environ.get("APP_URL", "").rstrip("/")
+
         required = ["job_id","video_url","vibe","user_id","upload_url"]
         missing = [f for f in required if not input_data.get(f)]
         if missing:
@@ -3256,6 +3277,8 @@ def handler(job):
         print(f"JOB {job_id}: \"{vibe}\"", flush=True)
         print(f"{'='*80}", flush=True)
 
+        # Step 1 — Download
+        send_progress(job_id, "download", 5, "Downloading your video...", app_url)
         t = time.time()
         print("[pipeline] step=download", flush=True)
         r = requests.get(video_url, stream=True, timeout=120)
@@ -3266,6 +3289,8 @@ def handler(job):
         size_mb = os.path.getsize(source_path) / (1024*1024)
         print(f"[pipeline] download complete: {size_mb:.1f}MB in {time.time()-t:.1f}s", flush=True)
 
+        # Step 2 — Normalize
+        send_progress(job_id, "normalize", 12, "Preparing your video...", app_url)
         print("[pipeline] step=normalize", flush=True)
         source_path = normalize_source_video(source_path, work_dir)
 
@@ -3277,6 +3302,7 @@ def handler(job):
 
             # ── Parallel group 1: Gemini / scene+beat / transcription ──────────────
             # All three need only source_path. Gemini dominates (~18s); others finish inside.
+            send_progress(job_id, "analysis", 20, "Analyzing your video with AI...", app_url)
             print("[pipeline] step=parallel_analysis (gemini + scene/beat + transcription)", flush=True)
             t_parallel = time.time()
 
@@ -3379,6 +3405,7 @@ def handler(job):
         # ── End vibe_executor ─────────────────────────────────────────────────────
 
         # Step 11 — Generate edit recipe
+        send_progress(job_id, "edit_recipe", 52, "Crafting your edit...", app_url)
         print("[pipeline] step=edit_recipe", flush=True)
         t = time.time()
         edit_plan = generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames)
@@ -3396,6 +3423,7 @@ def handler(job):
                 print(f"[pipeline] filler jump cuts: {original_cut_count} clips -> {len(edit_plan['cuts'])} clips", flush=True)
 
         # Step 12 — FFmpeg render
+        send_progress(job_id, "render", 62, "Rendering your video...", app_url)
         print("[pipeline] step=ffmpeg_render", flush=True)
         t = time.time()
         render_multi_clip(
@@ -3448,6 +3476,7 @@ def handler(job):
                 cover_frame_ts = (float(best["start"]) + float(best["end"])) / 2
 
         output_size_mb = os.path.getsize(output_path) / (1024*1024)
+        send_progress(job_id, "upload", 90, "Uploading your video...", app_url)
         print(f"[pipeline] output: {output_size_mb:.1f}MB — parallel upload + cover frame", flush=True)
 
         def _upload_main():
@@ -3507,6 +3536,8 @@ def handler(job):
         print(f"\n{'='*80}", flush=True)
         print(f"JOB {job_id} COMPLETE", flush=True)
         print(f"{'='*80}\n", flush=True)
+
+        send_progress(job_id, "complete", 100, "Your video is ready!", app_url)
 
         result_payload = {
             "status": "success",
