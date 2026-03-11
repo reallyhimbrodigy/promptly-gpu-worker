@@ -28,5 +28,6 @@ RUN python3 -m pip install \
 
 COPY handler.py .
 COPY src/assets/sounds/ /assets/sounds/
-COPY src/assets/fonts/  /assets/fonts/
+COPY src/assets/fonts/ /assets/fonts/
+COPY src/assets/music/ /assets/music/
 CMD python3 -u /handler.py
