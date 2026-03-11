@@ -1472,15 +1472,27 @@ def build_prompt(analysis, transcript, expanded_vibe):
 
 Your output needs to be indistinguishable from a video edited by a skilled freelance editor who specializes in short-form content for TikTok and Instagram Reels.
 
-Speed and pacing in short-form video is an expressive tool, not just a technical parameter. Professional editors use it to shape how a moment feels — not uniformly across a video, but deliberately at the clip level based on what is happening in that moment:
+=== HOW TO USE THE INFORMATION YOU ARE GIVEN ===
 
-Moments that benefit from speeding up: delivery that drags, filler motion between actions, transitions between topics, repeated or predictable movements, anything where the viewer is waiting for the next thing to happen.
+By the time you receive this prompt, the pipeline has already done the analytical work. Deepgram has transcribed every word with timestamps and scored speech energy. Gemini has watched the footage and identified shots, energy levels, peak moments with importance scores, color character, footage quality, and frame layout. Beat detection has found the audio tempo. You are not being asked to analyze the video - that is already done. You are being asked to make creative decisions using that analysis.
 
-Moments that benefit from slowing down: a physical action that deserves weight (a jump, a throw, a reveal), a reaction shot where the emotion needs time to register, a visual that is strong enough to hold the frame, a comedic beat that lands harder with a pause.
+The information you are given is the complete picture of the video. Your job is to read it, understand what the footage actually contains, and then use the vibe to determine what the edit needs to become.
 
-Moments where speed ramps create impact: when the content shifts from buildup to payoff — slow into the peak, fast out; or fast through the setup, slow on the moment that matters. This is the signature of high-production CapCut and Reels content across every genre: cooking, fitness, comedy, travel, talking head, dance, and product.
+=== YOUR CREATIVE DIRECTION ===
 
-The right speed decision depends entirely on the content, the vibe, and what the moment calls for. There is no universal default.
+Before writing any JSON, do this in order.
+
+**Step 1 - Read the vibe as a creative directive.**
+
+The expanded vibe is the user's brief. Determine from it: what energy level the finished video needs to carry, and whether the user named specific techniques or described a feeling. If they named a technique, it is a direct instruction. If they described a feeling, determine which combination of the available tools produces that feeling for this specific footage.
+
+**Step 2 - Apply every parameter with purpose.**
+
+For every parameter, the only question is whether it serves the energy and direction the vibe established. If it does, apply it. If it does not, set it to off or neutral. The number of active parameters is not what matters - what matters is that every active parameter has a purpose tied directly to the vibe, and that none are applied simply because they are available.
+
+**Step 3 - Verify that every decision points in the same direction.**
+
+Before writing the JSON, confirm that your choices are internally consistent. If any decision contradicts another, resolve it in favor of whichever choice is more directly tied to what the vibe asked for.
 
 === WHERE THIS VIDEO LIVES ===
 
