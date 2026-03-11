@@ -2753,12 +2753,20 @@ def generate_subtitle_file(transcript, caption_style, cuts, effective_durations,
     w = output_res.get("width") or 1080
     h = output_res.get("height") or 1920
 
-    # Font: use Montserrat Black if available, fall back to Arial
-    font_name = "Montserrat Black" if os.path.exists(OVERLAY_FONT_PATH) else "Arial"
-
     # Vertical position margin — how far from the bottom (or top) edge in pixels
     pos_margin = {"top": 1650, "center": 900, "lower-third": 300, "bottom": 80}
     margin_v = pos_margin.get(caption_position or "lower-third", 300)
+
+    styles_map = {
+        "standard":       {"fontsize": 44, "fontname": "Montserrat",           "bold": 0, "alignment": 2},
+        "bold_centered":  {"fontsize": 58, "fontname": "Montserrat Black",     "bold": 0, "alignment": 5},
+        "minimal_bottom": {"fontsize": 36, "fontname": "Montserrat",           "bold": 0, "alignment": 2},
+        "animated_word":  {"fontsize": 54, "fontname": "Montserrat ExtraBold", "bold": 0, "alignment": 5},
+        "bold_white":     {"fontsize": 60, "fontname": "Montserrat Black",     "bold": 0, "alignment": 5},
+        "bold_yellow":    {"fontsize": 60, "fontname": "Montserrat Black",     "bold": 0, "alignment": 5},
+        "keyword_pop":    {"fontsize": 54, "fontname": "Montserrat ExtraBold", "bold": 0, "alignment": 5},
+        "box_caption":    {"fontsize": 46, "fontname": "Montserrat",           "bold": 0, "alignment": 2},
+    }
 
     # ── Style definitions ───────────────────────────────────────────────────
     # All styles use the same CapCut-inspired base:
@@ -2775,18 +2783,24 @@ def generate_subtitle_file(transcript, caption_style, cuts, effective_durations,
         #   &H90000000 = ~56% opacity black box
         #   &H00000000 = fully opaque black box
         #   &HA0000000 = ~37% opacity black box
-        "standard":       (54,  "&H00FFFFFF", "&H0000FFFF", "&H90000000", 1, 3, 0, 0, 2,  1.2),
-        "bold_centered":  (62,  "&H00FFFFFF", "&H0000FFFF", "&H90000000", 1, 3, 0, 0, 5,  1.2),
-        "minimal_bottom": (46,  "&H00FFFFFF", "&H0000CCFF", "&HA0000000", 1, 3, 0, 0, 2,  1.0),
-        "animated_word":  (62,  "&H00FFFFFF", "&H0000FFFF", "&H90000000", 1, 3, 0, 0, 5,  1.2),
-        "bold_white":     (66,  "&H00FFFFFF", "&H00FFFFFF", "&H90000000", 1, 3, 0, 0, 5,  1.2),
-        "bold_yellow":    (66,  "&H0000FFFF", "&H00FFFFFF", "&H90000000", 1, 3, 0, 0, 5,  1.2),
-        "keyword_pop":    (58,  "&H00FFFFFF", "&H0000FF00", "&H90000000", 1, 3, 0, 0, 5,  1.2),
-        "box_caption":    (52,  "&H00FFFFFF", "&H0000FFFF", "&HB0000000", 1, 3, 0, 0, 2,  1.0),
+        "standard":       ("&H00FFFFFF", "&H0000FFFF", "&H90000000", 3, 0, 0,  1.2),
+        "bold_centered":  ("&H00FFFFFF", "&H0000FFFF", "&H90000000", 3, 0, 0,  1.2),
+        "minimal_bottom": ("&H00FFFFFF", "&H0000CCFF", "&HA0000000", 3, 0, 0,  1.0),
+        "animated_word":  ("&H00FFFFFF", "&H0000FFFF", "&H90000000", 3, 0, 0,  1.2),
+        "bold_white":     ("&H00FFFFFF", "&H00FFFFFF", "&H90000000", 3, 0, 0,  1.2),
+        "bold_yellow":    ("&H0000FFFF", "&H00FFFFFF", "&H90000000", 3, 0, 0,  1.2),
+        "keyword_pop":    ("&H00FFFFFF", "&H0000FF00", "&H90000000", 3, 0, 0,  1.2),
+        "box_caption":    ("&H00FFFFFF", "&H0000FFFF", "&HB0000000", 3, 0, 0,  1.0),
     }
 
+    style_meta = styles_map.get(caption_style, styles_map["standard"])
+    font_name = style_meta["fontname"]
+    fontsize = style_meta["fontsize"]
+    bold = style_meta["bold"]
+    alignment = style_meta["alignment"]
+
     cfg = STYLE_CONFIGS.get(caption_style, STYLE_CONFIGS["standard"])
-    fontsize, primary, secondary, back_c, bold, border_style, outline_w, shadow, alignment, spacing = cfg
+    primary, secondary, back_c, border_style, outline_w, shadow, spacing = cfg
 
     ass = f"""[Script Info]
 ScriptType: v4.00+
@@ -3187,12 +3201,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         )
         if ass_path:
             escaped = ass_path.replace("\\","\\\\").replace(":","\\:").replace("'","\\'")
-            _fontsdir_clause = (
-                f":fontsdir='{os.path.dirname(OVERLAY_FONT_PATH)}'"
-                if os.path.exists(OVERLAY_FONT_PATH)
-                else ""
-            )
-            post_filters.append(f"{video_out}subtitles='{escaped}'{_fontsdir_clause}[video_captioned]")
+            post_filters.append(f"{video_out}subtitles='{escaped}':fontsdir=/assets/fonts[video_captioned]")
             video_out = "[video_captioned]"
 
     text_overlays = edit_plan.get("text_overlays") or []
