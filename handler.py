@@ -159,7 +159,8 @@ Return ONLY valid JSON:
       "visual": "<Lighting, color temp, exposure, dominant tones>",
       "action": "<What the subject is doing>",
       "energy": <0.0 to 1.0>,
-      "editing_value": "<essential | strong | usable | filler | dead>"
+      "editing_value": "<essential | strong | usable | filler | dead>",
+      "delivery": "<excited | emphatic | conversational | calm | deadpan | intense | whisper — speaker's energy/style in this shot, or 'none' if no speaker>"
     }
   ],
   "audio": {
@@ -171,7 +172,15 @@ Return ONLY valid JSON:
     "visual_character": "<color palette, lighting, exposure, white balance>",
     "strongest_moments": "<timestamps and what makes them compelling>",
     "weakest_moments": "<timestamps and why they are weak, or 'none'>",
-    "editing_brief": "<how to edit this: what to keep, what to cut, pacing, feel>"
+    "editing_brief": "<how to edit this: what to keep, what to cut, pacing, feel>",
+    "recommended_duration": <target seconds for the final edit as an integer — how long should the finished video be>,
+    "pacing": "<fast | medium | slow — how quickly should cuts come: fast=1-3s clips, medium=3-6s clips, slow=5-10s clips>",
+    "hook": {
+      "timestamp": <float seconds — the single best moment to START the edit. Could be 0.0 or could be mid-video if the opening is slow>,
+      "description": "<what is happening at this timestamp>",
+      "why": "<why a viewer would stop scrolling at this moment>",
+      "quality": <0.0 to 1.0 — how compelling is this as a hook>
+    }
   },
   "frame_layout": {
     "subject_position": "<where the main subject/person is in the frame>",
@@ -200,6 +209,16 @@ Return ONLY valid JSON:
     "lighting_type": "<natural_outdoor | natural_indoor | studio | mixed | unknown> — dominant light source type"
   }
 }
+
+For footage_assessment.hook: Watch the entire video and identify the single most compelling moment that would make a viewer stop scrolling. This is NOT always the opening frame — often the best hook is a reaction, a surprising moment, or the point where the speaker says something interesting. Report its timestamp in seconds.
+
+For footage_assessment.recommended_duration: Based on the content density and engagement potential, estimate how long the final edited video should be. Talking-head educational content: 30-60s. Entertainment/reaction: 15-45s. Music/B-roll montage: 15-30s.
+
+For footage_assessment.pacing: Assess how quickly the edit should move. fast = cuts every 1-3 seconds, high energy content. medium = cuts every 3-6 seconds, conversational. slow = cuts every 5-10 seconds, calm or contemplative.
+
+For shots[].delivery: Describe the speaker's energy and style in each shot. Use one of: excited, emphatic, conversational, calm, deadpan, intense, whisper. Use 'none' if there is no speaker in the shot.
+
+For shots[].editing_value: Be strict. 'dead' means no viewer would want to watch this shot — it adds nothing and should be excluded from the edit. 'filler' means the shot is weak and should only be included if needed for continuity. 'usable' means acceptable. 'strong' means a good shot. 'essential' means this shot must be in the edit.
 
 Focus on visual accuracy — every shift in framing or content."""
 
@@ -361,12 +380,13 @@ def normalize_analysis(parsed):
             "action":        s.get("action") or "",
             "energy":        float(s.get("energy") or 0.5),
             "editing_value": s.get("editing_value") or "",
+            "delivery":      s.get("delivery") or "none",
             "description":   s.get("action") or s.get("visual") or f"Shot {i+1}",
             "score":         float(s.get("energy") or 0.5),
         })
     if not shots:
         shots = [{"start": 0, "end": duration, "description": "Full video", "score": 0.5,
-                  "visual": "", "action": "", "energy": 0.5, "editing_value": ""}]
+                  "visual": "", "action": "", "energy": 0.5, "editing_value": "", "delivery": "none"}]
 
     raw_cb = parsed.get("color_baseline") or {}
     color_baseline = {
@@ -389,6 +409,24 @@ def normalize_analysis(parsed):
         },
         "free_zones": raw_fl.get("free_zones") or "unknown",
     }
+
+    # Hook, pacing, recommended_duration (new fields — backward compatible)
+    raw_fa  = parsed.get("footage_assessment") or parsed.get("video_profile") or {}
+    raw_hook = raw_fa.get("hook") or {}
+    hook = {
+        "timestamp":   float(raw_hook["timestamp"]) if isinstance(raw_hook.get("timestamp"), (int, float)) else 0.0,
+        "description": str(raw_hook.get("description") or ""),
+        "why":         str(raw_hook.get("why") or ""),
+        "quality":     float(raw_hook["quality"]) if isinstance(raw_hook.get("quality"), (int, float)) else 0.5,
+    } if raw_hook else None
+
+    recommended_duration = None
+    if isinstance(raw_fa.get("recommended_duration"), (int, float)):
+        recommended_duration = int(raw_fa["recommended_duration"])
+
+    pacing = str(raw_fa.get("pacing") or "").strip().lower()
+    if pacing not in ("fast", "medium", "slow"):
+        pacing = None
 
     raw_fq = parsed.get("footage_quality") or {}
     valid_noise       = {"none", "low", "medium", "high"}
@@ -415,18 +453,21 @@ def normalize_analysis(parsed):
     print(f"[analyze] Analysis complete: {duration}s, {len(shots)} shots, {len(safe_cut_points)} cut points, {len((parsed.get('speech') or {}).get('segments') or [])} speech segments", flush=True)
 
     return {
-        "duration":        duration,
-        "shots":           shots,
-        "speech":          parsed.get("speech") or {"has_speech": False, "segments": [], "sentence_boundaries": []},
-        "audio":           parsed.get("audio") or {},
-        "safe_cut_points": safe_cut_points,
-        "peak_moments":    peak_moments,
-        "video_profile":   vp,
-        "frame_layout":    frame_layout,
-        "color_baseline":  color_baseline,
-        "footage_quality": footage_quality,
-        "metadata":        parsed.get("metadata") or {},
-        "visual_cuts":     [],
+        "duration":             duration,
+        "shots":                shots,
+        "speech":               parsed.get("speech") or {"has_speech": False, "segments": [], "sentence_boundaries": []},
+        "audio":                parsed.get("audio") or {},
+        "safe_cut_points":      safe_cut_points,
+        "peak_moments":         peak_moments,
+        "video_profile":        vp,
+        "frame_layout":         frame_layout,
+        "color_baseline":       color_baseline,
+        "footage_quality":      footage_quality,
+        "metadata":             parsed.get("metadata") or {},
+        "visual_cuts":          [],
+        "hook":                 hook,
+        "recommended_duration": recommended_duration,
+        "pacing":               pacing,
     }
 
 
@@ -1204,6 +1245,7 @@ def build_prompt(analysis, transcript, expanded_vibe):
     shots_block = "\n\n".join(
         f"[{s['start']:.2f}s – {s['end']:.2f}s]\n  {s.get('visual','')}\n  {s.get('action','')}\n  Energy: {s.get('energy',0.5):.1f}"
         + (f"\n  Value: {s['editing_value']}" if s.get("editing_value") else "")
+        + (f"\n  Delivery: {s['delivery']}" if s.get("delivery") and s["delivery"] != "none" else "")
         for s in shots
     )
 
@@ -1393,6 +1435,31 @@ def build_prompt(analysis, transcript, expanded_vibe):
     tightened_duration_val = sum(max(0, s.get("end",0) - s.get("start",0)) for s in (tightened.get("segments") or [])) if tightened else duration
     intents = ", ".join(COLOR_INTENTS.keys())
 
+    # Hook block for Claude prompt
+    hook          = analysis.get("hook") or {}
+    hook_ts       = hook.get("timestamp")
+    hook_block    = ""
+    if hook and hook_ts is not None and float(hook_ts) > 1.0 and float(hook.get("quality") or 0) >= 0.5:
+        hook_block = (
+            f"\n⚡ HOOK DETECTED at {float(hook_ts):.2f}s — {hook.get('description', '')}\n"
+            f"   Why compelling: {hook.get('why', '')}\n"
+            f"   Strength: {float(hook.get('quality', 0.5)):.1f}/1.0\n"
+            f"   → Consider starting your edit at {float(hook_ts):.2f}s instead of 0.0s"
+        )
+
+    # Pacing and duration block for Claude prompt
+    rec_dur    = analysis.get("recommended_duration")
+    pacing_val = analysis.get("pacing")
+    pacing_block = ""
+    if rec_dur or pacing_val:
+        pacing_parts = []
+        if rec_dur:
+            pacing_parts.append(f"Recommended edit length: ~{rec_dur}s")
+        if pacing_val:
+            clip_guidance = {"fast": "1-3s clips", "medium": "3-6s clips", "slow": "5-10s clips"}.get(pacing_val, "")
+            pacing_parts.append(f"Recommended pacing: {pacing_val}" + (f" ({clip_guidance})" if clip_guidance else ""))
+        pacing_block = "\n" + "\n".join(pacing_parts)
+
     tightened_fallback = (
         f"Tightened timeline (dead air and filler words already removed):\n"
         f"  Original: {duration:.2f}s → Tightened: {tightened_duration_val:.2f}s "
@@ -1403,6 +1470,16 @@ def build_prompt(analysis, transcript, expanded_vibe):
     full_prompt = f"""You are the professional editor inside Promptly, a mobile app that competes with CapCut and Captions. Users upload raw talking-head footage and receive back a fully edited short-form video (TikTok, Instagram Reels, YouTube Shorts) in under 90 seconds. You produce the edit recipe — every creative decision about how this video gets cut, graded, and polished.
 
 Your output needs to be indistinguishable from a video edited by a skilled freelance editor who specializes in short-form content for TikTok and Instagram Reels.
+
+Speed and pacing in short-form video is an expressive tool, not just a technical parameter. Professional editors use it to shape how a moment feels — not uniformly across a video, but deliberately at the clip level based on what is happening in that moment:
+
+Moments that benefit from speeding up: delivery that drags, filler motion between actions, transitions between topics, repeated or predictable movements, anything where the viewer is waiting for the next thing to happen.
+
+Moments that benefit from slowing down: a physical action that deserves weight (a jump, a throw, a reveal), a reaction shot where the emotion needs time to register, a visual that is strong enough to hold the frame, a comedic beat that lands harder with a pause.
+
+Moments where speed ramps create impact: when the content shifts from buildup to payoff — slow into the peak, fast out; or fast through the setup, slow on the moment that matters. This is the signature of high-production CapCut and Reels content across every genre: cooking, fitness, comedy, travel, talking head, dance, and product.
+
+The right speed decision depends entirely on the content, the vibe, and what the moment calls for. There is no universal default.
 
 === WHERE THIS VIDEO LIVES ===
 
@@ -1716,6 +1793,7 @@ Content type: {content_type}
 Visual character: {visual_character}
 Strongest moments: {strongest_moments}
 Weakest moments: {weakest_moments}{profile_block}{audio_block}
+{hook_block}{pacing_block}
 
 Color baseline (measured from the raw footage):
   {cb.get("assessment") or "No major exposure or white-balance issues detected."}
@@ -2396,85 +2474,135 @@ def generate_subtitle_file(transcript, caption_style, cuts, effective_durations,
     if not words:
         return None
 
-    styles_map = {
-        "standard":       {"fontsize": 42, "fontname": "Arial", "bold": 0, "alignment": 2},
-        "bold_centered":  {"fontsize": 56, "fontname": "Arial", "bold": 1, "alignment": 5},
-        "minimal_bottom": {"fontsize": 36, "fontname": "Arial", "bold": 0, "alignment": 2},
-        "animated_word":  {"fontsize": 52, "fontname": "Arial", "bold": 1, "alignment": 5},
-        "bold_white":     {"fontsize": 58, "fontname": "Arial", "bold": 1, "alignment": 5},
-        "bold_yellow":    {"fontsize": 58, "fontname": "Arial", "bold": 1, "alignment": 5},
-        "keyword_pop":    {"fontsize": 52, "fontname": "Arial", "bold": 1, "alignment": 5},
-        "box_caption":    {"fontsize": 44, "fontname": "Arial", "bold": 1, "alignment": 2},
-    }
-    style = styles_map.get(caption_style) or styles_map["standard"]
-    pos_margin = {"top": 1500, "center": 800, "lower-third": 450, "bottom": 100}
-    margin_v = pos_margin.get(caption_position or "lower-third", 450)
-
-    color_map = {
-        "bold_white":  ("&H00FFFFFF", "&H00000000", "&H80000000", 1, 3, 2),
-        "bold_yellow": ("&H0000FFFF", "&H00000000", "&H80000000", 1, 3, 2),
-        "box_caption": ("&H00FFFFFF", "&H00000000", "&HC0000000", 3, 0, 8),
-        "keyword_pop": ("&H00FFFFFF", "&H00000000", "&H80000000", 1, 3, 1),
-    }
-    primary, outline_c, back_c, border_style, outline_w, shadow = color_map.get(
-        caption_style, ("&H00FFFFFF", "&H00000000", "&H80000000", 1, 2, 1)
-    )
     w = output_res.get("width") or 1080
     h = output_res.get("height") or 1920
+
+    # Font: use Montserrat Black if available, fall back to Arial
+    font_name = "Montserrat Black" if os.path.exists(OVERLAY_FONT_PATH) else "Arial"
+
+    # Vertical position margin — how far from the bottom (or top) edge in pixels
+    pos_margin = {"top": 1650, "center": 900, "lower-third": 300, "bottom": 80}
+    margin_v = pos_margin.get(caption_position or "lower-third", 300)
+
+    # ── Style definitions ───────────────────────────────────────────────────
+    # All styles use the same CapCut-inspired base:
+    #   - Filled semi-transparent background box (BorderStyle=3)
+    #   - Karaoke highlight color (SecondaryColour) = yellow for active word
+    #   - No outline, no shadow — the box provides all contrast
+    # Override per style below.
+
+    STYLE_CONFIGS = {
+        # name: (fontsize, primary, secondary, backcolour, bold, border_style, outline, shadow, alignment, spacing)
+        # primary = text color (inactive words)
+        # secondary = highlight color (active word during karaoke sweep)
+        # backcolour = background box color (&HAA = alpha, BB=blue, GG=green, RR=red)
+        #   &H90000000 = ~56% opacity black box
+        #   &H00000000 = fully opaque black box
+        #   &HA0000000 = ~37% opacity black box
+        "standard":       (54,  "&H00FFFFFF", "&H0000FFFF", "&H90000000", 1, 3, 0, 0, 2,  1.2),
+        "bold_centered":  (62,  "&H00FFFFFF", "&H0000FFFF", "&H90000000", 1, 3, 0, 0, 5,  1.2),
+        "minimal_bottom": (46,  "&H00FFFFFF", "&H0000CCFF", "&HA0000000", 1, 3, 0, 0, 2,  1.0),
+        "animated_word":  (62,  "&H00FFFFFF", "&H0000FFFF", "&H90000000", 1, 3, 0, 0, 5,  1.2),
+        "bold_white":     (66,  "&H00FFFFFF", "&H00FFFFFF", "&H90000000", 1, 3, 0, 0, 5,  1.2),
+        "bold_yellow":    (66,  "&H0000FFFF", "&H00FFFFFF", "&H90000000", 1, 3, 0, 0, 5,  1.2),
+        "keyword_pop":    (58,  "&H00FFFFFF", "&H0000FF00", "&H90000000", 1, 3, 0, 0, 5,  1.2),
+        "box_caption":    (52,  "&H00FFFFFF", "&H0000FFFF", "&HB0000000", 1, 3, 0, 0, 2,  1.0),
+    }
+
+    cfg = STYLE_CONFIGS.get(caption_style, STYLE_CONFIGS["standard"])
+    fontsize, primary, secondary, back_c, bold, border_style, outline_w, shadow, alignment, spacing = cfg
 
     ass = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {w}
 PlayResY: {h}
+WrapStyle: 1
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{style['fontname']},{style['fontsize']},{primary},&H000000FF,{outline_c},{back_c},{style['bold']},0,0,0,100,100,0,0,{border_style},{outline_w},{shadow},{style['alignment']},20,20,{margin_v},1
+Style: Default,{font_name},{fontsize},{primary},{secondary},&H00000000,{back_c},{bold},0,0,0,100,100,{spacing},0,{border_style},{outline_w},{shadow},{alignment},30,30,{margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
-    if caption_style == "animated_word":
-        for word in words:
-            ass += f"Dialogue: 0,{format_ass_time(word['start'])},{format_ass_time(word['end'])},Default,,0,0,0,,{word['word']}\n"
-    elif caption_style == "keyword_pop":
-        keyword_set = set(re.sub(r"[.,!?;:'\"\\]","",k.lower()) for k in (caption_keywords or []))
-        highlight_colors = ["\\c&H0000FF00&","\\c&H000055FF&","\\c&H0000FFFF&"]
-        reset_color = "\\c&H00FFFFFF&"
+    def _kf_group(group):
+        """
+        Build a karaoke dialogue line for a group of word dicts.
+        Each word gets a {\\kf<cs>} tag where cs = word duration in centiseconds.
+        The entire group gets {\\fad(80,60)} for fade in/out.
+        Returns the dialogue text string (without the Dialogue prefix).
+        """
+        parts = ["{\\fad(80,60)}"]
+        for word_dict in group:
+            dur_s  = max(0.05, float(word_dict["end"]) - float(word_dict["start"]))
+            dur_cs = max(5, round(dur_s * 100))
+            clean  = str(word_dict["word"]).strip()
+            parts.append(f"{{\\kf{dur_cs}}}{clean} ")
+        return "".join(parts).rstrip()
+
+    # ── Group words into batches of max 3 words ─────────────────────────────
+    # Split on: pause > 0.3s, sentence end punctuation on previous word, or group size == 3
+    PUNCT_END = re.compile(r"[.!?,;:]$")
+    MAX_WORDS = 3
+
+    def _flush_group(group, ass_acc):
+        if not group:
+            return
+        start = group[0]["start"]
+        end   = group[-1]["end"]
+        # Small buffer so karaoke highlight finishes before event ends
+        end_buffered = end + 0.05
+        text = _kf_group(group)
+        ass_acc.append(
+            f"Dialogue: 0,{format_ass_time(start)},{format_ass_time(end_buffered)}"
+            f",Default,,0,0,0,,{text}\n"
+        )
+
+    if caption_style == "keyword_pop":
+        # keyword_pop: same karaoke groups but highlight is keyword color instead of yellow
+        # Override secondary color per-word via inline tags
+        keyword_set = set(re.sub(r"[.,!?;:'\"\\]", "", k.lower()) for k in (caption_keywords or []))
+        highlight_color = "&H0000FF00"  # green
+        normal_color    = "&H00FFFFFF"  # white
+
+        ass_lines = []
         group = []
-        for i, word in enumerate(words):
-            group.append(word)
-            next_w = words[i+1] if i+1 < len(words) else None
-            pause = (next_w["start"] - word["end"]) if next_w else 1
-            if not next_w or pause > 0.35 or len(group) >= 8:
+        for i, word_dict in enumerate(words):
+            group.append(word_dict)
+            next_w = words[i + 1] if i + 1 < len(words) else None
+            pause  = (next_w["start"] - word_dict["end"]) if next_w else 1.0
+            ends_sentence = bool(PUNCT_END.search(word_dict.get("word") or ""))
+            if not next_w or pause > 0.3 or ends_sentence or len(group) >= MAX_WORDS:
                 start = group[0]["start"]
-                end = group[-1]["end"]
-                color_idx = 0
-                parts = []
-                for g in group:
-                    clean = re.sub(r"[.,!?;:'\"\\]","",g["word"].lower())
-                    if clean in keyword_set:
-                        col = highlight_colors[color_idx % len(highlight_colors)]
-                        color_idx += 1
-                        parts.append(f"{{{col}\\b1}}{g['word']}{{  {reset_color}\\b1}}")
-                    else:
-                        parts.append(g["word"])
-                text = " ".join(parts)
-                ass += f"Dialogue: 0,{format_ass_time(start)},{format_ass_time(end)},Default,,0,0,0,,{text}\n"
+                end   = group[-1]["end"] + 0.05
+                parts = ["{\\fad(80,60)}"]
+                for wd in group:
+                    dur_cs = max(5, round(max(0.05, float(wd["end"]) - float(wd["start"])) * 100))
+                    clean  = re.sub(r"[.,!?;:'\"\\]", "", (wd.get("word") or "").lower())
+                    is_kw  = clean in keyword_set
+                    col    = highlight_color if is_kw else normal_color
+                    parts.append(f"{{\\kf{dur_cs}}}{{\\1c{col}}}{wd['word']} ")
+                text = "".join(parts).rstrip()
+                ass_lines.append(
+                    f"Dialogue: 0,{format_ass_time(start)},{format_ass_time(end)},Default,,0,0,0,,{text}\n"
+                )
                 group = []
+        ass += "".join(ass_lines)
+
     else:
+        # All other styles: uniform karaoke groups with the style's secondary colour as highlight
+        ass_lines = []
         group = []
-        for i, word in enumerate(words):
-            group.append(word)
-            next_w = words[i+1] if i+1 < len(words) else None
-            pause = (next_w["start"] - word["end"]) if next_w else 1
-            if not next_w or pause > 0.35 or len(group) >= 8:
-                start = group[0]["start"]
-                end = group[-1]["end"]
-                text = " ".join(g["word"] for g in group)
-                ass += f"Dialogue: 0,{format_ass_time(start)},{format_ass_time(end)},Default,,0,0,0,,{text}\n"
+        for i, word_dict in enumerate(words):
+            group.append(word_dict)
+            next_w = words[i + 1] if i + 1 < len(words) else None
+            pause  = (next_w["start"] - word_dict["end"]) if next_w else 1.0
+            ends_sentence = bool(PUNCT_END.search(word_dict.get("word") or ""))
+            if not next_w or pause > 0.3 or ends_sentence or len(group) >= MAX_WORDS:
+                _flush_group(group, ass_lines)
                 group = []
+        ass += "".join(ass_lines)
 
     ass_path = os.path.join(work_dir, "captions.ass")
     with open(ass_path, "w", encoding="utf-8") as f:
@@ -2548,13 +2676,26 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         eff_dur = effective_durations[i]
         fps = 30
         total_frames = max(1, round(eff_dur * fps))
-        zoom_max = 1.06 if has_burned_captions else 1.10
+        zoom_max = 1.07 if has_burned_captions else 1.14
 
         zoom_filter = None
         if zoom == "slow_in":
-            zoom_filter = f"scale=w='trunc(iw*(1.0+{zoom_max-1.0}*n/{total_frames})/2)*2':h='trunc(ih*(1.0+{zoom_max-1.0}*n/{total_frames})/2)*2':eval=frame:flags=bilinear,crop=1080:1920"
+            # Smoothstep easing: t*t*(3-2*t) — ease in AND out, not linear
+            tf = max(1, total_frames)
+            zoom_range = zoom_max - 1.0
+            zoom_filter = (
+                f"scale=w='trunc(iw*(1.0+{zoom_range:.4f}*(n/{tf})*(n/{tf})*(3-2*(n/{tf})))/2)*2'"
+                f":h='trunc(ih*(1.0+{zoom_range:.4f}*(n/{tf})*(n/{tf})*(3-2*(n/{tf})))/2)*2'"
+                f":eval=frame:flags=bilinear,crop=1080:1920"
+            )
         elif zoom == "slow_out":
-            zoom_filter = f"scale=w='trunc(iw*({zoom_max}-{zoom_max-1.0}*n/{total_frames})/2)*2':h='trunc(ih*({zoom_max}-{zoom_max-1.0}*n/{total_frames})/2)*2':eval=frame:flags=bilinear,crop=1080:1920"
+            tf = max(1, total_frames)
+            zoom_range = zoom_max - 1.0
+            zoom_filter = (
+                f"scale=w='trunc(iw*({zoom_max:.4f}-{zoom_range:.4f}*(n/{tf})*(n/{tf})*(3-2*(n/{tf})))/2)*2'"
+                f":h='trunc(ih*({zoom_max:.4f}-{zoom_range:.4f}*(n/{tf})*(n/{tf})*(3-2*(n/{tf})))/2)*2'"
+                f":eval=frame:flags=bilinear,crop=1080:1920"
+            )
         elif zoom == "punch_in":
             zoom_filter = f"scale=w='trunc(iw*(if(lt(n\\,10)\\,1.0+0.15*n/10\\,1.15))/2)*2':h='trunc(ih*(if(lt(n\\,10)\\,1.0+0.15*n/10\\,1.15))/2)*2':eval=frame:flags=bilinear,crop=1080:1920"
         elif zoom == "punch_out":
@@ -2770,7 +2911,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         )
         if ass_path:
             escaped = ass_path.replace("\\","\\\\").replace(":","\\:").replace("'","\\'")
-            post_filters.append(f"{video_out}subtitles='{escaped}'[video_captioned]")
+            _fontsdir_clause = (
+                f":fontsdir='{os.path.dirname(OVERLAY_FONT_PATH)}'"
+                if os.path.exists(OVERLAY_FONT_PATH)
+                else ""
+            )
+            post_filters.append(f"{video_out}subtitles='{escaped}'{_fontsdir_clause}[video_captioned]")
             video_out = "[video_captioned]"
 
     text_overlays = edit_plan.get("text_overlays") or []
@@ -2855,8 +3001,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     filter_complex = ";".join(video_filters + audio_filters + transition_filters + sfx_filter_strs + post_filters)
 
     encode_args = [
-        "-c:v","libx264","-preset","veryfast","-crf","26",
-        "-b:v","4M","-maxrate","5M","-bufsize","10M",
+        "-c:v","libx264","-preset","fast","-crf","23",
+        "-b:v","6M","-maxrate","8M","-bufsize","16M",
         "-pix_fmt","yuv420p",
         "-c:a","aac","-b:a","128k",
         "-movflags","+faststart",
