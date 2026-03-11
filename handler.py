@@ -67,6 +67,52 @@ else:
 
 # ─── COLOR INTENTS ────────────────────────────────────────────────────────────
 
+# ─── MUSIC LIBRARY ────────────────────────────────────────────────────────────
+# Tracks stored at /assets/music/<filename>.mp3 in the Docker image.
+# Claude picks by filename. Values are for prompt context only — not used in code.
+MUSIC_LIBRARY = {
+    "none": {"mood": "none", "energy": "none", "description": "No background music."},
+
+    # Hype / High energy
+    "hype_trap_01":       {"mood": "hype",      "energy": "high",   "description": "Hard-hitting trap beat, 140bpm, heavy 808s. Nike ad, gym motivation, flex content."},
+    "hype_electronic_01": {"mood": "hype",      "energy": "high",   "description": "Festival electronic drop, 128bpm, euphoric synths. Party, celebration, big reveal."},
+    "upbeat_pop_01":      {"mood": "upbeat",    "energy": "high",   "description": "Bright pop energy, 120bpm, driving beat. Vlog highlight, travel, fun day out."},
+    "upbeat_hip_hop_01":  {"mood": "upbeat",    "energy": "high",   "description": "Chill hip-hop groove, 95bpm, confident. Street style, fashion, lifestyle flex."},
+
+    # Cinematic / Emotional
+    "cinematic_epic_01":  {"mood": "cinematic", "energy": "high",   "description": "Orchestral swell, 90bpm, building tension. Dramatic reveal, sports highlight, transformation."},
+    "cinematic_tense_01": {"mood": "cinematic", "energy": "medium", "description": "Dark atmospheric strings, 80bpm, suspense. Before/after, serious story, weight."},
+    "emotional_piano_01": {"mood": "emotional", "energy": "low",    "description": "Intimate solo piano, 70bpm, melancholy. Personal story, reflection, vulnerability."},
+    "emotional_indie_01": {"mood": "emotional", "energy": "medium", "description": "Indie folk guitar, 85bpm, warm. Life update, sentimental, nostalgia."},
+
+    # Calm / Lo-fi
+    "calm_ambient_01":    {"mood": "calm",      "energy": "low",    "description": "Soft ambient pads, no strong beat. Meditation, mindfulness, slow aesthetic content."},
+    "lo_fi_chill_01":     {"mood": "calm",      "energy": "low",    "description": "Lo-fi hip-hop, 75bpm, warm vinyl texture. Study, casual vlog, relaxed lifestyle."},
+    "lo_fi_beats_01":     {"mood": "calm",      "energy": "medium", "description": "Lo-fi trap, 85bpm, laid back. Day-in-the-life, morning routine, quiet hustle."},
+
+    # Corporate / Clean
+    "corporate_inspire_01": {"mood": "upbeat",  "energy": "medium", "description": "Clean corporate pop, 110bpm, optimistic. Product demo, explainer, professional content."},
+    "corporate_tech_01":    {"mood": "clean",   "energy": "medium", "description": "Minimal electronic, 100bpm, forward-moving. App demo, tech review, startup content."},
+
+    # Dark / Moody
+    "dark_moody_01":      {"mood": "moody",     "energy": "medium", "description": "Dark atmospheric hip-hop, 90bpm, brooding. Edgy aesthetic, night content, fashion."},
+    "dark_cinematic_01":  {"mood": "moody",     "energy": "high",   "description": "Dark orchestral, 85bpm, heavy. Intense story, villain arc, dramatic transformation."},
+
+    # Fun / Playful
+    "fun_quirky_01":      {"mood": "fun",       "energy": "high",   "description": "Quirky ukulele pop, 115bpm, lighthearted. Comedy, pets, kids, lighthearted content."},
+    "fun_retro_01":       {"mood": "fun",       "energy": "medium", "description": "Retro synth-pop, 105bpm, nostalgic. Throwback content, 80s/90s aesthetic."},
+
+    # Romantic / Warm
+    "romantic_soft_01":   {"mood": "romantic",  "energy": "low",    "description": "Soft acoustic guitar, 65bpm, tender. Couple content, anniversary, heartfelt."},
+    "warm_acoustic_01":   {"mood": "warm",      "energy": "medium", "description": "Warm acoustic strumming, 90bpm, feel-good. Family content, wholesome moments."},
+
+    # Epic / Dramatic
+    "epic_trailer_01":    {"mood": "epic",      "energy": "high",   "description": "Trailer-style orchestral + electronic, 120bpm. Big announcement, challenge, transformation."},
+    "epic_sports_01":     {"mood": "epic",      "energy": "high",   "description": "Stadium energy, 130bpm, crowd hype. Sports highlights, competition, achievement."},
+}
+
+_MUSIC_DIR = "/assets/music"
+
 COLOR_INTENTS = {
     "none":      {"brightness": 0,     "contrast": 0,     "saturation": 0,     "gamma": 0,     "color_temperature": None},
     "neutral":   {"brightness": 0,     "contrast": 0,     "saturation": 0,     "gamma": 0,     "color_temperature": "neutral"},
@@ -1195,7 +1241,12 @@ Global:
   outro — none, fade_black, fade_white
   text_overlays — optional. Title cards, location text, or visual emphasis only.
     Max 1-2. Keep minimal — this is a visual edit, not an information edit.
-  background_music — always "none"
+  background_music — choose one track filename from the library below, or "none" if the content works better without music.
+
+  For most vibes, music is essential — pick the track that best matches the emotional tone and energy the user described. The track will be mixed under the speech at low volume with ducking, so it enhances rather than competes.
+
+  Music library (pick the filename that best fits the vibe):
+  {music_library_block}
   aspect_ratio — always "9:16"
 
 === RESPONSE FORMAT ===
@@ -1205,7 +1256,7 @@ Respond with ONLY this JSON:
 {{
   "notes": "<50 words max>",
   "color_intent": "<intent>",
-  "background_music": "none",
+  "background_music": "<track_filename or none>",
   "caption_style": "none",
   "caption_position": "lower-third",
   "caption_keywords": [],
@@ -1241,7 +1292,7 @@ The user said: "{expanded_vibe}"
 
 
 # truncated in command preview; full user-provided file continues below unchanged
-def build_prompt(analysis, transcript, expanded_vibe):
+def build_prompt(analysis, transcript, expanded_vibe, music_library_block=""):
     shots = analysis.get("shots") or []
     shots_block = "\n\n".join(
         f"[{s['start']:.2f}s – {s['end']:.2f}s]\n  {s.get('visual','')}\n  {s.get('action','')}\n  Energy: {s.get('energy',0.5):.1f}"
@@ -1674,7 +1725,12 @@ Global parameters:
     fade_black — last clip gradually fades to black
     fade_white — last clip gradually fades to white
 
-  background_music — always "none"
+  background_music — choose one track filename from the library below, or "none" if the content works better without music.
+
+  For most vibes, music is essential — pick the track that best matches the emotional tone and energy the user described. The track will be mixed under the speech at low volume with ducking, so it enhances rather than competes.
+
+  Music library (pick the filename that best fits the vibe):
+  {music_library_block}
   aspect_ratio — always "9:16"
 
 Text overlays — text graphics displayed on specific clips:
@@ -1762,7 +1818,7 @@ Respond with ONLY this JSON object:
 {{
   "notes": "<50 words max. Key decisions only, no justification>",
   "color_intent": "<intent>",
-  "background_music": "none",
+  "background_music": "<track_filename or none>",
   "caption_style": "<style>",
   "caption_position": "<position>",
   "caption_keywords": [],
@@ -1903,7 +1959,14 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames):
     else:
         # speech and speech_with_music both use build_prompt
         # speech_with_music gets extra beat context via the audio_block enrichment in build_prompt
-        static_prefix, dynamic_suffix = build_prompt(analysis, transcript, expanded_vibe)
+        music_lines = []
+        for fname, meta in MUSIC_LIBRARY.items():
+            if fname == "none":
+                continue
+            music_lines.append(f"    {fname} — {meta['description']}")
+        music_library_block = "\n".join(music_lines)
+
+        static_prefix, dynamic_suffix = build_prompt(analysis, transcript, expanded_vibe, music_library_block)
 
     content_blocks = [
         {"type": "text", "text": static_prefix, "cache_control": {"type": "ephemeral"}},
@@ -2033,7 +2096,9 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames):
     edit_plan.setdefault("highlight_rolloff", False)
     edit_plan.setdefault("vibrance", False)
     edit_plan.setdefault("teal_orange", "none")
-    edit_plan["background_music"] = "none"
+    # Validate background_music against known library — fall back to none if unknown
+    raw_music = str(edit_plan.get("background_music") or "none").strip()
+    edit_plan["background_music"] = raw_music if raw_music in MUSIC_LIBRARY else "none"
     edit_plan["audio_ducking"] = False
 
     for bool_field in ("sharpening", "denoise", "shadow_lift", "highlight_rolloff", "vibrance",
@@ -3209,7 +3274,38 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     )
     audio_out = "[final_audio]"
 
-    filter_complex = ";".join(video_filters + audio_filters + transition_filters + sfx_filter_strs + post_filters)
+    # Background music mix
+    music_input_idx = None
+    music_filters = []
+    music_track = str(edit_plan.get("background_music") or "none").strip()
+    if music_track != "none" and music_track in MUSIC_LIBRARY:
+        music_path = os.path.join(_MUSIC_DIR, f"{music_track}.mp3")
+        if os.path.exists(music_path):
+            music_input_idx = n + len(sfx_input_args) // 2
+            input_args += ["-stream_loop", "-1", "-i", music_path]
+            total_duration = sum(effective_durations)
+            fade_out_start = max(0, total_duration - 2.0)
+            music_vol = 0.18 if any(
+                str(cut.get("speed") or 1.0) != "1.0" or cut.get("zoom") != "none"
+                for cut in cuts
+            ) else 0.22
+            music_filters.append(
+                f"[{music_input_idx}:a]"
+                f"atrim=duration={total_duration:.3f},"
+                f"afade=t=in:st=0:d=1.5,"
+                f"afade=t=out:st={fade_out_start:.3f}:d=2.0,"
+                f"volume={music_vol}"
+                f"[music_track]"
+            )
+            music_filters.append(
+                f"[final_audio][music_track]amix=inputs=2:duration=first:dropout_transition=2[mixed_audio]"
+            )
+            audio_out = "[mixed_audio]"
+            print(f"[render] background_music={music_track} vol={music_vol} duration={total_duration:.1f}s", flush=True)
+        else:
+            print(f"[render] WARNING: music track not found at {music_path} — skipping", flush=True)
+
+    filter_complex = ";".join(video_filters + audio_filters + transition_filters + sfx_filter_strs + post_filters + music_filters)
 
     encode_args = [
         "-c:v","libx264","-preset","fast","-crf","23",
