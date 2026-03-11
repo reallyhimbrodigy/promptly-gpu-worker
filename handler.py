@@ -2468,7 +2468,7 @@ def normalize_source_video(source_path, work_dir):
         "-vf","scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1",
         "-r","30","-vsync","cfr","-pix_fmt","yuv420p",
         "-c:v","libx264","-preset","ultrafast","-crf","23",
-        "-c:a","aac","-b:a","128k","-ar","48000","-ac","1",
+        "-c:a","aac","-b:a","192k","-ar","48000","-ac","2",
         "-threads","1","-map","0:v:0",
     ]
     if audio:
@@ -3233,6 +3233,43 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
 # ─── MAIN HANDLER ─────────────────────────────────────────────────────────────
 
+def classify_error(e):
+    """
+    Convert a pipeline exception into a user-facing message.
+    Returns a string safe to display directly to the user.
+    """
+    msg = str(e)
+
+    # File / input problems — user can fix these
+    if "No video stream found" in msg:
+        return "We couldn't read your video file. Please make sure it's a standard video format (MP4, MOV, or similar)."
+    if "Landscape video" in msg:
+        return "Promptly works with vertical videos (9:16). Please upload a portrait-orientation clip."
+
+    # Edit generation — no cuts produced
+    if "missing cuts array" in msg:
+        return "We couldn't generate an edit for this video. Try a different vibe or a longer clip."
+
+    # Analysis problems
+    if "Gemini file upload timed out" in msg:
+        return "Your video took too long to upload for analysis. Please try again."
+    if "Failed to parse Gemini" in msg or "parse Gemini" in msg:
+        return "We had trouble analyzing your video. Please try again."
+
+    # Edit recipe problems
+    if "Empty Claude response" in msg or "valid JSON from Claude" in msg:
+        return "We had trouble generating your edit. Please try again."
+    if "source_start" in msg or "source_end" in msg or "chronological" in msg:
+        return "We had trouble generating your edit. Please try again."
+
+    # Render problems
+    if "FFmpeg failed" in msg or "Pre-split mismatch" in msg:
+        return "We had trouble rendering your video. Please try again."
+
+    # Config / internal — user can't fix, keep it vague
+    return "Something went wrong. Please try again."
+
+
 def send_progress(job_id, step, pct, message, app_url):
     """
     POST progress update to the JS server. Non-fatal — never raises.
@@ -3557,7 +3594,8 @@ def handler(job):
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return {"error": str(e)}
+        user_message = classify_error(e)
+        return {"error": user_message, "error_detail": str(e)}
 
     finally:
         if work_dir:
