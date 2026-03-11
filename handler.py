@@ -9,6 +9,7 @@ import shutil
 import json
 import re
 import math
+import concurrent.futures
 
 print(f"[startup] Python {sys.version}", flush=True)
 
@@ -2180,6 +2181,204 @@ def get_sfx_volume(sound_name, timestamp, speech_segments, is_text_overlay=False
 
 # ─── FFMPEG RENDER ────────────────────────────────────────────────────────────
 
+def export_additional_format(output_path, aspect_ratio, dest_path):
+    """Crop 9:16 output to '1:1' (1080x1080) or '16:9' (1920x1080)."""
+    if aspect_ratio == "1:1":
+        vf = "crop=1080:1080:0:(ih-1080)/2"
+    elif aspect_ratio == "16:9":
+        vf = "crop=1080:607:0:(ih-607)/2,scale=1920:1080"
+    else:
+        raise ValueError(f"Unsupported aspect_ratio: {aspect_ratio}")
+    run_ffmpeg([
+        "-y", "-i", output_path,
+        "-vf", vf,
+        "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+        "-c:a", "copy",
+        "-movflags", "+faststart",
+        dest_path,
+    ])
+
+
+def extract_cover_frame(source_path, timestamp, work_dir):
+    """Extract a single JPEG frame. Returns (bytes, 'image/jpeg') or (None, None)."""
+    frame_path = os.path.join(work_dir, "cover_frame.jpg")
+    result = subprocess.run(
+        ["ffmpeg", "-y", "-ss", str(timestamp), "-i", source_path,
+         "-frames:v", "1", "-vf", "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2",
+         "-q:v", "3", frame_path],
+        capture_output=True,
+    )
+    if result.returncode == 0 and os.path.exists(frame_path):
+        with open(frame_path, "rb") as f:
+            data = f.read()
+        try:
+            os.unlink(frame_path)
+        except Exception:
+            pass
+        return data, "image/jpeg"
+    return None, None
+
+
+def fetch_broll_clip(keyword, duration_needed, work_dir):
+    """Search Pexels for a portrait video clip. Returns local path or None."""
+    pexels_key = os.environ.get("PEXELS_API_KEY")
+    if not pexels_key:
+        print(f"[broll] PEXELS_API_KEY not set — skipping '{keyword}'", flush=True)
+        return None
+    try:
+        resp = requests.get(
+            "https://api.pexels.com/videos/search",
+            headers={"Authorization": pexels_key},
+            params={"query": keyword, "per_page": 5, "orientation": "portrait", "size": "medium"},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        videos = resp.json().get("videos") or []
+        if not videos:
+            print(f"[broll] No Pexels results for '{keyword}'", flush=True)
+            return None
+        chosen_url = None
+        for video in videos:
+            for vf in (video.get("video_files") or []):
+                w = vf.get("width") or 0
+                h = vf.get("height") or 0
+                dur = float(video.get("duration") or 0)
+                if h >= w and dur >= duration_needed and vf.get("link"):
+                    chosen_url = vf["link"]
+                    break
+            if chosen_url:
+                break
+        if not chosen_url:
+            for vf in (videos[0].get("video_files") or []):
+                if vf.get("link"):
+                    chosen_url = vf["link"]
+                    break
+        if not chosen_url:
+            print(f"[broll] No usable file for '{keyword}'", flush=True)
+            return None
+        safe_kw = re.sub(r"[^a-z0-9]", "_", keyword.lower())[:30]
+        dest = os.path.join(work_dir, f"broll_{safe_kw}.mp4")
+        dl = requests.get(chosen_url, stream=True, timeout=30)
+        dl.raise_for_status()
+        with open(dest, "wb") as f:
+            for chunk in dl.iter_content(65536):
+                f.write(chunk)
+        print(f"[broll] Downloaded '{keyword}' -> {dest}", flush=True)
+        return dest
+    except Exception as e:
+        print(f"[broll] Failed to fetch '{keyword}': {e}", flush=True)
+        return None
+
+
+def composite_broll(output_path, broll_entries, work_dir):
+    """Overlay b-roll clips on the rendered output in a single FFmpeg pass. Overwrites output_path."""
+    valid = [e for e in broll_entries if e.get("local_path") and os.path.exists(e["local_path"])]
+    if not valid:
+        return
+    tmp_out = output_path + ".broll_tmp.mp4"
+    input_args = ["-i", output_path]
+    for entry in valid:
+        input_args += ["-i", entry["local_path"]]
+    filter_parts = []
+    for i, entry in enumerate(valid):
+        idx = i + 1
+        filter_parts.append(
+            f"[{idx}:v]scale=1080:1920:force_original_aspect_ratio=increase,"
+            f"crop=1080:1920,setsar=1[bv{i}]"
+        )
+    prev = "0:v"
+    for i, entry in enumerate(valid):
+        ts    = float(entry["timestamp"])
+        dur   = float(entry["duration"])
+        label = f"ov{i}"
+        filter_parts.append(
+            f"[{prev}][bv{i}]overlay=0:0:enable='between(t,{ts:.3f},{ts+dur:.3f})'[{label}]"
+        )
+        prev = label
+    run_ffmpeg([
+        "-y",
+        ] + input_args + [
+        "-filter_complex", ";".join(filter_parts),
+        "-map", f"[{prev}]",
+        "-map", "0:a",
+        "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+        "-c:a", "copy",
+        "-movflags", "+faststart",
+        tmp_out,
+    ])
+    os.replace(tmp_out, output_path)
+    print(f"[broll] Composited {len(valid)} b-roll clip(s) onto output", flush=True)
+
+
+def apply_filler_jump_cuts(cuts, deepgram_words):
+    """
+    Split Claude's clips at ALWAYS_FILLER word boundaries (um, uh, hmm, etc.)
+    Context fillers (like, so, basically) are intentionally never removed.
+    Returns the expanded cut list, or the original if no fillers found inside clips.
+    """
+    if not deepgram_words:
+        return cuts
+
+    all_fillers = detect_filler_words(deepgram_words)
+    hard_fillers = [f for f in all_fillers if f["reason"] == "always-filler"]
+    if not hard_fillers:
+        return cuts
+
+    MIN_SUBCLIP = 0.25
+
+    result = []
+    for cut in cuts:
+        cs = float(cut["source_start"])
+        ce = float(cut["source_end"])
+        original_transition  = cut.get("transition_out") or "none"
+        original_trans_sound = cut.get("transition_sound") or "none"
+
+        interior_fillers = [
+            f for f in hard_fillers
+            if float(f["start"]) >= cs + 0.05 and float(f["end"]) <= ce - 0.05
+        ]
+
+        if not interior_fillers:
+            result.append(cut)
+            continue
+
+        keep_ranges = []
+        cursor = cs
+        for filler in sorted(interior_fillers, key=lambda f: f["start"]):
+            fs = float(filler["start"])
+            fe = float(filler["end"])
+            if fs > cursor:
+                keep_ranges.append((round(cursor * 1000) / 1000, round(fs * 1000) / 1000))
+            cursor = max(cursor, fe)
+        if cursor < ce:
+            keep_ranges.append((round(cursor * 1000) / 1000, round(ce * 1000) / 1000))
+
+        keep_ranges = [(s, e) for s, e in keep_ranges if e - s >= MIN_SUBCLIP]
+
+        if not keep_ranges:
+            result.append(cut)
+            continue
+
+        for i, (sub_start, sub_end) in enumerate(keep_ranges):
+            is_last = (i == len(keep_ranges) - 1)
+            sub = dict(cut)
+            sub["source_start"]     = sub_start
+            sub["source_end"]       = sub_end
+            sub["transition_out"]   = original_transition   if is_last else "none"
+            sub["transition_sound"] = original_trans_sound  if is_last else "none"
+            if not is_last:
+                sub["freeze_frame"]           = False
+                sub["motion_blur_transition"] = False
+            result.append(sub)
+
+        removed = [f["word"] for f in interior_fillers]
+        print(f"[filler_cuts] clip {cs:.2f}s-{ce:.2f}s: removed {removed} -> {len(keep_ranges)} sub-clips", flush=True)
+
+    return result
+
+
+# ─── FFMPEG RENDER ────────────────────────────────────────────────────────────
+
 TRANSITION_DURATION = 0.3
 
 
@@ -2238,7 +2437,7 @@ def normalize_source_video(source_path, work_dir):
     w = int(video.get("width") or 0)
     h = int(video.get("height") or 0)
     if w > h:
-        raise RuntimeError(f"Landscape video ({w}x{h}) — Promptly requires vertical video")
+        print(f"[normalize] Landscape input ({w}x{h}) — will center-crop to 9:16", flush=True)
 
     fps_str = video.get("avg_frame_rate") or video.get("r_frame_rate") or "30/1"
     try:
@@ -2993,7 +3192,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         f"equalizer=f=2800:t=q:w=1.5:g=3,"
         f"equalizer=f=200:t=q:w=0.8:g=1.5,"
         f"acompressor=threshold=-20dB:ratio=3:attack=5:release=50:makeup=2,"
-        f"dynaudnorm=f=150:g=15:p=0.95:m=10,"
+        f"loudnorm=I=-14:TP=-1.5:LRA=11,"
         f"alimiter=limit=0.95:attack=1:release=10[final_audio]"
     )
     audio_out = "[final_audio]"
@@ -3070,79 +3269,59 @@ def handler(job):
         print("[pipeline] step=normalize", flush=True)
         source_path = normalize_source_video(source_path, work_dir)
 
-        # Steps 3–5 — Parallel: Gemini, scene detection, beat detection, transcription
-        print("[pipeline] step=parallel_analysis (Gemini + scdet + beats + transcription)", flush=True)
-        t_parallel = time.time()
+        # ── Parallel group 0: vibe expansion — no video dep, start immediately ─────
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as vibe_executor:
+            vibe_future = vibe_executor.submit(expand_vibe_intent, vibe)
 
-        import concurrent.futures
+            # Steps 1+2 (download + normalize) already done — source_path is ready
 
-        def _run_gemini():
-            if cached_analysis:
-                print("[pipeline] analysis: cache HIT", flush=True)
-                return normalize_analysis(cached_analysis) if isinstance(cached_analysis, dict) else cached_analysis
-            print("[pipeline] analysis: Gemini START", flush=True)
-            result = run_gemini_analysis(source_path)
-            print("[pipeline] analysis: Gemini DONE", flush=True)
-            return result
+            # ── Parallel group 1: Gemini / scene+beat / transcription ──────────────
+            # All three need only source_path. Gemini dominates (~18s); others finish inside.
+            print("[pipeline] step=parallel_analysis (gemini + scene/beat + transcription)", flush=True)
+            t_parallel = time.time()
 
-        def _run_scene():
-            print("[pipeline] scene_detection START", flush=True)
-            result = detect_scene_cuts(source_path)
-            print(f"[pipeline] scene_detection DONE ({len(result)} cuts)", flush=True)
-            return result
+            def _run_gemini():
+                if cached_analysis:
+                    print("[pipeline] analysis: cache HIT", flush=True)
+                    return normalize_analysis(cached_analysis) if isinstance(cached_analysis, dict) else cached_analysis
+                print("[pipeline] analysis: Gemini start", flush=True)
+                t = time.time()
+                result = run_gemini_analysis(source_path)
+                print(f"[pipeline] Gemini complete in {time.time()-t:.1f}s", flush=True)
+                return result
 
-        def _run_beats():
-            print("[pipeline] beat_detection START", flush=True)
-            result = detect_beats(source_path)
-            print(f"[pipeline] beat_detection DONE ({len(result)} beats)", flush=True)
-            return result
+            def _run_scene_and_beat():
+                t = time.time()
+                cuts = detect_scene_cuts(source_path)
+                print(f"[pipeline] scene detection complete in {time.time()-t:.1f}s ({len(cuts)} cuts)", flush=True)
+                t = time.time()
+                beats = detect_beats(source_path)
+                print(f"[pipeline] beat detection complete in {time.time()-t:.1f}s ({len(beats)} beats)", flush=True)
+                return cuts, beats
 
-        def _run_transcription():
-            print("[pipeline] transcription START", flush=True)
-            result = transcribe_audio(source_path)
-            print(f"[pipeline] transcription DONE ({len(result.get('words') or [])} words)", flush=True)
-            return result
+            def _run_transcription():
+                t = time.time()
+                result = transcribe_audio(source_path)
+                words = result.get("words") or []
+                print(f"[pipeline] transcription complete in {time.time()-t:.1f}s ({len(words)} words)", flush=True)
+                return result
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-            f_gemini = executor.submit(_run_gemini)
-            f_scene = executor.submit(_run_scene)
-            f_beats = executor.submit(_run_beats)
-            f_transcription = executor.submit(_run_transcription)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as analysis_executor:
+                f_gemini     = analysis_executor.submit(_run_gemini)
+                f_scene_beat = analysis_executor.submit(_run_scene_and_beat)
+                f_transcribe = analysis_executor.submit(_run_transcription)
 
-            analysis = f_gemini.result()
-            visual_cuts = f_scene.result()
-            beat_timestamps = f_beats.result()
-            transcript = f_transcription.result()
+                analysis                     = f_gemini.result()
+                visual_cuts, beat_timestamps = f_scene_beat.result()
+                transcript                   = f_transcribe.result()
 
-        deepgram_words = transcript.get("words") or []
-        analysis["visual_cuts"] = visual_cuts
-        analysis["beat_timestamps"] = beat_timestamps
+            print(f"[pipeline] parallel analysis complete in {time.time()-t_parallel:.1f}s", flush=True)
 
-        print(f"[pipeline] parallel_analysis complete in {time.time()-t_parallel:.1f}s", flush=True)
+            deepgram_words = transcript.get("words") or []
+            analysis["visual_cuts"]     = visual_cuts
+            analysis["beat_timestamps"] = beat_timestamps
 
-        # Step 5.5 — Content mode detection
-        content_mode = detect_content_mode(deepgram_words, analysis)
-        analysis["content_mode"] = content_mode
-
-        # Step 6 — Route by content mode
-        if content_mode == "music_edit":
-            print("[pipeline] step=beat_alignment (music_edit mode)", flush=True)
-            t = time.time()
-            source_duration = float(analysis.get("duration") or probe_duration(source_path) or 0)
-            beat_aligned_clips = align_beats_to_cuts(
-                beat_timestamps=beat_timestamps,
-                visual_cuts=visual_cuts,
-                source_duration=source_duration,
-                source_path=source_path,
-                work_dir=work_dir,
-            )
-            analysis["beat_aligned_clips"] = beat_aligned_clips
-            analysis["speech"] = {"has_speech": False, "segments": [], "sentence_boundaries": []}
-            analysis["safe_cut_points"] = []
-            print(f"[pipeline] beat_alignment complete in {time.time()-t:.1f}s "
-                  f"({len(beat_aligned_clips)} clips)", flush=True)
-        else:
-            # speech or speech_with_music — speech drives cut structure
+            # Step 6 — Build speech from Deepgram
             speech_result = build_speech_from_deepgram(deepgram_words, float(analysis.get("duration") or 0))
             analysis["speech"] = speech_result["speech"]
             safe_cut_points = speech_result["safe_cut_points"]
@@ -3151,30 +3330,29 @@ def handler(job):
                     safe_cut_points.append({"time": cut_time, "quality": 1.0, "why": "scene change"})
             safe_cut_points.sort(key=lambda cp: cp["time"])
             analysis["safe_cut_points"] = safe_cut_points
-            analysis["beat_aligned_clips"] = []
 
-        if visual_cuts and analysis.get("shots"):
-            duration_val = float(analysis.get("duration") or 0)
-            boundaries = [0] + visual_cuts + [duration_val]
-            mapped_shots = []
-            for i in range(len(boundaries)-1):
-                start = round(boundaries[i]*1000)/1000
-                end   = round(boundaries[i+1]*1000)/1000
-                gsrc = analysis["shots"][min(i, len(analysis["shots"])-1)] if analysis["shots"] else {}
-                mapped_shots.append({
-                    "start":         start,
-                    "end":           end,
-                    "visual":        gsrc.get("visual") or "",
-                    "action":        gsrc.get("action") or "",
-                    "energy":        gsrc.get("energy") or 0.5,
-                    "editing_value": gsrc.get("editing_value") or "usable",
-                    "description":   gsrc.get("description") or "",
-                    "score":         gsrc.get("score") or 0.5,
-                })
-            analysis["shots"] = mapped_shots
+            # Map Gemini shots to scdet boundaries
+            if visual_cuts and analysis.get("shots"):
+                duration_val = float(analysis.get("duration") or 0)
+                boundaries = [0] + visual_cuts + [duration_val]
+                mapped_shots = []
+                for i in range(len(boundaries)-1):
+                    start = round(boundaries[i]*1000)/1000
+                    end   = round(boundaries[i+1]*1000)/1000
+                    gsrc = analysis["shots"][min(i, len(analysis["shots"])-1)] if analysis["shots"] else {}
+                    mapped_shots.append({
+                        "start":         start,
+                        "end":           end,
+                        "visual":        gsrc.get("visual") or "",
+                        "action":        gsrc.get("action") or "",
+                        "energy":        gsrc.get("energy") or 0.5,
+                        "editing_value": gsrc.get("editing_value") or "usable",
+                        "description":   gsrc.get("description") or "",
+                        "score":         gsrc.get("score") or 0.5,
+                    })
+                analysis["shots"] = mapped_shots
 
-        # Step 7 — Tighten transcript (skip in music_edit — no speech words)
-        if analysis.get("content_mode") != "music_edit":
+            # Step 7 — Tighten transcript
             print("[pipeline] step=tighten", flush=True)
             tighten_result = tighten_transcript(
                 deepgram_words,
@@ -3184,21 +3362,23 @@ def handler(job):
             )
             analysis["tightened_timeline"] = tighten_result
 
-        # Step 8 — Broll keywords (skip in music_edit — no speech words)
-        if analysis.get("content_mode") != "music_edit":
+            # Step 8 — Broll keywords
             broll_candidates = extract_broll_keywords(deepgram_words, 8)
             if broll_candidates:
                 analysis["broll_candidates"] = broll_candidates
                 print(f"[broll] Candidates: {', '.join(c['keyword'] for c in broll_candidates)}", flush=True)
 
-        print("[pipeline] step=scene_frames", flush=True)
-        scene_frames = extract_scene_frames(source_path, visual_cuts, work_dir)
+            # Step 9 — Scene frames
+            print("[pipeline] step=scene_frames", flush=True)
+            scene_frames = extract_scene_frames(source_path, visual_cuts, work_dir)
 
-        print("[pipeline] step=vibe_expansion", flush=True)
-        t = time.time()
-        expanded_vibe = expand_vibe_intent(vibe)
-        print(f"[pipeline] vibe expansion complete in {time.time()-t:.1f}s", flush=True)
+            # Step 10 — Collect vibe expansion (fired before download, ready by now)
+            expanded_vibe = vibe_future.result()
+            print("[pipeline] vibe expansion ready", flush=True)
 
+        # ── End vibe_executor ─────────────────────────────────────────────────────
+
+        # Step 11 — Generate edit recipe
         print("[pipeline] step=edit_recipe", flush=True)
         t = time.time()
         edit_plan = generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames)
@@ -3206,6 +3386,16 @@ def handler(job):
 
         edit_plan["analysis_data"] = analysis
 
+        # Step 11.5 — Filler word jump cuts (speech only, ALWAYS_FILLER only)
+        has_speech = bool((analysis.get("speech") or {}).get("has_speech"))
+        if has_speech and deepgram_words:
+            original_cut_count = len(edit_plan["cuts"])
+            edit_plan["cuts"] = apply_filler_jump_cuts(edit_plan["cuts"], deepgram_words)
+            expanded = len(edit_plan["cuts"]) - original_cut_count
+            if expanded > 0:
+                print(f"[pipeline] filler jump cuts: {original_cut_count} clips -> {len(edit_plan['cuts'])} clips", flush=True)
+
+        # Step 12 — FFmpeg render
         print("[pipeline] step=ffmpeg_render", flush=True)
         t = time.time()
         render_multi_clip(
@@ -3217,26 +3407,121 @@ def handler(job):
         if not os.path.exists(output_path):
             return {"error": "No output file produced by FFmpeg"}
 
-        output_size_mb = os.path.getsize(output_path) / (1024*1024)
-        print(f"[pipeline] output: {output_size_mb:.1f}MB", flush=True)
+        # Step 12.5 — B-roll overlay (only if Claude requested broll in edit recipe)
+        broll_requests = edit_plan.get("broll") or []
+        if broll_requests:
+            print(f"[pipeline] step=broll ({len(broll_requests)} request(s))", flush=True)
+            broll_entries = []
+            for req in broll_requests:
+                kw  = str(req.get("keyword") or "").strip()
+                dur = float(req.get("duration") or 2.0)
+                ts  = float(req.get("timestamp") or 0.0)
+                if not kw:
+                    continue
+                local = fetch_broll_clip(kw, dur, work_dir)
+                if local:
+                    broll_entries.append({"local_path": local, "timestamp": ts, "duration": dur})
+            if broll_entries:
+                composite_broll(output_path, broll_entries, work_dir)
+            for entry in broll_entries:
+                try:
+                    os.unlink(entry["local_path"])
+                except Exception:
+                    pass
 
-        print("[pipeline] step=upload", flush=True)
-        with open(output_path, "rb") as f:
-            resp = requests.put(upload_url, data=f, headers={"Content-Type":"video/mp4"}, timeout=120)
-            resp.raise_for_status()
-        print("[pipeline] upload complete", flush=True)
+        # ── Parallel group 2: cover frame + upload ────────────────────────────────
+        cover_frame_ts   = 1.0
+        cover_frame_b64  = None
+        cover_frame_mime = "image/jpeg"
+
+        hook = (analysis.get("hook") or {})
+        if hook.get("timestamp") is not None and float(hook.get("quality") or 0) >= 0.5:
+            cover_frame_ts = float(hook["timestamp"])
+        else:
+            shots_sorted = sorted(
+                analysis.get("shots") or [],
+                key=lambda s: float(s.get("energy") or 0),
+                reverse=True,
+            )
+            if shots_sorted:
+                best = shots_sorted[0]
+                cover_frame_ts = (float(best["start"]) + float(best["end"])) / 2
+
+        output_size_mb = os.path.getsize(output_path) / (1024*1024)
+        print(f"[pipeline] output: {output_size_mb:.1f}MB — parallel upload + cover frame", flush=True)
+
+        def _upload_main():
+            print("[pipeline] step=upload", flush=True)
+            with open(output_path, "rb") as f:
+                resp = requests.put(upload_url, data=f, headers={"Content-Type": "video/mp4"}, timeout=120)
+                resp.raise_for_status()
+            print("[pipeline] upload complete", flush=True)
+
+        def _extract_cover():
+            data, mime = extract_cover_frame(source_path, cover_frame_ts, work_dir)
+            if data:
+                print(f"[pipeline] cover frame at {cover_frame_ts:.2f}s ({len(data)//1024}KB)", flush=True)
+            return data, mime
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as post_executor:
+            f_upload = post_executor.submit(_upload_main)
+            f_cover  = post_executor.submit(_extract_cover)
+            f_upload.result()
+            cover_bytes, _ = f_cover.result()
+
+        if cover_bytes:
+            import base64
+            cover_frame_b64 = base64.b64encode(cover_bytes).decode()
+            upload_url_thumb = input_data.get("upload_url_thumb")
+            if upload_url_thumb:
+                try:
+                    thumb_resp = requests.put(
+                        upload_url_thumb, data=cover_bytes,
+                        headers={"Content-Type": cover_frame_mime}, timeout=30,
+                    )
+                    thumb_resp.raise_for_status()
+                    print("[pipeline] thumbnail uploaded", flush=True)
+                except Exception as thumb_err:
+                    print(f"[pipeline] thumbnail upload failed (non-fatal): {thumb_err}", flush=True)
+
+        # Step 13.5 — Additional format exports (only if export_formats provided in job input)
+        export_formats   = input_data.get("export_formats") or []
+        exported_formats = []
+        for fmt in export_formats:
+            ar  = str(fmt.get("aspect_ratio") or "").strip()
+            url = str(fmt.get("upload_url") or "").strip()
+            if not ar or not url:
+                continue
+            try:
+                fmt_path = os.path.join(work_dir, f"output_{ar.replace(':','x')}.mp4")
+                export_additional_format(output_path, ar, fmt_path)
+                with open(fmt_path, "rb") as f:
+                    fmt_resp = requests.put(url, data=f, headers={"Content-Type": "video/mp4"}, timeout=120)
+                    fmt_resp.raise_for_status()
+                fmt_size = os.path.getsize(fmt_path) / (1024 * 1024)
+                print(f"[pipeline] exported {ar} ({fmt_size:.1f}MB) -> uploaded", flush=True)
+                exported_formats.append({"aspect_ratio": ar, "size_mb": round(fmt_size, 1)})
+            except Exception as fmt_err:
+                print(f"[pipeline] export {ar} failed (non-fatal): {fmt_err}", flush=True)
 
         print(f"\n{'='*80}", flush=True)
         print(f"JOB {job_id} COMPLETE", flush=True)
         print(f"{'='*80}\n", flush=True)
 
-        return {
+        result_payload = {
             "status": "success",
             "job_id": job_id,
             "render_time": round(render_elapsed, 1),
             "output_size_mb": round(output_size_mb, 1),
             "edit_recipe": {k: v for k, v in edit_plan.items() if k != "analysis_data"},
+            "cover_frame_timestamp": round(cover_frame_ts, 3),
         }
+        if cover_frame_b64:
+            result_payload["cover_frame_b64"]  = cover_frame_b64
+            result_payload["cover_frame_mime"] = "image/jpeg"
+        if exported_formats:
+            result_payload["exported_formats"] = exported_formats
+        return result_payload
 
     except Exception as e:
         import traceback
