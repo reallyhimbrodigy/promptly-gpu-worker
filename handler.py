@@ -1853,7 +1853,7 @@ The user is a content creator who either doesn't know how to edit or doesn't hav
 
 The user said: "{expanded_vibe}"
 
-The user's vibe describes exactly what they want done to their video. Edit the video to match what they described — nothing more, nothing less. The tools and techniques you apply should be the ones the user's words call for. If their vibe doesn't reference a specific capability, they didn't ask for it.
+The user's vibe is a creative brief. Read it and make confident editorial decisions that bring it to life for this specific footage. Users describe feelings, energy, and references — not feature lists. It is your job as the editor to translate what they described into the right combination of tools. If they named a specific technique, deliver it exactly. If they described a feeling or aesthetic, use your creative judgment to determine what this footage needs to become that. Doing nothing is never the safe choice — an edit that fails to capture the vibe has failed the user.
 
 === THIS VIDEO ===
 
