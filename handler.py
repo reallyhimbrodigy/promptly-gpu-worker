@@ -1089,8 +1089,12 @@ def expand_vibe_intent(vibe):
         max_tokens=120,
         temperature=0,
         messages=[{"role": "user", "content": (
-            f'The user described how they want their video edited in a few words. Your job is to turn their brief into a clear, complete creative direction that a professional video editor can follow. The expanded version will be passed directly to the editor as their instructions.\n\n'
-            f'Keep every specific technique, effect, or style the user mentioned in the output — words like "transitions", "captions", "zoom", "speed", "sound effects", "fast", "slow", "cinematic" etc. should appear in your expansion exactly as the user stated them. Add clarity and detail around what the user\'s words mean for the edit, but preserve their original intent and specific requests.\n\n'
+            f'The user described how they want their video edited in a few words. Your job is to expand their brief into a specific, energetic creative direction that a professional video editor can act on immediately. The expanded version will be passed directly to the editor as their instructions.\n\n'
+            f'Rules:\n'
+            f'1. Every specific technique, effect, or style the user named must appear in the output verbatim. Do not replace their words with softer synonyms.\n'
+            f'2. Modifiers are scoped to the feature they describe. Do not let a modifier on one feature bleed into other features.\n'
+            f'3. Where the user described a feeling or aesthetic without naming specific tools, add one or two concrete techniques that would produce that feeling.\n'
+            f'4. Never soften, hedge, or reduce the energy of what the user asked for. If they asked for something specific, make it more specific. If they asked for something energetic, make it more energetic.\n\n'
             f'User input: "{vibe}"'
         )}]
     )
@@ -1539,7 +1543,9 @@ The expanded vibe is the user's brief. Determine from it: what energy level the 
 
 **Step 2 - Apply every parameter with purpose.**
 
-For every parameter, the only question is whether it serves the energy and direction the vibe established. If it does, apply it. If it does not, set it to off or neutral. The number of active parameters is not what matters - what matters is that every active parameter has a purpose tied directly to the vibe, and that none are applied simply because they are available.
+For every parameter, the only question is whether it serves the energy and direction the vibe established. If it does, apply it. If it does not, set it to off or neutral. The number of active parameters is not what matters — what matters is that every active parameter has a purpose tied directly to the vibe, and that none are applied simply because they are available.
+
+Modifiers are scoped to the feature they describe. A modifier on one feature is not a license for restraint on other features. Each parameter is evaluated independently against the vibe, not through the lens of a modifier that was aimed at something else.
 
 **Step 3 - Verify that every decision points in the same direction.**
 
