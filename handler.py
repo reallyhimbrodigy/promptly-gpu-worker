@@ -2572,7 +2572,7 @@ def create_keyframed_source(source_path, keyframe_timestamps, work_dir):
         "-c:v","libx264","-preset","ultrafast","-crf","28",
         "-force_key_frames",kf_str,
         "-r","30","-vsync","cfr","-pix_fmt","yuv420p",
-        "-c:a","aac","-b:a","128k","-threads","1",
+        "-c:a","aac","-b:a","192k","-threads","1",
         keyframed_path,
     ])
     return keyframed_path
@@ -3320,7 +3320,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         "-c:v","libx264","-preset","fast","-crf","23",
         "-b:v","6M","-maxrate","8M","-bufsize","16M",
         "-pix_fmt","yuv420p",
-        "-c:a","aac","-b:a","128k",
+        "-c:a","aac","-b:a","192k",
         "-movflags","+faststart",
         "-max_muxing_queue_size","1024",
     ]
