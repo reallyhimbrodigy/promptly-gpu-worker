@@ -3438,7 +3438,7 @@ def handler(job):
         print(f"{'='*80}", flush=True)
 
         # Step 1 — Download
-        send_progress(job_id, "download", 5, "Downloading your video...", app_url)
+        send_progress(job_id, "download", 5, "Got your video, loading it in...", app_url)
         t = time.time()
         print("[pipeline] step=download", flush=True)
         r = requests.get(video_url, stream=True, timeout=120)
@@ -3450,7 +3450,7 @@ def handler(job):
         print(f"[pipeline] download complete: {size_mb:.1f}MB in {time.time()-t:.1f}s", flush=True)
 
         # Step 2 — Normalize
-        send_progress(job_id, "normalize", 12, "Preparing your video...", app_url)
+        send_progress(job_id, "normalize", 12, "Getting everything set up...", app_url)
         print("[pipeline] step=normalize", flush=True)
         source_path = normalize_source_video(source_path, work_dir)
 
@@ -3462,7 +3462,7 @@ def handler(job):
 
             # ── Parallel group 1: Gemini / scene+beat / transcription ──────────────
             # All three need only source_path. Gemini dominates (~18s); others finish inside.
-            send_progress(job_id, "analysis", 20, "Analyzing your footage...", app_url)
+            send_progress(job_id, "analysis", 20, "Taking a look at your footage...", app_url)
             print("[pipeline] step=parallel_analysis (gemini + scene/beat + transcription)", flush=True)
             t_parallel = time.time()
 
@@ -3565,7 +3565,8 @@ def handler(job):
         # ── End vibe_executor ─────────────────────────────────────────────────────
 
         # Step 11 — Generate edit recipe
-        send_progress(job_id, "edit_recipe", 52, "Crafting your edit recipe...", app_url)
+        send_progress(job_id, "transcribe", 35, "Transcribing your audio...", app_url)
+        send_progress(job_id, "edit_recipe", 52, "Putting your edit together...", app_url)
         print("[pipeline] step=edit_recipe", flush=True)
         t = time.time()
         edit_plan = generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames)
@@ -3583,7 +3584,7 @@ def handler(job):
                 print(f"[pipeline] filler jump cuts: {original_cut_count} clips -> {len(edit_plan['cuts'])} clips", flush=True)
 
         # Step 12 — FFmpeg render
-        send_progress(job_id, "render", 62, "Rendering your video...", app_url)
+        send_progress(job_id, "render", 62, "Rendering — almost there...", app_url)
         print("[pipeline] step=ffmpeg_render", flush=True)
         t = time.time()
         render_multi_clip(
@@ -3636,7 +3637,7 @@ def handler(job):
                 cover_frame_ts = (float(best["start"]) + float(best["end"])) / 2
 
         output_size_mb = os.path.getsize(output_path) / (1024*1024)
-        send_progress(job_id, "upload", 90, "Finishing up...", app_url)
+        send_progress(job_id, "upload", 90, "Just about done...", app_url)
         print(f"[pipeline] output: {output_size_mb:.1f}MB — parallel upload + cover frame", flush=True)
 
         def _upload_main():
