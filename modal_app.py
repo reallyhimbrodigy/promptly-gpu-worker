@@ -16,7 +16,7 @@ image = (
         "libsndfile1-dev",
         "libsamplerate0-dev",
     )
-    .pip_install("numpy")
+    .pip_install("numpy", "wheel")
     .pip_install("aubio", extra_options="--no-build-isolation")
     .pip_install(
         "requests",
