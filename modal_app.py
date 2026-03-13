@@ -27,10 +27,10 @@ image = (
         "fastapi",
         "pydantic",
     )
-    .copy_local_dir("src/assets/sounds", "/assets/sounds")
-    .copy_local_dir("src/assets/fonts", "/assets/fonts")
-    .copy_local_dir("src/assets/music", "/assets/music")
-    .copy_local_file("handler.py", "/handler.py")
+    .add_local_dir("src/assets/sounds", "/assets/sounds")
+    .add_local_dir("src/assets/fonts", "/assets/fonts")
+    .add_local_dir("src/assets/music", "/assets/music")
+    .add_local_file("handler.py", "/handler.py")
 )
 
 # ── Secrets ────────────────────────────────────────────────────────────────────
