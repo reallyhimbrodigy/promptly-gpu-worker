@@ -3462,7 +3462,7 @@ def handler(job):
 
             # ── Parallel group 1: Gemini / scene+beat / transcription ──────────────
             # All three need only source_path. Gemini dominates (~18s); others finish inside.
-            send_progress(job_id, "analysis", 20, "Analyzing your video with AI...", app_url)
+            send_progress(job_id, "analysis", 20, "Analyzing your footage...", app_url)
             print("[pipeline] step=parallel_analysis (gemini + scene/beat + transcription)", flush=True)
             t_parallel = time.time()
 
@@ -3565,7 +3565,7 @@ def handler(job):
         # ── End vibe_executor ─────────────────────────────────────────────────────
 
         # Step 11 — Generate edit recipe
-        send_progress(job_id, "edit_recipe", 52, "Crafting your edit...", app_url)
+        send_progress(job_id, "edit_recipe", 52, "Crafting your edit recipe...", app_url)
         print("[pipeline] step=edit_recipe", flush=True)
         t = time.time()
         edit_plan = generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames)
@@ -3636,7 +3636,7 @@ def handler(job):
                 cover_frame_ts = (float(best["start"]) + float(best["end"])) / 2
 
         output_size_mb = os.path.getsize(output_path) / (1024*1024)
-        send_progress(job_id, "upload", 90, "Uploading your video...", app_url)
+        send_progress(job_id, "upload", 90, "Finishing up...", app_url)
         print(f"[pipeline] output: {output_size_mb:.1f}MB — parallel upload + cover frame", flush=True)
 
         def _upload_main():
