@@ -1,0 +1,57 @@
+import modal
+
+# ── Image definition (replaces Dockerfile) ────────────────────────────────────
+image = (
+    modal.Image.from_registry("nvidia/cuda:12.2.0-runtime-ubuntu22.04", add_python="3.10")
+    .apt_install(
+        "ffmpeg",
+        "build-essential",
+        "pkg-config",
+        "python3-dev",
+        "libaubio-dev",
+        "libavcodec-dev",
+        "libavformat-dev",
+        "libavutil-dev",
+        "libswresample-dev",
+        "libsndfile1-dev",
+        "libsamplerate0-dev",
+    )
+    .pip_install("numpy")
+    .pip_install("aubio", extra_options="--no-build-isolation")
+    .pip_install(
+        "requests",
+        "anthropic",
+        "google-generativeai",
+        "deepgram-sdk",
+        "httpx",
+        "fastapi",
+        "pydantic",
+    )
+    .copy_local_dir("src/assets/sounds", "/assets/sounds")
+    .copy_local_dir("src/assets/fonts", "/assets/fonts")
+    .copy_local_dir("src/assets/music", "/assets/music")
+    .copy_local_file("handler.py", "/handler.py")
+)
+
+# ── Secrets ────────────────────────────────────────────────────────────────────
+secrets = [
+    modal.Secret.from_name("promptly-secrets"),
+]
+
+# ── App ────────────────────────────────────────────────────────────────────────
+app = modal.App("promptly-gpu-worker", image=image, secrets=secrets)
+
+# ── Web endpoint ───────────────────────────────────────────────────────────────
+@app.function(
+    gpu="A10G",
+    timeout=600,
+    container_idle_timeout=60,
+    allow_concurrent_inputs=1,
+)
+@modal.fastapi_endpoint(method="POST")
+def run_job(body: dict):
+    import sys
+    sys.path.insert(0, "/")
+    from handler import handler as pipeline_handler
+    result = pipeline_handler({"input": body})
+    return result

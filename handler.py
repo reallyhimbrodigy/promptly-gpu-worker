@@ -1,4 +1,4 @@
-import runpod
+# runpod removed — using Modal
 import subprocess
 import os
 import sys
@@ -12,12 +12,6 @@ import math
 import concurrent.futures
 
 print(f"[startup] Python {sys.version}", flush=True)
-
-try:
-    import runpod
-    print("[startup] runpod OK", flush=True)
-except Exception as e:
-    print(f"[startup] runpod FAILED: {e}", flush=True)
 
 try:
     import anthropic
@@ -3726,4 +3720,7 @@ def handler(job):
             shutil.rmtree(work_dir, ignore_errors=True)
 
 
-runpod.serverless.start({"handler": handler})
+# Modal entrypoint — handler() is called directly by modal_app.py
+# To test locally: python3 handler.py
+if __name__ == "__main__":
+    print("[handler] Running in local test mode", flush=True)

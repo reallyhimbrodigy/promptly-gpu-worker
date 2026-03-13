@@ -19,7 +19,6 @@ RUN python3 -m pip install \
     && python3 -m pip install --no-build-isolation \
     aubio \
     && python3 -m pip install \
-    runpod \
     requests \
     anthropic \
     google-generativeai \
