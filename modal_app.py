@@ -6,6 +6,7 @@ image = (
     .apt_install(
         "ffmpeg",
         "build-essential",
+        "clang",
         "pkg-config",
         "python3-dev",
         "libaubio-dev",
