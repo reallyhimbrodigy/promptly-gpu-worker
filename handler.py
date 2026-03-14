@@ -68,41 +68,41 @@ MUSIC_LIBRARY = {
     "none": {"mood": "none", "energy": "none", "description": "No background music."},
 
     # Hype / High energy
-    "hype_trap_01":       {"mood": "hype",      "energy": "high",   "description": "Hard-hitting trap beat, 140bpm, heavy 808s. Nike ad, gym motivation, flex content."},
-    "hype_electronic_01": {"mood": "hype",      "energy": "high",   "description": "Festival electronic drop, 128bpm, euphoric synths. Party, celebration, big reveal."},
-    "upbeat_pop_01":      {"mood": "upbeat",    "energy": "high",   "description": "Bright pop energy, 120bpm, driving beat. Vlog highlight, travel, fun day out."},
-    "upbeat_hip_hop_01":  {"mood": "upbeat",    "energy": "high",   "description": "Chill hip-hop groove, 95bpm, confident. Street style, fashion, lifestyle flex."},
+    "hype_trap_01":       {"mood": "hype",      "energy": "high",   "description": "Hard-hitting trap beat, 140bpm, heavy 808s. Feels aggressive, powerful, unstoppable — the kind of energy that makes a viewer sit up straight."},
+    "hype_electronic_01": {"mood": "hype",      "energy": "high",   "description": "Festival electronic drop, 128bpm, euphoric synths. Feels massive and celebratory — pure forward momentum and release."},
+    "upbeat_pop_01":      {"mood": "upbeat",    "energy": "high",   "description": "Bright pop energy, 120bpm, driving beat. Feels fun, alive, and optimistic — like something good is happening right now."},
+    "upbeat_hip_hop_01":  {"mood": "upbeat",    "energy": "high",   "description": "Chill hip-hop groove, 95bpm, confident swagger. Feels cool and self-assured — low-key energy that still moves."},
 
     # Cinematic / Emotional
-    "cinematic_epic_01":  {"mood": "cinematic", "energy": "high",   "description": "Orchestral swell, 90bpm, building tension. Dramatic reveal, sports highlight, transformation."},
-    "cinematic_tense_01": {"mood": "cinematic", "energy": "medium", "description": "Dark atmospheric strings, 80bpm, suspense. Before/after, serious story, weight."},
-    "emotional_piano_01": {"mood": "emotional", "energy": "low",    "description": "Intimate solo piano, 70bpm, melancholy. Personal story, reflection, vulnerability."},
-    "emotional_indie_01": {"mood": "emotional", "energy": "medium", "description": "Indie folk guitar, 85bpm, warm. Life update, sentimental, nostalgia."},
+    "cinematic_epic_01":  {"mood": "cinematic", "energy": "high",   "description": "Orchestral swell, 90bpm, building tension. Feels like something significant is unfolding — weight and momentum growing toward a peak."},
+    "cinematic_tense_01": {"mood": "cinematic", "energy": "medium", "description": "Dark atmospheric strings, 80bpm, suspense. Feels heavy and serious — like the air before something important is said."},
+    "emotional_piano_01": {"mood": "emotional", "energy": "low",    "description": "Intimate solo piano, 70bpm, melancholy. Feels quiet and personal — the kind of music that makes a viewer lean in and listen carefully."},
+    "emotional_indie_01": {"mood": "emotional", "energy": "medium", "description": "Indie folk guitar, 85bpm, warmth. Feels genuine and heartfelt — honest emotion without being dramatic."},
 
     # Calm / Lo-fi
-    "calm_ambient_01":    {"mood": "calm",      "energy": "low",    "description": "Soft ambient pads, no strong beat. Meditation, mindfulness, slow aesthetic content."},
-    "lo_fi_chill_01":     {"mood": "calm",      "energy": "low",    "description": "Lo-fi hip-hop, 75bpm, warm vinyl texture. Study, casual vlog, relaxed lifestyle."},
-    "lo_fi_beats_01":     {"mood": "calm",      "energy": "medium", "description": "Lo-fi trap, 85bpm, laid back. Day-in-the-life, morning routine, quiet hustle."},
+    "calm_ambient_01":    {"mood": "calm",      "energy": "low",    "description": "Soft ambient pads, no strong beat. Feels spacious and unhurried — the viewer exhales and settles in."},
+    "lo_fi_chill_01":     {"mood": "calm",      "energy": "low",    "description": "Lo-fi hip-hop, 75bpm, warm vinyl texture. Feels comfortable and easy — like a lazy afternoon where nothing is urgent."},
+    "lo_fi_beats_01":     {"mood": "calm",      "energy": "medium", "description": "Lo-fi trap, 85bpm, understated groove. Feels focused and quietly driven — calm on the surface but moving underneath."},
 
     # Corporate / Clean
-    "corporate_inspire_01": {"mood": "upbeat",  "energy": "medium", "description": "Clean corporate pop, 110bpm, optimistic. Product demo, explainer, professional content."},
-    "corporate_tech_01":    {"mood": "clean",   "energy": "medium", "description": "Minimal electronic, 100bpm, forward-moving. App demo, tech review, startup content."},
+    "corporate_inspire_01": {"mood": "upbeat",  "energy": "medium", "description": "Clean pop production, 110bpm, bright and optimistic. Feels polished and forward-moving — confident without being aggressive."},
+    "corporate_tech_01":    {"mood": "clean",   "energy": "medium", "description": "Minimal electronic, 100bpm, precise and clean. Feels modern and purposeful — steady energy that supports without distracting."},
 
     # Dark / Moody
-    "dark_moody_01":      {"mood": "moody",     "energy": "medium", "description": "Dark atmospheric hip-hop, 90bpm, brooding. Edgy aesthetic, night content, fashion."},
-    "dark_cinematic_01":  {"mood": "moody",     "energy": "high",   "description": "Dark orchestral, 85bpm, heavy. Intense story, villain arc, dramatic transformation."},
+    "dark_moody_01":      {"mood": "moody",     "energy": "medium", "description": "Dark atmospheric hip-hop, 90bpm, brooding bass. Feels mysterious and a little dangerous — tension that never fully releases."},
+    "dark_cinematic_01":  {"mood": "moody",     "energy": "high",   "description": "Dark orchestral, 85bpm, heavy and intense. Feels like something is at stake — the kind of music that makes a moment feel consequential."},
 
     # Fun / Playful
-    "fun_quirky_01":      {"mood": "fun",       "energy": "high",   "description": "Quirky ukulele pop, 115bpm, lighthearted. Comedy, pets, kids, lighthearted content."},
-    "fun_retro_01":       {"mood": "fun",       "energy": "medium", "description": "Retro synth-pop, 105bpm, nostalgic. Throwback content, 80s/90s aesthetic."},
+    "fun_quirky_01":      {"mood": "fun",       "energy": "high",   "description": "Quirky ukulele pop, 115bpm, bouncy and light. Feels playful and a little silly — instantly puts a viewer in a good mood."},
+    "fun_retro_01":       {"mood": "fun",       "energy": "medium", "description": "Retro synth-pop, 105bpm, nostalgic warmth. Feels familiar and fun — like something from a better, simpler time."},
 
     # Romantic / Warm
-    "romantic_soft_01":   {"mood": "romantic",  "energy": "low",    "description": "Soft acoustic guitar, 65bpm, tender. Couple content, anniversary, heartfelt."},
-    "warm_acoustic_01":   {"mood": "warm",      "energy": "medium", "description": "Warm acoustic strumming, 90bpm, feel-good. Family content, wholesome moments."},
+    "romantic_soft_01":   {"mood": "romantic",  "energy": "low",    "description": "Soft acoustic guitar, 65bpm, tender and intimate. Feels gentle and close — the emotional equivalent of a quiet moment between two people."},
+    "warm_acoustic_01":   {"mood": "warm",      "energy": "medium", "description": "Warm acoustic strumming, 90bpm, feel-good brightness. Feels open-hearted and sincere — the kind of warmth that makes a viewer smile without knowing why."},
 
     # Epic / Dramatic
-    "epic_trailer_01":    {"mood": "epic",      "energy": "high",   "description": "Trailer-style orchestral + electronic, 120bpm. Big announcement, challenge, transformation."},
-    "epic_sports_01":     {"mood": "epic",      "energy": "high",   "description": "Stadium energy, 130bpm, crowd hype. Sports highlights, competition, achievement."},
+    "epic_trailer_01":    {"mood": "epic",      "energy": "high",   "description": "Orchestral and electronic hybrid, 120bpm, building intensity. Feels like something big is about to happen — anticipation and scale."},
+    "epic_sports_01":     {"mood": "epic",      "energy": "high",   "description": "Stadium-sized energy, 130bpm, relentless drive. Feels like peak physical effort — the music itself is pushing forward."},
 }
 
 _MUSIC_DIR = "/assets/music"
