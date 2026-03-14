@@ -1,5 +1,7 @@
 import modal
 
+# rebuild trigger v3
+
 # ── Image definition (replaces Dockerfile) ────────────────────────────────────
 image = (
     modal.Image.from_registry("nvidia/cuda:12.2.0-runtime-ubuntu22.04", add_python="3.10")
