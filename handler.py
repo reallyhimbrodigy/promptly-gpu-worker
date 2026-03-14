@@ -1289,15 +1289,11 @@ Global:
   highlight_rolloff — true/false
   vibrance — true/false
   teal_orange — none, subtle, strong
-  caption_style — always "none"
-  audio_denoise — always false (do not denoise music)
-  beat_sync — always true
   outro — none, fade_black, fade_white
-  text_overlays — optional. Title cards, location text, or visual emphasis only.
-    Max 1-2. Keep minimal — this is a visual edit, not an information edit.
+  text_overlays — optional. Text graphics displayed on specific clips.
   background_music — choose one track filename from the library below, or "none" if the content works better without music.
 
-  Pick the track that best matches the emotional tone and energy the user described, or none if the content works better without it. When music is present it will be mixed under the speech at low volume so it enhances rather than competes.
+  Pick the track that best matches the emotional tone and energy the user described, or none if the footage already has music or works better without it.
 
   Music library (pick the filename that best fits the vibe):
   {music_library_block}
@@ -1770,7 +1766,7 @@ Global parameters:
 
   background_music — choose one track filename from the library below, or "none" if the content works better without music.
 
-  Pick the track that best matches the emotional tone and energy the user described, or none if the content works better without it. When music is present it will be mixed under the speech at low volume so it enhances rather than competes.
+  Pick the track that best matches the emotional tone and energy the user described, or none if the content works better without it. When music is present it will be mixed at low volume so it enhances rather than competes.
 
   Music library (pick the filename that best fits the vibe):
   {music_library_block}
@@ -1821,7 +1817,7 @@ Beat sync: beat_sync is a truthful observation about your edit. It means your cu
 
 Audio denoise: arnndn AI neural audio denoising applied to the final output. Removes background hiss, room tone, fan noise, A/C hum, and ambient rumble from the speaker's audio. The result sounds like it was recorded with a professional microphone in a treated room rather than a phone in a bedroom or outdoor space.
 
-Color grade: color_intent is combined with the measured color baseline of the footage by the rendering system. The resulting grade is applied uniformly across all clips.
+Color grade: color_intent is the only color decision you make. The rendering system combines your chosen intent with the measured color baseline of the footage to produce the final grade. You do not control individual brightness, contrast, or saturation values — color_intent is the complete color instruction.
 
 Vignette: A cosine-curve darkening applied radially from the center outward. light, medium, and strong control the angle of the falloff — stronger values begin the darkening closer to the center of the frame.
 
@@ -1907,7 +1903,7 @@ Gemini observed — lower energy moments: {weakest_moments}{profile_block}{audio
 
 Color baseline (measured from the raw footage):
   {cb.get("assessment") or "No major exposure or white-balance issues detected."}
-  Brightness: {cb.get("brightness", 0)}, Contrast: {cb.get("contrast", 1)}, Saturation: {cb.get("saturation", 1)}, Gamma: {cb.get("gamma", 1)}, Temperature: {cb.get("color_temperature", "neutral")}
+  Temperature: {cb.get("color_temperature", "neutral")}
 
 Footage quality (Gemini directly observed the video — these are facts about the source material, not estimates):
 {render_recs_block}
