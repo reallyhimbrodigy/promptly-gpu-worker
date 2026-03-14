@@ -1149,15 +1149,12 @@ def expand_vibe_intent(vibe):
     client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     resp = client.messages.create(
         model="claude-haiku-4-5-20251001",
-        max_tokens=120,
-        temperature=0,
+        max_tokens=200,
+        temperature=0.7,
         messages=[{"role": "user", "content": (
-            f'The user described how they want their video edited in a few words. Your job is to expand their brief into a specific, energetic creative direction that a professional video editor can act on immediately. The expanded version will be passed directly to the editor as their instructions.\n\n'
-            f'Rules:\n'
-            f'1. Every specific technique, effect, or style the user named must appear in the output verbatim. Do not replace their words with softer synonyms.\n'
-            f'2. Modifiers are scoped to the feature they describe. Do not let a modifier on one feature bleed into other features.\n'
-            f'3. Where the user described a feeling or aesthetic without naming specific tools, add one or two concrete techniques that would produce that feeling.\n'
-            f'4. Never soften, hedge, or reduce the energy of what the user asked for. If they asked for something specific, make it more specific. If they asked for something energetic, make it more energetic.\n\n'
+            f'A content creator described how they want their video edited. Your job is to expand their brief into a vivid creative direction that captures the feeling they are going for — something a skilled editor can feel and act on immediately.\n\n'
+            f'Preserve every specific technique or style they named exactly as they said it. Where they described a feeling or aesthetic without naming specific tools, add concrete techniques that would produce that feeling for this kind of content. Keep the energy and intention of what they asked for — do not soften it or make it more conservative than what they described. Do not add techniques that contradict or dilute what they asked for.\n\n'
+            f'Respond with only the expanded brief. No preamble, no explanation.\n\n'
             f'User input: "{vibe}"'
         )}]
     )
@@ -1188,9 +1185,9 @@ def build_music_edit_prompt(analysis, expanded_vibe):
     for i, clip in enumerate(beat_clips):
         snap = clip.get("snap_type", "beat_forced")
         label = {
-            "scene_change": "scene cut — footage changes here, clean cut",
-            "frame_diff": "visual change — significant movement, clean cut",
-            "beat_forced": "beat forced — static footage, use masking transition",
+            "scene_change": "scene cut — footage changes here",
+            "frame_diff": "visual change — significant movement",
+            "beat_forced": "beat forced — footage is continuous across this cut",
         }.get(snap, snap)
         clip_lines.append(
             f"  Clip {i+1}: {clip['source_start']:.3f}s → {clip['source_end']:.3f}s "
@@ -1225,30 +1222,21 @@ def build_music_edit_prompt(analysis, expanded_vibe):
     cb_assessment = cb.get("assessment") or "No major exposure issues detected."
     frame_overlays = (frame_layout.get("existing_overlays") or {}).get("overlay_locations", "none")
 
-    static_part = f"""You are the professional editor inside Promptly, a mobile app that competes with CapCut and Captions. This video has no speech — it is footage set to music. The pipeline has already detected the audio beats and built a beat-aligned cut list. Your job is the creative treatment.
+    static_part = f"""You are a video editor with years of experience cutting short-form content for TikTok and Instagram Reels. You have edited thousands of videos across every category. You know what goes viral and what gets scrolled past in the first second.
 
-=== YOUR ROLE IN THIS EDIT ===
+You are the entire creative brain of this edit. You have access to every feature in the pipeline and you are free to use any of them — as long as it serves the vibe.
 
-The cut timestamps are already solved. The pipeline detected {len(beat_timestamps)} beats and produced {len(beat_clips)} pre-aligned clips. The source_start and source_end values are fixed — do not invent or change timestamps. Copy them exactly from the clip list.
+This video has no speech — it is footage set to music. The cut timestamps are already solved — the pipeline detected {len(beat_timestamps)} beats and produced {len(beat_clips)} pre-aligned clips. The source_start and source_end values are fixed — copy them exactly from the clip list. Do not invent or change timestamps.
 
-Your decisions:
-1. Which clips to include and in what order (you may exclude clips by omitting them)
-2. transition_out for each clip — your primary creative lever in a beat-sync edit
-3. Color grade and all global visual parameters
-4. Per-clip effects: zoom, speed, speed_ramp, freeze_frame, motion_blur_transition
-
-This is a beat-sync edit. Every cut lands on or near a musical beat. Transitions and effects reinforce the rhythm — the viewer feels the music through the editing.
+Every cut in this edit lands on or near a musical beat. The viewer should feel the music through the editing — every creative decision you make should serve that connection between the footage and the music.
 
 === PRE-BUILT CLIP LIST (timestamps are locked — copy exactly) ===
 
 {clips_block}
 
-Cut type rules:
-  scene cut or visual change → any transition works, footage supports it cleanly
-  beat forced → footage is continuous here, cut is mid-movement
-    REQUIRED: motion_blur_transition=true on every beat_forced clip
-    USE: dissolve, flash, glitch, whip_left, or whip_right to mask the continuity break
-    AVOID: none, fade, wipeleft/wiperight/wipeup/wipedown — these expose the break
+Cut type notes:
+  scene cut or visual change — the footage itself is already changing at this moment
+  beat forced — the footage is continuous across this cut, the edit is happening mid-movement. The transition needs to carry the cut — something that makes the viewer feel the beat rather than notice the edit.
 
 === THIS VIDEO ===
 
@@ -1272,7 +1260,7 @@ Platform safe zones (9:16): bottom 20% covered by TikTok/Reels UI. Top 10% statu
 
 === SCENE FRAMES ===
 
-Frame thumbnails follow — use them to make shot-specific decisions on color grade, transitions, and whether clips have strong or weak visual content.
+Here are frames from the video at key moments.
 
 === TOOLS ===
 
@@ -1281,15 +1269,14 @@ Per-clip (copy source_start/source_end exactly from the clip list above):
   transition_out — none, fade, fadeblack, fadewhite, dissolve, wipeleft, wiperight, wipeup, wipedown,
     smoothleft, smoothright, smoothup, smoothdown, zoomin, flash, glitch, whip_left, whip_right
   transition_sound — none, swoosh, thud, pop, ding, reverb_hit, typing, ching, shutter
-    Pairings: flash→pop or thud | glitch→thud or reverb_hit | whip→swoosh | dissolve→none or reverb_hit
-    Do not use the same transition_sound on consecutive clips.
+    The sound plays at the moment of the transition and blends with the music. It should feel like it belongs to the beat, not like a sound effect dropped on top. Do not use the same sound on consecutive clips.
   sfx_style — none, swoosh, thud, shutter
   zoom — none, slow_in, slow_out, punch_in, punch_out
   cut_zoom — true/false
   speed — 0.5, 0.75, 1.0, 1.05, 1.1, 1.15, 1.25, 1.5, 2.0
   speed_ramp — none, hero_time, bullet, flash_in, flash_out, montage
-  freeze_frame — true/false. Holds last frame 0.3s. Use sparingly on climactic beats for emphasis.
-  motion_blur_transition — true/false. Required=true on all beat_forced clips. Optional on others.
+  freeze_frame — true/false. Holds last frame 0.3s before the transition fires. The motion stops, the image hangs, then the cut happens.
+  motion_blur_transition — true/false. Adds directional motion blur to the outgoing frames at the moment of the cut. Makes the transition feel physically motivated rather than editorial.
 
 Global:
   color_intent — {intents}
