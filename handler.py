@@ -950,8 +950,8 @@ def detect_filler_words(words):
 
 def tighten_transcript(words, scene_cuts=None, shots=None, original_duration=0):
     scene_cuts = scene_cuts or []
-    max_gap = 0.15
-    trim_to = 0.05
+    max_gap = 0.35
+    trim_to = 0.08
     min_segment = 0.3
     padding = 0.02
 
@@ -982,8 +982,8 @@ def tighten_transcript(words, scene_cuts=None, shots=None, original_duration=0):
         if remove_end > remove_start:
             dead_air_cuts.append({"start": remove_start, "end": remove_end})
 
-    first = max(0, keep_words[0]["start"] - padding)
-    last  = keep_words[-1]["end"] + padding
+    first = 0
+    last  = keep_words[-1]["end"] + 0.15
     if original_duration > 0:
         last = min(last, original_duration)
 
@@ -1569,9 +1569,11 @@ Some tool combinations produce specific results in this rendering pipeline. Thes
 
 Captions and burned-in captions: The frame layout analysis below tells you whether this video already has captions burned into the frames. If it does, those captions are baked into the pixel data and cannot be removed. Adding a caption_style on top of existing burned-in captions means the viewer sees two overlapping text tracks. On TikTok and Reels, the bottom 20% of the screen is already covered by platform UI (username, caption text, buttons). Two caption layers plus platform UI produces three layers of overlapping text at the bottom of a phone screen.
 
-Zoom effects and frame content: Zoom works by scaling the frame larger than 1080x1920 and cropping back to 1080x1920. This crops the edges. If the video has text burned into the frame — captions, watermarks, lower thirds — zoom crops into that text, cutting off letters or words. On videos without burned-in text, zoom works cleanly.
+Zoom effects and frame content: Zoom and cut-zoom both work by scaling the frame and cropping back to 1080x1920. This means the edges of the frame get cut off. A real editor looking at footage with text, captions, watermarks, or graphics already baked into the pixels immediately knows that any framing move — zoom, cut-zoom, punch-in — is going to crop into that content. Whether the text survives depends on where it sits in the frame, but anything near the edges is at risk. On footage with a clean frame and no burned-in elements, framing moves work freely. On footage where text is already part of the image, the editor has to weigh whether the move is worth what it does to the frame.
 
-Zoom and cut-zoom on the same clip: Zoom applies a continuous scale change across the clip. Cut-zoom alternates between two framing levels at sentence boundaries. Both active on the same clip produces two competing scale changes — continuous drift plus sudden jumps.
+Zoom as a creative tool: Zoom changes the viewer's relationship to the subject — the physical sensation of moving closer. On a phone screen this is felt immediately. Its power comes from a very specific context: a viewer who hasn't committed yet, a subject speaking directly to camera, and a frame that rewards being pulled into. At the start of a video, before the viewer has decided to stay or scroll, a slow zoom creates pull and draws them into the subject. That same movement anywhere else in the video — once the viewer is already inside the content — feels unmotivated. The frame moves but nothing called for it, and the viewer feels the edit instead of the content. Zoom is a tool with a narrow window where it genuinely earns its place.
+
+Zoom and cut-zoom together: Both tools change the framing of the clip — zoom continuously across the clip's duration, cut-zoom in alternating jumps at sentence boundaries. Running both on the same clip means two competing framing changes are fighting each other across the same frames.
 
 Sound effect files: Each transition sound and text overlay sound is a single short audio recording. When the same sound file plays on consecutive transitions (e.g., whoosh then whoosh), the viewer hears the identical audio sample repeated back-to-back.
 
@@ -1609,22 +1611,22 @@ After you respond, the pipeline:
 Each clip in your recipe has these parameters:
   source_start / source_end — timestamps in the source video that define this clip's boundaries. Clips must be strictly sequential and non-overlapping: each clip's source_start must be greater than or equal to the previous clip's source_end. You cannot reuse or revisit a segment of the source video that has already appeared in an earlier clip.
 
-  transition_out — visual effect between this clip and the next:
-    none — clean hard cut, no visual effect
-    fade — gradual opacity fade between clips
-    fadeblack — first clip fades to black, then next clip fades in from black
-    fadewhite — same as fadeblack but through white
-    dissolve — cross-fade blend where both clips are briefly visible
-    wipeleft — next clip slides in from the right, pushing current clip left
-    wiperight — next clip slides in from the left
-    wipeup — next clip slides in from the bottom
-    wipedown — next clip slides in from the top
-    smoothleft / smoothright / smoothup / smoothdown — polished versions of the wipe transitions with eased motion
-    zoomin — current clip zooms in and reveals next clip underneath
-    flash — a single bright white frame hit between clips. An instant visual snap that punctuates a beat or a high-energy moment. No fade — just a flash and cut
-    glitch — chromatic aberration and horizontal frame displacement on the transition frames. Signals disruption, intensity, or a topic/energy shift. Common on tech, hype, beat-drop content
-    whip_left — directional motion blur streaking left, simulating a fast camera whip pan. The outgoing clip smears into the incoming one. Kinetic and high-energy
-    whip_right — same as whip_left but streaking right
+  transition_out — visual effect between this clip and the next. Every transition is a statement about the relationship between two clips — it expresses something about what changed between them. When a transition matches what is actually happening in the content, the viewer feels it as natural. When it doesn't, they notice the edit instead of the content:
+    none — a clean hard cut. The most honest and direct transition — the edit moves with intention and the viewer stays inside the content. The default for most professional and high-performing short-form content.
+    fade — the content softens and dissolves into nothing before the next clip begins. Signals a gentle shift — softer than a hard cut, less definitive than a dissolve.
+    fadeblack — fades through black between clips. A more deliberate pause or scene break — the world goes dark before the next moment begins.
+    fadewhite — fades through white. Brighter and more energetic than fadeblack — the frame flares before the next clip arrives.
+    dissolve — both clips are briefly visible layered on top of each other. Communicates that something is transitioning — mood shifting, time passing, location changing, topic moving. Earned when something genuinely changed between the two clips. Decorative and distracting when nothing did.
+    wipeleft — next clip slides in from the right. Directional forward momentum.
+    wiperight — next clip slides in from the left. The same directional energy moving the other way.
+    wipeup — next clip slides in from the bottom. Upward energy, progression.
+    wipedown — next clip slides in from the top. Downward movement.
+    smoothleft / smoothright / smoothup / smoothdown — the same directional wipes with eased, polished motion curves. More refined feeling than the standard wipes.
+    zoomin — the outgoing clip zooms in and the incoming clip is revealed beneath it. Creates a sense of pushing deeper into the content.
+    flash — a single frame of pure white between clips. An instant visual snap — no fade, just a hit. The viewer feels it as a physical punch. Earned at a beat, an emphasis, a peak moment of energy.
+    glitch — chromatic aberration and horizontal frame displacement. The viewer reads it as something breaking or shifting fast. Signals disruption or a sharp energy change.
+    whip_left — the outgoing clip's last frames smear left in a directional blur. The physical sensation of a fast camera pan. Kinetic and high-energy.
+    whip_right — the same motion streaking right.
 
   transition_sound — audio that plays during the transition:
     none — silent transition
@@ -1674,6 +1676,8 @@ Global parameters:
 
   vignette — darkens the edges of the frame, drawing the eye toward the center:
     none, light, medium, strong
+
+  Vignette pushes a video toward a moodier, more cinematic feeling. It is a stylistic statement — the darkened edges tell the viewer this is a crafted, atmospheric piece. On footage where that atmosphere serves the vibe, it adds depth. On footage where the vibe is clean, professional, bright, or energetic, vignette works against the feeling the user described. The question is whether darkening the edges makes this video more of what it needs to be, or less.
 
   sharpening — true/false. When true, the renderer measures the source sharpness Gemini observed and applies the calibrated unsharp filter strength for that footage. Counteracts compression softness and produces the clean, high-definition look of professionally shot content.
     true, false
