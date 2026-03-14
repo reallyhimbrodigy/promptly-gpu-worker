@@ -23,7 +23,7 @@ image = (
         "requests",
         "anthropic",
         "google-generativeai",
-        "deepgram-sdk",
+        "deepgram-sdk==3.4.0",
         "httpx",
         "fastapi",
         "pydantic",
