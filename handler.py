@@ -876,7 +876,7 @@ def transcribe_audio(source_path):
         with open(source_path, "rb") as f:
             audio_bytes = f.read()
         options = PrerecordedOptions(
-            model="nova-3", detect_language=True, words=True,
+            model="nova-2", detect_language=True,
             smart_format=True, utterances=True, punctuate=True, diarize=False,
         )
         resp = dg.listen.prerecorded.v("1").transcribe_file({"buffer": audio_bytes}, options)
