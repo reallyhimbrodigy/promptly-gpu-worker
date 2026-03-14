@@ -46,9 +46,9 @@ app = modal.App("promptly-gpu-worker", image=image, secrets=secrets)
 @app.function(
     gpu="A10G",
     timeout=600,
-    container_idle_timeout=60,
-    allow_concurrent_inputs=1,
+    scaledown_window=60,
 )
+@modal.concurrent(max_inputs=1)
 @modal.fastapi_endpoint(method="POST")
 def run_job(body: dict):
     import sys
