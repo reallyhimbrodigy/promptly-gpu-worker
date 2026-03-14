@@ -948,12 +948,56 @@ def detect_filler_words(words):
     return fillers
 
 
-def tighten_transcript(words, scene_cuts=None, shots=None, original_duration=0):
+def detect_silence_regions(source_path, silence_db=-40, min_silence_duration=0.2):
+    """
+    Use ffmpeg silencedetect to find actual silent regions in the audio.
+    Returns list of {"start": float, "end": float} dicts.
+    silence_db: threshold in dB below which audio is considered silent
+    min_silence_duration: minimum duration in seconds to count as silence
+    """
+    try:
+        cmd = [
+            "ffprobe", "-v", "quiet",
+            "-f", "lavfi",
+            "-i", f"amovie={source_path},silencedetect=noise={silence_db}dB:d={min_silence_duration}",
+            "-show_entries", "frame_tags=lavfi.silence_start,lavfi.silence_end",
+            "-of", "csv=p=0"
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        regions = []
+        current_start = None
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split(",")
+            for part in parts:
+                part = part.strip()
+                if "silence_start" in part:
+                    try:
+                        current_start = float(part.split("=")[-1])
+                    except ValueError:
+                        pass
+                elif "silence_end" in part and current_start is not None:
+                    try:
+                        end = float(part.split("=")[-1])
+                        regions.append({"start": current_start, "end": end})
+                        current_start = None
+                    except ValueError:
+                        pass
+        # Handle unclosed silence at end of file
+        if current_start is not None:
+            regions.append({"start": current_start, "end": 999999})
+        return regions
+    except Exception as e:
+        print(f"[silence_detect] failed: {e}", flush=True)
+        return []
+
+
+def tighten_transcript(words, scene_cuts=None, shots=None, original_duration=0, source_path=None):
     scene_cuts = scene_cuts or []
-    max_gap = 0.25
-    trim_to = 0.05
     min_segment = 0.3
-    padding = 0.02
+    breath_pad = 0.08  # Leave natural breath on each side of a silence region
 
     if not words:
         if original_duration > 0:
@@ -963,38 +1007,57 @@ def tighten_transcript(words, scene_cuts=None, shots=None, original_duration=0):
     fillers = detect_filler_words(words)
     filler_keys = {f"{round(f['start']*1000)/1000}-{round(f['end']*1000)/1000}" for f in fillers}
     keep_words = [w for w in words if f"{round(w['start']*1000)/1000}-{round(w['end']*1000)/1000}" not in filler_keys]
-
     if not keep_words:
         return {"segments": [], "removedSeconds": 0, "timeline_map": [], "tightened_duration": 0}
 
-    dead_air_cuts = []
-    for i in range(1, len(keep_words)):
-        prev_end  = keep_words[i-1]["end"]
-        curr_start = keep_words[i]["start"]
-        gap = curr_start - prev_end
-        if gap <= max_gap:
-            continue
-        near_scene = any(abs(c - prev_end) < 0.05 or abs(c - curr_start) < 0.05 for c in scene_cuts)
-        if near_scene:
-            continue
-        remove_end = curr_start
-        remove_start = prev_end + trim_to
-        if remove_end > remove_start:
-            dead_air_cuts.append({"start": remove_start, "end": remove_end})
-
     first = 0
-    last  = keep_words[-1]["end"] + 0.15
+    last = keep_words[-1]["end"] + 0.15
     if original_duration > 0:
         last = min(last, original_duration)
 
-    # Remove leading silence before the first word
-    first_word_start = keep_words[0]["start"]
-    leading_cuts = []
-    if first_word_start > trim_to:
-        leading_cuts.append({"start": 0, "end": first_word_start - trim_to})
+    # Use actual silence detection if source_path available
+    silence_regions = []
+    if source_path and os.path.exists(source_path):
+        silence_regions = detect_silence_regions(source_path, silence_db=-40, min_silence_duration=0.2)
+        print(f"[tighten] silence detection found {len(silence_regions)} silent regions", flush=True)
 
-    filler_cuts = [{"start": max(0, f["start"]-0.02), "end": f["end"]+0.02} for f in fillers]
-    remove_ranges = sorted(leading_cuts + filler_cuts + dead_air_cuts, key=lambda r: r["start"])
+    if silence_regions:
+        # Build remove_ranges from actual silence, trimmed by breath_pad on each side
+        dead_air_cuts = []
+        for region in silence_regions:
+            rs = region["start"] + breath_pad
+            re_ = region["end"] - breath_pad
+            if re_ > rs + 0.05:
+                # Don't cut near scene changes
+                near_scene = any(abs(c - region["start"]) < 0.1 or abs(c - region["end"]) < 0.1 for c in scene_cuts)
+                if not near_scene:
+                    dead_air_cuts.append({"start": rs, "end": re_})
+        filler_cuts = [{"start": max(0, f["start"]-0.02), "end": f["end"]+0.02} for f in fillers]
+        remove_ranges = sorted(filler_cuts + dead_air_cuts, key=lambda r: r["start"])
+    else:
+        # Fallback to gap-based detection if silence detection unavailable
+        max_gap = 0.25
+        trim_to = 0.05
+        dead_air_cuts = []
+        for i in range(1, len(keep_words)):
+            prev_end = keep_words[i-1]["end"]
+            curr_start = keep_words[i]["start"]
+            gap = curr_start - prev_end
+            if gap <= max_gap:
+                continue
+            near_scene = any(abs(c - prev_end) < 0.05 or abs(c - curr_start) < 0.05 for c in scene_cuts)
+            if near_scene:
+                continue
+            remove_start = prev_end + trim_to
+            remove_end = curr_start
+            if remove_end > remove_start:
+                dead_air_cuts.append({"start": remove_start, "end": remove_end})
+        first_word_start = keep_words[0]["start"]
+        leading_cuts = []
+        if first_word_start > trim_to:
+            leading_cuts.append({"start": 0, "end": first_word_start - trim_to})
+        filler_cuts = [{"start": max(0, f["start"]-0.02), "end": f["end"]+0.02} for f in fillers]
+        remove_ranges = sorted(leading_cuts + filler_cuts + dead_air_cuts, key=lambda r: r["start"])
 
     segments = []
     cursor = first
@@ -3539,6 +3602,7 @@ def handler(job):
                 scene_cuts=visual_cuts,
                 shots=analysis.get("shots") or [],
                 original_duration=float(analysis.get("duration") or 0),
+                source_path=source_path,
             )
             analysis["tightened_timeline"] = tighten_result
 
