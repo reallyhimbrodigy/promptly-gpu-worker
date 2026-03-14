@@ -29,6 +29,7 @@ image = (
         "httpx",
         "fastapi",
         "pydantic",
+        "tqdm",
     )
     .add_local_dir("src/assets/sounds", "/assets/sounds")
     .add_local_dir("src/assets/fonts", "/assets/fonts")
