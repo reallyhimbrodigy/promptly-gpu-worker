@@ -1157,7 +1157,7 @@ def expand_vibe_intent(vibe):
         messages=[{"role": "user", "content": (
             f'A content creator described how they want their video edited. Your job is to expand their brief into a vivid creative direction that captures the feeling they are going for — something a skilled editor can feel and act on immediately.\n\n'
             f'Preserve every specific technique or style they named exactly as they said it. Where they described a feeling or aesthetic without naming specific tools, add concrete techniques that would produce that feeling for this kind of content. Keep the energy and intention of what they asked for — do not soften it or make it more conservative than what they described. Do not add techniques that contradict or dilute what they asked for.\n\n'
-            f'Respond with only the expanded brief. No preamble, no explanation.\n\n'
+            f'Respond with only the expanded brief in plain prose. No markdown, no headers, no bullet points, no preamble, no explanation. Just the creative direction as flowing sentences.\n\n'
             f'User input: "{vibe}"'
         )}]
     )
@@ -3078,7 +3078,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
         motion_blur_transition = bool(cut.get("motion_blur_transition"))
         if motion_blur_transition and i < n-1:
-            v_chain.append(f"boxblur=luma_radius='if(gt(t\\,{max(0,eff_dur-0.17):.3f})\\,8\\,0)':luma_power=1:chroma_radius=0:chroma_power=0")
+            v_chain.append(f"boxblur=luma_radius=6:luma_power=1:chroma_radius=0:chroma_power=0")
             print(f"[render] clip {i}: motion_blur_transition=true", flush=True)
 
         if outro_filter:
