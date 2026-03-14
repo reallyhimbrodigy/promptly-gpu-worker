@@ -1750,25 +1750,23 @@ B-roll — stock footage clips overlaid briefly on the main video:
 
 === HOW THESE TOOLS LOOK AND SOUND ===
 
-Transitions: On a phone screen, transitions occupy the 0.3-second window between clips. dissolve briefly shows both clips layered. fade passes through opacity to black or white. wipeleft/wiperight/wipeup/wipedown slides the incoming clip over the outgoing one. smoothleft/smoothright/smoothup/smoothdown are the same wipes with eased motion curves. zoomin magnifies the outgoing clip while revealing the incoming clip beneath it. fadeblack/fadewhite pass through a solid color between clips — fadewhite produces a bright white flash visible at full brightness on phone screens.
+flash transition: A single frame of pure white between the outgoing and incoming clip. At 30fps this is one frame. On a phone screen at full brightness it reads as a physical snap — instant and percussive. The viewer feels it in their body before they process it visually.
 
-flash transition: A single frame is filled with pure white between the outgoing and incoming clip — an instant visual punch with no gradual fade. At 30fps this is one frame of white. On a phone screen at full brightness it reads as a sharp snap. Used to punctuate beats, emphasize an edit, or create high-energy rhythm. Pairs naturally with transition_sound=pop or thud.
+glitch transition: The outgoing clip's last few frames are displaced horizontally in slices with RGB channel separation — red, green, and blue channels offset in opposite directions, creating a chromatic tear. The incoming clip cuts in hard after. On screen it reads as a digital disruption or signal break.
 
-glitch transition: The outgoing clip's last few frames are displaced horizontally in slices with RGB channel separation — the red, green, and blue channels are offset in opposite directions, creating a chromatic tear effect. The incoming clip cuts in hard after. On screen it reads as a digital disruption or signal break. Used for energy shifts, topic pivots, and high-intensity moments.
-
-whip_left / whip_right: The outgoing clip's last frames are blurred with a strong horizontal directional smear — the image streaks in the direction of the whip before the incoming clip arrives. Creates the visual sensation of a fast camera pan between shots. Kinetic and physical-feeling. Frequently used in TikTok travel content, reaction edits, and fast-paced vlogs.
+whip_left / whip_right: The outgoing clip's last frames smear in a strong horizontal directional blur before the incoming clip arrives. The physical sensation of a fast camera pan between shots — kinetic and immediate.
 
 Transition sounds: These are short audio accents timed to the transition frame. swoosh is a fast air-swipe. thud is a punchy impact. shutter is a camera click. pop is a bright snap. ding is a single-note bell. reverb_hit is an impact with a tail that lingers. typing is rapid keyboard clicks. ching is a cash register sound. The sound plays during the 0.3-second transition window and blends with any audio already playing.
 
-Freeze frame: The last frame of the clip is held as a still image for 0.3 seconds before the transition fires. The motion stops, the image hangs, then the cut happens. On screen this reads as a deliberate pause or emphasis beat — the action is frozen in place before moving on. Common for reactions, punchlines, or moments that deserve a visual breath.
+Freeze frame: The last frame of the clip is held as a still image for 0.3 seconds before the transition fires. The motion stops, the image hangs, then the cut happens. On screen this reads as a deliberate beat — the action freezes in place before the edit moves on.
 
-Motion blur on transition: The outgoing clip's last frames receive a directional motion blur (boxblur on horizontal or vertical axis) before the cut. This makes the transition feel physically motivated — like the camera moved rather than the edit happened. Adds production value to any transition. The blur is applied to the last 5 frames of the outgoing clip and first 3 frames of the incoming clip.
+Motion blur on transition: The outgoing clip's last frames receive a directional motion blur before the cut. This makes the transition feel physically motivated — like the camera moved rather than the edit happened. The blur is applied to the last 5 frames of the outgoing clip and first 3 frames of the incoming clip.
 
 Zoom: slow_in gradually scales the clip from 100% to 110% across its full duration — the subject slowly fills more of the frame. slow_out does the reverse. punch_in jumps quickly to 115% at the first 10 frames then holds. punch_out jumps quickly to 85% at the first 10 frames then holds. All zoom modes crop the edges of the frame to maintain 1080x1920.
 
-Cut-zoom: At each sentence boundary within the clip, the framing alternates between normal and slightly zoomed-in. On a 1080px screen this creates the visual effect of a two-camera shoot from a single angle.
+Cut-zoom: At each sentence boundary within the clip, the framing alternates between normal and slightly zoomed-in. On screen this creates the sensation of a second camera angle from the same position. Like zoom, it scales the frame and crops the edges — on footage with text or captions burned into the frame, that crop affects those elements the same way zoom does.
 
-Speed: The speech pitch is preserved regardless of speed value. At 1.05–1.15x the change is imperceptible to most viewers. At 1.25x+ the motion is visibly faster. At 0.75x and below the motion is visibly slower and the voice lowers slightly in tempo.
+Speed: The speech pitch is preserved regardless of speed value. Below 1.0x the motion and delivery slow down. Above 1.0x they accelerate. The viewer's perception of the change scales with how far from 1.0 the value is.
 
 Speed ramp: Creates non-linear acceleration within a single clip. hero_time compresses the first half of the clip and expands the second half into slow motion — whatever is happening at the midpoint of the clip becomes the lingering focal moment. bullet expands the first third into slow motion then compresses the rest into fast motion. flash_in compresses the opening frames then eases to normal pacing. flash_out plays at normal speed then compresses the final frames. montage alternates between fast and slow in four equal segments across the clip.
 
