@@ -1373,7 +1373,7 @@ def build_prompt(analysis, transcript, expanded_vibe, music_library_block=""):
         original_duration = float(analysis.get("duration") or 0)
         tightened_duration = sum(max(0, s.get("end",0) - s.get("start",0)) for s in tightened["segments"])
         seg_text = ", ".join(f"{s.get('start',0):.2f}s-{s.get('end',0):.2f}s" for s in tightened["segments"])
-        tightened_block = f"Tightened timeline (dead air and filler words already removed):\n  Original: {original_duration:.2f}s → Tightened: {tightened_duration:.2f}s (removed {float(tightened.get('removedSeconds',0)):.2f}s)\n  Keep segments: {seg_text}"
+        tightened_block = f"Tightened timeline (dead air and filler words already removed):\n  Original: {original_duration:.2f}s → Tightened: {tightened_duration:.2f}s (removed {float(tightened.get('removedSeconds',0)):.2f}s)\n  Content to include: {seg_text}\n  Note: These segments show which parts of the source contain speech. Choose your cut points from speech boundaries and scene changes — do not use segment boundaries as clip endpoints, as they may have small gaps between them that will create audio dropouts."
     else:
         original_duration = float(analysis.get("duration") or 0)
         tightened_block = None
@@ -1906,7 +1906,7 @@ Speech boundaries detected by Deepgram (timestamps where sentences end with a na
 
 {tightened_block if tightened_block else tightened_fallback}
 
-These are reference points for choosing your cuts. Scene change timestamps produce visually clean cuts because the image is already changing at that frame. Speech boundary timestamps produce audio-clean cuts because the speaker is pausing naturally. Cutting at other timestamps is valid when the footage calls for it — the pipeline will force keyframes at your chosen timestamps to ensure frame-perfect extraction.
+These are reference points for choosing your cuts. Scene change timestamps and speech boundary timestamps are the best places to cut — they produce clean audio and visual transitions. The tightened segments above show which parts of the source contain speech worth keeping. Your clip endpoints should come from speech boundaries and scene changes, not from tightened segment boundaries.
 
 B-roll keyword candidates from transcript:
 {broll_candidates_block if broll_candidates_block else "  none"}
