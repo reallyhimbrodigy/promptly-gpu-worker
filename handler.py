@@ -950,8 +950,8 @@ def detect_filler_words(words):
 
 def tighten_transcript(words, scene_cuts=None, shots=None, original_duration=0):
     scene_cuts = scene_cuts or []
-    max_gap = 0.35
-    trim_to = 0.08
+    max_gap = 0.25
+    trim_to = 0.05
     min_segment = 0.3
     padding = 0.02
 
@@ -987,8 +987,14 @@ def tighten_transcript(words, scene_cuts=None, shots=None, original_duration=0):
     if original_duration > 0:
         last = min(last, original_duration)
 
+    # Remove leading silence before the first word
+    first_word_start = keep_words[0]["start"]
+    leading_cuts = []
+    if first_word_start > trim_to:
+        leading_cuts.append({"start": 0, "end": first_word_start - trim_to})
+
     filler_cuts = [{"start": max(0, f["start"]-0.02), "end": f["end"]+0.02} for f in fillers]
-    remove_ranges = sorted(filler_cuts + dead_air_cuts, key=lambda r: r["start"])
+    remove_ranges = sorted(leading_cuts + filler_cuts + dead_air_cuts, key=lambda r: r["start"])
 
     segments = []
     cursor = first
@@ -1612,7 +1618,7 @@ Each clip in your recipe has these parameters:
   source_start / source_end — timestamps in the source video that define this clip's boundaries. Clips must be strictly sequential and non-overlapping: each clip's source_start must be greater than or equal to the previous clip's source_end. You cannot reuse or revisit a segment of the source video that has already appeared in an earlier clip.
 
   transition_out — visual effect between this clip and the next. Every transition is a statement about the relationship between two clips — it expresses something about what changed between them. When a transition matches what is actually happening in the content, the viewer feels it as natural. When it doesn't, they notice the edit instead of the content:
-    none — a clean hard cut. The most honest and direct transition — the edit moves with intention and the viewer stays inside the content. The default for most professional and high-performing short-form content.
+    none — a clean hard cut. The edit moves with intention and the viewer stays inside the content. No visual effect — just the cut.
     fade — the content softens and dissolves into nothing before the next clip begins. Signals a gentle shift — softer than a hard cut, less definitive than a dissolve.
     fadeblack — fades through black between clips. A more deliberate pause or scene break — the world goes dark before the next moment begins.
     fadewhite — fades through white. Brighter and more energetic than fadeblack — the frame flares before the next clip arrives.
