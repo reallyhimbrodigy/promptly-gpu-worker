@@ -1955,7 +1955,7 @@ Platform safe zones (9:16 vertical):
 
 === SCENE FRAMES ===
 
-Frame thumbnails with timestamps — the actual images from the video at each scene change.
+These are actual frames extracted from the video at each scene change. Together with the transcript, shot analysis, and audio data above, they form the complete picture of this footage. Everything you need to make decisions that are specific to this video is here — read all of it and let all of it inform what you create.
 
 === REFERENCE DATA FOR YOUR CUTS ===
 
