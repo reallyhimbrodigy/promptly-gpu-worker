@@ -1255,8 +1255,8 @@ Cut type rules:
 Duration: {duration:.2f}s
 Content type: {content_type}
 Visual character: {visual_character}
-Strongest moments: {strongest}
-Weakest moments: {weakest}
+Gemini observed — notable moments: {strongest}
+Gemini observed — lower energy moments: {weakest}
 
 Color baseline: {cb_assessment}
 
@@ -1454,8 +1454,8 @@ def build_prompt(analysis, transcript, expanded_vibe, music_library_block=""):
     if vp.get("content_type"):     profile_parts.append(f"Type: {vp['content_type']}")
     if vp.get("visual_character") or vp.get("visual_style"):
         profile_parts.append(f"Look: {vp.get('visual_character') or vp.get('visual_style')}")
-    if vp.get("strongest_moments"): profile_parts.append(f"Best parts: {vp['strongest_moments']}")
-    if vp.get("weakest_moments"):   profile_parts.append(f"Weakest parts: {vp['weakest_moments']}")
+    if vp.get("strongest_moments"): profile_parts.append(f"Gemini observed — notable moments: {vp['strongest_moments']}")
+    if vp.get("weakest_moments"):   profile_parts.append(f"Gemini observed — lower energy moments: {vp['weakest_moments']}")
     profile_block = "\n" + "\n".join(profile_parts) if profile_parts else ""
 
     audio_block = ""
@@ -1650,14 +1650,6 @@ Text overlay rendering: Text overlays use FFmpeg's drawtext filter at a fixed fo
 
 === PIPELINE STEPS ===
 
-Before you see anything, the pipeline has already:
-1. Downloaded the user's raw footage
-2. Normalized it to 1080x1920 at 30fps
-3. Transcribed all speech with word-level timestamps (Deepgram)
-4. Analyzed the footage visually — identified shots, scene changes, speaker energy, frame layout, existing overlays, color character (Gemini, with frame thumbnails)
-5. Detected scene change timestamps from the raw video (FFmpeg scdet)
-6. Tightened the timeline by removing dead air and filler words
-
 You decide the clip structure. The reference data below gives you scene changes, speech boundaries, and the tightened timeline.
 
 A cut is not just a division between clips — it is a creative statement. The best cuts are the ones the viewer never notices because they land exactly where the content was already moving. A cut on a natural breath, on a thought completing, on an energy shift, on a visual change — these feel inevitable. A cut that interrupts a thought mid-flow or breaks a movement mid-action feels wrong, even to a viewer who doesn't know why.
@@ -1665,13 +1657,6 @@ A cut is not just a division between clips — it is a creative statement. The b
 The scene changes and speech boundaries in the reference data are a map of where the footage has natural seams. These are the moments where the content is already transitioning — topic shifting, energy changing, speaker pausing. Cuts placed here feel like the footage breathes them naturally. Cuts placed elsewhere can work when the footage calls for it, but the audio reality is this: Cutting mid-sentence produces an audible break that sounds like a glitch. Speech boundary timestamps are where the speaker naturally pauses — cuts there are silent to the listener.
 
 The footage has a timeline. Your clips move through it in order. Sections you leave out are excluded from the final video.
-
-After you respond, the pipeline:
-1. Extracts each clip from the source video at the timestamps
-2. Downloads any b-roll clips you requested from Pexels
-3. Builds a single FFmpeg filter graph using every value from your recipe
-4. Sends it to a GPU server which renders the final video in one pass
-5. Uploads the rendered video directly to the user's library
 
 === TOOLS ===
 
@@ -1929,8 +1914,8 @@ This is your brief. Read it, understand the feeling behind it, and bring this sp
 Duration: {duration:.2f}s
 Content type: {content_type}
 Visual character: {visual_character}
-Strongest moments: {strongest_moments}
-Weakest moments: {weakest_moments}{profile_block}{audio_block}
+Gemini observed — notable moments: {strongest_moments}
+Gemini observed — lower energy moments: {weakest_moments}{profile_block}{audio_block}
 {hook_block}{pacing_block}
 
 Color baseline (measured from the raw footage):
