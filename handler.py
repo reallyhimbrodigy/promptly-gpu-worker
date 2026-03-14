@@ -1772,8 +1772,16 @@ Global parameters:
     subtle — light push, adds depth without being obvious
     strong — pronounced split, a defining color statement
 
-  caption_style — word-by-word captions synchronized to the speaker's voice:
-    none, standard, bold_centered, minimal_bottom, animated_word, bold_white, bold_yellow, keyword_pop, box_caption
+  caption_style — word-by-word captions synchronized to the speaker's voice. For any video with speech and no burned-in captions, captions are what keep viewers who are watching with sound off engaged from the first second to the last. The style determines how they feel on screen:
+    none — no captions
+    standard — clean white text, simple and readable
+    bold_centered — large bold text centered on screen, high visual weight
+    minimal_bottom — understated text in the lower third, stays out of the way
+    animated_word — each word highlights or animates as it is spoken. This is the style that defines the look of high-performing TikTok and Reels content right now — the words feel alive, they pull the viewer's eye, and they make the speech feel energetic even on mute. For talking head content, this style is what separates videos that feel native to the platform from videos that feel uploaded from somewhere else.
+    bold_white — large white outlined text, clean and high contrast
+    bold_yellow — large yellow outlined text, high energy and attention-grabbing
+    keyword_pop — base captions with specific keywords highlighted in a different color, draws attention to the most important words
+    box_caption — filled rectangle behind each word group, high legibility on any background
 
   caption_position — where captions are placed vertically: top, center, lower-third, bottom
 
@@ -1861,7 +1869,7 @@ Teal-orange: A colorbalance split where shadows are pushed toward blue-green and
 
 Cinematic bars: Two filled black rectangles drawn at the top and bottom of the 1080x1920 frame. The visible image area is narrowed to a 1080x459 horizontal band in the center of the frame, matching a 2.35:1 aspect ratio. The bars are composited on top of all other elements including captions and text overlays.
 
-Captions: Rendered as ASS subtitle burn-in synchronized to word-level Deepgram timestamps. bold_white and bold_yellow use large outlined text. animated_word highlights each word as it is spoken. keyword_pop colorizes words from the caption_keywords list. box_caption draws a filled rectangle behind each word group.
+Captions: Rendered as word-by-word burn-in synchronized to Deepgram timestamps — each word appears exactly as the speaker says it. animated_word is the style that defines short-form content on TikTok and Reels right now — words animate or highlight as they're spoken, creating a visual rhythm that keeps viewers watching even with sound off. bold_white and bold_yellow render large outlined text at high contrast. keyword_pop highlights specific words from the caption_keywords list in a different color. box_caption places a filled rectangle behind each word group for maximum legibility on any background.
 
 Text overlays: drawtext rendered at the clip's output timecode. style title is 72px, callout is 56px, cta is 64px with a fade-in/out animation of 0.3–0.4 seconds. All text is white with a 5px black border.
 
