@@ -215,7 +215,7 @@ Return ONLY valid JSON:
     "weakest_moments": "<timestamps and why they are weak, or 'none'>",
     "editing_brief": "<how to edit this: what to keep, what to cut, pacing, feel>",
     "recommended_duration": <target seconds for the final edit as an integer — how long should the finished video be>,
-    "pacing": "<fast | medium | slow — how quickly should cuts come: fast=1-3s clips, medium=3-6s clips, slow=5-10s clips>",
+    "pacing": "<fast | medium | slow — how quickly should cuts come relative to the content>",
     "hook": {
       "timestamp": <float seconds — the single best moment to START the edit. Could be 0.0 or could be mid-video if the opening is slow>,
       "description": "<what is happening at this timestamp>",
@@ -1310,7 +1310,7 @@ Global:
     Max 1-2. Keep minimal — this is a visual edit, not an information edit.
   background_music — choose one track filename from the library below, or "none" if the content works better without music.
 
-  For most vibes, music is essential — pick the track that best matches the emotional tone and energy the user described. The track will be mixed under the speech at low volume with ducking, so it enhances rather than competes.
+  Pick the track that best matches the emotional tone and energy the user described, or none if the content works better without it. When music is present it will be mixed under the speech at low volume so it enhances rather than competes.
 
   Music library (pick the filename that best fits the vibe):
   {music_library_block}
@@ -1327,7 +1327,7 @@ Respond with ONLY this JSON:
   "caption_style": "none",
   "caption_position": "lower-third",
   "caption_keywords": [],
-  "audio_ducking": false,
+  "audio_ducking": true,
   "audio_denoise": false,
   "beat_sync": true,
   "outro": "<outro>",
@@ -1526,20 +1526,20 @@ def build_prompt(analysis, transcript, expanded_vibe, music_library_block=""):
     if shadows == "crushed":
         render_recs.append(f"SHADOWS: Crushed to pure black — shadow_lift=true (renderer will apply high lift for crushed shadows)")
     elif shadows == "deep":
-        render_recs.append(f"SHADOWS: Deep and rich — shadow_lift=false preserves the look; true applies a low lift if the vibe is faded/editorial")
+        render_recs.append(f"SHADOWS: Deep and rich")
     elif shadows == "lifted":
-        render_recs.append(f"SHADOWS: Already elevated in raw footage — shadow_lift=false (additional lift will look washed out)")
+        render_recs.append(f"SHADOWS: Already elevated in raw footage — additional lift will compound")
     else:
-        render_recs.append(f"SHADOWS: Balanced — shadow_lift is purely a stylistic choice")
+        render_recs.append(f"SHADOWS: Balanced")
 
     if richness == "flat":
         render_recs.append(f"COLOR: Color-flat footage — vibrance=true (renderer will apply high vibrance for flat footage)" + (" — skin tones present, vibrance protects them" if skin else ""))
     elif richness == "muted":
         render_recs.append(f"COLOR: Muted colors — vibrance=true (renderer applies medium vibrance for muted footage)" + (" — skin tones present, vibrance protects them" if skin else ""))
     elif richness == "vivid":
-        render_recs.append(f"COLOR: Already vivid — vibrance=false (boosting vivid footage produces neon/artificial results)")
+        render_recs.append(f"COLOR: Already vivid — vibrance will apply a minimal boost only")
     else:
-        render_recs.append(f"COLOR: Normal color richness — vibrance=false unless the vibe calls for more punch")
+        render_recs.append(f"COLOR: Normal color richness")
 
     if lighting == "natural_indoor":
         render_recs.append(f"LIGHTING: Indoor natural light observed")
@@ -1562,8 +1562,7 @@ def build_prompt(analysis, transcript, expanded_vibe, music_library_block=""):
         hook_block = (
             f"\n⚡ HOOK DETECTED at {float(hook_ts):.2f}s — {hook.get('description', '')}\n"
             f"   Why compelling: {hook.get('why', '')}\n"
-            f"   Strength: {float(hook.get('quality', 0.5)):.1f}/1.0\n"
-            f"   → Consider starting your edit at {float(hook_ts):.2f}s instead of 0.0s"
+            f"   Strength: {float(hook.get('quality', 0.5)):.1f}/1.0"
         )
 
     # Pacing and duration block for Claude prompt
@@ -1575,8 +1574,7 @@ def build_prompt(analysis, transcript, expanded_vibe, music_library_block=""):
         if rec_dur:
             pacing_parts.append(f"Recommended edit length: ~{rec_dur}s")
         if pacing_val:
-            clip_guidance = {"fast": "1-3s clips", "medium": "3-6s clips", "slow": "5-10s clips"}.get(pacing_val, "")
-            pacing_parts.append(f"Recommended pacing: {pacing_val}" + (f" ({clip_guidance})" if clip_guidance else ""))
+            pacing_parts.append(f"Recommended pacing: {pacing_val}")
         pacing_block = "\n" + "\n".join(pacing_parts)
 
     tightened_fallback = (
@@ -1731,7 +1729,7 @@ Each clip in your recipe has these parameters:
     bullet — slow-motion intro, then rockets to fast speed through the rest of the clip. Builds anticipation then releases it
     flash_in — instant fast at the start, eases down to normal speed. Creates an urgent, high-energy opening
     flash_out — normal speed, then accelerates hard at the end. Propels the viewer into the next clip
-    montage — alternating fast/slow bursts across the clip duration. High visual energy, works best on action or movement content
+    montage — alternating fast/slow bursts across the clip duration. High visual energy, creates a fragmented rhythmic feel across the clip
 
   freeze_frame — holds the last frame of the clip as a still image for a brief moment before the transition fires. Creates a punctuation beat — the action literally freezes and then cuts. Used for emphasis on a reaction, a word landing, or a visual moment worth letting sit. The freeze duration is automatically set to 0.3s.
     true, false
@@ -1751,7 +1749,7 @@ Global parameters:
   sharpening — true/false. When true, the renderer measures the source sharpness Gemini observed and applies the calibrated unsharp filter strength for that footage. Counteracts compression softness and produces the clean, high-definition look of professionally shot content.
     true, false
 
-  grain — adds film grain texture to the entire video. Transforms flat digital footage into something that looks like it was shot on film or with a high-end camera. Often used to make color-graded footage feel intentional and textured rather than processed. Pairs well with faded, vintage, cinematic, and moody color intents.
+  grain — adds film grain texture to the entire video. Transforms flat digital footage into something that looks like it was shot on film or with a high-end camera. Makes color-graded footage feel intentional and textured rather than processed.
     none, subtle, medium, heavy
 
   denoise — true/false. When true, the renderer applies the calibrated denoising strength for the noise level Gemini observed. Cleans the base before the color grade so grading applies to clean pixels rather than noise.
@@ -1769,7 +1767,7 @@ Global parameters:
   vibrance — true/false. When true, the renderer applies the calibrated vibrance boost for the color richness Gemini observed. Boosts under-saturated colors while protecting skin tones and already-vivid colors from over-processing.
     true, false
 
-  teal_orange — applies the most recognizable cinematic color grade: shadows pushed toward teal/blue-green, skin tones pushed warm toward orange. Creates depth and contrast between the subject and background. Common in action films, music videos, and high-production TikTok content.
+  teal_orange — applies the most recognizable cinematic color grade: shadows pushed toward teal/blue-green, skin tones pushed warm toward orange. Creates depth and contrast between the subject and background.
     none — no teal-orange split
     subtle — light push, adds depth without being obvious
     strong — pronounced split, a defining color statement
@@ -1779,7 +1777,7 @@ Global parameters:
 
   caption_position — where captions are placed vertically: top, center, lower-third, bottom
 
-  audio_denoise — true/false. When true, applies AI-based audio noise removal (arnndn) to the output. Strips background hiss, room tone, fan noise, and ambient rumble from the audio track. The result sounds like it was recorded in a treated studio rather than a bedroom or outdoor space. Captions uses this as a flagship feature called "Studio Sound."
+  audio_denoise — true/false. When true, applies AI-based audio noise removal (arnndn) to the output. Strips background hiss, room tone, fan noise, and ambient rumble from the audio track. The result sounds like it was recorded in a treated studio rather than a bedroom or outdoor space.
     true, false
 
   beat_sync — true/false. A factual label, not a creative lever. Set beat_sync=true only if your cut timestamps actually land within ~0.15s of beat timestamps in the reference data. Beats do not move cuts — cuts are chosen on speech boundaries and scene changes first. After choosing all cuts on content grounds, check whether those timestamps happen to coincide with beats. If yes: beat_sync=true. If no: beat_sync=false. For music-only content, the pipeline pre-aligns cuts to beats and you receive a different prompt where beat_sync is always true.
@@ -1792,7 +1790,7 @@ Global parameters:
 
   background_music — choose one track filename from the library below, or "none" if the content works better without music.
 
-  For most vibes, music is essential — pick the track that best matches the emotional tone and energy the user described. The track will be mixed under the speech at low volume with ducking, so it enhances rather than competes.
+  Pick the track that best matches the emotional tone and energy the user described, or none if the content works better without it. When music is present it will be mixed under the speech at low volume so it enhances rather than competes.
 
   Music library (pick the filename that best fits the vibe):
   {music_library_block}
@@ -1815,7 +1813,7 @@ Text overlays — text graphics displayed on specific clips:
 B-roll — stock footage clips overlaid briefly on the main video:
   keyword — search term for Pexels stock video API
   timestamp — when in the source video timeline the overlay starts (seconds)
-  duration — how long the overlay is visible (1-3 seconds)
+  duration — how long the overlay is visible in seconds
 
 === HOW THESE TOOLS LOOK AND SOUND ===
 
@@ -1841,7 +1839,7 @@ Speed ramp: Creates non-linear acceleration within a single clip. hero_time comp
 
 Beat sync: beat_sync is a truthful observation about your edit. It means your cut timestamps — chosen on speech boundaries and scene changes — happen to coincide with beat timestamps in the reference data. You do not move a cut to hit a beat. A cut that would land mid-sentence or mid-movement to chase a beat is a broken cut regardless of rhythmic alignment. Choose all cuts on content grounds first. Then check the beat list. If your timestamps land within ~0.15s of beats, set beat_sync=true. Otherwise false. For music-only content the pipeline pre-solves beat alignment before you see the video — you receive a different prompt where cut timestamps are pre-built and beat_sync is always true.
 
-Audio denoise: arnndn AI neural audio denoising applied to the final output. Removes background hiss, room tone, fan noise, A/C hum, and ambient rumble from the speaker's audio. The result sounds like it was recorded with a professional microphone in a treated room rather than a phone in a bedroom or outdoor space. Captions markets this feature as "Studio Sound."
+Audio denoise: arnndn AI neural audio denoising applied to the final output. Removes background hiss, room tone, fan noise, A/C hum, and ambient rumble from the speaker's audio. The result sounds like it was recorded with a professional microphone in a treated room rather than a phone in a bedroom or outdoor space.
 
 Color grade: color_intent is combined with the measured color baseline of the footage by the rendering system. The resulting grade is applied uniformly across all clips.
 
@@ -1885,7 +1883,7 @@ Respond with ONLY this JSON object:
   "caption_style": "<style>",
   "caption_position": "<position>",
   "caption_keywords": [],
-  "audio_ducking": false,
+  "audio_ducking": true,
   "audio_denoise": <true|false>,
   "beat_sync": <true|false>,
   "outro": "<outro>",
@@ -1903,7 +1901,7 @@ Respond with ONLY this JSON object:
     {{ "text": "<text>", "position": "<position>", "appear_at_clip": <clip number>, "style": "<style>", "sfx_style": "<sfx>" }}
   ],
   "broll": [
-    {{ "keyword": "<search term>", "timestamp": <seconds>, "duration": <1-3> }}
+    {{ "keyword": "<search term>", "timestamp": <seconds>, "duration": <seconds> }}
   ],
   "cuts": [
     {{ "source_start": <n>, "source_end": <n>, "transition_out": "<transition>", "transition_sound": "<sound>", "sfx_style": "<sfx>", "zoom": "<zoom>", "cut_zoom": <true|false>, "speed": <n>, "speed_ramp": "<ramp>", "freeze_frame": <true|false>, "motion_blur_transition": <true|false> }}
@@ -2038,20 +2036,8 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames):
 
     if scene_frames:
         _is_music_edit = analysis.get("content_mode") == "music_edit"
-        _frame_intro = (
-            "\nHere are frame thumbnails from the video. Use them to assess the visual quality, "
-            "color character, and strength of each clip when deciding which to keep, "
-            "what transitions to use, and how to color grade."
-            if _is_music_edit else
-            "\nHere are frame thumbnails from the opening and scene-change moments. Use them as visual context "
-            "when deciding transitions, zoom, cut-zoom, b-roll, text overlays, and color intent."
-        )
-        _frame_outro = (
-            "\nUse these frames to assess clip quality and drive your color grade and transition choices."
-            if _is_music_edit else
-            "\nUse these frames to make shot-specific decisions. If a shot is a screen recording or demo, "
-            "avoid unnecessary cut-zoom/text clutter. If framing and lighting are already strong, use a lighter touch."
-        )
+        _frame_intro = "\nHere are frames from the video at key moments."
+        _frame_outro = "\nThese frames, together with everything else you have been given, are your complete picture of this footage."
         content_blocks.append({"type": "text", "text": _frame_intro})
         for frame in scene_frames:
             if not frame.get("base64"):
@@ -2143,7 +2129,6 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames):
     edit_plan.setdefault("background_music", "none")
     edit_plan.setdefault("caption_style", "none")
     edit_plan.setdefault("caption_position", "lower-third")
-    edit_plan.setdefault("audio_ducking", False)
     edit_plan.setdefault("audio_denoise", False)
     edit_plan.setdefault("beat_sync", False)
     edit_plan.setdefault("outro", "none")
@@ -2162,7 +2147,13 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames):
     # Validate background_music against known library — fall back to none if unknown
     raw_music = str(edit_plan.get("background_music") or "none").strip()
     edit_plan["background_music"] = raw_music if raw_music in MUSIC_LIBRARY else "none"
-    edit_plan["audio_ducking"] = False
+    # Auto-enable ducking when background music is present — this is always correct behavior
+    if edit_plan.get("background_music") and edit_plan["background_music"] != "none":
+        edit_plan["audio_ducking"] = True
+    else:
+        if "audio_ducking" not in edit_plan:
+            default_ducking = False
+            edit_plan["audio_ducking"] = default_ducking
 
     for bool_field in ("sharpening", "denoise", "shadow_lift", "highlight_rolloff", "vibrance",
                        "cinematic_bars", "audio_denoise", "beat_sync"):
