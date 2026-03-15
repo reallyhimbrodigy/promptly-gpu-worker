@@ -11,7 +11,7 @@ import re
 import math
 import concurrent.futures
 
-HANDLER_VERSION = "2.4.0"
+HANDLER_VERSION = "2.5.0"
 
 print(f"[startup] Python {sys.version}", flush=True)
 print(f"[startup] handler version: {HANDLER_VERSION}", flush=True)
@@ -1931,7 +1931,18 @@ The question is never "can I justify using this tool?" The question is "what doe
 
 === RESPONSE FORMAT ===
 
-Respond with ONLY this JSON object:
+First, write your creative vision for this edit in a <vision> block. This is where you think through what the finished video should look and feel like before you commit to any parameters. Describe:
+- What the viewer experiences in the first 2 seconds and why that stops the scroll
+- How the visual rhythm works across the whole video — where the frame moves, where it's still, and why
+- Where the energy shifts and how you mark those shifts
+- What the sonic landscape is — where there's music, where there's silence, where sounds punctuate
+- What moments deserve text overlays and what those overlays accomplish
+- Whether b-roll would strengthen any moments and where
+- What the overall color and production feel is
+
+This is your plan. Every parameter in the JSON below should be a direct execution of this plan. If a value in your JSON contradicts your vision, the vision wins — go back and fix the JSON.
+
+Then output the JSON recipe:
 
 {{
   "notes": "<50 words max. Key decisions only, no justification>",
@@ -2071,7 +2082,7 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames):
     t = time.time()
     response = client.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=4096,
+        max_tokens=4500,
         temperature=0.4,
         messages=[{"role": "user", "content": content_blocks}],
     )
@@ -2083,6 +2094,16 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames):
     print(f"[claude] Cache: write={cache_write} read={cache_read} input={inp}", flush=True)
 
     response_text = response.content[0].text
+    vision_text = ""
+    if "<vision>" in response_text and "</vision>" in response_text:
+        try:
+            vision_start = response_text.index("<vision>") + len("<vision>")
+            vision_end = response_text.index("</vision>", vision_start)
+            vision_text = response_text[vision_start:vision_end].strip()
+        except Exception:
+            vision_text = ""
+    if vision_text:
+        print(f"[generate-edit] VISION: {vision_text}", flush=True)
     print(f"[generate-edit] RAW RESPONSE:\n{response_text}\n[generate-edit] END RESPONSE", flush=True)
 
     edit_plan = extract_json(response_text)
