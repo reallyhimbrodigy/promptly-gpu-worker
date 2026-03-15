@@ -11,7 +11,7 @@ import re
 import math
 import concurrent.futures
 
-HANDLER_VERSION = "2.3.0"
+HANDLER_VERSION = "2.4.0"
 
 print(f"[startup] Python {sys.version}", flush=True)
 print(f"[startup] handler version: {HANDLER_VERSION}", flush=True)
@@ -1149,23 +1149,8 @@ def extract_scene_frames(source_path, timestamps, work_dir):
 # ─── EXPAND VIBE ─────────────────────────────────────────────────────────────
 
 def expand_vibe_intent(vibe):
-    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-    resp = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=200,
-        temperature=0.7,
-        messages=[{"role": "user", "content": (
-            f'A content creator described how they want their video edited. Your job is to expand their brief into a richer description of the feeling they are going for — the emotional tone, the energy, the aesthetic, the impression it should leave on a viewer.\n\n'
-            f'Preserve every specific technique, style, or tool they named exactly as they said it — do not rephrase or replace their words.\n\n'
-            f'Where they described a feeling without naming specific techniques, expand on the FEELING — not on editing techniques that could produce it. Describe what the finished video feels like to watch, not how it should be edited. Do not name any editing tools, transitions, effects, speeds, cuts, zooms, ramps, or sound design. Do not prescribe how the edit should be constructed. A separate system will decide the techniques — your job is only to make the feeling vivid and specific.\n\n'
-            f'Keep the energy and intention of what they asked for — do not soften it, but also do not escalate it beyond what they described. "Engaging" does not mean "aggressive." "Professional" does not mean "cinematic." "Viral" does not mean "intense." Stay faithful to the actual words they used.\n\n'
-            f'Respond with only the expanded brief in plain prose. No markdown, no headers, no bullet points, no preamble, no explanation.\n\n'
-            f'User input: "{vibe}"'
-        )}]
-    )
-    expanded = (resp.content[0].text or "").strip()
-    print(f"[edit] Vibe expansion: \"{vibe}\" -> \"{expanded}\"", flush=True)
-    return expanded or vibe
+    print(f"[edit] User vibe: \"{vibe}\"", flush=True)
+    return vibe
 
 
 
