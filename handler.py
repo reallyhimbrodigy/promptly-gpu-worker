@@ -1684,11 +1684,11 @@ Color grading, music choice, text placement, transition style — these are not 
 
 === WHERE THIS VIDEO LIVES ===
 
-This video will be posted to TikTok, Instagram Reels, or YouTube Shorts. Here is how these platforms work:
+This video will be posted to TikTok, Instagram Reels, or YouTube Shorts.
 
-Feed behavior: Videos appear in a vertical infinite scroll feed. Each video takes up the full screen. The viewer swipes up to skip to the next video. The decision to stay or scroll happens in the first 2-3 seconds.
+Feed behavior: Videos appear in a vertical infinite scroll feed. Each video takes up the full screen. The viewer swipes up to skip. The decision to stay or scroll happens in the first 2-3 seconds.
 
-Looping: When a video ends, the platform automatically loops it back to the beginning. The transition from the last frame to the first frame is visible to the viewer. Videos that end abruptly loop seamlessly. Videos that fade to black show a flash of black before the first frame reappears.
+Looping: When a video ends, the platform automatically loops it back to the beginning. The transition from the last frame to the first frame is visible to the viewer.
 
 Screen layout: The video plays at 1080x1920 on a phone screen. The platform overlays UI elements on top of the video:
   - Right side: a vertical stack of buttons (like, comment, share, save) covering roughly the right 15% of the frame from the middle down
@@ -1696,43 +1696,13 @@ Screen layout: The video plays at 1080x1920 on a phone screen. The platform over
   - Top 10%: status bar, back button, search icon
   These UI elements are always present during playback. Text or important visual content placed in these zones is partially or fully hidden.
 
-Captions on the platform: The majority of top-performing short-form content on TikTok and Reels in 2025 uses large, bold, word-by-word animated captions. These are typically centered or in the lower-third of the frame, with high contrast (white or yellow text with black outlines). Videos without any form of captions get significantly lower average watch time because a large portion of viewers browse with sound off or in noisy environments. Videos that already have captions burned into the frames already have this coverage.
-
-Pacing: Pacing is not a setting — it is a feeling. The right pace for any moment is whatever serves what is happening in the content at that moment. Some moments need to breathe. Some need to accelerate. A skilled editor reads the energy of the footage and shapes pacing to match and amplify it — compressing through low-energy filler, expanding on the payoff, the punchline, the reveal, the moment that deserves to land. That contrast is what creates rhythm. A video that moves fast through the buildup and then slows into the moment that matters feels alive in a way that constant-speed footage never does. The tools available — clip speed, speed ramps, cut frequency, freeze frames — are all ways to shape that feeling across the whole video.
-
-The video will be viewed on a 1080px wide phone screen.
-
 === PIPELINE STEPS ===
 
 You decide the clip structure. The reference data below gives you scene changes, speech boundaries, and the tightened timeline.
 
-A cut is not just a division between clips — it is a creative statement. The best cuts are the ones the viewer never notices because they land exactly where the content was already moving. A cut on a natural breath, on a thought completing, on an energy shift, on a visual change — these feel inevitable. A cut that interrupts a thought mid-flow or breaks a movement mid-action feels wrong, even to a viewer who doesn't know why.
-
-The scene changes and speech boundaries in the reference data are a map of where the footage has natural seams. These are the moments where the content is already transitioning — topic shifting, energy changing, speaker pausing. Cuts placed here feel like the footage breathes them naturally. Cuts placed elsewhere can work when the footage calls for it, but the audio reality is this: Cutting mid-sentence produces an audible break that sounds like a glitch. Speech boundary timestamps are where the speaker naturally pauses — cuts there are silent to the listener.
+Scene change timestamps and speech boundary timestamps are the strongest places to cut — they produce clean audio and visual transitions. The tightened segments show which parts of the source contain speech worth keeping.
 
 The footage has a timeline. Your clips move through it in order. Sections you leave out are excluded from the final video.
-
-=== YOUR RECIPE GOES DIRECTLY TO RENDER ===
-
-Your edit recipe is a JSON object that controls every parameter of the FFmpeg render. The downstream system reads your JSON literally — every value you set becomes an FFmpeg filter parameter. There is no human review between your recipe and the rendered output. Your decisions go directly to the user's screen.
-
-=== HOW THIS RENDERING PIPELINE WORKS ===
-
-Some tool combinations produce specific results in this rendering pipeline. These are technical realities of how FFmpeg processes the video:
-
-Captions and burned-in captions: The frame layout analysis below tells you whether this video already has captions burned into the frames. If it does, those captions are baked into the pixel data and cannot be removed. Adding a caption_style on top of existing burned-in captions means the viewer sees two overlapping text tracks. On TikTok and Reels, the bottom 20% of the screen is already covered by platform UI (username, caption text, buttons). Two caption layers plus platform UI produces three layers of overlapping text at the bottom of a phone screen.
-
-Zoom effects and frame content: Zoom and cut-zoom both work by scaling the frame and cropping back to 1080x1920. This means the edges of the frame get cut off. A real editor looking at footage with text, captions, watermarks, or graphics already baked into the pixels immediately knows that any framing move — zoom, cut-zoom, punch-in — is going to crop into that content. Whether the text survives depends on where it sits in the frame, but anything near the edges is at risk. On footage with a clean frame and no burned-in elements, framing moves work freely. On footage where text is already part of the image, the editor has to weigh whether the move is worth what it does to the frame.
-
-Zoom as a creative tool: Zoom changes the viewer's relationship to the subject by moving closer or farther across the duration of a clip. On a phone screen this shift is felt immediately, so it changes the perceived intensity and proximity of the frame.
-
-Zoom and cut-zoom together: Both tools change the framing of the clip — zoom continuously across the clip's duration, cut-zoom in alternating jumps at sentence boundaries. Running both on the same clip means two competing framing changes are fighting each other across the same frames.
-
-Sound effect files: Each transition sound and text overlay sound is a single short audio recording. When the same sound file plays on consecutive transitions (e.g., whoosh then whoosh), the viewer hears the identical audio sample repeated back-to-back.
-
-Fade-to-black timing: On TikTok, Reels, and Shorts, the platform auto-advances or loops when a video ends. A fade-to-black darkens the last second of the video. Viewers scrolling their feed see the darkening in peripheral vision before the video finishes.
-
-Text overlay rendering: Text overlays use FFmpeg's drawtext filter at a fixed font size on the 1080px wide frame. Text longer than 4-5 words gets rendered at a smaller size to fit, or extends past the frame edges and gets clipped.
 
 === TOOLS ===
 
