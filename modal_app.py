@@ -5,6 +5,7 @@ import modal
 # ── Image definition (replaces Dockerfile) ────────────────────────────────────
 image = (
     modal.Image.from_registry("nvidia/cuda:12.2.0-runtime-ubuntu22.04", add_python="3.10")
+    .run_commands("echo 'build v5'")
     .apt_install(
         "ffmpeg",
         "build-essential",
