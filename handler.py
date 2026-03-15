@@ -1576,21 +1576,75 @@ def build_prompt(analysis, transcript, expanded_vibe, music_library_block=""):
 
 You are the entire creative brain of this edit. You have access to every feature in the pipeline and you are free to use any of them — as long as it serves the vibe.
 
-=== USE YOUR TOOLS ===
-
-A flat edit is a failed edit. If the finished video looks like raw footage with a color filter, you have failed — regardless of how technically correct your JSON is. The user came to Promptly because they want their video transformed.
-
-Before you return your recipe, look at it honestly:
-- If most of your clips have zoom=none, cut_zoom=false, speed=1.0, transition_out=none, sfx_style=none — that is not an edit. That is raw footage with metadata.
-- If your recipe reads like a cautious list of "none" values with one or two exceptions — you are optimizing for safety, not for the vibe.
-
-The question is never "can I justify using this tool?" The question is "what does this footage need to feel like what the user described?"
-
 === WHAT YOU ARE TRYING TO ACHIEVE ===
 
 The user uploaded raw footage and described a vibe. What they actually want — even if they can't articulate it — is to watch the finished video and think: this AI did exactly what I wanted, and I didn't even know exactly what I wanted. This looks like it's already gone viral.
 
 Your job is to look at this footage and ask: what does this specific video need to become that? Not what does a video like this usually need — what does this one need.
+
+=== WHO THE USER IS ===
+
+The user is a content creator who uploaded their raw footage and described a vibe. They want to watch the finished video and feel like it already belongs on their feed — like it was made by someone who understood exactly what they were going for, even better than they could have described it themselves.
+
+The user said: "{expanded_vibe}"
+
+This is your brief. Read it, understand the feeling behind it, and bring this specific footage to life.
+
+=== THIS VIDEO ===
+
+Duration: {duration:.2f}s
+Content type: {content_type}
+Visual character: {visual_character}
+Gemini observed — notable moments: {strongest_moments}
+Gemini observed — lower energy moments: {weakest_moments}{profile_block}{audio_block}
+{hook_block}{pacing_block}
+
+Color baseline (measured from the raw footage):
+  {cb.get("assessment") or "No major exposure or white-balance issues detected."}
+  Temperature: {cb.get("color_temperature", "neutral")}
+
+Footage quality (Gemini directly observed the video — these are facts about the source material, not estimates):
+{render_recs_block}
+
+Frame layout:
+  Subject: {frame_layout.get("subject_position", "unknown")}
+  Existing overlays: {frame_overlay_locations}
+  {"Captions are already burned into the video frames." if has_burned_captions else "No burned-in captions detected."}
+  Open space for graphics: {frame_layout.get("free_zones", "unknown")}
+
+Platform safe zones (9:16 vertical):
+  Bottom 20% of frame is covered by TikTok/Reels/Shorts UI (username, caption text, like/comment/share buttons) — text placed here is hidden.
+  Top 10% may be partially covered by status bar.
+  Safe zone for text: middle 70% vertically.
+
+=== SHOTS ===
+
+{shots_block}
+
+=== TRANSCRIPT ===
+
+{speech_block}
+
+=== SCENE FRAMES ===
+
+These are actual frames extracted from the video at each scene change. Together with the transcript, shot analysis, and audio data above, they form the complete picture of this footage. Everything you need to make decisions that are specific to this video is here — read all of it and let all of it inform what you create.
+
+=== REFERENCE DATA FOR YOUR CUTS ===
+
+Scene changes detected by FFmpeg (reliable visual cut timestamps):
+{scene_changes_block}
+
+Speech boundaries detected by Deepgram (timestamps where sentences end with a natural pause):
+{speech_boundaries_block}
+{highlights_block}
+{beat_block}
+
+{tightened_block if tightened_block else tightened_fallback}
+
+These are reference points for choosing your cuts. Scene change timestamps and speech boundary timestamps are the best places to cut — they produce clean audio and visual transitions. The tightened segments above show which parts of the source contain speech worth keeping. Your clip endpoints should come from speech boundaries and scene changes, not from tightened segment boundaries.
+
+B-roll keyword candidates from transcript:
+{broll_candidates_block if broll_candidates_block else "  none"}
 
 === YOUR CREATIVE PROCESS ===
 
@@ -1648,6 +1702,16 @@ Pacing: Pacing is not a setting — it is a feeling. The right pace for any mome
 
 The video will be viewed on a 1080px wide phone screen.
 
+=== PIPELINE STEPS ===
+
+You decide the clip structure. The reference data below gives you scene changes, speech boundaries, and the tightened timeline.
+
+A cut is not just a division between clips — it is a creative statement. The best cuts are the ones the viewer never notices because they land exactly where the content was already moving. A cut on a natural breath, on a thought completing, on an energy shift, on a visual change — these feel inevitable. A cut that interrupts a thought mid-flow or breaks a movement mid-action feels wrong, even to a viewer who doesn't know why.
+
+The scene changes and speech boundaries in the reference data are a map of where the footage has natural seams. These are the moments where the content is already transitioning — topic shifting, energy changing, speaker pausing. Cuts placed here feel like the footage breathes them naturally. Cuts placed elsewhere can work when the footage calls for it, but the audio reality is this: Cutting mid-sentence produces an audible break that sounds like a glitch. Speech boundary timestamps are where the speaker naturally pauses — cuts there are silent to the listener.
+
+The footage has a timeline. Your clips move through it in order. Sections you leave out are excluded from the final video.
+
 === YOUR RECIPE GOES DIRECTLY TO RENDER ===
 
 Your edit recipe is a JSON object that controls every parameter of the FFmpeg render. The downstream system reads your JSON literally — every value you set becomes an FFmpeg filter parameter. There is no human review between your recipe and the rendered output. Your decisions go directly to the user's screen.
@@ -1669,16 +1733,6 @@ Sound effect files: Each transition sound and text overlay sound is a single sho
 Fade-to-black timing: On TikTok, Reels, and Shorts, the platform auto-advances or loops when a video ends. A fade-to-black darkens the last second of the video. Viewers scrolling their feed see the darkening in peripheral vision before the video finishes.
 
 Text overlay rendering: Text overlays use FFmpeg's drawtext filter at a fixed font size on the 1080px wide frame. Text longer than 4-5 words gets rendered at a smaller size to fit, or extends past the frame edges and gets clipped.
-
-=== PIPELINE STEPS ===
-
-You decide the clip structure. The reference data below gives you scene changes, speech boundaries, and the tightened timeline.
-
-A cut is not just a division between clips — it is a creative statement. The best cuts are the ones the viewer never notices because they land exactly where the content was already moving. A cut on a natural breath, on a thought completing, on an energy shift, on a visual change — these feel inevitable. A cut that interrupts a thought mid-flow or breaks a movement mid-action feels wrong, even to a viewer who doesn't know why.
-
-The scene changes and speech boundaries in the reference data are a map of where the footage has natural seams. These are the moments where the content is already transitioning — topic shifting, energy changing, speaker pausing. Cuts placed here feel like the footage breathes them naturally. Cuts placed elsewhere can work when the footage calls for it, but the audio reality is this: Cutting mid-sentence produces an audible break that sounds like a glitch. Speech boundary timestamps are where the speaker naturally pauses — cuts there are silent to the listener.
-
-The footage has a timeline. Your clips move through it in order. Sections you leave out are excluded from the final video.
 
 === TOOLS ===
 
@@ -1848,6 +1902,15 @@ Beat sync: Truthful label. Set true only if your cut timestamps happen to land w
 
 The "notes" field must be 50 words maximum. Be ruthlessly brief.
 
+=== USE YOUR TOOLS ===
+
+A flat edit is a failed edit. If the finished video looks like raw footage with a color filter, you have failed — regardless of how technically correct your JSON is. The user came to Promptly because they want their video transformed.
+
+Before you return your recipe, look at it honestly:
+- If most of your clips have zoom=none, cut_zoom=false, speed=1.0, transition_out=none, sfx_style=none — that is not an edit. That is raw footage with metadata.
+- If your recipe reads like a cautious list of "none" values with one or two exceptions — you are optimizing for safety, not for the vibe.
+
+The question is never "can I justify using this tool?" The question is "what does this footage need to feel like what the user described?"
 
 === RESPONSE FORMAT ===
 
@@ -1884,74 +1947,9 @@ Respond with ONLY this JSON object:
     {{ "source_start": <n>, "source_end": <n>, "transition_out": "<transition>", "transition_sound": "<sound>", "sfx_style": "<sfx>", "zoom": "<zoom>", "cut_zoom": <true|false>, "speed": <n>, "speed_ramp": "<ramp>", "freeze_frame": <true|false>, "motion_blur_transition": <true|false> }}
   ]
 }}
-
-=== WHO THE USER IS ===
-
-The user is a content creator who uploaded their raw footage and described a vibe. They want to watch the finished video and feel like it already belongs on their feed — like it was made by someone who understood exactly what they were going for, even better than they could have described it themselves.
-
-The user said: "{expanded_vibe}"
-
-This is your brief. Read it, understand the feeling behind it, and bring this specific footage to life.
-
-=== THIS VIDEO ===
-
-Duration: {duration:.2f}s
-Content type: {content_type}
-Visual character: {visual_character}
-Gemini observed — notable moments: {strongest_moments}
-Gemini observed — lower energy moments: {weakest_moments}{profile_block}{audio_block}
-{hook_block}{pacing_block}
-
-Color baseline (measured from the raw footage):
-  {cb.get("assessment") or "No major exposure or white-balance issues detected."}
-  Temperature: {cb.get("color_temperature", "neutral")}
-
-Footage quality (Gemini directly observed the video — these are facts about the source material, not estimates):
-{render_recs_block}
-
-Frame layout:
-  Subject: {frame_layout.get("subject_position", "unknown")}
-  Existing overlays: {frame_overlay_locations}
-  {"Captions are already burned into the video frames." if has_burned_captions else "No burned-in captions detected."}
-  Open space for graphics: {frame_layout.get("free_zones", "unknown")}
-
-Platform safe zones (9:16 vertical):
-  Bottom 20% of frame is covered by TikTok/Reels/Shorts UI (username, caption text, like/comment/share buttons) — text placed here is hidden.
-  Top 10% may be partially covered by status bar.
-  Safe zone for text: middle 70% vertically.
-
-=== SHOTS ===
-
-{shots_block}
-
-=== TRANSCRIPT ===
-
-{speech_block}
-
-=== SCENE FRAMES ===
-
-These are actual frames extracted from the video at each scene change. Together with the transcript, shot analysis, and audio data above, they form the complete picture of this footage. Everything you need to make decisions that are specific to this video is here — read all of it and let all of it inform what you create.
-
-=== REFERENCE DATA FOR YOUR CUTS ===
-
-Scene changes detected by FFmpeg (reliable visual cut timestamps):
-{scene_changes_block}
-
-Speech boundaries detected by Deepgram (timestamps where sentences end with a natural pause):
-{speech_boundaries_block}
-{highlights_block}
-{beat_block}
-
-{tightened_block if tightened_block else tightened_fallback}
-
-These are reference points for choosing your cuts. Scene change timestamps and speech boundary timestamps are the best places to cut — they produce clean audio and visual transitions. The tightened segments above show which parts of the source contain speech worth keeping. Your clip endpoints should come from speech boundaries and scene changes, not from tightened segment boundaries.
-
-B-roll keyword candidates from transcript:
-{broll_candidates_block if broll_candidates_block else "  none"}
-
 """
 
-    split_marker = "=== WHO THE USER IS ==="
+    split_marker = "=== SCENE FRAMES ==="
     split_index = full_prompt.index(split_marker)
     static_prefix = full_prompt[:split_index].strip()
     dynamic_suffix = full_prompt[split_index:].strip()
@@ -2008,28 +2006,48 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames):
 
     content_blocks = [
         {"type": "text", "text": static_prefix, "cache_control": {"type": "ephemeral"}},
-        {"type": "text", "text": dynamic_suffix},
     ]
 
-    if scene_frames:
-        _is_music_edit = analysis.get("content_mode") == "music_edit"
-        _frame_intro = "\nHere are frames from the video at key moments."
-        _frame_outro = "\nThese frames, together with everything else you have been given, are your complete picture of this footage."
-        content_blocks.append({"type": "text", "text": _frame_intro})
-        for frame in scene_frames:
-            if not frame.get("base64"):
-                continue
-            ts = float(frame.get("timestamp") or 0)
-            content_blocks.append({"type": "text", "text": f"Frame at {ts:.1f}s:"})
-            content_blocks.append({
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": frame.get("mediaType") or "image/jpeg",
-                    "data": frame["base64"],
-                },
-            })
-        content_blocks.append({"type": "text", "text": _frame_outro})
+    if content_mode != "music_edit" and "=== REFERENCE DATA FOR YOUR CUTS ===" in dynamic_suffix:
+        scene_frames_text, post_frames_text = dynamic_suffix.split("=== REFERENCE DATA FOR YOUR CUTS ===", 1)
+        content_blocks.append({"type": "text", "text": scene_frames_text.strip()})
+        if scene_frames:
+            for frame in scene_frames:
+                if not frame.get("base64"):
+                    continue
+                ts = float(frame.get("timestamp") or 0)
+                content_blocks.append({"type": "text", "text": f"Scene frame at {ts:.2f}s"})
+                content_blocks.append({
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": frame.get("mediaType") or "image/jpeg",
+                        "data": frame["base64"],
+                    },
+                })
+        content_blocks.append({"type": "text", "text": "=== REFERENCE DATA FOR YOUR CUTS ===\n\n" + post_frames_text.strip()})
+    else:
+        content_blocks.append({"type": "text", "text": dynamic_suffix})
+
+        if scene_frames:
+            _is_music_edit = analysis.get("content_mode") == "music_edit"
+            _frame_intro = "\nHere are frames from the video at key moments."
+            _frame_outro = "\nThese frames, together with everything else you have been given, are your complete picture of this footage."
+            content_blocks.append({"type": "text", "text": _frame_intro})
+            for frame in scene_frames:
+                if not frame.get("base64"):
+                    continue
+                ts = float(frame.get("timestamp") or 0)
+                content_blocks.append({"type": "text", "text": f"Frame at {ts:.1f}s:"})
+                content_blocks.append({
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": frame.get("mediaType") or "image/jpeg",
+                        "data": frame["base64"],
+                    },
+                })
+            content_blocks.append({"type": "text", "text": _frame_outro})
 
     client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     print("[generate-edit] Calling Claude Sonnet...", flush=True)
