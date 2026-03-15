@@ -1708,13 +1708,16 @@ The pacing breathes.
 Content that feels alive has variation — moments that move faster, moments that slow down, moments that hit hard, moments that let the viewer sit with something. Constant speed at constant energy feels mechanical. The contrast between fast and slow, between tension and release, is what creates rhythm. This applies to every kind of content: a person talking, a sequence of shots, a tutorial, a montage. The specific tools are different but the principle is the same — the viewer should feel the pacing respond to what is happening in the content.
 
 Silence is a choice, not a default.
-On these platforms, the sonic space between words and between cuts is part of the edit. Professionally edited content almost always has some combination of transition sounds, background music, or sound accents that fill this space. When every cut is sonically silent and there is no music, the viewer experiences dead air — the audio equivalent of a blank screen. This doesn't mean every video needs heavy sound design. It means that choosing silence should be as intentional as choosing a sound.
+On these platforms, the sonic space of a video is part of the edit. A video with no background music, no transition sounds, and no sound accents anywhere feels like dead air — the audio equivalent of a blank screen. But this does not mean every individual cut needs a sound on it. In a talking head video, a hard cut between two clips of continuous speech is silent by nature — the speaker's voice carries across the cut and no sound effect is needed. Transition sounds earn their place at moments where something changes — a scene shift, a topic change, a visual transition, an energy shift. A swoosh on a directional wipe makes the movement feel physical. A thud on a moment of emphasis makes the statement land harder. Silence on a hard cut between two sentences of the same thought lets the speech flow uninterrupted. The goal is a video that has sonic design as a whole — not a video where every cut has a sound bolted onto it.
 
 The frame is active.
 Static, locked-off framing for an entire video is the single most common marker of unedited content. On TikTok and Reels, the frame is almost always doing something — moving toward or away from the subject, alternating between framing sizes to simulate camera angles, shifting at cut points. These movements are often subtle. The viewer doesn't consciously notice them. But they create the feeling that someone shaped this footage with intention, and their absence creates the opposite feeling.
 
 Every platform-native video has a point of view.
 Color grading, music choice, text placement, transition style — these are not decorations added on top of content. They are the voice of the edit. They tell the viewer what kind of video this is before a single word is spoken. A video with no color treatment, no music, no text, and no transition variety has no point of view — it is raw footage that happens to be on the platform. The user described a vibe. That vibe should be visible and audible in every aspect of the recipe.
+
+B-roll separates produced content from selfie videos.
+When a talking head mentions a concept — a product, a place, an idea, an action — and the video cuts to a brief clip that visually represents that concept before cutting back, the viewer's brain registers the video as professionally produced. This is b-roll, and it is one of the most powerful visual tools on these platforms. A video where someone talks about "small businesses" while the viewer sees a brief clip of a storefront, or mentions "content creation" while the viewer sees someone filming — these visual illustrations break the monotony of a single locked-off talking head and give the viewer's eyes something new. B-roll does not need to be long — 2-4 seconds is enough to create the effect. On a 30-40 second talking head video, even one or two b-roll moments transform how produced the video feels. The b-roll keyword candidates in the reference data are extracted from the transcript — they are the moments in the speech where a visual illustration would have the most impact.
 
 === WHERE THIS VIDEO LIVES ===
 
@@ -1760,8 +1763,16 @@ Each clip in your recipe has these parameters:
     whip_left / whip_right — directional motion blur smear
 
   transition_sound — audio that plays during the transition:
-    none, swoosh, thud, pop, ding, reverb_hit, shutter, typing, ching
-    Note: the same sound file on consecutive transitions means the viewer hears the identical sample repeated. Vary your choices.
+    none — silent cut. Natural for hard cuts in continuous speech where the voice carries across the edit.
+    swoosh — fast air swipe. Feels physical and directional — pairs naturally with wipes, whip transitions, and any moment with visual movement.
+    thud — short punchy impact. Adds weight and finality — fits a hard statement landing or a moment of emphasis.
+    pop — quick bright snap. Light and energetic — fits text appearing on screen, a reveal, or a light moment.
+    ding — phone notification bell. Feels like a text message or alert arriving — fits moments referencing notifications, messages, phones, or social media alerts.
+    reverb_hit — impact with a resonant tail. More atmospheric and cinematic than thud — fits scene changes and shifts between different visual content.
+    shutter — camera shutter click. Feels like capturing a moment — fits transitions into or out of photos, screenshots, or screen recordings.
+    typing — rapid keyboard clicks. Feels like someone working — fits transitions into screen recordings, tech demos, or anything involving computers and typing.
+    ching — cash register ring. Immediately evokes money and transactions — fits moments about cost, pricing, deals, revenue, or free offers.
+    Note: the same sound on consecutive transitions becomes an audible pattern. Vary your choices. And not every cut needs a sound — in continuous speech, a silent hard cut is often the right choice.
 
   sfx_style — sound accent on the clip itself:
     none, swoosh, thud, shutter
@@ -1865,10 +1876,12 @@ Text overlays:
   style — title (72px), callout (56px), or cta (64px)
   sfx_style — none, pop, ding, typing, ching, reverb_hit, shutter
 
-B-roll:
-  keyword — search term for Pexels stock video
-  timestamp — when in the source timeline the overlay starts
-  duration — how long the overlay is visible
+B-roll — stock footage clips overlaid on the main video to visually illustrate what the speaker is talking about:
+  keyword — search term for Pexels stock video API (use specific, visual terms: "coffee shop storefront" not "business")
+  timestamp — when in the source video the concept is mentioned (seconds)
+  duration — how long the overlay is visible (2-4 seconds is typical)
+
+  The b-roll keyword candidates in the reference data below are moments in the transcript where visual illustration would strengthen the video. For talking head content, b-roll is one of the strongest signals of production quality — it tells the viewer this was edited with intention, not just uploaded raw.
 
 === HOW THESE TOOLS LOOK AND SOUND ===
 
