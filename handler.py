@@ -11,7 +11,7 @@ import re
 import math
 import concurrent.futures
 
-HANDLER_VERSION = "2.2.0"
+HANDLER_VERSION = "2.3.0"
 
 print(f"[startup] Python {sys.version}", flush=True)
 print(f"[startup] handler version: {HANDLER_VERSION}", flush=True)
