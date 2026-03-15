@@ -10,8 +10,9 @@ import json
 import re
 import math
 import concurrent.futures
+from datetime import datetime
 
-HANDLER_VERSION = "2.5.0"
+HANDLER_VERSION = "2.6.0"
 
 print(f"[startup] Python {sys.version}", flush=True)
 print(f"[startup] handler version: {HANDLER_VERSION}", flush=True)
@@ -28,6 +29,19 @@ try:
 except Exception as e:
     print(f"[startup] google.generativeai FAILED: {e}", flush=True)
 
+supabase = None
+try:
+    from supabase import create_client
+    supabase_url = os.environ.get("SUPABASE_URL")
+    supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_KEY")
+    if supabase_url and supabase_key:
+        supabase = create_client(supabase_url, supabase_key)
+        print("[startup] supabase OK", flush=True)
+    else:
+        print("[startup] supabase unavailable: missing env", flush=True)
+except Exception as e:
+    print(f"[startup] supabase unavailable: {e}", flush=True)
+
 DeepgramClient = None
 PrerecordedOptions = None
 try:
@@ -42,6 +56,45 @@ except ImportError:
         print(f"[startup] deepgram FAILED: {e}", flush=True)
 
 print("[startup] all import checks done", flush=True)
+
+
+def get_trend_context():
+    """Fetch the latest valid trend profile from Supabase."""
+    if supabase is None:
+        print("[trend] No valid trend profile found — proceeding without trend context", flush=True)
+        return None
+    try:
+        response = supabase.table("trend_profiles") \
+            .select("profile_json, computed_at, sample_size, valid_until") \
+            .eq("profile_type", "general") \
+            .gte("valid_until", datetime.utcnow().isoformat()) \
+            .order("computed_at", desc=True) \
+            .limit(1) \
+            .execute()
+
+        if response.data and len(response.data) > 0:
+            row = response.data[0]
+            computed = row.get("computed_at", "unknown")
+            sample = row.get("sample_size", 0)
+            print(f"[trend] Loaded trend profile: {sample} videos, computed {computed}", flush=True)
+
+            # Check staleness — warn if older than 10 days
+            try:
+                from datetime import datetime as dt
+                computed_dt = dt.fromisoformat(computed.replace("Z", "+00:00"))
+                age_days = (dt.now(computed_dt.tzinfo) - computed_dt).days
+                if age_days > 10:
+                    print(f"[trend] WARNING: trend profile is {age_days} days old — may be stale", flush=True)
+            except Exception:
+                pass
+
+            return row["profile_json"]
+        else:
+            print("[trend] No valid trend profile found — proceeding without trend context", flush=True)
+            return None
+    except Exception as e:
+        print(f"[trend] Error fetching trend profile: {e} — proceeding without trend context", flush=True)
+        return None
 
 # Download arnndn noise-reduction model if not present (used by audio_denoise feature)
 _RNNOISE_MODEL_PATH = "/usr/share/rnnoise/bd.rnnn"
@@ -2014,7 +2067,7 @@ def extract_json(text):
     raise ValueError("Could not extract valid JSON from Claude response")
 
 
-def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames):
+def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames, trend_context=None):
     print("[generate-edit] Building Claude prompt...", flush=True)
     content_mode = analysis.get("content_mode", "speech")
     if content_mode == "music_edit":
@@ -3651,7 +3704,8 @@ def handler(job):
         send_progress(job_id, "edit_recipe", 52, "Putting your edit together...", app_url)
         print("[pipeline] step=edit_recipe", flush=True)
         t = time.time()
-        edit_plan = generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames)
+        trend_context = get_trend_context()
+        edit_plan = generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames, trend_context=trend_context)
         print(f"[pipeline] edit recipe complete in {time.time()-t:.1f}s", flush=True)
 
         edit_plan["analysis_data"] = analysis
