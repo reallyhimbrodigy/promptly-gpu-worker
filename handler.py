@@ -11,7 +11,7 @@ import re
 import math
 import concurrent.futures
 
-HANDLER_VERSION = "2.1.0"
+HANDLER_VERSION = "2.2.0"
 
 print(f"[startup] Python {sys.version}", flush=True)
 print(f"[startup] handler version: {HANDLER_VERSION}", flush=True)
@@ -1155,9 +1155,11 @@ def expand_vibe_intent(vibe):
         max_tokens=200,
         temperature=0.7,
         messages=[{"role": "user", "content": (
-            f'A content creator described how they want their video edited. Your job is to expand their brief into a vivid creative direction that captures the feeling they are going for — something a skilled editor can feel and act on immediately.\n\n'
-            f'Preserve every specific technique or style they named exactly as they said it. Where they described a feeling or aesthetic without naming specific tools, add concrete techniques that would produce that feeling for this kind of content. Keep the energy and intention of what they asked for — do not soften it or make it more conservative than what they described. Do not add techniques that contradict or dilute what they asked for.\n\n'
-            f'Respond with only the expanded brief in plain prose. No markdown, no headers, no bullet points, no preamble, no explanation. Just the creative direction as flowing sentences.\n\n'
+            f'A content creator described how they want their video edited. Your job is to expand their brief into a richer description of the feeling they are going for — the emotional tone, the energy, the aesthetic, the impression it should leave on a viewer.\n\n'
+            f'Preserve every specific technique, style, or tool they named exactly as they said it — do not rephrase or replace their words.\n\n'
+            f'Where they described a feeling without naming specific techniques, expand on the FEELING — not on editing techniques that could produce it. Describe what the finished video feels like to watch, not how it should be edited. Do not name any editing tools, transitions, effects, speeds, cuts, zooms, ramps, or sound design. Do not prescribe how the edit should be constructed. A separate system will decide the techniques — your job is only to make the feeling vivid and specific.\n\n'
+            f'Keep the energy and intention of what they asked for — do not soften it, but also do not escalate it beyond what they described. "Engaging" does not mean "aggressive." "Professional" does not mean "cinematic." "Viral" does not mean "intense." Stay faithful to the actual words they used.\n\n'
+            f'Respond with only the expanded brief in plain prose. No markdown, no headers, no bullet points, no preamble, no explanation.\n\n'
             f'User input: "{vibe}"'
         )}]
     )
@@ -1658,7 +1660,7 @@ Captions and burned-in captions: The frame layout analysis below tells you wheth
 
 Zoom effects and frame content: Zoom and cut-zoom both work by scaling the frame and cropping back to 1080x1920. This means the edges of the frame get cut off. A real editor looking at footage with text, captions, watermarks, or graphics already baked into the pixels immediately knows that any framing move — zoom, cut-zoom, punch-in — is going to crop into that content. Whether the text survives depends on where it sits in the frame, but anything near the edges is at risk. On footage with a clean frame and no burned-in elements, framing moves work freely. On footage where text is already part of the image, the editor has to weigh whether the move is worth what it does to the frame.
 
-Zoom as a creative tool: Zoom changes the viewer's relationship to the subject — the physical sensation of moving closer. On a phone screen this is felt immediately. Its power comes from a very specific context: a viewer who hasn't committed yet, a subject speaking directly to camera, and a frame that rewards being pulled into. At the start of a video, before the viewer has decided to stay or scroll, a slow zoom creates pull and draws them into the subject. That same movement anywhere else in the video — once the viewer is already inside the content — feels unmotivated. The frame moves but nothing called for it, and the viewer feels the edit instead of the content. Zoom is a tool with a narrow window where it genuinely earns its place.
+Zoom as a creative tool: Zoom changes the viewer's relationship to the subject by moving closer or farther across the duration of a clip. On a phone screen this shift is felt immediately, so it changes the perceived intensity and proximity of the frame.
 
 Zoom and cut-zoom together: Both tools change the framing of the clip — zoom continuously across the clip's duration, cut-zoom in alternating jumps at sentence boundaries. Running both on the same clip means two competing framing changes are fighting each other across the same frames.
 
@@ -1839,6 +1841,8 @@ B-roll: Full-frame Pexels stock overlays at specified timestamps. Replace the ma
 Audio denoise: arnndn AI neural noise removal. Strips hiss, room tone, fan noise, A/C hum.
 
 Outro: fade_black and fade_white apply a 1s fade on the last clip's video and audio.
+
+Beat sync: Truthful label. Set true only if your cut timestamps happen to land within ~0.15s of beat timestamps. Do not move cuts to chase beats.
 
 The "notes" field must be 50 words maximum. Be ruthlessly brief.
 
