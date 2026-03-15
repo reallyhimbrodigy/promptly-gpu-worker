@@ -1617,6 +1617,55 @@ Platform safe zones (9:16 vertical):
   Top 10% may be partially covered by status bar.
   Safe zone for text: middle 70% vertically.
 
+=== HOW THE ALGORITHM DECIDES WHAT GOES VIRAL ===
+
+TikTok and Instagram have both publicly documented how their algorithms work. This is not speculation — this is how the platforms decide whether to show a video to 300 people or 3 million. Understanding this changes how you edit, because every editing decision either helps or hurts the video's performance in this system.
+
+How distribution works:
+When a video is posted, the platform does not show it to all the creator's followers at once. It shows it to a small test group — typically 300-500 people. The algorithm watches how that test group responds. If the response is strong, it pushes the video to a larger group — typically 5-10x bigger. If that group responds well, another expansion. Each wave of strong performance triggers the next wave. A video that survives four or five expansion waves reaches millions. A video that fails the first test reaches a few hundred and dies. Every video goes through this process independently. The algorithm does not care about the creator's follower count or past performance — it evaluates each video on its own.
+
+The signals the algorithm measures, in order of importance:
+
+1. Watch time and completion rate — the dominant signal.
+The percentage of the video that viewers watch is the single most important metric on both TikTok and Instagram Reels. A video with 80% completion rate and 10,000 views will be distributed more aggressively than a video with 20% completion and 100,000 views. The algorithm interprets high completion as proof that the content is worth showing to more people. The first test group of 300-500 people determines the video's entire future — if most of them watch to the end, the video advances. If most of them scroll away in the first 2 seconds, the video is effectively dead.
+
+What this means for your edit: Everything that causes a viewer to scroll away kills the video. Dead air, flat pacing, a slow start, a section that drags in the middle, an ending that fades to nothing — each of these is a moment where a viewer leaves, the completion rate drops, and the algorithm stops distributing. Your edit must hold attention from the first frame to the last. Tighten dead air. Vary pacing so the middle doesn't drag. Make the opening visually or sonically different from the rest — that is the moment the viewer decides to stay or leave. The ending matters too — the platform auto-loops, so a clean end that flows back into the beginning gets replay credit.
+
+2. Replays and rewatches — the strongest quality signal.
+When a viewer watches the same video more than once, the algorithm treats this as an exceptionally strong signal — stronger than a like, stronger than a comment. A video that gets rewatched frequently is flagged as high-quality content worth aggressive distribution. On TikTok, replays are weighted heavily enough that a video with high rewatch rate can outperform videos with far more total views.
+
+What this means for your edit: Videos that loop cleanly get replayed. A video that ends abruptly on the last word and loops seamlessly back to the opening gets accidental replays — the viewer watches 1.5x or 2x without even meaning to, and the algorithm counts every second. Set outro=none so the video ends on the last frame and loops instantly. Avoid fade_black — it creates a visible flash of black between the end and the loop restart, which breaks the loop feeling and signals the viewer to scroll. If the video's content has a reveal or payoff, pacing the edit so the payoff lands near the end and the opening creates a natural lead-in from that payoff creates a structural loop.
+
+3. Shares (sends via DM) — the most powerful signal for reaching new audiences.
+Instagram's head Adam Mosseri confirmed in 2025 that DM shares are the single strongest signal for reaching people who don't follow the creator. TikTok weights shares approximately 3x higher than likes. When someone shares a video, the algorithm interprets this as the strongest possible endorsement — the viewer found the content valuable enough to personally recommend it to someone they know.
+
+What this means for your edit: You cannot directly control whether someone shares a video — that depends on the content itself. But the edit can make shareable moments land harder. Text overlays that reinforce a key statement or reveal make the "moment" more visible and memorable. A well-timed freeze frame or speed ramp on a punchline gives it emphasis that makes the viewer think "I need to send this to someone." Clean, polished production quality makes people more willing to share — people share content that makes them look good for sharing it.
+
+4. Saves — signal of lasting value.
+When a viewer saves a video, the algorithm interprets this as content with long-term utility — something worth coming back to. Saves are weighted higher than likes on both platforms. Tutorial content, educational content, and content with specific actionable information gets saved most frequently.
+
+What this means for your edit: Text overlays that display specific information (a tool name, a step number, a key fact) give the viewer something concrete to save for later. Clear visual structure — where the viewer can see that the video has organized, useful content — encourages saves.
+
+5. Comments — signal of engagement depth.
+Comments indicate that the content provoked enough of a response for the viewer to stop scrolling and type. The algorithm values comment volume and comment velocity (how quickly comments accumulate after posting). Content that sparks opinions, questions, or debate generates more comments.
+
+What this means for your edit: This is primarily about the content, not the edit. But text overlays that pose a question or make a bold claim can encourage comment behavior. The edit's job is to make sure the viewer watches long enough to reach the moment that would provoke a comment.
+
+6. Likes — the weakest individual signal.
+Likes are the lowest-weighted engagement action on both platforms. A like is easy and low-commitment. The algorithm treats it as a mild positive signal but weights it far below completion rate, shares, and saves. A video with many likes but poor watch time will not be distributed aggressively.
+
+What this means for your edit: Do not optimize for likes. Optimize for watch time. Everything else follows from that.
+
+The 2-second decision:
+Research across both platforms shows that viewers decide whether to continue watching within 1.7-2 seconds. The algorithm tracks this threshold — it measures whether viewers watch past the first 2-3 seconds as a distinct signal. A video where 80% of viewers watch past 3 seconds will dramatically outperform one where only 40% do, even if the rest of the content is identical. The opening of the video is not the beginning of the content — it is an audition. It must earn the viewer's attention before the content even starts.
+
+What this means for your edit: The first clip is the most important clip in the entire recipe. It needs to be visually distinct from the rest of the video — a different framing, a burst of movement, a sonic event, something that signals "this is not raw footage, this is worth watching." A static, flat opening with no visual energy is the single most common reason videos fail the initial test group.
+
+Production quality as a ranking signal:
+TikTok's AI systems now evaluate upload quality, visual clarity, and editing sophistication as content signals. High-quality video with clear audio, intentional editing, and professional color treatment is more likely to be categorized as premium content and distributed to larger audiences. This does not mean over-produced — TikTok's data shows authentic content outperforms heavily polished production. It means the video should look intentional. Crisp audio, clean color, purposeful cuts, and visual variety signal that the creator invested effort, which the algorithm interprets as a quality indicator.
+
+What this means for your edit: Every tool you have — color grading, audio denoising, sharpening, text overlays, transition variety, speed variation — contributes to the production quality signal. A video with flat color, raw audio, no text, uniform cuts, and constant speed reads as unedited to both the viewer and the algorithm. Using your tools appropriately does not just make the video look better to humans — it literally signals quality to the ranking system.
+
 === SHOTS ===
 
 {shots_block}
