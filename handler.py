@@ -1684,7 +1684,9 @@ The footage has a timeline. Your clips move through it in order. Sections you le
 
 Each clip in your recipe has these parameters:
  
-  source_start / source_end — timestamps in the source video. Clips must be sequential and non-overlapping: each clip's source_start must be >= the previous clip's source_end.
+  source_start / source_end — timestamps in the source video that define this clip's boundaries.
+
+  CRITICAL RULE: Clips must be strictly chronological. Each clip's source_start must be >= the previous clip's source_end. You cannot go backward in the timeline. You cannot reuse or revisit any segment of the source video that already appeared in an earlier clip. The timeline moves forward only — always. If your recipe violates this, the render will fail.
 
   transition_out — visual effect between this clip and the next:
     none — clean hard cut
