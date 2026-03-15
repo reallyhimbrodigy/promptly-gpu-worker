@@ -12,7 +12,7 @@ import math
 import concurrent.futures
 from datetime import datetime
 
-HANDLER_VERSION = "2.6.0"
+HANDLER_VERSION = "2.7.0"
 
 print(f"[startup] Python {sys.version}", flush=True)
 print(f"[startup] handler version: {HANDLER_VERSION}", flush=True)
@@ -88,13 +88,135 @@ def get_trend_context():
             except Exception:
                 pass
 
-            return row["profile_json"]
+            profile = row.get("profile_json") or {}
+            if isinstance(profile, dict):
+                profile.setdefault("sample_size", sample)
+                profile.setdefault("computed_at", computed)
+            return profile
         else:
             print("[trend] No valid trend profile found — proceeding without trend context", flush=True)
             return None
     except Exception as e:
         print(f"[trend] Error fetching trend profile: {e} — proceeding without trend context", flush=True)
         return None
+
+
+def format_trend_section(trend_context):
+    """Format the trend profile into a human-readable prompt section."""
+    if not trend_context:
+        return ""
+
+    try:
+        sample_size = trend_context.get("sample_size", 0)
+        np = trend_context.get("numeric_patterns", {})
+        cp = trend_context.get("categorical_patterns", {})
+        bp = trend_context.get("boolean_patterns", {})
+
+        def fmt_range(key):
+            """Format a numeric pattern as 'p25-p75 (median X)'"""
+            d = np.get(key, {})
+            p25 = d.get("p25")
+            med = d.get("median")
+            p75 = d.get("p75")
+            if p25 is None or med is None or p75 is None:
+                return "no data"
+            return f"{p25}-{p75} (median {med})"
+
+        def fmt_pct(key):
+            """Format a boolean pattern as a percentage string"""
+            val = bp.get(key)
+            if val is None:
+                return "no data"
+            return f"{int(val * 100)}%"
+
+        def fmt_top_categories(key, top_n=4):
+            """Format a categorical pattern as 'name: X%, name: X%' sorted by frequency"""
+            d = cp.get(key, {})
+            if not d:
+                return "no data"
+            sorted_items = sorted(d.items(), key=lambda x: x[1], reverse=True)[:top_n]
+            return ", ".join(f"{k}: {int(v * 100)}%" for k, v in sorted_items)
+
+        lines = []
+        lines.append("=== WHAT IS PERFORMING RIGHT NOW ===")
+        lines.append("")
+        lines.append(f"The data below comes from {sample_size} of the highest-performing TikTok videos over the past week — videos with 500K+ views that the algorithm is actively distributing. These numbers are not instructions. They are intelligence about what the audience and the algorithm are currently rewarding.")
+        lines.append("")
+        lines.append("Read these patterns. Let them inform your instincts for this specific edit. Where the footage naturally aligns with a current pattern, lean into it. Where it doesn't, use your judgment about whether to adapt or let the footage's own strengths lead.")
+        lines.append("")
+
+        lines.append("Timing and structure:")
+        lines.append(f"  Time to first cut: {fmt_range('time_to_first_cut')} seconds")
+        lines.append(f"  Cuts in first 3 seconds: {fmt_range('cuts_in_first_3s')}")
+        lines.append(f"  Cuts in first 5 seconds: {fmt_range('cuts_in_first_5s')}")
+        lines.append(f"  Total cuts per video: {fmt_range('total_cuts')}")
+        lines.append(f"  Average cut duration: {fmt_range('avg_cut_duration')} seconds")
+        lines.append(f"  Transition effects (non-hard-cut): {fmt_range('transition_effect_count')} per video")
+        lines.append(f"  Video duration: {fmt_range('video_duration')} seconds")
+        lines.append("")
+
+        lines.append("Hook patterns:")
+        lines.append(f"  Hook lands within: {fmt_range('hook_timing')} seconds")
+        lines.append(f"  Hook types: {fmt_top_categories('hook_type')}")
+        lines.append(f"  {fmt_pct('has_hook_text')} of top videos have hook text on screen in the first 2 seconds")
+        lines.append("")
+
+        lines.append("Visual patterns:")
+        lines.append(f"  {fmt_pct('has_cut_zoom')} use cut-zoom (alternating framing at sentence boundaries)")
+        lines.append(f"  {fmt_pct('has_zoom_movements')} use zoom movements within clips")
+        lines.append(f"  Zoom movements per video: {fmt_range('zoom_movement_count')}")
+        lines.append(f"  {fmt_pct('framing_changes_at_cuts')} change framing at cut points")
+        lines.append(f"  {fmt_pct('has_broll')} include b-roll (clips: {fmt_range('broll_clip_count')}, ratio of video: {fmt_range('broll_ratio')})")
+        lines.append(f"  Primary framing: {fmt_top_categories('primary_shot_type')}")
+        lines.append(f"  Color grading: {fmt_top_categories('color_tone')}")
+        lines.append(f"  {fmt_pct('has_vignette')} use vignette")
+        lines.append(f"  {fmt_pct('looks_color_graded')} appear intentionally color graded")
+        lines.append("")
+
+        lines.append("Speed patterns:")
+        lines.append(f"  {fmt_pct('has_speed_changes')} use visible speed changes")
+        lines.append(f"  {fmt_pct('has_speed_ramp')} use speed ramps")
+        lines.append(f"  {fmt_pct('base_speed_accelerated')} have base speed slightly accelerated")
+        lines.append(f"  Speed changes per video: {fmt_range('speed_change_count')}")
+        lines.append("")
+
+        lines.append("Audio patterns:")
+        lines.append(f"  {fmt_pct('has_background_music')} have background music")
+        lines.append(f"  Music energy: {fmt_top_categories('music_energy')}")
+        lines.append(f"  {fmt_pct('has_sound_effects')} have sound effects (median count: {np.get('sound_effect_count', {}).get('median', 'N/A')} per video)")
+        lines.append(f"  {fmt_pct('sfx_at_transitions')} have SFX at cut points")
+        lines.append(f"  {fmt_pct('sfx_on_text')} have SFX when text appears")
+        lines.append(f"  {fmt_pct('sfx_on_emphasis')} have SFX on emphasis moments")
+        lines.append(f"  {fmt_pct('speaks_to_camera')} feature someone speaking to camera")
+        lines.append(f"  {fmt_pct('audio_feels_clean')} have clean, processed audio")
+        lines.append("")
+
+        lines.append("Text and captions:")
+        lines.append(f"  {fmt_pct('has_text')} have text overlays on screen")
+        lines.append(f"  Text overlays per video: {fmt_range('text_overlay_count')}")
+        lines.append(f"  First text appears at: {fmt_range('text_first_appearance')} seconds")
+        lines.append(f"  {fmt_pct('text_reinforces_speech')} use text that reinforces what the speaker is saying")
+        lines.append(f"  {fmt_pct('has_animated_captions')} use animated word-by-word captions")
+        lines.append(f"  {fmt_pct('has_cta_text')} have a CTA text overlay")
+        lines.append(f"  Text positions: {fmt_top_categories('text_positions')}")
+        lines.append("")
+
+        lines.append("Ending patterns:")
+        lines.append(f"  {fmt_pct('loops_cleanly')} loop cleanly (no fade to black)")
+        lines.append(f"  {fmt_pct('has_cta_at_end')} have a CTA in the last 3 seconds")
+        lines.append(f"  Ending types: {fmt_top_categories('ending_type')}")
+        lines.append("")
+
+        lines.append("Production quality:")
+        lines.append(f"  {fmt_pct('feels_professionally_edited')} feel professionally edited")
+        lines.append(f"  Editing intensity: {fmt_top_categories('editing_intensity')}")
+        lines.append("")
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        print(f"[trend] Error formatting trend section: {e} — skipping trend context", flush=True)
+        return ""
 
 # Download arnndn noise-reduction model if not present (used by audio_denoise feature)
 _RNNOISE_MODEL_PATH = "/usr/share/rnnoise/bd.rnnn"
@@ -1385,7 +1507,7 @@ The user said: "{expanded_vibe}"
 
 
 # truncated in command preview; full user-provided file continues below unchanged
-def build_prompt(analysis, transcript, expanded_vibe, music_library_block=""):
+def build_prompt(analysis, transcript, expanded_vibe, music_library_block="", trend_context=None):
     shots = analysis.get("shots") or []
     shots_block = "\n\n".join(
         f"[{s['start']:.2f}s – {s['end']:.2f}s]\n  {s.get('visual','')}\n  {s.get('action','')}\n  Energy: {s.get('energy',0.5):.1f}"
@@ -1474,6 +1596,8 @@ def build_prompt(analysis, transcript, expanded_vibe, music_library_block=""):
             f"  - {c['keyword']} @ {float(c.get('timestamp',0)):.2f}s"
             for c in broll_candidates[:6]
         )
+    trend_section = format_trend_section(trend_context) if trend_context else ""
+    trend_block = f"\n\n{trend_section}" if trend_section else ""
 
     vp = analysis.get("video_profile") or {}
     profile_parts = []
@@ -1732,6 +1856,7 @@ These are reference points for choosing your cuts. Scene change timestamps and s
 
 B-roll keyword candidates from transcript:
 {broll_candidates_block if broll_candidates_block else "  none"}
+{trend_block}
 
 === YOUR CREATIVE PROCESS ===
 
@@ -2083,7 +2208,12 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames, trend
             music_lines.append(f"    {fname} — {meta['description']}")
         music_library_block = "\n".join(music_lines)
 
-        static_prefix, dynamic_suffix = build_prompt(analysis, transcript, expanded_vibe, music_library_block)
+        static_prefix, dynamic_suffix = build_prompt(analysis, transcript, expanded_vibe, music_library_block, trend_context=trend_context)
+
+    if trend_context:
+        print(f"[generate-edit] Trend context included: {trend_context.get('sample_size', '?')} videos", flush=True)
+    else:
+        print("[generate-edit] No trend context available", flush=True)
 
     content_blocks = [
         {"type": "text", "text": static_prefix, "cache_control": {"type": "ephemeral"}},
