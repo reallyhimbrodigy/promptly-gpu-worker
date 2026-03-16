@@ -1676,7 +1676,7 @@ def export_additional_format(output_path, aspect_ratio, dest_path):
     run_ffmpeg([
         "-y", "-i", output_path,
         "-vf", vf,
-        "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+        "-c:v", "libx264", "-preset", "fast", "-crf", "18",
         "-c:a", "copy",
         "-movflags", "+faststart",
         dest_path,
@@ -1818,7 +1818,7 @@ def composite_broll(output_path, broll_entries, work_dir):
         "-filter_complex", ";".join(filter_parts),
         "-map", f"[{prev}]",
         "-map", "0:a",
-        "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+        "-c:v", "libx264", "-preset", "medium", "-crf", "18",
         "-c:a", "copy",
         "-movflags", "+faststart",
         tmp_out,
@@ -1984,7 +1984,7 @@ def normalize_source_video(source_path, work_dir):
         "-y","-i",source_path,
         "-vf","scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1",
         "-r","30","-vsync","cfr","-pix_fmt","yuv420p",
-        "-c:v","libx264","-preset","ultrafast","-crf","23",
+        "-c:v","libx264","-preset","medium","-crf","18",
         "-c:a","aac","-b:a","192k","-ar","48000","-ac","2",
         "-threads","1","-map","0:v:0",
     ]
@@ -2009,7 +2009,7 @@ def create_keyframed_source(source_path, keyframe_timestamps, work_dir):
     print(f"[ffmpeg] Forcing keyframes at {len(unique_kf)} cut points", flush=True)
     run_ffmpeg([
         "-y","-i",source_path,
-        "-c:v","libx264","-preset","ultrafast","-crf","28",
+        "-c:v","libx264","-preset","fast","-crf","18",
         "-force_key_frames",kf_str,
         "-r","30","-vsync","cfr","-pix_fmt","yuv420p",
         "-c:a","aac","-b:a","192k","-threads","1",
@@ -2135,7 +2135,7 @@ def apply_speed_curve(output_path, speed_curve, work_dir):
         "-i", output_path,
         "-filter_complex", filter_complex,
         "-map", "[outv]", "-map", "[outa]",
-        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
+        "-c:v", "libx264", "-preset", "medium", "-crf", "18",
         "-c:a", "aac", "-b:a", "128k",
         "-movflags", "+faststart",
         temp_output,
@@ -2832,7 +2832,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     filter_complex = ";".join(video_filters + audio_filters + transition_filters + sfx_filter_strs + post_filters + music_filters)
 
     encode_args = [
-        "-c:v","libx264","-preset","fast","-crf","23",
+        "-c:v","libx264","-preset","medium","-crf","18",
         "-b:v","6M","-maxrate","8M","-bufsize","16M",
         "-pix_fmt","yuv420p",
         "-c:a","aac","-b:a","192k",
@@ -3046,6 +3046,7 @@ def handler(job):
         )
         render_elapsed = time.time() - t
         print(f"[pipeline] FFmpeg render complete in {render_elapsed:.1f}s", flush=True)
+        print(f"[render] Encoding: crf=18 preset=medium", flush=True)
 
         if not os.path.exists(output_path):
             return {"error": "No output file produced by FFmpeg"}
