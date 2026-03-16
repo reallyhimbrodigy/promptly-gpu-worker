@@ -185,7 +185,7 @@ def format_trend_section(trend_context):
         lines.append("")
 
         lines.append("Audio patterns:")
-        lines.append(f"  {fmt_pct('has_background_music')} have background music")
+        lines.append(f"  {fmt_pct('has_background_music')} were posted with background music selected by the creator at publishing time")
         lines.append(f"  Music energy: {fmt_top_categories('music_energy')}")
         lines.append(f"  {fmt_pct('has_sound_effects')} have sound effects (median count: {np.get('sound_effect_count', {}).get('median', 'N/A')} per video)")
         lines.append(f"  {fmt_pct('sfx_at_transitions')} have SFX at cut points")
@@ -1380,7 +1380,7 @@ def build_music_edit_prompt(analysis, expanded_vibe):
         f"COLOR: {'vibrance=true recommended' if richness in ('flat','muted') else f'vibrance your call ({richness})'}",
     ]
     if skin:
-        render_recs.append("SKIN: Skin tones present — vibrance and teal_orange affect them")
+        render_recs.append("SKIN: Skin tones present — vibrance affects them")
     render_recs.append(f"LIGHTING: {lighting}")
     render_recs_block = "\n".join(f"  {r}" for r in render_recs)
 
@@ -1454,15 +1454,9 @@ Global:
   shadow_lift — true/false
   highlight_rolloff — true/false
   vibrance — true/false
-  teal_orange — none, subtle, strong
   outro — none, fade_black, fade_white
   text_overlays — optional. Text graphics displayed on specific clips.
-  background_music — choose one track filename from the library below, or "none" if the content works better without music.
-
-  Pick the track that best matches the emotional tone and energy the user described, or none if the footage already has music or works better without it.
-
-  Music library (pick the filename that best fits the vibe):
-  {music_library_block}
+  background_music — always "none". Creators select their own audio and trending sounds when posting to TikTok and Instagram. The edit should not include background music.
   aspect_ratio — always "9:16"
 
 === RESPONSE FORMAT ===
@@ -1472,7 +1466,7 @@ Respond with ONLY this JSON:
 {{
   "notes": "<50 words max>",
   "color_intent": "<intent>",
-  "background_music": "<track_filename or none>",
+  "background_music": "none",
   "caption_style": "none",
   "caption_position": "lower-third",
   "caption_keywords": [],
@@ -1489,7 +1483,6 @@ Respond with ONLY this JSON:
   "shadow_lift": <true|false>,
   "highlight_rolloff": <true|false>,
   "vibrance": <true|false>,
-  "teal_orange": "<level>",
   "text_overlays": [
     {{ "text": "<text>", "position": "<pos>", "appear_at_clip": <n>, "style": "<style>", "sfx_style": "<sfx>" }}
   ],
@@ -1887,7 +1880,7 @@ The pacing breathes.
 Content that feels alive has variation — moments that move faster, moments that slow down, moments that hit hard, moments that let the viewer sit with something. Constant speed at constant energy feels mechanical. The contrast between fast and slow, between tension and release, is what creates rhythm. This applies to every kind of content: a person talking, a sequence of shots, a tutorial, a montage. The specific tools are different but the principle is the same — the viewer should feel the pacing respond to what is happening in the content.
 
 Silence is a choice, not a default.
-On these platforms, the sonic space of a video is part of the edit. A video with no background music, no transition sounds, and no sound accents anywhere feels like dead air — the audio equivalent of a blank screen. But this does not mean every individual cut needs a sound on it. In a talking head video, a hard cut between two clips of continuous speech is silent by nature — the speaker's voice carries across the cut and no sound effect is needed. Transition sounds earn their place at moments where something changes — a scene shift, a topic change, a visual transition, an energy shift. A swoosh on a directional wipe makes the movement feel physical. A thud on a moment of emphasis makes the statement land harder. Silence on a hard cut between two sentences of the same thought lets the speech flow uninterrupted. The goal is a video that has sonic design as a whole — not a video where every cut has a sound bolted onto it.
+On these platforms, the sonic space of a video is part of the edit. But the creator usually chooses the final music or trending sound at posting time, not during editing. That means your job is not to add background music — it is to shape the speech, silence, and sound accents so the edit still feels intentional on its own. In a talking head video, a hard cut between two clips of continuous speech is silent by nature — the speaker's voice carries across the cut and no sound effect is needed. Transition sounds earn their place at moments where something changes — a scene shift, a topic change, a visual transition, an energy shift. A swoosh on a directional wipe makes the movement feel physical. A thud on a moment of emphasis makes the statement land harder. Silence on a hard cut between two sentences of the same thought lets the speech flow uninterrupted. The goal is a video that has sonic design as a whole — not a video where every cut has a sound bolted onto it.
 
 The frame is active.
 Static, locked-off framing for an entire video is the single most common marker of unedited content. On TikTok and Reels, the frame is almost always doing something — moving toward or away from the subject, alternating between framing sizes to simulate camera angles, shifting at cut points. These movements are often subtle. The viewer doesn't consciously notice them. But they create the feeling that someone shaped this footage with intention, and their absence creates the opposite feeling.
@@ -2008,9 +2001,6 @@ Global parameters:
   vibrance — true/false. Auto-calibrated. Boosts under-saturated colors, protects skin tones.
     true, false
 
-  teal_orange — cinematic shadow/highlight color split:
-    none, subtle, strong
-
   caption_style — word-by-word captions synced to speech:
     none — no captions
     standard — clean white text
@@ -2037,8 +2027,7 @@ Global parameters:
     fade_white — 1s fade to white
     Note: on TikTok/Reels, videos auto-loop. fade_black means a flash of black before the first frame reappears.
 
-  background_music — track filename from the library below, or "none":
-  {music_library_block}
+  background_music — always "none". Creators select their own audio and trending sounds when posting to TikTok and Instagram. The edit should not include background music.
 
   aspect_ratio — always "9:16"
 
@@ -2075,8 +2064,6 @@ Highlight rolloff: Auto-calibrated. Prevents blown-out whites, preserves detail 
 
 Vibrance: Auto-calibrated. Boosts under-saturated colors while protecting skin tones and already-vivid colors.
 
-Teal-orange: Shadows→teal, highlights→warm orange. subtle adds depth naturally. strong is a defining stylistic statement.
-
 Cinematic bars: 2.35:1 letterbox on 9:16. Bars composite on top of all elements including captions and text overlays.
 
 Captions: Word-by-word burn-in synced to Deepgram timestamps.
@@ -2109,7 +2096,7 @@ First, write your creative vision for this edit in a <vision> block. This is whe
 - What the viewer experiences in the first 2 seconds and why that stops the scroll
 - How the visual rhythm works across the whole video — where the frame moves, where it's still, and why
 - Where the energy shifts and how you mark those shifts
-- What the sonic landscape is — where there's music, where there's silence, where sounds punctuate
+- What the sonic landscape is — where speech carries cleanly, where silence is right, and where sounds punctuate
 - What moments deserve text overlays and what those overlays accomplish
 - Whether b-roll would strengthen any moments and where
 - What the overall color and production feel is
@@ -2121,7 +2108,7 @@ Then output the JSON recipe:
 {{
   "notes": "<50 words max. Key decisions only, no justification>",
   "color_intent": "<intent>",
-  "background_music": "<track_filename or none>",
+  "background_music": "none",
   "caption_style": "<style>",
   "caption_position": "<position>",
   "caption_keywords": [],
@@ -2138,7 +2125,6 @@ Then output the JSON recipe:
   "shadow_lift": <true|false>,
   "highlight_rolloff": <true|false>,
   "vibrance": <true|false>,
-  "teal_orange": "<level>",
   "text_overlays": [
     {{ "text": "<text>", "position": "<position>", "appear_at_clip": <clip number>, "style": "<style>", "sfx_style": "<sfx>" }}
   ],
@@ -2369,9 +2355,7 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames, trend
     edit_plan.setdefault("highlight_rolloff", False)
     edit_plan.setdefault("vibrance", False)
     edit_plan.setdefault("teal_orange", "none")
-    # Validate background_music against known library — fall back to none if unknown
-    raw_music = str(edit_plan.get("background_music") or "none").strip()
-    edit_plan["background_music"] = raw_music if raw_music in MUSIC_LIBRARY else "none"
+    edit_plan["background_music"] = "none"
     # Auto-enable ducking when background music is present — this is always correct behavior
     if edit_plan.get("background_music") and edit_plan["background_music"] != "none":
         edit_plan["audio_ducking"] = True
@@ -2389,7 +2373,6 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames, trend
             edit_plan[bool_field] = bool(v)
 
     valid_grain      = {"none", "subtle", "medium", "heavy"}
-    valid_teal       = {"none", "subtle", "strong"}
     valid_vignette   = {"none", "light", "medium", "strong"}
     valid_transitions = {
         "none","fade","fadeblack","fadewhite","dissolve",
@@ -2399,8 +2382,7 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames, trend
     }
     if edit_plan.get("grain") not in valid_grain:
         edit_plan["grain"] = "none"
-    if edit_plan.get("teal_orange") not in valid_teal:
-        edit_plan["teal_orange"] = "none"
+    edit_plan["teal_orange"] = "none"
     if edit_plan.get("vignette") not in valid_vignette:
         edit_plan["vignette"] = "none"
 
@@ -2408,6 +2390,10 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames, trend
     for clip_entry in validated_cuts:
         transition = str(clip_entry.get("transition_out") or "").lower()
         transition_out = transition if transition in valid_transitions else "none"
+        transition_sound = str(clip_entry.get("transition_sound") or "none").lower()
+        if transition_out == "none" and transition_sound != "none":
+            print(f"[generate-edit] Stripping transition_sound={transition_sound} from hard cut (no visual transition)", flush=True)
+            transition_sound = "none"
         speed = max(0.25, min(4.0, float(clip_entry.get("speed") or 1.0)))
         valid_ramps = {"none","hero_time","bullet","flash_in","flash_out","montage"}
         speed_ramp = str(clip_entry.get("speed_ramp") or "none").lower()
@@ -2417,7 +2403,7 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames, trend
             "source_start":           clip_entry["source_start"],
             "source_end":             clip_entry["source_end"],
             "transition_out":         transition_out,
-            "transition_sound":       clip_entry.get("transition_sound") or "none",
+            "transition_sound":       transition_sound,
             "sfx_style":              clip_entry.get("sfx_style") or "none",
             "zoom":                   clip_entry.get("zoom") or "none",
             "cut_zoom":               bool(clip_entry.get("cut_zoom")),
@@ -3570,10 +3556,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             input_args += ["-stream_loop", "-1", "-i", music_path]
             total_duration = sum(effective_durations)
             fade_out_start = max(0, total_duration - 2.0)
-            music_vol = 0.10 if any(
-                str(cut.get("speed") or 1.0) != "1.0" or cut.get("zoom") != "none"
-                for cut in cuts
-            ) else 0.10
+            music_vol = 0.05
             music_filters.append(
                 f"[{music_input_idx}:a]"
                 f"atrim=duration={total_duration:.3f},"
