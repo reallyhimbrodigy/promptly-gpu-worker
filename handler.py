@@ -1444,7 +1444,6 @@ Per-clip (copy source_start/source_end exactly from the clip list above):
   cut_zoom — true/false
   speed — 0.5, 0.75, 1.0, 1.05, 1.1, 1.15, 1.25, 1.5, 2.0
   speed_ramp — none, hero_time, bullet, flash_in, flash_out, montage
-  freeze_frame — true/false. Holds last frame 0.3s before the transition fires. The motion stops, the image hangs, then the cut happens.
 Global:
   color_intent — {intents}
   vignette — none, light, medium, strong
@@ -1496,7 +1495,7 @@ Respond with ONLY this JSON:
   ],
   "broll": [],
   "cuts": [
-    {{ "source_start": <locked>, "source_end": <locked>, "transition_out": "<t>", "transition_sound": "<s>", "sfx_style": "<sfx>", "zoom": "<zoom>", "cut_zoom": false, "speed": <n>, "speed_ramp": "<ramp>", "freeze_frame": <true|false> }}
+    {{ "source_start": <locked>, "source_end": <locked>, "transition_out": "<t>", "transition_sound": "<s>", "sfx_style": "<sfx>", "zoom": "<zoom>", "cut_zoom": false, "speed": <n>, "speed_ramp": "<ramp>" }}
   ]
 }}
 
@@ -1981,9 +1980,6 @@ Each clip in your recipe has these parameters:
     flash_out — normal speed, accelerates hard at the end
     montage — alternating fast/slow bursts
 
-  freeze_frame — holds the last frame of the clip as a still for 0.3s before the transition:
-    true / false
-
 Global parameters:
   color_intent — sets the overall color character of the video.
     {intents}
@@ -2150,7 +2146,7 @@ Then output the JSON recipe:
     {{ "keyword": "<search term>", "timestamp": <seconds>, "duration": <seconds> }}
   ],
   "cuts": [
-    {{ "source_start": <n>, "source_end": <n>, "transition_out": "<transition>", "transition_sound": "<sound>", "sfx_style": "<sfx>", "zoom": "<zoom>", "cut_zoom": <true|false>, "speed": <n>, "speed_ramp": "<ramp>", "freeze_frame": <true|false> }}
+    {{ "source_start": <n>, "source_end": <n>, "transition_out": "<transition>", "transition_sound": "<sound>", "sfx_style": "<sfx>", "zoom": "<zoom>", "cut_zoom": <true|false>, "speed": <n>, "speed_ramp": "<ramp>" }}
   ]
 }}
 """
@@ -2298,6 +2294,7 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames, trend
     if not raw_cuts:
         raise ValueError("Claude response missing cuts array")
     for clip in raw_cuts:
+        clip["freeze_frame"] = False
         clip["motion_blur_transition"] = False
 
     video_duration = float(analysis.get("duration") or 0)
@@ -2416,8 +2413,6 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames, trend
         speed_ramp = str(clip_entry.get("speed_ramp") or "none").lower()
         if speed_ramp not in valid_ramps:
             speed_ramp = "none"
-        freeze_raw = clip_entry.get("freeze_frame")
-        freeze_frame = freeze_raw.strip().lower() in ("true","1","yes") if isinstance(freeze_raw, str) else bool(freeze_raw)
         final_cuts.append({
             "source_start":           clip_entry["source_start"],
             "source_end":             clip_entry["source_end"],
@@ -2428,7 +2423,7 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames, trend
             "cut_zoom":               bool(clip_entry.get("cut_zoom")),
             "speed":                  speed,
             "speed_ramp":             speed_ramp,
-            "freeze_frame":           freeze_frame,
+            "freeze_frame":           False,
             "motion_blur_transition": False,
             "speed_segments":         [],
         })
