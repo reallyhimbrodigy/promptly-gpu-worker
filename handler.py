@@ -2041,12 +2041,37 @@ Text overlays:
     swoosh — a fast air movement. The sound of something moving quickly past. Fits moments of speed, transition between topics, or energy shifts where something changes direction or pace.
   Note: if this video has burned-in captions (check the frame layout section), the viewer is already reading text on screen throughout the entire video. Adding many text overlays on top of burned-in captions creates visual clutter — two competing text tracks with different fonts that looks unprofessional. On burned-in caption footage, use text overlays sparingly — at most 1-2 on the highest-impact moments only (a reveal, a CTA, a key number). Do not add text overlays that simply reinforce what the captions already show.
 
-B-roll — stock footage clips overlaid on the main video to visually illustrate what the speaker is talking about:
-  keyword — search term for Pexels stock video API. Be extremely specific and visual. Pexels works best with concrete, filmable scenes — not abstract concepts. Good: "person typing on laptop coffee shop", "storefront small business owner". Bad: "small business social media phone", "ai content creation laptop", "marketing strategy". If you cannot think of a concrete visual scene that Pexels would have footage of, do not add b-roll for that moment — a bad b-roll clip is worse than no b-roll.
-  timestamp — when in the source video the concept is mentioned (seconds)
-  duration — how long the overlay is visible (2-4 seconds is typical)
+B-roll — stock footage clips overlaid briefly on the main video. Good b-roll is the single strongest signal that a video was professionally edited. Bad b-roll — generic, boring, or mismatched stock footage — makes the video look cheaper than no b-roll at all.
 
-  The b-roll keyword candidates in the reference data below are moments in the transcript where visual illustration would strengthen the video. For talking head content, b-roll is one of the strongest signals of production quality — it tells the viewer this was edited with intention, not just uploaded raw.
+How Pexels stock video search works: Pexels returns short aesthetic clips. The best results come from keywords that describe a VISUAL ACTION or CLOSE-UP DETAIL — not a concept or a person's role. The footage needs to look good as a 3-second cutaway on a phone screen.
+
+Keywords that return good footage:
+  "hands scrolling phone social media" — tight close-up of fingers on a screen
+  "typing laptop keyboard close up" — dynamic detail shot
+  "instagram feed scrolling" — screen content that reads as social media
+  "person filming with ring light" — action shot of content creation
+  "coffee shop laptop aesthetic" — visually warm, lifestyle feel
+  "neon sign store window" — texture shot for business/retail context
+  "money cash register transaction" — action shot for sales/revenue context
+  "phone notification screen" — tight detail for social media context
+
+Keywords that return bad footage:
+  "small business owner working at desk" — boring wide shot of someone sitting
+  "person using social media" — generic, could be anything
+  "ai content creation laptop" — too abstract, Pexels doesn't know what this looks like
+  "marketing strategy" — a concept, not a visual
+  "entrepreneur" — returns generic corporate headshots
+
+Rules for b-roll keywords:
+  - Always include a PHYSICAL DETAIL or ACTION: "hands", "close up", "scrolling", "typing", "filming"
+  - Prefer close-ups over wide shots — they look better at 3 seconds on a phone
+  - Prefer movement over static scenes — action reads faster
+  - Never use abstract concepts as keywords — "strategy", "algorithm", "value", "engagement" return nothing useful
+  - If you cannot think of a visually compelling close-up or action shot, do not add b-roll for that moment
+
+  keyword — search term for Pexels (follow the rules above)
+  timestamp — when in the source video to place the b-roll (seconds). Do NOT place b-roll in the first 2 seconds — the hook needs the speaker's face visible. Place b-roll on moments 3+ seconds in where a visual break strengthens the content.
+  duration — how long the overlay is visible (2-3 seconds. Never longer than 3 seconds — b-roll should be a quick visual break, not a replacement for the speaker.)
 
 === HOW THESE TOOLS LOOK AND SOUND ===
 
