@@ -12,7 +12,7 @@ import math
 import concurrent.futures
 from datetime import datetime
 
-HANDLER_VERSION = "2.8.0"
+HANDLER_VERSION = "2.9.0"
 
 print(f"[startup] Python {sys.version}", flush=True)
 print(f"[startup] handler version: {HANDLER_VERSION}", flush=True)
@@ -1959,12 +1959,12 @@ Each clip in your recipe has these parameters:
     slow_out — gradually zooms out from tight to wide
     punch_in — quick zoom in at the start of the clip
     punch_out — quick zoom out at the start of the clip
-    Note: zoom scales and crops the frame to 1080x1920. Edges get cut off. On footage with burned-in text or graphics near the edges, the crop may cut into that content.
+    Note: zoom scales and crops the frame to 1080x1920. Edges get cut off. If this video has burned-in captions or text overlays baked into the frames (check the frame layout section), set zoom=none on all clips — zoom will crop into the burned-in text and make it illegible.
 
   cut_zoom — simulates a multi-camera shoot from a single take:
     true — alternates between normal and slightly zoomed-in framing at sentence boundaries
     false — single continuous framing for the whole clip
-    Note: do not use cut_zoom=true and a zoom value on the same clip — they produce competing framing changes.
+    Note: do not use cut_zoom=true and a zoom value on the same clip — they produce competing framing changes. If this video has burned-in captions, cut_zoom is safe (it stays within the frame bounds) but zoom is not.
 
   speed — playback speed multiplier. Audio pitch is preserved.
     0.5, 0.75, 1.0, 1.05, 1.1, 1.15, 1.25, 1.5, 2.0
@@ -2048,9 +2048,10 @@ Text overlays:
   appear_at_clip — which clip number the text appears on
   style — title (72px), callout (56px), or cta (64px)
   sfx_style — none, pop, ding, typing, ching, reverb_hit, shutter
+  Note: if this video has burned-in captions (check the frame layout section), the viewer is already reading text on screen throughout the entire video. Adding many text overlays on top of burned-in captions creates visual clutter — two competing text tracks with different fonts that looks unprofessional. On burned-in caption footage, use text overlays sparingly — at most 1-2 on the highest-impact moments only (a reveal, a CTA, a key number). Do not add text overlays that simply reinforce what the captions already show.
 
 B-roll — stock footage clips overlaid on the main video to visually illustrate what the speaker is talking about:
-  keyword — search term for Pexels stock video API (use specific, visual terms: "coffee shop storefront" not "business")
+  keyword — search term for Pexels stock video API. Be extremely specific and visual. Pexels works best with concrete, filmable scenes — not abstract concepts. Good: "person typing on laptop coffee shop", "storefront small business owner". Bad: "small business social media phone", "ai content creation laptop", "marketing strategy". If you cannot think of a concrete visual scene that Pexels would have footage of, do not add b-roll for that moment — a bad b-roll clip is worse than no b-roll.
   timestamp — when in the source video the concept is mentioned (seconds)
   duration — how long the overlay is visible (2-4 seconds is typical)
 
@@ -2285,6 +2286,9 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames, trend
     print(f"[generate-edit] RAW RESPONSE:\n{response_text}\n[generate-edit] END RESPONSE", flush=True)
 
     edit_plan = extract_json(response_text)
+    has_burned_captions = bool(
+        ((analysis.get("frame_layout") or {}).get("existing_overlays") or {}).get("has_burned_captions")
+    )
 
     raw_cuts = edit_plan.get("cuts") or edit_plan.get("clips") or []
     if not raw_cuts:
@@ -2339,6 +2343,13 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames, trend
             raise ValueError(f"Cut {i}: not in chronological order")
         validated_cuts.append({**cut, "source_start": src_start, "source_end": src_end, "clip": i+1})
 
+    # Override zoom on footage with burned-in captions
+    if has_burned_captions:
+        for clip in validated_cuts:
+            if clip.get("zoom") and clip["zoom"] != "none":
+                print(f"[generate-edit] Overriding zoom={clip['zoom']} to none (burned-in captions detected)", flush=True)
+                clip["zoom"] = "none"
+
     edit_plan.setdefault("background_music", "none")
     edit_plan.setdefault("caption_style", "none")
     edit_plan.setdefault("caption_position", "lower-third")
@@ -2391,6 +2402,13 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames, trend
         edit_plan["teal_orange"] = "none"
     if edit_plan.get("vignette") not in valid_vignette:
         edit_plan["vignette"] = "none"
+
+    if has_burned_captions:
+        for overlay in (edit_plan.get("text_overlays") or []):
+            pos = str(overlay.get("position") or "center").strip().lower()
+            if pos != "center":
+                print(f"[generate-edit] Repositioning text overlay from {pos} to center (burned-in captions detected)", flush=True)
+                overlay["position"] = "center"
 
     final_cuts = []
     for clip_entry in validated_cuts:
