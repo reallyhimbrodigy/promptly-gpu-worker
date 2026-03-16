@@ -1447,9 +1447,7 @@ Per-clip (copy source_start/source_end exactly from the clip list above):
 Global:
   color_intent — {intents}
   vignette — none, light, medium, strong
-  sharpening — true/false
   grain — none, subtle, medium, heavy
-  denoise — true/false
   cinematic_bars — true/false
   shadow_lift — true/false
   highlight_rolloff — true/false
@@ -1476,9 +1474,7 @@ Respond with ONLY this JSON:
   "outro": "<outro>",
   "aspect_ratio": "9:16",
   "vignette": "<level>",
-  "sharpening": <true|false>,
   "grain": "<level>",
-  "denoise": <true|false>,
   "cinematic_bars": <true|false>,
   "shadow_lift": <true|false>,
   "highlight_rolloff": <true|false>,
@@ -1980,14 +1976,8 @@ Global parameters:
   vignette — darkens the edges of the frame, drawing the eye toward the center:
     none, light, medium, strong
 
-  sharpening — true/false. Auto-calibrated to source sharpness.
-    true, false
-
   grain — film grain texture:
     none, subtle, medium, heavy
-
-  denoise — true/false. Auto-calibrated to source noise level.
-    true, false
 
   cinematic_bars — 2.35:1 letterbox on 9:16 frame:
     true, false
@@ -2061,11 +2051,7 @@ Color grade: color_intent is your only color decision. The pipeline combines you
 
 Vignette: Cosine-curve radial edge darkening. light, medium, strong control the falloff angle.
 
-Sharpening: Auto-calibrated to Gemini's observed source sharpness (soft→1.2, normal→0.6, sharp→0.3 luma strength).
-
 Grain: Animated temporal luma noise. subtle=4, medium=9, heavy=16. Living texture, not a static overlay.
-
-Denoise: Auto-calibrated to Gemini's observed noise level. Cleans the base before color grading.
 
 Shadow lift: Auto-calibrated. Raises the black point so shadows glow softly instead of crushing to pure black.
 
@@ -2127,9 +2113,7 @@ Then output the JSON recipe:
   "outro": "<outro>",
   "aspect_ratio": "9:16",
   "vignette": "<level>",
-  "sharpening": <true|false>,
   "grain": "<level>",
-  "denoise": <true|false>,
   "cinematic_bars": <true|false>,
   "shadow_lift": <true|false>,
   "highlight_rolloff": <true|false>,
@@ -2356,9 +2340,9 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames, trend
     edit_plan.setdefault("text_overlays", [])
     edit_plan.setdefault("vignette", "none")
     edit_plan.setdefault("broll", [])
-    edit_plan.setdefault("sharpening", False)
+    edit_plan.setdefault("sharpening", True)
     edit_plan.setdefault("grain", "none")
-    edit_plan.setdefault("denoise", False)
+    edit_plan.setdefault("denoise", True)
     edit_plan.setdefault("cinematic_bars", False)
     edit_plan.setdefault("shadow_lift", False)
     edit_plan.setdefault("highlight_rolloff", False)
@@ -2380,6 +2364,8 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames, trend
             edit_plan[bool_field] = v.strip().lower() in ("true", "1", "yes")
         else:
             edit_plan[bool_field] = bool(v)
+    edit_plan["sharpening"] = True
+    edit_plan["denoise"] = True
 
     valid_grain      = {"none", "subtle", "medium", "heavy"}
     valid_vignette   = {"none", "light", "medium", "strong"}
@@ -2893,11 +2879,11 @@ def build_video_filter_chain(color_grade, source_res, edit_plan=None):
     if ep.get("denoise"):
         noise = fq.get("noise_level", "low")
         denoise_params = {
-            "none":   "1:1:2:2",
-            "low":    "2:2:3:3",
-            "medium": "3:3:5:5",
-            "high":   "5:5:8:8",
-        }.get(noise, "2:2:3:3")
+            "none":   "1.5:1.5:2:2",
+            "low":    "2.5:2.5:4:4",
+            "medium": "4:4:6:6",
+            "high":   "6:6:9:9",
+        }.get(noise, "2.5:2.5:4:4")
         filters.append(f"hqdn3d={denoise_params}")
         print(f"[render] denoise: noise_level={noise} → hqdn3d={denoise_params}", flush=True)
 
@@ -2921,11 +2907,11 @@ def build_video_filter_chain(color_grade, source_res, edit_plan=None):
     if ep.get("shadow_lift"):
         shadow_cond = fq.get("shadow_condition", "normal")
         lift_curves = {
-            "crushed": "curves=r='0/0.09 1/1':g='0/0.09 1/1':b='0/0.09 1/1'",
-            "deep":    "curves=r='0/0.05 1/1':g='0/0.05 1/1':b='0/0.05 1/1'",
-            "normal":  "curves=r='0/0.04 1/1':g='0/0.04 1/1':b='0/0.04 1/1'",
+            "crushed": "curves=r='0/0.10 1/1':g='0/0.10 1/1':b='0/0.10 1/1'",
+            "deep":    "curves=r='0/0.07 1/1':g='0/0.07 1/1':b='0/0.07 1/1'",
+            "normal":  "curves=r='0/0.05 1/1':g='0/0.05 1/1':b='0/0.05 1/1'",
             "lifted":  "curves=r='0/0.02 1/1':g='0/0.02 1/1':b='0/0.02 1/1'",
-        }.get(shadow_cond, "curves=r='0/0.04 1/1':g='0/0.04 1/1':b='0/0.04 1/1'")
+        }.get(shadow_cond, "curves=r='0/0.05 1/1':g='0/0.05 1/1':b='0/0.05 1/1'")
         filters.append(lift_curves)
         print(f"[render] shadow_lift: shadow_condition={shadow_cond} → lift applied", flush=True)
 
@@ -2943,27 +2929,21 @@ def build_video_filter_chain(color_grade, source_res, edit_plan=None):
     if ep.get("vibrance"):
         richness = fq.get("color_richness", "normal")
         vibrance_hue = {
-            "flat":   "hue=s=1.35",
-            "muted":  "hue=s=1.22",
-            "normal": "hue=s=1.12",
-            "vivid":  "hue=s=1.06",
-        }.get(richness, "hue=s=1.12")
+            "flat":   "hue=s=1.40",
+            "muted":  "hue=s=1.28",
+            "normal": "hue=s=1.18",
+            "vivid":  "hue=s=1.08",
+        }.get(richness, "hue=s=1.18")
         filters.append(vibrance_hue)
         print(f"[render] vibrance: color_richness={richness} → {vibrance_hue}", flush=True)
-
-    teal_orange = str(ep.get("teal_orange") or "none").lower()
-    if teal_orange == "subtle":
-        filters.append("colorbalance=rs=-0.08:gs=0.04:bs=0.10:rm=0.04:gm=0:bm=-0.04:rh=0.05:gh=0.01:bh=-0.05")
-    elif teal_orange == "strong":
-        filters.append("colorbalance=rs=-0.16:gs=0.06:bs=0.18:rm=0.07:gm=0:bm=-0.07:rh=0.09:gh=0.02:bh=-0.09")
 
     if ep.get("sharpening"):
         src_sharp = fq.get("source_sharpness", "normal")
         unsharp_params = {
-            "soft":   "unsharp=7:7:1.2:5:5:0.0",
-            "normal": "unsharp=5:5:0.6:3:3:0.0",
-            "sharp":  "unsharp=3:3:0.3:3:3:0.0",
-        }.get(src_sharp, "unsharp=5:5:0.6:3:3:0.0")
+            "soft":   "unsharp=7:7:1.5:5:5:0.0",
+            "normal": "unsharp=5:5:1.0:3:3:0.0",
+            "sharp":  "unsharp=3:3:0.4:3:3:0.0",
+        }.get(src_sharp, "unsharp=5:5:1.0:3:3:0.0")
         filters.append(unsharp_params)
         print(f"[render] sharpening: source_sharpness={src_sharp} → {unsharp_params}", flush=True)
 
