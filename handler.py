@@ -2036,7 +2036,16 @@ Text overlays:
   position — top, center, or bottom
   appear_at_clip — which clip number the text appears on
   style — title (72px), callout (56px), or cta (64px)
-  sfx_style — none, pop, ding, typing, ching, reverb_hit, shutter
+  sfx_style — a short sound accent that plays at this moment in the video. Sound effects punctuate moments — they make something the viewer sees or hears land harder. A sound effect should feel like it belongs to the moment. If a viewer would wonder "why did that sound play?", it's wrong.
+    none — no sound. Most moments don't need one. Use this by default unless a specific sound clearly fits.
+    pop — a quick, bright snap. The sound of something appearing or arriving. Fits moments of surprise, a reveal, something new entering the frame or the conversation.
+    thud — a short, heavy impact. The sound of something landing with weight. Fits bold statements, confrontational moments, a hard truth dropping, emphasis on something serious.
+    ding — a notification bell. The sound of an alert arriving. Fits moments referencing notifications, messages, social media, tips, or new information — anything that would naturally trigger a notification sound in real life.
+    typing — rapid keyboard clicks. The sound of someone working on a computer. Fits moments showing or referencing screens, apps, software, websites, typing, coding, or digital tools. Should feel like the viewer is watching someone use technology.
+    ching — a cash register ring. The sound of a transaction. Fits moments about money, cost, free offers, pricing, savings, revenue, deals — any moment where the concept of money or value exchange is front and center.
+    shutter — a camera shutter click. The sound of capturing a photo. Fits moments showing or referencing photos, screenshots, capturing content, taking pictures, or visual documentation.
+    reverb_hit — a deep boom with echo. The sound of something dramatic landing. Fits major reveals, turning points, before-and-after moments, or any moment that deserves cinematic weight and a brief pause for impact.
+    swoosh — a fast air movement. The sound of something moving quickly past. Fits moments of speed, transition between topics, or energy shifts where something changes direction or pace.
   Note: if this video has burned-in captions (check the frame layout section), the viewer is already reading text on screen throughout the entire video. Adding many text overlays on top of burned-in captions creates visual clutter — two competing text tracks with different fonts that looks unprofessional. On burned-in caption footage, use text overlays sparingly — at most 1-2 on the highest-impact moments only (a reveal, a CTA, a key number). Do not add text overlays that simply reinforce what the captions already show.
 
 B-roll — stock footage clips overlaid on the main video to visually illustrate what the speaker is talking about:
