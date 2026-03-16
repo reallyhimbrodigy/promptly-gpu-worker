@@ -33,7 +33,11 @@ supabase = None
 try:
     from supabase import create_client
     supabase_url = os.environ.get("SUPABASE_URL")
-    supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_KEY")
+    supabase_key = (
+        os.environ.get("SUPABASE_SERVICE_KEY")
+        or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        or os.environ.get("SUPABASE_KEY")
+    )
     if supabase_url and supabase_key:
         supabase = create_client(supabase_url, supabase_key)
         print("[startup] supabase OK", flush=True)

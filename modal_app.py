@@ -27,6 +27,7 @@ image = (
         "anthropic",
         "google-generativeai",
         "deepgram-sdk==3.4.0",
+        "supabase",
         "httpx",
         "fastapi",
         "pydantic",
