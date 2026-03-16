@@ -12,7 +12,7 @@ import math
 import concurrent.futures
 from datetime import datetime
 
-HANDLER_VERSION = "2.7.0"
+HANDLER_VERSION = "2.8.0"
 
 print(f"[startup] Python {sys.version}", flush=True)
 print(f"[startup] handler version: {HANDLER_VERSION}", flush=True)
@@ -1441,8 +1441,6 @@ Per-clip (copy source_start/source_end exactly from the clip list above):
   speed — 0.5, 0.75, 1.0, 1.05, 1.1, 1.15, 1.25, 1.5, 2.0
   speed_ramp — none, hero_time, bullet, flash_in, flash_out, montage
   freeze_frame — true/false. Holds last frame 0.3s before the transition fires. The motion stops, the image hangs, then the cut happens.
-  motion_blur_transition — true/false. Adds directional motion blur to the outgoing frames at the moment of the cut. Makes the transition feel physically motivated rather than editorial.
-
 Global:
   color_intent — {intents}
   vignette — none, light, medium, strong
@@ -1494,7 +1492,7 @@ Respond with ONLY this JSON:
   ],
   "broll": [],
   "cuts": [
-    {{ "source_start": <locked>, "source_end": <locked>, "transition_out": "<t>", "transition_sound": "<s>", "sfx_style": "<sfx>", "zoom": "<zoom>", "cut_zoom": false, "speed": <n>, "speed_ramp": "<ramp>", "freeze_frame": <true|false>, "motion_blur_transition": <true|false> }}
+    {{ "source_start": <locked>, "source_end": <locked>, "transition_out": "<t>", "transition_sound": "<s>", "sfx_style": "<sfx>", "zoom": "<zoom>", "cut_zoom": false, "speed": <n>, "speed_ramp": "<ramp>", "freeze_frame": <true|false> }}
   ]
 }}
 
@@ -1982,9 +1980,6 @@ Each clip in your recipe has these parameters:
   freeze_frame — holds the last frame of the clip as a still for 0.3s before the transition:
     true / false
 
-  motion_blur_transition — directional motion blur on the outgoing frames at the cut point:
-    true / false
-
 Global parameters:
   color_intent — sets the overall color character of the video.
     {intents}
@@ -2150,7 +2145,7 @@ Then output the JSON recipe:
     {{ "keyword": "<search term>", "timestamp": <seconds>, "duration": <seconds> }}
   ],
   "cuts": [
-    {{ "source_start": <n>, "source_end": <n>, "transition_out": "<transition>", "transition_sound": "<sound>", "sfx_style": "<sfx>", "zoom": "<zoom>", "cut_zoom": <true|false>, "speed": <n>, "speed_ramp": "<ramp>", "freeze_frame": <true|false>, "motion_blur_transition": <true|false> }}
+    {{ "source_start": <n>, "source_end": <n>, "transition_out": "<transition>", "transition_sound": "<sound>", "sfx_style": "<sfx>", "zoom": "<zoom>", "cut_zoom": <true|false>, "speed": <n>, "speed_ramp": "<ramp>", "freeze_frame": <true|false> }}
   ]
 }}
 """
@@ -2294,6 +2289,8 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames, trend
     raw_cuts = edit_plan.get("cuts") or edit_plan.get("clips") or []
     if not raw_cuts:
         raise ValueError("Claude response missing cuts array")
+    for clip in raw_cuts:
+        clip["motion_blur_transition"] = False
 
     video_duration = float(analysis.get("duration") or 0)
 
@@ -2406,8 +2403,6 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames, trend
             speed_ramp = "none"
         freeze_raw = clip_entry.get("freeze_frame")
         freeze_frame = freeze_raw.strip().lower() in ("true","1","yes") if isinstance(freeze_raw, str) else bool(freeze_raw)
-        mb_raw = clip_entry.get("motion_blur_transition")
-        motion_blur_transition = mb_raw.strip().lower() in ("true","1","yes") if isinstance(mb_raw, str) else bool(mb_raw)
         final_cuts.append({
             "source_start":           clip_entry["source_start"],
             "source_end":             clip_entry["source_end"],
@@ -2419,7 +2414,7 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames, trend
             "speed":                  speed,
             "speed_ramp":             speed_ramp,
             "freeze_frame":           freeze_frame,
-            "motion_blur_transition": motion_blur_transition,
+            "motion_blur_transition": False,
             "speed_segments":         [],
         })
 
@@ -3313,7 +3308,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             v_chain.append(f"tpad=stop={freeze_frames}:stop_mode=clone")
             print(f"[render] clip {i}: freeze_frame=true (+{freeze_frames} frames @ end)", flush=True)
 
-        motion_blur_transition = bool(cut.get("motion_blur_transition"))
+        motion_blur_transition = False
+        # motion_blur_transition disabled — degrades output quality
         if motion_blur_transition and i < n-1:
             v_chain.append(f"boxblur=luma_radius=6:luma_power=1:chroma_radius=0:chroma_power=0")
             print(f"[render] clip {i}: motion_blur_transition=true", flush=True)
@@ -3564,10 +3560,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             input_args += ["-stream_loop", "-1", "-i", music_path]
             total_duration = sum(effective_durations)
             fade_out_start = max(0, total_duration - 2.0)
-            music_vol = 0.18 if any(
+            music_vol = 0.10 if any(
                 str(cut.get("speed") or 1.0) != "1.0" or cut.get("zoom") != "none"
                 for cut in cuts
-            ) else 0.22
+            ) else 0.10
             music_filters.append(
                 f"[{music_input_idx}:a]"
                 f"atrim=duration={total_duration:.3f},"
