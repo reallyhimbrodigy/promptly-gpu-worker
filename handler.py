@@ -2165,7 +2165,7 @@ Then output the JSON recipe:
   "beat_sync": <true|false>,
   "outro": "<outro>",
   "aspect_ratio": "9:16",
-  "speed_curve": [{"t": <seconds>, "speed": <number>}] or "none",
+  "speed_curve": [{{"t": <seconds>, "speed": <number>}}] or "none",
   "vignette": "<level>",
   "grain": "<level>",
   "cinematic_bars": <true|false>,
