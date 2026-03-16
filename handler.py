@@ -13,9 +13,11 @@ import concurrent.futures
 from datetime import datetime
 
 HANDLER_VERSION = "3.0.0"
+GEMINI_MODEL = "gemini-3.1-pro-preview"
 
 print(f"[startup] Python {sys.version}", flush=True)
 print(f"[startup] handler version: {HANDLER_VERSION}", flush=True)
+print(f"[startup] Gemini model: {GEMINI_MODEL}", flush=True)
 
 try:
     import google.generativeai as genai
@@ -1349,10 +1351,9 @@ def generate_edit_gemini(video_path, transcript, vibe, scene_cuts, beats, tighte
         raise RuntimeError(f"Gemini file upload failed: {gemini_file.state.name}")
     print(f"[generate-edit] Video active: {gemini_file.uri}", flush=True)
 
-    model_names = ["gemini-2.5-pro-preview-06-05", "gemini-2.5-pro", "gemini-2.5-flash"]
     last_err = None
     response = None
-    for model_name in model_names:
+    for model_name in [GEMINI_MODEL]:
         try:
             print(f"[generate-edit] Calling Gemini model={model_name}...", flush=True)
             t = time.time()
