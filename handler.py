@@ -2407,13 +2407,6 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames, trend
     if edit_plan.get("vignette") not in valid_vignette:
         edit_plan["vignette"] = "none"
 
-    if has_burned_captions:
-        for overlay in (edit_plan.get("text_overlays") or []):
-            pos = str(overlay.get("position") or "center").strip().lower()
-            if pos != "center":
-                print(f"[generate-edit] Repositioning text overlay from {pos} to center (burned-in captions detected)", flush=True)
-                overlay["position"] = "center"
-
     final_cuts = []
     for clip_entry in validated_cuts:
         transition = str(clip_entry.get("transition_out") or "").lower()
