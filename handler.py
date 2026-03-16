@@ -2377,6 +2377,14 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames, trend
             raise ValueError(f"Cut {i}: not in chronological order")
         validated_cuts.append({**cut, "source_start": src_start, "source_end": src_end, "clip": i+1})
 
+    # Fix clip overlaps — clamp each clip's start to >= previous clip's end
+    for i in range(1, len(validated_cuts)):
+        prev_end = validated_cuts[i - 1]["source_end"]
+        curr_start = validated_cuts[i]["source_start"]
+        if curr_start < prev_end:
+            print(f"[generate-edit] Fixing clip {i} overlap: source_start {curr_start} -> {prev_end}", flush=True)
+            validated_cuts[i]["source_start"] = prev_end
+
     # Override zoom on footage with burned-in captions
     if has_burned_captions:
         for clip in validated_cuts:
@@ -2643,22 +2651,25 @@ def fetch_broll_clip(keyword, duration_needed, work_dir):
         if not videos:
             print(f"[broll] No Pexels results for '{keyword}'", flush=True)
             return None
-        chosen_url = None
+        best_video = None
         for video in videos:
-            for vf in (video.get("video_files") or []):
-                w = vf.get("width") or 0
-                h = vf.get("height") or 0
-                dur = float(video.get("duration") or 0)
-                if h >= w and dur >= duration_needed and vf.get("link"):
-                    chosen_url = vf["link"]
-                    break
-            if chosen_url:
+            dur = float(video.get("duration") or 0)
+            if dur >= duration_needed:
+                best_video = video
                 break
-        if not chosen_url:
-            for vf in (videos[0].get("video_files") or []):
-                if vf.get("link"):
-                    chosen_url = vf["link"]
-                    break
+        if not best_video:
+            best_video = videos[0]
+
+        chosen_url = None
+        video_files = best_video.get("video_files") or []
+        portrait_files = [f for f in video_files if (f.get("height") or 0) > (f.get("width") or 0) and f.get("link")]
+        if portrait_files:
+            portrait_files.sort(key=lambda f: f.get("height") or 0, reverse=True)
+            chosen_url = portrait_files[0].get("link")
+        else:
+            video_files = [f for f in video_files if f.get("link")]
+            video_files.sort(key=lambda f: f.get("height") or 0, reverse=True)
+            chosen_url = video_files[0].get("link") if video_files else None
         if not chosen_url:
             print(f"[broll] No usable file for '{keyword}'", flush=True)
             return None
