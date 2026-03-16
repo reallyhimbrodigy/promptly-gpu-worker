@@ -2711,6 +2711,18 @@ def fetch_broll_clip(keyword, duration_needed, work_dir):
         return None
 
 
+def get_video_duration(path):
+    """Get duration of a video file in seconds."""
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-show_entries", "format=duration", "-of", "csv=p=0", path],
+            capture_output=True, text=True, timeout=10,
+        )
+        return float(result.stdout.strip())
+    except Exception:
+        return 0.0
+
+
 def composite_broll(output_path, broll_entries, work_dir):
     """Overlay b-roll clips on the rendered output in a single FFmpeg pass. Overwrites output_path."""
     valid = [e for e in broll_entries if e.get("local_path") and os.path.exists(e["local_path"])]
@@ -2723,8 +2735,26 @@ def composite_broll(output_path, broll_entries, work_dir):
     filter_parts = []
     for i, entry in enumerate(valid):
         idx = i + 1
+        keyword = str(entry.get("keyword") or "broll")
+        needed_duration = float(entry.get("duration") or 2.0)
+        broll_duration = get_video_duration(entry["local_path"])
+        if broll_duration > needed_duration + 1.0:
+            seek_point = broll_duration * 0.35
+            max_seek = broll_duration - needed_duration - 0.5
+            seek_point = min(seek_point, max(0.0, max_seek))
+            print(
+                f"[broll] Trimming '{keyword}': {broll_duration:.1f}s clip, seeking to {seek_point:.1f}s, using {needed_duration}s",
+                flush=True,
+            )
+        else:
+            seek_point = 0.0
+            print(
+                f"[broll] Using '{keyword}' from start ({broll_duration:.1f}s clip, need {needed_duration}s)",
+                flush=True,
+            )
         filter_parts.append(
-            f"[{idx}:v]scale=1080:1920:force_original_aspect_ratio=increase,"
+            f"[{idx}:v]trim=start={seek_point:.3f}:duration={needed_duration:.3f},"
+            f"setpts=PTS-STARTPTS,scale=1080:1920:force_original_aspect_ratio=increase,"
             f"crop=1080:1920,setsar=1[bv{i}]"
         )
     prev = "0:v"
@@ -4044,7 +4074,7 @@ def handler(job):
                     continue
                 local = fetch_broll_clip(kw, dur, work_dir)
                 if local:
-                    broll_entries.append({"local_path": local, "timestamp": ts, "duration": dur})
+                    broll_entries.append({"local_path": local, "keyword": kw, "timestamp": ts, "duration": dur})
             if broll_entries:
                 composite_broll(output_path, broll_entries, work_dir)
             for entry in broll_entries:
