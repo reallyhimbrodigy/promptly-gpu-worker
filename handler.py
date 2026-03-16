@@ -1443,7 +1443,6 @@ Per-clip (copy source_start/source_end exactly from the clip list above):
   zoom — none, slow_in, slow_out, punch_in, punch_out
   cut_zoom — true/false
   speed — 0.5, 0.75, 1.0, 1.05, 1.1, 1.15, 1.25, 1.5, 2.0
-  speed_ramp — none, hero_time, bullet, flash_in, flash_out, montage
 Global:
   color_intent — {intents}
   vignette — none, light, medium, strong
@@ -1452,6 +1451,7 @@ Global:
   shadow_lift — true/false
   highlight_rolloff — true/false
   vibrance — true/false
+  speed_curve — always "none" for music edits. Beat-driven montage timing is already solved by the pre-built clip list.
   outro — none, fade_black, fade_white
   text_overlays — optional. Text graphics displayed on specific clips.
   background_music — always "none". Creators select their own audio and trending sounds when posting to TikTok and Instagram. The edit should not include background music.
@@ -1473,6 +1473,7 @@ Respond with ONLY this JSON:
   "beat_sync": true,
   "outro": "<outro>",
   "aspect_ratio": "9:16",
+  "speed_curve": "none",
   "vignette": "<level>",
   "grain": "<level>",
   "cinematic_bars": <true|false>,
@@ -1484,7 +1485,7 @@ Respond with ONLY this JSON:
   ],
   "broll": [],
   "cuts": [
-    {{ "source_start": <locked>, "source_end": <locked>, "transition_out": "<t>", "transition_sound": "<s>", "sfx_style": "<sfx>", "zoom": "<zoom>", "cut_zoom": false, "speed": <n>, "speed_ramp": "<ramp>" }}
+    {{ "source_start": <locked>, "source_end": <locked>, "transition_out": "<t>", "transition_sound": "<s>", "sfx_style": "<sfx>", "zoom": "<zoom>", "cut_zoom": false, "speed": <n> }}
   ]
 }}
 
@@ -1961,14 +1962,6 @@ Each clip in your recipe has these parameters:
   speed — playback speed multiplier. Audio pitch is preserved.
     0.5, 0.75, 1.0, 1.05, 1.1, 1.15, 1.25, 1.5, 2.0
 
-  speed_ramp — non-linear speed curve within a single clip:
-    none — constant speed
-    hero_time — starts fast, slams into slow motion at the peak
-    bullet — slow-motion intro, then rockets to fast
-    flash_in — instant fast at the start, eases down to normal
-    flash_out — normal speed, accelerates hard at the end
-    montage — alternating fast/slow bursts
-
 Global parameters:
   color_intent — sets the overall color character of the video.
     {intents}
@@ -1993,6 +1986,38 @@ Global parameters:
 
   vibrance — true/false. Auto-calibrated. Boosts under-saturated colors, protects skin tones.
     true, false
+
+  speed_curve — a smooth speed ramp applied across the entire video. The speed gradually transitions between keypoints you define — never jumps. Audio stays in sync.
+
+    Set to "none" for most videos. Use a speed curve when the user asks for speed ramping, or when the content would benefit from dramatic pacing — compressing buildup and stretching punchlines.
+
+    When using a speed curve, provide an array of keypoints. Each keypoint is a timestamp in the OUTPUT timeline (after cuts and per-clip speed are applied) and a target speed. The renderer smoothly interpolates between keypoints so the speed transitions are gradual, not abrupt.
+
+    How to think about the speed curve: watch the transcript. Identify which moments are setup, buildup, filler, or transitions — these should be faster. Identify which moments are the reveal, the punchline, the key statement, the emotional peak — these should be slower. The contrast between fast and slow is what makes speed ramp engaging. The bigger the contrast, the more dramatic the effect.
+
+    Example for a 35-second talking head:
+    [
+      {{"t": 0.0, "speed": 1.0}},
+      {{"t": 3.0, "speed": 1.4}},
+      {{"t": 5.5, "speed": 0.7}},
+      {{"t": 8.0, "speed": 1.3}},
+      {{"t": 15.0, "speed": 1.5}},
+      {{"t": 20.0, "speed": 0.65}},
+      {{"t": 23.0, "speed": 1.2}},
+      {{"t": 30.0, "speed": 0.8}},
+      {{"t": 35.0, "speed": 1.0}}
+    ]
+
+    Speed values: 0.5 to 2.0. Below 0.8 is noticeably slow. Above 1.3 is noticeably fast. The contrast between your fastest and slowest keypoints determines how dramatic the ramp feels.
+
+    IMPORTANT: the timestamps refer to the output video timeline AFTER all clips are assembled, not the source video timestamps. If your clips total 35 seconds of output, your speed curve keypoints should span 0 to ~35.
+
+    When NOT to use speed_curve:
+    - When the user didn't ask for it and the content doesn't call for it
+    - When per-clip speed variation (the speed parameter on each cut) is sufficient
+    - When the content has no clear buildup/payoff structure
+
+    When speed_curve is set, the per-clip speed values still apply first. The speed_curve is then applied on top of the assembled output. So if a clip is at 1.05x and the speed_curve says 1.3x at that moment, the effective speed is approximately 1.05 * 1.3 = 1.365x.
 
   caption_style — word-by-word captions synced to speech:
     none — no captions
@@ -2140,6 +2165,7 @@ Then output the JSON recipe:
   "beat_sync": <true|false>,
   "outro": "<outro>",
   "aspect_ratio": "9:16",
+  "speed_curve": [{"t": <seconds>, "speed": <number>}] or "none",
   "vignette": "<level>",
   "grain": "<level>",
   "cinematic_bars": <true|false>,
@@ -2153,7 +2179,7 @@ Then output the JSON recipe:
     {{ "keyword": "<search term>", "timestamp": <seconds>, "duration": <seconds> }}
   ],
   "cuts": [
-    {{ "source_start": <n>, "source_end": <n>, "transition_out": "<transition>", "transition_sound": "<sound>", "sfx_style": "<sfx>", "zoom": "<zoom>", "cut_zoom": <true|false>, "speed": <n>, "speed_ramp": "<ramp>" }}
+    {{ "source_start": <n>, "source_end": <n>, "transition_out": "<transition>", "transition_sound": "<sound>", "sfx_style": "<sfx>", "zoom": "<zoom>", "cut_zoom": <true|false>, "speed": <n> }}
   ]
 }}
 """
@@ -2377,6 +2403,29 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames, trend
     edit_plan.setdefault("vibrance", False)
     edit_plan.setdefault("teal_orange", "none")
     edit_plan["background_music"] = "none"
+    raw_curve = edit_plan.get("speed_curve", "none")
+    if raw_curve == "none" or raw_curve is None or not isinstance(raw_curve, list):
+        speed_curve = None
+    else:
+        speed_curve = []
+        for kp in raw_curve:
+            if isinstance(kp, dict) and "t" in kp and "speed" in kp:
+                try:
+                    t = max(0.0, float(kp["t"]))
+                    s = max(0.5, min(2.0, float(kp["speed"])))
+                    speed_curve.append({"t": t, "speed": s})
+                except Exception:
+                    continue
+        if len(speed_curve) < 2:
+            speed_curve = None
+        else:
+            speed_curve.sort(key=lambda x: x["t"])
+            print(
+                f"[generate-edit] Speed curve: {len(speed_curve)} keypoints, range "
+                f"{speed_curve[0]['speed']:.2f}x - {max(kp['speed'] for kp in speed_curve):.2f}x",
+                flush=True,
+            )
+    edit_plan["_parsed_speed_curve"] = speed_curve
     # Auto-enable ducking when background music is present — this is always correct behavior
     if edit_plan.get("background_music") and edit_plan["background_music"] != "none":
         edit_plan["audio_ducking"] = True
@@ -2418,10 +2467,6 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames, trend
             print(f"[generate-edit] Stripping transition_sound={transition_sound} from hard cut (no visual transition)", flush=True)
             transition_sound = "none"
         speed = max(0.25, min(4.0, float(clip_entry.get("speed") or 1.0)))
-        valid_ramps = {"none","hero_time","bullet","flash_in","flash_out","montage"}
-        speed_ramp = str(clip_entry.get("speed_ramp") or "none").lower()
-        if speed_ramp not in valid_ramps:
-            speed_ramp = "none"
         final_cuts.append({
             "source_start":           clip_entry["source_start"],
             "source_end":             clip_entry["source_end"],
@@ -2431,7 +2476,7 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames, trend
             "zoom":                   clip_entry.get("zoom") or "none",
             "cut_zoom":               bool(clip_entry.get("cut_zoom")),
             "speed":                  speed,
-            "speed_ramp":             speed_ramp,
+            "speed_ramp":             "none",
             "freeze_frame":           False,
             "motion_blur_transition": False,
             "speed_segments":         [],
@@ -2894,6 +2939,102 @@ def get_atempo_filter(speed):
     return ",".join(parts)
 
 
+def interpolate_speed(speed_curve, t):
+    """Linearly interpolate speed at time t from keypoints."""
+    if not speed_curve:
+        return 1.0
+    if t <= speed_curve[0]["t"]:
+        return speed_curve[0]["speed"]
+    if t >= speed_curve[-1]["t"]:
+        return speed_curve[-1]["speed"]
+    for i in range(len(speed_curve) - 1):
+        t0 = speed_curve[i]["t"]
+        t1 = speed_curve[i + 1]["t"]
+        if t0 <= t <= t1:
+            frac = (t - t0) / (t1 - t0) if t1 != t0 else 0.0
+            s0 = speed_curve[i]["speed"]
+            s1 = speed_curve[i + 1]["speed"]
+            return s0 + (s1 - s0) * frac
+    return 1.0
+
+
+def apply_speed_curve(output_path, speed_curve, work_dir):
+    """
+    Apply a smooth speed curve to the final rendered video.
+    Falls back to the original output if the pass fails.
+    """
+    if not speed_curve or len(speed_curve) < 2:
+        return
+
+    print(f"[speed_curve] Applying speed curve with {len(speed_curve)} keypoints", flush=True)
+    duration = probe_duration(output_path)
+    if not duration or duration <= 0:
+        print("[speed_curve] Could not determine input duration — skipping", flush=True)
+        return
+    print(f"[speed_curve] Input duration: {duration:.2f}s", flush=True)
+
+    segment_duration = 0.5
+    segments = []
+    current_t = 0.0
+    while current_t < duration - 1e-6:
+        seg_end = min(current_t + segment_duration, duration)
+        seg_mid = (current_t + seg_end) / 2.0
+        speed = interpolate_speed(speed_curve, seg_mid)
+        segments.append({
+            "start": current_t,
+            "end": seg_end,
+            "speed": speed,
+        })
+        current_t = seg_end
+
+    if len(segments) < 2:
+        print("[speed_curve] Not enough segments generated — skipping", flush=True)
+        return
+
+    print(f"[speed_curve] Generated {len(segments)} segments", flush=True)
+    temp_output = os.path.join(work_dir, "speed_curved.mp4")
+    filter_parts = []
+    concat_inputs = []
+
+    for i, seg in enumerate(segments):
+        filter_parts.append(
+            f"[0:v]trim=start={seg['start']:.4f}:end={seg['end']:.4f},"
+            f"setpts=PTS-STARTPTS,setpts={1.0/seg['speed']:.6f}*PTS[v{i}]"
+        )
+        atempo_chain = get_atempo_filter(seg["speed"])
+        filter_parts.append(
+            f"[0:a]atrim=start={seg['start']:.4f}:end={seg['end']:.4f},"
+            f"asetpts=PTS-STARTPTS,{atempo_chain}[a{i}]"
+        )
+        concat_inputs.append(f"[v{i}][a{i}]")
+
+    filter_parts.append(
+        f"{''.join(concat_inputs)}concat=n={len(segments)}:v=1:a=1[outv][outa]"
+    )
+    filter_complex = ";".join(filter_parts)
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", output_path,
+        "-filter_complex", filter_complex,
+        "-map", "[outv]", "-map", "[outa]",
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
+        "-c:a", "aac", "-b:a", "128k",
+        "-movflags", "+faststart",
+        temp_output,
+    ]
+
+    print("[speed_curve] Rendering speed curve...", flush=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    if result.returncode != 0:
+        print(f"[speed_curve] FAILED: {result.stderr[-500:]}", flush=True)
+        print("[speed_curve] Falling back to original output (no speed curve)", flush=True)
+        return
+
+    os.replace(temp_output, output_path)
+    new_duration = probe_duration(output_path) or duration
+    print(f"[speed_curve] Complete: {duration:.2f}s → {new_duration:.2f}s", flush=True)
+
+
 def is_hard_cut(transition):
     t = str(transition or "").strip().lower()
     return not t or t in ("none", "clean_cut")
@@ -3284,27 +3425,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
         v_chain = ["settb=AVTB","fps=30"]
 
-        speed_ramp = str(cut.get("speed_ramp") or "none").lower()
-        if speed_ramp != "none" and speed_ramp in {"hero_time","bullet","flash_in","flash_out","montage"}:
-            tf = max(1, total_frames)
-            if speed_ramp == "hero_time":
-                expr = f"if(lt(N\\,{tf//2})\\,PTS*0.5\\,{tf//2}*TB/30+({tf//2}*TB+(N-{tf//2})*TB)*2.5)"
-                v_chain.append(f"setpts='if(lt(N\\,{tf//2})\\,PTS*0.5\\,{tf//4*1.0/30:.6f}+(PTS-{tf//2*1.0/30:.6f})*2.5)'")
-            elif speed_ramp == "bullet":
-                v_chain.append(f"setpts='if(lt(N\\,{tf//3})\\,PTS*2.5\\,{tf//3*2.5/30:.6f}+(PTS-{tf//3*1.0/30:.6f})*0.7)'")
-            elif speed_ramp == "flash_in":
-                v_chain.append(f"setpts='if(lt(N\\,{tf//3})\\,PTS*0.4\\,{tf//3*0.4/30:.6f}+(PTS-{tf//3*1.0/30:.6f})*1.0)'")
-            elif speed_ramp == "flash_out":
-                v_chain.append(f"setpts='if(lt(N\\,{tf*2//3})\\,PTS*1.0\\,{tf*2//3*1.0/30:.6f}+(PTS-{tf*2//3*1.0/30:.6f})*0.4)'")
-            elif speed_ramp == "montage":
-                q = tf // 4
-                v_chain.append(
-                    f"setpts='if(lt(N\\,{q})\\,PTS*0.5"
-                    f"\\,if(lt(N\\,{2*q})\\,{q*0.5/30:.6f}+(PTS-{q*1.0/30:.6f})*2.0"
-                    f"\\,if(lt(N\\,{3*q})\\,{q*0.5/30+q*2.0/30:.6f}+(PTS-{2*q*1.0/30:.6f})*0.5"
-                    f"\\,{q*0.5/30+q*2.0/30+q*0.5/30:.6f}+(PTS-{3*q*1.0/30:.6f})*2.0)))'"
-                )
-            v_chain.append("fps=30")
+        # speed_ramp is deprecated in favor of a whole-video post-render speed_curve pass
 
         if speed != 1.0:
             v_chain.append(f"setpts={1.0/speed:.4f}*PTS")
@@ -3889,6 +4010,10 @@ def handler(job):
                     os.unlink(entry["local_path"])
                 except Exception:
                     pass
+
+        speed_curve = edit_plan.get("_parsed_speed_curve")
+        if speed_curve:
+            apply_speed_curve(output_path, speed_curve, work_dir)
 
         # ── Parallel group 2: cover frame + upload ────────────────────────────────
         cover_frame_ts   = 1.0
