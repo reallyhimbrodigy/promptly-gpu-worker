@@ -1918,18 +1918,12 @@ Each clip in your recipe has these parameters:
 
   CRITICAL RULE: Clips must be strictly chronological. Each clip's source_start must be >= the previous clip's source_end. You cannot go backward in the timeline. You cannot reuse or revisit any segment of the source video that already appeared in an earlier clip. The timeline moves forward only — always. If your recipe violates this, the render will fail.
 
-  transition_out — visual effect between this clip and the next:
-    none — clean hard cut
-    fade — softens into the next clip
-    fadeblack — fades through black between clips
-    fadewhite — fades through white between clips
-    dissolve — both clips briefly visible, layered
-    wipeleft / wiperight / wipeup / wipedown — directional slide transitions
-    smoothleft / smoothright / smoothup / smoothdown — eased directional wipes
-    zoomin — outgoing clip zooms in, incoming clip revealed beneath
-    flash — single frame of white between clips
-    glitch — chromatic aberration and horizontal displacement
-    whip_left / whip_right — directional motion blur smear
+  transition_out — visual transition effect at the END of this clip going into the next clip:
+    none — hard cut. The right choice for 90% of cuts. Use this between clips of the same scene, same speaker, same camera angle. Hard cuts feel sharp, professional, and invisible. When in doubt, use none.
+    whip_right, whip_left — fast directional wipe. ONLY use at a genuine scene change where the visual content changes dramatically (e.g., speaker face -> screen recording, indoor -> outdoor, person A -> person B). Never use between clips of the same speaker.
+    smoothleft, smoothright — smooth directional slide. Same rule as whip — ONLY at genuine scene changes. Never between clips of the same speaker.
+
+    CRITICAL: On talking head videos, almost every cut should be transition_out=none. Transitions between clips of the same person talking create a distracting blur effect that looks like a rendering glitch. Only use transitions when the visual content genuinely changes between clips.
 
   transition_sound — audio that plays during the transition:
     none — silent cut. Natural for hard cuts in continuous speech where the voice carries across the edit.
@@ -2019,6 +2013,14 @@ Global parameters:
 
     When speed_curve is set, the per-clip speed values still apply first. The speed_curve is then applied on top of the assembled output. So if a clip is at 1.05x and the speed_curve says 1.3x at that moment, the effective speed is approximately 1.05 * 1.3 = 1.365x.
 
+    RULES FOR SPEED CURVE:
+    - NEVER speed up the hook (first 3-5 seconds). The hook is the most important part — it needs to play at normal speed or slightly slow so the viewer catches every word.
+    - The fastest sections should be filler, transitions between ideas, or repetitive content — NOT key moments.
+    - The slowest sections should be reveals, punchlines, key statements, or emotional peaks — the moments that matter most.
+    - The curve should have a clear structure: normal opening -> accelerate through setup -> decelerate into payoff -> accelerate through filler -> decelerate into CTA. Not random oscillation.
+    - Every keypoint must be faster OR slower than 1.0x. When speed_curve is active, no section should play at exactly 1.0x — the whole point is that the pacing is dynamic throughout.
+    - The last keypoint should NOT be 1.0. End slightly fast (1.05-1.15) for energy, or slightly slow (0.85-0.95) for emphasis on the CTA.
+
   caption_style — word-by-word captions synced to speech:
     none — no captions
     standard — clean white text
@@ -2051,7 +2053,10 @@ Global parameters:
 
 Text overlays:
   text — plain text, no emojis. Keep under 5 words — longer text gets shrunk or clipped.
-  position — top, center, or bottom
+  position — where the text overlay appears on screen:
+    top — above the speaker's head. SAFE ZONE. This is the best default position for talking head videos because it avoids the speaker's face and avoids the platform UI at the bottom.
+    bottom — near the bottom of the frame. WARNING: on most platforms (TikTok, Instagram), the bottom 15-20% of the screen is covered by UI elements (like, comment, share buttons). If burned-in captions are present at the bottom, do NOT place overlays here.
+    center — middle of the frame. WARNING: on talking head videos, this puts text directly on the speaker's face. NEVER use center position on talking head content. Center is only appropriate for content without a person's face in frame (e.g., product shots, screen recordings, landscapes).
   appear_at_clip — which clip number the text appears on
   style — title (72px), callout (56px), or cta (64px)
   sfx_style — a short sound accent that plays at this moment in the video. Sound effects punctuate moments — they make something the viewer sees or hears land harder. A sound effect should feel like it belongs to the moment. If a viewer would wonder "why did that sound play?", it's wrong.
@@ -2385,6 +2390,20 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames, trend
             print(f"[generate-edit] Fixing clip {i} overlap: source_start {curr_start} -> {prev_end}", flush=True)
             validated_cuts[i]["source_start"] = prev_end
 
+    # Strip transitions between clips that don't cross a scene change
+    scene_cuts = sorted(float(sc) for sc in (analysis.get("visual_cuts") or []) if sc is not None)
+    for i in range(len(validated_cuts) - 1):
+        clip_end = round(validated_cuts[i]["source_end"], 1)
+        has_scene_change = any(abs(clip_end - sc) < 0.5 for sc in scene_cuts)
+        if not has_scene_change and str(validated_cuts[i].get("transition_out") or "none").lower() != "none":
+            print(
+                f"[generate-edit] Stripping transition={validated_cuts[i]['transition_out']} "
+                f"from clip {i} (no scene change at {clip_end}s)",
+                flush=True,
+            )
+            validated_cuts[i]["transition_out"] = "none"
+            validated_cuts[i]["transition_sound"] = "none"
+
     # Override zoom on footage with burned-in captions
     if has_burned_captions:
         for clip in validated_cuts:
@@ -2465,6 +2484,11 @@ def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames, trend
     edit_plan["teal_orange"] = "none"
     if edit_plan.get("vignette") not in valid_vignette:
         edit_plan["vignette"] = "none"
+
+    for overlay in edit_plan.get("text_overlays", []):
+        if overlay.get("position") == "center":
+            print(f"[generate-edit] Moving text overlay '{overlay.get('text', '')}' from center to top (talking head safety)", flush=True)
+            overlay["position"] = "top"
 
     final_cuts = []
     for clip_entry in validated_cuts:
@@ -2983,6 +3007,13 @@ def apply_speed_curve(output_path, speed_curve, work_dir):
         print("[speed_curve] Could not determine input duration — skipping", flush=True)
         return
     print(f"[speed_curve] Input duration: {duration:.2f}s", flush=True)
+    last_kp_time = float(speed_curve[-1]["t"])
+    if duration > last_kp_time + 5.0:
+        print(
+            f"[speed_curve] WARNING: video duration ({duration:.1f}s) exceeds last keypoint "
+            f"({last_kp_time}s) by {duration - last_kp_time:.1f}s — possible dead air",
+            flush=True,
+        )
 
     segment_duration = 0.5
     segments = []
@@ -4021,6 +4052,29 @@ def handler(job):
                     os.unlink(entry["local_path"])
                 except Exception:
                     pass
+
+        expected_duration = sum(
+            (float(cut["source_end"]) - float(cut["source_start"])) / max(0.25, float(cut.get("speed") or 1.0))
+            for cut in edit_plan["cuts"]
+        )
+        actual_duration = probe_duration(output_path) or 0.0
+        if actual_duration > expected_duration + 2.0:
+            print(
+                f"[pipeline] Trimming output: {actual_duration:.1f}s -> {expected_duration:.1f}s "
+                f"(removing {actual_duration - expected_duration:.1f}s dead air)",
+                flush=True,
+            )
+            trimmed_path = os.path.join(work_dir, "trimmed_output.mp4")
+            trim_result = subprocess.run(
+                ["ffmpeg", "-y", "-i", output_path, "-t", f"{expected_duration:.2f}", "-c", "copy", trimmed_path],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            if trim_result.returncode == 0 and os.path.exists(trimmed_path):
+                os.replace(trimmed_path, output_path)
+            else:
+                print(f"[pipeline] WARNING: trim failed, keeping original output: {trim_result.stderr[-400:]}", flush=True)
 
         speed_curve = edit_plan.get("_parsed_speed_curve")
         if speed_curve:
