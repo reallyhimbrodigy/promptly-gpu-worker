@@ -1973,8 +1973,11 @@ Global parameters:
   color_intent — sets the overall color character of the video.
     {intents}
 
-  vignette — darkens the edges of the frame, drawing the eye toward the center:
-    none, light, medium, strong
+  vignette — darkens the edges of the frame, creating a moody, cinematic feel:
+    none — no edge darkening. The right choice for clean, bright, professional, or educational content. Most talking head videos look better without vignette.
+    light — subtle edge darkening. Adds atmosphere for lifestyle, travel, or storytelling content.
+    medium — noticeable edge darkening. Cinematic feel. Fits moody, dramatic, or narrative content.
+    strong — heavy edge darkening. Very cinematic. Only for content where a dark, atmospheric look is the intention.
 
   grain — film grain texture:
     none, subtle, medium, heavy
