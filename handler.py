@@ -780,7 +780,7 @@ def detect_content_mode(deepgram_words, analysis):
                             pipeline pre-solves beat-aligned cuts
 
     speech_source from Gemini is the primary signal. Deepgram word count is the fallback
-    when speech_source is absent (e.g. cached analysis from before this field existed).
+    when speech_source is absent.
 
     TikTok/platform sounds and lip-sync audio are routed to music_edit regardless of
     how many words Deepgram transcribed — those words belong to someone else's audio
@@ -808,8 +808,7 @@ def detect_content_mode(deepgram_words, analysis):
         # Words from Deepgram are irrelevant — use beat alignment if possible
         mode = "music_edit" if has_beats else "speech"
     else:
-        # speech_source missing — old cached analysis without this field
-        # Fall back to word_count heuristic
+        # speech_source missing — fall back to word_count heuristic
         if word_count < 5 and has_beats:
             mode = "music_edit"
         elif word_count >= 5 and has_music and has_beats:
@@ -3890,7 +3889,6 @@ def handler(job):
         video_url = input_data["video_url"]
         vibe      = input_data["vibe"]
         upload_url = input_data["upload_url"]
-        cached_analysis = input_data.get("cached_analysis")
 
         work_dir    = tempfile.mkdtemp(prefix=f"promptly-{job_id}-")
         source_path = os.path.join(work_dir, "source.mp4")
@@ -3930,9 +3928,6 @@ def handler(job):
             t_parallel = time.time()
 
             def _run_gemini():
-                if cached_analysis:
-                    print("[pipeline] analysis: cache HIT", flush=True)
-                    return normalize_analysis(cached_analysis) if isinstance(cached_analysis, dict) else cached_analysis
                 print("[pipeline] analysis: Gemini start", flush=True)
                 t = time.time()
                 result = run_gemini_analysis(source_path)
