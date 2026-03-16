@@ -12,7 +12,7 @@ import math
 import concurrent.futures
 from datetime import datetime
 
-HANDLER_VERSION = "2.9.0"
+HANDLER_VERSION = "3.0.0"
 
 print(f"[startup] Python {sys.version}", flush=True)
 print(f"[startup] handler version: {HANDLER_VERSION}", flush=True)
@@ -2225,6 +2225,715 @@ def extract_json(text):
     raise ValueError("Could not extract valid JSON from Claude response")
 
 
+def format_transcript_for_prompt(transcript):
+    words = (transcript or {}).get("words") or []
+    if not words:
+        return "  none"
+
+    groups = []
+    current = []
+    for i, w in enumerate(words):
+        current.append(w)
+        token = str(w.get("punctuated_word") or w.get("word") or "").strip()
+        next_w = words[i + 1] if i + 1 < len(words) else None
+        pause = (float(next_w.get("start") or 0) - float(w.get("end") or 0)) if next_w else 1.0
+        if re.search(r"[.!?]$", token) or pause > 0.35 or len(current) >= 14 or not next_w:
+            start = float(current[0].get("start") or 0)
+            end = float(current[-1].get("end") or start)
+            text = " ".join(str(x.get("punctuated_word") or x.get("word") or "").strip() for x in current).strip()
+            groups.append(f"  [{start:.2f}s - {end:.2f}s] {text}")
+            current = []
+    return "\n".join(groups) if groups else "  none"
+
+
+def format_tightened_segments_for_prompt(tightened_segments):
+    if not tightened_segments:
+        return "  none"
+    return "\n".join(
+        f"  {float(seg.get('start') or 0):.2f}s - {float(seg.get('end') or 0):.2f}s"
+        for seg in tightened_segments
+    )
+
+
+def format_timestamps_for_prompt(values, empty_label="none"):
+    vals = [float(v) for v in (values or []) if v is not None]
+    if not vals:
+        return f"  {empty_label}"
+    return "  " + ", ".join(f"{v:.2f}s" for v in vals[:120])
+
+
+def build_gemini_edit_prompt(duration, transcript, vibe, scene_cuts, beats, tightened_segments, broll_candidates, trend_context=None):
+    transcript_block = format_transcript_for_prompt(transcript)
+    scene_cuts_block = format_timestamps_for_prompt(scene_cuts)
+    beat_block = format_timestamps_for_prompt(beats)
+    tightened_block = format_tightened_segments_for_prompt(tightened_segments)
+    broll_block = "  none"
+    if broll_candidates:
+        broll_block = "\n".join(
+            f"  - {str(c.get('keyword') or '').strip()} @ {float(c.get('timestamp') or 0):.2f}s"
+            for c in broll_candidates[:8]
+            if str(c.get("keyword") or "").strip()
+        ) or "  none"
+    trend_section = format_trend_section(trend_context) if trend_context else ""
+    trend_block = f"\n\n{trend_section}" if trend_section else ""
+    intents = ", ".join(COLOR_INTENTS.keys())
+
+    return f"""You are a video editor with years of experience cutting short-form content for TikTok and Instagram Reels. You have edited thousands of videos across every category — talking heads, lifestyle, fitness, tutorials, comedy, travel, food, fashion, business. You know what goes viral and what gets scrolled past in the first second.
+
+You are the entire creative brain of this edit. You are watching the source video directly while you read this prompt. Do not infer what is on screen from text alone when you can see it.
+
+=== WHAT YOU ARE TRYING TO ACHIEVE ===
+
+The user uploaded raw footage and described a vibe. What they actually want — even if they can't articulate it — is to watch the finished video and think: this AI did exactly what I wanted, and I didn't even know exactly what I wanted. This looks like it already belongs on their feed.
+
+Your job is to look at this specific footage and ask: what does this exact video need to become that?
+
+=== WHO THE USER IS ===
+
+The user said: "{vibe}"
+
+=== THIS VIDEO ===
+
+You are watching this video right now. Everything you need to know about the footage — what is on screen, where the speaker appears, where screen recordings appear, where the energy changes, how the lighting looks, whether captions are already burned in, what the framing looks like — you can see directly.
+
+Duration: {duration:.2f} seconds
+
+Transcript:
+{transcript_block}
+
+Scene change timestamps (detected visually):
+{scene_cuts_block}
+
+Beat timestamps (reference only — do not move cuts just to chase beats):
+{beat_block}
+
+Speech segments worth keeping:
+{tightened_block}
+
+B-roll keyword candidates:
+{broll_block}
+
+Analyze the video's visual and technical characteristics yourself. Report them in `footage_quality`, `color_baseline`, and `frame_layout` in your JSON response.
+
+Specifically determine:
+- overall color temperature
+- exposure / highlight condition
+- shadow condition
+- noise level
+- source sharpness
+- color richness
+- whether skin tones are present
+- lighting type
+- whether burned-in captions or other text overlays are already visible in the frames{trend_block}
+
+=== YOUR CREATIVE PROCESS ===
+
+Read the vibe. Understand what the finished video is supposed to feel like to a viewer watching it on their phone.
+
+Now look at the footage itself. What is actually happening on screen? Where does the energy rise? Where does it drag? Where does the visual content change? Where does the speaker land a point? Where would the viewer's attention naturally dip unless the edit intervenes?
+
+Now bridge those two things. The edit recipe is whatever transforms this specific footage into that specific feeling.
+
+=== WHAT NATIVE CONTENT LOOKS LIKE ON THESE PLATFORMS ===
+
+The content feels edited, not just cut.
+Viewers should feel that every moment was chosen on purpose. Static framing, uniform cuts, constant speed, and no visual variation read as unedited.
+
+The opening earns the viewer's attention.
+The first 1-2 seconds are an audition. Something in the opening should signal that this is worth watching.
+
+The pacing breathes.
+Good short-form editing varies tension and release. Some parts move quickly. Some parts slow down so the important line lands.
+
+Silence is a choice, not a default.
+On these platforms, the sonic space of a video is part of the edit. A video with no transition sounds and no sonic punctuation anywhere feels flat. But that does not mean every cut needs a sound. Hard cuts in continuous speech are often best left silent.
+
+B-roll separates produced content from selfie videos.
+When a talking head mentions a concept and the video cuts to a brief visual illustration before cutting back, the viewer reads the video as intentionally produced. One or two good b-roll moments can transform how edited the whole video feels.
+
+=== HOW THE ALGORITHM DECIDES WHAT GOES VIRAL ===
+
+The platforms reward watch time, completion rate, replays, shares, saves, and clean hooks.
+
+What this means for your edit:
+- the first 2-3 seconds must stop the scroll
+- dead air and flat pacing kill completion
+- shareable moments need emphasis
+- a clean ending improves loops and replays
+- intentional production quality helps both viewers and ranking systems
+
+=== WHERE THIS VIDEO LIVES ===
+
+This video will be posted to TikTok, Instagram Reels, or YouTube Shorts.
+
+Feed behavior: videos fill the phone screen and the viewer decides quickly whether to keep watching.
+
+Looping: the end transitions directly back to the beginning.
+
+Screen layout: the right side and bottom of the frame are partially covered by platform UI. Do not place important text or visuals there.
+
+=== PIPELINE STEPS ===
+
+You decide the clip structure. The reference data gives you scene changes, speech boundaries, and the tightened timeline.
+
+Scene change timestamps and speech boundaries are the strongest places to cut. The tightened speech segments show which parts of the source contain content worth keeping.
+
+The source timeline only moves forward. Your clips must stay chronological. Sections you leave out are excluded from the final video.
+
+=== TOOLS ===
+
+Each clip in your recipe has these parameters:
+
+  source_start / source_end — timestamps in the source video that define this clip's boundaries.
+
+  CRITICAL RULE: clips must be strictly chronological. Each clip's source_start must be >= the previous clip's source_end.
+
+  transition_out — visual transition effect at the END of this clip going into the next clip:
+    none — hard cut. The right choice for 90% of cuts. Use this between clips of the same scene, same speaker, same camera angle. Hard cuts feel sharp, professional, and invisible. When in doubt, use none.
+    whip_right, whip_left — fast directional wipe. ONLY use at a genuine scene change where the visual content changes dramatically.
+    smoothleft, smoothright — smooth directional slide. Same rule as whip — ONLY at genuine scene changes.
+    CRITICAL: on talking head videos, almost every cut should be transition_out=none.
+
+  transition_sound — audio that plays during the transition:
+    none — silent cut. Natural for hard cuts in continuous speech where the voice carries across the edit.
+    swoosh — fast air swipe. Feels physical and directional.
+    thud — short punchy impact. Adds weight.
+    pop — quick bright snap. Fits reveals and light moments.
+    ding — notification bell. Fits alerts, messages, phones, or social media moments.
+    reverb_hit — atmospheric impact. Fits scene changes and bigger shifts.
+    shutter — camera shutter click. Fits photos, screenshots, or captured moments.
+    typing — keyboard clicks. Fits screens, tech, software, typing, coding.
+    ching — cash register ring. Fits pricing, money, sales, or offers.
+    Note: not every cut needs a sound.
+
+  sfx_style — sound accent on the clip itself:
+    none, swoosh, thud, shutter
+
+  zoom — camera movement applied across the clip:
+    none, slow_in, slow_out, punch_in, punch_out
+    Note: zoom scales and crops the frame. If this video has burned-in captions or text overlays baked into the frames, set zoom=none on all clips.
+
+  cut_zoom — simulates a multi-camera shoot from a single take:
+    true / false
+    Note: do not use cut_zoom=true and a zoom value on the same clip.
+
+  speed — playback speed multiplier. Audio pitch is preserved.
+    0.5, 0.75, 1.0, 1.05, 1.1, 1.15, 1.25, 1.5, 2.0
+
+Global parameters:
+  color_intent — sets the overall color character of the video.
+    {intents}
+
+  vignette — darkens the edges of the frame, creating a moody, cinematic feel:
+    none — the right choice for clean, bright, professional, or educational content.
+    light — subtle atmosphere.
+    medium — noticeable cinematic edge darkening.
+    strong — heavy atmospheric vignette.
+
+  grain — film grain texture:
+    none, subtle, medium, heavy
+
+  cinematic_bars — 2.35:1 letterbox on 9:16 frame:
+    true, false
+
+  shadow_lift — true/false. Auto-calibrated.
+    true, false
+
+  highlight_rolloff — true/false. Auto-calibrated.
+    true, false
+
+  vibrance — true/false. Auto-calibrated.
+    true, false
+
+  speed_curve — a smooth speed ramp applied across the entire assembled video. Audio stays in sync.
+    Set to "none" for most videos.
+    Use a speed curve when the content benefits from dramatic pacing — faster through setup or filler, slower on reveals, punchlines, key statements, or emotional peaks.
+    Provide an array of keypoints in OUTPUT time, not source time.
+    Speed values: 0.5 to 2.0.
+    RULES FOR SPEED CURVE:
+    - NEVER speed up the hook (first 3-5 seconds).
+    - Fastest sections should be filler or transitions between ideas.
+    - Slowest sections should be reveals, punchlines, or emotional peaks.
+    - The curve should have a clear structure, not random oscillation.
+    - When speed_curve is active, no section should sit at exactly 1.0x.
+    - The last keypoint should not be exactly 1.0x.
+
+  caption_style — word-by-word captions synced to speech:
+    none, standard, bold_centered, minimal_bottom, animated_word, bold_white, bold_yellow, keyword_pop, box_caption
+    Note: if captions are already burned into the footage, set caption_style=none.
+
+  caption_position — top, center, lower-third, bottom
+
+  audio_denoise — true/false
+
+  beat_sync — true/false. Truthful label only.
+
+  outro — none, fade_black, fade_white
+
+  background_music — always "none". Creators select their own audio when posting.
+
+  aspect_ratio — always "9:16"
+
+Text overlays:
+  text — plain text, no emojis, under 5 words
+  position — top, bottom, center
+    top is the best default for talking head content.
+    center should only be used when no person's face is in frame.
+  appear_at_clip — clip number
+  style — title, callout, cta
+  sfx_style — a short sound accent at that moment:
+    none, pop, thud, ding, typing, ching, shutter, reverb_hit, swoosh
+  Note: if captions are already burned in, use text overlays sparingly.
+
+B-roll — stock footage clips overlaid briefly on the main video. Good b-roll is one of the strongest signals that a video was professionally edited.
+
+How Pexels stock video search works: Pexels returns short aesthetic clips. The best results come from keywords that describe a VISUAL ACTION or CLOSE-UP DETAIL — not a concept or a person's role.
+
+Rules for b-roll keywords:
+  - always include a physical detail or action like hands, close up, scrolling, typing, filming
+  - prefer close-ups over wide shots
+  - prefer movement over static scenes
+  - never use abstract concepts as keywords
+  - if you cannot think of a visually compelling close-up or action shot, do not add b-roll for that moment
+
+  keyword — search term for Pexels
+  timestamp — when in the source video to place the b-roll. Do NOT place b-roll in the first 2 seconds.
+  duration — 2-3 seconds. Never longer than 3 seconds.
+
+=== HOW THESE TOOLS LOOK AND SOUND ===
+
+Color grade: color_intent is your only color decision. The pipeline combines your intent with the measured baseline to produce the final grade.
+
+Vignette: cosine-curve radial edge darkening.
+
+Grain: animated temporal luma noise.
+
+Shadow lift, highlight rolloff, and vibrance are auto-calibrated by the pipeline using the footage_quality you report.
+
+Captions: word-by-word burn-in synced to Deepgram timestamps.
+
+Text overlays: white text with black border and short fade-in/out animation.
+
+B-roll: full-frame Pexels stock overlays at specified timestamps.
+
+Beat sync: truthful label only. Do not move cuts to chase beats.
+
+The "notes" field must be 50 words maximum.
+
+=== USE YOUR TOOLS ===
+
+A flat edit is a failed edit. If the finished video looks like raw footage with a color filter, you have failed.
+
+Before you return your recipe, look at it honestly:
+- if most clips have zoom=none, cut_zoom=false, speed=1.0, transition_out=none, sfx_style=none, that is not an edit
+- if your recipe reads like a cautious list of "none" values with one or two exceptions, you are optimizing for safety instead of the vibe
+
+=== RESPONSE FORMAT ===
+
+First, write your creative vision for this edit in a <vision> block. Describe:
+- what happens in the first 2 seconds and why it stops the scroll
+- how the visual rhythm works across the whole video
+- where the energy shifts and how you mark those shifts
+- where speech carries cleanly, where silence is right, and where sounds punctuate
+- what moments deserve text overlays
+- whether b-roll strengthens any moments
+- what the overall color and production feel is
+
+Then output the JSON recipe in a ```json fenced block:
+
+```json
+{{
+  "notes": "<50 words max. Key decisions only, no justification>",
+  "video_profile": {{
+    "content_type": "<what kind of video this is>",
+    "visual_character": "<color palette, lighting, exposure, white balance>",
+    "strongest_moments": "<timestamps and what makes them compelling>",
+    "weakest_moments": "<timestamps and why they are weak, or none>"
+  }},
+  "frame_layout": {{
+    "subject_position": "<where the main subject is in frame>",
+    "existing_overlays": {{
+      "has_burned_captions": <true|false>,
+      "has_text_graphics": <true|false>,
+      "overlay_locations": "<where existing text/graphics appear>"
+    }},
+    "free_zones": "<areas of the frame where new text can go>"
+  }},
+  "footage_quality": {{
+    "noise_level": "<none|low|medium|high>",
+    "source_sharpness": "<soft|normal|sharp>",
+    "highlight_condition": "<clipped|bright|normal|dark>",
+    "shadow_condition": "<crushed|deep|normal|lifted>",
+    "color_richness": "<flat|muted|normal|vivid>",
+    "skin_tones_present": <true|false>,
+    "lighting_type": "<natural_outdoor|natural_indoor|studio|mixed|unknown>",
+    "has_burned_captions": <true|false>
+  }},
+  "color_baseline": {{
+    "brightness": <-0.3 to 0.3>,
+    "contrast": <0.5 to 2.0>,
+    "saturation": <0.5 to 2.0>,
+    "gamma": <0.5 to 2.0>,
+    "color_temperature": "<warm|cool|neutral>"
+  }},
+  "color_intent": "<intent>",
+  "background_music": "none",
+  "caption_style": "<style>",
+  "caption_position": "<position>",
+  "caption_keywords": [],
+  "audio_ducking": true,
+  "audio_denoise": <true|false>,
+  "beat_sync": <true|false>,
+  "outro": "<outro>",
+  "aspect_ratio": "9:16",
+  "speed_curve": [{{"t": <seconds>, "speed": <number>}}] or "none",
+  "vignette": "<level>",
+  "grain": "<level>",
+  "cinematic_bars": <true|false>,
+  "shadow_lift": <true|false>,
+  "highlight_rolloff": <true|false>,
+  "vibrance": <true|false>,
+  "text_overlays": [
+    {{ "text": "<text>", "position": "<position>", "appear_at_clip": <clip number>, "style": "<style>", "sfx_style": "<sfx>" }}
+  ],
+  "broll": [
+    {{ "keyword": "<search term>", "timestamp": <seconds>, "duration": <seconds> }}
+  ],
+  "cuts": [
+    {{ "source_start": <n>, "source_end": <n>, "transition_out": "<transition>", "transition_sound": "<sound>", "sfx_style": "<sfx>", "zoom": "<zoom>", "cut_zoom": <true|false>, "speed": <n> }}
+  ]
+}}
+```"""
+
+
+def build_analysis_from_gemini_recipe(edit_plan, transcript, duration, scene_cuts, beat_timestamps, tightened_result, broll_candidates):
+    speech_result = build_speech_from_deepgram((transcript or {}).get("words") or [], duration)
+    safe_cut_points = speech_result["safe_cut_points"]
+    for cut_time in scene_cuts or []:
+        if not any(abs(float(cp.get("time") or 0) - float(cut_time)) < 0.5 for cp in safe_cut_points):
+            safe_cut_points.append({"time": float(cut_time), "quality": 1.0, "why": "scene change"})
+    safe_cut_points.sort(key=lambda cp: float(cp.get("time") or 0))
+
+    raw_frame_layout = edit_plan.get("frame_layout") or {}
+    raw_existing = raw_frame_layout.get("existing_overlays") or {}
+    raw_fq = edit_plan.get("footage_quality") or {}
+    has_burned_captions = bool(
+        raw_existing.get("has_burned_captions")
+        or raw_fq.get("has_burned_captions")
+    )
+
+    parsed = {
+        "duration": duration,
+        "speech": speech_result["speech"],
+        "safe_cut_points": safe_cut_points,
+        "video_profile": edit_plan.get("video_profile") or {},
+        "frame_layout": {
+            "subject_position": raw_frame_layout.get("subject_position") or "unknown",
+            "existing_overlays": {
+                "has_burned_captions": has_burned_captions,
+                "has_text_graphics": bool(raw_existing.get("has_text_graphics")),
+                "overlay_locations": raw_existing.get("overlay_locations") or ("captions visible in-frame" if has_burned_captions else "none detected"),
+            },
+            "free_zones": raw_frame_layout.get("free_zones") or "unknown",
+        },
+        "color_baseline": edit_plan.get("color_baseline") or {},
+        "footage_quality": {
+            **raw_fq,
+            "has_burned_captions": has_burned_captions,
+        },
+        "audio": {"speech_source": "on_camera" if speech_result["speech"].get("has_speech") else "none"},
+        "shots": [{
+            "start": 0,
+            "end": duration,
+            "visual": "",
+            "action": "Full video",
+            "energy": 0.5,
+            "editing_value": "usable",
+            "delivery": "none",
+        }],
+    }
+    analysis = normalize_analysis(parsed)
+    analysis["visual_cuts"] = [float(x) for x in (scene_cuts or [])]
+    analysis["beat_timestamps"] = [float(x) for x in (beat_timestamps or [])]
+    analysis["tightened_timeline"] = tightened_result or {}
+    if broll_candidates:
+        analysis["broll_candidates"] = broll_candidates
+    analysis["content_mode"] = "speech" if analysis.get("speech", {}).get("has_speech") else "speech"
+    return analysis
+
+
+def generate_edit_gemini(video_path, transcript, vibe, scene_cuts, beats, tightened_segments, broll_candidates, trend_context=None):
+    gemini_api_key = os.environ.get("GEMINI_API_KEY")
+    if not gemini_api_key:
+        raise RuntimeError("GEMINI_API_KEY not set")
+
+    genai.configure(api_key=gemini_api_key)
+    duration = probe_duration(video_path) or 0.0
+    prompt = build_gemini_edit_prompt(
+        duration=duration,
+        transcript=transcript,
+        vibe=vibe,
+        scene_cuts=scene_cuts,
+        beats=beats,
+        tightened_segments=tightened_segments,
+        broll_candidates=broll_candidates,
+        trend_context=trend_context,
+    )
+
+    if trend_context:
+        print(f"[generate-edit] Trend context included: {trend_context.get('sample_size', '?')} videos", flush=True)
+    else:
+        print("[generate-edit] No trend context available", flush=True)
+
+    print("[generate-edit] Uploading video to Gemini...", flush=True)
+    gemini_file = genai.upload_file(video_path)
+    deadline = time.time() + 180
+    while gemini_file.state.name == "PROCESSING":
+        if time.time() > deadline:
+            raise RuntimeError("Gemini file upload timed out after 180s")
+        time.sleep(2)
+        gemini_file = genai.get_file(gemini_file.name)
+    if gemini_file.state.name != "ACTIVE":
+        raise RuntimeError(f"Gemini file upload failed: {gemini_file.state.name}")
+    print(f"[generate-edit] Video active: {gemini_file.uri}", flush=True)
+
+    model_names = ["gemini-2.5-pro-preview-06-05", "gemini-2.5-pro", "gemini-2.5-flash"]
+    last_err = None
+    response = None
+    for model_name in model_names:
+        try:
+            print(f"[generate-edit] Calling Gemini model={model_name}...", flush=True)
+            t = time.time()
+            model = genai.GenerativeModel(model_name)
+            response = model.generate_content(
+                [gemini_file, prompt],
+                generation_config=genai.GenerationConfig(
+                    temperature=0.7,
+                    max_output_tokens=5000,
+                ),
+            )
+            print(f"[generate-edit] Gemini complete in {time.time()-t:.1f}s", flush=True)
+            break
+        except Exception as e:
+            last_err = e
+            print(f"[generate-edit] Gemini model {model_name} failed: {e}", flush=True)
+    if response is None:
+        raise RuntimeError(f"Gemini edit generation failed: {last_err}")
+
+    response_text = str(getattr(response, "text", "") or "").strip()
+    if not response_text:
+        raise RuntimeError("Empty Gemini response")
+
+    vision_text = ""
+    if "<vision>" in response_text and "</vision>" in response_text:
+        try:
+            vision_start = response_text.index("<vision>") + len("<vision>")
+            vision_end = response_text.index("</vision>", vision_start)
+            vision_text = response_text[vision_start:vision_end].strip()
+        except Exception:
+            vision_text = ""
+    if vision_text:
+        print(f"[generate-edit] VISION: {vision_text}", flush=True)
+    print(f"[generate-edit] RAW RESPONSE:\n{response_text}\n[generate-edit] END RESPONSE", flush=True)
+
+    edit_plan = extract_json(response_text)
+    analysis = build_analysis_from_gemini_recipe(
+        edit_plan,
+        transcript=transcript,
+        duration=duration,
+        scene_cuts=scene_cuts,
+        beat_timestamps=beats,
+        tightened_result={"segments": tightened_segments} if tightened_segments else {},
+        broll_candidates=broll_candidates,
+    )
+    has_burned_captions = bool(
+        ((analysis.get("frame_layout") or {}).get("existing_overlays") or {}).get("has_burned_captions")
+    )
+
+    raw_cuts = edit_plan.get("cuts") or edit_plan.get("clips") or []
+    if not raw_cuts:
+        raise ValueError("Gemini response missing cuts array")
+    for clip in raw_cuts:
+        clip["freeze_frame"] = False
+        clip["motion_blur_transition"] = False
+
+    video_duration = float(analysis.get("duration") or 0)
+    validated_cuts = []
+    for i, cut in enumerate(raw_cuts):
+        src_start = float(cut.get("source_start") or 0)
+        src_end = float(cut.get("source_end") or 0)
+        if src_start >= src_end:
+            raise ValueError(f"Cut {i}: source_start ({src_start}) >= source_end ({src_end})")
+        if src_start < 0:
+            raise ValueError(f"Cut {i}: source_start is negative")
+        if video_duration > 0 and src_end > video_duration + 0.5:
+            raise ValueError(f"Cut {i}: source_end ({src_end}) exceeds video duration ({video_duration})")
+        if i > 0 and src_start < validated_cuts[i-1]["source_start"]:
+            raise ValueError(f"Cut {i}: not in chronological order")
+        validated_cuts.append({**cut, "source_start": src_start, "source_end": src_end, "clip": i + 1})
+
+    for i in range(1, len(validated_cuts)):
+        prev_end = validated_cuts[i - 1]["source_end"]
+        curr_start = validated_cuts[i]["source_start"]
+        if curr_start < prev_end:
+            print(f"[generate-edit] Fixing clip {i} overlap: source_start {curr_start} -> {prev_end}", flush=True)
+            validated_cuts[i]["source_start"] = prev_end
+
+    visual_cuts = sorted(float(sc) for sc in (analysis.get("visual_cuts") or []) if sc is not None)
+    for i in range(len(validated_cuts) - 1):
+        clip_end = round(validated_cuts[i]["source_end"], 1)
+        has_scene_change = any(abs(clip_end - sc) < 0.5 for sc in visual_cuts)
+        if not has_scene_change and str(validated_cuts[i].get("transition_out") or "none").lower() != "none":
+            print(
+                f"[generate-edit] Stripping transition={validated_cuts[i]['transition_out']} "
+                f"from clip {i} (no scene change at {clip_end}s)",
+                flush=True,
+            )
+            validated_cuts[i]["transition_out"] = "none"
+            validated_cuts[i]["transition_sound"] = "none"
+
+    if has_burned_captions:
+        for clip in validated_cuts:
+            if clip.get("zoom") and clip["zoom"] != "none":
+                print(f"[generate-edit] Overriding zoom={clip['zoom']} to none (burned-in captions detected)", flush=True)
+                clip["zoom"] = "none"
+
+    edit_plan.setdefault("background_music", "none")
+    edit_plan.setdefault("caption_style", "none")
+    edit_plan.setdefault("caption_position", "lower-third")
+    edit_plan.setdefault("audio_denoise", False)
+    edit_plan.setdefault("beat_sync", False)
+    edit_plan.setdefault("outro", "none")
+    edit_plan.setdefault("aspect_ratio", "original")
+    edit_plan.setdefault("text_overlays", [])
+    edit_plan.setdefault("vignette", "none")
+    edit_plan.setdefault("broll", [])
+    edit_plan.setdefault("sharpening", True)
+    edit_plan.setdefault("grain", "none")
+    edit_plan.setdefault("denoise", True)
+    edit_plan.setdefault("cinematic_bars", False)
+    edit_plan.setdefault("shadow_lift", False)
+    edit_plan.setdefault("highlight_rolloff", False)
+    edit_plan.setdefault("vibrance", False)
+    edit_plan.setdefault("teal_orange", "none")
+    edit_plan["background_music"] = "none"
+
+    raw_curve = edit_plan.get("speed_curve", "none")
+    if raw_curve == "none" or raw_curve is None or not isinstance(raw_curve, list):
+        speed_curve = None
+    else:
+        speed_curve = []
+        for kp in raw_curve:
+            if isinstance(kp, dict) and "t" in kp and "speed" in kp:
+                try:
+                    t = max(0.0, float(kp["t"]))
+                    s = max(0.5, min(2.0, float(kp["speed"])))
+                    speed_curve.append({"t": t, "speed": s})
+                except Exception:
+                    continue
+        if len(speed_curve) < 2:
+            speed_curve = None
+        else:
+            speed_curve.sort(key=lambda x: x["t"])
+            print(
+                f"[generate-edit] Speed curve: {len(speed_curve)} keypoints, range "
+                f"{speed_curve[0]['speed']:.2f}x - {max(kp['speed'] for kp in speed_curve):.2f}x",
+                flush=True,
+            )
+    edit_plan["_parsed_speed_curve"] = speed_curve
+
+    if edit_plan.get("background_music") and edit_plan["background_music"] != "none":
+        edit_plan["audio_ducking"] = True
+    else:
+        if "audio_ducking" not in edit_plan:
+            edit_plan["audio_ducking"] = False
+
+    for bool_field in ("sharpening", "denoise", "shadow_lift", "highlight_rolloff", "vibrance",
+                       "cinematic_bars", "audio_denoise", "beat_sync"):
+        v = edit_plan.get(bool_field)
+        if isinstance(v, str):
+            edit_plan[bool_field] = v.strip().lower() in ("true", "1", "yes")
+        else:
+            edit_plan[bool_field] = bool(v)
+    edit_plan["sharpening"] = True
+    edit_plan["denoise"] = True
+
+    valid_grain = {"none", "subtle", "medium", "heavy"}
+    valid_vignette = {"none", "light", "medium", "strong"}
+    valid_transitions = {
+        "none","fade","fadeblack","fadewhite","dissolve",
+        "wipeleft","wiperight","wipeup","wipedown",
+        "smoothleft","smoothright","smoothup","smoothdown",
+        "zoomin","flash","glitch","whip_left","whip_right",
+    }
+    if edit_plan.get("grain") not in valid_grain:
+        edit_plan["grain"] = "none"
+    edit_plan["teal_orange"] = "none"
+    if edit_plan.get("vignette") not in valid_vignette:
+        edit_plan["vignette"] = "none"
+
+    for overlay in edit_plan.get("text_overlays", []):
+        if overlay.get("position") == "center":
+            print(f"[generate-edit] Moving text overlay '{overlay.get('text', '')}' from center to top (talking head safety)", flush=True)
+            overlay["position"] = "top"
+
+    final_cuts = []
+    for clip_entry in validated_cuts:
+        transition = str(clip_entry.get("transition_out") or "").lower()
+        transition_out = transition if transition in valid_transitions else "none"
+        transition_sound = str(clip_entry.get("transition_sound") or "none").lower()
+        if transition_out == "none" and transition_sound != "none":
+            print(f"[generate-edit] Stripping transition_sound={transition_sound} from hard cut (no visual transition)", flush=True)
+            transition_sound = "none"
+        speed = max(0.25, min(4.0, float(clip_entry.get("speed") or 1.0)))
+        final_cuts.append({
+            "source_start": clip_entry["source_start"],
+            "source_end": clip_entry["source_end"],
+            "transition_out": transition_out,
+            "transition_sound": transition_sound,
+            "sfx_style": clip_entry.get("sfx_style") or "none",
+            "zoom": clip_entry.get("zoom") or "none",
+            "cut_zoom": bool(clip_entry.get("cut_zoom")),
+            "speed": speed,
+            "speed_ramp": "none",
+            "freeze_frame": False,
+            "motion_blur_transition": False,
+            "speed_segments": [],
+        })
+
+    baseline = analysis.get("color_baseline") or {}
+    intent = normalize_intent(edit_plan.get("color_intent") or "none")
+    edit_plan["color_intent"] = intent
+    edit_plan["color_grade"] = build_color_grade(baseline, intent)
+    edit_plan["cuts"] = final_cuts
+    if "clips" in edit_plan:
+        del edit_plan["clips"]
+    if final_cuts:
+        edit_plan["target_duration"] = final_cuts[-1]["source_end"] - final_cuts[0]["source_start"]
+
+    total_clip_duration = sum(max(0, c["source_end"] - c["source_start"]) for c in final_cuts)
+    if video_duration > 0 and total_clip_duration / video_duration < 0.3:
+        print(
+            f"[generate-edit] WARNING: Gemini's clips only cover {(total_clip_duration / video_duration)*100:.0f}% "
+            f"of the video ({total_clip_duration:.1f}s of {video_duration:.1f}s)",
+            flush=True,
+        )
+
+    edit_plan["analysis_data"] = analysis
+
+    print(f"[generateEdit] Final cuts ({len(final_cuts)} clips):", flush=True)
+    for cut in final_cuts:
+        print(f"  {cut['source_start']} -> {cut['source_end']} [{cut['transition_out']}]", flush=True)
+    cg = edit_plan["color_grade"]
+    print(
+        f"  Created {len(final_cuts)} cuts, intent={intent}, color: brightness={cg['brightness']} "
+        f"contrast={cg['contrast']} sat={cg['saturation']} gamma={cg['gamma']} temp={cg['color_temperature']}",
+        flush=True,
+    )
+
+    return edit_plan
+
+
 def generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames, trend_context=None):
     print("[generate-edit] Building Claude prompt...", flush=True)
     content_mode = analysis.get("content_mode", "speech")
@@ -3915,24 +4624,15 @@ def handler(job):
         print("[pipeline] step=normalize", flush=True)
         source_path = normalize_source_video(source_path, work_dir)
 
+        source_duration = probe_duration(source_path) or 0.0
+
         # ── Parallel group 0: vibe expansion — no video dep, start immediately ─────
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as vibe_executor:
             vibe_future = vibe_executor.submit(expand_vibe_intent, vibe)
 
-            # Steps 1+2 (download + normalize) already done — source_path is ready
-
-            # ── Parallel group 1: Gemini / scene+beat / transcription ──────────────
-            # All three need only source_path. Gemini dominates (~18s); others finish inside.
             send_progress(job_id, "analysis", 20, "Taking a look at your footage...", app_url)
-            print("[pipeline] step=parallel_analysis (gemini + scene/beat + transcription)", flush=True)
+            print("[pipeline] step=parallel_analysis (scene/beat + transcription)", flush=True)
             t_parallel = time.time()
-
-            def _run_gemini():
-                print("[pipeline] analysis: Gemini start", flush=True)
-                t = time.time()
-                result = run_gemini_analysis(source_path)
-                print(f"[pipeline] Gemini complete in {time.time()-t:.1f}s", flush=True)
-                return result
 
             def _run_scene_and_beat():
                 t = time.time()
@@ -3950,74 +4650,29 @@ def handler(job):
                 print(f"[pipeline] transcription complete in {time.time()-t:.1f}s ({len(words)} words)", flush=True)
                 return result
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as analysis_executor:
-                f_gemini     = analysis_executor.submit(_run_gemini)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as analysis_executor:
                 f_scene_beat = analysis_executor.submit(_run_scene_and_beat)
                 f_transcribe = analysis_executor.submit(_run_transcription)
-
-                analysis                     = f_gemini.result()
                 visual_cuts, beat_timestamps = f_scene_beat.result()
-                transcript                   = f_transcribe.result()
+                transcript = f_transcribe.result()
 
             print(f"[pipeline] parallel analysis complete in {time.time()-t_parallel:.1f}s", flush=True)
 
             deepgram_words = transcript.get("words") or []
-            analysis["visual_cuts"]     = visual_cuts
-            analysis["beat_timestamps"] = beat_timestamps
 
-            # Step 6 — Build speech from Deepgram
-            speech_result = build_speech_from_deepgram(deepgram_words, float(analysis.get("duration") or 0))
-            analysis["speech"] = speech_result["speech"]
-            safe_cut_points = speech_result["safe_cut_points"]
-            for cut_time in visual_cuts:
-                if not any(abs(cp["time"] - cut_time) < 0.5 for cp in safe_cut_points):
-                    safe_cut_points.append({"time": cut_time, "quality": 1.0, "why": "scene change"})
-            safe_cut_points.sort(key=lambda cp: cp["time"])
-            analysis["safe_cut_points"] = safe_cut_points
-
-            # Map Gemini shots to scdet boundaries
-            if visual_cuts and analysis.get("shots"):
-                duration_val = float(analysis.get("duration") or 0)
-                boundaries = [0] + visual_cuts + [duration_val]
-                mapped_shots = []
-                for i in range(len(boundaries)-1):
-                    start = round(boundaries[i]*1000)/1000
-                    end   = round(boundaries[i+1]*1000)/1000
-                    gsrc = analysis["shots"][min(i, len(analysis["shots"])-1)] if analysis["shots"] else {}
-                    mapped_shots.append({
-                        "start":         start,
-                        "end":           end,
-                        "visual":        gsrc.get("visual") or "",
-                        "action":        gsrc.get("action") or "",
-                        "energy":        gsrc.get("energy") or 0.5,
-                        "editing_value": gsrc.get("editing_value") or "usable",
-                        "description":   gsrc.get("description") or "",
-                        "score":         gsrc.get("score") or 0.5,
-                    })
-                analysis["shots"] = mapped_shots
-
-            # Step 7 — Tighten transcript
             print("[pipeline] step=tighten", flush=True)
             tighten_result = tighten_transcript(
                 deepgram_words,
                 scene_cuts=visual_cuts,
-                shots=analysis.get("shots") or [],
-                original_duration=float(analysis.get("duration") or 0),
+                shots=[],
+                original_duration=source_duration,
                 source_path=source_path,
             )
-            analysis["tightened_timeline"] = tighten_result
 
-            # Step 8 — Broll keywords
             broll_candidates = extract_broll_keywords(deepgram_words, 8)
             if broll_candidates:
-                analysis["broll_candidates"] = broll_candidates
                 print(f"[broll] Candidates: {', '.join(c['keyword'] for c in broll_candidates)}", flush=True)
 
-            # Step 9 — Scene frames
-            print("[pipeline] step=scene_frames", flush=True)
-            scene_frames = extract_scene_frames(source_path, visual_cuts, work_dir)
-
-            # Step 10 — Collect vibe expansion (fired before download, ready by now)
             expanded_vibe = vibe_future.result()
             print("[pipeline] vibe expansion ready", flush=True)
 
@@ -4029,10 +4684,18 @@ def handler(job):
         print("[pipeline] step=edit_recipe", flush=True)
         t = time.time()
         trend_context = get_trend_context()
-        edit_plan = generate_edit(analysis, transcript, vibe, expanded_vibe, scene_frames, trend_context=trend_context)
+        edit_plan = generate_edit_gemini(
+            video_path=source_path,
+            transcript=transcript,
+            vibe=expanded_vibe,
+            scene_cuts=visual_cuts,
+            beats=beat_timestamps,
+            tightened_segments=(tighten_result or {}).get("segments") or [],
+            broll_candidates=broll_candidates,
+            trend_context=trend_context,
+        )
         print(f"[pipeline] edit recipe complete in {time.time()-t:.1f}s", flush=True)
-
-        edit_plan["analysis_data"] = analysis
+        analysis = edit_plan.get("analysis_data") or {}
 
         # Step 11.5 — Filler word jump cuts (speech only, ALWAYS_FILLER only)
         has_speech = bool((analysis.get("speech") or {}).get("has_speech"))
