@@ -1516,48 +1516,178 @@ def fetch_broll_clip(keyword, duration_needed, work_dir):
     if not pexels_key:
         print(f"[broll] PEXELS_API_KEY not set — skipping '{keyword}'", flush=True)
         return None
+
     try:
         resp = requests.get(
             "https://api.pexels.com/videos/search",
             headers={"Authorization": pexels_key},
-            params={"query": keyword, "per_page": 5, "orientation": "portrait", "size": "medium"},
+            params={
+                "query": keyword,
+                "per_page": 15,
+                "orientation": "portrait",
+                "size": "medium",
+            },
             timeout=15,
         )
         resp.raise_for_status()
         videos = resp.json().get("videos") or []
+
         if not videos:
             print(f"[broll] No Pexels results for '{keyword}'", flush=True)
             return None
-        best_video = None
-        for video in videos:
-            dur = float(video.get("duration") or 0)
-            if dur >= duration_needed:
-                best_video = video
-                break
-        if not best_video:
-            best_video = videos[0]
 
-        chosen_url = None
-        video_files = best_video.get("video_files") or []
-        portrait_files = [f for f in video_files if (f.get("height") or 0) > (f.get("width") or 0) and f.get("link")]
-        if portrait_files:
-            portrait_files.sort(key=lambda f: f.get("height") or 0, reverse=True)
-            chosen_url = portrait_files[0].get("link")
-        else:
-            video_files = [f for f in video_files if f.get("link")]
-            video_files.sort(key=lambda f: f.get("height") or 0, reverse=True)
-            chosen_url = video_files[0].get("link") if video_files else None
+        print(f"[broll] Pexels returned {len(videos)} results for '{keyword}'", flush=True)
+
+        best_match = None
+        best_score = -1
+        for vid_idx, video in enumerate(videos):
+            vid_dur = float(video.get("duration") or 0)
+            vid_id = video.get("id", "unknown")
+            video_files = video.get("video_files") or []
+
+            portrait_files = []
+            for f in video_files:
+                h = f.get("height") or 0
+                w = f.get("width") or 0
+                link = f.get("link") or ""
+                file_type = f.get("file_type") or ""
+                quality = f.get("quality") or ""
+
+                if h <= w:
+                    continue
+                if not link:
+                    continue
+                if h < 720:
+                    continue
+                if file_type and "image" in file_type.lower():
+                    continue
+                if file_type and "video" not in file_type.lower() and file_type != "":
+                    continue
+
+                portrait_files.append({
+                    "link": link,
+                    "height": h,
+                    "width": w,
+                    "file_type": file_type,
+                    "quality": quality,
+                })
+
+            if not portrait_files:
+                continue
+
+            portrait_files.sort(key=lambda x: x["height"], reverse=True)
+            best_file = portrait_files[0]
+
+            score = 0
+            if vid_dur >= duration_needed:
+                score += 10
+            elif vid_dur >= duration_needed * 0.7:
+                score += 5
+            if best_file["height"] >= 1920:
+                score += 5
+            elif best_file["height"] >= 1080:
+                score += 3
+            score += max(0, 10 - vid_idx)
+
+            if score > best_score:
+                best_match = {
+                    "video_id": vid_id,
+                    "video_idx": vid_idx,
+                    "duration": vid_dur,
+                    "file": best_file,
+                    "score": score,
+                }
+                best_score = score
+
+        if not best_match:
+            print(f"[broll] No portrait video files found across {len(videos)} results for '{keyword}' — SKIPPING", flush=True)
+            return None
+
+        chosen_file = best_match["file"]
+        chosen_url = chosen_file["link"]
         if not chosen_url:
             print(f"[broll] No usable file for '{keyword}'", flush=True)
             return None
+
+        print(
+            f"[broll] Selected '{keyword}': pexels_id={best_match['video_id']}, "
+            f"result #{best_match['video_idx']+1}/{len(videos)}, "
+            f"{chosen_file['width']}x{chosen_file['height']}, "
+            f"type={chosen_file['file_type']}, "
+            f"duration={best_match['duration']:.1f}s, "
+            f"score={best_match['score']}",
+            flush=True,
+        )
+
         safe_kw = re.sub(r"[^a-z0-9]", "_", keyword.lower())[:30]
         dest = os.path.join(work_dir, f"broll_{safe_kw}.mp4")
+
         dl = requests.get(chosen_url, stream=True, timeout=30)
         dl.raise_for_status()
+
+        content_type = dl.headers.get("content-type", "")
+        if "image" in content_type.lower():
+            print(f"[broll] REJECTED '{keyword}': download returned image content-type ({content_type})", flush=True)
+            return None
+
         with open(dest, "wb") as f:
+            total_bytes = 0
             for chunk in dl.iter_content(65536):
                 f.write(chunk)
-        print(f"[broll] Downloaded '{keyword}' -> {dest}", flush=True)
+                total_bytes += len(chunk)
+
+        print(f"[broll] Downloaded '{keyword}': {total_bytes / 1024:.0f}KB -> {dest}", flush=True)
+
+        try:
+            probe_cmd = [
+                "ffprobe", "-v", "quiet",
+                "-show_entries", "stream=codec_type,duration,nb_frames,width,height",
+                "-show_entries", "format=duration",
+                "-of", "json",
+                dest,
+            ]
+            probe_result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=10)
+            probe_data = json.loads(probe_result.stdout)
+
+            video_stream = None
+            for stream in probe_data.get("streams", []):
+                if stream.get("codec_type") == "video":
+                    video_stream = stream
+                    break
+
+            if not video_stream:
+                print(f"[broll] REJECTED '{keyword}': no video stream in downloaded file", flush=True)
+                os.remove(dest)
+                return None
+
+            nb_frames = int(video_stream.get("nb_frames", 0) or 0)
+            stream_w = int(video_stream.get("width", 0) or 0)
+            stream_h = int(video_stream.get("height", 0) or 0)
+            fmt_duration = float(probe_data.get("format", {}).get("duration", 0) or 0)
+
+            if fmt_duration < 1.0:
+                print(f"[broll] REJECTED '{keyword}': too short ({fmt_duration:.1f}s)", flush=True)
+                os.remove(dest)
+                return None
+
+            if nb_frames > 0 and nb_frames < 15:
+                print(f"[broll] REJECTED '{keyword}': only {nb_frames} frames — likely a still image", flush=True)
+                os.remove(dest)
+                return None
+
+            is_portrait = stream_h > stream_w
+            print(
+                f"[broll] VALIDATED '{keyword}': {stream_w}x{stream_h}, "
+                f"{fmt_duration:.1f}s, {nb_frames} frames, "
+                f"portrait={is_portrait}",
+                flush=True,
+            )
+
+            if not is_portrait:
+                print(f"[broll] WARNING: '{keyword}' downloaded as landscape despite portrait filter — will be cropped", flush=True)
+        except Exception as e:
+            print(f"[broll] Could not validate '{keyword}': {e} — using file anyway", flush=True)
+
         return dest
     except Exception as e:
         print(f"[broll] Failed to fetch '{keyword}': {e}", flush=True)
