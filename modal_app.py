@@ -28,12 +28,7 @@ image = (
     .pip_install("numpy", "wheel")
     .pip_install("aubio", extra_options="--no-build-isolation")
     .pip_install(
-        "realesrgan",
-        "basicsr",
         "facexlib",
-        "gfpgan",
-        "torch",
-        "torchvision",
         "opencv-python-headless",
         "requests",
         "anthropic",
@@ -46,6 +41,8 @@ image = (
         "tqdm",
     )
     .run_commands(
+        "python3 -m pip install torch==2.1.2 torchvision==0.16.2 --index-url https://download.pytorch.org/whl/cu121",
+        "python3 -m pip install basicsr==1.4.2 realesrgan gfpgan",
         "python3 -c \"import urllib.request; urllib.request.urlretrieve('https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-general-x4v3.pth', '/models/realesr-general-x4v3.pth'); print('Model downloaded')\"",
     )
     .add_local_dir("src/assets/sounds", "/assets/sounds")

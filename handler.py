@@ -71,13 +71,17 @@ try:
 except Exception:
     pass
 
+REAL_ESRGAN_AVAILABLE = False
+RRDBNet = None
+RealESRGANer = None
 try:
     from basicsr.archs.rrdbnet_arch import RRDBNet
     from realesrgan import RealESRGANer
+    REAL_ESRGAN_AVAILABLE = True
     model_exists = os.path.exists("/models/realesr-general-x4v3.pth")
     print(f"[startup] Real-ESRGAN: available, model={'cached' if model_exists else 'will download on first use'}", flush=True)
-except ImportError:
-    print("[startup] WARNING: Real-ESRGAN not installed — AI enhancement unavailable", flush=True)
+except ImportError as e:
+    print(f"[startup] WARNING: Real-ESRGAN not installed — {e}", flush=True)
 
 print("[startup] all import checks done", flush=True)
 
@@ -957,6 +961,8 @@ Global parameters:
     Most serious, informational, or calm content does NOT need speed ramping. Only use speed_curve when the user asks for it or when the content genuinely has a buildup/payoff structure that benefits from dynamic pacing.
 
     Speed values range from 0.5 to 2.0. When speed_curve is active, EVERY section of the video should be either faster or slower than normal — the entire video has a dynamic rhythm. No section should sit at exactly 1.0x. The contrast between your fastest and slowest keypoints is what makes the effect feel real — if all your values are between 0.9 and 1.1, the viewer will not feel anything.
+
+    A speed curve with all values between 0.8 and 1.3 will be barely perceptible. Push the range wider.
 
     Place keypoints at real content moments you can see and hear — not at evenly spaced intervals.
 
@@ -1844,7 +1850,7 @@ def composite_broll(output_path, broll_entries, broll_files, work_dir):
         "-filter_complex", ";".join(filter_parts),
         "-map", f"[{prev}]",
         "-map", "0:a",
-        "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "0",
         "-c:a", "copy",
         "-movflags", "+faststart",
         tmp_out,
@@ -1976,11 +1982,13 @@ def enhance_video_quality(input_path, work_dir):
     Processes at 1x scale (same resolution) — enhances detail, removes noise,
     sharpens edges intelligently. Replaces all FFmpeg denoise/sharpen filters.
     """
+    if not REAL_ESRGAN_AVAILABLE:
+        print("[enhance] Real-ESRGAN not available — skipping", flush=True)
+        return
+
     import cv2
     import numpy as np
     import torch
-    from basicsr.archs.rrdbnet_arch import RRDBNet
-    from realesrgan import RealESRGANer
 
     print("[enhance] Starting AI quality enhancement (Real-ESRGAN)...", flush=True)
     start_time = time.time()
@@ -2091,7 +2099,7 @@ def enhance_video_quality(input_path, work_dir):
     if has_audio:
         reassemble_cmd += ["-i", audio_path]
     reassemble_cmd += [
-        "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "0",
     ]
     if has_audio:
         reassemble_cmd += ["-c:a", "copy"]
@@ -2192,7 +2200,7 @@ def create_keyframed_source(source_path, keyframe_timestamps, work_dir):
     print(f"[ffmpeg] Forcing keyframes at {len(unique_kf)} cut points", flush=True)
     run_ffmpeg([
         "-y","-i",source_path,
-        "-c:v","libx264","-preset","ultrafast","-crf","23",
+        "-c:v","libx264","-preset","ultrafast","-crf","0",
         "-force_key_frames",kf_str,
         "-r","30","-vsync","cfr","-pix_fmt","yuv420p",
         "-c:a","aac","-b:a","192k","-threads","1",
@@ -2875,7 +2883,7 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
         "-i", output_path,
         "-filter_complex", ";".join(post_filters),
         "-map", video_out, "-map", "0:a?",
-        "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "0",
         "-c:a", "copy",
         "-movflags", "+faststart",
         temp_output,
@@ -3229,8 +3237,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     filter_complex = ";".join(video_filters + audio_filters + transition_filters + sfx_filter_strs + post_filters + music_filters)
 
     encode_args = [
-        "-c:v","libx264","-preset","medium","-crf","18",
-        "-b:v","6M","-maxrate","8M","-bufsize","16M",
+        "-c:v","libx264","-preset","ultrafast","-crf","0",
         "-pix_fmt","yuv420p",
         "-c:a","aac","-b:a","192k",
         "-movflags","+faststart",
@@ -3467,8 +3474,11 @@ def handler(job):
 
         vibe_lower = vibe.lower()
         if "enhanced quality" in vibe_lower or "enhance quality" in vibe_lower or "enhanced" in vibe_lower:
-            print("[pipeline] step=ai_enhance (user requested enhanced quality)", flush=True)
-            enhance_video_quality(output_path, work_dir)
+            if REAL_ESRGAN_AVAILABLE:
+                print("[pipeline] step=ai_enhance (user requested enhanced quality)", flush=True)
+                enhance_video_quality(output_path, work_dir)
+            else:
+                print("[pipeline] AI enhancement requested but Real-ESRGAN not available — skipping", flush=True)
         else:
             print("[pipeline] AI enhancement skipped (not requested in vibe)", flush=True)
 
