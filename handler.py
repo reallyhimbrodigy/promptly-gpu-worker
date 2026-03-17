@@ -938,10 +938,21 @@ Global parameters:
   speed_curve — smooth speed ramp across the entire assembled video:
     "none" — no speed ramping.
     Array of keypoints: [{{"t": <output_seconds>, "speed": <0.5 to 2.0>}}]
-    When the user asks for "speed ramping", "dynamic pacing", "engaging", or "captivating" editing, use a speed curve.
-    Rules: never speed up the first 3 seconds (the hook). Fastest on filler/transitions. Slowest on reveals/punchlines.
+    When the user asks for "speed ramping", "dynamic", "engaging", "captivating", or "CapCut style" editing, use a speed curve.
 
-    IMPORTANT: subtle speed differences (0.9 to 1.1) are INVISIBLE to viewers — that is essentially normal speed. A real speed ramp uses dramatic contrast:
+    Watch the video. Listen to the speech. Place your speed keypoints based on what you actually see and hear:
+
+    SPEED UP through moments that don't need the viewer's full attention — buildup, filler, transitions between ideas, repetition, anything that isn't the point.
+
+    SLOW DOWN on moments that need to land — punchlines, reveals, key statements, offers, emotional peaks, anything the viewer would want to rewatch.
+
+    The video will speed up and slow down MULTIPLE TIMES throughout. It's a wave — not one slow moment surrounded by fast. Every shift in content energy is an opportunity to shift the speed. Watch the video and feel where the rhythm naturally rises and falls.
+
+    Most serious, informational, or calm content does NOT need speed ramping. Only use speed_curve when the user asks for it or when the content genuinely has a buildup/payoff structure that benefits from dynamic pacing.
+
+    Speed values range from 0.5 to 2.0. When speed_curve is active, EVERY section of the video should be either faster or slower than normal — the entire video has a dynamic rhythm. No section should sit at exactly 1.0x. The contrast between your fastest and slowest keypoints is what makes the effect feel real — if all your values are between 0.9 and 1.1, the viewer will not feel anything.
+
+    Place keypoints at real content moments you can see and hear — not at evenly spaced intervals.
 
     Example for a 35s talking head:
       t=0 speed=0.92 (hook — slightly slow for clarity)
