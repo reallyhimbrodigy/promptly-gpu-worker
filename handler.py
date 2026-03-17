@@ -59,163 +59,68 @@ print("[startup] all import checks done", flush=True)
 
 
 def get_trend_context():
-    """Fetch the latest valid trend profile from Supabase."""
+    """Load the current weekly editing style guide from Supabase."""
     if supabase is None:
-        print("[trend] No valid trend profile found — proceeding without trend context", flush=True)
+        print("[trend] No valid trend profile found", flush=True)
         return None
     try:
-        response = supabase.table("trend_profiles") \
-            .select("profile_json, computed_at, sample_size, valid_until") \
-            .eq("profile_type", "general") \
-            .gte("valid_until", datetime.utcnow().isoformat()) \
-            .order("computed_at", desc=True) \
+        result = supabase.table("trend_profiles") \
+            .select("profile_json, sample_size") \
+            .gt("valid_until", datetime.utcnow().isoformat()) \
+            .order("valid_until", desc=True) \
             .limit(1) \
             .execute()
 
-        if response.data and len(response.data) > 0:
-            row = response.data[0]
-            computed = row.get("computed_at", "unknown")
-            sample = row.get("sample_size", 0)
-            print(f"[trend] Loaded trend profile: {sample} videos, computed {computed}", flush=True)
+        if result.data and len(result.data) > 0:
+            profile = result.data[0]["profile_json"]
+            sample_size = result.data[0].get("sample_size", 0)
 
-            # Check staleness — warn if older than 10 days
-            try:
-                from datetime import datetime as dt
-                computed_dt = dt.fromisoformat(computed.replace("Z", "+00:00"))
-                age_days = (dt.now(computed_dt.tzinfo) - computed_dt).days
-                if age_days > 10:
-                    print(f"[trend] WARNING: trend profile is {age_days} days old — may be stale", flush=True)
-            except Exception:
-                pass
-
-            profile = row.get("profile_json") or {}
-            if isinstance(profile, dict):
-                profile.setdefault("sample_size", sample)
-                profile.setdefault("computed_at", computed)
-            return profile
+            if isinstance(profile, dict) and profile.get("type") == "style_guide":
+                style_guide = profile.get("style_guide", "")
+                print(f"[trend] Loaded editing style guide: {sample_size} videos, {len(style_guide)} chars", flush=True)
+                return {"type": "style_guide", "style_guide": style_guide, "sample_size": sample_size}
+            else:
+                print(f"[trend] Loaded trend profile (legacy stats): {sample_size} videos", flush=True)
+                return profile
         else:
-            print("[trend] No valid trend profile found — proceeding without trend context", flush=True)
+            print("[trend] No valid trend profile found", flush=True)
             return None
     except Exception as e:
-        print(f"[trend] Error fetching trend profile: {e} — proceeding without trend context", flush=True)
+        print(f"[trend] Error loading trend context: {e}", flush=True)
         return None
 
 
 def format_trend_section(trend_context):
-    """Format the trend profile into a human-readable prompt section."""
+    """Format the trend context for injection into the Gemini prompt."""
     if not trend_context:
         return ""
 
     try:
-        sample_size = trend_context.get("sample_size", 0)
-        np = trend_context.get("numeric_patterns", {})
-        cp = trend_context.get("categorical_patterns", {})
-        bp = trend_context.get("boolean_patterns", {})
+        if isinstance(trend_context, dict) and trend_context.get("type") == "style_guide":
+            style_guide = trend_context.get("style_guide", "")
+            sample_size = trend_context.get("sample_size", 0)
+            if not style_guide:
+                return ""
 
-        def fmt_range(key):
-            """Format a numeric pattern as 'p25-p75 (median X)'"""
-            d = np.get(key, {})
-            p25 = d.get("p25")
-            med = d.get("median")
-            p75 = d.get("p75")
-            if p25 is None or med is None or p75 is None:
-                return "no data"
-            return f"{p25}-{p75} (median {med})"
+            return f"""
 
-        def fmt_pct(key):
-            """Format a boolean pattern as a percentage string"""
-            val = bp.get(key)
-            if val is None:
-                return "no data"
-            return f"{int(val * 100)}%"
+=== WHAT'S WORKING ON TIKTOK RIGHT NOW ===
 
-        def fmt_top_categories(key, top_n=4):
-            """Format a categorical pattern as 'name: X%, name: X%' sorted by frequency"""
-            d = cp.get(key, {})
-            if not d:
-                return "no data"
-            sorted_items = sorted(d.items(), key=lambda x: x[1], reverse=True)[:top_n]
-            return ", ".join(f"{k}: {int(v * 100)}%" for k, v in sorted_items)
+The following editing style guide was generated by watching {sample_size} of the highest-performing TikTok videos from this week — videos with 500K+ views that the algorithm is actively distributing. These are real patterns from real viral content, not theory.
 
-        lines = []
-        lines.append("=== WHAT IS PERFORMING RIGHT NOW ===")
-        lines.append("")
-        lines.append(f"The data below comes from {sample_size} of the highest-performing TikTok videos over the past week — videos with 500K+ views that the algorithm is actively distributing. These numbers are not instructions. They are intelligence about what the audience and the algorithm are currently rewarding.")
-        lines.append("")
-        lines.append("Read these patterns. Let them inform your instincts for this specific edit. Where the footage naturally aligns with a current pattern, lean into it. Where it doesn't, use your judgment about whether to adapt or let the footage's own strengths lead.")
-        lines.append("")
+Use this to inform your editing decisions. Where the user's footage naturally fits these patterns, lean into them. Where it doesn't, use your judgment.
 
-        lines.append("Timing and structure:")
-        lines.append(f"  Time to first cut: {fmt_range('time_to_first_cut')} seconds")
-        lines.append(f"  Cuts in first 3 seconds: {fmt_range('cuts_in_first_3s')}")
-        lines.append(f"  Cuts in first 5 seconds: {fmt_range('cuts_in_first_5s')}")
-        lines.append(f"  Total cuts per video: {fmt_range('total_cuts')}")
-        lines.append(f"  Average cut duration: {fmt_range('avg_cut_duration')} seconds")
-        lines.append(f"  Transition effects (non-hard-cut): {fmt_range('transition_effect_count')} per video")
-        lines.append(f"  Video duration: {fmt_range('video_duration')} seconds")
-        lines.append("")
+{style_guide}"""
 
-        lines.append("Hook patterns:")
-        lines.append(f"  Hook lands within: {fmt_range('hook_timing')} seconds")
-        lines.append(f"  Hook types: {fmt_top_categories('hook_type')}")
-        lines.append(f"  {fmt_pct('has_hook_text')} of top videos have hook text on screen in the first 2 seconds")
-        lines.append("")
+        elif isinstance(trend_context, dict) and "numeric_patterns" in trend_context:
+            sample_size = trend_context.get("sample_size", 0)
+            return f"\n\n(Legacy trend data from {sample_size} videos available but in old format)\n"
 
-        lines.append("Visual patterns:")
-        lines.append(f"  {fmt_pct('has_cut_zoom')} use cut-zoom (alternating framing at sentence boundaries)")
-        lines.append(f"  {fmt_pct('has_zoom_movements')} use zoom movements within clips")
-        lines.append(f"  Zoom movements per video: {fmt_range('zoom_movement_count')}")
-        lines.append(f"  {fmt_pct('framing_changes_at_cuts')} change framing at cut points")
-        lines.append(f"  {fmt_pct('has_broll')} include b-roll (clips: {fmt_range('broll_clip_count')}, ratio of video: {fmt_range('broll_ratio')})")
-        lines.append(f"  Primary framing: {fmt_top_categories('primary_shot_type')}")
-        lines.append(f"  Color grading: {fmt_top_categories('color_tone')}")
-        lines.append(f"  {fmt_pct('has_vignette')} use vignette")
-        lines.append(f"  {fmt_pct('looks_color_graded')} appear intentionally color graded")
-        lines.append("")
-
-        lines.append("Speed patterns:")
-        lines.append(f"  {fmt_pct('has_speed_changes')} use visible speed changes")
-        lines.append(f"  {fmt_pct('has_speed_ramp')} use speed ramps")
-        lines.append(f"  {fmt_pct('base_speed_accelerated')} have base speed slightly accelerated")
-        lines.append(f"  Speed changes per video: {fmt_range('speed_change_count')}")
-        lines.append("")
-
-        lines.append("Audio patterns:")
-        lines.append(f"  {fmt_pct('has_background_music')} were posted with background music selected by the creator at publishing time")
-        lines.append(f"  Music energy: {fmt_top_categories('music_energy')}")
-        lines.append(f"  {fmt_pct('has_sound_effects')} have sound effects (median count: {np.get('sound_effect_count', {}).get('median', 'N/A')} per video)")
-        lines.append(f"  {fmt_pct('sfx_at_transitions')} have SFX at cut points")
-        lines.append(f"  {fmt_pct('sfx_on_text')} have SFX when text appears")
-        lines.append(f"  {fmt_pct('sfx_on_emphasis')} have SFX on emphasis moments")
-        lines.append(f"  {fmt_pct('speaks_to_camera')} feature someone speaking to camera")
-        lines.append(f"  {fmt_pct('audio_feels_clean')} have clean, processed audio")
-        lines.append("")
-
-        lines.append("Text and captions:")
-        lines.append(f"  {fmt_pct('has_text')} have text overlays on screen")
-        lines.append(f"  Text overlays per video: {fmt_range('text_overlay_count')}")
-        lines.append(f"  First text appears at: {fmt_range('text_first_appearance')} seconds")
-        lines.append(f"  {fmt_pct('text_reinforces_speech')} use text that reinforces what the speaker is saying")
-        lines.append(f"  {fmt_pct('has_animated_captions')} use animated word-by-word captions")
-        lines.append(f"  {fmt_pct('has_cta_text')} have a CTA text overlay")
-        lines.append(f"  Text positions: {fmt_top_categories('text_positions')}")
-        lines.append("")
-
-        lines.append("Ending patterns:")
-        lines.append(f"  {fmt_pct('loops_cleanly')} loop cleanly (no fade to black)")
-        lines.append(f"  {fmt_pct('has_cta_at_end')} have a CTA in the last 3 seconds")
-        lines.append(f"  Ending types: {fmt_top_categories('ending_type')}")
-        lines.append("")
-
-        lines.append("Production quality:")
-        lines.append(f"  {fmt_pct('feels_professionally_edited')} feel professionally edited")
-        lines.append(f"  Editing intensity: {fmt_top_categories('editing_intensity')}")
-        lines.append("")
-
-        return "\n".join(lines)
+        else:
+            return ""
 
     except Exception as e:
-        print(f"[trend] Error formatting trend section: {e} — skipping trend context", flush=True)
+        print(f"[trend] Error formatting trend section: {e}", flush=True)
         return ""
 
 # Download arnndn noise-reduction model if not present (used by audio_denoise feature)
