@@ -972,10 +972,25 @@ Global parameters:
 
     Your speed curve should span at least 0.65 to 1.4 for the effect to be noticeable.
 
-  caption_style: none, standard, bold_centered, minimal_bottom, animated_word, bold_white, bold_yellow, keyword_pop, box_caption
-    Set none if you see captions already burned into the footage.
+  caption_style — word-by-word animated captions synced to speech:
+    none — no captions. Use when captions are already burned into the footage.
+    capcut — the standard TikTok/Reels caption style. Bold white text with black outline, word-by-word bounce animation, active word highlighted in yellow. This is what viewers expect on these platforms. Use this as the default when the video has speech and no burned-in captions.
+    animated_word — similar to capcut but with a karaoke color sweep instead of bounce animation.
+    bold_white — large bold white text, karaoke highlight.
+    bold_yellow — large bold yellow text.
+    keyword_pop — white text with green highlight on specific keywords.
+    standard — clean white text, subtle animation.
+    minimal_bottom — small understated text at the bottom.
+    bold_centered — large bold centered text.
+    box_caption — text with filled background rectangle.
 
-  caption_position: top, center, lower-third, bottom
+    If the video has speech and no burned-in captions, use "capcut" — it is the defining caption style of TikTok and Reels content.
+
+  caption_position — where captions appear:
+    center — the standard position for CapCut-style captions. Centered in the frame where the viewer's eye naturally goes.
+    lower-third — slightly below center. Good when the speaker's face needs to stay visible.
+    top — above the speaker. Use when the bottom of the frame is cluttered.
+    bottom — near the bottom edge. WARNING: platform UI covers this area on TikTok/Reels.
 
   audio_denoise: true / false — AI noise removal for room tone, hiss, fan noise.
 
@@ -1324,6 +1339,15 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None):
     edit_plan["audio_ducking"] = True
     edit_plan["beat_sync"] = False
     edit_plan.setdefault("sound_effects", [])
+
+    valid_caption_styles = {
+        "none", "capcut", "standard", "bold_centered", "minimal_bottom",
+        "animated_word", "bold_white", "bold_yellow", "keyword_pop", "box_caption",
+    }
+    if str(edit_plan.get("caption_style") or "").lower() not in valid_caption_styles:
+        edit_plan["caption_style"] = "capcut"
+    else:
+        edit_plan["caption_style"] = str(edit_plan.get("caption_style") or "none").lower()
 
     raw_curve = edit_plan.get("speed_curve", "none")
     if raw_curve == "none" or raw_curve is None or not isinstance(raw_curve, list):
@@ -2524,6 +2548,7 @@ def generate_subtitle_file(transcript, caption_style, cuts, effective_durations,
     margin_v = pos_margin.get(caption_position or "lower-third", 300)
 
     styles_map = {
+        "capcut":         {"fontsize": 58, "fontname": "Montserrat ExtraBold", "bold": 0, "alignment": 5},
         "standard":       {"fontsize": 44, "fontname": "Montserrat",           "bold": 0, "alignment": 2},
         "bold_centered":  {"fontsize": 58, "fontname": "Montserrat Black",     "bold": 0, "alignment": 5},
         "minimal_bottom": {"fontsize": 36, "fontname": "Montserrat",           "bold": 0, "alignment": 2},
@@ -2549,6 +2574,7 @@ def generate_subtitle_file(transcript, caption_style, cuts, effective_durations,
         #   &H90000000 = ~56% opacity black box
         #   &H00000000 = fully opaque black box
         #   &HA0000000 = ~37% opacity black box
+        "capcut":         ("&H00FFFFFF", "&H0000FFFF", "&H00000000", 1, 5, 0,  0.5),
         "standard":       ("&H00FFFFFF", "&H0000FFFF", "&H90000000", 3, 0, 0,  1.2),
         "bold_centered":  ("&H00FFFFFF", "&H0000FFFF", "&H90000000", 3, 0, 0,  1.2),
         "minimal_bottom": ("&H00FFFFFF", "&H0000CCFF", "&HA0000000", 3, 0, 0,  1.0),
@@ -2568,6 +2594,19 @@ def generate_subtitle_file(transcript, caption_style, cuts, effective_durations,
     cfg = STYLE_CONFIGS.get(caption_style, STYLE_CONFIGS["standard"])
     primary, secondary, back_c, border_style, outline_w, shadow, spacing = cfg
 
+    if caption_style == "capcut":
+        style_line = (
+            f"Style: Default,{font_name},{fontsize},&H00FFFFFF,&H0000FFFF,"
+            f"&H00000000,&H00000000,{bold},0,0,0,100,100,{spacing},0,"
+            f"1,5,0,{alignment},30,30,{margin_v},1"
+        )
+    else:
+        style_line = (
+            f"Style: Default,{font_name},{fontsize},{primary},{secondary},"
+            f"&H00000000,{back_c},{bold},0,0,0,100,100,{spacing},0,"
+            f"{border_style},{outline_w},{shadow},{alignment},30,30,{margin_v},1"
+        )
+
     ass = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {w}
@@ -2576,11 +2615,45 @@ WrapStyle: 1
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{font_name},{fontsize},{primary},{secondary},&H00000000,{back_c},{bold},0,0,0,100,100,{spacing},0,{border_style},{outline_w},{shadow},{alignment},30,30,{margin_v},1
+{style_line}
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
+
+    def _capcut_group(group, highlight_color="&H0000FFFF"):
+        """
+        Build a CapCut-style animated dialogue line for a group of words.
+        Each word gets:
+        - A scale bounce animation (80% -> 110% -> 100%)
+        - Color highlight while active
+        - No background box — uses outline for contrast
+        """
+        parts = []
+        cumulative_ms = 0
+
+        for word_dict in group:
+            dur_s = max(0.05, float(word_dict["end"]) - float(word_dict["start"]))
+            dur_ms = max(50, round(dur_s * 1000))
+            clean = str(word_dict["word"]).strip()
+
+            pop_in_ms = 80
+            settle_ms = 100
+
+            word_tag = (
+                f"{{\\fscx80\\fscy80\\1c&H00FFFFFF&}}"
+                f"{{\\t({cumulative_ms},{cumulative_ms + pop_in_ms},"
+                f"\\fscx115\\fscy115\\1c{highlight_color})}}"
+                f"{{\\t({cumulative_ms + pop_in_ms},{cumulative_ms + pop_in_ms + settle_ms},"
+                f"\\fscx100\\fscy100)}}"
+                f"{{\\t({cumulative_ms + dur_ms - 30},{cumulative_ms + dur_ms},"
+                f"\\1c&H00FFFFFF&)}}"
+                f"{clean} "
+            )
+            parts.append(word_tag)
+            cumulative_ms += dur_ms
+
+        return "".join(parts).rstrip()
 
     def _kf_group(group):
         """
@@ -2642,6 +2715,26 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 text = "".join(parts).rstrip()
                 ass_lines.append(
                     f"Dialogue: 0,{format_ass_time(start)},{format_ass_time(end)},Default,,0,0,0,,{text}\n"
+                )
+                group = []
+        ass += "".join(ass_lines)
+
+    elif caption_style == "capcut":
+        highlight = "&H0000FFFF"
+        ass_lines = []
+        group = []
+        for i, word_dict in enumerate(words):
+            group.append(word_dict)
+            next_w = words[i + 1] if i + 1 < len(words) else None
+            pause = (next_w["start"] - word_dict["end"]) if next_w else 1.0
+            ends_sentence = bool(PUNCT_END.search(word_dict.get("word") or ""))
+            if not next_w or pause > 0.3 or ends_sentence or len(group) >= MAX_WORDS:
+                start = group[0]["start"]
+                end = group[-1]["end"] + 0.08
+                text = _capcut_group(group, highlight_color=highlight)
+                ass_lines.append(
+                    f"Dialogue: 0,{format_ass_time(start)},{format_ass_time(end)}"
+                    f",Default,,0,0,0,,{text}\n"
                 )
                 group = []
         ass += "".join(ass_lines)
@@ -3229,6 +3322,22 @@ def handler(job):
         )
         print(f"[pipeline] edit recipe complete in {time.time()-t:.1f}s", flush=True)
         analysis = edit_plan.get("analysis_data") or {}
+
+        caption_style = str(edit_plan.get("caption_style") or "none").lower()
+        if caption_style != "none":
+            print("[pipeline] step=transcribe (captions requested)", flush=True)
+            audio_path = os.path.join(work_dir, "audio_for_captions.wav")
+            extract_cmd = [
+                "ffmpeg", "-y", "-i", source_path,
+                "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
+                audio_path,
+            ]
+            subprocess.run(extract_cmd, capture_output=True, text=True, timeout=30)
+            transcript = transcribe_audio(audio_path)
+            if os.path.exists(audio_path):
+                os.remove(audio_path)
+        else:
+            print("[pipeline] Captions not requested — skipping transcription", flush=True)
 
         # Step 12 — FFmpeg render
         send_progress(job_id, "render", 62, "Rendering — almost there...", app_url)
