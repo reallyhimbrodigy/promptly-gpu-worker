@@ -71,6 +71,14 @@ try:
 except Exception:
     pass
 
+try:
+    from basicsr.archs.rrdbnet_arch import RRDBNet
+    from realesrgan import RealESRGANer
+    model_exists = os.path.exists("/models/realesr-general-x4v3.pth")
+    print(f"[startup] Real-ESRGAN: available, model={'cached' if model_exists else 'will download on first use'}", flush=True)
+except ImportError:
+    print("[startup] WARNING: Real-ESRGAN not installed — AI enhancement unavailable", flush=True)
+
 print("[startup] all import checks done", flush=True)
 
 
@@ -938,10 +946,6 @@ Global parameters:
 
   vibrance: true / false — boosts muted colors while protecting skin. Set true if the footage looks flat or desaturated.
 
-  denoise: true / false — cleans noise/grain. Set true ONLY if you see visible grain or noise in flat areas like walls, skin, or sky. On clean well-lit footage, set false — denoise on clean footage removes real detail and makes the video look soft and blurry. Most modern phone footage is clean enough that denoise=false is the right choice.
-
-  sharpening: true / false — enhances edge detail. Set true ONLY on noticeably soft or blurry footage. On normal or sharp footage, set false — over-sharpening creates harsh edges and digital artifacts. Most phone footage is already sharp enough.
-
   speed_curve — smooth speed ramp across the entire assembled video:
     "none" — no speed ramping.
     Array of keypoints: [{{"t": <output_seconds>, "speed": <0.5 to 2.0>}}]
@@ -1043,8 +1047,6 @@ Then output the JSON:
   "shadow_lift": <true|false>,
   "highlight_rolloff": <true|false>,
   "vibrance": <true|false>,
-  "denoise": <true|false>,
-  "sharpening": <true|false>,
   "text_overlays": [
     {{"text": "<text>", "position": "<pos>", "appear_at_clip": <n>, "style": "<style>", "sfx_style": "<sfx>"}}
   ],
@@ -1881,6 +1883,158 @@ def run_ffmpeg(args):
     return result
 
 
+def enhance_video_quality(input_path, work_dir):
+    """
+    Apply Real-ESRGAN AI quality enhancement to the video.
+    Processes at 1x scale (same resolution) — enhances detail, removes noise,
+    sharpens edges intelligently. Replaces all FFmpeg denoise/sharpen filters.
+    """
+    import cv2
+    import numpy as np
+    import torch
+    from basicsr.archs.rrdbnet_arch import RRDBNet
+    from realesrgan import RealESRGANer
+
+    print("[enhance] Starting AI quality enhancement (Real-ESRGAN)...", flush=True)
+    start_time = time.time()
+
+    model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=4)
+    model_path = "/models/realesr-general-x4v3.pth"
+
+    if not os.path.exists(model_path):
+        os.makedirs("/models", exist_ok=True)
+        import urllib.request
+        print("[enhance] Downloading model weights...", flush=True)
+        urllib.request.urlretrieve(
+            "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-general-x4v3.pth",
+            model_path,
+        )
+
+    upsampler = RealESRGANer(
+        scale=4,
+        model_path=model_path,
+        model=model,
+        tile=512,
+        tile_pad=10,
+        pre_pad=0,
+        half=True,
+    )
+
+    if hasattr(torch, "compile"):
+        try:
+            upsampler.model = torch.compile(upsampler.model)
+            print("[enhance] torch.compile enabled", flush=True)
+        except Exception:
+            print("[enhance] torch.compile not available, using standard inference", flush=True)
+
+    frames_dir = os.path.join(work_dir, "enhance_frames")
+    enhanced_dir = os.path.join(work_dir, "enhance_output")
+    os.makedirs(frames_dir, exist_ok=True)
+    os.makedirs(enhanced_dir, exist_ok=True)
+
+    extract_cmd = [
+        "ffmpeg", "-y", "-i", input_path,
+        "-qscale:v", "2",
+        f"{frames_dir}/frame_%06d.png",
+    ]
+    subprocess.run(extract_cmd, capture_output=True, text=True, timeout=120)
+
+    frame_files = sorted([f for f in os.listdir(frames_dir) if f.endswith(".png")])
+    total_frames = len(frame_files)
+    print(f"[enhance] Extracted {total_frames} frames", flush=True)
+
+    if total_frames == 0:
+        print("[enhance] No frames extracted — skipping enhancement", flush=True)
+        return
+
+    processed = 0
+    for frame_file in frame_files:
+        frame_path = os.path.join(frames_dir, frame_file)
+        output_path_frame = os.path.join(enhanced_dir, frame_file)
+
+        img = cv2.imread(frame_path, cv2.IMREAD_UNCHANGED)
+        if img is None:
+            continue
+
+        try:
+            output, _ = upsampler.enhance(img, outscale=1)
+            cv2.imwrite(output_path_frame, output)
+            processed += 1
+
+            if processed % 100 == 0:
+                elapsed = time.time() - start_time
+                fps = processed / elapsed if elapsed > 0 else 0.0
+                remaining = (total_frames - processed) / fps if fps > 0 else 0
+                print(f"[enhance] {processed}/{total_frames} frames ({fps:.1f} fps, ~{remaining:.0f}s remaining)", flush=True)
+        except Exception:
+            shutil.copy2(frame_path, output_path_frame)
+
+    elapsed = time.time() - start_time
+    fps_done = processed / elapsed if elapsed > 0 else 0.0
+    print(f"[enhance] Processed {processed}/{total_frames} frames in {elapsed:.1f}s ({fps_done:.1f} fps)", flush=True)
+
+    audio_path = os.path.join(work_dir, "enhance_audio.aac")
+    audio_extract = subprocess.run(
+        ["ffmpeg", "-y", "-i", input_path, "-vn", "-acodec", "copy", audio_path],
+        capture_output=True, text=True, timeout=30,
+    )
+    has_audio = audio_extract.returncode == 0 and os.path.exists(audio_path)
+
+    fps_cmd = [
+        "ffprobe", "-v", "quiet",
+        "-select_streams", "v:0",
+        "-show_entries", "stream=r_frame_rate",
+        "-of", "csv=p=0",
+        input_path,
+    ]
+    fps_result = subprocess.run(fps_cmd, capture_output=True, text=True, timeout=10)
+    fps_str = fps_result.stdout.strip()
+    if "/" in fps_str:
+        num, den = fps_str.split("/")
+        fps = float(num) / float(den)
+    else:
+        fps = float(fps_str) if fps_str else 30.0
+
+    enhanced_output = os.path.join(work_dir, "enhanced_output.mp4")
+    reassemble_cmd = [
+        "ffmpeg", "-y",
+        "-framerate", f"{fps}",
+        "-i", f"{enhanced_dir}/frame_%06d.png",
+    ]
+    if has_audio:
+        reassemble_cmd += ["-i", audio_path]
+    reassemble_cmd += [
+        "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+    ]
+    if has_audio:
+        reassemble_cmd += ["-c:a", "copy"]
+    reassemble_cmd += [
+        "-pix_fmt", "yuv420p",
+        "-movflags", "+faststart",
+    ]
+    if has_audio:
+        reassemble_cmd.append("-shortest")
+    reassemble_cmd.append(enhanced_output)
+
+    r = subprocess.run(reassemble_cmd, capture_output=True, text=True, timeout=120)
+    if r.returncode != 0:
+        print(f"[enhance] Reassembly failed: {r.stderr[-300:]}", flush=True)
+        print("[enhance] Falling back to original video", flush=True)
+        shutil.rmtree(frames_dir, ignore_errors=True)
+        shutil.rmtree(enhanced_dir, ignore_errors=True)
+        return
+
+    os.replace(enhanced_output, input_path)
+    total_time = time.time() - start_time
+    total_fps = total_frames / total_time if total_time > 0 else 0.0
+    print(f"[enhance] Complete: {total_frames} frames in {total_time:.1f}s ({total_fps:.1f} fps)", flush=True)
+
+    shutil.rmtree(frames_dir, ignore_errors=True)
+    shutil.rmtree(enhanced_dir, ignore_errors=True)
+    if os.path.exists(audio_path):
+        os.remove(audio_path)
+
+
 def normalize_source_video(source_path, work_dir):
     result = subprocess.run(
         ["ffprobe","-v","quiet","-print_format","json","-show_streams","-show_format",source_path],
@@ -2200,17 +2354,6 @@ def build_video_filter_chain(color_grade, source_res, edit_plan=None):
     fq = (ep.get("analysis_data") or {}).get("footage_quality") or {}
     filters = []
 
-    if ep.get("denoise"):
-        noise = fq.get("noise_level", "low")
-        denoise_params = {
-            "none":   "1.5:1.5:2:2",
-            "low":    "2.5:2.5:4:4",
-            "medium": "4:4:6:6",
-            "high":   "6:6:9:9",
-        }.get(noise, "2.5:2.5:4:4")
-        filters.append(f"hqdn3d={denoise_params}")
-        print(f"[render] denoise: noise_level={noise} → hqdn3d={denoise_params}", flush=True)
-
     b = clamp(float(color_grade.get("brightness") or 0), -0.3, 0.3)
     c = clamp(float(color_grade.get("contrast") or 1), 0.5, 2.0)
     s = clamp(float(color_grade.get("saturation") or 1), 0.5, 2.0)
@@ -2260,16 +2403,6 @@ def build_video_filter_chain(color_grade, source_res, edit_plan=None):
         }.get(richness, "hue=s=1.18")
         filters.append(vibrance_hue)
         print(f"[render] vibrance: color_richness={richness} → {vibrance_hue}", flush=True)
-
-    if ep.get("sharpening"):
-        src_sharp = fq.get("source_sharpness", "normal")
-        unsharp_params = {
-            "soft":   "unsharp=7:7:1.5:5:5:0.0",
-            "normal": "unsharp=5:5:1.0:3:3:0.0",
-            "sharp":  "unsharp=3:3:0.4:3:3:0.0",
-        }.get(src_sharp, "unsharp=5:5:1.0:3:3:0.0")
-        filters.append(unsharp_params)
-        print(f"[render] sharpening: source_sharpness={src_sharp} → {unsharp_params}", flush=True)
 
     grain = str(ep.get("grain") or "none").lower()
     if grain == "subtle":
@@ -3031,6 +3164,13 @@ def handler(job):
 
         if not os.path.exists(output_path):
             return {"error": "No output file produced by FFmpeg"}
+
+        vibe_lower = vibe.lower()
+        if "enhanced quality" in vibe_lower or "enhance quality" in vibe_lower or "enhanced" in vibe_lower:
+            print("[pipeline] step=ai_enhance (user requested enhanced quality)", flush=True)
+            enhance_video_quality(output_path, work_dir)
+        else:
+            print("[pipeline] AI enhancement skipped (not requested in vibe)", flush=True)
 
         # Step 12.5 — B-roll overlay (only if the recipe requested b-roll)
         broll_requests = edit_plan.get("broll") or []
