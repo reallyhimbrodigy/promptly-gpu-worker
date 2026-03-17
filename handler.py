@@ -897,24 +897,19 @@ Per-clip parameters:
   source_start / source_end — timestamps defining each clip. MUST be strictly chronological.
     Clips must be chronological. Leave gaps between clips to remove dead air, pauses, or dull moments — the pipeline preserves these gaps as intentional cuts. Only overlap or touch clips when the speech flows continuously with no pause.
 
-  transition_out:
-    none — hard cut. Best for most cuts, especially between clips of the same speaker.
-    whip_right / whip_left — directional blur wipe. Use at genuine scene changes where the visual content dramatically changes.
-    smoothleft / smoothright — smooth slide. Same as whip — only at real scene changes.
-    Use transitions where the user asks for them or where the content genuinely shifts. Most talking-head cuts should be hard cuts.
+  transition_out — visual transition between this clip and the next:
 
-  transition_sound:
-    none — silent. Best for continuous speech.
-    swoosh — directional air swipe. Pairs with scene changes and wipes.
-    thud — punchy impact. Emphasizes a strong statement.
-    pop — bright snap. Fits reveals and appearances.
-    ding — bell. Fits notifications, tips, social media references.
-    reverb_hit — atmospheric impact. Fits major shifts.
-    shutter — camera click. Fits screenshots, screen recordings, visual captures.
-    typing — keyboard clicks. Fits tech and screen content.
-    ching — cash register. Fits money, pricing, free offers.
+    none — hard cut. This is what 95% of cuts on TikTok and Reels look like. Clean, instant, professional. The viewer doesn't notice a hard cut — they just feel the rhythm. Use this for every cut where the speaker is continuing to talk or the visual content isn't dramatically changing.
 
-  sfx_style — sound accent on the clip: none, swoosh, thud, shutter
+    fadewhite — fades through white between clips. This is the signature transition on TikTok and Reels — a brief white flash between two clips that signals a scene change or energy shift. Use when the visual content genuinely changes: speaker to screen recording, one location to another, one topic section to another. Do not use between two clips of the same person in the same setting.
+
+    whip_left / whip_right — fast directional blur. High energy. Use sparingly on content that has real momentum — a dramatic shift, a high-energy moment. Most talking head content does not need this.
+
+    Watch the video. Almost every cut should be none. Place fadewhite only where you SEE the content actually change — not where you think it "should" have a transition. If you're not sure, use none.
+
+  transition_sound — always "none"
+
+  sfx_style — always "none"
 
   zoom — camera movement across the clip:
     none — static. Use when the footage has burned-in captions or edge text.
@@ -995,7 +990,6 @@ Text overlays:
   position — top (default for talking heads), center (only when no face in frame), bottom
   appear_at_clip — which clip number
   style — title (72px), callout (56px), cta (64px)
-  sfx_style — none, pop, thud, ding, typing, ching, shutter, reverb_hit, swoosh
   If captions are already burned in, use overlays sparingly — maximum 2-3 per video.
 
 B-roll — stock footage overlaid on the main video for 2-3 seconds:
@@ -1006,6 +1000,42 @@ B-roll — stock footage overlaid on the main video for 2-3 seconds:
   timestamp — seconds into the source video. Not in the first 3 seconds.
   duration — 2-3 seconds max.
   Maximum 2 b-roll clips per video.
+
+Sound effects — audio accents placed at specific moments in the video based on what you see and hear. These are NOT tied to cuts or text overlays — they are tied to MOMENTS in the content.
+
+Watch the video. Listen to the speech. Place sounds at the exact timestamp where the moment happens:
+
+  pop — bright snap. Use when:
+    - text appears on screen
+    - something is revealed or introduced
+    - a new idea arrives
+
+  ching — cash register. Use ONLY when the speaker says or references:
+    - money, pricing, cost
+    - something being free
+    - a deal, discount, or offer
+
+  ding — notification bell. Use ONLY when the speaker says or references:
+    - a notification or alert
+    - a message or DM
+    - a phone or app
+
+  thud — heavy impact. Use when:
+    - a bold or confrontational statement lands
+    - a hard truth is spoken
+    - a punchline hits
+
+  swoosh — air swipe. Use when:
+    - energy shifts direction
+    - a topic changes quickly
+
+  Place each sound at the EXACT TIMESTAMP where the moment happens — when the word is spoken or the action occurs.
+
+  Do not overdo it. Most videos have 2-5 sound effects total. Each one should match a real moment you can hear or see. If the video is calm or serious, use fewer. If it's energetic, use more.
+
+  sound_effects: [
+    {{"t": <seconds>, "sound": "<pop|ching|ding|thud|swoosh>"}}
+  ]
 
 === RESPONSE FORMAT ===
 
@@ -1048,13 +1078,16 @@ Then output the JSON:
   "highlight_rolloff": <true|false>,
   "vibrance": <true|false>,
   "text_overlays": [
-    {{"text": "<text>", "position": "<pos>", "appear_at_clip": <n>, "style": "<style>", "sfx_style": "<sfx>"}}
+    {{"text": "<text>", "position": "<pos>", "appear_at_clip": <n>, "style": "<style>"}}
   ],
   "broll": [
     {{"keyword": "<search>", "timestamp": <seconds>, "duration": <seconds>}}
   ],
+  "sound_effects": [
+    {{"t": <seconds>, "sound": "<sound>"}}
+  ],
   "cuts": [
-    {{"source_start": <n>, "source_end": <n>, "transition_out": "<transition>", "transition_sound": "<sound>", "sfx_style": "<sfx>", "zoom": "<zoom>", "cut_zoom": <bool>, "speed": <n>}}
+    {{"source_start": <n>, "source_end": <n>, "transition_out": "<transition>", "zoom": "<zoom>", "cut_zoom": <bool>, "speed": <n>}}
   ]
 }}
 ```"""
@@ -1290,6 +1323,7 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None):
     edit_plan["caption_keywords"] = []
     edit_plan["audio_ducking"] = True
     edit_plan["beat_sync"] = False
+    edit_plan.setdefault("sound_effects", [])
 
     raw_curve = edit_plan.get("speed_curve", "none")
     if raw_curve == "none" or raw_curve is None or not isinstance(raw_curve, list):
@@ -1315,6 +1349,26 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None):
             )
     edit_plan["_parsed_speed_curve"] = speed_curve
 
+    raw_sfx = edit_plan.get("sound_effects", [])
+    sound_effects = []
+    valid_sounds = {"pop", "ching", "ding", "thud", "swoosh"}
+    for sfx in raw_sfx:
+        if isinstance(sfx, dict) and "t" in sfx and "sound" in sfx:
+            try:
+                t = float(sfx["t"])
+            except Exception:
+                continue
+            sound = str(sfx["sound"]).lower()
+            if sound in valid_sounds and t >= 0:
+                sound_effects.append({"t": t, "sound": sound})
+    if sound_effects:
+        sound_effects.sort(key=lambda x: x["t"])
+        print(f"[generate-edit] Sound effects: {len(sound_effects)} placements", flush=True)
+        for sfx in sound_effects:
+            print(f"[generate-edit]   {sfx['t']:.1f}s: {sfx['sound']}", flush=True)
+    edit_plan["sound_effects"] = sound_effects
+    edit_plan["_parsed_sound_effects"] = sound_effects
+
     for bool_field in ("sharpening", "denoise", "shadow_lift", "highlight_rolloff", "vibrance",
                        "cinematic_bars", "audio_denoise", "beat_sync"):
         v = edit_plan.get(bool_field)
@@ -1325,12 +1379,7 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None):
 
     valid_grain = {"none", "subtle", "medium", "heavy"}
     valid_vignette = {"none", "light", "medium", "strong"}
-    valid_transitions = {
-        "none","fade","fadeblack","fadewhite","dissolve",
-        "wipeleft","wiperight","wipeup","wipedown",
-        "smoothleft","smoothright","smoothup","smoothdown",
-        "zoomin","flash","glitch","whip_left","whip_right",
-    }
+    valid_transitions = {"none", "fadewhite", "whip_left", "whip_right"}
     if edit_plan.get("grain") not in valid_grain:
         edit_plan["grain"] = "none"
     edit_plan["teal_orange"] = "none"
@@ -1341,19 +1390,29 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None):
         if overlay.get("position") == "center":
             print(f"[generate-edit] Moving text overlay '{overlay.get('text', '')}' from center to top (talking head safety)", flush=True)
             overlay["position"] = "top"
+        overlay.setdefault("sfx_style", "none")
+        overlay["sfx_style"] = "none"
 
     final_cuts = []
     for clip_entry in validated_cuts:
         transition = str(clip_entry.get("transition_out") or "").lower()
-        transition_out = transition if transition in valid_transitions else "none"
-        transition_sound = str(clip_entry.get("transition_sound") or "none").lower()
+        if transition not in valid_transitions:
+            if "fade" in transition or "dissolve" in transition:
+                transition = "fadewhite"
+            elif "whip" in transition or "wipe" in transition or "smooth" in transition:
+                transition = "whip_right"
+            else:
+                transition = "none"
+            print(f"[generate-edit] Mapped unsupported transition '{clip_entry.get('transition_out')}' -> '{transition}'", flush=True)
         speed = max(0.25, min(4.0, float(clip_entry.get("speed") or 1.0)))
+        clip_entry["transition_sound"] = "none"
+        clip_entry["sfx_style"] = "none"
         final_cuts.append({
             "source_start": clip_entry["source_start"],
             "source_end": clip_entry["source_end"],
-            "transition_out": transition_out,
-            "transition_sound": transition_sound,
-            "sfx_style": clip_entry.get("sfx_style") or "none",
+            "transition_out": transition,
+            "transition_sound": "none",
+            "sfx_style": "none",
             "zoom": clip_entry.get("zoom") or "none",
             "cut_zoom": bool(clip_entry.get("cut_zoom")),
             "speed": speed,
@@ -2806,6 +2865,26 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         )
         sfx_audio_labels.append(_label)
         print(f"[sfx] text_overlay {_i}: {_sfx_style} vol={_vol:.3f} at {_ts:.3f}s", flush=True)
+        extra_input_index += 1
+
+    parsed_sfx = edit_plan.get("_parsed_sound_effects", [])
+    for _i, _sfx in enumerate(parsed_sfx):
+        _sound_style = normalize_sfx_style(_sfx.get("sound") or "none")
+        if _sound_style == "none":
+            continue
+        _sound_path = get_sfx_path(_sound_style)
+        if not _sound_path:
+            continue
+        _ts = max(0.0, float(_sfx.get("t") or 0.0))
+        _offset_ms = round(_ts * 1000)
+        _vol = 0.5
+        _label = f"[timesfx{_i}]"
+        sfx_input_args += ["-i", _sound_path]
+        sfx_filter_strs.append(
+            f"[{extra_input_index}:a]volume={_vol:.3f},adelay={_offset_ms}|{_offset_ms}{_label}"
+        )
+        sfx_audio_labels.append(_label)
+        print(f"[sfx] sound_effect: {_sound_style} vol={_vol:.3f} at {_ts:.3f}s", flush=True)
         extra_input_index += 1
 
     transition_filters = []
