@@ -340,7 +340,7 @@ def build_color_grade(baseline, intent_name):
     return {
         "brightness":        clamp(safe_baseline["brightness"] + delta["brightness"], -0.3, 0.3),
         "contrast":          clamp(safe_baseline["contrast"] + delta["contrast"], 0.5, 2.0),
-        "saturation":        clamp(safe_baseline["saturation"] + delta["saturation"], 0.5, 2.0),
+        "saturation":        clamp(safe_baseline["saturation"] + delta["saturation"], 0.5, 1.20),
         "gamma":             clamp(safe_baseline["gamma"] + delta["gamma"], 0.5, 2.0),
         "color_temperature": delta["color_temperature"] or safe_baseline["color_temperature"] or "neutral",
     }
@@ -1552,9 +1552,6 @@ def generate_edit_gemini(video_path, transcript, vibe, scene_cuts, beats, tighte
         transition = str(clip_entry.get("transition_out") or "").lower()
         transition_out = transition if transition in valid_transitions else "none"
         transition_sound = str(clip_entry.get("transition_sound") or "none").lower()
-        if transition_out == "none" and transition_sound != "none":
-            print(f"[generate-edit] Stripping transition_sound={transition_sound} from hard cut (no visual transition)", flush=True)
-            transition_sound = "none"
         speed = max(0.25, min(4.0, float(clip_entry.get("speed") or 1.0)))
         final_cuts.append({
             "source_start": clip_entry["source_start"],
@@ -2026,7 +2023,7 @@ def create_keyframed_source(source_path, keyframe_timestamps, work_dir):
     print(f"[ffmpeg] Forcing keyframes at {len(unique_kf)} cut points", flush=True)
     run_ffmpeg([
         "-y","-i",source_path,
-        "-c:v","libx264","-preset","fast","-crf","18",
+        "-c:v","libx264","-preset","ultrafast","-crf","23",
         "-force_key_frames",kf_str,
         "-r","30","-vsync","cfr","-pix_fmt","yuv420p",
         "-c:a","aac","-b:a","192k","-threads","1",
