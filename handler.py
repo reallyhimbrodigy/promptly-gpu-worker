@@ -1791,17 +1791,21 @@ def get_video_duration(path):
         return 0.0
 
 
-def composite_broll(output_path, broll_entries, work_dir):
-    """Overlay b-roll clips on the rendered output in a single FFmpeg pass. Overwrites output_path."""
-    valid = [e for e in broll_entries if e.get("local_path") and os.path.exists(e["local_path"])]
-    if not valid:
+def composite_broll(output_path, broll_entries, broll_files, work_dir):
+    """Composite pre-downloaded b-roll clips onto the output video."""
+    entries_with_files = []
+    for i, entry in enumerate(broll_entries):
+        local_path = broll_files.get(i)
+        if local_path and os.path.exists(local_path):
+            entries_with_files.append({**entry, "local_path": local_path})
+    if not entries_with_files:
         return
     tmp_out = output_path + ".broll_tmp.mp4"
     input_args = ["-i", output_path]
-    for entry in valid:
+    for entry in entries_with_files:
         input_args += ["-i", entry["local_path"]]
     filter_parts = []
-    for i, entry in enumerate(valid):
+    for i, entry in enumerate(entries_with_files):
         idx = i + 1
         keyword = str(entry.get("keyword") or "broll")
         needed_duration = float(entry.get("duration") or 2.0)
@@ -1826,7 +1830,7 @@ def composite_broll(output_path, broll_entries, work_dir):
             f"crop=1080:1920,setsar=1[bv{i}]"
         )
     prev = "0:v"
-    for i, entry in enumerate(valid):
+    for i, entry in enumerate(entries_with_files):
         ts    = float(entry["timestamp"])
         dur   = float(entry["duration"])
         label = f"ov{i}"
@@ -1846,7 +1850,7 @@ def composite_broll(output_path, broll_entries, work_dir):
         tmp_out,
     ])
     os.replace(tmp_out, output_path)
-    print(f"[broll] Composited {len(valid)} b-roll clip(s) onto output", flush=True)
+    print(f"[broll] Composited {len(entries_with_files)} b-roll clip(s) onto output", flush=True)
 
 
 def apply_filler_jump_cuts(cuts, deepgram_words):
@@ -2778,6 +2782,112 @@ def get_output_clip_ranges(cuts, effective_durations):
     return ranges
 
 
+def compute_effective_durations(cuts):
+    return [
+        round(
+            (float(cut["source_end"]) - float(cut["source_start"])) /
+            max(0.25, min(4.0, float(cut.get("speed") or 1.0))),
+            3,
+        )
+        for cut in (cuts or [])
+    ]
+
+
+def burn_in_captions(output_path, edit_plan, transcript, work_dir):
+    """Burn captions and text overlays into the output video as a post-process."""
+    caption_style = str(edit_plan.get("caption_style") or "none").lower()
+    text_overlays = edit_plan.get("text_overlays") or []
+    if caption_style == "none" and not text_overlays:
+        return
+
+    cuts = edit_plan.get("cuts") or []
+    effective_durations = compute_effective_durations(cuts)
+    post_filters = []
+    video_out = "[video_base]"
+    post_filters.append(f"[0:v]null{video_out}")
+
+    if caption_style != "none" and transcript.get("words"):
+        ass_path = generate_subtitle_file(
+            transcript, caption_style, cuts, effective_durations,
+            {"width": 1080, "height": 1920},
+            edit_plan.get("caption_position") or "center",
+            edit_plan.get("caption_keywords") or [],
+            work_dir,
+        )
+        if ass_path and os.path.exists(ass_path):
+            escaped = ass_path.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+            post_filters.append(f"{video_out}subtitles='{escaped}':fontsdir=/assets/fonts[video_captioned]")
+            video_out = "[video_captioned]"
+        else:
+            print("[captions] No subtitle file generated — skipping ASS burn-in", flush=True)
+
+    if text_overlays:
+        clip_ranges = get_output_clip_ranges(cuts, effective_durations)
+        for i, overlay in enumerate(text_overlays):
+            clip_idx = int(overlay.get("appear_at_clip") or 0) - 1
+            if clip_idx < 0 or clip_idx >= len(clip_ranges):
+                continue
+            raw_text = str(overlay.get("text") or "")
+            text = re.sub(r"[^\x00-\x7F]", "", raw_text).strip()
+            if not text:
+                continue
+            text = text.replace("'", "").replace('"', "").replace("\\", "").replace(":", "\\:").replace(",", "\\,")
+            start = clip_ranges[clip_idx]["start"]
+            end = clip_ranges[clip_idx]["end"]
+            style = str(overlay.get("style") or "callout")
+            char_count = len(text)
+            base_size = 72 if style == "title" else (64 if style == "cta" else 56)
+            if char_count <= 18:
+                font_size = base_size
+            elif char_count <= 25:
+                font_size = round(base_size * 0.85)
+            elif char_count <= 35:
+                font_size = round(base_size * 0.70)
+            else:
+                font_size = round(base_size * 0.60)
+            pos = str(overlay.get("position") or "center")
+            y_expr = "250" if pos == "top" else ("(h-th)/2" if pos == "center" else str(max(0, 1920 - 350)))
+            anim_in = 0.4 if style == "cta" else 0.3
+            anim_out = 0.3
+            end_t = max(start + 0.8, end)
+            alpha_expr = f"if(lt(t\\,{(start+anim_in):.3f})\\,(t-{start:.3f})/{anim_in}\\,if(lt(t\\,{(end_t-anim_out):.3f})\\,1\\,if(lt(t\\,{end_t:.3f})\\,({end_t:.3f}-t)/{anim_out}\\,0)))"
+            out_label = f"[video_overlay_{i}]"
+            _font_clause = (
+                f":fontfile='{OVERLAY_FONT_PATH}'"
+                if os.path.exists(OVERLAY_FONT_PATH)
+                else ""
+            )
+            post_filters.append(
+                f"{video_out}drawtext=text='{text}':fontsize={font_size}:fontcolor=white"
+                f"{_font_clause}"
+                f":x=(w-tw)/2:y={y_expr}:alpha='{alpha_expr}'"
+                f":borderw=5:bordercolor=black:enable='between(t\\,{start:.3f}\\,{end_t:.3f})'{out_label}"
+            )
+            video_out = out_label
+
+    if len(post_filters) == 1:
+        print("[captions] Nothing to burn in — skipping", flush=True)
+        return
+
+    temp_output = os.path.join(work_dir, "captioned.mp4")
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", output_path,
+        "-filter_complex", ";".join(post_filters),
+        "-map", video_out, "-map", "0:a?",
+        "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+        "-c:a", "copy",
+        "-movflags", "+faststart",
+        temp_output,
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    if result.returncode != 0:
+        print(f"[captions] Burn-in failed: {result.stderr[-300:]}", flush=True)
+        return
+    os.replace(temp_output, output_path)
+    print("[captions] Burn-in complete", flush=True)
+
+
 def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, work_dir, speech_segments=None):
     n = len(cuts)
     source_res = probe_resolution(source_path)
@@ -3050,61 +3160,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     video_out = "[video_base]"
     post_filters.append(f"[{tl_video}]null{video_out}")
 
-    caption_style = str(edit_plan.get("caption_style") or "none")
-    if caption_style != "none":
-        ass_path = generate_subtitle_file(
-            transcript, caption_style, cuts, effective_durations,
-            {"width": 1080, "height": 1920},
-            edit_plan.get("caption_position") or "lower-third",
-            edit_plan.get("caption_keywords") or [],
-            work_dir,
-        )
-        if ass_path:
-            escaped = ass_path.replace("\\","\\\\").replace(":","\\:").replace("'","\\'")
-            post_filters.append(f"{video_out}subtitles='{escaped}':fontsdir=/assets/fonts[video_captioned]")
-            video_out = "[video_captioned]"
-
-    text_overlays = edit_plan.get("text_overlays") or []
-    if text_overlays:
-        clip_ranges = get_output_clip_ranges(cuts, effective_durations)
-        for i, overlay in enumerate(text_overlays):
-            clip_idx = int(overlay.get("appear_at_clip") or 0) - 1
-            if clip_idx < 0 or clip_idx >= len(clip_ranges):
-                continue
-            raw_text = str(overlay.get("text") or "")
-            text = re.sub(r"[^\x00-\x7F]","",raw_text).strip()
-            if not text:
-                continue
-            text = text.replace("'","").replace('"',"").replace("\\","").replace(":","\\:").replace(",","\\,")
-            start = clip_ranges[clip_idx]["start"]
-            end   = clip_ranges[clip_idx]["end"]
-            style = str(overlay.get("style") or "callout")
-            char_count = len(text)
-            base_size = 72 if style == "title" else (64 if style == "cta" else 56)
-            if char_count <= 18:       font_size = base_size
-            elif char_count <= 25:     font_size = round(base_size * 0.85)
-            elif char_count <= 35:     font_size = round(base_size * 0.70)
-            else:                      font_size = round(base_size * 0.60)
-            pos = str(overlay.get("position") or "center")
-            y_expr = "250" if pos == "top" else ("(h-th)/2" if pos == "center" else str(max(0, 1920-350)))
-            anim_in = 0.4 if style == "cta" else 0.3
-            anim_out = 0.3
-            end_t = max(start + 0.8, end)
-            alpha_expr = f"if(lt(t\\,{(start+anim_in):.3f})\\,(t-{start:.3f})/{anim_in}\\,if(lt(t\\,{(end_t-anim_out):.3f})\\,1\\,if(lt(t\\,{end_t:.3f})\\,({end_t:.3f}-t)/{anim_out}\\,0)))"
-            out_label = f"[video_overlay_{i}]"
-            _font_clause = (
-                f":fontfile='{OVERLAY_FONT_PATH}'"
-                if os.path.exists(OVERLAY_FONT_PATH)
-                else ""
-            )
-            post_filters.append(
-                f"{video_out}drawtext=text='{text}':fontsize={font_size}:fontcolor=white"
-                f"{_font_clause}"
-                f":x=(w-tw)/2:y={y_expr}:alpha='{alpha_expr}'"
-                f":borderw=5:bordercolor=black:enable='between(t\\,{start:.3f}\\,{end_t:.3f})'{out_label}"
-            )
-            video_out = out_label
-
     if edit_plan.get("cinematic_bars"):
         bar_h = int((1920 - int(1080 / 2.35)) / 2)
         bars_label = f"[video_bars]"
@@ -3191,7 +3246,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         + [output_path]
     )
 
-    print(f"[ffmpeg] Rendering: {n} clips, ~{running_dur:.1f}s output (captions={caption_style}, overlays={len(text_overlays)})", flush=True)
+    print(f"[ffmpeg] Rendering: {n} clips, ~{running_dur:.1f}s output (base render)", flush=True)
 
     try:
         run_ffmpeg(args)
@@ -3323,76 +3378,70 @@ def handler(job):
         print(f"[pipeline] edit recipe complete in {time.time()-t:.1f}s", flush=True)
         analysis = edit_plan.get("analysis_data") or {}
 
+        print("[pipeline] step=post_process", flush=True)
         caption_style = str(edit_plan.get("caption_style") or "none").lower()
-        if caption_style != "none":
+        broll_requests = edit_plan.get("broll") or []
+
+        print("[pipeline] step=parallel_render", flush=True)
+        send_progress(job_id, "render", 62, "Rendering — almost there...", app_url)
+        t = time.time()
+        broll_files = {}
+
+        def task_render():
+            render_multi_clip(
+                source_path, edit_plan["cuts"], edit_plan, output_path, transcript, work_dir,
+            )
+
+        def task_download_broll():
+            results = {}
+            for i, entry in enumerate(broll_requests):
+                keyword = str(entry.get("keyword") or "").strip()
+                dur = float(entry.get("duration") or 3.0)
+                if not keyword:
+                    continue
+                path = fetch_broll_clip(keyword, dur, work_dir)
+                if path:
+                    results[i] = path
+            return results
+
+        def task_deepgram():
+            if caption_style == "none":
+                print("[pipeline] Captions not requested — skipping transcription", flush=True)
+                return {"text": "", "words": []}
             print("[pipeline] step=transcribe (captions requested)", flush=True)
             audio_path = os.path.join(work_dir, "audio_for_captions.wav")
-            extract_cmd = [
-                "ffmpeg", "-y", "-i", source_path,
-                "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
-                audio_path,
-            ]
-            subprocess.run(extract_cmd, capture_output=True, text=True, timeout=30)
-            transcript = transcribe_audio(audio_path)
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", source_path, "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", audio_path],
+                capture_output=True, text=True, timeout=30,
+            )
+            result = transcribe_audio(audio_path)
             if os.path.exists(audio_path):
                 os.remove(audio_path)
-        else:
-            print("[pipeline] Captions not requested — skipping transcription", flush=True)
+            return result
 
-        # Step 12 — FFmpeg render
-        send_progress(job_id, "render", 62, "Rendering — almost there...", app_url)
-        print("[pipeline] step=ffmpeg_render", flush=True)
-        t = time.time()
-        render_multi_clip(
-            source_path, edit_plan["cuts"], edit_plan, output_path, transcript, work_dir,
-        )
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+            future_render = pool.submit(task_render)
+            future_broll = pool.submit(task_download_broll)
+            future_deepgram = pool.submit(task_deepgram)
+            future_render.result()
+            broll_files = future_broll.result()
+            transcript = future_deepgram.result()
+
         render_elapsed = time.time() - t
-        print(f"[pipeline] FFmpeg render complete in {render_elapsed:.1f}s", flush=True)
+        print(f"[pipeline] parallel_render complete in {render_elapsed:.1f}s", flush=True)
         print(f"[render] Encoding: crf=18 preset=medium", flush=True)
 
         if not os.path.exists(output_path):
             return {"error": "No output file produced by FFmpeg"}
 
-        vibe_lower = vibe.lower()
-        if "enhanced quality" in vibe_lower or "enhance quality" in vibe_lower or "enhanced" in vibe_lower:
-            print("[pipeline] step=ai_enhance (user requested enhanced quality)", flush=True)
-            enhance_video_quality(output_path, work_dir)
-        else:
-            print("[pipeline] AI enhancement skipped (not requested in vibe)", flush=True)
-
-        # Step 12.5 — B-roll overlay (only if the recipe requested b-roll)
-        broll_requests = edit_plan.get("broll") or []
-        if broll_requests:
-            print(f"[pipeline] step=broll ({len(broll_requests)} request(s))", flush=True)
-            broll_entries = []
-            for req in broll_requests:
-                kw  = str(req.get("keyword") or "").strip()
-                dur = float(req.get("duration") or 2.0)
-                ts  = float(req.get("timestamp") or 0.0)
-                if not kw:
-                    continue
-                local = fetch_broll_clip(kw, dur, work_dir)
-                if local:
-                    broll_entries.append({"local_path": local, "keyword": kw, "timestamp": ts, "duration": dur})
-            if broll_entries:
-                composite_broll(output_path, broll_entries, work_dir)
-            for entry in broll_entries:
-                try:
-                    os.unlink(entry["local_path"])
-                except Exception:
-                    pass
-
+        print("[pipeline] step=trim", flush=True)
         expected_duration = sum(
             (float(cut["source_end"]) - float(cut["source_start"])) / max(0.25, float(cut.get("speed") or 1.0))
             for cut in edit_plan["cuts"]
         )
         actual_duration = probe_duration(output_path) or 0.0
         if actual_duration > expected_duration + 2.0:
-            print(
-                f"[pipeline] Trimming output: {actual_duration:.1f}s -> {expected_duration:.1f}s "
-                f"(removing {actual_duration - expected_duration:.1f}s dead air)",
-                flush=True,
-            )
+            print(f"[pipeline] Trimming dead air: {actual_duration:.1f}s → {expected_duration:.1f}s", flush=True)
             trimmed_path = os.path.join(work_dir, "trimmed_output.mp4")
             trim_result = subprocess.run(
                 ["ffmpeg", "-y", "-i", output_path, "-t", f"{expected_duration:.2f}", "-c", "copy", trimmed_path],
@@ -3405,9 +3454,36 @@ def handler(job):
             else:
                 print(f"[pipeline] WARNING: trim failed, keeping original output: {trim_result.stderr[-400:]}", flush=True)
 
+        if broll_files:
+            print(f"[pipeline] step=broll ({len(broll_files)} clip(s))", flush=True)
+            composite_broll(output_path, broll_requests, broll_files, work_dir)
+        else:
+            print("[pipeline] No b-roll to composite", flush=True)
+        for local_path in broll_files.values():
+            try:
+                os.unlink(local_path)
+            except Exception:
+                pass
+
+        vibe_lower = vibe.lower()
+        if "enhanced quality" in vibe_lower or "enhance quality" in vibe_lower or "enhanced" in vibe_lower:
+            print("[pipeline] step=ai_enhance (user requested enhanced quality)", flush=True)
+            enhance_video_quality(output_path, work_dir)
+        else:
+            print("[pipeline] AI enhancement skipped (not requested in vibe)", flush=True)
+
+        if caption_style != "none" and transcript.get("words"):
+            print(f"[pipeline] step=captions (style={caption_style})", flush=True)
+            burn_in_captions(output_path, edit_plan, transcript, work_dir)
+        else:
+            print("[pipeline] Captions skipped", flush=True)
+
         speed_curve = edit_plan.get("_parsed_speed_curve")
         if speed_curve:
+            print(f"[pipeline] step=speed_curve ({len(speed_curve)} keypoints)", flush=True)
             apply_speed_curve(output_path, speed_curve, work_dir)
+        else:
+            print("[pipeline] Speed curve skipped", flush=True)
 
         # ── Parallel group 2: cover frame + upload ────────────────────────────────
         cover_frame_ts   = 1.0
