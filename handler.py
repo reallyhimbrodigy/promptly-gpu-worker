@@ -241,7 +241,7 @@ else:
 
 # ─── MUSIC LIBRARY ────────────────────────────────────────────────────────────
 # Tracks stored at /assets/music/<filename>.mp3 in the Docker image.
-# Claude picks by filename. Values are for prompt context only — not used in code.
+# The model picks by filename. Values are for prompt context only — not used in code.
 MUSIC_LIBRARY = {
     "none": {"mood": "none", "energy": "none", "description": "No background music."},
 
@@ -852,7 +852,7 @@ def extract_broll_keywords(words, limit=8):
 def extract_json(text):
     raw = str(text or "").strip()
     if not raw:
-        raise ValueError("Empty Claude response")
+        raise ValueError("Empty Gemini response")
     try:
         return json.loads(raw)
     except Exception:
@@ -876,7 +876,7 @@ def extract_json(text):
             return json.loads(raw[first:last+1])
         except Exception:
             pass
-    raise ValueError("Could not extract valid JSON from Claude response")
+    raise ValueError("Could not extract valid JSON from Gemini response")
 
 
 def format_transcript_for_prompt(transcript):
@@ -1361,8 +1361,8 @@ def generate_edit_gemini(video_path, transcript, vibe, scene_cuts, beats, tighte
             response = model.generate_content(
                 [gemini_file, prompt],
                 generation_config=genai.GenerationConfig(
-                    temperature=0.7,
-                    max_output_tokens=5000,
+                    temperature=0.6,
+                    max_output_tokens=16000,
                 ),
             )
             print(f"[generate-edit] Gemini complete in {time.time()-t:.1f}s", flush=True)
@@ -1374,6 +1374,23 @@ def generate_edit_gemini(video_path, transcript, vibe, scene_cuts, beats, tighte
         raise RuntimeError(f"Gemini edit generation failed: {last_err}")
 
     response_text = str(getattr(response, "text", "") or "").strip()
+    try:
+        candidates = getattr(response, "candidates", None) or []
+        if candidates:
+            finish_reason = getattr(candidates[0], "finish_reason", None)
+            if finish_reason is not None and str(finish_reason) not in {"1", "STOP"}:
+                print(
+                    f"[generate-edit] WARNING: Gemini response may be truncated. finish_reason={finish_reason}",
+                    flush=True,
+                )
+    except Exception:
+        pass
+    if "```json" not in response_text and "{" not in response_text:
+        print(
+            f"[generate-edit] ERROR: No JSON found in response. Response length: {len(response_text)} chars",
+            flush=True,
+        )
+        print(f"[generate-edit] Response tail: ...{response_text[-200:]}", flush=True)
     if not response_text:
         raise RuntimeError("Empty Gemini response")
 
@@ -1829,7 +1846,7 @@ def composite_broll(output_path, broll_entries, work_dir):
 
 def apply_filler_jump_cuts(cuts, deepgram_words):
     """
-    Split Claude's clips at ALWAYS_FILLER word boundaries (um, uh, hmm, etc.)
+    Split model-generated clips at ALWAYS_FILLER word boundaries (um, uh, hmm, etc.)
     Context fillers (like, so, basically) are intentionally never removed.
     Returns the expanded cut list, or the original if no fillers found inside clips.
     """
@@ -2889,7 +2906,7 @@ def classify_error(e):
         return "We had trouble analyzing your video. Please try again."
 
     # Edit recipe problems
-    if "Empty Claude response" in msg or "valid JSON from Claude" in msg:
+    if "Empty Gemini response" in msg or "valid JSON from Gemini" in msg:
         return "We had trouble generating your edit. Please try again."
     if "source_start" in msg or "source_end" in msg or "chronological" in msg:
         return "We had trouble generating your edit. Please try again."
@@ -3051,7 +3068,7 @@ def handler(job):
         if not os.path.exists(output_path):
             return {"error": "No output file produced by FFmpeg"}
 
-        # Step 12.5 — B-roll overlay (only if Claude requested broll in edit recipe)
+        # Step 12.5 — B-roll overlay (only if the recipe requested b-roll)
         broll_requests = edit_plan.get("broll") or []
         if broll_requests:
             print(f"[pipeline] step=broll ({len(broll_requests)} request(s))", flush=True)
