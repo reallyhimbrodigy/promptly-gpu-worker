@@ -72,16 +72,16 @@ except Exception:
     pass
 
 REAL_ESRGAN_AVAILABLE = False
-RRDBNet = None
-RealESRGANer = None
 try:
-    from basicsr.archs.rrdbnet_arch import RRDBNet
-    from realesrgan import RealESRGANer
-    REAL_ESRGAN_AVAILABLE = True
-    model_exists = os.path.exists("/models/realesr-general-x4v3.pth")
-    print(f"[startup] Real-ESRGAN: available, model={'cached' if model_exists else 'will download on first use'}", flush=True)
-except ImportError as e:
-    print(f"[startup] WARNING: Real-ESRGAN not installed — {e}", flush=True)
+    import torch
+
+    if torch.cuda.is_available():
+        REAL_ESRGAN_AVAILABLE = True
+        print("[startup] Real-ESRGAN: torch + CUDA available, will load on demand", flush=True)
+    else:
+        print("[startup] Real-ESRGAN: no CUDA — enhancement unavailable", flush=True)
+except ImportError:
+    print("[startup] Real-ESRGAN: torch not installed — enhancement unavailable", flush=True)
 
 print("[startup] all import checks done", flush=True)
 
@@ -1990,6 +1990,13 @@ def enhance_video_quality(input_path, work_dir):
     import numpy as np
     import torch
 
+    try:
+        from basicsr.archs.rrdbnet_arch import RRDBNet
+        from realesrgan import RealESRGANer
+    except ImportError as e:
+        print(f"[enhance] Failed to import Real-ESRGAN: {e} — skipping", flush=True)
+        return
+
     print("[enhance] Starting AI quality enhancement (Real-ESRGAN)...", flush=True)
     start_time = time.time()
 
@@ -3476,7 +3483,10 @@ def handler(job):
         if "enhanced quality" in vibe_lower or "enhance quality" in vibe_lower or "enhanced" in vibe_lower:
             if REAL_ESRGAN_AVAILABLE:
                 print("[pipeline] step=ai_enhance (user requested enhanced quality)", flush=True)
-                enhance_video_quality(output_path, work_dir)
+                try:
+                    enhance_video_quality(output_path, work_dir)
+                except Exception as e:
+                    print(f"[pipeline] AI enhancement failed: {e} — continuing without enhancement", flush=True)
             else:
                 print("[pipeline] AI enhancement requested but Real-ESRGAN not available — skipping", flush=True)
         else:
