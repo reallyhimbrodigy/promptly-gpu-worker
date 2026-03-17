@@ -1816,7 +1816,7 @@ def get_atempo_filter(speed):
     return ",".join(parts)
 
 
-def interpolate_speed(speed_curve, t):
+def _interpolate_speed(speed_curve, t):
     """Linearly interpolate speed at time t from keypoints."""
     if not speed_curve:
         return 1.0
@@ -1838,6 +1838,8 @@ def interpolate_speed(speed_curve, t):
 def apply_speed_curve(output_path, speed_curve, work_dir):
     """
     Apply a smooth speed curve to the final rendered video.
+    Uses a precomputed PTS mapping for smooth video speed and
+    keypoint-based audio segments for time-stretching.
     Falls back to the original output if the pass fails.
     """
     if not speed_curve or len(speed_curve) < 2:
@@ -1857,45 +1859,76 @@ def apply_speed_curve(output_path, speed_curve, work_dir):
             flush=True,
         )
 
-    segment_duration = 0.5
-    segments = []
-    current_t = 0.0
-    while current_t < duration - 1e-6:
-        seg_end = min(current_t + segment_duration, duration)
-        seg_mid = (current_t + seg_end) / 2.0
-        speed = interpolate_speed(speed_curve, seg_mid)
-        segments.append({
-            "start": current_t,
-            "end": seg_end,
-            "speed": speed,
-        })
-        current_t = seg_end
+    if speed_curve[-1]["t"] < duration:
+        speed_curve = speed_curve + [{"t": duration, "speed": speed_curve[-1]["speed"]}]
+    if speed_curve[0]["t"] > 0:
+        speed_curve = [{"t": 0.0, "speed": speed_curve[0]["speed"]}] + speed_curve
 
-    if len(segments) < 2:
-        print("[speed_curve] Not enough segments generated — skipping", flush=True)
+    sample_interval = 0.05
+    samples = []
+    input_time = 0.0
+    output_time = 0.0
+    while input_time < duration:
+        speed = _interpolate_speed(speed_curve, input_time)
+        samples.append({"in": input_time, "out": output_time})
+        dt = min(sample_interval, duration - input_time)
+        output_time += dt / speed
+        input_time += dt
+    samples.append({"in": duration, "out": output_time})
+    total_output_duration = output_time
+    print(
+        f"[speed_curve] Computed {len(samples)} sample points, output duration: {total_output_duration:.2f}s",
+        flush=True,
+    )
+
+    expr_parts = []
+    for i in range(len(speed_curve) - 1):
+        t_start = float(speed_curve[i]["t"])
+        t_end = float(speed_curve[i + 1]["t"])
+        s_start = float(speed_curve[i]["speed"])
+        s_end = float(speed_curve[i + 1]["speed"])
+        avg_speed = (s_start + s_end) / 2.0
+        expr_parts.append({
+            "t_start": t_start,
+            "t_end": t_end,
+            "avg_speed": avg_speed,
+        })
+
+    if not expr_parts:
+        print("[speed_curve] Not enough keypoint intervals — skipping", flush=True)
         return
 
-    print(f"[speed_curve] Generated {len(segments)} segments", flush=True)
-    temp_output = os.path.join(work_dir, "speed_curved.mp4")
-    filter_parts = []
-    concat_inputs = []
+    cum_output = [0.0]
+    for part in expr_parts:
+        seg_input_dur = part["t_end"] - part["t_start"]
+        seg_output_dur = seg_input_dur / part["avg_speed"]
+        cum_output.append(cum_output[-1] + seg_output_dur)
 
-    for i, seg in enumerate(segments):
-        filter_parts.append(
-            f"[0:v]trim=start={seg['start']:.4f}:end={seg['end']:.4f},"
-            f"setpts=PTS-STARTPTS,setpts={1.0/seg['speed']:.6f}*PTS[v{i}]"
-        )
-        atempo_chain = get_atempo_filter(seg["speed"])
-        filter_parts.append(
-            f"[0:a]atrim=start={seg['start']:.4f}:end={seg['end']:.4f},"
-            f"asetpts=PTS-STARTPTS,{atempo_chain}[a{i}]"
-        )
-        concat_inputs.append(f"[v{i}][a{i}]")
+    last = expr_parts[-1]
+    setpts_expr = f"{cum_output[-2]:.6f}+(T-{last['t_start']:.6f})/{last['avg_speed']:.6f}"
+    for i in range(len(expr_parts) - 2, -1, -1):
+        part = expr_parts[i]
+        inner = f"{cum_output[i]:.6f}+(T-{part['t_start']:.6f})/{part['avg_speed']:.6f}"
+        setpts_expr = f"if(lt(T\\,{part['t_end']:.6f})\\,{inner}\\,{setpts_expr})"
 
-    filter_parts.append(
-        f"{''.join(concat_inputs)}concat=n={len(segments)}:v=1:a=1[outv][outa]"
+    video_setpts = f"setpts='{setpts_expr}'"
+    fps = 30
+    audio_filter_parts = []
+    audio_concat = []
+    for i, part in enumerate(expr_parts):
+        atempo = get_atempo_filter(part["avg_speed"])
+        audio_filter_parts.append(
+            f"[0:a]atrim=start={part['t_start']:.4f}:end={part['t_end']:.4f},"
+            f"asetpts=PTS-STARTPTS,{atempo}[a{i}]"
+        )
+        audio_concat.append(f"[a{i}]")
+
+    audio_filter_parts.append(
+        f"{''.join(audio_concat)}concat=n={len(expr_parts)}:v=0:a=1[outa]"
     )
-    filter_complex = ";".join(filter_parts)
+
+    filter_complex = f"[0:v]{video_setpts},fps={fps}[outv];" + ";".join(audio_filter_parts)
+    temp_output = os.path.join(work_dir, "speed_curved.mp4")
     cmd = [
         "ffmpeg", "-y",
         "-i", output_path,
