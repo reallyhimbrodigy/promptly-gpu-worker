@@ -8,6 +8,8 @@ image = (
     .run_commands("echo 'build v6'")
     .apt_install(
         "ffmpeg",
+        "librubberband-dev",
+        "rubberband-cli",
         "build-essential",
         "clang",
         "pkg-config",

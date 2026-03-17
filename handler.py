@@ -55,6 +55,22 @@ except ImportError:
     except ImportError as e:
         print(f"[startup] deepgram FAILED: {e}", flush=True)
 
+try:
+    rb_check = subprocess.run(["rubberband", "--version"], capture_output=True, text=True, timeout=5)
+    rb_version = (rb_check.stdout or rb_check.stderr or "").strip().splitlines()
+    print(f"[startup] rubberband OK: {rb_version[0] if rb_version else 'available'}", flush=True)
+except Exception:
+    print("[startup] WARNING: rubberband not found — speed curve will use fallback audio", flush=True)
+
+try:
+    ff_check = subprocess.run(["ffmpeg", "-filters"], capture_output=True, text=True, timeout=5)
+    if "rubberband" in (ff_check.stdout or ""):
+        print("[startup] FFmpeg rubberband filter: available", flush=True)
+    else:
+        print("[startup] WARNING: FFmpeg rubberband filter not available", flush=True)
+except Exception:
+    pass
+
 print("[startup] all import checks done", flush=True)
 
 
@@ -1838,8 +1854,8 @@ def _interpolate_speed(speed_curve, t):
 def apply_speed_curve(output_path, speed_curve, work_dir):
     """
     Apply a smooth speed curve to the final rendered video.
-    Uses a precomputed PTS mapping for smooth video speed and
-    keypoint-based audio segments for time-stretching.
+    Video: single setpts expression (smooth).
+    Audio: rubberband CLI with tempo map when available.
     Falls back to the original output if the pass fails.
     """
     if not speed_curve or len(speed_curve) < 2:
@@ -1863,23 +1879,6 @@ def apply_speed_curve(output_path, speed_curve, work_dir):
         speed_curve = speed_curve + [{"t": duration, "speed": speed_curve[-1]["speed"]}]
     if speed_curve[0]["t"] > 0:
         speed_curve = [{"t": 0.0, "speed": speed_curve[0]["speed"]}] + speed_curve
-
-    sample_interval = 0.05
-    samples = []
-    input_time = 0.0
-    output_time = 0.0
-    while input_time < duration:
-        speed = _interpolate_speed(speed_curve, input_time)
-        samples.append({"in": input_time, "out": output_time})
-        dt = min(sample_interval, duration - input_time)
-        output_time += dt / speed
-        input_time += dt
-    samples.append({"in": duration, "out": output_time})
-    total_output_duration = output_time
-    print(
-        f"[speed_curve] Computed {len(samples)} sample points, output duration: {total_output_duration:.2f}s",
-        flush=True,
-    )
 
     expr_parts = []
     for i in range(len(speed_curve) - 1):
@@ -1911,8 +1910,89 @@ def apply_speed_curve(output_path, speed_curve, work_dir):
         inner = f"{cum_output[i]:.6f}+(T-{part['t_start']:.6f})/{part['avg_speed']:.6f}"
         setpts_expr = f"if(lt(T\\,{part['t_end']:.6f})\\,{inner}\\,{setpts_expr})"
 
-    video_setpts = f"setpts='{setpts_expr}'"
-    fps = 30
+    total_output_duration = cum_output[-1]
+    print(f"[speed_curve] Expected output duration: {total_output_duration:.2f}s", flush=True)
+
+    audio_raw = os.path.join(work_dir, "sc_audio_raw.wav")
+    cmd_extract = [
+        "ffmpeg", "-y",
+        "-i", output_path,
+        "-vn", "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "2",
+        audio_raw,
+    ]
+
+    r = subprocess.run(cmd_extract, capture_output=True, text=True, timeout=60)
+    if r.returncode != 0:
+        print(f"[speed_curve] Audio extract failed: {r.stderr[-300:]}", flush=True)
+        print("[speed_curve] Falling back to segment-based audio", flush=True)
+        return _apply_speed_curve_fallback(output_path, speed_curve, expr_parts, setpts_expr, work_dir, duration)
+
+    tempo_map_path = os.path.join(work_dir, "sc_tempo_map.txt")
+    with open(tempo_map_path, "w") as f:
+        for kp in speed_curve:
+            f.write(f"{kp['t']:.4f}:{kp['speed']:.4f}\n")
+
+    audio_curved = os.path.join(work_dir, "sc_audio_curved.wav")
+    cmd_rb = [
+        "rubberband",
+        "--tempo", tempo_map_path,
+        "--pitch-hq",
+        audio_raw,
+        audio_curved,
+    ]
+    r = subprocess.run(cmd_rb, capture_output=True, text=True, timeout=120)
+    if r.returncode != 0:
+        print(f"[speed_curve] Rubberband failed: {r.stderr[-300:]}", flush=True)
+        print("[speed_curve] Trying rubberband without tempo map (constant average)...", flush=True)
+        avg_speed = sum(p["avg_speed"] for p in expr_parts) / len(expr_parts)
+        cmd_rb_simple = [
+            "rubberband",
+            "--tempo", f"{avg_speed:.4f}",
+            "--pitch-hq",
+            audio_raw,
+            audio_curved,
+        ]
+        r2 = subprocess.run(cmd_rb_simple, capture_output=True, text=True, timeout=120)
+        if r2.returncode != 0:
+            print(f"[speed_curve] Rubberband simple also failed: {r2.stderr[-300:]}", flush=True)
+            return _apply_speed_curve_fallback(output_path, speed_curve, expr_parts, setpts_expr, work_dir, duration)
+
+    temp_output = os.path.join(work_dir, "speed_curved.mp4")
+    cmd_mux = [
+        "ffmpeg", "-y",
+        "-i", output_path,
+        "-i", audio_curved,
+        "-filter_complex", f"[0:v]setpts='{setpts_expr}',fps=30[outv]",
+        "-map", "[outv]", "-map", "1:a",
+        "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+        "-c:a", "aac", "-b:a", "128k",
+        "-shortest",
+        "-movflags", "+faststart",
+        temp_output,
+    ]
+
+    print("[speed_curve] Muxing smooth video + smooth audio...", flush=True)
+    r = subprocess.run(cmd_mux, capture_output=True, text=True, timeout=300)
+    if r.returncode != 0:
+        print(f"[speed_curve] Mux failed: {r.stderr[-500:]}", flush=True)
+        print("[speed_curve] Falling back to original output", flush=True)
+        for f in [audio_raw, audio_curved, tempo_map_path]:
+            if os.path.exists(f):
+                os.remove(f)
+        return
+
+    os.replace(temp_output, output_path)
+    new_duration = probe_duration(output_path) or duration
+    print(f"[speed_curve] Complete: {duration:.2f}s → {new_duration:.2f}s", flush=True)
+    for f in [audio_raw, audio_curved, tempo_map_path]:
+        if os.path.exists(f):
+            os.remove(f)
+
+
+def _apply_speed_curve_fallback(output_path, speed_curve, expr_parts, setpts_expr, work_dir, duration):
+    """Fallback: smooth video with keypoint-segment audio."""
+    print("[speed_curve] Using fallback: smooth video + keypoint-segment audio", flush=True)
+
     audio_filter_parts = []
     audio_concat = []
     for i, part in enumerate(expr_parts):
@@ -1922,17 +2002,16 @@ def apply_speed_curve(output_path, speed_curve, work_dir):
             f"asetpts=PTS-STARTPTS,{atempo}[a{i}]"
         )
         audio_concat.append(f"[a{i}]")
-
     audio_filter_parts.append(
         f"{''.join(audio_concat)}concat=n={len(expr_parts)}:v=0:a=1[outa]"
     )
 
-    filter_complex = f"[0:v]{video_setpts},fps={fps}[outv];" + ";".join(audio_filter_parts)
+    full_filter = f"[0:v]setpts='{setpts_expr}',fps=30[outv];{';'.join(audio_filter_parts)}"
     temp_output = os.path.join(work_dir, "speed_curved.mp4")
     cmd = [
         "ffmpeg", "-y",
         "-i", output_path,
-        "-filter_complex", filter_complex,
+        "-filter_complex", full_filter,
         "-map", "[outv]", "-map", "[outa]",
         "-c:v", "libx264", "-preset", "medium", "-crf", "18",
         "-c:a", "aac", "-b:a", "128k",
@@ -1940,16 +2019,15 @@ def apply_speed_curve(output_path, speed_curve, work_dir):
         temp_output,
     ]
 
-    print("[speed_curve] Rendering speed curve...", flush=True)
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
     if result.returncode != 0:
-        print(f"[speed_curve] FAILED: {result.stderr[-500:]}", flush=True)
-        print("[speed_curve] Falling back to original output (no speed curve)", flush=True)
+        print(f"[speed_curve] Fallback also failed: {result.stderr[-500:]}", flush=True)
+        print("[speed_curve] Keeping original output (no speed curve)", flush=True)
         return
 
     os.replace(temp_output, output_path)
     new_duration = probe_duration(output_path) or duration
-    print(f"[speed_curve] Complete: {duration:.2f}s → {new_duration:.2f}s", flush=True)
+    print(f"[speed_curve] Fallback complete: {duration:.2f}s → {new_duration:.2f}s", flush=True)
 
 
 def is_hard_cut(transition):
