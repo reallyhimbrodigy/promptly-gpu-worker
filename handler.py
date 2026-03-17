@@ -917,285 +917,148 @@ def format_timestamps_for_prompt(values, empty_label="none"):
 
 
 def build_gemini_edit_prompt(vibe, duration, trend_context=None):
-    trend_section = format_trend_section(trend_context) if trend_context else ""
-    trend_block = f"\n\n{trend_section}" if trend_section else ""
-    intents = ", ".join(COLOR_INTENTS.keys())
+    trend_block = ""
+    if trend_context:
+        trend_block = "\n\n" + format_trend_section(trend_context)
 
-    return f"""You are a video editor with years of experience cutting short-form content for TikTok and Instagram Reels. You have edited thousands of videos across every category — talking heads, lifestyle, fitness, tutorials, comedy, travel, food, fashion, business. You know what goes viral and what gets scrolled past in the first second.
+    intents = "none, neutral, cinematic, warm, cozy, cool, moody, vibrant, punchy, vivid, clean, polished, enhanced, faded, vintage, dramatic, bold, soft, dreamy"
 
-You are the entire creative brain of this edit. You are watching the source video directly while you read this prompt. Do not infer what is on screen from text alone when you can see it.
+    prompt = f"""You are a professional short-form video editor. You are watching the source video right now. You can see every frame and hear every word.
 
-=== WHAT YOU ARE TRYING TO ACHIEVE ===
+The user wants: "{vibe}"
 
-The user uploaded raw footage and described a vibe. What they actually want — even if they can't articulate it — is to watch the finished video and think: this AI did exactly what I wanted, and I didn't even know exactly what I wanted. This looks like it already belongs on their feed.
+This video is {duration:.1f} seconds long. It will be posted on TikTok, Instagram Reels, or YouTube Shorts — vertical full-screen content where viewers decide in 2 seconds whether to keep watching or scroll past.
 
-Your job is to look at this specific footage and ask: what does this exact video need to become that?
+Watch the video. Then create an edit recipe that transforms this raw footage into something that feels professionally edited and matches the vibe the user described.
 
-=== WHO THE USER IS ===
+=== HOW TO THINK ABOUT THIS EDIT ===
 
-The user said: "{vibe}"
+What does the user actually want? They want to watch the finished video and feel like a professional editor understood their footage and made it look incredible. The edit should feel intentional — every cut, every speed change, every sound has a reason.
 
-=== THIS VIDEO ===
+As you watch, pay attention to:
+- Where the content changes (speaker to screen recording, topic shifts, visual changes)
+- Where the energy peaks (strong statements, reveals, punchlines) and where it dips (filler, transitions between ideas, breaths)
+- Where the viewer's attention would drift without intervention
+- What's already baked into the footage (burned-in captions, existing text, graphics)
 
-You are watching and listening to this video right now. You can see every frame and hear every word.
+=== WHAT MAKES SHORT-FORM CONTENT FEEL EDITED ===
 
-Duration: {duration:.2f} seconds
+The opening is an audition. The first 2 seconds must give the viewer a reason to stay. A visual event, a sonic hit, tighter framing, text that creates curiosity — something that signals this isn't raw footage.
 
-Use what you see and hear to make all editing decisions — where to cut, where scenes change, where energy shifts, where speech pauses, where b-roll would help, and where pacing should change.
+Pacing creates rhythm. Filler and setup should move faster. Key moments — reveals, punchlines, important statements — should breathe. The contrast between fast and slow is what makes pacing feel alive.
 
-Transcribe the speech yourself as you watch. Use the transcript you hear to identify the best cut points, text overlay moments, and b-roll placement.
+Cuts should be seamless. When you cut between clips of the same speaker, the audio must flow continuously with no gaps. Each clip's source_start should equal the previous clip's source_end. Gaps of even 0.1 seconds cause visible glitches.
 
-Analyze the video's visual and technical characteristics yourself. Report them in `footage_quality`, `color_baseline`, `frame_layout`, and `video_profile` in your JSON response.
+Sound design adds texture. A swoosh on a scene change, a thud when a statement lands, a pop when text appears — these make cuts feel physical instead of digital. But not every cut needs a sound. Continuous speech flows best with silent hard cuts.
 
-Specifically determine:
-- where the visual content changes (scene changes, camera angles, screen recordings)
-- where the speaker's energy rises or falls
-- where speech pauses or breaths create natural cut points
-- overall color temperature
-- exposure / highlight condition
-- shadow condition
-- noise level
-- source sharpness
-- color richness
-- whether skin tones are present
-- lighting type
-- whether burned-in captions or other text overlays are already visible in the frames
-- where b-roll would strengthen the content
-- whether the footage feels color graded or raw{trend_block}
+B-roll elevates production value. When the speaker mentions a concept, a 2-3 second visual cutaway makes the video feel produced. One or two well-placed b-roll moments transform how professional the entire video feels.
 
-=== YOUR CREATIVE PROCESS ===
-
-Read the vibe. Understand what the finished video is supposed to feel like to a viewer watching it on their phone.
-
-Now look at the footage itself. What is actually happening on screen? Where does the energy rise? Where does it drag? Where does the visual content change? Where does the speaker land a point? Where would the viewer's attention naturally dip unless the edit intervenes?
-
-Now bridge those two things. The edit recipe is whatever transforms this specific footage into that specific feeling.
-
-=== WHAT NATIVE CONTENT LOOKS LIKE ON THESE PLATFORMS ===
-
-The content feels edited, not just cut.
-Viewers should feel that every moment was chosen on purpose. Static framing, uniform cuts, constant speed, and no visual variation read as unedited.
-
-The opening earns the viewer's attention.
-The first 1-2 seconds are an audition. Something in the opening should signal that this is worth watching.
-
-The pacing breathes.
-Good short-form editing varies tension and release. Some parts move quickly. Some parts slow down so the important line lands.
-
-Silence is a choice, not a default.
-On these platforms, the sonic space of a video is part of the edit. A video with no transition sounds and no sonic punctuation anywhere feels flat. But that does not mean every cut needs a sound. Hard cuts in continuous speech are often best left silent.
-
-B-roll separates produced content from selfie videos.
-When a talking head mentions a concept and the video cuts to a brief visual illustration before cutting back, the viewer reads the video as intentionally produced. One or two good b-roll moments can transform how edited the whole video feels.
-
-=== HOW THE ALGORITHM DECIDES WHAT GOES VIRAL ===
-
-The platforms reward watch time, completion rate, replays, shares, saves, and clean hooks.
-
-What this means for your edit:
-- the first 2-3 seconds must stop the scroll
-- dead air and flat pacing kill completion
-- shareable moments need emphasis
-- a clean ending improves loops and replays
-- intentional production quality helps both viewers and ranking systems
-
-=== WHERE THIS VIDEO LIVES ===
-
-This video will be posted to TikTok, Instagram Reels, or YouTube Shorts.
-
-Feed behavior: videos fill the phone screen and the viewer decides quickly whether to keep watching.
-
-Looping: the end transitions directly back to the beginning.
-
-Screen layout: the right side and bottom of the frame are partially covered by platform UI. Do not place important text or visuals there.
-
-=== PIPELINE STEPS ===
-
-You decide the clip structure by watching and listening to the footage yourself.
-
-Cut where the visual content changes, where speech naturally breaks, or where the pacing benefits from intervention.
-
-The source timeline only moves forward. Your clips must stay chronological. Sections you leave out are excluded from the final video.
+The ending matters. On these platforms, videos auto-loop. A clean ending that flows back into the opening earns replay credit. Avoid fade to black — it creates a flash before the loop restarts.{trend_block}
 
 === TOOLS ===
 
-Each clip in your recipe has these parameters:
+Per-clip parameters:
 
-  source_start / source_end — timestamps in the source video that define this clip's boundaries.
+  source_start / source_end — timestamps defining each clip. MUST be strictly chronological and seamless (no gaps between clips unless intentionally skipping a section of 0.5s or more).
 
-  CRITICAL RULE: clips must be strictly chronological. Each clip's source_start must be >= the previous clip's source_end.
+  transition_out:
+    none — hard cut. Best for most cuts, especially between clips of the same speaker.
+    whip_right / whip_left — directional blur wipe. Use at genuine scene changes where the visual content dramatically changes.
+    smoothleft / smoothright — smooth slide. Same as whip — only at real scene changes.
+    Use transitions where the user asks for them or where the content genuinely shifts. Most talking-head cuts should be hard cuts.
 
-  transition_out — visual transition effect at the END of this clip going into the next clip:
-    none — hard cut. The right choice for 90% of cuts. Use this between clips of the same scene, same speaker, same camera angle. Hard cuts feel sharp, professional, and invisible. When in doubt, use none.
-    whip_right, whip_left — fast directional wipe. ONLY use at a genuine scene change where the visual content changes dramatically.
-    smoothleft, smoothright — smooth directional slide. Same rule as whip — ONLY at genuine scene changes.
-    CRITICAL: on talking head videos, almost every cut should be transition_out=none.
+  transition_sound:
+    none — silent. Best for continuous speech.
+    swoosh — directional air swipe. Pairs with scene changes and wipes.
+    thud — punchy impact. Emphasizes a strong statement.
+    pop — bright snap. Fits reveals and appearances.
+    ding — bell. Fits notifications, tips, social media references.
+    reverb_hit — atmospheric impact. Fits major shifts.
+    shutter — camera click. Fits screenshots, screen recordings, visual captures.
+    typing — keyboard clicks. Fits tech and screen content.
+    ching — cash register. Fits money, pricing, free offers.
 
-  transition_sound — audio that plays during the transition:
-    none — silent cut. Natural for hard cuts in continuous speech where the voice carries across the edit.
-    swoosh — fast air swipe. Feels physical and directional.
-    thud — short punchy impact. Adds weight.
-    pop — quick bright snap. Fits reveals and light moments.
-    ding — notification bell. Fits alerts, messages, phones, or social media moments.
-    reverb_hit — atmospheric impact. Fits scene changes and bigger shifts.
-    shutter — camera shutter click. Fits photos, screenshots, or captured moments.
-    typing — keyboard clicks. Fits screens, tech, software, typing, coding.
-    ching — cash register ring. Fits pricing, money, sales, or offers.
-    Note: not every cut needs a sound.
+  sfx_style — sound accent on the clip: none, swoosh, thud, shutter
 
-  sfx_style — sound accent on the clip itself:
-    none, swoosh, thud, shutter
+  zoom — camera movement across the clip:
+    none — static. Use when the footage has burned-in captions or edge text.
+    slow_in / slow_out / punch_in / punch_out — creates frame movement.
+    Zoom crops the edges. If you see burned-in text near the frame edges, use none.
 
-  zoom — camera movement applied across the clip:
-    none, slow_in, slow_out, punch_in, punch_out
-    Note: zoom scales and crops the frame. If this video has burned-in captions or text overlays baked into the frames, set zoom=none on all clips.
-
-  cut_zoom — simulates a multi-camera shoot from a single take:
+  cut_zoom — alternates between normal and slightly zoomed framing at sentence boundaries to simulate multi-camera:
     true / false
-    Note: do not use cut_zoom=true and a zoom value on the same clip.
+    Do not combine with zoom on the same clip.
 
-  speed — playback speed multiplier. Audio pitch is preserved.
-    0.5, 0.75, 1.0, 1.05, 1.1, 1.15, 1.25, 1.5, 2.0
+  speed — playback multiplier (audio pitch preserved):
+    0.5, 0.75, 0.85, 0.9, 0.95, 1.0, 1.05, 1.1, 1.15, 1.25, 1.5, 2.0
 
 Global parameters:
-  color_intent — sets the overall color character of the video.
-    {intents}
 
-  vignette — darkens the edges of the frame, creating a moody, cinematic feel:
-    none — the right choice for clean, bright, professional, or educational content.
-    light — subtle atmosphere.
-    medium — noticeable cinematic edge darkening.
-    strong — heavy atmospheric vignette.
+  color_intent — the overall color feel: {intents}
+    Choose based on what you see in the footage and what the vibe calls for. The pipeline applies the grade automatically.
 
-  grain — film grain texture:
-    none, subtle, medium, heavy
+  vignette: none, light, medium, strong
+    Use none for clean/bright/educational content. Use light-strong for moody/cinematic/lifestyle.
 
-  cinematic_bars — 2.35:1 letterbox on 9:16 frame:
-    true, false
+  grain: none, subtle, medium, heavy
 
-  shadow_lift — true/false. Auto-calibrated.
-    true, false
+  cinematic_bars: true / false
 
-  highlight_rolloff — true/false. Auto-calibrated.
-    true, false
+  shadow_lift: true / false — lifts crushed shadows. Set true if you see dark, underexposed shadow areas.
 
-  vibrance — true/false. Auto-calibrated.
-    true, false
+  highlight_rolloff: true / false — protects blown highlights. Set true if you see bright, overexposed areas.
 
-  speed_curve — a smooth speed ramp applied across the entire assembled video. Audio stays in sync.
-    Set to "none" for most videos.
-    Use a speed curve when the content benefits from dramatic pacing — faster through setup or filler, slower on reveals, punchlines, key statements, or emotional peaks.
-    Provide an array of keypoints in OUTPUT time, not source time.
-    Speed values: 0.5 to 2.0.
-    RULES FOR SPEED CURVE:
-    - NEVER speed up the hook (first 3-5 seconds).
-    - Fastest sections should be filler or transitions between ideas.
-    - Slowest sections should be reveals, punchlines, or emotional peaks.
-    - The curve should have a clear structure, not random oscillation.
-    - When speed_curve is active, no section should sit at exactly 1.0x.
-    - The last keypoint should not be exactly 1.0x.
+  vibrance: true / false — boosts muted colors while protecting skin. Set true if the footage looks flat or desaturated.
 
-  caption_style — word-by-word captions synced to speech:
-    none, standard, bold_centered, minimal_bottom, animated_word, bold_white, bold_yellow, keyword_pop, box_caption
-    Note: if captions are already burned into the footage, set caption_style=none.
+  denoise: true / false — cleans noise/grain. Set true if you see visible noise in flat areas (walls, skin, sky). Set false on clean footage to preserve detail.
 
-  caption_position — top, center, lower-third, bottom
+  sharpening: true / false — enhances edge detail. Set true on soft/slightly blurry footage. Set false on already-sharp footage to avoid over-sharpening.
 
-  audio_denoise — true/false
+  speed_curve — smooth speed ramp across the entire assembled video:
+    "none" — no speed ramping.
+    Array of keypoints: [{{"t": <output_seconds>, "speed": <0.5 to 2.0>}}]
+    When the user asks for "speed ramping", "dynamic pacing", "engaging", or "captivating" editing, use a speed curve.
+    Rules: never speed up the first 3 seconds (the hook). Fastest on filler/transitions. Slowest on reveals/punchlines. The contrast between fast and slow is the effect — subtle differences (0.95 to 1.05) are invisible to viewers. Make it dramatic enough to feel.
 
-  beat_sync — true/false. Truthful label only.
+  caption_style: none, standard, bold_centered, minimal_bottom, animated_word, bold_white, bold_yellow, keyword_pop, box_caption
+    Set none if you see captions already burned into the footage.
 
-  outro — none, fade_black, fade_white
+  caption_position: top, center, lower-third, bottom
 
-  background_music — always "none". Creators select their own audio when posting.
+  audio_denoise: true / false — AI noise removal for room tone, hiss, fan noise.
 
-  aspect_ratio — always "9:16"
+  outro: none, fade_black, fade_white — none is best for clean looping.
+
+  background_music: always "none" — creators add their own music when posting.
+
+  aspect_ratio: always "9:16"
 
 Text overlays:
-  text — plain text, no emojis, under 5 words
-  position — top, bottom, center
-    top is the best default for talking head content.
-    center should only be used when no person's face is in frame.
-  appear_at_clip — clip number
-  style — title, callout, cta
-  sfx_style — a short sound accent at that moment:
-    none, pop, thud, ding, typing, ching, shutter, reverb_hit, swoosh
-  Note: if captions are already burned in, use text overlays sparingly.
+  text — under 5 words, no emojis
+  position — top (default for talking heads), center (only when no face in frame), bottom
+  appear_at_clip — which clip number
+  style — title (72px), callout (56px), cta (64px)
+  sfx_style — none, pop, thud, ding, typing, ching, shutter, reverb_hit, swoosh
+  If captions are already burned in, use overlays sparingly — maximum 2-3 per video.
 
-B-roll — stock footage clips overlaid briefly on the main video. Good b-roll is one of the strongest signals that a video was professionally edited.
-
-How Pexels stock video search works: Pexels returns short aesthetic clips. The best results come from keywords that describe a VISUAL ACTION or CLOSE-UP DETAIL — not a concept or a person's role.
-
-Rules for b-roll keywords:
-  - always include a physical detail or action like hands, close up, scrolling, typing, filming
-  - prefer close-ups over wide shots
-  - prefer movement over static scenes
-  - never use abstract concepts as keywords
-  - if you cannot think of a visually compelling close-up or action shot, do not add b-roll for that moment
-
-  keyword — search term for Pexels
-  timestamp — when in the source video to place the b-roll. Do NOT place b-roll in the first 2 seconds.
-  duration — 2-3 seconds. Never longer than 3 seconds.
-
-=== HOW THESE TOOLS LOOK AND SOUND ===
-
-Color grade: color_intent is your only color decision. The pipeline combines your intent with the measured baseline to produce the final grade.
-
-Vignette: cosine-curve radial edge darkening.
-
-Grain: animated temporal luma noise.
-
-Shadow lift, highlight rolloff, and vibrance are auto-calibrated by the pipeline using the footage_quality you report.
-
-Captions: word-by-word burn-in synced to detected speech timing.
-
-Text overlays: white text with black border and short fade-in/out animation.
-
-B-roll: full-frame Pexels stock overlays at specified timestamps.
-
-Beat sync: truthful label only. Use it only when the edit genuinely feels beat-driven.
-
-The "notes" field must be 50 words maximum.
-
-=== USE YOUR TOOLS ===
-
-A flat edit is a failed edit. If the finished video looks like raw footage with a color filter, you have failed.
-
-Before you return your recipe, look at it honestly:
-- if most clips have zoom=none, cut_zoom=false, speed=1.0, transition_out=none, sfx_style=none, that is not an edit
-- if your recipe reads like a cautious list of "none" values with one or two exceptions, you are optimizing for safety instead of the vibe
+B-roll — stock footage overlaid on the main video for 2-3 seconds:
+  keyword — search term for Pexels. Must describe what a CAMERA SEES, not a concept.
+    GOOD: "hands scrolling phone instagram feed", "fingers typing macbook keyboard", "person filming with ring light", "coffee shop laptop overhead", "phone screen notification close up"
+    BAD: "person holding credit card phone", "small business social media", "content creation strategy", "entrepreneur working"
+    If you can't think of a concrete visual action, don't add b-roll. No b-roll is better than bad b-roll.
+  timestamp — seconds into the source video. Not in the first 3 seconds.
+  duration — 2-3 seconds max.
+  Maximum 2 b-roll clips per video.
 
 === RESPONSE FORMAT ===
 
-First, write your creative vision for this edit in a <vision> block. Describe:
-- what happens in the first 2 seconds and why it stops the scroll
-- how the visual rhythm works across the whole video
-- where the energy shifts and how you mark those shifts
-- where speech carries cleanly, where silence is right, and where sounds punctuate
-- what moments deserve text overlays
-- whether b-roll strengthens any moments
-- what the overall color and production feel is
+First, write a <vision> block describing your creative plan — what happens in the opening, how pacing flows, where you place b-roll and text, what the color feel is.
 
-Then output the JSON recipe in a ```json fenced block:
+Then output the JSON:
 
 ```json
 {{
-  "notes": "<50 words max. Key decisions only, no justification>",
-  "video_profile": {{
-    "content_type": "<what kind of video this is>",
-    "visual_character": "<color palette, lighting, exposure, white balance>",
-    "strongest_moments": "<timestamps and what makes them compelling>",
-    "weakest_moments": "<timestamps and why they are weak, or none>"
-  }},
-  "frame_layout": {{
-    "subject_position": "<where the main subject is in frame>",
-    "existing_overlays": {{
-      "has_burned_captions": <true|false>,
-      "has_text_graphics": <true|false>,
-      "overlay_locations": "<where existing text/graphics appear>"
-    }},
-    "free_zones": "<areas of the frame where new text can go>"
-  }},
+  "notes": "<50 words max>",
   "footage_quality": {{
     "noise_level": "<none|low|medium|high>",
     "source_sharpness": "<soft|normal|sharp>",
@@ -1207,40 +1070,41 @@ Then output the JSON recipe in a ```json fenced block:
     "has_burned_captions": <true|false>
   }},
   "color_baseline": {{
-    "brightness": <-0.3 to 0.3>,
-    "contrast": <0.5 to 2.0>,
-    "saturation": <0.5 to 2.0>,
-    "gamma": <0.5 to 2.0>,
+    "brightness": <number>,
+    "contrast": <number>,
+    "saturation": <number>,
+    "gamma": <number>,
     "color_temperature": "<warm|cool|neutral>"
   }},
   "color_intent": "<intent>",
-  "background_music": "none",
   "caption_style": "<style>",
   "caption_position": "<position>",
-  "caption_keywords": [],
-  "audio_ducking": true,
   "audio_denoise": <true|false>,
-  "beat_sync": <true|false>,
-  "outro": "<outro>",
+  "outro": "<none|fade_black|fade_white>",
+  "background_music": "none",
   "aspect_ratio": "9:16",
-  "speed_curve": [{{"t": <seconds>, "speed": <number>}}] or "none",
-  "vignette": "<level>",
-  "grain": "<level>",
+  "speed_curve": [<keypoints>] or "none",
+  "vignette": "<none|light|medium|strong>",
+  "grain": "<none|subtle|medium|heavy>",
   "cinematic_bars": <true|false>,
   "shadow_lift": <true|false>,
   "highlight_rolloff": <true|false>,
   "vibrance": <true|false>,
+  "denoise": <true|false>,
+  "sharpening": <true|false>,
   "text_overlays": [
-    {{ "text": "<text>", "position": "<position>", "appear_at_clip": <clip number>, "style": "<style>", "sfx_style": "<sfx>" }}
+    {{"text": "<text>", "position": "<pos>", "appear_at_clip": <n>, "style": "<style>", "sfx_style": "<sfx>"}}
   ],
   "broll": [
-    {{ "keyword": "<search term>", "timestamp": <seconds>, "duration": <seconds> }}
+    {{"keyword": "<search>", "timestamp": <seconds>, "duration": <seconds>}}
   ],
   "cuts": [
-    {{ "source_start": <n>, "source_end": <n>, "transition_out": "<transition>", "transition_sound": "<sound>", "sfx_style": "<sfx>", "zoom": "<zoom>", "cut_zoom": <true|false>, "speed": <n> }}
+    {{"source_start": <n>, "source_end": <n>, "transition_out": "<transition>", "transition_sound": "<sound>", "sfx_style": "<sfx>", "zoom": "<zoom>", "cut_zoom": <bool>, "speed": <n>}}
   ]
 }}
 ```"""
+
+    return prompt
 
 
 def build_analysis_from_gemini_recipe(edit_plan, duration):
@@ -1438,10 +1302,13 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None):
     edit_plan.setdefault("background_music", "none")
     edit_plan.setdefault("caption_style", "none")
     edit_plan.setdefault("caption_position", "lower-third")
+    edit_plan.setdefault("caption_keywords", [])
     edit_plan.setdefault("audio_denoise", False)
     edit_plan.setdefault("beat_sync", False)
     edit_plan.setdefault("outro", "none")
     edit_plan.setdefault("aspect_ratio", "original")
+    edit_plan.setdefault("video_profile", {})
+    edit_plan.setdefault("frame_layout", {})
     edit_plan.setdefault("text_overlays", [])
     edit_plan.setdefault("vignette", "none")
     edit_plan.setdefault("broll", [])
@@ -1454,6 +1321,9 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None):
     edit_plan.setdefault("vibrance", False)
     edit_plan.setdefault("teal_orange", "none")
     edit_plan["background_music"] = "none"
+    edit_plan["caption_keywords"] = []
+    edit_plan["audio_ducking"] = True
+    edit_plan["beat_sync"] = False
 
     raw_curve = edit_plan.get("speed_curve", "none")
     if raw_curve == "none" or raw_curve is None or not isinstance(raw_curve, list):
@@ -1478,12 +1348,6 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None):
                 flush=True,
             )
     edit_plan["_parsed_speed_curve"] = speed_curve
-
-    if edit_plan.get("background_music") and edit_plan["background_music"] != "none":
-        edit_plan["audio_ducking"] = True
-    else:
-        if "audio_ducking" not in edit_plan:
-            edit_plan["audio_ducking"] = False
 
     for bool_field in ("sharpening", "denoise", "shadow_lift", "highlight_rolloff", "vibrance",
                        "cinematic_bars", "audio_denoise", "beat_sync"):
