@@ -868,7 +868,13 @@ The opening is an audition. The first 2 seconds must give the viewer a reason to
 
 Pacing creates rhythm. Filler and setup should move faster. Key moments — reveals, punchlines, important statements — should breathe. The contrast between fast and slow is what makes pacing feel alive.
 
-Cuts should be seamless. When you cut between clips of the same speaker, the audio must flow continuously with no gaps. Each clip's source_start should equal the previous clip's source_end. Gaps of even 0.1 seconds cause visible glitches.
+You are the editor. You decide what stays and what gets cut.
+
+Tighten the video. Remove dead air — long pauses, breaths between sentences, filler moments where nothing is happening, dull sections that don't serve the content. Skip them by leaving gaps between your clips. If the speaker pauses for half a second between two sentences, end one clip before the pause and start the next clip after it. The viewer should never sit through dead silence or a moment where nothing is happening.
+
+Cut where the visual content changes, where speech naturally pauses, or where pacing benefits from intervention. Every clip should contain content worth watching. If a section is boring, skip it.
+
+The source timeline only moves forward. Your clips must stay chronological. Gaps between clips are how you remove content — the pipeline will not fill them in.
 
 Sound design adds texture. A swoosh on a scene change, a thud when a statement lands, a pop when text appears — these make cuts feel physical instead of digital. But not every cut needs a sound. Continuous speech flows best with silent hard cuts.
 
@@ -880,7 +886,8 @@ The ending matters. On these platforms, videos auto-loop. A clean ending that fl
 
 Per-clip parameters:
 
-  source_start / source_end — timestamps defining each clip. MUST be strictly chronological and seamless (no gaps between clips unless intentionally skipping a section of 0.5s or more).
+  source_start / source_end — timestamps defining each clip. MUST be strictly chronological.
+    Clips must be chronological. Leave gaps between clips to remove dead air, pauses, or dull moments — the pipeline preserves these gaps as intentional cuts. Only overlap or touch clips when the speech flows continuously with no pause.
 
   transition_out:
     none — hard cut. Best for most cuts, especially between clips of the same speaker.
@@ -1224,6 +1231,18 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None):
         if curr_start < prev_end:
             print(f"[generate-edit] Fixing clip {i} overlap: source_start {curr_start} -> {prev_end}", flush=True)
             validated_cuts[i]["source_start"] = prev_end
+
+    for i in range(1, len(validated_cuts)):
+        prev_end = validated_cuts[i - 1]["source_end"]
+        curr_start = validated_cuts[i]["source_start"]
+        gap = curr_start - prev_end
+        if 0 < gap <= 0.05:
+            print(f"[generate-edit] Closing {gap:.3f}s micro-gap between clip {i-1} and clip {i}", flush=True)
+            validated_cuts[i - 1]["source_end"] = curr_start
+        elif 0.05 < gap <= 2.0:
+            print(f"[generate-edit] Intentional cut: {gap:.3f}s removed between clip {i-1} and clip {i}", flush=True)
+        elif gap > 2.0:
+            print(f"[generate-edit] Section skip: {gap:.3f}s removed between clip {i-1} and clip {i}", flush=True)
 
     visual_cuts = sorted(float(sc) for sc in (analysis.get("visual_cuts") or []) if sc is not None)
     if visual_cuts:
