@@ -1010,15 +1010,29 @@ Global parameters:
 
   vibrance: true / false — boosts muted colors while protecting skin. Set true if the footage looks flat or desaturated.
 
-  denoise: true / false — cleans noise/grain. Set true if you see visible noise in flat areas (walls, skin, sky). Set false on clean footage to preserve detail.
+  denoise: true / false — cleans noise/grain. Set true ONLY if you see visible grain or noise in flat areas like walls, skin, or sky. On clean well-lit footage, set false — denoise on clean footage removes real detail and makes the video look soft and blurry. Most modern phone footage is clean enough that denoise=false is the right choice.
 
-  sharpening: true / false — enhances edge detail. Set true on soft/slightly blurry footage. Set false on already-sharp footage to avoid over-sharpening.
+  sharpening: true / false — enhances edge detail. Set true ONLY on noticeably soft or blurry footage. On normal or sharp footage, set false — over-sharpening creates harsh edges and digital artifacts. Most phone footage is already sharp enough.
 
   speed_curve — smooth speed ramp across the entire assembled video:
     "none" — no speed ramping.
     Array of keypoints: [{{"t": <output_seconds>, "speed": <0.5 to 2.0>}}]
     When the user asks for "speed ramping", "dynamic pacing", "engaging", or "captivating" editing, use a speed curve.
-    Rules: never speed up the first 3 seconds (the hook). Fastest on filler/transitions. Slowest on reveals/punchlines. The contrast between fast and slow is the effect — subtle differences (0.95 to 1.05) are invisible to viewers. Make it dramatic enough to feel.
+    Rules: never speed up the first 3 seconds (the hook). Fastest on filler/transitions. Slowest on reveals/punchlines.
+
+    IMPORTANT: subtle speed differences (0.9 to 1.1) are INVISIBLE to viewers — that is essentially normal speed. A real speed ramp uses dramatic contrast:
+
+    Example for a 35s talking head:
+      t=0 speed=0.92 (hook — slightly slow for clarity)
+      t=4 speed=1.4 (setup — compress the buildup)
+      t=8 speed=0.7 (first key point — let it land)
+      t=12 speed=1.5 (filler — move fast)
+      t=18 speed=0.65 (reveal — dramatic slowdown)
+      t=22 speed=1.3 (transition — pick up energy)
+      t=28 speed=0.75 (CTA — slow for emphasis)
+      t=34 speed=1.1 (ending — slight energy for loop)
+
+    Your speed curve should span at least 0.65 to 1.4 for the effect to be noticeable.
 
   caption_style: none, standard, bold_centered, minimal_bottom, animated_word, bold_white, bold_yellow, keyword_pop, box_caption
     Set none if you see captions already burned into the footage.
@@ -1291,7 +1305,6 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None):
                     flush=True,
                 )
                 validated_cuts[i]["transition_out"] = "none"
-                validated_cuts[i]["transition_sound"] = "none"
 
     if has_burned_captions:
         for clip in validated_cuts:
@@ -1312,9 +1325,9 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None):
     edit_plan.setdefault("text_overlays", [])
     edit_plan.setdefault("vignette", "none")
     edit_plan.setdefault("broll", [])
-    edit_plan.setdefault("sharpening", True)
+    edit_plan.setdefault("sharpening", False)
     edit_plan.setdefault("grain", "none")
-    edit_plan.setdefault("denoise", True)
+    edit_plan.setdefault("denoise", False)
     edit_plan.setdefault("cinematic_bars", False)
     edit_plan.setdefault("shadow_lift", False)
     edit_plan.setdefault("highlight_rolloff", False)
@@ -1356,8 +1369,6 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None):
             edit_plan[bool_field] = v.strip().lower() in ("true", "1", "yes")
         else:
             edit_plan[bool_field] = bool(v)
-    edit_plan["sharpening"] = True
-    edit_plan["denoise"] = True
 
     valid_grain = {"none", "subtle", "medium", "heavy"}
     valid_vignette = {"none", "light", "medium", "strong"}
