@@ -894,13 +894,16 @@ Pacing creates rhythm. Filler and setup should move faster. Key moments — reve
 
 You are the editor. You decide what stays and what gets cut.
 
-Tighten the video. Remove dead air — long pauses, breaths between sentences, filler moments where nothing is happening, dull sections that don't serve the content. Skip them by leaving gaps between your clips. If the speaker pauses for half a second between two sentences, end one clip before the pause and start the next clip after it. The viewer should never sit through dead silence or a moment where nothing is happening.
+Your job is to decide which SECTIONS of the video to include. The pipeline will automatically remove filler words (uh, um) and tighten silence gaps within your clips — you do not need to worry about micro-pauses or breaths.
 
-When removing pauses between sentences, leave a small buffer (~0.1 seconds) on each side of the gap. Do not cut right at the instant speech ends — leave room for the natural tail of the last word. Starting a clip 0.1s before speech begins sounds natural. Starting exactly at the first phoneme sounds clipped.
+Focus on the big decisions:
+- Which sections of the video are worth keeping?
+- Are there any parts that are boring, repetitive, or off-topic that should be skipped entirely?
+- Where does the visual content change (speaker to screen recording, etc.)?
 
-Cut where the visual content changes, where speech naturally pauses, or where pacing benefits from intervention. Every clip should contain content worth watching. If a section is boring, skip it.
+Make your clips generous — include full sentences and thoughts. The pipeline will tighten them automatically. Do NOT try to cut mid-sentence or trim individual pauses — the pipeline handles that with millisecond precision.
 
-The source timeline only moves forward. Your clips must stay chronological. Gaps between clips are how you remove content — the pipeline will not fill them in.
+The source timeline only moves forward. Your clips must stay chronological. Gaps between clips mean you are skipping a section of the video entirely.
 
 Sound design adds texture. A swoosh on a scene change, a thud when a statement lands, a pop when text appears — these make cuts feel physical instead of digital. But not every cut needs a sound. Continuous speech flows best with silent hard cuts.
 
@@ -1034,8 +1037,9 @@ Sound effects — audio accents that EMPHASIZE specific moments in the video. Ea
   ding — notification bell. Place when the speaker says: notification, message, DM, inbox, email, alert, ping, phone, app.
     "word" = the exact trigger word spoken.
 
-  pop — bright snap. Place when something VISUALLY APPEARS on screen: a text overlay pops up, an image appears, a visual element is introduced, a new screen is shown. Also place when the speaker introduces or reveals something for the first time.
-    "word" = the word being spoken at that moment, or "text_overlay" if triggered by a visual element appearing.
+  pop — bright snap. Place ONLY when something VISUALLY APPEARS on screen: a text overlay pops up, a screen recording appears, a new visual element is shown. This is a VISUAL trigger only — NOT a speech trigger.
+    "word" = "visual_appear"
+    Do NOT place pop on spoken words. Pop is for visual events only.
 
   swoosh — air swipe. Place ONLY when the video visually cuts from one type of content to another — speaker to screen recording, or screen recording back to speaker. NOT for topic changes within speech.
     "word" = "scene_change"
@@ -1299,8 +1303,11 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None, deepgra
         elif gap > 2.0:
             print(f"[generate-edit] Section skip: {gap:.3f}s removed between clip {i-1} and clip {i}", flush=True)
 
-    # Snap cut points to word boundaries using Deepgram
     _dg_words = edit_plan.get("_deepgram_words", [])
+    if _dg_words:
+        validated_cuts = tighten_clips_with_deepgram(validated_cuts, _dg_words, min_silence_to_remove=0.3)
+
+    # Snap cut points to word boundaries using Deepgram
     if _dg_words:
         print(f"[generate-edit] Snapping {len(validated_cuts)} cuts to word boundaries ({len(_dg_words)} words)", flush=True)
         validated_cuts = snap_cuts_to_word_boundaries(validated_cuts, _dg_words)
@@ -2817,6 +2824,115 @@ def get_output_clip_ranges(cuts, effective_durations):
         overlap = td if i < len(cuts) - 1 else 0.0
         cursor  = round((end - overlap) * 1000) / 1000
     return ranges
+
+
+FILLER_WORDS = {"uh", "um", "uh,", "um,", "hmm", "hmm,", "uhh", "umm", "er", "ah"}
+
+
+def tighten_clips_with_deepgram(cuts, deepgram_words, min_silence_to_remove=0.3):
+    """
+    Go inside each of Gemini's clips and remove:
+    1. Filler words (uh, um, etc.)
+    2. Silence gaps longer than min_silence_to_remove seconds
+
+    Splits clips at removal points, creating more clips with tighter pacing.
+    Gemini's creative decisions (which sections to include) are preserved.
+    Only dead air and filler within those sections is removed.
+    """
+    if not deepgram_words or not cuts:
+        return cuts
+
+    sorted_words = sorted(deepgram_words, key=lambda w: float(w.get("start") or 0))
+
+    total_filler_removed = 0.0
+    total_silence_removed = 0.0
+    new_cuts = []
+
+    for clip in cuts:
+        clip_start = float(clip["source_start"])
+        clip_end = float(clip["source_end"])
+
+        clip_words = []
+        for w in sorted_words:
+            w_start = float(w.get("start") or 0)
+            w_end = float(w.get("end") or 0)
+            if w_start >= clip_start and w_end <= clip_end:
+                clip_words.append(w)
+
+        if not clip_words:
+            new_cuts.append(dict(clip))
+            continue
+
+        keep_segments = []
+        for w in clip_words:
+            w_text = str(w.get("punctuated_word") or w.get("word") or "").strip().lower()
+            w_clean = w_text.strip(".,!?;:'\"")
+
+            if w_clean in FILLER_WORDS:
+                filler_dur = float(w.get("end") or 0) - float(w.get("start") or 0)
+                total_filler_removed += filler_dur
+                print(
+                    f"[tighten] Removing filler '{w_clean}' at {float(w.get('start') or 0):.3f}s ({filler_dur:.3f}s)",
+                    flush=True,
+                )
+                continue
+
+            keep_segments.append({
+                "start": float(w.get("start") or 0),
+                "end": float(w.get("end") or 0),
+                "word": w_text,
+            })
+
+        if not keep_segments:
+            continue
+
+        sub_clips = []
+        current_sub_start = keep_segments[0]["start"]
+        current_sub_end = keep_segments[0]["end"]
+
+        for i in range(1, len(keep_segments)):
+            gap = keep_segments[i]["start"] - keep_segments[i - 1]["end"]
+
+            if gap > min_silence_to_remove:
+                total_silence_removed += gap
+                sub_clips.append({
+                    "start": current_sub_start,
+                    "end": current_sub_end,
+                })
+                current_sub_start = keep_segments[i]["start"]
+
+            current_sub_end = keep_segments[i]["end"]
+
+        sub_clips.append({
+            "start": current_sub_start,
+            "end": current_sub_end,
+        })
+
+        for sc in sub_clips:
+            sc["start"] = max(clip_start, sc["start"] - 0.05)
+            sc["end"] = min(clip_end, sc["end"] + 0.05)
+
+        for sc in sub_clips:
+            if sc["end"] - sc["start"] < 0.1:
+                continue
+            new_clip = dict(clip)
+            new_clip["source_start"] = round(sc["start"] * 1000) / 1000
+            new_clip["source_end"] = round(sc["end"] * 1000) / 1000
+            new_cuts.append(new_clip)
+
+    for i in range(1, len(new_cuts)):
+        if new_cuts[i]["source_start"] < new_cuts[i - 1]["source_end"]:
+            mid = (new_cuts[i - 1]["source_end"] + new_cuts[i]["source_start"]) / 2
+            new_cuts[i - 1]["source_end"] = round(mid * 1000) / 1000
+            new_cuts[i]["source_start"] = round(mid * 1000) / 1000
+
+    print(
+        f"[tighten] Deepgram tightening: {len(cuts)} clips → {len(new_cuts)} clips, "
+        f"removed {total_filler_removed:.2f}s filler + {total_silence_removed:.2f}s silence",
+        flush=True,
+    )
+
+    return new_cuts
 
 
 def snap_cuts_to_word_boundaries(cuts, deepgram_words):
