@@ -927,15 +927,13 @@ Per-clip parameters:
 
   transition_out — visual transition between this clip and the next:
 
-    none — hard cut. This is what 95% of cuts on TikTok and Reels look like. Clean, instant, professional. The viewer doesn't notice a hard cut — they just feel the rhythm. Use this for every cut where the speaker is continuing to talk or the visual content isn't dramatically changing.
+    none — hard cut. Use this for EVERY cut unless the user's vibe specifically asks for transitions. Hard cuts are what TikTok and Reels content uses. They are clean, instant, and professional.
 
-    fadewhite — fades through white between clips. This is the signature transition on TikTok and Reels — a brief white flash between two clips that signals a scene change or energy shift. Use when the visual content genuinely changes: speaker to screen recording, one location to another, one topic section to another. Do not use between two clips of the same person in the same setting.
+    fadewhite — fades through white between clips. ONLY use if the user's vibe mentions "transitions" or "white fade" or similar. Never add transitions on your own.
 
-    For talking head videos: use fadewhite ONLY ONCE per scene change — when going FROM the speaker TO different visual content (screen recording, different location). When cutting BACK to the speaker, use none. Two fadewhites in a row looks amateur. If in doubt, use none.
+    whip_left / whip_right — fast directional blur. ONLY use if the user's vibe specifically asks for it.
 
-    whip_left / whip_right — fast directional blur. High energy. Use sparingly on content that has real momentum — a dramatic shift, a high-energy moment. Most talking head content does not need this.
-
-    Watch the video. Almost every cut should be none. Place fadewhite only where you SEE the content actually change — not where you think it "should" have a transition. If you're not sure, use none.
+    DEFAULT: set every transition_out to "none" unless the user explicitly requests transitions in their vibe.
 
   transition_sound — always "none"
 
@@ -1331,13 +1329,15 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None):
         elif gap > 2.0:
             print(f"[generate-edit] Section skip: {gap:.3f}s removed between clip {i-1} and clip {i}", flush=True)
 
-    for i in range(1, len(validated_cuts)):
-        if (
-            str(validated_cuts[i - 1].get("transition_out") or "none").lower() == "fadewhite"
-            and str(validated_cuts[i].get("transition_out") or "none").lower() == "fadewhite"
-        ):
-            print(f"[generate-edit] Downgrading consecutive fadewhite on clip {i} to none", flush=True)
-            validated_cuts[i]["transition_out"] = "none"
+    vibe_lower = vibe.lower() if isinstance(vibe, str) else ""
+    has_transition_request = any(
+        word in vibe_lower for word in ["transition", "transitions", "white fade", "fadewhite", "whip", "flash"]
+    )
+    if not has_transition_request:
+        for clip in validated_cuts:
+            if clip.get("transition_out") != "none":
+                print(f"[generate-edit] Removing transition '{clip['transition_out']}' (not requested in vibe)", flush=True)
+                clip["transition_out"] = "none"
 
     visual_cuts = sorted(float(sc) for sc in (analysis.get("visual_cuts") or []) if sc is not None)
     if visual_cuts:
