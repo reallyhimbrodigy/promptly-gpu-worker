@@ -2822,6 +2822,32 @@ def get_output_clip_ranges(cuts, effective_durations):
     return ranges
 
 
+def project_source_time_to_output(source_t, cuts, clip_ranges):
+    """
+    Map a source-timeline timestamp to the output-timeline timestamp.
+    Returns the output time, or None if the source time falls in a removed gap.
+    """
+    for i, cut in enumerate(cuts):
+        src_start = float(cut["source_start"])
+        src_end = float(cut["source_end"])
+        speed = max(0.25, float(cut.get("speed") or 1.0))
+
+        if src_start <= source_t <= src_end:
+            local_offset = (source_t - src_start) / speed
+            output_t = float(clip_ranges[i]["start"]) + local_offset
+            return round(output_t * 1000) / 1000
+
+    for i, cut in enumerate(cuts):
+        src_start = float(cut["source_start"])
+        if source_t < src_start:
+            return float(clip_ranges[i]["start"])
+
+    if clip_ranges:
+        return float(clip_ranges[-1]["end"]) - 0.1
+
+    return None
+
+
 def compute_effective_durations(cuts):
     return [
         round(
@@ -3118,7 +3144,15 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _sound_path = get_sfx_path(_sound_style)
         if not _sound_path:
             continue
-        _ts = max(0.0, float(_sfx.get("t") or 0.0))
+        _source_t = float(_sfx.get("t") or 0.0)
+        _output_t = project_source_time_to_output(_source_t, cuts, _clip_ranges)
+        if _output_t is None:
+            print(
+                f"[sfx] sound_effect: {_sound_style} at source {_source_t:.3f}s — could not project, skipping",
+                flush=True,
+            )
+            continue
+        _ts = max(0.0, _output_t)
         _offset_ms = round(_ts * 1000)
         _vol = 0.5
         _label = f"[timesfx{_i}]"
@@ -3127,7 +3161,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             f"[{extra_input_index}:a]volume={_vol:.3f},adelay={_offset_ms}|{_offset_ms}{_label}"
         )
         sfx_audio_labels.append(_label)
-        print(f"[sfx] sound_effect: {_sound_style} vol={_vol:.3f} at {_ts:.3f}s", flush=True)
+        print(
+            f"[sfx] sound_effect: {_sound_style} vol={_vol:.3f} at source={_source_t:.3f}s → output={_ts:.3f}s",
+            flush=True,
+        )
         extra_input_index += 1
 
     transition_filters = []
