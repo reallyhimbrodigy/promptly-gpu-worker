@@ -1037,46 +1037,30 @@ B-roll — stock footage overlaid on the main video for 2-3 seconds:
   duration — 2-3 seconds max.
   Maximum 2 b-roll clips per video.
 
-Sound effects — audio accents placed at specific moments in the video based on what you see and hear. These are NOT tied to cuts or text overlays — they are tied to MOMENTS in the content.
+Sound effects — audio accents that EMPHASIZE specific moments in the video. Each sound effect must be tied to a specific word being spoken OR a specific visual event happening on screen. No random placement.
 
-Watch the video. Listen to the speech. Place sounds at the exact timestamp where the moment happens:
+  ching — cash register. Place when the speaker says: free, money, price, cost, pay, dollar, discount, deal, sale, offer, cash, revenue, income, profit, cheap, affordable.
+    "word" = the exact trigger word spoken.
 
-  pop — bright snap. Use when:
-    - text appears on screen
-    - something is revealed or introduced
-    - a new idea arrives
+  ding — notification bell. Place when the speaker says: notification, message, DM, inbox, email, alert, ping, phone, app.
+    "word" = the exact trigger word spoken.
 
-  ching — cash register. Use ONLY when the speaker says or references:
-    - money, pricing, cost
-    - something being free
-    - a deal, discount, or offer
+  pop — bright snap. Place when something VISUALLY APPEARS on screen: a text overlay pops up, an image appears, a visual element is introduced, a new screen is shown. Also place when the speaker introduces or reveals something for the first time.
+    "word" = the word being spoken at that moment, or "text_overlay" if triggered by a visual element appearing.
 
-  ding — notification bell. Use ONLY when the speaker says or references:
-    - a notification or alert
-    - a message or DM
-    - a phone or app
+  swoosh — air swipe. Place ONLY when the video visually cuts from one type of content to another — speaker to screen recording, or screen recording back to speaker. NOT for topic changes within speech.
+    "word" = "scene_change"
 
-  thud — heavy impact. Use when:
-    - a bold or confrontational statement lands
-    - a hard truth is spoken
-    - a punchline hits
-
-  swoosh — air swipe. Use when:
-    - energy shifts direction
-    - a topic changes quickly
-
-  For each sound effect, provide the approximate timestamp AND the specific word or short phrase being spoken at that moment. The pipeline will use speech recognition to snap the sound to the exact millisecond the word is spoken.
-
-  Do not overdo it. Most videos have 2-5 sound effects total. Each one should match a real moment you can hear or see. If the video is calm or serious, use fewer. If it's energetic, use more.
+  Rules:
+  - Every sound effect MUST have a "word" field explaining what triggers it.
+  - If you cannot identify a specific spoken word or visual event that triggers the sound, DO NOT add it.
+  - Do not spread sounds evenly across the video. Cluster them where moments actually happen.
+  - Most videos have 1-4 sound effects. Some have zero. Zero is fine.
+  - Each sound must ADD to the video and EMPHASIZE the moment. If removing the sound wouldn't change how the moment feels, don't add it.
 
   sound_effects: [
-    {{"t": <seconds>, "sound": "<pop|ching|ding|thud|swoosh>", "word": "<the word or short phrase being spoken>"}}
+    {{"t": <seconds>, "sound": "<pop|ching|ding|swoosh>", "word": "<trigger word or event>"}}
   ]
-
-  The "word" field is critical — it tells the pipeline exactly which spoken word to attach the sound to. Use the most distinctive word at that moment. Examples:
-    {{"t": 3.2, "sound": "thud", "word": "trash"}}
-    {{"t": 37.5, "sound": "ching", "word": "free"}}
-    {{"t": 18.0, "sound": "pop", "word": "tool"}}
 
 === RESPONSE FORMAT ===
 
@@ -1418,7 +1402,7 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None):
 
     raw_sfx = edit_plan.get("sound_effects", [])
     sound_effects = []
-    valid_sounds = {"pop", "ching", "ding", "thud", "swoosh"}
+    valid_sounds = {"pop", "ching", "ding", "swoosh"}
     for sfx in raw_sfx:
         if isinstance(sfx, dict) and "t" in sfx and "sound" in sfx:
             try:
