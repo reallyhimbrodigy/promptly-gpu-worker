@@ -289,12 +289,13 @@ def build_color_grade(baseline, intent_name):
     print(f"[color] Temperature: baseline={baseline_temp}", flush=True)
     intent = normalize_intent(intent_name)
     delta = COLOR_INTENTS[intent]
+    intended_temp = delta["color_temperature"] if delta["color_temperature"] in ("warm", "cool") else None
     color_grade = {
         "brightness":        clamp(safe_baseline["brightness"] + delta["brightness"], -0.15, 0.15),
         "contrast":          clamp(safe_baseline["contrast"] + delta["contrast"], 0.8, 1.4),
         "saturation":        clamp(safe_baseline["saturation"] + delta["saturation"], 0.8, 1.20),
         "gamma":             clamp(safe_baseline["gamma"] + delta["gamma"], 0.8, 1.2),
-        "color_temperature": delta["color_temperature"] or safe_baseline["color_temperature"] or "neutral",
+        "color_temperature": intended_temp or safe_baseline["color_temperature"] or "neutral",
     }
     print(
         f"[color] Clamped color_grade: b={color_grade['brightness']:.2f} "
@@ -930,6 +931,8 @@ Per-clip parameters:
 
     fadewhite — fades through white between clips. This is the signature transition on TikTok and Reels — a brief white flash between two clips that signals a scene change or energy shift. Use when the visual content genuinely changes: speaker to screen recording, one location to another, one topic section to another. Do not use between two clips of the same person in the same setting.
 
+    For talking head videos: use fadewhite ONLY ONCE per scene change — when going FROM the speaker TO different visual content (screen recording, different location). When cutting BACK to the speaker, use none. Two fadewhites in a row looks amateur. If in doubt, use none.
+
     whip_left / whip_right — fast directional blur. High energy. Use sparingly on content that has real momentum — a dramatic shift, a high-energy moment. Most talking head content does not need this.
 
     Watch the video. Almost every cut should be none. Place fadewhite only where you SEE the content actually change — not where you think it "should" have a transition. If you're not sure, use none.
@@ -1327,6 +1330,14 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None):
             print(f"[generate-edit] Intentional cut: {gap:.3f}s removed between clip {i-1} and clip {i}", flush=True)
         elif gap > 2.0:
             print(f"[generate-edit] Section skip: {gap:.3f}s removed between clip {i-1} and clip {i}", flush=True)
+
+    for i in range(1, len(validated_cuts)):
+        if (
+            str(validated_cuts[i - 1].get("transition_out") or "none").lower() == "fadewhite"
+            and str(validated_cuts[i].get("transition_out") or "none").lower() == "fadewhite"
+        ):
+            print(f"[generate-edit] Downgrading consecutive fadewhite on clip {i} to none", flush=True)
+            validated_cuts[i]["transition_out"] = "none"
 
     visual_cuts = sorted(float(sc) for sc in (analysis.get("visual_cuts") or []) if sc is not None)
     if visual_cuts:
@@ -2381,11 +2392,12 @@ def apply_speed_curve(output_path, speed_curve, work_dir):
         seg_output_dur = seg_input_dur / part["avg_speed"]
         cum_output.append(cum_output[-1] + seg_output_dur)
 
+    fps = 30
     last = expr_parts[-1]
-    setpts_expr = f"{cum_output[-2]:.6f}+(T-{last['t_start']:.6f})/{last['avg_speed']:.6f}"
+    setpts_expr = f"({cum_output[-2]:.6f}+(T-{last['t_start']:.6f})/{last['avg_speed']:.6f})/TB"
     for i in range(len(expr_parts) - 2, -1, -1):
         part = expr_parts[i]
-        inner = f"{cum_output[i]:.6f}+(T-{part['t_start']:.6f})/{part['avg_speed']:.6f}"
+        inner = f"({cum_output[i]:.6f}+(T-{part['t_start']:.6f})/{part['avg_speed']:.6f})/TB"
         setpts_expr = f"if(lt(T,{part['t_end']:.6f}),{inner},{setpts_expr})"
 
     total_output_duration = cum_output[-1]
@@ -2448,8 +2460,41 @@ def apply_speed_curve(output_path, speed_curve, work_dir):
     temp_output = os.path.join(work_dir, "speed_curved.mp4")
     filter_script_path = os.path.join(work_dir, "speed_filter.txt")
     with open(filter_script_path, "w", encoding="utf-8") as f:
-        f.write(f"[0:v]setpts='{setpts_expr}',fps=30[outv]\n")
+        f.write(f"[0:v]setpts={setpts_expr},fps={fps}[outv]\n")
     print(f"[speed_curve] Filter script written to {filter_script_path}", flush=True)
+    with open(filter_script_path, "r", encoding="utf-8") as f:
+        script_content = f.read()
+    print(f"[speed_curve] Filter script content:\n{script_content}", flush=True)
+
+    test_filter_path = os.path.join(work_dir, "sc_test_filter.txt")
+    with open(test_filter_path, "w", encoding="utf-8") as f:
+        f.write("[0:v]setpts=PTS/1.1,fps=30[outv]\n")
+    test_output = os.path.join(work_dir, "sc_test.mp4")
+    test_cmd = [
+        "ffmpeg", "-y",
+        "-i", output_path,
+        "-i", audio_curved,
+        "-filter_complex_script", test_filter_path,
+        "-map", "[outv]", "-map", "1:a",
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
+        "-c:a", "aac", "-b:a", "128k",
+        "-shortest",
+        "-movflags", "+faststart",
+        test_output,
+    ]
+    test_result = subprocess.run(test_cmd, capture_output=True, text=True, timeout=60)
+    test_size = os.path.getsize(test_output) if os.path.exists(test_output) else 0
+    print(
+        f"[speed_curve] DIAGNOSTIC: simple setpts=PTS/1.1 → {test_size} bytes, exit={test_result.returncode}",
+        flush=True,
+    )
+    if test_size < 1000:
+        print(f"[speed_curve] DIAGNOSTIC stderr: {test_result.stderr[-500:]}", flush=True)
+    if os.path.exists(test_output):
+        os.remove(test_output)
+    if os.path.exists(test_filter_path):
+        os.remove(test_filter_path)
+
     cmd_mux = [
         "ffmpeg", "-y",
         "-i", output_path,
@@ -2463,10 +2508,11 @@ def apply_speed_curve(output_path, speed_curve, work_dir):
         temp_output,
     ]
 
+    print(f"[speed_curve] FFmpeg command: {' '.join(cmd_mux)}", flush=True)
     print("[speed_curve] Muxing smooth video + smooth audio...", flush=True)
     r = subprocess.run(cmd_mux, capture_output=True, text=True, timeout=300)
     if r.stderr:
-        print(f"[speed_curve] FFmpeg stderr (last 300): {r.stderr[-300:]}", flush=True)
+        print(f"[speed_curve] FFmpeg stderr (last 1500): {r.stderr[-1500:]}", flush=True)
     if r.returncode != 0:
         print(f"[speed_curve] Mux FAILED (exit code {r.returncode}): {r.stderr[-500:]}", flush=True)
         print("[speed_curve] Falling back to original output", flush=True)
