@@ -1788,7 +1788,7 @@ def fetch_broll_clip(keyword, duration_needed, work_dir):
         try:
             probe_cmd = [
                 "ffprobe", "-v", "quiet",
-                "-show_entries", "stream=codec_type,duration,nb_frames,width,height",
+                "-show_entries", "stream=codec_type,duration,width,height,r_frame_rate,codec_name",
                 "-show_entries", "format=duration",
                 "-of", "json",
                 dest,
@@ -1803,13 +1803,13 @@ def fetch_broll_clip(keyword, duration_needed, work_dir):
                     break
 
             if not video_stream:
-                print(f"[broll] REJECTED '{keyword}': no video stream in downloaded file", flush=True)
+                print(f"[broll] REJECTED '{keyword}': no video stream found", flush=True)
                 os.remove(dest)
                 return None
 
-            nb_frames = int(video_stream.get("nb_frames", 0) or 0)
             stream_w = int(video_stream.get("width", 0) or 0)
             stream_h = int(video_stream.get("height", 0) or 0)
+            codec_name = video_stream.get("codec_name", "unknown")
             fmt_duration = float(probe_data.get("format", {}).get("duration", 0) or 0)
 
             if fmt_duration < 1.0:
@@ -1817,23 +1817,48 @@ def fetch_broll_clip(keyword, duration_needed, work_dir):
                 os.remove(dest)
                 return None
 
-            if nb_frames > 0 and nb_frames < 15:
-                print(f"[broll] REJECTED '{keyword}': only {nb_frames} frames — likely a still image", flush=True)
+            frame_check_cmd = [
+                "ffmpeg", "-y",
+                "-i", dest,
+                "-t", "2",
+                "-vf", "fps=5",
+                "-f", "null", "-",
+            ]
+            frame_result = subprocess.run(frame_check_cmd, capture_output=True, text=True, timeout=15)
+
+            frame_count = 0
+            for line in frame_result.stderr.split("\n"):
+                if "frame=" in line:
+                    try:
+                        frame_part = line.split("frame=")[1].strip().split()[0]
+                        frame_count = int(frame_part)
+                    except (IndexError, ValueError):
+                        pass
+
+            if frame_count < 5:
+                print(
+                    f"[broll] REJECTED '{keyword}': only {frame_count} decoded frames in first 2s — likely a still image",
+                    flush=True,
+                )
                 os.remove(dest)
                 return None
 
             is_portrait = stream_h > stream_w
             print(
-                f"[broll] VALIDATED '{keyword}': {stream_w}x{stream_h}, "
-                f"{fmt_duration:.1f}s, {nb_frames} frames, "
-                f"portrait={is_portrait}",
+                f"[broll] VALIDATED '{keyword}': {stream_w}x{stream_h} ({codec_name}), "
+                f"{fmt_duration:.1f}s, {frame_count} test frames, portrait={is_portrait}",
                 flush=True,
             )
 
             if not is_portrait:
-                print(f"[broll] WARNING: '{keyword}' downloaded as landscape despite portrait filter — will be cropped", flush=True)
+                print(f"[broll] REJECTED '{keyword}': landscape orientation", flush=True)
+                os.remove(dest)
+                return None
         except Exception as e:
-            print(f"[broll] Could not validate '{keyword}': {e} — using file anyway", flush=True)
+            print(f"[broll] Could not validate '{keyword}': {e} — rejecting to be safe", flush=True)
+            if os.path.exists(dest):
+                os.remove(dest)
+            return None
 
         return dest
     except Exception as e:
@@ -1873,9 +1898,8 @@ def composite_broll(output_path, broll_entries, broll_files, work_dir):
         needed_duration = float(entry.get("duration") or 2.0)
         broll_duration = get_video_duration(entry["local_path"])
         if broll_duration > needed_duration + 1.0:
-            seek_point = broll_duration * 0.35
-            max_seek = broll_duration - needed_duration - 0.5
-            seek_point = min(seek_point, max(0.0, max_seek))
+            seek_point = broll_duration * 0.25
+            seek_point = min(seek_point, max(0.0, broll_duration - needed_duration - 0.5))
             print(
                 f"[broll] Trimming '{keyword}': {broll_duration:.1f}s clip, seeking to {seek_point:.1f}s, using {needed_duration}s",
                 flush=True,
@@ -1889,7 +1913,7 @@ def composite_broll(output_path, broll_entries, broll_files, work_dir):
         filter_parts.append(
             f"[{idx}:v]trim=start={seek_point:.3f}:duration={needed_duration:.3f},"
             f"setpts=PTS-STARTPTS,scale=1080:1920:force_original_aspect_ratio=increase,"
-            f"crop=1080:1920,setsar=1[bv{i}]"
+            f"crop=1080:1920:(iw-1080)/2:(ih-1920)/2,setsar=1[bv{i}]"
         )
     prev = "0:v"
     for i, entry in enumerate(entries_with_files):
