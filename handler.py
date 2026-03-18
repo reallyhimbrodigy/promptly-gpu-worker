@@ -957,7 +957,7 @@ Global parameters:
     Choose based on what you see in the footage and what the vibe calls for. The pipeline applies the grade automatically.
 
   vignette: none, light, medium, strong
-    Use none for clean/bright/educational content. Use light-strong for moody/cinematic/lifestyle.
+    Use none for talking head videos and educational content — vignette darkens the edges and looks unnatural on a person's face. Only use light-strong for lifestyle, cinematic, or moody content where the speaker is NOT the primary visual.
 
   grain: none, subtle, medium, heavy
 
@@ -1038,10 +1038,11 @@ Text overlays:
   If captions are already burned in, use overlays sparingly — maximum 2-3 per video.
 
 B-roll — stock footage overlaid on the main video for 2-3 seconds:
-  keyword — search term for Pexels. Must describe what a CAMERA SEES, not a concept.
-    GOOD: "hands scrolling phone instagram feed", "fingers typing macbook keyboard", "person filming with ring light", "coffee shop laptop overhead", "phone screen notification close up"
-    BAD: "person holding credit card phone", "small business social media", "content creation strategy", "entrepreneur working"
-    If you can't think of a concrete visual action, don't add b-roll. No b-roll is better than bad b-roll.
+  keyword — search term for Pexels. Must describe a MEDIUM or WIDE shot of a person doing something in a setting. NOT a close-up of hands or objects.
+    GOOD: "woman scrolling social media on phone couch", "person typing on laptop at desk wide shot", "creator filming video with phone tripod", "coffee shop customer using laptop", "young person watching phone smiling"
+    BAD: "person scrolling phone screen" (returns extreme close-ups), "hands typing laptop keyboard" (returns disembodied hands), "frustrated person looking at phone" (Pexels cannot search emotions), "phone screen close up" (macro shots of screens), "person typing on laptop" (too vague, returns random angles)
+    Every keyword MUST include: WHO (person, woman, man, creator), WHAT they're doing (scrolling, typing, filming), and WHERE (couch, desk, cafe, office). This produces medium shots of real scenes.
+    If you can't describe a specific scene with a person in a setting, don't add b-roll.
   timestamp — seconds into the source video. Not in the first 3 seconds.
   duration — 2-3 seconds max.
   Maximum 2 b-roll clips per video.
@@ -2088,8 +2089,8 @@ def enhance_video_quality(input_path, work_dir):
     import torch
 
     try:
-        from basicsr.archs.rrdbnet_arch import RRDBNet
         from realesrgan import RealESRGANer
+        from realesrgan.archs.srvgg_arch import SRVGGNetCompact
     except ImportError as e:
         print(f"[enhance] Failed to import Real-ESRGAN: {e} — skipping", flush=True)
         return
@@ -2097,7 +2098,7 @@ def enhance_video_quality(input_path, work_dir):
     print("[enhance] Starting AI quality enhancement (Real-ESRGAN)...", flush=True)
     start_time = time.time()
 
-    model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=4)
+    model = SRVGGNetCompact(num_in_ch=3, num_out_ch=3, num_feat=64, num_conv=32, upscale=4, act_type='prelu')
     model_path = "/models/realesr-general-x4v3.pth"
 
     if not os.path.exists(model_path):
@@ -2482,49 +2483,19 @@ def apply_speed_curve(output_path, speed_curve, work_dir):
         print("[speed_curve] Rubberband output file missing", flush=True)
 
     temp_output = os.path.join(work_dir, "speed_curved.mp4")
-    filter_script_path = os.path.join(work_dir, "speed_filter.txt")
-    with open(filter_script_path, "w", encoding="utf-8") as f:
-        f.write(f"[0:v]setpts={setpts_expr},fps={fps}[outv]\n")
-    print(f"[speed_curve] Filter script written to {filter_script_path}", flush=True)
-    with open(filter_script_path, "r", encoding="utf-8") as f:
-        script_content = f.read()
-    print(f"[speed_curve] Filter script content:\n{script_content}", flush=True)
 
-    test_filter_path = os.path.join(work_dir, "sc_test_filter.txt")
-    with open(test_filter_path, "w", encoding="utf-8") as f:
-        f.write("[0:v]setpts=PTS/1.1,fps=30[outv]\n")
-    test_output = os.path.join(work_dir, "sc_test.mp4")
-    test_cmd = [
-        "ffmpeg", "-y",
-        "-i", output_path,
-        "-i", audio_curved,
-        "-filter_complex_script", test_filter_path,
-        "-map", "[outv]", "-map", "1:a",
-        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
-        "-c:a", "aac", "-b:a", "128k",
-        "-shortest",
-        "-movflags", "+faststart",
-        test_output,
-    ]
-    test_result = subprocess.run(test_cmd, capture_output=True, text=True, timeout=60)
-    test_size = os.path.getsize(test_output) if os.path.exists(test_output) else 0
-    print(
-        f"[speed_curve] DIAGNOSTIC: simple setpts=PTS/1.1 → {test_size} bytes, exit={test_result.returncode}",
-        flush=True,
-    )
-    if test_size < 1000:
-        print(f"[speed_curve] DIAGNOSTIC stderr: {test_result.stderr[-500:]}", flush=True)
-    if os.path.exists(test_output):
-        os.remove(test_output)
-    if os.path.exists(test_filter_path):
-        os.remove(test_filter_path)
+    # Use -vf (not filter_complex_script) because filter_complex_script
+    # interprets commas inside if(lt(T,x),y,z) as filter chain separators.
+    # -vf handles commas inside expressions correctly.
+    vf_expr = f"setpts='{setpts_expr}',fps={fps}"
+    print(f"[speed_curve] vf expression length: {len(vf_expr)} chars", flush=True)
 
     cmd_mux = [
         "ffmpeg", "-y",
         "-i", output_path,
         "-i", audio_curved,
-        "-filter_complex_script", filter_script_path,
-        "-map", "[outv]", "-map", "1:a",
+        "-vf", vf_expr,
+        "-map", "0:v", "-map", "1:a",
         "-c:v", "libx264", "-preset", "medium", "-crf", "18",
         "-c:a", "aac", "-b:a", "128k",
         "-shortest",
@@ -2540,14 +2511,14 @@ def apply_speed_curve(output_path, speed_curve, work_dir):
     if r.returncode != 0:
         print(f"[speed_curve] Mux FAILED (exit code {r.returncode}): {r.stderr[-500:]}", flush=True)
         print("[speed_curve] Falling back to original output", flush=True)
-        for f in [audio_raw, audio_curved, tempo_map_path, filter_script_path]:
+        for f in [audio_raw, audio_curved, tempo_map_path]:
             if os.path.exists(f):
                 os.remove(f)
         return
 
     if not os.path.exists(temp_output):
         print("[speed_curve] Mux produced no output file — falling back", flush=True)
-        for f in [audio_raw, audio_curved, tempo_map_path, filter_script_path]:
+        for f in [audio_raw, audio_curved, tempo_map_path]:
             if os.path.exists(f):
                 os.remove(f)
         return
@@ -2555,7 +2526,7 @@ def apply_speed_curve(output_path, speed_curve, work_dir):
     temp_size = os.path.getsize(temp_output)
     if temp_size < 100000:
         print(f"[speed_curve] Mux output too small ({temp_size} bytes) — falling back", flush=True)
-        for f in [temp_output, audio_raw, audio_curved, tempo_map_path, filter_script_path]:
+        for f in [temp_output, audio_raw, audio_curved, tempo_map_path]:
             if os.path.exists(f):
                 os.remove(f)
         return
@@ -2563,7 +2534,7 @@ def apply_speed_curve(output_path, speed_curve, work_dir):
     temp_dur = probe_duration(temp_output)
     if not temp_dur or temp_dur < 1.0:
         print(f"[speed_curve] Mux output invalid duration ({temp_dur}s) — falling back", flush=True)
-        for f in [temp_output, audio_raw, audio_curved, tempo_map_path, filter_script_path]:
+        for f in [temp_output, audio_raw, audio_curved, tempo_map_path]:
             if os.path.exists(f):
                 os.remove(f)
         return
@@ -2571,7 +2542,7 @@ def apply_speed_curve(output_path, speed_curve, work_dir):
     os.replace(temp_output, output_path)
     new_duration = probe_duration(output_path) or duration
     print(f"[speed_curve] Complete: {duration:.2f}s → {new_duration:.2f}s ({temp_size / 1024 / 1024:.1f}MB)", flush=True)
-    for f in [audio_raw, audio_curved, tempo_map_path, filter_script_path]:
+    for f in [audio_raw, audio_curved, tempo_map_path]:
         if os.path.exists(f):
             os.remove(f)
 
