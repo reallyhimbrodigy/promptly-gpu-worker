@@ -2954,6 +2954,140 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
     print("[captions] Burn-in complete", flush=True)
 
 
+def mix_sfx_after_speed_curve(output_path, edit_plan, cuts, effective_durations, work_dir):
+    """
+    Mix sound effects into the final video AFTER the speed curve has been applied.
+    Uses -c:v copy so the video stream is not re-encoded.
+    Timestamps are projected from source time to final output time.
+    """
+    parsed_sfx = edit_plan.get("_parsed_sound_effects", [])
+    if not parsed_sfx:
+        print("[sfx] No sound effects to mix", flush=True)
+        return
+
+    clip_ranges = get_output_clip_ranges(cuts, effective_durations)
+    speed_curve = edit_plan.get("_parsed_speed_curve") or []
+
+    speed_expr_parts = []
+    speed_cum_output = [0.0]
+    if speed_curve and len(speed_curve) >= 2:
+        sc = list(speed_curve)
+        pre_sc_duration = sum(effective_durations)
+        if sc[-1]["t"] < pre_sc_duration:
+            sc = sc + [{"t": pre_sc_duration, "speed": sc[-1]["speed"]}]
+        if sc[0]["t"] > 0:
+            sc = [{"t": 0.0, "speed": sc[0]["speed"]}] + sc
+        for i in range(len(sc) - 1):
+            t_start = float(sc[i]["t"])
+            t_end = float(sc[i + 1]["t"])
+            s_start = float(sc[i]["speed"])
+            s_end = float(sc[i + 1]["speed"])
+            avg_speed = (s_start + s_end) / 2.0
+            speed_expr_parts.append({
+                "t_start": t_start,
+                "t_end": t_end,
+                "avg_speed": avg_speed,
+            })
+        speed_cum_output = [0.0]
+        for part in speed_expr_parts:
+            seg_dur = part["t_end"] - part["t_start"]
+            speed_cum_output.append(speed_cum_output[-1] + seg_dur / part["avg_speed"])
+
+    def apply_speed_warp(t):
+        """Map a pre-speed-curve output time to a post-speed-curve output time."""
+        if not speed_expr_parts:
+            return t
+        for i, part in enumerate(speed_expr_parts):
+            if t <= part["t_end"] or i == len(speed_expr_parts) - 1:
+                local = t - part["t_start"]
+                return speed_cum_output[i] + local / part["avg_speed"]
+        return t
+
+    sfx_entries = []
+    for sfx in parsed_sfx:
+        sound_style = normalize_sfx_style(sfx.get("sound") or "none")
+        if sound_style == "none":
+            continue
+        sound_path = get_sfx_path(sound_style)
+        if not sound_path:
+            continue
+
+        source_t = float(sfx.get("t") or 0.0)
+        pre_sc_t = project_source_time_to_output(source_t, cuts, clip_ranges)
+        if pre_sc_t is None:
+            print(f"[sfx] {sound_style} at source={source_t:.3f}s — could not project, skipping", flush=True)
+            continue
+
+        final_t = apply_speed_warp(pre_sc_t)
+        final_t = max(0.0, final_t)
+
+        sfx_entries.append({
+            "sound": sound_style,
+            "path": sound_path,
+            "source_t": source_t,
+            "final_t": final_t,
+        })
+        print(
+            f"[sfx] {sound_style}: source={source_t:.3f}s → tightened={pre_sc_t:.3f}s → final={final_t:.3f}s",
+            flush=True,
+        )
+
+    if not sfx_entries:
+        print("[sfx] No valid sound effects after projection", flush=True)
+        return
+
+    input_args = ["-i", output_path]
+    filter_parts = []
+    labels = []
+
+    for i, entry in enumerate(sfx_entries):
+        input_args += ["-i", entry["path"]]
+        offset_ms = round(entry["final_t"] * 1000)
+        label = f"[sfx{i}]"
+        filter_parts.append(
+            f"[{i + 1}:a]volume=0.5,adelay={offset_ms}|{offset_ms}{label}"
+        )
+        labels.append(label)
+
+    n_inputs = len(labels) + 1
+    all_inputs = "[0:a]" + "".join(labels)
+    filter_parts.append(
+        f"{all_inputs}amix=inputs={n_inputs}:duration=first:dropout_transition=2[mixed]"
+    )
+
+    filter_complex = ";".join(filter_parts)
+
+    temp_output = os.path.join(work_dir, "sfx_mixed.mp4")
+    cmd = [
+        "ffmpeg", "-y",
+        *input_args,
+        "-filter_complex", filter_complex,
+        "-map", "0:v", "-map", "[mixed]",
+        "-c:v", "copy",
+        "-c:a", "aac", "-b:a", "128k",
+        "-movflags", "+faststart",
+        temp_output,
+    ]
+
+    print(f"[sfx] Mixing {len(sfx_entries)} sound effect(s) into final video...", flush=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+
+    if result.returncode != 0:
+        print(f"[sfx] Mix failed: {result.stderr[-300:]}", flush=True)
+        print("[sfx] Keeping video without sound effects", flush=True)
+        if os.path.exists(temp_output):
+            os.remove(temp_output)
+        return
+
+    if not validate_output(temp_output, "sfx_mix"):
+        if os.path.exists(temp_output):
+            os.remove(temp_output)
+        return
+
+    os.replace(temp_output, output_path)
+    print("[sfx] Sound effects mixed successfully", flush=True)
+
+
 def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, work_dir, speech_segments=None):
     n = len(cuts)
     source_res = probe_resolution(source_path)
@@ -3078,94 +3212,97 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         audio_filters.append(f"[{i}:a]{','.join(a_chain)}[a{i}]")
 
     # ── SFX collection ───────────────────────────────────────────────────────
+    # SFX are NOT mixed during render — they are added as a post-processing
+    # step AFTER the speed curve so timestamps are correct.
     sfx_input_args   = []
     sfx_filter_strs  = []
     sfx_audio_labels = []
     extra_input_index = n
 
-    _speech_segs = speech_segments or (edit_plan.get("analysis_data") or {}).get("speech", {}).get("segments") or []
+    if False:  # SFX disabled in render — mixed after speed curve in mix_sfx_after_speed_curve()
+        _speech_segs = speech_segments or (edit_plan.get("analysis_data") or {}).get("speech", {}).get("segments") or []
 
-    _running = effective_durations[0]
-    _transition_times = []
-    for _i in range(n - 1):
-        _transition = str(cuts[_i].get("transition_out") or "none").lower()
-        _td = TRANSITION_DURATION if _transition not in ("none", "clean_cut", "") else 0.0
-        _event_time = max(0.0, _running - 0.15)
-        _transition_times.append(_event_time)
-        _running = _running + effective_durations[_i + 1] - _td
+        _running = effective_durations[0]
+        _transition_times = []
+        for _i in range(n - 1):
+            _transition = str(cuts[_i].get("transition_out") or "none").lower()
+            _td = TRANSITION_DURATION if _transition not in ("none", "clean_cut", "") else 0.0
+            _event_time = max(0.0, _running - 0.15)
+            _transition_times.append(_event_time)
+            _running = _running + effective_durations[_i + 1] - _td
 
-    for _i in range(n - 1):
-        _sound_style = normalize_sfx_style(cuts[_i].get("transition_sound") or cuts[_i].get("sfx_style") or "none")
-        if _sound_style == "none":
-            continue
-        _sound_path = get_sfx_path(_sound_style)
-        if not _sound_path:
-            continue
-        _event_time = _transition_times[_i]
-        _offset_ms  = max(0, round(_event_time * 1000))
-        _vol        = get_sfx_volume(_sound_style, _event_time, _speech_segs, is_text_overlay=False)
-        _label      = f"[snd{_i}]"
-        sfx_input_args  += ["-i", _sound_path]
-        sfx_filter_strs.append(
-            f"[{extra_input_index}:a]volume={_vol:.3f},adelay={_offset_ms}|{_offset_ms}{_label}"
-        )
-        sfx_audio_labels.append(_label)
-        print(f"[sfx] transition {_i}: {_sound_style} vol={_vol:.3f} at {_event_time:.3f}s", flush=True)
-        extra_input_index += 1
+        for _i in range(n - 1):
+            _sound_style = normalize_sfx_style(cuts[_i].get("transition_sound") or cuts[_i].get("sfx_style") or "none")
+            if _sound_style == "none":
+                continue
+            _sound_path = get_sfx_path(_sound_style)
+            if not _sound_path:
+                continue
+            _event_time = _transition_times[_i]
+            _offset_ms  = max(0, round(_event_time * 1000))
+            _vol        = get_sfx_volume(_sound_style, _event_time, _speech_segs, is_text_overlay=False)
+            _label      = f"[snd{_i}]"
+            sfx_input_args  += ["-i", _sound_path]
+            sfx_filter_strs.append(
+                f"[{extra_input_index}:a]volume={_vol:.3f},adelay={_offset_ms}|{_offset_ms}{_label}"
+            )
+            sfx_audio_labels.append(_label)
+            print(f"[sfx] transition {_i}: {_sound_style} vol={_vol:.3f} at {_event_time:.3f}s", flush=True)
+            extra_input_index += 1
 
-    _clip_ranges = get_output_clip_ranges(cuts, effective_durations)
-    for _i, _overlay in enumerate(edit_plan.get("text_overlays") or []):
-        _clip_idx = int(_overlay.get("appear_at_clip") or 0) - 1
-        if _clip_idx < 0 or _clip_idx >= len(_clip_ranges):
-            continue
-        _sfx_style = normalize_sfx_style(_overlay.get("sfx_style") or "none")
-        if _sfx_style == "none":
-            continue
-        _sound_path = get_sfx_path(_sfx_style)
-        if not _sound_path:
-            continue
-        _ts        = max(0.0, float(_clip_ranges[_clip_idx].get("start") or 0) + 0.02)
-        _offset_ms = round(_ts * 1000)
-        _vol       = get_sfx_volume(_sfx_style, _ts, _speech_segs, is_text_overlay=True)
-        _label     = f"[txtsnd{_i}]"
-        sfx_input_args  += ["-i", _sound_path]
-        sfx_filter_strs.append(
-            f"[{extra_input_index}:a]volume={_vol:.3f},adelay={_offset_ms}|{_offset_ms}{_label}"
-        )
-        sfx_audio_labels.append(_label)
-        print(f"[sfx] text_overlay {_i}: {_sfx_style} vol={_vol:.3f} at {_ts:.3f}s", flush=True)
-        extra_input_index += 1
+        _clip_ranges = get_output_clip_ranges(cuts, effective_durations)
+        for _i, _overlay in enumerate(edit_plan.get("text_overlays") or []):
+            _clip_idx = int(_overlay.get("appear_at_clip") or 0) - 1
+            if _clip_idx < 0 or _clip_idx >= len(_clip_ranges):
+                continue
+            _sfx_style = normalize_sfx_style(_overlay.get("sfx_style") or "none")
+            if _sfx_style == "none":
+                continue
+            _sound_path = get_sfx_path(_sfx_style)
+            if not _sound_path:
+                continue
+            _ts        = max(0.0, float(_clip_ranges[_clip_idx].get("start") or 0) + 0.02)
+            _offset_ms = round(_ts * 1000)
+            _vol       = get_sfx_volume(_sfx_style, _ts, _speech_segs, is_text_overlay=True)
+            _label     = f"[txtsnd{_i}]"
+            sfx_input_args  += ["-i", _sound_path]
+            sfx_filter_strs.append(
+                f"[{extra_input_index}:a]volume={_vol:.3f},adelay={_offset_ms}|{_offset_ms}{_label}"
+            )
+            sfx_audio_labels.append(_label)
+            print(f"[sfx] text_overlay {_i}: {_sfx_style} vol={_vol:.3f} at {_ts:.3f}s", flush=True)
+            extra_input_index += 1
 
-    parsed_sfx = edit_plan.get("_parsed_sound_effects", [])
-    for _i, _sfx in enumerate(parsed_sfx):
-        _sound_style = normalize_sfx_style(_sfx.get("sound") or "none")
-        if _sound_style == "none":
-            continue
-        _sound_path = get_sfx_path(_sound_style)
-        if not _sound_path:
-            continue
-        _source_t = float(_sfx.get("t") or 0.0)
-        _output_t = project_source_time_to_output(_source_t, cuts, _clip_ranges)
-        if _output_t is None:
+        parsed_sfx = edit_plan.get("_parsed_sound_effects", [])
+        for _i, _sfx in enumerate(parsed_sfx):
+            _sound_style = normalize_sfx_style(_sfx.get("sound") or "none")
+            if _sound_style == "none":
+                continue
+            _sound_path = get_sfx_path(_sound_style)
+            if not _sound_path:
+                continue
+            _source_t = float(_sfx.get("t") or 0.0)
+            _output_t = project_source_time_to_output(_source_t, cuts, _clip_ranges)
+            if _output_t is None:
+                print(
+                    f"[sfx] sound_effect: {_sound_style} at source {_source_t:.3f}s — could not project, skipping",
+                    flush=True,
+                )
+                continue
+            _ts = max(0.0, _output_t)
+            _offset_ms = round(_ts * 1000)
+            _vol = 0.5
+            _label = f"[timesfx{_i}]"
+            sfx_input_args += ["-i", _sound_path]
+            sfx_filter_strs.append(
+                f"[{extra_input_index}:a]volume={_vol:.3f},adelay={_offset_ms}|{_offset_ms}{_label}"
+            )
+            sfx_audio_labels.append(_label)
             print(
-                f"[sfx] sound_effect: {_sound_style} at source {_source_t:.3f}s — could not project, skipping",
+                f"[sfx] sound_effect: {_sound_style} vol={_vol:.3f} at source={_source_t:.3f}s → output={_ts:.3f}s",
                 flush=True,
             )
-            continue
-        _ts = max(0.0, _output_t)
-        _offset_ms = round(_ts * 1000)
-        _vol = 0.5
-        _label = f"[timesfx{_i}]"
-        sfx_input_args += ["-i", _sound_path]
-        sfx_filter_strs.append(
-            f"[{extra_input_index}:a]volume={_vol:.3f},adelay={_offset_ms}|{_offset_ms}{_label}"
-        )
-        sfx_audio_labels.append(_label)
-        print(
-            f"[sfx] sound_effect: {_sound_style} vol={_vol:.3f} at source={_source_t:.3f}s → output={_ts:.3f}s",
-            flush=True,
-        )
-        extra_input_index += 1
+            extra_input_index += 1
 
     transition_filters = []
     tl_video = "v0"
@@ -3567,6 +3704,11 @@ def handler(job):
                 os.remove(speed_backup_path)
         else:
             print("[pipeline] Speed curve skipped", flush=True)
+
+        cuts = edit_plan.get("cuts") or []
+        effective_durations = compute_effective_durations(cuts)
+        print("[pipeline] step=sfx_mix", flush=True)
+        mix_sfx_after_speed_curve(output_path, edit_plan, cuts, effective_durations, work_dir)
 
         output_size = os.path.getsize(output_path)
         output_dur = probe_duration(output_path) or 0
