@@ -1173,7 +1173,7 @@ def build_analysis_from_gemini_recipe(edit_plan, duration):
     return analysis
 
 
-def generate_edit_gemini(video_path, vibe, duration, trend_context=None):
+def generate_edit_gemini(video_path, vibe, duration, trend_context=None, deepgram_words=None):
     gemini_api_key = os.environ.get("GEMINI_API_KEY")
     if not gemini_api_key:
         raise RuntimeError("GEMINI_API_KEY not set")
@@ -1259,6 +1259,7 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None):
     print(f"[generate-edit] RAW RESPONSE:\n{response_text}\n[generate-edit] END RESPONSE", flush=True)
 
     edit_plan = extract_json(response_text)
+    edit_plan["_deepgram_words"] = list(deepgram_words or [])
     analysis = build_analysis_from_gemini_recipe(edit_plan, duration=duration)
     has_burned_captions = bool(
         ((analysis.get("frame_layout") or {}).get("existing_overlays") or {}).get("has_burned_captions")
@@ -1308,6 +1309,23 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None):
             print(f"[generate-edit] Intentional cut: {gap:.3f}s removed between clip {i-1} and clip {i}", flush=True)
         elif gap > 2.0:
             print(f"[generate-edit] Section skip: {gap:.3f}s removed between clip {i-1} and clip {i}", flush=True)
+
+    # Snap cut points to word boundaries using Deepgram
+    _dg_words = edit_plan.get("_deepgram_words", [])
+    if _dg_words:
+        print(f"[generate-edit] Snapping {len(validated_cuts)} cuts to word boundaries ({len(_dg_words)} words)", flush=True)
+        validated_cuts = snap_cuts_to_word_boundaries(validated_cuts, _dg_words)
+
+        # Second micro-gap pass: snapping may have created tiny gaps
+        for i in range(1, len(validated_cuts)):
+            prev_end = validated_cuts[i - 1]["source_end"]
+            curr_start = validated_cuts[i]["source_start"]
+            gap = curr_start - prev_end
+            if 0 < gap <= 0.05:
+                # Tiny gap from snapping — close it by extending prev clip to curr start
+                validated_cuts[i - 1]["source_end"] = curr_start
+    else:
+        print("[generate-edit] No Deepgram words available — skipping word-boundary snapping", flush=True)
 
     vibe_lower = vibe.lower() if isinstance(vibe, str) else ""
     has_transition_request = any(
@@ -2812,6 +2830,132 @@ def get_output_clip_ranges(cuts, effective_durations):
     return ranges
 
 
+def snap_cuts_to_word_boundaries(cuts, deepgram_words):
+    """
+    Move every clip source_start and source_end into a silence gap
+    between words. Cuts NEVER land mid-word.
+    """
+    if not deepgram_words or not cuts:
+        return cuts
+
+    sorted_words = sorted(deepgram_words, key=lambda w: float(w.get("start") or 0))
+    silences = []
+
+    first_word_start = float(sorted_words[0].get("start") or 0)
+    if first_word_start > 0.01:
+        silences.append({"start": 0.0, "end": first_word_start})
+
+    for i in range(len(sorted_words) - 1):
+        gap_start = float(sorted_words[i].get("end") or 0)
+        gap_end = float(sorted_words[i + 1].get("start") or 0)
+        if gap_end > gap_start + 0.01:
+            silences.append({"start": gap_start, "end": gap_end})
+
+    last_word_end = float(sorted_words[-1].get("end") or 0)
+    silences.append({"start": last_word_end, "end": last_word_end + 10.0})
+
+    if not silences:
+        print("[generate-edit] No silence gaps found — cannot snap cuts", flush=True)
+        return cuts
+
+    print(f"[generate-edit] Found {len(silences)} silence gaps for cut snapping", flush=True)
+
+    def find_best_silence(t):
+        """
+        Find the silence gap closest to timestamp t.
+        Returns the midpoint of that silence gap.
+        Searches with no distance limit — always finds one.
+        """
+        best_silence = None
+        best_distance = float("inf")
+
+        for s in silences:
+            if s["start"] <= t <= s["end"]:
+                return t
+
+            dist = min(abs(t - s["start"]), abs(t - s["end"]))
+            if dist < best_distance:
+                best_distance = dist
+                best_silence = s
+
+        if best_silence is None:
+            return t
+
+        midpoint = (best_silence["start"] + best_silence["end"]) / 2
+        return midpoint
+
+    for i, cut in enumerate(cuts):
+        old_start = cut["source_start"]
+        old_end = cut["source_end"]
+
+        # Don't snap the very first clip's start (should be at or near 0.0)
+        if i > 0:
+            new_start = find_best_silence(old_start)
+            new_start = round(new_start * 1000) / 1000
+            if abs(new_start - old_start) > 0.01:
+                print(
+                    f"[generate-edit] Snapped clip {i} start: {old_start:.3f}s → {new_start:.3f}s (silence gap)",
+                    flush=True,
+                )
+            cut["source_start"] = new_start
+
+        # Don't snap the very last clip's end
+        if i < len(cuts) - 1:
+            new_end = find_best_silence(old_end)
+            new_end = round(new_end * 1000) / 1000
+            if abs(new_end - old_end) > 0.01:
+                print(
+                    f"[generate-edit] Snapped clip {i} end: {old_end:.3f}s → {new_end:.3f}s (silence gap)",
+                    flush=True,
+                )
+            cut["source_end"] = new_end
+
+        # Safety: ensure start < end after snapping
+        if cut["source_start"] >= cut["source_end"]:
+            print(
+                f"[generate-edit] WARNING: clip {i} start >= end after snapping, reverting",
+                flush=True,
+            )
+            cut["source_start"] = old_start
+            cut["source_end"] = old_end
+
+    # Fix any overlaps created by snapping
+    for i in range(1, len(cuts)):
+        if cuts[i]["source_start"] < cuts[i - 1]["source_end"]:
+            overlap_mid = (cuts[i - 1]["source_end"] + cuts[i]["source_start"]) / 2
+            cuts[i - 1]["source_end"] = round(overlap_mid * 1000) / 1000
+            cuts[i]["source_start"] = round(overlap_mid * 1000) / 1000
+            print(
+                f"[generate-edit] Resolved overlap between clip {i-1} and {i} at {overlap_mid:.3f}s",
+                flush=True,
+            )
+
+    # Final verification: if any cut still lands inside a word, force it out
+    for i, cut in enumerate(cuts):
+        for boundary_name, boundary_t in [("start", cut["source_start"]), ("end", cut["source_end"])]:
+            if i == 0 and boundary_name == "start":
+                continue
+            if i == len(cuts) - 1 and boundary_name == "end":
+                continue
+            for w in sorted_words:
+                w_start = float(w.get("start") or 0)
+                w_end = float(w.get("end") or 0)
+                if w_start < boundary_t < w_end:
+                    word_text = w.get("punctuated_word") or w.get("word") or ""
+                    print(
+                        f"[generate-edit] FORCING clip {i} {boundary_name} out of word '{word_text}' "
+                        f"({w_start:.3f}-{w_end:.3f})",
+                        flush=True,
+                    )
+                    if boundary_name == "start":
+                        cut["source_start"] = round((w_end + 0.01) * 1000) / 1000
+                    else:
+                        cut["source_end"] = round((w_start - 0.01) * 1000) / 1000
+                    break
+
+    return cuts
+
+
 def snap_sfx_to_word(sfx_entry, deepgram_words):
     """
     Snap a sound effect to the exact timestamp of a spoken word using Deepgram.
@@ -3674,6 +3818,18 @@ def handler(job):
 
         print(f"[edit] User vibe: \"{vibe}\"", flush=True)
 
+        # Run Deepgram for word timestamps (needed for cut snapping and SFX)
+        print("[pipeline] step=transcribe", flush=True)
+        audio_path = os.path.join(work_dir, "audio_for_words.wav")
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", source_path, "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", audio_path],
+            capture_output=True, text=True, timeout=30,
+        )
+        transcript = transcribe_audio(audio_path)
+        if os.path.exists(audio_path):
+            os.remove(audio_path)
+        print(f"[pipeline] Deepgram: {len(transcript.get('words', []))} words", flush=True)
+
         send_progress(job_id, "analysis", 20, "Watching your footage...", app_url)
         send_progress(job_id, "edit_recipe", 52, "Putting your edit together...", app_url)
         print("[pipeline] step=edit_recipe", flush=True)
@@ -3684,6 +3840,7 @@ def handler(job):
             vibe=vibe,
             duration=source_duration,
             trend_context=trend_context,
+            deepgram_words=transcript.get("words", []),
         )
         print(f"[pipeline] edit recipe complete in {time.time()-t:.1f}s", flush=True)
         analysis = edit_plan.get("analysis_data") or {}
@@ -3707,17 +3864,8 @@ def handler(job):
             return {}
 
         def task_deepgram():
-            # Always run Deepgram — needed for sound effect word-snapping and captions
-            print("[pipeline] step=transcribe (word timestamps for SFX + captions)", flush=True)
-            audio_path = os.path.join(work_dir, "audio_for_captions.wav")
-            subprocess.run(
-                ["ffmpeg", "-y", "-i", source_path, "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", audio_path],
-                capture_output=True, text=True, timeout=30,
-            )
-            result = transcribe_audio(audio_path)
-            if os.path.exists(audio_path):
-                os.remove(audio_path)
-            return result
+            # Deepgram already ran before post-processing
+            return transcript
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
             future_render = pool.submit(task_render)
