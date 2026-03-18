@@ -1482,7 +1482,8 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None):
     baseline = analysis.get("color_baseline") or {}
     intent = normalize_intent(edit_plan.get("color_intent") or "none")
     edit_plan["color_intent"] = intent
-    edit_plan["color_grade"] = build_color_grade(baseline, intent)
+    # Color grading filters are disabled; keep recipe metadata but emit no FFmpeg grading.
+    edit_plan["color_grade"] = {}
     edit_plan["cuts"] = final_cuts
     edit_plan.pop("teal_orange", None)
     edit_plan.pop("beat_sync", None)
@@ -2528,58 +2529,7 @@ def is_hard_cut(transition):
 
 def build_video_filter_chain(color_grade, source_res, edit_plan=None):
     ep = edit_plan or {}
-    fq = (ep.get("analysis_data") or {}).get("footage_quality") or {}
     filters = []
-
-    b = clamp(float(color_grade.get("brightness") or 0), -0.3, 0.3)
-    c = clamp(float(color_grade.get("contrast") or 1), 0.5, 2.0)
-    s = clamp(float(color_grade.get("saturation") or 1), 0.5, 2.0)
-    g = clamp(float(color_grade.get("gamma") or 1), 0.5, 2.0)
-    eq_parts = []
-    if b != 0:   eq_parts.append(f"brightness={b:.4f}")
-    if c != 1:   eq_parts.append(f"contrast={c:.4f}")
-    if s != 1:   eq_parts.append(f"saturation={s:.4f}")
-    if g != 1:   eq_parts.append(f"gamma={g:.4f}")
-    if eq_parts:
-        filters.append(f"eq={':'.join(eq_parts)}")
-
-    temp = color_grade.get("color_temperature") or "neutral"
-    temp_filter = TEMPERATURE_FILTERS.get(temp)
-    if temp_filter:
-        filters.append(temp_filter)
-
-    if ep.get("shadow_lift"):
-        shadow_cond = fq.get("shadow_condition", "normal")
-        lift_curves = {
-            "crushed": "curves=r='0/0.10 1/1':g='0/0.10 1/1':b='0/0.10 1/1'",
-            "deep":    "curves=r='0/0.07 1/1':g='0/0.07 1/1':b='0/0.07 1/1'",
-            "normal":  "curves=r='0/0.05 1/1':g='0/0.05 1/1':b='0/0.05 1/1'",
-            "lifted":  "curves=r='0/0.02 1/1':g='0/0.02 1/1':b='0/0.02 1/1'",
-        }.get(shadow_cond, "curves=r='0/0.05 1/1':g='0/0.05 1/1':b='0/0.05 1/1'")
-        filters.append(lift_curves)
-        print(f"[render] shadow_lift: shadow_condition={shadow_cond} → lift applied", flush=True)
-
-    if ep.get("highlight_rolloff"):
-        hl_cond = fq.get("highlight_condition", "normal")
-        rolloff_curves = {
-            "clipped": "curves=r='0/0 0.6/0.58 0.85/0.80 1/0.88':g='0/0 0.6/0.58 0.85/0.80 1/0.88':b='0/0 0.6/0.58 0.85/0.80 1/0.88'",
-            "bright":  "curves=r='0/0 0.75/0.72 1/0.95':g='0/0 0.75/0.72 1/0.95':b='0/0 0.75/0.72 1/0.95'",
-            "normal":  "curves=r='0/0 0.82/0.80 1/0.97':g='0/0 0.82/0.80 1/0.97':b='0/0 0.82/0.80 1/0.97'",
-            "dark":    "curves=r='0/0 0.88/0.87 1/0.98':g='0/0 0.88/0.87 1/0.98':b='0/0 0.88/0.87 1/0.98'",
-        }.get(hl_cond, "curves=r='0/0 0.82/0.80 1/0.97':g='0/0 0.82/0.80 1/0.97':b='0/0 0.82/0.80 1/0.97'")
-        filters.append(rolloff_curves)
-        print(f"[render] highlight_rolloff: highlight_condition={hl_cond} → rolloff applied", flush=True)
-
-    if ep.get("vibrance"):
-        richness = fq.get("color_richness", "normal")
-        vibrance_hue = {
-            "flat":   "hue=s=1.40",
-            "muted":  "hue=s=1.28",
-            "normal": "hue=s=1.18",
-            "vivid":  "hue=s=1.08",
-        }.get(richness, "hue=s=1.18")
-        filters.append(vibrance_hue)
-        print(f"[render] vibrance: color_richness={richness} → {vibrance_hue}", flush=True)
 
     grain = str(ep.get("grain") or "none").lower()
     if grain == "subtle":
@@ -3482,16 +3432,8 @@ def handler(job):
             )
 
         def task_download_broll():
-            results = {}
-            for i, entry in enumerate(broll_requests):
-                keyword = str(entry.get("keyword") or "").strip()
-                dur = float(entry.get("duration") or 3.0)
-                if not keyword:
-                    continue
-                path = fetch_broll_clip(keyword, dur, work_dir)
-                if path:
-                    results[i] = path
-            return results
+            """B-roll disabled."""
+            return {}
 
         def task_deepgram():
             if caption_style == "none":
@@ -3552,18 +3494,8 @@ def handler(job):
                 if os.path.exists(trim_backup_path):
                     os.remove(trim_backup_path)
 
-        if broll_files:
-            print(f"[pipeline] step=broll ({len(broll_files)} clip(s))", flush=True)
-            broll_backup_path = os.path.join(work_dir, "output_broll.backup.mp4")
-            shutil.copy2(output_path, broll_backup_path)
-            composite_broll(output_path, broll_requests, broll_files, work_dir)
-            if not validate_output(output_path, "broll"):
-                print("[broll] Compositing produced invalid output — restoring backup", flush=True)
-                os.replace(broll_backup_path, output_path)
-            elif os.path.exists(broll_backup_path):
-                os.remove(broll_backup_path)
-        else:
-            print("[pipeline] No b-roll to composite", flush=True)
+        # B-roll removed — Pexels free API cannot consistently produce good clips
+        print("[pipeline] B-roll disabled", flush=True)
         for local_path in broll_files.values():
             try:
                 os.unlink(local_path)
