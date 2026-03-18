@@ -1944,6 +1944,23 @@ def probe_duration(file_path):
         return None
 
 
+def validate_output(path, step_name, min_size_bytes=100000):
+    """Check that output file exists and is not empty/corrupt. Returns True if valid."""
+    if not os.path.exists(path):
+        print(f"[{step_name}] OUTPUT MISSING: {path} does not exist", flush=True)
+        return False
+    size = os.path.getsize(path)
+    if size < min_size_bytes:
+        print(f"[{step_name}] OUTPUT TOO SMALL: {path} is {size} bytes (expected >{min_size_bytes})", flush=True)
+        return False
+    dur = probe_duration(path)
+    if not dur or dur < 1.0:
+        print(f"[{step_name}] OUTPUT INVALID: duration={dur}s", flush=True)
+        return False
+    print(f"[{step_name}] Output valid: {size / 1024 / 1024:.1f}MB, {dur:.1f}s", flush=True)
+    return True
+
+
 def get_source_duration(video_path):
     """Get duration of source video in seconds."""
     return probe_duration(video_path) or 0.0
@@ -2328,6 +2345,8 @@ def apply_speed_curve(output_path, speed_curve, work_dir):
 
     total_output_duration = cum_output[-1]
     print(f"[speed_curve] Expected output duration: {total_output_duration:.2f}s", flush=True)
+    print(f"[speed_curve] setpts expression length: {len(setpts_expr)} chars", flush=True)
+    print(f"[speed_curve] setpts first 200 chars: {setpts_expr[:200]}", flush=True)
 
     audio_raw = os.path.join(work_dir, "sc_audio_raw.wav")
     cmd_extract = [
@@ -2373,12 +2392,24 @@ def apply_speed_curve(output_path, speed_curve, work_dir):
             print(f"[speed_curve] Rubberband simple also failed: {r2.stderr[-300:]}", flush=True)
             return _apply_speed_curve_fallback(output_path, speed_curve, expr_parts, setpts_expr, work_dir, duration)
 
+    if os.path.exists(audio_curved):
+        audio_size = os.path.getsize(audio_curved)
+        print(f"[speed_curve] Rubberband output: {audio_size / 1024:.0f}KB", flush=True)
+        if audio_size < 1000:
+            print("[speed_curve] Rubberband output too small — audio may be empty", flush=True)
+    else:
+        print("[speed_curve] Rubberband output file missing", flush=True)
+
     temp_output = os.path.join(work_dir, "speed_curved.mp4")
+    filter_script_path = os.path.join(work_dir, "speed_filter.txt")
+    with open(filter_script_path, "w", encoding="utf-8") as f:
+        unescaped_expr = setpts_expr.replace("\\,", ",")
+        f.write(f"[0:v]setpts='{unescaped_expr}',fps=30[outv]\n")
     cmd_mux = [
         "ffmpeg", "-y",
         "-i", output_path,
         "-i", audio_curved,
-        "-filter_complex", f"[0:v]setpts='{setpts_expr}',fps=30[outv]",
+        "-filter_complex_script", filter_script_path,
         "-map", "[outv]", "-map", "1:a",
         "-c:v", "libx264", "-preset", "medium", "-crf", "18",
         "-c:a", "aac", "-b:a", "128k",
@@ -2390,17 +2421,40 @@ def apply_speed_curve(output_path, speed_curve, work_dir):
     print("[speed_curve] Muxing smooth video + smooth audio...", flush=True)
     r = subprocess.run(cmd_mux, capture_output=True, text=True, timeout=300)
     if r.returncode != 0:
-        print(f"[speed_curve] Mux failed: {r.stderr[-500:]}", flush=True)
+        print(f"[speed_curve] Mux FAILED (exit code {r.returncode}): {r.stderr[-500:]}", flush=True)
         print("[speed_curve] Falling back to original output", flush=True)
-        for f in [audio_raw, audio_curved, tempo_map_path]:
+        for f in [audio_raw, audio_curved, tempo_map_path, filter_script_path]:
+            if os.path.exists(f):
+                os.remove(f)
+        return
+
+    if not os.path.exists(temp_output):
+        print("[speed_curve] Mux produced no output file — falling back", flush=True)
+        for f in [audio_raw, audio_curved, tempo_map_path, filter_script_path]:
+            if os.path.exists(f):
+                os.remove(f)
+        return
+
+    temp_size = os.path.getsize(temp_output)
+    if temp_size < 100000:
+        print(f"[speed_curve] Mux output too small ({temp_size} bytes) — falling back", flush=True)
+        for f in [temp_output, audio_raw, audio_curved, tempo_map_path, filter_script_path]:
+            if os.path.exists(f):
+                os.remove(f)
+        return
+
+    temp_dur = probe_duration(temp_output)
+    if not temp_dur or temp_dur < 1.0:
+        print(f"[speed_curve] Mux output invalid duration ({temp_dur}s) — falling back", flush=True)
+        for f in [temp_output, audio_raw, audio_curved, tempo_map_path, filter_script_path]:
             if os.path.exists(f):
                 os.remove(f)
         return
 
     os.replace(temp_output, output_path)
     new_duration = probe_duration(output_path) or duration
-    print(f"[speed_curve] Complete: {duration:.2f}s → {new_duration:.2f}s", flush=True)
-    for f in [audio_raw, audio_curved, tempo_map_path]:
+    print(f"[speed_curve] Complete: {duration:.2f}s → {new_duration:.2f}s ({temp_size / 1024 / 1024:.1f}MB)", flush=True)
+    for f in [audio_raw, audio_curved, tempo_map_path, filter_script_path]:
         if os.path.exists(f):
             os.remove(f)
 
@@ -2439,6 +2493,12 @@ def _apply_speed_curve_fallback(output_path, speed_curve, expr_parts, setpts_exp
     if result.returncode != 0:
         print(f"[speed_curve] Fallback also failed: {result.stderr[-500:]}", flush=True)
         print("[speed_curve] Keeping original output (no speed curve)", flush=True)
+        return
+
+    if not validate_output(temp_output, "speed_curve"):
+        if os.path.exists(temp_output):
+            os.remove(temp_output)
+        print("[speed_curve] Fallback output invalid — keeping original output", flush=True)
         return
 
     os.replace(temp_output, output_path)
@@ -3443,10 +3503,10 @@ def handler(job):
 
         render_elapsed = time.time() - t
         print(f"[pipeline] parallel_render complete in {render_elapsed:.1f}s", flush=True)
-        print(f"[render] Encoding: crf=18 preset=medium", flush=True)
+        print("[render] Encoding: crf=0 preset=ultrafast", flush=True)
 
-        if not os.path.exists(output_path):
-            return {"error": "No output file produced by FFmpeg"}
+        if not validate_output(output_path, "render"):
+            raise RuntimeError("Main render produced invalid output")
 
         print("[pipeline] step=trim", flush=True)
         expected_duration = sum(
@@ -3457,6 +3517,8 @@ def handler(job):
         if actual_duration > expected_duration + 2.0:
             print(f"[pipeline] Trimming dead air: {actual_duration:.1f}s → {expected_duration:.1f}s", flush=True)
             trimmed_path = os.path.join(work_dir, "trimmed_output.mp4")
+            trim_backup_path = os.path.join(work_dir, "output_trim.backup.mp4")
+            shutil.copy2(output_path, trim_backup_path)
             trim_result = subprocess.run(
                 ["ffmpeg", "-y", "-i", output_path, "-t", f"{expected_duration:.2f}", "-c", "copy", trimmed_path],
                 capture_output=True,
@@ -3465,12 +3527,26 @@ def handler(job):
             )
             if trim_result.returncode == 0 and os.path.exists(trimmed_path):
                 os.replace(trimmed_path, output_path)
+                if not validate_output(output_path, "trim"):
+                    print("[trim] Trim produced invalid output — restoring backup", flush=True)
+                    os.replace(trim_backup_path, output_path)
+                elif os.path.exists(trim_backup_path):
+                    os.remove(trim_backup_path)
             else:
                 print(f"[pipeline] WARNING: trim failed, keeping original output: {trim_result.stderr[-400:]}", flush=True)
+                if os.path.exists(trim_backup_path):
+                    os.remove(trim_backup_path)
 
         if broll_files:
             print(f"[pipeline] step=broll ({len(broll_files)} clip(s))", flush=True)
+            broll_backup_path = os.path.join(work_dir, "output_broll.backup.mp4")
+            shutil.copy2(output_path, broll_backup_path)
             composite_broll(output_path, broll_requests, broll_files, work_dir)
+            if not validate_output(output_path, "broll"):
+                print("[broll] Compositing produced invalid output — restoring backup", flush=True)
+                os.replace(broll_backup_path, output_path)
+            elif os.path.exists(broll_backup_path):
+                os.remove(broll_backup_path)
         else:
             print("[pipeline] No b-roll to composite", flush=True)
         for local_path in broll_files.values():
@@ -3483,10 +3559,19 @@ def handler(job):
         if "enhanced quality" in vibe_lower or "enhance quality" in vibe_lower or "enhanced" in vibe_lower:
             if REAL_ESRGAN_AVAILABLE:
                 print("[pipeline] step=ai_enhance (user requested enhanced quality)", flush=True)
+                enhance_backup_path = os.path.join(work_dir, "output_enhance.backup.mp4")
+                shutil.copy2(output_path, enhance_backup_path)
                 try:
                     enhance_video_quality(output_path, work_dir)
+                    if not validate_output(output_path, "enhance"):
+                        print("[enhance] Enhancement produced invalid output — restoring backup", flush=True)
+                        os.replace(enhance_backup_path, output_path)
+                    elif os.path.exists(enhance_backup_path):
+                        os.remove(enhance_backup_path)
                 except Exception as e:
                     print(f"[pipeline] AI enhancement failed: {e} — continuing without enhancement", flush=True)
+                    if os.path.exists(enhance_backup_path):
+                        os.replace(enhance_backup_path, output_path)
             else:
                 print("[pipeline] AI enhancement requested but Real-ESRGAN not available — skipping", flush=True)
         else:
@@ -3494,14 +3579,28 @@ def handler(job):
 
         if caption_style != "none" and transcript.get("words"):
             print(f"[pipeline] step=captions (style={caption_style})", flush=True)
+            captions_backup_path = os.path.join(work_dir, "output_captions.backup.mp4")
+            shutil.copy2(output_path, captions_backup_path)
             burn_in_captions(output_path, edit_plan, transcript, work_dir)
+            if not validate_output(output_path, "captions"):
+                print("[captions] Caption burn-in produced invalid output — restoring backup", flush=True)
+                os.replace(captions_backup_path, output_path)
+            elif os.path.exists(captions_backup_path):
+                os.remove(captions_backup_path)
         else:
             print("[pipeline] Captions skipped", flush=True)
 
         speed_curve = edit_plan.get("_parsed_speed_curve")
         if speed_curve:
             print(f"[pipeline] step=speed_curve ({len(speed_curve)} keypoints)", flush=True)
+            speed_backup_path = os.path.join(work_dir, "output_speed_curve.backup.mp4")
+            shutil.copy2(output_path, speed_backup_path)
             apply_speed_curve(output_path, speed_curve, work_dir)
+            if not validate_output(output_path, "speed_curve"):
+                print("[speed_curve] Speed curve produced invalid output — restoring backup", flush=True)
+                os.replace(speed_backup_path, output_path)
+            elif os.path.exists(speed_backup_path):
+                os.remove(speed_backup_path)
         else:
             print("[pipeline] Speed curve skipped", flush=True)
 
@@ -3523,9 +3622,12 @@ def handler(job):
                 best = shots_sorted[0]
                 cover_frame_ts = (float(best["start"]) + float(best["end"])) / 2
 
+        if not validate_output(output_path, "final"):
+            raise RuntimeError(f"Final output is invalid: {output_path}")
         output_size_mb = os.path.getsize(output_path) / (1024*1024)
+        final_dur = probe_duration(output_path) or 0
         send_progress(job_id, "upload", 90, "Just about done...", app_url)
-        print(f"[pipeline] output: {output_size_mb:.1f}MB — parallel upload + cover frame", flush=True)
+        print(f"[pipeline] output: {output_size_mb:.1f}MB, {final_dur:.1f}s — parallel upload + cover frame", flush=True)
 
         def _upload_main():
             print("[pipeline] step=upload", flush=True)
