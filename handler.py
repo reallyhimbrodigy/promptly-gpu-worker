@@ -3004,12 +3004,28 @@ def mix_sfx_after_speed_curve(output_path, edit_plan, cuts, effective_durations,
     Uses -c:v copy so the video stream is not re-encoded.
     Timestamps are projected from source time to final output time.
     """
-    parsed_sfx = edit_plan.get("_parsed_sound_effects", [])
+    clip_ranges = get_output_clip_ranges(cuts, effective_durations)
+    parsed_sfx = list(edit_plan.get("_parsed_sound_effects", []))
+
+    # Auto-add pop sounds for text overlays (exact timing from pipeline, not Gemini's guess)
+    text_overlays = edit_plan.get("text_overlays", [])
+    if text_overlays and clip_ranges:
+        for ov in text_overlays:
+            clip_idx = int(ov.get("appear_at_clip") or 0) - 1
+            if 0 <= clip_idx < len(clip_ranges):
+                ov_t = float(clip_ranges[clip_idx]["start"]) + 0.02
+                already_has_pop = any(
+                    s.get("sound") == "pop" and abs(float(s.get("t", 0)) - ov_t) < 1.0
+                    for s in parsed_sfx
+                )
+                if not already_has_pop:
+                    parsed_sfx.append({"t": ov_t, "sound": "pop", "word": "text_overlay", "_auto": True})
+                    print(f"[sfx] Auto-added pop for text overlay at output={ov_t:.3f}s", flush=True)
+
     if not parsed_sfx:
         print("[sfx] No sound effects to mix", flush=True)
         return
 
-    clip_ranges = get_output_clip_ranges(cuts, effective_durations)
     speed_curve = edit_plan.get("_parsed_speed_curve") or []
 
     speed_expr_parts = []
@@ -3056,13 +3072,42 @@ def mix_sfx_after_speed_curve(output_path, edit_plan, cuts, effective_durations,
         if not sound_path:
             continue
 
-        # Step 0: Snap to exact word timestamp using Deepgram
         raw_t = float(sfx.get("t") or 0.0)
-        deepgram_words = edit_plan.get("_deepgram_words", [])
-        source_t = snap_sfx_to_word(sfx, deepgram_words)
-        if source_t != raw_t:
-            word = sfx.get("word", "")
-            print(f"[sfx] Snapped {sfx.get('sound')} from {raw_t:.3f}s to {source_t:.3f}s (word='{word}')", flush=True)
+        word = str(sfx.get("word") or "")
+        is_auto = sfx.get("_auto", False)
+
+        if is_auto:
+            final_t = max(0.0, apply_speed_warp(raw_t))
+            sfx_entries.append({
+                "sound": sfx.get("sound", "pop"),
+                "path": get_sfx_path(normalize_sfx_style(sfx.get("sound", "pop"))),
+                "source_t": raw_t,
+                "final_t": final_t,
+            })
+            if sfx_entries[-1]["path"]:
+                print(f"[sfx] auto {sfx.get('sound')}: output={final_t:.3f}s (text overlay)", flush=True)
+            else:
+                sfx_entries.pop()
+            continue
+
+        if word == "scene_change":
+            nearest_boundary = raw_t
+            for cr in clip_ranges:
+                for edge in [float(cr["start"]), float(cr["end"])]:
+                    if abs(edge - raw_t) < abs(nearest_boundary - raw_t) or nearest_boundary == raw_t:
+                        if abs(edge - raw_t) < 2.0:
+                            nearest_boundary = edge
+            source_t = nearest_boundary
+            if source_t != raw_t:
+                print(f"[sfx] Snapped swoosh to clip boundary: {raw_t:.3f}s → {source_t:.3f}s", flush=True)
+        else:
+            deepgram_words = edit_plan.get("_deepgram_words", [])
+            source_t = snap_sfx_to_word(sfx, deepgram_words)
+            if source_t != raw_t:
+                print(
+                    f"[sfx] Snapped {sfx.get('sound')} from {raw_t:.3f}s to {source_t:.3f}s (word='{word}')",
+                    flush=True,
+                )
 
         # Step 1: Project source time → pre-speed-curve output time (accounts for tightening)
         pre_sc_t = project_source_time_to_output(source_t, cuts, clip_ranges)
