@@ -1065,13 +1065,18 @@ Watch the video. Listen to the speech. Place sounds at the exact timestamp where
     - energy shifts direction
     - a topic changes quickly
 
-  Place each sound at the EXACT TIMESTAMP where the moment happens — when the word is spoken or the action occurs.
+  For each sound effect, provide the approximate timestamp AND the specific word or short phrase being spoken at that moment. The pipeline will use speech recognition to snap the sound to the exact millisecond the word is spoken.
 
   Do not overdo it. Most videos have 2-5 sound effects total. Each one should match a real moment you can hear or see. If the video is calm or serious, use fewer. If it's energetic, use more.
 
   sound_effects: [
-    {{"t": <seconds>, "sound": "<pop|ching|ding|thud|swoosh>"}}
+    {{"t": <seconds>, "sound": "<pop|ching|ding|thud|swoosh>", "word": "<the word or short phrase being spoken>"}}
   ]
+
+  The "word" field is critical — it tells the pipeline exactly which spoken word to attach the sound to. Use the most distinctive word at that moment. Examples:
+    {{"t": 3.2, "sound": "thud", "word": "trash"}}
+    {{"t": 37.5, "sound": "ching", "word": "free"}}
+    {{"t": 18.0, "sound": "pop", "word": "tool"}}
 
 === RESPONSE FORMAT ===
 
@@ -1422,7 +1427,8 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None):
                 continue
             sound = str(sfx["sound"]).lower()
             if sound in valid_sounds and t >= 0:
-                sound_effects.append({"t": t, "sound": sound})
+                word = str(sfx.get("word") or "").strip()
+                sound_effects.append({"t": t, "sound": sound, "word": word})
     if sound_effects:
         sound_effects.sort(key=lambda x: x["t"])
         print(f"[generate-edit] Sound effects: {len(sound_effects)} placements", flush=True)
@@ -2822,6 +2828,60 @@ def get_output_clip_ranges(cuts, effective_durations):
     return ranges
 
 
+def snap_sfx_to_word(sfx_entry, deepgram_words):
+    """
+    Snap a sound effect to the exact timestamp of a spoken word using Deepgram.
+
+    Args:
+        sfx_entry: dict with "t" (approx timestamp), "sound", and optionally "word"
+        deepgram_words: list of {"word": str, "start": float, "end": float, "punctuated_word": str}
+
+    Returns:
+        float: the exact source timestamp to place the sound, or the original "t" as fallback
+    """
+    target_word = str(sfx_entry.get("word") or "").strip().lower()
+    approx_t = float(sfx_entry.get("t") or 0.0)
+
+    if not deepgram_words:
+        return approx_t
+
+    # Strategy 1: Find the exact word near the approximate timestamp
+    if target_word:
+        # Search for the word within ±3 seconds of the approximate timestamp
+        candidates = []
+        for w in deepgram_words:
+            w_text = str(w.get("punctuated_word") or w.get("word") or "").strip().lower()
+            w_text_clean = w_text.strip(".,!?;:'\"")
+            w_start = float(w.get("start") or 0)
+
+            if w_text_clean == target_word or target_word in w_text_clean:
+                distance = abs(w_start - approx_t)
+                if distance < 3.0:
+                    candidates.append({"start": w_start, "distance": distance, "word": w_text})
+
+        if candidates:
+            # Pick the closest match to the approximate timestamp
+            best = min(candidates, key=lambda c: c["distance"])
+            return best["start"]
+
+    # Strategy 2: No word match found — snap to the nearest word boundary
+    # Find the word whose start time is closest to the approximate timestamp
+    nearest = None
+    nearest_dist = float("inf")
+    for w in deepgram_words:
+        w_start = float(w.get("start") or 0)
+        dist = abs(w_start - approx_t)
+        if dist < nearest_dist:
+            nearest_dist = dist
+            nearest = w_start
+
+    if nearest is not None and nearest_dist < 1.0:
+        return nearest
+
+    # Strategy 3: Nothing close — use the original timestamp
+    return approx_t
+
+
 def project_source_time_to_output(source_t, cuts, clip_ranges):
     """
     Map a source-timeline timestamp to the output-timeline timestamp.
@@ -3012,7 +3072,15 @@ def mix_sfx_after_speed_curve(output_path, edit_plan, cuts, effective_durations,
         if not sound_path:
             continue
 
-        source_t = float(sfx.get("t") or 0.0)
+        # Step 0: Snap to exact word timestamp using Deepgram
+        raw_t = float(sfx.get("t") or 0.0)
+        deepgram_words = edit_plan.get("_deepgram_words", [])
+        source_t = snap_sfx_to_word(sfx, deepgram_words)
+        if source_t != raw_t:
+            word = sfx.get("word", "")
+            print(f"[sfx] Snapped {sfx.get('sound')} from {raw_t:.3f}s to {source_t:.3f}s (word='{word}')", flush=True)
+
+        # Step 1: Project source time → pre-speed-curve output time (accounts for tightening)
         pre_sc_t = project_source_time_to_output(source_t, cuts, clip_ranges)
         if pre_sc_t is None:
             print(f"[sfx] {sound_style} at source={source_t:.3f}s — could not project, skipping", flush=True)
@@ -3610,10 +3678,8 @@ def handler(job):
             return {}
 
         def task_deepgram():
-            if caption_style == "none":
-                print("[pipeline] Captions not requested — skipping transcription", flush=True)
-                return {"text": "", "words": []}
-            print("[pipeline] step=transcribe (captions requested)", flush=True)
+            # Always run Deepgram — needed for sound effect word-snapping and captions
+            print("[pipeline] step=transcribe (word timestamps for SFX + captions)", flush=True)
             audio_path = os.path.join(work_dir, "audio_for_captions.wav")
             subprocess.run(
                 ["ffmpeg", "-y", "-i", source_path, "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", audio_path],
@@ -3631,6 +3697,8 @@ def handler(job):
             future_render.result()
             broll_files = future_broll.result()
             transcript = future_deepgram.result()
+            # Store Deepgram words for SFX word-snapping
+            edit_plan["_deepgram_words"] = transcript.get("words", [])
 
         render_elapsed = time.time() - t
         print(f"[pipeline] parallel_render complete in {render_elapsed:.1f}s", flush=True)
