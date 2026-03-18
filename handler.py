@@ -261,22 +261,49 @@ def normalize_intent(intent_name):
 
 
 def build_color_grade(baseline, intent_name):
+    raw_b = float(baseline.get("brightness", 1.0)) if isinstance(baseline.get("brightness"), (int, float)) else 1.0
+    raw_c = float(baseline.get("contrast", 1.0)) if isinstance(baseline.get("contrast"), (int, float)) else 1.0
+    raw_s = float(baseline.get("saturation", 1.0)) if isinstance(baseline.get("saturation"), (int, float)) else 1.0
+    raw_g = float(baseline.get("gamma", 1.0)) if isinstance(baseline.get("gamma"), (int, float)) else 1.0
+
+    if raw_c > 3.0 or raw_s > 3.0 or raw_b > 2.0 or raw_b < -1.0 or raw_g > 3.0 or raw_g < 0.1:
+        print(
+            f"[color] WARNING: Gemini output extreme color_baseline values: "
+            f"b={raw_b} c={raw_c} s={raw_s} g={raw_g} — using safe defaults",
+            flush=True,
+        )
+        raw_b = 1.0
+        raw_c = 1.0
+        raw_s = 1.0
+        raw_g = 1.0
+
     safe_baseline = {
-        "brightness":        baseline.get("brightness", 0) if isinstance(baseline.get("brightness"), (int, float)) else 0,
-        "contrast":          baseline.get("contrast", 1) if isinstance(baseline.get("contrast"), (int, float)) else 1,
-        "saturation":        baseline.get("saturation", 1) if isinstance(baseline.get("saturation"), (int, float)) else 1,
-        "gamma":             baseline.get("gamma", 1) if isinstance(baseline.get("gamma"), (int, float)) else 1,
+        # Gemini reports brightness around 1.0 as neutral, but FFmpeg eq brightness is centered at 0.0.
+        "brightness":        raw_b - 1.0,
+        "contrast":          raw_c,
+        "saturation":        raw_s,
+        "gamma":             raw_g,
         "color_temperature": baseline.get("color_temperature", "neutral") if baseline.get("color_temperature") in ["warm", "cool", "neutral"] else "neutral",
     }
+    baseline_temp = safe_baseline.get("color_temperature", "neutral")
+    print(f"[color] Temperature: baseline={baseline_temp}", flush=True)
     intent = normalize_intent(intent_name)
     delta = COLOR_INTENTS[intent]
-    return {
-        "brightness":        clamp(safe_baseline["brightness"] + delta["brightness"], -0.3, 0.3),
-        "contrast":          clamp(safe_baseline["contrast"] + delta["contrast"], 0.5, 2.0),
-        "saturation":        clamp(safe_baseline["saturation"] + delta["saturation"], 0.5, 1.20),
-        "gamma":             clamp(safe_baseline["gamma"] + delta["gamma"], 0.5, 2.0),
+    color_grade = {
+        "brightness":        clamp(safe_baseline["brightness"] + delta["brightness"], -0.15, 0.15),
+        "contrast":          clamp(safe_baseline["contrast"] + delta["contrast"], 0.8, 1.4),
+        "saturation":        clamp(safe_baseline["saturation"] + delta["saturation"], 0.8, 1.20),
+        "gamma":             clamp(safe_baseline["gamma"] + delta["gamma"], 0.8, 1.2),
         "color_temperature": delta["color_temperature"] or safe_baseline["color_temperature"] or "neutral",
     }
+    print(
+        f"[color] Clamped color_grade: b={color_grade['brightness']:.2f} "
+        f"c={color_grade['contrast']:.2f} s={color_grade['saturation']:.2f} "
+        f"g={color_grade['gamma']:.2f}",
+        flush=True,
+    )
+    print(f"[color] Temperature: grade={color_grade.get('color_temperature', 'not set')}", flush=True)
+    return color_grade
 
 def normalize_analysis(parsed):
     if not parsed.get("speech"):
@@ -312,14 +339,12 @@ def normalize_analysis(parsed):
     raw_cb = parsed.get("color_baseline") or {}
     color_baseline = {
         "assessment":        raw_cb.get("assessment") or "",
-        "brightness":        float(raw_cb["brightness"]) if isinstance(raw_cb.get("brightness"), (int, float)) else 0,
+        "brightness":        float(raw_cb["brightness"]) if isinstance(raw_cb.get("brightness"), (int, float)) else 1,
         "contrast":          float(raw_cb["contrast"]) if isinstance(raw_cb.get("contrast"), (int, float)) else 1,
         "saturation":        float(raw_cb["saturation"]) if isinstance(raw_cb.get("saturation"), (int, float)) else 1,
         "gamma":             float(raw_cb["gamma"]) if isinstance(raw_cb.get("gamma"), (int, float)) else 1,
         "color_temperature": raw_cb.get("color_temperature") if raw_cb.get("color_temperature") in ["warm", "cool", "neutral"] else "neutral",
     }
-    print(f"[analyze] Color baseline: b={color_baseline['brightness']}, c={color_baseline['contrast']}, s={color_baseline['saturation']}, g={color_baseline['gamma']}, temp={color_baseline['color_temperature']}", flush=True)
-
     raw_fl = parsed.get("frame_layout") or {}
     frame_layout = {
         "subject_position": raw_fl.get("subject_position") or "unknown",
@@ -365,13 +390,9 @@ def normalize_analysis(parsed):
         "skin_tones_present": bool(raw_fq.get("skin_tones_present", True)),
         "lighting_type":     raw_fq.get("lighting_type", "unknown") if raw_fq.get("lighting_type") in valid_lighting else "unknown",
     }
-    print(f"[analyze] Footage quality: noise={footage_quality['noise_level']} sharpness={footage_quality['source_sharpness']} highlights={footage_quality['highlight_condition']} shadows={footage_quality['shadow_condition']} richness={footage_quality['color_richness']} lighting={footage_quality['lighting_type']}", flush=True)
-
     safe_cut_points = parsed.get("cut_points") or parsed.get("safe_cut_points") or []
     peak_moments = parsed.get("highlights") or parsed.get("peak_moments") or []
     vp = parsed.get("video_profile") or parsed.get("footage_assessment") or {}
-
-    print(f"[analyze] Analysis complete: {duration}s, {len(shots)} shots, {len(safe_cut_points)} cut points, {len((parsed.get('speech') or {}).get('segments') or [])} speech segments", flush=True)
 
     return {
         "duration":             duration,
@@ -884,6 +905,8 @@ You are the editor. You decide what stays and what gets cut.
 
 Tighten the video. Remove dead air — long pauses, breaths between sentences, filler moments where nothing is happening, dull sections that don't serve the content. Skip them by leaving gaps between your clips. If the speaker pauses for half a second between two sentences, end one clip before the pause and start the next clip after it. The viewer should never sit through dead silence or a moment where nothing is happening.
 
+When removing pauses between sentences, leave a small buffer (~0.1 seconds) on each side of the gap. Do not cut right at the instant speech ends — leave room for the natural tail of the last word. Starting a clip 0.1s before speech begins sounds natural. Starting exactly at the first phoneme sounds clipped.
+
 Cut where the visual content changes, where speech naturally pauses, or where pacing benefits from intervention. Every clip should contain content worth watching. If a section is boring, skip it.
 
 The source timeline only moves forward. Your clips must stay chronological. Gaps between clips are how you remove content — the pipeline will not fill them in.
@@ -1078,10 +1101,10 @@ Then output the JSON:
     "has_burned_captions": <true|false>
   }},
   "color_baseline": {{
-    "brightness": <number>,
-    "contrast": <number>,
-    "saturation": <number>,
-    "gamma": <number>,
+    "brightness": <number 0.85-1.15, where 1.0 = no change>,
+    "contrast": <number 0.85-1.15, where 1.0 = no change>,
+    "saturation": <number 0.85-1.15, where 1.0 = no change>,
+    "gamma": <number 0.85-1.15, where 1.0 = no change>,
     "color_temperature": "<warm|cool|neutral>"
   }},
   "color_intent": "<intent>",
@@ -1225,11 +1248,12 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None):
         candidates = getattr(response, "candidates", None) or []
         if candidates:
             finish_reason = getattr(candidates[0], "finish_reason", None)
-            if finish_reason is not None and str(finish_reason) not in {"1", "STOP"}:
-                print(
-                    f"[generate-edit] WARNING: Gemini response may be truncated. finish_reason={finish_reason}",
-                    flush=True,
-                )
+            print(f"[generate-edit] Gemini finish_reason={finish_reason}", flush=True)
+            fr_str = str(finish_reason).upper()
+            if "MAX" in fr_str or finish_reason == 2:
+                print("[generate-edit] WARNING: Gemini response TRUNCATED — increase max_output_tokens", flush=True)
+            elif "SAFETY" in fr_str or finish_reason == 3:
+                print("[generate-edit] WARNING: Gemini response blocked by safety filter", flush=True)
     except Exception:
         pass
     if "```json" not in response_text and "{" not in response_text:
@@ -1265,6 +1289,10 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None):
     for clip in raw_cuts:
         clip["freeze_frame"] = False
         clip["motion_blur_transition"] = False
+        clip.pop("speed_ramp", None)
+        clip.pop("freeze_frame", None)
+        clip.pop("motion_blur_transition", None)
+        clip.pop("speed_segments", None)
 
     video_duration = float(analysis.get("duration") or 0)
     validated_cuts = []
@@ -1345,6 +1373,8 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None):
     edit_plan["audio_ducking"] = True
     edit_plan["beat_sync"] = False
     edit_plan.setdefault("sound_effects", [])
+    edit_plan.pop("teal_orange", None)
+    edit_plan.pop("beat_sync", None)
 
     valid_caption_styles = {
         "none", "capcut", "standard", "bold_centered", "minimal_bottom",
@@ -1412,7 +1442,6 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None):
     valid_transitions = {"none", "fadewhite", "whip_left", "whip_right"}
     if edit_plan.get("grain") not in valid_grain:
         edit_plan["grain"] = "none"
-    edit_plan["teal_orange"] = "none"
     if edit_plan.get("vignette") not in valid_vignette:
         edit_plan["vignette"] = "none"
 
@@ -1446,10 +1475,6 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None):
             "zoom": clip_entry.get("zoom") or "none",
             "cut_zoom": bool(clip_entry.get("cut_zoom")),
             "speed": speed,
-            "speed_ramp": "none",
-            "freeze_frame": False,
-            "motion_blur_transition": False,
-            "speed_segments": [],
         })
 
     baseline = analysis.get("color_baseline") or {}
@@ -1457,10 +1482,15 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None):
     edit_plan["color_intent"] = intent
     edit_plan["color_grade"] = build_color_grade(baseline, intent)
     edit_plan["cuts"] = final_cuts
+    edit_plan.pop("teal_orange", None)
+    edit_plan.pop("beat_sync", None)
+    edit_plan.pop("video_profile", None)
+    edit_plan.pop("frame_layout", None)
     if "clips" in edit_plan:
         del edit_plan["clips"]
     if final_cuts:
         edit_plan["target_duration"] = final_cuts[-1]["source_end"] - final_cuts[0]["source_start"]
+    edit_plan.pop("target_duration", None)
 
     total_clip_duration = sum(max(0, c["source_end"] - c["source_start"]) for c in final_cuts)
     if video_duration > 0 and total_clip_duration / video_duration < 0.3:
@@ -1472,13 +1502,12 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None):
 
     edit_plan["analysis_data"] = analysis
 
-    print(f"[generateEdit] Final cuts ({len(final_cuts)} clips):", flush=True)
-    for cut in final_cuts:
-        print(f"  {cut['source_start']} -> {cut['source_end']} [{cut['transition_out']}]", flush=True)
-    cg = edit_plan["color_grade"]
     print(
-        f"  Created {len(final_cuts)} cuts, intent={intent}, color: brightness={cg['brightness']} "
-        f"contrast={cg['contrast']} sat={cg['saturation']} gamma={cg['gamma']} temp={cg['color_temperature']}",
+        f"[generate-edit] Recipe: {len(final_cuts)} clips, "
+        f"{len(edit_plan.get('broll', []))} b-roll, "
+        f"{len(edit_plan.get('sound_effects', []))} sfx, "
+        f"intent={edit_plan.get('color_intent', 'none')}, "
+        f"captions={edit_plan.get('caption_style', 'none')}",
         flush=True,
     )
 
@@ -1609,18 +1638,34 @@ def fetch_broll_clip(keyword, duration_needed, work_dir):
         return None
 
     try:
-        resp = requests.get(
-            "https://api.pexels.com/videos/search",
-            headers={"Authorization": pexels_key},
-            params={
-                "query": keyword,
-                "per_page": 15,
-                "orientation": "portrait",
-                "size": "medium",
-            },
-            timeout=15,
-        )
-        resp.raise_for_status()
+        resp = None
+        for attempt in range(2):
+            try:
+                resp = requests.get(
+                    "https://api.pexels.com/videos/search",
+                    headers={"Authorization": pexels_key},
+                    params={
+                        "query": keyword,
+                        "per_page": 15,
+                        "orientation": "portrait",
+                        "size": "medium",
+                    },
+                    timeout=25,
+                )
+                resp.raise_for_status()
+                break
+            except requests.exceptions.Timeout:
+                if attempt == 0:
+                    print(f"[broll] Pexels timed out for '{keyword}' — retrying...", flush=True)
+                    continue
+                print(f"[broll] Pexels timed out for '{keyword}' after retry — skipping", flush=True)
+                return None
+            except Exception as e:
+                print(f"[broll] Pexels API error for '{keyword}': {e}", flush=True)
+                return None
+
+        if resp is None:
+            return None
         videos = resp.json().get("videos") or []
 
         if not videos:
@@ -2341,7 +2386,7 @@ def apply_speed_curve(output_path, speed_curve, work_dir):
     for i in range(len(expr_parts) - 2, -1, -1):
         part = expr_parts[i]
         inner = f"{cum_output[i]:.6f}+(T-{part['t_start']:.6f})/{part['avg_speed']:.6f}"
-        setpts_expr = f"if(lt(T\\,{part['t_end']:.6f})\\,{inner}\\,{setpts_expr})"
+        setpts_expr = f"if(lt(T,{part['t_end']:.6f}),{inner},{setpts_expr})"
 
     total_output_duration = cum_output[-1]
     print(f"[speed_curve] Expected output duration: {total_output_duration:.2f}s", flush=True)
@@ -2403,8 +2448,7 @@ def apply_speed_curve(output_path, speed_curve, work_dir):
     temp_output = os.path.join(work_dir, "speed_curved.mp4")
     filter_script_path = os.path.join(work_dir, "speed_filter.txt")
     with open(filter_script_path, "w", encoding="utf-8") as f:
-        unescaped_expr = setpts_expr.replace("\\,", ",")
-        f.write(f"[0:v]setpts='{unescaped_expr}',fps=30[outv]\n")
+        f.write(f"[0:v]setpts='{setpts_expr}',fps=30[outv]\n")
     print(f"[speed_curve] Filter script written to {filter_script_path}", flush=True)
     cmd_mux = [
         "ffmpeg", "-y",
@@ -2468,7 +2512,6 @@ def _apply_speed_curve_fallback(output_path, speed_curve, expr_parts, setpts_exp
 
     fps = 30
     filter_script_path = os.path.join(work_dir, "sc_fallback_filter.txt")
-    unescaped_setpts = setpts_expr.replace("\\,", ",")
     audio_filter_parts = []
     audio_concat = []
     for i, part in enumerate(expr_parts):
@@ -2483,7 +2526,7 @@ def _apply_speed_curve_fallback(output_path, speed_curve, expr_parts, setpts_exp
     )
 
     with open(filter_script_path, "w", encoding="utf-8") as f:
-        f.write(f"[0:v]setpts='{unescaped_setpts}',fps={fps}[outv];\n")
+        f.write(f"[0:v]setpts='{setpts_expr}',fps={fps}[outv];\n")
         f.write(";\n".join(audio_filter_parts) + "\n")
 
     temp_output = os.path.join(work_dir, "speed_curved.mp4")
