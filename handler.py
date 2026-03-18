@@ -2548,11 +2548,12 @@ def apply_speed_curve(output_path, speed_curve, work_dir):
 
 
 def _apply_speed_curve_fallback(output_path, speed_curve, expr_parts, setpts_expr, work_dir, duration):
-    """Fallback: smooth video with keypoint-segment audio."""
+    """Fallback: smooth video with keypoint-segment audio (no rubberband)."""
     print("[speed_curve] Using fallback: smooth video + keypoint-segment audio", flush=True)
 
     fps = 30
-    filter_script_path = os.path.join(work_dir, "sc_fallback_filter.txt")
+
+    # Build audio filter chain (atempo per keypoint segment)
     audio_filter_parts = []
     audio_concat = []
     for i, part in enumerate(expr_parts):
@@ -2565,16 +2566,19 @@ def _apply_speed_curve_fallback(output_path, speed_curve, expr_parts, setpts_exp
     audio_filter_parts.append(
         f"{''.join(audio_concat)}concat=n={len(expr_parts)}:v=0:a=1[outa]"
     )
+    audio_filter = ";".join(audio_filter_parts)
 
-    with open(filter_script_path, "w", encoding="utf-8") as f:
-        f.write(f"[0:v]setpts='{setpts_expr}',fps={fps}[outv];\n")
-        f.write(";\n".join(audio_filter_parts) + "\n")
+    # Escape commas in the setpts expression for -filter_complex
+    escaped_setpts = setpts_expr.replace(",", "\\,")
+
+    # Combine video and audio into one filter_complex string
+    full_filter = f"[0:v]setpts='{escaped_setpts}',fps={fps}[outv];{audio_filter}"
 
     temp_output = os.path.join(work_dir, "speed_curved.mp4")
     cmd = [
         "ffmpeg", "-y",
         "-i", output_path,
-        "-filter_complex_script", filter_script_path,
+        "-filter_complex", full_filter,
         "-map", "[outv]", "-map", "[outa]",
         "-c:v", "libx264", "-preset", "medium", "-crf", "18",
         "-c:a", "aac", "-b:a", "128k",
@@ -2582,29 +2586,26 @@ def _apply_speed_curve_fallback(output_path, speed_curve, expr_parts, setpts_exp
         temp_output,
     ]
 
+    print(f"[speed_curve] Fallback filter_complex length: {len(full_filter)} chars", flush=True)
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
     if result.stderr:
-        print(f"[speed_curve] Fallback FFmpeg stderr (last 300): {result.stderr[-300:]}", flush=True)
+        print(f"[speed_curve] Fallback FFmpeg stderr (last 500): {result.stderr[-500:]}", flush=True)
     if result.returncode != 0:
-        print(f"[speed_curve] Fallback also failed: {result.stderr[-500:]}", flush=True)
+        print(f"[speed_curve] Fallback also failed", flush=True)
         print("[speed_curve] Keeping original output (no speed curve)", flush=True)
-        if os.path.exists(filter_script_path):
-            os.remove(filter_script_path)
+        if os.path.exists(temp_output):
+            os.remove(temp_output)
         return
 
     if not validate_output(temp_output, "speed_curve"):
         if os.path.exists(temp_output):
             os.remove(temp_output)
-        if os.path.exists(filter_script_path):
-            os.remove(filter_script_path)
         print("[speed_curve] Fallback output invalid — keeping original output", flush=True)
         return
 
     os.replace(temp_output, output_path)
     new_duration = probe_duration(output_path) or duration
     print(f"[speed_curve] Fallback complete: {duration:.2f}s → {new_duration:.2f}s", flush=True)
-    if os.path.exists(filter_script_path):
-        os.remove(filter_script_path)
 
 
 def is_hard_cut(transition):
