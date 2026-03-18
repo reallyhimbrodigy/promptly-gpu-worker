@@ -2405,6 +2405,7 @@ def apply_speed_curve(output_path, speed_curve, work_dir):
     with open(filter_script_path, "w", encoding="utf-8") as f:
         unescaped_expr = setpts_expr.replace("\\,", ",")
         f.write(f"[0:v]setpts='{unescaped_expr}',fps=30[outv]\n")
+    print(f"[speed_curve] Filter script written to {filter_script_path}", flush=True)
     cmd_mux = [
         "ffmpeg", "-y",
         "-i", output_path,
@@ -2420,6 +2421,8 @@ def apply_speed_curve(output_path, speed_curve, work_dir):
 
     print("[speed_curve] Muxing smooth video + smooth audio...", flush=True)
     r = subprocess.run(cmd_mux, capture_output=True, text=True, timeout=300)
+    if r.stderr:
+        print(f"[speed_curve] FFmpeg stderr (last 300): {r.stderr[-300:]}", flush=True)
     if r.returncode != 0:
         print(f"[speed_curve] Mux FAILED (exit code {r.returncode}): {r.stderr[-500:]}", flush=True)
         print("[speed_curve] Falling back to original output", flush=True)
@@ -2463,6 +2466,9 @@ def _apply_speed_curve_fallback(output_path, speed_curve, expr_parts, setpts_exp
     """Fallback: smooth video with keypoint-segment audio."""
     print("[speed_curve] Using fallback: smooth video + keypoint-segment audio", flush=True)
 
+    fps = 30
+    filter_script_path = os.path.join(work_dir, "sc_fallback_filter.txt")
+    unescaped_setpts = setpts_expr.replace("\\,", ",")
     audio_filter_parts = []
     audio_concat = []
     for i, part in enumerate(expr_parts):
@@ -2476,12 +2482,15 @@ def _apply_speed_curve_fallback(output_path, speed_curve, expr_parts, setpts_exp
         f"{''.join(audio_concat)}concat=n={len(expr_parts)}:v=0:a=1[outa]"
     )
 
-    full_filter = f"[0:v]setpts='{setpts_expr}',fps=30[outv];{';'.join(audio_filter_parts)}"
+    with open(filter_script_path, "w", encoding="utf-8") as f:
+        f.write(f"[0:v]setpts='{unescaped_setpts}',fps={fps}[outv];\n")
+        f.write(";\n".join(audio_filter_parts) + "\n")
+
     temp_output = os.path.join(work_dir, "speed_curved.mp4")
     cmd = [
         "ffmpeg", "-y",
         "-i", output_path,
-        "-filter_complex", full_filter,
+        "-filter_complex_script", filter_script_path,
         "-map", "[outv]", "-map", "[outa]",
         "-c:v", "libx264", "-preset", "medium", "-crf", "18",
         "-c:a", "aac", "-b:a", "128k",
@@ -2490,20 +2499,28 @@ def _apply_speed_curve_fallback(output_path, speed_curve, expr_parts, setpts_exp
     ]
 
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    if result.stderr:
+        print(f"[speed_curve] Fallback FFmpeg stderr (last 300): {result.stderr[-300:]}", flush=True)
     if result.returncode != 0:
         print(f"[speed_curve] Fallback also failed: {result.stderr[-500:]}", flush=True)
         print("[speed_curve] Keeping original output (no speed curve)", flush=True)
+        if os.path.exists(filter_script_path):
+            os.remove(filter_script_path)
         return
 
     if not validate_output(temp_output, "speed_curve"):
         if os.path.exists(temp_output):
             os.remove(temp_output)
+        if os.path.exists(filter_script_path):
+            os.remove(filter_script_path)
         print("[speed_curve] Fallback output invalid — keeping original output", flush=True)
         return
 
     os.replace(temp_output, output_path)
     new_duration = probe_duration(output_path) or duration
     print(f"[speed_curve] Fallback complete: {duration:.2f}s → {new_duration:.2f}s", flush=True)
+    if os.path.exists(filter_script_path):
+        os.remove(filter_script_path)
 
 
 def is_hard_cut(transition):
@@ -3603,6 +3620,45 @@ def handler(job):
                 os.remove(speed_backup_path)
         else:
             print("[pipeline] Speed curve skipped", flush=True)
+
+        output_size = os.path.getsize(output_path)
+        output_dur = probe_duration(output_path) or 0
+        if output_size > 100 * 1024 * 1024:
+            print(
+                f"[pipeline] step=final_encode (output is {output_size / 1024 / 1024:.0f}MB — needs compression)",
+                flush=True,
+            )
+            final_path = os.path.join(work_dir, "final.mp4")
+            cmd = [
+                "ffmpeg", "-y",
+                "-i", output_path,
+                "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+                "-c:a", "aac", "-b:a", "128k",
+                "-movflags", "+faststart",
+                final_path,
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+            if result.returncode == 0 and os.path.exists(final_path):
+                final_size = os.path.getsize(final_path)
+                final_dur = probe_duration(final_path) or 0
+                if final_size > 100000 and final_dur > 1.0:
+                    os.replace(final_path, output_path)
+                    print(
+                        f"[final_encode] {output_size / 1024 / 1024:.0f}MB → "
+                        f"{final_size / 1024 / 1024:.1f}MB, {final_dur:.1f}s",
+                        flush=True,
+                    )
+                else:
+                    print(
+                        f"[final_encode] Output invalid ({final_size} bytes, {final_dur}s) — keeping previous",
+                        flush=True,
+                    )
+                    if os.path.exists(final_path):
+                        os.remove(final_path)
+            else:
+                print("[final_encode] FFmpeg failed — keeping previous output", flush=True)
+        else:
+            print(f"[pipeline] Output already compressed: {output_size / 1024 / 1024:.1f}MB", flush=True)
 
         # ── Parallel group 2: cover frame + upload ────────────────────────────────
         cover_frame_ts   = 1.0
