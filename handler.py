@@ -2484,7 +2484,7 @@ def apply_speed_curve(output_path, speed_curve, work_dir):
 
     temp_output = os.path.join(work_dir, "speed_curved.mp4")
 
-    # Use -vf (not filter_complex_script) because filter_complex_script
+    # Use -vf (not script-based filter loading) because script-based loading
     # interprets commas inside if(lt(T,x),y,z) as filter chain separators.
     # -vf handles commas inside expressions correctly.
     vf_expr = f"setpts='{setpts_expr}',fps={fps}"
