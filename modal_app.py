@@ -7,7 +7,6 @@ image = (
     modal.Image.from_registry("nvidia/cuda:12.2.0-runtime-ubuntu22.04", add_python="3.10")
     .run_commands(
         "echo 'build v6'",
-        "mkdir -p /models",
     )
     .apt_install(
         "ffmpeg",
@@ -38,14 +37,6 @@ image = (
         "fastapi",
         "pydantic",
         "tqdm",
-    )
-    .run_commands(
-        "python3 -m pip install 'numpy<2'",
-        "python3 -m pip install torch==2.1.2 torchvision==0.16.2 --index-url https://download.pytorch.org/whl/cu121",
-        "python3 -m pip install basicsr==1.4.2 realesrgan gfpgan facexlib",
-        "python3 -m pip install 'numpy<2'",
-        "mkdir -p /models",
-        "python3 -c \"import urllib.request; urllib.request.urlretrieve('https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-general-x4v3.pth', '/models/realesr-general-x4v3.pth'); print('Model downloaded')\"",
     )
     .add_local_dir("src/assets/sounds", "/assets/sounds")
     .add_local_dir("src/assets/fonts", "/assets/fonts")

@@ -71,17 +71,7 @@ try:
 except Exception:
     pass
 
-REAL_ESRGAN_AVAILABLE = False
-try:
-    import torch
-
-    if torch.cuda.is_available():
-        REAL_ESRGAN_AVAILABLE = True
-        print("[startup] Real-ESRGAN: torch + CUDA available, will load on demand", flush=True)
-    else:
-        print("[startup] Real-ESRGAN: no CUDA — enhancement unavailable", flush=True)
-except ImportError:
-    print("[startup] Real-ESRGAN: torch not installed — enhancement unavailable", flush=True)
+# Real-ESRGAN removed from pipeline — not needed for clean phone footage
 
 print("[startup] all import checks done", flush=True)
 
@@ -2080,10 +2070,6 @@ def enhance_video_quality(input_path, work_dir):
     Processes at 1x scale (same resolution) — enhances detail, removes noise,
     sharpens edges intelligently. Replaces all FFmpeg denoise/sharpen filters.
     """
-    if not REAL_ESRGAN_AVAILABLE:
-        print("[enhance] Real-ESRGAN not available — skipping", flush=True)
-        return
-
     import cv2
     import numpy as np
     import torch
@@ -2368,8 +2354,8 @@ def _interpolate_speed(speed_curve, t):
 def apply_speed_curve(output_path, speed_curve, work_dir):
     """
     Apply a smooth speed curve to the final rendered video.
-    Video: single setpts expression (smooth).
-    Audio: rubberband CLI with tempo map when available.
+    Video: single setpts expression via -vf (perfectly smooth).
+    Audio: native atempo chain (pitch shifts naturally — the TikTok sound).
     Falls back to the original output if the pass fails.
     """
     if not speed_curve or len(speed_curve) < 2:
@@ -2381,19 +2367,14 @@ def apply_speed_curve(output_path, speed_curve, work_dir):
         print("[speed_curve] Could not determine input duration — skipping", flush=True)
         return
     print(f"[speed_curve] Input duration: {duration:.2f}s", flush=True)
-    last_kp_time = float(speed_curve[-1]["t"])
-    if duration > last_kp_time + 5.0:
-        print(
-            f"[speed_curve] WARNING: video duration ({duration:.1f}s) exceeds last keypoint "
-            f"({last_kp_time}s) by {duration - last_kp_time:.1f}s — possible dead air",
-            flush=True,
-        )
 
+    # Extend speed curve to cover full duration
     if speed_curve[-1]["t"] < duration:
         speed_curve = speed_curve + [{"t": duration, "speed": speed_curve[-1]["speed"]}]
     if speed_curve[0]["t"] > 0:
         speed_curve = [{"t": 0.0, "speed": speed_curve[0]["speed"]}] + speed_curve
 
+    # Build segment data
     expr_parts = []
     for i in range(len(speed_curve) - 1):
         t_start = float(speed_curve[i]["t"])
@@ -2411,12 +2392,17 @@ def apply_speed_curve(output_path, speed_curve, work_dir):
         print("[speed_curve] Not enough keypoint intervals — skipping", flush=True)
         return
 
+    # Cumulative output time at each boundary
     cum_output = [0.0]
     for part in expr_parts:
         seg_input_dur = part["t_end"] - part["t_start"]
         seg_output_dur = seg_input_dur / part["avg_speed"]
         cum_output.append(cum_output[-1] + seg_output_dur)
 
+    total_output_duration = cum_output[-1]
+    print(f"[speed_curve] Expected output duration: {total_output_duration:.2f}s", flush=True)
+
+    # Build video setpts expression (output in PTS units)
     fps = 30
     last = expr_parts[-1]
     setpts_expr = f"({cum_output[-2]:.6f}+(T-{last['t_start']:.6f})/{last['avg_speed']:.6f})/TB"
@@ -2425,135 +2411,9 @@ def apply_speed_curve(output_path, speed_curve, work_dir):
         inner = f"({cum_output[i]:.6f}+(T-{part['t_start']:.6f})/{part['avg_speed']:.6f})/TB"
         setpts_expr = f"if(lt(T,{part['t_end']:.6f}),{inner},{setpts_expr})"
 
-    total_output_duration = cum_output[-1]
-    print(f"[speed_curve] Expected output duration: {total_output_duration:.2f}s", flush=True)
     print(f"[speed_curve] setpts expression length: {len(setpts_expr)} chars", flush=True)
-    print(f"[speed_curve] setpts first 200 chars: {setpts_expr[:200]}", flush=True)
 
-    audio_raw = os.path.join(work_dir, "sc_audio_raw.wav")
-    cmd_extract = [
-        "ffmpeg", "-y",
-        "-i", output_path,
-        "-vn", "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "2",
-        audio_raw,
-    ]
-
-    r = subprocess.run(cmd_extract, capture_output=True, text=True, timeout=60)
-    if r.returncode != 0:
-        print(f"[speed_curve] Audio extract failed: {r.stderr[-300:]}", flush=True)
-        print("[speed_curve] Falling back to segment-based audio", flush=True)
-        return _apply_speed_curve_fallback(output_path, speed_curve, expr_parts, setpts_expr, work_dir, duration)
-
-    tempo_map_path = os.path.join(work_dir, "sc_tempo_map.txt")
-    with open(tempo_map_path, "w") as f:
-        for kp in speed_curve:
-            f.write(f"{kp['t']:.4f}:{kp['speed']:.4f}\n")
-
-    audio_curved = os.path.join(work_dir, "sc_audio_curved.wav")
-    cmd_rb = [
-        "rubberband",
-        "--tempo", tempo_map_path,
-        "--pitch-hq",
-        audio_raw,
-        audio_curved,
-    ]
-    r = subprocess.run(cmd_rb, capture_output=True, text=True, timeout=120)
-    if r.returncode != 0:
-        print(f"[speed_curve] Rubberband failed: {r.stderr[-300:]}", flush=True)
-        print("[speed_curve] Trying rubberband without tempo map (constant average)...", flush=True)
-        avg_speed = sum(p["avg_speed"] for p in expr_parts) / len(expr_parts)
-        cmd_rb_simple = [
-            "rubberband",
-            "--tempo", f"{avg_speed:.4f}",
-            "--pitch-hq",
-            audio_raw,
-            audio_curved,
-        ]
-        r2 = subprocess.run(cmd_rb_simple, capture_output=True, text=True, timeout=120)
-        if r2.returncode != 0:
-            print(f"[speed_curve] Rubberband simple also failed: {r2.stderr[-300:]}", flush=True)
-            return _apply_speed_curve_fallback(output_path, speed_curve, expr_parts, setpts_expr, work_dir, duration)
-
-    if os.path.exists(audio_curved):
-        audio_size = os.path.getsize(audio_curved)
-        print(f"[speed_curve] Rubberband output: {audio_size / 1024:.0f}KB", flush=True)
-        if audio_size < 1000:
-            print("[speed_curve] Rubberband output too small — audio may be empty", flush=True)
-    else:
-        print("[speed_curve] Rubberband output file missing", flush=True)
-
-    temp_output = os.path.join(work_dir, "speed_curved.mp4")
-
-    # Use -vf (not script-based filter loading) because script-based loading
-    # interprets commas inside if(lt(T,x),y,z) as filter chain separators.
-    # -vf handles commas inside expressions correctly.
-    vf_expr = f"setpts='{setpts_expr}',fps={fps}"
-    print(f"[speed_curve] vf expression length: {len(vf_expr)} chars", flush=True)
-
-    cmd_mux = [
-        "ffmpeg", "-y",
-        "-i", output_path,
-        "-i", audio_curved,
-        "-vf", vf_expr,
-        "-map", "0:v", "-map", "1:a",
-        "-c:v", "libx264", "-preset", "medium", "-crf", "18",
-        "-c:a", "aac", "-b:a", "128k",
-        "-shortest",
-        "-movflags", "+faststart",
-        temp_output,
-    ]
-
-    print(f"[speed_curve] FFmpeg command: {' '.join(cmd_mux)}", flush=True)
-    print("[speed_curve] Muxing smooth video + smooth audio...", flush=True)
-    r = subprocess.run(cmd_mux, capture_output=True, text=True, timeout=300)
-    if r.stderr:
-        print(f"[speed_curve] FFmpeg stderr (last 1500): {r.stderr[-1500:]}", flush=True)
-    if r.returncode != 0:
-        print(f"[speed_curve] Mux FAILED (exit code {r.returncode}): {r.stderr[-500:]}", flush=True)
-        print("[speed_curve] Falling back to original output", flush=True)
-        for f in [audio_raw, audio_curved, tempo_map_path]:
-            if os.path.exists(f):
-                os.remove(f)
-        return
-
-    if not os.path.exists(temp_output):
-        print("[speed_curve] Mux produced no output file — falling back", flush=True)
-        for f in [audio_raw, audio_curved, tempo_map_path]:
-            if os.path.exists(f):
-                os.remove(f)
-        return
-
-    temp_size = os.path.getsize(temp_output)
-    if temp_size < 100000:
-        print(f"[speed_curve] Mux output too small ({temp_size} bytes) — falling back", flush=True)
-        for f in [temp_output, audio_raw, audio_curved, tempo_map_path]:
-            if os.path.exists(f):
-                os.remove(f)
-        return
-
-    temp_dur = probe_duration(temp_output)
-    if not temp_dur or temp_dur < 1.0:
-        print(f"[speed_curve] Mux output invalid duration ({temp_dur}s) — falling back", flush=True)
-        for f in [temp_output, audio_raw, audio_curved, tempo_map_path]:
-            if os.path.exists(f):
-                os.remove(f)
-        return
-
-    os.replace(temp_output, output_path)
-    new_duration = probe_duration(output_path) or duration
-    print(f"[speed_curve] Complete: {duration:.2f}s → {new_duration:.2f}s ({temp_size / 1024 / 1024:.1f}MB)", flush=True)
-    for f in [audio_raw, audio_curved, tempo_map_path]:
-        if os.path.exists(f):
-            os.remove(f)
-
-
-def _apply_speed_curve_fallback(output_path, speed_curve, expr_parts, setpts_expr, work_dir, duration):
-    """Fallback: smooth video with keypoint-segment audio (no rubberband)."""
-    print("[speed_curve] Using fallback: smooth video + keypoint-segment audio", flush=True)
-
-    fps = 30
-
-    # Build audio filter chain (atempo per keypoint segment)
+    # Build audio filter chain: split audio into segments, apply atempo to each, concat
     audio_filter_parts = []
     audio_concat = []
     for i, part in enumerate(expr_parts):
@@ -2568,11 +2428,11 @@ def _apply_speed_curve_fallback(output_path, speed_curve, expr_parts, setpts_exp
     )
     audio_filter = ";".join(audio_filter_parts)
 
-    # Escape commas in the setpts expression for -filter_complex
+    # Escape commas in setpts for -filter_complex
     escaped_setpts = setpts_expr.replace(",", "\\,")
 
-    # Combine video and audio into one filter_complex string
-    full_filter = f"[0:v]setpts='{escaped_setpts}',fps={fps}[outv];{audio_filter}"
+    # Combine video + audio in one filter_complex
+    full_filter = f"[0:v]setpts='{escaped_setpts}'\\,fps={fps}[outv];{audio_filter}"
 
     temp_output = os.path.join(work_dir, "speed_curved.mp4")
     cmd = [
@@ -2586,26 +2446,79 @@ def _apply_speed_curve_fallback(output_path, speed_curve, expr_parts, setpts_exp
         temp_output,
     ]
 
-    print(f"[speed_curve] Fallback filter_complex length: {len(full_filter)} chars", flush=True)
+    print(f"[speed_curve] FFmpeg command: {' '.join(cmd)}", flush=True)
+    print("[speed_curve] Rendering speed curve...", flush=True)
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+
     if result.stderr:
-        print(f"[speed_curve] Fallback FFmpeg stderr (last 500): {result.stderr[-500:]}", flush=True)
+        print(f"[speed_curve] FFmpeg stderr (last 500): {result.stderr[-500:]}", flush=True)
+
     if result.returncode != 0:
-        print(f"[speed_curve] Fallback also failed", flush=True)
-        print("[speed_curve] Keeping original output (no speed curve)", flush=True)
+        print(f"[speed_curve] FAILED — trying without escaped fps comma...", flush=True)
+
+        # Try alternate escaping: fps comma might need different treatment
+        full_filter_alt = f"[0:v]setpts='{escaped_setpts}',fps={fps}[outv];{audio_filter}"
+        cmd_alt = [
+            "ffmpeg", "-y",
+            "-i", output_path,
+            "-filter_complex", full_filter_alt,
+            "-map", "[outv]", "-map", "[outa]",
+            "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+            "-c:a", "aac", "-b:a", "128k",
+            "-movflags", "+faststart",
+            temp_output,
+        ]
+        result = subprocess.run(cmd_alt, capture_output=True, text=True, timeout=300)
+        if result.stderr:
+            print(f"[speed_curve] Alt stderr (last 500): {result.stderr[-500:]}", flush=True)
+
+        if result.returncode != 0:
+            print(f"[speed_curve] Alt also failed — trying -vf for video only...", flush=True)
+
+            # Last resort: -vf for video, let audio stay at original speed
+            vf_expr = f"setpts='{setpts_expr}',fps={fps}"
+            cmd_vf = [
+                "ffmpeg", "-y",
+                "-i", output_path,
+                "-vf", vf_expr,
+                "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+                "-c:a", "aac", "-b:a", "128k",
+                "-shortest",
+                "-movflags", "+faststart",
+                temp_output,
+            ]
+            result = subprocess.run(cmd_vf, capture_output=True, text=True, timeout=300)
+            if result.stderr:
+                print(f"[speed_curve] VF-only stderr (last 500): {result.stderr[-500:]}", flush=True)
+
+            if result.returncode != 0:
+                print("[speed_curve] All attempts failed — keeping original output", flush=True)
+                if os.path.exists(temp_output):
+                    os.remove(temp_output)
+                return
+
+    # Validate output
+    if not os.path.exists(temp_output):
+        print("[speed_curve] No output file — keeping original", flush=True)
+        return
+
+    temp_size = os.path.getsize(temp_output)
+    if temp_size < 100000:
+        print(f"[speed_curve] Output too small ({temp_size} bytes) — keeping original", flush=True)
         if os.path.exists(temp_output):
             os.remove(temp_output)
         return
 
-    if not validate_output(temp_output, "speed_curve"):
+    temp_dur = probe_duration(temp_output)
+    if not temp_dur or temp_dur < 1.0:
+        print(f"[speed_curve] Output invalid duration ({temp_dur}s) — keeping original", flush=True)
         if os.path.exists(temp_output):
             os.remove(temp_output)
-        print("[speed_curve] Fallback output invalid — keeping original output", flush=True)
         return
 
     os.replace(temp_output, output_path)
     new_duration = probe_duration(output_path) or duration
-    print(f"[speed_curve] Fallback complete: {duration:.2f}s → {new_duration:.2f}s", flush=True)
+    print(f"[speed_curve] Complete: {duration:.2f}s → {new_duration:.2f}s ({temp_size / 1024 / 1024:.1f}MB)", flush=True)
 
 
 def is_hard_cut(transition):
@@ -3657,27 +3570,7 @@ def handler(job):
             except Exception:
                 pass
 
-        vibe_lower = vibe.lower()
-        if "enhanced quality" in vibe_lower or "enhance quality" in vibe_lower or "enhanced" in vibe_lower:
-            if REAL_ESRGAN_AVAILABLE:
-                print("[pipeline] step=ai_enhance (user requested enhanced quality)", flush=True)
-                enhance_backup_path = os.path.join(work_dir, "output_enhance.backup.mp4")
-                shutil.copy2(output_path, enhance_backup_path)
-                try:
-                    enhance_video_quality(output_path, work_dir)
-                    if not validate_output(output_path, "enhance"):
-                        print("[enhance] Enhancement produced invalid output — restoring backup", flush=True)
-                        os.replace(enhance_backup_path, output_path)
-                    elif os.path.exists(enhance_backup_path):
-                        os.remove(enhance_backup_path)
-                except Exception as e:
-                    print(f"[pipeline] AI enhancement failed: {e} — continuing without enhancement", flush=True)
-                    if os.path.exists(enhance_backup_path):
-                        os.replace(enhance_backup_path, output_path)
-            else:
-                print("[pipeline] AI enhancement requested but Real-ESRGAN not available — skipping", flush=True)
-        else:
-            print("[pipeline] AI enhancement skipped (not requested in vibe)", flush=True)
+        # AI enhancement removed — minimal visible improvement on clean phone footage
 
         if caption_style != "none" and transcript.get("words"):
             print(f"[pipeline] step=captions (style={caption_style})", flush=True)
