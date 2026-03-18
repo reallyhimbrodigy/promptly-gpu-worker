@@ -959,38 +959,27 @@ Global parameters:
 
   vibrance: true / false — boosts muted colors while protecting skin. Set true if the footage looks flat or desaturated.
 
-  speed_curve — smooth speed ramp across the entire assembled video:
+  speed_curve — smooth speed ramp across the entire assembled video. Audio pitch shifts naturally with the speed — sped up sections sound higher-pitched, slowed sections sound deeper. This pitch shift is the signature sound of TikTok speed ramping and is intentional.
     "none" — no speed ramping.
     Array of keypoints: [{{"t": <output_seconds>, "speed": <0.5 to 2.0>}}]
+
     When the user asks for "speed ramping", "dynamic", "engaging", "captivating", or "CapCut style" editing, use a speed curve.
 
     Watch the video. Listen to the speech. Place your speed keypoints based on what you actually see and hear:
 
-    SPEED UP through moments that don't need the viewer's full attention — buildup, filler, transitions between ideas, repetition, anything that isn't the point.
+    SPEED UP through moments that don't need the viewer's full attention — buildup, filler, transitions between ideas, repetition, anything that isn't the point. The viewer should feel the video RUSHING through these moments. The speaker's voice rises in pitch and the words fly by.
 
-    SLOW DOWN on moments that need to land — punchlines, reveals, key statements, offers, emotional peaks, anything the viewer would want to rewatch.
+    SLOW DOWN on moments that need to land — punchlines, reveals, key statements, offers, emotional peaks, anything the viewer would want to rewatch. The viewer should feel the video PULLING them in. The speaker's voice drops deeper and every word carries weight.
 
-    The video will speed up and slow down MULTIPLE TIMES throughout. It's a wave — not one slow moment surrounded by fast. Every shift in content energy is an opportunity to shift the speed. Watch the video and feel where the rhythm naturally rises and falls.
+    The video will speed up and slow down MULTIPLE TIMES throughout. It's a wave. Every shift in content energy is an opportunity to shift the speed.
 
-    Most serious, informational, or calm content does NOT need speed ramping. Only use speed_curve when the user asks for it or when the content genuinely has a buildup/payoff structure that benefits from dynamic pacing.
+    The speed shift must be DRAMATIC enough for the viewer to feel it. This is TikTok — the audience expects to hear the voice pitch up and down. Conservative speed changes (0.9x to 1.1x) are invisible and pointless. The viewer should clearly HEAR the difference between fast and slow sections.
 
-    Speed values range from 0.5 to 2.0. When speed_curve is active, EVERY section of the video should be either faster or slower than normal — the entire video has a dynamic rhythm. No section should sit at exactly 1.0x. The contrast between your fastest and slowest keypoints is what makes the effect feel real — if all your values are between 0.9 and 1.1, the viewer will not feel anything.
+    Speed values range from 0.5 to 2.0. Use the full range based on what the content needs. You decide how fast and how slow based on what you watch and hear — there are no preset values. Trust your judgment. The only rule: the viewer must be able to feel the speed changes.
 
-    A speed curve with all values between 0.8 and 1.3 will be barely perceptible. Push the range wider.
+    Most serious, informational, or calm content does NOT need speed ramping. Only use speed_curve when the user asks for it or when the content genuinely benefits from dynamic pacing.
 
     Place keypoints at real content moments you can see and hear — not at evenly spaced intervals.
-
-    Example for a 35s talking head:
-      t=0 speed=0.92 (hook — slightly slow for clarity)
-      t=4 speed=1.4 (setup — compress the buildup)
-      t=8 speed=0.7 (first key point — let it land)
-      t=12 speed=1.5 (filler — move fast)
-      t=18 speed=0.65 (reveal — dramatic slowdown)
-      t=22 speed=1.3 (transition — pick up energy)
-      t=28 speed=0.75 (CTA — slow for emphasis)
-      t=34 speed=1.1 (ending — slight energy for loop)
-
-    Your speed curve should span at least 0.65 to 1.4 for the effect to be noticeable.
 
   caption_style — word-by-word animated captions synced to speech:
     none — no captions. Use when captions are already burned into the footage.
