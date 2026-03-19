@@ -4083,8 +4083,9 @@ def handler(job):
 
         # AI enhancement removed — minimal visible improvement on clean phone footage
 
-        if caption_style != "none" and transcript.get("words"):
-            print(f"[pipeline] step=captions (style={caption_style})", flush=True)
+        _text_overlays = edit_plan.get("text_overlays") or []
+        if (caption_style != "none" and transcript.get("words")) or _text_overlays:
+            print(f"[pipeline] step=captions (style={caption_style}, overlays={len(_text_overlays)})", flush=True)
             captions_backup_path = os.path.join(work_dir, "output_captions.backup.mp4")
             shutil.copy2(output_path, captions_backup_path)
             burn_in_captions(output_path, edit_plan, transcript, work_dir)
@@ -4094,7 +4095,7 @@ def handler(job):
             elif os.path.exists(captions_backup_path):
                 os.remove(captions_backup_path)
         else:
-            print("[pipeline] Captions skipped", flush=True)
+            print("[pipeline] Captions skipped (no captions, no text overlays)", flush=True)
 
         speed_curve = edit_plan.get("_parsed_speed_curve")
         if speed_curve:
