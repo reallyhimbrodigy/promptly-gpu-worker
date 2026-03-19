@@ -1010,7 +1010,8 @@ Sound effects — audio accents that EMPHASIZE specific moments in the video. Ea
     - The very beginning of the video (nothing is "appearing" — it's just starting)
     Pop only makes sense when the viewer is watching one thing and then something NEW suddenly appears on screen. If there's no contrast between "before" and "after", there's no pop.
 
-  swoosh — air swipe. Place ONLY when the video visually cuts from one type of content to another — speaker to screen recording, or screen recording back to speaker. NOT for topic changes within speech.
+  swoosh — air swipe. Place ONLY when the user's vibe requests transitions AND a wipe or fade transition is being used. Do NOT place swoosh on hard cuts. Hard cuts are silent. Swoosh is for visible transitions only.
+    If you are not using any transitions (transition_out = "none" on all clips), do not use swoosh at all.
     "word" = "scene_change"
 
   Rules:
@@ -1415,6 +1416,16 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None, deepgra
                     is_dollar_amount = "$" in word or word_clean.replace(".", "").replace(",", "").isdigit()
                     if word_clean not in VALID_CHING_WORDS and not is_dollar_amount:
                         print(f"[generate-edit] Filtered out ching on '{word}' at {t:.1f}s (not an approved trigger)", flush=True)
+                        continue
+
+                # Enforce swoosh only when transitions are present
+                if sound == "swoosh":
+                    has_transitions = any(
+                        str(c.get("transition_out") or "none").lower() not in ("none", "")
+                        for c in (edit_plan.get("cuts") or [])
+                    )
+                    if not has_transitions:
+                        print(f"[generate-edit] Filtered out swoosh at {t:.1f}s (no transitions in video)", flush=True)
                         continue
 
                 sound_effects.append({"t": t, "sound": sound, "word": word})
@@ -2316,23 +2327,6 @@ def pre_split_clips(keyframed_path, cuts, work_dir):
                 "-c:a", "aac", "-b:a", "192k",
                 clip_path,
             ])
-            # Trim any leading audio silence from clip 0
-            trimmed_path = clip_path.replace(".mp4", "_trimmed.mp4")
-            _trim_result = subprocess.run([
-                "ffmpeg", "-y",
-                "-i", clip_path,
-                "-af", "silenceremove=start_periods=1:start_silence=0.01:start_threshold=-40dB",
-                "-c:v", "copy",
-                "-c:a", "aac", "-b:a", "192k",
-                trimmed_path,
-            ], capture_output=True, text=True, timeout=30)
-            if _trim_result.returncode == 0 and os.path.exists(trimmed_path):
-                os.replace(trimmed_path, clip_path)
-                print(f"[ffmpeg] Clip 0: trimmed leading audio silence", flush=True)
-            else:
-                print(f"[ffmpeg] Clip 0: silence trim failed, using original", flush=True)
-                if os.path.exists(trimmed_path):
-                    os.remove(trimmed_path)
         else:
             run_ffmpeg(["-y","-ss",str(clip_start),"-i",keyframed_path,"-t",str(clip_dur),"-c","copy",clip_path])
         clip_files.append(clip_path)
@@ -2982,7 +2976,7 @@ def tighten_clips_with_deepgram(cuts, deepgram_words, min_silence_to_remove=0.08
                 pass
             else:
                 sc["start"] = sc["start"] - 0.01
-            sc["end"] = sc["end"] + 0.02
+            sc["end"] = sc["end"] + 0.05
 
         # Convert sub-clips to full clip dicts
         for sc in sub_clips:
