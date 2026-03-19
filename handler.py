@@ -2291,7 +2291,17 @@ def pre_split_clips(keyframed_path, cuts, work_dir):
             clip_files.append(None)
             continue
         clip_path = os.path.join(work_dir, f"clip_{i}.mp4")
-        run_ffmpeg(["-y","-ss",str(clip_start),"-i",keyframed_path,"-t",str(clip_dur),"-c","copy",clip_path])
+        if i == 0:
+            # First clip: re-encode for precise seek (no keyframe alignment issues)
+            run_ffmpeg([
+                "-y", "-ss", str(clip_start), "-i", keyframed_path,
+                "-t", str(clip_dur),
+                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "0",
+                "-c:a", "aac", "-b:a", "192k",
+                clip_path,
+            ])
+        else:
+            run_ffmpeg(["-y","-ss",str(clip_start),"-i",keyframed_path,"-t",str(clip_dur),"-c","copy",clip_path])
         clip_files.append(clip_path)
     try:
         os.unlink(keyframed_path)
@@ -3244,19 +3254,7 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
                 font_size = round(base_size * 0.60)
             pos = str(overlay.get("position") or "center")
             y_expr = "250" if pos == "top" else ("(h-th)/2" if pos == "center" else str(max(0, 1920 - 350)))
-            anim_in = 0.4 if style == "cta" else 0.3
-            anim_out = 0.3
             end_t = max(start + 0.8, end)
-            # Fade in from start to start+anim_in, full opacity until end_t-anim_out, fade out to end_t
-            alpha_expr = (
-                f"if(lt(t\\,{(start+anim_in):.3f})\\,"
-                f"(t-{start:.3f})/{anim_in}\\,"
-                f"if(lt(t\\,{(end_t-anim_out):.3f})\\,"
-                f"1\\,"
-                f"if(lt(t\\,{end_t:.3f})\\,"
-                f"({end_t:.3f}-t)/{anim_out}\\,"
-                f"0)))"
-            )
             out_label = f"[video_overlay_{i}]"
             _font_clause = (
                 f":fontfile='{OVERLAY_FONT_PATH}'"
@@ -3266,8 +3264,9 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
             post_filters.append(
                 f"{video_out}drawtext=text='{text}':fontsize={font_size}:fontcolor=white"
                 f"{_font_clause}"
-                f":x=(w-tw)/2:y={y_expr}:alpha='{alpha_expr}'"
-                f":borderw=5:bordercolor=black:enable='between(t\\,{start:.3f}\\,{end_t:.3f})'{out_label}"
+                f":x=(w-tw)/2:y={y_expr}"
+                f":borderw=5:bordercolor=black"
+                f":enable='between(t,{start:.3f},{end_t:.3f})'{out_label}"
             )
             video_out = out_label
 
