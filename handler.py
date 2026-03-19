@@ -941,9 +941,6 @@ Per-clip parameters:
     true / false
     Do not combine with zoom on the same clip.
 
-  speed — playback multiplier (audio pitch preserved):
-    0.5, 0.75, 0.85, 0.9, 0.95, 1.0, 1.05, 1.1, 1.15, 1.25, 1.5, 2.0
-
 Global parameters:
 
   color_intent — the overall color feel: {intents}
@@ -1048,7 +1045,7 @@ Then output the JSON:
     {{"t": <seconds>, "sound": "<sound>", "word": "<trigger>"}}
   ],
   "cuts": [
-    {{"source_start": <n>, "source_end": <n>, "transition_out": "<transition>", "zoom": "<zoom>", "cut_zoom": <bool>, "speed": <n>}}
+    {{"source_start": <n>, "source_end": <n>, "transition_out": "<transition>", "zoom": "<zoom>", "cut_zoom": <bool>}}
   ]
 }}
 ```"""
@@ -2787,11 +2784,12 @@ def get_output_clip_ranges(cuts, effective_durations):
 FILLER_WORDS = {"uh", "um", "uh,", "um,", "hmm", "hmm,", "uhh", "umm", "er", "ah"}
 
 
-def tighten_clips_with_deepgram(cuts, deepgram_words, min_silence_to_remove=0.3):
+def tighten_clips_with_deepgram(cuts, deepgram_words, min_silence_to_remove=0.15):
     """
     Go inside each of Gemini's clips and remove:
     1. Filler words (uh, um, etc.)
     2. Silence gaps longer than min_silence_to_remove seconds
+    3. Dead air at the start and end of each clip (trim to first/last word)
 
     Splits clips at removal points, creating more clips with tighter pacing.
     Gemini's creative decisions (which sections to include) are preserved.
@@ -2804,9 +2802,10 @@ def tighten_clips_with_deepgram(cuts, deepgram_words, min_silence_to_remove=0.3)
 
     total_filler_removed = 0.0
     total_silence_removed = 0.0
+    total_edge_trimmed = 0.0
     new_cuts = []
 
-    for clip in cuts:
+    for clip_idx, clip in enumerate(cuts):
         clip_start = float(clip["source_start"])
         clip_end = float(clip["source_end"])
 
@@ -2814,7 +2813,7 @@ def tighten_clips_with_deepgram(cuts, deepgram_words, min_silence_to_remove=0.3)
         for w in sorted_words:
             w_start = float(w.get("start") or 0)
             w_end = float(w.get("end") or 0)
-            if w_start >= clip_start and w_end <= clip_end:
+            if w_start >= clip_start - 0.05 and w_end <= clip_end + 0.05:
                 clip_words.append(w)
 
         if not clip_words:
@@ -2844,6 +2843,17 @@ def tighten_clips_with_deepgram(cuts, deepgram_words, min_silence_to_remove=0.3)
         if not keep_segments:
             continue
 
+        first_word_start = keep_segments[0]["start"]
+        last_word_end = keep_segments[-1]["end"]
+
+        if first_word_start > clip_start + 0.05:
+            edge_trim = first_word_start - clip_start - 0.02
+            total_edge_trimmed += max(0, edge_trim)
+
+        if clip_end > last_word_end + 0.05:
+            edge_trim = clip_end - last_word_end - 0.02
+            total_edge_trimmed += max(0, edge_trim)
+
         sub_clips = []
         current_sub_start = keep_segments[0]["start"]
         current_sub_end = keep_segments[0]["end"]
@@ -2867,8 +2877,8 @@ def tighten_clips_with_deepgram(cuts, deepgram_words, min_silence_to_remove=0.3)
         })
 
         for sc in sub_clips:
-            sc["start"] = max(clip_start, sc["start"] - 0.05)
-            sc["end"] = min(clip_end, sc["end"] + 0.05)
+            sc["start"] = max(clip_start, sc["start"] - 0.02)
+            sc["end"] = min(clip_end, sc["end"] + 0.02)
 
         for sc in sub_clips:
             if sc["end"] - sc["start"] < 0.1:
@@ -2886,7 +2896,7 @@ def tighten_clips_with_deepgram(cuts, deepgram_words, min_silence_to_remove=0.3)
 
     print(
         f"[tighten] Deepgram tightening: {len(cuts)} clips → {len(new_cuts)} clips, "
-        f"removed {total_filler_removed:.2f}s filler + {total_silence_removed:.2f}s silence",
+        f"removed {total_filler_removed:.2f}s filler + {total_silence_removed:.2f}s silence + {total_edge_trimmed:.2f}s edge trim",
         flush=True,
     )
 
@@ -2923,55 +2933,57 @@ def snap_cuts_to_word_boundaries(cuts, deepgram_words):
 
     print(f"[generate-edit] Found {len(silences)} silence gaps for cut snapping", flush=True)
 
-    def find_best_silence(t):
-        """
-        Find the silence gap closest to timestamp t.
-        Returns the midpoint of that silence gap.
-        Searches with no distance limit — always finds one.
-        """
-        best_silence = None
-        best_distance = float("inf")
-
+    def find_silence_backward(t):
+        """Find the nearest silence gap AT or BEFORE timestamp t."""
+        best = None
+        best_dist = float("inf")
         for s in silences:
             if s["start"] <= t <= s["end"]:
                 return t
+            mid = (s["start"] + s["end"]) / 2
+            if mid <= t:
+                dist = t - mid
+                if dist < best_dist:
+                    best_dist = dist
+                    best = mid
+        return best if best is not None else t
 
-            dist = min(abs(t - s["start"]), abs(t - s["end"]))
-            if dist < best_distance:
-                best_distance = dist
-                best_silence = s
-
-        if best_silence is None:
-            return t
-
-        midpoint = (best_silence["start"] + best_silence["end"]) / 2
-        return midpoint
+    def find_silence_forward(t):
+        """Find the nearest silence gap AT or AFTER timestamp t."""
+        best = None
+        best_dist = float("inf")
+        for s in silences:
+            if s["start"] <= t <= s["end"]:
+                return t
+            mid = (s["start"] + s["end"]) / 2
+            if mid >= t:
+                dist = mid - t
+                if dist < best_dist:
+                    best_dist = dist
+                    best = mid
+        return best if best is not None else t
 
     for i, cut in enumerate(cuts):
         old_start = cut["source_start"]
         old_end = cut["source_end"]
 
-        # Don't snap the very first clip's start (should be at or near 0.0)
-        if i > 0:
-            new_start = find_best_silence(old_start)
-            new_start = round(new_start * 1000) / 1000
-            if abs(new_start - old_start) > 0.01:
-                print(
-                    f"[generate-edit] Snapped clip {i} start: {old_start:.3f}s → {new_start:.3f}s (silence gap)",
-                    flush=True,
-                )
-            cut["source_start"] = new_start
+        new_start = find_silence_backward(old_start)
+        new_start = round(new_start * 1000) / 1000
+        if abs(new_start - old_start) > 0.01:
+            print(
+                f"[generate-edit] Snapped clip {i} start: {old_start:.3f}s → {new_start:.3f}s (backward)",
+                flush=True,
+            )
+        cut["source_start"] = new_start
 
-        # Don't snap the very last clip's end
-        if i < len(cuts) - 1:
-            new_end = find_best_silence(old_end)
-            new_end = round(new_end * 1000) / 1000
-            if abs(new_end - old_end) > 0.01:
-                print(
-                    f"[generate-edit] Snapped clip {i} end: {old_end:.3f}s → {new_end:.3f}s (silence gap)",
-                    flush=True,
-                )
-            cut["source_end"] = new_end
+        new_end = find_silence_forward(old_end)
+        new_end = round(new_end * 1000) / 1000
+        if abs(new_end - old_end) > 0.01:
+            print(
+                f"[generate-edit] Snapped clip {i} end: {old_end:.3f}s → {new_end:.3f}s (forward)",
+                flush=True,
+            )
+        cut["source_end"] = new_end
 
         # Safety: ensure start < end after snapping
         if cut["source_start"] >= cut["source_end"]:
