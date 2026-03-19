@@ -2931,10 +2931,14 @@ def tighten_clips_with_deepgram(cuts, deepgram_words, min_silence_to_remove=0.08
             "end": current_sub_end,
         })
 
-        # Minimal buffer: 0.01s before first word, 0.02s after last word
-        # This is just enough to avoid clipping the attack of the first phoneme
-        for sc in sub_clips:
-            sc["start"] = sc["start"] - 0.01
+        # Buffer: tiny pad before words, small pad after words
+        for j, sc in enumerate(sub_clips):
+            if clip_idx == 0 and j == 0:
+                # First sub-clip of the first clip: start exactly on the word, zero buffer
+                # No dead air before the first word of the video
+                pass
+            else:
+                sc["start"] = sc["start"] - 0.01
             sc["end"] = sc["end"] + 0.02
 
         # Convert sub-clips to full clip dicts
@@ -3067,27 +3071,26 @@ def snap_cuts_to_word_boundaries(cuts, deepgram_words):
             )
             cuts[i]["source_start"] = cuts[i - 1]["source_end"]
 
-    # Final verification: if any cut still lands inside a word, force it out
+    # If a boundary lands inside a word, EXPAND the clip to include the full word
+    # Never remove words — only include them
     for i, cut in enumerate(cuts):
-        for boundary_name, boundary_t in [("start", cut["source_start"]), ("end", cut["source_end"])]:
-            if i == 0 and boundary_name == "start":
-                continue
-            if i == len(cuts) - 1 and boundary_name == "end":
-                continue
+        for boundary_name in ["start", "end"]:
+            boundary_t = cut[f"source_{boundary_name}"]
             for w in sorted_words:
                 w_start = float(w.get("start") or 0)
                 w_end = float(w.get("end") or 0)
                 if w_start < boundary_t < w_end:
                     word_text = w.get("punctuated_word") or w.get("word") or ""
-                    print(
-                        f"[generate-edit] FORCING clip {i} {boundary_name} out of word '{word_text}' "
-                        f"({w_start:.3f}-{w_end:.3f})",
-                        flush=True,
-                    )
                     if boundary_name == "start":
-                        cut["source_start"] = round((w_end + 0.01) * 1000) / 1000
+                        # Move start EARLIER to include the word
+                        new_val = round((w_start - 0.01) * 1000) / 1000
+                        print(f"[generate-edit] Including word '{word_text}' in clip {i} (start {boundary_t:.3f}s → {new_val:.3f}s)", flush=True)
+                        cut["source_start"] = max(0.0, new_val)
                     else:
-                        cut["source_end"] = round((w_start - 0.01) * 1000) / 1000
+                        # Move end LATER to include the word
+                        new_val = round((w_end + 0.01) * 1000) / 1000
+                        print(f"[generate-edit] Including word '{word_text}' in clip {i} (end {boundary_t:.3f}s → {new_val:.3f}s)", flush=True)
+                        cut["source_end"] = new_val
                     break
 
     return cuts
@@ -3244,7 +3247,16 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
             anim_in = 0.4 if style == "cta" else 0.3
             anim_out = 0.3
             end_t = max(start + 0.8, end)
-            alpha_expr = f"if(lt(t\\,{(start+anim_in):.3f})\\,(t-{start:.3f})/{anim_in}\\,if(lt(t\\,{(end_t-anim_out):.3f})\\,1\\,if(lt(t\\,{end_t:.3f})\\,({end_t:.3f}-t)/{anim_out}\\,0)))"
+            # Fade in from start to start+anim_in, full opacity until end_t-anim_out, fade out to end_t
+            alpha_expr = (
+                f"if(lt(t\\,{(start+anim_in):.3f})\\,"
+                f"(t-{start:.3f})/{anim_in}\\,"
+                f"if(lt(t\\,{(end_t-anim_out):.3f})\\,"
+                f"1\\,"
+                f"if(lt(t\\,{end_t:.3f})\\,"
+                f"({end_t:.3f}-t)/{anim_out}\\,"
+                f"0)))"
+            )
             out_label = f"[video_overlay_{i}]"
             _font_clause = (
                 f":fontfile='{OVERLAY_FONT_PATH}'"
