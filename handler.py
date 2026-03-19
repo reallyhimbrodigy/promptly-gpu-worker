@@ -1272,7 +1272,7 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None, deepgra
         edit_plan["_original_cuts_before_tighten"] = [dict(c) for c in validated_cuts]
 
         # Step 2: Tighten AFTER snapping (trims dead air and filler within the snapped clips)
-        validated_cuts = tighten_clips_with_deepgram(validated_cuts, _dg_words, min_silence_to_remove=0.15)
+        validated_cuts = tighten_clips_with_deepgram(validated_cuts, _dg_words, min_silence_to_remove=0.08)
 
         # Step 3: Close micro-gaps created by tightening
         for i in range(1, len(validated_cuts)):
@@ -2840,16 +2840,14 @@ def resolve_overlay_clip_idx(orig_clip_idx, original_cuts, current_cuts):
 FILLER_WORDS = {"uh", "um", "uh,", "um,", "hmm", "hmm,", "uhh", "umm", "er", "ah"}
 
 
-def tighten_clips_with_deepgram(cuts, deepgram_words, min_silence_to_remove=0.15):
+def tighten_clips_with_deepgram(cuts, deepgram_words, min_silence_to_remove=0.08):
     """
-    Go inside each of Gemini's clips and remove:
-    1. Filler words (uh, um, etc.)
-    2. Silence gaps longer than min_silence_to_remove seconds
-    3. Dead air at the start and end of each clip (trim to first/last word)
+    Go inside each of Gemini's clips and:
+    1. Remove filler words (uh, um, etc.)
+    2. Remove silence gaps longer than min_silence_to_remove
+    3. Trim each clip to start at its first word and end at its last word
 
-    Splits clips at removal points, creating more clips with tighter pacing.
-    Gemini's creative decisions (which sections to include) are preserved.
-    Only dead air and filler within those sections is removed.
+    Every clip starts on a word and ends on a word. Zero dead air.
     """
     if not deepgram_words or not cuts:
         return cuts
@@ -2865,17 +2863,20 @@ def tighten_clips_with_deepgram(cuts, deepgram_words, min_silence_to_remove=0.15
         clip_start = float(clip["source_start"])
         clip_end = float(clip["source_end"])
 
+        # Get all words that overlap with this clip (generous matching)
         clip_words = []
         for w in sorted_words:
             w_start = float(w.get("start") or 0)
             w_end = float(w.get("end") or 0)
-            if w_start >= clip_start - 0.05 and w_end <= clip_end + 0.05:
+            # Word is inside clip if it starts within the clip bounds (with small tolerance)
+            if w_start >= clip_start - 0.05 and w_start < clip_end + 0.05:
                 clip_words.append(w)
 
         if not clip_words:
             new_cuts.append(dict(clip))
             continue
 
+        # Filter out filler words
         keep_segments = []
         for w in clip_words:
             w_text = str(w.get("punctuated_word") or w.get("word") or "").strip().lower()
@@ -2899,17 +2900,15 @@ def tighten_clips_with_deepgram(cuts, deepgram_words, min_silence_to_remove=0.15
         if not keep_segments:
             continue
 
+        # Track edge trimming
         first_word_start = keep_segments[0]["start"]
         last_word_end = keep_segments[-1]["end"]
+        if first_word_start > clip_start:
+            total_edge_trimmed += first_word_start - clip_start
+        if clip_end > last_word_end:
+            total_edge_trimmed += clip_end - last_word_end
 
-        if first_word_start > clip_start + 0.05:
-            edge_trim = first_word_start - clip_start - 0.02
-            total_edge_trimmed += max(0, edge_trim)
-
-        if clip_end > last_word_end + 0.05:
-            edge_trim = clip_end - last_word_end - 0.02
-            total_edge_trimmed += max(0, edge_trim)
-
+        # Build sub-clips by splitting at silence gaps
         sub_clips = []
         current_sub_start = keep_segments[0]["start"]
         current_sub_end = keep_segments[0]["end"]
@@ -2932,27 +2931,28 @@ def tighten_clips_with_deepgram(cuts, deepgram_words, min_silence_to_remove=0.15
             "end": current_sub_end,
         })
 
-        for j, sc in enumerate(sub_clips):
-            sc["end"] = min(clip_end, sc["end"] + 0.02)
-            # First sub-clip of the FIRST clip: start at 0.0 (no dead air before first word)
-            if clip_idx == 0 and j == 0:
-                sc["start"] = 0.0
-            else:
-                sc["start"] = max(clip_start, sc["start"] - 0.02)
-
+        # Minimal buffer: 0.01s before first word, 0.02s after last word
+        # This is just enough to avoid clipping the attack of the first phoneme
         for sc in sub_clips:
-            if sc["end"] - sc["start"] < 0.1:
-                continue
+            sc["start"] = sc["start"] - 0.01
+            sc["end"] = sc["end"] + 0.02
+
+        # Convert sub-clips to full clip dicts
+        for sc in sub_clips:
+            if sc["end"] - sc["start"] < 0.15:
+                continue  # Skip tiny fragments
             new_clip = dict(clip)
-            new_clip["source_start"] = round(sc["start"] * 1000) / 1000
+            new_clip["source_start"] = round(max(0.0, sc["start"]) * 1000) / 1000
             new_clip["source_end"] = round(sc["end"] * 1000) / 1000
             new_cuts.append(new_clip)
 
+    # Fix overlaps: earlier clip wins, later clip starts where earlier ends
     for i in range(1, len(new_cuts)):
         if new_cuts[i]["source_start"] < new_cuts[i - 1]["source_end"]:
-            mid = (new_cuts[i - 1]["source_end"] + new_cuts[i]["source_start"]) / 2
-            new_cuts[i - 1]["source_end"] = round(mid * 1000) / 1000
-            new_cuts[i]["source_start"] = round(mid * 1000) / 1000
+            new_cuts[i]["source_start"] = new_cuts[i - 1]["source_end"]
+
+    # Remove any clips that became zero-length or negative after overlap fix
+    new_cuts = [c for c in new_cuts if c["source_end"] > c["source_start"] + 0.05]
 
     print(
         f"[tighten] Deepgram tightening: {len(cuts)} clips → {len(new_cuts)} clips, "
@@ -3056,16 +3056,16 @@ def snap_cuts_to_word_boundaries(cuts, deepgram_words):
             cut["source_start"] = old_start
             cut["source_end"] = old_end
 
-    # Fix any overlaps created by snapping
+    # Fix any overlaps created by snapping: earlier clip wins
     for i in range(1, len(cuts)):
         if cuts[i]["source_start"] < cuts[i - 1]["source_end"]:
-            overlap_mid = (cuts[i - 1]["source_end"] + cuts[i]["source_start"]) / 2
-            cuts[i - 1]["source_end"] = round(overlap_mid * 1000) / 1000
-            cuts[i]["source_start"] = round(overlap_mid * 1000) / 1000
+            # Don't split at midpoint — just close the gap
+            # The later clip starts where the earlier clip ends
             print(
-                f"[generate-edit] Resolved overlap between clip {i-1} and {i} at {overlap_mid:.3f}s",
+                f"[generate-edit] Resolved overlap: clip {i} start moved from {cuts[i]['source_start']:.3f}s to {cuts[i-1]['source_end']:.3f}s",
                 flush=True,
             )
+            cuts[i]["source_start"] = cuts[i - 1]["source_end"]
 
     # Final verification: if any cut still lands inside a word, force it out
     for i, cut in enumerate(cuts):
