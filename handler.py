@@ -1268,6 +1268,9 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None, deepgra
         print(f"[generate-edit] Snapping {len(validated_cuts)} cuts to word boundaries ({len(_dg_words)} words)", flush=True)
         validated_cuts = snap_cuts_to_word_boundaries(validated_cuts, _dg_words)
 
+        # Save original cuts before tightening (text overlays reference these indices)
+        edit_plan["_original_cuts_before_tighten"] = [dict(c) for c in validated_cuts]
+
         # Step 2: Tighten AFTER snapping (trims dead air and filler within the snapped clips)
         validated_cuts = tighten_clips_with_deepgram(validated_cuts, _dg_words, min_silence_to_remove=0.15)
 
@@ -2818,6 +2821,22 @@ def get_output_clip_ranges(cuts, effective_durations):
     return ranges
 
 
+def resolve_overlay_clip_idx(orig_clip_idx, original_cuts, current_cuts):
+    """
+    Map an overlay's appear_at_clip (0-indexed into original/pre-tighten cuts)
+    to the correct index in the current (post-tighten) cuts by matching source timestamps.
+    """
+    if orig_clip_idx < 0 or orig_clip_idx >= len(original_cuts):
+        return None
+    target_source_time = float(original_cuts[orig_clip_idx]["source_start"])
+    for ci, cut in enumerate(current_cuts):
+        if float(cut["source_start"]) <= target_source_time <= float(cut["source_end"]):
+            return ci
+        if abs(float(cut["source_start"]) - target_source_time) < 1.0:
+            return ci
+    return None
+
+
 FILLER_WORDS = {"uh", "um", "uh,", "um,", "hmm", "hmm,", "uhh", "umm", "er", "ah"}
 
 
@@ -2913,9 +2932,13 @@ def tighten_clips_with_deepgram(cuts, deepgram_words, min_silence_to_remove=0.15
             "end": current_sub_end,
         })
 
-        for sc in sub_clips:
-            sc["start"] = max(clip_start, sc["start"] - 0.02)
+        for j, sc in enumerate(sub_clips):
             sc["end"] = min(clip_end, sc["end"] + 0.02)
+            # First sub-clip of the FIRST clip: start at 0.0 (no dead air before first word)
+            if clip_idx == 0 and j == 0:
+                sc["start"] = 0.0
+            else:
+                sc["start"] = max(clip_start, sc["start"] - 0.02)
 
         for sc in sub_clips:
             if sc["end"] - sc["start"] < 0.1:
@@ -2970,8 +2993,10 @@ def snap_cuts_to_word_boundaries(cuts, deepgram_words):
 
     print(f"[generate-edit] Found {len(silences)} silence gaps for cut snapping", flush=True)
 
+    MAX_SNAP_DISTANCE = 0.5  # Never snap more than 0.5 seconds in either direction
+
     def find_silence_backward(t):
-        """Find the nearest silence gap AT or BEFORE timestamp t."""
+        """Find the nearest silence gap AT or BEFORE timestamp t, within MAX_SNAP_DISTANCE."""
         best = None
         best_dist = float("inf")
         for s in silences:
@@ -2980,13 +3005,13 @@ def snap_cuts_to_word_boundaries(cuts, deepgram_words):
             mid = (s["start"] + s["end"]) / 2
             if mid <= t:
                 dist = t - mid
-                if dist < best_dist:
+                if dist < best_dist and dist <= MAX_SNAP_DISTANCE:
                     best_dist = dist
                     best = mid
         return best if best is not None else t
 
     def find_silence_forward(t):
-        """Find the nearest silence gap AT or AFTER timestamp t."""
+        """Find the nearest silence gap AT or AFTER timestamp t, within MAX_SNAP_DISTANCE."""
         best = None
         best_dist = float("inf")
         for s in silences:
@@ -2995,7 +3020,7 @@ def snap_cuts_to_word_boundaries(cuts, deepgram_words):
             mid = (s["start"] + s["end"]) / 2
             if mid >= t:
                 dist = mid - t
-                if dist < best_dist:
+                if dist < best_dist and dist <= MAX_SNAP_DISTANCE:
                     best_dist = dist
                     best = mid
         return best if best is not None else t
@@ -3189,9 +3214,12 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
 
     if text_overlays:
         clip_ranges = get_output_clip_ranges(cuts, effective_durations)
+        _original_cuts = edit_plan.get("_original_cuts_before_tighten") or cuts
         for i, overlay in enumerate(text_overlays):
-            clip_idx = int(overlay.get("appear_at_clip") or 0) - 1
-            if clip_idx < 0 or clip_idx >= len(clip_ranges):
+            orig_clip_idx = int(overlay.get("appear_at_clip") or 0) - 1
+            clip_idx = resolve_overlay_clip_idx(orig_clip_idx, _original_cuts, cuts)
+            if clip_idx is None or clip_idx >= len(clip_ranges):
+                print(f"[render] Text overlay '{overlay.get('text')}' — could not find matching clip for appear_at_clip={orig_clip_idx+1}, skipping", flush=True)
                 continue
             raw_text = str(overlay.get("text") or "")
             text = re.sub(r"[^\x00-\x7F]", "", raw_text).strip()
@@ -3265,10 +3293,12 @@ def mix_sfx_after_speed_curve(output_path, edit_plan, cuts, effective_durations,
 
     # Auto-add pop sounds for text overlays (exact timing from pipeline, not Gemini's guess)
     text_overlays = edit_plan.get("text_overlays", [])
+    _original_cuts = edit_plan.get("_original_cuts_before_tighten") or cuts
     if text_overlays and clip_ranges:
         for ov in text_overlays:
-            clip_idx = int(ov.get("appear_at_clip") or 0) - 1
-            if 0 <= clip_idx < len(clip_ranges):
+            orig_clip_idx = int(ov.get("appear_at_clip") or 0) - 1
+            clip_idx = resolve_overlay_clip_idx(orig_clip_idx, _original_cuts, cuts)
+            if clip_idx is not None and 0 <= clip_idx < len(clip_ranges):
                 ov_t = float(clip_ranges[clip_idx]["start"]) + 0.02
                 already_has_pop = any(
                     s.get("sound") == "pop" and abs(float(s.get("t", 0)) - ov_t) < 1.0
@@ -3603,9 +3633,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             extra_input_index += 1
 
         _clip_ranges = get_output_clip_ranges(cuts, effective_durations)
+        _original_cuts_sfx = edit_plan.get("_original_cuts_before_tighten") or cuts
         for _i, _overlay in enumerate(edit_plan.get("text_overlays") or []):
-            _clip_idx = int(_overlay.get("appear_at_clip") or 0) - 1
-            if _clip_idx < 0 or _clip_idx >= len(_clip_ranges):
+            _orig_clip_idx = int(_overlay.get("appear_at_clip") or 0) - 1
+            _clip_idx = resolve_overlay_clip_idx(_orig_clip_idx, _original_cuts_sfx, cuts)
+            if _clip_idx is None or _clip_idx >= len(_clip_ranges):
                 continue
             _sfx_style = normalize_sfx_style(_overlay.get("sfx_style") or "none")
             if _sfx_style == "none":
