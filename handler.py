@@ -996,15 +996,19 @@ Text overlays:
 
 Sound effects — audio accents that EMPHASIZE specific moments in the video. Each sound effect must be tied to a specific word being spoken OR a specific visual event happening on screen. No random placement.
 
-  ching — cash register. Place when the speaker says: free, money, price, cost, pay, dollar, discount, deal, sale, offer, cash, revenue, income, profit, cheap, affordable.
+  ching — cash register. Place ONLY when the speaker says the word "free" or states an actual dollar amount (like "$50" or "seven thousand dollars") or says "sold". No other words trigger ching. Not "sell", not "money", not "cost", not "pay", not "price", not "profit", not "revenue". ONLY "free", "sold", or a specific dollar amount.
     "word" = the exact trigger word spoken.
 
   ding — notification bell. Place when the speaker says: notification, message, DM, inbox, email, alert, ping, phone, app.
     "word" = the exact trigger word spoken.
 
-  pop — bright snap. Place ONLY when something VISUALLY APPEARS on screen: a text overlay pops up, a screen recording appears, a new visual element is shown. This is a VISUAL trigger only — NOT a speech trigger.
+  pop — bright snap. Place ONLY when something NEW visually appears on screen MID-VIDEO: a screen recording suddenly appears, a new visual element is introduced that wasn't there before. This is a VISUAL trigger only — NOT a speech trigger.
     "word" = "visual_appear"
-    Do NOT place pop on spoken words. Pop is for visual events only.
+    Do NOT place pop on:
+    - Spoken words or phrases
+    - Text overlays that appear at the start of a clip (they're already there when the clip starts — there's no "pop up" moment)
+    - The very beginning of the video (nothing is "appearing" — it's just starting)
+    Pop only makes sense when the viewer is watching one thing and then something NEW suddenly appears on screen. If there's no contrast between "before" and "after", there's no pop.
 
   swoosh — air swipe. Place ONLY when the video visually cuts from one type of content to another — speaker to screen recording, or screen recording back to speaker. NOT for topic changes within speech.
     "word" = "scene_change"
@@ -1394,6 +1398,7 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None, deepgra
     raw_sfx = edit_plan.get("sound_effects", [])
     sound_effects = []
     valid_sounds = {"pop", "ching", "ding", "swoosh"}
+    VALID_CHING_WORDS = {"free", "sold", "dollar", "dollars"}
     for sfx in raw_sfx:
         if isinstance(sfx, dict) and "t" in sfx and "sound" in sfx:
             try:
@@ -1402,7 +1407,16 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None, deepgra
                 continue
             sound = str(sfx["sound"]).lower()
             if sound in valid_sounds and t >= 0:
-                word = str(sfx.get("word") or "").strip()
+                word = str(sfx.get("word") or "").strip().lower()
+
+                # Enforce ching only on approved trigger words
+                if sound == "ching":
+                    word_clean = word.strip(".,!?;:'\"")
+                    is_dollar_amount = "$" in word or word_clean.replace(".", "").replace(",", "").isdigit()
+                    if word_clean not in VALID_CHING_WORDS and not is_dollar_amount:
+                        print(f"[generate-edit] Filtered out ching on '{word}' at {t:.1f}s (not an approved trigger)", flush=True)
+                        continue
+
                 sound_effects.append({"t": t, "sound": sound, "word": word})
     if sound_effects:
         sound_effects.sort(key=lambda x: x["t"])
