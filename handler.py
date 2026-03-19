@@ -933,13 +933,12 @@ Per-clip parameters:
   sfx_style — always "none"
 
   zoom — camera movement across the clip:
-    none — static. Use when the footage has burned-in captions or edge text.
-    slow_in / slow_out / punch_in / punch_out — creates frame movement.
-    Zoom crops the edges. If you see burned-in text near the frame edges, use none.
+    none — static. DEFAULT for all clips.
+    slow_in — gentle push-in. Use ONLY on the first clip of a talking head video to make the opening feel dynamic. Do not use on any other clip.
+    slow_out / punch_in / punch_out — other zoom options. Rarely needed.
+    Zoom crops the edges. If the footage has burned-in captions, use none on ALL clips.
 
-  cut_zoom — alternates between normal and slightly zoomed framing at sentence boundaries to simulate multi-camera:
-    true / false
-    Do not combine with zoom on the same clip.
+  cut_zoom — always false. The pipeline controls this.
 
 Global parameters:
 
@@ -1053,13 +1052,35 @@ Then output the JSON:
     return prompt
 
 
+def infer_has_burned_captions(edit_plan, analysis_data=None, log_prefix=None):
+    has_burned_captions = bool(
+        ((analysis_data or {}).get("frame_layout") or {})
+        .get("existing_overlays", {})
+        .get("has_burned_captions")
+    )
+    if not has_burned_captions:
+        notes = str((edit_plan or {}).get("notes") or "").lower()
+        if "burned" in notes or "burned-in" in notes or "burn-in" in notes or "existing caption" in notes:
+            has_burned_captions = True
+            if log_prefix:
+                print(f"{log_prefix} Detected burned-in captions from recipe notes", flush=True)
+    if not has_burned_captions:
+        caption_style = str((edit_plan or {}).get("caption_style") or "").lower()
+        has_words = bool((edit_plan or {}).get("_deepgram_words"))
+        if caption_style == "none" and has_words:
+            has_burned_captions = True
+            if log_prefix:
+                print(f"{log_prefix} Inferred burned-in captions (caption_style=none but speech detected)", flush=True)
+    return has_burned_captions
+
+
 def build_analysis_from_gemini_recipe(edit_plan, duration):
     raw_frame_layout = edit_plan.get("frame_layout") or {}
     raw_existing = raw_frame_layout.get("existing_overlays") or {}
     raw_fq = edit_plan.get("footage_quality") or {}
-    has_burned_captions = bool(
-        raw_existing.get("has_burned_captions")
-        or raw_fq.get("has_burned_captions")
+    has_burned_captions = infer_has_burned_captions(
+        edit_plan,
+        analysis_data={"frame_layout": {"existing_overlays": raw_existing}},
     )
 
     parsed = {
@@ -1194,9 +1215,7 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None, deepgra
     edit_plan = extract_json(response_text)
     edit_plan["_deepgram_words"] = list(deepgram_words or [])
     analysis = build_analysis_from_gemini_recipe(edit_plan, duration=duration)
-    has_burned_captions = bool(
-        ((analysis.get("frame_layout") or {}).get("existing_overlays") or {}).get("has_burned_captions")
-    )
+    has_burned_captions = infer_has_burned_captions(edit_plan, analysis, log_prefix="[generate-edit]")
 
     raw_cuts = edit_plan.get("cuts") or edit_plan.get("clips") or []
     if not raw_cuts:
@@ -1245,23 +1264,22 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None, deepgra
 
     _dg_words = edit_plan.get("_deepgram_words", [])
     if _dg_words:
-        validated_cuts = tighten_clips_with_deepgram(validated_cuts, _dg_words, min_silence_to_remove=0.3)
-
-    # Snap cut points to word boundaries using Deepgram
-    if _dg_words:
+        # Step 1: Snap boundaries to silence gaps FIRST (preserves all content Gemini intended)
         print(f"[generate-edit] Snapping {len(validated_cuts)} cuts to word boundaries ({len(_dg_words)} words)", flush=True)
         validated_cuts = snap_cuts_to_word_boundaries(validated_cuts, _dg_words)
 
-        # Second micro-gap pass: snapping may have created tiny gaps
+        # Step 2: Tighten AFTER snapping (trims dead air and filler within the snapped clips)
+        validated_cuts = tighten_clips_with_deepgram(validated_cuts, _dg_words, min_silence_to_remove=0.15)
+
+        # Step 3: Close micro-gaps created by tightening
         for i in range(1, len(validated_cuts)):
             prev_end = validated_cuts[i - 1]["source_end"]
             curr_start = validated_cuts[i]["source_start"]
             gap = curr_start - prev_end
             if 0 < gap <= 0.05:
-                # Tiny gap from snapping — close it by extending prev clip to curr start
                 validated_cuts[i - 1]["source_end"] = curr_start
     else:
-        print("[generate-edit] No Deepgram words available — skipping word-boundary snapping", flush=True)
+        print("[generate-edit] No Deepgram words available — skipping word-boundary snapping and tightening", flush=True)
 
     vibe_lower = vibe.lower() if isinstance(vibe, str) else ""
     has_transition_request = any(
@@ -1286,11 +1304,30 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None, deepgra
                 )
                 validated_cuts[i]["transition_out"] = "none"
 
+    # Zoom rules:
+    # - If burned-in captions: ALL zoom and cut_zoom disabled on ALL clips
+    # - If no burned-in captions: zoom allowed ONLY on the first clip, disabled on all others
+    # - cut_zoom disabled everywhere (too distracting, crops burned-in text)
     if has_burned_captions:
         for clip in validated_cuts:
             if clip.get("zoom") and clip["zoom"] != "none":
-                print(f"[generate-edit] Overriding zoom={clip['zoom']} to none (burned-in captions detected)", flush=True)
+                print(f"[generate-edit] Overriding zoom={clip['zoom']} to none (burned-in captions)", flush=True)
                 clip["zoom"] = "none"
+            if clip.get("cut_zoom"):
+                print(f"[generate-edit] Overriding cut_zoom=true to false (burned-in captions)", flush=True)
+                clip["cut_zoom"] = False
+    else:
+        for i, clip in enumerate(validated_cuts):
+            if i == 0:
+                if clip.get("cut_zoom"):
+                    clip["cut_zoom"] = False
+            else:
+                if clip.get("zoom") and clip["zoom"] != "none":
+                    print(f"[generate-edit] Overriding zoom={clip['zoom']} to none (only first clip gets zoom)", flush=True)
+                    clip["zoom"] = "none"
+                if clip.get("cut_zoom"):
+                    print(f"[generate-edit] Overriding cut_zoom=true to false (only first clip gets zoom)", flush=True)
+                    clip["cut_zoom"] = False
 
     edit_plan.setdefault("background_music", "none")
     edit_plan.setdefault("caption_style", "none")
@@ -3416,11 +3453,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     color_grade = edit_plan.get("color_grade") or {}
     color_filter_str = build_video_filter_chain(color_grade, source_res, edit_plan)
-    has_burned_captions = bool(
-        (edit_plan.get("analysis_data") or {})
-        .get("frame_layout", {})
-        .get("existing_overlays", {})
-        .get("has_burned_captions")
+    has_burned_captions = infer_has_burned_captions(
+        edit_plan,
+        edit_plan.get("analysis_data") or {},
+        log_prefix="[render]",
     )
 
     input_args = []
