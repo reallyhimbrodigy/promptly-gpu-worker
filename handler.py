@@ -949,27 +949,30 @@ Global parameters:
   color_intent — the overall color feel: {intents}
     Choose based on what you see in the footage and what the vibe calls for. The pipeline applies the grade automatically.
 
-  speed_curve — smooth speed ramp across the entire assembled video. Audio pitch shifts naturally with the speed — sped up sections sound higher-pitched, slowed sections sound deeper. This pitch shift is the signature sound of TikTok speed ramping and is intentional.
-    "none" — no speed ramping.
+  speed_curve — smooth speed ramp across the entire assembled video. Audio pitch shifts naturally with the speed — sped up sections sound higher-pitched (chipmunk), slowed sections sound deeper. This pitch shift IS the effect.
+    "none" — no speed ramping. This is the default. Most videos do not need speed ramping.
     Array of keypoints: [{{"t": <output_seconds>, "speed": <0.5 to 2.0>}}]
 
-    When the user asks for "speed ramping", "dynamic", "engaging", "captivating", or "CapCut style" editing, use a speed curve.
+    ONLY use a speed curve when the user explicitly asks for "speed ramping", "speed ramp", or "CapCut style" editing. Do NOT add speed ramping just because the user said "engaging" or "captivating."
 
-    Watch the video. Listen to the speech. Place your speed keypoints based on what you actually see and hear:
+    Speed ramping is a COMEDY and EMPHASIS tool. It makes punchlines land harder, makes funny moments funnier, and creates dramatic contrast. It does NOT make informational videos "more engaging" — tight cuts do that.
 
-    SPEED UP through moments that don't need the viewer's full attention — buildup, filler, transitions between ideas, repetition, anything that isn't the point. The viewer should feel the video RUSHING through these moments. The speaker's voice rises in pitch and the words fly by.
+    HOW SPEED RAMPING WORKS ON TIKTOK:
+    The effect comes from CONTRAST — the sharp jump between fast and slow. A punchline only lands hard if the setup right before it was noticeably fast. The speed should SNAP from fast to slow at the exact moment the punchline hits.
 
-    SLOW DOWN on moments that need to land — punchlines, reveals, key statements, offers, emotional peaks, anything the viewer would want to rewatch. The viewer should feel the video PULLING them in. The speaker's voice drops deeper and every word carries weight.
+    Place keypoints in PAIRS: a fast keypoint immediately followed by a slow keypoint (or vice versa). The comedy comes from the sudden shift, not from gradual changes. Two keypoints that are close together in time but far apart in speed create the snap.
 
-    The video will speed up and slow down MULTIPLE TIMES throughout. It's a wave. Every shift in content energy is an opportunity to shift the speed.
+    NOT EVERY SECTION NEEDS SPEED CHANGES. Many sections should be at 1.0x. Speed ramping is like seasoning — a few well-placed moments across the video, not a constant wave. A video with 3-4 speed-ramped moments and the rest at 1.0x is better than a video where every second has a different speed.
 
-    The speed shift must be DRAMATIC enough for the viewer to feel it. This is TikTok — the audience expects to hear the voice pitch up and down. Conservative speed changes (0.9x to 1.1x) are invisible and pointless. The viewer should clearly HEAR the difference between fast and slow sections.
+    WRONG approach (even spacing, small differences):
+      t=0 speed=1.1, t=5 speed=0.9, t=10 speed=1.2, t=15 speed=0.85, t=20 speed=1.1
+      This feels random and cheap. The viewer can barely hear the changes.
 
-    Speed values range from 0.5 to 2.0. Use the full range based on what the content needs. You decide how fast and how slow based on what you watch and hear — there are no preset values. Trust your judgment. The only rule: the viewer must be able to feel the speed changes.
+    RIGHT approach (targeted moments with sharp contrast):
+      t=0 speed=1.0, t=8 speed=1.5, t=8.5 speed=0.6, t=12 speed=1.0, t=25 speed=1.4, t=25.3 speed=0.55, t=28 speed=1.0
+      Speed is normal, then SNAPS fast right before the punchline, then SNAPS slow on the punchline, then returns to normal. Only 2-3 moments in the whole video are speed-ramped.
 
-    Most serious, informational, or calm content does NOT need speed ramping. Only use speed_curve when the user asks for it or when the content genuinely benefits from dynamic pacing.
-
-    Place keypoints at real content moments you can see and hear — not at evenly spaced intervals.
+    Watch the video. Find the 2-4 moments that deserve emphasis. Speed ramp ONLY those moments. Leave everything else at 1.0x.
 
   caption_style — word-by-word animated captions synced to speech:
     none — no captions. Use when captions are already burned into the footage.
@@ -2476,14 +2479,10 @@ def build_video_filter_chain(color_grade, source_res, edit_plan=None):
     intent = str(ep.get("color_intent") or "none").lower()
 
     if intent == "polished" or intent == "clean" or intent == "warm" or intent == "punchy" or intent == "vibrant":
-        # "polished" preset — makes any video look slightly better than raw footage
-        # Slightly lifted shadows, subtle warmth, gentle saturation boost, touch of contrast
+        # "polished" preset — contrast and saturation only
+        # NO brightness, NO gamma, NO curves — those wash out well-exposed footage
         filters.append(
-            "eq=brightness=0.03:contrast=1.05:saturation=1.06:gamma=1.02"
-        )
-        # Gentle shadow lift — opens up dark areas without washing out
-        filters.append(
-            "curves=master='0/0 0.05/0.09 0.5/0.52 1/1'"
+            "eq=contrast=1.06:saturation=1.08"
         )
 
     elif intent == "none":
