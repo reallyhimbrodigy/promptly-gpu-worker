@@ -2316,6 +2316,23 @@ def pre_split_clips(keyframed_path, cuts, work_dir):
                 "-c:a", "aac", "-b:a", "192k",
                 clip_path,
             ])
+            # Trim any leading audio silence from clip 0
+            trimmed_path = clip_path.replace(".mp4", "_trimmed.mp4")
+            _trim_result = subprocess.run([
+                "ffmpeg", "-y",
+                "-i", clip_path,
+                "-af", "silenceremove=start_periods=1:start_silence=0.01:start_threshold=-40dB",
+                "-c:v", "copy",
+                "-c:a", "aac", "-b:a", "192k",
+                trimmed_path,
+            ], capture_output=True, text=True, timeout=30)
+            if _trim_result.returncode == 0 and os.path.exists(trimmed_path):
+                os.replace(trimmed_path, clip_path)
+                print(f"[ffmpeg] Clip 0: trimmed leading audio silence", flush=True)
+            else:
+                print(f"[ffmpeg] Clip 0: silence trim failed, using original", flush=True)
+                if os.path.exists(trimmed_path):
+                    os.remove(trimmed_path)
         else:
             run_ffmpeg(["-y","-ss",str(clip_start),"-i",keyframed_path,"-t",str(clip_dur),"-c","copy",clip_path])
         clip_files.append(clip_path)
@@ -3323,23 +3340,6 @@ def mix_sfx_after_speed_curve(output_path, edit_plan, cuts, effective_durations,
     """
     clip_ranges = get_output_clip_ranges(cuts, effective_durations)
     parsed_sfx = list(edit_plan.get("_parsed_sound_effects", []))
-
-    # Auto-add pop sounds for text overlays (exact timing from pipeline, not Gemini's guess)
-    text_overlays = edit_plan.get("text_overlays", [])
-    _original_cuts = edit_plan.get("_original_cuts_before_tighten") or cuts
-    if text_overlays and clip_ranges:
-        for ov in text_overlays:
-            orig_clip_idx = int(ov.get("appear_at_clip") or 0) - 1
-            clip_idx = resolve_overlay_clip_idx(orig_clip_idx, _original_cuts, cuts)
-            if clip_idx is not None and 0 <= clip_idx < len(clip_ranges):
-                ov_t = float(clip_ranges[clip_idx]["start"]) + 0.02
-                already_has_pop = any(
-                    s.get("sound") == "pop" and abs(float(s.get("t", 0)) - ov_t) < 1.0
-                    for s in parsed_sfx
-                )
-                if not already_has_pop:
-                    parsed_sfx.append({"t": ov_t, "sound": "pop", "word": "text_overlay", "_auto": True})
-                    print(f"[sfx] Auto-added pop for text overlay at output={ov_t:.3f}s", flush=True)
 
     if not parsed_sfx:
         print("[sfx] No sound effects to mix", flush=True)
