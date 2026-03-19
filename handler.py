@@ -2535,6 +2535,24 @@ def build_video_filter_chain(color_grade, source_res, edit_plan=None):
     ep = edit_plan or {}
     filters = []
 
+    # Color preset based on color_intent
+    intent = str(ep.get("color_intent") or "none").lower()
+
+    if intent == "polished" or intent == "clean" or intent == "warm" or intent == "punchy" or intent == "vibrant":
+        # "polished" preset — makes any video look slightly better than raw footage
+        # Slightly lifted shadows, subtle warmth, gentle saturation boost, touch of contrast
+        filters.append(
+            "eq=brightness=0.03:contrast=1.05:saturation=1.06:gamma=1.02"
+        )
+        # Gentle shadow lift — opens up dark areas without washing out
+        filters.append(
+            "curves=master='0/0 0.05/0.09 0.5/0.52 1/1'"
+        )
+
+    elif intent == "none":
+        # No color processing — raw footage
+        pass
+
     grain = str(ep.get("grain") or "none").lower()
     if grain == "subtle":
         filters.append("noise=c0s=4:c0f=t+u")
