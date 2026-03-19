@@ -3227,6 +3227,10 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
 
     if text_overlays:
         clip_ranges = get_output_clip_ranges(cuts, effective_durations)
+        total_output_dur = sum(effective_durations)
+        print(f"[render] Total output duration: {total_output_dur:.3f}s, {len(clip_ranges)} clip ranges", flush=True)
+        for cr_i, cr in enumerate(clip_ranges):
+            print(f"[render]   clip_range[{cr_i}]: {cr['start']:.3f}s - {cr['end']:.3f}s", flush=True)
         _original_cuts = edit_plan.get("_original_cuts_before_tighten") or cuts
         for i, overlay in enumerate(text_overlays):
             orig_clip_idx = int(overlay.get("appear_at_clip") or 0) - 1
@@ -3255,6 +3259,8 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
             pos = str(overlay.get("position") or "center")
             y_expr = "250" if pos == "top" else ("(h-th)/2" if pos == "center" else str(max(0, 1920 - 350)))
             end_t = max(start + 0.8, end)
+            print(f"[render] Text overlay '{text}' on clip {clip_idx}: start={start:.3f}s end_t={end_t:.3f}s (clip range {clip_ranges[clip_idx]['start']:.3f}-{clip_ranges[clip_idx]['end']:.3f})", flush=True)
+            print(f"[render] drawtext enable: between(t,{start:.3f},{end_t:.3f})", flush=True)
             out_label = f"[video_overlay_{i}]"
             _font_clause = (
                 f":fontfile='{OVERLAY_FONT_PATH}'"
