@@ -949,19 +949,6 @@ Global parameters:
   color_intent — the overall color feel: {intents}
     Choose based on what you see in the footage and what the vibe calls for. The pipeline applies the grade automatically.
 
-  vignette: none, light, medium, strong
-    Use none for talking head videos and educational content — vignette darkens the edges and looks unnatural on a person's face. Only use light-strong for lifestyle, cinematic, or moody content where the speaker is NOT the primary visual.
-
-  grain: none, subtle, medium, heavy
-
-  cinematic_bars: true / false
-
-  shadow_lift: true / false — lifts crushed shadows. Set true if you see dark, underexposed shadow areas.
-
-  highlight_rolloff: true / false — protects blown highlights. Set true if you see bright, overexposed areas.
-
-  vibrance: true / false — boosts muted colors while protecting skin. Set true if the footage looks flat or desaturated.
-
   speed_curve — smooth speed ramp across the entire assembled video. Audio pitch shifts naturally with the speed — sped up sections sound higher-pitched, slowed sections sound deeper. This pitch shift is the signature sound of TikTok speed ramping and is intentional.
     "none" — no speed ramping.
     Array of keypoints: [{{"t": <output_seconds>, "speed": <0.5 to 2.0>}}]
@@ -1019,16 +1006,6 @@ Text overlays:
   style — title (72px), callout (56px), cta (64px)
   If captions are already burned in, use overlays sparingly — maximum 2-3 per video.
 
-B-roll — stock footage overlaid on the main video for 2-3 seconds:
-  keyword — search term for Pexels. Must describe a MEDIUM or WIDE shot of a person doing something in a setting. NOT a close-up of hands or objects.
-    GOOD: "woman scrolling social media on phone couch", "person typing on laptop at desk wide shot", "creator filming video with phone tripod", "coffee shop customer using laptop", "young person watching phone smiling"
-    BAD: "person scrolling phone screen" (returns extreme close-ups), "hands typing laptop keyboard" (returns disembodied hands), "frustrated person looking at phone" (Pexels cannot search emotions), "phone screen close up" (macro shots of screens), "person typing on laptop" (too vague, returns random angles)
-    Every keyword MUST include: WHO (person, woman, man, creator), WHAT they're doing (scrolling, typing, filming), and WHERE (couch, desk, cafe, office). This produces medium shots of real scenes.
-    If you can't describe a specific scene with a person in a setting, don't add b-roll.
-  timestamp — seconds into the source video. Not in the first 3 seconds.
-  duration — 2-3 seconds max.
-  Maximum 2 b-roll clips per video.
-
 Sound effects — audio accents that EMPHASIZE specific moments in the video. Each sound effect must be tied to a specific word being spoken OR a specific visual event happening on screen. No random placement.
 
   ching — cash register. Place when the speaker says: free, money, price, cost, pay, dollar, discount, deal, sale, offer, cash, revenue, income, profit, cheap, affordable.
@@ -1064,23 +1041,6 @@ Then output the JSON:
 ```json
 {{
   "notes": "<50 words max>",
-  "footage_quality": {{
-    "noise_level": "<none|low|medium|high>",
-    "source_sharpness": "<soft|normal|sharp>",
-    "highlight_condition": "<clipped|bright|normal|dark>",
-    "shadow_condition": "<crushed|deep|normal|lifted>",
-    "color_richness": "<flat|muted|normal|vivid>",
-    "skin_tones_present": <true|false>,
-    "lighting_type": "<natural_outdoor|natural_indoor|studio|mixed|unknown>",
-    "has_burned_captions": <true|false>
-  }},
-  "color_baseline": {{
-    "brightness": <number 0.85-1.15, where 1.0 = no change>,
-    "contrast": <number 0.85-1.15, where 1.0 = no change>,
-    "saturation": <number 0.85-1.15, where 1.0 = no change>,
-    "gamma": <number 0.85-1.15, where 1.0 = no change>,
-    "color_temperature": "<warm|cool|neutral>"
-  }},
   "color_intent": "<intent>",
   "caption_style": "<style>",
   "caption_position": "<position>",
@@ -1089,20 +1049,11 @@ Then output the JSON:
   "background_music": "none",
   "aspect_ratio": "9:16",
   "speed_curve": [<keypoints>] or "none",
-  "vignette": "<none|light|medium|strong>",
-  "grain": "<none|subtle|medium|heavy>",
-  "cinematic_bars": <true|false>,
-  "shadow_lift": <true|false>,
-  "highlight_rolloff": <true|false>,
-  "vibrance": <true|false>,
   "text_overlays": [
     {{"text": "<text>", "position": "<pos>", "appear_at_clip": <n>, "style": "<style>"}}
   ],
-  "broll": [
-    {{"keyword": "<search>", "timestamp": <seconds>, "duration": <seconds>}}
-  ],
   "sound_effects": [
-    {{"t": <seconds>, "sound": "<sound>"}}
+    {{"t": <seconds>, "sound": "<sound>", "word": "<trigger>"}}
   ],
   "cuts": [
     {{"source_start": <n>, "source_end": <n>, "transition_out": "<transition>", "zoom": "<zoom>", "cut_zoom": <bool>, "speed": <n>}}
