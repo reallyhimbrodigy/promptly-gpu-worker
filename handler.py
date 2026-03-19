@@ -997,32 +997,30 @@ Text overlays:
   style — title (72px), callout (56px), cta (64px)
   If captions are already burned in, use overlays sparingly — maximum 2-3 per video.
 
-Sound effects — audio accents that EMPHASIZE specific moments in the video. Each sound effect must be tied to a specific word being spoken OR a specific visual event happening on screen. No random placement.
+Sound effects — audio accents that EMPHASIZE specific moments. Each sound must be tied to a real event you can see or hear. Use the word timestamps above to place sounds at the EXACT moment.
 
-  ching — cash register. Place ONLY when the speaker says the word "free" or states an actual dollar amount (like "$50" or "seven thousand dollars") or says "sold". No other words trigger ching. Not "sell", not "money", not "cost", not "pay", not "price", not "profit", not "revenue". ONLY "free", "sold", or a specific dollar amount.
-    "word" = the exact trigger word spoken.
+  ching — cash register. Place ONLY when the speaker says the word "free" or "sold" or states a specific dollar amount. No other words. Use the word timestamps to place the ching at the exact start of the trigger word.
+    "word" = the exact trigger word (e.g. "free", "sold")
 
-  ding — notification bell. Place when the speaker says: notification, message, DM, inbox, email, alert, ping, phone, app.
-    "word" = the exact trigger word spoken.
+  ding — notification bell. Place ONLY when the speaker says the word "text", "notification", or "email". No other words.
+    "word" = the exact trigger word (e.g. "text", "notification", "email")
 
-  pop — bright snap. Place ONLY when something NEW visually appears on screen MID-VIDEO: a screen recording suddenly appears, a new visual element is introduced that wasn't there before. This is a VISUAL trigger only — NOT a speech trigger.
-    "word" = "visual_appear"
-    Do NOT place pop on:
+  pop — bright snap. Place ONLY when a new visual element appears on screen mid-video that was NOT there before — such as a screen recording appearing, an image overlay appearing, or a picture-in-picture opening. This is a VISUAL event only. Do NOT place pop on:
+    - The start of the video (nothing is "appearing")
+    - Text overlays (they don't "pop")
     - Spoken words or phrases
-    - Text overlays that appear at the start of a clip (they're already there when the clip starts — there's no "pop up" moment)
-    - The very beginning of the video (nothing is "appearing" — it's just starting)
-    Pop only makes sense when the viewer is watching one thing and then something NEW suddenly appears on screen. If there's no contrast between "before" and "after", there's no pop.
+    - Cuts between clips (cuts are silent)
+    If you cannot point to a specific frame where something new visually appears on screen, do not use pop.
+    "word" = "visual_appear"
 
-  swoosh — air swipe. Place ONLY when the user's vibe requests transitions AND a wipe or fade transition is being used. Do NOT place swoosh on hard cuts. Hard cuts are silent. Swoosh is for visible transitions only.
-    If you are not using any transitions (transition_out = "none" on all clips), do not use swoosh at all.
+  swoosh — air swipe. Place ONLY when you are using a wipe or fade transition between clips. If all transitions are "none" (hard cuts), do not use swoosh at all.
     "word" = "scene_change"
 
   Rules:
-  - Every sound effect MUST have a "word" field explaining what triggers it.
-  - If you cannot identify a specific spoken word or visual event that triggers the sound, DO NOT add it.
-  - Do not spread sounds evenly across the video. Cluster them where moments actually happen.
-  - Most videos have 1-4 sound effects. Some have zero. Zero is fine.
-  - Each sound must ADD to the video and EMPHASIZE the moment. If removing the sound wouldn't change how the moment feels, don't add it.
+  - Most videos have 1-3 sound effects total. Many have zero. Zero is fine.
+  - Every sound effect MUST have a "word" field.
+  - Use the word timestamps to place each sound at the EXACT millisecond.
+  - If you are unsure whether a sound belongs, leave it out. Silence is better than a wrong sound.
 
   sound_effects: [
     {{"t": <seconds>, "sound": "<pop|ching|ding|swoosh>", "word": "<trigger word or event>"}}
@@ -1301,23 +1299,15 @@ RULES FOR USING THESE TIMESTAMPS:
 
     _dg_words = edit_plan.get("_deepgram_words", [])
     if _dg_words:
-        # Step 1: Snap boundaries to silence gaps FIRST (preserves all content Gemini intended)
-        print(f"[generate-edit] Snapping {len(validated_cuts)} cuts to word boundaries ({len(_dg_words)} words)", flush=True)
-        validated_cuts = snap_cuts_to_word_boundaries(validated_cuts, _dg_words)
+        # Snapping disabled — Gemini has Deepgram timestamps and places cuts in silence gaps
+        # validated_cuts = snap_cuts_to_word_boundaries(validated_cuts, _dg_words)
+        print(f"[generate-edit] Snapping disabled — Gemini has word timestamps", flush=True)
 
-        # Save original cuts before tightening (text overlays reference these indices)
-        edit_plan["_original_cuts_before_tighten"] = [dict(c) for c in validated_cuts]
+        # Tightening disabled — Gemini has Deepgram timestamps and places precise cuts
+        # validated_cuts = tighten_clips_with_deepgram(validated_cuts, _dg_words, min_silence_to_remove=0.08)
+        print(f"[generate-edit] Tightening disabled — Gemini has word timestamps", flush=True)
 
-        # Step 2: Tighten AFTER snapping (trims dead air and filler within the snapped clips)
-        validated_cuts = tighten_clips_with_deepgram(validated_cuts, _dg_words, min_silence_to_remove=0.08)
-
-        # Step 3: Close micro-gaps created by tightening
-        for i in range(1, len(validated_cuts)):
-            prev_end = validated_cuts[i - 1]["source_end"]
-            curr_start = validated_cuts[i]["source_start"]
-            gap = curr_start - prev_end
-            if 0 < gap <= 0.05:
-                validated_cuts[i - 1]["source_end"] = curr_start
+        # Micro-gap closing not needed — Gemini places precise boundaries
     else:
         print("[generate-edit] No Deepgram words available — skipping word-boundary snapping and tightening", flush=True)
 
@@ -1450,6 +1440,14 @@ RULES FOR USING THESE TIMESTAMPS:
                         print(f"[generate-edit] Filtered out ching on '{word}' at {t:.1f}s (not an approved trigger)", flush=True)
                         continue
 
+                # Enforce ding only on approved trigger words
+                if sound == "ding":
+                    VALID_DING_WORDS = {"text", "notification", "email"}
+                    word_clean = word.strip(".,!?;:'\"")
+                    if word_clean not in VALID_DING_WORDS:
+                        print(f"[generate-edit] Filtered out ding on '{word}' at {t:.1f}s (not an approved trigger)", flush=True)
+                        continue
+
                 # Enforce swoosh only when transitions are present
                 if sound == "swoosh":
                     has_transitions = any(
@@ -1460,19 +1458,24 @@ RULES FOR USING THESE TIMESTAMPS:
                         print(f"[generate-edit] Filtered out swoosh at {t:.1f}s (no transitions in video)", flush=True)
                         continue
 
-                # Enforce pop: only when text overlays or b-roll exist in the recipe
+                # Enforce pop: only when b-roll exists near this timestamp
                 if sound == "pop":
                     pop_has_visual = False
-                    for ov in (edit_plan.get("text_overlays") or []):
-                        if int(ov.get("appear_at_clip", 0)) > 0:
-                            pop_has_visual = True
-                            break
                     for br in (edit_plan.get("broll") or []):
                         if abs(float(br.get("timestamp", 0)) - t) < 3.0:
                             pop_has_visual = True
                             break
+                    if word == "visual_appear":
+                        cuts_list = edit_plan.get("cuts") or []
+                        for ci in range(1, len(cuts_list)):
+                            gap = float(cuts_list[ci].get("source_start", 0)) - float(cuts_list[ci-1].get("source_end", 0))
+                            if gap > 0.5:
+                                skip_time = float(cuts_list[ci].get("source_start", 0))
+                                if abs(skip_time - t) < 3.0:
+                                    pop_has_visual = True
+                                    break
                     if not pop_has_visual:
-                        print(f"[generate-edit] Filtered out pop at {t:.1f}s (no text overlay or b-roll in recipe)", flush=True)
+                        print(f"[generate-edit] Filtered out pop at {t:.1f}s (no visual event confirmed)", flush=True)
                         continue
 
                 sound_effects.append({"t": t, "sound": sound, "word": word})
@@ -3305,12 +3308,10 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
         print(f"[render] Total output duration: {total_output_dur:.3f}s, {len(clip_ranges)} clip ranges", flush=True)
         for cr_i, cr in enumerate(clip_ranges):
             print(f"[render]   clip_range[{cr_i}]: {cr['start']:.3f}s - {cr['end']:.3f}s", flush=True)
-        _original_cuts = edit_plan.get("_original_cuts_before_tighten") or cuts
         for i, overlay in enumerate(text_overlays):
-            orig_clip_idx = int(overlay.get("appear_at_clip") or 0) - 1
-            clip_idx = resolve_overlay_clip_idx(orig_clip_idx, _original_cuts, cuts)
-            if clip_idx is None or clip_idx >= len(clip_ranges):
-                print(f"[render] Text overlay '{overlay.get('text')}' — could not find matching clip for appear_at_clip={orig_clip_idx+1}, skipping", flush=True)
+            clip_idx = int(overlay.get("appear_at_clip") or 0) - 1
+            if clip_idx < 0 or clip_idx >= len(clip_ranges):
+                print(f"[render] Text overlay '{overlay.get('text')}' — clip_idx={clip_idx} out of range ({len(clip_ranges)} clips), skipping", flush=True)
                 continue
             raw_text = str(overlay.get("text") or "")
             text = re.sub(r"[^\x00-\x7F]", "", raw_text).strip()
@@ -3707,11 +3708,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             extra_input_index += 1
 
         _clip_ranges = get_output_clip_ranges(cuts, effective_durations)
-        _original_cuts_sfx = edit_plan.get("_original_cuts_before_tighten") or cuts
         for _i, _overlay in enumerate(edit_plan.get("text_overlays") or []):
-            _orig_clip_idx = int(_overlay.get("appear_at_clip") or 0) - 1
-            _clip_idx = resolve_overlay_clip_idx(_orig_clip_idx, _original_cuts_sfx, cuts)
-            if _clip_idx is None or _clip_idx >= len(_clip_ranges):
+            _clip_idx = int(_overlay.get("appear_at_clip") or 0) - 1
+            if _clip_idx < 0 or _clip_idx >= len(_clip_ranges):
                 continue
             _sfx_style = normalize_sfx_style(_overlay.get("sfx_style") or "none")
             if _sfx_style == "none":
