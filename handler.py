@@ -2306,9 +2306,11 @@ def pre_split_clips(keyframed_path, cuts, work_dir):
             continue
         clip_path = os.path.join(work_dir, f"clip_{i}.mp4")
         if i == 0:
-            # First clip: re-encode for precise seek (no keyframe alignment issues)
+            # First clip: -ss AFTER -i for frame+audio-accurate seeking
+            # Slower but eliminates AAC packet alignment silence
             run_ffmpeg([
-                "-y", "-ss", str(clip_start), "-i", keyframed_path,
+                "-y", "-i", keyframed_path,
+                "-ss", str(clip_start),
                 "-t", str(clip_dur),
                 "-c:v", "libx264", "-preset", "ultrafast", "-crf", "0",
                 "-c:a", "aac", "-b:a", "192k",
