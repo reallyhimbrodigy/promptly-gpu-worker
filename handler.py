@@ -973,23 +973,12 @@ Global parameters:
 
   caption_style — word-by-word animated captions synced to speech:
     none — no captions. Use when captions are already burned into the footage.
-    capcut — the standard TikTok/Reels caption style. Bold white text with black outline, word-by-word bounce animation, active word highlighted in yellow. This is what viewers expect on these platforms. Use this as the default when the video has speech and no burned-in captions.
-    animated_word — similar to capcut but with a karaoke color sweep instead of bounce animation.
-    bold_white — large bold white text, karaoke highlight.
-    bold_yellow — large bold yellow text.
-    keyword_pop — white text with green highlight on specific keywords.
-    standard — clean white text, subtle animation.
-    minimal_bottom — small understated text at the bottom.
-    bold_centered — large bold centered text.
-    box_caption — text with filled background rectangle.
+    capcut — bold white text with black outline, active word highlighted in yellow, word-by-word animation. This is the standard TikTok/Reels caption style. Use this as the default when the video has speech and no burned-in captions.
+    animated_word — similar to capcut but with a smooth karaoke color sweep. Use when the user asks for something slightly different.
 
-    If the video has speech and no burned-in captions, use "capcut" — it is the defining caption style of TikTok and Reels content.
+    If the video has speech and no burned-in captions, use "capcut".
 
-  caption_position — where captions appear:
-    center — the standard position for CapCut-style captions. Centered in the frame where the viewer's eye naturally goes.
-    lower-third — slightly below center. Good when the speaker's face needs to stay visible.
-    top — above the speaker. Use when the bottom of the frame is cluttered.
-    bottom — near the bottom edge. WARNING: platform UI covers this area on TikTok/Reels.
+  caption_position — where captions appear on screen. Always use "lower-third" — this places captions in the safe zone below faces and above the TikTok/Reels platform UI. This is the standard caption placement used by every major short-form editor.
 
   audio_denoise: true / false — AI noise removal for room tone, hiss, fan noise.
 
@@ -1332,10 +1321,7 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None, deepgra
     edit_plan.pop("teal_orange", None)
     edit_plan.pop("beat_sync", None)
 
-    valid_caption_styles = {
-        "none", "capcut", "standard", "bold_centered", "minimal_bottom",
-        "animated_word", "bold_white", "bold_yellow", "keyword_pop", "box_caption",
-    }
+    valid_caption_styles = {"none", "capcut", "animated_word"}
     if str(edit_plan.get("caption_style") or "").lower() not in valid_caption_styles:
         edit_plan["caption_style"] = "capcut"
     else:
@@ -2560,9 +2546,13 @@ def generate_subtitle_file(transcript, caption_style, cuts, effective_durations,
     w = output_res.get("width") or 1080
     h = output_res.get("height") or 1920
 
-    # Vertical position margin — how far from the bottom (or top) edge in pixels
-    pos_margin = {"top": 1650, "center": 900, "lower-third": 300, "bottom": 80}
-    margin_v = pos_margin.get(caption_position or "lower-third", 300)
+    # Vertical position margin — distance from BOTTOM of frame in pixels
+    # On a 1920px tall frame:
+    #   400px from bottom = 79% from top (below most faces, above TikTok/Reels UI)
+    #   TikTok UI covers roughly the bottom 280px (username, caption, buttons)
+    #   Faces are typically in the top 60% of the frame
+    pos_margin = {"top": 1550, "lower-third": 400, "center": 400, "bottom": 400}
+    margin_v = pos_margin.get(caption_position or "lower-third", 400)
 
     styles_map = {
         "capcut":         {"fontsize": 58, "fontname": "Montserrat ExtraBold", "bold": 0, "alignment": 5},
@@ -3138,7 +3128,7 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
         ass_path = generate_subtitle_file(
             transcript, caption_style, cuts, effective_durations,
             {"width": 1080, "height": 1920},
-            edit_plan.get("caption_position") or "center",
+            edit_plan.get("caption_position") or "lower-third",
             edit_plan.get("caption_keywords") or [],
             work_dir,
         )
