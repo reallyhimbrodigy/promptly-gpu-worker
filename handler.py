@@ -894,16 +894,19 @@ Pacing creates rhythm. Filler and setup should move faster. Key moments — reve
 
 You are the editor. You decide what stays and what gets cut.
 
-Your job is to decide which SECTIONS of the video to include. The pipeline will automatically remove filler words (uh, um) and tighten silence gaps within your clips — you do not need to worry about micro-pauses or breaths.
+Your job is to decide which SECTIONS of the video to include and place PRECISE cuts using the word timestamps provided below.
 
-Focus on the big decisions:
-- Which sections of the video are worth keeping?
-- Are there any parts that are boring, repetitive, or off-topic that should be skipped entirely?
-- Where does the visual content change (speaker to screen recording, etc.)?
+You have the exact transcript with millisecond timestamps. Use them:
+- Place source_end at the END of the last word you want to keep in a clip.
+- Place source_start at the START of the first word you want in the next clip.
+- The gap between source_end of one clip and source_start of the next clip is content you are REMOVING (dead air, pauses, filler).
+- Every source_start and source_end MUST align with a word boundary from the transcript. Never place a cut inside a word.
 
-Make your clips generous — include full sentences and thoughts. The pipeline will tighten them automatically. Do NOT try to cut mid-sentence or trim individual pauses — the pipeline handles that with millisecond precision.
+For talking head videos: remove ALL silence between sentences. End each clip at the last word's end timestamp. Start the next clip at the next word's start timestamp. The result should be continuous speech with zero dead air.
 
-The source timeline only moves forward. Your clips must stay chronological. Gaps between clips mean you are skipping a section of the video entirely.
+For visual content (product shots, scenery, action): preserve the visual pacing. Don't remove gaps that contain important visuals just because there's no speech.
+
+The source timeline only moves forward. Your clips must stay chronological.
 
 Sound design adds texture. A swoosh on a scene change, a thud when a statement lands, a pop when text appears — these make cuts feel physical instead of digital. But not every cut needs a sound. Continuous speech flows best with silent hard cuts.
 
@@ -1143,6 +1146,35 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None, deepgra
         duration=duration,
         trend_context=trend_context,
     )
+
+    # Inject Deepgram word timestamps so Gemini can place cuts precisely
+    if deepgram_words:
+        word_lines = []
+        for w in deepgram_words:
+            word_text = w.get("punctuated_word") or w.get("word") or ""
+            start = float(w.get("start") or 0)
+            end = float(w.get("end") or 0)
+            word_lines.append(f"  {start:.2f}-{end:.2f}: {word_text}")
+
+        transcript_block = "\n".join(word_lines)
+        first_word_start = float(deepgram_words[0].get("start", 0))
+        prompt += f"""
+
+=== SPEECH TRANSCRIPT WITH EXACT TIMESTAMPS ===
+
+The following is the complete word-by-word transcript with millisecond-accurate timestamps from speech recognition. Use these timestamps to place your cuts PRECISELY in the silence gaps between words.
+
+{transcript_block}
+
+RULES FOR USING THESE TIMESTAMPS:
+- Your source_start and source_end values MUST land in the gaps BETWEEN words, not inside a word.
+- A gap is the time between one word's end timestamp and the next word's start timestamp.
+- For example, if "problem." ends at 5.62 and "With" starts at 5.76, the silence gap is 5.62-5.76. Place source_end at 5.62 and source_start at 5.76 (or anywhere in between).
+- NEVER place a source_start or source_end between a word's start and end timestamps — that cuts the word in half.
+- The first word starts at {first_word_start:.2f}s. If this is a talking head video, set your first clip's source_start to {first_word_start:.2f} so the video starts on the first word with zero dead air.
+- If the video has intentional visual content before the first word (action, scenery, product shots), start source_start at 0.0 to preserve that content.
+"""
+        print(f"[generate-edit] Injected {len(deepgram_words)} Deepgram word timestamps into Gemini prompt", flush=True)
 
     if trend_context:
         print(f"[generate-edit] Trend context included: {trend_context.get('sample_size', '?')} videos", flush=True)
@@ -1426,6 +1458,21 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None, deepgra
                     )
                     if not has_transitions:
                         print(f"[generate-edit] Filtered out swoosh at {t:.1f}s (no transitions in video)", flush=True)
+                        continue
+
+                # Enforce pop: only when text overlays or b-roll exist in the recipe
+                if sound == "pop":
+                    pop_has_visual = False
+                    for ov in (edit_plan.get("text_overlays") or []):
+                        if int(ov.get("appear_at_clip", 0)) > 0:
+                            pop_has_visual = True
+                            break
+                    for br in (edit_plan.get("broll") or []):
+                        if abs(float(br.get("timestamp", 0)) - t) < 3.0:
+                            pop_has_visual = True
+                            break
+                    if not pop_has_visual:
+                        print(f"[generate-edit] Filtered out pop at {t:.1f}s (no text overlay or b-roll in recipe)", flush=True)
                         continue
 
                 sound_effects.append({"t": t, "sound": sound, "word": word})
