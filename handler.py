@@ -903,8 +903,8 @@ Look at the gaps between words in the transcript:
 - Filler words (uh, um, hmm, er, ah) — skip these entirely. End the previous clip before the filler word and start the next clip at the word after it.
 
 HOW TO CUT PRECISELY:
-- source_end = last word's end timestamp + 0.05 seconds (preserves the natural tail of the word)
-- source_start = first word's start timestamp of the next section (speech starts clean)
+- source_end = the exact end timestamp of the last word you want to keep. The word timestamps from Deepgram already include the full word sound. If "Hatikvah" ends at 7.22, set source_end to 7.22. Not 7.17, not 7.20 — exactly 7.22. You have millisecond-accurate timestamps. Use them exactly. Never place source_end before a word's end timestamp.
+- source_start = the exact start timestamp of the first word in the clip. If "and" starts at 8.88, set source_start to 8.88. You have the exact timestamps. Use them exactly.
 - The gap between clips is the dead air being removed
 
 CONTINUOUS PHRASES:
