@@ -3789,10 +3789,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     source_res = probe_resolution(source_path)
     kf_timestamps = [float(c["source_start"]) for c in cuts]
     keyframed_path = create_keyframed_source(source_path, kf_timestamps, work_dir)
-    clip_files = pre_split_clips(keyframed_path, cuts, work_dir)
-
-    if len(clip_files) != n:
-        raise RuntimeError(f"Pre-split mismatch: expected {n}, got {len(clip_files)}")
 
     color_grade = edit_plan.get("color_grade") or {}
     color_filter_str = build_video_filter_chain(color_grade, source_res, edit_plan)
@@ -3802,26 +3798,24 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         log_prefix="[render]",
     )
 
-    input_args = []
-    source_durations = []
+    # Single input: the keyframed source
+    input_args = ["-analyzeduration", "10000000", "-probesize", "10000000", "-i", keyframed_path]
+
+    # Compute effective durations from recipe (no intermediate files to probe)
     effective_durations = []
-
     for i, cut in enumerate(cuts):
-        nominal_dur = round((float(cut["source_end"]) - float(cut["source_start"]))*1000)/1000
-        probed = probe_duration(clip_files[i])
-        src_dur = round((probed if probed else nominal_dur)*1000)/1000
+        src_dur = round((float(cut["source_end"]) - float(cut["source_start"])) * 1000) / 1000
         speed = max(0.25, min(4.0, float(cut.get("speed") or 1.0)))
-        eff_dur = round((src_dur / speed)*1000)/1000
-
-        input_args += ["-analyzeduration","5000000","-probesize","5000000","-i",clip_files[i]]
-        source_durations.append(src_dur)
+        eff_dur = round((src_dur / speed) * 1000) / 1000
         effective_durations.append(eff_dur)
-        print(f"[ffmpeg] Input {i}: {cut['source_start']:.1f}s->{cut['source_end']:.1f}s (src={src_dur:.3f}s, eff={eff_dur:.3f}s @ {speed}x)", flush=True)
+        print(f"[ffmpeg] Segment {i}: {cut['source_start']:.3f}s->{cut['source_end']:.3f}s (dur={src_dur:.3f}s, eff={eff_dur:.3f}s @ {speed}x)", flush=True)
 
     video_filters = []
     audio_filters = []
 
     for i, cut in enumerate(cuts):
+        start = float(cut["source_start"])
+        end = float(cut["source_end"])
         speed = max(0.25, min(4.0, float(cut.get("speed") or 1.0)))
         zoom = str(cut.get("zoom") or "none")
         if has_burned_captions and zoom in ["punch_in","punch_out"]:
@@ -3834,7 +3828,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
         zoom_filter = None
         if zoom == "slow_in":
-            # Smoothstep easing: t*t*(3-2*t) — ease in AND out, not linear
             tf = max(1, total_frames)
             zoom_range = zoom_max - 1.0
             zoom_filter = (
@@ -3868,9 +3861,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             fade_start = max(0, eff_dur - 1.0)
             outro_filter = f"fade=t=out:st={fade_start:.3f}:d=1.0:color={fade_color}"
 
-        v_chain = ["settb=AVTB","fps=30"]
-
-        # speed_ramp is deprecated in favor of a whole-video post-render speed_curve pass
+        # Video: trim from source, then apply per-clip filters
+        v_chain = [f"trim=start={start:.3f}:end={end:.3f}", "setpts=PTS-STARTPTS", "settb=AVTB", "fps=30"]
 
         if speed != 1.0:
             v_chain.append(f"setpts={1.0/speed:.4f}*PTS")
@@ -3887,24 +3879,19 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             v_chain.append(f"tpad=stop={freeze_frames}:stop_mode=clone")
             print(f"[render] clip {i}: freeze_frame=true (+{freeze_frames} frames @ end)", flush=True)
 
-        motion_blur_transition = False
-        # motion_blur_transition disabled — degrades output quality
-        if motion_blur_transition and i < n-1:
-            v_chain.append(f"boxblur=luma_radius=6:luma_power=1:chroma_radius=0:chroma_power=0")
-            print(f"[render] clip {i}: motion_blur_transition=true", flush=True)
-
         if outro_filter:
             v_chain.append(outro_filter)
 
-        video_filters.append(f"[{i}:v]{','.join(v_chain)}[v{i}]")
+        video_filters.append(f"[0:v]{','.join(v_chain)}[v{i}]")
 
-        a_chain = ["asetpts=PTS-STARTPTS"]
+        # Audio: trim from source, then apply per-clip filters
+        a_chain = [f"atrim=start={start:.3f}:end={end:.3f}", "asetpts=PTS-STARTPTS"]
         if speed != 1.0:
             a_chain.append(get_atempo_filter(speed))
         if i == n-1 and outro != "none":
             fade_start = max(0, eff_dur - 1.0)
             a_chain.append(f"afade=t=out:st={fade_start:.3f}:d=1.0")
-        audio_filters.append(f"[{i}:a]{','.join(a_chain)}[a{i}]")
+        audio_filters.append(f"[0:a]{','.join(a_chain)}[a{i}]")
 
     # ── SFX collection ───────────────────────────────────────────────────────
     # SFX are NOT mixed during render — they are added as a post-processing
@@ -3912,7 +3899,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     sfx_input_args   = []
     sfx_filter_strs  = []
     sfx_audio_labels = []
-    extra_input_index = n
+    extra_input_index = 1  # single input (keyframed source)
 
     if False:  # SFX disabled in render — mixed after speed curve in mix_sfx_after_speed_curve()
         _speech_segs = speech_segments or (edit_plan.get("analysis_data") or {}).get("speech", {}).get("segments") or []
@@ -4110,7 +4097,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     if music_track != "none" and music_track in MUSIC_LIBRARY:
         music_path = os.path.join(_MUSIC_DIR, f"{music_track}.mp3")
         if os.path.exists(music_path):
-            music_input_idx = n + len(sfx_input_args) // 2
+            music_input_idx = 1 + len(sfx_input_args) // 2
             input_args += ["-stream_loop", "-1", "-i", music_path]
             total_duration = sum(effective_durations)
             fade_out_start = max(0, total_duration - 2.0)
@@ -4150,17 +4137,16 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         + [output_path]
     )
 
-    print(f"[ffmpeg] Rendering: {n} clips, ~{running_dur:.1f}s output (base render)", flush=True)
+    print(f"[render] Single-pass render: {n} segments from keyframed source, ~{running_dur:.1f}s output", flush=True)
 
     try:
         run_ffmpeg(args)
     finally:
-        for cf in clip_files:
-            if cf and os.path.exists(cf):
-                try:
-                    os.unlink(cf)
-                except Exception:
-                    pass
+        if os.path.exists(keyframed_path):
+            try:
+                os.unlink(keyframed_path)
+            except Exception:
+                pass
 
 
 
