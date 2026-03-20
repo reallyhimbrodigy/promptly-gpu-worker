@@ -4026,7 +4026,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     audio_denoise = bool(edit_plan.get("audio_denoise"))
     denoise_filter = ""
     if audio_denoise:
-        denoise_filter = "afftdn=nr=12:nf=-30:tn=1,"
+        denoise_filter = "afftdn=nr=20:nf=-20:tn=1,"
         print(f"[render] audio_denoise=true — afftdn adaptive noise removal enabled", flush=True)
     post_filters.append(
         f"{audio_out}{denoise_filter}highpass=f=80,lowpass=f=12000,"
