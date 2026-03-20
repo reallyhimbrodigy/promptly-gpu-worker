@@ -4064,15 +4064,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         print(f"[sfx] Mixed {len(sfx_audio_labels)} SFX track(s) into audio", flush=True)
 
     audio_denoise = bool(edit_plan.get("audio_denoise"))
-    arnndn_filter = ""
+    denoise_filter = ""
     if audio_denoise:
-        if os.path.exists(_RNNOISE_MODEL_PATH):
-            arnndn_filter = f"arnndn=m={_RNNOISE_MODEL_PATH},"
-            print(f"[render] audio_denoise=true — arnndn AI noise removal enabled", flush=True)
-        else:
-            print(f"[render] audio_denoise=true but model not found at {_RNNOISE_MODEL_PATH} — skipping", flush=True)
+        denoise_filter = "afftdn=nr=12:nf=-30:tn=1,"
+        print(f"[render] audio_denoise=true — afftdn adaptive noise removal enabled", flush=True)
     post_filters.append(
-        f"{audio_out}{arnndn_filter}highpass=f=80,lowpass=f=12000,"
+        f"{audio_out}{denoise_filter}highpass=f=80,lowpass=f=12000,"
         f"equalizer=f=2800:t=q:w=1.5:g=3,"
         f"equalizer=f=200:t=q:w=0.8:g=1.5,"
         f"acompressor=threshold=-20dB:ratio=3:attack=5:release=50:makeup=2,"
