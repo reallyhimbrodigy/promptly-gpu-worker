@@ -2409,6 +2409,7 @@ def pre_split_clips(keyframed_path, cuts, work_dir):
                 "-ss", str(clip_start),
                 "-t", str(clip_dur),
                 "-c:v", "libx264", "-preset", "ultrafast", "-crf", "0",
+                "-af", "aresample=async=1:first_pts=0",
                 "-c:a", "aac", "-b:a", "192k",
                 clip_path,
             ])
@@ -2418,6 +2419,7 @@ def pre_split_clips(keyframed_path, cuts, work_dir):
                 "-y", "-ss", str(clip_start), "-i", keyframed_path,
                 "-t", str(clip_dur),
                 "-c:v", "copy",
+                "-af", "aresample=async=1:first_pts=0",
                 "-c:a", "aac", "-b:a", "192k",
                 clip_path,
             ])
