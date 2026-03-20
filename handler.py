@@ -580,6 +580,80 @@ def transcribe_audio(source_path):
 
 
 
+def diagnose_word_timestamps(source_path, deepgram_words, work_dir):
+    """Temporary diagnostic: verify Deepgram end timestamps against source audio RMS."""
+    target_words = ["hatikvah", "nafalti", "prosperity", "israel", "mean", "strategy", "money", "business"]
+
+    found_words = []
+    for w in deepgram_words:
+        if w["word"].lower().rstrip(".,!?;:'\"") in target_words:
+            found_words.append(w)
+
+    if not found_words:
+        # Fall back to last 5 words
+        found_words = deepgram_words[-5:] if len(deepgram_words) >= 5 else deepgram_words
+
+    print(f"[DIAG] Testing {len(found_words)} word timestamps against source audio:", flush=True)
+
+    for w in found_words:
+        word = w["word"]
+        start = float(w["start"])
+        end = float(w["end"])
+        extract_start = max(0, start - 0.1)
+        extract_end = end + 0.3
+        extract_dur = extract_end - extract_start
+
+        clip_path = os.path.join(work_dir, f"diag_{word}_{start:.2f}.wav")
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", source_path, "-ss", str(extract_start),
+             "-t", str(extract_dur), "-vn", "-acodec", "pcm_s16le", "-ar", "48000", "-ac", "1", clip_path],
+            capture_output=True, text=True, timeout=10,
+        )
+
+        word_end_in_clip = end - extract_start
+
+        # Measure RMS in last 0.1s of word vs first 0.15s after Deepgram end
+        tail_start = max(0, word_end_in_clip - 0.1)
+        tail_result = subprocess.run(
+            ["ffmpeg", "-y", "-i", clip_path,
+             "-af", f"atrim=start={tail_start:.3f}:end={word_end_in_clip:.3f},astats=metadata=1:reset=1",
+             "-f", "null", "-"],
+            capture_output=True, text=True, timeout=10,
+        )
+        after_result = subprocess.run(
+            ["ffmpeg", "-y", "-i", clip_path,
+             "-af", f"atrim=start={word_end_in_clip:.3f}:end={word_end_in_clip + 0.15:.3f},astats=metadata=1:reset=1",
+             "-f", "null", "-"],
+            capture_output=True, text=True, timeout=10,
+        )
+
+        def extract_rms(stderr):
+            m = re.search(r"RMS level dB: ([-\d.inf]+)", stderr)
+            return m.group(1) if m else "N/A"
+
+        tail_rms = extract_rms(tail_result.stderr)
+        after_rms = extract_rms(after_result.stderr)
+
+        print(f"[DIAG] '{word}': start={start:.3f} end={end:.3f} dur={end - start:.3f}s", flush=True)
+        print(f"[DIAG]   RMS tail(last 0.1s)={tail_rms}dB  RMS after(0.15s past end)={after_rms}dB", flush=True)
+
+        if after_rms != "N/A" and tail_rms != "N/A" and "inf" not in after_rms and "inf" not in tail_rms:
+            try:
+                if float(after_rms) > float(tail_rms) - 12:
+                    print(f"[DIAG]   *** SPEECH CONTINUES past Deepgram end — timestamp is EARLY", flush=True)
+                else:
+                    print(f"[DIAG]   Audio drops off after Deepgram end — timestamp looks correct", flush=True)
+            except ValueError:
+                pass
+
+        try:
+            os.unlink(clip_path)
+        except Exception:
+            pass
+
+    print(f"[DIAG] Diagnostic complete", flush=True)
+
+
 # ─── TIGHTEN ──────────────────────────────────────────────────────────────────
 
 ALWAYS_FILLER = {"um","uh","uhh","uhm","umm","erm","er","hmm","hm","mm","mmm","mhm","ah","ahh","huh"}
@@ -4265,6 +4339,14 @@ def handler(job):
         if os.path.exists(audio_path):
             os.remove(audio_path)
         print(f"[pipeline] Deepgram: {len(transcript.get('words', []))} words", flush=True)
+
+        # Temporary diagnostic — remove after investigation
+        _dg_words = transcript.get("words", [])
+        if _dg_words:
+            try:
+                diagnose_word_timestamps(source_path, _dg_words, work_dir)
+            except Exception as e:
+                print(f"[DIAG] Diagnostic failed: {e}", flush=True)
 
         send_progress(job_id, "analysis", 20, "Watching your footage...", app_url)
         send_progress(job_id, "edit_recipe", 52, "Putting your edit together...", app_url)
