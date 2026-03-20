@@ -2386,7 +2386,7 @@ def create_keyframed_source(source_path, keyframe_timestamps, work_dir):
         "-c:v","libx264","-preset","ultrafast","-crf","0",
         "-force_key_frames",kf_str,
         "-r","30","-vsync","cfr","-pix_fmt","yuv420p",
-        "-c:a","aac","-b:a","192k","-threads","1",
+        "-c:a","copy","-threads","1",
         keyframed_path,
     ])
     return keyframed_path
@@ -3872,7 +3872,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
         video_filters.append(f"[{i}:v]{','.join(v_chain)}[v{i}]")
 
-        a_chain = ["asetpts=PTS-STARTPTS","afftdn=nr=10:nf=-25"]
+        a_chain = ["asetpts=PTS-STARTPTS"]
         if speed != 1.0:
             a_chain.append(get_atempo_filter(speed))
         if i == n-1 and outro != "none":
@@ -4073,7 +4073,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         f"equalizer=f=2800:t=q:w=1.5:g=3,"
         f"equalizer=f=200:t=q:w=0.8:g=1.5,"
         f"acompressor=threshold=-20dB:ratio=3:attack=5:release=50:makeup=2,"
-        f"loudnorm=I=-14:TP=-1.5:LRA=11,"
         f"alimiter=limit=0.95:attack=1:release=10[final_audio]"
     )
     audio_out = "[final_audio]"
