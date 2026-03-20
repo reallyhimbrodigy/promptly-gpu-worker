@@ -2414,6 +2414,23 @@ def pre_split_clips(keyframed_path, cuts, work_dir):
             ])
         else:
             run_ffmpeg(["-y","-ss",str(clip_start),"-i",keyframed_path,"-t",str(clip_dur),"-c","copy",clip_path])
+        # Debug: probe actual clip duration and compare to requested
+        _actual_dur = probe_duration(clip_path)
+        _requested_start = float(cut["source_start"])
+        _requested_end = float(cut["source_end"])
+        _requested_dur = _requested_end - _requested_start
+        if _actual_dur is not None:
+            _end_drift = _actual_dur - _requested_dur
+            print(f"[DEBUG-CLIP] Clip {i}: req_start={_requested_start:.3f} req_end={_requested_end:.3f} req_dur={_requested_dur:.3f} actual_dur={_actual_dur:.3f} drift={_end_drift:+.4f}s", flush=True)
+            if abs(_end_drift) > 0.02:
+                print(f"[DEBUG-CLIP] *** Clip {i} has significant duration drift: {_end_drift:+.4f}s — word clipping likely", flush=True)
+        if i <= 2:
+            _pts_cmd = ["ffprobe", "-v", "quiet", "-select_streams", "a:0",
+                       "-show_entries", "packet=pts_time", "-read_intervals", "%+0.1",
+                       "-of", "csv=p=0", clip_path]
+            _pts_result = subprocess.run(_pts_cmd, capture_output=True, text=True, timeout=10)
+            _first_pts = _pts_result.stdout.strip().split("\n")[0] if _pts_result.stdout.strip() else "N/A"
+            print(f"[DEBUG-CLIP] Clip {i}: first audio packet PTS={_first_pts}", flush=True)
         clip_files.append(clip_path)
     try:
         os.unlink(keyframed_path)
