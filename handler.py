@@ -2413,7 +2413,14 @@ def pre_split_clips(keyframed_path, cuts, work_dir):
                 clip_path,
             ])
         else:
-            run_ffmpeg(["-y","-ss",str(clip_start),"-i",keyframed_path,"-t",str(clip_dur),"-c","copy",clip_path])
+            # Copy video (keyframe-aligned, precise) but re-encode audio (sample-accurate)
+            run_ffmpeg([
+                "-y", "-ss", str(clip_start), "-i", keyframed_path,
+                "-t", str(clip_dur),
+                "-c:v", "copy",
+                "-c:a", "aac", "-b:a", "192k",
+                clip_path,
+            ])
         # Debug: probe actual clip duration and compare to requested
         _actual_dur = probe_duration(clip_path)
         _requested_start = float(cut["source_start"])
