@@ -4247,7 +4247,7 @@ def handler(job):
         print("[pipeline] step=transcribe", flush=True)
         audio_path = os.path.join(work_dir, "audio_for_words.wav")
         subprocess.run(
-            ["ffmpeg", "-y", "-i", source_path, "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", audio_path],
+            ["ffmpeg", "-y", "-i", source_path, "-vn", "-acodec", "pcm_s16le", "-ar", "48000", "-ac", "1", audio_path],
             capture_output=True, text=True, timeout=30,
         )
         transcript = transcribe_audio(audio_path)
