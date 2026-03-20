@@ -2393,60 +2393,6 @@ def create_keyframed_source(source_path, keyframe_timestamps, work_dir):
     return keyframed_path
 
 
-def pre_split_clips(keyframed_path, cuts, work_dir):
-    clip_files = []
-    for i, cut in enumerate(cuts):
-        clip_start = round(float(cut["source_start"])*1000)/1000
-        clip_dur   = round((float(cut["source_end"]) - float(cut["source_start"]))*1000)/1000
-        if clip_dur <= 0:
-            clip_files.append(None)
-            continue
-        clip_path = os.path.join(work_dir, f"clip_{i}.mp4")
-        if i == 0:
-            # First clip: -ss AFTER -i for frame+audio-accurate seeking
-            # Slower but eliminates AAC packet alignment silence
-            run_ffmpeg([
-                "-y", "-i", keyframed_path,
-                "-ss", str(clip_start),
-                "-t", str(clip_dur),
-                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "0",
-                "-af", "aresample=async=1:first_pts=0",
-                "-c:a", "aac", "-b:a", "192k",
-                clip_path,
-            ])
-        else:
-            # Copy video (keyframe-aligned, precise) but re-encode audio (sample-accurate)
-            run_ffmpeg([
-                "-y", "-ss", str(clip_start), "-i", keyframed_path,
-                "-t", str(clip_dur),
-                "-c:v", "copy",
-                "-af", "aresample=async=1:first_pts=0",
-                "-c:a", "aac", "-b:a", "192k",
-                clip_path,
-            ])
-        # Debug: probe actual clip duration and compare to requested
-        _actual_dur = probe_duration(clip_path)
-        _requested_start = float(cut["source_start"])
-        _requested_end = float(cut["source_end"])
-        _requested_dur = _requested_end - _requested_start
-        if _actual_dur is not None:
-            _end_drift = _actual_dur - _requested_dur
-            print(f"[DEBUG-CLIP] Clip {i}: req_start={_requested_start:.3f} req_end={_requested_end:.3f} req_dur={_requested_dur:.3f} actual_dur={_actual_dur:.3f} drift={_end_drift:+.4f}s", flush=True)
-            if abs(_end_drift) > 0.02:
-                print(f"[DEBUG-CLIP] *** Clip {i} has significant duration drift: {_end_drift:+.4f}s — word clipping likely", flush=True)
-        if i <= 2:
-            _pts_cmd = ["ffprobe", "-v", "quiet", "-select_streams", "a:0",
-                       "-show_entries", "packet=pts_time", "-read_intervals", "%+0.1",
-                       "-of", "csv=p=0", clip_path]
-            _pts_result = subprocess.run(_pts_cmd, capture_output=True, text=True, timeout=10)
-            _first_pts = _pts_result.stdout.strip().split("\n")[0] if _pts_result.stdout.strip() else "N/A"
-            print(f"[DEBUG-CLIP] Clip {i}: first audio packet PTS={_first_pts}", flush=True)
-        clip_files.append(clip_path)
-    try:
-        os.unlink(keyframed_path)
-    except Exception:
-        pass
-    return clip_files
 
 
 def get_atempo_filter(speed):
