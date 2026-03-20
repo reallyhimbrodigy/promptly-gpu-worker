@@ -969,30 +969,40 @@ Global parameters:
   color_intent — the overall color feel: {intents}
     Choose based on what you see in the footage and what the vibe calls for. The pipeline applies the grade automatically.
 
-  speed_curve — smooth speed ramp across the entire assembled video. Audio pitch shifts naturally with the speed — sped up sections sound higher-pitched (chipmunk), slowed sections sound deeper. This pitch shift IS the effect.
-    "none" — no speed ramping. This is the default. Most videos do not need speed ramping.
-    Array of keypoints: [{{"t": <output_seconds>, "speed": <0.5 to 2.0>}}]
+  speed_curve — speed ramping changes the playback speed dynamically throughout the video. This creates the viral TikTok effect where speech speeds up and slows down with natural pitch changes (fast = high pitch, slow = deep voice).
 
-    ONLY use a speed curve when the user explicitly asks for "speed ramping", "speed ramp", or "CapCut style" editing. Do NOT add speed ramping just because the user said "engaging" or "captivating."
+    WHEN TO USE: Only when the user's vibe explicitly mentions "speed ramping", "speed ramp", "speed curve", or "CapCut style". Do NOT add speed ramping for generic vibes like "engaging" or "captivating".
 
-    Speed ramping is a COMEDY and EMPHASIS tool. It makes punchlines land harder, makes funny moments funnier, and creates dramatic contrast. It does NOT make informational videos "more engaging" — tight cuts do that.
+    If speed ramping is requested, output a list of keypoints:
+    speed_curve: [
+      {{"t": <seconds in source timeline>, "speed": <multiplier>}}
+    ]
 
-    HOW SPEED RAMPING WORKS ON TIKTOK:
-    The effect comes from CONTRAST — the sharp jump between fast and slow. A punchline only lands hard if the setup right before it was noticeably fast. The speed should SNAP from fast to slow at the exact moment the punchline hits.
+    HOW SPEED RAMPING WORKS ON TALKING HEADS:
+    Think of it like comedy timing. The speaker makes a point, you speed through the setup, then SNAP to normal or slow speed on the punchline. The contrast between fast and normal/slow is what creates impact.
 
-    Place keypoints in PAIRS: a fast keypoint immediately followed by a slow keypoint (or vice versa). The comedy comes from the sudden shift, not from gradual changes. Two keypoints that are close together in time but far apart in speed create the snap.
+    RULES:
+    - Most of the video should be at 1.0x (normal speed). Speed changes are MOMENTS, not the entire video.
+    - Use 2-4 speed change moments per 30-second video. More than that feels chaotic.
+    - Speed changes come in PAIRS: a speed-up followed by a snap back to normal (or slow).
+    - Speed-up range: 1.2x to 1.5x — this is noticeably fast but still understandable speech
+    - Slow-down range: 0.7x to 0.85x — this is noticeably slow and creates emphasis
+    - NEVER go below 0.6x (sounds drunk) or above 2.0x (incomprehensible)
+    - The transition between speeds should be instant (one keypoint to the next), not gradual. Gradual speed changes feel like a glitch. Sharp speed changes feel intentional.
 
-    NOT EVERY SECTION NEEDS SPEED CHANGES. Many sections should be at 1.0x. Speed ramping is like seasoning — a few well-placed moments across the video, not a constant wave. A video with 3-4 speed-ramped moments and the rest at 1.0x is better than a video where every second has a different speed.
+    WHAT TO SPEED UP:
+    - Setup phrases, transitions between points, filler phrases ("and so what I did was...")
+    - Repetitive statements, listing items quickly
+    - Moments where the speaker is building to something
 
-    WRONG approach (even spacing, small differences):
-      t=0 speed=1.1, t=5 speed=0.9, t=10 speed=1.2, t=15 speed=0.85, t=20 speed=1.1
-      This feels random and cheap. The viewer can barely hear the changes.
+    WHAT TO SLOW DOWN:
+    - The punchline, the key insight, the most important word or phrase
+    - Dramatic reveals ("and it was completely... FREE")
+    - Emotional moments, pauses for effect
 
-    RIGHT approach (targeted moments with sharp contrast):
-      t=0 speed=1.0, t=8 speed=1.5, t=8.5 speed=0.6, t=12 speed=1.0, t=25 speed=1.4, t=25.3 speed=0.55, t=28 speed=1.0
-      Speed is normal, then SNAPS fast right before the punchline, then SNAPS slow on the punchline, then returns to normal. Only 2-3 moments in the whole video are speed-ramped.
+    Use the word timestamps provided to place speed changes at the exact boundaries between words. NEVER place a speed change in the middle of a word. Place them in the silence gaps between phrases.
 
-    Watch the video. Find the 2-4 moments that deserve emphasis. Speed ramp ONLY those moments. Leave everything else at 1.0x.
+    If the user does NOT request speed ramping, set: speed_curve: "none"
 
   caption_style — word-by-word animated captions synced to speech:
     none — no captions. Use when captions are already burned into the footage.
