@@ -1431,9 +1431,10 @@ RULES FOR USING THESE TIMESTAMPS:
             speed_curve = None
         else:
             speed_curve.sort(key=lambda x: x["t"])
+            speeds = [kp["speed"] for kp in speed_curve]
             print(
                 f"[generate-edit] Speed curve: {len(speed_curve)} keypoints, range "
-                f"{speed_curve[0]['speed']:.2f}x - {max(kp['speed'] for kp in speed_curve):.2f}x",
+                f"{min(speeds):.2f}x - {max(speeds):.2f}x",
                 flush=True,
             )
     edit_plan["_parsed_speed_curve"] = speed_curve
@@ -2335,7 +2336,7 @@ def apply_speed_curve(output_path, speed_curve, work_dir):
     escaped_setpts = setpts_expr.replace(",", "\\,")
 
     # Combine video + audio in one filter_complex
-    full_filter = f"[0:v]setpts='{escaped_setpts}'\\,fps={fps}[outv];{audio_filter}"
+    full_filter = f"[0:v]setpts='{escaped_setpts}',fps={fps}[outv];{audio_filter}"
 
     temp_output = os.path.join(work_dir, "speed_curved.mp4")
     cmd = [
