@@ -2,6 +2,7 @@
 import subprocess
 import os
 import sys
+import ssl
 import requests
 import tempfile
 import time
@@ -11,6 +12,10 @@ import re
 import math
 import concurrent.futures
 from datetime import datetime
+import certifi
+
+os.environ["SSL_CERT_FILE"] = certifi.where()
+os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
 
 HANDLER_VERSION = "3.0.0"
 GEMINI_MODEL = "gemini-3.1-pro-preview"
@@ -575,7 +580,7 @@ def transcribe_audio(source_path):
         print(f"[deepgram] Transcribed {len(words)} words", flush=True)
         return {"text": alt.transcript or "", "words": words}
     except Exception as e:
-        print(f"[pipeline] transcription failed (non-fatal): {e}", flush=True)
+        print(f"[pipeline] transcription failed: {e}", flush=True)
         return {"text": "", "words": []}
 
 
@@ -904,7 +909,7 @@ Look at the gaps between words in the transcript:
 - Filler words (uh, um, hmm, er, ah) — skip these entirely. End the previous clip before the filler word and start the next clip at the word after it.
 
 HOW TO CUT PRECISELY:
-- source_end = the exact end timestamp of the last word you want to keep. The word timestamps from Deepgram already include the full word sound. If "Hatikvah" ends at 7.22, set source_end to 7.22. Not 7.17, not 7.20 — exactly 7.22. You have millisecond-accurate timestamps. Use them exactly. Never place source_end before a word's end timestamp.
+- source_end = place this in the SILENCE after the last word you want to keep. Look at the last word's end timestamp and the next word's start timestamp — the silence gap is between them. Place source_end in the middle of that gap. Example: if "Hatikvah" ends at 7.30 and "and" starts at 7.84, set source_end to 7.57 (midpoint of the gap). This guarantees the full word sound is captured. If there is no next word (last clip), set source_end to the last word's end timestamp + 0.15.
 - source_start = the exact start timestamp of the first word in the clip. If "and" starts at 8.88, set source_start to 8.88. You have the exact timestamps. Use them exactly.
 - The gap between clips is the dead air being removed
 
@@ -3408,8 +3413,7 @@ def mix_sfx_after_speed_curve(output_path, edit_plan, cuts, effective_durations,
             t_start = float(sc[i]["t"])
             t_end = float(sc[i + 1]["t"])
             s_start = float(sc[i]["speed"])
-            s_end = float(sc[i + 1]["speed"])
-            avg_speed = (s_start + s_end) / 2.0
+            avg_speed = s_start
             speed_expr_parts.append({
                 "t_start": t_start,
                 "t_end": t_end,
@@ -3599,8 +3603,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             tf = max(1, total_frames)
             zoom_range = zoom_max - 1.0
             zoom_filter = (
-                f"scale=w='trunc(iw*(1.0+{zoom_range:.4f}*(n/{tf})*(n/{tf})*(3-2*(n/{tf})))/2)*2'"
-                f":h='trunc(ih*(1.0+{zoom_range:.4f}*(n/{tf})*(n/{tf})*(3-2*(n/{tf})))/2)*2'"
+                f"scale=w='trunc(iw*(1.0+{zoom_range:.4f}*min(n/{tf}\\,1.0))/2)*2'"
+                f":h='trunc(ih*(1.0+{zoom_range:.4f}*min(n/{tf}\\,1.0))/2)*2'"
                 f":eval=frame:flags=bilinear,crop=1080:1920"
             )
         elif zoom == "slow_out":
@@ -4030,6 +4034,16 @@ def handler(job):
             capture_output=True, text=True, timeout=30,
         )
         transcript = transcribe_audio(audio_path)
+        _dg_words = transcript.get("words", [])
+        if len(_dg_words) == 0:
+            print("[pipeline] Deepgram returned 0 words — retrying once...", flush=True)
+            try:
+                transcript = transcribe_audio(audio_path)
+                _dg_words = transcript.get("words", [])
+            except Exception as e2:
+                print(f"[pipeline] Deepgram retry also failed: {e2}", flush=True)
+        if len(_dg_words) == 0:
+            raise RuntimeError("Deepgram transcription failed — 0 words returned. Cannot proceed without word timestamps.")
         if os.path.exists(audio_path):
             os.remove(audio_path)
         print(f"[pipeline] Deepgram: {len(transcript.get('words', []))} words", flush=True)
@@ -4039,6 +4053,8 @@ def handler(job):
         print("[pipeline] step=edit_recipe", flush=True)
         t = time.time()
         trend_context = get_trend_context()
+        if not trend_context:
+            print("[trend] WARNING: Style guide not available — Gemini will edit without reference video patterns", flush=True)
         edit_plan = generate_edit_gemini(
             video_path=source_path,
             vibe=vibe,

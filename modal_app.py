@@ -6,9 +6,11 @@ import modal
 image = (
     modal.Image.from_registry("ubuntu:22.04", add_python="3.10")
     .run_commands(
-        "echo 'build v6'",
+        "echo 'build v7'",
+        "apt-get update && apt-get install -y ca-certificates && update-ca-certificates",
     )
     .apt_install(
+        "ca-certificates",
         "ffmpeg",
         "librubberband-dev",
         "rubberband-cli",
@@ -27,6 +29,7 @@ image = (
     .pip_install("numpy", "wheel")
     .pip_install("aubio", extra_options="--no-build-isolation")
     .pip_install(
+        "certifi",
         "opencv-python-headless",
         "requests",
         "anthropic",
