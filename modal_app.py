@@ -54,7 +54,7 @@ app = modal.App("promptly-gpu-worker", image=image, secrets=secrets)
 
 # ── Web endpoint ───────────────────────────────────────────────────────────────
 @app.function(
-    gpu="A10G",
+    gpu=modal.gpu.Any(),
     timeout=600,
     scaledown_window=60,
 )
