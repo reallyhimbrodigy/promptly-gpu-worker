@@ -1222,9 +1222,24 @@ RULES FOR USING THESE TIMESTAMPS:
                 [gemini_file, prompt],
                 generation_config=genai.GenerationConfig(
                     temperature=0.6,
-                    max_output_tokens=16000,
+                    max_output_tokens=16384,
                 ),
             )
+            candidates = getattr(response, "candidates", None) or []
+            if candidates:
+                finish_reason = getattr(candidates[0], "finish_reason", None)
+                if finish_reason == 2:
+                    print("[generate-edit] WARNING: Gemini response truncated — retrying with higher token limit", flush=True)
+                    response = model.generate_content(
+                        [gemini_file, prompt],
+                        generation_config=genai.GenerationConfig(
+                            temperature=0.6,
+                            max_output_tokens=32768,
+                        ),
+                    )
+                    retry_candidates = getattr(response, "candidates", None) or []
+                    if retry_candidates and getattr(retry_candidates[0], "finish_reason", None) == 2:
+                        raise RuntimeError("Gemini response truncated even with 32768 max tokens")
             print(f"[generate-edit] Gemini complete in {time.time()-t:.1f}s", flush=True)
             break
         except Exception as e:
