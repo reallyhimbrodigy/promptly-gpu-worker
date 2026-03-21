@@ -4,7 +4,7 @@ import modal
 
 # ── Image definition (replaces Dockerfile) ────────────────────────────────────
 image = (
-    modal.Image.from_registry("nvidia/cuda:12.2.0-runtime-ubuntu22.04", add_python="3.10")
+    modal.Image.from_registry("ubuntu:22.04", add_python="3.10")
     .run_commands(
         "echo 'build v6'",
     )
@@ -54,9 +54,10 @@ app = modal.App("promptly-gpu-worker", image=image, secrets=secrets)
 
 # ── Web endpoint ───────────────────────────────────────────────────────────────
 @app.function(
-    gpu=modal.gpu.Any(),
     timeout=600,
     scaledown_window=60,
+    cpu=4,
+    memory=8192,
 )
 @modal.concurrent(max_inputs=1)
 @modal.fastapi_endpoint(method="POST")
