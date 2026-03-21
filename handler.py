@@ -970,40 +970,17 @@ Global parameters:
   color_intent — the overall color feel: {intents}
     Choose based on what you see in the footage and what the vibe calls for. The pipeline applies the grade automatically.
 
-  speed_curve — speed ramping changes the playback speed dynamically throughout the video. This creates the viral TikTok effect where speech speeds up and slows down with natural pitch changes (fast = high pitch, slow = deep voice).
+  SPEED RAMPING (only when vibe mentions "speed ramp", "speed ramping", or "CapCut style"):
+  Follow the speed ramping techniques described in the editing style guide above. The style guide was generated from watching real viral videos — use exactly the speeds, timing, and rhythm it describes. Place your speed changes in the speed_curve array.
 
-    WHEN TO USE: Only when the user's vibe explicitly mentions "speed ramping", "speed ramp", "speed curve", or "CapCut style". Do NOT add speed ramping for generic vibes like "engaging" or "captivating".
+  SPEED CURVE FORMAT:
+  speed_curve: [
+    {{"t": <timestamp in source seconds>, "speed": <speed multiplier>}},
+    ...
+  ]
 
-    If speed ramping is requested, output a list of keypoints:
-    speed_curve: [
-      {{"t": <seconds in source timeline>, "speed": <multiplier>}}
-    ]
-
-    HOW SPEED RAMPING WORKS ON TALKING HEADS:
-    Think of it like comedy timing. The speaker makes a point, you speed through the setup, then SNAP to normal or slow speed on the punchline. The contrast between fast and normal/slow is what creates impact.
-
-    RULES:
-    - Most of the video should be at 1.0x (normal speed). Speed changes are MOMENTS, not the entire video.
-    - Use 2-4 speed change moments per 30-second video. More than that feels chaotic.
-    - Speed changes come in PAIRS: a speed-up followed by a snap back to normal (or slow).
-    - Speed-up range: 1.2x to 1.5x — this is noticeably fast but still understandable speech
-    - Slow-down range: 0.7x to 0.85x — this is noticeably slow and creates emphasis
-    - NEVER go below 0.6x (sounds drunk) or above 2.0x (incomprehensible)
-    - The transition between speeds should be instant (one keypoint to the next), not gradual. Gradual speed changes feel like a glitch. Sharp speed changes feel intentional.
-
-    WHAT TO SPEED UP:
-    - Setup phrases, transitions between points, filler phrases ("and so what I did was...")
-    - Repetitive statements, listing items quickly
-    - Moments where the speaker is building to something
-
-    WHAT TO SLOW DOWN:
-    - The punchline, the key insight, the most important word or phrase
-    - Dramatic reveals ("and it was completely... FREE")
-    - Emotional moments, pauses for effect
-
-    Use the word timestamps provided to place speed changes at the exact boundaries between words. NEVER place a speed change in the middle of a word. Place them in the silence gaps between phrases.
-
-    If the user does NOT request speed ramping, set: speed_curve: "none"
+  Each keypoint means: "from this timestamp, play at this speed until the next keypoint."
+  If speed ramping is not requested, set speed_curve to "none".
 
   caption_style — word-by-word animated captions synced to speech:
     none — no captions. Use when captions are already burned into the footage.
@@ -1439,7 +1416,7 @@ RULES FOR USING THESE TIMESTAMPS:
             if isinstance(kp, dict) and "t" in kp and "speed" in kp:
                 try:
                     t = max(0.0, float(kp["t"]))
-                    s = max(0.5, min(2.0, float(kp["speed"])))
+                    s = max(0.3, min(2.5, float(kp["speed"])))
                     speed_curve.append({"t": t, "speed": s})
                 except Exception:
                     continue
