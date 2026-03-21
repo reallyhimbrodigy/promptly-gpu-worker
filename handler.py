@@ -976,7 +976,9 @@ Global parameters:
     Choose based on what you see in the footage and what the vibe calls for. The pipeline applies the grade automatically.
 
   SPEED RAMPING (only when vibe mentions "speed ramp", "speed ramping", or "CapCut style"):
-  Follow the speed ramping techniques described in the editing style guide above. The style guide was generated from watching real viral videos — use exactly the speeds, timing, and rhythm it describes. Place your speed changes in the speed_curve array.
+  Follow the speed ramping techniques described in the editing style guide above. The style guide was generated from watching real viral videos.
+
+  Be selective. The viewer needs to follow the story — only speed up parts that are filler or setup, and only slow down the precise moment of impact. The slow should snap in exactly when the punchline hits, hold just long enough to land, and get out.
 
   SPEED CURVE FORMAT:
   speed_curve: [
@@ -1421,7 +1423,7 @@ RULES FOR USING THESE TIMESTAMPS:
             if isinstance(kp, dict) and "t" in kp and "speed" in kp:
                 try:
                     t = max(0.0, float(kp["t"]))
-                    s = max(0.3, min(2.5, float(kp["speed"])))
+                    s = max(0.4, min(1.8, float(kp["speed"])))
                     speed_curve.append({"t": t, "speed": s})
                 except Exception:
                     continue
