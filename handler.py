@@ -2457,8 +2457,7 @@ def apply_speed_curve(output_path, speed_curve, work_dir):
         t_start = float(speed_curve[i]["t"])
         t_end = float(speed_curve[i + 1]["t"])
         s_start = float(speed_curve[i]["speed"])
-        s_end = float(speed_curve[i + 1]["speed"])
-        avg_speed = (s_start + s_end) / 2.0
+        avg_speed = s_start
         expr_parts.append({
             "t_start": t_start,
             "t_end": t_end,
@@ -2682,7 +2681,7 @@ def generate_subtitle_file(transcript, caption_style, cuts, effective_durations,
     #   400px from bottom = 79% from top (below most faces, above TikTok/Reels UI)
     #   TikTok UI covers roughly the bottom 280px (username, caption, buttons)
     #   Faces are typically in the top 60% of the frame
-    pos_margin = {"top": 1550, "lower-third": 400, "center": 400, "bottom": 400}
+    pos_margin = {"top": 1550, "lower-third": 400, "center": 800, "bottom": 100}
     margin_v = pos_margin.get(caption_position or "lower-third", 400)
 
     styles_map = {
@@ -2736,6 +2735,8 @@ def generate_subtitle_file(transcript, caption_style, cuts, effective_durations,
     fontsize = style_meta["fontsize"]
     bold = style_meta["bold"]
     alignment = style_meta["alignment"]
+    position_alignment = {"top": 8, "center": 5, "lower-third": 2, "bottom": 2}
+    alignment = position_alignment.get(caption_position or "lower-third", alignment)
 
     cfg = STYLE_CONFIGS.get(caption_style, STYLE_CONFIGS["standard"])
     primary, secondary, back_c, border_style, outline_w, shadow, spacing = cfg
