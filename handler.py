@@ -959,7 +959,7 @@ Per-clip parameters:
 
   zoom — camera movement across the clip:
     none — static. DEFAULT for all clips.
-    slow_in — gentle push-in. Use ONLY on the first clip of a talking head video to make the opening feel dynamic. Do not use on any other clip.
+    slow_in — gentle push-in. Use ONLY on the first clip when ALL of these are true: (1) the subject is a talking head, (2) the subject's face is centered in the frame, and (3) the subject is looking directly at the camera. If the subject is off-center, looking away, or there are multiple people, use none. Do not use on any clip other than the first.
     slow_out / punch_in / punch_out — other zoom options. Rarely needed.
     Zoom crops the edges. If the footage has burned-in captions, use none on ALL clips.
 
