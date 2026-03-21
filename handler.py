@@ -980,6 +980,15 @@ Global parameters:
 
   Be selective. The viewer needs to follow the story — only speed up parts that are filler or setup, and only slow down the precise moment of impact. The slow should snap in exactly when the punchline hits, hold just long enough to land, and get out.
 
+  What each speed value does to speech:
+    1.0x = normal speech, no change
+    1.2x = slightly fast, viewer can still follow easily
+    1.3x = fast, noticeable pitch rise, good for compressing filler
+    1.5x+ = very fast, chipmunk voice, hard to understand — use sparingly
+    0.8x = slightly slow, barely noticeable — not dramatic enough for a punchline
+    0.6x = noticeably slow, voice gets deeper, clearly dramatic
+    0.4x = very slow, deep voice, extreme impact — use on the biggest moments only
+
   SPEED CURVE FORMAT:
   speed_curve: [
     {{"t": <timestamp in source seconds>, "speed": <speed multiplier>}},
