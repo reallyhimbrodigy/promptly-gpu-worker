@@ -1,4 +1,4 @@
-# runpod removed — using Modal
+# Modal worker entrypoint
 import subprocess
 import os
 import sys
@@ -4148,7 +4148,7 @@ def send_progress(job_id, step, pct, message, app_url):
         return
     try:
         requests.post(
-            f"{app_url}/api/runpod-progress",
+            f"{app_url}/api/modal-progress",
             json={"job_id": job_id, "step": step, "pct": pct, "message": message},
             timeout=3,
         )
