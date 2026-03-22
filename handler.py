@@ -2298,7 +2298,38 @@ def _interpolate_speed(speed_curve, t):
     return 1.0
 
 
-def apply_speed_curve(output_path, speed_curve, work_dir):
+def project_speed_to_rendered_time(speed_keypoints, cuts, effective_durations):
+    """
+    Convert speed-curve keypoints from source timestamps to rendered timestamps.
+    """
+    if not speed_keypoints:
+        return []
+
+    clip_ranges = get_output_clip_ranges(cuts, effective_durations)
+    projected = []
+    for kp in speed_keypoints:
+        source_t = float(kp["t"])
+        rendered_t = project_source_time_to_output(source_t, cuts, clip_ranges)
+        if rendered_t is None:
+            rendered_t = source_t
+        projected.append({"t": round(rendered_t, 3), "speed": kp["speed"]})
+        print(
+            f"[speed_curve] Projected t={source_t:.2f}s (source) → t={rendered_t:.2f}s (rendered) "
+            f"speed={kp['speed']}x",
+            flush=True,
+        )
+
+    projected.sort(key=lambda x: x["t"])
+    deduped = []
+    for kp in projected:
+        if deduped and abs(deduped[-1]["t"] - kp["t"]) < 0.001:
+            deduped[-1] = kp
+        else:
+            deduped.append(kp)
+    return deduped
+
+
+def apply_speed_curve(output_path, speed_curve, work_dir, cuts, effective_durations):
     """
     Apply a smooth speed curve to the final rendered video.
     Video: single setpts expression via -vf (perfectly smooth).
@@ -2306,6 +2337,11 @@ def apply_speed_curve(output_path, speed_curve, work_dir):
     Falls back to the original output if the pass fails.
     """
     if not speed_curve or len(speed_curve) < 2:
+        return
+
+    speed_curve = project_speed_to_rendered_time(speed_curve, cuts, effective_durations)
+    if not speed_curve or len(speed_curve) < 2:
+        print("[speed_curve] Not enough projected keypoints — skipping", flush=True)
         return
 
     print(f"[speed_curve] Applying speed curve with {len(speed_curve)} keypoints", flush=True)
@@ -2326,6 +2362,8 @@ def apply_speed_curve(output_path, speed_curve, work_dir):
     for i in range(len(speed_curve) - 1):
         t_start = float(speed_curve[i]["t"])
         t_end = float(speed_curve[i + 1]["t"])
+        if t_end <= t_start:
+            continue
         s_start = float(speed_curve[i]["speed"])
         avg_speed = s_start
         expr_parts.append({
@@ -4207,7 +4245,9 @@ def handler(job):
             print(f"[pipeline] step=speed_curve ({len(speed_curve)} keypoints)", flush=True)
             speed_backup_path = os.path.join(work_dir, "output_speed_curve.backup.mp4")
             shutil.copy2(output_path, speed_backup_path)
-            apply_speed_curve(output_path, speed_curve, work_dir)
+            cuts = edit_plan.get("cuts") or []
+            effective_durations = compute_effective_durations(cuts)
+            apply_speed_curve(output_path, speed_curve, work_dir, cuts, effective_durations)
             if not validate_output(output_path, "speed_curve"):
                 print("[speed_curve] Speed curve produced invalid output — restoring backup", flush=True)
                 os.replace(speed_backup_path, output_path)
