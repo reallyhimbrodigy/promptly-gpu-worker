@@ -1177,6 +1177,12 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None, deepgra
 
     # Inject Deepgram word timestamps so Gemini can place cuts precisely
     if deepgram_words:
+        # Build a readable paragraph transcript so Gemini can understand the narrative
+        readable_words = []
+        for w in deepgram_words:
+            readable_words.append(w.get("punctuated_word") or w.get("word") or "")
+        readable_transcript = " ".join(readable_words)
+
         word_lines = []
         for w in deepgram_words:
             word_text = w.get("punctuated_word") or w.get("word") or ""
@@ -1188,7 +1194,13 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None, deepgra
         first_word_start = float(deepgram_words[0].get("start", 0))
         prompt += f"""
 
-=== SPEECH TRANSCRIPT WITH EXACT TIMESTAMPS ===
+=== FULL TRANSCRIPT ===
+
+Read this first to understand the full story before making any editing decisions. Identify the narrative structure — what is setup, what is filler, what is the buildup, and where are the punchlines or reveals. For speed ramping, use this understanding: the parts you'd skim if reading are filler (speed up), the parts that make you react are punchlines (slow down), and the parts that build tension should stay at normal speed.
+
+{readable_transcript}
+
+=== WORD-BY-WORD TIMESTAMPS ===
 
 The following is the complete word-by-word transcript with millisecond-accurate timestamps from speech recognition. Use these timestamps to place your cuts PRECISELY in the silence gaps between words.
 
