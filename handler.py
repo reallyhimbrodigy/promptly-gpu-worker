@@ -907,6 +907,7 @@ Look at the gaps between words in the transcript:
 - Under 0.10 seconds between words — natural word spacing. KEEP. This is how speech flows.
 - 0.10 seconds or more between words — this is a pause, breath, or dead air. REMOVE it by ending one clip before the gap and starting the next clip after it.
 - Filler words (uh, um, hmm, er, ah) — skip these entirely. End the previous clip before the filler word and start the next clip at the word after it.
+- Stutters and false starts — when the speaker starts a word then restarts it ("she shou- shouldn't", "I said, who is... I said, who is he?", "I'm going to... I'm gonna"), cut out the false start and keep only the corrected version. End the previous clip before the false start and start the next clip at the corrected word.
 
 HOW TO CUT PRECISELY:
 - source_end = the exact end timestamp of the last word you want to keep. The timestamps are accurate — use them exactly. If "electrocuted" ends at 26.07, set source_end to 26.07.
@@ -2385,10 +2386,12 @@ def apply_speed_curve(output_path, speed_curve, work_dir, cuts, effective_durati
         seg_end = max(seg_start, min(seg_end, duration))
         if seg_end <= seg_start:
             continue
+        output_duration = round((seg_end - seg_start) / speed, 6)
         expr_parts.append({
             "t_start": seg_start,
             "t_end": seg_end,
             "avg_speed": speed,
+            "output_duration": output_duration,
         })
         seg_start = seg_end
 
@@ -2399,9 +2402,7 @@ def apply_speed_curve(output_path, speed_curve, work_dir, cuts, effective_durati
     # Cumulative output time at each boundary
     cum_output = [0.0]
     for part in expr_parts:
-        seg_input_dur = part["t_end"] - part["t_start"]
-        seg_output_dur = seg_input_dur / part["avg_speed"]
-        cum_output.append(cum_output[-1] + seg_output_dur)
+        cum_output.append(round(cum_output[-1] + part["output_duration"], 6))
 
     total_output_duration = cum_output[-1]
     print(f"[speed_curve] Expected output duration: {total_output_duration:.2f}s", flush=True)
