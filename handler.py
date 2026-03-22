@@ -978,7 +978,7 @@ Global parameters:
   SPEED RAMPING (only when vibe mentions "speed ramp", "speed ramping", or "CapCut style"):
   Follow the speed ramping techniques described in the editing style guide above. The style guide was generated from watching real viral videos.
 
-  Be selective. The viewer needs to follow the story — only speed up parts that are filler or setup, and only slow down the precise moment of impact. The slow should snap in exactly when the punchline hits, hold just long enough to land, and get out.
+  When speed ramping is active, every moment in the video is either sped up or slowed down — there is no 1.0x normal speed. If a section is filler or setup, it gets sped up. If it is a punchline or reveal, it gets slowed down. The contrast between fast and slow is what makes speed ramping work. Do not use 1.0x in your speed curve.
 
   What each speed value does to speech:
     1.0x = normal speech, no change
