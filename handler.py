@@ -1032,12 +1032,18 @@ B-roll elevates production value. When the speaker mentions a concept, a 2-3 sec
 
 The ending matters. On these platforms, videos auto-loop. A clean ending that flows back into the opening earns replay credit. Avoid fade to black — it creates a flash before the loop restarts.{trend_block}
 
-  HOOK CLIP (when vibe mentions "viral", "engaging", "captivating", "hook", or "retention"):
-  Pick the single most captivating 1-2 second moment from the video — the punchline, the reveal, the reaction that makes someone stop scrolling. Set hook_clip to the source_start and source_end of that moment. This clip will play FIRST as a teaser, then the full video plays chronologically from the beginning.
+  HOOK CLIP:
+  BOTH of these conditions must be true to use a hook clip:
+  1. The vibe mentions "viral", "engaging", "captivating", "hook", or "retention"
+  2. The video does NOT already have a strong hook at the beginning — meaning the first 2-3 seconds are slow, boring setup, or dead air rather than something immediately compelling
+
+  If the video already starts with a strong statement, a provocative question, action, or anything that grabs attention in the first 2 seconds, set hook_clip to null — it doesn't need one.
+
+  If BOTH conditions are met: pick the single most captivating 1-2 second moment from the video — the punchline, the reveal, the reaction that makes someone stop scrolling. Set hook_clip to the source_start and source_end of that moment. This clip will play FIRST as a teaser, then the full video plays chronologically from the beginning.
 
   The hook clip should be short (1-2 seconds max), impactful, and make the viewer think "HOW did this happen?" It should NOT make sense without context — that's what makes them keep watching.
 
-  If the video doesn't have a clear punchline or dramatic moment, set hook_clip to null.
+  If either condition is not met, or if the video doesn't have a clear punchline, set hook_clip to null.
 
 === TOOLS ===
 
