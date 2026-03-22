@@ -255,6 +255,96 @@ def normalize_intent(intent_name):
     return "none"
 
 
+def detect_face_positions(video_path, sample_timestamps):
+    """
+    Sample frames at given timestamps and detect the dominant face position.
+    Returns list of {"t", "cx", "cy", "found"} entries.
+    """
+    import cv2
+
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        print("[reframe] Could not open video for face detection", flush=True)
+        return []
+
+    frame_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+    frame_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+    center_x = frame_w // 2 if frame_w > 0 else 540
+    center_y = frame_h // 2 if frame_h > 0 else 960
+
+    face_cascade = cv2.CascadeClassifier(
+        cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+    )
+
+    positions = []
+    for t in sample_timestamps:
+        cap.set(cv2.CAP_PROP_POS_MSEC, float(t) * 1000.0)
+        ret, frame = cap.read()
+        if not ret or frame is None:
+            positions.append({"t": float(t), "cx": center_x, "cy": center_y, "found": False})
+            continue
+
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        faces = face_cascade.detectMultiScale(
+            gray,
+            scaleFactor=1.1,
+            minNeighbors=5,
+            minSize=(80, 80),
+        )
+
+        if len(faces) > 0:
+            fx, fy, fw, fh = max(faces, key=lambda f: f[2] * f[3])
+            positions.append({
+                "t": float(t),
+                "cx": int(fx + fw // 2),
+                "cy": int(fy + fh // 2),
+                "found": True,
+            })
+        else:
+            positions.append({"t": float(t), "cx": center_x, "cy": center_y, "found": False})
+
+    cap.release()
+    found_count = sum(1 for p in positions if p["found"])
+    print(f"[reframe] Detected faces in {found_count}/{len(positions)} sampled frames", flush=True)
+    return positions
+
+
+def calculate_reframe_crop(face_positions, source_w, source_h, target_w=1080, target_h=1920):
+    """
+    Calculate a crop window that keeps the detected face near frame center.
+    Returns crop positions in source-pixel coordinates, or None if no crop shift is needed.
+    """
+    if source_w == target_w and source_h == target_h:
+        return None
+
+    target_aspect = target_w / target_h
+    source_aspect = source_w / source_h if source_h else target_aspect
+
+    if source_aspect > target_aspect:
+        crop_h = source_h
+        crop_w = int(source_h * target_aspect)
+    else:
+        crop_w = source_w
+        crop_h = int(source_w / target_aspect) if target_aspect else source_h
+
+    crops = []
+    for pos in face_positions:
+        crop_x = int(pos["cx"] - crop_w // 2)
+        crop_y = int(pos["cy"] - crop_h // 2)
+        crop_x = max(0, min(crop_x, max(0, source_w - crop_w)))
+        crop_y = max(0, min(crop_y, max(0, source_h - crop_h)))
+        crops.append({
+            "t": pos["t"],
+            "crop_x": crop_x,
+            "crop_y": crop_y,
+            "crop_w": crop_w,
+            "crop_h": crop_h,
+            "found": bool(pos.get("found")),
+        })
+
+    return crops
+
+
 def build_color_grade(baseline, intent_name):
     raw_b = float(baseline.get("brightness", 1.0)) if isinstance(baseline.get("brightness"), (int, float)) else 1.0
     raw_c = float(baseline.get("contrast", 1.0)) if isinstance(baseline.get("contrast"), (int, float)) else 1.0
@@ -942,6 +1032,13 @@ B-roll elevates production value. When the speaker mentions a concept, a 2-3 sec
 
 The ending matters. On these platforms, videos auto-loop. A clean ending that flows back into the opening earns replay credit. Avoid fade to black — it creates a flash before the loop restarts.{trend_block}
 
+  HOOK CLIP (when vibe mentions "viral", "engaging", "captivating", "hook", or "retention"):
+  Pick the single most captivating 1-2 second moment from the video — the punchline, the reveal, the reaction that makes someone stop scrolling. Set hook_clip to the source_start and source_end of that moment. This clip will play FIRST as a teaser, then the full video plays chronologically from the beginning.
+
+  The hook clip should be short (1-2 seconds max), impactful, and make the viewer think "HOW did this happen?" It should NOT make sense without context — that's what makes them keep watching.
+
+  If the video doesn't have a clear punchline or dramatic moment, set hook_clip to null.
+
 === TOOLS ===
 
 Per-clip parameters:
@@ -1067,6 +1164,7 @@ Then output the JSON:
 {{
   "notes": "<50 words max>",
   "color_intent": "<intent>",
+  "hook_clip": {{"source_start": <seconds>, "source_end": <seconds>}} or null,
   "thumbnail_timestamp": <seconds>,
   "caption_style": "<style>",
   "caption_position": "<position>",
@@ -1165,7 +1263,7 @@ def build_analysis_from_gemini_recipe(edit_plan, duration):
     return analysis
 
 
-def generate_edit_gemini(video_path, vibe, duration, trend_context=None, deepgram_words=None):
+def generate_edit_gemini(video_path, vibe, duration, trend_context=None, deepgram_words=None, face_positions=None):
     gemini_api_key = os.environ.get("GEMINI_API_KEY")
     if not gemini_api_key:
         raise RuntimeError("GEMINI_API_KEY not set")
@@ -1217,6 +1315,17 @@ RULES FOR USING THESE TIMESTAMPS:
 - If the video has intentional visual content before the first word (action, scenery, product shots), start source_start at 0.0 to preserve that content.
 """
         print(f"[generate-edit] Injected {len(deepgram_words)} Deepgram word timestamps into Gemini prompt", flush=True)
+
+    if face_positions:
+        found_positions = [p for p in face_positions if p.get("found")]
+        if found_positions:
+            avg_cx = sum(float(p["cx"]) for p in found_positions) / len(found_positions)
+            if abs(avg_cx - 540) > 100:
+                prompt += (
+                    f"\nNOTE: The subject's face is off-center (average X position: {int(avg_cx)} out of 1080). "
+                    "Do NOT use zoom on this video — it will crop poorly.\n"
+                )
+                print(f"[generate-edit] Injected off-center face note into Gemini prompt (avg_x={avg_cx:.1f})", flush=True)
 
     if trend_context:
         print(f"[generate-edit] Trend context included: {trend_context.get('sample_size', '?')} videos", flush=True)
@@ -1492,6 +1601,27 @@ RULES FOR USING THESE TIMESTAMPS:
     except Exception:
         thumbnail_timestamp = None
     edit_plan["thumbnail_timestamp"] = thumbnail_timestamp
+
+    hook_clip = None
+    raw_hook = edit_plan.get("hook_clip")
+    if isinstance(raw_hook, dict):
+        try:
+            hook_start = max(0.0, float(raw_hook.get("source_start")))
+            hook_end = max(0.0, float(raw_hook.get("source_end")))
+            if video_duration > 0:
+                hook_end = min(hook_end, video_duration)
+            hook_dur = hook_end - hook_start
+            if 0.5 <= hook_dur <= 3.0:
+                hook_clip = {
+                    "source_start": round(hook_start, 3),
+                    "source_end": round(hook_end, 3),
+                }
+            else:
+                print(f"[generate-edit] Hook clip duration {hook_dur:.2f}s out of range — skipping", flush=True)
+        except Exception:
+            hook_clip = None
+    edit_plan["hook_clip"] = hook_clip
+    edit_plan["_hook_offset"] = 0.0
 
     raw_sfx = edit_plan.get("sound_effects", [])
     sound_effects = []
@@ -2253,9 +2383,31 @@ def normalize_source_video(source_path, work_dir):
     normalized_path = os.path.join(work_dir, "normalized_source.mp4")
     print(f"[normalize] Converting {w}x{h} @ {fps:.2f}fps to 1080x1920 @ 30fps", flush=True)
 
+    sample_timestamps = []
+    source_duration = probe_duration(source_path) or 0.0
+    if source_duration > 0:
+        sample_timestamps = [round(i * 2.0, 3) for i in range(int(source_duration / 2.0) + 1)]
+    face_positions = detect_face_positions(source_path, sample_timestamps) if sample_timestamps else []
+    reframe_crops = calculate_reframe_crop(face_positions, w, h)
+
+    normalize_vf = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1"
+    if reframe_crops:
+        avg_crops = [c for c in reframe_crops if c.get("found")] or reframe_crops
+        avg_x = int(sum(c["crop_x"] for c in avg_crops) / len(avg_crops))
+        avg_y = int(sum(c["crop_y"] for c in avg_crops) / len(avg_crops))
+        crop_w = int(reframe_crops[0]["crop_w"])
+        crop_h = int(reframe_crops[0]["crop_h"])
+        normalize_vf = f"crop={crop_w}:{crop_h}:{avg_x}:{avg_y},scale=1080:1920,setsar=1"
+        print(
+            f"[reframe] Smart reframe active in normalize: crop={crop_w}x{crop_h}@({avg_x},{avg_y})",
+            flush=True,
+        )
+    else:
+        print("[reframe] Source is native 9:16 — using center crop", flush=True)
+
     normalize_args = [
         "-y","-i",source_path,
-        "-vf","scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1",
+        "-vf", normalize_vf,
         "-r","30","-vsync","cfr","-pix_fmt","yuv420p",
         "-c:v","libx264","-preset","medium","-crf","18",
         "-c:a","aac","-b:a","192k","-ar","48000","-ac","2",
@@ -2357,7 +2509,7 @@ def project_speed_to_rendered_time(speed_keypoints, cuts, effective_durations):
     return deduped
 
 
-def apply_speed_curve(output_path, speed_curve, work_dir, cuts, effective_durations):
+def apply_speed_curve(output_path, speed_curve, work_dir, cuts, effective_durations, hook_offset=0.0):
     """
     Apply a smooth speed curve to the final rendered video.
     Video: single setpts expression via -vf (perfectly smooth).
@@ -2371,6 +2523,9 @@ def apply_speed_curve(output_path, speed_curve, work_dir, cuts, effective_durati
     if not speed_curve or len(speed_curve) < 2:
         print("[speed_curve] Not enough projected keypoints — skipping", flush=True)
         return
+    if hook_offset > 0:
+        speed_curve = [{"t": round(float(kp["t"]) + hook_offset, 3), "speed": kp["speed"]} for kp in speed_curve]
+        speed_curve = [{"t": 0.0, "speed": 1.0}, {"t": round(hook_offset, 3), "speed": speed_curve[0]["speed"]}] + speed_curve
 
     print(f"[speed_curve] Applying speed curve with {len(speed_curve)} keypoints", flush=True)
     duration = probe_duration(output_path)
@@ -2582,7 +2737,7 @@ def build_video_filter_chain(color_grade, source_res, edit_plan=None):
     return ",".join(filters) if filters else "null"
 
 
-def project_words_to_output(transcript, cuts, effective_durations):
+def project_words_to_output(transcript, cuts, effective_durations, hook_offset=0.0, hook_clip=None):
     words = transcript.get("words") or []
     projected = []
     if not words or not cuts:
@@ -2607,7 +2762,30 @@ def project_words_to_output(transcript, cuts, effective_durations):
         dur = effective_durations[i] if i < len(effective_durations) else (c_end - c_start)
         overlap = TRANSITION_DURATION if i < len(cuts)-1 and not is_hard_cut(cut.get("transition_out")) else 0
         output_cursor = round((output_cursor + dur - overlap)*1000)/1000
-    return [w for w in projected if w["end"] > w["start"]]
+
+    projected = [w for w in projected if w["end"] > w["start"]]
+    if hook_offset > 0:
+        for w in projected:
+            w["start"] = round((w["start"] + hook_offset) * 1000) / 1000
+            w["end"] = round((w["end"] + hook_offset) * 1000) / 1000
+        print(f"[hook] Shifted caption timestamps by +{hook_offset:.2f}s for hook", flush=True)
+
+        if isinstance(hook_clip, dict):
+            hook_start = float(hook_clip.get("source_start") or 0.0)
+            hook_end = float(hook_clip.get("source_end") or 0.0)
+            hook_words = []
+            for w in words:
+                ws = float(w.get("start") or 0)
+                we = float(w.get("end") or 0)
+                if ws >= hook_start and we <= hook_end:
+                    hook_words.append({
+                        "start": round((ws - hook_start) * 1000) / 1000,
+                        "end": round((we - hook_start) * 1000) / 1000,
+                        "word": w.get("punctuated_word") or w.get("word") or "",
+                    })
+            projected = hook_words + projected
+
+    return projected
 
 
 def format_ass_time(seconds):
@@ -2619,8 +2797,8 @@ def format_ass_time(seconds):
     return f"{h}:{m:02d}:{sec:02d}.{cs:02d}"
 
 
-def generate_subtitle_file(transcript, caption_style, cuts, effective_durations, output_res, caption_position, caption_keywords, work_dir):
-    words = project_words_to_output(transcript, cuts, effective_durations)
+def generate_subtitle_file(transcript, caption_style, cuts, effective_durations, output_res, caption_position, caption_keywords, work_dir, hook_offset=0.0, hook_clip=None):
+    words = project_words_to_output(transcript, cuts, effective_durations, hook_offset=hook_offset, hook_clip=hook_clip)
     if not words:
         return None
 
@@ -3424,13 +3602,16 @@ def project_output_time_through_speed_curve(output_t, speed_curve, pre_speed_dur
     return round(output_t * 1000) / 1000
 
 
-def project_source_time_to_final_output(source_t, cuts, effective_durations, speed_curve=None):
+def project_source_time_to_final_output(source_t, cuts, effective_durations, speed_curve=None, hook_offset=0.0):
     """Map a source timestamp to the final output timeline after cut compression and speed curve."""
     clip_ranges = get_output_clip_ranges(cuts, effective_durations)
     pre_speed_t = project_source_time_to_output(source_t, cuts, clip_ranges)
     if pre_speed_t is None:
         return None
-    return project_output_time_through_speed_curve(pre_speed_t, speed_curve, sum(effective_durations))
+    final_t = project_output_time_through_speed_curve(pre_speed_t, speed_curve, sum(effective_durations))
+    if final_t is None:
+        return None
+    return round((final_t + hook_offset) * 1000) / 1000
 
 
 def compute_effective_durations(cuts):
@@ -3444,6 +3625,73 @@ def compute_effective_durations(cuts):
     ]
 
 
+def prepend_hook_clip(output_path, source_path, edit_plan, work_dir):
+    """Extract a short teaser clip from later in the source and prepend it to the rendered output."""
+    hook_clip_data = edit_plan.get("hook_clip")
+    edit_plan["_hook_offset"] = 0.0
+    if not isinstance(hook_clip_data, dict):
+        return
+
+    hook_start = float(hook_clip_data.get("source_start") or 0.0)
+    hook_end = float(hook_clip_data.get("source_end") or 0.0)
+    hook_dur = hook_end - hook_start
+    if not (0.5 <= hook_dur <= 3.0):
+        print(f"[hook] Hook duration {hook_dur:.2f}s out of range — skipping", flush=True)
+        return
+
+    print(f"[hook] Extracting hook clip: {hook_start:.2f}s - {hook_end:.2f}s ({hook_dur:.2f}s)", flush=True)
+    hook_path = os.path.join(work_dir, "hook_clip.mp4")
+    source_res = probe_resolution(source_path)
+    color_filter_str = build_video_filter_chain(edit_plan.get("color_grade") or {}, source_res, edit_plan)
+    vf_parts = ["fps=30", "format=yuv420p"]
+    if color_filter_str and color_filter_str != "null":
+        vf_parts.append(color_filter_str)
+
+    hook_cmd = [
+        "ffmpeg", "-y",
+        "-ss", f"{hook_start:.3f}",
+        "-to", f"{hook_end:.3f}",
+        "-i", source_path,
+        "-map", "0:v:0", "-map", "0:a?",
+        "-vf", ",".join(vf_parts),
+        "-r", "30", "-pix_fmt", "yuv420p",
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "0",
+        "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
+        "-movflags", "+faststart",
+        hook_path,
+    ]
+    result = subprocess.run(hook_cmd, capture_output=True, text=True, timeout=30)
+    if result.returncode != 0 or not os.path.exists(hook_path) or os.path.getsize(hook_path) <= 0:
+        print("[hook] Hook extraction failed — continuing without hook", flush=True)
+        if result.stderr:
+            print(f"[hook] stderr (last 300): {result.stderr[-300:]}", flush=True)
+        return
+
+    hook_actual_dur = probe_duration(hook_path) or hook_dur
+    hooked_output = os.path.join(work_dir, "hooked_output.mp4")
+    concat_cmd = [
+        "ffmpeg", "-y",
+        "-i", hook_path,
+        "-i", output_path,
+        "-filter_complex", "[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[outv][outa]",
+        "-map", "[outv]", "-map", "[outa]",
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "0",
+        "-c:a", "aac", "-b:a", "192k",
+        "-movflags", "+faststart",
+        hooked_output,
+    ]
+    concat_result = subprocess.run(concat_cmd, capture_output=True, text=True, timeout=60)
+    if concat_result.returncode != 0 or not os.path.exists(hooked_output) or os.path.getsize(hooked_output) <= 0:
+        print("[hook] Concat failed — continuing without hook", flush=True)
+        if concat_result.stderr:
+            print(f"[hook] concat stderr (last 300): {concat_result.stderr[-300:]}", flush=True)
+        return
+
+    os.replace(hooked_output, output_path)
+    edit_plan["_hook_offset"] = hook_actual_dur
+    print(f"[hook] Prepended {hook_actual_dur:.2f}s hook teaser", flush=True)
+
+
 def burn_in_captions(output_path, edit_plan, transcript, work_dir):
     """Burn captions and text overlays into the output video as a post-process."""
     caption_style = str(edit_plan.get("caption_style") or "none").lower()
@@ -3453,6 +3701,8 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
 
     cuts = edit_plan.get("cuts") or []
     effective_durations = compute_effective_durations(cuts)
+    hook_offset = float(edit_plan.get("_hook_offset") or 0.0)
+    hook_clip = edit_plan.get("hook_clip")
     post_filters = []
     video_out = "[video_base]"
     post_filters.append(f"[0:v]null{video_out}")
@@ -3464,6 +3714,8 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
             edit_plan.get("caption_position") or "lower-third",
             edit_plan.get("caption_keywords") or [],
             work_dir,
+            hook_offset=hook_offset,
+            hook_clip=hook_clip,
         )
         if ass_path and os.path.exists(ass_path):
             escaped = ass_path.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
@@ -3474,6 +3726,10 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
 
     if text_overlays:
         clip_ranges = get_output_clip_ranges(cuts, effective_durations)
+        if hook_offset > 0:
+            for cr in clip_ranges:
+                cr["start"] = round((cr["start"] + hook_offset) * 1000) / 1000
+                cr["end"] = round((cr["end"] + hook_offset) * 1000) / 1000
         total_output_dur = sum(effective_durations)
         print(f"[render] Total output duration: {total_output_dur:.3f}s, {len(clip_ranges)} clip ranges", flush=True)
         for cr_i, cr in enumerate(clip_ranges):
@@ -3552,6 +3808,7 @@ def mix_sfx_after_speed_curve(output_path, edit_plan, cuts, effective_durations,
     """
     clip_ranges = get_output_clip_ranges(cuts, effective_durations)
     parsed_sfx = list(edit_plan.get("_parsed_sound_effects", []))
+    hook_offset = float(edit_plan.get("_hook_offset") or 0.0)
 
     if not parsed_sfx:
         print("[sfx] No sound effects to mix", flush=True)
@@ -3607,7 +3864,7 @@ def mix_sfx_after_speed_curve(output_path, edit_plan, cuts, effective_durations,
         is_auto = sfx.get("_auto", False)
 
         if is_auto:
-            final_t = max(0.0, apply_speed_warp(raw_t))
+            final_t = max(0.0, hook_offset + apply_speed_warp(raw_t))
             sfx_entries.append({
                 "sound": sfx.get("sound", "pop"),
                 "path": get_sfx_path(normalize_sfx_style(sfx.get("sound", "pop"))),
@@ -3645,7 +3902,7 @@ def mix_sfx_after_speed_curve(output_path, edit_plan, cuts, effective_durations,
             print(f"[sfx] {sound_style} at source={source_t:.3f}s — could not project, skipping", flush=True)
             continue
 
-        final_t = apply_speed_warp(pre_sc_t)
+        final_t = hook_offset + apply_speed_warp(pre_sc_t)
         final_t = max(0.0, final_t)
 
         sfx_entries.append({
@@ -3743,6 +4000,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     video_filters = []
     audio_filters = []
+    face_positions = edit_plan.get("_face_positions") or []
 
     for i, cut in enumerate(cuts):
         start = float(cut["source_start"])
@@ -3761,11 +4019,34 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         if zoom == "slow_in":
             tf = max(1, total_frames)
             zoom_range = zoom_max - 1.0
-            zoom_filter = (
-                f"scale=w='trunc(iw*(1.0+{zoom_range:.4f}*min(n/{tf}\\,1.0))/2)*2'"
-                f":h='trunc(ih*(1.0+{zoom_range:.4f}*min(n/{tf}\\,1.0))/2)*2'"
-                f":eval=frame:flags=bilinear,crop=1080:1920"
-            )
+            closest_face = None
+            if face_positions:
+                clip_mid = (start + end) / 2.0
+                closest_face = min(face_positions, key=lambda p: abs(float(p.get("t") or 0.0) - clip_mid))
+            if closest_face and closest_face.get("found"):
+                face_cx = float(closest_face.get("cx") or 540.0)
+                face_cy = float(closest_face.get("cy") or 960.0)
+                offset_x = clamp(face_cx - 540.0, -240.0, 240.0)
+                offset_y = clamp(face_cy - 960.0, -320.0, 320.0)
+                progress = f"min(n/{tf}\\,1.0)"
+                crop_x = (
+                    f"max(0\\,min((iw-1080)/2+{offset_x:.1f}*{progress}*{zoom_range:.4f}\\,iw-1080))"
+                )
+                crop_y = (
+                    f"max(0\\,min((ih-1920)/2+{offset_y:.1f}*{progress}*{zoom_range:.4f}\\,ih-1920))"
+                )
+                zoom_filter = (
+                    f"scale=w='trunc(iw*(1.0+{zoom_range:.4f}*{progress})/2)*2'"
+                    f":h='trunc(ih*(1.0+{zoom_range:.4f}*{progress})/2)*2'"
+                    f":eval=frame:flags=bilinear,"
+                    f"crop=1080:1920:x='{crop_x}':y='{crop_y}'"
+                )
+            else:
+                zoom_filter = (
+                    f"scale=w='trunc(iw*(1.0+{zoom_range:.4f}*min(n/{tf}\\,1.0))/2)*2'"
+                    f":h='trunc(ih*(1.0+{zoom_range:.4f}*min(n/{tf}\\,1.0))/2)*2'"
+                    f":eval=frame:flags=bilinear,crop=1080:1920"
+                )
         elif zoom == "slow_out":
             tf = max(1, total_frames)
             zoom_range = zoom_max - 1.0
@@ -4183,6 +4464,16 @@ def handler(job):
         source_duration = get_source_duration(source_path)
         transcript = {"text": "", "words": []}
 
+        print("[pipeline] step=face_detect", flush=True)
+        source_res = probe_resolution(source_path)
+        sample_timestamps = [round(i * 2.0, 3) for i in range(int(source_duration / 2.0) + 1)] if source_duration > 0 else []
+        face_positions = detect_face_positions(source_path, sample_timestamps) if sample_timestamps else []
+        reframe_crops = calculate_reframe_crop(face_positions, source_res.get("width") or 1080, source_res.get("height") or 1920)
+        if reframe_crops:
+            print(f"[reframe] Smart reframe active: {len(reframe_crops)} crop positions", flush=True)
+        else:
+            print("[reframe] Source is native 9:16 — using center crop", flush=True)
+
         print(f"[edit] User vibe: \"{vibe}\"", flush=True)
 
         # Run Deepgram for word timestamps (needed for cut snapping and SFX)
@@ -4220,7 +4511,9 @@ def handler(job):
             duration=source_duration,
             trend_context=trend_context,
             deepgram_words=transcript.get("words", []),
+            face_positions=face_positions,
         )
+        edit_plan["_face_positions"] = face_positions
         print(f"[pipeline] edit recipe complete in {time.time()-t:.1f}s", flush=True)
         analysis = edit_plan.get("analysis_data") or {}
 
@@ -4263,11 +4556,15 @@ def handler(job):
         if not validate_output(output_path, "render"):
             raise RuntimeError("Main render produced invalid output")
 
+        print("[pipeline] step=hook", flush=True)
+        prepend_hook_clip(output_path, source_path, edit_plan, work_dir)
+
         print("[pipeline] step=trim", flush=True)
         expected_duration = sum(
             (float(cut["source_end"]) - float(cut["source_start"])) / max(0.25, float(cut.get("speed") or 1.0))
             for cut in edit_plan["cuts"]
         )
+        expected_duration += float(edit_plan.get("_hook_offset") or 0.0)
         actual_duration = probe_duration(output_path) or 0.0
         if actual_duration > expected_duration + 2.0:
             print(f"[pipeline] Trimming dead air: {actual_duration:.1f}s → {expected_duration:.1f}s", flush=True)
@@ -4323,7 +4620,7 @@ def handler(job):
             shutil.copy2(output_path, speed_backup_path)
             cuts = edit_plan.get("cuts") or []
             effective_durations = compute_effective_durations(cuts)
-            apply_speed_curve(output_path, speed_curve, work_dir, cuts, effective_durations)
+            apply_speed_curve(output_path, speed_curve, work_dir, cuts, effective_durations, hook_offset=float(edit_plan.get("_hook_offset") or 0.0))
             if not validate_output(output_path, "speed_curve"):
                 print("[speed_curve] Speed curve produced invalid output — restoring backup", flush=True)
                 os.replace(speed_backup_path, output_path)
@@ -4387,6 +4684,7 @@ def handler(job):
             cuts,
             effective_durations,
             speed_curve,
+            hook_offset=float(edit_plan.get("_hook_offset") or 0.0),
         )
         if cover_frame_ts is None:
             cover_frame_ts = 1.0
