@@ -1240,6 +1240,10 @@ RULES FOR USING THESE TIMESTAMPS:
             print(f"[generate-edit] Calling Gemini model={model_name}...", flush=True)
             t = time.time()
             model = genai.GenerativeModel(model_name)
+            # Temporary: dump full prompt for debugging
+            with open("/tmp/gemini_prompt_debug.txt", "w") as f:
+                f.write(prompt)
+            print(f"[DEBUG] Full Gemini prompt written to /tmp/gemini_prompt_debug.txt ({len(prompt)} chars)", flush=True)
             response = model.generate_content(
                 [gemini_file, prompt],
                 generation_config=genai.GenerationConfig(
