@@ -1007,7 +1007,7 @@ Global parameters:
     two_line — shows two lines at once: active line on top with karaoke highlight, upcoming line dimmed below. Use for longer sentences or interview-style content.
     boxed — text inside a semi-transparent black box with karaoke sweep highlight. High contrast, easy to read. Use for noisy backgrounds or outdoor footage.
 
-    If the video has speech and no burned-in captions, use "capcut".
+    If the video has speech and no burned-in captions, choose the caption style that best fits the content and vibe. Match the energy — aggressive content gets hormozi, clean/aesthetic content gets minimal, storytelling gets capcut or two_line, fast-paced content gets word_pop.
 
   caption_position — where captions appear on screen. Always use "lower-third" — this places captions in the safe zone below faces and above the TikTok/Reels platform UI. This is the standard caption placement used by every major short-form editor.
 
@@ -1018,6 +1018,8 @@ Global parameters:
   background_music: always "none" — creators add their own music when posting.
 
   aspect_ratio: always "9:16"
+
+  thumbnail_timestamp — the source timestamp (in seconds) of the single best frame to use as the video's cover image / thumbnail. Pick the frame where the speaker has the most expressive or emotional face — surprise, laughter, intensity, reaction. Avoid frames where eyes are closed, face is blurry, or expression is blank. This frame needs to make someone scrolling stop and click.
 
 Text overlays:
   text — under 5 words, no emojis
@@ -1065,6 +1067,7 @@ Then output the JSON:
 {{
   "notes": "<50 words max>",
   "color_intent": "<intent>",
+  "thumbnail_timestamp": <seconds>,
   "caption_style": "<style>",
   "caption_position": "<position>",
   "audio_denoise": <true|false>,
@@ -1479,6 +1482,16 @@ RULES FOR USING THESE TIMESTAMPS:
                 flush=True,
             )
     edit_plan["_parsed_speed_curve"] = speed_curve
+
+    thumbnail_timestamp = None
+    try:
+        if edit_plan.get("thumbnail_timestamp") is not None:
+            thumbnail_timestamp = max(0.0, float(edit_plan.get("thumbnail_timestamp")))
+            if video_duration > 0:
+                thumbnail_timestamp = min(thumbnail_timestamp, video_duration)
+    except Exception:
+        thumbnail_timestamp = None
+    edit_plan["thumbnail_timestamp"] = thumbnail_timestamp
 
     raw_sfx = edit_plan.get("sound_effects", [])
     sound_effects = []
@@ -3387,6 +3400,39 @@ def project_source_time_to_output(source_t, cuts, clip_ranges):
     return None
 
 
+def project_output_time_through_speed_curve(output_t, speed_curve, pre_speed_duration):
+    """Map a pre-speed-curve output time to post-speed-curve output time."""
+    if output_t is None or not speed_curve or len(speed_curve) < 2:
+        return output_t
+
+    sc = list(speed_curve)
+    if sc[-1]["t"] < pre_speed_duration:
+        sc = sc + [{"t": pre_speed_duration, "speed": sc[-1]["speed"]}]
+    if sc[0]["t"] > 0:
+        sc = [{"t": 0.0, "speed": sc[0]["speed"]}] + sc
+
+    cum_output = 0.0
+    for i in range(len(sc) - 1):
+        t_start = float(sc[i]["t"])
+        t_end = float(sc[i + 1]["t"])
+        speed = float(sc[i]["speed"])
+        if output_t <= t_end or i == len(sc) - 2:
+            local = max(0.0, output_t - t_start)
+            return round((cum_output + (local / speed)) * 1000) / 1000
+        cum_output += (t_end - t_start) / speed
+
+    return round(output_t * 1000) / 1000
+
+
+def project_source_time_to_final_output(source_t, cuts, effective_durations, speed_curve=None):
+    """Map a source timestamp to the final output timeline after cut compression and speed curve."""
+    clip_ranges = get_output_clip_ranges(cuts, effective_durations)
+    pre_speed_t = project_source_time_to_output(source_t, cuts, clip_ranges)
+    if pre_speed_t is None:
+        return None
+    return project_output_time_through_speed_curve(pre_speed_t, speed_curve, sum(effective_durations))
+
+
 def compute_effective_durations(cuts):
     return [
         round(
@@ -4331,22 +4377,21 @@ def handler(job):
             print(f"[pipeline] Output already compressed: {output_size / 1024 / 1024:.1f}MB", flush=True)
 
         # ── Parallel group 2: cover frame + upload ────────────────────────────────
-        cover_frame_ts   = 1.0
+        source_duration = float(analysis.get("duration") or 0) or (probe_duration(source_path) or 0.0)
+        thumbnail_source_ts = edit_plan.get("thumbnail_timestamp")
+        if thumbnail_source_ts is None:
+            thumbnail_source_ts = (source_duration / 3.0) if source_duration > 0 else 1.0
+        speed_curve = edit_plan.get("_parsed_speed_curve")
+        cover_frame_ts = project_source_time_to_final_output(
+            float(thumbnail_source_ts),
+            cuts,
+            effective_durations,
+            speed_curve,
+        )
+        if cover_frame_ts is None:
+            cover_frame_ts = 1.0
         cover_frame_b64  = None
         cover_frame_mime = "image/jpeg"
-
-        hook = (analysis.get("hook") or {})
-        if hook.get("timestamp") is not None and float(hook.get("quality") or 0) >= 0.5:
-            cover_frame_ts = float(hook["timestamp"])
-        else:
-            shots_sorted = sorted(
-                analysis.get("shots") or [],
-                key=lambda s: float(s.get("energy") or 0),
-                reverse=True,
-            )
-            if shots_sorted:
-                best = shots_sorted[0]
-                cover_frame_ts = (float(best["start"]) + float(best["end"])) / 2
 
         if not validate_output(output_path, "final"):
             raise RuntimeError(f"Final output is invalid: {output_path}")
@@ -4363,9 +4408,13 @@ def handler(job):
             print("[pipeline] upload complete", flush=True)
 
         def _extract_cover():
-            data, mime = extract_cover_frame(source_path, cover_frame_ts, work_dir)
+            data, mime = extract_cover_frame(output_path, cover_frame_ts, work_dir)
             if data:
-                print(f"[pipeline] cover frame at {cover_frame_ts:.2f}s ({len(data)//1024}KB)", flush=True)
+                print(
+                    f"[pipeline] cover frame at {cover_frame_ts:.2f}s "
+                    f"(AI-selected from source {float(thumbnail_source_ts):.2f}s, {len(data)//1024}KB)",
+                    flush=True,
+                )
             return data, mime
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as post_executor:
@@ -4422,6 +4471,7 @@ def handler(job):
             "output_size_mb": round(output_size_mb, 1),
             "edit_recipe": {k: v for k, v in edit_plan.items() if k != "analysis_data"},
             "cover_frame_timestamp": round(cover_frame_ts, 3),
+            "thumbnail_timestamp": round(float(thumbnail_source_ts), 3),
         }
         if cover_frame_b64:
             result_payload["cover_frame_b64"]  = cover_frame_b64
