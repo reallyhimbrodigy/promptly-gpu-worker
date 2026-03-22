@@ -982,12 +982,13 @@ Global parameters:
 
   What each speed value does to speech:
     1.0x = normal speech, no change
-    1.2x = slightly fast, viewer can still follow easily
-    1.3x = fast, noticeable pitch rise, good for compressing filler
-    1.5x+ = very fast, chipmunk voice, hard to understand — use sparingly
-    0.8x = slightly slow, barely noticeable — not dramatic enough for a punchline
+    1.2x = slightly fast, natural sounding, good default for filler and setup
+    1.3x = comfortably fast, pitch rises slightly, viewer follows easily
+    1.5x = fast, noticeable pitch shift, still understandable
+    1.8x = very fast, chipmunk territory — use only on pure filler
+    0.8x = slightly slow, barely noticeable
     0.6x = noticeably slow, voice gets deeper, clearly dramatic
-    0.4x = very slow, deep voice, extreme impact — use on the biggest moments only
+    0.4x = very slow, deep voice, extreme impact
 
   SPEED CURVE FORMAT:
   speed_curve: [
