@@ -909,7 +909,7 @@ Look at the gaps between words in the transcript:
 - Filler words (uh, um, hmm, er, ah) — skip these entirely. End the previous clip before the filler word and start the next clip at the word after it.
 
 HOW TO CUT PRECISELY:
-- source_end = place this in the SILENCE after the last word you want to keep. Look at the last word's end timestamp and the next word's start timestamp — the silence gap is between them. Place source_end in the middle of that gap. Example: if "Hatikvah" ends at 7.30 and "and" starts at 7.84, set source_end to 7.57 (midpoint of the gap). This guarantees the full word sound is captured. If there is no next word (last clip), set source_end to the last word's end timestamp + 0.15.
+- source_end = the exact end timestamp of the last word you want to keep. The timestamps are accurate — use them exactly. If "electrocuted" ends at 26.07, set source_end to 26.07.
 - source_start = the exact start timestamp of the first word in the clip. If "and" starts at 8.88, set source_start to 8.88. You have the exact timestamps. Use them exactly.
 - The gap between clips is the dead air being removed
 
@@ -981,14 +981,12 @@ Global parameters:
   When speed ramping is active, every moment in the video is either sped up or slowed down — there is no 1.0x normal speed. If a section is filler or setup, it gets sped up. If it is a punchline or reveal, it gets slowed down. The contrast between fast and slow is what makes speed ramping work. Do not use 1.0x in your speed curve.
 
   What each speed value does to speech:
-    1.0x = normal speech, no change
     1.2x = slightly fast, natural sounding, good default for filler and setup
-    1.3x = comfortably fast, pitch rises slightly, viewer follows easily
-    1.5x = fast, noticeable pitch shift, still understandable
-    1.8x = very fast, chipmunk territory — use only on pure filler
-    0.8x = slightly slow, barely noticeable
+    1.3x = comfortably fast, pitch rises slightly, still easy to follow
+    1.5x = fast, noticeable pitch shift — maximum speed
+    0.8x = slightly slow, subtle dramatic effect
     0.6x = noticeably slow, voice gets deeper, clearly dramatic
-    0.4x = very slow, deep voice, extreme impact
+    0.5x = very slow, deep voice, maximum dramatic impact
 
   SPEED CURVE FORMAT:
   speed_curve: [
@@ -1465,7 +1463,7 @@ RULES FOR USING THESE TIMESTAMPS:
             if isinstance(kp, dict) and "t" in kp and "speed" in kp:
                 try:
                     t = max(0.0, float(kp["t"]))
-                    s = max(0.4, min(1.8, float(kp["speed"])))
+                    s = max(0.5, min(1.5, float(kp["speed"])))
                     speed_curve.append({"t": t, "speed": s})
                 except Exception:
                     continue
@@ -2357,20 +2355,24 @@ def apply_speed_curve(output_path, speed_curve, work_dir, cuts, effective_durati
     if speed_curve[0]["t"] > 0:
         speed_curve = [{"t": 0.0, "speed": speed_curve[0]["speed"]}] + speed_curve
 
-    # Build segment data
+    # Build contiguous segment data using the exact probed rendered duration.
     expr_parts = []
-    for i in range(len(speed_curve) - 1):
-        t_start = float(speed_curve[i]["t"])
-        t_end = float(speed_curve[i + 1]["t"])
-        if t_end <= t_start:
+    seg_start = 0.0
+    for i in range(len(speed_curve)):
+        speed = float(speed_curve[i]["speed"])
+        if i < len(speed_curve) - 1:
+            seg_end = float(speed_curve[i + 1]["t"])
+        else:
+            seg_end = duration
+        seg_end = max(seg_start, min(seg_end, duration))
+        if seg_end <= seg_start:
             continue
-        s_start = float(speed_curve[i]["speed"])
-        avg_speed = s_start
         expr_parts.append({
-            "t_start": t_start,
-            "t_end": t_end,
-            "avg_speed": avg_speed,
+            "t_start": seg_start,
+            "t_end": seg_end,
+            "avg_speed": speed,
         })
+        seg_start = seg_end
 
     if not expr_parts:
         print("[speed_curve] Not enough keypoint intervals — skipping", flush=True)
