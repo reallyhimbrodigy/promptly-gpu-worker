@@ -2133,6 +2133,22 @@ def probe_duration(file_path):
         return None
 
 
+def probe_audio_sample_rate(file_path):
+    result = subprocess.run(
+        [
+            "ffprobe", "-v", "error", "-select_streams", "a:0",
+            "-show_entries", "stream=sample_rate",
+            "-of", "default=noprint_wrappers=1:nokey=1", file_path,
+        ],
+        capture_output=True, text=True
+    )
+    try:
+        sample_rate = int((result.stdout or "").strip())
+        return sample_rate if sample_rate > 0 else None
+    except Exception:
+        return None
+
+
 def validate_output(path, step_name, min_size_bytes=100000):
     """Check that output file exists and is not empty/corrupt. Returns True if valid."""
     if not os.path.exists(path):
@@ -2331,7 +2347,7 @@ def apply_speed_curve(output_path, speed_curve, work_dir, cuts, effective_durati
     """
     Apply a smooth speed curve to the final rendered video.
     Video: single setpts expression via -vf (perfectly smooth).
-    Audio: native atempo chain (pitch shifts naturally — the TikTok sound).
+    Audio: playback-rate pitch shifting via asetrate/aresample.
     Falls back to the original output if the pass fails.
     """
     if not speed_curve or len(speed_curve) < 2:
@@ -2348,6 +2364,8 @@ def apply_speed_curve(output_path, speed_curve, work_dir, cuts, effective_durati
         print("[speed_curve] Could not determine input duration — skipping", flush=True)
         return
     print(f"[speed_curve] Input duration: {duration:.2f}s", flush=True)
+    audio_sample_rate = probe_audio_sample_rate(output_path) or 48000
+    print(f"[speed_curve] Input audio sample rate: {audio_sample_rate} Hz", flush=True)
 
     # Extend speed curve to cover full duration
     if speed_curve[-1]["t"] < duration:
@@ -2399,15 +2417,24 @@ def apply_speed_curve(output_path, speed_curve, work_dir, cuts, effective_durati
 
     print(f"[speed_curve] setpts expression length: {len(setpts_expr)} chars", flush=True)
 
-    # Build audio filter chain: split audio into segments, apply atempo to each, concat
+    # Build audio filter chain: split audio into segments, apply pitch-shifted
+    # playback-rate changes via asetrate, then resample back for output.
     audio_filter_parts = []
     audio_concat = []
     for i, part in enumerate(expr_parts):
-        atempo = get_atempo_filter(part["avg_speed"])
-        audio_filter_parts.append(
-            f"[0:a]atrim=start={part['t_start']:.4f}:end={part['t_end']:.4f},"
-            f"asetpts=PTS-STARTPTS,{atempo}[a{i}]"
-        )
+        speed = float(part["avg_speed"])
+        if abs(speed - 1.0) < 0.0001:
+            segment_filter = (
+                f"[0:a]atrim=start={part['t_start']:.4f}:end={part['t_end']:.4f},"
+                f"asetpts=PTS-STARTPTS[a{i}]"
+            )
+        else:
+            segment_filter = (
+                f"[0:a]atrim=start={part['t_start']:.4f}:end={part['t_end']:.4f},"
+                f"asetpts=PTS-STARTPTS,"
+                f"asetrate={audio_sample_rate}*{speed:.4f},aresample={audio_sample_rate}[a{i}]"
+            )
+        audio_filter_parts.append(segment_filter)
         audio_concat.append(f"[a{i}]")
     audio_filter_parts.append(
         f"{''.join(audio_concat)}concat=n={len(expr_parts)}:v=0:a=1[outa]"
