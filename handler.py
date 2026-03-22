@@ -2730,6 +2730,33 @@ def apply_speed_curve(output_path, speed_curve, work_dir, cuts, effective_durati
     new_duration = probe_duration(output_path) or duration
     print(f"[speed_curve] Complete: {duration:.2f}s → {new_duration:.2f}s ({temp_size / 1024 / 1024:.1f}MB)", flush=True)
 
+    # Resync audio to the final video timeline after segmented asetrate processing.
+    # This corrects cumulative drift without touching the already-rendered video stream.
+    synced_output = os.path.join(work_dir, "speed_curved_synced.mp4")
+    sync_cmd = [
+        "ffmpeg", "-y",
+        "-i", output_path,
+        "-af", "aresample=async=1:first_pts=0",
+        "-c:v", "copy",
+        "-c:a", "aac", "-b:a", "128k",
+        "-movflags", "+faststart",
+        synced_output,
+    ]
+
+    print("[speed_curve] Re-syncing audio to video timestamps...", flush=True)
+    sync_result = subprocess.run(sync_cmd, capture_output=True, text=True, timeout=120)
+    if sync_result.stderr:
+        print(f"[speed_curve] Resync stderr (last 500): {sync_result.stderr[-500:]}", flush=True)
+
+    if sync_result.returncode == 0 and validate_output(synced_output, "speed_curve_resync"):
+        os.replace(synced_output, output_path)
+        synced_duration = probe_duration(output_path) or new_duration
+        print(f"[speed_curve] Audio re-synced to video ({synced_duration:.2f}s)", flush=True)
+    else:
+        print("[speed_curve] Audio sync correction failed — using original speed-curve output", flush=True)
+        if os.path.exists(synced_output):
+            os.remove(synced_output)
+
 
 def is_hard_cut(transition):
     t = str(transition or "").strip().lower()
