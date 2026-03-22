@@ -1244,6 +1244,7 @@ RULES FOR USING THESE TIMESTAMPS:
             with open("/tmp/gemini_prompt_debug.txt", "w") as f:
                 f.write(prompt)
             print(f"[DEBUG] Full Gemini prompt written to /tmp/gemini_prompt_debug.txt ({len(prompt)} chars)", flush=True)
+            print(f"[DEBUG-PROMPT] {prompt}", flush=True)
             response = model.generate_content(
                 [gemini_file, prompt],
                 generation_config=genai.GenerationConfig(
