@@ -1108,6 +1108,8 @@ Global parameters:
 
   caption_position — where captions appear on screen. Always use "lower-third" — this places captions in the safe zone below faces and above the TikTok/Reels platform UI. This is the standard caption placement used by every major short-form editor.
 
+  emoji_keywords — optional list of words that should have an emoji appear next to them in the captions. The emoji renders inline to the right of the word, flowing naturally with the text. Use sparingly — 2-5 per video max. Only on words where the emoji adds energy or emotion. Examples: "crying" → 😭, "money" → 💰, "crazy" → 🤯, "love" → ❤️, "dead" → 💀, "fire" → 🔥, "shocked" → 😱. If no emojis fit naturally, set to an empty list.
+
   audio_denoise: true / false — AI noise removal for room tone, hiss, fan noise.
 
   outro: none, fade_black, fade_white — none is best for clean looping.
@@ -1168,6 +1170,9 @@ Then output the JSON:
   "thumbnail_timestamp": <seconds>,
   "caption_style": "<style>",
   "caption_position": "<position>",
+  "emoji_keywords": [
+    {{"word": "<word to match>", "emoji": "<emoji>"}}
+  ],
   "audio_denoise": <true|false>,
   "outro": "<none|fade_black|fade_white>",
   "background_music": "none",
@@ -1536,6 +1541,7 @@ RULES FOR USING THESE TIMESTAMPS:
     edit_plan.setdefault("caption_style", "none")
     edit_plan.setdefault("caption_position", "lower-third")
     edit_plan.setdefault("caption_keywords", [])
+    edit_plan.setdefault("emoji_keywords", [])
     edit_plan.setdefault("audio_denoise", False)
     edit_plan.setdefault("beat_sync", False)
     edit_plan.setdefault("outro", "none")
@@ -1591,6 +1597,18 @@ RULES FOR USING THESE TIMESTAMPS:
                 flush=True,
             )
     edit_plan["_parsed_speed_curve"] = speed_curve
+
+    parsed_emoji_keywords = []
+    for ek in (edit_plan.get("emoji_keywords") or []):
+        if not isinstance(ek, dict):
+            continue
+        word = str(ek.get("word") or "").strip()
+        emoji = str(ek.get("emoji") or "").strip()
+        if word and emoji:
+            parsed_emoji_keywords.append({"word": word, "emoji": emoji})
+        if len(parsed_emoji_keywords) >= 5:
+            break
+    edit_plan["emoji_keywords"] = parsed_emoji_keywords
 
     thumbnail_timestamp = None
     try:
@@ -2737,7 +2755,7 @@ def build_video_filter_chain(color_grade, source_res, edit_plan=None):
     return ",".join(filters) if filters else "null"
 
 
-def project_words_to_output(transcript, cuts, effective_durations, hook_offset=0.0, hook_clip=None):
+def project_words_to_output(transcript, cuts, effective_durations, hook_offset=0.0, hook_clip=None, emoji_keywords=None):
     words = transcript.get("words") or []
     projected = []
     if not words or not cuts:
@@ -2758,6 +2776,7 @@ def project_words_to_output(transcript, cuts, effective_durations, hook_offset=0
                 "start": round((output_cursor + local_s)*1000)/1000,
                 "end":   round((output_cursor + local_e)*1000)/1000,
                 "word":  w.get("punctuated_word") or w.get("word") or "",
+                "punctuated_word": w.get("punctuated_word") or w.get("word") or "",
             })
         dur = effective_durations[i] if i < len(effective_durations) else (c_end - c_start)
         overlap = TRANSITION_DURATION if i < len(cuts)-1 and not is_hard_cut(cut.get("transition_out")) else 0
@@ -2782,8 +2801,31 @@ def project_words_to_output(transcript, cuts, effective_durations, hook_offset=0
                         "start": round((ws - hook_start) * 1000) / 1000,
                         "end": round((we - hook_start) * 1000) / 1000,
                         "word": w.get("punctuated_word") or w.get("word") or "",
+                        "punctuated_word": w.get("punctuated_word") or w.get("word") or "",
                     })
             projected = hook_words + projected
+
+    emoji_keywords = emoji_keywords or []
+    if emoji_keywords:
+        emoji_map = {}
+        for ek in emoji_keywords:
+            word = str((ek or {}).get("word", "")).lower().strip(".,!?;:'\"")
+            emoji = str((ek or {}).get("emoji", "")).strip()
+            if word and emoji:
+                emoji_map[word] = emoji
+
+        emoji_count = 0
+        for w in projected:
+            original = str(w.get("punctuated_word") or w.get("word") or "")
+            clean_word = original.lower().strip(".,!?;:'\"")
+            if clean_word in emoji_map:
+                updated = f"{original} {emoji_map[clean_word]}"
+                w["punctuated_word"] = updated
+                w["word"] = updated
+                emoji_count += 1
+
+        if emoji_count > 0:
+            print(f"[captions] Added emojis to {emoji_count} words", flush=True)
 
     return projected
 
@@ -2797,8 +2839,15 @@ def format_ass_time(seconds):
     return f"{h}:{m:02d}:{sec:02d}.{cs:02d}"
 
 
-def generate_subtitle_file(transcript, caption_style, cuts, effective_durations, output_res, caption_position, caption_keywords, work_dir, hook_offset=0.0, hook_clip=None):
-    words = project_words_to_output(transcript, cuts, effective_durations, hook_offset=hook_offset, hook_clip=hook_clip)
+def generate_subtitle_file(transcript, caption_style, cuts, effective_durations, output_res, caption_position, caption_keywords, work_dir, hook_offset=0.0, hook_clip=None, emoji_keywords=None):
+    words = project_words_to_output(
+        transcript,
+        cuts,
+        effective_durations,
+        hook_offset=hook_offset,
+        hook_clip=hook_clip,
+        emoji_keywords=emoji_keywords,
+    )
     if not words:
         return None
 
@@ -3716,6 +3765,7 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
             work_dir,
             hook_offset=hook_offset,
             hook_clip=hook_clip,
+            emoji_keywords=edit_plan.get("emoji_keywords") or [],
         )
         if ass_path and os.path.exists(ass_path):
             escaped = ass_path.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
