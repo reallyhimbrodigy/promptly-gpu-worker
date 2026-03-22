@@ -652,7 +652,7 @@ def transcribe_audio(source_path):
             audio_bytes = f.read()
         options = PrerecordedOptions(
             model="nova-3", detect_language=True,
-            smart_format=True, utterances=True, punctuate=True, diarize=False,
+            smart_format=True, utterances=True, punctuate=True, diarize=True,
         )
         resp = dg.listen.prerecorded.v("1").transcribe_file({"buffer": audio_bytes}, options)
         alt = resp.results.channels[0].alternatives[0]
@@ -664,9 +664,13 @@ def transcribe_audio(source_path):
                 "start":           float(w.start),
                 "end":             float(w.end),
                 "confidence":      float(getattr(w, "confidence", 1.0)),
+                "speaker":         int(getattr(w, "speaker", 0)),
             }
             for w in raw_words
         ]
+        speaker_ids = set(w["speaker"] for w in words)
+        if len(speaker_ids) > 1:
+            print(f"[deepgram] Detected {len(speaker_ids)} speakers", flush=True)
         print(f"[deepgram] Transcribed {len(words)} words", flush=True)
         return {"text": alt.transcript or "", "words": words}
     except Exception as e:
@@ -2783,6 +2787,7 @@ def project_words_to_output(transcript, cuts, effective_durations, hook_offset=0
                 "end":   round((output_cursor + local_e)*1000)/1000,
                 "word":  w.get("punctuated_word") or w.get("word") or "",
                 "punctuated_word": w.get("punctuated_word") or w.get("word") or "",
+                "speaker": int(w.get("speaker", 0) or 0),
             })
         dur = effective_durations[i] if i < len(effective_durations) else (c_end - c_start)
         overlap = TRANSITION_DURATION if i < len(cuts)-1 and not is_hard_cut(cut.get("transition_out")) else 0
@@ -2808,6 +2813,7 @@ def project_words_to_output(transcript, cuts, effective_durations, hook_offset=0
                         "end": round((we - hook_start) * 1000) / 1000,
                         "word": w.get("punctuated_word") or w.get("word") or "",
                         "punctuated_word": w.get("punctuated_word") or w.get("word") or "",
+                        "speaker": int(w.get("speaker", 0) or 0),
                     })
             projected = hook_words + projected
 
@@ -2914,6 +2920,16 @@ def generate_subtitle_file(transcript, caption_style, cuts, effective_durations,
         "box_caption":    ("&H00FFFFFF", "&H0000FFFF", "&HB0000000", 3, 0, 0,  1.0),
     }
 
+    # Per-speaker active word highlight colors (ASS BGR format)
+    SPEAKER_HIGHLIGHT_COLORS = {
+        0: None,
+        1: None,
+        2: "&H00FFFF00&",  # cyan
+        3: "&H0000FF00&",  # green
+        4: "&H00FF00FF&",  # magenta
+        5: "&H000080FF&",  # orange
+    }
+
     style_meta = styles_map.get(caption_style, styles_map["standard"])
     font_name = style_meta["fontname"]
     fontsize = style_meta["fontsize"]
@@ -2924,6 +2940,17 @@ def generate_subtitle_file(transcript, caption_style, cuts, effective_durations,
 
     cfg = STYLE_CONFIGS.get(caption_style, STYLE_CONFIGS["standard"])
     primary, secondary, back_c, border_style, outline_w, shadow, spacing = cfg
+    all_speakers = set(int(wd.get("speaker", 0) or 0) for wd in words)
+    is_multi_speaker = len(all_speakers) > 1
+    if is_multi_speaker:
+        print(f"[captions] Multi-speaker mode: {len(all_speakers)} speakers detected", flush=True)
+
+    def _speaker_highlight(default_color, word_dict):
+        if not is_multi_speaker:
+            return default_color
+        speaker_id = int((word_dict or {}).get("speaker", 0) or 0)
+        speaker_color = SPEAKER_HIGHLIGHT_COLORS.get(speaker_id)
+        return speaker_color or default_color
 
     if caption_style in ("capcut", "hormozi"):
         style_line = (
@@ -2967,6 +2994,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             dur_s = max(0.05, float(word_dict["end"]) - float(word_dict["start"]))
             dur_ms = max(50, round(dur_s * 1000))
             clean = str(word_dict["word"]).strip()
+            word_highlight = _speaker_highlight(highlight_color, word_dict)
 
             pop_in_ms = 80
             settle_ms = 100
@@ -2974,7 +3002,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             word_tag = (
                 f"{{\\fscx80\\fscy80\\1c&H00FFFFFF&}}"
                 f"{{\\t({cumulative_ms},{cumulative_ms + pop_in_ms},"
-                f"\\fscx115\\fscy115\\1c{highlight_color})}}"
+                f"\\fscx115\\fscy115\\1c{word_highlight})}}"
                 f"{{\\t({cumulative_ms + pop_in_ms},{cumulative_ms + pop_in_ms + settle_ms},"
                 f"\\fscx100\\fscy100)}}"
                 f"{{\\t({cumulative_ms + dur_ms - 30},{cumulative_ms + dur_ms},"
@@ -2998,7 +3026,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             dur_s  = max(0.05, float(word_dict["end"]) - float(word_dict["start"]))
             dur_cs = max(5, round(dur_s * 100))
             clean  = str(word_dict["word"]).strip()
-            parts.append(f"{{\\kf{dur_cs}}}{clean} ")
+            speaker_color = _speaker_highlight(None, word_dict)
+            if speaker_color:
+                parts.append(f"{{\\2c{speaker_color}\\kf{dur_cs}}}{clean} ")
+            else:
+                parts.append(f"{{\\kf{dur_cs}}}{clean} ")
         return "".join(parts).rstrip()
 
     # ── Group words into batches of max 3 words ─────────────────────────────
@@ -3042,7 +3074,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     clean  = re.sub(r"[.,!?;:'\"\\]", "", (wd.get("word") or "").lower())
                     is_kw  = clean in keyword_set
                     col    = highlight_color if is_kw else normal_color
-                    parts.append(f"{{\\kf{dur_cs}}}{{\\1c{col}}}{wd['word']} ")
+                    speaker_color = _speaker_highlight(None, wd)
+                    if speaker_color:
+                        parts.append(f"{{\\2c{speaker_color}\\kf{dur_cs}}}{{\\1c{col}}}{wd['word']} ")
+                    else:
+                        parts.append(f"{{\\kf{dur_cs}}}{{\\1c{col}}}{wd['word']} ")
                 text = "".join(parts).rstrip()
                 ass_lines.append(
                     f"Dialogue: 0,{format_ass_time(start)},{format_ass_time(end)},Default,,0,0,0,,{text}\n"
@@ -3217,6 +3253,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     clean_check = re.sub(r"[.,!?;:'\"\\]", "", str(wd["word"]).strip().lower())
                     is_kw = clean_check in keyword_set
                     active_color = keyword_color if is_kw else highlight_color
+                    active_color = _speaker_highlight(active_color, wd)
                     pop_in_ms = 80
                     settle_ms = 100
                     word_tag = (
