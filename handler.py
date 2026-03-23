@@ -3605,17 +3605,15 @@ def prepend_hook_clip(output_path, edit_plan, work_dir):
         capture_output=True, text=True, timeout=10
     ).stdout.strip()
     print(f"[DIAG] Main video: start_time,duration = {_main_v}", flush=True)
-    concat_list_path = os.path.join(work_dir, "hook_concat.txt")
-    with open(concat_list_path, "w") as f:
-        f.write(f"file '{hook_path}'\n")
-        f.write(f"file '{output_path}'\n")
     hooked_output = os.path.join(work_dir, "hooked_output.mp4")
     concat_cmd = [
         "ffmpeg", "-y",
-        "-f", "concat", "-safe", "0",
-        "-i", concat_list_path,
-        "-c", "copy",
-        "-avoid_negative_ts", "make_zero",
+        "-i", hook_path,
+        "-i", output_path,
+        "-filter_complex", "[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[outv][outa]",
+        "-map", "[outv]", "-map", "[outa]",
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "0",
+        "-c:a", "aac", "-b:a", "192k",
         "-movflags", "+faststart",
         hooked_output,
     ]
