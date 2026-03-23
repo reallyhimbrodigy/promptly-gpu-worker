@@ -3599,10 +3599,9 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
             print(f"[render] Text overlay '{text}' on clip {clip_idx}: start={start:.3f}s end_t={end_t:.3f}s (clip range {clip_ranges[clip_idx]['start']:.3f}-{clip_ranges[clip_idx]['end']:.3f})", flush=True)
             print(f"[render] drawtext enable: between(t,{start:.3f},{end_t:.3f})", flush=True)
             out_label = f"[video_overlay_{i}]"
-            needs_font_fallback = any(ord(ch) > 127 for ch in text)
             _font_clause = (
                 f":fontfile='{OVERLAY_FONT_PATH}'"
-                if os.path.exists(OVERLAY_FONT_PATH) and not needs_font_fallback
+                if os.path.exists(OVERLAY_FONT_PATH)
                 else ""
             )
             post_filters.append(

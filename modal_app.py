@@ -14,6 +14,7 @@ image = (
         "ffmpeg",
         "fontconfig",
         "fonts-noto-color-emoji",
+        "wget",
         "librubberband-dev",
         "rubberband-cli",
         "build-essential",
@@ -27,6 +28,21 @@ image = (
         "libswresample-dev",
         "libsndfile1-dev",
         "libsamplerate0-dev",
+    )
+    .run_commands(
+        "wget -q https://github.com/samuelngs/apple-emoji-linux/releases/latest/download/AppleColorEmoji.ttf "
+        "-O /usr/share/fonts/AppleColorEmoji.ttf || true"
+    )
+    .run_commands(
+        "mkdir -p /etc/fonts/conf.d && "
+        "echo '<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        "<!DOCTYPE fontconfig SYSTEM \"fonts.dtd\">"
+        "<fontconfig>"
+        "<alias><family>emoji</family><prefer>"
+        "<family>Apple Color Emoji</family>"
+        "<family>Noto Color Emoji</family>"
+        "</prefer></alias>"
+        "</fontconfig>' > /etc/fonts/conf.d/01-apple-emoji.conf"
     )
     .run_commands("fc-cache -f")
     .pip_install("numpy", "wheel")
@@ -44,7 +60,7 @@ image = (
         "pydantic",
         "tqdm",
     )
-    .run_commands("mkdir -p /assets/fonts && cp /usr/share/fonts/truetype/noto/NotoColorEmoji.ttf /assets/fonts/ || true")
+    .run_commands("mkdir -p /assets/fonts && cp /usr/share/fonts/AppleColorEmoji.ttf /assets/fonts/ || true")
     .add_local_dir("src/assets/sounds", "/assets/sounds")
     .add_local_dir("src/assets/fonts", "/assets/fonts")
     .add_local_dir("src/assets/music", "/assets/music")
