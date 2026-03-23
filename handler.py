@@ -77,6 +77,9 @@ except Exception:
     pass
 
 try:
+    _fc_cmd = subprocess.run(["fc-match", "emoji"], capture_output=True, text=True, timeout=5)
+    print(f"[startup] Emoji font: {(_fc_cmd.stdout or '').strip()}", flush=True)
+
     _test_output = "/tmp/emoji_test.png"
     _test_cmd = [
         "ffmpeg", "-y",
@@ -1076,6 +1079,7 @@ The ending matters. On these platforms, videos auto-loop. A clean ending that fl
   If the video already starts with a strong statement, a provocative question, action, or anything that grabs attention in the first 2 seconds, set hook_clip to null — it doesn't need one.
 
   If BOTH conditions are met: pick the single most captivating 1-2 second moment from the video — the punchline, the reveal, the reaction that makes someone stop scrolling. Set hook_clip to the source_start and source_end of that moment. This clip will play FIRST as a teaser, then the full video plays chronologically from the beginning.
+  hook_clip source_start and source_end MUST be the exact timestamps of the punchline WORDS, not the cut boundaries. Use the word timestamps provided above. The hook should start at the first word of the punchline and end at the last word. No silence before or after.
 
   The hook clip should be short (1-2 seconds max), impactful, and make the viewer think "HOW did this happen?" It should NOT make sense without context — that's what makes them keep watching.
 
@@ -1657,6 +1661,29 @@ RULES FOR USING THESE TIMESTAMPS:
                 print(f"[generate-edit] Hook clip duration {hook_dur:.2f}s out of range — skipping", flush=True)
         except Exception:
             hook_clip = None
+    if hook_clip and _dg_words:
+        hook_s = float(hook_clip.get("source_start") or 0.0)
+        hook_e = float(hook_clip.get("source_end") or 0.0)
+        first_word_start = None
+        last_word_end = None
+        for w in _dg_words:
+            ws = float(w.get("start") or 0.0)
+            we = float(w.get("end") or 0.0)
+            if ws >= hook_s - 0.05 and ws <= hook_e:
+                if first_word_start is None:
+                    first_word_start = ws
+                last_word_end = we
+        if first_word_start is not None and last_word_end is not None:
+            new_start = max(hook_s, first_word_start - 0.05)
+            new_end = min(hook_e, last_word_end + 0.1)
+            if new_start != hook_s or new_end != hook_e:
+                print(
+                    f"[hook] Tightened hook: {hook_s:.2f}-{hook_e:.2f} → {new_start:.2f}-{new_end:.2f} "
+                    f"(snapped to speech)",
+                    flush=True,
+                )
+                hook_clip["source_start"] = round(new_start, 3)
+                hook_clip["source_end"] = round(new_end, 3)
     edit_plan["hook_clip"] = hook_clip
     edit_plan["_hook_offset"] = 0.0
     if edit_plan.get("hook_clip"):
@@ -3546,6 +3573,7 @@ def prepend_hook_clip(output_path, edit_plan, work_dir):
         "-map", "0:v:0", "-map", "0:a?",
         "-c:v", "libx264", "-preset", "ultrafast", "-crf", "0",
         "-c:a", "aac", "-b:a", "192k", "-ar", str(main_sr), "-ac", str(main_ch),
+        "-avoid_negative_ts", "make_zero",
         "-movflags", "+faststart",
         hook_path,
     ]
@@ -3567,6 +3595,7 @@ def prepend_hook_clip(output_path, edit_plan, work_dir):
         "-f", "concat", "-safe", "0",
         "-i", concat_list_path,
         "-c", "copy",
+        "-avoid_negative_ts", "make_zero",
         "-movflags", "+faststart",
         hooked_output,
     ]
@@ -4163,10 +4192,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         )
         video_out = bars_label
 
-    total_video_dur = sum(effective_durations)
+    fps = 30
+    actual_video_dur = sum(round(d * fps) / fps for d in effective_durations)
     audio_out = "[audio_timed]"
     post_filters.append(
-        f"[{tl_audio}]atrim=end={total_video_dur:.3f},asetpts=PTS-STARTPTS{audio_out}"
+        f"[{tl_audio}]atrim=end={actual_video_dur:.3f},asetpts=PTS-STARTPTS{audio_out}"
     )
 
     if sfx_audio_labels:
