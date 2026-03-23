@@ -1361,11 +1361,6 @@ RULES FOR USING THESE TIMESTAMPS:
             print(f"[generate-edit] Calling Gemini model={model_name}...", flush=True)
             t = time.time()
             model = genai.GenerativeModel(model_name)
-            # Temporary: dump full prompt for debugging
-            with open("/tmp/gemini_prompt_debug.txt", "w") as f:
-                f.write(prompt)
-            print(f"[DEBUG] Full Gemini prompt written to /tmp/gemini_prompt_debug.txt ({len(prompt)} chars)", flush=True)
-            print(f"[DEBUG-PROMPT] {prompt}", flush=True)
             response = model.generate_content(
                 [gemini_file, prompt],
                 generation_config=genai.GenerationConfig(
@@ -2470,6 +2465,19 @@ def get_atempo_filter(speed):
     return ",".join(parts)
 
 
+def get_speed_for_timestamp(t, speed_curve):
+    """Given a source timestamp, return the speed from the speed curve."""
+    if not speed_curve or speed_curve == "none":
+        return 1.0
+    active_speed = 1.0
+    for kp in speed_curve:
+        if float(kp["t"]) <= t:
+            active_speed = float(kp["speed"])
+        else:
+            break
+    return active_speed
+
+
 def _interpolate_speed(speed_curve, t):
     """Linearly interpolate speed at time t from keypoints."""
     if not speed_curve:
@@ -2487,235 +2495,6 @@ def _interpolate_speed(speed_curve, t):
             s1 = speed_curve[i + 1]["speed"]
             return s0 + (s1 - s0) * frac
     return 1.0
-
-
-def project_speed_to_rendered_time(speed_keypoints, cuts, effective_durations):
-    """
-    Convert speed-curve keypoints from source timestamps to rendered timestamps.
-    """
-    if not speed_keypoints:
-        return []
-
-    clip_ranges = get_output_clip_ranges(cuts, effective_durations)
-    projected = []
-    for kp in speed_keypoints:
-        source_t = float(kp["t"])
-        rendered_t = project_source_time_to_output(source_t, cuts, clip_ranges)
-        if rendered_t is None:
-            rendered_t = source_t
-        projected.append({"t": round(rendered_t, 3), "speed": kp["speed"]})
-        print(
-            f"[speed_curve] Projected t={source_t:.2f}s (source) → t={rendered_t:.2f}s (rendered) "
-            f"speed={kp['speed']}x",
-            flush=True,
-        )
-
-    projected.sort(key=lambda x: x["t"])
-    deduped = []
-    for kp in projected:
-        if deduped and abs(deduped[-1]["t"] - kp["t"]) < 0.001:
-            deduped[-1] = kp
-        else:
-            deduped.append(kp)
-    return deduped
-
-
-def apply_speed_curve(output_path, speed_curve, work_dir, cuts, effective_durations, hook_offset=0.0):
-    """
-    Apply a smooth speed curve to the final rendered video.
-    Video: single setpts expression via -vf (perfectly smooth).
-    Audio: playback-rate pitch shifting via asetrate/aresample.
-    Falls back to the original output if the pass fails.
-    """
-    if not speed_curve or len(speed_curve) < 2:
-        return
-
-    speed_curve = project_speed_to_rendered_time(speed_curve, cuts, effective_durations)
-    if not speed_curve or len(speed_curve) < 2:
-        print("[speed_curve] Not enough projected keypoints — skipping", flush=True)
-        return
-    if hook_offset > 0:
-        speed_curve = [{"t": round(float(kp["t"]) + hook_offset, 3), "speed": kp["speed"]} for kp in speed_curve]
-        speed_curve = [{"t": 0.0, "speed": 1.0}, {"t": round(hook_offset, 3), "speed": speed_curve[0]["speed"]}] + speed_curve
-
-    print(f"[speed_curve] Applying speed curve with {len(speed_curve)} keypoints", flush=True)
-    duration = probe_duration(output_path)
-    if not duration or duration <= 0:
-        print("[speed_curve] Could not determine input duration — skipping", flush=True)
-        return
-    print(f"[speed_curve] Input duration: {duration:.2f}s", flush=True)
-    audio_sample_rate = probe_audio_sample_rate(output_path) or 48000
-    print(f"[speed_curve] Input audio sample rate: {audio_sample_rate} Hz", flush=True)
-
-    # Extend speed curve to cover full duration
-    if speed_curve[-1]["t"] < duration:
-        speed_curve = speed_curve + [{"t": duration, "speed": speed_curve[-1]["speed"]}]
-    if speed_curve[0]["t"] > 0:
-        speed_curve = [{"t": 0.0, "speed": speed_curve[0]["speed"]}] + speed_curve
-
-    # Build contiguous segment data using the exact probed rendered duration.
-    expr_parts = []
-    seg_start = 0.0
-    for i in range(len(speed_curve)):
-        speed = float(speed_curve[i]["speed"])
-        if i < len(speed_curve) - 1:
-            seg_end = float(speed_curve[i + 1]["t"])
-        else:
-            seg_end = duration
-        seg_end = max(seg_start, min(seg_end, duration))
-        if seg_end <= seg_start:
-            continue
-        output_duration = round((seg_end - seg_start) / speed, 6)
-        expr_parts.append({
-            "t_start": seg_start,
-            "t_end": seg_end,
-            "avg_speed": speed,
-            "output_duration": output_duration,
-        })
-        seg_start = seg_end
-
-    if not expr_parts:
-        print("[speed_curve] Not enough keypoint intervals — skipping", flush=True)
-        return
-
-    # Cumulative output time at each boundary
-    cum_output = [0.0]
-    for part in expr_parts:
-        cum_output.append(round(cum_output[-1] + part["output_duration"], 6))
-
-    total_output_duration = cum_output[-1]
-    print(f"[speed_curve] Expected output duration: {total_output_duration:.2f}s", flush=True)
-
-    # Build video setpts expression (output in PTS units)
-    fps = 30
-    last = expr_parts[-1]
-    setpts_expr = f"({cum_output[-2]:.6f}+(T-{last['t_start']:.6f})/{last['avg_speed']:.6f})/TB"
-    for i in range(len(expr_parts) - 2, -1, -1):
-        part = expr_parts[i]
-        inner = f"({cum_output[i]:.6f}+(T-{part['t_start']:.6f})/{part['avg_speed']:.6f})/TB"
-        setpts_expr = f"if(lt(T,{part['t_end']:.6f}),{inner},{setpts_expr})"
-
-    print(f"[speed_curve] setpts expression length: {len(setpts_expr)} chars", flush=True)
-
-    # Build audio filter chain: split audio into segments, use asetrate for the
-    # TikTok-style pitch shift, then resync the concatenated stream with an
-    # async resample pass to correct accumulated drift.
-    audio_filter_parts = []
-    audio_concat = []
-    for i, part in enumerate(expr_parts):
-        speed = float(part["avg_speed"])
-        if abs(speed - 1.0) < 0.0001:
-            segment_filter = (
-                f"[0:a]atrim=start={part['t_start']:.4f}:end={part['t_end']:.4f},"
-                f"asetpts=PTS-STARTPTS[a{i}]"
-            )
-        else:
-            segment_filter = (
-                f"[0:a]atrim=start={part['t_start']:.4f}:end={part['t_end']:.4f},"
-                f"asetpts=PTS-STARTPTS,"
-                f"asetrate={audio_sample_rate}*{speed:.4f},aresample={audio_sample_rate}[a{i}]"
-            )
-        audio_filter_parts.append(segment_filter)
-        audio_concat.append(f"[a{i}]")
-    audio_filter_parts.append(
-        f"{''.join(audio_concat)}concat=n={len(expr_parts)}:v=0:a=1[outa_raw]"
-    )
-    audio_filter_parts.append(
-        f"[outa_raw]aresample=async=1000:first_pts=0[outa]"
-    )
-    audio_filter = ";".join(audio_filter_parts)
-
-    # Escape commas in setpts for -filter_complex
-    escaped_setpts = setpts_expr.replace(",", "\\,")
-
-    # Combine video + audio in one filter_complex
-    full_filter = f"[0:v]setpts='{escaped_setpts}',fps={fps}[outv];{audio_filter}"
-
-    temp_output = os.path.join(work_dir, "speed_curved.mp4")
-    cmd = [
-        "ffmpeg", "-y",
-        "-i", output_path,
-        "-filter_complex", full_filter,
-        "-map", "[outv]", "-map", "[outa]",
-        "-c:v", "libx264", "-preset", "medium", "-crf", "18",
-        "-c:a", "aac", "-b:a", "128k",
-        "-movflags", "+faststart",
-        temp_output,
-    ]
-
-    print(f"[speed_curve] FFmpeg command: {' '.join(cmd)}", flush=True)
-    print("[speed_curve] Rendering speed curve...", flush=True)
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-
-    if result.stderr:
-        print(f"[speed_curve] FFmpeg stderr (last 500): {result.stderr[-500:]}", flush=True)
-
-    if result.returncode != 0:
-        print(f"[speed_curve] FAILED — trying without escaped fps comma...", flush=True)
-
-        # Try alternate escaping: fps comma might need different treatment
-        full_filter_alt = f"[0:v]setpts='{escaped_setpts}',fps={fps}[outv];{audio_filter}"
-        cmd_alt = [
-            "ffmpeg", "-y",
-            "-i", output_path,
-            "-filter_complex", full_filter_alt,
-            "-map", "[outv]", "-map", "[outa]",
-            "-c:v", "libx264", "-preset", "medium", "-crf", "18",
-            "-c:a", "aac", "-b:a", "128k",
-            "-movflags", "+faststart",
-            temp_output,
-        ]
-        result = subprocess.run(cmd_alt, capture_output=True, text=True, timeout=300)
-        if result.stderr:
-            print(f"[speed_curve] Alt stderr (last 500): {result.stderr[-500:]}", flush=True)
-
-        if result.returncode != 0:
-            print(f"[speed_curve] Alt also failed — trying -vf for video only...", flush=True)
-
-            # Last resort: -vf for video, let audio stay at original speed
-            vf_expr = f"setpts='{setpts_expr}',fps={fps}"
-            cmd_vf = [
-                "ffmpeg", "-y",
-                "-i", output_path,
-                "-vf", vf_expr,
-                "-c:v", "libx264", "-preset", "medium", "-crf", "18",
-                "-c:a", "aac", "-b:a", "128k",
-                "-shortest",
-                "-movflags", "+faststart",
-                temp_output,
-            ]
-            result = subprocess.run(cmd_vf, capture_output=True, text=True, timeout=300)
-            if result.stderr:
-                print(f"[speed_curve] VF-only stderr (last 500): {result.stderr[-500:]}", flush=True)
-
-            if result.returncode != 0:
-                print("[speed_curve] All attempts failed — keeping original output", flush=True)
-                if os.path.exists(temp_output):
-                    os.remove(temp_output)
-                return
-
-    # Validate output
-    if not os.path.exists(temp_output):
-        print("[speed_curve] No output file — keeping original", flush=True)
-        return
-
-    temp_size = os.path.getsize(temp_output)
-    if temp_size < 100000:
-        print(f"[speed_curve] Output too small ({temp_size} bytes) — keeping original", flush=True)
-        if os.path.exists(temp_output):
-            os.remove(temp_output)
-        return
-
-    temp_dur = probe_duration(temp_output)
-    if not temp_dur or temp_dur < 1.0:
-        print(f"[speed_curve] Output invalid duration ({temp_dur}s) — keeping original", flush=True)
-        if os.path.exists(temp_output):
-            os.remove(temp_output)
-        return
-
-    os.replace(temp_output, output_path)
-    new_duration = probe_duration(output_path) or duration
-    print(f"[speed_curve] Complete: {duration:.2f}s → {new_duration:.2f}s ({temp_size / 1024 / 1024:.1f}MB)", flush=True)
 
 
 def is_hard_cut(transition):
@@ -2752,7 +2531,7 @@ def build_video_filter_chain(color_grade, source_res, edit_plan=None):
     return ",".join(filters) if filters else "null"
 
 
-def project_words_to_output(transcript, cuts, effective_durations, hook_offset=0.0, hook_clip=None):
+def project_words_to_output(transcript, cuts, effective_durations, hook_offset=0.0, hook_clip=None, speed_curve=None):
     words = transcript.get("words") or []
     projected = []
     if not words or not cuts:
@@ -2762,13 +2541,17 @@ def project_words_to_output(transcript, cuts, effective_durations, hook_offset=0
         c_start = float(cut["source_start"])
         c_end   = float(cut["source_end"])
         speed   = max(0.25, min(4.0, float(cut.get("speed") or 1.0)))
+        curve_speed = 1.0
+        if speed_curve and speed_curve != "none":
+            curve_speed = max(0.5, min(1.5, get_speed_for_timestamp(c_start, speed_curve)))
+        combined_speed = speed * curve_speed
         for w in words:
             ws = float(w.get("start") or 0)
             we = float(w.get("end") or 0)
             if we <= c_start or ws >= c_end:
                 continue
-            local_s = (max(ws, c_start) - c_start) / speed
-            local_e = (min(we, c_end) - c_start) / speed
+            local_s = (max(ws, c_start) - c_start) / combined_speed
+            local_e = (min(we, c_end) - c_start) / combined_speed
             projected.append({
                 "start": round((output_cursor + local_s)*1000)/1000,
                 "end":   round((output_cursor + local_e)*1000)/1000,
@@ -2816,13 +2599,14 @@ def format_ass_time(seconds):
     return f"{h}:{m:02d}:{sec:02d}.{cs:02d}"
 
 
-def generate_subtitle_file(transcript, caption_style, cuts, effective_durations, output_res, caption_position, caption_keywords, work_dir, hook_offset=0.0, hook_clip=None):
+def generate_subtitle_file(transcript, caption_style, cuts, effective_durations, output_res, caption_position, caption_keywords, work_dir, hook_offset=0.0, hook_clip=None, speed_curve=None):
     words = project_words_to_output(
         transcript,
         cuts,
         effective_durations,
         hook_offset=hook_offset,
         hook_clip=hook_clip,
+        speed_curve=speed_curve,
     )
     if not words:
         return None
@@ -3608,7 +3392,7 @@ def snap_sfx_to_word(sfx_entry, deepgram_words):
     return approx_t
 
 
-def project_source_time_to_output(source_t, cuts, clip_ranges):
+def project_source_time_to_output(source_t, cuts, clip_ranges, speed_curve=None):
     """
     Map a source-timeline timestamp to the output-timeline timestamp.
     Returns the output time, or None if the source time falls in a removed gap.
@@ -3617,9 +3401,13 @@ def project_source_time_to_output(source_t, cuts, clip_ranges):
         src_start = float(cut["source_start"])
         src_end = float(cut["source_end"])
         speed = max(0.25, float(cut.get("speed") or 1.0))
+        curve_speed = 1.0
+        if speed_curve and speed_curve != "none":
+            curve_speed = max(0.5, min(1.5, get_speed_for_timestamp(src_start, speed_curve)))
+        combined_speed = speed * curve_speed
 
         if src_start <= source_t <= src_end:
-            local_offset = (source_t - src_start) / speed
+            local_offset = (source_t - src_start) / combined_speed
             output_t = float(clip_ranges[i]["start"]) + local_offset
             return round(output_t * 1000) / 1000
 
@@ -3635,50 +3423,31 @@ def project_source_time_to_output(source_t, cuts, clip_ranges):
 
 
 def project_output_time_through_speed_curve(output_t, speed_curve, pre_speed_duration):
-    """Map a pre-speed-curve output time to post-speed-curve output time."""
-    if output_t is None or not speed_curve or len(speed_curve) < 2:
-        return output_t
-
-    sc = list(speed_curve)
-    if sc[-1]["t"] < pre_speed_duration:
-        sc = sc + [{"t": pre_speed_duration, "speed": sc[-1]["speed"]}]
-    if sc[0]["t"] > 0:
-        sc = [{"t": 0.0, "speed": sc[0]["speed"]}] + sc
-
-    cum_output = 0.0
-    for i in range(len(sc) - 1):
-        t_start = float(sc[i]["t"])
-        t_end = float(sc[i + 1]["t"])
-        speed = float(sc[i]["speed"])
-        if output_t <= t_end or i == len(sc) - 2:
-            local = max(0.0, output_t - t_start)
-            return round((cum_output + (local / speed)) * 1000) / 1000
-        cum_output += (t_end - t_start) / speed
-
     return round(output_t * 1000) / 1000
 
 
 def project_source_time_to_final_output(source_t, cuts, effective_durations, speed_curve=None, hook_offset=0.0):
-    """Map a source timestamp to the final output timeline after cut compression and speed curve."""
+    """Map a source timestamp to the final output timeline after cut compression."""
     clip_ranges = get_output_clip_ranges(cuts, effective_durations)
-    pre_speed_t = project_source_time_to_output(source_t, cuts, clip_ranges)
+    pre_speed_t = project_source_time_to_output(source_t, cuts, clip_ranges, speed_curve)
     if pre_speed_t is None:
         return None
-    final_t = project_output_time_through_speed_curve(pre_speed_t, speed_curve, sum(effective_durations))
-    if final_t is None:
-        return None
-    return round((final_t + hook_offset) * 1000) / 1000
+    return round((pre_speed_t + hook_offset) * 1000) / 1000
 
 
-def compute_effective_durations(cuts):
-    return [
-        round(
-            (float(cut["source_end"]) - float(cut["source_start"])) /
-            max(0.25, min(4.0, float(cut.get("speed") or 1.0))),
-            3,
-        )
-        for cut in (cuts or [])
-    ]
+def compute_effective_durations(cuts, speed_curve=None):
+    durations = []
+    for cut in (cuts or []):
+        src_start = float(cut["source_start"])
+        src_end = float(cut["source_end"])
+        raw_dur = src_end - src_start
+        clip_speed = max(0.25, min(4.0, float(cut.get("speed") or 1.0)))
+        curve_speed = 1.0
+        if speed_curve and speed_curve != "none":
+            curve_speed = max(0.5, min(1.5, get_speed_for_timestamp(src_start, speed_curve)))
+        effective_dur = raw_dur / clip_speed / curve_speed
+        durations.append(round(effective_dur, 3))
+    return durations
 
 
 def prepend_hook_clip(output_path, source_path, edit_plan, work_dir):
@@ -3756,7 +3525,8 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
         return
 
     cuts = edit_plan.get("cuts") or []
-    effective_durations = compute_effective_durations(cuts)
+    speed_curve = edit_plan.get("_parsed_speed_curve")
+    effective_durations = compute_effective_durations(cuts, speed_curve)
     hook_offset = float(edit_plan.get("_hook_offset") or 0.0)
     hook_clip = edit_plan.get("hook_clip")
     projected_words = project_words_to_output(
@@ -3765,6 +3535,7 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
         effective_durations,
         hook_offset=hook_offset,
         hook_clip=hook_clip,
+        speed_curve=speed_curve,
     )
     post_filters = []
     video_out = "[video_base]"
@@ -3779,6 +3550,7 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
             work_dir,
             hook_offset=hook_offset,
             hook_clip=hook_clip,
+            speed_curve=speed_curve,
         )
         if ass_path and os.path.exists(ass_path):
             escaped = ass_path.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
@@ -3879,42 +3651,6 @@ def mix_sfx_after_speed_curve(output_path, edit_plan, cuts, effective_durations,
         print("[sfx] No sound effects to mix", flush=True)
         return
 
-    speed_curve = edit_plan.get("_parsed_speed_curve") or []
-
-    speed_expr_parts = []
-    speed_cum_output = [0.0]
-    if speed_curve and len(speed_curve) >= 2:
-        sc = list(speed_curve)
-        pre_sc_duration = sum(effective_durations)
-        if sc[-1]["t"] < pre_sc_duration:
-            sc = sc + [{"t": pre_sc_duration, "speed": sc[-1]["speed"]}]
-        if sc[0]["t"] > 0:
-            sc = [{"t": 0.0, "speed": sc[0]["speed"]}] + sc
-        for i in range(len(sc) - 1):
-            t_start = float(sc[i]["t"])
-            t_end = float(sc[i + 1]["t"])
-            s_start = float(sc[i]["speed"])
-            avg_speed = s_start
-            speed_expr_parts.append({
-                "t_start": t_start,
-                "t_end": t_end,
-                "avg_speed": avg_speed,
-            })
-        speed_cum_output = [0.0]
-        for part in speed_expr_parts:
-            seg_dur = part["t_end"] - part["t_start"]
-            speed_cum_output.append(speed_cum_output[-1] + seg_dur / part["avg_speed"])
-
-    def apply_speed_warp(t):
-        """Map a pre-speed-curve output time to a post-speed-curve output time."""
-        if not speed_expr_parts:
-            return t
-        for i, part in enumerate(speed_expr_parts):
-            if t <= part["t_end"] or i == len(speed_expr_parts) - 1:
-                local = t - part["t_start"]
-                return speed_cum_output[i] + local / part["avg_speed"]
-        return t
-
     sfx_entries = []
     for sfx in parsed_sfx:
         sound_style = normalize_sfx_style(sfx.get("sound") or "none")
@@ -3929,7 +3665,7 @@ def mix_sfx_after_speed_curve(output_path, edit_plan, cuts, effective_durations,
         is_auto = sfx.get("_auto", False)
 
         if is_auto:
-            final_t = max(0.0, hook_offset + apply_speed_warp(raw_t))
+            final_t = max(0.0, hook_offset + raw_t)
             sfx_entries.append({
                 "sound": sfx.get("sound", "pop"),
                 "path": get_sfx_path(normalize_sfx_style(sfx.get("sound", "pop"))),
@@ -3962,12 +3698,12 @@ def mix_sfx_after_speed_curve(output_path, edit_plan, cuts, effective_durations,
                 )
 
         # Step 1: Project source time → pre-speed-curve output time (accounts for tightening)
-        pre_sc_t = project_source_time_to_output(source_t, cuts, clip_ranges)
+        pre_sc_t = project_source_time_to_output(source_t, cuts, clip_ranges, edit_plan.get("_parsed_speed_curve"))
         if pre_sc_t is None:
             print(f"[sfx] {sound_style} at source={source_t:.3f}s — could not project, skipping", flush=True)
             continue
 
-        final_t = hook_offset + apply_speed_warp(pre_sc_t)
+        final_t = hook_offset + pre_sc_t
         final_t = max(0.0, final_t)
 
         sfx_entries.append({
@@ -4053,15 +3789,24 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     # Single input: the keyframed source
     input_args = ["-analyzeduration", "10000000", "-probesize", "10000000", "-i", keyframed_path]
+    speed_curve = edit_plan.get("_parsed_speed_curve")
+    sample_rate = probe_audio_sample_rate(source_path) or 48000
+    print(f"[render] Input audio sample rate: {sample_rate} Hz", flush=True)
 
-    # Compute effective durations from recipe (no intermediate files to probe)
-    effective_durations = []
+    # Compute effective durations from recipe with per-segment speed applied.
+    effective_durations = compute_effective_durations(cuts, speed_curve)
     for i, cut in enumerate(cuts):
         src_dur = round((float(cut["source_end"]) - float(cut["source_start"])) * 1000) / 1000
-        speed = max(0.25, min(4.0, float(cut.get("speed") or 1.0)))
-        eff_dur = round((src_dur / speed) * 1000) / 1000
-        effective_durations.append(eff_dur)
-        print(f"[ffmpeg] Segment {i}: {cut['source_start']:.3f}s->{cut['source_end']:.3f}s (dur={src_dur:.3f}s, eff={eff_dur:.3f}s @ {speed}x)", flush=True)
+        clip_speed = max(0.25, min(4.0, float(cut.get("speed") or 1.0)))
+        curve_speed = 1.0
+        if speed_curve and speed_curve != "none":
+            curve_speed = max(0.5, min(1.5, get_speed_for_timestamp(float(cut["source_start"]), speed_curve)))
+        eff_dur = effective_durations[i]
+        print(
+            f"[ffmpeg] Segment {i}: {cut['source_start']:.3f}s->{cut['source_end']:.3f}s "
+            f"(dur={src_dur:.3f}s, eff={eff_dur:.3f}s @ clip={clip_speed}x curve={curve_speed}x)",
+            flush=True,
+        )
 
     video_filters = []
     audio_filters = []
@@ -4071,6 +3816,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         start = float(cut["source_start"])
         end = float(cut["source_end"])
         speed = max(0.25, min(4.0, float(cut.get("speed") or 1.0)))
+        curve_speed = 1.0
+        if speed_curve and speed_curve != "none":
+            curve_speed = max(0.5, min(1.5, get_speed_for_timestamp(start, speed_curve)))
         zoom = str(cut.get("zoom") or "none")
         if has_burned_captions and zoom in ["punch_in","punch_out"]:
             zoom = "slow_in" if zoom == "punch_in" else "slow_out"
@@ -4144,6 +3892,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         if speed != 1.0:
             v_chain.append(f"setpts={1.0/speed:.4f}*PTS")
             v_chain.append("fps=30")
+        if abs(curve_speed - 1.0) > 0.001:
+            v_chain.append(f"setpts={1.0/curve_speed:.4f}*PTS")
+            v_chain.append("fps=30")
         if zoom_filter:
             v_chain.append(zoom_filter)
         v_chain += ["format=yuv420p", color_filter_str]
@@ -4165,6 +3916,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         a_chain = [f"atrim=start={start:.3f}:end={end:.3f}", "asetpts=PTS-STARTPTS"]
         if speed != 1.0:
             a_chain.append(get_atempo_filter(speed))
+        if abs(curve_speed - 1.0) > 0.001:
+            a_chain.append(f"asetrate={sample_rate}*{curve_speed:.4f}")
+            a_chain.append(f"aresample={sample_rate}")
         if i == n-1 and outro != "none":
             fade_start = max(0, eff_dur - 1.0)
             a_chain.append(f"afade=t=out:st={fade_start:.3f}:d=1.0")
@@ -4241,7 +3995,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             if not _sound_path:
                 continue
             _source_t = float(_sfx.get("t") or 0.0)
-            _output_t = project_source_time_to_output(_source_t, cuts, _clip_ranges)
+            _output_t = project_source_time_to_output(_source_t, cuts, _clip_ranges, edit_plan.get("_parsed_speed_curve"))
             if _output_t is None:
                 print(
                     f"[sfx] sound_effect: {_sound_style} at source {_source_t:.3f}s — could not project, skipping",
@@ -4617,6 +4371,7 @@ def handler(job):
         render_elapsed = time.time() - t
         print(f"[pipeline] parallel_render complete in {render_elapsed:.1f}s", flush=True)
         print("[render] Encoding: crf=0 preset=ultrafast", flush=True)
+        speed_curve = edit_plan.get("_parsed_speed_curve")
 
         if not validate_output(output_path, "render"):
             raise RuntimeError("Main render produced invalid output")
@@ -4625,10 +4380,7 @@ def handler(job):
         prepend_hook_clip(output_path, source_path, edit_plan, work_dir)
 
         print("[pipeline] step=trim", flush=True)
-        expected_duration = sum(
-            (float(cut["source_end"]) - float(cut["source_start"])) / max(0.25, float(cut.get("speed") or 1.0))
-            for cut in edit_plan["cuts"]
-        )
+        expected_duration = sum(compute_effective_durations(edit_plan["cuts"], speed_curve))
         expected_duration += float(edit_plan.get("_hook_offset") or 0.0)
         actual_duration = probe_duration(output_path) or 0.0
         if actual_duration > expected_duration + 2.0:
@@ -4678,24 +4430,13 @@ def handler(job):
         else:
             print("[pipeline] Captions skipped (no captions, no text overlays)", flush=True)
 
-        speed_curve = edit_plan.get("_parsed_speed_curve")
         if speed_curve:
-            print(f"[pipeline] step=speed_curve ({len(speed_curve)} keypoints)", flush=True)
-            speed_backup_path = os.path.join(work_dir, "output_speed_curve.backup.mp4")
-            shutil.copy2(output_path, speed_backup_path)
-            cuts = edit_plan.get("cuts") or []
-            effective_durations = compute_effective_durations(cuts)
-            apply_speed_curve(output_path, speed_curve, work_dir, cuts, effective_durations, hook_offset=float(edit_plan.get("_hook_offset") or 0.0))
-            if not validate_output(output_path, "speed_curve"):
-                print("[speed_curve] Speed curve produced invalid output — restoring backup", flush=True)
-                os.replace(speed_backup_path, output_path)
-            elif os.path.exists(speed_backup_path):
-                os.remove(speed_backup_path)
+            print("[pipeline] Speed curve applied in single-pass render — skipping post-process", flush=True)
         else:
             print("[pipeline] Speed curve skipped", flush=True)
 
         cuts = edit_plan.get("cuts") or []
-        effective_durations = compute_effective_durations(cuts)
+        effective_durations = compute_effective_durations(cuts, speed_curve)
         print("[pipeline] step=sfx_mix", flush=True)
         mix_sfx_after_speed_curve(output_path, edit_plan, cuts, effective_durations, work_dir)
 
