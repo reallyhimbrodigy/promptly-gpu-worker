@@ -14,15 +14,6 @@ import concurrent.futures
 from datetime import datetime
 import certifi
 
-try:
-    from PIL import Image, ImageDraw, ImageFont
-    print("[startup] Pillow OK", flush=True)
-except ImportError:
-    print("[startup] WARNING: Pillow not installed — emoji overlays disabled", flush=True)
-    Image = None
-    ImageDraw = None
-    ImageFont = None
-
 os.environ["SSL_CERT_FILE"] = certifi.where()
 os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
 
@@ -191,28 +182,6 @@ Use this to inform your editing decisions. Where the user's footage naturally fi
 _RNNOISE_MODEL_PATH = "/usr/share/rnnoise/bd.rnnn"
 SFX_SOUNDS_DIR    = os.path.join(os.path.dirname(__file__), "assets", "sounds")
 OVERLAY_FONT_PATH = os.path.join(os.path.dirname(__file__), "assets", "fonts", "Montserrat-Black.ttf")
-APPLE_EMOJI_FONT_PATH = "/usr/share/fonts/AppleColorEmoji.ttf"
-NOTO_EMOJI_FONT_PATHS = (
-    "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
-    "/assets/fonts/NotoColorEmoji.ttf",
-    "/usr/share/fonts/noto/NotoColorEmoji.ttf",
-)
-EMOJI_PATTERN = re.compile(
-    "["
-    "\U0001F1E0-\U0001F1FF"
-    "\U0001F300-\U0001F5FF"
-    "\U0001F600-\U0001F64F"
-    "\U0001F680-\U0001F6FF"
-    "\U0001F700-\U0001F77F"
-    "\U0001F780-\U0001F7FF"
-    "\U0001F800-\U0001F8FF"
-    "\U0001F900-\U0001F9FF"
-    "\U0001FA00-\U0001FAFF"
-    "\U00002700-\U000027BF"
-    "\U00002600-\U000026FF"
-    "]+",
-    flags=re.UNICODE,
-)
 if not os.path.exists(_RNNOISE_MODEL_PATH):
     try:
         os.makedirs(os.path.dirname(_RNNOISE_MODEL_PATH), exist_ok=True)
@@ -2544,59 +2513,6 @@ def get_speed_for_timestamp(t, speed_curve):
     return active_speed
 
 
-def split_text_and_emojis(text):
-    emoji_matches = EMOJI_PATTERN.findall(text or "")
-    text_without_emoji = EMOJI_PATTERN.sub("", text or "")
-    text_without_emoji = re.sub(r"\s{2,}", " ", text_without_emoji).strip()
-    return text_without_emoji, emoji_matches
-
-
-def get_emoji_font_path():
-    for candidate in (
-        "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
-        "/assets/fonts/NotoColorEmoji.ttf",
-        "/usr/share/fonts/noto/NotoColorEmoji.ttf",
-    ):
-        if os.path.exists(candidate):
-            print(f"[emoji] Using font: {candidate}", flush=True)
-            return candidate
-    print("[emoji] No emoji font found", flush=True)
-    return None
-
-
-def create_emoji_image(emoji_char, size, output_path):
-    """Render a single emoji as a transparent PNG using Noto Color Emoji."""
-    if Image is None or ImageDraw is None or ImageFont is None:
-        print("[emoji] Pillow not available — skipping", flush=True)
-        return False
-    font_path = get_emoji_font_path()
-    if not font_path:
-        print(f"[emoji] No emoji font found — cannot render '{emoji_char}'", flush=True)
-        return False
-    try:
-        native_size = 109
-        print(f"[emoji] Rendering '{emoji_char}' with font {font_path} at size {native_size}", flush=True)
-        font = ImageFont.truetype(font_path, native_size)
-        canvas_size = native_size + 20
-        img = Image.new("RGBA", (canvas_size, canvas_size), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(img)
-        bbox = draw.textbbox((0, 0), emoji_char, font=font, embedded_color=True)
-        text_w = max(1, bbox[2] - bbox[0])
-        text_h = max(1, bbox[3] - bbox[1])
-        x = max(0, (canvas_size - text_w) // 2 - bbox[0])
-        y = max(0, (canvas_size - text_h) // 2 - bbox[1])
-        draw.text((x, y), emoji_char, font=font, embedded_color=True)
-        content_bbox = img.getbbox()
-        if content_bbox:
-            img = img.crop(content_bbox)
-        img = img.resize((size, size), Image.LANCZOS)
-        img.save(output_path, "PNG")
-        return os.path.exists(output_path) and os.path.getsize(output_path) > 100
-    except Exception as e:
-        print(f"[emoji] Failed to render '{emoji_char}': {e}", flush=True)
-        return False
-
-
 def _interpolate_speed(speed_curve, t):
     """Linearly interpolate speed at time t from keypoints."""
     if not speed_curve:
@@ -3641,15 +3557,16 @@ def prepend_hook_clip(output_path, edit_plan, work_dir):
         return
 
     hook_actual_dur = probe_duration(hook_path) or hook_render_dur
+    concat_list_path = os.path.join(work_dir, "hook_concat.txt")
+    with open(concat_list_path, "w") as f:
+        f.write(f"file '{hook_path}'\n")
+        f.write(f"file '{output_path}'\n")
     hooked_output = os.path.join(work_dir, "hooked_output.mp4")
     concat_cmd = [
         "ffmpeg", "-y",
-        "-i", hook_path,
-        "-i", output_path,
-        "-filter_complex", "[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[outv][outa]",
-        "-map", "[outv]", "-map", "[outa]",
-        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "0",
-        "-c:a", "aac", "-b:a", "192k", "-ar", str(main_sr), "-ac", str(main_ch),
+        "-f", "concat", "-safe", "0",
+        "-i", concat_list_path,
+        "-c", "copy",
         "-movflags", "+faststart",
         hooked_output,
     ]
@@ -3687,7 +3604,6 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
     )
     post_filters = []
     video_out = "[video_base]"
-    emoji_overlay_specs = []
     post_filters.append(f"[0:v]null{video_out}")
 
     if caption_style != "none" and transcript.get("words"):
@@ -3725,13 +3641,13 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
                 print(f"[render] Text overlay '{overlay.get('text')}' — clip_idx={clip_idx} out of range ({len(clip_ranges)} clips), skipping", flush=True)
                 continue
             raw_text = str(overlay.get("text") or "")
-            text, emojis_in_text = split_text_and_emojis(raw_text.strip())
-            if not text and not emojis_in_text:
+            text = raw_text.strip()
+            if not text:
                 continue
             start = clip_ranges[clip_idx]["start"]
             end = clip_ranges[clip_idx]["end"]
             style = str(overlay.get("style") or "callout")
-            char_count = len(text) if text else max(1, len(raw_text.strip()))
+            char_count = len(text)
             base_size = 72 if style == "title" else (64 if style == "cta" else 56)
             if char_count <= 18:
                 font_size = base_size
@@ -3743,44 +3659,24 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
                 font_size = round(base_size * 0.60)
             pos = str(overlay.get("position") or "center")
             y_expr = "250" if pos == "top" else ("(h-th)/2" if pos == "center" else str(max(0, 1920 - 350)))
-            emoji_y_expr = "250" if pos == "top" else ("(main_h-overlay_h)/2" if pos == "center" else str(max(0, 1920 - 350)))
             end_t = max(start + 0.8, end)
-            print(f"[render] Text overlay '{raw_text.strip()}' on clip {clip_idx}: start={start:.3f}s end_t={end_t:.3f}s (clip range {clip_ranges[clip_idx]['start']:.3f}-{clip_ranges[clip_idx]['end']:.3f})", flush=True)
+            print(f"[render] Text overlay '{text}' on clip {clip_idx}: start={start:.3f}s end_t={end_t:.3f}s (clip range {clip_ranges[clip_idx]['start']:.3f}-{clip_ranges[clip_idx]['end']:.3f})", flush=True)
             print(f"[render] drawtext enable: between(t,{start:.3f},{end_t:.3f})", flush=True)
             _font_clause = (
                 f":fontfile='{OVERLAY_FONT_PATH}'"
                 if os.path.exists(OVERLAY_FONT_PATH)
                 else ""
             )
-            if text:
-                escaped_text = text.replace("'", "").replace('"', "").replace("\\", "").replace(":", "\\:").replace(",", "\\,")
-                out_label = f"[video_overlay_{i}]"
-                post_filters.append(
-                    f"{video_out}drawtext=text='{escaped_text}':fontsize={font_size}:fontcolor=white"
-                    f"{_font_clause}"
-                    f":x=(w-tw)/2:y={y_expr}"
-                    f":borderw=5:bordercolor=black"
-                    f":enable='between(t,{start:.3f},{end_t:.3f})'{out_label}"
-                )
-                video_out = out_label
-
-            if emojis_in_text:
-                for emoji_idx, emoji_char in enumerate(emojis_in_text):
-                    emoji_png = os.path.join(work_dir, f"emoji_{i}_{emoji_idx}.png")
-                    if create_emoji_image(emoji_char, max(48, font_size), emoji_png):
-                        estimated_text_width = len(text) * font_size * 0.55
-                        emoji_x = int((1080 + estimated_text_width) / 2 + 8 + emoji_idx * (font_size + 4))
-                        emoji_overlay_specs.append(
-                            {
-                                "path": emoji_png,
-                                "start": start,
-                                "end": end_t,
-                                "x": str(emoji_x),
-                                "y": emoji_y_expr if isinstance(emoji_y_expr, str) and not emoji_y_expr.isdigit() else str(int(float(str(emoji_y_expr)))),
-                            }
-                        )
-                    else:
-                        print(f"[emoji] Skipping overlay for '{emoji_char}'", flush=True)
+            escaped_text = text.replace("'", "").replace('"', "").replace("\\", "").replace(":", "\\:").replace(",", "\\,")
+            out_label = f"[video_overlay_{i}]"
+            post_filters.append(
+                f"{video_out}drawtext=text='{escaped_text}':fontsize={font_size}:fontcolor=white"
+                f"{_font_clause}"
+                f":x=(w-tw)/2:y={y_expr}"
+                f":borderw=5:bordercolor=black"
+                f":enable='between(t,{start:.3f},{end_t:.3f})'{out_label}"
+            )
+            video_out = out_label
 
     if len(post_filters) == 1:
         print("[captions] Nothing to burn in — skipping", flush=True)
@@ -3802,34 +3698,6 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
         print(f"[captions] Burn-in failed: {result.stderr[-300:]}", flush=True)
         return
     os.replace(temp_output, output_path)
-
-    if emoji_overlay_specs:
-        emoji_temp_output = os.path.join(work_dir, "captioned_emoji.mp4")
-        emoji_inputs = ["ffmpeg", "-y", "-i", output_path]
-        overlay_filters = []
-        current_video = "[0:v]"
-        for i, spec in enumerate(emoji_overlay_specs):
-            emoji_inputs.extend(["-i", spec["path"]])
-            next_video = f"[emoji_out_{i}]"
-            overlay_filters.append(
-                f"{current_video}[{i + 1}:v]overlay=x={spec['x']}:y={spec['y']}"
-                f":enable='between(t,{spec['start']:.3f},{spec['end']:.3f})'{next_video}"
-            )
-            current_video = next_video
-        emoji_cmd = emoji_inputs + [
-            "-filter_complex", ";".join(overlay_filters),
-            "-map", current_video, "-map", "0:a?",
-            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "0",
-            "-c:a", "copy",
-            "-movflags", "+faststart",
-            emoji_temp_output,
-        ]
-        emoji_result = subprocess.run(emoji_cmd, capture_output=True, text=True, timeout=120)
-        if emoji_result.returncode == 0 and os.path.exists(emoji_temp_output) and os.path.getsize(emoji_temp_output) > 0:
-            os.replace(emoji_temp_output, output_path)
-            print(f"[emoji] Burned in {len(emoji_overlay_specs)} emoji overlay(s)", flush=True)
-        else:
-            print(f"[emoji] Overlay pass failed: {(emoji_result.stderr or '')[-300:]}", flush=True)
     print("[captions] Burn-in complete", flush=True)
 
 

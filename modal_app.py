@@ -29,6 +29,27 @@ image = (
         "libsndfile1-dev",
         "libsamplerate0-dev",
     )
+    .run_commands(
+        "wget -q https://github.com/samuelngs/apple-emoji-linux/releases/latest/download/AppleColorEmoji.ttf "
+        "-O /usr/share/fonts/AppleColorEmoji.ttf || true"
+    )
+    .run_commands(
+        "python3 -c \"import os; os.makedirs('/etc/fonts/conf.d', exist_ok=True); "
+        "open('/etc/fonts/conf.d/01-apple-emoji.conf', 'w').write('''<?xml version=\\\"1.0\\\" encoding=\\\"UTF-8\\\"?>\\n"
+        "<!DOCTYPE fontconfig SYSTEM \\\"fonts.dtd\\\">\\n"
+        "<fontconfig>\\n"
+        "  <match>\\n"
+        "    <test name=\\\"family\\\"><string>emoji</string></test>\\n"
+        "    <edit name=\\\"family\\\" mode=\\\"prepend\\\" binding=\\\"strong\\\">\\n"
+        "      <string>Apple Color Emoji</string>\\n"
+        "    </edit>\\n"
+        "  </match>\\n"
+        "  <alias binding=\\\"strong\\\">\\n"
+        "    <family>Apple Color Emoji</family>\\n"
+        "    <default><family>emoji</family></default>\\n"
+        "  </alias>\\n"
+        "</fontconfig>\\n''')\""
+    )
     .run_commands("fc-cache -f")
     .pip_install("numpy", "wheel")
     .pip_install("aubio", extra_options="--no-build-isolation")
@@ -42,7 +63,6 @@ image = (
         "supabase",
         "httpx",
         "fastapi",
-        "Pillow",
         "pydantic",
         "tqdm",
     )
