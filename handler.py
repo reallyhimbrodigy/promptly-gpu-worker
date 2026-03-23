@@ -13,7 +13,15 @@ import math
 import concurrent.futures
 from datetime import datetime
 import certifi
-from PIL import Image, ImageDraw, ImageFont
+
+try:
+    from PIL import Image, ImageDraw, ImageFont
+    print("[startup] Pillow OK", flush=True)
+except ImportError:
+    print("[startup] WARNING: Pillow not installed — emoji overlays disabled", flush=True)
+    Image = None
+    ImageDraw = None
+    ImageFont = None
 
 os.environ["SSL_CERT_FILE"] = certifi.where()
 os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
@@ -2510,15 +2518,22 @@ def split_text_and_emojis(text):
 def get_emoji_font_path():
     for candidate in (APPLE_EMOJI_FONT_PATH, *NOTO_EMOJI_FONT_PATHS):
         if os.path.exists(candidate):
+            print(f"[emoji] Using font: {candidate}", flush=True)
             return candidate
+    print(f"[emoji] No emoji font found. Checked: {APPLE_EMOJI_FONT_PATH}, {NOTO_EMOJI_FONT_PATHS}", flush=True)
     return None
 
 
 def create_emoji_image(emoji_char, size, output_path):
     """Render a single emoji as a transparent PNG using the best available emoji font."""
+    if Image is None or ImageDraw is None or ImageFont is None:
+        print("[emoji] Pillow not available — skipping", flush=True)
+        return False
     font_path = get_emoji_font_path()
     if not font_path:
+        print(f"[emoji] No emoji font found — cannot render '{emoji_char}'", flush=True)
         return False
+    print(f"[emoji] Rendering '{emoji_char}' with font {font_path} at size {size}", flush=True)
     try:
         img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
         font = ImageFont.truetype(font_path, max(8, size - 8))
@@ -3527,6 +3542,19 @@ def prepend_hook_clip(output_path, edit_plan, work_dir):
     speed_curve = edit_plan.get("_parsed_speed_curve")
     effective_durations = compute_effective_durations(cuts, speed_curve)
     clip_ranges = get_output_clip_ranges(cuts, effective_durations)
+    main_audio_info = (subprocess.run(
+        [
+            "ffprobe", "-v", "quiet", "-select_streams", "a:0",
+            "-show_entries", "stream=sample_rate,channels",
+            "-of", "csv=p=0",
+            output_path,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    ).stdout or "").strip().split(",")
+    main_sr = int(main_audio_info[0]) if main_audio_info and str(main_audio_info[0]).strip().isdigit() else 48000
+    main_ch = int(main_audio_info[1]) if len(main_audio_info) > 1 and str(main_audio_info[1]).strip().isdigit() else 2
 
     hook_src_start = float(hook_clip_data.get("source_start") or 0.0)
     hook_src_end = float(hook_clip_data.get("source_end") or 0.0)
@@ -3555,7 +3583,7 @@ def prepend_hook_clip(output_path, edit_plan, work_dir):
         "-t", f"{hook_render_dur:.3f}",
         "-map", "0:v:0", "-map", "0:a?",
         "-c:v", "libx264", "-preset", "ultrafast", "-crf", "0",
-        "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
+        "-c:a", "aac", "-b:a", "192k", "-ar", str(main_sr), "-ac", str(main_ch),
         "-movflags", "+faststart",
         hook_path,
     ]
@@ -3575,7 +3603,7 @@ def prepend_hook_clip(output_path, edit_plan, work_dir):
         "-filter_complex", "[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[outv][outa]",
         "-map", "[outv]", "-map", "[outa]",
         "-c:v", "libx264", "-preset", "ultrafast", "-crf", "0",
-        "-c:a", "aac", "-b:a", "192k",
+        "-c:a", "aac", "-b:a", "192k", "-ar", str(main_sr), "-ac", str(main_ch),
         "-movflags", "+faststart",
         hooked_output,
     ]
@@ -3938,6 +3966,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         curve_speed = 1.0
         if speed_curve and speed_curve != "none":
             curve_speed = max(0.5, min(1.5, get_speed_for_timestamp(start, speed_curve)))
+        combined_speed = speed * curve_speed
         zoom = str(cut.get("zoom") or "none")
         if has_burned_captions and zoom in ["punch_in","punch_out"]:
             zoom = "slow_in" if zoom == "punch_in" else "slow_out"
@@ -4008,11 +4037,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # Video: trim from source, then apply per-clip filters
         v_chain = [f"trim=start={start:.3f}:end={end:.3f}", "setpts=PTS-STARTPTS", "settb=AVTB", "fps=30"]
 
-        if speed != 1.0:
-            v_chain.append(f"setpts={1.0/speed:.4f}*PTS")
-            v_chain.append("fps=30")
-        if abs(curve_speed - 1.0) > 0.001:
-            v_chain.append(f"setpts={1.0/curve_speed:.4f}*PTS")
+        if abs(combined_speed - 1.0) > 0.001:
+            v_chain.append(f"setpts={1.0/combined_speed:.4f}*PTS")
             v_chain.append("fps=30")
         if zoom_filter:
             v_chain.append(zoom_filter)
@@ -4033,10 +4059,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
         # Audio: trim from source, then apply per-clip filters
         a_chain = [f"atrim=start={start:.3f}:end={end:.3f}", "asetpts=PTS-STARTPTS"]
-        if speed != 1.0:
-            a_chain.append(get_atempo_filter(speed))
-        if abs(curve_speed - 1.0) > 0.001:
-            a_chain.append(f"asetrate={sample_rate}*{curve_speed:.4f}")
+        if abs(combined_speed - 1.0) > 0.001:
+            a_chain.append(f"asetrate={sample_rate}*{combined_speed:.4f}")
             a_chain.append(f"aresample={sample_rate}")
         if i == n-1 and outro != "none":
             fade_start = max(0, eff_dur - 1.0)
