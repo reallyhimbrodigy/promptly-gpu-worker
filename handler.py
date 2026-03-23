@@ -2516,11 +2516,13 @@ def split_text_and_emojis(text):
 
 
 def get_emoji_font_path():
-    for candidate in (APPLE_EMOJI_FONT_PATH, *NOTO_EMOJI_FONT_PATHS):
+    """Return emoji font path for Pillow rendering.
+    Noto uses CBDT/CBLC which Pillow supports. Apple uses sbix which Pillow cannot read."""
+    for candidate in NOTO_EMOJI_FONT_PATHS:
         if os.path.exists(candidate):
             print(f"[emoji] Using font: {candidate}", flush=True)
             return candidate
-    print(f"[emoji] No emoji font found. Checked: {APPLE_EMOJI_FONT_PATH}, {NOTO_EMOJI_FONT_PATHS}", flush=True)
+    print(f"[emoji] No emoji font found. Checked: {NOTO_EMOJI_FONT_PATHS}", flush=True)
     return None
 
 
@@ -2535,7 +2537,7 @@ def create_emoji_image(emoji_char, size, output_path):
         print(f"[emoji] No emoji font found — cannot render '{emoji_char}'", flush=True)
         return False
     try:
-        native_size = 137 if "Apple" in font_path else 109
+        native_size = 109
         print(f"[emoji] Rendering '{emoji_char}' with font {font_path} at size {native_size}", flush=True)
         font = ImageFont.truetype(font_path, native_size)
         canvas_size = native_size + 20
@@ -4049,11 +4051,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             outro_filter = f"fade=t=out:st={fade_start:.3f}:d=1.0:color={fade_color}"
 
         # Video: trim from source, then apply per-clip filters
-        v_chain = [f"trim=start={start:.3f}:end={end:.3f}", "setpts=PTS-STARTPTS", "settb=AVTB", "fps=30"]
+        v_chain = [f"trim=start={start:.3f}:end={end:.3f}", "setpts=PTS-STARTPTS", "settb=AVTB"]
 
         if abs(combined_speed - 1.0) > 0.001:
             v_chain.append(f"setpts={1.0/combined_speed:.4f}*PTS")
-            v_chain.append("fps=30")
+        
+        v_chain.append("fps=30")
         if zoom_filter:
             v_chain.append(zoom_filter)
         v_chain += ["format=yuv420p", color_filter_str]
