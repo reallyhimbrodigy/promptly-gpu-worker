@@ -2821,28 +2821,6 @@ def project_words_to_output(transcript, cuts, effective_durations, hook_offset=0
                     })
             projected = hook_words + projected
 
-    emoji_keywords = emoji_keywords or []
-    if emoji_keywords:
-        emoji_map = {}
-        for ek in emoji_keywords:
-            word = str((ek or {}).get("word", "")).lower().strip(".,!?;:'\"")
-            emoji = str((ek or {}).get("emoji", "")).strip()
-            if word and emoji:
-                emoji_map[word] = emoji
-
-        emoji_count = 0
-        for w in projected:
-            original = str(w.get("punctuated_word") or w.get("word") or "")
-            clean_word = original.lower().strip(".,!?;:'\"")
-            if clean_word in emoji_map:
-                updated = f"{original} {emoji_map[clean_word]}"
-                w["punctuated_word"] = updated
-                w["word"] = updated
-                emoji_count += 1
-
-        if emoji_count > 0:
-            print(f"[captions] Added emojis to {emoji_count} words", flush=True)
-
     return projected
 
 
@@ -3298,6 +3276,50 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     with open(ass_path, "w", encoding="utf-8") as f:
         f.write(ass)
     return ass_path
+
+
+def resolve_emoji_font_path():
+    for candidate in (
+        "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
+        "/usr/share/fonts/noto/NotoColorEmoji.ttf",
+    ):
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
+
+def build_emoji_overlay_specs(projected_words, emoji_keywords, caption_position):
+    emoji_map = {}
+    for ek in (emoji_keywords or []):
+        word = str((ek or {}).get("word") or "").lower().strip(".,!?;:'\"")
+        emoji = str((ek or {}).get("emoji") or "").strip()
+        if word and emoji:
+            emoji_map[word] = emoji
+
+    if not emoji_map or not projected_words:
+        return []
+
+    if str(caption_position or "lower-third").lower() == "top":
+        emoji_y = 250
+    elif str(caption_position or "lower-third").lower() == "center":
+        emoji_y = 960
+    else:
+        emoji_y = 1520
+
+    overlays = []
+    for w in projected_words:
+        clean_word = str(w.get("punctuated_word") or w.get("word") or "").lower().strip(".,!?;:'\"")
+        emoji_char = emoji_map.get(clean_word)
+        if not emoji_char:
+            continue
+        overlays.append({
+            "text": emoji_char,
+            "start": float(w.get("start") or 0.0),
+            "end": float(w.get("end") or 0.0),
+            "x": 680,
+            "y": emoji_y,
+        })
+    return overlays
 
 
 def get_output_clip_ranges(cuts, effective_durations):
@@ -3799,6 +3821,13 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
     effective_durations = compute_effective_durations(cuts)
     hook_offset = float(edit_plan.get("_hook_offset") or 0.0)
     hook_clip = edit_plan.get("hook_clip")
+    projected_words = project_words_to_output(
+        transcript,
+        cuts,
+        effective_durations,
+        hook_offset=hook_offset,
+        hook_clip=hook_clip,
+    )
     post_filters = []
     video_out = "[video_base]"
     post_filters.append(f"[0:v]null{video_out}")
@@ -3812,7 +3841,7 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
             work_dir,
             hook_offset=hook_offset,
             hook_clip=hook_clip,
-            emoji_keywords=edit_plan.get("emoji_keywords") or [],
+            emoji_keywords=[],
         )
         if ass_path and os.path.exists(ass_path):
             escaped = ass_path.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
@@ -3820,6 +3849,39 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
             video_out = "[video_captioned]"
         else:
             print("[captions] No subtitle file generated — skipping ASS burn-in", flush=True)
+
+    emoji_overlays = build_emoji_overlay_specs(
+        projected_words,
+        edit_plan.get("emoji_keywords") or [],
+        edit_plan.get("caption_position") or "lower-third",
+    )
+    if emoji_overlays:
+        emoji_font_path = resolve_emoji_font_path()
+        if not emoji_font_path:
+            print("[captions] Emoji font not found — skipping emoji overlays", flush=True)
+        else:
+            emoji_rendered = 0
+            escaped_font_path = emoji_font_path.replace("\\", "\\\\").replace(":", "\\:")
+            for i, overlay in enumerate(emoji_overlays):
+                escaped_emoji = (
+                    str(overlay["text"])
+                    .replace("\\", "\\\\")
+                    .replace("'", "\\'")
+                    .replace(":", "\\:")
+                    .replace(",", "\\,")
+                )
+                out_label = f"[video_emoji_{i}]"
+                post_filters.append(
+                    f"{video_out}drawtext=text='{escaped_emoji}'"
+                    f":fontfile='{escaped_font_path}'"
+                    f":fontsize=52"
+                    f":x={int(overlay['x'])}:y={int(overlay['y'])}"
+                    f":enable='between(t,{overlay['start']:.3f},{overlay['end']:.3f})'"
+                    f"{out_label}"
+                )
+                video_out = out_label
+                emoji_rendered += 1
+            print(f"[captions] Rendering {emoji_rendered} emoji overlays via drawtext", flush=True)
 
     if text_overlays:
         clip_ranges = get_output_clip_ranges(cuts, effective_durations)
