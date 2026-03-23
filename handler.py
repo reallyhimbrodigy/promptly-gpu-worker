@@ -13,6 +13,7 @@ import math
 import concurrent.futures
 from datetime import datetime
 import certifi
+from PIL import Image, ImageDraw, ImageFont
 
 os.environ["SSL_CERT_FILE"] = certifi.where()
 os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
@@ -150,6 +151,27 @@ Use this to inform your editing decisions. Where the user's footage naturally fi
 _RNNOISE_MODEL_PATH = "/usr/share/rnnoise/bd.rnnn"
 SFX_SOUNDS_DIR    = os.path.join(os.path.dirname(__file__), "assets", "sounds")
 OVERLAY_FONT_PATH = os.path.join(os.path.dirname(__file__), "assets", "fonts", "Montserrat-Black.ttf")
+APPLE_EMOJI_FONT_PATH = "/usr/share/fonts/AppleColorEmoji.ttf"
+NOTO_EMOJI_FONT_PATHS = (
+    "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
+    "/usr/share/fonts/noto/NotoColorEmoji.ttf",
+)
+EMOJI_PATTERN = re.compile(
+    "["
+    "\U0001F1E0-\U0001F1FF"
+    "\U0001F300-\U0001F5FF"
+    "\U0001F600-\U0001F64F"
+    "\U0001F680-\U0001F6FF"
+    "\U0001F700-\U0001F77F"
+    "\U0001F780-\U0001F7FF"
+    "\U0001F800-\U0001F8FF"
+    "\U0001F900-\U0001F9FF"
+    "\U0001FA00-\U0001FAFF"
+    "\U00002700-\U000027BF"
+    "\U00002600-\U000026FF"
+    "]+",
+    flags=re.UNICODE,
+)
 if not os.path.exists(_RNNOISE_MODEL_PATH):
     try:
         os.makedirs(os.path.dirname(_RNNOISE_MODEL_PATH), exist_ok=True)
@@ -2478,6 +2500,42 @@ def get_speed_for_timestamp(t, speed_curve):
     return active_speed
 
 
+def split_text_and_emojis(text):
+    emoji_matches = EMOJI_PATTERN.findall(text or "")
+    text_without_emoji = EMOJI_PATTERN.sub("", text or "")
+    text_without_emoji = re.sub(r"\s{2,}", " ", text_without_emoji).strip()
+    return text_without_emoji, emoji_matches
+
+
+def get_emoji_font_path():
+    for candidate in (APPLE_EMOJI_FONT_PATH, *NOTO_EMOJI_FONT_PATHS):
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
+
+def create_emoji_image(emoji_char, size, output_path):
+    """Render a single emoji as a transparent PNG using the best available emoji font."""
+    font_path = get_emoji_font_path()
+    if not font_path:
+        return False
+    try:
+        img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        font = ImageFont.truetype(font_path, max(8, size - 8))
+        draw = ImageDraw.Draw(img)
+        bbox = draw.textbbox((0, 0), emoji_char, font=font, embedded_color=True)
+        text_w = max(1, bbox[2] - bbox[0])
+        text_h = max(1, bbox[3] - bbox[1])
+        x = max(0, (size - text_w) // 2 - bbox[0])
+        y = max(0, (size - text_h) // 2 - bbox[1])
+        draw.text((x, y), emoji_char, font=font, embedded_color=True)
+        img.save(output_path, "PNG")
+        return os.path.exists(output_path) and os.path.getsize(output_path) > 100
+    except Exception as e:
+        print(f"[emoji] Failed to render '{emoji_char}': {e}", flush=True)
+        return False
+
+
 def _interpolate_speed(speed_curve, t):
     """Linearly interpolate speed at time t from keypoints."""
     if not speed_curve:
@@ -2536,6 +2594,7 @@ def project_words_to_output(transcript, cuts, effective_durations, hook_offset=0
     projected = []
     if not words or not cuts:
         return projected
+    clip_ranges = get_output_clip_ranges(cuts, effective_durations)
     output_cursor = 0.0
     for i, cut in enumerate(cuts):
         c_start = float(cut["source_start"])
@@ -2573,14 +2632,21 @@ def project_words_to_output(transcript, cuts, effective_durations, hook_offset=0
         if isinstance(hook_clip, dict):
             hook_start = float(hook_clip.get("source_start") or 0.0)
             hook_end = float(hook_clip.get("source_end") or 0.0)
+            hook_render_start = project_source_time_to_output(hook_start, cuts, clip_ranges, speed_curve)
             hook_words = []
             for w in words:
                 ws = float(w.get("start") or 0)
                 we = float(w.get("end") or 0)
                 if ws >= hook_start and we <= hook_end:
+                    if hook_render_start is None:
+                        continue
+                    projected_start = project_source_time_to_output(ws, cuts, clip_ranges, speed_curve)
+                    projected_end = project_source_time_to_output(we, cuts, clip_ranges, speed_curve)
+                    if projected_start is None or projected_end is None:
+                        continue
                     hook_words.append({
-                        "start": round((ws - hook_start) * 1000) / 1000,
-                        "end": round((we - hook_start) * 1000) / 1000,
+                        "start": round((projected_start - hook_render_start) * 1000) / 1000,
+                        "end": round((projected_end - hook_render_start) * 1000) / 1000,
                         "word": w.get("punctuated_word") or w.get("word") or "",
                         "punctuated_word": w.get("punctuated_word") or w.get("word") or "",
                         "speaker": int(w.get("speaker", 0) or 0),
@@ -3450,36 +3516,44 @@ def compute_effective_durations(cuts, speed_curve=None):
     return durations
 
 
-def prepend_hook_clip(output_path, source_path, edit_plan, work_dir):
-    """Extract a short teaser clip from later in the source and prepend it to the rendered output."""
+def prepend_hook_clip(output_path, edit_plan, work_dir):
+    """Extract a short teaser clip from the rendered output and prepend it to the final video."""
     hook_clip_data = edit_plan.get("hook_clip")
     edit_plan["_hook_offset"] = 0.0
     if not isinstance(hook_clip_data, dict):
         return
 
-    hook_start = float(hook_clip_data.get("source_start") or 0.0)
-    hook_end = float(hook_clip_data.get("source_end") or 0.0)
-    hook_dur = hook_end - hook_start
-    if not (0.5 <= hook_dur <= 3.0):
-        print(f"[hook] Hook duration {hook_dur:.2f}s out of range — skipping", flush=True)
+    cuts = edit_plan.get("cuts") or []
+    speed_curve = edit_plan.get("_parsed_speed_curve")
+    effective_durations = compute_effective_durations(cuts, speed_curve)
+    clip_ranges = get_output_clip_ranges(cuts, effective_durations)
+
+    hook_src_start = float(hook_clip_data.get("source_start") or 0.0)
+    hook_src_end = float(hook_clip_data.get("source_end") or 0.0)
+    hook_src_dur = hook_src_end - hook_src_start
+    if not (0.5 <= hook_src_dur <= 3.0):
+        print(f"[hook] Hook duration {hook_src_dur:.2f}s out of range — skipping", flush=True)
         return
 
-    print(f"[hook] Extracting hook clip: {hook_start:.2f}s - {hook_end:.2f}s ({hook_dur:.2f}s)", flush=True)
-    hook_path = os.path.join(work_dir, "hook_clip.mp4")
-    source_res = probe_resolution(source_path)
-    color_filter_str = build_video_filter_chain(edit_plan.get("color_grade") or {}, source_res, edit_plan)
-    vf_parts = ["fps=30", "format=yuv420p"]
-    if color_filter_str and color_filter_str != "null":
-        vf_parts.append(color_filter_str)
+    hook_render_start = project_source_time_to_output(hook_src_start, cuts, clip_ranges, speed_curve)
+    hook_render_end = project_source_time_to_output(hook_src_end, cuts, clip_ranges, speed_curve)
+    if hook_render_start is None or hook_render_end is None or hook_render_end <= hook_render_start:
+        print("[hook] Could not map hook clip into rendered timeline — skipping", flush=True)
+        return
 
+    hook_render_dur = hook_render_end - hook_render_start
+    print(
+        f"[hook] Extracting rendered hook clip: src {hook_src_start:.2f}s-{hook_src_end:.2f}s "
+        f"-> out {hook_render_start:.2f}s-{hook_render_end:.2f}s ({hook_render_dur:.2f}s)",
+        flush=True,
+    )
+    hook_path = os.path.join(work_dir, "hook_clip.mp4")
     hook_cmd = [
         "ffmpeg", "-y",
-        "-ss", f"{hook_start:.3f}",
-        "-to", f"{hook_end:.3f}",
-        "-i", source_path,
+        "-ss", f"{hook_render_start:.3f}",
+        "-i", output_path,
+        "-t", f"{hook_render_dur:.3f}",
         "-map", "0:v:0", "-map", "0:a?",
-        "-vf", ",".join(vf_parts),
-        "-r", "30", "-pix_fmt", "yuv420p",
         "-c:v", "libx264", "-preset", "ultrafast", "-crf", "0",
         "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
         "-movflags", "+faststart",
@@ -3492,7 +3566,7 @@ def prepend_hook_clip(output_path, source_path, edit_plan, work_dir):
             print(f"[hook] stderr (last 300): {result.stderr[-300:]}", flush=True)
         return
 
-    hook_actual_dur = probe_duration(hook_path) or hook_dur
+    hook_actual_dur = probe_duration(hook_path) or hook_render_dur
     hooked_output = os.path.join(work_dir, "hooked_output.mp4")
     concat_cmd = [
         "ffmpeg", "-y",
@@ -3539,6 +3613,7 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
     )
     post_filters = []
     video_out = "[video_base]"
+    emoji_overlay_specs = []
     post_filters.append(f"[0:v]null{video_out}")
 
     if caption_style != "none" and transcript.get("words"):
@@ -3576,14 +3651,13 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
                 print(f"[render] Text overlay '{overlay.get('text')}' — clip_idx={clip_idx} out of range ({len(clip_ranges)} clips), skipping", flush=True)
                 continue
             raw_text = str(overlay.get("text") or "")
-            text = raw_text.strip()
-            if not text:
+            text, emojis_in_text = split_text_and_emojis(raw_text.strip())
+            if not text and not emojis_in_text:
                 continue
-            text = text.replace("'", "").replace('"', "").replace("\\", "").replace(":", "\\:").replace(",", "\\,")
             start = clip_ranges[clip_idx]["start"]
             end = clip_ranges[clip_idx]["end"]
             style = str(overlay.get("style") or "callout")
-            char_count = len(text)
+            char_count = len(text) if text else max(1, len(raw_text.strip()))
             base_size = 72 if style == "title" else (64 if style == "cta" else 56)
             if char_count <= 18:
                 font_size = base_size
@@ -3595,23 +3669,42 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
                 font_size = round(base_size * 0.60)
             pos = str(overlay.get("position") or "center")
             y_expr = "250" if pos == "top" else ("(h-th)/2" if pos == "center" else str(max(0, 1920 - 350)))
+            emoji_y_expr = "250" if pos == "top" else ("(main_h-overlay_h)/2" if pos == "center" else str(max(0, 1920 - 350)))
             end_t = max(start + 0.8, end)
-            print(f"[render] Text overlay '{text}' on clip {clip_idx}: start={start:.3f}s end_t={end_t:.3f}s (clip range {clip_ranges[clip_idx]['start']:.3f}-{clip_ranges[clip_idx]['end']:.3f})", flush=True)
+            print(f"[render] Text overlay '{raw_text.strip()}' on clip {clip_idx}: start={start:.3f}s end_t={end_t:.3f}s (clip range {clip_ranges[clip_idx]['start']:.3f}-{clip_ranges[clip_idx]['end']:.3f})", flush=True)
             print(f"[render] drawtext enable: between(t,{start:.3f},{end_t:.3f})", flush=True)
-            out_label = f"[video_overlay_{i}]"
             _font_clause = (
                 f":fontfile='{OVERLAY_FONT_PATH}'"
                 if os.path.exists(OVERLAY_FONT_PATH)
                 else ""
             )
-            post_filters.append(
-                f"{video_out}drawtext=text='{text}':fontsize={font_size}:fontcolor=white"
-                f"{_font_clause}"
-                f":x=(w-tw)/2:y={y_expr}"
-                f":borderw=5:bordercolor=black"
-                f":enable='between(t,{start:.3f},{end_t:.3f})'{out_label}"
-            )
-            video_out = out_label
+            if text:
+                escaped_text = text.replace("'", "").replace('"', "").replace("\\", "").replace(":", "\\:").replace(",", "\\,")
+                out_label = f"[video_overlay_{i}]"
+                post_filters.append(
+                    f"{video_out}drawtext=text='{escaped_text}':fontsize={font_size}:fontcolor=white"
+                    f"{_font_clause}"
+                    f":x=(w-tw)/2:y={y_expr}"
+                    f":borderw=5:bordercolor=black"
+                    f":enable='between(t,{start:.3f},{end_t:.3f})'{out_label}"
+                )
+                video_out = out_label
+
+            if emojis_in_text:
+                for emoji_idx, emoji_char in enumerate(emojis_in_text):
+                    emoji_png = os.path.join(work_dir, f"emoji_{i}_{emoji_idx}.png")
+                    if create_emoji_image(emoji_char, max(48, font_size), emoji_png):
+                        emoji_overlay_specs.append(
+                            {
+                                "path": emoji_png,
+                                "start": start,
+                                "end": end_t,
+                                "x": f"(main_w/2)+{max(32, int((len(text) or 0) * font_size * 0.28) + emoji_idx * (font_size + 8))}",
+                                "y": emoji_y_expr,
+                            }
+                        )
+                    else:
+                        print(f"[emoji] Skipping overlay for '{emoji_char}'", flush=True)
 
     if len(post_filters) == 1:
         print("[captions] Nothing to burn in — skipping", flush=True)
@@ -3633,6 +3726,34 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
         print(f"[captions] Burn-in failed: {result.stderr[-300:]}", flush=True)
         return
     os.replace(temp_output, output_path)
+
+    if emoji_overlay_specs:
+        emoji_temp_output = os.path.join(work_dir, "captioned_emoji.mp4")
+        emoji_inputs = ["ffmpeg", "-y", "-i", output_path]
+        overlay_filters = []
+        current_video = "[0:v]"
+        for i, spec in enumerate(emoji_overlay_specs):
+            emoji_inputs.extend(["-i", spec["path"]])
+            next_video = f"[emoji_out_{i}]"
+            overlay_filters.append(
+                f"{current_video}[{i + 1}:v]overlay=x={spec['x']}:y={spec['y']}"
+                f":enable='between(t,{spec['start']:.3f},{spec['end']:.3f})'{next_video}"
+            )
+            current_video = next_video
+        emoji_cmd = emoji_inputs + [
+            "-filter_complex", ";".join(overlay_filters),
+            "-map", current_video, "-map", "0:a?",
+            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "0",
+            "-c:a", "copy",
+            "-movflags", "+faststart",
+            emoji_temp_output,
+        ]
+        emoji_result = subprocess.run(emoji_cmd, capture_output=True, text=True, timeout=120)
+        if emoji_result.returncode == 0 and os.path.exists(emoji_temp_output) and os.path.getsize(emoji_temp_output) > 0:
+            os.replace(emoji_temp_output, output_path)
+            print(f"[emoji] Burned in {len(emoji_overlay_specs)} emoji overlay(s)", flush=True)
+        else:
+            print(f"[emoji] Overlay pass failed: {(emoji_result.stderr or '')[-300:]}", flush=True)
     print("[captions] Burn-in complete", flush=True)
 
 
@@ -3789,8 +3910,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # Single input: the keyframed source
     input_args = ["-analyzeduration", "10000000", "-probesize", "10000000", "-i", keyframed_path]
     speed_curve = edit_plan.get("_parsed_speed_curve")
-    sample_rate = probe_audio_sample_rate(source_path) or 48000
-    print(f"[render] Input audio sample rate: {sample_rate} Hz", flush=True)
 
     # Compute effective durations from recipe with per-segment speed applied.
     effective_durations = compute_effective_durations(cuts, speed_curve)
@@ -3916,8 +4035,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         if speed != 1.0:
             a_chain.append(get_atempo_filter(speed))
         if abs(curve_speed - 1.0) > 0.001:
-            a_chain.append(f"asetrate={sample_rate}*{curve_speed:.4f}")
-            a_chain.append(f"aresample={sample_rate}")
+            a_chain.append(get_atempo_filter(curve_speed))
         if i == n-1 and outro != "none":
             fade_start = max(0, eff_dur - 1.0)
             a_chain.append(f"afade=t=out:st={fade_start:.3f}:d=1.0")
@@ -4376,7 +4494,7 @@ def handler(job):
             raise RuntimeError("Main render produced invalid output")
 
         print("[pipeline] step=hook", flush=True)
-        prepend_hook_clip(output_path, source_path, edit_plan, work_dir)
+        prepend_hook_clip(output_path, edit_plan, work_dir)
 
         print("[pipeline] step=trim", flush=True)
         expected_duration = sum(compute_effective_durations(edit_plan["cuts"], speed_curve))

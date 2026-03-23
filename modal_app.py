@@ -57,6 +57,7 @@ image = (
         "supabase",
         "httpx",
         "fastapi",
+        "Pillow",
         "pydantic",
         "tqdm",
     )
