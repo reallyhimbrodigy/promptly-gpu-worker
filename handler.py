@@ -3585,6 +3585,26 @@ def prepend_hook_clip(output_path, edit_plan, work_dir):
         return
 
     hook_actual_dur = probe_duration(hook_path) or hook_render_dur
+    # DIAG: Probe hook clip duration
+    _hook_v = subprocess.run(
+        ["ffprobe", "-v", "quiet", "-select_streams", "v:0",
+         "-show_entries", "stream=duration,nb_frames", "-of", "csv=p=0", hook_path],
+        capture_output=True, text=True, timeout=10
+    ).stdout.strip()
+    _hook_a = subprocess.run(
+        ["ffprobe", "-v", "quiet", "-select_streams", "a:0",
+         "-show_entries", "stream=duration", "-of", "csv=p=0", hook_path],
+        capture_output=True, text=True, timeout=10
+    ).stdout.strip()
+    print(f"[DIAG] Hook clip: video={_hook_v}, audio={_hook_a}", flush=True)
+
+    # DIAG: Probe main video first 2 seconds — what's at the start?
+    _main_v = subprocess.run(
+        ["ffprobe", "-v", "quiet", "-select_streams", "v:0",
+         "-show_entries", "stream=start_time,duration", "-of", "csv=p=0", output_path],
+        capture_output=True, text=True, timeout=10
+    ).stdout.strip()
+    print(f"[DIAG] Main video: start_time,duration = {_main_v}", flush=True)
     concat_list_path = os.path.join(work_dir, "hook_concat.txt")
     with open(concat_list_path, "w") as f:
         f.write(f"file '{hook_path}'\n")
@@ -3605,6 +3625,27 @@ def prepend_hook_clip(output_path, edit_plan, work_dir):
         if concat_result.stderr:
             print(f"[hook] concat stderr (last 300): {concat_result.stderr[-300:]}", flush=True)
         return
+
+    # DIAG: Probe concatenated output
+    _concat_dur = probe_duration(hooked_output) or 0
+    _concat_v = subprocess.run(
+        ["ffprobe", "-v", "quiet", "-select_streams", "v:0",
+         "-show_entries", "stream=duration,nb_frames,start_time", "-of", "csv=p=0", hooked_output],
+        capture_output=True, text=True, timeout=10
+    ).stdout.strip()
+    print(f"[DIAG] Concatenated: total={_concat_dur:.2f}s, video={_concat_v}", flush=True)
+    print(f"[DIAG] Expected: hook={hook_actual_dur:.2f}s + main={probe_duration(output_path):.2f}s = {hook_actual_dur + (probe_duration(output_path) or 0):.2f}s", flush=True)
+
+    # DIAG: Extract frame at hook_end to see what's visible
+    _boundary_frame = os.path.join(work_dir, "diag_boundary.png")
+    subprocess.run(
+        ["ffmpeg", "-y", "-i", hooked_output, "-ss", f"{hook_actual_dur + 0.1:.3f}",
+         "-frames:v", "1", _boundary_frame],
+        capture_output=True, timeout=10
+    )
+    if os.path.exists(_boundary_frame):
+        _bsize = os.path.getsize(_boundary_frame)
+        print(f"[DIAG] Frame at hook boundary ({hook_actual_dur + 0.1:.2f}s): {_bsize} bytes", flush=True)
 
     os.replace(hooked_output, output_path)
     edit_plan["_hook_offset"] = hook_actual_dur
