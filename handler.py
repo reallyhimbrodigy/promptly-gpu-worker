@@ -3910,6 +3910,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # Single input: the keyframed source
     input_args = ["-analyzeduration", "10000000", "-probesize", "10000000", "-i", keyframed_path]
     speed_curve = edit_plan.get("_parsed_speed_curve")
+    sample_rate = probe_audio_sample_rate(source_path) or 48000
 
     # Compute effective durations from recipe with per-segment speed applied.
     effective_durations = compute_effective_durations(cuts, speed_curve)
@@ -4035,7 +4036,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         if speed != 1.0:
             a_chain.append(get_atempo_filter(speed))
         if abs(curve_speed - 1.0) > 0.001:
-            a_chain.append(get_atempo_filter(curve_speed))
+            a_chain.append(f"asetrate={sample_rate}*{curve_speed:.4f}")
+            a_chain.append(f"aresample={sample_rate}")
         if i == n-1 and outro != "none":
             fade_start = max(0, eff_dur - 1.0)
             a_chain.append(f"afade=t=out:st={fade_start:.3f}:d=1.0")
