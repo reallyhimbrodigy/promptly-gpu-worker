@@ -3816,9 +3816,7 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
         )
         if ass_path and os.path.exists(ass_path):
             escaped = ass_path.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
-            post_filters.append(
-                f"{video_out}subtitles='{escaped}':fontsdir=/assets/fonts:/usr/share/fonts/truetype/noto[video_captioned]"
-            )
+            post_filters.append(f"{video_out}subtitles='{escaped}':fontsdir=/assets/fonts[video_captioned]")
             video_out = "[video_captioned]"
         else:
             print("[captions] No subtitle file generated — skipping ASS burn-in", flush=True)

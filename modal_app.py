@@ -44,6 +44,7 @@ image = (
         "pydantic",
         "tqdm",
     )
+    .run_commands("mkdir -p /assets/fonts && cp /usr/share/fonts/truetype/noto/NotoColorEmoji.ttf /assets/fonts/ || true")
     .add_local_dir("src/assets/sounds", "/assets/sounds")
     .add_local_dir("src/assets/fonts", "/assets/fonts")
     .add_local_dir("src/assets/music", "/assets/music")
