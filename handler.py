@@ -76,44 +76,26 @@ try:
 except Exception:
     pass
 
-try:
-    _fc_cmd = subprocess.run(["fc-match", "emoji"], capture_output=True, text=True, timeout=5)
-    print(f"[startup] Emoji font: {(_fc_cmd.stdout or '').strip()}", flush=True)
-
-    _test_output = "/tmp/emoji_test.png"
-    _test_cmd = [
-        "ffmpeg", "-y",
-        "-f", "lavfi", "-i", "color=white:s=200x200:d=0.1",
-        "-vf", "drawtext=text='Hi 💀':fontfile=/assets/fonts/Montserrat-Black.ttf:fontsize=40:fontcolor=black:x=10:y=80",
-        "-frames:v", "1",
-        _test_output,
-    ]
-    _test_result = subprocess.run(_test_cmd, capture_output=True, text=True, timeout=10)
-    if _test_result.returncode == 0 and os.path.exists(_test_output):
-        _size = os.path.getsize(_test_output)
-        print(f"[startup] Emoji drawtext test: OK ({_size} bytes)", flush=True)
-    else:
-        print(f"[startup] Emoji drawtext test: FAILED — {_test_result.stderr[-200:]}", flush=True)
-
-    _test_output2 = "/tmp/emoji_test2.png"
-    _test_cmd2 = [
-        "ffmpeg", "-y",
-        "-f", "lavfi", "-i", "color=white:s=200x200:d=0.1",
-        "-vf", "drawtext=text='💀':font=sans:fontsize=40:fontcolor=black:x=80:y=80",
-        "-frames:v", "1",
-        _test_output2,
-    ]
-    _test_result2 = subprocess.run(_test_cmd2, capture_output=True, text=True, timeout=10)
-    if _test_result2.returncode == 0:
-        print("[startup] Emoji fontconfig-only test: OK", flush=True)
-    else:
-        print(f"[startup] Emoji fontconfig-only test: FAILED — {_test_result2.stderr[-200:]}", flush=True)
-except Exception as e:
-    print(f"[startup] Emoji test error: {e}", flush=True)
-
 # Real-ESRGAN removed from pipeline — not needed for clean phone footage
 
 print("[startup] all import checks done", flush=True)
+
+EMOJI_STRIP = re.compile(
+    "["
+    "\U0001F600-\U0001F64F"
+    "\U0001F300-\U0001F5FF"
+    "\U0001F680-\U0001F6FF"
+    "\U0001F1E0-\U0001F1FF"
+    "\U00002702-\U000027B0"
+    "\U000024C2-\U0001F251"
+    "\U0001f926-\U0001f937"
+    "\U00010000-\U0010ffff"
+    "\u2640-\u2642"
+    "\u2600-\u2B55"
+    "\u200d\u23cf\u23e9\u231a\ufe0f\u3030"
+    "]+",
+    flags=re.UNICODE,
+)
 
 
 def get_trend_context():
@@ -1165,7 +1147,7 @@ Global parameters:
   thumbnail_timestamp — the source timestamp (in seconds) of the single best frame to use as the video's cover image / thumbnail. Pick the frame where the speaker has the most expressive or emotional face — surprise, laughter, intensity, reaction. Avoid frames where eyes are closed, face is blurry, or expression is blank. This frame needs to make someone scrolling stop and click.
 
 Text overlays:
-  text — under 5 words. Emojis are allowed and encouraged when they add energy (e.g. "Bro said Netanyahu 😭", "Uncle Stelios?! 😱", "She should be crying 💀").
+  text — under 5 words, no emojis
   position — top (default for talking heads), center (only when no face in frame), bottom
   appear_at_clip — which clip number
   style — title (72px), callout (56px), cta (64px)
@@ -3552,13 +3534,33 @@ def prepend_hook_clip(output_path, edit_plan, work_dir):
         print(f"[hook] Hook duration {hook_src_dur:.2f}s out of range — skipping", flush=True)
         return
 
-    hook_render_start = project_source_time_to_output(hook_src_start, cuts, clip_ranges, speed_curve)
-    hook_render_end = project_source_time_to_output(hook_src_end, cuts, clip_ranges, speed_curve)
-    if hook_render_start is None or hook_render_end is None or hook_render_end <= hook_render_start:
-        print("[hook] Could not map hook clip into rendered timeline — skipping", flush=True)
+    hook_clip_idx = None
+    for i, cut in enumerate(cuts):
+        cs = float(cut["source_start"])
+        ce = float(cut["source_end"])
+        if hook_src_start >= cs - 0.1 and hook_src_end <= ce + 0.1:
+            hook_clip_idx = i
+            break
+
+    if hook_clip_idx is None:
+        print("[hook] Could not find hook clip in cuts array — skipping", flush=True)
         return
 
+    hook_render_end = float(clip_ranges[hook_clip_idx]["end"])
+    clip_src_start = float(cuts[hook_clip_idx]["source_start"])
+    clip_speed = max(0.25, float(cuts[hook_clip_idx].get("speed") or 1.0))
+    curve_speed = 1.0
+    if speed_curve and speed_curve != "none":
+        curve_speed = max(0.5, min(1.5, get_speed_for_timestamp(clip_src_start, speed_curve)))
+    combined_speed = clip_speed * curve_speed
+    start_offset = (hook_src_start - clip_src_start) / combined_speed
+    hook_render_start = float(clip_ranges[hook_clip_idx]["start"]) + start_offset
+    hook_render_start = round(hook_render_start * 1000) / 1000
+    hook_render_end = round(hook_render_end * 1000) / 1000
     hook_render_dur = hook_render_end - hook_render_start
+    if hook_render_dur <= 0:
+        print("[hook] Hook render duration collapsed after clip-boundary mapping — skipping", flush=True)
+        return
     print(
         f"[hook] Extracting rendered hook clip: src {hook_src_start:.2f}s-{hook_src_end:.2f}s "
         f"-> out {hook_render_start:.2f}s-{hook_render_end:.2f}s ({hook_render_dur:.2f}s)",
@@ -3709,7 +3711,7 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
                 print(f"[render] Text overlay '{overlay.get('text')}' — clip_idx={clip_idx} out of range ({len(clip_ranges)} clips), skipping", flush=True)
                 continue
             raw_text = str(overlay.get("text") or "")
-            text = raw_text.strip()
+            text = EMOJI_STRIP.sub("", raw_text).strip()
             if not text:
                 continue
             start = clip_ranges[clip_idx]["start"]
