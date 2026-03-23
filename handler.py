@@ -2525,7 +2525,8 @@ def get_emoji_font_path():
 
 
 def create_emoji_image(emoji_char, size, output_path):
-    """Render a single emoji as a transparent PNG using the best available emoji font."""
+    """Render a single emoji as a transparent PNG. Renders at the font's native
+    bitmap size then resizes to the requested display size."""
     if Image is None or ImageDraw is None or ImageFont is None:
         print("[emoji] Pillow not available — skipping", flush=True)
         return False
@@ -2533,17 +2534,23 @@ def create_emoji_image(emoji_char, size, output_path):
     if not font_path:
         print(f"[emoji] No emoji font found — cannot render '{emoji_char}'", flush=True)
         return False
-    print(f"[emoji] Rendering '{emoji_char}' with font {font_path} at size {size}", flush=True)
     try:
-        img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-        font = ImageFont.truetype(font_path, max(8, size - 8))
+        native_size = 137 if "Apple" in font_path else 109
+        print(f"[emoji] Rendering '{emoji_char}' with font {font_path} at size {native_size}", flush=True)
+        font = ImageFont.truetype(font_path, native_size)
+        canvas_size = native_size + 20
+        img = Image.new("RGBA", (canvas_size, canvas_size), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
         bbox = draw.textbbox((0, 0), emoji_char, font=font, embedded_color=True)
         text_w = max(1, bbox[2] - bbox[0])
         text_h = max(1, bbox[3] - bbox[1])
-        x = max(0, (size - text_w) // 2 - bbox[0])
-        y = max(0, (size - text_h) // 2 - bbox[1])
+        x = max(0, (canvas_size - text_w) // 2 - bbox[0])
+        y = max(0, (canvas_size - text_h) // 2 - bbox[1])
         draw.text((x, y), emoji_char, font=font, embedded_color=True)
+        content_bbox = img.getbbox()
+        if content_bbox:
+            img = img.crop(content_bbox)
+        img = img.resize((size, size), Image.LANCZOS)
         img.save(output_path, "PNG")
         return os.path.exists(output_path) and os.path.getsize(output_path) > 100
     except Exception as e:
@@ -3972,6 +3979,13 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             zoom = "slow_in" if zoom == "punch_in" else "slow_out"
 
         eff_dur = effective_durations[i]
+        print(
+            f"[DIAG] Segment {i}: src={start:.3f}-{end:.3f} raw_dur={end-start:.3f} "
+            f"speed={speed} curve={curve_speed} combined={combined_speed:.4f} "
+            f"eff_dur={eff_dur:.3f} v_setpts={1.0/combined_speed:.4f} "
+            f"a_asetrate={sample_rate}*{combined_speed:.4f}",
+            flush=True,
+        )
         fps = 30
         total_frames = max(1, round(eff_dur * fps))
         zoom_max = 1.07 if has_burned_captions else 1.14
@@ -4515,6 +4529,12 @@ def handler(job):
         print(f"[pipeline] parallel_render complete in {render_elapsed:.1f}s", flush=True)
         print("[render] Encoding: crf=0 preset=ultrafast", flush=True)
         speed_curve = edit_plan.get("_parsed_speed_curve")
+        _diag_cmd = [
+            "ffprobe", "-v", "quiet", "-show_streams", "-show_format",
+            "-print_format", "json", output_path
+        ]
+        _diag = subprocess.run(_diag_cmd, capture_output=True, text=True, timeout=10)
+        print(f"[DIAG] Rendered output probe:\n{_diag.stdout[:2000]}", flush=True)
 
         if not validate_output(output_path, "render"):
             raise RuntimeError("Main render produced invalid output")
@@ -4642,6 +4662,11 @@ def handler(job):
 
         if not validate_output(output_path, "final"):
             raise RuntimeError(f"Final output is invalid: {output_path}")
+        _v_dur_cmd = ["ffprobe", "-v", "quiet", "-select_streams", "v:0", "-show_entries", "stream=duration", "-of", "csv=p=0", output_path]
+        _a_dur_cmd = ["ffprobe", "-v", "quiet", "-select_streams", "a:0", "-show_entries", "stream=duration", "-of", "csv=p=0", output_path]
+        _v_dur = subprocess.run(_v_dur_cmd, capture_output=True, text=True, timeout=10).stdout.strip()
+        _a_dur = subprocess.run(_a_dur_cmd, capture_output=True, text=True, timeout=10).stdout.strip()
+        print(f"[DIAG] Final output — video duration: {_v_dur}s, audio duration: {_a_dur}s, diff: {float(_v_dur or 0) - float(_a_dur or 0):.4f}s", flush=True)
         output_size_mb = os.path.getsize(output_path) / (1024*1024)
         final_dur = probe_duration(output_path) or 0
         send_progress(job_id, "upload", 90, "Just about done...", app_url)
