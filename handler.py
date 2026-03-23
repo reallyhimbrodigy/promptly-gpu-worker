@@ -162,6 +162,7 @@ OVERLAY_FONT_PATH = os.path.join(os.path.dirname(__file__), "assets", "fonts", "
 APPLE_EMOJI_FONT_PATH = "/usr/share/fonts/AppleColorEmoji.ttf"
 NOTO_EMOJI_FONT_PATHS = (
     "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
+    "/assets/fonts/NotoColorEmoji.ttf",
     "/usr/share/fonts/noto/NotoColorEmoji.ttf",
 )
 EMOJI_PATTERN = re.compile(
@@ -1657,6 +1658,9 @@ RULES FOR USING THESE TIMESTAMPS:
             hook_clip = None
     edit_plan["hook_clip"] = hook_clip
     edit_plan["_hook_offset"] = 0.0
+    if edit_plan.get("hook_clip"):
+        for cut in edit_plan.get("cuts", []):
+            cut["zoom"] = "none"
 
     raw_sfx = edit_plan.get("sound_effects", [])
     sound_effects = []
@@ -2516,40 +2520,23 @@ def split_text_and_emojis(text):
 
 
 def get_emoji_font_path():
-    """Return emoji font path for Pillow rendering.
-    Noto uses CBDT/CBLC which Pillow supports. Apple uses sbix which Pillow cannot read."""
-    for candidate in NOTO_EMOJI_FONT_PATHS:
+    for candidate in (
+        "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
+        "/assets/fonts/NotoColorEmoji.ttf",
+        "/usr/share/fonts/noto/NotoColorEmoji.ttf",
+    ):
         if os.path.exists(candidate):
             print(f"[emoji] Using font: {candidate}", flush=True)
             return candidate
-    print(f"[emoji] No emoji font found. Checked: {NOTO_EMOJI_FONT_PATHS}", flush=True)
+    print("[emoji] No emoji font found", flush=True)
     return None
 
 
 def create_emoji_image(emoji_char, size, output_path):
-    """Get an Apple-style emoji PNG. First check pre-rendered assets, fall back to Pillow + Noto."""
+    """Render a single emoji as a transparent PNG using Noto Color Emoji."""
     if Image is None or ImageDraw is None or ImageFont is None:
         print("[emoji] Pillow not available — skipping", flush=True)
         return False
-    codepoints = "-".join(
-        f"{ord(c):04x}"
-        for c in emoji_char
-        if ord(c) > 255 or ord(c) in (0x200D, 0xFE0F)
-    )
-    codepoints_clean = codepoints.replace("-fe0f", "").strip("-")
-    for cp in (codepoints, codepoints_clean):
-        if not cp:
-            continue
-        asset_path = f"/assets/emoji/{cp}.png"
-        if os.path.exists(asset_path):
-            try:
-                img = Image.open(asset_path).convert("RGBA")
-                img = img.resize((size, size), Image.LANCZOS)
-                img.save(output_path, "PNG")
-                print(f"[emoji] Using pre-rendered Apple emoji for '{emoji_char}'", flush=True)
-                return True
-            except Exception as e:
-                print(f"[emoji] Failed to resize Apple emoji: {e}", flush=True)
     font_path = get_emoji_font_path()
     if not font_path:
         print(f"[emoji] No emoji font found — cannot render '{emoji_char}'", flush=True)
@@ -2572,7 +2559,6 @@ def create_emoji_image(emoji_char, size, output_path):
             img = img.crop(content_bbox)
         img = img.resize((size, size), Image.LANCZOS)
         img.save(output_path, "PNG")
-        print(f"[emoji] Rendered with Noto fallback for '{emoji_char}'", flush=True)
         return os.path.exists(output_path) and os.path.getsize(output_path) > 100
     except Exception as e:
         print(f"[emoji] Failed to render '{emoji_char}': {e}", flush=True)
@@ -3751,14 +3737,14 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
                     emoji_png = os.path.join(work_dir, f"emoji_{i}_{emoji_idx}.png")
                     if create_emoji_image(emoji_char, max(48, font_size), emoji_png):
                         estimated_text_width = len(text) * font_size * 0.55
-                        emoji_x = int((1080 - estimated_text_width) / 2 + estimated_text_width + 4 + emoji_idx * (font_size + 4))
+                        emoji_x = int((1080 + estimated_text_width) / 2 + 8 + emoji_idx * (font_size + 4))
                         emoji_overlay_specs.append(
                             {
                                 "path": emoji_png,
                                 "start": start,
                                 "end": end_t,
                                 "x": str(emoji_x),
-                                "y": emoji_y_expr,
+                                "y": emoji_y_expr if isinstance(emoji_y_expr, str) and not emoji_y_expr.isdigit() else str(int(float(str(emoji_y_expr)))),
                             }
                         )
                     else:
@@ -4277,7 +4263,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         )
         video_out = bars_label
 
-    total_video_dur = running_dur
+    total_video_dur = sum(effective_durations)
     audio_out = "[audio_timed]"
     post_filters.append(
         f"[{tl_audio}]atrim=end={total_video_dur:.3f},asetpts=PTS-STARTPTS{audio_out}"
