@@ -12,6 +12,8 @@ image = (
     .apt_install(
         "ca-certificates",
         "ffmpeg",
+        "fontconfig",
+        "fonts-noto-color-emoji",
         "librubberband-dev",
         "rubberband-cli",
         "build-essential",
@@ -26,6 +28,7 @@ image = (
         "libsndfile1-dev",
         "libsamplerate0-dev",
     )
+    .run_commands("fc-cache -f")
     .pip_install("numpy", "wheel")
     .pip_install("aubio", extra_options="--no-build-isolation")
     .pip_install(

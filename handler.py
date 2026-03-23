@@ -2474,7 +2474,8 @@ def create_keyframed_source(source_path, keyframe_timestamps, work_dir):
 
 
 def get_atempo_filter(speed):
-    safe = max(0.25, min(4.0, float(speed) or 1.0))
+    """Build an atempo filter chain for arbitrary positive speed values."""
+    safe = max(0.01, float(speed) or 1.0)
     parts = []
     remaining = safe
     while remaining > 2.0:
@@ -2614,8 +2615,9 @@ def apply_speed_curve(output_path, speed_curve, work_dir, cuts, effective_durati
 
     print(f"[speed_curve] setpts expression length: {len(setpts_expr)} chars", flush=True)
 
-    # Build audio filter chain: split audio into segments, apply pitch-shifted
-    # playback-rate changes via asetrate, then resample back for output.
+    # Build audio filter chain: split audio into segments, use atempo for
+    # time-stretching so segment durations stay aligned with video setpts, then
+    # restore the TikTok-style pitch effect with rubberband.
     audio_filter_parts = []
     audio_concat = []
     for i, part in enumerate(expr_parts):
@@ -2626,10 +2628,12 @@ def apply_speed_curve(output_path, speed_curve, work_dir, cuts, effective_durati
                 f"asetpts=PTS-STARTPTS[a{i}]"
             )
         else:
+            atempo_chain = get_atempo_filter(speed)
             segment_filter = (
                 f"[0:a]atrim=start={part['t_start']:.4f}:end={part['t_end']:.4f},"
                 f"asetpts=PTS-STARTPTS,"
-                f"asetrate={audio_sample_rate}*{speed:.4f},aresample={audio_sample_rate}[a{i}]"
+                f"{atempo_chain},"
+                f"rubberband=pitch={speed:.4f}[a{i}]"
             )
         audio_filter_parts.append(segment_filter)
         audio_concat.append(f"[a{i}]")
@@ -2729,33 +2733,6 @@ def apply_speed_curve(output_path, speed_curve, work_dir, cuts, effective_durati
     os.replace(temp_output, output_path)
     new_duration = probe_duration(output_path) or duration
     print(f"[speed_curve] Complete: {duration:.2f}s → {new_duration:.2f}s ({temp_size / 1024 / 1024:.1f}MB)", flush=True)
-
-    # Resync audio to the final video timeline after segmented asetrate processing.
-    # This corrects cumulative drift without touching the already-rendered video stream.
-    synced_output = os.path.join(work_dir, "speed_curved_synced.mp4")
-    sync_cmd = [
-        "ffmpeg", "-y",
-        "-i", output_path,
-        "-af", "aresample=async=1:first_pts=0",
-        "-c:v", "copy",
-        "-c:a", "aac", "-b:a", "128k",
-        "-movflags", "+faststart",
-        synced_output,
-    ]
-
-    print("[speed_curve] Re-syncing audio to video timestamps...", flush=True)
-    sync_result = subprocess.run(sync_cmd, capture_output=True, text=True, timeout=120)
-    if sync_result.stderr:
-        print(f"[speed_curve] Resync stderr (last 500): {sync_result.stderr[-500:]}", flush=True)
-
-    if sync_result.returncode == 0 and validate_output(synced_output, "speed_curve_resync"):
-        os.replace(synced_output, output_path)
-        synced_duration = probe_duration(output_path) or new_duration
-        print(f"[speed_curve] Audio re-synced to video ({synced_duration:.2f}s)", flush=True)
-    else:
-        print("[speed_curve] Audio sync correction failed — using original speed-curve output", flush=True)
-        if os.path.exists(synced_output):
-            os.remove(synced_output)
 
 
 def is_hard_cut(transition):
@@ -3839,7 +3816,9 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
         )
         if ass_path and os.path.exists(ass_path):
             escaped = ass_path.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
-            post_filters.append(f"{video_out}subtitles='{escaped}':fontsdir=/assets/fonts[video_captioned]")
+            post_filters.append(
+                f"{video_out}subtitles='{escaped}':fontsdir=/assets/fonts:/usr/share/fonts/truetype/noto[video_captioned]"
+            )
             video_out = "[video_captioned]"
         else:
             print("[captions] No subtitle file generated — skipping ASS burn-in", flush=True)
@@ -3860,7 +3839,7 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
                 print(f"[render] Text overlay '{overlay.get('text')}' — clip_idx={clip_idx} out of range ({len(clip_ranges)} clips), skipping", flush=True)
                 continue
             raw_text = str(overlay.get("text") or "")
-            text = re.sub(r"[^\x00-\x7F]", "", raw_text).strip()
+            text = raw_text.strip()
             if not text:
                 continue
             text = text.replace("'", "").replace('"', "").replace("\\", "").replace(":", "\\:").replace(",", "\\,")
@@ -3883,9 +3862,10 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
             print(f"[render] Text overlay '{text}' on clip {clip_idx}: start={start:.3f}s end_t={end_t:.3f}s (clip range {clip_ranges[clip_idx]['start']:.3f}-{clip_ranges[clip_idx]['end']:.3f})", flush=True)
             print(f"[render] drawtext enable: between(t,{start:.3f},{end_t:.3f})", flush=True)
             out_label = f"[video_overlay_{i}]"
+            needs_font_fallback = any(ord(ch) > 127 for ch in text)
             _font_clause = (
                 f":fontfile='{OVERLAY_FONT_PATH}'"
-                if os.path.exists(OVERLAY_FONT_PATH)
+                if os.path.exists(OVERLAY_FONT_PATH) and not needs_font_fallback
                 else ""
             )
             post_filters.append(
