@@ -1118,8 +1118,6 @@ Global parameters:
 
   caption_position — where captions appear on screen. Always use "lower-third" — this places captions in the safe zone below faces and above the TikTok/Reels platform UI. This is the standard caption placement used by every major short-form editor.
 
-  emoji_keywords — optional list of words that should have an emoji appear next to them in the captions. The emoji renders inline to the right of the word, flowing naturally with the text. Use sparingly — 2-5 per video max. Only on words where the emoji adds energy or emotion. Examples: "crying" → 😭, "money" → 💰, "crazy" → 🤯, "love" → ❤️, "dead" → 💀, "fire" → 🔥, "shocked" → 😱. If no emojis fit naturally, set to an empty list.
-
   audio_denoise: true / false — AI noise removal for room tone, hiss, fan noise.
 
   outro: none, fade_black, fade_white — none is best for clean looping.
@@ -1131,7 +1129,7 @@ Global parameters:
   thumbnail_timestamp — the source timestamp (in seconds) of the single best frame to use as the video's cover image / thumbnail. Pick the frame where the speaker has the most expressive or emotional face — surprise, laughter, intensity, reaction. Avoid frames where eyes are closed, face is blurry, or expression is blank. This frame needs to make someone scrolling stop and click.
 
 Text overlays:
-  text — under 5 words, no emojis
+  text — under 5 words. Emojis are allowed and encouraged when they add energy (e.g. "Bro said Netanyahu 😭", "Uncle Stelios?! 😱", "She should be crying 💀").
   position — top (default for talking heads), center (only when no face in frame), bottom
   appear_at_clip — which clip number
   style — title (72px), callout (56px), cta (64px)
@@ -1180,9 +1178,6 @@ Then output the JSON:
   "thumbnail_timestamp": <seconds>,
   "caption_style": "<style>",
   "caption_position": "<position>",
-  "emoji_keywords": [
-    {{"word": "<word to match>", "emoji": "<emoji>"}}
-  ],
   "audio_denoise": <true|false>,
   "outro": "<none|fade_black|fade_white>",
   "background_music": "none",
@@ -1551,7 +1546,6 @@ RULES FOR USING THESE TIMESTAMPS:
     edit_plan.setdefault("caption_style", "none")
     edit_plan.setdefault("caption_position", "lower-third")
     edit_plan.setdefault("caption_keywords", [])
-    edit_plan.setdefault("emoji_keywords", [])
     edit_plan.setdefault("audio_denoise", False)
     edit_plan.setdefault("beat_sync", False)
     edit_plan.setdefault("outro", "none")
@@ -1607,18 +1601,6 @@ RULES FOR USING THESE TIMESTAMPS:
                 flush=True,
             )
     edit_plan["_parsed_speed_curve"] = speed_curve
-
-    parsed_emoji_keywords = []
-    for ek in (edit_plan.get("emoji_keywords") or []):
-        if not isinstance(ek, dict):
-            continue
-        word = str(ek.get("word") or "").strip()
-        emoji = str(ek.get("emoji") or "").strip()
-        if word and emoji:
-            parsed_emoji_keywords.append({"word": word, "emoji": emoji})
-        if len(parsed_emoji_keywords) >= 5:
-            break
-    edit_plan["emoji_keywords"] = parsed_emoji_keywords
 
     thumbnail_timestamp = None
     try:
@@ -2615,9 +2597,9 @@ def apply_speed_curve(output_path, speed_curve, work_dir, cuts, effective_durati
 
     print(f"[speed_curve] setpts expression length: {len(setpts_expr)} chars", flush=True)
 
-    # Build audio filter chain: split audio into segments, use atempo for
-    # time-stretching so segment durations stay aligned with video setpts, then
-    # restore the TikTok-style pitch effect with rubberband.
+    # Build audio filter chain: split audio into segments, use asetrate for the
+    # TikTok-style pitch shift, then resync the concatenated stream with an
+    # async resample pass to correct accumulated drift.
     audio_filter_parts = []
     audio_concat = []
     for i, part in enumerate(expr_parts):
@@ -2628,17 +2610,18 @@ def apply_speed_curve(output_path, speed_curve, work_dir, cuts, effective_durati
                 f"asetpts=PTS-STARTPTS[a{i}]"
             )
         else:
-            atempo_chain = get_atempo_filter(speed)
             segment_filter = (
                 f"[0:a]atrim=start={part['t_start']:.4f}:end={part['t_end']:.4f},"
                 f"asetpts=PTS-STARTPTS,"
-                f"{atempo_chain},"
-                f"rubberband=pitch={speed:.4f}[a{i}]"
+                f"asetrate={audio_sample_rate}*{speed:.4f},aresample={audio_sample_rate}[a{i}]"
             )
         audio_filter_parts.append(segment_filter)
         audio_concat.append(f"[a{i}]")
     audio_filter_parts.append(
-        f"{''.join(audio_concat)}concat=n={len(expr_parts)}:v=0:a=1[outa]"
+        f"{''.join(audio_concat)}concat=n={len(expr_parts)}:v=0:a=1[outa_raw]"
+    )
+    audio_filter_parts.append(
+        f"[outa_raw]aresample=async=1000:first_pts=0[outa]"
     )
     audio_filter = ";".join(audio_filter_parts)
 
@@ -2769,7 +2752,7 @@ def build_video_filter_chain(color_grade, source_res, edit_plan=None):
     return ",".join(filters) if filters else "null"
 
 
-def project_words_to_output(transcript, cuts, effective_durations, hook_offset=0.0, hook_clip=None, emoji_keywords=None):
+def project_words_to_output(transcript, cuts, effective_durations, hook_offset=0.0, hook_clip=None):
     words = transcript.get("words") or []
     projected = []
     if not words or not cuts:
@@ -2833,14 +2816,13 @@ def format_ass_time(seconds):
     return f"{h}:{m:02d}:{sec:02d}.{cs:02d}"
 
 
-def generate_subtitle_file(transcript, caption_style, cuts, effective_durations, output_res, caption_position, caption_keywords, work_dir, hook_offset=0.0, hook_clip=None, emoji_keywords=None):
+def generate_subtitle_file(transcript, caption_style, cuts, effective_durations, output_res, caption_position, caption_keywords, work_dir, hook_offset=0.0, hook_clip=None):
     words = project_words_to_output(
         transcript,
         cuts,
         effective_durations,
         hook_offset=hook_offset,
         hook_clip=hook_clip,
-        emoji_keywords=emoji_keywords,
     )
     if not words:
         return None
@@ -3276,50 +3258,6 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     with open(ass_path, "w", encoding="utf-8") as f:
         f.write(ass)
     return ass_path
-
-
-def resolve_emoji_font_path():
-    for candidate in (
-        "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
-        "/usr/share/fonts/noto/NotoColorEmoji.ttf",
-    ):
-        if os.path.exists(candidate):
-            return candidate
-    return None
-
-
-def build_emoji_overlay_specs(projected_words, emoji_keywords, caption_position):
-    emoji_map = {}
-    for ek in (emoji_keywords or []):
-        word = str((ek or {}).get("word") or "").lower().strip(".,!?;:'\"")
-        emoji = str((ek or {}).get("emoji") or "").strip()
-        if word and emoji:
-            emoji_map[word] = emoji
-
-    if not emoji_map or not projected_words:
-        return []
-
-    if str(caption_position or "lower-third").lower() == "top":
-        emoji_y = 250
-    elif str(caption_position or "lower-third").lower() == "center":
-        emoji_y = 960
-    else:
-        emoji_y = 1520
-
-    overlays = []
-    for w in projected_words:
-        clean_word = str(w.get("punctuated_word") or w.get("word") or "").lower().strip(".,!?;:'\"")
-        emoji_char = emoji_map.get(clean_word)
-        if not emoji_char:
-            continue
-        overlays.append({
-            "text": emoji_char,
-            "start": float(w.get("start") or 0.0),
-            "end": float(w.get("end") or 0.0),
-            "x": 680,
-            "y": emoji_y,
-        })
-    return overlays
 
 
 def get_output_clip_ranges(cuts, effective_durations):
@@ -3841,7 +3779,6 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
             work_dir,
             hook_offset=hook_offset,
             hook_clip=hook_clip,
-            emoji_keywords=[],
         )
         if ass_path and os.path.exists(ass_path):
             escaped = ass_path.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
@@ -3849,39 +3786,6 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
             video_out = "[video_captioned]"
         else:
             print("[captions] No subtitle file generated — skipping ASS burn-in", flush=True)
-
-    emoji_overlays = build_emoji_overlay_specs(
-        projected_words,
-        edit_plan.get("emoji_keywords") or [],
-        edit_plan.get("caption_position") or "lower-third",
-    )
-    if emoji_overlays:
-        emoji_font_path = resolve_emoji_font_path()
-        if not emoji_font_path:
-            print("[captions] Emoji font not found — skipping emoji overlays", flush=True)
-        else:
-            emoji_rendered = 0
-            escaped_font_path = emoji_font_path.replace("\\", "\\\\").replace(":", "\\:")
-            for i, overlay in enumerate(emoji_overlays):
-                escaped_emoji = (
-                    str(overlay["text"])
-                    .replace("\\", "\\\\")
-                    .replace("'", "\\'")
-                    .replace(":", "\\:")
-                    .replace(",", "\\,")
-                )
-                out_label = f"[video_emoji_{i}]"
-                post_filters.append(
-                    f"{video_out}drawtext=text='{escaped_emoji}'"
-                    f":fontfile='{escaped_font_path}'"
-                    f":fontsize=52"
-                    f":x={int(overlay['x'])}:y={int(overlay['y'])}"
-                    f":enable='between(t,{overlay['start']:.3f},{overlay['end']:.3f})'"
-                    f"{out_label}"
-                )
-                video_out = out_label
-                emoji_rendered += 1
-            print(f"[captions] Rendering {emoji_rendered} emoji overlays via drawtext", flush=True)
 
     if text_overlays:
         clip_ranges = get_output_clip_ranges(cuts, effective_durations)
@@ -3894,7 +3798,8 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
         for cr_i, cr in enumerate(clip_ranges):
             print(f"[render]   clip_range[{cr_i}]: {cr['start']:.3f}s - {cr['end']:.3f}s", flush=True)
         for i, overlay in enumerate(text_overlays):
-            clip_idx = int(overlay.get("appear_at_clip") or 0) - 1
+            raw_idx = int(overlay.get("appear_at_clip") or 0)
+            clip_idx = max(0, raw_idx - 1) if raw_idx > 0 else 0
             if clip_idx < 0 or clip_idx >= len(clip_ranges):
                 print(f"[render] Text overlay '{overlay.get('text')}' — clip_idx={clip_idx} out of range ({len(clip_ranges)} clips), skipping", flush=True)
                 continue
