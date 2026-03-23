@@ -85,6 +85,38 @@ try:
 except Exception:
     pass
 
+try:
+    _test_output = "/tmp/emoji_test.png"
+    _test_cmd = [
+        "ffmpeg", "-y",
+        "-f", "lavfi", "-i", "color=white:s=200x200:d=0.1",
+        "-vf", "drawtext=text='Hi 💀':fontfile=/assets/fonts/Montserrat-Black.ttf:fontsize=40:fontcolor=black:x=10:y=80",
+        "-frames:v", "1",
+        _test_output,
+    ]
+    _test_result = subprocess.run(_test_cmd, capture_output=True, text=True, timeout=10)
+    if _test_result.returncode == 0 and os.path.exists(_test_output):
+        _size = os.path.getsize(_test_output)
+        print(f"[startup] Emoji drawtext test: OK ({_size} bytes)", flush=True)
+    else:
+        print(f"[startup] Emoji drawtext test: FAILED — {_test_result.stderr[-200:]}", flush=True)
+
+    _test_output2 = "/tmp/emoji_test2.png"
+    _test_cmd2 = [
+        "ffmpeg", "-y",
+        "-f", "lavfi", "-i", "color=white:s=200x200:d=0.1",
+        "-vf", "drawtext=text='💀':font=sans:fontsize=40:fontcolor=black:x=80:y=80",
+        "-frames:v", "1",
+        _test_output2,
+    ]
+    _test_result2 = subprocess.run(_test_cmd2, capture_output=True, text=True, timeout=10)
+    if _test_result2.returncode == 0:
+        print("[startup] Emoji fontconfig-only test: OK", flush=True)
+    else:
+        print(f"[startup] Emoji fontconfig-only test: FAILED — {_test_result2.stderr[-200:]}", flush=True)
+except Exception as e:
+    print(f"[startup] Emoji test error: {e}", flush=True)
+
 # Real-ESRGAN removed from pipeline — not needed for clean phone footage
 
 print("[startup] all import checks done", flush=True)
