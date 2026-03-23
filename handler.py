@@ -2527,11 +2527,29 @@ def get_emoji_font_path():
 
 
 def create_emoji_image(emoji_char, size, output_path):
-    """Render a single emoji as a transparent PNG. Renders at the font's native
-    bitmap size then resizes to the requested display size."""
+    """Get an Apple-style emoji PNG. First check pre-rendered assets, fall back to Pillow + Noto."""
     if Image is None or ImageDraw is None or ImageFont is None:
         print("[emoji] Pillow not available — skipping", flush=True)
         return False
+    codepoints = "-".join(
+        f"{ord(c):04x}"
+        for c in emoji_char
+        if ord(c) > 255 or ord(c) in (0x200D, 0xFE0F)
+    )
+    codepoints_clean = codepoints.replace("-fe0f", "").strip("-")
+    for cp in (codepoints, codepoints_clean):
+        if not cp:
+            continue
+        asset_path = f"/assets/emoji/{cp}.png"
+        if os.path.exists(asset_path):
+            try:
+                img = Image.open(asset_path).convert("RGBA")
+                img = img.resize((size, size), Image.LANCZOS)
+                img.save(output_path, "PNG")
+                print(f"[emoji] Using pre-rendered Apple emoji for '{emoji_char}'", flush=True)
+                return True
+            except Exception as e:
+                print(f"[emoji] Failed to resize Apple emoji: {e}", flush=True)
     font_path = get_emoji_font_path()
     if not font_path:
         print(f"[emoji] No emoji font found — cannot render '{emoji_char}'", flush=True)
@@ -2554,6 +2572,7 @@ def create_emoji_image(emoji_char, size, output_path):
             img = img.crop(content_bbox)
         img = img.resize((size, size), Image.LANCZOS)
         img.save(output_path, "PNG")
+        print(f"[emoji] Rendered with Noto fallback for '{emoji_char}'", flush=True)
         return os.path.exists(output_path) and os.path.getsize(output_path) > 100
     except Exception as e:
         print(f"[emoji] Failed to render '{emoji_char}': {e}", flush=True)
@@ -3587,8 +3606,8 @@ def prepend_hook_clip(output_path, edit_plan, work_dir):
     hook_path = os.path.join(work_dir, "hook_clip.mp4")
     hook_cmd = [
         "ffmpeg", "-y",
-        "-ss", f"{hook_render_start:.3f}",
         "-i", output_path,
+        "-ss", f"{hook_render_start:.3f}",
         "-t", f"{hook_render_dur:.3f}",
         "-map", "0:v:0", "-map", "0:a?",
         "-c:v", "libx264", "-preset", "ultrafast", "-crf", "0",
@@ -3731,12 +3750,14 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
                 for emoji_idx, emoji_char in enumerate(emojis_in_text):
                     emoji_png = os.path.join(work_dir, f"emoji_{i}_{emoji_idx}.png")
                     if create_emoji_image(emoji_char, max(48, font_size), emoji_png):
+                        estimated_text_width = len(text) * font_size * 0.55
+                        emoji_x = int((1080 - estimated_text_width) / 2 + estimated_text_width + 4 + emoji_idx * (font_size + 4))
                         emoji_overlay_specs.append(
                             {
                                 "path": emoji_png,
                                 "start": start,
                                 "end": end_t,
-                                "x": f"(main_w/2)+{max(32, int((len(text) or 0) * font_size * 0.28) + emoji_idx * (font_size + 8))}",
+                                "x": str(emoji_x),
                                 "y": emoji_y_expr,
                             }
                         )
@@ -4256,7 +4277,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         )
         video_out = bars_label
 
-    audio_out = f"[{tl_audio}]"
+    total_video_dur = running_dur
+    audio_out = "[audio_timed]"
+    post_filters.append(
+        f"[{tl_audio}]atrim=end={total_video_dur:.3f},asetpts=PTS-STARTPTS{audio_out}"
+    )
 
     if sfx_audio_labels:
         _n_inputs   = len(sfx_audio_labels) + 1

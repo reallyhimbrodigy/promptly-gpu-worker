@@ -45,6 +45,33 @@ image = (
         "</fontconfig>' > /etc/fonts/conf.d/01-apple-emoji.conf"
     )
     .run_commands("fc-cache -f")
+    .run_commands(
+        """mkdir -p /assets/emoji && python3 - <<'PY'
+import os
+import urllib.request
+
+base = "https://raw.githubusercontent.com/zhdsmy/apple-emoji/main/assets/emoji"
+emoji_files = [
+    "1f480", "1f621", "1f631", "1f4b0",
+    "1f525", "1f62d", "1f92f", "2764",
+    "1f64f", "1f3b6", "2705", "274c",
+    "1f3a4", "1f929", "1f633", "1f48b",
+    "26a1", "1f6cf", "1f1ee-1f1f1", "1f3a8",
+    "1f54d",
+]
+downloaded = 0
+for codepoint in emoji_files:
+    dest = f"/assets/emoji/{codepoint}.png"
+    if os.path.exists(dest):
+        continue
+    try:
+        urllib.request.urlretrieve(f"{base}/{codepoint}.png", dest)
+        downloaded += 1
+    except Exception:
+        pass
+print(f"Downloaded {len([f for f in os.listdir('/assets/emoji') if f.endswith('.png')])} emoji PNGs ({downloaded} new)")
+PY"""
+    )
     .pip_install("numpy", "wheel")
     .pip_install("aubio", extra_options="--no-build-isolation")
     .pip_install(
