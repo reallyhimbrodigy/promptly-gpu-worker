@@ -3504,189 +3504,6 @@ def compute_effective_durations(cuts, speed_curve=None):
     return durations
 
 
-def prepend_hook_clip(output_path, edit_plan, work_dir):
-    """Extract a short teaser clip from the rendered output and prepend it to the final video."""
-    hook_clip_data = edit_plan.get("hook_clip")
-    edit_plan["_hook_offset"] = 0.0
-    if not isinstance(hook_clip_data, dict):
-        return
-
-    cuts = edit_plan.get("cuts") or []
-    speed_curve = edit_plan.get("_parsed_speed_curve")
-    effective_durations = compute_effective_durations(cuts, speed_curve)
-    clip_ranges = get_output_clip_ranges(cuts, effective_durations)
-    main_audio_info = (subprocess.run(
-        [
-            "ffprobe", "-v", "quiet", "-select_streams", "a:0",
-            "-show_entries", "stream=sample_rate,channels",
-            "-of", "csv=p=0",
-            output_path,
-        ],
-        capture_output=True,
-        text=True,
-        timeout=10,
-    ).stdout or "").strip().split(",")
-    main_sr = int(main_audio_info[0]) if main_audio_info and str(main_audio_info[0]).strip().isdigit() else 48000
-    main_ch = int(main_audio_info[1]) if len(main_audio_info) > 1 and str(main_audio_info[1]).strip().isdigit() else 2
-
-    hook_src_start = float(hook_clip_data.get("source_start") or 0.0)
-    hook_src_end = float(hook_clip_data.get("source_end") or 0.0)
-    hook_src_dur = hook_src_end - hook_src_start
-    if not (0.5 <= hook_src_dur <= 3.0):
-        print(f"[hook] Hook duration {hook_src_dur:.2f}s out of range — skipping", flush=True)
-        return
-
-    hook_clip_idx = None
-    for i, cut in enumerate(cuts):
-        cs = float(cut["source_start"])
-        ce = float(cut["source_end"])
-        if hook_src_start >= cs - 0.1 and hook_src_end <= ce + 0.1:
-            hook_clip_idx = i
-            break
-
-    if hook_clip_idx is None:
-        print("[hook] Could not find hook clip in cuts array — skipping", flush=True)
-        return
-
-    clip_src_start = float(cuts[hook_clip_idx]["source_start"])
-    clip_speed = max(0.25, float(cuts[hook_clip_idx].get("speed") or 1.0))
-    curve_speed = 1.0
-    if speed_curve and speed_curve != "none":
-        curve_speed = max(0.5, min(1.5, get_speed_for_timestamp(clip_src_start, speed_curve)))
-    combined_speed = clip_speed * curve_speed
-    clip_render_start = float(clip_ranges[hook_clip_idx]["start"])
-    clip_render_end = float(clip_ranges[hook_clip_idx]["end"])
-    start_offset = (hook_src_start - clip_src_start) / combined_speed
-    end_offset = (hook_src_end - clip_src_start) / combined_speed
-    hook_render_start = clip_render_start + start_offset
-    hook_render_end = clip_render_start + end_offset
-    hook_render_end = min(hook_render_end, clip_render_end)
-    hook_render_start = round(hook_render_start * 1000) / 1000
-    hook_render_end = round(hook_render_end * 1000) / 1000
-    hook_render_dur = hook_render_end - hook_render_start
-    if hook_render_dur <= 0:
-        print("[hook] Hook render duration collapsed after clip-boundary mapping — skipping", flush=True)
-        return
-    print(
-        f"[hook] Extracting rendered hook clip: src {hook_src_start:.2f}s-{hook_src_end:.2f}s "
-        f"-> out {hook_render_start:.2f}s-{hook_render_end:.2f}s ({hook_render_dur:.2f}s)",
-        flush=True,
-    )
-    hook_path = os.path.join(work_dir, "hook_clip.mp4")
-    hook_cmd = [
-        "ffmpeg", "-y",
-        "-i", output_path,
-        "-ss", f"{hook_render_start:.3f}",
-        "-t", f"{hook_render_dur:.3f}",
-        "-map", "0:v:0", "-map", "0:a?",
-        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "0",
-        "-c:a", "aac", "-b:a", "192k", "-ar", str(main_sr), "-ac", str(main_ch),
-        "-avoid_negative_ts", "make_zero",
-        "-movflags", "+faststart",
-        hook_path,
-    ]
-    result = subprocess.run(hook_cmd, capture_output=True, text=True, timeout=30)
-    if result.returncode != 0 or not os.path.exists(hook_path) or os.path.getsize(hook_path) <= 0:
-        print("[hook] Hook extraction failed — continuing without hook", flush=True)
-        if result.stderr:
-            print(f"[hook] stderr (last 300): {result.stderr[-300:]}", flush=True)
-        return
-
-    hook_actual_dur = probe_duration(hook_path) or hook_render_dur
-    # DIAG: Probe hook clip duration
-    _hook_v = subprocess.run(
-        ["ffprobe", "-v", "quiet", "-select_streams", "v:0",
-         "-show_entries", "stream=duration,nb_frames", "-of", "csv=p=0", hook_path],
-        capture_output=True, text=True, timeout=10
-    ).stdout.strip()
-    _hook_a = subprocess.run(
-        ["ffprobe", "-v", "quiet", "-select_streams", "a:0",
-         "-show_entries", "stream=duration", "-of", "csv=p=0", hook_path],
-        capture_output=True, text=True, timeout=10
-    ).stdout.strip()
-    print(f"[DIAG] Hook clip: video={_hook_v}, audio={_hook_a}", flush=True)
-
-    # DIAG: Probe main video first 2 seconds — what's at the start?
-    _main_v = subprocess.run(
-        ["ffprobe", "-v", "quiet", "-select_streams", "v:0",
-         "-show_entries", "stream=start_time,duration", "-of", "csv=p=0", output_path],
-        capture_output=True, text=True, timeout=10
-    ).stdout.strip()
-    print(f"[DIAG] Main video: start_time,duration = {_main_v}", flush=True)
-    # DIAG: Extract LAST frame of hook to see what's at the end
-    _last_frame = os.path.join(work_dir, "diag_hook_last_frame.png")
-    _hook_dur_probe = probe_duration(hook_path) or 0
-    subprocess.run(
-        ["ffmpeg", "-y", "-i", hook_path, "-ss", f"{max(0, _hook_dur_probe - 0.1):.3f}",
-         "-frames:v", "1", _last_frame],
-        capture_output=True, timeout=10
-    )
-
-    # DIAG: Extract FIRST frame of main video to see what starts
-    _first_frame = os.path.join(work_dir, "diag_main_first_frame.png")
-    subprocess.run(
-        ["ffmpeg", "-y", "-i", output_path, "-frames:v", "1", _first_frame],
-        capture_output=True, timeout=10
-    )
-
-    # DIAG: What frame is at hook_render_end in the rendered output?
-    _boundary_in_render = os.path.join(work_dir, "diag_render_at_hookend.png")
-    subprocess.run(
-        ["ffmpeg", "-y", "-i", output_path, "-ss", f"{hook_render_end:.3f}",
-         "-frames:v", "1", _boundary_in_render],
-        capture_output=True, timeout=10
-    )
-
-    print(f"[DIAG] Hook last frame at {max(0, _hook_dur_probe - 0.1):.2f}s, main first frame at 0.0s, render at hook_end={hook_render_end:.3f}s", flush=True)
-    print(f"[DIAG] hook_render_start={hook_render_start:.3f} hook_render_end={hook_render_end:.3f} hook_render_dur={hook_render_dur:.3f}", flush=True)
-    print(f"[DIAG] hook_src_start={hook_src_start:.3f} hook_src_end={hook_src_end:.3f} combined_speed={combined_speed:.4f}", flush=True)
-    print(f"[DIAG] clip_ranges[{hook_clip_idx}] = {clip_ranges[hook_clip_idx]}", flush=True)
-    print(f"[DIAG] clip source = {cuts[hook_clip_idx]['source_start']}-{cuts[hook_clip_idx]['source_end']}", flush=True)
-    hooked_output = os.path.join(work_dir, "hooked_output.mp4")
-    concat_cmd = [
-        "ffmpeg", "-y",
-        "-i", hook_path,
-        "-i", output_path,
-        "-filter_complex", "[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[outv][outa]",
-        "-map", "[outv]", "-map", "[outa]",
-        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "0",
-        "-c:a", "aac", "-b:a", "192k",
-        "-movflags", "+faststart",
-        hooked_output,
-    ]
-    concat_result = subprocess.run(concat_cmd, capture_output=True, text=True, timeout=60)
-    if concat_result.returncode != 0 or not os.path.exists(hooked_output) or os.path.getsize(hooked_output) <= 0:
-        print("[hook] Concat failed — continuing without hook", flush=True)
-        if concat_result.stderr:
-            print(f"[hook] concat stderr (last 300): {concat_result.stderr[-300:]}", flush=True)
-        return
-
-    # DIAG: Probe concatenated output
-    _concat_dur = probe_duration(hooked_output) or 0
-    _concat_v = subprocess.run(
-        ["ffprobe", "-v", "quiet", "-select_streams", "v:0",
-         "-show_entries", "stream=duration,nb_frames,start_time", "-of", "csv=p=0", hooked_output],
-        capture_output=True, text=True, timeout=10
-    ).stdout.strip()
-    print(f"[DIAG] Concatenated: total={_concat_dur:.2f}s, video={_concat_v}", flush=True)
-    print(f"[DIAG] Expected: hook={hook_actual_dur:.2f}s + main={probe_duration(output_path):.2f}s = {hook_actual_dur + (probe_duration(output_path) or 0):.2f}s", flush=True)
-
-    # DIAG: Extract frame at hook_end to see what's visible
-    _boundary_frame = os.path.join(work_dir, "diag_boundary.png")
-    subprocess.run(
-        ["ffmpeg", "-y", "-i", hooked_output, "-ss", f"{hook_actual_dur + 0.1:.3f}",
-         "-frames:v", "1", _boundary_frame],
-        capture_output=True, timeout=10
-    )
-    if os.path.exists(_boundary_frame):
-        _bsize = os.path.getsize(_boundary_frame)
-        print(f"[DIAG] Frame at hook boundary ({hook_actual_dur + 0.1:.2f}s): {_bsize} bytes", flush=True)
-
-    os.replace(hooked_output, output_path)
-    edit_plan["_hook_offset"] = hook_actual_dur
-    print(f"[hook] Prepended {hook_actual_dur:.2f}s hook teaser", flush=True)
-
-
 def burn_in_captions(output_path, edit_plan, transcript, work_dir):
     """Burn captions and text overlays into the output video as a post-process."""
     caption_style = str(edit_plan.get("caption_style") or "none").lower()
@@ -3943,9 +3760,31 @@ def mix_sfx_after_speed_curve(output_path, edit_plan, cuts, effective_durations,
 
 
 def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, work_dir, speech_segments=None):
-    n = len(cuts)
+    speed_curve = edit_plan.get("_parsed_speed_curve")
+    hook_clip = edit_plan.get("hook_clip")
+    render_cuts = list(cuts)
+    hook_segment_added = False
+    edit_plan["_hook_offset"] = 0.0
+    if isinstance(hook_clip, dict):
+        hook_s = float(hook_clip.get("source_start") or 0.0)
+        hook_e = float(hook_clip.get("source_end") or 0.0)
+        if 0.5 <= (hook_e - hook_s) <= 3.0:
+            hook_cut = {
+                "source_start": hook_s,
+                "source_end": hook_e,
+                "transition_out": "none",
+                "zoom": "none",
+                "cut_zoom": False,
+            }
+            render_cuts = [hook_cut] + render_cuts
+            hook_segment_added = True
+            print(f"[hook] Added hook as first render segment: {hook_s:.2f}-{hook_e:.2f}", flush=True)
+    edit_plan["_render_cuts"] = render_cuts
+    edit_plan["_hook_segment_added"] = hook_segment_added
+
+    n = len(render_cuts)
     source_res = probe_resolution(source_path)
-    kf_timestamps = [float(c["source_start"]) for c in cuts]
+    kf_timestamps = [float(c["source_start"]) for c in render_cuts]
     keyframed_path = create_keyframed_source(source_path, kf_timestamps, work_dir)
 
     color_grade = edit_plan.get("color_grade") or {}
@@ -3958,12 +3797,15 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     # Single input: the keyframed source
     input_args = ["-analyzeduration", "10000000", "-probesize", "10000000", "-i", keyframed_path]
-    speed_curve = edit_plan.get("_parsed_speed_curve")
     sample_rate = probe_audio_sample_rate(source_path) or 48000
 
     # Compute effective durations from recipe with per-segment speed applied.
-    effective_durations = compute_effective_durations(cuts, speed_curve)
-    for i, cut in enumerate(cuts):
+    effective_durations = compute_effective_durations(render_cuts, speed_curve)
+    if hook_segment_added and effective_durations:
+        hook_offset = effective_durations[0]
+        edit_plan["_hook_offset"] = round(hook_offset, 3)
+        print(f"[hook] Hook segment duration: {hook_offset:.2f}s", flush=True)
+    for i, cut in enumerate(render_cuts):
         src_dur = round((float(cut["source_end"]) - float(cut["source_start"])) * 1000) / 1000
         clip_speed = max(0.25, min(4.0, float(cut.get("speed") or 1.0)))
         curve_speed = 1.0
@@ -3980,7 +3822,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     audio_filters = []
     face_positions = edit_plan.get("_face_positions") or []
 
-    for i, cut in enumerate(cuts):
+    for i, cut in enumerate(render_cuts):
         start = float(cut["source_start"])
         end = float(cut["source_end"])
         speed = max(0.25, min(4.0, float(cut.get("speed") or 1.0)))
@@ -4135,7 +3977,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             print(f"[sfx] transition {_i}: {_sound_style} vol={_vol:.3f} at {_event_time:.3f}s", flush=True)
             extra_input_index += 1
 
-        _clip_ranges = get_output_clip_ranges(cuts, effective_durations)
+        _clip_ranges = get_output_clip_ranges(render_cuts, effective_durations)
         for _i, _overlay in enumerate(edit_plan.get("text_overlays") or []):
             _clip_idx = int(_overlay.get("appear_at_clip") or 0) - 1
             if _clip_idx < 0 or _clip_idx >= len(_clip_ranges):
@@ -4167,7 +4009,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             if not _sound_path:
                 continue
             _source_t = float(_sfx.get("t") or 0.0)
-            _output_t = project_source_time_to_output(_source_t, cuts, _clip_ranges, edit_plan.get("_parsed_speed_curve"))
+            _output_t = project_source_time_to_output(_source_t, render_cuts, _clip_ranges, edit_plan.get("_parsed_speed_curve"))
             if _output_t is None:
                 print(
                     f"[sfx] sound_effect: {_sound_style} at source {_source_t:.3f}s — could not project, skipping",
@@ -4203,7 +4045,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     }
 
     for i in range(1, n):
-        transition = str(cuts[i-1].get("transition_out") or "none").lower()
+        transition = str(render_cuts[i-1].get("transition_out") or "none").lower()
         out_v     = "vout" if i == n-1 else f"vx{i}"
         out_v_raw = f"{out_v}_raw"
         out_a     = "aout" if i == n-1 else f"ax{i}"
@@ -4559,8 +4401,7 @@ def handler(job):
         if not validate_output(output_path, "render"):
             raise RuntimeError("Main render produced invalid output")
 
-        print("[pipeline] step=hook", flush=True)
-        prepend_hook_clip(output_path, edit_plan, work_dir)
+        print("[pipeline] step=hook (built into render)", flush=True)
 
         print("[pipeline] step=trim", flush=True)
         expected_duration = sum(compute_effective_durations(edit_plan["cuts"], speed_curve))
