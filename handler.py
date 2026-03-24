@@ -1672,9 +1672,25 @@ RULES FOR USING THESE TIMESTAMPS:
             hook_clip["source_end"] = round(new_end, 3)
     edit_plan["hook_clip"] = hook_clip
     edit_plan["_hook_offset"] = 0.0
-    if edit_plan.get("hook_clip"):
-        for cut in edit_plan.get("cuts", []):
-            cut["zoom"] = "none"
+    if hook_clip:
+        hook_s = float(hook_clip["source_start"])
+        hook_e = float(hook_clip["source_end"])
+        cuts = edit_plan.get("cuts", [])
+        hook_clip_idx = None
+        for idx, cut in enumerate(cuts):
+            cs = float(cut["source_start"])
+            ce = float(cut["source_end"])
+            if hook_s >= cs - 0.1 and hook_e <= ce + 0.1:
+                hook_clip_idx = idx
+                break
+
+        for cut in cuts:
+            if cut.get("zoom") and cut["zoom"] != "none":
+                cut["zoom"] = "none"
+
+        if hook_clip_idx is not None:
+            cuts[hook_clip_idx]["zoom"] = "slow_in"
+            print(f"[zoom] Moved zoom to hook clip {hook_clip_idx}", flush=True)
 
     raw_sfx = edit_plan.get("sound_effects", [])
     sound_effects = []
@@ -3944,12 +3960,19 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         )
         fps = 30
         total_frames = max(1, round(eff_dur * fps))
+        MIN_ZOOM_FRAMES = 90
+        if zoom != "none" and total_frames < MIN_ZOOM_FRAMES:
+            zoom_scale_factor = total_frames / MIN_ZOOM_FRAMES
+            total_frames_for_zoom = MIN_ZOOM_FRAMES
+        else:
+            zoom_scale_factor = 1.0
+            total_frames_for_zoom = total_frames
         zoom_max = 1.07 if has_burned_captions else 1.14
 
         zoom_filter = None
         if zoom == "slow_in":
-            tf = max(1, total_frames)
-            zoom_range = zoom_max - 1.0
+            tf = max(1, total_frames_for_zoom) if zoom_scale_factor < 1.0 else max(1, total_frames)
+            zoom_range = (zoom_max - 1.0) * zoom_scale_factor
             closest_face = None
             if face_positions:
                 clip_mid = (start + end) / 2.0
@@ -3957,6 +3980,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             if closest_face and closest_face.get("found"):
                 face_cx = float(closest_face.get("cx") or 540.0)
                 face_cy = float(closest_face.get("cy") or 960.0)
+                print(f"[zoom] clip {i}: face at ({face_cx:.0f}, {face_cy:.0f}), zoom toward face", flush=True)
                 offset_x = clamp(face_cx - 540.0, -240.0, 240.0)
                 offset_y = clamp(face_cy - 960.0, -320.0, 320.0)
                 progress = f"min(n/{tf}\\,1.0)"
@@ -3973,23 +3997,38 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                     f"crop=1080:1920:x='{crop_x}':y='{crop_y}'"
                 )
             else:
+                print(f"[zoom] clip {i}: no face detected, zooming center", flush=True)
                 zoom_filter = (
                     f"scale=w='trunc(iw*(1.0+{zoom_range:.4f}*min(n/{tf}\\,1.0))/2)*2'"
                     f":h='trunc(ih*(1.0+{zoom_range:.4f}*min(n/{tf}\\,1.0))/2)*2'"
                     f":eval=frame:flags=bilinear,crop=1080:1920"
                 )
         elif zoom == "slow_out":
-            tf = max(1, total_frames)
-            zoom_range = zoom_max - 1.0
+            tf = max(1, total_frames_for_zoom) if zoom_scale_factor < 1.0 else max(1, total_frames)
+            zoom_range = (zoom_max - 1.0) * zoom_scale_factor
             zoom_filter = (
-                f"scale=w='trunc(iw*({zoom_max:.4f}-{zoom_range:.4f}*(n/{tf})*(n/{tf})*(3-2*(n/{tf})))/2)*2'"
-                f":h='trunc(ih*({zoom_max:.4f}-{zoom_range:.4f}*(n/{tf})*(n/{tf})*(3-2*(n/{tf})))/2)*2'"
+                f"scale=w='trunc(iw*({1.0 + zoom_range:.4f}-{zoom_range:.4f}*(n/{tf})*(n/{tf})*(3-2*(n/{tf})))/2)*2'"
+                f":h='trunc(ih*({1.0 + zoom_range:.4f}-{zoom_range:.4f}*(n/{tf})*(n/{tf})*(3-2*(n/{tf})))/2)*2'"
                 f":eval=frame:flags=bilinear,crop=1080:1920"
             )
         elif zoom == "punch_in":
-            zoom_filter = f"scale=w='trunc(iw*(if(lt(n\\,10)\\,1.0+0.15*n/10\\,1.15))/2)*2':h='trunc(ih*(if(lt(n\\,10)\\,1.0+0.15*n/10\\,1.15))/2)*2':eval=frame:flags=bilinear,crop=1080:1920"
+            punch_range = 0.15 * zoom_scale_factor
+            zoom_filter = (
+                f"scale=w='trunc(iw*(if(lt(n\\,{max(1, total_frames_for_zoom)})\\,"
+                f"1.0+{punch_range:.4f}*n/{max(1, total_frames_for_zoom)}\\,{1.0 + punch_range:.4f}))/2)*2'"
+                f":h='trunc(ih*(if(lt(n\\,{max(1, total_frames_for_zoom)})\\,"
+                f"1.0+{punch_range:.4f}*n/{max(1, total_frames_for_zoom)}\\,{1.0 + punch_range:.4f}))/2)*2'"
+                f":eval=frame:flags=bilinear,crop=1080:1920"
+            )
         elif zoom == "punch_out":
-            zoom_filter = f"scale=w='trunc(iw*(if(lt(n\\,10)\\,1.15-0.15*n/10\\,1.0))/2)*2':h='trunc(ih*(if(lt(n\\,10)\\,1.15-0.15*n/10\\,1.0))/2)*2':eval=frame:flags=bilinear,crop=1080:1920"
+            punch_range = 0.15 * zoom_scale_factor
+            zoom_filter = (
+                f"scale=w='trunc(iw*(if(lt(n\\,{max(1, total_frames_for_zoom)})\\,"
+                f"{1.0 + punch_range:.4f}-{punch_range:.4f}*n/{max(1, total_frames_for_zoom)}\\,1.0))/2)*2'"
+                f":h='trunc(ih*(if(lt(n\\,{max(1, total_frames_for_zoom)})\\,"
+                f"{1.0 + punch_range:.4f}-{punch_range:.4f}*n/{max(1, total_frames_for_zoom)}\\,1.0))/2)*2'"
+                f":eval=frame:flags=bilinear,crop=1080:1920"
+            )
 
         vignette = str(edit_plan.get("vignette") or "none").lower()
         vignette_filter = None
