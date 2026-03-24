@@ -80,23 +80,6 @@ except Exception:
 
 print("[startup] all import checks done", flush=True)
 
-EMOJI_STRIP = re.compile(
-    "["
-    "\U0001F600-\U0001F64F"
-    "\U0001F300-\U0001F5FF"
-    "\U0001F680-\U0001F6FF"
-    "\U0001F1E0-\U0001F1FF"
-    "\U00002702-\U000027B0"
-    "\U000024C2-\U0001F251"
-    "\U0001f926-\U0001f937"
-    "\U00010000-\U0010ffff"
-    "\u2640-\u2642"
-    "\u2600-\u2B55"
-    "\u200d\u23cf\u23e9\u231a\ufe0f\u3030"
-    "]+",
-    flags=re.UNICODE,
-)
-
 
 def get_trend_context():
     """Load the current weekly editing style guide from Supabase."""
@@ -1089,9 +1072,7 @@ Per-clip parameters:
   sfx_style — always "none"
 
   zoom — camera movement across the clip:
-    none — static. DEFAULT for all clips.
-    slow_in — gentle push-in. Use ONLY on the first clip when ALL of these are true: (1) the subject is a talking head, (2) the subject's face is centered in the frame, and (3) the subject is looking directly at the camera. If the subject is off-center, looking away, or there are multiple people, use none. Do not use on any clip other than the first.
-    slow_out / punch_in / punch_out — other zoom options. Rarely needed.
+    "slow_in" or "none". Zoom is ONLY allowed on the first clip the viewer sees. If hook_clip is set, put zoom on the cut that contains the hook timestamps. If hook_clip is null, put zoom on clip 0. All other clips MUST have zoom set to "none". Never put zoom on a clip in the middle of the video.
     Zoom crops the edges. If the footage has burned-in captions, use none on ALL clips.
 
   cut_zoom — always false. The pipeline controls this.
@@ -1672,25 +1653,29 @@ RULES FOR USING THESE TIMESTAMPS:
             hook_clip["source_end"] = round(new_end, 3)
     edit_plan["hook_clip"] = hook_clip
     edit_plan["_hook_offset"] = 0.0
+    cuts = edit_plan.get("cuts") or []
     if hook_clip:
         hook_s = float(hook_clip["source_start"])
         hook_e = float(hook_clip["source_end"])
-        cuts = edit_plan.get("cuts", [])
-        hook_clip_idx = None
+        hook_idx = None
         for idx, cut in enumerate(cuts):
             cs = float(cut["source_start"])
             ce = float(cut["source_end"])
             if hook_s >= cs - 0.1 and hook_e <= ce + 0.1:
-                hook_clip_idx = idx
+                hook_idx = idx
                 break
 
-        for cut in cuts:
-            if cut.get("zoom") and cut["zoom"] != "none":
+        for idx, cut in enumerate(cuts):
+            if idx != hook_idx and cut.get("zoom") and cut["zoom"] != "none":
                 cut["zoom"] = "none"
 
-        if hook_clip_idx is not None:
-            cuts[hook_clip_idx]["zoom"] = "slow_in"
-            print(f"[zoom] Moved zoom to hook clip {hook_clip_idx}", flush=True)
+        if hook_idx is not None:
+            cuts[hook_idx]["zoom"] = "slow_in"
+            print(f"[zoom] Moved zoom to hook clip {hook_idx}", flush=True)
+    else:
+        for idx, cut in enumerate(cuts):
+            if idx != 0 and cut.get("zoom") and cut["zoom"] != "none":
+                cut["zoom"] = "none"
 
     raw_sfx = edit_plan.get("sound_effects", [])
     sound_effects = []
@@ -3683,7 +3668,7 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
                 print(f"[render] Text overlay '{overlay.get('text')}' — clip_idx={clip_idx} out of range ({len(clip_ranges)} clips), skipping", flush=True)
                 continue
             raw_text = str(overlay.get("text") or "")
-            text = EMOJI_STRIP.sub("", raw_text).strip()
+            text = raw_text.strip()
             if not text:
                 continue
             start = clip_ranges[clip_idx]["start"]
@@ -3897,16 +3882,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             kf_timestamps.append(hook_e)
     kf_timestamps = sorted(set(kf_timestamps))
     keyframed_path = create_keyframed_source(source_path, kf_timestamps, work_dir)
-    _kf_cmd = [
-        "ffprobe", "-v", "quiet", "-select_streams", "v:0",
-        "-show_entries", "frame=pts_time,key_frame",
-        "-read_intervals", "33%+#20",
-        "-of", "csv=p=0",
-        keyframed_path,
-    ]
-    _kf_result = subprocess.run(_kf_cmd, capture_output=True, text=True, timeout=15)
-    print(f"[DIAG] Keyframes near 33s: {_kf_result.stdout[:500]}", flush=True)
-
     color_grade = edit_plan.get("color_grade") or {}
     color_filter_str = build_video_filter_chain(color_grade, source_res, edit_plan)
     has_burned_captions = infer_has_burned_captions(
@@ -3951,13 +3926,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             zoom = "slow_in" if zoom == "punch_in" else "slow_out"
 
         eff_dur = effective_durations[i]
-        print(
-            f"[DIAG] Segment {i}: src={start:.3f}-{end:.3f} raw_dur={end-start:.3f} "
-            f"speed={speed} curve={curve_speed} combined={combined_speed:.4f} "
-            f"eff_dur={eff_dur:.3f} v_setpts={1.0/combined_speed:.4f} "
-            f"a_asetrate={sample_rate}*{combined_speed:.4f}",
-            flush=True,
-        )
         fps = 30
         total_frames = max(1, round(eff_dur * fps))
         MIN_ZOOM_FRAMES = 90
@@ -4308,13 +4276,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             print(f"[render] WARNING: music track not found at {music_path} — skipping", flush=True)
 
     filter_complex = ";".join(video_filters + audio_filters + transition_filters + sfx_filter_strs + post_filters + music_filters)
-    print(f"[DIAG] filter_complex length: {len(filter_complex)} chars, segments: {n}", flush=True)
-    print(f"[DIAG] video_filters: {len(video_filters)}, audio_filters: {len(audio_filters)}, transition_filters: {len(transition_filters)}", flush=True)
-    for idx, vf in enumerate(video_filters[:3]):
-        print(f"[DIAG] video_filter[{idx}]: {vf[:300]}", flush=True)
-    for idx, af in enumerate(audio_filters[:3]):
-        print(f"[DIAG] audio_filter[{idx}]: {af[:300]}", flush=True)
-
     encode_args = [
         "-c:v","libx264","-preset","ultrafast","-crf","0",
         "-pix_fmt","yuv420p",
@@ -4536,13 +4497,6 @@ def handler(job):
         print(f"[pipeline] parallel_render complete in {render_elapsed:.1f}s", flush=True)
         print("[render] Encoding: crf=0 preset=ultrafast", flush=True)
         speed_curve = edit_plan.get("_parsed_speed_curve")
-        _diag_cmd = [
-            "ffprobe", "-v", "quiet", "-show_streams", "-show_format",
-            "-print_format", "json", output_path
-        ]
-        _diag = subprocess.run(_diag_cmd, capture_output=True, text=True, timeout=10)
-        print(f"[DIAG] Rendered output probe:\n{_diag.stdout[:2000]}", flush=True)
-
         if not validate_output(output_path, "render"):
             raise RuntimeError("Main render produced invalid output")
 

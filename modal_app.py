@@ -28,10 +28,6 @@ image = (
         "libsndfile1-dev",
         "libsamplerate0-dev",
     )
-    .run_commands(
-        "wget -q https://github.com/samuelngs/apple-emoji-ttf/releases/latest/download/AppleColorEmoji-Linux.ttf "
-        "-O /usr/share/fonts/truetype/AppleColorEmoji.ttf"
-    )
     .run_commands("fc-cache -f")
     .pip_install("numpy", "wheel")
     .pip_install("aubio", extra_options="--no-build-isolation")
