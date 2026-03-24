@@ -89,6 +89,23 @@ _EMOJI_RE = re.compile(
 )
 
 
+def _probe_av_sync(path, label):
+    """Print video and audio duration for a file."""
+    try:
+        import subprocess as _sp
+        _v = float((_sp.run(
+            ["ffprobe", "-v", "quiet", "-select_streams", "v:0",
+             "-show_entries", "stream=duration", "-of", "csv=p=0", path],
+            capture_output=True, text=True, timeout=10).stdout or "0").strip() or "0")
+        _a = float((_sp.run(
+            ["ffprobe", "-v", "quiet", "-select_streams", "a:0",
+             "-show_entries", "stream=duration", "-of", "csv=p=0", path],
+            capture_output=True, text=True, timeout=10).stdout or "0").strip() or "0")
+        print(f"[DIAG-SYNC] {label}: video={_v:.3f}s audio={_a:.3f}s diff={_v-_a:.4f}s", flush=True)
+    except Exception:
+        pass
+
+
 def get_trend_context():
     """Load the current weekly editing style guide from Supabase."""
     if supabase is None:
@@ -1568,7 +1585,7 @@ RULES FOR USING THESE TIMESTAMPS:
             if isinstance(kp, dict) and "t" in kp and "speed" in kp:
                 try:
                     t = max(0.0, float(kp["t"]))
-                    s = max(0.5, min(1.5, float(kp["speed"])))
+                    s = max(0.6, min(1.5, float(kp["speed"])))
                     speed_curve.append({"t": t, "speed": s})
                 except Exception:
                     continue
@@ -3594,6 +3611,7 @@ def prepend_hook_clip(output_path, edit_plan, work_dir):
             print(f"[hook] stderr (last 300): {result.stderr[-300:]}", flush=True)
         return
 
+    _probe_av_sync(hook_path, "hook_clip")
     hook_actual_dur = probe_duration(hook_path) or hook_render_dur
 
     hooked_output = os.path.join(work_dir, "hooked_output.mp4")
@@ -3616,6 +3634,7 @@ def prepend_hook_clip(output_path, edit_plan, work_dir):
         return
 
     os.replace(hooked_output, output_path)
+    _probe_av_sync(output_path, "after_hook_concat")
     edit_plan["_hook_offset"] = hook_actual_dur
     print(f"[hook] Prepended {hook_actual_dur:.2f}s hook teaser", flush=True)
 
@@ -4517,6 +4536,7 @@ def handler(job):
         speed_curve = edit_plan.get("_parsed_speed_curve")
         if not validate_output(output_path, "render"):
             raise RuntimeError("Main render produced invalid output")
+        _probe_av_sync(output_path, "after_render")
 
         print("[pipeline] step=hook", flush=True)
         prepend_hook_clip(output_path, edit_plan, work_dir)
@@ -4569,6 +4589,7 @@ def handler(job):
                 os.replace(captions_backup_path, output_path)
             elif os.path.exists(captions_backup_path):
                 os.remove(captions_backup_path)
+            _probe_av_sync(output_path, "after_captions")
         else:
             print("[pipeline] Captions skipped (no captions, no text overlays)", flush=True)
 
@@ -4581,6 +4602,7 @@ def handler(job):
         effective_durations = compute_effective_durations(cuts, speed_curve)
         print("[pipeline] step=sfx_mix", flush=True)
         mix_sfx_after_speed_curve(output_path, edit_plan, cuts, effective_durations, work_dir)
+        _probe_av_sync(output_path, "after_sfx")
 
         output_size = os.path.getsize(output_path)
         output_dur = probe_duration(output_path) or 0
@@ -4606,6 +4628,7 @@ def handler(job):
                 if _sr.returncode == 0 and os.path.exists(_sync) and os.path.getsize(_sync) > 0:
                     os.replace(_sync, output_path)
                     print(f"[sync] Trimmed audio: {_fa:.2f}s -> {_fv:.2f}s", flush=True)
+                    _probe_av_sync(output_path, "after_sync_trim")
         except Exception:
             pass
         if output_size > 100 * 1024 * 1024:
