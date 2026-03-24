@@ -1518,30 +1518,6 @@ RULES FOR USING THESE TIMESTAMPS:
                 )
                 validated_cuts[i]["transition_out"] = "none"
 
-    # Zoom rules:
-    # - If burned-in captions: ALL zoom and cut_zoom disabled on ALL clips
-    # - If no burned-in captions: zoom allowed ONLY on the first clip, disabled on all others
-    # - cut_zoom disabled everywhere (too distracting, crops burned-in text)
-    has_hook = isinstance(hook_clip, dict)
-    if has_burned_captions or has_hook:
-        # No zoom on any clip when captions are burned in OR when hook plays first
-        for clip in validated_cuts:
-            if clip.get("zoom") and clip["zoom"] != "none":
-                clip["zoom"] = "none"
-            if clip.get("cut_zoom"):
-                clip["cut_zoom"] = False
-    else:
-        # Only clip 0 gets zoom
-        for i, clip in enumerate(validated_cuts):
-            if i == 0:
-                if clip.get("cut_zoom"):
-                    clip["cut_zoom"] = False
-            else:
-                if clip.get("zoom") and clip["zoom"] != "none":
-                    clip["zoom"] = "none"
-                if clip.get("cut_zoom"):
-                    clip["cut_zoom"] = False
-
     edit_plan.setdefault("background_music", "none")
     edit_plan.setdefault("caption_style", "none")
     edit_plan.setdefault("caption_position", "lower-third")
@@ -1650,6 +1626,31 @@ RULES FOR USING THESE TIMESTAMPS:
                     _he = calc_end
         print(f"[hook] Hook timestamps: {_hs:.2f}-{_he:.2f} ({_he - _hs:.2f}s)", flush=True)
     edit_plan["hook_clip"] = hook_clip
+
+    # Zoom rules:
+    # - If burned-in captions: ALL zoom and cut_zoom disabled on ALL clips
+    # - If no burned-in captions: zoom allowed ONLY on the first clip, disabled on all others
+    # - cut_zoom disabled everywhere (too distracting, crops burned-in text)
+    has_hook = isinstance(hook_clip, dict)
+    if has_burned_captions or has_hook:
+        # No zoom on any clip when captions are burned in OR when hook plays first
+        for clip in validated_cuts:
+            if clip.get("zoom") and clip["zoom"] != "none":
+                clip["zoom"] = "none"
+            if clip.get("cut_zoom"):
+                clip["cut_zoom"] = False
+    else:
+        # Only clip 0 gets zoom
+        for i, clip in enumerate(validated_cuts):
+            if i == 0:
+                if clip.get("cut_zoom"):
+                    clip["cut_zoom"] = False
+            else:
+                if clip.get("zoom") and clip["zoom"] != "none":
+                    clip["zoom"] = "none"
+                if clip.get("cut_zoom"):
+                    clip["cut_zoom"] = False
+
     edit_plan["_hook_offset"] = 0.0
 
     raw_sfx = edit_plan.get("sound_effects", [])
