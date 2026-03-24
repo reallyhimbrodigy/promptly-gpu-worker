@@ -1658,16 +1658,18 @@ RULES FOR USING THESE TIMESTAMPS:
                 last_word_end = we
         if first_word_start is not None and last_word_end is not None:
             print(f"[hook] Found speech: first_word={first_word_start:.2f}, last_word_end={last_word_end:.2f}", flush=True)
-            new_start = max(hook_s, first_word_start - 0.05)
-            new_end = min(hook_e, last_word_end + 0.1)
-            if new_start != hook_s or new_end != hook_e:
+            new_start = max(hook_s, first_word_start)
+            new_end = min(hook_e, last_word_end - 0.15)
+            if new_end <= new_start:
+                new_end = min(hook_e, last_word_end)
+            if abs(new_start - hook_s) > 0.01 or abs(new_end - hook_e) > 0.01:
                 print(
                     f"[hook] Tightened hook: {hook_s:.2f}-{hook_e:.2f} → {new_start:.2f}-{new_end:.2f} "
                     f"(snapped to speech)",
                     flush=True,
                 )
-                hook_clip["source_start"] = round(new_start, 3)
-                hook_clip["source_end"] = round(new_end, 3)
+            hook_clip["source_start"] = round(new_start, 3)
+            hook_clip["source_end"] = round(new_end, 3)
     edit_plan["hook_clip"] = hook_clip
     edit_plan["_hook_offset"] = 0.0
     if edit_plan.get("hook_clip"):
