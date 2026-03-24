@@ -3785,6 +3785,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     n = len(render_cuts)
     source_res = probe_resolution(source_path)
     kf_timestamps = [float(c["source_start"]) for c in render_cuts]
+    if isinstance(hook_clip, dict):
+        hook_s = float(hook_clip.get("source_start") or 0.0)
+        hook_e = float(hook_clip.get("source_end") or 0.0)
+        if hook_s > 0:
+            kf_timestamps.append(hook_s)
+        if hook_e > 0:
+            kf_timestamps.append(hook_e)
+    kf_timestamps = sorted(set(kf_timestamps))
     keyframed_path = create_keyframed_source(source_path, kf_timestamps, work_dir)
 
     color_grade = edit_plan.get("color_grade") or {}
