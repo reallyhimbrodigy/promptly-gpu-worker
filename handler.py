@@ -1518,10 +1518,8 @@ RULES FOR USING THESE TIMESTAMPS:
     if has_burned_captions:
         for clip in validated_cuts:
             if clip.get("zoom") and clip["zoom"] != "none":
-                print(f"[generate-edit] Overriding zoom={clip['zoom']} to none (burned-in captions)", flush=True)
                 clip["zoom"] = "none"
             if clip.get("cut_zoom"):
-                print(f"[generate-edit] Overriding cut_zoom=true to false (burned-in captions)", flush=True)
                 clip["cut_zoom"] = False
     else:
         for i, clip in enumerate(validated_cuts):
@@ -1530,10 +1528,8 @@ RULES FOR USING THESE TIMESTAMPS:
                     clip["cut_zoom"] = False
             else:
                 if clip.get("zoom") and clip["zoom"] != "none":
-                    print(f"[generate-edit] Overriding zoom={clip['zoom']} to none (only first clip gets zoom)", flush=True)
                     clip["zoom"] = "none"
                 if clip.get("cut_zoom"):
-                    print(f"[generate-edit] Overriding cut_zoom=true to false (only first clip gets zoom)", flush=True)
                     clip["cut_zoom"] = False
 
     edit_plan.setdefault("background_music", "none")
@@ -1671,7 +1667,6 @@ RULES FOR USING THESE TIMESTAMPS:
 
         if hook_idx is not None:
             cuts[hook_idx]["zoom"] = "slow_in"
-            print(f"[zoom] Moved zoom to hook clip {hook_idx}", flush=True)
     else:
         for idx, cut in enumerate(cuts):
             if idx != 0 and cut.get("zoom") and cut["zoom"] != "none":
