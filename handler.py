@@ -1615,18 +1615,6 @@ RULES FOR USING THESE TIMESTAMPS:
     if hook_clip:
         _hs = float(hook_clip["source_start"])
         _he = float(hook_clip["source_end"])
-        # Auto-tighten hook end using Deepgram words
-        if _dg_words:
-            hook_words = [w for w in _dg_words
-                          if float(w.get("start", 0)) >= _hs - 0.05
-                          and float(w.get("start", 0)) <= _hs + 2.5]
-            if hook_words:
-                last_word = hook_words[-1]
-                calc_end = float(last_word.get("end", 0))
-                if calc_end < _he:
-                    print(f"[hook] Tightened end: {_he:.2f} -> {calc_end:.2f} (last word: '{last_word.get('word')}')", flush=True)
-                    hook_clip["source_end"] = round(calc_end, 3)
-                    _he = calc_end
         print(f"[hook] Hook timestamps: {_hs:.2f}-{_he:.2f} ({_he - _hs:.2f}s)", flush=True)
     edit_plan["hook_clip"] = hook_clip
 
@@ -3500,6 +3488,33 @@ def prepend_hook_clip(output_path, edit_plan, work_dir):
         print("[hook] Could not find hook clip in cuts array — skipping", flush=True)
         return
 
+    # Detect where audio goes silent after hook start — that's the true end of the hook moment
+    source_path = edit_plan.get("_source_path")
+    if source_path and os.path.exists(source_path):
+        try:
+            silence_cmd = [
+                "ffmpeg", "-i", source_path,
+                "-af", f"atrim=start={hook_src_start:.3f}:end={hook_src_end:.3f},asetpts=PTS-STARTPTS,silencedetect=noise=-30dB:d=0.15",
+                "-f", "null", "-"
+            ]
+            silence_result = subprocess.run(silence_cmd, capture_output=True, text=True, timeout=15)
+            silence_starts = re.findall(r"silence_start:\s*([\d.]+)", silence_result.stderr)
+            if silence_starts:
+                for ss in silence_starts:
+                    silence_at = float(ss)
+                    if silence_at >= 0.3:
+                        true_end = hook_src_start + silence_at
+                        if true_end < hook_src_end - 0.1:
+                            print(
+                                f"[hook] Audio silence at {silence_at:.2f}s into hook — "
+                                f"tightening source_end: {hook_src_end:.2f} -> {true_end:.2f}",
+                                flush=True,
+                            )
+                            hook_src_end = true_end
+                        break
+        except Exception as e:
+            print(f"[hook] Silence detection failed ({e}) — using original end", flush=True)
+
     clip_src_start = float(cuts[hook_clip_idx]["source_start"])
     clip_speed = max(0.25, float(cuts[hook_clip_idx].get("speed") or 1.0))
     curve_speed = 1.0
@@ -3510,9 +3525,9 @@ def prepend_hook_clip(output_path, edit_plan, work_dir):
     clip_render_start = float(clip_ranges[hook_clip_idx]["start"])
     clip_render_end = float(clip_ranges[hook_clip_idx]["end"])
     start_offset = (hook_src_start - clip_src_start) / combined_speed
+    end_offset = (hook_src_end - clip_src_start) / combined_speed
     hook_render_start = clip_render_start + start_offset
-    # One frame before clip boundary — guarantees no next-clip frames
-    hook_render_end = clip_render_end - (1.0 / 30.0)
+    hook_render_end = min(clip_render_start + end_offset, clip_render_end)
 
     hook_render_dur = hook_render_end - hook_render_start
     if hook_render_dur <= 0.1:
@@ -4418,6 +4433,7 @@ def handler(job):
             deepgram_words=transcript.get("words", []),
             face_positions=face_positions,
         )
+        edit_plan["_source_path"] = source_path
         edit_plan["_face_positions"] = face_positions
         print(f"[pipeline] edit recipe complete in {time.time()-t:.1f}s", flush=True)
         analysis = edit_plan.get("analysis_data") or {}
