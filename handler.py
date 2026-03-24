@@ -3613,6 +3613,35 @@ def prepend_hook_clip(output_path, edit_plan, work_dir):
         capture_output=True, text=True, timeout=10
     ).stdout.strip()
     print(f"[DIAG] Main video: start_time,duration = {_main_v}", flush=True)
+    # DIAG: Extract LAST frame of hook to see what's at the end
+    _last_frame = os.path.join(work_dir, "diag_hook_last_frame.png")
+    _hook_dur_probe = probe_duration(hook_path) or 0
+    subprocess.run(
+        ["ffmpeg", "-y", "-i", hook_path, "-ss", f"{max(0, _hook_dur_probe - 0.1):.3f}",
+         "-frames:v", "1", _last_frame],
+        capture_output=True, timeout=10
+    )
+
+    # DIAG: Extract FIRST frame of main video to see what starts
+    _first_frame = os.path.join(work_dir, "diag_main_first_frame.png")
+    subprocess.run(
+        ["ffmpeg", "-y", "-i", output_path, "-frames:v", "1", _first_frame],
+        capture_output=True, timeout=10
+    )
+
+    # DIAG: What frame is at hook_render_end in the rendered output?
+    _boundary_in_render = os.path.join(work_dir, "diag_render_at_hookend.png")
+    subprocess.run(
+        ["ffmpeg", "-y", "-i", output_path, "-ss", f"{hook_render_end:.3f}",
+         "-frames:v", "1", _boundary_in_render],
+        capture_output=True, timeout=10
+    )
+
+    print(f"[DIAG] Hook last frame at {max(0, _hook_dur_probe - 0.1):.2f}s, main first frame at 0.0s, render at hook_end={hook_render_end:.3f}s", flush=True)
+    print(f"[DIAG] hook_render_start={hook_render_start:.3f} hook_render_end={hook_render_end:.3f} hook_render_dur={hook_render_dur:.3f}", flush=True)
+    print(f"[DIAG] hook_src_start={hook_src_start:.3f} hook_src_end={hook_src_end:.3f} combined_speed={combined_speed:.4f}", flush=True)
+    print(f"[DIAG] clip_ranges[{hook_clip_idx}] = {clip_ranges[hook_clip_idx]}", flush=True)
+    print(f"[DIAG] clip source = {cuts[hook_clip_idx]['source_start']}-{cuts[hook_clip_idx]['source_end']}", flush=True)
     hooked_output = os.path.join(work_dir, "hooked_output.mp4")
     concat_cmd = [
         "ffmpeg", "-y",
