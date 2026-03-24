@@ -80,6 +80,14 @@ except Exception:
 
 print("[startup] all import checks done", flush=True)
 
+_EMOJI_RE = re.compile(
+    "[\U0001F600-\U0001F64F\U0001F300-\U0001F5FF\U0001F680-\U0001F6FF"
+    "\U0001F1E0-\U0001F1FF\U00002702-\U000027B0\U000024C2-\U0001F251"
+    "\U0001f926-\U0001f937\U00010000-\U0010ffff"
+    "\u2640-\u2642\u2600-\u2B55\u200d\u23cf\u23e9\u231a\ufe0f\u3030]+",
+    flags=re.UNICODE,
+)
+
 
 def get_trend_context():
     """Load the current weekly editing style guide from Supabase."""
@@ -1043,23 +1051,12 @@ The ending matters. On these platforms, videos auto-loop. A clean ending that fl
 
   If the video already starts with a strong statement, a provocative question, action, or anything that grabs attention in the first 2 seconds, set hook_clip to null — it doesn't need one.
 
-  hook_clip — If BOTH conditions are true: (1) the vibe mentions viral/engaging/captivating/hook/retention AND (2) the video doesn't start with a strong hook in the first 2 seconds:
-    Pick the single most captivating 1-2 second moment — the punchline, reveal, or reaction.
-
-    CRITICAL: Use the WORD TIMESTAMPS above to set source_start and source_end precisely:
-    - source_start = the START timestamp of the first word of the punchline
-    - source_end = the START timestamp of the LAST word of the punchline + 0.3 seconds
-
-    Do NOT use cut boundaries. Do NOT include any words or silence after the punchline.
-    Example: if the punchline is "who the fuck is Stelios" and the words are:
-      "who" start=33.11, "the" start=33.27, "fuck" start=33.43, "is" start=33.67, "Stelios" start=33.83 end=34.47
-    Then: source_start=33.11, source_end=34.77 (last word start 34.47 + 0.3)
-
-    NOT source_end=34.95 (that's the cut boundary with silence after it).
-
-  The hook clip should be short (1-2 seconds max), impactful, and make the viewer think "HOW did this happen?" It should NOT make sense without context — that's what makes them keep watching.
-
-  Set hook_clip to null if neither condition is met or no clear punchline exists.
+  hook_clip — If the vibe asks for engagement/retention/viral AND the video doesn't already open with a strong hook:
+    Pick the single most captivating 1-2 second punchline moment.
+    source_start = when the punchline words BEGIN
+    source_end = when the punchline words END (tight — no trailing silence or extra content after the last word)
+    The hook should feel like a teaser that makes the viewer think "wait, WHAT?" — short, punchy, cuts right after the last word lands.
+    Set to null if the video already starts strong or has no clear punchline moment.
 
 === TOOLS ===
 
@@ -1564,6 +1561,9 @@ RULES FOR USING THESE TIMESTAMPS:
     edit_plan.setdefault("highlight_rolloff", False)
     edit_plan.setdefault("vibrance", False)
     edit_plan.setdefault("teal_orange", "none")
+    for _ov in (edit_plan.get("text_overlays") or []):
+        if "text" in _ov:
+            _ov["text"] = _EMOJI_RE.sub("", str(_ov["text"])).strip()
     edit_plan["background_music"] = "none"
     edit_plan["caption_keywords"] = []
     edit_plan["audio_ducking"] = True
@@ -3513,9 +3513,16 @@ def prepend_hook_clip(output_path, edit_plan, work_dir):
     for i, cut in enumerate(cuts):
         cs = float(cut["source_start"])
         ce = float(cut["source_end"])
-        if hook_src_start >= cs - 0.1 and hook_src_end <= ce + 0.1:
+        if hook_src_start >= cs - 0.1 and hook_src_start <= ce:
             hook_clip_idx = i
             break
+
+    if hook_clip_idx is not None:
+        ce = float(cuts[hook_clip_idx]["source_end"])
+        if hook_src_end > ce:
+            print(f"[hook] Clamping hook end from {hook_src_end:.2f} to cut end {ce:.2f}", flush=True)
+            hook_src_end = ce
+            hook_clip_data["source_end"] = ce
 
     if hook_clip_idx is None:
         print("[hook] Could not find hook clip in cuts array — skipping", flush=True)
@@ -3650,7 +3657,7 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
             if clip_idx < 0 or clip_idx >= len(clip_ranges):
                 print(f"[render] Text overlay '{overlay.get('text')}' — clip_idx={clip_idx} out of range ({len(clip_ranges)} clips), skipping", flush=True)
                 continue
-            raw_text = str(overlay.get("text") or "")
+            raw_text = _EMOJI_RE.sub("", str(overlay.get("text") or "")).strip()
             text = raw_text.strip()
             if not text:
                 continue
@@ -4200,11 +4207,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         )
         video_out = bars_label
 
-    fps = 30
-    actual_video_dur = sum(round(d * fps) / fps for d in effective_durations)
+    total_video_dur = sum(round(d * 30) / 30 for d in effective_durations)
     audio_out = "[audio_timed]"
     post_filters.append(
-        f"[{tl_audio}]atrim=end={actual_video_dur:.3f},asetpts=PTS-STARTPTS{audio_out}"
+        f"[{tl_audio}]atrim=end={total_video_dur:.3f},asetpts=PTS-STARTPTS{audio_out}"
     )
 
     if sfx_audio_labels:
