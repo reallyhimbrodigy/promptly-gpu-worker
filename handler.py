@@ -3504,6 +3504,108 @@ def compute_effective_durations(cuts, speed_curve=None):
     return durations
 
 
+def prepend_hook_clip(output_path, edit_plan, work_dir):
+    """Extract hook from rendered output using filter-based trim (frame-precise) and prepend."""
+    hook_clip_data = edit_plan.get("hook_clip")
+    edit_plan["_hook_offset"] = 0.0
+    if not isinstance(hook_clip_data, dict):
+        return
+
+    cuts = edit_plan.get("cuts") or []
+    speed_curve = edit_plan.get("_parsed_speed_curve")
+    effective_durations = compute_effective_durations(cuts, speed_curve)
+    clip_ranges = get_output_clip_ranges(cuts, effective_durations)
+
+    hook_src_start = float(hook_clip_data.get("source_start") or 0.0)
+    hook_src_end = float(hook_clip_data.get("source_end") or 0.0)
+    hook_src_dur = hook_src_end - hook_src_start
+    if not (0.5 <= hook_src_dur <= 3.0):
+        print(f"[hook] Hook duration {hook_src_dur:.2f}s out of range — skipping", flush=True)
+        return
+
+    hook_clip_idx = None
+    for i, cut in enumerate(cuts):
+        cs = float(cut["source_start"])
+        ce = float(cut["source_end"])
+        if hook_src_start >= cs - 0.1 and hook_src_end <= ce + 0.1:
+            hook_clip_idx = i
+            break
+
+    if hook_clip_idx is None:
+        print("[hook] Could not find hook clip in cuts array — skipping", flush=True)
+        return
+
+    clip_src_start = float(cuts[hook_clip_idx]["source_start"])
+    clip_speed = max(0.25, float(cuts[hook_clip_idx].get("speed") or 1.0))
+    curve_speed = 1.0
+    if speed_curve and speed_curve != "none":
+        curve_speed = max(0.5, min(1.5, get_speed_for_timestamp(clip_src_start, speed_curve)))
+    combined_speed = clip_speed * curve_speed
+
+    clip_render_start = float(clip_ranges[hook_clip_idx]["start"])
+    clip_render_end = float(clip_ranges[hook_clip_idx]["end"])
+    start_offset = (hook_src_start - clip_src_start) / combined_speed
+    end_offset = (hook_src_end - clip_src_start) / combined_speed
+    hook_render_start = clip_render_start + start_offset
+    hook_render_end = min(clip_render_start + end_offset, clip_render_end)
+
+    hook_render_dur = hook_render_end - hook_render_start
+    if hook_render_dur <= 0.1:
+        print("[hook] Hook render duration too short — skipping", flush=True)
+        return
+
+    print(
+        f"[hook] Extracting hook: src {hook_src_start:.2f}-{hook_src_end:.2f} "
+        f"-> rendered {hook_render_start:.3f}-{hook_render_end:.3f} ({hook_render_dur:.2f}s)",
+        flush=True,
+    )
+
+    hook_path = os.path.join(work_dir, "hook_clip.mp4")
+    hook_cmd = [
+        "ffmpeg", "-y",
+        "-i", output_path,
+        "-filter_complex",
+        f"[0:v]trim=start={hook_render_start:.3f}:end={hook_render_end:.3f},setpts=PTS-STARTPTS[hv];"
+        f"[0:a]atrim=start={hook_render_start:.3f}:end={hook_render_end:.3f},asetpts=PTS-STARTPTS[ha]",
+        "-map", "[hv]", "-map", "[ha]",
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "0",
+        "-c:a", "aac", "-b:a", "192k",
+        "-movflags", "+faststart",
+        hook_path,
+    ]
+    result = subprocess.run(hook_cmd, capture_output=True, text=True, timeout=30)
+    if result.returncode != 0 or not os.path.exists(hook_path) or os.path.getsize(hook_path) <= 0:
+        print("[hook] Hook extraction failed — continuing without hook", flush=True)
+        if result.stderr:
+            print(f"[hook] stderr (last 300): {result.stderr[-300:]}", flush=True)
+        return
+
+    hook_actual_dur = probe_duration(hook_path) or hook_render_dur
+
+    hooked_output = os.path.join(work_dir, "hooked_output.mp4")
+    concat_cmd = [
+        "ffmpeg", "-y",
+        "-i", hook_path,
+        "-i", output_path,
+        "-filter_complex", "[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[outv][outa]",
+        "-map", "[outv]", "-map", "[outa]",
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "0",
+        "-c:a", "aac", "-b:a", "192k",
+        "-movflags", "+faststart",
+        hooked_output,
+    ]
+    concat_result = subprocess.run(concat_cmd, capture_output=True, text=True, timeout=60)
+    if concat_result.returncode != 0 or not os.path.exists(hooked_output) or os.path.getsize(hooked_output) <= 0:
+        print("[hook] Concat failed — continuing without hook", flush=True)
+        if concat_result.stderr:
+            print(f"[hook] concat stderr (last 300): {concat_result.stderr[-300:]}", flush=True)
+        return
+
+    os.replace(hooked_output, output_path)
+    edit_plan["_hook_offset"] = hook_actual_dur
+    print(f"[hook] Prepended {hook_actual_dur:.2f}s hook teaser", flush=True)
+
+
 def burn_in_captions(output_path, edit_plan, transcript, work_dir):
     """Burn captions and text overlays into the output video as a post-process."""
     caption_style = str(edit_plan.get("caption_style") or "none").lower()
@@ -3761,30 +3863,13 @@ def mix_sfx_after_speed_curve(output_path, edit_plan, cuts, effective_durations,
 
 def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, work_dir, speech_segments=None):
     speed_curve = edit_plan.get("_parsed_speed_curve")
-    hook_clip = edit_plan.get("hook_clip")
     render_cuts = list(cuts)
-    hook_segment_added = False
     edit_plan["_hook_offset"] = 0.0
-    if isinstance(hook_clip, dict):
-        hook_s = float(hook_clip.get("source_start") or 0.0)
-        hook_e = float(hook_clip.get("source_end") or 0.0)
-        if 0.5 <= (hook_e - hook_s) <= 3.0:
-            hook_cut = {
-                "source_start": hook_s,
-                "source_end": hook_e,
-                "transition_out": "none",
-                "zoom": "none",
-                "cut_zoom": False,
-            }
-            render_cuts = [hook_cut] + render_cuts
-            hook_segment_added = True
-            print(f"[hook] Added hook as first render segment: {hook_s:.2f}-{hook_e:.2f}", flush=True)
-    edit_plan["_render_cuts"] = render_cuts
-    edit_plan["_hook_segment_added"] = hook_segment_added
 
     n = len(render_cuts)
     source_res = probe_resolution(source_path)
     kf_timestamps = [float(c["source_start"]) for c in render_cuts]
+    hook_clip = edit_plan.get("hook_clip")
     if isinstance(hook_clip, dict):
         hook_s = float(hook_clip.get("source_start") or 0.0)
         hook_e = float(hook_clip.get("source_end") or 0.0)
@@ -3818,10 +3903,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     # Compute effective durations from recipe with per-segment speed applied.
     effective_durations = compute_effective_durations(render_cuts, speed_curve)
-    if hook_segment_added and effective_durations:
-        hook_offset = effective_durations[0]
-        edit_plan["_hook_offset"] = round(hook_offset, 3)
-        print(f"[hook] Hook segment duration: {hook_offset:.2f}s", flush=True)
     for i, cut in enumerate(render_cuts):
         src_dur = round((float(cut["source_end"]) - float(cut["source_start"])) * 1000) / 1000
         clip_speed = max(0.25, min(4.0, float(cut.get("speed") or 1.0)))
@@ -4423,7 +4504,8 @@ def handler(job):
         if not validate_output(output_path, "render"):
             raise RuntimeError("Main render produced invalid output")
 
-        print("[pipeline] step=hook (built into render)", flush=True)
+        print("[pipeline] step=hook", flush=True)
+        prepend_hook_clip(output_path, edit_plan, work_dir)
 
         print("[pipeline] step=trim", flush=True)
         expected_duration = sum(compute_effective_durations(edit_plan["cuts"], speed_curve))
