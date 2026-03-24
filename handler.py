@@ -3794,6 +3794,15 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             kf_timestamps.append(hook_e)
     kf_timestamps = sorted(set(kf_timestamps))
     keyframed_path = create_keyframed_source(source_path, kf_timestamps, work_dir)
+    _kf_cmd = [
+        "ffprobe", "-v", "quiet", "-select_streams", "v:0",
+        "-show_entries", "frame=pts_time,key_frame",
+        "-read_intervals", "33%+#20",
+        "-of", "csv=p=0",
+        keyframed_path,
+    ]
+    _kf_result = subprocess.run(_kf_cmd, capture_output=True, text=True, timeout=15)
+    print(f"[DIAG] Keyframes near 33s: {_kf_result.stdout[:500]}", flush=True)
 
     color_grade = edit_plan.get("color_grade") or {}
     color_filter_str = build_video_filter_chain(color_grade, source_res, edit_plan)
@@ -4177,6 +4186,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             print(f"[render] WARNING: music track not found at {music_path} — skipping", flush=True)
 
     filter_complex = ";".join(video_filters + audio_filters + transition_filters + sfx_filter_strs + post_filters + music_filters)
+    for idx, vf in enumerate(video_filters[:3]):
+        print(f"[DIAG] video_filter[{idx}]: {vf[:300]}", flush=True)
+    for idx, af in enumerate(audio_filters[:3]):
+        print(f"[DIAG] audio_filter[{idx}]: {af[:300]}", flush=True)
 
     encode_args = [
         "-c:v","libx264","-preset","ultrafast","-crf","0",
