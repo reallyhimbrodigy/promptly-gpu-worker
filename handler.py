@@ -1646,6 +1646,7 @@ RULES FOR USING THESE TIMESTAMPS:
     if hook_clip and _dg_words:
         hook_s = float(hook_clip.get("source_start") or 0.0)
         hook_e = float(hook_clip.get("source_end") or 0.0)
+        print(f"[hook] Tightening: looking for words in {hook_s:.2f}-{hook_e:.2f} ({len(_dg_words)} total words)", flush=True)
         first_word_start = None
         last_word_end = None
         for w in _dg_words:
@@ -1656,6 +1657,7 @@ RULES FOR USING THESE TIMESTAMPS:
                     first_word_start = ws
                 last_word_end = we
         if first_word_start is not None and last_word_end is not None:
+            print(f"[hook] Found speech: first_word={first_word_start:.2f}, last_word_end={last_word_end:.2f}", flush=True)
             new_start = max(hook_s, first_word_start - 0.05)
             new_end = min(hook_e, last_word_end + 0.1)
             if new_start != hook_s or new_end != hook_e:
@@ -3546,15 +3548,19 @@ def prepend_hook_clip(output_path, edit_plan, work_dir):
         print("[hook] Could not find hook clip in cuts array — skipping", flush=True)
         return
 
-    hook_render_end = float(clip_ranges[hook_clip_idx]["end"])
     clip_src_start = float(cuts[hook_clip_idx]["source_start"])
     clip_speed = max(0.25, float(cuts[hook_clip_idx].get("speed") or 1.0))
     curve_speed = 1.0
     if speed_curve and speed_curve != "none":
         curve_speed = max(0.5, min(1.5, get_speed_for_timestamp(clip_src_start, speed_curve)))
     combined_speed = clip_speed * curve_speed
+    clip_render_start = float(clip_ranges[hook_clip_idx]["start"])
+    clip_render_end = float(clip_ranges[hook_clip_idx]["end"])
     start_offset = (hook_src_start - clip_src_start) / combined_speed
-    hook_render_start = float(clip_ranges[hook_clip_idx]["start"]) + start_offset
+    end_offset = (hook_src_end - clip_src_start) / combined_speed
+    hook_render_start = clip_render_start + start_offset
+    hook_render_end = clip_render_start + end_offset
+    hook_render_end = min(hook_render_end, clip_render_end)
     hook_render_start = round(hook_render_start * 1000) / 1000
     hook_render_end = round(hook_render_end * 1000) / 1000
     hook_render_dur = hook_render_end - hook_render_start
