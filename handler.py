@@ -1051,12 +1051,11 @@ The ending matters. On these platforms, videos auto-loop. A clean ending that fl
 
   If the video already starts with a strong statement, a provocative question, action, or anything that grabs attention in the first 2 seconds, set hook_clip to null — it doesn't need one.
 
-  hook_clip — If the vibe asks for engagement/retention/viral AND the video doesn't already open with a strong hook:
-    Pick the single most captivating 1-2 second punchline moment.
-    source_start = when the punchline words BEGIN
-    source_end = when the punchline words END (tight — no trailing silence or extra content after the last word)
-    The hook should feel like a teaser that makes the viewer think "wait, WHAT?" — short, punchy, cuts right after the last word lands.
-    Set to null if the video already starts strong or has no clear punchline moment.
+  If BOTH conditions are met: pick the single most captivating 1-2 second moment from the video — the punchline, the reveal, the reaction that makes someone stop scrolling. Set hook_clip to the source_start and source_end of that moment. This clip will play FIRST as a teaser, then the full video plays chronologically from the beginning.
+
+  The hook clip should be short (1-2 seconds max), impactful, and make the viewer think "HOW did this happen?" It should NOT make sense without context — that's what makes them keep watching.
+
+  If either condition is not met, or if the video doesn't have a clear punchline, set hook_clip to null.
 
 === TOOLS ===
 
