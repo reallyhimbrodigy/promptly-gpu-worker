@@ -4183,7 +4183,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             running_dur = running_dur + effective_durations[i] - td
 
         else:
-            transition_filters.append(f"[{tl_video}][v{i}]concat=n=2:v=1:a=0[{out_v}]")
+            transition_filters.append(f"[{tl_video}][v{i}]concat=n=2:v=1:a=0[{out_v_raw}]")
+            transition_filters.append(f"[{out_v_raw}]fps=30[{out_v}]")
             transition_filters.append(f"[{tl_audio}][a{i}]concat=n=2:v=0:a=1[{out_a}]")
             running_dur = running_dur + effective_durations[i]
 
