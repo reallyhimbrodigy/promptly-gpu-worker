@@ -1522,13 +1522,16 @@ RULES FOR USING THESE TIMESTAMPS:
     # - If burned-in captions: ALL zoom and cut_zoom disabled on ALL clips
     # - If no burned-in captions: zoom allowed ONLY on the first clip, disabled on all others
     # - cut_zoom disabled everywhere (too distracting, crops burned-in text)
-    if has_burned_captions:
+    has_hook = isinstance(hook_clip, dict)
+    if has_burned_captions or has_hook:
+        # No zoom on any clip when captions are burned in OR when hook plays first
         for clip in validated_cuts:
             if clip.get("zoom") and clip["zoom"] != "none":
                 clip["zoom"] = "none"
             if clip.get("cut_zoom"):
                 clip["cut_zoom"] = False
     else:
+        # Only clip 0 gets zoom
         for i, clip in enumerate(validated_cuts):
             if i == 0:
                 if clip.get("cut_zoom"):
@@ -1631,15 +1634,23 @@ RULES FOR USING THESE TIMESTAMPS:
         except Exception:
             hook_clip = None
     if hook_clip:
-        _hs = float(hook_clip.get("source_start") or 0)
-        _he = float(hook_clip.get("source_end") or 0)
+        _hs = float(hook_clip["source_start"])
+        _he = float(hook_clip["source_end"])
+        # Auto-tighten hook end using Deepgram words
+        if _dg_words:
+            hook_words = [w for w in _dg_words
+                          if float(w.get("start", 0)) >= _hs - 0.05
+                          and float(w.get("start", 0)) <= _hs + 2.5]
+            if hook_words:
+                last_word = hook_words[-1]
+                calc_end = float(last_word.get("end", 0))
+                if calc_end < _he:
+                    print(f"[hook] Tightened end: {_he:.2f} -> {calc_end:.2f} (last word: '{last_word.get('word')}')", flush=True)
+                    hook_clip["source_end"] = round(calc_end, 3)
+                    _he = calc_end
         print(f"[hook] Hook timestamps: {_hs:.2f}-{_he:.2f} ({_he - _hs:.2f}s)", flush=True)
     edit_plan["hook_clip"] = hook_clip
     edit_plan["_hook_offset"] = 0.0
-    cuts = edit_plan.get("cuts") or []
-    for idx, cut in enumerate(cuts):
-        if idx != 0 and cut.get("zoom") and cut["zoom"] != "none":
-            cut["zoom"] = "none"
 
     raw_sfx = edit_plan.get("sound_effects", [])
     sound_effects = []
@@ -3634,7 +3645,7 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
             print(f"[render]   clip_range[{cr_i}]: {cr['start']:.3f}s - {cr['end']:.3f}s", flush=True)
         for i, overlay in enumerate(text_overlays):
             raw_idx = int(overlay.get("appear_at_clip") or 0)
-            clip_idx = max(0, raw_idx - 1) if raw_idx > 0 else 0
+            clip_idx = max(0, min(raw_idx, len(clip_ranges) - 1))
             if clip_idx < 0 or clip_idx >= len(clip_ranges):
                 print(f"[render] Text overlay '{overlay.get('text')}' — clip_idx={clip_idx} out of range ({len(clip_ranges)} clips), skipping", flush=True)
                 continue
@@ -4536,6 +4547,30 @@ def handler(job):
 
         output_size = os.path.getsize(output_path)
         output_dur = probe_duration(output_path) or 0
+        # Final A/V sync — trim audio to match video if needed
+        try:
+            _fv = float((subprocess.run(
+                ["ffprobe", "-v", "quiet", "-select_streams", "v:0",
+                 "-show_entries", "stream=duration", "-of", "csv=p=0", output_path],
+                capture_output=True, text=True, timeout=10).stdout or "0").strip() or "0")
+            _fa = float((subprocess.run(
+                ["ffprobe", "-v", "quiet", "-select_streams", "a:0",
+                 "-show_entries", "stream=duration", "-of", "csv=p=0", output_path],
+                capture_output=True, text=True, timeout=10).stdout or "0").strip() or "0")
+            if _fv > 0 and _fa > _fv + 0.1:
+                _sync = os.path.join(work_dir, "synced.mp4")
+                _sr = subprocess.run([
+                    "ffmpeg", "-y", "-i", output_path,
+                    "-c:v", "copy",
+                    "-af", f"atrim=end={_fv:.3f},asetpts=PTS-STARTPTS",
+                    "-c:a", "aac", "-b:a", "192k",
+                    _sync,
+                ], capture_output=True, text=True, timeout=60)
+                if _sr.returncode == 0 and os.path.exists(_sync) and os.path.getsize(_sync) > 0:
+                    os.replace(_sync, output_path)
+                    print(f"[sync] Trimmed audio: {_fa:.2f}s -> {_fv:.2f}s", flush=True)
+        except Exception:
+            pass
         if output_size > 100 * 1024 * 1024:
             print(
                 f"[pipeline] step=final_encode (output is {output_size / 1024 / 1024:.0f}MB — needs compression)",
