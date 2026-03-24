@@ -4102,8 +4102,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             running_dur = running_dur + effective_durations[i] - td
 
         else:
-            transition_filters.append(f"[{tl_video}][v{i}]concat=n=2:v=1:a=0[{out_v_raw}]")
-            transition_filters.append(f"[{out_v_raw}]fps=30[{out_v}]")
+            transition_filters.append(f"[{tl_video}][v{i}]concat=n=2:v=1:a=0[{out_v}]")
             transition_filters.append(f"[{tl_audio}][a{i}]concat=n=2:v=0:a=1[{out_a}]")
             running_dur = running_dur + effective_durations[i]
 
@@ -4186,6 +4185,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             print(f"[render] WARNING: music track not found at {music_path} — skipping", flush=True)
 
     filter_complex = ";".join(video_filters + audio_filters + transition_filters + sfx_filter_strs + post_filters + music_filters)
+    print(f"[DIAG] filter_complex length: {len(filter_complex)} chars, segments: {n}", flush=True)
+    print(f"[DIAG] video_filters: {len(video_filters)}, audio_filters: {len(audio_filters)}, transition_filters: {len(transition_filters)}", flush=True)
     for idx, vf in enumerate(video_filters[:3]):
         print(f"[DIAG] video_filter[{idx}]: {vf[:300]}", flush=True)
     for idx, af in enumerate(audio_filters[:3]):
