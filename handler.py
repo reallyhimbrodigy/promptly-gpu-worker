@@ -1043,12 +1043,23 @@ The ending matters. On these platforms, videos auto-loop. A clean ending that fl
 
   If the video already starts with a strong statement, a provocative question, action, or anything that grabs attention in the first 2 seconds, set hook_clip to null — it doesn't need one.
 
-  If BOTH conditions are met: pick the single most captivating 1-2 second moment from the video — the punchline, the reveal, the reaction that makes someone stop scrolling. Set hook_clip to the source_start and source_end of that moment. This clip will play FIRST as a teaser, then the full video plays chronologically from the beginning.
-  hook_clip source_start and source_end MUST be the exact timestamps of the punchline WORDS, not the cut boundaries. Use the word timestamps provided above. The hook should start at the first word of the punchline and end at the last word. No silence before or after.
+  hook_clip — If BOTH conditions are true: (1) the vibe mentions viral/engaging/captivating/hook/retention AND (2) the video doesn't start with a strong hook in the first 2 seconds:
+    Pick the single most captivating 1-2 second moment — the punchline, reveal, or reaction.
+
+    CRITICAL: Use the WORD TIMESTAMPS above to set source_start and source_end precisely:
+    - source_start = the START timestamp of the first word of the punchline
+    - source_end = the START timestamp of the LAST word of the punchline + 0.3 seconds
+
+    Do NOT use cut boundaries. Do NOT include any words or silence after the punchline.
+    Example: if the punchline is "who the fuck is Stelios" and the words are:
+      "who" start=33.11, "the" start=33.27, "fuck" start=33.43, "is" start=33.67, "Stelios" start=33.83 end=34.47
+    Then: source_start=33.11, source_end=34.77 (last word start 34.47 + 0.3)
+
+    NOT source_end=34.95 (that's the cut boundary with silence after it).
 
   The hook clip should be short (1-2 seconds max), impactful, and make the viewer think "HOW did this happen?" It should NOT make sense without context — that's what makes them keep watching.
 
-  If either condition is not met, or if the video doesn't have a clear punchline, set hook_clip to null.
+  Set hook_clip to null if neither condition is met or no clear punchline exists.
 
 === TOOLS ===
 
@@ -1620,33 +1631,10 @@ RULES FOR USING THESE TIMESTAMPS:
                 print(f"[generate-edit] Hook clip duration {hook_dur:.2f}s out of range — skipping", flush=True)
         except Exception:
             hook_clip = None
-    if hook_clip and _dg_words:
-        hook_s = float(hook_clip.get("source_start") or 0.0)
-        hook_e = float(hook_clip.get("source_end") or 0.0)
-        print(f"[hook] Tightening: looking for words in {hook_s:.2f}-{hook_e:.2f} ({len(_dg_words)} total words)", flush=True)
-        first_word_start = None
-        last_word_end = None
-        for w in _dg_words:
-            ws = float(w.get("start") or 0.0)
-            we = float(w.get("end") or 0.0)
-            if ws >= hook_s - 0.05 and ws <= hook_e:
-                if first_word_start is None:
-                    first_word_start = ws
-                last_word_end = we
-        if first_word_start is not None and last_word_end is not None:
-            print(f"[hook] Found speech: first_word={first_word_start:.2f}, last_word_end={last_word_end:.2f}", flush=True)
-            new_start = max(hook_s, first_word_start)
-            new_end = min(hook_e, last_word_end - 0.15)
-            if new_end <= new_start:
-                new_end = min(hook_e, last_word_end)
-            if abs(new_start - hook_s) > 0.01 or abs(new_end - hook_e) > 0.01:
-                print(
-                    f"[hook] Tightened hook: {hook_s:.2f}-{hook_e:.2f} → {new_start:.2f}-{new_end:.2f} "
-                    f"(snapped to speech)",
-                    flush=True,
-                )
-            hook_clip["source_start"] = round(new_start, 3)
-            hook_clip["source_end"] = round(new_end, 3)
+    if hook_clip:
+        _hs = float(hook_clip.get("source_start") or 0)
+        _he = float(hook_clip.get("source_end") or 0)
+        print(f"[hook] Hook timestamps: {_hs:.2f}-{_he:.2f} ({_he - _hs:.2f}s)", flush=True)
     edit_plan["hook_clip"] = hook_clip
     edit_plan["_hook_offset"] = 0.0
     cuts = edit_plan.get("cuts") or []
