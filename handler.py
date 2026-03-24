@@ -1078,9 +1078,12 @@ Per-clip parameters:
 
   sfx_style — always "none"
 
-  zoom — camera movement across the clip:
-    "slow_in" or "none". Zoom is ONLY allowed on the first clip the viewer sees. If hook_clip is set, put zoom on the cut that contains the hook timestamps. If hook_clip is null, put zoom on clip 0. All other clips MUST have zoom set to "none". Never put zoom on a clip in the middle of the video.
-    Zoom crops the edges. If the footage has burned-in captions, use none on ALL clips.
+  zoom — "slow_in", "slow_out", or "none". Zoom adds a subtle push or pull effect.
+    Put zoom on the clip that the VIEWER SEES FIRST in the final video:
+      - If you are setting hook_clip, the hook clip plays first. Put zoom on the cut whose source timestamps contain the hook moment.
+      - If hook_clip is null, clip 0 plays first. Put zoom there if appropriate.
+    Only ONE clip should have zoom. All other clips must be "none".
+    Use zoom when it adds visual interest to the opening. Skip it if the content doesn't benefit from it.
 
   cut_zoom — always false. The pipeline controls this.
 
@@ -1626,30 +1629,6 @@ RULES FOR USING THESE TIMESTAMPS:
                     _he = calc_end
         print(f"[hook] Hook timestamps: {_hs:.2f}-{_he:.2f} ({_he - _hs:.2f}s)", flush=True)
     edit_plan["hook_clip"] = hook_clip
-
-    # Zoom rules:
-    # - If burned-in captions: ALL zoom and cut_zoom disabled on ALL clips
-    # - If no burned-in captions: zoom allowed ONLY on the first clip, disabled on all others
-    # - cut_zoom disabled everywhere (too distracting, crops burned-in text)
-    has_hook = isinstance(hook_clip, dict)
-    if has_burned_captions or has_hook:
-        # No zoom on any clip when captions are burned in OR when hook plays first
-        for clip in validated_cuts:
-            if clip.get("zoom") and clip["zoom"] != "none":
-                clip["zoom"] = "none"
-            if clip.get("cut_zoom"):
-                clip["cut_zoom"] = False
-    else:
-        # Only clip 0 gets zoom
-        for i, clip in enumerate(validated_cuts):
-            if i == 0:
-                if clip.get("cut_zoom"):
-                    clip["cut_zoom"] = False
-            else:
-                if clip.get("zoom") and clip["zoom"] != "none":
-                    clip["zoom"] = "none"
-                if clip.get("cut_zoom"):
-                    clip["cut_zoom"] = False
 
     edit_plan["_hook_offset"] = 0.0
 
@@ -3531,9 +3510,9 @@ def prepend_hook_clip(output_path, edit_plan, work_dir):
     clip_render_start = float(clip_ranges[hook_clip_idx]["start"])
     clip_render_end = float(clip_ranges[hook_clip_idx]["end"])
     start_offset = (hook_src_start - clip_src_start) / combined_speed
-    end_offset = (hook_src_end - clip_src_start) / combined_speed
     hook_render_start = clip_render_start + start_offset
-    hook_render_end = min(clip_render_start + end_offset, clip_render_end)
+    # One frame before clip boundary — guarantees no next-clip frames
+    hook_render_end = clip_render_end - (1.0 / 30.0)
 
     hook_render_dur = hook_render_end - hook_render_start
     if hook_render_dur <= 0.1:
