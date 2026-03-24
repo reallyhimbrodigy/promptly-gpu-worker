@@ -3492,12 +3492,32 @@ def prepend_hook_clip(output_path, edit_plan, work_dir):
     source_path = edit_plan.get("_source_path")
     if source_path and os.path.exists(source_path):
         try:
+            import re as _re
             silence_cmd = [
                 "ffmpeg", "-i", source_path,
                 "-af", f"atrim=start={hook_src_start:.3f}:end={hook_src_end:.3f},asetpts=PTS-STARTPTS,silencedetect=noise=-30dB:d=0.15",
                 "-f", "null", "-"
             ]
             silence_result = subprocess.run(silence_cmd, capture_output=True, text=True, timeout=15)
+            all_silence = _re.findall(r"silence_(start|end):\s*([\d.]+)", silence_result.stderr)
+            print(f"[DIAG] Hook {hook_src_start:.2f}-{hook_src_end:.2f} silence events: {all_silence}", flush=True)
+
+            hook_dur = hook_src_end - hook_src_start
+            for wi in range(int(hook_dur / 0.25) + 1):
+                ws = hook_src_start + wi * 0.25
+                we = min(ws + 0.25, hook_src_end)
+                if we <= ws:
+                    break
+                vol_result = subprocess.run(
+                    ["ffmpeg", "-i", source_path, "-af",
+                     f"atrim=start={ws:.3f}:end={we:.3f},volumedetect",
+                     "-f", "null", "-"],
+                    capture_output=True, text=True, timeout=10,
+                )
+                mean_match = _re.search(r"mean_volume:\s*(-?[\d.]+)", vol_result.stderr)
+                mean_vol = mean_match.group(1) if mean_match else "?"
+                print(f"[DIAG] Energy {ws:.2f}-{we:.2f}: {mean_vol}dB", flush=True)
+
             silence_starts = re.findall(r"silence_start:\s*([\d.]+)", silence_result.stderr)
             if silence_starts:
                 for ss in silence_starts:
