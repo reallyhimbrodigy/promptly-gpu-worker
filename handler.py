@@ -3539,13 +3539,48 @@ def prepend_hook_clip(output_path, edit_plan, work_dir):
         flush=True,
     )
 
+    # Build hook video filter — add zoom if the hook's clip had it
+    _hook_zoom = edit_plan.get("_hook_zoom")
+    if _hook_zoom and _hook_zoom != "none":
+        face_positions = edit_plan.get("_face_positions") or []
+        hook_mid = (hook_src_start + hook_src_end) / 2.0
+        cf = min(face_positions, key=lambda p: abs(float(p.get("t", 0)) - hook_mid)) if face_positions else None
+        hf = max(1, round((hook_render_end - hook_render_start) * 30))
+        zr = 0.07
+        prog = f"min(n/{hf}\\,1.0)"
+        if cf and cf.get("found"):
+            fx, fy = float(cf.get("cx", 540)), float(cf.get("cy", 960))
+            ox = max(-240, min(240, fx - 540))
+            oy = max(-320, min(320, fy - 960))
+            cx = f"max(0\\,min((iw-1080)/2+{ox:.1f}*{prog}*{zr:.4f}\\,iw-1080))"
+            cy = f"max(0\\,min((ih-1920)/2+{oy:.1f}*{prog}*{zr:.4f}\\,ih-1920))"
+        else:
+            cx, cy = "(iw-1080)/2", "(ih-1920)/2"
+        zoom_vf = (
+            f",scale=w='trunc(iw*(1.0+{zr:.4f}*{prog})/2)*2'"
+            f":h='trunc(ih*(1.0+{zr:.4f}*{prog})/2)*2'"
+            f":eval=frame:flags=bilinear"
+            f",crop=1080:1920:x='{cx}':y='{cy}'"
+        )
+        print(f"[zoom] Applying zoom to hook extraction", flush=True)
+    else:
+        zoom_vf = ""
+
+    hook_vf = (
+        f"[0:v]trim=start={hook_render_start:.3f}:end={hook_render_end:.3f},"
+        f"setpts=PTS-STARTPTS{zoom_vf}[hv]"
+    )
+    hook_af = (
+        f"[0:a]atrim=start={hook_render_start:.3f}:end={hook_render_end:.3f},"
+        f"asetpts=PTS-STARTPTS[ha]"
+    )
+
     hook_path = os.path.join(work_dir, "hook_clip.mp4")
     hook_cmd = [
         "ffmpeg", "-y",
         "-i", output_path,
         "-filter_complex",
-        f"[0:v]trim=start={hook_render_start:.3f}:end={hook_render_end:.3f},setpts=PTS-STARTPTS[hv];"
-        f"[0:a]atrim=start={hook_render_start:.3f}:end={hook_render_end:.3f},asetpts=PTS-STARTPTS[ha]",
+        f"{hook_vf};{hook_af}",
         "-map", "[hv]", "-map", "[ha]",
         "-c:v", "libx264", "-preset", "ultrafast", "-crf", "0",
         "-c:a", "aac", "-b:a", "192k",
@@ -3898,6 +3933,13 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             curve_speed = max(0.5, min(1.5, get_speed_for_timestamp(start, speed_curve)))
         combined_speed = speed * curve_speed
         zoom = str(cut.get("zoom") or "none")
+        # Skip zoom in render — it will be applied during hook extraction only
+        _hook_clip = edit_plan.get("hook_clip")
+        if _hook_clip and zoom != "none":
+            _hc_s = float(_hook_clip.get("source_start") or 0)
+            if abs(float(cut["source_start"]) - _hc_s) < 0.5:
+                edit_plan["_hook_zoom"] = zoom
+                zoom = "none"
         if has_burned_captions and zoom in ["punch_in","punch_out"]:
             zoom = "slow_in" if zoom == "punch_in" else "slow_out"
 
