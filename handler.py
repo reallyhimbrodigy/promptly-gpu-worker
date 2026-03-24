@@ -1638,27 +1638,9 @@ RULES FOR USING THESE TIMESTAMPS:
     edit_plan["hook_clip"] = hook_clip
     edit_plan["_hook_offset"] = 0.0
     cuts = edit_plan.get("cuts") or []
-    if hook_clip:
-        hook_s = float(hook_clip["source_start"])
-        hook_e = float(hook_clip["source_end"])
-        hook_idx = None
-        for idx, cut in enumerate(cuts):
-            cs = float(cut["source_start"])
-            ce = float(cut["source_end"])
-            if hook_s >= cs - 0.1 and hook_e <= ce + 0.1:
-                hook_idx = idx
-                break
-
-        for idx, cut in enumerate(cuts):
-            if idx != hook_idx and cut.get("zoom") and cut["zoom"] != "none":
-                cut["zoom"] = "none"
-
-        if hook_idx is not None:
-            cuts[hook_idx]["zoom"] = "slow_in"
-    else:
-        for idx, cut in enumerate(cuts):
-            if idx != 0 and cut.get("zoom") and cut["zoom"] != "none":
-                cut["zoom"] = "none"
+    for idx, cut in enumerate(cuts):
+        if idx != 0 and cut.get("zoom") and cut["zoom"] != "none":
+            cut["zoom"] = "none"
 
     raw_sfx = edit_plan.get("sound_effects", [])
     sound_effects = []
