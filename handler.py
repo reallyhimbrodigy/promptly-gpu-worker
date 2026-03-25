@@ -4517,26 +4517,6 @@ def handler(job):
         speed_curve = edit_plan.get("_parsed_speed_curve")
         if not validate_output(output_path, "render"):
             raise RuntimeError("Main render produced invalid output")
-        _v_dur = float((subprocess.run(
-            ["ffprobe", "-v", "quiet", "-select_streams", "v:0",
-             "-show_entries", "stream=duration", "-of", "csv=p=0", output_path],
-            capture_output=True, text=True, timeout=10).stdout or "0").strip() or "0")
-        _a_dur = float((subprocess.run(
-            ["ffprobe", "-v", "quiet", "-select_streams", "a:0",
-             "-show_entries", "stream=duration", "-of", "csv=p=0", output_path],
-            capture_output=True, text=True, timeout=10).stdout or "0").strip() or "0")
-        if _v_dur > 0 and abs(_a_dur - _v_dur) > 0.05:
-            _trimmed = os.path.join(work_dir, "av_synced.mp4")
-            _trim_result = subprocess.run([
-                "ffmpeg", "-y", "-i", output_path,
-                "-c:v", "copy",
-                "-af", f"atrim=end={_v_dur:.3f},asetpts=PTS-STARTPTS",
-                "-c:a", "aac", "-b:a", "192k",
-                _trimmed,
-            ], capture_output=True, text=True, timeout=60)
-            if _trim_result.returncode == 0 and os.path.exists(_trimmed) and os.path.getsize(_trimmed) > 0:
-                os.replace(_trimmed, output_path)
-                print(f"[render] A/V sync: trimmed audio {_a_dur:.2f}s -> {_v_dur:.2f}s", flush=True)
 
         print("[pipeline] step=hook", flush=True)
         prepend_hook_clip(output_path, edit_plan, work_dir)
