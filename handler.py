@@ -4070,6 +4070,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         if outro_filter:
             v_chain.append(outro_filter)
 
+        _seg_expected = round(eff_dur * 30)
+        print(f"[DIAG] Segment {i}: expected {_seg_expected} frames ({eff_dur:.3f}s * 30)", flush=True)
+
         video_filters.append(f"[0:v]{','.join(v_chain)}[v{i}]")
 
         # Audio: trim from source, then apply per-clip filters
@@ -4244,6 +4247,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     if n == 1:
         tl_video = "v0"
         tl_audio = "a0"
+
+    if video_filters:
+        print(f"[DIAG] Last video_filter: {video_filters[-1][:200]}", flush=True)
+    if transition_filters:
+        print(f"[DIAG] Last transition_filter: {transition_filters[-1][:200]}", flush=True)
+        print(f"[DIAG] Total transition_filters: {len(transition_filters)}", flush=True)
 
     post_filters = []
     video_out = "[video_base]"
@@ -4567,6 +4576,13 @@ def handler(job):
             if _trim_result.returncode == 0 and os.path.exists(_trimmed) and os.path.getsize(_trimmed) > 0:
                 os.replace(_trimmed, output_path)
                 print(f"[render] A/V sync: trimmed audio {_a_dur:.2f}s -> {_v_dur:.2f}s", flush=True)
+        _expected_frames = sum(round(d * 30) for d in effective_durations)
+        _actual_frames_str = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-select_streams", "v:0",
+             "-show_entries", "stream=nb_frames", "-of", "csv=p=0", output_path],
+            capture_output=True, text=True, timeout=10).stdout.strip()
+        _actual_frames = int(_actual_frames_str) if _actual_frames_str.isdigit() else 0
+        print(f"[DIAG] Frames: expected={_expected_frames} actual={_actual_frames} lost={_expected_frames - _actual_frames}", flush=True)
         _probe_av_sync(output_path, "after_render")
 
         print("[pipeline] step=hook", flush=True)
