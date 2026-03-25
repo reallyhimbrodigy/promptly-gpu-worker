@@ -4082,6 +4082,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             a_chain.append(f"afade=t=out:st={fade_start:.3f}:d=1.0")
         audio_filters.append(f"[0:a]{','.join(a_chain)}[a{i}]")
 
+    for idx, af in enumerate(audio_filters):
+        if "38." in af or "47." in af or "57." in af or "58." in af:
+            print(f"[DIAG] audio_filter[{idx}]: {af}", flush=True)
+
     # ── SFX collection ───────────────────────────────────────────────────────
     # SFX are NOT mixed during render — they are added as a post-processing
     # step AFTER the speed curve so timestamps are correct.
@@ -4529,12 +4533,13 @@ def handler(job):
             # Store Deepgram words for SFX word-snapping
             edit_plan["_deepgram_words"] = transcript.get("words", [])
             dg_words = transcript.get("words") or []
-            _end_words = [(w.get("word"), round(float(w.get("start",0)),3), round(float(w.get("end",0)),3))
-                          for w in dg_words if float(w.get("start",0)) >= 55.0]
-            print(f"[DIAG] Words near end: {_end_words}", flush=True)
-            _mid_words = [(w.get("word"), round(float(w.get("start",0)),3), round(float(w.get("end",0)),3))
-                          for w in dg_words if 37.5 <= float(w.get("start",0)) <= 40.0]
-            print(f"[DIAG] Words near 'and she said': {_mid_words}", flush=True)
+            if dg_words:
+                _end = [(w.get("word"), round(float(w.get("start",0)),3), round(float(w.get("end",0)),3))
+                        for w in dg_words if float(w.get("start",0)) >= 55.0]
+                print(f"[DIAG] End words (55s+): {_end}", flush=True)
+                _mid = [(w.get("word"), round(float(w.get("start",0)),3), round(float(w.get("end",0)),3))
+                        for w in dg_words if 36.0 <= float(w.get("start",0)) <= 40.0]
+                print(f"[DIAG] Mid words (36-40s): {_mid}", flush=True)
 
         render_elapsed = time.time() - t
         print(f"[pipeline] parallel_render complete in {render_elapsed:.1f}s", flush=True)
