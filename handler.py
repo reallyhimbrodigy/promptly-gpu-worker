@@ -88,6 +88,24 @@ _EMOJI_RE = re.compile(
     flags=re.UNICODE,
 )
 
+
+def _probe_av_sync(path, label):
+    """Print video and audio duration for a file."""
+    try:
+        import subprocess as _sp
+        _v = float((_sp.run(
+            ["ffprobe", "-v", "quiet", "-select_streams", "v:0",
+             "-show_entries", "stream=duration", "-of", "csv=p=0", path],
+            capture_output=True, text=True, timeout=10).stdout or "0").strip() or "0")
+        _a = float((_sp.run(
+            ["ffprobe", "-v", "quiet", "-select_streams", "a:0",
+             "-show_entries", "stream=duration", "-of", "csv=p=0", path],
+            capture_output=True, text=True, timeout=10).stdout or "0").strip() or "0")
+        print(f"[DIAG-SYNC] {label}: video={_v:.3f}s audio={_a:.3f}s diff={_v-_a:.4f}s", flush=True)
+    except Exception:
+        pass
+
+
 def get_trend_context():
     """Load the current weekly editing style guide from Supabase."""
     if supabase is None:
@@ -3593,6 +3611,7 @@ def prepend_hook_clip(output_path, edit_plan, work_dir):
             print(f"[hook] stderr (last 300): {result.stderr[-300:]}", flush=True)
         return
 
+    _probe_av_sync(hook_path, "hook_clip")
     hook_actual_dur = probe_duration(hook_path) or hook_render_dur
 
     hooked_output = os.path.join(work_dir, "hooked_output.mp4")
@@ -3615,6 +3634,7 @@ def prepend_hook_clip(output_path, edit_plan, work_dir):
         return
 
     os.replace(hooked_output, output_path)
+    _probe_av_sync(output_path, "after_hook_concat")
     edit_plan["_hook_offset"] = hook_actual_dur
     print(f"[hook] Prepended {hook_actual_dur:.2f}s hook teaser", flush=True)
 
@@ -4050,6 +4070,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         if outro_filter:
             v_chain.append(outro_filter)
 
+        _seg_expected = round(eff_dur * 30)
+        print(f"[DIAG] Segment {i}: expected {_seg_expected} frames ({eff_dur:.3f}s * 30)", flush=True)
+
         video_filters.append(f"[0:v]{','.join(v_chain)}[v{i}]")
 
         # Audio: trim from source, then apply per-clip filters
@@ -4061,6 +4084,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             fade_start = max(0, eff_dur - 1.0)
             a_chain.append(f"afade=t=out:st={fade_start:.3f}:d=1.0")
         audio_filters.append(f"[0:a]{','.join(a_chain)}[a{i}]")
+
+    for idx, af in enumerate(audio_filters):
+        if "38." in af or "47." in af or "57." in af or "58." in af:
+            print(f"[DIAG] audio_filter[{idx}]: {af}", flush=True)
 
     # ── SFX collection ───────────────────────────────────────────────────────
     # SFX are NOT mixed during render — they are added as a post-processing
@@ -4180,22 +4207,22 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
             if transition == "flash":
                 transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=fadewhite:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
-                transition_filters.append(f"[{out_v_raw}]setpts=N/30/TB[{out_v}]")
+                transition_filters.append(f"[{out_v_raw}]fps=30[{out_v}]")
                 transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
 
             elif transition == "glitch":
                 transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=pixelize:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
-                transition_filters.append(f"[{out_v_raw}]hue=h=0:s=1.4,setpts=N/30/TB[{out_v}]")
+                transition_filters.append(f"[{out_v_raw}]hue=h=0:s=1.4,fps=30[{out_v}]")
                 transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
 
             elif transition == "whip_left":
                 transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=wipeleft:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
-                transition_filters.append(f"[{out_v_raw}]boxblur=luma_radius=6:luma_power=1:chroma_radius=0,setpts=N/30/TB[{out_v}]")
+                transition_filters.append(f"[{out_v_raw}]boxblur=luma_radius=6:luma_power=1:chroma_radius=0,fps=30[{out_v}]")
                 transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
 
             elif transition == "whip_right":
                 transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=wiperight:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
-                transition_filters.append(f"[{out_v_raw}]boxblur=luma_radius=6:luma_power=1:chroma_radius=0,setpts=N/30/TB[{out_v}]")
+                transition_filters.append(f"[{out_v_raw}]boxblur=luma_radius=6:luma_power=1:chroma_radius=0,fps=30[{out_v}]")
                 transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
 
             running_dur = running_dur + effective_durations[i] - td
@@ -4204,13 +4231,13 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             td = TRANSITION_DURATION
             offset = max(0, running_dur - td)
             transition_filters.append(f"[{tl_video}][v{i}]xfade=transition={transition}:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
-            transition_filters.append(f"[{out_v_raw}]setpts=N/30/TB[{out_v}]")
+            transition_filters.append(f"[{out_v_raw}]fps=30[{out_v}]")
             transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
             running_dur = running_dur + effective_durations[i] - td
 
         else:
             transition_filters.append(f"[{tl_video}][v{i}]concat=n=2:v=1:a=0[{out_v_raw}]")
-            transition_filters.append(f"[{out_v_raw}]setpts=N/30/TB[{out_v}]")
+            transition_filters.append(f"[{out_v_raw}]fps=30[{out_v}]")
             transition_filters.append(f"[{tl_audio}][a{i}]concat=n=2:v=0:a=1[{out_a}]")
             running_dur = running_dur + effective_durations[i]
 
@@ -4220,6 +4247,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     if n == 1:
         tl_video = "v0"
         tl_audio = "a0"
+
+    if video_filters:
+        print(f"[DIAG] Last video_filter: {video_filters[-1][:200]}", flush=True)
+    if transition_filters:
+        print(f"[DIAG] Last transition_filter: {transition_filters[-1][:200]}", flush=True)
+        print(f"[DIAG] Total transition_filters: {len(transition_filters)}", flush=True)
 
     post_filters = []
     video_out = "[video_base]"
@@ -4508,6 +4541,14 @@ def handler(job):
             transcript = future_deepgram.result()
             # Store Deepgram words for SFX word-snapping
             edit_plan["_deepgram_words"] = transcript.get("words", [])
+            dg_words = transcript.get("words") or []
+            if dg_words:
+                _end = [(w.get("word"), round(float(w.get("start",0)),3), round(float(w.get("end",0)),3))
+                        for w in dg_words if float(w.get("start",0)) >= 55.0]
+                print(f"[DIAG] End words (55s+): {_end}", flush=True)
+                _mid = [(w.get("word"), round(float(w.get("start",0)),3), round(float(w.get("end",0)),3))
+                        for w in dg_words if 36.0 <= float(w.get("start",0)) <= 40.0]
+                print(f"[DIAG] Mid words (36-40s): {_mid}", flush=True)
 
         render_elapsed = time.time() - t
         print(f"[pipeline] parallel_render complete in {render_elapsed:.1f}s", flush=True)
@@ -4535,6 +4576,14 @@ def handler(job):
             if _trim_result.returncode == 0 and os.path.exists(_trimmed) and os.path.getsize(_trimmed) > 0:
                 os.replace(_trimmed, output_path)
                 print(f"[render] A/V sync: trimmed audio {_a_dur:.2f}s -> {_v_dur:.2f}s", flush=True)
+        _expected_frames = sum(round(d * 30) for d in effective_durations)
+        _actual_frames_str = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-select_streams", "v:0",
+             "-show_entries", "stream=nb_frames", "-of", "csv=p=0", output_path],
+            capture_output=True, text=True, timeout=10).stdout.strip()
+        _actual_frames = int(_actual_frames_str) if _actual_frames_str.isdigit() else 0
+        print(f"[DIAG] Frames: expected={_expected_frames} actual={_actual_frames} lost={_expected_frames - _actual_frames}", flush=True)
+        _probe_av_sync(output_path, "after_render")
 
         print("[pipeline] step=hook", flush=True)
         prepend_hook_clip(output_path, edit_plan, work_dir)
@@ -4587,6 +4636,7 @@ def handler(job):
                 os.replace(captions_backup_path, output_path)
             elif os.path.exists(captions_backup_path):
                 os.remove(captions_backup_path)
+            _probe_av_sync(output_path, "after_captions")
         else:
             print("[pipeline] Captions skipped (no captions, no text overlays)", flush=True)
 
@@ -4599,6 +4649,7 @@ def handler(job):
         effective_durations = compute_effective_durations(cuts, speed_curve)
         print("[pipeline] step=sfx_mix", flush=True)
         mix_sfx_after_speed_curve(output_path, edit_plan, cuts, effective_durations, work_dir)
+        _probe_av_sync(output_path, "after_sfx")
 
         output_size = os.path.getsize(output_path)
         output_dur = probe_duration(output_path) or 0
