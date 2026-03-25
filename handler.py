@@ -4528,6 +4528,13 @@ def handler(job):
             transcript = future_deepgram.result()
             # Store Deepgram words for SFX word-snapping
             edit_plan["_deepgram_words"] = transcript.get("words", [])
+            dg_words = transcript.get("words") or []
+            _end_words = [(w.get("word"), round(float(w.get("start",0)),3), round(float(w.get("end",0)),3))
+                          for w in dg_words if float(w.get("start",0)) >= 55.0]
+            print(f"[DIAG] Words near end: {_end_words}", flush=True)
+            _mid_words = [(w.get("word"), round(float(w.get("start",0)),3), round(float(w.get("end",0)),3))
+                          for w in dg_words if 37.5 <= float(w.get("start",0)) <= 40.0]
+            print(f"[DIAG] Words near 'and she said': {_mid_words}", flush=True)
 
         render_elapsed = time.time() - t
         print(f"[pipeline] parallel_render complete in {render_elapsed:.1f}s", flush=True)
