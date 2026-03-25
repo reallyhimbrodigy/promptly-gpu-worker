@@ -4254,10 +4254,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         )
         video_out = bars_label
 
-    total_video_dur = sum(round(d * 30) / 30 for d in effective_durations)
     audio_out = "[audio_timed]"
     post_filters.append(
-        f"[{tl_audio}]atrim=end={total_video_dur:.3f},asetpts=PTS-STARTPTS{audio_out}"
+        f"[{tl_audio}]asetpts=PTS-STARTPTS{audio_out}"
     )
 
     if sfx_audio_labels:
@@ -4536,6 +4535,26 @@ def handler(job):
         speed_curve = edit_plan.get("_parsed_speed_curve")
         if not validate_output(output_path, "render"):
             raise RuntimeError("Main render produced invalid output")
+        _v_dur = float((subprocess.run(
+            ["ffprobe", "-v", "quiet", "-select_streams", "v:0",
+             "-show_entries", "stream=duration", "-of", "csv=p=0", output_path],
+            capture_output=True, text=True, timeout=10).stdout or "0").strip() or "0")
+        _a_dur = float((subprocess.run(
+            ["ffprobe", "-v", "quiet", "-select_streams", "a:0",
+             "-show_entries", "stream=duration", "-of", "csv=p=0", output_path],
+            capture_output=True, text=True, timeout=10).stdout or "0").strip() or "0")
+        if _v_dur > 0 and abs(_a_dur - _v_dur) > 0.05:
+            _trimmed = os.path.join(work_dir, "av_synced.mp4")
+            _trim_result = subprocess.run([
+                "ffmpeg", "-y", "-i", output_path,
+                "-c:v", "copy",
+                "-af", f"atrim=end={_v_dur:.3f},asetpts=PTS-STARTPTS",
+                "-c:a", "aac", "-b:a", "192k",
+                _trimmed,
+            ], capture_output=True, text=True, timeout=60)
+            if _trim_result.returncode == 0 and os.path.exists(_trimmed) and os.path.getsize(_trimmed) > 0:
+                os.replace(_trimmed, output_path)
+                print(f"[render] A/V sync: trimmed audio {_a_dur:.2f}s -> {_v_dur:.2f}s", flush=True)
         _probe_av_sync(output_path, "after_render")
 
         print("[pipeline] step=hook", flush=True)
@@ -4606,31 +4625,6 @@ def handler(job):
 
         output_size = os.path.getsize(output_path)
         output_dur = probe_duration(output_path) or 0
-        # Final A/V sync — trim audio to match video if needed
-        try:
-            _fv = float((subprocess.run(
-                ["ffprobe", "-v", "quiet", "-select_streams", "v:0",
-                 "-show_entries", "stream=duration", "-of", "csv=p=0", output_path],
-                capture_output=True, text=True, timeout=10).stdout or "0").strip() or "0")
-            _fa = float((subprocess.run(
-                ["ffprobe", "-v", "quiet", "-select_streams", "a:0",
-                 "-show_entries", "stream=duration", "-of", "csv=p=0", output_path],
-                capture_output=True, text=True, timeout=10).stdout or "0").strip() or "0")
-            if _fv > 0 and _fa > _fv + 0.1:
-                _sync = os.path.join(work_dir, "synced.mp4")
-                _sr = subprocess.run([
-                    "ffmpeg", "-y", "-i", output_path,
-                    "-c:v", "copy",
-                    "-af", f"atrim=end={_fv:.3f},asetpts=PTS-STARTPTS",
-                    "-c:a", "aac", "-b:a", "192k",
-                    _sync,
-                ], capture_output=True, text=True, timeout=60)
-                if _sr.returncode == 0 and os.path.exists(_sync) and os.path.getsize(_sync) > 0:
-                    os.replace(_sync, output_path)
-                    print(f"[sync] Trimmed audio: {_fa:.2f}s -> {_fv:.2f}s", flush=True)
-                    _probe_av_sync(output_path, "after_sync_trim")
-        except Exception:
-            pass
         if output_size > 100 * 1024 * 1024:
             print(
                 f"[pipeline] step=final_encode (output is {output_size / 1024 / 1024:.0f}MB — needs compression)",
