@@ -3594,15 +3594,17 @@ def prepend_hook_clip(output_path, edit_plan, work_dir):
 
     hook_actual_dur = probe_duration(hook_path) or hook_render_dur
 
+    concat_list_path = os.path.join(work_dir, "concat_list.txt")
+    with open(concat_list_path, "w") as f:
+        f.write(f"file '{hook_path}'\n")
+        f.write(f"file '{output_path}'\n")
+
     hooked_output = os.path.join(work_dir, "hooked_output.mp4")
     concat_cmd = [
         "ffmpeg", "-y",
-        "-i", hook_path,
-        "-i", output_path,
-        "-filter_complex", "[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[outv][outa]",
-        "-map", "[outv]", "-map", "[outa]",
-        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "0",
-        "-c:a", "aac", "-b:a", "192k",
+        "-f", "concat", "-safe", "0",
+        "-i", concat_list_path,
+        "-c", "copy",
         "-movflags", "+faststart",
         hooked_output,
     ]
