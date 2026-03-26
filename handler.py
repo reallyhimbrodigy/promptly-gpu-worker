@@ -3683,20 +3683,10 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
             text = raw_text.strip()
             if not text:
                 continue
-            start = clip_ranges[clip_idx]["start"]
-            end = clip_ranges[clip_idx]["end"]
-            # If this overlay is on the hook's clip, render at the start of the video.
-            hook_clip = edit_plan.get("hook_clip")
-            hook_offset = float(edit_plan.get("_hook_offset") or 0)
-            if hook_clip and hook_offset > 0:
-                _hc_s = float(hook_clip.get("source_start") or 0)
-                cuts = edit_plan.get("cuts") or []
-                if clip_idx < len(cuts):
-                    _cs = float(cuts[clip_idx]["source_start"])
-                    _ce = float(cuts[clip_idx]["source_end"])
-                    if _hc_s >= _cs - 0.1 and _hc_s <= _ce:
-                        start = 0.0
-                        end = clip_ranges[0]["end"]
+            # Text overlay always starts at the beginning of the video
+            start = 0.0
+            # End at clip 0's end (covers hook + first clip)
+            end = clip_ranges[0]["end"]
             style = str(overlay.get("style") or "callout")
             char_count = len(text)
             base_size = 72 if style == "title" else (64 if style == "cta" else 56)
@@ -3949,12 +3939,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # Skip zoom in render — it will be applied during hook extraction only
         _hook_clip = edit_plan.get("hook_clip")
         if _hook_clip and zoom != "none":
-            _hc_s = float(_hook_clip.get("source_start") or 0)
-            _cs = float(cut["source_start"])
-            _ce = float(cut["source_end"])
-            if _hc_s >= _cs - 0.1 and _hc_s <= _ce:
+            # When hook exists, save the first zoom found for hook extraction
+            # Skip zoom on ALL clips — the hook is the start of the video
+            if not edit_plan.get("_hook_zoom"):
                 edit_plan["_hook_zoom"] = zoom
-                zoom = "none"
+            zoom = "none"
         if has_burned_captions and zoom in ["punch_in","punch_out"]:
             zoom = "slow_in" if zoom == "punch_in" else "slow_out"
 
