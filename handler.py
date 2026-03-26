@@ -1076,12 +1076,9 @@ Per-clip parameters:
 
   sfx_style — always "none"
 
-  zoom — "slow_in", "slow_out", or "none". Zoom adds a subtle push or pull effect.
-    Put zoom on the clip that the VIEWER SEES FIRST in the final video:
-      - If you are setting hook_clip, the hook clip plays first. Put zoom on the cut whose source timestamps contain the hook moment.
-      - If hook_clip is null, clip 0 plays first. Put zoom there if appropriate.
-    Only ONE clip should have zoom. All other clips must be "none".
-    Use zoom when it adds visual interest to the opening. Skip it if the content doesn't benefit from it.
+  zoom — "slow_in", "slow_out", or "none". A subtle push or pull to draw the viewer in.
+  Put zoom on the clip that contains the hook_clip timestamps (if hook_clip is set) or clip 0 (if no hook).
+  All other clips must be "none". The pipeline ensures zoom only appears at the start of the video.
 
   cut_zoom — always false. The pipeline controls this.
 
@@ -1137,11 +1134,10 @@ Global parameters:
 
 Text overlays:
   text_overlays — Short, bold text that gives the viewer instant context. Use ONE overlay maximum.
-  Put the overlay on the first clip the VIEWER SEES:
-    - If you set hook_clip, the hook clip plays first. Put appear_at_clip on the cut that contains the hook timestamps.
-    - If hook_clip is null, put appear_at_clip on clip 0.
-  This overlay sets the stakes in a few words — e.g. "My 6yo exposed my wife", "He said WHAT?!", "This ruined everything".
-  Do NOT place text overlays in the middle or end of the video. If the story doesn't need context-setting text, use an empty array.
+  Put appear_at_clip on the clip that contains the hook_clip timestamps (if hook_clip is set) or clip 0 (if no hook).
+  This overlay sets the stakes in a few words — e.g. "My 6yo exposed my wife", "He said WHAT?!".
+  The pipeline ensures the overlay appears at the start of the video. Do NOT place overlays in the middle or end.
+  If the story doesn't need context-setting text, use an empty array.
   text — under 5 words, no emojis
   position — top (default for talking heads), center (only when no face in frame), bottom
   appear_at_clip — which clip number
@@ -3689,6 +3685,18 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
                 continue
             start = clip_ranges[clip_idx]["start"]
             end = clip_ranges[clip_idx]["end"]
+            # If this overlay is on the hook's clip, render at the start of the video.
+            hook_clip = edit_plan.get("hook_clip")
+            hook_offset = float(edit_plan.get("_hook_offset") or 0)
+            if hook_clip and hook_offset > 0:
+                _hc_s = float(hook_clip.get("source_start") or 0)
+                cuts = edit_plan.get("cuts") or []
+                if clip_idx < len(cuts):
+                    _cs = float(cuts[clip_idx]["source_start"])
+                    _ce = float(cuts[clip_idx]["source_end"])
+                    if _hc_s >= _cs - 0.1 and _hc_s <= _ce:
+                        start = 0.0
+                        end = clip_ranges[0]["end"]
             style = str(overlay.get("style") or "callout")
             char_count = len(text)
             base_size = 72 if style == "title" else (64 if style == "cta" else 56)
@@ -3942,7 +3950,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _hook_clip = edit_plan.get("hook_clip")
         if _hook_clip and zoom != "none":
             _hc_s = float(_hook_clip.get("source_start") or 0)
-            if abs(float(cut["source_start"]) - _hc_s) < 0.5:
+            _cs = float(cut["source_start"])
+            _ce = float(cut["source_end"])
+            if _hc_s >= _cs - 0.1 and _hc_s <= _ce:
                 edit_plan["_hook_zoom"] = zoom
                 zoom = "none"
         if has_burned_captions and zoom in ["punch_in","punch_out"]:
