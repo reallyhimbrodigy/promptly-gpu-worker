@@ -9,7 +9,6 @@ import time
 import shutil
 import json
 import re
-import math
 import concurrent.futures
 from datetime import datetime
 import certifi
@@ -4072,10 +4071,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         video_filters.append(f"[0:v]{','.join(v_chain)}[v{i}]")
 
         # Audio: trim from source, then apply per-clip filters
-        frame_dur = math.floor(eff_dur * 30) / 30
-        audio_source_dur = frame_dur * combined_speed
-        audio_end = start + audio_source_dur
-        a_chain = [f"atrim=start={start:.3f}:end={audio_end:.3f}", "asetpts=PTS-STARTPTS"]
+        a_chain = [f"atrim=start={start:.3f}:end={end:.3f}", "asetpts=PTS-STARTPTS"]
         if abs(combined_speed - 1.0) > 0.001:
             a_chain.append(f"asetrate={sample_rate}*{combined_speed:.4f}")
             a_chain.append(f"aresample={sample_rate}")
@@ -4317,7 +4313,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         "-c:v","libx264","-preset","ultrafast","-crf","0",
         "-pix_fmt","yuv420p",
         "-c:a","aac","-b:a","192k",
-        "-shortest",
         "-movflags","+faststart",
         "-max_muxing_queue_size","1024",
     ]
