@@ -4317,6 +4317,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         "-c:v","libx264","-preset","ultrafast","-crf","0",
         "-pix_fmt","yuv420p",
         "-c:a","aac","-b:a","192k",
+        "-shortest",
         "-movflags","+faststart",
         "-max_muxing_queue_size","1024",
     ]
