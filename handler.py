@@ -3594,6 +3594,12 @@ def prepend_hook_clip(output_path, edit_plan, work_dir):
         return
 
     hook_actual_dur = probe_duration(hook_path) or hook_render_dur
+    try:
+        _hcv = float((subprocess.run(["ffprobe","-v","quiet","-select_streams","v:0","-show_entries","stream=duration","-of","csv=p=0",hook_path],capture_output=True,text=True,timeout=10).stdout or "0").strip() or "0")
+        _hca = float((subprocess.run(["ffprobe","-v","quiet","-select_streams","a:0","-show_entries","stream=duration","-of","csv=p=0",hook_path],capture_output=True,text=True,timeout=10).stdout or "0").strip() or "0")
+        print(f"[DIAG] Hook clip: video={_hcv:.3f}s audio={_hca:.3f}s diff={_hcv - _hca:.4f}s", flush=True)
+    except:
+        pass
 
     concat_list_path = os.path.join(work_dir, "concat_list.txt")
     with open(concat_list_path, "w") as f:
@@ -3617,6 +3623,12 @@ def prepend_hook_clip(output_path, edit_plan, work_dir):
         return
 
     os.replace(hooked_output, output_path)
+    try:
+        _hv = float((subprocess.run(["ffprobe","-v","quiet","-select_streams","v:0","-show_entries","stream=duration","-of","csv=p=0",output_path],capture_output=True,text=True,timeout=10).stdout or "0").strip() or "0")
+        _ha = float((subprocess.run(["ffprobe","-v","quiet","-select_streams","a:0","-show_entries","stream=duration","-of","csv=p=0",output_path],capture_output=True,text=True,timeout=10).stdout or "0").strip() or "0")
+        print(f"[DIAG] After hook concat: video={_hv:.3f}s audio={_ha:.3f}s diff={_hv - _ha:.4f}s", flush=True)
+    except:
+        pass
     edit_plan["_hook_offset"] = hook_actual_dur
     print(f"[hook] Prepended {hook_actual_dur:.2f}s hook teaser", flush=True)
 
@@ -4523,6 +4535,12 @@ def handler(job):
         speed_curve = edit_plan.get("_parsed_speed_curve")
         if not validate_output(output_path, "render"):
             raise RuntimeError("Main render produced invalid output")
+        try:
+            _rv = float((subprocess.run(["ffprobe","-v","quiet","-select_streams","v:0","-show_entries","stream=duration","-of","csv=p=0",output_path],capture_output=True,text=True,timeout=10).stdout or "0").strip() or "0")
+            _ra = float((subprocess.run(["ffprobe","-v","quiet","-select_streams","a:0","-show_entries","stream=duration","-of","csv=p=0",output_path],capture_output=True,text=True,timeout=10).stdout or "0").strip() or "0")
+            print(f"[DIAG] After render: video={_rv:.3f}s audio={_ra:.3f}s diff={_rv - _ra:.4f}s", flush=True)
+        except:
+            pass
 
         print("[pipeline] step=hook", flush=True)
         prepend_hook_clip(output_path, edit_plan, work_dir)
@@ -4574,6 +4592,12 @@ def handler(job):
                 print("[captions] Caption burn-in produced invalid output — restoring backup", flush=True)
                 os.replace(captions_backup_path, output_path)
             elif os.path.exists(captions_backup_path):
+                try:
+                    _cv = float((subprocess.run(["ffprobe","-v","quiet","-select_streams","v:0","-show_entries","stream=duration","-of","csv=p=0",output_path],capture_output=True,text=True,timeout=10).stdout or "0").strip() or "0")
+                    _ca = float((subprocess.run(["ffprobe","-v","quiet","-select_streams","a:0","-show_entries","stream=duration","-of","csv=p=0",output_path],capture_output=True,text=True,timeout=10).stdout or "0").strip() or "0")
+                    print(f"[DIAG] After captions: video={_cv:.3f}s audio={_ca:.3f}s diff={_cv - _ca:.4f}s", flush=True)
+                except:
+                    pass
                 os.remove(captions_backup_path)
         else:
             print("[pipeline] Captions skipped (no captions, no text overlays)", flush=True)
