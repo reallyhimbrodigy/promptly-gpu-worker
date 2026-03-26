@@ -1060,6 +1060,7 @@ The ending matters. On these platforms, videos auto-loop. A clean ending that fl
 Per-clip parameters:
 
   source_start / source_end — timestamps defining each clip. MUST be strictly chronological.
+    IMPORTANT: cuts must be in chronological order by source_start. The hook_clip field handles the hook — do NOT reorder cuts to put the hook first.
     Clips must be chronological. Leave gaps between clips to remove dead air, pauses, or dull moments — the pipeline preserves these gaps as intentional cuts. Only overlap or touch clips when the speech flows continuously with no pause.
 
   transition_out — visual transition between this clip and the next:
@@ -1460,9 +1461,10 @@ RULES FOR USING THESE TIMESTAMPS:
             raise ValueError(f"Cut {i}: source_start is negative")
         if video_duration > 0 and src_end > video_duration + 0.5:
             raise ValueError(f"Cut {i}: source_end ({src_end}) exceeds video duration ({video_duration})")
-        if i > 0 and src_start < validated_cuts[i-1]["source_start"]:
-            raise ValueError(f"Cut {i}: not in chronological order")
         validated_cuts.append({**cut, "source_start": src_start, "source_end": src_end, "clip": i + 1})
+
+    # Sort cuts chronologically — Gemini sometimes puts hook clip first
+    validated_cuts.sort(key=lambda c: float(c["source_start"]))
 
     for i in range(1, len(validated_cuts)):
         prev_end = validated_cuts[i - 1]["source_end"]
