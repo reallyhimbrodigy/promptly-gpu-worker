@@ -2437,6 +2437,10 @@ def create_keyframed_source(source_path, keyframe_timestamps, work_dir):
         "-c:a","copy","-threads","1",
         keyframed_path,
     ])
+    _kprobe = subprocess.run(
+        ["ffprobe", "-v", "quiet", "-show_streams", "-print_format", "json", keyframed_path],
+        capture_output=True, text=True, timeout=10)
+    print(f"[DIAG] Keyframed source probe: {_kprobe.stdout[:1500]}", flush=True)
     return keyframed_path
 
 
@@ -3948,6 +3952,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         if speed_curve and speed_curve != "none":
             curve_speed = max(0.5, min(1.5, get_speed_for_timestamp(start, speed_curve)))
         combined_speed = speed * curve_speed
+        raw_dur = end - start
+        video_setpts_dur = raw_dur / combined_speed
+        video_fps30_frames = round(video_setpts_dur * 30)
+        video_fps30_dur = video_fps30_frames / 30
+        audio_asetrate_dur = raw_dur / combined_speed
+        print(f"[DIAG] Seg{i}: raw={raw_dur:.3f} speed={combined_speed:.3f} v_setpts={video_setpts_dur:.4f} v_fps30={video_fps30_dur:.4f}({video_fps30_frames}f) a_asetrate={audio_asetrate_dur:.4f} gap={video_fps30_dur - audio_asetrate_dur:.6f}", flush=True)
         zoom = str(cut.get("zoom") or "none")
         # Skip zoom in render — it will be applied during hook extraction only
         _hook_clip = edit_plan.get("hook_clip")
@@ -4067,6 +4077,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
         if outro_filter:
             v_chain.append(outro_filter)
+        if i == 0 or i == 10:
+            print(f"[DIAG] Seg{i} v_filter: {','.join(v_chain)}", flush=True)
 
         video_filters.append(f"[0:v]{','.join(v_chain)}[v{i}]")
 
@@ -4078,6 +4090,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         if i == n-1 and outro != "none":
             fade_start = max(0, eff_dur - 1.0)
             a_chain.append(f"afade=t=out:st={fade_start:.3f}:d=1.0")
+        if i == 0 or i == 10:
+            print(f"[DIAG] Seg{i} a_filter: {','.join(a_chain)}", flush=True)
         audio_filters.append(f"[0:a]{','.join(a_chain)}[a{i}]")
 
     # ── SFX collection ───────────────────────────────────────────────────────
@@ -4309,6 +4323,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             print(f"[render] WARNING: music track not found at {music_path} — skipping", flush=True)
 
     filter_complex = ";".join(video_filters + audio_filters + transition_filters + sfx_filter_strs + post_filters + music_filters)
+    _total_expected_v = sum(round(d * 30) / 30 for d in effective_durations)
+    _total_expected_a = sum(effective_durations)
+    print(f"[DIAG] Expected totals: video(fps30)={_total_expected_v:.4f}s audio(raw)={_total_expected_a:.4f}s gap={_total_expected_v - _total_expected_a:.6f}s", flush=True)
     encode_args = [
         "-c:v","libx264","-preset","ultrafast","-crf","0",
         "-pix_fmt","yuv420p",
@@ -4437,6 +4454,10 @@ def handler(job):
         send_progress(job_id, "normalize", 12, "Getting everything set up...", app_url)
         print("[pipeline] step=normalize", flush=True)
         source_path = normalize_source_video(source_path, work_dir)
+        _probe = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-show_streams", "-show_format", "-print_format", "json", source_path],
+            capture_output=True, text=True, timeout=10)
+        print(f"[DIAG] Source probe: {_probe.stdout[:1500]}", flush=True)
 
         source_duration = get_source_duration(source_path)
         transcript = {"text": "", "words": []}
