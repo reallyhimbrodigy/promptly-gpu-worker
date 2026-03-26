@@ -1136,7 +1136,12 @@ Global parameters:
   thumbnail_timestamp — the source timestamp (in seconds) of the single best frame to use as the video's cover image / thumbnail. Pick the frame where the speaker has the most expressive or emotional face — surprise, laughter, intensity, reaction. Avoid frames where eyes are closed, face is blurry, or expression is blank. This frame needs to make someone scrolling stop and click.
 
 Text overlays:
-  text_overlays — Short, bold text that gives the viewer instant context. Use ONE overlay maximum, placed on the first clip the viewer sees (clip 0, or the hook's clip if hook_clip is set). This overlay sets the stakes of the story in a few words — e.g. "My 6yo exposed my wife", "He said WHAT?!", "This ruined everything". Do NOT place text overlays in the middle or end of the video. If the story doesn't need context-setting text, use an empty array.
+  text_overlays — Short, bold text that gives the viewer instant context. Use ONE overlay maximum.
+  Put the overlay on the first clip the VIEWER SEES:
+    - If you set hook_clip, the hook clip plays first. Put appear_at_clip on the cut that contains the hook timestamps.
+    - If hook_clip is null, put appear_at_clip on clip 0.
+  This overlay sets the stakes in a few words — e.g. "My 6yo exposed my wife", "He said WHAT?!", "This ruined everything".
+  Do NOT place text overlays in the middle or end of the video. If the story doesn't need context-setting text, use an empty array.
   text — under 5 words, no emojis
   position — top (default for talking heads), center (only when no face in frame), bottom
   appear_at_clip — which clip number
