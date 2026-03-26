@@ -3578,6 +3578,7 @@ def prepend_hook_clip(output_path, edit_plan, work_dir):
         f"[0:a]atrim=start={hook_render_start:.3f}:end={hook_render_end:.3f},"
         f"asetpts=PTS-STARTPTS[ha]"
     )
+    print(f"[DIAG] Hook timing: src={hook_src_start:.3f}-{hook_src_end:.3f} clip_src={clip_src_start:.3f}-{float(cuts[hook_clip_idx]['source_end']):.3f} clip_render={clip_render_start:.3f}-{clip_render_end:.3f} speed={combined_speed:.3f} start_offset={start_offset:.3f} end_offset={end_offset:.3f} render={hook_render_start:.3f}-{hook_render_end:.3f}", flush=True)
 
     hook_path = os.path.join(work_dir, "hook_clip.mp4")
     hook_cmd = [
