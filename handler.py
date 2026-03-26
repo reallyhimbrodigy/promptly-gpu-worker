@@ -4055,6 +4055,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         frame_dur = round(eff_dur * 30) / 30
         audio_source_dur = frame_dur * combined_speed
         audio_end = start + audio_source_dur
+        print(f"[DIAG] Seg{i}: start={start:.3f} end={end:.3f} eff={eff_dur:.3f} frame_dur={frame_dur:.3f} combined={combined_speed:.3f} audio_end={audio_end:.3f} orig_end={end:.3f} diff={end - audio_end:.4f}", flush=True)
         a_chain = [f"atrim=start={start:.3f}:end={audio_end:.3f}", "asetpts=PTS-STARTPTS"]
         if abs(combined_speed - 1.0) > 0.001:
             a_chain.append(f"asetrate={sample_rate}*{combined_speed:.4f}")
