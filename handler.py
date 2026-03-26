@@ -4087,14 +4087,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         if abs(combined_speed - 1.0) > 0.001:
             a_chain.append(f"asetrate={sample_rate}*{combined_speed:.4f}")
             a_chain.append(f"aresample={sample_rate}")
-        # Audio processing per-segment (prevents duration extension from post-concat filters)
-        audio_denoise = bool(edit_plan.get("audio_denoise"))
-        if audio_denoise:
-            a_chain.append("afftdn=nr=12:nf=-30:tn=1")
-        a_chain.append("highpass=f=80")
-        a_chain.append("lowpass=f=12000")
-        a_chain.append("acompressor=threshold=-18dB:ratio=2:attack=20:release=120:makeup=2")
-        a_chain.append("alimiter=limit=0.95")
         if i == n-1 and outro != "none":
             fade_start = max(0, eff_dur - 1.0)
             a_chain.append(f"afade=t=out:st={fade_start:.3f}:d=1.0")
@@ -4638,11 +4630,20 @@ def handler(job):
                 flush=True,
             )
             final_path = os.path.join(work_dir, "final.mp4")
+            audio_denoise = bool(edit_plan.get("audio_denoise"))
+            denoise_part = "afftdn=nr=12:nf=-30:tn=1," if audio_denoise else ""
+            audio_filters = (
+                f"{denoise_part}highpass=f=80,lowpass=f=12000,"
+                f"acompressor=threshold=-18dB:ratio=2:attack=20:release=120:makeup=2,"
+                f"alimiter=limit=0.95"
+            )
             cmd = [
                 "ffmpeg", "-y",
                 "-i", output_path,
                 "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+                "-af", audio_filters,
                 "-c:a", "aac", "-b:a", "128k",
+                "-shortest",
                 "-movflags", "+faststart",
                 final_path,
             ]
@@ -4667,6 +4668,25 @@ def handler(job):
             else:
                 print("[final_encode] FFmpeg failed — keeping previous output", flush=True)
         else:
+            # Still apply audio processing even if video doesn't need compression
+            audio_denoise = bool(edit_plan.get("audio_denoise"))
+            denoise_part = "afftdn=nr=12:nf=-30:tn=1," if audio_denoise else ""
+            audio_filters = (
+                f"{denoise_part}highpass=f=80,lowpass=f=12000,"
+                f"acompressor=threshold=-18dB:ratio=2:attack=20:release=120:makeup=2,"
+                f"alimiter=limit=0.95"
+            )
+            audio_path = os.path.join(work_dir, "audio_processed.mp4")
+            subprocess.run([
+                "ffmpeg", "-y", "-i", output_path,
+                "-c:v", "copy",
+                "-af", audio_filters,
+                "-c:a", "aac", "-b:a", "192k",
+                "-shortest",
+                audio_path,
+            ], capture_output=True, text=True, timeout=120)
+            if os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
+                os.replace(audio_path, output_path)
             print(f"[pipeline] Output already compressed: {output_size / 1024 / 1024:.1f}MB", flush=True)
 
         # ── Parallel group 2: cover frame + upload ────────────────────────────────
