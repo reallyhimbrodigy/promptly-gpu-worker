@@ -4087,6 +4087,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         if abs(combined_speed - 1.0) > 0.001:
             a_chain.append(f"asetrate={sample_rate}*{combined_speed:.4f}")
             a_chain.append(f"aresample={sample_rate}")
+        # Audio processing per-segment (prevents duration extension from post-concat filters)
+        audio_denoise = bool(edit_plan.get("audio_denoise"))
+        if audio_denoise:
+            a_chain.append("afftdn=nr=12:nf=-30:tn=1")
+        a_chain.append("highpass=f=80")
+        a_chain.append("lowpass=f=12000")
+        a_chain.append("acompressor=threshold=-18dB:ratio=2:attack=20:release=120:makeup=2")
+        a_chain.append("alimiter=limit=0.95")
         if i == n-1 and outro != "none":
             fade_start = max(0, eff_dur - 1.0)
             a_chain.append(f"afade=t=out:st={fade_start:.3f}:d=1.0")
@@ -4280,17 +4288,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         audio_out = "[audio_sfx_mixed]"
         print(f"[sfx] Mixed {len(sfx_audio_labels)} SFX track(s) into audio", flush=True)
 
-    audio_denoise = bool(edit_plan.get("audio_denoise"))
-    denoise_filter = ""
-    if audio_denoise:
-        denoise_filter = "afftdn=nr=12:nf=-30:tn=1,"
-        print(f"[render] audio_denoise=true — afftdn adaptive noise removal enabled", flush=True)
     post_filters.append(
-        f"{audio_out}{denoise_filter}highpass=f=80,lowpass=f=12000,"
-        f"equalizer=f=2800:t=q:w=1.5:g=3,"
-        f"equalizer=f=200:t=q:w=0.8:g=1.5,"
-        f"acompressor=threshold=-20dB:ratio=3:attack=5:release=50:makeup=2,"
-        f"alimiter=limit=0.95:attack=1:release=10[final_audio]"
+        f"{audio_out}anull[final_audio]"
     )
     audio_out = "[final_audio]"
 
