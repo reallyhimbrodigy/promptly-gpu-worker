@@ -1030,7 +1030,7 @@ Look at the gaps between words in the transcript:
 - Under 0.10 seconds between words — natural word spacing. KEEP. This is how speech flows.
 - 0.10 seconds or more between words — this is a pause, breath, or dead air. REMOVE it by ending one clip before the gap and starting the next clip after it.
 - Filler words (uh, um, hmm, er, ah) — skip these entirely. End the previous clip before the filler word and start the next clip at the word after it.
-- Stutters and false starts — ALWAYS remove these, no exceptions. When the speaker starts a word then restarts it ("she shou- shouldn't", "I said, who is... I said, who is he?", "I'm going to... I'm gonna"), you MUST cut out the false start and keep only the corrected version. End the previous clip before the false start and start the next clip at the corrected word. Leaving a stutter in the video is an editing mistake. Look at the transcript carefully: if the same word or phrase appears twice in a row with a slight variation, the first one is a false start and must be cut.
+- Stutters and false starts — when the speaker starts a word then restarts it ("she shou- shouldn't", "I said, who is... I said, who is he?", "I'm going to... I'm gonna"), cut out the false start and keep only the corrected version. End the previous clip before the false start and start the next clip at the corrected word.
 
 HOW TO CUT PRECISELY:
 - source_end = the exact end timestamp of the last word you want to keep. The timestamps are accurate — use them exactly. If "electrocuted" ends at 26.07, set source_end to 26.07.
@@ -1078,8 +1078,6 @@ The ending matters. On these platforms, videos auto-loop. A clean ending that fl
 
   If either condition is not met, or if the video doesn't have a clear punchline, set hook_clip to null.
 
-  HOOK AND SPEED: The hook clip plays at the start as a teaser — the pipeline controls its speed there. In your speed_curve, just set the speed based on the content at each timestamp like normal. The hook's chronological position is usually a punchline, so it should usually be slow. But don't overthink it — just apply the same rule: funny/dramatic = slow, everything else = fast.
-
 === TOOLS ===
 
 Per-clip parameters:
@@ -1116,14 +1114,7 @@ Global parameters:
   SPEED RAMPING (only when vibe mentions "speed ramp", "speed ramping", or "CapCut style"):
   Follow the speed ramping techniques described in the editing style guide above. The style guide was generated from watching real viral videos.
 
-  When speed ramping is active, the rule is simple:
-  - If the moment is funny, dramatic, or a punchline → SLOW (0.6x-0.8x)
-  - If it's NOT → FAST (1.2x-1.3x)
-  That's it. No 1.0x. No overthinking.
-
-  70-80% of the video should be fast. Only the 2-3 funniest or most dramatic moments get slowed down. If you slow down too much, the contrast disappears and the edit feels sluggish. Fast is the default. Slow is the exception.
-
-  Do not use 0.8x as a default — 0.8x is a deliberate slow-down reserved for punchlines only.
+  When speed ramping is active, every moment in the video is either sped up or slowed down — there is no 1.0x normal speed. If a section is filler or setup, it gets sped up. If it is a punchline or reveal, it gets slowed down. The contrast between fast and slow is what makes speed ramping work. Do not use 1.0x in your speed curve.
 
   What each speed value does to speech:
     1.2x = slightly fast, natural sounding, good default for filler and setup
@@ -1347,7 +1338,7 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None, deepgra
 
 === FULL TRANSCRIPT ===
 
-Read this first to understand the full story before making any editing decisions. Identify the narrative structure — what is setup, what is filler, what is the buildup, and where are the punchlines or reveals. For speed ramping, use this understanding: There is no normal speed — everything is either fast or slow. If it's funny or dramatic, slow it down. If it's not, speed it up.
+Read this first to understand the full story before making any editing decisions. Identify the narrative structure — what is setup, what is filler, what is the buildup, and where are the punchlines or reveals. For speed ramping, use this understanding: the parts you'd skim if reading are filler (speed up), the parts that make you react are punchlines (slow down), and the parts that build tension should stay at normal speed.
 
 {readable_transcript}
 
@@ -1523,8 +1514,9 @@ RULES FOR USING THESE TIMESTAMPS:
         # validated_cuts = snap_cuts_to_word_boundaries(validated_cuts, _dg_words)
         print(f"[generate-edit] Snapping disabled — Gemini has word timestamps", flush=True)
 
-        validated_cuts = tighten_clips_with_deepgram(validated_cuts, _dg_words, min_silence_to_remove=0.08)
-        print(f"[generate-edit] Applied Deepgram tightening to clip boundaries", flush=True)
+        # Tightening disabled — Gemini has Deepgram timestamps and places precise cuts
+        # validated_cuts = tighten_clips_with_deepgram(validated_cuts, _dg_words, min_silence_to_remove=0.08)
+        print(f"[generate-edit] Tightening disabled — Gemini has word timestamps", flush=True)
 
         # Micro-gap closing not needed — Gemini places precise boundaries
     else:
@@ -1647,37 +1639,6 @@ RULES FOR USING THESE TIMESTAMPS:
     if hook_clip:
         _hs = float(hook_clip["source_start"])
         _he = float(hook_clip["source_end"])
-        for cut in validated_cuts:
-            cs = float(cut["source_start"])
-            ce = float(cut["source_end"])
-            if _hs >= cs - 0.1 and _hs <= ce:
-                if _he > ce:
-                    print(f"[hook] Clamping hook end from {_he:.2f} to cut end {ce:.2f}", flush=True)
-                    _he = ce
-                    hook_clip["source_end"] = round(_he, 3)
-                break
-        try:
-            silence_cmd = [
-                "ffmpeg", "-i", video_path,
-                "-af", f"atrim=start={_hs:.3f}:end={_he:.3f},asetpts=PTS-STARTPTS,silencedetect=noise=-30dB:d=0.15",
-                "-f", "null", "-"
-            ]
-            silence_result = subprocess.run(silence_cmd, capture_output=True, text=True, timeout=15)
-            silence_starts = re.findall(r"silence_start:\s*([\d.]+)", silence_result.stderr)
-            if silence_starts:
-                last_silence = float(silence_starts[-1])
-                if last_silence >= 0.3:
-                    true_end = _hs + last_silence
-                    if true_end < _he - 0.1:
-                        print(
-                            f"[hook] Audio ends at {last_silence:.2f}s into hook — "
-                            f"tightening source_end: {_he:.2f} -> {true_end:.2f}",
-                            flush=True,
-                        )
-                        _he = true_end
-                        hook_clip["source_end"] = round(_he, 3)
-        except Exception as e:
-            print(f"[hook] Silence detection failed ({e}) — using original end", flush=True)
         print(f"[hook] Hook timestamps: {_hs:.2f}-{_he:.2f} ({_he - _hs:.2f}s)", flush=True)
     edit_plan["hook_clip"] = hook_clip
 
