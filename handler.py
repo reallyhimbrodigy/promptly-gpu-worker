@@ -4467,7 +4467,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     print(f"[DIAG] filter_complex (first 2000): {filter_complex[:2000]}", flush=True)
     print(f"[DIAG] filter_complex (last 1000): {filter_complex[-1000:]}", flush=True)
     encode_args = [
-        "-c:v","libx264","-preset","ultrafast","-crf","18",
+        "-c:v","libx264","-preset","veryfast","-crf","23",
         "-pix_fmt","yuv420p",
         "-c:a","aac","-b:a","128k",
         "-shortest",
