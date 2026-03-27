@@ -3948,6 +3948,7 @@ def mix_sfx_after_speed_curve(output_path, edit_plan, cuts, effective_durations,
 
 def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, work_dir, speech_segments=None):
     speed_curve = edit_plan.get("_parsed_speed_curve")
+    original_cuts = list(cuts)
     render_cuts = list(cuts)
     edit_plan["_hook_offset"] = 0.0
 
@@ -3990,7 +3991,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         if hook_e > 0:
             kf_timestamps.append(hook_e)
     kf_timestamps = sorted(set(kf_timestamps))
-    keyframed_path = create_keyframed_source(source_path, kf_timestamps, work_dir)
+    keyframed_path = source_path  # trim in filter_complex handles seeking
     color_grade = edit_plan.get("color_grade") or {}
     color_filter_str = build_video_filter_chain(color_grade, source_res, edit_plan)
     has_burned_captions = infer_has_burned_captions(
@@ -4005,8 +4006,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     # Compute effective durations from recipe with per-segment speed applied.
     effective_durations = compute_effective_durations(render_cuts, speed_curve)
+    hook_offset = 0.0
     if isinstance(hook_clip, dict) and effective_durations:
-        edit_plan["_hook_offset"] = effective_durations[0]
+        hook_offset = effective_durations[0]
+        edit_plan["_hook_offset"] = hook_offset
     for i, cut in enumerate(render_cuts):
         src_dur = round((float(cut["source_end"]) - float(cut["source_start"])) * 1000) / 1000
         clip_speed = max(0.25, min(4.0, float(cut.get("speed") or 1.0)))
@@ -4159,27 +4162,27 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         audio_filters.append(f"[0:a]{','.join(a_chain)}[a{i}]")
 
     # ── SFX collection ───────────────────────────────────────────────────────
-    # SFX are NOT mixed during render — they are added as a post-processing
-    # step AFTER the speed curve so timestamps are correct.
     sfx_input_args   = []
     sfx_filter_strs  = []
     sfx_audio_labels = []
     extra_input_index = 1  # single input (keyframed source)
 
-    if False:  # SFX disabled in render — mixed after speed curve in mix_sfx_after_speed_curve()
+    if True:
         _speech_segs = speech_segments or (edit_plan.get("analysis_data") or {}).get("speech", {}).get("segments") or []
+        _base_cuts = original_cuts
+        _base_effective_durations = compute_effective_durations(_base_cuts, speed_curve) if _base_cuts else []
 
-        _running = effective_durations[0]
+        _running = hook_offset + (_base_effective_durations[0] if _base_effective_durations else 0.0)
         _transition_times = []
-        for _i in range(n - 1):
-            _transition = str(cuts[_i].get("transition_out") or "none").lower()
+        for _i in range(max(0, len(_base_cuts) - 1)):
+            _transition = str(_base_cuts[_i].get("transition_out") or "none").lower()
             _td = TRANSITION_DURATION if _transition not in ("none", "clean_cut", "") else 0.0
             _event_time = max(0.0, _running - 0.15)
             _transition_times.append(_event_time)
-            _running = _running + effective_durations[_i + 1] - _td
+            _running = _running + _base_effective_durations[_i + 1] - _td
 
-        for _i in range(n - 1):
-            _sound_style = normalize_sfx_style(cuts[_i].get("transition_sound") or cuts[_i].get("sfx_style") or "none")
+        for _i in range(max(0, len(_base_cuts) - 1)):
+            _sound_style = normalize_sfx_style(_base_cuts[_i].get("transition_sound") or _base_cuts[_i].get("sfx_style") or "none")
             if _sound_style == "none":
                 continue
             _sound_path = get_sfx_path(_sound_style)
@@ -4197,9 +4200,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             print(f"[sfx] transition {_i}: {_sound_style} vol={_vol:.3f} at {_event_time:.3f}s", flush=True)
             extra_input_index += 1
 
-        _clip_ranges = get_output_clip_ranges(render_cuts, effective_durations)
+        _clip_ranges = get_output_clip_ranges(_base_cuts, _base_effective_durations) if _base_cuts else []
         for _i, _overlay in enumerate(edit_plan.get("text_overlays") or []):
-            _clip_idx = int(_overlay.get("appear_at_clip") or 0) - 1
+            _clip_idx = int(_overlay.get("appear_at_clip") or 0)
             if _clip_idx < 0 or _clip_idx >= len(_clip_ranges):
                 continue
             _sfx_style = normalize_sfx_style(_overlay.get("sfx_style") or "none")
@@ -4208,7 +4211,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _sound_path = get_sfx_path(_sfx_style)
             if not _sound_path:
                 continue
-            _ts        = max(0.0, float(_clip_ranges[_clip_idx].get("start") or 0) + 0.02)
+            _ts        = max(0.0, hook_offset + float(_clip_ranges[_clip_idx].get("start") or 0) + 0.02)
             _offset_ms = round(_ts * 1000)
             _vol       = get_sfx_volume(_sfx_style, _ts, _speech_segs, is_text_overlay=True)
             _label     = f"[txtsnd{_i}]"
@@ -4229,14 +4232,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             if not _sound_path:
                 continue
             _source_t = float(_sfx.get("t") or 0.0)
-            _output_t = project_source_time_to_output(_source_t, render_cuts, _clip_ranges, edit_plan.get("_parsed_speed_curve"))
-            if _output_t is None:
+            _pre_hook_t = project_source_time_to_output(_source_t, _base_cuts, _clip_ranges, edit_plan.get("_parsed_speed_curve"))
+            if _pre_hook_t is None:
                 print(
                     f"[sfx] sound_effect: {_sound_style} at source {_source_t:.3f}s — could not project, skipping",
                     flush=True,
                 )
                 continue
-            _ts = max(0.0, _output_t)
+            _ts = max(0.0, hook_offset + _pre_hook_t)
             _offset_ms = round(_ts * 1000)
             _vol = 0.5
             _label = f"[timesfx{_i}]"
@@ -4588,11 +4591,41 @@ def handler(job):
 
         source_duration = get_source_duration(source_path)
         transcript = {"text": "", "words": []}
-
-        print("[pipeline] step=face_detect", flush=True)
         source_res = probe_resolution(source_path)
         sample_timestamps = [round(i * 2.0, 3) for i in range(int(source_duration / 2.0) + 1)] if source_duration > 0 else []
-        face_positions = detect_face_positions(source_path, sample_timestamps) if sample_timestamps else []
+        print("[pipeline] step=face_detect + transcribe (parallel)", flush=True)
+
+        def _do_face_detect():
+            return detect_face_positions(source_path, sample_timestamps) if sample_timestamps else []
+
+        def _do_transcribe():
+            audio_path = os.path.join(work_dir, "audio_for_words.wav")
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", source_path, "-vn", "-acodec", "pcm_s16le", "-ar", "48000", "-ac", "1", audio_path],
+                capture_output=True, text=True, timeout=30,
+            )
+            local_transcript = transcribe_audio(audio_path)
+            _dg_words = local_transcript.get("words", [])
+            if len(_dg_words) == 0:
+                print("[pipeline] Deepgram returned 0 words — retrying once...", flush=True)
+                try:
+                    local_transcript = transcribe_audio(audio_path)
+                    _dg_words = local_transcript.get("words", [])
+                except Exception as e2:
+                    print(f"[pipeline] Deepgram retry also failed: {e2}", flush=True)
+            if os.path.exists(audio_path):
+                os.remove(audio_path)
+            if len(_dg_words) == 0:
+                raise RuntimeError("Deepgram transcription failed — 0 words returned. Cannot proceed without word timestamps.")
+            print(f"[pipeline] Deepgram: {len(local_transcript.get('words', []))} words", flush=True)
+            return local_transcript
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as prep_pool:
+            future_faces = prep_pool.submit(_do_face_detect)
+            future_transcript = prep_pool.submit(_do_transcribe)
+            face_positions = future_faces.result()
+            transcript = future_transcript.result()
+
         reframe_crops = calculate_reframe_crop(face_positions, source_res.get("width") or 1080, source_res.get("height") or 1920)
         if reframe_crops:
             print(f"[reframe] Smart reframe active: {len(reframe_crops)} crop positions", flush=True)
@@ -4600,28 +4633,6 @@ def handler(job):
             print("[reframe] Source is native 9:16 — using center crop", flush=True)
 
         print(f"[edit] User vibe: \"{vibe}\"", flush=True)
-
-        # Run Deepgram for word timestamps (needed for cut snapping and SFX)
-        print("[pipeline] step=transcribe", flush=True)
-        audio_path = os.path.join(work_dir, "audio_for_words.wav")
-        subprocess.run(
-            ["ffmpeg", "-y", "-i", source_path, "-vn", "-acodec", "pcm_s16le", "-ar", "48000", "-ac", "1", audio_path],
-            capture_output=True, text=True, timeout=30,
-        )
-        transcript = transcribe_audio(audio_path)
-        _dg_words = transcript.get("words", [])
-        if len(_dg_words) == 0:
-            print("[pipeline] Deepgram returned 0 words — retrying once...", flush=True)
-            try:
-                transcript = transcribe_audio(audio_path)
-                _dg_words = transcript.get("words", [])
-            except Exception as e2:
-                print(f"[pipeline] Deepgram retry also failed: {e2}", flush=True)
-        if len(_dg_words) == 0:
-            raise RuntimeError("Deepgram transcription failed — 0 words returned. Cannot proceed without word timestamps.")
-        if os.path.exists(audio_path):
-            os.remove(audio_path)
-        print(f"[pipeline] Deepgram: {len(transcript.get('words', []))} words", flush=True)
 
         send_progress(job_id, "analysis", 20, "Watching your footage...", app_url)
         send_progress(job_id, "edit_recipe", 52, "Putting your edit together...", app_url)
@@ -4643,37 +4654,13 @@ def handler(job):
         print(f"[pipeline] edit recipe complete in {time.time()-t:.1f}s", flush=True)
         analysis = edit_plan.get("analysis_data") or {}
 
-        print("[pipeline] step=post_process", flush=True)
-        caption_style = str(edit_plan.get("caption_style") or "none").lower()
-        broll_requests = edit_plan.get("broll") or []
-
         print("[pipeline] step=parallel_render", flush=True)
         send_progress(job_id, "render", 62, "Rendering — almost there...", app_url)
         t = time.time()
-        broll_files = {}
-
-        def task_render():
-            render_multi_clip(
-                source_path, edit_plan["cuts"], edit_plan, output_path, transcript, work_dir,
-            )
-
-        def task_download_broll():
-            """B-roll disabled."""
-            return {}
-
-        def task_deepgram():
-            # Deepgram already ran before post-processing
-            return transcript
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
-            future_render = pool.submit(task_render)
-            future_broll = pool.submit(task_download_broll)
-            future_deepgram = pool.submit(task_deepgram)
-            future_render.result()
-            broll_files = future_broll.result()
-            transcript = future_deepgram.result()
-            # Store Deepgram words for SFX word-snapping
-            edit_plan["_deepgram_words"] = transcript.get("words", [])
+        render_multi_clip(
+            source_path, edit_plan["cuts"], edit_plan, output_path, transcript, work_dir,
+        )
+        edit_plan["_deepgram_words"] = transcript.get("words", [])
 
         render_elapsed = time.time() - t
         print(f"[pipeline] parallel_render complete in {render_elapsed:.1f}s", flush=True)
@@ -4688,26 +4675,14 @@ def handler(job):
         except:
             pass
 
-        # B-roll removed — Pexels free API cannot consistently produce good clips
-        print("[pipeline] B-roll disabled", flush=True)
-        for local_path in broll_files.values():
-            try:
-                os.unlink(local_path)
-            except Exception:
-                pass
-
-        # AI enhancement removed — minimal visible improvement on clean phone footage
         print("[pipeline] Hook, captions, and final encode are combined with render", flush=True)
 
         if speed_curve:
             print("[pipeline] Speed curve applied in single-pass render — skipping post-process", flush=True)
         else:
             print("[pipeline] Speed curve skipped", flush=True)
-
         cuts = edit_plan.get("cuts") or []
         effective_durations = compute_effective_durations(cuts, speed_curve)
-        print("[pipeline] step=sfx_mix", flush=True)
-        mix_sfx_after_speed_curve(output_path, edit_plan, cuts, effective_durations, work_dir)
 
         output_size = os.path.getsize(output_path)
         output_dur = probe_duration(output_path) or 0
