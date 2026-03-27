@@ -2401,15 +2401,14 @@ def normalize_source_video(source_path, work_dir):
     except Exception:
         r_fps = fps
 
-    is_vfr = abs(fps - r_fps) > 0.5
-    needs_normalize = (w != 1080 or h != 1920 or abs(fps - 30) > 0.01 or is_vfr)
+    needs_spatial_transform = (w != 1080 or h != 1920)
 
-    if not needs_normalize:
+    if not needs_spatial_transform:
         print(f"[normalize] Source is already {w}x{h} @ {fps:.2f}fps — skipping", flush=True)
         return source_path
 
     normalized_path = os.path.join(work_dir, "normalized_source.mp4")
-    print(f"[normalize] Converting {w}x{h} @ {fps:.2f}fps to 1080x1920 @ 30fps", flush=True)
+    print(f"[normalize] Converting {w}x{h} @ {fps:.2f}fps to 1080x1920", flush=True)
 
     sample_timestamps = []
     source_duration = probe_duration(source_path) or 0.0
@@ -2436,10 +2435,10 @@ def normalize_source_video(source_path, work_dir):
     normalize_args = [
         "-y","-i",source_path,
         "-vf", normalize_vf,
-        "-r","30","-vsync","cfr","-pix_fmt","yuv420p",
+        "-pix_fmt","yuv420p",
         "-c:v","libx264","-preset","medium","-crf","18",
         "-c:a","aac","-b:a","192k","-ar","48000","-ac","2",
-        "-threads","1","-map","0:v:0",
+        "-map","0:v:0",
     ]
     if audio:
         normalize_args += ["-map","0:a:0"]
@@ -2465,7 +2464,7 @@ def create_keyframed_source(source_path, keyframe_timestamps, work_dir):
         "-c:v","libx264","-preset","ultrafast","-crf","0",
         "-force_key_frames",kf_str,
         "-r","30","-vsync","cfr","-pix_fmt","yuv420p",
-        "-c:a","copy","-threads","1",
+        "-c:a","copy",
         keyframed_path,
     ])
     _kprobe = subprocess.run(
@@ -3991,38 +3990,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         if hook_e > 0:
             kf_timestamps.append(hook_e)
     kf_timestamps = sorted(set(kf_timestamps))
-    _probe = subprocess.run(
-        ["ffprobe", "-v", "quiet", "-select_streams", "v:0",
-         "-show_entries", "stream=r_frame_rate,avg_frame_rate",
-         "-of", "csv=p=0", source_path],
-        capture_output=True, text=True, timeout=10)
-    _fps_info = ((_probe.stdout or "").strip().split("\n")[0].split(",") if (_probe.stdout or "").strip() else [])
-    _is_30cfr = False
-    try:
-        for fps_str in _fps_info:
-            num, den = fps_str.strip().split("/")
-            if abs(float(num) / float(den) - 30.0) < 0.01:
-                _is_30cfr = True
-                break
-    except Exception:
-        pass
-
-    if _is_30cfr:
-        print(f"[ffmpeg] Source is 30fps CFR — skipping preparation", flush=True)
-        keyframed_path = source_path
-    else:
-        prepared_path = os.path.join(work_dir, "prepared_source.mp4")
-        print(f"[ffmpeg] Preparing source: converting to 30fps CFR", flush=True)
-        run_ffmpeg([
-            "-y", "-i", source_path,
-            "-r", "30", "-vsync", "cfr",
-            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "0",
-            "-pix_fmt", "yuv420p",
-            "-c:a", "copy",
-            "-threads", "1",
-            prepared_path,
-        ])
-        keyframed_path = prepared_path
+    keyframed_path = source_path
     _detailed_probe = subprocess.run(
         ["ffprobe", "-v", "quiet", "-select_streams", "v:0",
          "-show_entries", "stream=time_base,start_pts,start_time,duration,duration_ts,nb_frames,r_frame_rate,avg_frame_rate,codec_time_base,codec_name,pix_fmt",
@@ -4172,7 +4140,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             v_chain.append(f"setpts={1.0/combined_speed:.4f}*PTS")
         
         v_chain.append("fps=30")
-        v_chain.append("setpts=N/(30*TB)")
+        v_chain.append("setpts=PTS-STARTPTS")
         if zoom_filter:
             v_chain.append(zoom_filter)
         v_chain += ["format=yuv420p", color_filter_str]
@@ -4294,8 +4262,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             extra_input_index += 1
 
     transition_filters = []
-    tl_video = "v0"
-    tl_audio = "a0"
     running_dur = effective_durations[0]
 
     CUSTOM_TRANSITIONS = {"flash", "glitch", "whip_left", "whip_right"}
@@ -4306,58 +4272,73 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         "zoomin",
     }
 
+    has_xfade = False
     for i in range(1, n):
         transition = str(render_cuts[i-1].get("transition_out") or "none").lower()
-        out_v     = "vout" if i == n-1 else f"vx{i}"
-        out_v_raw = f"{out_v}_raw"
-        out_a     = "aout" if i == n-1 else f"ax{i}"
+        if transition in CUSTOM_TRANSITIONS or transition in XFADE_TRANSITIONS:
+            has_xfade = True
+            break
 
-        if transition in CUSTOM_TRANSITIONS:
-            td = TRANSITION_DURATION
-            offset = max(0, running_dur - td)
-
-            if transition == "flash":
-                transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=fadewhite:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
-                transition_filters.append(f"[{out_v_raw}]fps=30[{out_v}]")
-                transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
-
-            elif transition == "glitch":
-                transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=pixelize:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
-                transition_filters.append(f"[{out_v_raw}]hue=h=0:s=1.4,fps=30[{out_v}]")
-                transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
-
-            elif transition == "whip_left":
-                transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=wipeleft:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
-                transition_filters.append(f"[{out_v_raw}]boxblur=luma_radius=6:luma_power=1:chroma_radius=0,fps=30[{out_v}]")
-                transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
-
-            elif transition == "whip_right":
-                transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=wiperight:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
-                transition_filters.append(f"[{out_v_raw}]boxblur=luma_radius=6:luma_power=1:chroma_radius=0,fps=30[{out_v}]")
-                transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
-
-            running_dur = running_dur + effective_durations[i] - td
-
-        elif transition in XFADE_TRANSITIONS:
-            td = TRANSITION_DURATION
-            offset = max(0, running_dur - td)
-            transition_filters.append(f"[{tl_video}][v{i}]xfade=transition={transition}:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
-            transition_filters.append(f"[{out_v_raw}]fps=30[{out_v}]")
-            transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
-            running_dur = running_dur + effective_durations[i] - td
-
+    if not has_xfade:
+        v_labels = "".join(f"[v{i}]" for i in range(n))
+        a_labels = "".join(f"[a{i}]" for i in range(n))
+        if n > 1:
+            transition_filters.append(f"{v_labels}concat=n={n}:v=1:a=0[vout]")
+            transition_filters.append(f"{a_labels}concat=n={n}:v=0:a=1[aout]")
+            tl_video = "vout"
+            tl_audio = "aout"
         else:
-            transition_filters.append(f"[{tl_video}][v{i}]concat=n=2:v=1:a=0[{out_v_raw}]")
-            transition_filters.append(f"[{out_v_raw}]fps=30[{out_v}]")
-            transition_filters.append(f"[{tl_audio}][a{i}]concat=n=2:v=0:a=1[{out_a}]")
-            running_dur = running_dur + effective_durations[i]
-
-        tl_video = out_v
-        tl_audio = out_a
-
-    if n == 1:
+            tl_video = "v0"
+            tl_audio = "a0"
+        running_dur = sum(effective_durations)
+    else:
         tl_video = "v0"
         tl_audio = "a0"
+        for i in range(1, n):
+            transition = str(render_cuts[i-1].get("transition_out") or "none").lower()
+            out_v     = "vout" if i == n-1 else f"vx{i}"
+            out_v_raw = f"{out_v}_raw"
+            out_a     = "aout" if i == n-1 else f"ax{i}"
+
+            if transition in CUSTOM_TRANSITIONS:
+                td = TRANSITION_DURATION
+                offset = max(0, running_dur - td)
+
+                if transition == "flash":
+                    transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=fadewhite:duration={td:.3f}:offset={offset:.3f}[{out_v}]")
+                    transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
+
+                elif transition == "glitch":
+                    transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=pixelize:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
+                    transition_filters.append(f"[{out_v_raw}]hue=h=0:s=1.4[{out_v}]")
+                    transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
+
+                elif transition == "whip_left":
+                    transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=wipeleft:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
+                    transition_filters.append(f"[{out_v_raw}]boxblur=luma_radius=6:luma_power=1:chroma_radius=0[{out_v}]")
+                    transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
+
+                elif transition == "whip_right":
+                    transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=wiperight:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
+                    transition_filters.append(f"[{out_v_raw}]boxblur=luma_radius=6:luma_power=1:chroma_radius=0[{out_v}]")
+                    transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
+
+                running_dur = running_dur + effective_durations[i] - td
+
+            elif transition in XFADE_TRANSITIONS:
+                td = TRANSITION_DURATION
+                offset = max(0, running_dur - td)
+                transition_filters.append(f"[{tl_video}][v{i}]xfade=transition={transition}:duration={td:.3f}:offset={offset:.3f}[{out_v}]")
+                transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
+                running_dur = running_dur + effective_durations[i] - td
+
+            else:
+                transition_filters.append(f"[{tl_video}][v{i}]concat=n=2:v=1:a=0[{out_v}]")
+                transition_filters.append(f"[{tl_audio}][a{i}]concat=n=2:v=0:a=1[{out_a}]")
+                running_dur = running_dur + effective_durations[i]
+
+            tl_video = out_v
+            tl_audio = out_a
 
     post_filters = []
     video_out = "[video_base]"
@@ -4495,6 +4476,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _total_expected_a = sum(effective_durations)
     print(f"[DIAG] Expected totals: video(fps30)={_total_expected_v:.4f}s audio(raw)={_total_expected_a:.4f}s gap={_total_expected_v - _total_expected_a:.6f}s", flush=True)
     print(f"[DIAG] filter_complex: {len(filter_complex)} chars, {len(video_filters)} v_filters, {len(audio_filters)} a_filters, {len(transition_filters)} transitions", flush=True)
+    print(f"[DIAG] filter_complex (first 2000): {filter_complex[:2000]}", flush=True)
+    print(f"[DIAG] filter_complex (last 1000): {filter_complex[-1000:]}", flush=True)
     encode_args = [
         "-c:v","libx264","-preset","ultrafast","-crf","18",
         "-pix_fmt","yuv420p",
@@ -4505,7 +4488,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     ]
 
     args = (
-        ["-y","-threads","1"]
+        ["-y"]
         + input_args
         + sfx_input_args
         + ["-filter_complex", filter_complex, "-map", video_out, "-map", audio_out]
@@ -4518,7 +4501,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     try:
         run_ffmpeg(args)
     finally:
-        if os.path.exists(keyframed_path):
+        if keyframed_path != source_path and os.path.exists(keyframed_path):
             try:
                 os.unlink(keyframed_path)
             except Exception:
