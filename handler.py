@@ -2402,7 +2402,7 @@ def normalize_source_video(source_path, work_dir):
         r_fps = fps
 
     is_vfr = abs(fps - r_fps) > 0.5
-    needs_normalize = (w != 1080 or h != 1920 or abs(fps - 30) > 1 or is_vfr)
+    needs_normalize = (w != 1080 or h != 1920 or abs(fps - 30) > 0.01 or is_vfr)
 
     if not needs_normalize:
         print(f"[normalize] Source is already {w}x{h} @ {fps:.2f}fps — skipping", flush=True)
@@ -3991,7 +3991,38 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         if hook_e > 0:
             kf_timestamps.append(hook_e)
     kf_timestamps = sorted(set(kf_timestamps))
-    keyframed_path = source_path  # trim in filter_complex handles seeking
+    _probe = subprocess.run(
+        ["ffprobe", "-v", "quiet", "-select_streams", "v:0",
+         "-show_entries", "stream=r_frame_rate,avg_frame_rate",
+         "-of", "csv=p=0", source_path],
+        capture_output=True, text=True, timeout=10)
+    _fps_info = ((_probe.stdout or "").strip().split("\n")[0].split(",") if (_probe.stdout or "").strip() else [])
+    _is_30cfr = False
+    try:
+        for fps_str in _fps_info:
+            num, den = fps_str.strip().split("/")
+            if abs(float(num) / float(den) - 30.0) < 0.01:
+                _is_30cfr = True
+                break
+    except Exception:
+        pass
+
+    if _is_30cfr:
+        print(f"[ffmpeg] Source is 30fps CFR — skipping preparation", flush=True)
+        keyframed_path = source_path
+    else:
+        prepared_path = os.path.join(work_dir, "prepared_source.mp4")
+        print(f"[ffmpeg] Preparing source: converting to 30fps CFR", flush=True)
+        run_ffmpeg([
+            "-y", "-i", source_path,
+            "-r", "30", "-vsync", "cfr",
+            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "0",
+            "-pix_fmt", "yuv420p",
+            "-c:a", "copy",
+            "-threads", "1",
+            prepared_path,
+        ])
+        keyframed_path = prepared_path
     color_grade = edit_plan.get("color_grade") or {}
     color_filter_str = build_video_filter_chain(color_grade, source_res, edit_plan)
     has_burned_captions = infer_has_burned_captions(
