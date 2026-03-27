@@ -11,9 +11,12 @@ image = (
     )
     .apt_install(
         "ca-certificates",
-        "ffmpeg",
         "fontconfig",
         "wget",
+        "xz-utils",
+        "libass-dev",
+        "libfontconfig1",
+        "fonts-dejavu-core",
         "librubberband-dev",
         "rubberband-cli",
         "build-essential",
@@ -28,7 +31,16 @@ image = (
         "libsndfile1-dev",
         "libsamplerate0-dev",
     )
-    .run_commands("fc-cache -f")
+    .run_commands(
+        "mkdir -p /opt/ffmpeg",
+        "cd /opt/ffmpeg && wget -q https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz -O ffmpeg.tar.xz",
+        "cd /opt/ffmpeg && tar -xJf ffmpeg.tar.xz --strip-components=1",
+        "ln -sf /opt/ffmpeg/bin/ffmpeg /usr/local/bin/ffmpeg",
+        "ln -sf /opt/ffmpeg/bin/ffprobe /usr/local/bin/ffprobe",
+        "ffmpeg -version | head -1",
+        "ffmpeg -filters 2>/dev/null | grep subtitles || echo 'WARNING: subtitles filter not found'",
+        "fc-cache -f",
+    )
     .pip_install("numpy", "wheel")
     .pip_install("aubio", extra_options="--no-build-isolation")
     .pip_install(
