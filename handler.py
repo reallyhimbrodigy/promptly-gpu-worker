@@ -4562,6 +4562,66 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             "[0:v]trim=start=20:end=23,setpts=PTS-STARTPTS,setpts=0.7692*PTS,fps=30[v4];"
             "[v0][v1][v2][v3][v4]concat=n=5:v=1:a=0[vout]",
         )
+        _run_diag_test(
+            "G (single seg + settb)",
+            3.85,
+            "[0:v]trim=start=0:end=5,setpts=PTS-STARTPTS,settb=AVTB,setpts=0.7692*PTS,fps=30[vout]",
+        )
+        _run_diag_test(
+            "H (single seg + settb + format + eq)",
+            3.85,
+            "[0:v]trim=start=0:end=5,setpts=PTS-STARTPTS,settb=AVTB,setpts=0.7692*PTS,fps=30,format=yuv420p,eq=contrast=1.06:saturation=1.08[vout]",
+        )
+        _run_diag_test(
+            "I (2-seg + settb + pairwise)",
+            7.69,
+            "[0:v]trim=start=0:end=5,setpts=PTS-STARTPTS,settb=AVTB,setpts=0.7692*PTS,fps=30,format=yuv420p,eq=contrast=1.06:saturation=1.08[v0];"
+            "[0:v]trim=start=10:end=15,setpts=PTS-STARTPTS,settb=AVTB,setpts=0.7692*PTS,fps=30,format=yuv420p,eq=contrast=1.06:saturation=1.08[v1];"
+            "[v0][v1]concat=n=2:v=1:a=0[vraw];[vraw]fps=30[vout]",
+        )
+        _run_diag_test(
+            "J (5-seg + settb + pairwise)",
+            11.54,
+            "[0:v]trim=start=0:end=3,setpts=PTS-STARTPTS,settb=AVTB,setpts=0.7692*PTS,fps=30,format=yuv420p,eq=contrast=1.06:saturation=1.08[v0];"
+            "[0:v]trim=start=5:end=8,setpts=PTS-STARTPTS,settb=AVTB,setpts=0.7692*PTS,fps=30,format=yuv420p,eq=contrast=1.06:saturation=1.08[v1];"
+            "[0:v]trim=start=10:end=13,setpts=PTS-STARTPTS,settb=AVTB,setpts=0.7692*PTS,fps=30,format=yuv420p,eq=contrast=1.06:saturation=1.08[v2];"
+            "[0:v]trim=start=15:end=18,setpts=PTS-STARTPTS,settb=AVTB,setpts=0.7692*PTS,fps=30,format=yuv420p,eq=contrast=1.06:saturation=1.08[v3];"
+            "[0:v]trim=start=20:end=23,setpts=PTS-STARTPTS,settb=AVTB,setpts=0.7692*PTS,fps=30,format=yuv420p,eq=contrast=1.06:saturation=1.08[v4];"
+            "[v0][v1]concat=n=2:v=1:a=0[vx1_raw];[vx1_raw]fps=30[vx1];"
+            "[vx1][v2]concat=n=2:v=1:a=0[vx2_raw];[vx2_raw]fps=30[vx2];"
+            "[vx2][v3]concat=n=2:v=1:a=0[vx3_raw];[vx3_raw]fps=30[vx3];"
+            "[vx3][v4]concat=n=2:v=1:a=0[vout_raw];[vout_raw]fps=30[vout]",
+        )
+        if len(video_filters) >= 3 and len(transition_filters) >= 4:
+            _k_path = os.path.join(work_dir, "diag_test_k.mp4")
+            try:
+                _k_filters = video_filters[:3]
+                _k_transitions = transition_filters[:4]
+                _k_fc = ";".join(_k_filters + _k_transitions)
+                _k_last_label = "[vx2]" if n > 3 else "[vout]"
+                _k_expected = sum(effective_durations[:3])
+                _k_args = [
+                    "ffmpeg", "-y", "-threads", "1",
+                    "-analyzeduration", "10000000", "-probesize", "10000000",
+                    "-i", keyframed_path,
+                    "-filter_complex", _k_fc,
+                    "-map", _k_last_label,
+                    "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
+                    _k_path,
+                ]
+                _k_result = subprocess.run(_k_args, capture_output=True, text=True, timeout=60)
+                _k_dur = 0.0
+                if _k_result.returncode == 0 and os.path.exists(_k_path):
+                    _k_dur = _probe_diag_duration(_k_path)
+                print(f"[DIAG-TEST] Test K (first 3 REAL segments): expected={_k_expected:.2f}s actual={_k_dur:.2f}s", flush=True)
+            except Exception as e:
+                print(f"[DIAG-TEST] Test K FAILED: {e}", flush=True)
+            finally:
+                if os.path.exists(_k_path):
+                    try:
+                        os.remove(_k_path)
+                    except Exception:
+                        pass
     except Exception as e:
         print(f"[DIAG-TEST] failed: {e}", flush=True)
     encode_args = [
