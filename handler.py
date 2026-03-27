@@ -4455,6 +4455,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _total_expected_v = sum(round(d * 30) / 30 for d in effective_durations)
     _total_expected_a = sum(effective_durations)
     print(f"[DIAG] Expected totals: video(fps30)={_total_expected_v:.4f}s audio(raw)={_total_expected_a:.4f}s gap={_total_expected_v - _total_expected_a:.6f}s", flush=True)
+    print(f"[DIAG] filter_complex: {len(filter_complex)} chars, {len(video_filters)} v_filters, {len(audio_filters)} a_filters, {len(transition_filters)} transitions", flush=True)
+    print(f"[DIAG] filter_complex (first 2000): {filter_complex[:2000]}", flush=True)
+    print(f"[DIAG] filter_complex (last 1000): {filter_complex[-1000:]}", flush=True)
     encode_args = [
         "-c:v","libx264","-preset","medium","-crf","18",
         "-pix_fmt","yuv420p",
