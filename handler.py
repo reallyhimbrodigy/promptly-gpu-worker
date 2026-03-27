@@ -4007,7 +4007,13 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     )
 
     # Single input: the keyframed source
-    input_args = ["-analyzeduration", "10000000", "-probesize", "10000000", "-i", keyframed_path]
+    input_args = [
+        "-analyzeduration", "10000000",
+        "-probesize", "10000000",
+        "-r", "30",
+        "-vsync", "cfr",
+        "-i", keyframed_path,
+    ]
     sample_rate = probe_audio_sample_rate(source_path) or 48000
 
     # Compute effective durations from recipe with per-segment speed applied.
