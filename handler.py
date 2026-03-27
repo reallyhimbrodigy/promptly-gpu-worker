@@ -4159,7 +4159,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             outro_filter = f"fade=t=out:st={fade_start:.3f}:d=1.0:color={fade_color}"
 
         # Video: trim from source, then apply per-clip filters
-        v_chain = [f"trim=start={start:.3f}:end={end:.3f}", "setpts=PTS-STARTPTS", "settb=AVTB"]
+        v_chain = [f"trim=start={start:.3f}:end={end:.3f}", "setpts=PTS-STARTPTS"]
 
         if abs(combined_speed - 1.0) > 0.001:
             v_chain.append(f"setpts={1.0/combined_speed:.4f}*PTS")
