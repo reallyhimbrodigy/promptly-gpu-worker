@@ -4159,7 +4159,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             outro_filter = f"fade=t=out:st={fade_start:.3f}:d=1.0:color={fade_color}"
 
         # Video: trim from source, then apply per-clip filters
-        v_chain = [f"trim=start={start:.3f}:end={end:.3f}", "setpts=PTS-STARTPTS"]
+        v_chain = [f"trim=start={start:.3f}:end={end:.3f}", "setpts=PTS-STARTPTS", "settb=AVTB"]
 
         if abs(combined_speed - 1.0) > 0.001:
             v_chain.append(f"setpts={1.0/combined_speed:.4f}*PTS")
@@ -4489,6 +4489,81 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     print(f"[DIAG] filter_complex: {len(filter_complex)} chars, {len(video_filters)} v_filters, {len(audio_filters)} a_filters, {len(transition_filters)} transitions", flush=True)
     print(f"[DIAG] filter_complex (first 2000): {filter_complex[:2000]}", flush=True)
     print(f"[DIAG] filter_complex (last 1000): {filter_complex[-1000:]}", flush=True)
+    try:
+        def _probe_diag_duration(path):
+            return float((subprocess.run(
+                ["ffprobe", "-v", "quiet", "-show_entries", "format=duration", "-of", "csv=p=0", path],
+                capture_output=True, text=True, timeout=10,
+            ).stdout or "0").strip() or "0")
+
+        def _run_diag_test(label, expected, filter_str):
+            test_path = os.path.join(work_dir, f"diag_{label}.mp4")
+            result = subprocess.run([
+                "ffmpeg", "-y", "-i", keyframed_path,
+                "-filter_complex", filter_str,
+                "-map", "[vout]",
+                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
+                test_path,
+            ], capture_output=True, text=True, timeout=60)
+            actual = 0.0
+            if result.returncode == 0 and os.path.exists(test_path):
+                actual = _probe_diag_duration(test_path)
+            print(f"[DIAG-TEST] Test {label}: expected={expected:.2f}s actual={actual:.2f}s", flush=True)
+            if os.path.exists(test_path):
+                try:
+                    os.remove(test_path)
+                except Exception:
+                    pass
+
+        _run_diag_test(
+            "A (single segment, no speed)",
+            5.00,
+            "[0:v]trim=start=0:end=5,setpts=PTS-STARTPTS,fps=30[vout]",
+        )
+        _run_diag_test(
+            "B (single segment, 1.3x speed)",
+            3.85,
+            "[0:v]trim=start=0:end=5,setpts=PTS-STARTPTS,setpts=0.7692*PTS,fps=30[vout]",
+        )
+        _run_diag_test(
+            "C (2-seg concat + fps=30)",
+            7.69,
+            "[0:v]trim=start=0:end=5,setpts=PTS-STARTPTS,setpts=0.7692*PTS,fps=30[v0];"
+            "[0:v]trim=start=10:end=15,setpts=PTS-STARTPTS,setpts=0.7692*PTS,fps=30[v1];"
+            "[v0][v1]concat=n=2:v=1:a=0[vraw];[vraw]fps=30[vout]",
+        )
+        _run_diag_test(
+            "D (2-seg concat, no fps=30)",
+            7.69,
+            "[0:v]trim=start=0:end=5,setpts=PTS-STARTPTS,setpts=0.7692*PTS,fps=30[v0];"
+            "[0:v]trim=start=10:end=15,setpts=PTS-STARTPTS,setpts=0.7692*PTS,fps=30[v1];"
+            "[v0][v1]concat=n=2:v=1:a=0[vout]",
+        )
+        _run_diag_test(
+            "E (5-seg pairwise + fps=30)",
+            11.54,
+            "[0:v]trim=start=0:end=3,setpts=PTS-STARTPTS,setpts=0.7692*PTS,fps=30[v0];"
+            "[0:v]trim=start=5:end=8,setpts=PTS-STARTPTS,setpts=0.7692*PTS,fps=30[v1];"
+            "[0:v]trim=start=10:end=13,setpts=PTS-STARTPTS,setpts=0.7692*PTS,fps=30[v2];"
+            "[0:v]trim=start=15:end=18,setpts=PTS-STARTPTS,setpts=0.7692*PTS,fps=30[v3];"
+            "[0:v]trim=start=20:end=23,setpts=PTS-STARTPTS,setpts=0.7692*PTS,fps=30[v4];"
+            "[v0][v1]concat=n=2:v=1:a=0[vx1_raw];[vx1_raw]fps=30[vx1];"
+            "[vx1][v2]concat=n=2:v=1:a=0[vx2_raw];[vx2_raw]fps=30[vx2];"
+            "[vx2][v3]concat=n=2:v=1:a=0[vx3_raw];[vx3_raw]fps=30[vx3];"
+            "[vx3][v4]concat=n=2:v=1:a=0[vout_raw];[vout_raw]fps=30[vout]",
+        )
+        _run_diag_test(
+            "F (5-seg single concat)",
+            11.54,
+            "[0:v]trim=start=0:end=3,setpts=PTS-STARTPTS,setpts=0.7692*PTS,fps=30[v0];"
+            "[0:v]trim=start=5:end=8,setpts=PTS-STARTPTS,setpts=0.7692*PTS,fps=30[v1];"
+            "[0:v]trim=start=10:end=13,setpts=PTS-STARTPTS,setpts=0.7692*PTS,fps=30[v2];"
+            "[0:v]trim=start=15:end=18,setpts=PTS-STARTPTS,setpts=0.7692*PTS,fps=30[v3];"
+            "[0:v]trim=start=20:end=23,setpts=PTS-STARTPTS,setpts=0.7692*PTS,fps=30[v4];"
+            "[v0][v1][v2][v3][v4]concat=n=5:v=1:a=0[vout]",
+        )
+    except Exception as e:
+        print(f"[DIAG-TEST] failed: {e}", flush=True)
     encode_args = [
         "-c:v","libx264","-preset","medium","-crf","18",
         "-pix_fmt","yuv420p",
