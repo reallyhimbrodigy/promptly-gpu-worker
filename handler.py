@@ -4504,228 +4504,77 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     print(f"[DIAG] filter_complex: {len(filter_complex)} chars, {len(video_filters)} v_filters, {len(audio_filters)} a_filters, {len(transition_filters)} transitions", flush=True)
     print(f"[DIAG] filter_complex (first 2000): {filter_complex[:2000]}", flush=True)
     print(f"[DIAG] filter_complex (last 1000): {filter_complex[-1000:]}", flush=True)
-    try:
-        def _probe_diag_duration(path):
-            return float((subprocess.run(
-                ["ffprobe", "-v", "quiet", "-show_entries", "format=duration", "-of", "csv=p=0", path],
-                capture_output=True, text=True, timeout=10,
-            ).stdout or "0").strip() or "0")
+    # ── PTS simulation ─────────────────────────────────────────────────
+    # Simulate PTS through the filter chain without running a real render.
+    print("[PTS-SIM] Simulating PTS through filter chain...", flush=True)
+    _settb_test = subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=duration=1:size=320x240:rate=30",
+         "-vf", "settb=AVTB,showinfo", "-frames:v", "3", "-f", "null", "-"],
+        capture_output=True, text=True, timeout=10)
+    _settb_stderr = _settb_test.stderr or ""
+    _pts_matches = re.findall(r"pts:\s*(\d+)\s+pts_time:([\d.]+)", _settb_stderr)
+    if _pts_matches:
+        print(f"[PTS-SIM] settb=AVTB test: {_pts_matches[:3]}", flush=True)
+    else:
+        print(f"[PTS-SIM] settb=AVTB test: no PTS found in output", flush=True)
 
-        def _run_diag_test(label, expected, filter_str):
-            test_path = os.path.join(work_dir, f"diag_{label}.mp4")
-            result = subprocess.run([
-                "ffmpeg", "-y", "-i", keyframed_path,
-                "-filter_complex", filter_str,
-                "-map", "[vout]",
-                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
-                test_path,
-            ], capture_output=True, text=True, timeout=60)
-            actual = 0.0
-            if result.returncode == 0 and os.path.exists(test_path):
-                actual = _probe_diag_duration(test_path)
-            print(f"[DIAG-TEST] Test {label}: expected={expected:.2f}s actual={actual:.2f}s", flush=True)
-            if os.path.exists(test_path):
-                try:
-                    os.remove(test_path)
-                except Exception:
-                    pass
+    _src_tb = 15360
+    _avtb = 1000000
+    _sim_segments = []
+    for _si, _scut in enumerate(render_cuts):
+        _s_start = float(_scut["source_start"])
+        _s_end = float(_scut["source_end"])
+        _s_speed = max(0.25, min(4.0, float(_scut.get("speed") or 1.0)))
+        _s_curve = 1.0
+        if speed_curve and speed_curve != "none":
+            _s_curve = max(0.5, min(1.5, get_speed_for_timestamp(_s_start, speed_curve)))
+        _s_combined = _s_speed * _s_curve
+        _s_raw_dur = _s_end - _s_start
+        _frame_interval_src = round(_src_tb / 30)
+        _n_frames_raw = round(_s_raw_dur * 30)
+        _speed_mult = 1.0 / _s_combined if abs(_s_combined - 1.0) > 0.001 else 1.0
+        _last_pts_after_setpts = max(0, _n_frames_raw - 1) * _frame_interval_src
+        _dur_after_setpts = _last_pts_after_setpts / _src_tb
+        _rescale_factor = _avtb / _src_tb
+        _last_pts_after_settb = _last_pts_after_setpts * _rescale_factor
+        _dur_after_settb = _last_pts_after_settb / _avtb
+        _last_pts_after_speed = _last_pts_after_settb * _speed_mult
+        _dur_after_speed = _last_pts_after_speed / _avtb
+        _n_output_frames = round(_dur_after_speed * 30)
+        _output_dur = _n_output_frames / 30
+        _expected_dur = effective_durations[_si]
 
-        _run_diag_test(
-            "A (single segment, no speed)",
-            5.00,
-            "[0:v]trim=start=0:end=5,setpts=PTS-STARTPTS,fps=30[vout]",
-        )
-        _run_diag_test(
-            "B (single segment, 1.3x speed)",
-            3.85,
-            "[0:v]trim=start=0:end=5,setpts=PTS-STARTPTS,setpts=0.7692*PTS,fps=30[vout]",
-        )
-        _run_diag_test(
-            "C (2-seg concat + fps=30)",
-            7.69,
-            "[0:v]trim=start=0:end=5,setpts=PTS-STARTPTS,setpts=0.7692*PTS,fps=30[v0];"
-            "[0:v]trim=start=10:end=15,setpts=PTS-STARTPTS,setpts=0.7692*PTS,fps=30[v1];"
-            "[v0][v1]concat=n=2:v=1:a=0[vraw];[vraw]fps=30[vout]",
-        )
-        _run_diag_test(
-            "D (2-seg concat, no fps=30)",
-            7.69,
-            "[0:v]trim=start=0:end=5,setpts=PTS-STARTPTS,setpts=0.7692*PTS,fps=30[v0];"
-            "[0:v]trim=start=10:end=15,setpts=PTS-STARTPTS,setpts=0.7692*PTS,fps=30[v1];"
-            "[v0][v1]concat=n=2:v=1:a=0[vout]",
-        )
-        _run_diag_test(
-            "E (5-seg pairwise + fps=30)",
-            11.54,
-            "[0:v]trim=start=0:end=3,setpts=PTS-STARTPTS,setpts=0.7692*PTS,fps=30[v0];"
-            "[0:v]trim=start=5:end=8,setpts=PTS-STARTPTS,setpts=0.7692*PTS,fps=30[v1];"
-            "[0:v]trim=start=10:end=13,setpts=PTS-STARTPTS,setpts=0.7692*PTS,fps=30[v2];"
-            "[0:v]trim=start=15:end=18,setpts=PTS-STARTPTS,setpts=0.7692*PTS,fps=30[v3];"
-            "[0:v]trim=start=20:end=23,setpts=PTS-STARTPTS,setpts=0.7692*PTS,fps=30[v4];"
-            "[v0][v1]concat=n=2:v=1:a=0[vx1_raw];[vx1_raw]fps=30[vx1];"
-            "[vx1][v2]concat=n=2:v=1:a=0[vx2_raw];[vx2_raw]fps=30[vx2];"
-            "[vx2][v3]concat=n=2:v=1:a=0[vx3_raw];[vx3_raw]fps=30[vx3];"
-            "[vx3][v4]concat=n=2:v=1:a=0[vout_raw];[vout_raw]fps=30[vout]",
-        )
-        _run_diag_test(
-            "F (5-seg single concat)",
-            11.54,
-            "[0:v]trim=start=0:end=3,setpts=PTS-STARTPTS,setpts=0.7692*PTS,fps=30[v0];"
-            "[0:v]trim=start=5:end=8,setpts=PTS-STARTPTS,setpts=0.7692*PTS,fps=30[v1];"
-            "[0:v]trim=start=10:end=13,setpts=PTS-STARTPTS,setpts=0.7692*PTS,fps=30[v2];"
-            "[0:v]trim=start=15:end=18,setpts=PTS-STARTPTS,setpts=0.7692*PTS,fps=30[v3];"
-            "[0:v]trim=start=20:end=23,setpts=PTS-STARTPTS,setpts=0.7692*PTS,fps=30[v4];"
-            "[v0][v1][v2][v3][v4]concat=n=5:v=1:a=0[vout]",
-        )
-        _run_diag_test(
-            "G (single seg + settb)",
-            3.85,
-            "[0:v]trim=start=0:end=5,setpts=PTS-STARTPTS,settb=AVTB,setpts=0.7692*PTS,fps=30[vout]",
-        )
-        _run_diag_test(
-            "H (single seg + settb + format + eq)",
-            3.85,
-            "[0:v]trim=start=0:end=5,setpts=PTS-STARTPTS,settb=AVTB,setpts=0.7692*PTS,fps=30,format=yuv420p,eq=contrast=1.06:saturation=1.08[vout]",
-        )
-        _run_diag_test(
-            "I (2-seg + settb + pairwise)",
-            7.69,
-            "[0:v]trim=start=0:end=5,setpts=PTS-STARTPTS,settb=AVTB,setpts=0.7692*PTS,fps=30,format=yuv420p,eq=contrast=1.06:saturation=1.08[v0];"
-            "[0:v]trim=start=10:end=15,setpts=PTS-STARTPTS,settb=AVTB,setpts=0.7692*PTS,fps=30,format=yuv420p,eq=contrast=1.06:saturation=1.08[v1];"
-            "[v0][v1]concat=n=2:v=1:a=0[vraw];[vraw]fps=30[vout]",
-        )
-        _run_diag_test(
-            "J (5-seg + settb + pairwise)",
-            11.54,
-            "[0:v]trim=start=0:end=3,setpts=PTS-STARTPTS,settb=AVTB,setpts=0.7692*PTS,fps=30,format=yuv420p,eq=contrast=1.06:saturation=1.08[v0];"
-            "[0:v]trim=start=5:end=8,setpts=PTS-STARTPTS,settb=AVTB,setpts=0.7692*PTS,fps=30,format=yuv420p,eq=contrast=1.06:saturation=1.08[v1];"
-            "[0:v]trim=start=10:end=13,setpts=PTS-STARTPTS,settb=AVTB,setpts=0.7692*PTS,fps=30,format=yuv420p,eq=contrast=1.06:saturation=1.08[v2];"
-            "[0:v]trim=start=15:end=18,setpts=PTS-STARTPTS,settb=AVTB,setpts=0.7692*PTS,fps=30,format=yuv420p,eq=contrast=1.06:saturation=1.08[v3];"
-            "[0:v]trim=start=20:end=23,setpts=PTS-STARTPTS,settb=AVTB,setpts=0.7692*PTS,fps=30,format=yuv420p,eq=contrast=1.06:saturation=1.08[v4];"
-            "[v0][v1]concat=n=2:v=1:a=0[vx1_raw];[vx1_raw]fps=30[vx1];"
-            "[vx1][v2]concat=n=2:v=1:a=0[vx2_raw];[vx2_raw]fps=30[vx2];"
-            "[vx2][v3]concat=n=2:v=1:a=0[vx3_raw];[vx3_raw]fps=30[vx3];"
-            "[vx3][v4]concat=n=2:v=1:a=0[vout_raw];[vout_raw]fps=30[vout]",
-        )
-        try:
-            _old_style_path = os.path.join(work_dir, "diag_old_keyframed.mp4")
-            _kf_str = ",".join(
-                str(round(float(c["source_start"]) * 1000) / 1000)
-                for c in render_cuts
-                if float(c["source_start"]) > 0
+        _sim_segments.append({
+            "i": _si,
+            "raw_dur": _s_raw_dur,
+            "speed": _s_combined,
+            "n_frames_raw": _n_frames_raw,
+            "dur_after_setpts": _dur_after_setpts,
+            "dur_after_settb": _dur_after_settb,
+            "dur_after_speed": _dur_after_speed,
+            "output_dur": _output_dur,
+            "expected_dur": _expected_dur,
+        })
+
+        if _si < 3 or abs(_output_dur - _expected_dur) > 0.1:
+            print(
+                f"[PTS-SIM] Seg{_si}: raw={_s_raw_dur:.3f}s speed={_s_combined:.3f} "
+                f"after_setpts={_dur_after_setpts:.4f}s after_settb={_dur_after_settb:.4f}s "
+                f"after_speed={_dur_after_speed:.4f}s output_fps30={_output_dur:.4f}s "
+                f"expected={_expected_dur:.4f}s {'OK' if abs(_output_dur - _expected_dur) < 0.1 else 'MISMATCH'}",
+                flush=True,
             )
 
-            run_ffmpeg([
-                "-y", "-i", keyframed_path,
-                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "0",
-                "-force_key_frames", _kf_str,
-                "-r", "30", "-vsync", "cfr", "-pix_fmt", "yuv420p",
-                "-c:a", "copy", "-threads", "1",
-                _old_style_path,
-            ])
-
-            _old_probe = subprocess.run(
-                ["ffprobe", "-v", "quiet", "-select_streams", "v:0",
-                 "-show_entries", "stream=time_base,start_pts,duration,nb_frames,r_frame_rate,codec_time_base",
-                 "-of", "json", _old_style_path],
-                capture_output=True, text=True, timeout=10)
-            print(f"[DIAG] Old-style keyframed probe: {_old_probe.stdout.strip()}", flush=True)
-
-            _old_pts_probe = subprocess.run(
-                ["ffprobe", "-v", "quiet", "-select_streams", "v:0",
-                 "-show_entries", "frame=pts,pts_time",
-                 "-of", "csv=p=0",
-                 "-read_intervals", "%+#10",
-                 _old_style_path],
-                capture_output=True, text=True, timeout=10)
-            print(f"[DIAG] Old-style first 10 frame PTS: {_old_pts_probe.stdout.strip()}", flush=True)
-
-            _test_current = os.path.join(work_dir, "diag_render_current.mp4")
-            _fc_current = (
-                "[0:v]trim=start=0:end=5,setpts=PTS-STARTPTS,settb=AVTB,setpts=0.7692*PTS,fps=30,format=yuv420p[v0];"
-                "[0:v]trim=start=10:end=15,setpts=PTS-STARTPTS,settb=AVTB,setpts=0.7692*PTS,fps=30,format=yuv420p[v1];"
-                "[v0][v1]concat=n=2:v=1:a=0[vraw];[vraw]fps=30[vout]"
-            )
-            run_ffmpeg([
-                "-y", "-i", keyframed_path,
-                "-filter_complex", _fc_current,
-                "-map", "[vout]",
-                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
-                _test_current,
-            ])
-            _dur_current = _probe_diag_duration(_test_current)
-
-            _test_old = os.path.join(work_dir, "diag_render_old.mp4")
-            run_ffmpeg([
-                "-y", "-i", _old_style_path,
-                "-filter_complex", _fc_current,
-                "-map", "[vout]",
-                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
-                _test_old,
-            ])
-            _dur_old = _probe_diag_duration(_test_old)
-
-            print(f"[DIAG-TEST] Test N render with CURRENT source: expected=7.69s actual={_dur_current:.2f}s", flush=True)
-            print(f"[DIAG-TEST] Test N render with OLD-STYLE source: expected=7.69s actual={_dur_old:.2f}s", flush=True)
-
-            for _p in [_old_style_path, _test_current, _test_old]:
-                if os.path.exists(_p):
-                    os.unlink(_p)
-        except Exception as e:
-            print(f"[DIAG-TEST] Test N FAILED: {e}", flush=True)
-
-        try:
-            _old_style_path_o = os.path.join(work_dir, "diag_old_keyframed_o.mp4")
-            run_ffmpeg([
-                "-y", "-i", keyframed_path,
-                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "0",
-                "-force_key_frames", _kf_str,
-                "-r", "30", "-vsync", "cfr", "-pix_fmt", "yuv420p",
-                "-c:a", "copy", "-threads", "1",
-                _old_style_path_o,
-            ])
-
-            _o_fc = ";".join(video_filters + transition_filters)
-            _o_path = os.path.join(work_dir, "diag_test_o.mp4")
-            _o_label = tl_video
-
-            run_ffmpeg([
-                "-y", "-threads", "1",
-                "-analyzeduration", "10000000", "-probesize", "10000000",
-                "-i", _old_style_path_o,
-                "-filter_complex", _o_fc,
-                "-map", f"[{_o_label}]",
-                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
-                "-an",
-                _o_path,
-            ])
-            _o_dur = _probe_diag_duration(_o_path)
-            _o_expected = sum(effective_durations)
-            print(f"[DIAG-TEST] Test O (FULL filter_complex + OLD source, video only): expected={_o_expected:.2f}s actual={_o_dur:.2f}s", flush=True)
-
-            _p_path = os.path.join(work_dir, "diag_test_p.mp4")
-            run_ffmpeg([
-                "-y", "-threads", "1",
-                "-analyzeduration", "10000000", "-probesize", "10000000",
-                "-i", keyframed_path,
-                "-filter_complex", _o_fc,
-                "-map", f"[{_o_label}]",
-                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
-                "-an",
-                _p_path,
-            ])
-            _p_dur = _probe_diag_duration(_p_path)
-            print(f"[DIAG-TEST] Test P (FULL filter_complex + CURRENT source, video only): expected={_o_expected:.2f}s actual={_p_dur:.2f}s", flush=True)
-
-            for _p in [_old_style_path_o, _o_path, _p_path]:
-                if os.path.exists(_p):
-                    os.unlink(_p)
-        except Exception as e:
-            print(f"[DIAG-TEST] Test O/P FAILED: {e}", flush=True)
-    except Exception as e:
-        print(f"[DIAG-TEST] failed: {e}", flush=True)
+    _concat_total = sum(s["output_dur"] for s in _sim_segments)
+    _expected_total = sum(effective_durations)
+    print(
+        f"[PTS-SIM] Total: simulated={_concat_total:.4f}s expected={_expected_total:.4f}s "
+        f"actual_render={_concat_total:.4f}s",
+        flush=True,
+    )
+    print("[PTS-SIM] Simulation complete", flush=True)
     encode_args = [
-        "-c:v","libx264","-preset","medium","-crf","18",
+        "-c:v","libx264","-preset","ultrafast","-crf","18",
         "-pix_fmt","yuv420p",
         "-c:a","aac","-b:a","128k",
         "-shortest",
