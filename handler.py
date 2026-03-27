@@ -4513,6 +4513,45 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         "-max_muxing_queue_size","1024",
     ]
 
+    # Definitive test: 2 segments on the confirmed CFR source
+    try:
+        _def_path = os.path.join(work_dir, "definitive_test.mp4")
+        _def_fc = (
+            f"[0:v]trim=start=0:end=5,setpts=PTS-STARTPTS,fps=30,setpts=0.7692*PTS,setpts=PTS-STARTPTS,format=yuv420p[v0];"
+            f"[0:v]trim=start=10:end=15,setpts=PTS-STARTPTS,fps=30,setpts=1.2500*PTS,setpts=PTS-STARTPTS,format=yuv420p[v1];"
+            f"[v0][v1]concat=n=2:v=1:a=0[vout]"
+        )
+        run_ffmpeg([
+            "-y", "-analyzeduration", "10000000", "-probesize", "10000000",
+            "-i", keyframed_path,
+            "-filter_complex", _def_fc,
+            "-map", "[vout]",
+            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
+            "-an", _def_path,
+        ])
+        _def_dur = float(subprocess.run(
+            ["ffprobe", "-v", "quiet", "-show_entries", "format=duration", "-of", "csv=p=0", _def_path],
+            capture_output=True, text=True, timeout=10).stdout.strip() or "0")
+        print(f"[DIAG-DEF] Definitive test on CFR source: expected=10.10s actual={_def_dur:.2f}s", flush=True)
+
+        _def2_path = os.path.join(work_dir, "definitive_test2.mp4")
+        run_ffmpeg([
+            "-y", "-analyzeduration", "10000000", "-probesize", "10000000",
+            "-i", keyframed_path,
+            "-filter_complex", _def_fc,
+            "-map", "[vout]",
+        ] + encode_args + [_def2_path])
+        _def2_dur = float(subprocess.run(
+            ["ffprobe", "-v", "quiet", "-show_entries", "format=duration", "-of", "csv=p=0", _def2_path],
+            capture_output=True, text=True, timeout=10).stdout.strip() or "0")
+        print(f"[DIAG-DEF] Same test with production encode_args: expected=10.10s actual={_def2_dur:.2f}s", flush=True)
+
+        for _p in [_def_path, _def2_path]:
+            if os.path.exists(_p):
+                os.unlink(_p)
+    except Exception as e:
+        print(f"[DIAG-DEF] FAILED: {e}", flush=True)
+
     args = (
         ["-y"]
         + input_args
