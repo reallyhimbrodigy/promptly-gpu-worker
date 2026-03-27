@@ -994,6 +994,10 @@ def build_gemini_edit_prompt(vibe, duration, trend_context=None):
     trend_block = ""
     if trend_context:
         trend_block = "\n\n" + format_trend_section(trend_context)
+    if trend_block:
+        print(f"[DIAG-PROMPT] trend_block length: {len(trend_block)} chars", flush=True)
+        print(f"[DIAG-PROMPT] trend_block first 1000 chars: {trend_block[:1000]}", flush=True)
+        print(f"[DIAG-PROMPT] trend_block last 500 chars: {trend_block[-500:]}", flush=True)
 
     intents = "none, neutral, cinematic, warm, cozy, cool, moody, vibrant, punchy, vivid, clean, polished, enhanced, faded, vintage, dramatic, bold, soft, dreamy"
 
@@ -1391,6 +1395,11 @@ RULES FOR USING THESE TIMESTAMPS:
     for model_name in [GEMINI_MODEL]:
         try:
             print(f"[generate-edit] Calling Gemini model={model_name}...", flush=True)
+            print(f"[DIAG-PROMPT] Total prompt length: {len(prompt)} chars", flush=True)
+            print(f"[DIAG-PROMPT] Contains 'speed_curve': {'speed_curve' in prompt}", flush=True)
+            print(f"[DIAG-PROMPT] Contains 'WHAT\\'S WORKING': {'WORKING' in prompt}", flush=True)
+            print(f"[DIAG-PROMPT] Contains 'style_guide': {'style_guide' in prompt.lower()}", flush=True)
+            print(f"[DIAG-PROMPT] Contains 'example': {'example' in prompt.lower()}", flush=True)
             t = time.time()
             model = genai.GenerativeModel(model_name)
             response = model.generate_content(
