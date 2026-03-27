@@ -4011,6 +4011,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         cfr_path,
     ])
     keyframed_path = cfr_path
+    print(f"[render] CFR output path: {cfr_path}", flush=True)
+    print(f"[render] keyframed_path after CFR: {keyframed_path}", flush=True)
+    _cfr_probe = subprocess.run(
+        ["ffprobe", "-v", "quiet", "-select_streams", "v:0",
+         "-show_entries", "stream=r_frame_rate,avg_frame_rate,time_base,duration,nb_frames,codec_name",
+         "-of", "json", keyframed_path],
+        capture_output=True, text=True, timeout=10)
+    print(f"[DIAG] CFR source probe: {(_cfr_probe.stdout or '').strip()}", flush=True)
     print(f"[render] CFR conversion complete", flush=True)
     color_grade = edit_plan.get("color_grade") or {}
     color_filter_str = build_video_filter_chain(color_grade, source_res, edit_plan)
