@@ -4552,6 +4552,86 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     except Exception as e:
         print(f"[DIAG-DEF] FAILED: {e}", flush=True)
 
+    # Progressive scale tests on the confirmed CFR source
+    try:
+        _t1_vf = []
+        for _ti, _tc in enumerate(render_cuts):
+            _ts = float(_tc["source_start"])
+            _te = float(_tc["source_end"])
+            _tsp = max(0.25, min(4.0, float(_tc.get("speed") or 1.0)))
+            _tcr = 1.0
+            if speed_curve and speed_curve != "none":
+                _tcr = max(0.5, min(1.5, get_speed_for_timestamp(_ts, speed_curve)))
+            _tcomb = _tsp * _tcr
+            _chain = f"[0:v]trim=start={_ts:.3f}:end={_te:.3f},setpts=PTS-STARTPTS,fps=30"
+            if abs(_tcomb - 1.0) > 0.001:
+                _chain += f",setpts={1.0/_tcomb:.4f}*PTS"
+            _chain += f",setpts=PTS-STARTPTS,format=yuv420p[tv{_ti}]"
+            _t1_vf.append(_chain)
+        _t1_labels = "".join(f"[tv{i}]" for i in range(len(render_cuts)))
+        _t1_fc = ";".join(_t1_vf) + f";{_t1_labels}concat=n={len(render_cuts)}:v=1:a=0[tvout]"
+        _t1_path = os.path.join(work_dir, "test1.mp4")
+        run_ffmpeg([
+            "-y", "-i", keyframed_path,
+            "-filter_complex", _t1_fc,
+            "-map", "[tvout]",
+            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
+            "-an", _t1_path,
+        ])
+        _t1_dur = float(subprocess.run(
+            ["ffprobe", "-v", "quiet", "-show_entries", "format=duration", "-of", "csv=p=0", _t1_path],
+            capture_output=True, text=True, timeout=10).stdout.strip() or "0")
+        _t1_exp = sum(effective_durations)
+        print(f"[DIAG-SCALE] Test 1 (ALL {len(render_cuts)} segs, no zoom/eq): expected={_t1_exp:.2f}s actual={_t1_dur:.2f}s", flush=True)
+        if os.path.exists(_t1_path):
+            os.unlink(_t1_path)
+    except Exception as e:
+        print(f"[DIAG-SCALE] Test 1 FAILED: {e}", flush=True)
+
+    try:
+        _t2_labels = "".join(f"[v{i}]" for i in range(len(video_filters)))
+        _t2_fc = ";".join(video_filters) + f";{_t2_labels}concat=n={len(video_filters)}:v=1:a=0[t2vout]"
+        _t2_path = os.path.join(work_dir, "test2.mp4")
+        run_ffmpeg([
+            "-y", "-i", keyframed_path,
+            "-filter_complex", _t2_fc,
+            "-map", "[t2vout]",
+            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
+            "-an", _t2_path,
+        ])
+        _t2_dur = float(subprocess.run(
+            ["ffprobe", "-v", "quiet", "-show_entries", "format=duration", "-of", "csv=p=0", _t2_path],
+            capture_output=True, text=True, timeout=10).stdout.strip() or "0")
+        print(f"[DIAG-SCALE] Test 2 (actual video_filters, video only): expected={_t1_exp:.2f}s actual={_t2_dur:.2f}s", flush=True)
+        if os.path.exists(_t2_path):
+            os.unlink(_t2_path)
+    except Exception as e:
+        print(f"[DIAG-SCALE] Test 2 FAILED: {e}", flush=True)
+
+    try:
+        _t3_path = os.path.join(work_dir, "test3.mp4")
+        _t3_args = (
+            ["-y"]
+            + input_args
+            + sfx_input_args
+            + ["-filter_complex", filter_complex, "-map", video_out, "-map", audio_out]
+            + [
+                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
+                "-c:a", "aac", "-b:a", "128k", "-shortest",
+                "-movflags", "+faststart", "-max_muxing_queue_size", "1024",
+            ]
+            + [_t3_path]
+        )
+        run_ffmpeg(_t3_args)
+        _t3_dur = float(subprocess.run(
+            ["ffprobe", "-v", "quiet", "-show_entries", "format=duration", "-of", "csv=p=0", _t3_path],
+            capture_output=True, text=True, timeout=10).stdout.strip() or "0")
+        print(f"[DIAG-SCALE] Test 3 (FULL production filter_complex): expected={_t1_exp:.2f}s actual={_t3_dur:.2f}s", flush=True)
+        if os.path.exists(_t3_path):
+            os.unlink(_t3_path)
+    except Exception as e:
+        print(f"[DIAG-SCALE] Test 3 FAILED: {e}", flush=True)
+
     args = (
         ["-y"]
         + input_args
@@ -4752,7 +4832,7 @@ def handler(job):
 
         render_elapsed = time.time() - t
         print(f"[pipeline] parallel_render complete in {render_elapsed:.1f}s", flush=True)
-        print("[render] Encoding: crf=18 preset=medium", flush=True)
+        print("[render] Encoding: crf=18 preset=ultrafast", flush=True)
         speed_curve = edit_plan.get("_parsed_speed_curve")
         if not validate_output(output_path, "render"):
             raise RuntimeError("Main render produced invalid output")
