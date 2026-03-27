@@ -3,6 +3,7 @@ import subprocess
 import os
 import sys
 import ssl
+import glob
 import requests
 import tempfile
 import time
@@ -155,6 +156,29 @@ Use this to inform your editing decisions. Where the user's footage naturally fi
 _RNNOISE_MODEL_PATH = "/usr/share/rnnoise/bd.rnnn"
 SFX_SOUNDS_DIR    = os.path.join(os.path.dirname(__file__), "assets", "sounds")
 OVERLAY_FONT_PATH = os.path.join(os.path.dirname(__file__), "assets", "fonts", "Montserrat-Black.ttf")
+CAPTION_FONT_DIR = "/usr/local/share/fonts/montserrat"
+
+
+def ensure_caption_fonts_registered():
+    """Register mounted caption fonts with fontconfig for libass."""
+    try:
+        os.makedirs(CAPTION_FONT_DIR, exist_ok=True)
+        copied = 0
+        for src in glob.glob("/assets/fonts/*.ttf"):
+            dst = os.path.join(CAPTION_FONT_DIR, os.path.basename(src))
+            shutil.copy2(src, dst)
+            copied += 1
+        subprocess.run(["fc-cache", "-f", "-v"], check=False, capture_output=True, text=True, timeout=20)
+        fc_list = subprocess.run(
+            ["bash", "-lc", "fc-list | grep -i montserrat || true"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        print(f"[fonts] Registered {copied} caption fonts into {CAPTION_FONT_DIR}", flush=True)
+        print(f"[fonts] fc-list Montserrat: {(fc_list.stdout or '').strip()}", flush=True)
+    except Exception as e:
+        print(f"[fonts] WARNING: failed to register caption fonts: {e}", flush=True)
 if not os.path.exists(_RNNOISE_MODEL_PATH):
     try:
         os.makedirs(os.path.dirname(_RNNOISE_MODEL_PATH), exist_ok=True)
@@ -1490,9 +1514,8 @@ RULES FOR USING THESE TIMESTAMPS:
         # validated_cuts = snap_cuts_to_word_boundaries(validated_cuts, _dg_words)
         print(f"[generate-edit] Snapping disabled — Gemini has word timestamps", flush=True)
 
-        # Tightening disabled — Gemini has Deepgram timestamps and places precise cuts
-        # validated_cuts = tighten_clips_with_deepgram(validated_cuts, _dg_words, min_silence_to_remove=0.08)
-        print(f"[generate-edit] Tightening disabled — Gemini has word timestamps", flush=True)
+        validated_cuts = tighten_clips_with_deepgram(validated_cuts, _dg_words, min_silence_to_remove=0.08)
+        print(f"[generate-edit] Applied Deepgram tightening to clip boundaries", flush=True)
 
         # Micro-gap closing not needed — Gemini places precise boundaries
     else:
@@ -3075,6 +3098,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     ass_path = os.path.join(work_dir, "captions.ass")
     with open(ass_path, "w", encoding="utf-8") as f:
         f.write(ass)
+    with open(ass_path, "r", encoding="utf-8") as f:
+        _ass_content = f.read()
+    print(f"[DIAG-ASS] First 500 chars: {_ass_content[:500]}", flush=True)
+    print(f"[DIAG-ASS] Style lines: {[l for l in _ass_content.split(chr(10)) if l.startswith('Style:')]}", flush=True)
     return ass_path
 
 
@@ -4578,6 +4605,7 @@ def handler(job):
         print(f"\n{'='*80}", flush=True)
         print(f"JOB {job_id}: \"{vibe}\"", flush=True)
         print(f"{'='*80}", flush=True)
+        ensure_caption_fonts_registered()
 
         # Step 1 — Download
         send_progress(job_id, "download", 5, "Got your video, loading it in...", app_url)
