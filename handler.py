@@ -1030,7 +1030,7 @@ Look at the gaps between words in the transcript:
 - Under 0.10 seconds between words — natural word spacing. KEEP. This is how speech flows.
 - 0.10 seconds or more between words — this is a pause, breath, or dead air. REMOVE it by ending one clip before the gap and starting the next clip after it.
 - Filler words (uh, um, hmm, er, ah) — skip these entirely. End the previous clip before the filler word and start the next clip at the word after it.
-- Stutters and false starts — when the speaker starts a word then restarts it ("she shou- shouldn't", "I said, who is... I said, who is he?", "I'm going to... I'm gonna"), cut out the false start and keep only the corrected version. End the previous clip before the false start and start the next clip at the corrected word.
+- Stutters and false starts — ALWAYS remove these, no exceptions. When the speaker starts a word then restarts it ("she shou- shouldn't", "I said, who is... I said, who is he?", "I'm going to... I'm gonna"), you MUST cut out the false start and keep only the corrected version. End the previous clip before the false start and start the next clip at the corrected word. Leaving a stutter in the video is an editing mistake — professional editors always remove them. Look at the transcript carefully: if the same word or phrase appears twice in a row with a slight variation, the first one is a false start and must be cut.
 
 HOW TO CUT PRECISELY:
 - source_end = the exact end timestamp of the last word you want to keep. The timestamps are accurate — use them exactly. If "electrocuted" ends at 26.07, set source_end to 26.07.
@@ -1114,7 +1114,17 @@ Global parameters:
   SPEED RAMPING (only when vibe mentions "speed ramp", "speed ramping", or "CapCut style"):
   Follow the speed ramping techniques described in the editing style guide above. The style guide was generated from watching real viral videos.
 
-  When speed ramping is active, every moment in the video is either sped up or slowed down — there is no 1.0x normal speed. If a section is filler or setup, it gets sped up. If it is a punchline or reveal, it gets slowed down. The contrast between fast and slow is what makes speed ramping work. Do not use 1.0x in your speed curve.
+  When speed ramping is active, every moment in the video is either sped up or slowed down — there is no 1.0x normal speed.
+
+  THE MOST IMPORTANT RULE OF SPEED RAMPING: The video should be MOSTLY FAST. 70-80% of the video should be at 1.2x-1.3x speed. Only 20-30% should be slow (0.6x-0.8x). Slow moments are RARE and POWERFUL — they only happen on the 2-3 biggest punchlines or reveals in the entire video. If you slow down too many moments, the contrast disappears and the edit feels sluggish instead of dynamic.
+
+  Think of it like a rollercoaster: the fast sections are the default state, building momentum. The slow sections are the drops — they only work BECAUSE everything before them was fast. If the whole ride is slow, there are no drops.
+
+  Setup, exposition, filler, transitions between ideas = FAST (1.2x-1.3x)
+  Punchlines, reveals, emotional peaks = SLOW (0.6x-0.8x) — USE SPARINGLY, maximum 2-3 slow moments per video
+  Everything else = FAST
+
+  Do not use 1.0x in your speed curve. Do not use 0.8x as a default — 0.8x is a slow-down, not a neutral speed.
 
   What each speed value does to speech:
     1.2x = slightly fast, natural sounding, good default for filler and setup
@@ -1338,7 +1348,7 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None, deepgra
 
 === FULL TRANSCRIPT ===
 
-Read this first to understand the full story before making any editing decisions. Identify the narrative structure — what is setup, what is filler, what is the buildup, and where are the punchlines or reveals. For speed ramping, use this understanding: the parts you'd skim if reading are filler (speed up), the parts that make you react are punchlines (slow down), and the parts that build tension should stay at normal speed.
+Read this first to understand the full story before making any editing decisions. Identify the narrative structure — what is setup, what is filler, what is the buildup, and where are the punchlines or reveals. For speed ramping, use this understanding: the parts you'd skim if reading are filler (speed up to 1.2x-1.3x), the parts that make you react are punchlines (slow down to 0.6x-0.8x). There is no normal speed — everything is either fast or slow.
 
 {readable_transcript}
 
