@@ -11,9 +11,9 @@ image = (
     )
     .apt_install(
         "ca-certificates",
-        "ffmpeg",
         "fontconfig",
         "wget",
+        "xz-utils",
         "librubberband-dev",
         "rubberband-cli",
         "build-essential",
@@ -27,6 +27,14 @@ image = (
         "libswresample-dev",
         "libsndfile1-dev",
         "libsamplerate0-dev",
+    )
+    .run_commands(
+        "mkdir -p /opt/ffmpeg",
+        "cd /opt/ffmpeg && wget -q https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz -O ffmpeg.tar.xz",
+        "cd /opt/ffmpeg && tar -xJf ffmpeg.tar.xz --strip-components=1",
+        "ln -sf /opt/ffmpeg/ffmpeg /usr/local/bin/ffmpeg",
+        "ln -sf /opt/ffmpeg/ffprobe /usr/local/bin/ffprobe",
+        "ffmpeg -version | head -1",
     )
     .run_commands("fc-cache -f")
     .pip_install("numpy", "wheel")
