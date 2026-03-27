@@ -4593,38 +4593,55 @@ def handler(job):
         transcript = {"text": "", "words": []}
         source_res = probe_resolution(source_path)
         sample_timestamps = [round(i * 2.0, 3) for i in range(int(source_duration / 2.0) + 1)] if source_duration > 0 else []
-        print("[pipeline] step=face_detect + transcribe (parallel)", flush=True)
+        print("[pipeline] step=transcribe", flush=True)
+        audio_path = os.path.join(work_dir, "audio_for_words.wav")
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", source_path, "-vn", "-acodec", "pcm_s16le", "-ar", "48000", "-ac", "1", audio_path],
+            capture_output=True, text=True, timeout=30,
+        )
+        transcript = transcribe_audio(audio_path)
+        _dg_words = transcript.get("words", [])
+        if len(_dg_words) == 0:
+            print("[pipeline] Deepgram returned 0 words — retrying once...", flush=True)
+            try:
+                transcript = transcribe_audio(audio_path)
+                _dg_words = transcript.get("words", [])
+            except Exception as e2:
+                print(f"[pipeline] Deepgram retry also failed: {e2}", flush=True)
+        if os.path.exists(audio_path):
+            os.remove(audio_path)
+        if len(_dg_words) == 0:
+            raise RuntimeError("Deepgram transcription failed — 0 words returned. Cannot proceed without word timestamps.")
+        print(f"[pipeline] Deepgram: {len(transcript.get('words', []))} words", flush=True)
+
+        print(f"[edit] User vibe: \"{vibe}\"", flush=True)
+
+        send_progress(job_id, "analysis", 20, "Watching your footage...", app_url)
+        send_progress(job_id, "edit_recipe", 52, "Putting your edit together...", app_url)
+        print("[pipeline] step=edit_recipe + face_detect (parallel)", flush=True)
+        t = time.time()
+        trend_context = get_trend_context()
+        if not trend_context:
+            print("[trend] WARNING: Style guide not available — Gemini will edit without reference video patterns", flush=True)
+
+        def _do_edit_recipe():
+            return generate_edit_gemini(
+                video_path=source_path,
+                vibe=vibe,
+                duration=source_duration,
+                trend_context=trend_context,
+                deepgram_words=transcript.get("words", []),
+                face_positions=None,
+            )
 
         def _do_face_detect():
             return detect_face_positions(source_path, sample_timestamps) if sample_timestamps else []
 
-        def _do_transcribe():
-            audio_path = os.path.join(work_dir, "audio_for_words.wav")
-            subprocess.run(
-                ["ffmpeg", "-y", "-i", source_path, "-vn", "-acodec", "pcm_s16le", "-ar", "48000", "-ac", "1", audio_path],
-                capture_output=True, text=True, timeout=30,
-            )
-            local_transcript = transcribe_audio(audio_path)
-            _dg_words = local_transcript.get("words", [])
-            if len(_dg_words) == 0:
-                print("[pipeline] Deepgram returned 0 words — retrying once...", flush=True)
-                try:
-                    local_transcript = transcribe_audio(audio_path)
-                    _dg_words = local_transcript.get("words", [])
-                except Exception as e2:
-                    print(f"[pipeline] Deepgram retry also failed: {e2}", flush=True)
-            if os.path.exists(audio_path):
-                os.remove(audio_path)
-            if len(_dg_words) == 0:
-                raise RuntimeError("Deepgram transcription failed — 0 words returned. Cannot proceed without word timestamps.")
-            print(f"[pipeline] Deepgram: {len(local_transcript.get('words', []))} words", flush=True)
-            return local_transcript
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as prep_pool:
-            future_faces = prep_pool.submit(_do_face_detect)
-            future_transcript = prep_pool.submit(_do_transcribe)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as recipe_pool:
+            future_edit = recipe_pool.submit(_do_edit_recipe)
+            future_faces = recipe_pool.submit(_do_face_detect)
+            edit_plan = future_edit.result()
             face_positions = future_faces.result()
-            transcript = future_transcript.result()
 
         reframe_crops = calculate_reframe_crop(face_positions, source_res.get("width") or 1080, source_res.get("height") or 1920)
         if reframe_crops:
@@ -4632,23 +4649,6 @@ def handler(job):
         else:
             print("[reframe] Source is native 9:16 — using center crop", flush=True)
 
-        print(f"[edit] User vibe: \"{vibe}\"", flush=True)
-
-        send_progress(job_id, "analysis", 20, "Watching your footage...", app_url)
-        send_progress(job_id, "edit_recipe", 52, "Putting your edit together...", app_url)
-        print("[pipeline] step=edit_recipe", flush=True)
-        t = time.time()
-        trend_context = get_trend_context()
-        if not trend_context:
-            print("[trend] WARNING: Style guide not available — Gemini will edit without reference video patterns", flush=True)
-        edit_plan = generate_edit_gemini(
-            video_path=source_path,
-            vibe=vibe,
-            duration=source_duration,
-            trend_context=trend_context,
-            deepgram_words=transcript.get("words", []),
-            face_positions=face_positions,
-        )
         edit_plan["_source_path"] = source_path
         edit_plan["_face_positions"] = face_positions
         print(f"[pipeline] edit recipe complete in {time.time()-t:.1f}s", flush=True)
