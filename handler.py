@@ -3997,6 +3997,21 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
          "-of", "json", keyframed_path],
         capture_output=True, text=True, timeout=10)
     print(f"[DIAG] Render source probe: {_detailed_probe.stdout.strip()}", flush=True)
+    # ── Mandatory CFR conversion ─────────────────────────────────────────
+    # VFR sources cause unpredictable frame counts in the filter chain.
+    # Convert to 30fps CFR before any processing.
+    cfr_path = os.path.join(work_dir, "cfr_source.mp4")
+    print(f"[render] Converting source to 30fps CFR", flush=True)
+    run_ffmpeg([
+        "-y", "-i", keyframed_path,
+        "-r", "30", "-vsync", "cfr",
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "0",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "copy",
+        cfr_path,
+    ])
+    keyframed_path = cfr_path
+    print(f"[render] CFR conversion complete", flush=True)
     color_grade = edit_plan.get("color_grade") or {}
     color_filter_str = build_video_filter_chain(color_grade, source_res, edit_plan)
     print(f"[DIAG] color_filter_str = '{color_filter_str}'", flush=True)
@@ -4007,13 +4022,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     )
 
     # Single input: the keyframed source
-    input_args = [
-        "-analyzeduration", "10000000",
-        "-probesize", "10000000",
-        "-r", "30",
-        "-vsync", "cfr",
-        "-i", keyframed_path,
-    ]
+    input_args = ["-analyzeduration", "10000000", "-probesize", "10000000", "-i", keyframed_path]
     sample_rate = probe_audio_sample_rate(source_path) or 48000
 
     # Compute effective durations from recipe with per-segment speed applied.
@@ -4144,8 +4153,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             f"trim=start={start:.3f}:end={end:.3f}",
             "setpts=PTS-STARTPTS",
             "fps=30",
-            "settb=AVTB",
-            "setpts=N/(30*TB)",
         ]
 
         if abs(combined_speed - 1.0) > 0.001:
@@ -4489,97 +4496,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     print(f"[DIAG] filter_complex: {len(filter_complex)} chars, {len(video_filters)} v_filters, {len(audio_filters)} a_filters, {len(transition_filters)} transitions", flush=True)
     print(f"[DIAG] filter_complex (first 2000): {filter_complex[:2000]}", flush=True)
     print(f"[DIAG] filter_complex (last 1000): {filter_complex[-1000:]}", flush=True)
-    # ── Real-source PTS test ─────────────────────────────────────────────
-    # Tests the actual filter chain on the actual source file to verify
-    # segment durations are correct before running the full render.
-    try:
-        if len(render_cuts) >= 2:
-            _c0 = render_cuts[0]
-            _c1 = render_cuts[1]
-            _s0 = float(_c0["source_start"])
-            _e0 = float(_c0["source_end"])
-            _s1 = float(_c1["source_start"])
-            _e1 = float(_c1["source_end"])
-
-            _sp0 = max(0.25, min(4.0, float(_c0.get("speed") or 1.0)))
-            _cr0 = 1.0
-            if speed_curve and speed_curve != "none":
-                _cr0 = max(0.5, min(1.5, get_speed_for_timestamp(_s0, speed_curve)))
-            _combined0 = _sp0 * _cr0
-
-            _sp1 = max(0.25, min(4.0, float(_c1.get("speed") or 1.0)))
-            _cr1 = 1.0
-            if speed_curve and speed_curve != "none":
-                _cr1 = max(0.5, min(1.5, get_speed_for_timestamp(_s1, speed_curve)))
-            _combined1 = _sp1 * _cr1
-
-            _speed_str0 = f"setpts={1.0/_combined0:.4f}*PTS," if abs(_combined0 - 1.0) > 0.001 else ""
-            _speed_str1 = f"setpts={1.0/_combined1:.4f}*PTS," if abs(_combined1 - 1.0) > 0.001 else ""
-
-            _expected_dur = effective_durations[0] + effective_durations[1]
-
-            def _probe_real_duration(path):
-                return float((subprocess.run(
-                    ["ffprobe", "-v", "quiet", "-show_entries", "format=duration", "-of", "csv=p=0", path],
-                    capture_output=True, text=True, timeout=10
-                ).stdout or "0").strip() or "0")
-
-            _fc_minimal = (
-                f"[0:v]trim=start={_s0:.3f}:end={_e0:.3f},setpts=PTS-STARTPTS,fps=30,"
-                f"settb=AVTB,setpts=N/(30*TB),{_speed_str0}setpts=PTS-STARTPTS,format=yuv420p[v0];"
-                f"[0:v]trim=start={_s1:.3f}:end={_e1:.3f},setpts=PTS-STARTPTS,fps=30,"
-                f"settb=AVTB,setpts=N/(30*TB),{_speed_str1}setpts=PTS-STARTPTS,format=yuv420p[v1];"
-                f"[v0][v1]concat=n=2:v=1:a=0[vout]"
-            )
-            _test_a = os.path.join(work_dir, "diag_test_a.mp4")
-            run_ffmpeg([
-                "-y", "-i", keyframed_path, "-filter_complex", _fc_minimal,
-                "-map", "[vout]", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28", "-an", _test_a
-            ])
-            _dur_a = _probe_real_duration(_test_a)
-            print(f"[DIAG-REAL] Test A (minimal, no zoom/eq): expected={_expected_dur:.2f}s actual={_dur_a:.2f}s", flush=True)
-
-            _fc_with_eq = (
-                f"[0:v]trim=start={_s0:.3f}:end={_e0:.3f},setpts=PTS-STARTPTS,fps=30,"
-                f"settb=AVTB,setpts=N/(30*TB),{_speed_str0}setpts=PTS-STARTPTS,format=yuv420p,{color_filter_str}[v0];"
-                f"[0:v]trim=start={_s1:.3f}:end={_e1:.3f},setpts=PTS-STARTPTS,fps=30,"
-                f"settb=AVTB,setpts=N/(30*TB),{_speed_str1}setpts=PTS-STARTPTS,format=yuv420p,{color_filter_str}[v1];"
-                f"[v0][v1]concat=n=2:v=1:a=0[vout]"
-            )
-            _test_b = os.path.join(work_dir, "diag_test_b.mp4")
-            run_ffmpeg([
-                "-y", "-i", keyframed_path, "-filter_complex", _fc_with_eq,
-                "-map", "[vout]", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28", "-an", _test_b
-            ])
-            _dur_b = _probe_real_duration(_test_b)
-            print(f"[DIAG-REAL] Test B (with eq={color_filter_str}): expected={_expected_dur:.2f}s actual={_dur_b:.2f}s", flush=True)
-
-            _fc_real = f"{video_filters[0]};{video_filters[1]};[v0][v1]concat=n=2:v=1:a=0[vout]"
-            _test_c = os.path.join(work_dir, "diag_test_c.mp4")
-            run_ffmpeg([
-                "-y", "-i", keyframed_path, "-filter_complex", _fc_real,
-                "-map", "[vout]", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28", "-an", _test_c
-            ])
-            _dur_c = _probe_real_duration(_test_c)
-            print(f"[DIAG-REAL] Test C (actual video_filters[0:2]): expected={_expected_dur:.2f}s actual={_dur_c:.2f}s", flush=True)
-
-            _all_v_labels = "".join(f"[v{i}]" for i in range(len(video_filters)))
-            _fc_all = ";".join(video_filters) + f";{_all_v_labels}concat=n={len(video_filters)}:v=1:a=0[vout]"
-            _test_d = os.path.join(work_dir, "diag_test_d.mp4")
-            run_ffmpeg([
-                "-y", "-i", keyframed_path, "-filter_complex", _fc_all,
-                "-map", "[vout]", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28", "-an", _test_d
-            ])
-            _dur_d = _probe_real_duration(_test_d)
-            _expected_total = sum(effective_durations)
-            print(f"[DIAG-REAL] Test D (ALL video_filters, video only): expected={_expected_total:.2f}s actual={_dur_d:.2f}s", flush=True)
-
-            for _p in [_test_a, _test_b, _test_c, _test_d]:
-                if os.path.exists(_p):
-                    os.unlink(_p)
-
-    except Exception as e:
-        print(f"[DIAG-REAL] Tests FAILED: {e}", flush=True)
     encode_args = [
         "-c:v","libx264","-preset","ultrafast","-crf","18",
         "-pix_fmt","yuv420p",
