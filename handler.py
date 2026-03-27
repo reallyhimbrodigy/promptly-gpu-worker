@@ -4023,8 +4023,23 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             prepared_path,
         ])
         keyframed_path = prepared_path
+    _detailed_probe = subprocess.run(
+        ["ffprobe", "-v", "quiet", "-select_streams", "v:0",
+         "-show_entries", "stream=time_base,start_pts,start_time,duration,duration_ts,nb_frames,r_frame_rate,avg_frame_rate,codec_time_base,codec_name,pix_fmt",
+         "-of", "json", keyframed_path],
+        capture_output=True, text=True, timeout=10)
+    print(f"[DIAG] Render source probe: {_detailed_probe.stdout.strip()}", flush=True)
+    _pts_probe = subprocess.run(
+        ["ffprobe", "-v", "quiet", "-select_streams", "v:0",
+         "-show_entries", "frame=pts,pts_time,duration,duration_time",
+         "-of", "csv=p=0",
+         "-read_intervals", "%+#10",
+         keyframed_path],
+        capture_output=True, text=True, timeout=10)
+    print(f"[DIAG] First 10 frame PTS: {_pts_probe.stdout.strip()}", flush=True)
     color_grade = edit_plan.get("color_grade") or {}
     color_filter_str = build_video_filter_chain(color_grade, source_res, edit_plan)
+    print(f"[DIAG] color_filter_str = '{color_filter_str}'", flush=True)
     has_burned_captions = infer_has_burned_captions(
         edit_plan,
         edit_plan.get("analysis_data") or {},
@@ -4592,36 +4607,121 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             "[vx2][v3]concat=n=2:v=1:a=0[vx3_raw];[vx3_raw]fps=30[vx3];"
             "[vx3][v4]concat=n=2:v=1:a=0[vout_raw];[vout_raw]fps=30[vout]",
         )
-        if len(video_filters) >= 3 and len(transition_filters) >= 4:
-            _k_path = os.path.join(work_dir, "diag_test_k.mp4")
-            try:
-                _k_filters = video_filters[:3]
-                _k_transitions = transition_filters[:4]
-                _k_fc = ";".join(_k_filters + _k_transitions)
-                _k_last_label = "[vx2]" if n > 3 else "[vout]"
-                _k_expected = sum(effective_durations[:3])
-                _k_args = [
-                    "ffmpeg", "-y", "-threads", "1",
-                    "-analyzeduration", "10000000", "-probesize", "10000000",
-                    "-i", keyframed_path,
-                    "-filter_complex", _k_fc,
-                    "-map", _k_last_label,
-                    "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
-                    _k_path,
-                ]
-                _k_result = subprocess.run(_k_args, capture_output=True, text=True, timeout=60)
-                _k_dur = 0.0
-                if _k_result.returncode == 0 and os.path.exists(_k_path):
-                    _k_dur = _probe_diag_duration(_k_path)
-                print(f"[DIAG-TEST] Test K (first 3 REAL segments): expected={_k_expected:.2f}s actual={_k_dur:.2f}s", flush=True)
-            except Exception as e:
-                print(f"[DIAG-TEST] Test K FAILED: {e}", flush=True)
-            finally:
-                if os.path.exists(_k_path):
-                    try:
-                        os.remove(_k_path)
-                    except Exception:
-                        pass
+        try:
+            _old_style_path = os.path.join(work_dir, "diag_old_keyframed.mp4")
+            _kf_str = ",".join(
+                str(round(float(c["source_start"]) * 1000) / 1000)
+                for c in render_cuts
+                if float(c["source_start"]) > 0
+            )
+
+            run_ffmpeg([
+                "-y", "-i", keyframed_path,
+                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "0",
+                "-force_key_frames", _kf_str,
+                "-r", "30", "-vsync", "cfr", "-pix_fmt", "yuv420p",
+                "-c:a", "copy", "-threads", "1",
+                _old_style_path,
+            ])
+
+            _old_probe = subprocess.run(
+                ["ffprobe", "-v", "quiet", "-select_streams", "v:0",
+                 "-show_entries", "stream=time_base,start_pts,duration,nb_frames,r_frame_rate,codec_time_base",
+                 "-of", "json", _old_style_path],
+                capture_output=True, text=True, timeout=10)
+            print(f"[DIAG] Old-style keyframed probe: {_old_probe.stdout.strip()}", flush=True)
+
+            _old_pts_probe = subprocess.run(
+                ["ffprobe", "-v", "quiet", "-select_streams", "v:0",
+                 "-show_entries", "frame=pts,pts_time",
+                 "-of", "csv=p=0",
+                 "-read_intervals", "%+#10",
+                 _old_style_path],
+                capture_output=True, text=True, timeout=10)
+            print(f"[DIAG] Old-style first 10 frame PTS: {_old_pts_probe.stdout.strip()}", flush=True)
+
+            _test_current = os.path.join(work_dir, "diag_render_current.mp4")
+            _fc_current = (
+                "[0:v]trim=start=0:end=5,setpts=PTS-STARTPTS,settb=AVTB,setpts=0.7692*PTS,fps=30,format=yuv420p[v0];"
+                "[0:v]trim=start=10:end=15,setpts=PTS-STARTPTS,settb=AVTB,setpts=0.7692*PTS,fps=30,format=yuv420p[v1];"
+                "[v0][v1]concat=n=2:v=1:a=0[vraw];[vraw]fps=30[vout]"
+            )
+            run_ffmpeg([
+                "-y", "-i", keyframed_path,
+                "-filter_complex", _fc_current,
+                "-map", "[vout]",
+                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
+                _test_current,
+            ])
+            _dur_current = _probe_diag_duration(_test_current)
+
+            _test_old = os.path.join(work_dir, "diag_render_old.mp4")
+            run_ffmpeg([
+                "-y", "-i", _old_style_path,
+                "-filter_complex", _fc_current,
+                "-map", "[vout]",
+                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
+                _test_old,
+            ])
+            _dur_old = _probe_diag_duration(_test_old)
+
+            print(f"[DIAG-TEST] Test N render with CURRENT source: expected=7.69s actual={_dur_current:.2f}s", flush=True)
+            print(f"[DIAG-TEST] Test N render with OLD-STYLE source: expected=7.69s actual={_dur_old:.2f}s", flush=True)
+
+            for _p in [_old_style_path, _test_current, _test_old]:
+                if os.path.exists(_p):
+                    os.unlink(_p)
+        except Exception as e:
+            print(f"[DIAG-TEST] Test N FAILED: {e}", flush=True)
+
+        try:
+            _old_style_path_o = os.path.join(work_dir, "diag_old_keyframed_o.mp4")
+            run_ffmpeg([
+                "-y", "-i", keyframed_path,
+                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "0",
+                "-force_key_frames", _kf_str,
+                "-r", "30", "-vsync", "cfr", "-pix_fmt", "yuv420p",
+                "-c:a", "copy", "-threads", "1",
+                _old_style_path_o,
+            ])
+
+            _o_fc = ";".join(video_filters + transition_filters)
+            _o_path = os.path.join(work_dir, "diag_test_o.mp4")
+            _o_label = tl_video
+
+            run_ffmpeg([
+                "-y", "-threads", "1",
+                "-analyzeduration", "10000000", "-probesize", "10000000",
+                "-i", _old_style_path_o,
+                "-filter_complex", _o_fc,
+                "-map", f"[{_o_label}]",
+                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
+                "-an",
+                _o_path,
+            ])
+            _o_dur = _probe_diag_duration(_o_path)
+            _o_expected = sum(effective_durations)
+            print(f"[DIAG-TEST] Test O (FULL filter_complex + OLD source, video only): expected={_o_expected:.2f}s actual={_o_dur:.2f}s", flush=True)
+
+            _p_path = os.path.join(work_dir, "diag_test_p.mp4")
+            run_ffmpeg([
+                "-y", "-threads", "1",
+                "-analyzeduration", "10000000", "-probesize", "10000000",
+                "-i", keyframed_path,
+                "-filter_complex", _o_fc,
+                "-map", f"[{_o_label}]",
+                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
+                "-an",
+                _p_path,
+            ])
+            _p_dur = _probe_diag_duration(_p_path)
+            print(f"[DIAG-TEST] Test P (FULL filter_complex + CURRENT source, video only): expected={_o_expected:.2f}s actual={_p_dur:.2f}s", flush=True)
+
+            for _p in [_old_style_path_o, _o_path, _p_path]:
+                if os.path.exists(_p):
+                    os.unlink(_p)
+        except Exception as e:
+            print(f"[DIAG-TEST] Test O/P FAILED: {e}", flush=True)
     except Exception as e:
         print(f"[DIAG-TEST] failed: {e}", flush=True)
     encode_args = [
