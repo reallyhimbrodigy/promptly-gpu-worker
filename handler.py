@@ -3990,36 +3990,13 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         if hook_e > 0:
             kf_timestamps.append(hook_e)
     kf_timestamps = sorted(set(kf_timestamps))
-    keyframed_path = source_path
+    keyframed_path = create_keyframed_source(source_path, kf_timestamps, work_dir)
     _detailed_probe = subprocess.run(
         ["ffprobe", "-v", "quiet", "-select_streams", "v:0",
-         "-show_entries", "stream=time_base,start_pts,start_time,duration,duration_ts,nb_frames,r_frame_rate,avg_frame_rate,codec_time_base,codec_name,pix_fmt",
+         "-show_entries", "stream=time_base,start_pts,start_time,duration,duration_ts,nb_frames,r_frame_rate,avg_frame_rate,codec_name,pix_fmt",
          "-of", "json", keyframed_path],
         capture_output=True, text=True, timeout=10)
     print(f"[DIAG] Render source probe: {_detailed_probe.stdout.strip()}", flush=True)
-    # ── Mandatory CFR conversion ─────────────────────────────────────────
-    # VFR sources cause unpredictable frame counts in the filter chain.
-    # Convert to 30fps CFR before any processing.
-    cfr_path = os.path.join(work_dir, "cfr_source.mp4")
-    print(f"[render] Converting source to 30fps CFR", flush=True)
-    run_ffmpeg([
-        "-y", "-i", keyframed_path,
-        "-r", "30", "-vsync", "cfr",
-        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "0",
-        "-pix_fmt", "yuv420p",
-        "-c:a", "copy",
-        cfr_path,
-    ])
-    keyframed_path = cfr_path
-    print(f"[render] CFR output path: {cfr_path}", flush=True)
-    print(f"[render] keyframed_path after CFR: {keyframed_path}", flush=True)
-    _cfr_probe = subprocess.run(
-        ["ffprobe", "-v", "quiet", "-select_streams", "v:0",
-         "-show_entries", "stream=r_frame_rate,avg_frame_rate,time_base,duration,nb_frames,codec_name",
-         "-of", "json", keyframed_path],
-        capture_output=True, text=True, timeout=10)
-    print(f"[DIAG] CFR source probe: {(_cfr_probe.stdout or '').strip()}", flush=True)
-    print(f"[render] CFR conversion complete", flush=True)
     color_grade = edit_plan.get("color_grade") or {}
     color_filter_str = build_video_filter_chain(color_grade, source_res, edit_plan)
     print(f"[DIAG] color_filter_str = '{color_filter_str}'", flush=True)
@@ -4286,6 +4263,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             extra_input_index += 1
 
     transition_filters = []
+    tl_video = "v0"
+    tl_audio = "a0"
     running_dur = effective_durations[0]
 
     CUSTOM_TRANSITIONS = {"flash", "glitch", "whip_left", "whip_right"}
@@ -4296,78 +4275,58 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         "zoomin",
     }
 
-    has_xfade = False
     for i in range(1, n):
         transition = str(render_cuts[i-1].get("transition_out") or "none").lower()
-        if transition in CUSTOM_TRANSITIONS or transition in XFADE_TRANSITIONS:
-            has_xfade = True
-            break
+        out_v     = "vout" if i == n-1 else f"vx{i}"
+        out_v_raw = f"{out_v}_raw"
+        out_a     = "aout" if i == n-1 else f"ax{i}"
 
-    if not has_xfade:
-        # Pairwise concat with PTS reset.
-        # N-way concat produces inflated duration with mixed-speed segments.
-        if n > 1:
-            tl_video = "v0"
-            tl_audio = "a0"
-            for i in range(1, n):
-                out_v = "vout" if i == n - 1 else f"vx{i}"
-                out_a = "aout" if i == n - 1 else f"ax{i}"
-                transition_filters.append(f"[{tl_video}][v{i}]concat=n=2:v=1:a=0[{out_v}]")
-                transition_filters.append(f"[{tl_audio}][a{i}]concat=n=2:v=0:a=1[{out_a}]")
-                tl_video = out_v
-                tl_audio = out_a
+        if transition in CUSTOM_TRANSITIONS:
+            td = TRANSITION_DURATION
+            offset = max(0, running_dur - td)
+
+            if transition == "flash":
+                transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=fadewhite:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
+                transition_filters.append(f"[{out_v_raw}]fps=30[{out_v}]")
+                transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
+
+            elif transition == "glitch":
+                transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=pixelize:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
+                transition_filters.append(f"[{out_v_raw}]hue=h=0:s=1.4,fps=30[{out_v}]")
+                transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
+
+            elif transition == "whip_left":
+                transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=wipeleft:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
+                transition_filters.append(f"[{out_v_raw}]boxblur=luma_radius=6:luma_power=1:chroma_radius=0,fps=30[{out_v}]")
+                transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
+
+            elif transition == "whip_right":
+                transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=wiperight:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
+                transition_filters.append(f"[{out_v_raw}]boxblur=luma_radius=6:luma_power=1:chroma_radius=0,fps=30[{out_v}]")
+                transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
+
+            running_dur = running_dur + effective_durations[i] - td
+
+        elif transition in XFADE_TRANSITIONS:
+            td = TRANSITION_DURATION
+            offset = max(0, running_dur - td)
+            transition_filters.append(f"[{tl_video}][v{i}]xfade=transition={transition}:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
+            transition_filters.append(f"[{out_v_raw}]fps=30[{out_v}]")
+            transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
+            running_dur = running_dur + effective_durations[i] - td
+
         else:
-            tl_video = "v0"
-            tl_audio = "a0"
-        running_dur = sum(effective_durations)
-    else:
+            transition_filters.append(f"[{tl_video}][v{i}]concat=n=2:v=1:a=0[{out_v_raw}]")
+            transition_filters.append(f"[{out_v_raw}]fps=30[{out_v}]")
+            transition_filters.append(f"[{tl_audio}][a{i}]concat=n=2:v=0:a=1[{out_a}]")
+            running_dur = running_dur + effective_durations[i]
+
+        tl_video = out_v
+        tl_audio = out_a
+
+    if n == 1:
         tl_video = "v0"
         tl_audio = "a0"
-        for i in range(1, n):
-            transition = str(render_cuts[i-1].get("transition_out") or "none").lower()
-            out_v     = "vout" if i == n-1 else f"vx{i}"
-            out_v_raw = f"{out_v}_raw"
-            out_a     = "aout" if i == n-1 else f"ax{i}"
-
-            if transition in CUSTOM_TRANSITIONS:
-                td = TRANSITION_DURATION
-                offset = max(0, running_dur - td)
-
-                if transition == "flash":
-                    transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=fadewhite:duration={td:.3f}:offset={offset:.3f}[{out_v}]")
-                    transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
-
-                elif transition == "glitch":
-                    transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=pixelize:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
-                    transition_filters.append(f"[{out_v_raw}]hue=h=0:s=1.4[{out_v}]")
-                    transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
-
-                elif transition == "whip_left":
-                    transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=wipeleft:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
-                    transition_filters.append(f"[{out_v_raw}]boxblur=luma_radius=6:luma_power=1:chroma_radius=0[{out_v}]")
-                    transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
-
-                elif transition == "whip_right":
-                    transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=wiperight:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
-                    transition_filters.append(f"[{out_v_raw}]boxblur=luma_radius=6:luma_power=1:chroma_radius=0[{out_v}]")
-                    transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
-
-                running_dur = running_dur + effective_durations[i] - td
-
-            elif transition in XFADE_TRANSITIONS:
-                td = TRANSITION_DURATION
-                offset = max(0, running_dur - td)
-                transition_filters.append(f"[{tl_video}][v{i}]xfade=transition={transition}:duration={td:.3f}:offset={offset:.3f}[{out_v}]")
-                transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
-                running_dur = running_dur + effective_durations[i] - td
-
-            else:
-                transition_filters.append(f"[{tl_video}][v{i}]concat=n=2:v=1:a=0[{out_v}]")
-                transition_filters.append(f"[{tl_audio}][a{i}]concat=n=2:v=0:a=1[{out_a}]")
-                running_dur = running_dur + effective_durations[i]
-
-            tl_video = out_v
-            tl_audio = out_a
 
     post_filters = []
     video_out = "[video_base]"
