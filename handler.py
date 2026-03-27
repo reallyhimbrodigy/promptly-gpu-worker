@@ -4165,8 +4165,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
         if abs(combined_speed - 1.0) > 0.001:
             v_chain.append(f"setpts={1.0/combined_speed:.4f}*PTS")
-
-        v_chain.append("setpts=PTS-STARTPTS")
         if zoom_filter:
             v_chain.append(zoom_filter)
         v_chain += ["format=yuv420p", color_filter_str]
@@ -4314,8 +4312,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             for i in range(1, n):
                 out_v = "vout" if i == n - 1 else f"vx{i}"
                 out_a = "aout" if i == n - 1 else f"ax{i}"
-                transition_filters.append(f"[{tl_video}][v{i}]concat=n=2:v=1:a=0[{out_v}_raw]")
-                transition_filters.append(f"[{out_v}_raw]fps=30[{out_v}]")
+                transition_filters.append(f"[{tl_video}][v{i}]concat=n=2:v=1:a=0[{out_v}]")
                 transition_filters.append(f"[{tl_audio}][a{i}]concat=n=2:v=0:a=1[{out_a}]")
                 tl_video = out_v
                 tl_audio = out_a
@@ -4365,8 +4362,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 running_dur = running_dur + effective_durations[i] - td
 
             else:
-                transition_filters.append(f"[{tl_video}][v{i}]concat=n=2:v=1:a=0[{out_v_raw}]")
-                transition_filters.append(f"[{out_v_raw}]fps=30[{out_v}]")
+                transition_filters.append(f"[{tl_video}][v{i}]concat=n=2:v=1:a=0[{out_v}]")
                 transition_filters.append(f"[{tl_audio}][a{i}]concat=n=2:v=0:a=1[{out_a}]")
                 running_dur = running_dur + effective_durations[i]
 
