@@ -1514,9 +1514,8 @@ RULES FOR USING THESE TIMESTAMPS:
         # validated_cuts = snap_cuts_to_word_boundaries(validated_cuts, _dg_words)
         print(f"[generate-edit] Snapping disabled — Gemini has word timestamps", flush=True)
 
-        # Tightening disabled — Gemini has Deepgram timestamps and places precise cuts
-        # validated_cuts = tighten_clips_with_deepgram(validated_cuts, _dg_words, min_silence_to_remove=0.08)
-        print(f"[generate-edit] Tightening disabled — Gemini has word timestamps", flush=True)
+        validated_cuts = tighten_clips_with_deepgram(validated_cuts, _dg_words, min_silence_to_remove=0.08)
+        print(f"[generate-edit] Tightening enabled — snapping to Deepgram word boundaries", flush=True)
 
         # Micro-gap closing not needed — Gemini places precise boundaries
     else:
