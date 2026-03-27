@@ -1615,6 +1615,37 @@ RULES FOR USING THESE TIMESTAMPS:
     if hook_clip:
         _hs = float(hook_clip["source_start"])
         _he = float(hook_clip["source_end"])
+        for cut in validated_cuts:
+            cs = float(cut["source_start"])
+            ce = float(cut["source_end"])
+            if _hs >= cs - 0.1 and _hs <= ce:
+                if _he > ce:
+                    print(f"[hook] Clamping hook end from {_he:.2f} to cut end {ce:.2f}", flush=True)
+                    _he = ce
+                    hook_clip["source_end"] = round(_he, 3)
+                break
+        try:
+            silence_cmd = [
+                "ffmpeg", "-i", video_path,
+                "-af", f"atrim=start={_hs:.3f}:end={_he:.3f},asetpts=PTS-STARTPTS,silencedetect=noise=-30dB:d=0.15",
+                "-f", "null", "-"
+            ]
+            silence_result = subprocess.run(silence_cmd, capture_output=True, text=True, timeout=15)
+            silence_starts = re.findall(r"silence_start:\s*([\d.]+)", silence_result.stderr)
+            if silence_starts:
+                last_silence = float(silence_starts[-1])
+                if last_silence >= 0.3:
+                    true_end = _hs + last_silence
+                    if true_end < _he - 0.1:
+                        print(
+                            f"[hook] Audio ends at {last_silence:.2f}s into hook — "
+                            f"tightening source_end: {_he:.2f} -> {true_end:.2f}",
+                            flush=True,
+                        )
+                        _he = true_end
+                        hook_clip["source_end"] = round(_he, 3)
+        except Exception as e:
+            print(f"[hook] Silence detection failed ({e}) — using original end", flush=True)
         print(f"[hook] Hook timestamps: {_hs:.2f}-{_he:.2f} ({_he - _hs:.2f}s)", flush=True)
     edit_plan["hook_clip"] = hook_clip
 
@@ -3639,7 +3670,7 @@ def prepend_hook_clip(output_path, edit_plan, work_dir):
     print(f"[hook] Prepended {hook_actual_dur:.2f}s hook teaser", flush=True)
 
 
-def burn_in_captions(output_path, edit_plan, transcript, work_dir):
+def burn_in_captions(output_path, edit_plan, transcript, work_dir, final_encode=False):
     """Burn captions and text overlays into the output video as a post-process."""
     caption_style = str(edit_plan.get("caption_style") or "none").lower()
     text_overlays = edit_plan.get("text_overlays") or []
@@ -3742,14 +3773,33 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
         return
 
     temp_output = os.path.join(work_dir, "captioned.mp4")
+    if final_encode:
+        audio_denoise = bool(edit_plan.get("audio_denoise"))
+        denoise_part = "afftdn=nr=12:nf=-30:tn=1," if audio_denoise else ""
+        audio_af = (
+            f"{denoise_part}highpass=f=80,lowpass=f=12000,"
+            f"acompressor=threshold=-18dB:ratio=2:attack=20:release=120:makeup=2,"
+            f"alimiter=limit=0.95"
+        )
+        encode_args = [
+            "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+            "-af", audio_af,
+            "-c:a", "aac", "-b:a", "128k",
+            "-shortest",
+            "-movflags", "+faststart",
+        ]
+    else:
+        encode_args = [
+            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "0",
+            "-c:a", "aac", "-b:a", "192k",
+            "-movflags", "+faststart",
+        ]
     cmd = [
         "ffmpeg", "-y",
         "-i", output_path,
         "-filter_complex", ";".join(post_filters),
         "-map", video_out, "-map", "0:a?",
-        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "0",
-        "-c:a", "copy",
-        "-movflags", "+faststart",
+    ] + encode_args + [
         temp_output,
     ]
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
@@ -3901,10 +3951,37 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     render_cuts = list(cuts)
     edit_plan["_hook_offset"] = 0.0
 
+    hook_clip = edit_plan.get("hook_clip")
+    if isinstance(hook_clip, dict):
+        hook_zoom = str(edit_plan.get("_hook_zoom") or "none")
+        if hook_zoom == "none":
+            hook_start = float(hook_clip.get("source_start") or 0.0)
+            for cut in render_cuts:
+                cs = float(cut["source_start"])
+                ce = float(cut["source_end"])
+                cut_zoom = str(cut.get("zoom") or "none")
+                if hook_start >= cs - 0.1 and hook_start <= ce and cut_zoom != "none":
+                    hook_zoom = cut_zoom
+                    break
+            if hook_zoom == "none":
+                for cut in render_cuts:
+                    cut_zoom = str(cut.get("zoom") or "none")
+                    if cut_zoom != "none":
+                        hook_zoom = cut_zoom
+                        break
+        edit_plan["_hook_zoom"] = hook_zoom
+        render_cuts = [{
+            "source_start": float(hook_clip.get("source_start") or 0.0),
+            "source_end": float(hook_clip.get("source_end") or 0.0),
+            "zoom": hook_zoom,
+            "speed": 1.0,
+            "transition_out": "none",
+            "freeze_frame": False,
+        }] + render_cuts
+
     n = len(render_cuts)
     source_res = probe_resolution(source_path)
     kf_timestamps = [float(c["source_start"]) for c in render_cuts]
-    hook_clip = edit_plan.get("hook_clip")
     if isinstance(hook_clip, dict):
         hook_s = float(hook_clip.get("source_start") or 0.0)
         hook_e = float(hook_clip.get("source_end") or 0.0)
@@ -3928,6 +4005,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     # Compute effective durations from recipe with per-segment speed applied.
     effective_durations = compute_effective_durations(render_cuts, speed_curve)
+    if isinstance(hook_clip, dict) and effective_durations:
+        edit_plan["_hook_offset"] = effective_durations[0]
     for i, cut in enumerate(render_cuts):
         src_dur = round((float(cut["source_end"]) - float(cut["source_start"])) * 1000) / 1000
         clip_speed = max(0.25, min(4.0, float(cut.get("speed") or 1.0)))
@@ -3953,20 +4032,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         if speed_curve and speed_curve != "none":
             curve_speed = max(0.5, min(1.5, get_speed_for_timestamp(start, speed_curve)))
         combined_speed = speed * curve_speed
-        raw_dur = end - start
-        video_setpts_dur = raw_dur / combined_speed
-        video_fps30_frames = round(video_setpts_dur * 30)
-        video_fps30_dur = video_fps30_frames / 30
-        audio_asetrate_dur = raw_dur / combined_speed
-        print(f"[DIAG] Seg{i}: raw={raw_dur:.3f} speed={combined_speed:.3f} v_setpts={video_setpts_dur:.4f} v_fps30={video_fps30_dur:.4f}({video_fps30_frames}f) a_asetrate={audio_asetrate_dur:.4f} gap={video_fps30_dur - audio_asetrate_dur:.6f}", flush=True)
         zoom = str(cut.get("zoom") or "none")
-        # Skip zoom in render — it will be applied during hook extraction only
-        _hook_clip = edit_plan.get("hook_clip")
-        if _hook_clip and zoom != "none":
-            # When hook exists, save the first zoom found for hook extraction
-            # Skip zoom on ALL clips — the hook is the start of the video
-            if not edit_plan.get("_hook_zoom"):
-                edit_plan["_hook_zoom"] = zoom
+        if hook_clip and i > 0 and zoom != "none":
             zoom = "none"
         if has_burned_captions and zoom in ["punch_in","punch_out"]:
             zoom = "slow_in" if zoom == "punch_in" else "slow_out"
@@ -4078,8 +4145,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
         if outro_filter:
             v_chain.append(outro_filter)
-        if i == 0 or i == 10:
-            print(f"[DIAG] Seg{i} v_filter: {','.join(v_chain)}", flush=True)
 
         video_filters.append(f"[0:v]{','.join(v_chain)}[v{i}]")
 
@@ -4091,8 +4156,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         if i == n-1 and outro != "none":
             fade_start = max(0, eff_dur - 1.0)
             a_chain.append(f"afade=t=out:st={fade_start:.3f}:d=1.0")
-        if i == 0 or i == 10:
-            print(f"[DIAG] Seg{i} a_filter: {','.join(a_chain)}", flush=True)
         audio_filters.append(f"[0:a]{','.join(a_chain)}[a{i}]")
 
     # ── SFX collection ───────────────────────────────────────────────────────
@@ -4267,6 +4330,72 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         )
         video_out = bars_label
 
+    caption_style = str(edit_plan.get("caption_style") or "none").lower()
+    ass_path = None
+    if caption_style != "none" and transcript.get("words"):
+        ass_path = generate_subtitle_file(
+            transcript,
+            caption_style,
+            render_cuts,
+            effective_durations,
+            {"width": 1080, "height": 1920},
+            edit_plan.get("caption_position") or "lower-third",
+            edit_plan.get("caption_keywords") or [],
+            work_dir,
+            hook_offset=0.0,
+            hook_clip=None,
+            speed_curve=speed_curve,
+        )
+    if ass_path and os.path.exists(ass_path):
+        escaped = ass_path.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+        post_filters.append(f"{video_out}subtitles='{escaped}':fontsdir=/assets/fonts[video_captioned]")
+        video_out = "[video_captioned]"
+
+    text_overlays = edit_plan.get("text_overlays") or []
+    if text_overlays:
+        clip_ranges = get_output_clip_ranges(render_cuts, effective_durations)
+        for i, overlay in enumerate(text_overlays):
+            raw_idx = int(overlay.get("appear_at_clip") or 0)
+            clip_idx = max(0, min(raw_idx, len(clip_ranges) - 1))
+            if clip_idx < 0 or clip_idx >= len(clip_ranges):
+                print(f"[render] Text overlay '{overlay.get('text')}' — clip_idx={clip_idx} out of range ({len(clip_ranges)} clips), skipping", flush=True)
+                continue
+            raw_text = _EMOJI_RE.sub("", str(overlay.get("text") or "")).strip()
+            text = raw_text.strip()
+            if not text:
+                continue
+            start = 0.0
+            end = clip_ranges[0]["end"]
+            style = str(overlay.get("style") or "callout")
+            char_count = len(text)
+            base_size = 72 if style == "title" else (64 if style == "cta" else 56)
+            if char_count <= 18:
+                font_size = base_size
+            elif char_count <= 25:
+                font_size = round(base_size * 0.85)
+            elif char_count <= 35:
+                font_size = round(base_size * 0.70)
+            else:
+                font_size = round(base_size * 0.60)
+            pos = str(overlay.get("position") or "center")
+            y_expr = "250" if pos == "top" else ("(h-th)/2" if pos == "center" else str(max(0, 1920 - 350)))
+            end_t = max(start + 0.8, end)
+            _font_clause = (
+                f":fontfile='{OVERLAY_FONT_PATH}'"
+                if os.path.exists(OVERLAY_FONT_PATH)
+                else ""
+            )
+            escaped_text = text.replace("'", "").replace('"', "").replace("\\", "").replace(":", "\\:").replace(",", "\\,")
+            out_label = f"[video_overlay_{i}]"
+            post_filters.append(
+                f"{video_out}drawtext=text='{escaped_text}':fontsize={font_size}:fontcolor=white"
+                f"{_font_clause}"
+                f":x=(w-tw)/2:y={y_expr}"
+                f":borderw=5:bordercolor=black"
+                f":enable='between(t,{start:.3f},{end_t:.3f})'{out_label}"
+            )
+            video_out = out_label
+
     audio_out = "[audio_timed]"
     post_filters.append(
         f"[{tl_audio}]asetpts=PTS-STARTPTS{audio_out}"
@@ -4281,9 +4410,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         audio_out = "[audio_sfx_mixed]"
         print(f"[sfx] Mixed {len(sfx_audio_labels)} SFX track(s) into audio", flush=True)
 
-    post_filters.append(
-        f"{audio_out}anull[final_audio]"
+    audio_denoise = bool(edit_plan.get("audio_denoise"))
+    denoise_part = "afftdn=nr=12:nf=-30:tn=1," if audio_denoise else ""
+    audio_chain = (
+        f"{denoise_part}highpass=f=80,lowpass=f=12000,"
+        f"acompressor=threshold=-18dB:ratio=2:attack=20:release=120:makeup=2,"
+        f"alimiter=limit=0.95"
     )
+    post_filters.append(f"{audio_out}{audio_chain}[final_audio]")
     audio_out = "[final_audio]"
 
     # Background music mix
@@ -4319,9 +4453,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _total_expected_a = sum(effective_durations)
     print(f"[DIAG] Expected totals: video(fps30)={_total_expected_v:.4f}s audio(raw)={_total_expected_a:.4f}s gap={_total_expected_v - _total_expected_a:.6f}s", flush=True)
     encode_args = [
-        "-c:v","libx264","-preset","ultrafast","-crf","0",
+        "-c:v","libx264","-preset","medium","-crf","18",
         "-pix_fmt","yuv420p",
-        "-c:a","aac","-b:a","192k",
+        "-c:a","aac","-b:a","128k",
+        "-shortest",
         "-movflags","+faststart",
         "-max_muxing_queue_size","1024",
     ]
@@ -4542,7 +4677,7 @@ def handler(job):
 
         render_elapsed = time.time() - t
         print(f"[pipeline] parallel_render complete in {render_elapsed:.1f}s", flush=True)
-        print("[render] Encoding: crf=0 preset=ultrafast", flush=True)
+        print("[render] Encoding: crf=18 preset=medium", flush=True)
         speed_curve = edit_plan.get("_parsed_speed_curve")
         if not validate_output(output_path, "render"):
             raise RuntimeError("Main render produced invalid output")
@@ -4553,36 +4688,6 @@ def handler(job):
         except:
             pass
 
-        print("[pipeline] step=hook", flush=True)
-        prepend_hook_clip(output_path, edit_plan, work_dir)
-
-        print("[pipeline] step=trim", flush=True)
-        expected_duration = sum(compute_effective_durations(edit_plan["cuts"], speed_curve))
-        expected_duration += float(edit_plan.get("_hook_offset") or 0.0)
-        actual_duration = probe_duration(output_path) or 0.0
-        if actual_duration > expected_duration + 2.0:
-            print(f"[pipeline] Trimming dead air: {actual_duration:.1f}s → {expected_duration:.1f}s", flush=True)
-            trimmed_path = os.path.join(work_dir, "trimmed_output.mp4")
-            trim_backup_path = os.path.join(work_dir, "output_trim.backup.mp4")
-            shutil.copy2(output_path, trim_backup_path)
-            trim_result = subprocess.run(
-                ["ffmpeg", "-y", "-i", output_path, "-t", f"{expected_duration:.2f}", "-c", "copy", trimmed_path],
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
-            if trim_result.returncode == 0 and os.path.exists(trimmed_path):
-                os.replace(trimmed_path, output_path)
-                if not validate_output(output_path, "trim"):
-                    print("[trim] Trim produced invalid output — restoring backup", flush=True)
-                    os.replace(trim_backup_path, output_path)
-                elif os.path.exists(trim_backup_path):
-                    os.remove(trim_backup_path)
-            else:
-                print(f"[pipeline] WARNING: trim failed, keeping original output: {trim_result.stderr[-400:]}", flush=True)
-                if os.path.exists(trim_backup_path):
-                    os.remove(trim_backup_path)
-
         # B-roll removed — Pexels free API cannot consistently produce good clips
         print("[pipeline] B-roll disabled", flush=True)
         for local_path in broll_files.values():
@@ -4592,26 +4697,7 @@ def handler(job):
                 pass
 
         # AI enhancement removed — minimal visible improvement on clean phone footage
-
-        _text_overlays = edit_plan.get("text_overlays") or []
-        if (caption_style != "none" and transcript.get("words")) or _text_overlays:
-            print(f"[pipeline] step=captions (style={caption_style}, overlays={len(_text_overlays)})", flush=True)
-            captions_backup_path = os.path.join(work_dir, "output_captions.backup.mp4")
-            shutil.copy2(output_path, captions_backup_path)
-            burn_in_captions(output_path, edit_plan, transcript, work_dir)
-            if not validate_output(output_path, "captions"):
-                print("[captions] Caption burn-in produced invalid output — restoring backup", flush=True)
-                os.replace(captions_backup_path, output_path)
-            elif os.path.exists(captions_backup_path):
-                try:
-                    _cv = float((subprocess.run(["ffprobe","-v","quiet","-select_streams","v:0","-show_entries","stream=duration","-of","csv=p=0",output_path],capture_output=True,text=True,timeout=10).stdout or "0").strip() or "0")
-                    _ca = float((subprocess.run(["ffprobe","-v","quiet","-select_streams","a:0","-show_entries","stream=duration","-of","csv=p=0",output_path],capture_output=True,text=True,timeout=10).stdout or "0").strip() or "0")
-                    print(f"[DIAG] After captions: video={_cv:.3f}s audio={_ca:.3f}s diff={_cv - _ca:.4f}s", flush=True)
-                except:
-                    pass
-                os.remove(captions_backup_path)
-        else:
-            print("[pipeline] Captions skipped (no captions, no text overlays)", flush=True)
+        print("[pipeline] Hook, captions, and final encode are combined with render", flush=True)
 
         if speed_curve:
             print("[pipeline] Speed curve applied in single-pass render — skipping post-process", flush=True)
@@ -4625,70 +4711,7 @@ def handler(job):
 
         output_size = os.path.getsize(output_path)
         output_dur = probe_duration(output_path) or 0
-        if output_size > 100 * 1024 * 1024:
-            print(
-                f"[pipeline] step=final_encode (output is {output_size / 1024 / 1024:.0f}MB — needs compression)",
-                flush=True,
-            )
-            final_path = os.path.join(work_dir, "final.mp4")
-            audio_denoise = bool(edit_plan.get("audio_denoise"))
-            denoise_part = "afftdn=nr=12:nf=-30:tn=1," if audio_denoise else ""
-            audio_filters = (
-                f"{denoise_part}highpass=f=80,lowpass=f=12000,"
-                f"acompressor=threshold=-18dB:ratio=2:attack=20:release=120:makeup=2,"
-                f"alimiter=limit=0.95"
-            )
-            cmd = [
-                "ffmpeg", "-y",
-                "-i", output_path,
-                "-c:v", "libx264", "-preset", "medium", "-crf", "18",
-                "-af", audio_filters,
-                "-c:a", "aac", "-b:a", "128k",
-                "-shortest",
-                "-movflags", "+faststart",
-                final_path,
-            ]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
-            if result.returncode == 0 and os.path.exists(final_path):
-                final_size = os.path.getsize(final_path)
-                final_dur = probe_duration(final_path) or 0
-                if final_size > 100000 and final_dur > 1.0:
-                    os.replace(final_path, output_path)
-                    print(
-                        f"[final_encode] {output_size / 1024 / 1024:.0f}MB → "
-                        f"{final_size / 1024 / 1024:.1f}MB, {final_dur:.1f}s",
-                        flush=True,
-                    )
-                else:
-                    print(
-                        f"[final_encode] Output invalid ({final_size} bytes, {final_dur}s) — keeping previous",
-                        flush=True,
-                    )
-                    if os.path.exists(final_path):
-                        os.remove(final_path)
-            else:
-                print("[final_encode] FFmpeg failed — keeping previous output", flush=True)
-        else:
-            # Still apply audio processing even if video doesn't need compression
-            audio_denoise = bool(edit_plan.get("audio_denoise"))
-            denoise_part = "afftdn=nr=12:nf=-30:tn=1," if audio_denoise else ""
-            audio_filters = (
-                f"{denoise_part}highpass=f=80,lowpass=f=12000,"
-                f"acompressor=threshold=-18dB:ratio=2:attack=20:release=120:makeup=2,"
-                f"alimiter=limit=0.95"
-            )
-            audio_path = os.path.join(work_dir, "audio_processed.mp4")
-            subprocess.run([
-                "ffmpeg", "-y", "-i", output_path,
-                "-c:v", "copy",
-                "-af", audio_filters,
-                "-c:a", "aac", "-b:a", "192k",
-                "-shortest",
-                audio_path,
-            ], capture_output=True, text=True, timeout=120)
-            if os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
-                os.replace(audio_path, output_path)
-            print(f"[pipeline] Output already compressed: {output_size / 1024 / 1024:.1f}MB", flush=True)
+        print(f"[pipeline] Final encode combined with render step", flush=True)
 
         # ── Parallel group 2: cover frame + upload ────────────────────────────────
         source_duration = float(analysis.get("duration") or 0) or (probe_duration(source_path) or 0.0)
