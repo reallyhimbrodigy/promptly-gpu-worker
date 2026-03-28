@@ -1114,13 +1114,11 @@ Global parameters:
   SPEED RAMPING (only when vibe mentions "speed ramp", "speed ramping", or "CapCut style"):
   Follow the speed ramping techniques described in the editing style guide above. The style guide was generated from watching real viral videos.
 
-  When speed ramping is active, every moment is either sped up or slowed down — there is no 1.0x.
-
-  Fast is the DEFAULT. Most of the video should be fast. Slow is ONLY for punchlines or funny/dramatic moments — and those slow moments should be brief, not drawn out.
-
-  The speed should RAMP — not jump. Don't abruptly switch speeds. Build up speed leading into a moment, then drop into the slow punchline, then ramp back up. The smooth fluctuation between fast and slow is what makes speed ramping feel dynamic and funny. Abrupt speed changes feel like mistakes.
-
-  Do not use 1.0x in your speed curve.
+  When speed ramping is active:
+  - Fast is the default. Everything that isn't funny or dramatic gets sped up.
+  - Slow down ONLY on moments that are funny, dramatic, or a punchline. The humor comes from the contrast.
+  - Ramp smoothly between speeds — don't jump. Build up, drop down, ramp back up.
+  - No 1.0x. Every moment is either fast or slow.
 
   What each speed value does to speech:
     1.2x = slightly fast, natural sounding, good default for filler and setup
@@ -3115,6 +3113,29 @@ def resolve_overlay_clip_idx(orig_clip_idx, original_cuts, current_cuts):
 FILLER_WORDS = {"uh", "um", "uh,", "um,", "hmm", "hmm,", "uhh", "umm", "er", "ah"}
 
 
+def _is_stutter(current_word, next_word):
+    """Detect clear false-start patterns that should be removed."""
+    if not next_word:
+        return False
+
+    curr = str(current_word or "").strip().lower().rstrip(".,!?;:'\"")
+    nxt = str(next_word or "").strip().lower().rstrip(".,!?;:'\"")
+
+    if not curr or not nxt:
+        return False
+
+    if curr == nxt:
+        return True
+
+    if len(curr) >= 2 and nxt.startswith(curr) and len(nxt) > len(curr):
+        return True
+
+    if curr + "n't" == nxt or curr + "nt" == nxt:
+        return True
+
+    return False
+
+
 def tighten_clips_with_deepgram(cuts, deepgram_words, min_silence_to_remove=0.08):
     """
     Go inside each of Gemini's clips and:
@@ -3153,7 +3174,7 @@ def tighten_clips_with_deepgram(cuts, deepgram_words, min_silence_to_remove=0.08
 
         # Filter out filler words
         keep_segments = []
-        for w in clip_words:
+        for idx, w in enumerate(clip_words):
             w_text = str(w.get("punctuated_word") or w.get("word") or "").strip().lower()
             w_clean = w_text.strip(".,!?;:'\"")
 
@@ -3162,6 +3183,22 @@ def tighten_clips_with_deepgram(cuts, deepgram_words, min_silence_to_remove=0.08
                 total_filler_removed += filler_dur
                 print(
                     f"[tighten] Removing filler '{w_clean}' at {float(w.get('start') or 0):.3f}s ({filler_dur:.3f}s)",
+                    flush=True,
+                )
+                continue
+
+            next_word_text = ""
+            if idx + 1 < len(clip_words):
+                next_word_text = str(
+                    clip_words[idx + 1].get("punctuated_word") or clip_words[idx + 1].get("word") or ""
+                ).strip().lower()
+
+            if _is_stutter(w_clean, next_word_text):
+                stutter_dur = float(w.get("end") or 0) - float(w.get("start") or 0)
+                total_filler_removed += stutter_dur
+                print(
+                    f"[tighten] Removing stutter '{w_clean}' before '{next_word_text}' at "
+                    f"{float(w.get('start') or 0):.3f}s ({stutter_dur:.3f}s)",
                     flush=True,
                 )
                 continue
@@ -4021,6 +4058,18 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         if speed_curve and speed_curve != "none":
             curve_speed = max(0.5, min(1.5, get_speed_for_timestamp(start, speed_curve)))
         combined_speed = speed * curve_speed
+        if hook_clip and i > 0:
+            _hook_start = float(hook_clip.get("source_start") or 0.0)
+            _hook_end = float(hook_clip.get("source_end") or 0.0)
+            if start <= _hook_start + 0.1 and end >= _hook_end - 0.1:
+                hook_speed = max(0.5, min(1.5, get_speed_for_timestamp(_hook_start, speed_curve)))
+                if abs(combined_speed - hook_speed) > 0.01:
+                    print(
+                        f"[render] Forcing hook chronological clip to match teaser speed: "
+                        f"{combined_speed:.2f}x -> {hook_speed:.2f}x",
+                        flush=True,
+                    )
+                    combined_speed = hook_speed
         zoom = str(cut.get("zoom") or "none")
         if hook_clip and i > 0 and zoom != "none":
             zoom = "none"
