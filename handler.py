@@ -83,6 +83,17 @@ print("[startup] all import checks done", flush=True)
 # ── GPU / NVENC detection ─────────────────────────────────────────────────────
 _HAS_NVENC = False
 try:
+    # Modal mounts NVIDIA drivers at runtime — find the encode library
+    _nvidia_lib_dirs = []
+    for _search_dir in ["/usr/local/nvidia/lib64", "/usr/lib/x86_64-linux-gnu",
+                        "/usr/lib64", "/usr/local/cuda/lib64"]:
+        if os.path.isdir(_search_dir):
+            _nvidia_lib_dirs.append(_search_dir)
+    if _nvidia_lib_dirs:
+        _existing_ldpath = os.environ.get("LD_LIBRARY_PATH", "")
+        os.environ["LD_LIBRARY_PATH"] = ":".join(_nvidia_lib_dirs) + (":" + _existing_ldpath if _existing_ldpath else "")
+        print(f"[startup] LD_LIBRARY_PATH set: {os.environ['LD_LIBRARY_PATH'][:200]}", flush=True)
+
     _nvenc_check = subprocess.run(
         ["ffmpeg", "-hide_banner", "-encoders"],
         capture_output=True, text=True, timeout=5,
@@ -93,16 +104,27 @@ try:
             ["ffmpeg", "-y", "-f", "lavfi", "-i", "nullsrc=s=64x64:d=0.1",
              "-c:v", "h264_nvenc", "-f", "null", "-"],
             capture_output=True, text=True, timeout=10,
+            env={**os.environ},
         )
         if _gpu_test.returncode == 0:
             _HAS_NVENC = True
             print("[startup] NVENC GPU encoder: available", flush=True)
         else:
-            print("[startup] NVENC listed but GPU not accessible — using CPU", flush=True)
+            _err_snippet = (_gpu_test.stderr or "")[-300:]
+            print(f"[startup] NVENC listed but GPU not accessible — using CPU", flush=True)
+            print(f"[startup] NVENC test error: {_err_snippet}", flush=True)
+            # Log what NVIDIA libs are actually available
+            _found_libs = []
+            for _ld in _nvidia_lib_dirs:
+                try:
+                    _found_libs.extend(f for f in os.listdir(_ld) if "nvidia" in f.lower() or "nvenc" in f.lower() or "cuda" in f.lower())
+                except Exception:
+                    pass
+            print(f"[startup] NVIDIA libs found: {_found_libs[:20]}", flush=True)
     else:
-        print("[startup] NVENC not available — using CPU encoder", flush=True)
-except Exception:
-    print("[startup] NVENC check failed — using CPU encoder", flush=True)
+        print("[startup] NVENC not available in FFmpeg build — using CPU encoder", flush=True)
+except Exception as _e:
+    print(f"[startup] NVENC check failed: {_e} — using CPU encoder", flush=True)
 
 
 def get_encode_args(quality="high"):
@@ -121,7 +143,8 @@ def get_encode_args(quality="high"):
         if quality == "lossless":
             return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "0"]
         else:
-            return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "18"]
+            # fast = good compression for final output; ultrafast only for intermediates
+            return ["-c:v", "libx264", "-preset", "fast", "-crf", "18"]
 
 _EMOJI_RE = re.compile(
     "[\U0001F600-\U0001F64F\U0001F300-\U0001F5FF\U0001F680-\U0001F6FF"
