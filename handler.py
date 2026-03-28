@@ -1514,11 +1514,22 @@ RULES FOR USING THESE TIMESTAMPS:
 
     _dg_words = edit_plan.get("_deepgram_words", [])
     if _dg_words:
+        for w in _dg_words:
+            if "cry" in str(w.get("word") or "").lower():
+                print(
+                    f"[DIAG] Found word '{w.get('word')}': start={w.get('start')}, end={w.get('end')}",
+                    flush=True,
+                )
+
         # Snapping disabled — Gemini has Deepgram timestamps and places cuts in silence gaps
         # validated_cuts = snap_cuts_to_word_boundaries(validated_cuts, _dg_words)
         print(f"[generate-edit] Snapping disabled — Gemini has word timestamps", flush=True)
 
+        if validated_cuts:
+            print(f"[DIAG] Last clip before tighten: source_end={validated_cuts[-1]['source_end']}", flush=True)
         validated_cuts = tighten_clips_with_deepgram(validated_cuts, _dg_words, min_silence_to_remove=0.08)
+        if validated_cuts:
+            print(f"[DIAG] Last clip after tighten: source_end={validated_cuts[-1]['source_end']}", flush=True)
         print(f"[generate-edit] Tightening enabled — snapping to Deepgram word boundaries", flush=True)
 
         # Micro-gap closing not needed — Gemini places precise boundaries
@@ -3171,6 +3182,13 @@ def tighten_clips_with_deepgram(cuts, deepgram_words, min_silence_to_remove=0.08
         if not clip_words:
             new_cuts.append(dict(clip))
             continue
+
+        print(
+            f"[tighten] Clip {clip_idx}: {len(clip_words)} words, "
+            f"first='{clip_words[0].get('word') if clip_words else 'N/A'}' "
+            f"last='{clip_words[-1].get('word') if clip_words else 'N/A'}'",
+            flush=True,
+        )
 
         # Filter out filler words
         keep_segments = []
