@@ -942,35 +942,6 @@ def tighten_transcript(words, scene_cuts=None, shots=None, original_duration=0, 
     return {"segments": merged, "removedSeconds": removed, "timeline_map": [], "tightened_duration": round(tightened_duration*1000)/1000}
 
 
-# ─── BROLL KEYWORD EXTRACTION ─────────────────────────────────────────────────
-
-STOPWORDS = {"the","a","an","is","are","was","were","be","been","being","have","has","had",
-             "do","does","did","will","would","could","should","may","might","shall","can",
-             "not","no","nor","so","yet","both","either","or","and","but","if","then",
-             "because","as","until","while","of","at","by","for","with","about","against",
-             "between","into","through","during","before","after","above","below","to","from",
-             "up","down","in","out","on","off","over","under","again","further","once",
-             "that","this","these","those","i","me","my","we","our","you","your","he",
-             "him","his","she","her","it","its","they","them","their","what","which","who",
-             "when","where","why","how","all","each","every","both","few","more","most",
-             "other","some","such","than","too","very","just","also","like","really","get",
-             "got","know","think","said","say","go","going","make","made","want","way"}
-
-
-def extract_broll_keywords(words, limit=8):
-    freq = {}
-    timestamps = {}
-    for w in words:
-        text = re.sub(r"[^a-z]", "", str(w.get("word") or "").lower())
-        if len(text) < 4 or text in STOPWORDS:
-            continue
-        freq[text] = freq.get(text, 0) + 1
-        if text not in timestamps:
-            timestamps[text] = float(w.get("start", 0))
-    sorted_words = sorted(freq.items(), key=lambda x: -x[1])
-    return [{"keyword": kw, "timestamp": timestamps[kw]} for kw, _ in sorted_words[:limit]]
-
-
 def extract_json(text):
     raw = str(text or "").strip()
     if not raw:
@@ -1108,10 +1079,6 @@ GENERAL RULES:
 - The source timeline only moves forward. Removals must stay chronological.
 
 Sound design adds texture. A swoosh on a scene change, a thud when a statement lands, a pop when text appears — these make cuts feel physical instead of digital. But not every cut needs a sound. Continuous speech flows best with silent hard cuts.
-
-B-roll is ONLY used when the user's vibe explicitly mentions "b-roll", "b roll", "cutaway", or "cutaways". If the vibe does not mention b-roll, set broll to an empty array []. Most videos should NOT have b-roll — bad stock footage looks worse than no footage at all.
-
-When b-roll IS requested, ONLY use concrete, visually specific nouns — real places (Paris, Tokyo), real objects (Ferrari, pizza, laptop), or real actions (surfing, cooking, running). NEVER use abstract concepts (success, growth, motivation, energy, power) — stock footage for abstract words always looks generic and cheap.
 
 The ending matters. On these platforms, videos auto-loop. A clean ending that flows back into the opening earns replay credit. Avoid fade to black — it creates a flash before the loop restarts.{trend_block}
 
@@ -1285,7 +1252,7 @@ Sound effects — audio accents that EMPHASIZE specific moments. Each sound must
 
 === RESPONSE FORMAT ===
 
-First, write a <vision> block describing your creative plan — what happens in the opening, how pacing flows, where you place b-roll and text, what the color feel is.
+First, write a <vision> block describing your creative plan — what happens in the opening, how pacing flows, where you place text, what the color feel is.
 
 Then output the JSON:
 
@@ -1716,7 +1683,6 @@ RULES FOR USING THESE TIMESTAMPS:
     edit_plan.setdefault("frame_layout", {})
     edit_plan.setdefault("text_overlays", [])
     edit_plan.setdefault("vignette", "none")
-    edit_plan.setdefault("broll", [])
     edit_plan.setdefault("sharpening", False)
     edit_plan.setdefault("grain", "none")
     edit_plan.setdefault("denoise", False)
@@ -1850,13 +1816,9 @@ RULES FOR USING THESE TIMESTAMPS:
                         print(f"[generate-edit] Filtered out swoosh at {t:.1f}s (no transitions in video)", flush=True)
                         continue
 
-                # Enforce pop: only when b-roll exists near this timestamp
+                # Enforce pop: only when a visual event (scene gap) exists near this timestamp
                 if sound == "pop":
                     pop_has_visual = False
-                    for br in (edit_plan.get("broll") or []):
-                        if abs(float(br.get("timestamp", 0)) - t) < 3.0:
-                            pop_has_visual = True
-                            break
                     if word == "visual_appear":
                         cuts_list = edit_plan.get("cuts") or []
                         for ci in range(1, len(cuts_list)):
@@ -1969,7 +1931,6 @@ RULES FOR USING THESE TIMESTAMPS:
 
     print(
         f"[generate-edit] Recipe: {len(final_cuts)} clips, "
-        f"{len(edit_plan.get('broll', []))} b-roll, "
         f"{len(edit_plan.get('sound_effects', []))} sfx, "
         f"intent={edit_plan.get('color_intent', 'none')}, "
         f"captions={edit_plan.get('caption_style', 'none')}",
