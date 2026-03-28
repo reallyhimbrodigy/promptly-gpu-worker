@@ -1623,7 +1623,7 @@ RULES FOR USING THESE TIMESTAMPS:
     while gemini_file.state.name == "PROCESSING":
         if time.time() > deadline:
             raise RuntimeError("Gemini file upload timed out after 180s")
-        time.sleep(2)
+        time.sleep(0.5)
         gemini_file = genai.get_file(gemini_file.name)
     if gemini_file.state.name != "ACTIVE":
         raise RuntimeError(f"Gemini file upload failed: {gemini_file.state.name}")
@@ -2641,7 +2641,7 @@ def probe_duration(file_path):
     result = subprocess.run(
         ["ffprobe","-v","error","-show_entries","format=duration",
          "-of","default=noprint_wrappers=1:nokey=1",file_path],
-        capture_output=True, text=True
+        capture_output=True, text=True, timeout=10
     )
     try:
         d = float(result.stdout.strip())
@@ -2657,7 +2657,7 @@ def probe_audio_sample_rate(file_path):
             "-show_entries", "stream=sample_rate",
             "-of", "default=noprint_wrappers=1:nokey=1", file_path,
         ],
-        capture_output=True, text=True
+        capture_output=True, text=True, timeout=10
     )
     try:
         sample_rate = int((result.stdout or "").strip())
@@ -2692,7 +2692,7 @@ def probe_resolution(file_path):
     result = subprocess.run(
         ["ffprobe","-v","error","-select_streams","v:0",
          "-show_entries","stream=width,height","-of","json",file_path],
-        capture_output=True, text=True
+        capture_output=True, text=True, timeout=10
     )
     try:
         data = json.loads(result.stdout)
@@ -2705,7 +2705,7 @@ def probe_resolution(file_path):
 def run_ffmpeg(args):
     print(f"[ffmpeg] Running: ffmpeg {' '.join(str(a) for a in args[:10])}...", flush=True)
     t = time.time()
-    result = subprocess.run(["ffmpeg", "-threads", "0"] + [str(a) for a in args], capture_output=True, text=True)
+    result = subprocess.run(["ffmpeg", "-threads", "0"] + [str(a) for a in args], capture_output=True, text=True, timeout=300)
     elapsed = time.time() - t
     if result.returncode != 0:
         print(f"[ffmpeg] FAILED after {elapsed:.1f}s", flush=True)
@@ -2759,7 +2759,7 @@ def normalize_source_video(source_path, work_dir):
     sample_timestamps = []
     source_duration = probe_duration(source_path) or 0.0
     if source_duration > 0:
-        sample_timestamps = [round(i * 2.0, 3) for i in range(int(source_duration / 2.0) + 1)]
+        sample_timestamps = [round(i * 4.0, 3) for i in range(int(source_duration / 4.0) + 1)]
     face_positions = detect_face_positions(source_path, sample_timestamps) if sample_timestamps else []
     reframe_crops = calculate_reframe_crop(face_positions, w, h)
 
@@ -4439,10 +4439,14 @@ def prepend_hook_clip(output_path, edit_plan, work_dir):
 
     hook_actual_dur = probe_duration(hook_path) or hook_render_dur
     try:
-        _hcv = float((subprocess.run(["ffprobe","-v","quiet","-select_streams","v:0","-show_entries","stream=duration","-of","csv=p=0",hook_path],capture_output=True,text=True,timeout=10).stdout or "0").strip() or "0")
-        _hca = float((subprocess.run(["ffprobe","-v","quiet","-select_streams","a:0","-show_entries","stream=duration","-of","csv=p=0",hook_path],capture_output=True,text=True,timeout=10).stdout or "0").strip() or "0")
+        _hp = subprocess.run(["ffprobe","-v","quiet","-show_entries","stream=codec_type,duration","-of","json",hook_path],capture_output=True,text=True,timeout=10)
+        _hpd = json.loads(_hp.stdout or "{}")
+        _hcv = _hca = 0.0
+        for _hs in (_hpd.get("streams") or []):
+            if _hs.get("codec_type") == "video" and _hs.get("duration"): _hcv = float(_hs["duration"])
+            elif _hs.get("codec_type") == "audio" and _hs.get("duration"): _hca = float(_hs["duration"])
         print(f"[DIAG] Hook clip: video={_hcv:.3f}s audio={_hca:.3f}s diff={_hcv - _hca:.4f}s", flush=True)
-    except:
+    except Exception:
         pass
 
     concat_list_path = os.path.join(work_dir, "concat_list.txt")
@@ -4468,10 +4472,14 @@ def prepend_hook_clip(output_path, edit_plan, work_dir):
 
     os.replace(hooked_output, output_path)
     try:
-        _hv = float((subprocess.run(["ffprobe","-v","quiet","-select_streams","v:0","-show_entries","stream=duration","-of","csv=p=0",output_path],capture_output=True,text=True,timeout=10).stdout or "0").strip() or "0")
-        _ha = float((subprocess.run(["ffprobe","-v","quiet","-select_streams","a:0","-show_entries","stream=duration","-of","csv=p=0",output_path],capture_output=True,text=True,timeout=10).stdout or "0").strip() or "0")
+        _hcp = subprocess.run(["ffprobe","-v","quiet","-show_entries","stream=codec_type,duration","-of","json",output_path],capture_output=True,text=True,timeout=10)
+        _hcpd = json.loads(_hcp.stdout or "{}")
+        _hv = _ha = 0.0
+        for _hs in (_hcpd.get("streams") or []):
+            if _hs.get("codec_type") == "video" and _hs.get("duration"): _hv = float(_hs["duration"])
+            elif _hs.get("codec_type") == "audio" and _hs.get("duration"): _ha = float(_hs["duration"])
         print(f"[DIAG] After hook concat: video={_hv:.3f}s audio={_ha:.3f}s diff={_hv - _ha:.4f}s", flush=True)
-    except:
+    except Exception:
         pass
     edit_plan["_hook_offset"] = hook_actual_dur
     print(f"[hook] Prepended {hook_actual_dur:.2f}s hook teaser", flush=True)
@@ -5542,7 +5550,7 @@ def handler(job):
                 source_duration = float(_fmt_dur)
         if not source_duration:
             source_duration = get_source_duration(source_path)
-        sample_timestamps = [round(i * 2.0, 3) for i in range(int(source_duration / 2.0) + 1)] if source_duration > 0 else []
+        sample_timestamps = [round(i * 4.0, 3) for i in range(int(source_duration / 4.0) + 1)] if source_duration > 0 else []
 
         # Configure Gemini API early so we can pre-upload
         gemini_api_key = os.environ.get("GEMINI_API_KEY")
@@ -5572,14 +5580,14 @@ def handler(job):
             try:
                 # Create a 360p proxy for Gemini — it doesn't need 1080p to make editing decisions
                 proxy_path = os.path.join(work_dir, "gemini_proxy.mp4")
-                print("[pipeline] Creating 360p proxy for Gemini upload...", flush=True)
+                print("[pipeline] Creating 240p proxy for Gemini upload...", flush=True)
                 _proxy_t = time.time()
                 _proxy_result = subprocess.run(
                     ["ffmpeg", "-threads", "0", "-y", "-i", source_path,
-                     "-vf", "scale=360:640:force_original_aspect_ratio=decrease",
-                     "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
-                     "-c:a", "aac", "-b:a", "64k", "-ar", "16000", "-ac", "1",
-                     "-r", "15",
+                     "-vf", "scale=240:426:force_original_aspect_ratio=decrease",
+                     "-c:v", "libx264", "-preset", "ultrafast", "-crf", "32",
+                     "-c:a", "aac", "-b:a", "32k", "-ar", "16000", "-ac", "1",
+                     "-r", "2",
                      proxy_path],
                     capture_output=True, text=True, timeout=30,
                 )
@@ -5689,7 +5697,7 @@ def handler(job):
                 elif _s.get("codec_type") == "audio" and _s.get("duration"):
                     _ra = float(_s["duration"])
             print(f"[DIAG] After render: video={_rv:.3f}s audio={_ra:.3f}s diff={_rv - _ra:.4f}s", flush=True)
-        except:
+        except Exception:
             pass
 
         if speed_curve:
