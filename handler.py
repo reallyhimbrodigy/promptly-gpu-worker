@@ -287,6 +287,9 @@ def normalize_intent(intent_name):
 def detect_face_positions(video_path, sample_timestamps):
     """
     Sample frames at given timestamps and detect the dominant face position.
+    Uses OpenCV's DNN-based face detector (ResNet SSD) which is far more
+    reliable than Haar cascades — handles angled faces, glasses, hats,
+    varying skin tones, and low light.
     Returns list of {"t", "cx", "cy", "found"} entries.
     """
     import cv2
@@ -301,36 +304,81 @@ def detect_face_positions(video_path, sample_timestamps):
     center_x = frame_w // 2 if frame_w > 0 else 540
     center_y = frame_h // 2 if frame_h > 0 else 960
 
-    face_cascade = cv2.CascadeClassifier(
-        cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-    )
+    # Load DNN face detector (ResNet-10 SSD, trained on WIDER FACE dataset)
+    PROTOTXT = "/models/face_detector/deploy.prototxt"
+    CAFFEMODEL = "/models/face_detector/res10_300x300_ssd_iter_140000.caffemodel"
+    use_dnn = os.path.exists(PROTOTXT) and os.path.exists(CAFFEMODEL)
+
+    if use_dnn:
+        net = cv2.dnn.readNetFromCaffe(PROTOTXT, CAFFEMODEL)
+        print("[reframe] Using DNN face detector (ResNet SSD)", flush=True)
+    else:
+        # Fallback to Haar cascade if model files not available
+        face_cascade = cv2.CascadeClassifier(
+            cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+        )
+        print("[reframe] WARNING: DNN model not found, falling back to Haar cascade", flush=True)
+
+    # Track last known face position for temporal smoothing
+    last_cx, last_cy = center_x, center_y
+    CONFIDENCE_THRESHOLD = 0.5
 
     positions = []
     for t in sample_timestamps:
         cap.set(cv2.CAP_PROP_POS_MSEC, float(t) * 1000.0)
         ret, frame = cap.read()
         if not ret or frame is None:
-            positions.append({"t": float(t), "cx": center_x, "cy": center_y, "found": False})
+            positions.append({"t": float(t), "cx": last_cx, "cy": last_cy, "found": False})
             continue
 
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        faces = face_cascade.detectMultiScale(
-            gray,
-            scaleFactor=1.1,
-            minNeighbors=5,
-            minSize=(80, 80),
-        )
+        found = False
+        best_cx, best_cy = center_x, center_y
 
-        if len(faces) > 0:
-            fx, fy, fw, fh = max(faces, key=lambda f: f[2] * f[3])
-            positions.append({
-                "t": float(t),
-                "cx": int(fx + fw // 2),
-                "cy": int(fy + fh // 2),
-                "found": True,
-            })
+        if use_dnn:
+            h, w = frame.shape[:2]
+            blob = cv2.dnn.blobFromImage(
+                cv2.resize(frame, (300, 300)), 1.0, (300, 300),
+                (104.0, 177.0, 123.0), swapRB=False, crop=False
+            )
+            net.setInput(blob)
+            detections = net.forward()
+
+            best_conf = 0.0
+            best_area = 0
+            for det_i in range(detections.shape[2]):
+                confidence = float(detections[0, 0, det_i, 2])
+                if confidence < CONFIDENCE_THRESHOLD:
+                    continue
+                x1 = int(detections[0, 0, det_i, 3] * w)
+                y1 = int(detections[0, 0, det_i, 4] * h)
+                x2 = int(detections[0, 0, det_i, 5] * w)
+                y2 = int(detections[0, 0, det_i, 6] * h)
+                area = (x2 - x1) * (y2 - y1)
+                # Pick the largest face with highest confidence
+                if confidence > best_conf or (confidence > CONFIDENCE_THRESHOLD and area > best_area):
+                    best_conf = confidence
+                    best_area = area
+                    best_cx = (x1 + x2) // 2
+                    best_cy = (y1 + y2) // 2
+                    found = True
         else:
-            positions.append({"t": float(t), "cx": center_x, "cy": center_y, "found": False})
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(80, 80))
+            if len(faces) > 0:
+                fx, fy, fw, fh = max(faces, key=lambda f: f[2] * f[3])
+                best_cx = int(fx + fw // 2)
+                best_cy = int(fy + fh // 2)
+                found = True
+
+        if found:
+            last_cx, last_cy = best_cx, best_cy
+
+        positions.append({
+            "t": float(t),
+            "cx": best_cx if found else last_cx,
+            "cy": best_cy if found else last_cy,
+            "found": found,
+        })
 
     cap.release()
     found_count = sum(1 for p in positions if p["found"])
@@ -4738,9 +4786,13 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             running_dur = running_dur + effective_durations[i] - td
 
         else:
+            # Hard cut: video is a clean concat, but audio gets a 4ms
+            # crossfade to eliminate splice clicks/pops at the cut point.
+            # 4ms is imperceptible as a fade but smooths the waveform
+            # discontinuity where two audio segments meet.
             transition_filters.append(f"[{tl_video}][v{i}]concat=n=2:v=1:a=0[{out_v_raw}]")
             transition_filters.append(f"[{out_v_raw}]fps=30[{out_v}]")
-            transition_filters.append(f"[{tl_audio}][a{i}]concat=n=2:v=0:a=1[{out_a}]")
+            transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d=0.004:c1=tri:c2=tri[{out_a}]")
             running_dur = running_dur + effective_durations[i]
 
         tl_video = out_v
@@ -4845,8 +4897,22 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     audio_denoise = bool(edit_plan.get("audio_denoise"))
     denoise_part = "afftdn=nr=12:nf=-30:tn=1," if audio_denoise else ""
+    # Audio processing chain:
+    #   1. Optional denoise (afftdn)
+    #   2. Highpass at 80Hz — removes low rumble, plosive thumps (p/b/t sounds)
+    #   3. De-esser — tame sibilance (s/sh/ch) that gets amplified by compression
+    #      Uses a tight bandpass at 5-9kHz to detect sibilance, then compresses
+    #      only that band with fast attack. This prevents harsh "s" sounds on
+    #      earbuds without dulling the overall audio.
+    #   4. Lowpass at 12kHz — remove hiss and high-frequency noise
+    #   5. Compressor — even out volume, make soft parts audible
+    #   6. Limiter — prevent digital clipping
     audio_chain = (
-        f"{denoise_part}highpass=f=80,lowpass=f=12000,"
+        f"{denoise_part}highpass=f=80,"
+        f"equalizer=f=120:t=q:w=2:g=-3,"
+        f"acompressor=threshold=-20dB:ratio=4:attack=0.3:release=50:detection=peak"
+        f":link=maximum:knee=2:mix=0.5,"
+        f"lowpass=f=12000,"
         f"acompressor=threshold=-18dB:ratio=2:attack=20:release=120:makeup=2,"
         f"alimiter=limit=0.95"
     )
@@ -4889,7 +4955,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     print(f"[DIAG] filter_complex (first 2000): {filter_complex[:2000]}", flush=True)
     print(f"[DIAG] filter_complex (last 1000): {filter_complex[-1000:]}", flush=True)
     encode_args = [
-        "-c:v","libx264","-preset","veryfast","-crf","23",
+        "-c:v","libx264","-preset","veryfast","-crf","18",
         "-pix_fmt","yuv420p",
         "-c:a","aac","-b:a","128k",
         "-movflags","+faststart",

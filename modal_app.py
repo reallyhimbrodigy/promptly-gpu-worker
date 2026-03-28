@@ -41,6 +41,12 @@ image = (
         "ffmpeg -filters 2>/dev/null | grep subtitles || echo 'WARNING: subtitles filter not found'",
         "fc-cache -f",
     )
+    .run_commands(
+        # Download OpenCV DNN face detector model (much more accurate than Haar cascades)
+        "mkdir -p /models/face_detector",
+        "wget -q -O /models/face_detector/deploy.prototxt https://raw.githubusercontent.com/opencv/opencv/master/samples/dnn/face_detector/deploy.prototxt",
+        "wget -q -O /models/face_detector/res10_300x300_ssd_iter_140000.caffemodel https://raw.githubusercontent.com/opencv/opencv_3rdparty/dnn_samples_face_detector_20170830/res10_300x300_ssd_iter_140000.caffemodel",
+    )
     .pip_install("numpy", "wheel")
     .pip_install("aubio", extra_options="--no-build-isolation")
     .pip_install(
