@@ -1093,11 +1093,22 @@ Word-level edit control:
       Use this when removing a silence range, a dead-air gap, or a whole non-speech section.
 
   Rules for remove_words:
-  - Be aggressive about marking filler, stutters, false starts, and dead air for removal.
-  - Keep the removals chronological.
-  - Use word_index whenever possible for speech.
-  - Use time ranges for silence, dead air, or non-speech gaps.
-  - The pipeline groups consecutive kept words into clips automatically, using Deepgram's exact timestamps, so there is zero risk of cutting inside a word.
+  WHAT TO REMOVE:
+  Only mark words for removal if they are genuinely one of these:
+  - Filler words: "uh", "um", "hmm", "er", "ah", "like" (when used as filler, not content)
+  - Stutters/false starts: when the speaker starts a word and restarts it ("shou-" before "shouldn't")
+  - Exact repeated words: "I I", "the the" — where the speaker said the same word twice by mistake
+
+  WHAT TO REMOVE AS TIME RANGES:
+  - Dead air: silence gaps of 0.05 seconds or longer between words where the speaker paused
+  - Section skips: long pauses or off-topic sections that break the flow
+
+  DO NOT remove:
+  - Content words that are part of a sentence, even if the sentence is filler/setup
+  - Partial phrases — if you remove a word, the remaining words must still form a complete thought
+  - Words just because they're in a "setup" section — speed ramping handles pacing, not word removal
+
+  The speed curve controls pacing. remove_words controls content. Only remove words that a human editor would cut because they are MISTAKES (stutters, filler) or SILENCE (dead air). Do not remove words to compress the video — that's what speed ramping is for.
 
   opening_zoom — "slow_in", "slow_out", or "none". A subtle push or pull to draw the viewer in.
   Put opening_zoom on the hook clip if hook_clip is set, otherwise on the first clip in the video.
@@ -1489,6 +1500,17 @@ RULES FOR USING THESE TIMESTAMPS:
                         "word_index": idx,
                         "reason": str(item.get("reason") or "remove"),
                     })
+                    w = _dg_words[idx]
+                    word_text = w.get("punctuated_word") or w.get("word") or ""
+                    print(
+                        f"[remove] Removing word [{idx}] '{word_text}' ({item.get('reason', 'unknown')})",
+                        flush=True,
+                    )
+                else:
+                    print(
+                        f"[remove] WARNING: word_index {idx} out of bounds (max {len(_dg_words)-1})",
+                        flush=True,
+                    )
             elif "start" in item and "end" in item:
                 try:
                     rs = max(0.0, float(item["start"]))
@@ -1503,6 +1525,10 @@ RULES FOR USING THESE TIMESTAMPS:
                         "end": round(re, 3),
                         "reason": str(item.get("reason") or "remove"),
                     })
+                    print(
+                        f"[remove] Removing range {rs:.2f}-{re:.2f} ({item.get('reason', 'unknown')})",
+                        flush=True,
+                    )
 
         edit_plan["remove_words"] = normalized_remove_words
         validated_cuts = build_clips_from_words(_dg_words, normalized_remove_words, max_silence_gap=0.08)
@@ -1511,6 +1537,21 @@ RULES FOR USING THESE TIMESTAMPS:
             f"{len(_dg_words)} words, {len(normalized_remove_words)} removals",
             flush=True,
         )
+        for i, clip in enumerate(validated_cuts):
+            clip_start = float(clip["source_start"])
+            clip_end = float(clip["source_end"])
+            first_word = ""
+            last_word = ""
+            for w in _dg_words:
+                ws = float(w.get("start") or 0)
+                if ws >= clip_start - 0.05 and ws < clip_end:
+                    if not first_word:
+                        first_word = w.get("punctuated_word") or w.get("word") or ""
+                    last_word = w.get("punctuated_word") or w.get("word") or ""
+            print(
+                f"[clips] Clip {i}: {clip_start:.3f}-{clip_end:.3f} first='{first_word}' last='{last_word}'",
+                flush=True,
+            )
         if not validated_cuts:
             raise ValueError("Gemini response removed all words — no clips remain")
     elif isinstance(raw_cuts, list):
