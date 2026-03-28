@@ -1589,7 +1589,7 @@ RULES FOR USING THESE TIMESTAMPS:
             f"{len(normalized_remove_words)} Gemini removals + deterministic tightening",
             flush=True,
         )
-        validated_cuts = build_clips_from_words(_dg_words, normalized_remove_words, max_silence_gap=0.08)
+        validated_cuts = build_clips_from_words(_dg_words, normalized_remove_words)
         for i, clip in enumerate(validated_cuts):
             clip_start = float(clip["source_start"])
             clip_end = float(clip["source_end"])
@@ -2634,13 +2634,26 @@ def get_atempo_filter(speed):
     return ",".join(parts)
 
 
+def _smoothstep(x):
+    """Attempt smoothstep easing: ease-in and ease-out (3x² - 2x³).
+
+    Converts linear fraction [0,1] into a smooth S-curve that starts
+    slow, accelerates through the middle, and decelerates at the end.
+    This makes speed ramps feel organic — like a natural gear shift
+    instead of a constant mechanical ramp.
+    """
+    x = max(0.0, min(1.0, x))
+    return x * x * (3.0 - 2.0 * x)
+
+
 def get_speed_for_timestamp(t, speed_curve):
     """Smoothly interpolate speed at time t from keypoints.
 
-    Uses linear interpolation between keypoints so the speed ramps
-    continuously instead of jumping in flat steps. This is what makes
-    speed ramping feel like CapCut — smooth acceleration/deceleration
-    with dramatic contrast between fast setup and slow punchlines.
+    Uses smoothstep easing between keypoints so speed ramps accelerate
+    and decelerate naturally. Fast→slow transitions build anticipation
+    before dropping into the slow moment. Slow→fast transitions snap
+    out with energy. This is what separates CapCut-level speed ramping
+    from flat mechanical ramps.
     """
     if not speed_curve or speed_curve == "none":
         return 1.0
@@ -2652,12 +2665,13 @@ def get_speed_for_timestamp(t, speed_curve):
     # After last keypoint
     if t >= float(speed_curve[-1]["t"]):
         return float(speed_curve[-1]["speed"])
-    # Interpolate between surrounding keypoints
+    # Interpolate between surrounding keypoints with smoothstep easing
     for i in range(len(speed_curve) - 1):
         t0 = float(speed_curve[i]["t"])
         t1 = float(speed_curve[i + 1]["t"])
         if t0 <= t <= t1:
             frac = (t - t0) / (t1 - t0) if t1 != t0 else 0.0
+            frac = _smoothstep(frac)
             s0 = float(speed_curve[i]["speed"])
             s1 = float(speed_curve[i + 1]["speed"])
             return s0 + (s1 - s0) * frac
@@ -3328,7 +3342,7 @@ def _is_stutter(current_word, next_word):
     return False
 
 
-def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.08):
+def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15):
     """
     Deterministic, CapCut-quality clip builder.
 
@@ -3441,7 +3455,7 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.08):
     # The split threshold: if the gap between two kept words exceeds this,
     # we create a new clip. This collapses dead air while preserving natural
     # sentence rhythm.
-    NATURAL_PAUSE = max_silence_gap  # 80ms — anything longer is dead air
+    NATURAL_PAUSE = max_silence_gap  # 150ms — preserves natural breath pauses, splits on real dead air
 
     clips = []
     current_words = [kept_words[0]]
@@ -4234,7 +4248,7 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
                 if os.path.exists(OVERLAY_FONT_PATH)
                 else ""
             )
-            escaped_text = text.replace("'", "").replace('"', "").replace("\\", "").replace(":", "\\:").replace(",", "\\,")
+            escaped_text = text.replace("\\", "\\\\").replace(":", "\\:").replace(",", "\\,").replace("'", "\u2019").replace('"', "")
             out_label = f"[video_overlay_{i}]"
             post_filters.append(
                 f"{video_out}drawtext=text='{escaped_text}':fontsize={font_size}:fontcolor=white"
@@ -4277,6 +4291,7 @@ def mix_sfx_after_speed_curve(output_path, edit_plan, cuts, effective_durations,
     clip_ranges = get_output_clip_ranges(cuts, effective_durations)
     parsed_sfx = list(edit_plan.get("_parsed_sound_effects", []))
     hook_offset = float(edit_plan.get("_hook_offset") or 0.0)
+    speech_segments = (edit_plan.get("analysis_data") or {}).get("speech", {}).get("segments") or []
 
     if not parsed_sfx:
         print("[sfx] No sound effects to mix", flush=True)
@@ -4360,8 +4375,9 @@ def mix_sfx_after_speed_curve(output_path, edit_plan, cuts, effective_durations,
         input_args += ["-i", entry["path"]]
         offset_ms = round(entry["final_t"] * 1000)
         label = f"[sfx{i}]"
+        _vol = get_sfx_volume(entry["sound"], entry["final_t"], speech_segments, is_text_overlay=False)
         filter_parts.append(
-            f"[{i + 1}:a]volume=0.5,adelay={offset_ms}|{offset_ms}{label}"
+            f"[{i + 1}:a]volume={_vol:.3f},adelay={offset_ms}|{offset_ms}{label}"
         )
         labels.append(label)
 
@@ -4731,7 +4747,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 continue
             _ts = max(0.0, hook_offset + _pre_hook_t)
             _offset_ms = round(_ts * 1000)
-            _vol = 0.5
+            _vol = get_sfx_volume(_sound_style, _ts, _speech_segs, is_text_overlay=False)
             _label = f"[timesfx{_i}]"
             sfx_input_args += ["-i", _sound_path]
             sfx_filter_strs.append(
@@ -4882,7 +4898,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 if os.path.exists(OVERLAY_FONT_PATH)
                 else ""
             )
-            escaped_text = text.replace("'", "").replace('"', "").replace("\\", "").replace(":", "\\:").replace(",", "\\,")
+            escaped_text = text.replace("\\", "\\\\").replace(":", "\\:").replace(",", "\\,").replace("'", "\u2019").replace('"', "")
             out_label = f"[video_overlay_{i}]"
             post_filters.append(
                 f"{video_out}drawtext=text='{escaped_text}':fontsize={font_size}:fontcolor=white"
@@ -4908,7 +4924,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         print(f"[sfx] Mixed {len(sfx_audio_labels)} SFX track(s) into audio", flush=True)
 
     audio_denoise = bool(edit_plan.get("audio_denoise"))
-    denoise_part = "afftdn=nr=12:nf=-30:tn=1," if audio_denoise else ""
+    denoise_part = "afftdn=nr=6:nf=-25:tn=1," if audio_denoise else ""
     # Audio processing chain:
     #   1. Optional denoise (afftdn)
     #   2. Highpass at 80Hz — removes low rumble, plosive thumps (p/b/t sounds)
