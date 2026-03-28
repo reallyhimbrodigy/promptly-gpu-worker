@@ -284,6 +284,33 @@ def normalize_intent(intent_name):
     return "none"
 
 
+def sample_background_brightness(video_path, timestamp, y_fraction=0.13):
+    """Sample average brightness at a vertical region of a frame.
+
+    Used to choose text overlay colors that contrast with the actual
+    background. Returns 0-255 (0=black, 255=white). Defaults to 128
+    if frame sampling fails.
+    """
+    import cv2
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        return 128
+    cap.set(cv2.CAP_PROP_POS_MSEC, timestamp * 1000)
+    ret, frame = cap.read()
+    cap.release()
+    if not ret or frame is None:
+        return 128
+    h, w = frame.shape[:2]
+    y_px = int(y_fraction * h)
+    y_start = max(0, y_px - 60)
+    y_end = min(h, y_px + 60)
+    strip = frame[y_start:y_end, :]
+    gray = cv2.cvtColor(strip, cv2.COLOR_BGR2GRAY)
+    avg = float(gray.mean())
+    print(f"[overlay] Background brightness at y={y_fraction:.2f} t={timestamp:.2f}s: {avg:.0f}/255", flush=True)
+    return avg
+
+
 def detect_face_positions(video_path, sample_timestamps):
     """
     Sample frames at given timestamps and detect the dominant face position.
@@ -1584,12 +1611,29 @@ RULES FOR USING THESE TIMESTAMPS:
                     )
 
         edit_plan["remove_words"] = normalized_remove_words
+        # Adapt tightening threshold to speech rate — fast speakers need
+        # a wider gap threshold (their natural pauses are longer relative to
+        # speech), slow speakers need tighter thresholds.
+        _speech_gap = 0.15  # default
+        if len(_dg_words) >= 5:
+            _first_t = float(_dg_words[0].get("start", 0))
+            _last_t = float(_dg_words[-1].get("end", 0))
+            _speech_dur = _last_t - _first_t
+            if _speech_dur > 0:
+                _wpm = len(_dg_words) / (_speech_dur / 60.0)
+                if _wpm > 180:
+                    _speech_gap = 0.20  # very fast — wider gap to preserve phrasing
+                elif _wpm > 150:
+                    _speech_gap = 0.18  # fast
+                elif _wpm < 100:
+                    _speech_gap = 0.12  # slow — tighter gap catches smaller pauses
+                print(f"[tighten] Speech rate: {_wpm:.0f} wpm → gap threshold: {_speech_gap*1000:.0f}ms", flush=True)
         print(
             f"[generate-edit] Building clips: {len(_dg_words)} words, "
             f"{len(normalized_remove_words)} Gemini removals + deterministic tightening",
             flush=True,
         )
-        validated_cuts = build_clips_from_words(_dg_words, normalized_remove_words)
+        validated_cuts = build_clips_from_words(_dg_words, normalized_remove_words, max_silence_gap=_speech_gap)
         for i, clip in enumerate(validated_cuts):
             clip_start = float(clip["source_start"])
             clip_end = float(clip["source_end"])
@@ -4212,8 +4256,7 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
                 cr["end"] = round((cr["end"] + hook_offset) * 1000) / 1000
         total_output_dur = sum(effective_durations)
         print(f"[render] Total output duration: {total_output_dur:.3f}s, {len(clip_ranges)} clip ranges", flush=True)
-        for cr_i, cr in enumerate(clip_ranges):
-            print(f"[render]   clip_range[{cr_i}]: {cr['start']:.3f}s - {cr['end']:.3f}s", flush=True)
+        _y_positions = {"top": 0.10, "center": 0.50, "bottom": 0.75}
         for i, overlay in enumerate(text_overlays):
             raw_idx = int(overlay.get("appear_at_clip") or 0)
             clip_idx = max(0, min(raw_idx, len(clip_ranges) - 1))
@@ -4224,9 +4267,7 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
             text = raw_text.strip()
             if not text:
                 continue
-            # Text overlay always starts at the beginning of the video
             start = 0.0
-            # End at clip 0's end (covers hook + first clip)
             end = clip_ranges[0]["end"]
             style = str(overlay.get("style") or "callout")
             char_count = len(text)
@@ -4240,12 +4281,26 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
             else:
                 font_size = round(base_size * 0.60)
             pos = str(overlay.get("position") or "center")
-            # TikTok-safe: top=200px, center=middle, bottom=480px from bottom (above UI)
             y_expr = "200" if pos == "top" else ("(h-th)/2" if pos == "center" else str(max(0, 1920 - 480)))
             end_t = max(start + 0.8, end)
             fade_in = 0.15
             fade_out = 0.15
-            print(f"[render] Text overlay '{text}' on clip {clip_idx}: start={start:.3f}s end_t={end_t:.3f}s (clip range {clip_ranges[clip_idx]['start']:.3f}-{clip_ranges[clip_idx]['end']:.3f})", flush=True)
+            # Adaptive text color based on background brightness
+            _y_frac = _y_positions.get(pos, 0.10)
+            _bg_brightness = sample_background_brightness(output_path, 0.5, _y_frac)
+            if _bg_brightness > 160:
+                _fg_color = "black"
+                _border_color = "white"
+                _box_color = "white@0.35"
+            elif _bg_brightness > 100:
+                _fg_color = "white"
+                _border_color = "black"
+                _box_color = "black@0.5"
+            else:
+                _fg_color = "white"
+                _border_color = "black"
+                _box_color = "black@0.35"
+            print(f"[overlay] bg={_bg_brightness:.0f} → text={_fg_color}, border={_border_color}", flush=True)
             _font_clause = (
                 f":fontfile='{OVERLAY_FONT_PATH}'"
                 if os.path.exists(OVERLAY_FONT_PATH)
@@ -4258,11 +4313,11 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
                 f"if(gt(t,{end_t-fade_out:.3f}),({end_t:.3f}-t)/{fade_out},1))"
             )
             post_filters.append(
-                f"{video_out}drawtext=text='{escaped_text}':fontsize={font_size}:fontcolor=white"
+                f"{video_out}drawtext=text='{escaped_text}':fontsize={font_size}:fontcolor={_fg_color}"
                 f"{_font_clause}"
                 f":x=(w-tw)/2:y={y_expr}"
-                f":borderw=4:bordercolor=black"
-                f":box=1:boxcolor=black@0.4:boxborderw=12"
+                f":borderw=4:bordercolor={_border_color}"
+                f":box=1:boxcolor={_box_color}:boxborderw=12"
                 f":alpha='{alpha_expr}'"
                 f":enable='between(t,{start:.3f},{end_t:.3f})'{out_label}"
             )
@@ -4876,6 +4931,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     text_overlays = edit_plan.get("text_overlays") or []
     if text_overlays:
         clip_ranges = get_output_clip_ranges(render_cuts, effective_durations)
+        # Sample background brightness once for text overlay color decisions
+        _overlay_sample_ts = float(render_cuts[0].get("source_start", 0)) + 0.5
+        _y_positions = {"top": 0.10, "center": 0.50, "bottom": 0.75}
         for i, overlay in enumerate(text_overlays):
             raw_idx = int(overlay.get("appear_at_clip") or 0)
             clip_idx = max(0, min(raw_idx, len(clip_ranges) - 1))
@@ -4904,6 +4962,25 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             end_t = max(start + 0.8, end)
             fade_in = 0.15
             fade_out = 0.15
+            # Adaptive text color: sample background brightness at overlay position
+            _y_frac = _y_positions.get(pos, 0.10)
+            _bg_brightness = sample_background_brightness(source_path, _overlay_sample_ts, _y_frac)
+            if _bg_brightness > 160:
+                # Light background — use dark text
+                _fg_color = "black"
+                _border_color = "white"
+                _box_color = "white@0.35"
+            elif _bg_brightness > 100:
+                # Medium background — white text with stronger box
+                _fg_color = "white"
+                _border_color = "black"
+                _box_color = "black@0.5"
+            else:
+                # Dark background — white text, subtle box
+                _fg_color = "white"
+                _border_color = "black"
+                _box_color = "black@0.35"
+            print(f"[overlay] bg={_bg_brightness:.0f} → text={_fg_color}, border={_border_color}", flush=True)
             _font_clause = (
                 f":fontfile='{OVERLAY_FONT_PATH}'"
                 if os.path.exists(OVERLAY_FONT_PATH)
@@ -4916,11 +4993,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 f"if(gt(t,{end_t-fade_out:.3f}),({end_t:.3f}-t)/{fade_out},1))"
             )
             post_filters.append(
-                f"{video_out}drawtext=text='{escaped_text}':fontsize={font_size}:fontcolor=white"
+                f"{video_out}drawtext=text='{escaped_text}':fontsize={font_size}:fontcolor={_fg_color}"
                 f"{_font_clause}"
                 f":x=(w-tw)/2:y={y_expr}"
-                f":borderw=4:bordercolor=black"
-                f":box=1:boxcolor=black@0.4:boxborderw=12"
+                f":borderw=4:bordercolor={_border_color}"
+                f":box=1:boxcolor={_box_color}:boxborderw=12"
                 f":alpha='{alpha_expr}'"
                 f":enable='between(t,{start:.3f},{end_t:.3f})'{out_label}"
             )
