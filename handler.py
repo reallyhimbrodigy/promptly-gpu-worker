@@ -1137,21 +1137,27 @@ Global parameters:
     Choose based on what you see in the footage and what the vibe calls for. The pipeline applies the grade automatically.
 
   SPEED RAMPING (only when vibe mentions "speed ramp", "speed ramping", or "CapCut style"):
-  Follow the speed ramping techniques described in the editing style guide above. The style guide was generated from watching real viral videos.
 
-  When speed ramping is active:
-  - Fast is the default. Everything that isn't funny or dramatic gets sped up.
-  - Slow down ONLY on moments that are funny, dramatic, or a punchline. The humor comes from the contrast.
-  - Ramp smoothly between speeds — don't jump. Build up, drop down, ramp back up.
-  - No 1.0x. Every moment is either fast or slow.
+  The whole point of speed ramping is CONTRAST. Fast setup → slow punchline → fast again.
+  That contrast is what makes it funny and engaging. Without dramatic swings it's just a slightly sped up video.
 
-  What each speed value does to speech:
-    1.2x = slightly fast, natural sounding, good default for filler and setup
-    1.3x = comfortably fast, pitch rises slightly, still easy to follow
-    1.5x = fast, noticeable pitch shift — maximum speed
-    0.8x = slightly slow, subtle dramatic effect
-    0.6x = noticeably slow, voice gets deeper, clearly dramatic
-    0.5x = very slow, deep voice, maximum dramatic impact
+  YOUR JOB: Mark the key MOMENTS in the video. The pipeline smoothly ramps between them.
+  - Place a keypoint where you want the speed to CHANGE
+  - The pipeline interpolates smoothly between keypoints — you don't need to add transition keypoints
+
+  RULES:
+  - Fast (1.3x-1.5x) is the DEFAULT. Setup, context, filler, transitions — all fast.
+  - Slow (0.5x-0.7x) is RARE and DRAMATIC. Only for: punchlines, reveals, reactions, emotional peaks.
+  - The contrast ratio matters: if your fast is 1.3x and your slow is 0.8x, there's no impact.
+    Good speed ramping has at least 2x contrast (e.g. 1.4x fast → 0.6x slow).
+  - Every video should have at least 2-3 dramatic slow moments, no more than 4-5.
+  - NEVER use 1.0x — every moment is either fast or slow.
+
+  What each speed feels like:
+    1.5x = fast, energetic, pitch rises — use for setup and filler
+    1.3x = comfortably fast, natural — good cruising speed
+    0.7x = noticeably slow, voice deepens — "wait for it" feeling
+    0.5x = very slow, deep voice, maximum impact — the punchline lands
 
   SPEED CURVE FORMAT:
   speed_curve: [
@@ -1159,7 +1165,9 @@ Global parameters:
     ...
   ]
 
-  Each keypoint means: "from this timestamp, play at this speed until the next keypoint."
+  Each keypoint marks a moment where speed changes. The pipeline smoothly ramps between them.
+  Example: [{{"t": 0, "speed": 1.4}}, {{"t": 3.2, "speed": 0.6}}, {{"t": 4.5, "speed": 1.4}}]
+  This means: start fast, smoothly slow down into the moment at 3.2s, then ramp back up.
   If speed ramping is not requested, set speed_curve to "none".
 
   caption_style — word-by-word animated captions synced to speech:
@@ -1699,7 +1707,7 @@ RULES FOR USING THESE TIMESTAMPS:
             if isinstance(kp, dict) and "t" in kp and "speed" in kp:
                 try:
                     t = max(0.0, float(kp["t"]))
-                    s = max(0.67, min(1.5, float(kp["speed"])))
+                    s = max(0.5, min(1.5, float(kp["speed"])))
                     speed_curve.append({"t": t, "speed": s})
                 except Exception:
                     continue
@@ -2608,33 +2616,31 @@ def get_atempo_filter(speed):
 
 
 def get_speed_for_timestamp(t, speed_curve):
-    """Given a source timestamp, return the speed from the speed curve."""
+    """Smoothly interpolate speed at time t from keypoints.
+
+    Uses linear interpolation between keypoints so the speed ramps
+    continuously instead of jumping in flat steps. This is what makes
+    speed ramping feel like CapCut — smooth acceleration/deceleration
+    with dramatic contrast between fast setup and slow punchlines.
+    """
     if not speed_curve or speed_curve == "none":
         return 1.0
-    active_speed = 1.0
-    for kp in speed_curve:
-        if float(kp["t"]) <= t:
-            active_speed = float(kp["speed"])
-        else:
-            break
-    return active_speed
-
-
-def _interpolate_speed(speed_curve, t):
-    """Linearly interpolate speed at time t from keypoints."""
-    if not speed_curve:
+    if not isinstance(speed_curve, list) or len(speed_curve) == 0:
         return 1.0
-    if t <= speed_curve[0]["t"]:
-        return speed_curve[0]["speed"]
-    if t >= speed_curve[-1]["t"]:
-        return speed_curve[-1]["speed"]
+    # Before first keypoint
+    if t <= float(speed_curve[0]["t"]):
+        return float(speed_curve[0]["speed"])
+    # After last keypoint
+    if t >= float(speed_curve[-1]["t"]):
+        return float(speed_curve[-1]["speed"])
+    # Interpolate between surrounding keypoints
     for i in range(len(speed_curve) - 1):
-        t0 = speed_curve[i]["t"]
-        t1 = speed_curve[i + 1]["t"]
+        t0 = float(speed_curve[i]["t"])
+        t1 = float(speed_curve[i + 1]["t"])
         if t0 <= t <= t1:
             frac = (t - t0) / (t1 - t0) if t1 != t0 else 0.0
-            s0 = speed_curve[i]["speed"]
-            s1 = speed_curve[i + 1]["speed"]
+            s0 = float(speed_curve[i]["speed"])
+            s1 = float(speed_curve[i + 1]["speed"])
             return s0 + (s1 - s0) * frac
     return 1.0
 
@@ -2686,7 +2692,8 @@ def project_words_to_output(transcript, cuts, effective_durations, hook_offset=0
         speed   = max(0.25, min(4.0, float(cut.get("speed") or 1.0)))
         curve_speed = 1.0
         if speed_curve and speed_curve != "none":
-            curve_speed = max(0.5, min(1.5, get_speed_for_timestamp(c_start, speed_curve)))
+            mid = (c_start + c_end) / 2.0
+            curve_speed = max(0.5, min(1.5, get_speed_for_timestamp(mid, speed_curve)))
         combined_speed = speed * curve_speed
         for w in words:
             ws = float(w.get("start") or 0)
@@ -3845,7 +3852,8 @@ def project_source_time_to_output(source_t, cuts, clip_ranges, speed_curve=None)
         speed = max(0.25, float(cut.get("speed") or 1.0))
         curve_speed = 1.0
         if speed_curve and speed_curve != "none":
-            curve_speed = max(0.5, min(1.5, get_speed_for_timestamp(src_start, speed_curve)))
+            mid = (src_start + src_end) / 2.0
+            curve_speed = max(0.5, min(1.5, get_speed_for_timestamp(mid, speed_curve)))
         combined_speed = speed * curve_speed
 
         if src_start <= source_t <= src_end:
@@ -3886,7 +3894,8 @@ def compute_effective_durations(cuts, speed_curve=None):
         clip_speed = max(0.25, min(4.0, float(cut.get("speed") or 1.0)))
         curve_speed = 1.0
         if speed_curve and speed_curve != "none":
-            curve_speed = max(0.5, min(1.5, get_speed_for_timestamp(src_start, speed_curve)))
+            mid = (src_start + src_end) / 2.0
+            curve_speed = max(0.5, min(1.5, get_speed_for_timestamp(mid, speed_curve)))
         effective_dur = raw_dur / clip_speed / curve_speed
         durations.append(round(effective_dur, 3))
     return durations
@@ -3957,10 +3966,12 @@ def prepend_hook_clip(output_path, edit_plan, work_dir):
             print(f"[hook] Silence detection failed ({e}) — using original end", flush=True)
 
     clip_src_start = float(cuts[hook_clip_idx]["source_start"])
+    clip_src_end = float(cuts[hook_clip_idx]["source_end"])
     clip_speed = max(0.25, float(cuts[hook_clip_idx].get("speed") or 1.0))
     curve_speed = 1.0
     if speed_curve and speed_curve != "none":
-        curve_speed = max(0.5, min(1.5, get_speed_for_timestamp(clip_src_start, speed_curve)))
+        clip_mid = (clip_src_start + clip_src_end) / 2.0
+        curve_speed = max(0.5, min(1.5, get_speed_for_timestamp(clip_mid, speed_curve)))
     combined_speed = clip_speed * curve_speed
 
     clip_render_start = float(clip_ranges[hook_clip_idx]["start"])
@@ -4410,7 +4421,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         clip_speed = max(0.25, min(4.0, float(cut.get("speed") or 1.0)))
         curve_speed = 1.0
         if speed_curve and speed_curve != "none":
-            curve_speed = max(0.5, min(1.5, get_speed_for_timestamp(float(cut["source_start"]), speed_curve)))
+            _mid = (float(cut["source_start"]) + float(cut["source_end"])) / 2.0
+            curve_speed = max(0.5, min(1.5, get_speed_for_timestamp(_mid, speed_curve)))
         eff_dur = effective_durations[i]
         print(
             f"[ffmpeg] Segment {i}: {cut['source_start']:.3f}s->{cut['source_end']:.3f}s "
@@ -4428,7 +4440,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         speed = max(0.25, min(4.0, float(cut.get("speed") or 1.0)))
         curve_speed = 1.0
         if speed_curve and speed_curve != "none":
-            curve_speed = max(0.5, min(1.5, get_speed_for_timestamp(start, speed_curve)))
+            # Sample at clip midpoint for smoother ramping across many small clips
+            mid = (start + end) / 2.0
+            curve_speed = max(0.5, min(1.5, get_speed_for_timestamp(mid, speed_curve)))
         combined_speed = speed * curve_speed
         if hook_clip and i > 0:
             _hook_start = float(hook_clip.get("source_start") or 0.0)
