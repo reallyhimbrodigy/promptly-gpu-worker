@@ -1486,6 +1486,13 @@ RULES FOR USING THESE TIMESTAMPS:
     if isinstance(raw_remove_words, list):
         if not _dg_words:
             raise ValueError("Deepgram words missing — remove_words architecture requires word timestamps")
+        print(f"[DIAG] Full transcript ({len(_dg_words)} words):", flush=True)
+        for i, w in enumerate(_dg_words):
+            print(
+                f"[DIAG]   [{i}] {float(w.get('start') or 0):.3f}-{float(w.get('end') or 0):.3f}: "
+                f"{w.get('punctuated_word') or w.get('word')}",
+                flush=True,
+            )
         normalized_remove_words = []
         for item in raw_remove_words:
             if not isinstance(item, dict):
@@ -1532,6 +1539,27 @@ RULES FOR USING THESE TIMESTAMPS:
 
         edit_plan["remove_words"] = normalized_remove_words
         validated_cuts = build_clips_from_words(_dg_words, normalized_remove_words, max_silence_gap=0.08)
+        removed_indices = set()
+        for item in normalized_remove_words:
+            if "word_index" in item:
+                removed_indices.add(int(item["word_index"]))
+            elif "start" in item and "end" in item:
+                rs = float(item["start"])
+                re = float(item["end"])
+                for i, w in enumerate(_dg_words):
+                    ws = float(w.get("start") or 0)
+                    we = float(w.get("end") or 0)
+                    if min(we, re) > max(ws, rs):
+                        removed_indices.add(i)
+        kept_indices = [i for i in range(len(_dg_words)) if i not in removed_indices]
+        kept_words = [
+            _dg_words[i].get("punctuated_word") or _dg_words[i].get("word") or ""
+            for i in kept_indices
+        ]
+        preview = " ".join(kept_words[:30])
+        if len(kept_words) > 30:
+            preview += "..."
+        print(f"[DIAG] Kept {len(kept_indices)}/{len(_dg_words)} words: {preview}", flush=True)
         print(
             f"[generate-edit] Word-level clip building: {len(validated_cuts)} clips from "
             f"{len(_dg_words)} words, {len(normalized_remove_words)} removals",
@@ -3273,7 +3301,11 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.08):
 
     for start, end in removal_ranges:
         for w in sorted_words:
-            if min(w["_end"], end) > max(w["_start"], start):
+            overlap_start = max(w["_start"], start)
+            overlap_end = min(w["_end"], end)
+            overlap = max(0.0, overlap_end - overlap_start)
+            word_dur = max(0.001, w["_end"] - w["_start"])
+            if overlap / word_dur > 0.5:
                 removed_indices.add(w["_word_index"])
 
     kept_words = [w for w in sorted_words if w["_word_index"] not in removed_indices]
