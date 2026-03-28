@@ -1028,21 +1028,21 @@ You are a professional short-form editor. You have the exact transcript with mil
 DEAD AIR IN SPEECH CONTENT:
 Look at the gaps between words in the transcript:
 - Under 0.10 seconds between words — natural word spacing. KEEP. This is how speech flows.
-- 0.10 seconds or more between words — this is a pause, breath, or dead air. REMOVE it by ending one clip before the gap and starting the next clip after it.
-- Filler words (uh, um, hmm, er, ah) — skip these entirely. End the previous clip before the filler word and start the next clip at the word after it.
-- Stutters and false starts — when the speaker starts a word then restarts it ("she shou- shouldn't", "I said, who is... I said, who is he?", "I'm going to... I'm gonna"), cut out the false start and keep only the corrected version. End the previous clip before the false start and start the next clip at the corrected word. This is mandatory — a professional editor never leaves a stutter in the final cut.
+- 0.10 seconds or more between words — this is a pause, breath, or dead air. REMOVE that gap using a remove_words time range.
+- Filler words (uh, um, hmm, er, ah) — remove them using word_index.
+- Stutters and false starts — when the speaker starts a word then restarts it ("she shou- shouldn't", "I said, who is... I said, who is he?", "I'm going to... I'm gonna"), remove the false start word(s) using word_index and keep only the corrected version. This is mandatory — a professional editor never leaves a stutter in the final cut.
 
-HOW TO CUT PRECISELY:
-- source_end = the exact end timestamp of the last word you want to keep. The timestamps are accurate — use them exactly. If "electrocuted" ends at 26.07, set source_end to 26.07.
-- source_start = the exact start timestamp of the first word in the clip. If "and" starts at 8.88, set source_start to 8.88. You have the exact timestamps. Use them exactly.
-- The gap between clips is the dead air being removed
+HOW TO MARK REMOVALS PRECISELY:
+- Use word_index when removing a specific spoken word.
+- Use start/end time ranges when removing silence, dead air, or an entire section.
+- The pipeline will build clips automatically from the kept words, so your job is only to say what gets removed.
 
 CONTINUOUS PHRASES:
-Words within the same phrase that have small natural gaps (under 0.10s) must stay together in ONE clip. "Strategies built in" is one phrase — keep it in one clip. Only create a new clip when you see a gap of 0.10s or more in the transcript.
+Words within the same phrase that have small natural gaps (under 0.10s) should usually stay together. Do not remove words inside a flowing phrase unless they are filler, a stutter, or clearly unwanted.
 
 FIRST CLIP:
-- If the video starts with someone talking, set source_start to the first word's start timestamp. Zero dead air.
-- If the video starts with visuals, music, or action before speech begins, set source_start to 0.0 to preserve that content.
+- If the video starts with someone talking, do not remove anything before the first word.
+- If the video starts with visuals, music, or action before speech begins, preserve that content unless it is clearly dead air.
 
 DEAD AIR IN NON-SPEECH CONTENT:
 Not every video is a talking head. For videos with music, product shots, tutorials, vlogs, or mixed content:
@@ -1055,9 +1055,9 @@ Not every video is a talking head. For videos with music, product shots, tutoria
 Your job as the editor: keep what's interesting, cut what isn't. Use the word timestamps for speech precision. Use your visual judgment for non-speech decisions. Every millisecond in the final video should earn its place.
 
 GENERAL RULES:
-- source_start and source_end MUST align with word boundaries from the transcript when speech is present. Never cut inside a word.
-- For non-speech sections, place cuts at natural visual break points — scene changes, camera movements, action pauses.
-- The source timeline only moves forward. Clips must stay chronological.
+- Never remove only half of a word. If a spoken word should go, remove it by word_index.
+- For non-speech sections, remove dead ranges at natural visual break points — scene changes, camera movements, action pauses.
+- The source timeline only moves forward. Removals must stay chronological.
 
 Sound design adds texture. A swoosh on a scene change, a thud when a statement lands, a pop when text appears — these make cuts feel physical instead of digital. But not every cut needs a sound. Continuous speech flows best with silent hard cuts.
 
@@ -1080,31 +1080,28 @@ The ending matters. On these platforms, videos auto-loop. A clean ending that fl
 
 === TOOLS ===
 
-Per-clip parameters:
+Word-level edit control:
 
-  source_start / source_end — timestamps defining each clip. MUST be strictly chronological.
-    IMPORTANT: cuts must be in chronological order by source_start. The hook_clip field handles the hook — do NOT reorder cuts to put the hook first.
-    Clips must be chronological. Leave gaps between clips to remove dead air, pauses, or dull moments — the pipeline preserves these gaps as intentional cuts. Only overlap or touch clips when the speech flows continuously with no pause.
+  remove_words — this is how you remove content. Do NOT output cuts. The pipeline will build clips automatically from Deepgram's exact word timestamps.
 
-  transition_out — visual transition between this clip and the next:
+  Each remove_words item can be one of:
 
-    none — hard cut. Use this for EVERY cut unless the user's vibe specifically asks for transitions. Hard cuts are what TikTok and Reels content uses. They are clean, instant, and professional.
+    {{"word_index": <index>, "reason": "<stutter|false_start|filler>"}}
+      Use this when removing a specific spoken word. This is the preferred way to remove stutters, repeated words, false starts, and filler words.
 
-    fadewhite — fades through white between clips. ONLY use if the user's vibe mentions "transitions" or "white fade" or similar. Never add transitions on your own.
+    {{"start": <seconds>, "end": <seconds>, "reason": "<dead_air|section_skip|non_speech_gap>"}}
+      Use this when removing a silence range, a dead-air gap, or a whole non-speech section.
 
-    whip_left / whip_right — fast directional blur. ONLY use if the user's vibe specifically asks for it.
+  Rules for remove_words:
+  - Be aggressive about marking filler, stutters, false starts, and dead air for removal.
+  - Keep the removals chronological.
+  - Use word_index whenever possible for speech.
+  - Use time ranges for silence, dead air, or non-speech gaps.
+  - The pipeline groups consecutive kept words into clips automatically, using Deepgram's exact timestamps, so there is zero risk of cutting inside a word.
 
-    DEFAULT: set every transition_out to "none" unless the user explicitly requests transitions in their vibe.
-
-  transition_sound — always "none"
-
-  sfx_style — always "none"
-
-  zoom — "slow_in", "slow_out", or "none". A subtle push or pull to draw the viewer in.
-  Put zoom on the clip that contains the hook_clip timestamps (if hook_clip is set) or clip 0 (if no hook).
-  All other clips must be "none". The pipeline ensures zoom only appears at the start of the video.
-
-  cut_zoom — always false. The pipeline controls this.
+  opening_zoom — "slow_in", "slow_out", or "none". A subtle push or pull to draw the viewer in.
+  Put opening_zoom on the hook clip if hook_clip is set, otherwise on the first clip in the video.
+  This is the ONLY zoom choice you need to make. All later clips stay at "none".
 
 Global parameters:
 
@@ -1162,7 +1159,7 @@ Global parameters:
 
 Text overlays:
   text_overlays — Short, bold text that gives the viewer instant context. Use ONE overlay maximum.
-  Put appear_at_clip on the clip that contains the hook_clip timestamps (if hook_clip is set) or clip 0 (if no hook).
+  Put appear_at_clip on clip 0.
   This overlay sets the stakes in a few words — e.g. "My 6yo exposed my wife", "He said WHAT?!".
   The pipeline ensures the overlay appears at the start of the video. Do NOT place overlays in the middle or end.
   If the story doesn't need context-setting text, use an empty array.
@@ -1219,14 +1216,16 @@ Then output the JSON:
   "background_music": "none",
   "aspect_ratio": "9:16",
   "speed_curve": [<keypoints>] or "none",
+  "opening_zoom": "<slow_in|slow_out|none>",
   "text_overlays": [
     {{"text": "<text>", "position": "<pos>", "appear_at_clip": <n>, "style": "<style>"}}
   ],
   "sound_effects": [
     {{"t": <seconds>, "sound": "<sound>", "word": "<trigger>"}}
   ],
-  "cuts": [
-    {{"source_start": <n>, "source_end": <n>, "transition_out": "<transition>", "zoom": "<zoom>", "cut_zoom": <bool>}}
+  "remove_words": [
+    {{"word_index": <n>, "reason": "<stutter|false_start|filler>"}} or
+    {{"start": <n>, "end": <n>, "reason": "<dead_air|section_skip|non_speech_gap>"}}
   ]
 }}
 ```"""
@@ -1330,11 +1329,11 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None, deepgra
         readable_transcript = " ".join(readable_words)
 
         word_lines = []
-        for w in deepgram_words:
+        for idx, w in enumerate(deepgram_words):
             word_text = w.get("punctuated_word") or w.get("word") or ""
             start = float(w.get("start") or 0)
             end = float(w.get("end") or 0)
-            word_lines.append(f"  {start:.2f}-{end:.2f}: {word_text}")
+            word_lines.append(f"  [{idx}] {start:.2f}-{end:.2f}: {word_text}")
 
         transcript_block = "\n".join(word_lines)
         first_word_start = float(deepgram_words[0].get("start", 0))
@@ -1353,6 +1352,7 @@ The following is the complete word-by-word transcript with millisecond-accurate 
 {transcript_block}
 
 RULES FOR USING THESE TIMESTAMPS:
+- word_index refers to the numbered list above. Use those exact indices in remove_words when removing specific spoken words.
 - Your source_start and source_end values MUST land in the gaps BETWEEN words, not inside a word.
 - A gap is the time between one word's end timestamp and the next word's start timestamp.
 - For example, if "problem." ends at 5.62 and "With" starts at 5.76, the silence gap is 5.62-5.76. Place source_end at 5.62 and source_start at 5.76 (or anywhere in between).
@@ -1466,75 +1466,95 @@ RULES FOR USING THESE TIMESTAMPS:
     analysis = build_analysis_from_gemini_recipe(edit_plan, duration=duration)
     has_burned_captions = infer_has_burned_captions(edit_plan, analysis, log_prefix="[generate-edit]")
 
-    raw_cuts = edit_plan.get("cuts") or edit_plan.get("clips") or []
-    if not raw_cuts:
-        raise ValueError("Gemini response missing cuts array")
-    for clip in raw_cuts:
-        clip["freeze_frame"] = False
-        clip["motion_blur_transition"] = False
-        clip.pop("speed_ramp", None)
-        clip.pop("freeze_frame", None)
-        clip.pop("motion_blur_transition", None)
-        clip.pop("speed_segments", None)
-
     video_duration = float(analysis.get("duration") or 0)
-    validated_cuts = []
-    for i, cut in enumerate(raw_cuts):
-        src_start = float(cut.get("source_start") or 0)
-        src_end = float(cut.get("source_end") or 0)
-        if src_start >= src_end:
-            raise ValueError(f"Cut {i}: source_start ({src_start}) >= source_end ({src_end})")
-        if src_start < 0:
-            raise ValueError(f"Cut {i}: source_start is negative")
-        if video_duration > 0 and src_end > video_duration + 0.5:
-            raise ValueError(f"Cut {i}: source_end ({src_end}) exceeds video duration ({video_duration})")
-        validated_cuts.append({**cut, "source_start": src_start, "source_end": src_end, "clip": i + 1})
-
-    # Sort cuts chronologically — Gemini sometimes puts hook clip first
-    validated_cuts.sort(key=lambda c: float(c["source_start"]))
-
-    for i in range(1, len(validated_cuts)):
-        prev_end = validated_cuts[i - 1]["source_end"]
-        curr_start = validated_cuts[i]["source_start"]
-        if curr_start < prev_end:
-            print(f"[generate-edit] Fixing clip {i} overlap: source_start {curr_start} -> {prev_end}", flush=True)
-            validated_cuts[i]["source_start"] = prev_end
-
-    for i in range(1, len(validated_cuts)):
-        prev_end = validated_cuts[i - 1]["source_end"]
-        curr_start = validated_cuts[i]["source_start"]
-        gap = curr_start - prev_end
-        if 0 < gap <= 0.05:
-            print(f"[generate-edit] Closing {gap:.3f}s micro-gap between clip {i-1} and clip {i}", flush=True)
-            validated_cuts[i - 1]["source_end"] = curr_start
-        elif 0.05 < gap <= 2.0:
-            print(f"[generate-edit] Intentional cut: {gap:.3f}s removed between clip {i-1} and clip {i}", flush=True)
-        elif gap > 2.0:
-            print(f"[generate-edit] Section skip: {gap:.3f}s removed between clip {i-1} and clip {i}", flush=True)
-
     _dg_words = edit_plan.get("_deepgram_words", [])
-    if _dg_words:
-        for w in _dg_words:
-            if "cry" in str(w.get("word") or "").lower():
-                print(
-                    f"[DIAG] Found word '{w.get('word')}': start={w.get('start')}, end={w.get('end')}",
-                    flush=True,
-                )
+    raw_remove_words = edit_plan.get("remove_words")
+    raw_cuts = edit_plan.get("cuts") or edit_plan.get("clips")
 
-        # Snapping disabled — Gemini has Deepgram timestamps and places cuts in silence gaps
-        # validated_cuts = snap_cuts_to_word_boundaries(validated_cuts, _dg_words)
-        print(f"[generate-edit] Snapping disabled — Gemini has word timestamps", flush=True)
+    validated_cuts = []
+    if isinstance(raw_remove_words, list):
+        if not _dg_words:
+            raise ValueError("Deepgram words missing — remove_words architecture requires word timestamps")
+        normalized_remove_words = []
+        for item in raw_remove_words:
+            if not isinstance(item, dict):
+                continue
+            if "word_index" in item:
+                try:
+                    idx = int(item["word_index"])
+                except Exception:
+                    continue
+                if 0 <= idx < len(_dg_words):
+                    normalized_remove_words.append({
+                        "word_index": idx,
+                        "reason": str(item.get("reason") or "remove"),
+                    })
+            elif "start" in item and "end" in item:
+                try:
+                    rs = max(0.0, float(item["start"]))
+                    re = max(0.0, float(item["end"]))
+                except Exception:
+                    continue
+                if re > rs:
+                    if video_duration > 0:
+                        re = min(re, video_duration)
+                    normalized_remove_words.append({
+                        "start": round(rs, 3),
+                        "end": round(re, 3),
+                        "reason": str(item.get("reason") or "remove"),
+                    })
 
-        if validated_cuts:
-            print(f"[DIAG] Last clip before tighten: source_end={validated_cuts[-1]['source_end']}", flush=True)
-        validated_cuts = tighten_clips_with_deepgram(validated_cuts, _dg_words, min_silence_to_remove=0.08)
-        if validated_cuts:
-            print(f"[DIAG] Last clip after tighten: source_end={validated_cuts[-1]['source_end']}", flush=True)
-        print(f"[generate-edit] Tightening enabled — snapping to Deepgram word boundaries", flush=True)
+        edit_plan["remove_words"] = normalized_remove_words
+        validated_cuts = build_clips_from_words(_dg_words, normalized_remove_words, max_silence_gap=0.08)
+        print(
+            f"[generate-edit] Word-level clip building: {len(validated_cuts)} clips from "
+            f"{len(_dg_words)} words, {len(normalized_remove_words)} removals",
+            flush=True,
+        )
+        if not validated_cuts:
+            raise ValueError("Gemini response removed all words — no clips remain")
+    elif isinstance(raw_cuts, list):
+        print("[generate-edit] WARNING: Gemini returned cuts instead of remove_words — using legacy path", flush=True)
+        for clip in raw_cuts:
+            clip["freeze_frame"] = False
+            clip["motion_blur_transition"] = False
+            clip.pop("speed_ramp", None)
+            clip.pop("freeze_frame", None)
+            clip.pop("motion_blur_transition", None)
+            clip.pop("speed_segments", None)
 
-        # Micro-gap closing not needed — Gemini places precise boundaries
+        for i, cut in enumerate(raw_cuts):
+            src_start = float(cut.get("source_start") or 0)
+            src_end = float(cut.get("source_end") or 0)
+            if src_start >= src_end:
+                raise ValueError(f"Cut {i}: source_start ({src_start}) >= source_end ({src_end})")
+            if src_start < 0:
+                raise ValueError(f"Cut {i}: source_start is negative")
+            if video_duration > 0 and src_end > video_duration + 0.5:
+                raise ValueError(f"Cut {i}: source_end ({src_end}) exceeds video duration ({video_duration})")
+            validated_cuts.append({**cut, "source_start": src_start, "source_end": src_end, "clip": i + 1})
+
+        validated_cuts.sort(key=lambda c: float(c["source_start"]))
+        for i in range(1, len(validated_cuts)):
+            prev_end = validated_cuts[i - 1]["source_end"]
+            curr_start = validated_cuts[i]["source_start"]
+            if curr_start < prev_end:
+                print(f"[generate-edit] Fixing clip {i} overlap: source_start {curr_start} -> {prev_end}", flush=True)
+                validated_cuts[i]["source_start"] = prev_end
+
+        for i in range(1, len(validated_cuts)):
+            prev_end = validated_cuts[i - 1]["source_end"]
+            curr_start = validated_cuts[i]["source_start"]
+            gap = curr_start - prev_end
+            if 0 < gap <= 0.05:
+                print(f"[generate-edit] Closing {gap:.3f}s micro-gap between clip {i-1} and clip {i}", flush=True)
+                validated_cuts[i - 1]["source_end"] = curr_start
+            elif 0.05 < gap <= 2.0:
+                print(f"[generate-edit] Intentional cut: {gap:.3f}s removed between clip {i-1} and clip {i}", flush=True)
+            elif gap > 2.0:
+                print(f"[generate-edit] Section skip: {gap:.3f}s removed between clip {i-1} and clip {i}", flush=True)
     else:
-        print("[generate-edit] No Deepgram words available — skipping word-boundary snapping and tightening", flush=True)
+        raise ValueError("Gemini response missing both remove_words and cuts")
 
     vibe_lower = vibe.lower() if isinstance(vibe, str) else ""
     has_transition_request = any(
@@ -1597,6 +1617,12 @@ RULES FOR USING THESE TIMESTAMPS:
     else:
         edit_plan["caption_style"] = str(edit_plan.get("caption_style") or "none").lower()
 
+    valid_zoom_modes = {"none", "slow_in", "slow_out", "punch_in", "punch_out"}
+    opening_zoom = str(edit_plan.get("opening_zoom") or "none").lower()
+    if opening_zoom not in valid_zoom_modes:
+        opening_zoom = "none"
+    edit_plan["opening_zoom"] = opening_zoom
+
     raw_curve = edit_plan.get("speed_curve", "none")
     if raw_curve == "none" or raw_curve is None or not isinstance(raw_curve, list):
         speed_curve = None
@@ -1655,6 +1681,7 @@ RULES FOR USING THESE TIMESTAMPS:
         _he = float(hook_clip["source_end"])
         print(f"[hook] Hook timestamps: {_hs:.2f}-{_he:.2f} ({_he - _hs:.2f}s)", flush=True)
     edit_plan["hook_clip"] = hook_clip
+    edit_plan["cuts"] = list(validated_cuts)
 
     edit_plan["_hook_offset"] = 0.0
 
@@ -1775,6 +1802,19 @@ RULES FOR USING THESE TIMESTAMPS:
             "speed": speed,
         })
 
+    if final_cuts and opening_zoom != "none":
+        target_idx = 0
+        raw_hook = edit_plan.get("hook_clip")
+        if isinstance(raw_hook, dict):
+            hs = float(raw_hook.get("source_start") or 0.0)
+            he = float(raw_hook.get("source_end") or 0.0)
+            for i, cut in enumerate(final_cuts):
+                if float(cut["source_start"]) <= hs + 0.1 and float(cut["source_end"]) >= he - 0.1:
+                    target_idx = i
+                    break
+        final_cuts[target_idx]["zoom"] = opening_zoom
+        print(f"[generate-edit] Assigned opening_zoom={opening_zoom} to clip {target_idx}", flush=True)
+
     baseline = analysis.get("color_baseline") or {}
     intent = normalize_intent(edit_plan.get("color_intent") or "none")
     edit_plan["color_intent"] = intent
@@ -1787,6 +1827,7 @@ RULES FOR USING THESE TIMESTAMPS:
     edit_plan.pop("frame_layout", None)
     if "clips" in edit_plan:
         del edit_plan["clips"]
+    edit_plan.pop("remove_words", None)
     if final_cuts:
         edit_plan["target_duration"] = final_cuts[-1]["source_end"] - final_cuts[0]["source_start"]
     edit_plan.pop("target_duration", None)
@@ -3145,6 +3186,97 @@ def _is_stutter(current_word, next_word):
         return True
 
     return False
+
+
+def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.08):
+    """
+    Build chronological clips from Deepgram word timestamps after removing words/ranges.
+    Output matches the clip shape expected by render_multi_clip().
+    """
+    if not deepgram_words:
+        return []
+
+    sorted_words = sorted(
+        [
+            {
+                **w,
+                "_word_index": i,
+                "_start": float(w.get("start") or 0.0),
+                "_end": float(w.get("end") or 0.0),
+            }
+            for i, w in enumerate(deepgram_words)
+        ],
+        key=lambda w: w["_start"],
+    )
+
+    removed_indices = set()
+    removal_ranges = []
+    for item in remove_words or []:
+        if not isinstance(item, dict):
+            continue
+        if "word_index" in item:
+            try:
+                idx = int(item["word_index"])
+                if 0 <= idx < len(sorted_words):
+                    removed_indices.add(idx)
+            except Exception:
+                continue
+        elif "start" in item and "end" in item:
+            try:
+                start = max(0.0, float(item["start"]))
+                end = max(0.0, float(item["end"]))
+            except Exception:
+                continue
+            if end > start:
+                removal_ranges.append((start, end))
+
+    for start, end in removal_ranges:
+        for w in sorted_words:
+            if min(w["_end"], end) > max(w["_start"], start):
+                removed_indices.add(w["_word_index"])
+
+    kept_words = [w for w in sorted_words if w["_word_index"] not in removed_indices]
+
+    if not kept_words:
+        return []
+
+    clips = []
+    current_words = [kept_words[0]]
+
+    for prev, curr in zip(kept_words, kept_words[1:]):
+        gap = curr["_start"] - prev["_end"]
+        removed_word_between = curr["_word_index"] > prev["_word_index"] + 1
+
+        if gap > max_silence_gap or removed_word_between:
+            clips.append({
+                "source_start": round(current_words[0]["_start"] * 1000) / 1000,
+                "source_end": round(current_words[-1]["_end"] * 1000) / 1000,
+                "transition_out": "none",
+                "transition_sound": "none",
+                "sfx_style": "none",
+                "zoom": "none",
+                "cut_zoom": False,
+                "speed": 1.0,
+                "freeze_frame": False,
+            })
+            current_words = [curr]
+        else:
+            current_words.append(curr)
+
+    if current_words:
+        clips.append({
+            "source_start": round(current_words[0]["_start"] * 1000) / 1000,
+            "source_end": round(current_words[-1]["_end"] * 1000) / 1000,
+            "transition_out": "none",
+            "transition_sound": "none",
+            "sfx_style": "none",
+            "zoom": "none",
+            "cut_zoom": False,
+            "speed": 1.0,
+            "freeze_frame": False,
+        })
+
+    return [c for c in clips if c["source_end"] > c["source_start"] + 0.01]
 
 
 def tighten_clips_with_deepgram(cuts, deepgram_words, min_silence_to_remove=0.08):
