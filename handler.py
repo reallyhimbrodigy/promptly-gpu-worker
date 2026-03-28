@@ -80,6 +80,49 @@ except Exception:
 
 print("[startup] all import checks done", flush=True)
 
+# ── GPU / NVENC detection ─────────────────────────────────────────────────────
+_HAS_NVENC = False
+try:
+    _nvenc_check = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-encoders"],
+        capture_output=True, text=True, timeout=5,
+    )
+    if "h264_nvenc" in (_nvenc_check.stdout or ""):
+        # Verify actual GPU access with a tiny encode
+        _gpu_test = subprocess.run(
+            ["ffmpeg", "-y", "-f", "lavfi", "-i", "nullsrc=s=64x64:d=0.1",
+             "-c:v", "h264_nvenc", "-f", "null", "-"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if _gpu_test.returncode == 0:
+            _HAS_NVENC = True
+            print("[startup] NVENC GPU encoder: available", flush=True)
+        else:
+            print("[startup] NVENC listed but GPU not accessible — using CPU", flush=True)
+    else:
+        print("[startup] NVENC not available — using CPU encoder", flush=True)
+except Exception:
+    print("[startup] NVENC check failed — using CPU encoder", flush=True)
+
+
+def get_encode_args(quality="high"):
+    """Return encoder args for FFmpeg. Uses NVENC when GPU is available.
+
+    quality="high"     → final output (CRF 18 equivalent)
+    quality="lossless" → intermediate files (CRF 0 equivalent)
+    """
+    if _HAS_NVENC:
+        if quality == "lossless":
+            return ["-c:v", "h264_nvenc", "-preset", "p1", "-rc", "lossless"]
+        else:
+            # p4 = good speed/quality balance, cq 19 ≈ libx264 CRF 18
+            return ["-c:v", "h264_nvenc", "-preset", "p4", "-rc", "vbr", "-cq", "19", "-b:v", "0"]
+    else:
+        if quality == "lossless":
+            return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "0"]
+        else:
+            return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "18"]
+
 _EMOJI_RE = re.compile(
     "[\U0001F600-\U0001F64F\U0001F300-\U0001F5FF\U0001F680-\U0001F6FF"
     "\U0001F1E0-\U0001F1FF\U00002702-\U000027B0\U000024C2-\U0001F251"
@@ -405,6 +448,7 @@ def detect_face_positions(video_path, sample_timestamps):
             "cx": best_cx if found else last_cx,
             "cy": best_cy if found else last_cy,
             "found": found,
+            "confidence": best_conf if found else 0.0,
         })
 
     cap.release()
@@ -880,7 +924,53 @@ def detect_silence_regions(source_path, silence_db=-40, min_silence_duration=0.2
         return []
 
 
-def tighten_transcript(words, scene_cuts=None, shots=None, original_duration=0, source_path=None):
+def measure_source_loudness(source_path):
+    """
+    Measure the source audio's peak level, RMS, and noise floor using ffmpeg.
+    Returns dict with 'peak_db', 'rms_db', 'noise_floor_db' (all negative floats).
+    Falls back to safe defaults if measurement fails.
+    """
+    defaults = {"peak_db": -6.0, "rms_db": -18.0, "noise_floor_db": -45.0}
+    try:
+        # astats gives us peak, RMS; we sample the first 60s to keep it fast
+        cmd = [
+            "ffmpeg", "-i", source_path, "-t", "60",
+            "-af", "astats=metadata=1:reset=0,ametadata=mode=print",
+            "-f", "null", "-"
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        stderr = result.stderr
+
+        # Parse peak and RMS from astats output
+        import re as _re
+        peak_matches = _re.findall(r"lavfi\.astats\.Overall\.Peak_level=([-\d.]+)", stderr)
+        rms_matches = _re.findall(r"lavfi\.astats\.Overall\.RMS_level=([-\d.]+)", stderr)
+        noise_matches = _re.findall(r"lavfi\.astats\.Overall\.Noise_floor=([-\d.]+)", stderr)
+
+        peak_db = float(peak_matches[-1]) if peak_matches else defaults["peak_db"]
+        rms_db = float(rms_matches[-1]) if rms_matches else defaults["rms_db"]
+        # Noise floor: if astats reports it, use it; otherwise estimate from RMS - 24dB
+        if noise_matches:
+            noise_floor_db = float(noise_matches[-1])
+        else:
+            noise_floor_db = rms_db - 24.0
+
+        # Clamp to reasonable ranges
+        peak_db = max(-60.0, min(0.0, peak_db))
+        rms_db = max(-60.0, min(0.0, rms_db))
+        noise_floor_db = max(-70.0, min(-20.0, noise_floor_db))
+
+        print(
+            f"[loudness] peak={peak_db:.1f}dB rms={rms_db:.1f}dB noise_floor={noise_floor_db:.1f}dB",
+            flush=True,
+        )
+        return {"peak_db": peak_db, "rms_db": rms_db, "noise_floor_db": noise_floor_db}
+    except Exception as e:
+        print(f"[loudness] measurement failed ({e}) — using defaults", flush=True)
+        return defaults
+
+
+def tighten_transcript(words, scene_cuts=None, shots=None, original_duration=0, source_path=None, noise_floor_db=None):
     scene_cuts = scene_cuts or []
     min_segment = 0.3
     breath_pad = 0.08  # Leave natural breath on each side of a silence region
@@ -902,9 +992,15 @@ def tighten_transcript(words, scene_cuts=None, shots=None, original_duration=0, 
         last = min(last, original_duration)
 
     # Use actual silence detection if source_path available
+    # Adaptive threshold: set silence detection ~5dB above measured noise floor
+    # so we catch dead air without cutting into quiet speech
+    _silence_db = -40  # default
+    if noise_floor_db is not None:
+        _silence_db = max(-55, min(-25, noise_floor_db + 5))
+        print(f"[tighten] adaptive silence threshold: {_silence_db:.0f}dB (noise_floor={noise_floor_db:.0f}dB)", flush=True)
     silence_regions = []
     if source_path and os.path.exists(source_path):
-        silence_regions = detect_silence_regions(source_path, silence_db=-40, min_silence_duration=0.2)
+        silence_regions = detect_silence_regions(source_path, silence_db=_silence_db, min_silence_duration=0.2)
         print(f"[tighten] silence detection found {len(silence_regions)} silent regions", flush=True)
 
     if silence_regions:
@@ -1194,18 +1290,19 @@ Global parameters:
   - The pipeline interpolates smoothly between keypoints — you don't need to add transition keypoints
 
   RULES:
-  - Fast (1.3x-1.5x) is the DEFAULT. Setup, context, filler, transitions — all fast.
-  - Slow (0.5x-0.7x) is RARE and DRAMATIC. Only for: punchlines, reveals, reactions, emotional peaks.
-  - The contrast ratio matters: if your fast is 1.3x and your slow is 0.8x, there's no impact.
+  - Fast (1.2x-1.4x) is the DEFAULT. Setup, context, filler, transitions — all fast.
+  - Slow (0.6x-0.8x) is RARE and DRAMATIC. Only for: punchlines, reveals, reactions, emotional peaks.
+  - The contrast ratio matters: if your fast is 1.2x and your slow is 0.8x, there's no impact.
     Good speed ramping has at least 2x contrast (e.g. 1.4x fast → 0.6x slow).
   - Every video should have at least 2-3 dramatic slow moments, no more than 4-5.
   - NEVER use 1.0x — every moment is either fast or slow.
+  - Maximum speed is 1.4x. Never exceed 1.4x.
 
   What each speed feels like:
-    1.5x = fast, energetic, pitch rises — use for setup and filler
-    1.3x = comfortably fast, natural — good cruising speed
+    1.4x = fast, energetic, pitch rises — use for setup and filler
+    1.2x = comfortably fast, natural — good cruising speed
     0.7x = noticeably slow, voice deepens — "wait for it" feeling
-    0.5x = very slow, deep voice, maximum impact — the punchline lands
+    0.6x = very slow, deep voice, maximum impact — the punchline lands
 
   SPEED CURVE FORMAT:
   speed_curve: [
@@ -1771,7 +1868,7 @@ RULES FOR USING THESE TIMESTAMPS:
             if isinstance(kp, dict) and "t" in kp and "speed" in kp:
                 try:
                     t = max(0.0, float(kp["t"]))
-                    s = max(0.5, min(1.5, float(kp["speed"])))
+                    s = max(0.5, min(1.4, float(kp["speed"])))
                     speed_curve.append({"t": t, "speed": s})
                 except Exception:
                     continue
@@ -2081,7 +2178,7 @@ def export_additional_format(output_path, aspect_ratio, dest_path):
     run_ffmpeg([
         "-y", "-i", output_path,
         "-vf", vf,
-        "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+    ] + get_encode_args("high") + [
         "-c:a", "copy",
         "-movflags", "+faststart",
         dest_path,
@@ -2397,7 +2494,7 @@ def composite_broll(output_path, broll_entries, broll_files, work_dir):
         "-filter_complex", ";".join(filter_parts),
         "-map", f"[{prev}]",
         "-map", "0:a",
-        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "0",
+    ] + get_encode_args("lossless") + [
         "-c:a", "copy",
         "-movflags", "+faststart",
         tmp_out,
@@ -2475,7 +2572,16 @@ def apply_filler_jump_cuts(cuts, deepgram_words):
 
 # ─── FFMPEG RENDER ────────────────────────────────────────────────────────────
 
-TRANSITION_DURATION = 0.3
+TRANSITION_DURATION_DEFAULT = 0.3
+
+def get_transition_duration(pacing=None):
+    """Adaptive transition duration based on video pacing.
+    Fast pacing = snappy transitions (0.2s), slow = smoother (0.4s)."""
+    if pacing == "fast":
+        return 0.2
+    elif pacing == "slow":
+        return 0.4
+    return TRANSITION_DURATION_DEFAULT
 
 
 def probe_duration(file_path):
@@ -2546,7 +2652,7 @@ def probe_resolution(file_path):
 def run_ffmpeg(args):
     print(f"[ffmpeg] Running: ffmpeg {' '.join(str(a) for a in args[:10])}...", flush=True)
     t = time.time()
-    result = subprocess.run(["ffmpeg"] + [str(a) for a in args], capture_output=True, text=True)
+    result = subprocess.run(["ffmpeg", "-threads", "0"] + [str(a) for a in args], capture_output=True, text=True)
     elapsed = time.time() - t
     if result.returncode != 0:
         print(f"[ffmpeg] FAILED after {elapsed:.1f}s", flush=True)
@@ -2623,9 +2729,9 @@ def normalize_source_video(source_path, work_dir):
         "-y","-i",source_path,
         "-vf", normalize_vf,
         "-r","30","-vsync","cfr","-pix_fmt","yuv420p",
-        "-c:v","libx264","-preset","medium","-crf","18",
+    ] + get_encode_args("high") + [
         "-c:a","aac","-b:a","192k","-ar","48000","-ac","2",
-        "-threads","1","-map","0:v:0",
+        "-map","0:v:0",
     ]
     if audio:
         normalize_args += ["-map","0:a:0"]
@@ -2648,10 +2754,10 @@ def create_keyframed_source(source_path, keyframe_timestamps, work_dir):
     print(f"[ffmpeg] Forcing keyframes at {len(unique_kf)} cut points", flush=True)
     run_ffmpeg([
         "-y","-i",source_path,
-        "-c:v","libx264","-preset","ultrafast","-crf","0",
+    ] + get_encode_args("lossless") + [
         "-force_key_frames",kf_str,
         "-r","30","-vsync","cfr","-pix_fmt","yuv420p",
-        "-c:a","copy","-threads","1",
+        "-c:a","copy",
         keyframed_path,
     ])
     _kprobe = subprocess.run(
@@ -2796,12 +2902,12 @@ def build_video_filter_chain(color_grade, source_res, edit_plan=None):
     return ",".join(filters) if filters else "null"
 
 
-def project_words_to_output(transcript, cuts, effective_durations, hook_offset=0.0, hook_clip=None, speed_curve=None):
+def project_words_to_output(transcript, cuts, effective_durations, hook_offset=0.0, hook_clip=None, speed_curve=None, transition_duration=None):
     words = transcript.get("words") or []
     projected = []
     if not words or not cuts:
         return projected
-    clip_ranges = get_output_clip_ranges(cuts, effective_durations)
+    clip_ranges = get_output_clip_ranges(cuts, effective_durations, transition_duration=transition_duration)
     output_cursor = 0.0
     for i, cut in enumerate(cuts):
         c_start = float(cut["source_start"])
@@ -2810,7 +2916,7 @@ def project_words_to_output(transcript, cuts, effective_durations, hook_offset=0
         curve_speed = 1.0
         if speed_curve and speed_curve != "none":
             mid = (c_start + c_end) / 2.0
-            curve_speed = max(0.5, min(1.5, get_speed_for_timestamp(mid, speed_curve)))
+            curve_speed = max(0.5, min(1.4, get_speed_for_timestamp(mid, speed_curve)))
         combined_speed = speed * curve_speed
         for w in words:
             ws = float(w.get("start") or 0)
@@ -2827,7 +2933,8 @@ def project_words_to_output(transcript, cuts, effective_durations, hook_offset=0
                 "speaker": int(w.get("speaker", 0) or 0),
             })
         dur = effective_durations[i] if i < len(effective_durations) else (c_end - c_start)
-        overlap = TRANSITION_DURATION if i < len(cuts)-1 and not is_hard_cut(cut.get("transition_out")) else 0
+        _td = transition_duration if transition_duration is not None else TRANSITION_DURATION_DEFAULT
+        overlap = _td if i < len(cuts)-1 and not is_hard_cut(cut.get("transition_out")) else 0
         output_cursor = round((output_cursor + dur - overlap)*1000)/1000
 
     projected = [w for w in projected if w["end"] > w["start"]]
@@ -2873,7 +2980,7 @@ def format_ass_time(seconds):
     return f"{h}:{m:02d}:{sec:02d}.{cs:02d}"
 
 
-def generate_subtitle_file(transcript, caption_style, cuts, effective_durations, output_res, caption_position, caption_keywords, work_dir, hook_offset=0.0, hook_clip=None, speed_curve=None):
+def generate_subtitle_file(transcript, caption_style, cuts, effective_durations, output_res, caption_position, caption_keywords, work_dir, hook_offset=0.0, hook_clip=None, speed_curve=None, transition_duration=None, face_positions=None):
     words = project_words_to_output(
         transcript,
         cuts,
@@ -2881,6 +2988,7 @@ def generate_subtitle_file(transcript, caption_style, cuts, effective_durations,
         hook_offset=hook_offset,
         hook_clip=hook_clip,
         speed_curve=speed_curve,
+        transition_duration=transition_duration,
     )
     if not words:
         return None
@@ -2888,13 +2996,33 @@ def generate_subtitle_file(transcript, caption_style, cuts, effective_durations,
     w = output_res.get("width") or 1080
     h = output_res.get("height") or 1920
 
-    # Vertical position margin — distance from BOTTOM of frame in pixels
-    # On a 1920px tall frame:
-    #   400px from bottom = 79% from top (below most faces, above TikTok/Reels UI)
-    #   TikTok UI covers roughly the bottom 280px (username, caption, buttons)
-    #   Faces are typically in the top 60% of the frame
-    pos_margin = {"top": 1550, "lower-third": 400, "center": 800, "bottom": 100}
-    margin_v = pos_margin.get(caption_position or "lower-third", 400)
+    # Adaptive caption margin: adjust based on face positions to avoid covering faces
+    # margin_v is distance from BOTTOM of frame in ASS format
+    # Default positions scaled to frame height
+    _h_scale = h / 1920.0
+    pos_margin = {
+        "top": round(1550 * _h_scale),
+        "lower-third": round(400 * _h_scale),
+        "center": round(800 * _h_scale),
+        "bottom": round(100 * _h_scale),
+    }
+    margin_v = pos_margin.get(caption_position or "lower-third", round(400 * _h_scale))
+
+    # If face is detected in the lower portion, push captions up to avoid overlap
+    if face_positions and caption_position in (None, "lower-third", "center"):
+        _face_ys = [float(fp.get("cy", 0)) for fp in face_positions if fp.get("found")]
+        if _face_ys:
+            _avg_face_y = sum(_face_ys) / len(_face_ys)
+            _face_bottom_frac = _avg_face_y / h  # 0=top, 1=bottom
+            # Caption margin_v is from bottom; face_bottom_frac > 0.65 means face is low
+            if _face_bottom_frac > 0.65:
+                # Face is in lower third — push captions higher
+                margin_v = max(margin_v, round(500 * _h_scale))
+                print(f"[captions] Face low in frame ({_face_bottom_frac:.0%}) — margin_v raised to {margin_v}px", flush=True)
+            elif _face_bottom_frac < 0.35 and caption_position == "center":
+                # Face is high — safe to use lower position
+                margin_v = round(350 * _h_scale)
+                print(f"[captions] Face high in frame ({_face_bottom_frac:.0%}) — margin_v lowered to {margin_v}px", flush=True)
 
     styles_map = {
         "capcut":         {"fontsize": 58, "fontname": "Montserrat ExtraBold", "bold": 0, "alignment": 5},
@@ -2911,6 +3039,12 @@ def generate_subtitle_file(transcript, caption_style, cuts, effective_durations,
         "keyword_pop":    {"fontsize": 54, "fontname": "Montserrat ExtraBold", "bold": 0, "alignment": 5},
         "box_caption":    {"fontsize": 46, "fontname": "Montserrat",           "bold": 0, "alignment": 2},
     }
+
+    # Scale caption font sizes proportionally to output resolution (base: 1920px height)
+    if h != 1920:
+        for _style_key in styles_map:
+            styles_map[_style_key]["fontsize"] = round(styles_map[_style_key]["fontsize"] * _h_scale)
+        print(f"[captions] Scaled font sizes by {_h_scale:.2f}x for {h}px height", flush=True)
 
     # ── Style definitions ───────────────────────────────────────────────────
     # All styles use the same CapCut-inspired base:
@@ -2962,6 +3096,9 @@ def generate_subtitle_file(transcript, caption_style, cuts, effective_durations,
 
     cfg = STYLE_CONFIGS.get(caption_style, STYLE_CONFIGS["standard"])
     primary, secondary, back_c, border_style, outline_w, shadow, spacing = cfg
+    # Scale outline to resolution
+    if h != 1920 and outline_w > 0:
+        outline_w = max(1, round(outline_w * _h_scale))
     all_speakers = set(int(wd.get("speaker", 0) or 0) for wd in words)
     is_multi_speaker = len(all_speakers) > 1
     if is_multi_speaker:
@@ -2987,6 +3124,26 @@ def generate_subtitle_file(transcript, caption_style, cuts, effective_durations,
             f"&H00000000,{back_c},{bold},0,0,0,100,100,{spacing},0,"
             f"{border_style},{outline_w},{shadow},{alignment},30,30,{margin_v},1"
         )
+
+    # Adaptive word animation timing based on speech rate
+    # Fast speakers (>180 WPM): snappy animations so they don't overlap
+    # Slow speakers (<100 WPM): more dramatic, slower animations
+    _word_anim_wpm = 150  # default
+    if len(words) >= 5:
+        _first_w = float(words[0].get("start", 0))
+        _last_w = float(words[-1].get("end", 0))
+        _speech_dur = _last_w - _first_w
+        if _speech_dur > 0:
+            _word_anim_wpm = len(words) / (_speech_dur / 60.0)
+    if _word_anim_wpm > 200:
+        _pop_in_ms, _settle_ms, _pop_scale, _init_scale = 40, 50, 120, 80
+    elif _word_anim_wpm > 160:
+        _pop_in_ms, _settle_ms, _pop_scale, _init_scale = 50, 65, 125, 75
+    elif _word_anim_wpm < 100:
+        _pop_in_ms, _settle_ms, _pop_scale, _init_scale = 80, 100, 140, 60
+    else:
+        _pop_in_ms, _settle_ms, _pop_scale, _init_scale = 60, 80, 130, 70
+    print(f"[captions] WPM={_word_anim_wpm:.0f} → pop_in={_pop_in_ms}ms settle={_settle_ms}ms scale={_init_scale}→{_pop_scale}→100", flush=True)
 
     ass = f"""[Script Info]
 ScriptType: v4.00+
@@ -3019,13 +3176,13 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             clean = str(word_dict["word"]).strip()
             word_highlight = _speaker_highlight(highlight_color, word_dict)
 
-            pop_in_ms = 60
-            settle_ms = 80
+            pop_in_ms = _pop_in_ms
+            settle_ms = _settle_ms
 
             word_tag = (
-                f"{{\\fscx70\\fscy70\\1c&H00FFFFFF&}}"
+                f"{{\\fscx{_init_scale}\\fscy{_init_scale}\\1c&H00FFFFFF&}}"
                 f"{{\\t({cumulative_ms},{cumulative_ms + pop_in_ms},"
-                f"\\fscx130\\fscy130\\1c{word_highlight})}}"
+                f"\\fscx{_pop_scale}\\fscy{_pop_scale}\\1c{word_highlight})}}"
                 f"{{\\t({cumulative_ms + pop_in_ms},{cumulative_ms + pop_in_ms + settle_ms},"
                 f"\\fscx100\\fscy100)}}"
                 f"{{\\t({cumulative_ms + dur_ms - 30},{cumulative_ms + dur_ms},"
@@ -3277,12 +3434,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     is_kw = clean_check in keyword_set
                     active_color = keyword_color if is_kw else highlight_color
                     active_color = _speaker_highlight(active_color, wd)
-                    pop_in_ms = 60
-                    settle_ms = 80
+                    pop_in_ms = _pop_in_ms
+                    settle_ms = _settle_ms
                     word_tag = (
-                        f"{{\\fscx70\\fscy70\\1c&H00FFFFFF&}}"
+                        f"{{\\fscx{_init_scale}\\fscy{_init_scale}\\1c&H00FFFFFF&}}"
                         f"{{\\t({cumulative_ms},{cumulative_ms + pop_in_ms},"
-                        f"\\fscx130\\fscy130\\1c{active_color})}}"
+                        f"\\fscx{_pop_scale}\\fscy{_pop_scale}\\1c{active_color})}}"
                         f"{{\\t({cumulative_ms + pop_in_ms},{cumulative_ms + pop_in_ms + settle_ms},"
                         f"\\fscx100\\fscy100)}}"
                         f"{{\\t({cumulative_ms + dur_ms - 30},{cumulative_ms + dur_ms},"
@@ -3319,11 +3476,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     return ass_path
 
 
-def get_output_clip_ranges(cuts, effective_durations):
+def get_output_clip_ranges(cuts, effective_durations, transition_duration=None):
     """
     Return list of {"start": float, "end": float} for each clip's position
     in the output timeline, accounting for transition overlap.
     """
+    _td_base = transition_duration if transition_duration is not None else TRANSITION_DURATION_DEFAULT
     ranges = []
     cursor = 0.0
     for i, cut in enumerate(cuts):
@@ -3332,7 +3490,7 @@ def get_output_clip_ranges(cuts, effective_durations):
         end   = round((cursor + dur) * 1000) / 1000
         ranges.append({"start": start, "end": end})
         transition = str(cut.get("transition_out") or "none").lower()
-        td      = TRANSITION_DURATION if transition not in ("none", "clean_cut", "") else 0.0
+        td      = _td_base if transition not in ("none", "clean_cut", "") else 0.0
         overlap = td if i < len(cuts) - 1 else 0.0
         cursor  = round((end - overlap) * 1000) / 1000
     return ranges
@@ -3971,7 +4129,7 @@ def project_source_time_to_output(source_t, cuts, clip_ranges, speed_curve=None)
         curve_speed = 1.0
         if speed_curve and speed_curve != "none":
             mid = (src_start + src_end) / 2.0
-            curve_speed = max(0.5, min(1.5, get_speed_for_timestamp(mid, speed_curve)))
+            curve_speed = max(0.5, min(1.4, get_speed_for_timestamp(mid, speed_curve)))
         combined_speed = speed * curve_speed
 
         if src_start <= source_t <= src_end:
@@ -4003,6 +4161,52 @@ def project_source_time_to_final_output(source_t, cuts, effective_durations, spe
     return round((pre_speed_t + hook_offset) * 1000) / 1000
 
 
+def split_clips_at_speed_boundaries(cuts, speed_curve):
+    """Split clips at speed curve keypoint boundaries for smooth speed ramping.
+
+    When a clip spans a speed curve transition (e.g. from 1.4x to 0.7x),
+    the midpoint sampling assigns one wrong speed to the entire clip.
+    By splitting at keypoint boundaries, each sub-clip gets the correct speed.
+    """
+    if not speed_curve or speed_curve == "none" or not isinstance(speed_curve, list):
+        return cuts
+
+    keypoint_times = sorted(set(float(kp["t"]) for kp in speed_curve))
+    result = []
+    split_count = 0
+
+    for cut in cuts:
+        start = float(cut["source_start"])
+        end = float(cut["source_end"])
+
+        # Find speed curve keypoints strictly inside this clip
+        split_points = [t for t in keypoint_times if start + 0.1 < t < end - 0.1]
+
+        if not split_points:
+            result.append(cut)
+            continue
+
+        # Split at each keypoint
+        boundaries = [start] + split_points + [end]
+        for i in range(len(boundaries) - 1):
+            sub_start = boundaries[i]
+            sub_end = boundaries[i + 1]
+            if sub_end - sub_start < 0.05:
+                continue
+            sub_cut = dict(cut)
+            sub_cut["source_start"] = round(sub_start, 3)
+            sub_cut["source_end"] = round(sub_end, 3)
+            # Only last sub-clip keeps the original transition
+            if i < len(boundaries) - 2:
+                sub_cut["transition_out"] = "none"
+            result.append(sub_cut)
+        split_count += 1
+
+    if split_count > 0:
+        print(f"[speed] Split {split_count} clips at speed boundaries → {len(result)} total segments", flush=True)
+    return result
+
+
 def compute_effective_durations(cuts, speed_curve=None):
     durations = []
     for cut in (cuts or []):
@@ -4013,7 +4217,7 @@ def compute_effective_durations(cuts, speed_curve=None):
         curve_speed = 1.0
         if speed_curve and speed_curve != "none":
             mid = (src_start + src_end) / 2.0
-            curve_speed = max(0.5, min(1.5, get_speed_for_timestamp(mid, speed_curve)))
+            curve_speed = max(0.5, min(1.4, get_speed_for_timestamp(mid, speed_curve)))
         effective_dur = raw_dur / clip_speed / curve_speed
         durations.append(round(effective_dur, 3))
     return durations
@@ -4058,12 +4262,17 @@ def prepend_hook_clip(output_path, edit_plan, work_dir):
         return
 
     # Detect where audio goes silent after hook start — that's the true end of the hook moment
+    # Adaptive: use noise floor + 10dB for hook silence (less sensitive than tightening)
     source_path = edit_plan.get("_source_path")
+    _loudness = edit_plan.get("_source_loudness") or {}
+    _hook_silence_db = -30  # default
+    if _loudness.get("noise_floor_db") is not None:
+        _hook_silence_db = max(-45, min(-20, _loudness["noise_floor_db"] + 10))
     if source_path and os.path.exists(source_path):
         try:
             silence_cmd = [
                 "ffmpeg", "-i", source_path,
-                "-af", f"atrim=start={hook_src_start:.3f}:end={hook_src_end:.3f},asetpts=PTS-STARTPTS,silencedetect=noise=-30dB:d=0.15",
+                "-af", f"atrim=start={hook_src_start:.3f}:end={hook_src_end:.3f},asetpts=PTS-STARTPTS,silencedetect=noise={_hook_silence_db:.0f}dB:d=0.15",
                 "-f", "null", "-"
             ]
             silence_result = subprocess.run(silence_cmd, capture_output=True, text=True, timeout=15)
@@ -4089,7 +4298,7 @@ def prepend_hook_clip(output_path, edit_plan, work_dir):
     curve_speed = 1.0
     if speed_curve and speed_curve != "none":
         clip_mid = (clip_src_start + clip_src_end) / 2.0
-        curve_speed = max(0.5, min(1.5, get_speed_for_timestamp(clip_mid, speed_curve)))
+        curve_speed = max(0.5, min(1.4, get_speed_for_timestamp(clip_mid, speed_curve)))
     combined_speed = clip_speed * curve_speed
 
     clip_render_start = float(clip_ranges[hook_clip_idx]["start"])
@@ -4117,7 +4326,16 @@ def prepend_hook_clip(output_path, edit_plan, work_dir):
         hook_mid = (hook_src_start + hook_src_end) / 2.0
         cf = min(face_positions, key=lambda p: abs(float(p.get("t", 0)) - hook_mid)) if face_positions else None
         hf = max(1, round((hook_render_end - hook_render_start) * 30))
-        zr = 0.07
+        # Adaptive hook zoom: stronger when face is detected and close, subtler otherwise
+        if cf and cf.get("found"):
+            _face_conf = float(cf.get("confidence", 0.5))
+            # Confident face detection: stronger zoom (up to 0.10)
+            # Low confidence: gentler zoom (0.04)
+            zr = 0.04 + 0.06 * min(1.0, _face_conf)
+        else:
+            # No face: minimal zoom to avoid zooming into empty space
+            zr = 0.04
+        print(f"[zoom] Hook zoom ratio: {zr:.3f} (face={'yes' if cf and cf.get('found') else 'no'})", flush=True)
         prog = f"min(n/{hf}\\,1.0)"
         if cf and cf.get("found"):
             fx, fy = float(cf.get("cx", 540)), float(cf.get("cy", 960))
@@ -4149,12 +4367,12 @@ def prepend_hook_clip(output_path, edit_plan, work_dir):
 
     hook_path = os.path.join(work_dir, "hook_clip.mp4")
     hook_cmd = [
-        "ffmpeg", "-y",
+        "ffmpeg", "-threads", "0", "-y",
         "-i", output_path,
         "-filter_complex",
         f"{hook_vf};{hook_af}",
         "-map", "[hv]", "-map", "[ha]",
-        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "0",
+    ] + get_encode_args("lossless") + [
         "-c:a", "aac", "-b:a", "192k",
         "-movflags", "+faststart",
         hook_path,
@@ -4181,7 +4399,7 @@ def prepend_hook_clip(output_path, edit_plan, work_dir):
 
     hooked_output = os.path.join(work_dir, "hooked_output.mp4")
     concat_cmd = [
-        "ffmpeg", "-y",
+        "ffmpeg", "-threads", "0", "-y",
         "-f", "concat", "-safe", "0",
         "-i", concat_list_path,
         "-c", "copy",
@@ -4271,7 +4489,9 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
             end = clip_ranges[0]["end"]
             style = str(overlay.get("style") or "callout")
             char_count = len(text)
-            base_size = 72 if style == "title" else (64 if style == "cta" else 56)
+            # Resolution-relative font sizes (base sizes designed for 1920px height)
+            _overlay_scale = 1920.0 / max(1, 1920)  # output is always 1920 here
+            base_size = round((72 if style == "title" else (64 if style == "cta" else 56)) * _overlay_scale)
             if char_count <= 18:
                 font_size = base_size
             elif char_count <= 25:
@@ -4281,7 +4501,8 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
             else:
                 font_size = round(base_size * 0.60)
             pos = str(overlay.get("position") or "center")
-            y_expr = "200" if pos == "top" else ("(h-th)/2" if pos == "center" else str(max(0, 1920 - 480)))
+            # Resolution-relative Y-positions (use expressions so they scale with any output height)
+            y_expr = "h*0.10" if pos == "top" else ("(h-th)/2" if pos == "center" else "h*0.75")
             end_t = max(start + 0.8, end)
             fade_in = 0.15
             fade_out = 0.15
@@ -4316,8 +4537,8 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
                 f"{video_out}drawtext=text='{escaped_text}':fontsize={font_size}:fontcolor={_fg_color}"
                 f"{_font_clause}"
                 f":x=(w-tw)/2:y={y_expr}"
-                f":borderw=4:bordercolor={_border_color}"
-                f":box=1:boxcolor={_box_color}:boxborderw=12"
+                f":borderw=5:bordercolor={_border_color}"
+                f":shadowcolor=black@0.5:shadowx=3:shadowy=3"
                 f":alpha='{alpha_expr}'"
                 f":enable='between(t,{start:.3f},{end_t:.3f})'{out_label}"
             )
@@ -4329,11 +4550,11 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
 
     temp_output = os.path.join(work_dir, "captioned.mp4")
     cmd = [
-        "ffmpeg", "-y",
+        "ffmpeg", "-threads", "0", "-y",
         "-i", output_path,
         "-filter_complex", ";".join(post_filters),
         "-map", video_out, "-map", "0:a?",
-        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "0",
+    ] + get_encode_args("lossless") + [
         "-c:a", "copy",
         "-movflags", "+faststart",
         temp_output,
@@ -4455,7 +4676,7 @@ def mix_sfx_after_speed_curve(output_path, edit_plan, cuts, effective_durations,
 
     temp_output = os.path.join(work_dir, "sfx_mixed.mp4")
     cmd = [
-        "ffmpeg", "-y",
+        "ffmpeg", "-threads", "0", "-y",
         *input_args,
         "-filter_complex", filter_complex,
         "-map", "0:v", "-map", "[mixed]",
@@ -4486,6 +4707,9 @@ def mix_sfx_after_speed_curve(output_path, edit_plan, cuts, effective_durations,
 
 def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, work_dir, speech_segments=None):
     speed_curve = edit_plan.get("_parsed_speed_curve")
+    # Adaptive transition duration based on Gemini pacing assessment
+    TRANSITION_DURATION = get_transition_duration(edit_plan.get("pacing"))
+    print(f"[render] transition_duration={TRANSITION_DURATION:.2f}s (pacing={edit_plan.get('pacing')})", flush=True)
     original_cuts = list(cuts)
     render_cuts = list(cuts)
     edit_plan["_hook_offset"] = 0.0
@@ -4518,22 +4742,17 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             "freeze_frame": False,
         }] + render_cuts
 
+    # Split clips at speed curve keypoint boundaries for smooth ramping
+    render_cuts = split_clips_at_speed_boundaries(render_cuts, speed_curve)
+
     n = len(render_cuts)
     source_res = probe_resolution(source_path)
-    kf_timestamps = [float(c["source_start"]) for c in render_cuts]
-    if isinstance(hook_clip, dict):
-        hook_s = float(hook_clip.get("source_start") or 0.0)
-        hook_e = float(hook_clip.get("source_end") or 0.0)
-        if hook_s > 0:
-            kf_timestamps.append(hook_s)
-        if hook_e > 0:
-            kf_timestamps.append(hook_e)
-    kf_timestamps = sorted(set(kf_timestamps))
-    keyframed_path = create_keyframed_source(source_path, kf_timestamps, work_dir)
+    # Skip keyframe forcing — trim filter works on decoded frames, always frame-accurate
+    render_source = source_path
     _detailed_probe = subprocess.run(
         ["ffprobe", "-v", "quiet", "-select_streams", "v:0",
          "-show_entries", "stream=time_base,start_pts,start_time,duration,duration_ts,nb_frames,r_frame_rate,avg_frame_rate,codec_name,pix_fmt",
-         "-of", "json", keyframed_path],
+         "-of", "json", render_source],
         capture_output=True, text=True, timeout=10)
     print(f"[DIAG] Render source probe: {_detailed_probe.stdout.strip()}", flush=True)
     color_grade = edit_plan.get("color_grade") or {}
@@ -4545,8 +4764,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         log_prefix="[render]",
     )
 
-    # Single input: the keyframed source
-    input_args = ["-analyzeduration", "10000000", "-probesize", "10000000", "-i", keyframed_path]
+    # Single input: source video (no keyframe pre-processing needed)
+    input_args = ["-analyzeduration", "10000000", "-probesize", "10000000", "-i", render_source]
     sample_rate = probe_audio_sample_rate(source_path) or 48000
 
     # Compute effective durations from recipe with per-segment speed applied.
@@ -4561,7 +4780,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         curve_speed = 1.0
         if speed_curve and speed_curve != "none":
             _mid = (float(cut["source_start"]) + float(cut["source_end"])) / 2.0
-            curve_speed = max(0.5, min(1.5, get_speed_for_timestamp(_mid, speed_curve)))
+            curve_speed = max(0.5, min(1.4, get_speed_for_timestamp(_mid, speed_curve)))
         eff_dur = effective_durations[i]
         print(
             f"[ffmpeg] Segment {i}: {cut['source_start']:.3f}s->{cut['source_end']:.3f}s "
@@ -4581,14 +4800,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         if speed_curve and speed_curve != "none":
             # Sample at clip midpoint for smoother ramping across many small clips
             mid = (start + end) / 2.0
-            curve_speed = max(0.5, min(1.5, get_speed_for_timestamp(mid, speed_curve)))
+            curve_speed = max(0.5, min(1.4, get_speed_for_timestamp(mid, speed_curve)))
         combined_speed = speed * curve_speed
         if hook_clip and i > 0:
             _hook_start = float(hook_clip.get("source_start") or 0.0)
             _hook_end = float(hook_clip.get("source_end") or 0.0)
             if start <= _hook_start + 0.1 and end >= _hook_end - 0.1:
                 hook_mid = (_hook_start + _hook_end) / 2.0
-                hook_speed = max(0.5, min(1.5, get_speed_for_timestamp(hook_mid, speed_curve)))
+                hook_speed = max(0.5, min(1.4, get_speed_for_timestamp(hook_mid, speed_curve)))
                 if abs(combined_speed - hook_speed) > 0.01:
                     print(
                         f"[render] Forcing hook chronological clip to match teaser speed: "
@@ -4612,7 +4831,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         else:
             zoom_scale_factor = 1.0
             total_frames_for_zoom = total_frames
-        zoom_max = 1.07 if has_burned_captions else 1.14
+        _base_zoom_max = 1.07 if has_burned_captions else 1.14
 
         # ── Face-tracked zoom ──────────────────────────────────────────
         # Find the closest face detection to this clip's midpoint.
@@ -4624,6 +4843,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             closest_face = min(face_positions, key=lambda p: abs(float(p.get("t") or 0.0) - clip_mid))
             if not closest_face.get("found"):
                 closest_face = None
+
+        # Adaptive zoom_max: scale based on face detection confidence
+        if closest_face:
+            _face_conf = float(closest_face.get("confidence", 0.5))
+            zoom_max = 1.0 + (_base_zoom_max - 1.0) * max(0.5, min(1.0, _face_conf))
+        else:
+            # No face: reduce zoom to avoid zooming into empty space
+            zoom_max = 1.0 + (_base_zoom_max - 1.0) * 0.5
 
         # Compute face offset for crop targeting
         face_cx = float(closest_face.get("cx") or 540.0) if closest_face else 540.0
@@ -4696,14 +4923,15 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             outro_filter = f"fade=t=out:st={fade_start:.3f}:d=1.0:color={fade_color}"
 
         # Video: trim from source, then apply per-clip filters
+        # fps=30 AFTER speed change to avoid frame count drift at clip boundaries
         v_chain = [
             f"trim=start={start:.3f}:end={end:.3f}",
             "setpts=PTS-STARTPTS",
-            "fps=30",
         ]
 
         if abs(combined_speed - 1.0) > 0.001:
             v_chain.append(f"setpts={1.0/combined_speed:.4f}*PTS")
+        v_chain.append("fps=30")
         if zoom_filter:
             v_chain.append(zoom_filter)
         v_chain += ["format=yuv420p", color_filter_str]
@@ -4770,7 +4998,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             print(f"[sfx] transition {_i}: {_sound_style} vol={_vol:.3f} at {_event_time:.3f}s", flush=True)
             extra_input_index += 1
 
-        _clip_ranges = get_output_clip_ranges(_base_cuts, _base_effective_durations) if _base_cuts else []
+        _clip_ranges = get_output_clip_ranges(_base_cuts, _base_effective_durations, transition_duration=TRANSITION_DURATION) if _base_cuts else []
         for _i, _overlay in enumerate(edit_plan.get("text_overlays") or []):
             _clip_idx = int(_overlay.get("appear_at_clip") or 0)
             if _clip_idx < 0 or _clip_idx >= len(_clip_ranges):
@@ -4922,6 +5150,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             hook_offset=0.0,
             hook_clip=None,
             speed_curve=speed_curve,
+            transition_duration=TRANSITION_DURATION,
+            face_positions=face_positions,
         )
     if ass_path and os.path.exists(ass_path):
         escaped = ass_path.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
@@ -4930,7 +5160,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     text_overlays = edit_plan.get("text_overlays") or []
     if text_overlays:
-        clip_ranges = get_output_clip_ranges(render_cuts, effective_durations)
+        clip_ranges = get_output_clip_ranges(render_cuts, effective_durations, transition_duration=TRANSITION_DURATION)
         # Sample background brightness once for text overlay color decisions
         _overlay_sample_ts = float(render_cuts[0].get("source_start", 0)) + 0.5
         _y_positions = {"top": 0.10, "center": 0.50, "bottom": 0.75}
@@ -4948,7 +5178,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             end = clip_ranges[0]["end"]
             style = str(overlay.get("style") or "callout")
             char_count = len(text)
-            base_size = 72 if style == "title" else (64 if style == "cta" else 56)
+            # Resolution-relative font sizes (base sizes designed for 1920px height)
+            _overlay_scale = 1920.0 / max(1, 1920)
+            base_size = round((72 if style == "title" else (64 if style == "cta" else 56)) * _overlay_scale)
             if char_count <= 18:
                 font_size = base_size
             elif char_count <= 25:
@@ -4958,7 +5190,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             else:
                 font_size = round(base_size * 0.60)
             pos = str(overlay.get("position") or "center")
-            y_expr = "200" if pos == "top" else ("(h-th)/2" if pos == "center" else str(max(0, 1920 - 480)))
+            # Resolution-relative Y-positions
+            y_expr = "h*0.10" if pos == "top" else ("(h-th)/2" if pos == "center" else "h*0.75")
             end_t = max(start + 0.8, end)
             fade_in = 0.15
             fade_out = 0.15
@@ -4996,8 +5229,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 f"{video_out}drawtext=text='{escaped_text}':fontsize={font_size}:fontcolor={_fg_color}"
                 f"{_font_clause}"
                 f":x=(w-tw)/2:y={y_expr}"
-                f":borderw=4:bordercolor={_border_color}"
-                f":box=1:boxcolor={_box_color}:boxborderw=12"
+                f":borderw=5:bordercolor={_border_color}"
+                f":shadowcolor=black@0.5:shadowx=3:shadowy=3"
                 f":alpha='{alpha_expr}'"
                 f":enable='between(t,{start:.3f},{end_t:.3f})'{out_label}"
             )
@@ -5018,26 +5251,36 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         print(f"[sfx] Mixed {len(sfx_audio_labels)} SFX track(s) into audio", flush=True)
 
     audio_denoise = bool(edit_plan.get("audio_denoise"))
-    denoise_part = "afftdn=nr=6:nf=-25:tn=1," if audio_denoise else ""
-    # Audio processing chain:
-    #   1. Optional denoise (afftdn, transparent at nr=6)
-    #   2. Highpass at 75Hz — removes low rumble
-    #   3. EQ: cut boxiness at 200Hz, boost presence at 3kHz for vocal clarity
-    #   4. Fast compressor (3ms attack) — catches plosives before they clip
-    #   5. Lowpass at 14kHz — keeps air/brightness, removes harsh artifacts
-    #   6. Gentle leveling compressor — evens out volume without squashing
-    #   7. Limiter — prevents digital clipping
+    _src_loudness = edit_plan.get("_source_loudness") or {}
+    _src_rms = _src_loudness.get("rms_db", -18.0)
+    _src_peak = _src_loudness.get("peak_db", -6.0)
+    _src_nf = _src_loudness.get("noise_floor_db", -45.0)
+    # Adaptive denoise: stronger for noisier sources
+    if audio_denoise:
+        _nr = 6 if _src_nf > -40 else (10 if _src_nf > -50 else 14)
+        denoise_part = f"afftdn=nr={_nr}:nf={int(_src_nf)}:tn=1,"
+    else:
+        denoise_part = ""
+    # Adaptive compressor thresholds based on source loudness:
+    #   Quiet source (RMS < -24dB): lower thresholds to catch more, more makeup gain
+    #   Normal source (RMS -18 to -12): standard thresholds
+    #   Hot source (RMS > -12dB): higher thresholds to avoid over-compression
+    _fast_thresh = max(-28, min(-16, _src_rms - 4))
+    _level_thresh = max(-22, min(-10, _src_rms + 2))
+    _makeup = max(1, min(4, round(-_src_rms / 6)))
+    print(
+        f"[audio] Adaptive chain: rms={_src_rms:.0f}dB peak={_src_peak:.0f}dB "
+        f"fast_thresh={_fast_thresh:.0f}dB level_thresh={_level_thresh:.0f}dB makeup={_makeup}dB",
+        flush=True,
+    )
     audio_chain = (
         f"{denoise_part}highpass=f=75,"
-        # Presence boost at 3kHz for vocal clarity, gentle cut at 200Hz for boxiness
         f"equalizer=f=200:t=q:w=1.5:g=-1.5,"
         f"equalizer=f=3000:t=q:w=1.2:g=1.5,"
-        # Fast compressor for peak control (catches plosives)
-        f"acompressor=threshold=-22dB:ratio=3:attack=3:release=40:detection=peak"
+        f"acompressor=threshold={_fast_thresh}dB:ratio=3:attack=3:release=40:detection=peak"
         f":link=maximum:knee=3:mix=0.6,"
         f"lowpass=f=14000,"
-        # Gentle compressor for overall leveling
-        f"acompressor=threshold=-16dB:ratio=1.8:attack=15:release=80:makeup=2,"
+        f"acompressor=threshold={_level_thresh}dB:ratio=1.8:attack=15:release=80:makeup={_makeup},"
         f"alimiter=limit=0.95"
     )
     # Calculate frame-quantized video duration so we can force audio to match exactly.
@@ -5059,14 +5302,35 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             music_input_idx = 1 + len(sfx_input_args) // 2
             input_args += ["-stream_loop", "-1", "-i", music_path]
             total_duration = sum(effective_durations)
-            fade_out_start = max(0, total_duration - 2.0)
-            music_vol = 0.05
+            # Adaptive music fades and volume based on video length
+            # Short videos (<15s): quick fades, slightly louder music
+            # Medium videos (15-45s): standard fades
+            # Long videos (>45s): longer fades for smoother transitions
+            if total_duration < 15:
+                _music_fade_in = 0.8
+                _music_fade_out = 1.0
+                music_vol = 0.06
+            elif total_duration < 45:
+                _music_fade_in = 1.5
+                _music_fade_out = 2.0
+                music_vol = 0.05
+            else:
+                _music_fade_in = 2.5
+                _music_fade_out = 3.0
+                music_vol = 0.04
+            fade_out_start = max(0, total_duration - _music_fade_out)
+            # Also adapt to music energy: high-energy tracks can be slightly louder
+            _music_meta = MUSIC_LIBRARY.get(music_track, {})
+            if _music_meta.get("energy") == "high":
+                music_vol = min(0.08, music_vol * 1.3)
+            elif _music_meta.get("energy") == "low":
+                music_vol = music_vol * 0.8
             music_filters.append(
                 f"[{music_input_idx}:a]"
                 f"atrim=duration={total_duration:.3f},"
-                f"afade=t=in:st=0:d=1.5,"
-                f"afade=t=out:st={fade_out_start:.3f}:d=2.0,"
-                f"volume={music_vol}"
+                f"afade=t=in:st=0:d={_music_fade_in:.1f},"
+                f"afade=t=out:st={fade_out_start:.3f}:d={_music_fade_out:.1f},"
+                f"volume={music_vol:.4f}"
                 f"[music_track]"
             )
             music_filters.append(
@@ -5084,8 +5348,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     print(f"[DIAG] filter_complex: {len(filter_complex)} chars, {len(video_filters)} v_filters, {len(audio_filters)} a_filters, {len(transition_filters)} transitions", flush=True)
     print(f"[DIAG] filter_complex (first 2000): {filter_complex[:2000]}", flush=True)
     print(f"[DIAG] filter_complex (last 1000): {filter_complex[-1000:]}", flush=True)
-    encode_args = [
-        "-c:v","libx264","-preset","veryfast","-crf","18",
+    encode_args = get_encode_args("high") + [
         "-pix_fmt","yuv420p",
         "-c:a","aac","-b:a","128k",
         "-movflags","+faststart",
@@ -5101,16 +5364,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         + [output_path]
     )
 
-    print(f"[render] Single-pass render: {n} segments from keyframed source, ~{running_dur:.1f}s output", flush=True)
+    print(f"[render] Single-pass render: {n} segments from source, ~{running_dur:.1f}s output", flush=True)
 
-    try:
-        run_ffmpeg(args)
-    finally:
-        if keyframed_path != source_path and os.path.exists(keyframed_path):
-            try:
-                os.unlink(keyframed_path)
-            except Exception:
-                pass
+    run_ffmpeg(args)
 
 
 
@@ -5280,6 +5536,9 @@ def handler(job):
 
         edit_plan["_source_path"] = source_path
         edit_plan["_face_positions"] = face_positions
+        # Measure source audio characteristics for adaptive processing
+        source_loudness = measure_source_loudness(source_path)
+        edit_plan["_source_loudness"] = source_loudness
         print(f"[pipeline] edit recipe complete in {time.time()-t:.1f}s", flush=True)
         analysis = edit_plan.get("analysis_data") or {}
 
@@ -5293,7 +5552,7 @@ def handler(job):
 
         render_elapsed = time.time() - t
         print(f"[pipeline] parallel_render complete in {render_elapsed:.1f}s", flush=True)
-        print("[render] Encoding: crf=18 preset=ultrafast", flush=True)
+        print("[render] Encoding: crf=18 preset=ultrafast threads=auto", flush=True)
         speed_curve = edit_plan.get("_parsed_speed_curve")
         if not validate_output(output_path, "render"):
             raise RuntimeError("Main render produced invalid output")
