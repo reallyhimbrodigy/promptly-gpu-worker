@@ -1806,14 +1806,19 @@ RULES FOR USING THESE TIMESTAMPS:
                         print(f"[generate-edit] Filtered out ding on '{word}' at {t:.1f}s (not an approved trigger)", flush=True)
                         continue
 
-                # Enforce swoosh only when transitions are present
+                # Enforce swoosh: allow when transitions exist OR speed ramping is active
                 if sound == "swoosh":
                     has_transitions = any(
                         str(c.get("transition_out") or "none").lower() not in ("none", "")
                         for c in (edit_plan.get("cuts") or [])
                     )
-                    if not has_transitions:
-                        print(f"[generate-edit] Filtered out swoosh at {t:.1f}s (no transitions in video)", flush=True)
+                    _sc = edit_plan.get("speed_curve") or []
+                    has_speed_ramp = (
+                        isinstance(_sc, list) and len(_sc) >= 2
+                        and max(float(k.get("speed", 1)) for k in _sc) / max(0.01, min(float(k.get("speed", 1)) for k in _sc)) >= 1.5
+                    )
+                    if not has_transitions and not has_speed_ramp:
+                        print(f"[generate-edit] Filtered out swoosh at {t:.1f}s (no transitions or speed ramps)", flush=True)
                         continue
 
                 # Enforce pop: only when a visual event (scene gap) exists near this timestamp
@@ -1905,8 +1910,7 @@ RULES FOR USING THESE TIMESTAMPS:
     baseline = analysis.get("color_baseline") or {}
     intent = normalize_intent(edit_plan.get("color_intent") or "none")
     edit_plan["color_intent"] = intent
-    # Color grading filters are disabled; keep recipe metadata but emit no FFmpeg grading.
-    edit_plan["color_grade"] = {}
+    edit_plan["color_grade"] = {"intent": intent}
     edit_plan["cuts"] = final_cuts
     edit_plan.pop("teal_orange", None)
     edit_plan.pop("beat_sync", None)
@@ -2668,15 +2672,62 @@ def build_video_filter_chain(color_grade, source_res, edit_plan=None):
     # Color preset based on color_intent
     intent = str(ep.get("color_intent") or "none").lower()
 
-    if intent == "polished" or intent == "clean" or intent == "warm" or intent == "punchy" or intent == "vibrant":
-        # "polished" preset — contrast and saturation only
-        # NO brightness, NO gamma, NO curves — those wash out well-exposed footage
+    if intent in ("polished", "clean", "warm", "punchy", "vibrant"):
+        # Subtle contrast + saturation boost — safe for all footage
+        filters.append("eq=contrast=1.06:saturation=1.08")
+
+    elif intent == "cinematic":
+        # Cinematic look: slight desaturation, lifted blacks, cool shadows + warm highlights
+        # Uses curves to lift the black point and colorbalance for split-toning
         filters.append(
-            "eq=contrast=1.06:saturation=1.08"
+            "curves=m='0/0.04 0.25/0.22 0.5/0.50 0.75/0.78 1/0.96',"
+            "eq=contrast=1.10:saturation=0.90,"
+            "colorbalance=rs=-0.05:gs=-0.03:bs=0.06:rh=0.06:gh=0.02:bh=-0.03"
         )
 
+    elif intent == "moody":
+        # Dark, contrasty with crushed shadows and teal-leaning midtones
+        filters.append(
+            "curves=m='0/0 0.15/0.05 0.5/0.45 0.85/0.82 1/0.95',"
+            "eq=contrast=1.15:saturation=0.85,"
+            "colorbalance=rs=-0.04:gs=0.02:bs=0.06:rh=0.03:gh=-0.01:bh=-0.02"
+        )
+
+    elif intent == "dramatic":
+        # High contrast, slightly desaturated, cool tones
+        filters.append(
+            "curves=m='0/0 0.2/0.10 0.5/0.48 0.8/0.85 1/0.95',"
+            "eq=contrast=1.18:saturation=0.88,"
+            "colorbalance=rs=-0.04:gs=0:bs=0.04:rh=0.02:gh=0:bh=-0.01"
+        )
+
+    elif intent == "faded" or intent == "vintage":
+        # Lifted blacks, low contrast, warm tone — retro film look
+        filters.append(
+            "curves=m='0/0.08 0.25/0.25 0.5/0.52 0.75/0.76 1/0.92',"
+            "eq=contrast=0.90:saturation=0.78,"
+            "colorbalance=rs=0.04:gs=0.02:bs=-0.04:rh=0.03:gh=0.01:bh=-0.02"
+        )
+
+    elif intent == "bold":
+        # Punchy contrast, vivid colors
+        filters.append("eq=contrast=1.15:saturation=1.15")
+
+    elif intent == "soft" or intent == "dreamy":
+        # Low contrast, slightly warm, gentle feel
+        filters.append(
+            "curves=m='0/0.06 0.25/0.26 0.5/0.53 0.75/0.77 1/0.94',"
+            "eq=contrast=0.92:saturation=0.90"
+        )
+
+    elif intent in ("cool", "cozy", "neutral", "enhanced", "vivid"):
+        # Generic safe preset for all other recognized intents — contrast + saturation only
+        delta = COLOR_INTENTS.get(intent, {})
+        _c = 1.0 + float(delta.get("contrast", 0))
+        _s = 1.0 + float(delta.get("saturation", 0))
+        filters.append(f"eq=contrast={_c:.2f}:saturation={_s:.2f}")
+
     elif intent == "none":
-        # No color processing — raw footage
         pass
 
     grain = str(ep.get("grain") or "none").lower()
@@ -4459,7 +4510,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _hook_start = float(hook_clip.get("source_start") or 0.0)
             _hook_end = float(hook_clip.get("source_end") or 0.0)
             if start <= _hook_start + 0.1 and end >= _hook_end - 0.1:
-                hook_speed = max(0.5, min(1.5, get_speed_for_timestamp(_hook_start, speed_curve)))
+                hook_mid = (_hook_start + _hook_end) / 2.0
+                hook_speed = max(0.5, min(1.5, get_speed_for_timestamp(hook_mid, speed_curve)))
                 if abs(combined_speed - hook_speed) > 0.01:
                     print(
                         f"[render] Forcing hook chronological clip to match teaser speed: "
@@ -4879,6 +4931,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         f"acompressor=threshold=-18dB:ratio=2:attack=20:release=120:makeup=2,"
         f"alimiter=limit=0.95"
     )
+    # Calculate frame-quantized video duration so we can force audio to match exactly.
+    # The acrossfade chain and asetrate/aresample introduce cumulative rounding that
+    # drifts audio vs video by up to ~200ms on longer edits. Pad if short, trim if long.
+    _target_v_dur = sum(round(d * 30) / 30 for d in effective_durations)
+    audio_chain += f",apad=whole_dur={_target_v_dur:.4f},atrim=end={_target_v_dur:.4f}"
+
     post_filters.append(f"{audio_out}{audio_chain}[final_audio]")
     audio_out = "[final_audio]"
 
