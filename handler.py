@@ -1544,7 +1544,7 @@ def build_analysis_from_gemini_recipe(edit_plan, duration):
     return analysis
 
 
-def generate_edit_gemini(video_path, vibe, duration, trend_context=None, deepgram_words=None, face_positions=None):
+def generate_edit_gemini(video_path, vibe, duration, trend_context=None, deepgram_words=None, face_positions=None, gemini_file=None):
     gemini_api_key = os.environ.get("GEMINI_API_KEY")
     if not gemini_api_key:
         raise RuntimeError("GEMINI_API_KEY not set")
@@ -1614,8 +1614,11 @@ RULES FOR USING THESE TIMESTAMPS:
     else:
         print("[generate-edit] No trend context available", flush=True)
 
-    print("[generate-edit] Uploading video to Gemini...", flush=True)
-    gemini_file = genai.upload_file(video_path)
+    if gemini_file is None:
+        print("[generate-edit] Uploading video to Gemini...", flush=True)
+        gemini_file = genai.upload_file(video_path)
+    else:
+        print("[generate-edit] Using pre-uploaded Gemini file", flush=True)
     deadline = time.time() + 180
     while gemini_file.state.name == "PROCESSING":
         if time.time() > deadline:
@@ -5520,39 +5523,81 @@ def handler(job):
         size_mb = os.path.getsize(source_path) / (1024*1024)
         print(f"[pipeline] download complete: {size_mb:.1f}MB in {time.time()-t:.1f}s", flush=True)
 
-        # Step 2 — Normalize
+        # Step 2 — Normalize + Transcribe + Gemini upload (parallel)
         send_progress(job_id, "normalize", 12, "Getting everything set up...", app_url)
-        print("[pipeline] step=normalize", flush=True)
+        print("[pipeline] step=normalize + transcribe + gemini_upload (parallel)", flush=True)
         source_path = normalize_source_video(source_path, work_dir)
         _probe = subprocess.run(
             ["ffprobe", "-v", "quiet", "-show_streams", "-show_format", "-print_format", "json", source_path],
             capture_output=True, text=True, timeout=10)
+        _probe_data = json.loads(_probe.stdout or "{}")
         print(f"[DIAG] Source probe: {_probe.stdout[:1500]}", flush=True)
 
-        source_duration = get_source_duration(source_path)
-        transcript = {"text": "", "words": []}
-        source_res = probe_resolution(source_path)
+        # Extract duration and resolution from the single probe (no redundant calls)
+        source_duration = 0.0
+        source_res = {"width": 1080, "height": 1920}
+        for _s in (_probe_data.get("streams") or []):
+            if _s.get("codec_type") == "video":
+                source_res = {"width": int(_s.get("width") or 1080), "height": int(_s.get("height") or 1920)}
+                if _s.get("duration"):
+                    source_duration = float(_s["duration"])
+        if not source_duration:
+            _fmt_dur = (_probe_data.get("format") or {}).get("duration")
+            if _fmt_dur:
+                source_duration = float(_fmt_dur)
+        if not source_duration:
+            source_duration = get_source_duration(source_path)
         sample_timestamps = [round(i * 2.0, 3) for i in range(int(source_duration / 2.0) + 1)] if source_duration > 0 else []
-        print("[pipeline] step=transcribe", flush=True)
-        audio_path = os.path.join(work_dir, "audio_for_words.wav")
-        subprocess.run(
-            ["ffmpeg", "-y", "-i", source_path, "-vn", "-acodec", "pcm_s16le", "-ar", "48000", "-ac", "1", audio_path],
-            capture_output=True, text=True, timeout=30,
-        )
-        transcript = transcribe_audio(audio_path)
+
+        # Configure Gemini API early so we can pre-upload
+        gemini_api_key = os.environ.get("GEMINI_API_KEY")
+        if gemini_api_key:
+            genai.configure(api_key=gemini_api_key)
+
+        # Run transcription, Gemini upload, and loudness measurement in parallel
+        def _do_transcribe():
+            audio_path = os.path.join(work_dir, "audio_for_words.wav")
+            subprocess.run(
+                ["ffmpeg", "-threads", "0", "-y", "-i", source_path, "-vn", "-acodec", "pcm_s16le", "-ar", "48000", "-ac", "1", audio_path],
+                capture_output=True, text=True, timeout=30,
+            )
+            result = transcribe_audio(audio_path)
+            _words = result.get("words", [])
+            if len(_words) == 0:
+                print("[pipeline] Deepgram returned 0 words — retrying once...", flush=True)
+                try:
+                    result = transcribe_audio(audio_path)
+                except Exception as e2:
+                    print(f"[pipeline] Deepgram retry also failed: {e2}", flush=True)
+            if os.path.exists(audio_path):
+                os.remove(audio_path)
+            return result
+
+        def _do_gemini_upload():
+            try:
+                print("[pipeline] Pre-uploading video to Gemini...", flush=True)
+                gf = genai.upload_file(source_path)
+                print(f"[pipeline] Gemini upload started: {gf.name}", flush=True)
+                return gf
+            except Exception as e:
+                print(f"[pipeline] Gemini pre-upload failed: {e} — will upload inline", flush=True)
+                return None
+
+        def _do_loudness():
+            return measure_source_loudness(source_path)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as early_pool:
+            future_transcribe = early_pool.submit(_do_transcribe)
+            future_gemini_upload = early_pool.submit(_do_gemini_upload)
+            future_loudness = early_pool.submit(_do_loudness)
+            transcript = future_transcribe.result()
+            gemini_file_ref = future_gemini_upload.result()
+            source_loudness = future_loudness.result()
+
         _dg_words = transcript.get("words", [])
         if len(_dg_words) == 0:
-            print("[pipeline] Deepgram returned 0 words — retrying once...", flush=True)
-            try:
-                transcript = transcribe_audio(audio_path)
-                _dg_words = transcript.get("words", [])
-            except Exception as e2:
-                print(f"[pipeline] Deepgram retry also failed: {e2}", flush=True)
-        if os.path.exists(audio_path):
-            os.remove(audio_path)
-        if len(_dg_words) == 0:
             raise RuntimeError("Deepgram transcription failed — 0 words returned. Cannot proceed without word timestamps.")
-        print(f"[pipeline] Deepgram: {len(transcript.get('words', []))} words", flush=True)
+        print(f"[pipeline] Deepgram: {len(_dg_words)} words", flush=True)
 
         print(f"[edit] User vibe: \"{vibe}\"", flush=True)
 
@@ -5572,6 +5617,7 @@ def handler(job):
                 trend_context=trend_context,
                 deepgram_words=transcript.get("words", []),
                 face_positions=None,
+                gemini_file=gemini_file_ref,
             )
 
         def _do_face_detect():
@@ -5591,8 +5637,6 @@ def handler(job):
 
         edit_plan["_source_path"] = source_path
         edit_plan["_face_positions"] = face_positions
-        # Measure source audio characteristics for adaptive processing
-        source_loudness = measure_source_loudness(source_path)
         edit_plan["_source_loudness"] = source_loudness
         print(f"[pipeline] edit recipe complete in {time.time()-t:.1f}s", flush=True)
         analysis = edit_plan.get("analysis_data") or {}
@@ -5612,14 +5656,21 @@ def handler(job):
         speed_curve = edit_plan.get("_parsed_speed_curve")
         if not validate_output(output_path, "render"):
             raise RuntimeError("Main render produced invalid output")
+        # Single probe for both video and audio duration (avoid redundant ffprobe calls)
+        _rv, _ra = 0.0, 0.0
         try:
-            _rv = float((subprocess.run(["ffprobe","-v","quiet","-select_streams","v:0","-show_entries","stream=duration","-of","csv=p=0",output_path],capture_output=True,text=True,timeout=10).stdout or "0").strip() or "0")
-            _ra = float((subprocess.run(["ffprobe","-v","quiet","-select_streams","a:0","-show_entries","stream=duration","-of","csv=p=0",output_path],capture_output=True,text=True,timeout=10).stdout or "0").strip() or "0")
+            _combined_probe = subprocess.run(
+                ["ffprobe", "-v", "quiet", "-show_entries", "stream=codec_type,duration", "-of", "json", output_path],
+                capture_output=True, text=True, timeout=10)
+            _cp = json.loads(_combined_probe.stdout or "{}")
+            for _s in (_cp.get("streams") or []):
+                if _s.get("codec_type") == "video" and _s.get("duration"):
+                    _rv = float(_s["duration"])
+                elif _s.get("codec_type") == "audio" and _s.get("duration"):
+                    _ra = float(_s["duration"])
             print(f"[DIAG] After render: video={_rv:.3f}s audio={_ra:.3f}s diff={_rv - _ra:.4f}s", flush=True)
         except:
             pass
-
-        print("[pipeline] Hook, captions, and final encode are combined with render", flush=True)
 
         if speed_curve:
             print("[pipeline] Speed curve applied in single-pass render — skipping post-process", flush=True)
@@ -5628,12 +5679,9 @@ def handler(job):
         cuts = edit_plan.get("cuts") or []
         effective_durations = compute_effective_durations(cuts, speed_curve)
 
-        output_size = os.path.getsize(output_path)
-        output_dur = probe_duration(output_path) or 0
-        print(f"[pipeline] Final encode combined with render step", flush=True)
+        final_dur = _rv or (probe_duration(output_path) or 0)
 
         # ── Parallel group 2: cover frame + upload ────────────────────────────────
-        source_duration = float(analysis.get("duration") or 0) or (probe_duration(source_path) or 0.0)
         thumbnail_source_ts = edit_plan.get("thumbnail_timestamp")
         if thumbnail_source_ts is None:
             thumbnail_source_ts = (source_duration / 3.0) if source_duration > 0 else 1.0
@@ -5652,13 +5700,7 @@ def handler(job):
 
         if not validate_output(output_path, "final"):
             raise RuntimeError(f"Final output is invalid: {output_path}")
-        _v_dur_cmd = ["ffprobe", "-v", "quiet", "-select_streams", "v:0", "-show_entries", "stream=duration", "-of", "csv=p=0", output_path]
-        _a_dur_cmd = ["ffprobe", "-v", "quiet", "-select_streams", "a:0", "-show_entries", "stream=duration", "-of", "csv=p=0", output_path]
-        _v_dur = subprocess.run(_v_dur_cmd, capture_output=True, text=True, timeout=10).stdout.strip()
-        _a_dur = subprocess.run(_a_dur_cmd, capture_output=True, text=True, timeout=10).stdout.strip()
-        print(f"[DIAG] Final output — video duration: {_v_dur}s, audio duration: {_a_dur}s, diff: {float(_v_dur or 0) - float(_a_dur or 0):.4f}s", flush=True)
         output_size_mb = os.path.getsize(output_path) / (1024*1024)
-        final_dur = probe_duration(output_path) or 0
         send_progress(job_id, "upload", 90, "Just about done...", app_url)
         print(f"[pipeline] output: {output_size_mb:.1f}MB, {final_dur:.1f}s — parallel upload + cover frame", flush=True)
 
