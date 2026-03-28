@@ -18,7 +18,7 @@ os.environ["SSL_CERT_FILE"] = certifi.where()
 os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
 
 HANDLER_VERSION = "3.0.0"
-GEMINI_MODEL = "gemini-3.1-pro-preview"
+GEMINI_MODEL = "gemini-2.5-flash"
 
 print(f"[startup] Python {sys.version}", flush=True)
 print(f"[startup] handler version: {HANDLER_VERSION}", flush=True)
@@ -5575,9 +5575,34 @@ def handler(job):
 
         def _do_gemini_upload():
             try:
-                print("[pipeline] Pre-uploading video to Gemini...", flush=True)
-                gf = genai.upload_file(source_path)
+                # Create a 360p proxy for Gemini — it doesn't need 1080p to make editing decisions
+                proxy_path = os.path.join(work_dir, "gemini_proxy.mp4")
+                print("[pipeline] Creating 360p proxy for Gemini upload...", flush=True)
+                _proxy_t = time.time()
+                _proxy_result = subprocess.run(
+                    ["ffmpeg", "-threads", "0", "-y", "-i", source_path,
+                     "-vf", "scale=360:640:force_original_aspect_ratio=decrease",
+                     "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
+                     "-c:a", "aac", "-b:a", "64k", "-ar", "16000", "-ac", "1",
+                     "-r", "15",
+                     proxy_path],
+                    capture_output=True, text=True, timeout=30,
+                )
+                if _proxy_result.returncode == 0 and os.path.exists(proxy_path):
+                    _proxy_size = os.path.getsize(proxy_path) / (1024 * 1024)
+                    print(f"[pipeline] Proxy created: {_proxy_size:.1f}MB in {time.time()-_proxy_t:.1f}s", flush=True)
+                    upload_path = proxy_path
+                else:
+                    print(f"[pipeline] Proxy creation failed — uploading full-res", flush=True)
+                    upload_path = source_path
+                gf = genai.upload_file(upload_path)
                 print(f"[pipeline] Gemini upload started: {gf.name}", flush=True)
+                # Clean up proxy
+                if upload_path == proxy_path and os.path.exists(proxy_path):
+                    try:
+                        os.unlink(proxy_path)
+                    except Exception:
+                        pass
                 return gf
             except Exception as e:
                 print(f"[pipeline] Gemini pre-upload failed: {e} — will upload inline", flush=True)
