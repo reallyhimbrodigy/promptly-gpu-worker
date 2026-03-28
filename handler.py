@@ -2009,19 +2009,14 @@ RULES FOR USING THESE TIMESTAMPS:
                         print(f"[generate-edit] Filtered out ding on '{word}' at {t:.1f}s (not an approved trigger)", flush=True)
                         continue
 
-                # Enforce swoosh: allow when transitions exist OR speed ramping is active
+                # Enforce swoosh: ONLY allow when actual wipe/fade transitions exist
                 if sound == "swoosh":
                     has_transitions = any(
                         str(c.get("transition_out") or "none").lower() not in ("none", "")
                         for c in (edit_plan.get("cuts") or [])
                     )
-                    _sc = edit_plan.get("speed_curve") or []
-                    has_speed_ramp = (
-                        isinstance(_sc, list) and len(_sc) >= 2
-                        and max(float(k.get("speed", 1)) for k in _sc) / max(0.01, min(float(k.get("speed", 1)) for k in _sc)) >= 1.5
-                    )
-                    if not has_transitions and not has_speed_ramp:
-                        print(f"[generate-edit] Filtered out swoosh at {t:.1f}s (no transitions or speed ramps)", flush=True)
+                    if not has_transitions:
+                        print(f"[generate-edit] Filtered out swoosh at {t:.1f}s (no wipe/fade transitions — hard cuts don't get swoosh)", flush=True)
                         continue
 
                 # Enforce pop: only when a visual event (scene gap) exists near this timestamp
