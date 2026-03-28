@@ -94,6 +94,38 @@ try:
         os.environ["LD_LIBRARY_PATH"] = ":".join(_nvidia_lib_dirs) + (":" + _existing_ldpath if _existing_ldpath else "")
         print(f"[startup] LD_LIBRARY_PATH set: {os.environ['LD_LIBRARY_PATH'][:200]}", flush=True)
 
+    # Create soname symlinks for NVIDIA libs (Modal mounts versioned .so but not symlinks)
+    for _lib_dir in _nvidia_lib_dirs:
+        try:
+            for _f in os.listdir(_lib_dir):
+                # e.g. libnvidia-encode.so.580.95.05 → libnvidia-encode.so.1
+                if _f.startswith("libnvidia-") and ".so." in _f and not _f.endswith(".so.1"):
+                    _base = _f.split(".so.")[0]
+                    _symlink1 = os.path.join(_lib_dir, f"{_base}.so.1")
+                    _symlink2 = os.path.join(_lib_dir, f"{_base}.so")
+                    _target = os.path.join(_lib_dir, _f)
+                    for _sym in [_symlink1, _symlink2]:
+                        if not os.path.exists(_sym):
+                            try:
+                                os.symlink(_target, _sym)
+                            except Exception:
+                                pass
+                # Also handle libcuda.so → libcuda.so.1
+                if _f.startswith("libcuda.so.") and not _f.endswith(".so.1"):
+                    _target = os.path.join(_lib_dir, _f)
+                    for _sym_name in ["libcuda.so.1", "libcuda.so"]:
+                        _sym = os.path.join(_lib_dir, _sym_name)
+                        if not os.path.exists(_sym):
+                            try:
+                                os.symlink(_target, _sym)
+                            except Exception:
+                                pass
+        except Exception:
+            pass
+    # Refresh linker cache after creating symlinks
+    subprocess.run(["ldconfig"], capture_output=True, timeout=5)
+    print("[startup] NVIDIA driver symlinks created, ldconfig refreshed", flush=True)
+
     _nvenc_check = subprocess.run(
         ["ffmpeg", "-hide_banner", "-encoders"],
         capture_output=True, text=True, timeout=5,
@@ -101,8 +133,8 @@ try:
     if "h264_nvenc" in (_nvenc_check.stdout or ""):
         # Verify actual GPU access with a tiny encode
         _gpu_test = subprocess.run(
-            ["ffmpeg", "-y", "-f", "lavfi", "-i", "nullsrc=s=64x64:d=0.1",
-             "-c:v", "h264_nvenc", "-f", "null", "-"],
+            ["ffmpeg", "-y", "-f", "lavfi", "-i", "color=black:s=64x64:d=0.1",
+             "-pix_fmt", "yuv420p", "-c:v", "h264_nvenc", "-f", "null", "-"],
             capture_output=True, text=True, timeout=10,
             env={**os.environ},
         )
@@ -110,17 +142,17 @@ try:
             _HAS_NVENC = True
             print("[startup] NVENC GPU encoder: available", flush=True)
         else:
-            _err_snippet = (_gpu_test.stderr or "")[-300:]
+            _err_snippet = (_gpu_test.stderr or "")[-500:]
             print(f"[startup] NVENC listed but GPU not accessible — using CPU", flush=True)
             print(f"[startup] NVENC test error: {_err_snippet}", flush=True)
-            # Log what NVIDIA libs are actually available
-            _found_libs = []
+            # Check symlinks
+            _encode_libs = []
             for _ld in _nvidia_lib_dirs:
                 try:
-                    _found_libs.extend(f for f in os.listdir(_ld) if "nvidia" in f.lower() or "nvenc" in f.lower() or "cuda" in f.lower())
+                    _encode_libs.extend(f for f in os.listdir(_ld) if "encode" in f.lower() or "cuda.so" in f.lower())
                 except Exception:
                     pass
-            print(f"[startup] NVIDIA libs found: {_found_libs[:20]}", flush=True)
+            print(f"[startup] Encode libs: {sorted(set(_encode_libs))}", flush=True)
     else:
         print("[startup] NVENC not available in FFmpeg build — using CPU encoder", flush=True)
 except Exception as _e:
@@ -5575,7 +5607,8 @@ def handler(job):
 
         render_elapsed = time.time() - t
         print(f"[pipeline] parallel_render complete in {render_elapsed:.1f}s", flush=True)
-        print("[render] Encoding: crf=18 preset=ultrafast threads=auto", flush=True)
+        _enc_label = "NVENC" if _HAS_NVENC else "libx264/fast"
+        print(f"[render] Encoding: {_enc_label} threads=auto", flush=True)
         speed_curve = edit_plan.get("_parsed_speed_curve")
         if not validate_output(output_path, "render"):
             raise RuntimeError("Main render produced invalid output")
