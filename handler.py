@@ -1153,7 +1153,9 @@ Word-level edit control:
 Global parameters:
 
   color_intent — the overall color feel: {intents}
-    Choose based on what you see in the footage and what the vibe calls for. The pipeline applies the grade automatically.
+    Most videos are talking head content — use "clean" or "polished" by default.
+    Only use cinematic/moody/dramatic when the vibe EXPLICITLY asks for that look.
+    The goal is to make the creator look good, not to make it look like a movie.
 
   SPEED RAMPING (only when vibe mentions "speed ramp", "speed ramping", or "CapCut style"):
 
