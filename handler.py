@@ -2931,10 +2931,11 @@ def generate_subtitle_file(transcript, caption_style, cuts, effective_durations,
         return speaker_color or default_color
 
     if caption_style in ("capcut", "hormozi"):
+        # Outline for contrast + subtle drop shadow (2px) for depth
         style_line = (
             f"Style: Default,{font_name},{fontsize},{primary},{secondary},"
-            f"&H00000000,&H00000000,{bold},0,0,0,100,100,{spacing},0,"
-            f"1,{outline_w},0,{alignment},30,30,{margin_v},1"
+            f"&H00000000,&H80000000,{bold},0,0,0,100,100,{spacing},0,"
+            f"1,{outline_w},2,{alignment},30,30,{margin_v},1"
         )
     else:
         style_line = (
@@ -2961,9 +2962,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         """
         Build a CapCut-style animated dialogue line for a group of words.
         Each word gets:
-        - A scale bounce animation (80% -> 110% -> 100%)
+        - A punchy scale bounce (70% -> 130% -> 100%)
         - Color highlight while active
-        - No background box — uses outline for contrast
+        - Outline + shadow for depth
         """
         parts = []
         cumulative_ms = 0
@@ -2974,13 +2975,13 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             clean = str(word_dict["word"]).strip()
             word_highlight = _speaker_highlight(highlight_color, word_dict)
 
-            pop_in_ms = 80
-            settle_ms = 100
+            pop_in_ms = 60
+            settle_ms = 80
 
             word_tag = (
-                f"{{\\fscx80\\fscy80\\1c&H00FFFFFF&}}"
+                f"{{\\fscx70\\fscy70\\1c&H00FFFFFF&}}"
                 f"{{\\t({cumulative_ms},{cumulative_ms + pop_in_ms},"
-                f"\\fscx115\\fscy115\\1c{word_highlight})}}"
+                f"\\fscx130\\fscy130\\1c{word_highlight})}}"
                 f"{{\\t({cumulative_ms + pop_in_ms},{cumulative_ms + pop_in_ms + settle_ms},"
                 f"\\fscx100\\fscy100)}}"
                 f"{{\\t({cumulative_ms + dur_ms - 30},{cumulative_ms + dur_ms},"
@@ -3232,12 +3233,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     is_kw = clean_check in keyword_set
                     active_color = keyword_color if is_kw else highlight_color
                     active_color = _speaker_highlight(active_color, wd)
-                    pop_in_ms = 80
-                    settle_ms = 100
+                    pop_in_ms = 60
+                    settle_ms = 80
                     word_tag = (
-                        f"{{\\fscx80\\fscy80\\1c&H00FFFFFF&}}"
+                        f"{{\\fscx70\\fscy70\\1c&H00FFFFFF&}}"
                         f"{{\\t({cumulative_ms},{cumulative_ms + pop_in_ms},"
-                        f"\\fscx120\\fscy120\\1c{active_color})}}"
+                        f"\\fscx130\\fscy130\\1c{active_color})}}"
                         f"{{\\t({cumulative_ms + pop_in_ms},{cumulative_ms + pop_in_ms + settle_ms},"
                         f"\\fscx100\\fscy100)}}"
                         f"{{\\t({cumulative_ms + dur_ms - 30},{cumulative_ms + dur_ms},"
@@ -4239,10 +4240,12 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
             else:
                 font_size = round(base_size * 0.60)
             pos = str(overlay.get("position") or "center")
-            y_expr = "250" if pos == "top" else ("(h-th)/2" if pos == "center" else str(max(0, 1920 - 350)))
+            # TikTok-safe: top=200px, center=middle, bottom=480px from bottom (above UI)
+            y_expr = "200" if pos == "top" else ("(h-th)/2" if pos == "center" else str(max(0, 1920 - 480)))
             end_t = max(start + 0.8, end)
+            fade_in = 0.15
+            fade_out = 0.15
             print(f"[render] Text overlay '{text}' on clip {clip_idx}: start={start:.3f}s end_t={end_t:.3f}s (clip range {clip_ranges[clip_idx]['start']:.3f}-{clip_ranges[clip_idx]['end']:.3f})", flush=True)
-            print(f"[render] drawtext enable: between(t,{start:.3f},{end_t:.3f})", flush=True)
             _font_clause = (
                 f":fontfile='{OVERLAY_FONT_PATH}'"
                 if os.path.exists(OVERLAY_FONT_PATH)
@@ -4250,11 +4253,17 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
             )
             escaped_text = text.replace("\\", "\\\\").replace(":", "\\:").replace(",", "\\,").replace("'", "\u2019").replace('"', "")
             out_label = f"[video_overlay_{i}]"
+            alpha_expr = (
+                f"if(lt(t-{start:.3f},{fade_in}),(t-{start:.3f})/{fade_in},"
+                f"if(gt(t,{end_t-fade_out:.3f}),({end_t:.3f}-t)/{fade_out},1))"
+            )
             post_filters.append(
                 f"{video_out}drawtext=text='{escaped_text}':fontsize={font_size}:fontcolor=white"
                 f"{_font_clause}"
                 f":x=(w-tw)/2:y={y_expr}"
-                f":borderw=5:bordercolor=black"
+                f":borderw=4:bordercolor=black"
+                f":box=1:boxcolor=black@0.4:boxborderw=12"
+                f":alpha='{alpha_expr}'"
                 f":enable='between(t,{start:.3f},{end_t:.3f})'{out_label}"
             )
             video_out = out_label
@@ -4891,8 +4900,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             else:
                 font_size = round(base_size * 0.60)
             pos = str(overlay.get("position") or "center")
-            y_expr = "250" if pos == "top" else ("(h-th)/2" if pos == "center" else str(max(0, 1920 - 350)))
+            y_expr = "200" if pos == "top" else ("(h-th)/2" if pos == "center" else str(max(0, 1920 - 480)))
             end_t = max(start + 0.8, end)
+            fade_in = 0.15
+            fade_out = 0.15
             _font_clause = (
                 f":fontfile='{OVERLAY_FONT_PATH}'"
                 if os.path.exists(OVERLAY_FONT_PATH)
@@ -4900,11 +4911,17 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             )
             escaped_text = text.replace("\\", "\\\\").replace(":", "\\:").replace(",", "\\,").replace("'", "\u2019").replace('"', "")
             out_label = f"[video_overlay_{i}]"
+            alpha_expr = (
+                f"if(lt(t-{start:.3f},{fade_in}),(t-{start:.3f})/{fade_in},"
+                f"if(gt(t,{end_t-fade_out:.3f}),({end_t:.3f}-t)/{fade_out},1))"
+            )
             post_filters.append(
                 f"{video_out}drawtext=text='{escaped_text}':fontsize={font_size}:fontcolor=white"
                 f"{_font_clause}"
                 f":x=(w-tw)/2:y={y_expr}"
-                f":borderw=5:bordercolor=black"
+                f":borderw=4:bordercolor=black"
+                f":box=1:boxcolor=black@0.4:boxborderw=12"
+                f":alpha='{alpha_expr}'"
                 f":enable='between(t,{start:.3f},{end_t:.3f})'{out_label}"
             )
             video_out = out_label
@@ -4926,22 +4943,24 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     audio_denoise = bool(edit_plan.get("audio_denoise"))
     denoise_part = "afftdn=nr=6:nf=-25:tn=1," if audio_denoise else ""
     # Audio processing chain:
-    #   1. Optional denoise (afftdn)
-    #   2. Highpass at 80Hz — removes low rumble, plosive thumps (p/b/t sounds)
-    #   3. De-esser — tame sibilance (s/sh/ch) that gets amplified by compression
-    #      Uses a tight bandpass at 5-9kHz to detect sibilance, then compresses
-    #      only that band with fast attack. This prevents harsh "s" sounds on
-    #      earbuds without dulling the overall audio.
-    #   4. Lowpass at 12kHz — remove hiss and high-frequency noise
-    #   5. Compressor — even out volume, make soft parts audible
-    #   6. Limiter — prevent digital clipping
+    #   1. Optional denoise (afftdn, transparent at nr=6)
+    #   2. Highpass at 75Hz — removes low rumble
+    #   3. EQ: cut boxiness at 200Hz, boost presence at 3kHz for vocal clarity
+    #   4. Fast compressor (3ms attack) — catches plosives before they clip
+    #   5. Lowpass at 14kHz — keeps air/brightness, removes harsh artifacts
+    #   6. Gentle leveling compressor — evens out volume without squashing
+    #   7. Limiter — prevents digital clipping
     audio_chain = (
-        f"{denoise_part}highpass=f=80,"
-        f"equalizer=f=120:t=q:w=2:g=-3,"
-        f"acompressor=threshold=-20dB:ratio=4:attack=0.3:release=50:detection=peak"
-        f":link=maximum:knee=2:mix=0.5,"
-        f"lowpass=f=12000,"
-        f"acompressor=threshold=-18dB:ratio=2:attack=20:release=120:makeup=2,"
+        f"{denoise_part}highpass=f=75,"
+        # Presence boost at 3kHz for vocal clarity, gentle cut at 200Hz for boxiness
+        f"equalizer=f=200:t=q:w=1.5:g=-1.5,"
+        f"equalizer=f=3000:t=q:w=1.2:g=1.5,"
+        # Fast compressor for peak control (catches plosives)
+        f"acompressor=threshold=-22dB:ratio=3:attack=3:release=40:detection=peak"
+        f":link=maximum:knee=3:mix=0.6,"
+        f"lowpass=f=14000,"
+        # Gentle compressor for overall leveling
+        f"acompressor=threshold=-16dB:ratio=1.8:attack=15:release=80:makeup=2,"
         f"alimiter=limit=0.95"
     )
     # Calculate frame-quantized video duration so we can force audio to match exactly.
