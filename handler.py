@@ -452,11 +452,13 @@ def build_color_grade(baseline, intent_name):
     intent = normalize_intent(intent_name)
     delta = COLOR_INTENTS[intent]
     intended_temp = delta["color_temperature"] if delta["color_temperature"] in ("warm", "cool") else None
+    # Tight clamp ranges — phone footage is already auto-corrected by the camera ISP.
+    # These ranges are enough to enhance without making skin tones look unnatural.
     color_grade = {
-        "brightness":        clamp(safe_baseline["brightness"] + delta["brightness"], -0.15, 0.15),
-        "contrast":          clamp(safe_baseline["contrast"] + delta["contrast"], 0.8, 1.4),
-        "saturation":        clamp(safe_baseline["saturation"] + delta["saturation"], 0.8, 1.20),
-        "gamma":             clamp(safe_baseline["gamma"] + delta["gamma"], 0.8, 1.2),
+        "brightness":        clamp(safe_baseline["brightness"] + delta["brightness"], -0.08, 0.08),
+        "contrast":          clamp(safe_baseline["contrast"] + delta["contrast"], 0.88, 1.18),
+        "saturation":        clamp(safe_baseline["saturation"] + delta["saturation"], 0.82, 1.15),
+        "gamma":             clamp(safe_baseline["gamma"] + delta["gamma"], 0.88, 1.12),
         "color_temperature": intended_temp or safe_baseline["color_temperature"] or "neutral",
     }
     print(
@@ -1910,7 +1912,7 @@ RULES FOR USING THESE TIMESTAMPS:
     baseline = analysis.get("color_baseline") or {}
     intent = normalize_intent(edit_plan.get("color_intent") or "none")
     edit_plan["color_intent"] = intent
-    edit_plan["color_grade"] = {"intent": intent}
+    edit_plan["color_grade"] = build_color_grade(baseline, intent)
     edit_plan["cuts"] = final_cuts
     edit_plan.pop("teal_orange", None)
     edit_plan.pop("beat_sync", None)
@@ -2666,69 +2668,62 @@ def is_hard_cut(transition):
 
 
 def build_video_filter_chain(color_grade, source_res, edit_plan=None):
+    """Build FFmpeg video filters using adaptive color_grade values.
+
+    color_grade comes from build_color_grade() which already accounts for the
+    source footage baseline — so a "cinematic" grade on already-cool footage
+    won't push it further into blue territory.  Values are clamped to safe
+    ranges (brightness ±0.15, contrast 0.8-1.4, saturation 0.8-1.2, gamma
+    0.8-1.2).  We only add curves for intents that need tone-mapping (lifted
+    blacks, crushed shadows, etc.) — everything else uses eq which is lighter.
+    """
     ep = edit_plan or {}
     filters = []
-
-    # Color preset based on color_intent
     intent = str(ep.get("color_intent") or "none").lower()
 
-    if intent in ("polished", "clean", "warm", "punchy", "vibrant"):
-        # Subtle contrast + saturation boost — safe for all footage
-        filters.append("eq=contrast=1.06:saturation=1.08")
-
-    elif intent == "cinematic":
-        # Cinematic look: slight desaturation, lifted blacks, cool shadows + warm highlights
-        # Uses curves to lift the black point and colorbalance for split-toning
-        filters.append(
-            "curves=m='0/0.04 0.25/0.22 0.5/0.50 0.75/0.78 1/0.96',"
-            "eq=contrast=1.10:saturation=0.90,"
-            "colorbalance=rs=-0.05:gs=-0.03:bs=0.06:rh=0.06:gh=0.02:bh=-0.03"
-        )
-
-    elif intent == "moody":
-        # Dark, contrasty with crushed shadows and teal-leaning midtones
-        filters.append(
-            "curves=m='0/0 0.15/0.05 0.5/0.45 0.85/0.82 1/0.95',"
-            "eq=contrast=1.15:saturation=0.85,"
-            "colorbalance=rs=-0.04:gs=0.02:bs=0.06:rh=0.03:gh=-0.01:bh=-0.02"
-        )
-
-    elif intent == "dramatic":
-        # High contrast, slightly desaturated, cool tones
-        filters.append(
-            "curves=m='0/0 0.2/0.10 0.5/0.48 0.8/0.85 1/0.95',"
-            "eq=contrast=1.18:saturation=0.88,"
-            "colorbalance=rs=-0.04:gs=0:bs=0.04:rh=0.02:gh=0:bh=-0.01"
-        )
-
-    elif intent == "faded" or intent == "vintage":
-        # Lifted blacks, low contrast, warm tone — retro film look
-        filters.append(
-            "curves=m='0/0.08 0.25/0.25 0.5/0.52 0.75/0.76 1/0.92',"
-            "eq=contrast=0.90:saturation=0.78,"
-            "colorbalance=rs=0.04:gs=0.02:bs=-0.04:rh=0.03:gh=0.01:bh=-0.02"
-        )
-
-    elif intent == "bold":
-        # Punchy contrast, vivid colors
-        filters.append("eq=contrast=1.15:saturation=1.15")
-
-    elif intent == "soft" or intent == "dreamy":
-        # Low contrast, slightly warm, gentle feel
-        filters.append(
-            "curves=m='0/0.06 0.25/0.26 0.5/0.53 0.75/0.77 1/0.94',"
-            "eq=contrast=0.92:saturation=0.90"
-        )
-
-    elif intent in ("cool", "cozy", "neutral", "enhanced", "vivid"):
-        # Generic safe preset for all other recognized intents — contrast + saturation only
-        delta = COLOR_INTENTS.get(intent, {})
-        _c = 1.0 + float(delta.get("contrast", 0))
-        _s = 1.0 + float(delta.get("saturation", 0))
-        filters.append(f"eq=contrast={_c:.2f}:saturation={_s:.2f}")
-
-    elif intent == "none":
+    if intent == "none":
         pass
+
+    elif color_grade and intent != "none":
+        # Pull adaptive values from build_color_grade (baseline + intent delta, clamped)
+        b = float(color_grade.get("brightness", 0))
+        c = float(color_grade.get("contrast", 1.0))
+        s = float(color_grade.get("saturation", 1.0))
+        g = float(color_grade.get("gamma", 1.0))
+        temp = color_grade.get("color_temperature", "neutral")
+
+        # Curves-based tone mapping for intents that need it (subtle — half strength)
+        if intent == "cinematic":
+            # Slightly lifted blacks, gently rolled-off highlights
+            filters.append("curves=m='0/0.03 0.25/0.23 0.5/0.50 0.75/0.77 1/0.97'")
+        elif intent in ("moody", "dramatic"):
+            # Slightly crushed shadows for moodiness
+            filters.append("curves=m='0/0 0.15/0.08 0.5/0.48 0.85/0.83 1/0.96'")
+        elif intent in ("faded", "vintage"):
+            # Lifted blacks + rolled highlights for washed-out film look
+            filters.append("curves=m='0/0.06 0.25/0.24 0.5/0.51 0.75/0.76 1/0.94'")
+        elif intent in ("soft", "dreamy"):
+            # Gently lifted shadows
+            filters.append("curves=m='0/0.04 0.25/0.25 0.5/0.52 0.75/0.77 1/0.96'")
+
+        # Adaptive eq using source-aware values from build_color_grade
+        # Only apply if there's actually a meaningful adjustment
+        eq_parts = []
+        if abs(b) > 0.005:
+            eq_parts.append(f"brightness={b:.3f}")
+        if abs(c - 1.0) > 0.01:
+            eq_parts.append(f"contrast={c:.2f}")
+        if abs(s - 1.0) > 0.01:
+            eq_parts.append(f"saturation={s:.2f}")
+        if abs(g - 1.0) > 0.01:
+            eq_parts.append(f"gamma={g:.2f}")
+        if eq_parts:
+            filters.append(f"eq={':'.join(eq_parts)}")
+
+        # Color temperature — applied via colorbalance (subtle values from TEMPERATURE_FILTERS)
+        temp_filter = TEMPERATURE_FILTERS.get(temp)
+        if temp_filter:
+            filters.append(temp_filter)
 
     grain = str(ep.get("grain") or "none").lower()
     if grain == "subtle":
