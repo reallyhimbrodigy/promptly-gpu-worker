@@ -1093,22 +1093,39 @@ Word-level edit control:
       Use this when removing a silence range, a dead-air gap, or a whole non-speech section.
 
   Rules for remove_words:
-  WHAT TO REMOVE:
-  Only mark words for removal if they are genuinely one of these:
-  - Filler words: "uh", "um", "hmm", "er", "ah", "like" (when used as filler, not content)
-  - Stutters/false starts: when the speaker starts a word and restarts it ("shou-" before "shouldn't")
-  - Exact repeated words: "I I", "the the" — where the speaker said the same word twice by mistake
+
+  The pipeline already handles these AUTOMATICALLY — do NOT mark them:
+  - "uh", "um", "er", "ah", "hmm", "uhh", "umm", "mhm" and similar non-word fillers
+  - Stutters where a word is repeated exactly ("I I", "the the")
+  - False starts where a partial word precedes the full word ("shou-" before "shouldn't")
+  These are removed deterministically by the pipeline. You do not need to include them.
+
+  YOUR JOB — context-dependent filler words:
+  The pipeline cannot tell if "like", "so", "basically", "you know", "I mean", "right",
+  "literally", "actually", "honestly", "obviously", "just", "really", "kind of", "sort of"
+  are filler or content. YOU decide based on the sentence:
+    - "I was like walking down the street" → "like" is FILLER, remove it
+    - "I like this color" → "like" is CONTENT, keep it
+    - "So basically what happened was" → "so basically" is FILLER, remove both
+    - "So here's the plan" → "so" is CONTENT (sentence opener), keep it
+    - "You know what I mean?" → "you know" is CONTENT (question), keep it
+    - "And then, you know, he just left" → "you know" is FILLER, remove it
+
+  Remove context fillers aggressively — a tight, clean edit has zero verbal clutter.
+  But NEVER remove a word that changes the meaning of the sentence.
 
   WHAT TO REMOVE AS TIME RANGES:
-  - Dead air: silence gaps of 0.05 seconds or longer between words where the speaker paused
+  - Dead air: silence gaps where the speaker paused with no speech
   - Section skips: long pauses or off-topic sections that break the flow
 
   DO NOT remove:
-  - Content words that are part of a sentence, even if the sentence is filler/setup
-  - Partial phrases — if you remove a word, the remaining words must still form a complete thought
+  - Content words that carry meaning in the sentence
+  - Partial phrases — if you remove words, the remaining words must still form a complete, natural thought
   - Words just because they're in a "setup" section — speed ramping handles pacing, not word removal
 
-  The speed curve controls pacing. remove_words controls content. Only remove words that a human editor would cut because they are MISTAKES (stutters, filler) or SILENCE (dead air). Do not remove words to compress the video — that's what speed ramping is for.
+  The speed curve controls pacing. remove_words controls content. Think like a professional video editor:
+  cut every word that a viewer would notice as verbal clutter, but never cut a word that would
+  make the sentence sound unnatural or lose meaning.
 
   opening_zoom — "slow_in", "slow_out", or "none". A subtle push or pull to draw the viewer in.
   Put opening_zoom on the hook clip if hook_clip is set, otherwise on the first clip in the video.
@@ -1538,46 +1555,27 @@ RULES FOR USING THESE TIMESTAMPS:
                     )
 
         edit_plan["remove_words"] = normalized_remove_words
-        validated_cuts = build_clips_from_words(_dg_words, normalized_remove_words, max_silence_gap=0.08)
-        removed_indices = set()
-        for item in normalized_remove_words:
-            if "word_index" in item:
-                removed_indices.add(int(item["word_index"]))
-            elif "start" in item and "end" in item:
-                rs = float(item["start"])
-                re = float(item["end"])
-                for i, w in enumerate(_dg_words):
-                    ws = float(w.get("start") or 0)
-                    we = float(w.get("end") or 0)
-                    if min(we, re) > max(ws, rs):
-                        removed_indices.add(i)
-        kept_indices = [i for i in range(len(_dg_words)) if i not in removed_indices]
-        kept_words = [
-            _dg_words[i].get("punctuated_word") or _dg_words[i].get("word") or ""
-            for i in kept_indices
-        ]
-        preview = " ".join(kept_words[:30])
-        if len(kept_words) > 30:
-            preview += "..."
-        print(f"[DIAG] Kept {len(kept_indices)}/{len(_dg_words)} words: {preview}", flush=True)
         print(
-            f"[generate-edit] Word-level clip building: {len(validated_cuts)} clips from "
-            f"{len(_dg_words)} words, {len(normalized_remove_words)} removals",
+            f"[generate-edit] Building clips: {len(_dg_words)} words, "
+            f"{len(normalized_remove_words)} Gemini removals + deterministic tightening",
             flush=True,
         )
+        validated_cuts = build_clips_from_words(_dg_words, normalized_remove_words, max_silence_gap=0.08)
         for i, clip in enumerate(validated_cuts):
             clip_start = float(clip["source_start"])
             clip_end = float(clip["source_end"])
-            first_word = ""
-            last_word = ""
+            # Find words inside this clip using padded boundaries
+            clip_words = []
             for w in _dg_words:
                 ws = float(w.get("start") or 0)
-                if ws >= clip_start - 0.05 and ws < clip_end:
-                    if not first_word:
-                        first_word = w.get("punctuated_word") or w.get("word") or ""
-                    last_word = w.get("punctuated_word") or w.get("word") or ""
+                we = float(w.get("end") or 0)
+                if ws >= clip_start - 0.02 and we <= clip_end + 0.02:
+                    clip_words.append(w.get("punctuated_word") or w.get("word") or "")
+            first_word = clip_words[0] if clip_words else ""
+            last_word = clip_words[-1] if clip_words else ""
             print(
-                f"[clips] Clip {i}: {clip_start:.3f}-{clip_end:.3f} first='{first_word}' last='{last_word}'",
+                f"[clips] Clip {i}: {clip_start:.3f}-{clip_end:.3f} "
+                f"({len(clip_words)} words) '{first_word}' ... '{last_word}'",
                 flush=True,
             )
         if not validated_cuts:
@@ -3245,13 +3243,20 @@ def _is_stutter(current_word, next_word):
     if not curr or not nxt:
         return False
 
+    # Exact repetition: "I I", "the the"
     if curr == nxt:
         return True
 
+    # Prefix/false start: "shou" before "shouldn't", "wh" before "what"
     if len(curr) >= 2 and nxt.startswith(curr) and len(nxt) > len(curr):
         return True
 
+    # Contraction false start: "do" before "don't"
     if curr + "n't" == nxt or curr + "nt" == nxt:
+        return True
+
+    # Hyphenated/truncated word (Deepgram sometimes returns "wh-" or "th-")
+    if curr.endswith("-") and len(curr) >= 2:
         return True
 
     return False
@@ -3259,12 +3264,22 @@ def _is_stutter(current_word, next_word):
 
 def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.08):
     """
-    Build chronological clips from Deepgram word timestamps after removing words/ranges.
-    Output matches the clip shape expected by render_multi_clip().
+    Deterministic, CapCut-quality clip builder.
+
+    Pipeline:
+      1. Apply Gemini's remove_words (word indices + time ranges)
+      2. Deterministic filler removal (ALWAYS_FILLER, CONTEXT_FILLER, MULTI_WORD_FILLER)
+      3. Stutter/repeat detection and removal
+      4. Build clips from kept words, collapsing dead air
+      5. Add audio padding so cuts never clip consonants
+      6. Merge micro-clips (< 120ms) into neighbors
+      7. Fix overlaps between adjacent clips
+      8. Final safety: expand any boundary that lands mid-word
     """
     if not deepgram_words:
         return []
 
+    # ── Step 0: Prepare sorted word list with metadata ────────────────────
     sorted_words = sorted(
         [
             {
@@ -3272,6 +3287,8 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.08):
                 "_word_index": i,
                 "_start": float(w.get("start") or 0.0),
                 "_end": float(w.get("end") or 0.0),
+                "_text": str(w.get("punctuated_word") or w.get("word") or "").strip(),
+                "_clean": re.sub(r"[^a-z']", "", str(w.get("word") or w.get("punctuated_word") or "").strip().lower()),
             }
             for i, w in enumerate(deepgram_words)
         ],
@@ -3279,6 +3296,8 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.08):
     )
 
     removed_indices = set()
+
+    # ── Step 1: Apply Gemini's remove_words ───────────────────────────────
     removal_ranges = []
     for item in remove_words or []:
         if not isinstance(item, dict):
@@ -3308,38 +3327,155 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.08):
             if overlap / word_dur > 0.5:
                 removed_indices.add(w["_word_index"])
 
+    gemini_removed = set(removed_indices)
+
+    # ── Step 2: Deterministic filler word removal ─────────────────────────
+    # Build a list of non-Gemini-removed words for context-aware filler detection
+    remaining = [w for w in sorted_words if w["_word_index"] not in removed_indices]
+
+    for idx_in_remaining, w in enumerate(remaining):
+        clean = w["_clean"]
+
+        # Always-filler: remove unconditionally — these are never content words
+        # ("um", "uh", "er", "ah", "hmm", etc.)
+        # Context-dependent fillers ("like", "so", "basically", "you know") are
+        # left to Gemini which understands sentence meaning and can decide whether
+        # the word is filler or actual content.
+        if clean in ALWAYS_FILLER:
+            removed_indices.add(w["_word_index"])
+            print(
+                f"[tighten] Filler '{w['_text']}' at {w['_start']:.3f}s removed (always-filler)",
+                flush=True,
+            )
+            continue
+
+    # ── Step 3: Stutter/repeat detection ──────────────────────────────────
+    # Re-build remaining list after filler removal
+    remaining = [w for w in sorted_words if w["_word_index"] not in removed_indices]
+
+    for idx_in_remaining, w in enumerate(remaining):
+        if w["_word_index"] in removed_indices:
+            continue
+        next_w = remaining[idx_in_remaining + 1] if idx_in_remaining + 1 < len(remaining) else None
+        if next_w and _is_stutter(w["_clean"], next_w["_clean"]):
+            removed_indices.add(w["_word_index"])
+            print(
+                f"[tighten] Stutter '{w['_text']}' before '{next_w['_text']}' at {w['_start']:.3f}s removed",
+                flush=True,
+            )
+
+    deterministic_removed = removed_indices - gemini_removed
+
+    # ── Step 4: Build clips from kept words ───────────────────────────────
     kept_words = [w for w in sorted_words if w["_word_index"] not in removed_indices]
 
     if not kept_words:
         return []
+
+    # The split threshold: if the gap between two kept words exceeds this,
+    # we create a new clip. This collapses dead air while preserving natural
+    # sentence rhythm.
+    NATURAL_PAUSE = max_silence_gap  # 80ms — anything longer is dead air
 
     clips = []
     current_words = [kept_words[0]]
 
     for prev, curr in zip(kept_words, kept_words[1:]):
         gap = curr["_start"] - prev["_end"]
-        removed_word_between = curr["_word_index"] > prev["_word_index"] + 1
 
-        if gap > max_silence_gap or removed_word_between:
-            clips.append({
-                "source_start": round(current_words[0]["_start"] * 1000) / 1000,
-                "source_end": round(current_words[-1]["_end"] * 1000) / 1000,
-                "transition_out": "none",
-                "transition_sound": "none",
-                "sfx_style": "none",
-                "zoom": "none",
-                "cut_zoom": False,
-                "speed": 1.0,
-                "freeze_frame": False,
-            })
+        # Only split when there's actual dead air — NOT just because a word
+        # was removed between them. If a filler "um" was removed and the
+        # surrounding words are close together, they stay in the same clip.
+        if gap > NATURAL_PAUSE:
+            clips.append(current_words)
             current_words = [curr]
         else:
             current_words.append(curr)
 
     if current_words:
-        clips.append({
-            "source_start": round(current_words[0]["_start"] * 1000) / 1000,
-            "source_end": round(current_words[-1]["_end"] * 1000) / 1000,
+        clips.append(current_words)
+
+    # ── Step 5: Add audio padding ─────────────────────────────────────────
+    # Deepgram's word boundaries mark where acoustic energy is detected, but
+    # consonant releases (t, k, p, s) and breaths extend past the endpoint.
+    # Pad start by -15ms (catch onset) and end by +40ms (catch release).
+    PAD_START = 0.015  # 15ms before first word
+    PAD_END = 0.040    # 40ms after last word
+
+    raw_clips = []
+    for word_group in clips:
+        first_start = word_group[0]["_start"]
+        last_end = word_group[-1]["_end"]
+        raw_clips.append({
+            "raw_start": first_start,
+            "raw_end": last_end,
+            "padded_start": max(0.0, first_start - PAD_START),
+            "padded_end": last_end + PAD_END,
+            "first_word": word_group[0]["_text"],
+            "last_word": word_group[-1]["_text"],
+            "word_count": len(word_group),
+        })
+
+    # ── Step 6: Merge micro-clips into neighbors ──────────────────────────
+    # Any clip shorter than 120ms is too small to be a standalone segment.
+    # Merge it into the nearest neighbor.
+    MIN_CLIP_DURATION = 0.120
+    merged = []
+    for clip in raw_clips:
+        dur = clip["padded_end"] - clip["padded_start"]
+        if dur < MIN_CLIP_DURATION and merged:
+            # Merge into previous clip (extend its end)
+            merged[-1]["padded_end"] = clip["padded_end"]
+            merged[-1]["raw_end"] = clip["raw_end"]
+            merged[-1]["last_word"] = clip["last_word"]
+            merged[-1]["word_count"] += clip["word_count"]
+        else:
+            merged.append(clip)
+    raw_clips = merged
+
+    # ── Step 7: Fix overlaps — earlier clip wins ──────────────────────────
+    for i in range(1, len(raw_clips)):
+        if raw_clips[i]["padded_start"] < raw_clips[i - 1]["padded_end"]:
+            # Place the boundary at the midpoint of the gap between the
+            # last word of clip i-1 and the first word of clip i
+            mid = (raw_clips[i - 1]["raw_end"] + raw_clips[i]["raw_start"]) / 2
+            raw_clips[i - 1]["padded_end"] = round(mid * 1000) / 1000
+            raw_clips[i]["padded_start"] = round(mid * 1000) / 1000
+
+    # ── Step 8: Mid-word boundary safety ──────────────────────────────────
+    # If any clip boundary lands inside a word (shouldn't happen with this
+    # approach, but as a safety net), expand the clip to include the full word.
+    for rc in raw_clips:
+        for w in sorted_words:
+            if w["_word_index"] in removed_indices:
+                continue
+            # Check start boundary
+            if w["_start"] < rc["padded_start"] < w["_end"]:
+                old = rc["padded_start"]
+                rc["padded_start"] = max(0.0, w["_start"] - 0.01)
+                print(
+                    f"[tighten] Safety: expanded clip start {old:.3f}s → {rc['padded_start']:.3f}s to include '{w['_text']}'",
+                    flush=True,
+                )
+            # Check end boundary
+            if w["_start"] < rc["padded_end"] < w["_end"]:
+                old = rc["padded_end"]
+                rc["padded_end"] = w["_end"] + 0.01
+                print(
+                    f"[tighten] Safety: expanded clip end {old:.3f}s → {rc['padded_end']:.3f}s to include '{w['_text']}'",
+                    flush=True,
+                )
+
+    # ── Build final clip dicts ────────────────────────────────────────────
+    final_clips = []
+    for rc in raw_clips:
+        s = round(rc["padded_start"] * 1000) / 1000
+        e = round(rc["padded_end"] * 1000) / 1000
+        if e - s < 0.05:
+            continue
+        final_clips.append({
+            "source_start": s,
+            "source_end": e,
             "transition_out": "none",
             "transition_sound": "none",
             "sfx_style": "none",
@@ -3349,7 +3485,20 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.08):
             "freeze_frame": False,
         })
 
-    return [c for c in clips if c["source_end"] > c["source_start"] + 0.01]
+    # ── Summary ───────────────────────────────────────────────────────────
+    total_kept = len(kept_words)
+    total_words = len(sorted_words)
+    total_gemini = len(gemini_removed)
+    total_det = len(deterministic_removed)
+    total_source = sum(c["source_end"] - c["source_start"] for c in final_clips)
+    print(
+        f"[tighten] {total_words} words → {total_kept} kept, "
+        f"{total_gemini} Gemini removals + {total_det} deterministic removals, "
+        f"{len(final_clips)} clips, {total_source:.2f}s output",
+        flush=True,
+    )
+
+    return final_clips
 
 
 def tighten_clips_with_deepgram(cuts, deepgram_words, min_silence_to_remove=0.08):
