@@ -1109,7 +1109,9 @@ GENERAL RULES:
 
 Sound design adds texture. A swoosh on a scene change, a thud when a statement lands, a pop when text appears — these make cuts feel physical instead of digital. But not every cut needs a sound. Continuous speech flows best with silent hard cuts.
 
-B-roll elevates production value. When the speaker mentions a concept, a 2-3 second visual cutaway makes the video feel produced. One or two well-placed b-roll moments transform how professional the entire video feels.
+B-roll is ONLY used when the user's vibe explicitly mentions "b-roll", "b roll", "cutaway", or "cutaways". If the vibe does not mention b-roll, set broll to an empty array []. Most videos should NOT have b-roll — bad stock footage looks worse than no footage at all.
+
+When b-roll IS requested, ONLY use concrete, visually specific nouns — real places (Paris, Tokyo), real objects (Ferrari, pizza, laptop), or real actions (surfing, cooking, running). NEVER use abstract concepts (success, growth, motivation, energy, power) — stock footage for abstract words always looks generic and cheap.
 
 The ending matters. On these platforms, videos auto-loop. A clean ending that flows back into the opening earns replay credit. Avoid fade to black — it creates a flash before the loop restarts.{trend_block}
 
