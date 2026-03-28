@@ -4474,66 +4474,73 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             total_frames_for_zoom = total_frames
         zoom_max = 1.07 if has_burned_captions else 1.14
 
+        # ── Face-tracked zoom ──────────────────────────────────────────
+        # Find the closest face detection to this clip's midpoint.
+        # ALL zoom types target the face — never zoom into dead space.
         zoom_filter = None
+        closest_face = None
+        if zoom != "none" and face_positions:
+            clip_mid = (start + end) / 2.0
+            closest_face = min(face_positions, key=lambda p: abs(float(p.get("t") or 0.0) - clip_mid))
+            if not closest_face.get("found"):
+                closest_face = None
+
+        # Compute face offset for crop targeting
+        face_cx = float(closest_face.get("cx") or 540.0) if closest_face else 540.0
+        face_cy = float(closest_face.get("cy") or 960.0) if closest_face else 960.0
+        offset_x = clamp(face_cx - 540.0, -240.0, 240.0)
+        offset_y = clamp(face_cy - 960.0, -320.0, 320.0)
+        if closest_face:
+            print(f"[zoom] clip {i}: {zoom} → face at ({face_cx:.0f}, {face_cy:.0f})", flush=True)
+        elif zoom != "none":
+            print(f"[zoom] clip {i}: {zoom} → no face detected, using center", flush=True)
+
+        def _face_crop(scale_expr, tf_val):
+            """Build a scale+crop filter that targets the detected face."""
+            progress = f"min(n/{tf_val}\\,1.0)"
+            crop_x = f"max(0\\,min((iw-1080)/2+{offset_x:.1f}*{progress}\\,iw-1080))"
+            crop_y = f"max(0\\,min((ih-1920)/2+{offset_y:.1f}*{progress}\\,ih-1920))"
+            return f"{scale_expr}:eval=frame:flags=bilinear,crop=1080:1920:x='{crop_x}':y='{crop_y}'"
+
         if zoom == "slow_in":
             tf = max(1, total_frames_for_zoom) if zoom_scale_factor < 1.0 else max(1, total_frames)
             zoom_range = (zoom_max - 1.0) * zoom_scale_factor
-            closest_face = None
-            if face_positions:
-                clip_mid = (start + end) / 2.0
-                closest_face = min(face_positions, key=lambda p: abs(float(p.get("t") or 0.0) - clip_mid))
-            if closest_face and closest_face.get("found"):
-                face_cx = float(closest_face.get("cx") or 540.0)
-                face_cy = float(closest_face.get("cy") or 960.0)
-                print(f"[zoom] clip {i}: face at ({face_cx:.0f}, {face_cy:.0f}), zoom toward face", flush=True)
-                offset_x = clamp(face_cx - 540.0, -240.0, 240.0)
-                offset_y = clamp(face_cy - 960.0, -320.0, 320.0)
-                progress = f"min(n/{tf}\\,1.0)"
-                crop_x = (
-                    f"max(0\\,min((iw-1080)/2+{offset_x:.1f}*{progress}*{zoom_range:.4f}\\,iw-1080))"
-                )
-                crop_y = (
-                    f"max(0\\,min((ih-1920)/2+{offset_y:.1f}*{progress}*{zoom_range:.4f}\\,ih-1920))"
-                )
-                zoom_filter = (
-                    f"scale=w='trunc(iw*(1.0+{zoom_range:.4f}*{progress})/2)*2'"
-                    f":h='trunc(ih*(1.0+{zoom_range:.4f}*{progress})/2)*2'"
-                    f":eval=frame:flags=bilinear,"
-                    f"crop=1080:1920:x='{crop_x}':y='{crop_y}'"
-                )
-            else:
-                print(f"[zoom] clip {i}: no face detected, zooming center", flush=True)
-                zoom_filter = (
-                    f"scale=w='trunc(iw*(1.0+{zoom_range:.4f}*min(n/{tf}\\,1.0))/2)*2'"
-                    f":h='trunc(ih*(1.0+{zoom_range:.4f}*min(n/{tf}\\,1.0))/2)*2'"
-                    f":eval=frame:flags=bilinear,crop=1080:1920"
-                )
+            progress = f"min(n/{tf}\\,1.0)"
+            scale_expr = (
+                f"scale=w='trunc(iw*(1.0+{zoom_range:.4f}*{progress})/2)*2'"
+                f":h='trunc(ih*(1.0+{zoom_range:.4f}*{progress})/2)*2'"
+            )
+            zoom_filter = _face_crop(scale_expr, tf)
         elif zoom == "slow_out":
             tf = max(1, total_frames_for_zoom) if zoom_scale_factor < 1.0 else max(1, total_frames)
             zoom_range = (zoom_max - 1.0) * zoom_scale_factor
-            zoom_filter = (
-                f"scale=w='trunc(iw*({1.0 + zoom_range:.4f}-{zoom_range:.4f}*(n/{tf})*(n/{tf})*(3-2*(n/{tf})))/2)*2'"
-                f":h='trunc(ih*({1.0 + zoom_range:.4f}-{zoom_range:.4f}*(n/{tf})*(n/{tf})*(3-2*(n/{tf})))/2)*2'"
-                f":eval=frame:flags=bilinear,crop=1080:1920"
+            # Smoothstep easing: 3t²-2t³ for natural deceleration
+            smooth = f"(n/{tf})*(n/{tf})*(3-2*(n/{tf}))"
+            scale_expr = (
+                f"scale=w='trunc(iw*({1.0 + zoom_range:.4f}-{zoom_range:.4f}*{smooth})/2)*2'"
+                f":h='trunc(ih*({1.0 + zoom_range:.4f}-{zoom_range:.4f}*{smooth})/2)*2'"
             )
+            zoom_filter = _face_crop(scale_expr, tf)
         elif zoom == "punch_in":
             punch_range = 0.15 * zoom_scale_factor
-            zoom_filter = (
-                f"scale=w='trunc(iw*(if(lt(n\\,{max(1, total_frames_for_zoom)})\\,"
-                f"1.0+{punch_range:.4f}*n/{max(1, total_frames_for_zoom)}\\,{1.0 + punch_range:.4f}))/2)*2'"
-                f":h='trunc(ih*(if(lt(n\\,{max(1, total_frames_for_zoom)})\\,"
-                f"1.0+{punch_range:.4f}*n/{max(1, total_frames_for_zoom)}\\,{1.0 + punch_range:.4f}))/2)*2'"
-                f":eval=frame:flags=bilinear,crop=1080:1920"
+            tf = max(1, total_frames_for_zoom)
+            scale_expr = (
+                f"scale=w='trunc(iw*(if(lt(n\\,{tf})\\,"
+                f"1.0+{punch_range:.4f}*n/{tf}\\,{1.0 + punch_range:.4f}))/2)*2'"
+                f":h='trunc(ih*(if(lt(n\\,{tf})\\,"
+                f"1.0+{punch_range:.4f}*n/{tf}\\,{1.0 + punch_range:.4f}))/2)*2'"
             )
+            zoom_filter = _face_crop(scale_expr, tf)
         elif zoom == "punch_out":
             punch_range = 0.15 * zoom_scale_factor
-            zoom_filter = (
-                f"scale=w='trunc(iw*(if(lt(n\\,{max(1, total_frames_for_zoom)})\\,"
-                f"{1.0 + punch_range:.4f}-{punch_range:.4f}*n/{max(1, total_frames_for_zoom)}\\,1.0))/2)*2'"
-                f":h='trunc(ih*(if(lt(n\\,{max(1, total_frames_for_zoom)})\\,"
-                f"{1.0 + punch_range:.4f}-{punch_range:.4f}*n/{max(1, total_frames_for_zoom)}\\,1.0))/2)*2'"
-                f":eval=frame:flags=bilinear,crop=1080:1920"
+            tf = max(1, total_frames_for_zoom)
+            scale_expr = (
+                f"scale=w='trunc(iw*(if(lt(n\\,{tf})\\,"
+                f"{1.0 + punch_range:.4f}-{punch_range:.4f}*n/{tf}\\,1.0))/2)*2'"
+                f":h='trunc(ih*(if(lt(n\\,{tf})\\,"
+                f"{1.0 + punch_range:.4f}-{punch_range:.4f}*n/{tf}\\,1.0))/2)*2'"
             )
+            zoom_filter = _face_crop(scale_expr, tf)
 
         vignette = str(edit_plan.get("vignette") or "none").lower()
         vignette_filter = None
