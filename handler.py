@@ -1316,6 +1316,7 @@ Word-level edit control:
   DO NOT remove:
   - Content words that carry meaning in the sentence
   - Partial phrases — if you remove words, the remaining words must still form a complete, natural thought
+  - The last word of a sentence or phrase — if the speaker says "she should be crying", you CANNOT remove "crying" and leave "she should be". That is cutting mid-speech.
   - Words just because they're in a "setup" section — speed ramping handles pacing, not word removal
 
   The speed curve controls pacing. remove_words controls content. Think like a professional video editor:
@@ -1454,7 +1455,7 @@ Then output the JSON:
   "outro": "<none|fade_black|fade_white>",
   "background_music": "none",
   "aspect_ratio": "9:16",
-  "speed_curve": [<keypoints>] or "none",
+  "speed_curve": [{{"t": <seconds>, "speed": <multiplier>}}, ...] or "none",
   "opening_zoom": "<slow_in|slow_out|none>",
   "text_overlays": [
     {{"text": "<text>", "position": "<pos>", "appear_at_clip": <n>, "style": "<style>"}}
@@ -1926,10 +1927,10 @@ RULES FOR USING THESE TIMESTAMPS:
     else:
         speed_curve = []
         for kp in raw_curve:
-            if isinstance(kp, dict) and "t" in kp and "speed" in kp:
+            if isinstance(kp, dict) and "t" in kp and ("speed" in kp or "s" in kp):
                 try:
                     t = max(0.0, float(kp["t"]))
-                    s = max(0.5, min(1.4, float(kp["speed"])))
+                    s = max(0.5, min(1.4, float(kp.get("speed") or kp.get("s"))))
                     speed_curve.append({"t": t, "speed": s})
                 except Exception:
                     continue
