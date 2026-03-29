@@ -1374,11 +1374,8 @@ Global parameters:
     capcut — bold white text with black outline, active word highlighted in yellow with scale bounce animation. This is the standard TikTok/Reels caption style. Use this as the default.
     word_pop — similar to capcut but with a smooth karaoke color sweep instead of bounce animation. Use when the user asks for something slightly different.
     hormozi — uppercase bold text, active word pops with scale bounce, keyword words highlighted in orange-red. Aggressive, high-energy style inspired by Alex Hormozi. Use for motivational/business content.
-    minimal — lowercase thin text with subtle shadow, simple karaoke sweep. Clean, understated look. Use for aesthetic/lifestyle content.
-    two_line — shows two lines at once: active line on top with karaoke highlight, upcoming line dimmed below. Use for longer sentences or interview-style content.
-    boxed — text inside a semi-transparent black box with karaoke sweep highlight. High contrast, easy to read. Use for noisy backgrounds or outdoor footage.
 
-    If the video has speech and no burned-in captions, choose the caption style that best fits the content and vibe. Match the energy — aggressive content gets hormozi, clean/aesthetic content gets minimal, storytelling gets capcut or two_line, fast-paced content gets word_pop.
+    If the video has speech and no burned-in captions, choose the caption style that best fits the content and vibe. Match the energy — aggressive/motivational content gets hormozi, storytelling gets capcut, fast-paced content gets word_pop.
 
   caption_position — where captions appear on screen. Always use "lower-third" — this places captions in the safe zone below faces and above the TikTok/Reels platform UI. This is the standard caption placement used by every major short-form editor.
 
@@ -1903,7 +1900,7 @@ RULES FOR USING THESE TIMESTAMPS:
     edit_plan.pop("teal_orange", None)
     edit_plan.pop("beat_sync", None)
 
-    valid_caption_styles = {"none", "capcut", "word_pop", "hormozi", "minimal", "two_line", "boxed"}
+    valid_caption_styles = {"none", "capcut", "word_pop", "hormozi", "keyword_pop"}
     if str(edit_plan.get("caption_style") or "").lower() not in valid_caption_styles:
         edit_plan["caption_style"] = "capcut"
     else:
@@ -3082,9 +3079,6 @@ def generate_subtitle_file(transcript, caption_style, cuts, effective_durations,
         "minimal_bottom": {"fontsize": 36, "fontname": "Montserrat",           "bold": 0, "alignment": 2},
         "word_pop":       {"fontsize": 54, "fontname": "Montserrat ExtraBold", "bold": 0, "alignment": 5},
         "hormozi":        {"fontsize": 62, "fontname": "Montserrat Black",     "bold": 0, "alignment": 5},
-        "minimal":        {"fontsize": 40, "fontname": "Montserrat Bold",      "bold": 0, "alignment": 5},
-        "two_line":       {"fontsize": 50, "fontname": "Montserrat ExtraBold", "bold": 0, "alignment": 5},
-        "boxed":          {"fontsize": 48, "fontname": "Montserrat Bold",      "bold": 0, "alignment": 5},
         "bold_white":     {"fontsize": 60, "fontname": "Montserrat Black",     "bold": 0, "alignment": 5},
         "bold_yellow":    {"fontsize": 60, "fontname": "Montserrat Black",     "bold": 0, "alignment": 5},
         "keyword_pop":    {"fontsize": 54, "fontname": "Montserrat ExtraBold", "bold": 0, "alignment": 5},
@@ -3118,9 +3112,6 @@ def generate_subtitle_file(transcript, caption_style, cuts, effective_durations,
         "minimal_bottom": ("&H00FFFFFF", "&H0000CCFF", "&HA0000000", 3, 0, 0,  1.0),
         "word_pop":       ("&H00FFFFFF", "&H0000FFFF", "&H90000000", 3, 0, 0,  1.2),
         "hormozi":        ("&H00FFFFFF", "&H0000FFFF", "&H00000000", 1, 5, 0,  0.5),
-        "minimal":        ("&H00FFFFFF", "&H00AAAAAA", "&H00000000", 1, 2, 1,  0.5),
-        "two_line":       ("&H00FFFFFF", "&H0000FFFF", "&H00000000", 1, 4, 0,  0.5),
-        "boxed":          ("&H00FFFFFF", "&H0000FFFF", "&HB0000000", 3, 0, 0,  0.5),
         "bold_white":     ("&H00FFFFFF", "&H00FFFFFF", "&H90000000", 3, 0, 0,  1.2),
         "bold_yellow":    ("&H0000FFFF", "&H00FFFFFF", "&H90000000", 3, 0, 0,  1.2),
         "keyword_pop":    ("&H00FFFFFF", "&H0000FF00", "&H90000000", 3, 0, 0,  1.2),
@@ -3335,127 +3326,6 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     f",Default,,0,0,0,,{text}\n"
                 )
                 group = []
-        ass += "".join(ass_lines)
-
-    elif caption_style == "minimal":
-        # Minimal: lowercase text, thin font, subtle shadow, simple karaoke sweep
-        ass_lines = []
-        group = []
-        for i, word_dict in enumerate(words):
-            group.append(word_dict)
-            next_w = words[i + 1] if i + 1 < len(words) else None
-            pause = (next_w["start"] - word_dict["end"]) if next_w else 1.0
-            ends_sentence = bool(PUNCT_END.search(word_dict.get("word") or ""))
-            if not next_w or pause > 0.3 or ends_sentence or len(group) >= MAX_WORDS:
-                start = group[0]["start"]
-                end = group[-1]["end"] + 0.05
-                parts = ["{\\fad(80,60)}"]
-                for wd in group:
-                    dur_cs = max(5, round(max(0.05, float(wd["end"]) - float(wd["start"])) * 100))
-                    clean = str(wd["word"]).strip().lower()
-                    parts.append(f"{{\\kf{dur_cs}}}{clean} ")
-                text = "".join(parts).rstrip()
-                ass_lines.append(
-                    f"Dialogue: 0,{format_ass_time(start)},{format_ass_time(end)},Default,,0,0,0,,{text}\n"
-                )
-                group = []
-        ass += "".join(ass_lines)
-
-    elif caption_style == "boxed":
-        # Boxed: text inside semi-transparent black box, karaoke sweep highlight
-        ass_lines = []
-        group = []
-        for i, word_dict in enumerate(words):
-            group.append(word_dict)
-            next_w = words[i + 1] if i + 1 < len(words) else None
-            pause = (next_w["start"] - word_dict["end"]) if next_w else 1.0
-            ends_sentence = bool(PUNCT_END.search(word_dict.get("word") or ""))
-            if not next_w or pause > 0.3 or ends_sentence or len(group) >= MAX_WORDS:
-                start = group[0]["start"]
-                end = group[-1]["end"] + 0.05
-                parts = ["{\\fad(80,60)}"]
-                for wd in group:
-                    dur_cs = max(5, round(max(0.05, float(wd["end"]) - float(wd["start"])) * 100))
-                    clean = str(wd["word"]).strip()
-                    parts.append(f"{{\\kf{dur_cs}}}{clean} ")
-                text = "".join(parts).rstrip()
-                ass_lines.append(
-                    f"Dialogue: 0,{format_ass_time(start)},{format_ass_time(end)},Default,,0,0,0,,{text}\n"
-                )
-                group = []
-        ass += "".join(ass_lines)
-
-    elif caption_style == "two_line":
-        # Two-line: show 2 groups at once — active line bright, upcoming line dimmed
-        # Group words into pairs of groups, show both lines simultaneously
-        TWO_LINE_MAX = 4  # words per line
-        all_groups = []
-        group = []
-        for i, word_dict in enumerate(words):
-            group.append(word_dict)
-            next_w = words[i + 1] if i + 1 < len(words) else None
-            pause = (next_w["start"] - word_dict["end"]) if next_w else 1.0
-            ends_sentence = bool(PUNCT_END.search(word_dict.get("word") or ""))
-            if not next_w or pause > 0.3 or ends_sentence or len(group) >= TWO_LINE_MAX:
-                all_groups.append(group)
-                group = []
-
-        ass_lines = []
-        for gi in range(0, len(all_groups), 2):
-            top_group = all_groups[gi]
-            bot_group = all_groups[gi + 1] if gi + 1 < len(all_groups) else None
-
-            pair_start = top_group[0]["start"]
-            pair_end = (bot_group[-1]["end"] if bot_group else top_group[-1]["end"]) + 0.08
-
-            # Top line: active with karaoke highlight
-            top_parts = []
-            for wd in top_group:
-                dur_cs = max(5, round(max(0.05, float(wd["end"]) - float(wd["start"])) * 100))
-                clean = str(wd["word"]).strip()
-                top_parts.append(f"{{\\kf{dur_cs}}}{clean} ")
-            top_text = "".join(top_parts).rstrip()
-
-            if bot_group:
-                # Bottom line: dimmed (shown as upcoming)
-                bot_parts = []
-                for wd in bot_group:
-                    clean = str(wd["word"]).strip()
-                    bot_parts.append(f"{{\\1c&H00888888&}}{clean} ")
-                dim_text = "".join(bot_parts).rstrip()
-
-                # Top line with bottom preview below
-                ass_lines.append(
-                    f"Dialogue: 0,{format_ass_time(pair_start)},{format_ass_time(top_group[-1]['end'] + 0.05)}"
-                    f",Default,,0,0,0,,{top_text}\\N{dim_text}\n"
-                )
-
-                # Bottom line becomes active
-                bot_active_parts = []
-                for wd in bot_group:
-                    dur_cs = max(5, round(max(0.05, float(wd["end"]) - float(wd["start"])) * 100))
-                    clean = str(wd["word"]).strip()
-                    bot_active_parts.append(f"{{\\kf{dur_cs}}}{clean} ")
-                bot_active_text = "".join(bot_active_parts).rstrip()
-
-                # Show top line dimmed, bottom line active
-                top_dim_parts = []
-                for wd in top_group:
-                    clean = str(wd["word"]).strip()
-                    top_dim_parts.append(f"{{\\1c&H00888888&}}{clean} ")
-                top_dim_text = "".join(top_dim_parts).rstrip()
-
-                ass_lines.append(
-                    f"Dialogue: 0,{format_ass_time(bot_group[0]['start'])},{format_ass_time(pair_end)}"
-                    f",Default,,0,0,0,,{top_dim_text}\\N{bot_active_text}\n"
-                )
-            else:
-                # Only top line (odd number of groups)
-                ass_lines.append(
-                    f"Dialogue: 0,{format_ass_time(pair_start)},{format_ass_time(pair_end)}"
-                    f",Default,,0,0,0,,{top_text}\n"
-                )
-
         ass += "".join(ass_lines)
 
     elif caption_style == "hormozi":
