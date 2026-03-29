@@ -873,6 +873,23 @@ def transcribe_audio(source_path):
             }
             for w in raw_words
         ]
+
+        # Utterances group words by speaker turn and are more reliable than
+        # per-word speaker labels. Override per-word labels with utterance-level
+        # speaker assignments when available.
+        raw_utterances = getattr(resp.results, "utterances", None) or []
+        if raw_utterances:
+            utt_count = 0
+            for utt in raw_utterances:
+                utt_start = float(getattr(utt, "start", 0))
+                utt_end = float(getattr(utt, "end", 0))
+                utt_speaker = int(getattr(utt, "speaker", 0))
+                for w in words:
+                    if w["start"] >= utt_start - 0.05 and w["end"] <= utt_end + 0.05:
+                        w["speaker"] = utt_speaker
+                utt_count += 1
+            print(f"[deepgram] Applied {utt_count} utterance-level speaker labels", flush=True)
+
         speaker_ids = set(w["speaker"] for w in words)
         if len(speaker_ids) > 1:
             print(f"[deepgram] Detected {len(speaker_ids)} speakers", flush=True)
@@ -1715,9 +1732,10 @@ RULES FOR USING THESE TIMESTAMPS:
             raise ValueError("Deepgram words missing — remove_words architecture requires word timestamps")
         print(f"[DIAG] Full transcript ({len(_dg_words)} words):", flush=True)
         for i, w in enumerate(_dg_words):
+            spk = w.get('speaker', '?')
             print(
-                f"[DIAG]   [{i}] {float(w.get('start') or 0):.3f}-{float(w.get('end') or 0):.3f}: "
-                f"{w.get('punctuated_word') or w.get('word')}",
+                f"[DIAG]   [{i}] {float(w.get('start') or 0):.3f}-{float(w.get('end') or 0):.3f} "
+                f"(spk{spk}): {w.get('punctuated_word') or w.get('word')}",
                 flush=True,
             )
         normalized_remove_words = []
@@ -1933,6 +1951,21 @@ RULES FOR USING THESE TIMESTAMPS:
             speed_curve = None
         else:
             speed_curve.sort(key=lambda x: x["t"])
+
+            # Enforce minimum ramp duration for large speed changes.
+            # Going from 1.3x to 0.7x in 0.3s sounds jarring (pitch shifts
+            # too fast). Spread keypoints apart so the ramp is at least 0.6s
+            # for large deltas.
+            MIN_RAMP_SECS = 0.6
+            for i in range(len(speed_curve) - 1):
+                dt = speed_curve[i + 1]["t"] - speed_curve[i]["t"]
+                ds = abs(speed_curve[i + 1]["speed"] - speed_curve[i]["speed"])
+                if ds > 0.3 and dt < MIN_RAMP_SECS:
+                    # Spread the two keypoints symmetrically around their midpoint
+                    mid_t = (speed_curve[i]["t"] + speed_curve[i + 1]["t"]) / 2
+                    speed_curve[i]["t"] = round(mid_t - MIN_RAMP_SECS / 2, 3)
+                    speed_curve[i + 1]["t"] = round(mid_t + MIN_RAMP_SECS / 2, 3)
+
             speeds = [kp["speed"] for kp in speed_curve]
             print(
                 f"[generate-edit] Speed curve: {len(speed_curve)} keypoints, range "
@@ -3058,30 +3091,54 @@ def generate_subtitle_file(transcript, caption_style, cuts, effective_durations,
         "center": round(800 * _h_scale),
         "bottom": round(100 * _h_scale),
     }
-    margin_v = pos_margin.get(caption_position or "lower-third", round(400 * _h_scale))
+    # Word pop defaults to lower-middle (between center and lower-third)
+    if caption_style == "word_pop":
+        margin_v = round(550 * _h_scale)
+    else:
+        margin_v = pos_margin.get(caption_position or "lower-third", round(400 * _h_scale))
 
-    # If face is detected in the lower portion, push captions up to avoid overlap
-    if face_positions and caption_position in (None, "lower-third", "center"):
+    # Smart face-aware caption placement.
+    # margin_v in ASS = distance from BOTTOM of frame.
+    # Goal: never overlap the speaker's face.
+    if face_positions:
         _face_ys = [float(fp.get("cy", 0)) for fp in face_positions if fp.get("found")]
         if _face_ys:
             _avg_face_y = sum(_face_ys) / len(_face_ys)
-            _face_bottom_frac = _avg_face_y / h  # 0=top, 1=bottom
-            # Caption margin_v is from bottom; face_bottom_frac > 0.65 means face is low
-            if _face_bottom_frac > 0.65:
-                # Face is in lower third — push captions higher
-                margin_v = max(margin_v, round(500 * _h_scale))
-                print(f"[captions] Face low in frame ({_face_bottom_frac:.0%}) — margin_v raised to {margin_v}px", flush=True)
-            elif _face_bottom_frac < 0.35 and caption_position == "center":
-                # Face is high — safe to use lower position
-                margin_v = round(350 * _h_scale)
-                print(f"[captions] Face high in frame ({_face_bottom_frac:.0%}) — margin_v lowered to {margin_v}px", flush=True)
+            _face_frac = _avg_face_y / h  # 0=top, 1=bottom
+
+            if caption_style == "word_pop":
+                # Word pop wants center screen. Place captions in the largest
+                # gap (above or below face) to avoid overlap.
+                _face_top = max(0, _avg_face_y - 200 * _h_scale)   # rough face bounds
+                _face_bot = min(h, _avg_face_y + 200 * _h_scale)
+                _gap_above = _face_top                              # space above face
+                _gap_below = h - _face_bot                          # space below face
+                if _gap_below > _gap_above and _gap_below > 300 * _h_scale:
+                    # More room below face — put captions in lower area
+                    margin_v = round((_gap_below / 2) * 0.8)
+                    print(f"[captions] word_pop: face at {_face_frac:.0%} — captions below face, margin_v={margin_v}px", flush=True)
+                elif _gap_above > 300 * _h_scale:
+                    # More room above face — put captions in upper area
+                    margin_v = round(h - _face_top / 2)
+                    print(f"[captions] word_pop: face at {_face_frac:.0%} — captions above face, margin_v={margin_v}px", flush=True)
+                else:
+                    # Face is centered, tight — default to lower-third
+                    margin_v = round(350 * _h_scale)
+                    print(f"[captions] word_pop: face centered — falling back to lower-third, margin_v={margin_v}px", flush=True)
+            elif caption_position in (None, "lower-third", "center"):
+                if _face_frac > 0.65:
+                    margin_v = max(margin_v, round(500 * _h_scale))
+                    print(f"[captions] Face low in frame ({_face_frac:.0%}) — margin_v raised to {margin_v}px", flush=True)
+                elif _face_frac < 0.35 and caption_position == "center":
+                    margin_v = round(350 * _h_scale)
+                    print(f"[captions] Face high in frame ({_face_frac:.0%}) — margin_v lowered to {margin_v}px", flush=True)
 
     styles_map = {
         "capcut":         {"fontsize": 58, "fontname": "Montserrat ExtraBold", "bold": 0, "alignment": 5},
         "standard":       {"fontsize": 44, "fontname": "Montserrat",           "bold": 0, "alignment": 2},
         "bold_centered":  {"fontsize": 58, "fontname": "Montserrat Black",     "bold": 0, "alignment": 5},
         "minimal_bottom": {"fontsize": 36, "fontname": "Montserrat",           "bold": 0, "alignment": 2},
-        "word_pop":       {"fontsize": 54, "fontname": "Montserrat ExtraBold", "bold": 0, "alignment": 5},
+        "word_pop":       {"fontsize": 68, "fontname": "Montserrat Black", "bold": 0, "alignment": 5},
         "hormozi":        {"fontsize": 62, "fontname": "Montserrat Black",     "bold": 0, "alignment": 5},
         "bold_white":     {"fontsize": 60, "fontname": "Montserrat Black",     "bold": 0, "alignment": 5},
         "bold_yellow":    {"fontsize": 60, "fontname": "Montserrat Black",     "bold": 0, "alignment": 5},
@@ -3114,7 +3171,7 @@ def generate_subtitle_file(transcript, caption_style, cuts, effective_durations,
         "standard":       ("&H00FFFFFF", "&H0000FFFF", "&H90000000", 3, 0, 0,  1.2),
         "bold_centered":  ("&H00FFFFFF", "&H0000FFFF", "&H90000000", 3, 0, 0,  1.2),
         "minimal_bottom": ("&H00FFFFFF", "&H0000CCFF", "&HA0000000", 3, 0, 0,  1.0),
-        "word_pop":       ("&H00FFFFFF", "&H0000FFFF", "&H90000000", 3, 0, 0,  1.2),
+        "word_pop":       ("&H00FFFFFF", "&H0000FFFF", "&H00000000", 1, 6, 2,  0.5),
         "hormozi":        ("&H00FFFFFF", "&H0000FFFF", "&H00000000", 1, 5, 0,  0.5),
         "bold_white":     ("&H00FFFFFF", "&H00FFFFFF", "&H90000000", 3, 0, 0,  1.2),
         "bold_yellow":    ("&H0000FFFF", "&H00FFFFFF", "&H90000000", 3, 0, 0,  1.2),
@@ -3123,12 +3180,15 @@ def generate_subtitle_file(transcript, caption_style, cuts, effective_durations,
     }
 
     # Per-speaker active word highlight colors (ASS BGR format)
+    # Per-speaker active word highlight colors (ASS BGR format).
+    # In a 2-speaker video: speaker 0 = yellow (default), speaker 1 = cyan.
+    # Viewer instantly sees who's talking even on mute.
     SPEAKER_HIGHLIGHT_COLORS = {
-        0: None,
-        1: None,
-        2: "&H00FFFF00&",  # cyan
-        3: "&H0000FF00&",  # green
-        4: "&H00FF00FF&",  # magenta
+        0: None,             # speaker 0 → default highlight (yellow for capcut)
+        1: "&H00FFFF00&",    # speaker 1 → cyan
+        2: "&H0000FF00&",    # speaker 2 → green
+        3: "&H00FF00FF&",    # speaker 3 → magenta
+        4: "&H000080FF&",    # speaker 4 → orange
         5: "&H000080FF&",  # orange
     }
 
@@ -3157,7 +3217,7 @@ def generate_subtitle_file(transcript, caption_style, cuts, effective_durations,
         speaker_color = SPEAKER_HIGHLIGHT_COLORS.get(speaker_id)
         return speaker_color or default_color
 
-    if caption_style in ("capcut", "hormozi"):
+    if caption_style in ("capcut", "hormozi", "word_pop"):
         # Outline for contrast + subtle drop shadow (2px) for depth
         style_line = (
             f"Style: Default,{font_name},{fontsize},{primary},{secondary},"
@@ -3310,6 +3370,59 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     f"Dialogue: 0,{format_ass_time(start)},{format_ass_time(end)},Default,,0,0,0,,{text}\n"
                 )
                 group = []
+        ass += "".join(ass_lines)
+
+    elif caption_style == "word_pop":
+        # Word pop: ONE word at a time, ALL CAPS, white with thick black outline.
+        # Scale animation: 0% → ~115% → 100% (spring bounce). Hard-cut between words.
+        # 1-2 keyword highlights per sentence in yellow. No background box.
+        accent_color = "&H0004C2F7"   # warm yellow (#F7C204 in ASS BGR)
+        default_color = "&H00FFFFFF"  # white
+
+        # Build keyword set from Gemini's caption_keywords if provided,
+        # otherwise pick 1-2 emotionally strong words per sentence.
+        keyword_set = set(re.sub(r"[.,!?;:'\"\\]", "", k.lower()) for k in (caption_keywords or []))
+        if not keyword_set:
+            # Auto-detect: pick ~1 keyword per 8-10 words (emotionally charged / long words)
+            _sentence_words = []
+            for wd in words:
+                _w_clean = re.sub(r"[.,!?;:'\"\\]", "", str(wd.get("word") or "").lower())
+                _sentence_words.append(_w_clean)
+                _ends_sent = bool(re.search(r"[.!?]$", str(wd.get("word") or "")))
+                if _ends_sent or wd == words[-1]:
+                    if _sentence_words:
+                        # Pick the longest word in this sentence as keyword
+                        _best = max(_sentence_words, key=len)
+                        if len(_best) >= 4:
+                            keyword_set.add(_best)
+                    _sentence_words = []
+
+        ass_lines = []
+        for i, word_dict in enumerate(words):
+            start = float(word_dict["start"])
+            end = float(word_dict["end"])
+            dur_ms = max(80, round((end - start) * 1000))
+            clean = str(word_dict["word"]).strip().upper()
+            _w_check = re.sub(r"[.,!?;:'\"\\]", "", str(word_dict.get("word") or "").lower())
+
+            is_keyword = _w_check in keyword_set
+            word_color = accent_color if is_keyword else default_color
+            word_color = _speaker_highlight(word_color, word_dict)
+
+            # Spring bounce: start invisible (0%), overshoot to 115%, settle to 100%
+            # ~5 frames at 30fps = ~150ms total
+            pop_up = min(80, max(40, dur_ms // 4))     # 0% → 115%
+            settle = min(70, max(30, dur_ms // 5))      # 115% → 100%
+            word_tag = (
+                f"{{\\an5\\fscx0\\fscy0\\1c{word_color}}}"
+                f"{{\\t(0,{pop_up},\\fscx115\\fscy115)}}"
+                f"{{\\t({pop_up},{pop_up + settle},\\fscx100\\fscy100)}}"
+                f"{clean}"
+            )
+            ass_lines.append(
+                f"Dialogue: 0,{format_ass_time(start)},{format_ass_time(end + 0.02)}"
+                f",Default,,0,0,0,,{word_tag}\n"
+            )
         ass += "".join(ass_lines)
 
     elif caption_style == "capcut":
@@ -3526,14 +3639,9 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15):
             if end > start:
                 removal_ranges.append((start, end))
 
-    for start, end in removal_ranges:
-        for w in sorted_words:
-            overlap_start = max(w["_start"], start)
-            overlap_end = min(w["_end"], end)
-            overlap = max(0.0, overlap_end - overlap_start)
-            word_dur = max(0.001, w["_end"] - w["_start"])
-            if overlap / word_dur > 0.5:
-                removed_indices.add(w["_word_index"])
+    # Time ranges only remove silence/dead air — they NEVER remove spoken words.
+    # Words can only be removed via explicit word_index. This prevents Gemini's
+    # slightly-off timestamps from accidentally killing real content.
 
     gemini_removed = set(removed_indices)
 
@@ -3566,6 +3674,26 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15):
             continue
         next_w = remaining[idx_in_remaining + 1] if idx_in_remaining + 1 < len(remaining) else None
         if next_w and _is_stutter(w["_clean"], next_w["_clean"]):
+            # A real stutter happens close together. If there's a large gap
+            # between the two words, it's a conversational repeat, not a stutter.
+            gap = next_w["_start"] - w["_end"]
+            if gap > 1.0:
+                print(
+                    f"[tighten] Skipping repeat '{w['_text']}' → '{next_w['_text']}' "
+                    f"(gap={gap:.2f}s too large for stutter)",
+                    flush=True,
+                )
+                continue
+            # Different speakers repeating the same word is conversation, not a stutter.
+            w_speaker = w.get("speaker", w.get("_speaker"))
+            next_speaker = next_w.get("speaker", next_w.get("_speaker"))
+            if w_speaker is not None and next_speaker is not None and w_speaker != next_speaker:
+                print(
+                    f"[tighten] Skipping cross-speaker repeat '{w['_text']}' (speaker {w_speaker}) → "
+                    f"'{next_w['_text']}' (speaker {next_speaker})",
+                    flush=True,
+                )
+                continue
             removed_indices.add(w["_word_index"])
             print(
                 f"[tighten] Stutter '{w['_text']}' before '{next_w['_text']}' at {w['_start']:.3f}s removed",
@@ -3591,10 +3719,17 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15):
     for prev, curr in zip(kept_words, kept_words[1:]):
         gap = curr["_start"] - prev["_end"]
 
-        # Only split when there's actual dead air — NOT just because a word
-        # was removed between them. If a filler "um" was removed and the
-        # surrounding words are close together, they stay in the same clip.
-        if gap > NATURAL_PAUSE:
+        # If any removed word exists between these two kept words, we MUST
+        # split here. Otherwise the clip's audio range spans the removed
+        # word and its audio bleeds through (e.g. "shou-" before "shouldn't").
+        # This also fixes captions: the removed word's timestamps fall
+        # outside all clips, so project_words_to_output naturally skips it.
+        removed_between = any(
+            idx in removed_indices
+            for idx in range(prev["_word_index"] + 1, curr["_word_index"])
+        )
+
+        if gap > NATURAL_PAUSE or removed_between:
             clips.append(current_words)
             current_words = [curr]
         else:
@@ -3614,6 +3749,7 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15):
     for word_group in clips:
         first_start = word_group[0]["_start"]
         last_end = word_group[-1]["_end"]
+
         raw_clips.append({
             "raw_start": first_start,
             "raw_end": last_end,
@@ -3699,6 +3835,16 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15):
     total_gemini = len(gemini_removed)
     total_det = len(deterministic_removed)
     total_source = sum(c["source_end"] - c["source_start"] for c in final_clips)
+
+    # Log every removed word so we can audit exactly what was cut
+    all_removed = sorted(removed_indices)
+    if all_removed:
+        print(f"[tighten] REMOVED WORDS ({len(all_removed)}):", flush=True)
+        for idx in all_removed:
+            w = sorted_words[idx]
+            source = "gemini" if idx in gemini_removed else "deterministic"
+            print(f"[tighten]   [{idx}] '{w['_text']}' @ {w['_start']:.3f}s ({source})", flush=True)
+
     print(
         f"[tighten] {total_words} words → {total_kept} kept, "
         f"{total_gemini} Gemini removals + {total_det} deterministic removals, "
@@ -4984,6 +5130,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             print(f"[sfx] text_overlay {_i}: {_sfx_style} vol={_vol:.3f} at {_ts:.3f}s", flush=True)
             extra_input_index += 1
 
+        # Use the full render cuts (with hook prepended) so SFX that land
+        # in the hook clip map to the start of the video automatically.
+        _full_durations = compute_effective_durations(render_cuts, speed_curve) if render_cuts else []
+        _full_ranges = get_output_clip_ranges(render_cuts, _full_durations, transition_duration=TRANSITION_DURATION) if render_cuts else []
+
         parsed_sfx = edit_plan.get("_parsed_sound_effects", [])
         for _i, _sfx in enumerate(parsed_sfx):
             _sound_style = normalize_sfx_style(_sfx.get("sound") or "none")
@@ -4993,14 +5144,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             if not _sound_path:
                 continue
             _source_t = float(_sfx.get("t") or 0.0)
-            _pre_hook_t = project_source_time_to_output(_source_t, _base_cuts, _clip_ranges, edit_plan.get("_parsed_speed_curve"))
-            if _pre_hook_t is None:
+            _projected_t = project_source_time_to_output(_source_t, render_cuts, _full_ranges, edit_plan.get("_parsed_speed_curve"))
+            if _projected_t is None:
                 print(
                     f"[sfx] sound_effect: {_sound_style} at source {_source_t:.3f}s — could not project, skipping",
                     flush=True,
                 )
                 continue
-            _ts = max(0.0, hook_offset + _pre_hook_t)
+            _ts = max(0.0, _projected_t)
             _offset_ms = round(_ts * 1000)
             _vol = get_sfx_volume(_sound_style, _ts, _speech_segs, is_text_overlay=False)
             _label = f"[timesfx{_i}]"
