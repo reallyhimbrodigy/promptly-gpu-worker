@@ -1336,7 +1336,6 @@ Word-level edit control:
 
   opening_zoom — "slow_in", "slow_out", or "none". A subtle push or pull to draw the viewer in.
   Put opening_zoom on the hook clip if hook_clip is set, otherwise on the first clip in the video.
-  This is the ONLY zoom choice you need to make. All later clips stay at "none".
 
 Global parameters:
 
@@ -1389,11 +1388,13 @@ Global parameters:
   caption_style — word-by-word animated captions synced to speech:
     none — no captions. Use when captions are already burned into the footage.
     capcut — bold white text with black outline, active word highlighted in yellow with scale bounce animation. This is the standard TikTok/Reels caption style. Use this as the default.
-    word_pop — similar to capcut but with a smooth karaoke color sweep instead of bounce animation. Use when the user asks for something slightly different.
+    word_pop — one word at a time, ALL CAPS, white with black outline, spring bounce animation. Keywords highlighted in yellow. Clean and punchy.
     hormozi — uppercase bold text, active word pops with scale bounce, keyword words highlighted in orange-red. Aggressive, high-energy style inspired by Alex Hormozi. Use for motivational/business content.
+    dynamic — professional dynamic typography. Words stack vertically and build up on screen. Regular words are small lowercase white. Emphasis keywords are MASSIVE uppercase yellow/gold, filling the frame width. This is the premium Captions-app style — use for high-production content, storytime, anything that should feel professionally edited.
 
     Caption style is NOT optional — you MUST choose the right style for the content:
-    - hormozi: storytime, rants, motivational, business, high-energy, confrontational
+    - dynamic: storytime, rants, high-energy, professional content, anything that should feel like a premium edit
+    - hormozi: motivational, business, confrontational, high-energy monologues
     - capcut: casual conversation, vlogs, tutorials, Q&A, interviews
     - word_pop: fast-paced edits, speed ramping videos, trend content, comedy skits
     - keyword_pop: educational content, listicles, explainers where specific terms matter
@@ -1410,6 +1411,21 @@ Global parameters:
 
   thumbnail_timestamp — the source timestamp (in seconds) of the single best frame to use as the video's cover image / thumbnail. Pick the frame where the speaker has the most expressive or emotional face — surprise, laughter, intensity, reaction. Avoid frames where eyes are closed, face is blurry, or expression is blank. This frame needs to make someone scrolling stop and click.
 
+Emphasis moments — THE MOST IMPORTANT PART OF YOUR EDIT. These are the 2-5 moments in the video that should HIT HARDEST. Every emphasis moment drives caption keyword highlighting, automatic zoom punches, and sound effects simultaneously. Think like a professional editor: which moments make the viewer feel something?
+
+  emphasis_moments: [
+    {{"t": <seconds>, "word_indices": [<n>, ...], "type": "<punchline|reveal|statement|reaction>", "intensity": "<high|medium>"}}
+  ]
+
+  - t: the source timestamp where the moment peaks (use word timestamps for precision)
+  - word_indices: the 1-3 word indices that ARE the emphasis (these become the highlighted keywords in captions)
+  - type: what kind of moment (punchline, reveal, strong statement, emotional reaction)
+  - intensity: "high" = the biggest moment (gets cut-zoom + bass hit), "medium" = notable but not peak
+
+  Every video MUST have at least 2 emphasis_moments. Most have 3-5. These moments are what separate a professional edit from a raw upload.
+
+  caption_keywords — list of words that should be visually emphasized in captions (larger, colored). These are auto-derived from emphasis_moments word_indices, but you can add extra keywords here for words that should stand out even outside emphasis moments.
+
 Text overlays:
   text_overlays — Short, bold text that gives the viewer instant context. Use ONE overlay maximum.
   Put appear_at_clip on clip 0.
@@ -1421,38 +1437,35 @@ Text overlays:
   appear_at_clip — which clip number
   style — title (72px), callout (56px), cta (64px)
 
-Sound effects — audio accents that EMPHASIZE specific moments. Each sound must be tied to a real event you can see or hear. Use the word timestamps above to place sounds at the EXACT moment.
+Sound effects — audio accents that punctuate moments. Use the word timestamps to place sounds at the EXACT millisecond.
 
-  ching — cash register. Place ONLY when the speaker says the word "free" or "sold" or states a specific dollar amount. No other words. Use the word timestamps to place the ching at the exact start of the trigger word.
-    "word" = the exact trigger word (e.g. "free", "sold")
+  Available sounds: pop, ching, ding, swoosh, thud
 
-  ding — notification bell. Place ONLY when the speaker says the word "text", "notification", or "email". No other words.
-    "word" = the exact trigger word (e.g. "text", "notification", "email")
-
-  pop — bright snap. Place ONLY when a new visual element appears on screen mid-video that was NOT there before — such as a screen recording appearing, an image overlay appearing, or a picture-in-picture opening. This is a VISUAL event only. Do NOT place pop on:
-    - The start of the video (nothing is "appearing")
-    - Text overlays (they don't "pop")
-    - Spoken words or phrases
-    - Cuts between clips (cuts are silent)
-    If you cannot point to a specific frame where something new visually appears on screen, do not use pop.
-    "word" = "visual_appear"
-
-  swoosh — air swipe. Place ONLY when you are using a wipe or fade transition between clips. If all transitions are "none" (hard cuts), do not use swoosh at all.
-    "word" = "scene_change"
+  ching — cash register. Use when speaker mentions money, prices, "free", "sold", dollar amounts.
+  ding — notification bell. Use when speaker mentions texts, notifications, emails, alerts.
+  pop — bright snap. Use when something new visually appears on screen (screen recording, overlay, PiP).
+  swoosh — air swipe. Use on scene transitions (wipe, fade — not hard cuts).
+  thud — deep bass impact. Use on the BIGGEST emphasis moments — dramatic statements, reveals, punchlines. This is the sound that makes a moment feel physical. Place it on your highest-intensity emphasis_moments.
 
   Rules:
-  - Most videos have 1-3 sound effects total. Many have zero. Zero is fine.
-  - Every sound effect MUST have a "word" field.
+  - Sound effects should punctuate emphasis_moments. Place sounds where they amplify the moment.
+  - Every sound effect MUST have a "word" field (the trigger word or event description).
   - Use the word timestamps to place each sound at the EXACT millisecond.
-  - If you are unsure whether a sound belongs, leave it out. Silence is better than a wrong sound.
+  - Most videos have 2-5 sound effects. Zero is fine if nothing earns one.
+  - thud is the most impactful — reserve it for 1-2 peak moments per video.
 
   sound_effects: [
-    {{"t": <seconds>, "sound": "<pop|ching|ding|swoosh>", "word": "<trigger word or event>"}}
+    {{"t": <seconds>, "sound": "<pop|ching|ding|swoosh|thud>", "word": "<trigger word or event>"}}
   ]
 
 === RESPONSE FORMAT ===
 
-First, write a <vision> block describing your creative plan — what happens in the opening, how pacing flows, where you place text, what the color feel is.
+First, write a <vision> block with your editorial analysis:
+- HOOK: What makes someone stop scrolling in the first 2 seconds
+- STORY ARC: Setup → Buildup → Payoff → Resolution
+- EMOTIONAL BEATS: List each moment where the viewer should feel something (timestamp + what they feel)
+- EMPHASIS MOMENTS: The 2-5 moments that should hit hardest — these drive zooms, sound effects, and keyword highlighting
+- PACING MAP: Which sections should move fast (setup/filler) vs slow (payoff/reveal)
 
 Then output the JSON:
 
@@ -1463,12 +1476,16 @@ Then output the JSON:
   "thumbnail_timestamp": <seconds>,
   "caption_style": "<style>",
   "caption_position": "<position>",
+  "caption_keywords": ["<word1>", "<word2>", ...],
   "audio_denoise": <true|false>,
   "outro": "<none|fade_black|fade_white>",
   "background_music": "none",
   "aspect_ratio": "9:16",
   "speed_curve": [{{"t": <seconds>, "speed": <multiplier>}}, ...] or "none",
   "opening_zoom": "<slow_in|slow_out|none>",
+  "emphasis_moments": [
+    {{"t": <seconds>, "word_indices": [<n>, ...], "type": "<punchline|reveal|statement|reaction>", "intensity": "<high|medium>"}}
+  ],
   "text_overlays": [
     {{"text": "<text>", "position": "<pos>", "appear_at_clip": <n>, "style": "<style>"}}
   ],
@@ -1915,20 +1932,20 @@ RULES FOR USING THESE TIMESTAMPS:
         if "text" in _ov:
             _ov["text"] = _EMOJI_RE.sub("", str(_ov["text"])).strip()
     edit_plan["background_music"] = "none"
-    edit_plan["caption_keywords"] = []
     edit_plan["audio_ducking"] = True
     edit_plan["beat_sync"] = False
     edit_plan.setdefault("sound_effects", [])
+    edit_plan.setdefault("emphasis_moments", [])
     edit_plan.pop("teal_orange", None)
     edit_plan.pop("beat_sync", None)
 
-    valid_caption_styles = {"none", "capcut", "word_pop", "hormozi", "keyword_pop"}
+    valid_caption_styles = {"none", "capcut", "word_pop", "hormozi", "keyword_pop", "dynamic"}
     if str(edit_plan.get("caption_style") or "").lower() not in valid_caption_styles:
         edit_plan["caption_style"] = "capcut"
     else:
         edit_plan["caption_style"] = str(edit_plan.get("caption_style") or "none").lower()
 
-    valid_zoom_modes = {"none", "slow_in", "slow_out", "punch_in", "punch_out"}
+    valid_zoom_modes = {"none", "slow_in", "slow_out", "punch_in", "punch_out", "cut_zoom"}
     opening_zoom = str(edit_plan.get("opening_zoom") or "none").lower()
     if opening_zoom not in valid_zoom_modes:
         opening_zoom = "none"
@@ -2011,10 +2028,53 @@ RULES FOR USING THESE TIMESTAMPS:
 
     edit_plan["_hook_offset"] = 0.0
 
+    # ── Parse emphasis moments ─────────────────────────────────────────────
+    raw_emphasis = edit_plan.get("emphasis_moments", [])
+    emphasis_moments = []
+    for em in raw_emphasis:
+        if isinstance(em, dict) and "t" in em:
+            try:
+                t = float(em["t"])
+                word_indices = em.get("word_indices", [])
+                if not isinstance(word_indices, list):
+                    word_indices = []
+                intensity = str(em.get("intensity") or "medium").lower()
+                if intensity not in ("high", "medium"):
+                    intensity = "medium"
+                em_type = str(em.get("type") or "statement").lower()
+                emphasis_moments.append({
+                    "t": t,
+                    "word_indices": [int(i) for i in word_indices if isinstance(i, (int, float))],
+                    "type": em_type,
+                    "intensity": intensity,
+                })
+            except Exception:
+                continue
+    if emphasis_moments:
+        emphasis_moments.sort(key=lambda x: x["t"])
+        print(f"[generate-edit] Emphasis moments: {len(emphasis_moments)}", flush=True)
+        for em in emphasis_moments:
+            print(f"[generate-edit]   {em['t']:.1f}s: {em['type']} ({em['intensity']})", flush=True)
+    edit_plan["_emphasis_moments"] = emphasis_moments
+
+    # Auto-derive caption_keywords from emphasis_moments if not provided
+    if not edit_plan.get("caption_keywords") and emphasis_moments and _dg_words:
+        auto_keywords = set()
+        for em in emphasis_moments:
+            for idx in em.get("word_indices", []):
+                if 0 <= idx < len(_dg_words):
+                    kw = re.sub(r"[.,!?;:'\"\\]", "", str(_dg_words[idx].get("word") or "").lower())
+                    if len(kw) >= 3:
+                        auto_keywords.add(kw)
+        if auto_keywords:
+            edit_plan["caption_keywords"] = list(auto_keywords)
+            print(f"[generate-edit] Auto-derived {len(auto_keywords)} caption keywords from emphasis moments: {auto_keywords}", flush=True)
+
+    # ── Parse sound effects ──────────────────────────────────────────────
     raw_sfx = edit_plan.get("sound_effects", [])
     sound_effects = []
-    valid_sounds = {"pop", "ching", "ding", "swoosh"}
-    VALID_CHING_WORDS = {"free", "sold", "dollar", "dollars"}
+    valid_sounds = {"pop", "ching", "ding", "swoosh", "thud"}
+    VALID_CHING_WORDS = {"free", "sold", "dollar", "dollars", "money", "price", "cost", "pay", "paid", "cash", "buy", "bought", "deal"}
     for sfx in raw_sfx:
         if isinstance(sfx, dict) and "t" in sfx and "sound" in sfx:
             try:
@@ -2022,10 +2082,12 @@ RULES FOR USING THESE TIMESTAMPS:
             except Exception:
                 continue
             sound = str(sfx["sound"]).lower()
+            # Resolve aliases
+            sound = _SFX_ALIASES.get(sound, sound)
             if sound in valid_sounds and t >= 0:
                 word = str(sfx.get("word") or "").strip().lower()
 
-                # Enforce ching only on approved trigger words
+                # ching: only on money-related trigger words
                 if sound == "ching":
                     word_clean = word.strip(".,!?;:'\"")
                     is_dollar_amount = "$" in word or word_clean.replace(".", "").replace(",", "").isdigit()
@@ -2033,39 +2095,26 @@ RULES FOR USING THESE TIMESTAMPS:
                         print(f"[generate-edit] Filtered out ching on '{word}' at {t:.1f}s (not an approved trigger)", flush=True)
                         continue
 
-                # Enforce ding only on approved trigger words
+                # ding: only on notification-related trigger words
                 if sound == "ding":
-                    VALID_DING_WORDS = {"text", "notification", "email"}
+                    VALID_DING_WORDS = {"text", "notification", "email", "message", "alert", "ping"}
                     word_clean = word.strip(".,!?;:'\"")
                     if word_clean not in VALID_DING_WORDS:
                         print(f"[generate-edit] Filtered out ding on '{word}' at {t:.1f}s (not an approved trigger)", flush=True)
                         continue
 
-                # Enforce swoosh: ONLY allow when actual wipe/fade transitions exist
+                # swoosh: only with wipe/fade transitions
                 if sound == "swoosh":
                     has_transitions = any(
                         str(c.get("transition_out") or "none").lower() not in ("none", "")
                         for c in (edit_plan.get("cuts") or [])
                     )
                     if not has_transitions:
-                        print(f"[generate-edit] Filtered out swoosh at {t:.1f}s (no wipe/fade transitions — hard cuts don't get swoosh)", flush=True)
+                        print(f"[generate-edit] Filtered out swoosh at {t:.1f}s (no wipe/fade transitions)", flush=True)
                         continue
 
-                # Enforce pop: only when a visual event (scene gap) exists near this timestamp
-                if sound == "pop":
-                    pop_has_visual = False
-                    if word == "visual_appear":
-                        cuts_list = edit_plan.get("cuts") or []
-                        for ci in range(1, len(cuts_list)):
-                            gap = float(cuts_list[ci].get("source_start", 0)) - float(cuts_list[ci-1].get("source_end", 0))
-                            if gap > 0.5:
-                                skip_time = float(cuts_list[ci].get("source_start", 0))
-                                if abs(skip_time - t) < 3.0:
-                                    pop_has_visual = True
-                                    break
-                    if not pop_has_visual:
-                        print(f"[generate-edit] Filtered out pop at {t:.1f}s (no visual event confirmed)", flush=True)
-                        continue
+                # thud: always allowed — the AI places these on emphasis moments
+                # pop: always allowed — the AI decides when something visually appears
 
                 sound_effects.append({"t": t, "sound": sound, "word": word})
     if sound_effects:
@@ -2136,6 +2185,33 @@ RULES FOR USING THESE TIMESTAMPS:
                     break
         final_cuts[target_idx]["zoom"] = opening_zoom
         print(f"[generate-edit] Assigned opening_zoom={opening_zoom} to clip {target_idx}", flush=True)
+
+    # ── Map emphasis_moments to clips ────────────────────────────────────
+    # High-intensity emphasis moments get cut_zoom (instant snap-in zoom)
+    # and auto-placed SFX if no sound already exists nearby.
+    for em in emphasis_moments:
+        em_t = em["t"]
+        for clip in final_cuts:
+            cs = float(clip["source_start"])
+            ce = float(clip["source_end"])
+            if cs <= em_t <= ce:
+                if em["intensity"] == "high" and str(clip.get("zoom") or "none") == "none":
+                    clip["zoom"] = "cut_zoom"
+                    clip["cut_zoom"] = True
+                    print(f"[emphasis] Applied cut_zoom to clip {cs:.1f}-{ce:.1f}s ({em['type']})", flush=True)
+                break
+
+        # Auto-place thud on high-intensity moments that have no SFX nearby
+        if em["intensity"] == "high":
+            nearby_sfx = any(abs(sfx["t"] - em_t) < 1.0 for sfx in sound_effects)
+            if not nearby_sfx:
+                sound_effects.append({"t": em_t, "sound": "thud", "word": f"emphasis_{em['type']}"})
+                print(f"[emphasis] Auto-placed thud at {em_t:.1f}s ({em['type']})", flush=True)
+
+    # Re-sort and re-store sound effects after emphasis auto-placement
+    sound_effects.sort(key=lambda x: x["t"])
+    edit_plan["sound_effects"] = sound_effects
+    edit_plan["_parsed_sound_effects"] = sound_effects
 
     # Color grading disabled — phone cameras already auto-correct color,
     # and artistic grades consistently make talking-head content look worse.
@@ -3140,6 +3216,7 @@ def generate_subtitle_file(transcript, caption_style, cuts, effective_durations,
         "minimal_bottom": {"fontsize": 36, "fontname": "Montserrat",           "bold": 0, "alignment": 2},
         "word_pop":       {"fontsize": 68, "fontname": "Montserrat Black", "bold": 0, "alignment": 5},
         "hormozi":        {"fontsize": 62, "fontname": "Montserrat Black",     "bold": 0, "alignment": 5},
+        "dynamic":        {"fontsize": 42, "fontname": "Montserrat ExtraBold", "bold": 0, "alignment": 5},
         "bold_white":     {"fontsize": 60, "fontname": "Montserrat Black",     "bold": 0, "alignment": 5},
         "bold_yellow":    {"fontsize": 60, "fontname": "Montserrat Black",     "bold": 0, "alignment": 5},
         "keyword_pop":    {"fontsize": 54, "fontname": "Montserrat ExtraBold", "bold": 0, "alignment": 5},
@@ -3173,6 +3250,7 @@ def generate_subtitle_file(transcript, caption_style, cuts, effective_durations,
         "minimal_bottom": ("&H00FFFFFF", "&H0000CCFF", "&HA0000000", 3, 0, 0,  1.0),
         "word_pop":       ("&H00FFFFFF", "&H0000FFFF", "&H00000000", 1, 6, 2,  0.5),
         "hormozi":        ("&H00FFFFFF", "&H0000FFFF", "&H00000000", 1, 5, 0,  0.5),
+        "dynamic":        ("&H00FFFFFF", "&H0004C2F7", "&H00000000", 1, 5, 2,  0.5),
         "bold_white":     ("&H00FFFFFF", "&H00FFFFFF", "&H90000000", 3, 0, 0,  1.2),
         "bold_yellow":    ("&H0000FFFF", "&H00FFFFFF", "&H90000000", 3, 0, 0,  1.2),
         "keyword_pop":    ("&H00FFFFFF", "&H0000FF00", "&H90000000", 3, 0, 0,  1.2),
@@ -3217,7 +3295,7 @@ def generate_subtitle_file(transcript, caption_style, cuts, effective_durations,
         speaker_color = SPEAKER_HIGHLIGHT_COLORS.get(speaker_id)
         return speaker_color or default_color
 
-    if caption_style in ("capcut", "hormozi", "word_pop"):
+    if caption_style in ("capcut", "hormozi", "word_pop", "dynamic"):
         # Outline for contrast + subtle drop shadow (2px) for depth
         style_line = (
             f"Style: Default,{font_name},{fontsize},{primary},{secondary},"
@@ -3424,6 +3502,136 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 f",Default,,0,0,0,,{word_tag}\n"
             )
         ass += "".join(ass_lines)
+
+    elif caption_style == "dynamic":
+        # Dynamic typography: words stack vertically and build on screen.
+        # Regular words: small, lowercase, white with outline.
+        # Emphasis keywords: MASSIVE, ALL CAPS, yellow/gold, scale bounce.
+        # Previous phrases remain visible until the sentence ends, creating
+        # the cascading stack effect used by the Captions app.
+        accent_color = "&H0004C2F7"   # warm yellow (#F7C204 in ASS BGR)
+        default_color = "&H00FFFFFF"  # white
+        base_fs = fontsize            # regular word font size (~42px at 1920)
+        emphasis_fs = round(fontsize * 2.8)  # emphasis font size (~118px at 1920)
+
+        # Build keyword set
+        keyword_set = set(re.sub(r"[.,!?;:'\"\\]", "", k.lower()) for k in (caption_keywords or []))
+        if not keyword_set:
+            # Auto-detect: pick the longest word per ~8 words as keyword
+            _sentence_words = []
+            for wd in words:
+                _w_clean = re.sub(r"[.,!?;:'\"\\]", "", str(wd.get("word") or "").lower())
+                _sentence_words.append(_w_clean)
+                _ends_sent = bool(re.search(r"[.!?]$", str(wd.get("word") or "")))
+                if _ends_sent or wd == words[-1]:
+                    if _sentence_words:
+                        _best = max(_sentence_words, key=len)
+                        if len(_best) >= 4:
+                            keyword_set.add(_best)
+                    _sentence_words = []
+
+        # Group words into phrases (2-3 words each)
+        phrases = []
+        current_phrase = []
+        for i, wd in enumerate(words):
+            current_phrase.append(wd)
+            next_w = words[i + 1] if i + 1 < len(words) else None
+            pause = (next_w["start"] - wd["end"]) if next_w else 1.0
+            ends_sentence = bool(PUNCT_END.search(wd.get("word") or ""))
+            if not next_w or pause > 0.3 or ends_sentence or len(current_phrase) >= 3:
+                phrases.append(current_phrase)
+                current_phrase = []
+
+        # Group phrases into sentences (between sentence-end punctuation)
+        sentences = []
+        current_sent = []
+        for phrase in phrases:
+            current_sent.append(phrase)
+            last_word_text = str(phrase[-1].get("word") or "")
+            if bool(re.search(r"[.!?]$", last_word_text)) or phrase == phrases[-1]:
+                sentences.append(current_sent)
+                current_sent = []
+        if current_sent:
+            sentences.append(current_sent)
+
+        center_x = w // 2
+        ass_lines = []
+
+        for sentence_phrases in sentences:
+            if not sentence_phrases:
+                continue
+            sentence_end = sentence_phrases[-1][-1]["end"]
+
+            # Determine which phrases contain emphasis keywords
+            phrase_info = []
+            for phrase in sentence_phrases:
+                has_kw = any(
+                    re.sub(r"[.,!?;:'\"\\]", "", str(wd.get("word") or "").lower()) in keyword_set
+                    for wd in phrase
+                )
+                fs = emphasis_fs if has_kw else base_fs
+                line_height = round(fs * 1.4)
+                phrase_info.append({"phrase": phrase, "is_emphasis": has_kw, "fs": fs, "line_height": line_height})
+
+            # Calculate total height for vertical centering
+            total_height = sum(pi["line_height"] for pi in phrase_info)
+            # Start Y: center the stack vertically, offset slightly upward
+            start_y = max(round(200 * _h_scale), (h // 2) - (total_height // 2) - round(50 * _h_scale))
+
+            current_y = start_y
+            for pi in phrase_info:
+                phrase = pi["phrase"]
+                is_emphasis = pi["is_emphasis"]
+                fs = pi["fs"]
+                phrase_start = phrase[0]["start"]
+                current_y += pi["line_height"]
+
+                # Cap Y so text doesn't go below safe zone
+                current_y = min(current_y, h - round(100 * _h_scale))
+
+                # Build phrase text
+                if is_emphasis:
+                    phrase_text = " ".join(str(wd["word"]).strip().upper() for wd in phrase)
+                    color = accent_color
+                    # Speaker highlight for emphasis
+                    speaker_color = _speaker_highlight(color, phrase[0])
+                    if speaker_color and speaker_color != color:
+                        color = speaker_color
+                else:
+                    phrase_text = " ".join(str(wd["word"]).strip().lower() for wd in phrase)
+                    color = default_color
+                    speaker_color = _speaker_highlight(color, phrase[0])
+                    if speaker_color and speaker_color != color:
+                        color = speaker_color
+
+                if is_emphasis:
+                    # Emphasis: pop from 0% to 120% to 100% with color
+                    tag = (
+                        f"{{\\an5\\pos({center_x},{current_y})\\fs{fs}\\1c{color}"
+                        f"\\3c&H00000000&\\bord5\\shad2"
+                        f"\\fscx0\\fscy0}}"
+                        f"{{\\t(0,80,\\fscx120\\fscy120)}}"
+                        f"{{\\t(80,160,\\fscx100\\fscy100)}}"
+                        f"{phrase_text}"
+                    )
+                else:
+                    # Regular: fade in with slight scale up (85% → 100%)
+                    tag = (
+                        f"{{\\an5\\pos({center_x},{current_y})\\fs{fs}\\1c{color}"
+                        f"\\3c&H00000000&\\bord3\\shad1"
+                        f"\\alpha&HFF&\\fscx85\\fscy85}}"
+                        f"{{\\t(0,60,\\alpha&H00&\\fscx100\\fscy100)}}"
+                        f"{phrase_text}"
+                    )
+
+                # Phrase appears at its start time, stays until sentence ends
+                ass_lines.append(
+                    f"Dialogue: 0,{format_ass_time(phrase_start)},{format_ass_time(sentence_end + 0.08)}"
+                    f",Default,,0,0,0,,{tag}\n"
+                )
+
+        ass += "".join(ass_lines)
+        print(f"[captions] Dynamic typography: {len(phrases)} phrases, {len(sentences)} sentences, {len(keyword_set)} keywords", flush=True)
 
     elif caption_style == "capcut":
         highlight = "&H0000FFFF"
@@ -4924,10 +5132,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                     )
                     combined_speed = hook_speed
         zoom = str(cut.get("zoom") or "none")
-        if hook_clip and i > 0 and zoom != "none":
-            zoom = "none"
-        if has_burned_captions and zoom in ["punch_in","punch_out"]:
-            zoom = "slow_in" if zoom == "punch_in" else "slow_out"
+        if has_burned_captions and zoom in ["punch_in", "punch_out", "cut_zoom"]:
+            zoom = "slow_in" if zoom in ("punch_in", "cut_zoom") else "slow_out"
 
         eff_dur = effective_durations[i]
         fps = 30
@@ -5016,6 +5222,19 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 f"{1.0 + punch_range:.4f}-{punch_range:.4f}*n/{tf}\\,1.0))/2)*2'"
             )
             zoom_filter = _face_crop(scale_expr, tf)
+        elif zoom == "cut_zoom":
+            # Instant snap-in zoom — no ramp. Holds at 118% for the entire clip.
+            # The "cut" back to 100% on the next clip creates the visual punch.
+            cz_scale = 1.18
+            scale_expr = (
+                f"scale=w='trunc(iw*{cz_scale:.4f}/2)*2'"
+                f":h='trunc(ih*{cz_scale:.4f}/2)*2'"
+            )
+            # Static face-targeted crop (no animation — instant)
+            crop_x = f"max(0\\,min((iw-1080)/2+{offset_x:.1f}\\,iw-1080))"
+            crop_y = f"max(0\\,min((ih-1920)/2+{offset_y:.1f}\\,ih-1920))"
+            zoom_filter = f"{scale_expr}:flags=bilinear,crop=1080:1920:x='{crop_x}':y='{crop_y}'"
+            print(f"[zoom] clip {i}: cut_zoom @ {cz_scale:.0%} scale", flush=True)
 
         vignette = str(edit_plan.get("vignette") or "none").lower()
         vignette_filter = None
