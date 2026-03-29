@@ -1333,34 +1333,52 @@ Global parameters:
   The whole point of speed ramping is CONTRAST. Fast setup → slow punchline → fast again.
   That contrast is what makes it funny and engaging. Without dramatic swings it's just a slightly sped up video.
 
-  YOUR JOB: Mark the key MOMENTS in the video. The pipeline smoothly ramps between them.
-  - Place a keypoint where you want the speed to CHANGE
-  - The pipeline interpolates smoothly between keypoints — you don't need to add transition keypoints
+  CRITICAL: The pipeline interpolates smoothly between keypoints. If you only place two keypoints
+  far apart, the speed will GRADUALLY ramp over the entire gap — making everything in between
+  the wrong speed. You MUST use HOLD keypoints to lock the speed until the exact moment you
+  want it to change.
+
+  HOW TO WRITE SPEED CURVES:
+  Use pairs of keypoints to create SHARP transitions:
+  1. Place a HOLD keypoint at the current speed right BEFORE the transition (0.3s before)
+  2. Place the NEW speed keypoint at the exact moment
+
+  WRONG (gradual 17-second ramp):
+    [{{"t": 0, "speed": 1.4}}, {{"t": 17, "speed": 0.7}}]
+    This slowly ramps from fast to slow over 17 seconds — the whole middle is the wrong speed.
+
+  RIGHT (sharp snap at the punchline):
+    [{{"t": 0, "speed": 1.4}}, {{"t": 16.7, "speed": 1.4}}, {{"t": 17.0, "speed": 0.7}}]
+    This HOLDS fast until 16.7s, then snaps to slow at 17.0s. Everything before stays fast.
+
+  FULL EXAMPLE for a storytime video:
+    [
+      {{"t": 0, "speed": 1.4}},     // fast: setup
+      {{"t": 9.7, "speed": 1.4}},   // HOLD fast until right before reveal
+      {{"t": 10.0, "speed": 0.65}}, // SNAP slow: the big reveal lands
+      {{"t": 12.5, "speed": 0.65}}, // HOLD slow through the moment
+      {{"t": 12.8, "speed": 1.4}},  // SNAP back to fast
+      {{"t": 24.7, "speed": 1.4}},  // HOLD fast until next punchline
+      {{"t": 25.0, "speed": 0.65}}, // SNAP slow: punchline hits
+      {{"t": 27.0, "speed": 0.65}}, // HOLD slow
+      {{"t": 27.3, "speed": 1.4}}   // SNAP back to fast for ending
+    ]
 
   RULES:
-  - Fast (1.2x-1.4x) is the DEFAULT. Setup, context, filler, transitions — all fast.
-  - Slow (0.6x-0.8x) is RARE and DRAMATIC. Only for: punchlines, reveals, reactions, emotional peaks.
-  - The contrast ratio matters: if your fast is 1.2x and your slow is 0.8x, there's no impact.
-    Good speed ramping has at least 2x contrast (e.g. 1.4x fast → 0.6x slow).
-  - Every video should have at least 2-3 dramatic slow moments, no more than 4-5.
+  - Fast (1.3x-1.4x) is the DEFAULT. Setup, context, filler, transitions — all fast.
+  - Slow (0.6x-0.7x) is RARE and DRAMATIC. Only for: punchlines, reveals, reactions, emotional peaks.
+  - Every transition needs a HOLD+SNAP pair (two keypoints 0.3s apart).
+  - 2-3 slow moments per video, max 4. Each slow moment lasts 1.5-3 seconds.
   - NEVER use 1.0x — every moment is either fast or slow.
-  - Maximum speed is 1.4x. Never exceed 1.4x.
+  - Maximum speed is 1.4x. Minimum is 0.6x.
+  - Slow moments must land on WORDS, not silence. Slow down the actual spoken punchline.
 
   What each speed feels like:
     1.4x = fast, energetic, pitch rises — use for setup and filler
-    1.2x = comfortably fast, natural — good cruising speed
+    1.3x = comfortably fast — good cruising speed
     0.7x = noticeably slow, voice deepens — "wait for it" feeling
-    0.6x = very slow, deep voice, maximum impact — the punchline lands
+    0.65x = very slow, deep voice, maximum impact — the punchline lands
 
-  SPEED CURVE FORMAT:
-  speed_curve: [
-    {{"t": <timestamp in source seconds>, "speed": <speed multiplier>}},
-    ...
-  ]
-
-  Each keypoint marks a moment where speed changes. The pipeline smoothly ramps between them.
-  Example: [{{"t": 0, "speed": 1.4}}, {{"t": 3.2, "speed": 0.6}}, {{"t": 4.5, "speed": 1.4}}]
-  This means: start fast, smoothly slow down into the moment at 3.2s, then ramp back up.
   If speed ramping is not requested, set speed_curve to "none".
 
   caption_style — word-by-word animated captions synced to speech:
@@ -5000,10 +5018,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         video_filters.append(f"[0:v]{','.join(v_chain)}[v{i}]")
 
         # Audio: trim from source, then apply per-clip filters
-        # Use atempo for pitch-preserving speed change (no squeaky/deep voice artifacts)
+        # asetrate shifts pitch intentionally (chipmunk fast / deep slow = the desired effect)
         a_chain = [f"atrim=start={start:.3f}:end={end:.3f}", "asetpts=PTS-STARTPTS"]
         if abs(combined_speed - 1.0) > 0.001:
-            a_chain.append(f"atempo={combined_speed:.4f}")
+            a_chain.append(f"asetrate={sample_rate}*{combined_speed:.4f}")
+            a_chain.append(f"aresample={sample_rate}")
         if i == n-1 and outro != "none":
             fade_start = max(0, eff_dur - 1.0)
             a_chain.append(f"afade=t=out:st={fade_start:.3f}:d=1.0")
