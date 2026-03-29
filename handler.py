@@ -1306,22 +1306,30 @@ Word-level edit control:
     - "You know what I mean?" → "you know" is CONTENT (question), keep it
     - "And then, you know, he just left" → "you know" is FILLER, remove it
 
-  Remove context fillers aggressively — a tight, clean edit has zero verbal clutter.
-  But NEVER remove a word that changes the meaning of the sentence.
+  Only remove words that are GENUINELY filler — verbal clutter that adds zero meaning.
+  When in doubt, KEEP the word. It is far better to leave a borderline word in than to
+  cut something that makes the video feel choppy or unnatural.
 
   WHAT TO REMOVE AS TIME RANGES:
-  - Dead air: silence gaps where the speaker paused with no speech
-  - Section skips: long pauses or off-topic sections that break the flow
+  - Dead air: silence gaps of 0.5 seconds or more where the speaker paused with no speech
+  - Section skips: ONLY for truly off-topic tangents or technical issues (camera adjusting, etc.)
 
   DO NOT remove:
   - Content words that carry meaning in the sentence
   - Partial phrases — if you remove words, the remaining words must still form a complete, natural thought
   - The last word of a sentence or phrase — if the speaker says "she should be crying", you CANNOT remove "crying" and leave "she should be". That is cutting mid-speech.
   - Words just because they're in a "setup" section — speed ramping handles pacing, not word removal
+  - Intros, greetings, or the speaker introducing themselves — this is context, not filler
+  - Outros, sign-offs, or closing remarks — these give the video a natural ending
+  - Interviewer reactions like "okay", "right", "yeah", "wow", "interesting" — these provide
+    natural conversational pacing and are NOT filler. Only remove them if they are genuinely
+    disruptive or overlap with the next question.
+  - Short natural pauses between sentences — these are breathing room, not dead air.
+    Only remove silence gaps that are noticeably long (0.5s+).
 
   The speed curve controls pacing. remove_words controls content. Think like a professional video editor:
-  cut every word that a viewer would notice as verbal clutter, but never cut a word that would
-  make the sentence sound unnatural or lose meaning.
+  preserve the natural flow of conversation. Only cut words that a viewer would notice as
+  verbal clutter. If removing something would make the edit feel jarring or choppy, keep it.
 
   opening_zoom — "slow_in", "slow_out", or "none". A subtle push or pull to draw the viewer in.
   Put opening_zoom on the hook clip if hook_clip is set, otherwise on the first clip in the video.
