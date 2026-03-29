@@ -5264,18 +5264,25 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             )
             zoom_filter = _face_crop(scale_expr, tf)
         elif zoom == "cut_zoom":
-            # Instant snap-in zoom — no ramp. Holds at 118% for the entire clip.
-            # The "cut" back to 100% on the next clip creates the visual punch.
-            cz_scale = 1.18
+            # Rapid smooth punch-in: 100% → 118% over ~6 frames (200ms at 30fps)
+            # with ease-out, then HOLD at 118% for the rest of the clip.
+            # The rapid motion is what makes it feel impactful — you see the
+            # frame push in. Resets to 100% on the next clip (the "cut" back).
+            cz_target = 0.18  # 18% zoom
+            cz_frames = 6     # ~200ms ramp
+            # Ease-out curve: fast start, smooth stop. Uses smoothstep.
+            # progress = clamp(n/6, 0, 1), eased = 3p²-2p³
+            cz_p = f"min(n/{cz_frames}\\,1.0)"
+            cz_ease = f"({cz_p}*{cz_p}*(3-2*{cz_p}))"
             scale_expr = (
-                f"scale=w='trunc(iw*{cz_scale:.4f}/2)*2'"
-                f":h='trunc(ih*{cz_scale:.4f}/2)*2'"
+                f"scale=w='trunc(iw*(1.0+{cz_target:.4f}*{cz_ease})/2)*2'"
+                f":h='trunc(ih*(1.0+{cz_target:.4f}*{cz_ease})/2)*2'"
             )
-            # Static face-targeted crop (no animation — instant)
-            crop_x = f"max(0\\,min((iw-1080)/2+{offset_x:.1f}\\,iw-1080))"
-            crop_y = f"max(0\\,min((ih-1920)/2+{offset_y:.1f}\\,ih-1920))"
-            zoom_filter = f"{scale_expr}:flags=bilinear,crop=1080:1920:x='{crop_x}':y='{crop_y}'"
-            print(f"[zoom] clip {i}: cut_zoom @ {cz_scale:.0%} scale", flush=True)
+            # Face-targeted crop that follows the zoom ramp
+            cz_crop_x = f"max(0\\,min((iw-1080)/2+{offset_x:.1f}*{cz_ease}\\,iw-1080))"
+            cz_crop_y = f"max(0\\,min((ih-1920)/2+{offset_y:.1f}*{cz_ease}\\,ih-1920))"
+            zoom_filter = f"{scale_expr}:eval=frame:flags=bilinear,crop=1080:1920:x='{cz_crop_x}':y='{cz_crop_y}'"
+            print(f"[zoom] clip {i}: cut_zoom → 100%→{1+cz_target:.0%} over {cz_frames} frames, face-tracked", flush=True)
 
         vignette = str(edit_plan.get("vignette") or "none").lower()
         vignette_filter = None
