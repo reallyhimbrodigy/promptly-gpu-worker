@@ -1375,7 +1375,11 @@ Global parameters:
     word_pop — similar to capcut but with a smooth karaoke color sweep instead of bounce animation. Use when the user asks for something slightly different.
     hormozi — uppercase bold text, active word pops with scale bounce, keyword words highlighted in orange-red. Aggressive, high-energy style inspired by Alex Hormozi. Use for motivational/business content.
 
-    If the video has speech and no burned-in captions, choose the caption style that best fits the content and vibe. Match the energy — aggressive/motivational content gets hormozi, storytelling gets capcut, fast-paced content gets word_pop.
+    Caption style is NOT optional — you MUST choose the right style for the content:
+    - hormozi: storytime, rants, motivational, business, high-energy, confrontational
+    - capcut: casual conversation, vlogs, tutorials, Q&A, interviews
+    - word_pop: fast-paced edits, speed ramping videos, trend content, comedy skits
+    - keyword_pop: educational content, listicles, explainers where specific terms matter
 
   caption_position — where captions appear on screen. Always use "lower-third" — this places captions in the safe zone below faces and above the TikTok/Reels platform UI. This is the standard caption placement used by every major short-form editor.
 
