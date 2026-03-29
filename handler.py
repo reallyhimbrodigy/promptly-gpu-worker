@@ -1194,8 +1194,6 @@ def build_gemini_edit_prompt(vibe, duration, trend_context=None):
     if trend_context:
         trend_block = "\n\n" + format_trend_section(trend_context)
 
-    intents = "none, neutral, cinematic, warm, cozy, cool, moody, vibrant, punchy, vivid, clean, polished, enhanced, faded, vintage, dramatic, bold, soft, dreamy"
-
     prompt = f"""You are a professional short-form video editor. You are watching the source video right now. You can see every frame and hear every word.
 
 The user wants: "{vibe}"
@@ -1330,11 +1328,6 @@ Word-level edit control:
 
 Global parameters:
 
-  color_intent — the overall color feel: {intents}
-    Most videos are talking head content — use "clean" or "polished" by default.
-    Only use cinematic/moody/dramatic when the vibe EXPLICITLY asks for that look.
-    The goal is to make the creator look good, not to make it look like a movie.
-
   SPEED RAMPING (only when vibe mentions "speed ramp", "speed ramping", or "CapCut style"):
 
   The whole point of speed ramping is CONTRAST. Fast setup → slow punchline → fast again.
@@ -1442,7 +1435,6 @@ Then output the JSON:
 ```json
 {{
   "notes": "<50 words max>",
-  "color_intent": "<intent>",
   "hook_clip": {{"source_start": <seconds>, "source_end": <seconds>}} or null,
   "thumbnail_timestamp": <seconds>,
   "caption_style": "<style>",
@@ -2105,10 +2097,10 @@ RULES FOR USING THESE TIMESTAMPS:
         final_cuts[target_idx]["zoom"] = opening_zoom
         print(f"[generate-edit] Assigned opening_zoom={opening_zoom} to clip {target_idx}", flush=True)
 
-    baseline = analysis.get("color_baseline") or {}
-    intent = normalize_intent(edit_plan.get("color_intent") or "none")
-    edit_plan["color_intent"] = intent
-    edit_plan["color_grade"] = build_color_grade(baseline, intent)
+    # Color grading disabled — phone cameras already auto-correct color,
+    # and artistic grades consistently make talking-head content look worse.
+    edit_plan["color_intent"] = "none"
+    edit_plan["color_grade"] = {}
     edit_plan["cuts"] = final_cuts
     edit_plan.pop("teal_orange", None)
     edit_plan.pop("beat_sync", None)
@@ -4816,9 +4808,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
          "-of", "json", render_source],
         capture_output=True, text=True, timeout=10)
     print(f"[DIAG] Render source probe: {_detailed_probe.stdout.strip()}", flush=True)
-    color_grade = edit_plan.get("color_grade") or {}
-    color_filter_str = build_video_filter_chain(color_grade, source_res, edit_plan)
-    print(f"[DIAG] color_filter_str = '{color_filter_str}'", flush=True)
     has_burned_captions = infer_has_burned_captions(
         edit_plan,
         edit_plan.get("analysis_data") or {},
@@ -4995,7 +4984,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         v_chain.append("fps=30")
         if zoom_filter:
             v_chain.append(zoom_filter)
-        v_chain += ["format=yuv420p", color_filter_str]
+        v_chain.append("format=yuv420p")
         if vignette_filter:
             v_chain.append(vignette_filter)
 
@@ -5011,10 +5000,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         video_filters.append(f"[0:v]{','.join(v_chain)}[v{i}]")
 
         # Audio: trim from source, then apply per-clip filters
+        # Use atempo for pitch-preserving speed change (no squeaky/deep voice artifacts)
         a_chain = [f"atrim=start={start:.3f}:end={end:.3f}", "asetpts=PTS-STARTPTS"]
         if abs(combined_speed - 1.0) > 0.001:
-            a_chain.append(f"asetrate={sample_rate}*{combined_speed:.4f}")
-            a_chain.append(f"aresample={sample_rate}")
+            a_chain.append(f"atempo={combined_speed:.4f}")
         if i == n-1 and outro != "none":
             fade_start = max(0, eff_dur - 1.0)
             a_chain.append(f"afade=t=out:st={fade_start:.3f}:d=1.0")
