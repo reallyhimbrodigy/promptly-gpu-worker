@@ -1330,56 +1330,49 @@ Global parameters:
 
   SPEED RAMPING (only when vibe mentions "speed ramp", "speed ramping", or "CapCut style"):
 
-  The whole point of speed ramping is CONTRAST. Fast setup → slow punchline → fast again.
-  That contrast is what makes it funny and engaging. Without dramatic swings it's just a slightly sped up video.
+  Speed ramping is a COMEDIC and DRAMATIC tool. It creates exaggerated contrast between
+  fast and slow moments for humor and impact. The viewer must FEEL the video ramp down
+  and ramp up — the pitch shift and tempo change IS the effect.
 
-  CRITICAL: The pipeline interpolates smoothly between keypoints. If you only place two keypoints
-  far apart, the speed will GRADUALLY ramp over the entire gap — making everything in between
-  the wrong speed. You MUST use HOLD keypoints to lock the speed until the exact moment you
-  want it to change.
+  THE RUBRIC — follow this exactly:
 
-  HOW TO WRITE SPEED CURVES:
-  Use pairs of keypoints to create SHARP transitions:
-  1. Place a HOLD keypoint at the current speed right BEFORE the transition (0.3s before)
-  2. Place the NEW speed keypoint at the exact moment
+  SPEED UP (1.3x-1.4x):
+  - Filler words and "um", "uh", "like", "you know"
+  - Setup and context ("So I was at the store and...")
+  - Buildup before a punchline or reveal
+  - Transitions between story beats
+  - Any moment that is NOT the payoff
 
-  WRONG (gradual 17-second ramp):
-    [{{"t": 0, "speed": 1.4}}, {{"t": 17, "speed": 0.7}}]
-    This slowly ramps from fast to slow over 17 seconds — the whole middle is the wrong speed.
+  SLOW DOWN (0.67x-0.8x):
+  - Punchlines ("...and she said WHO IS STELIUS?")
+  - Funny moments (the absurd thing, the unexpected twist)
+  - Dramatic reveals (the shocking information drops)
 
-  RIGHT (sharp snap at the punchline):
-    [{{"t": 0, "speed": 1.4}}, {{"t": 16.7, "speed": 1.4}}, {{"t": 17.0, "speed": 0.7}}]
-    This HOLDS fast until 16.7s, then snaps to slow at 17.0s. Everything before stays fast.
+  This is not a suggestion. Every fast section MUST be filler/setup/buildup.
+  Every slow section MUST be a punchline/funny moment/dramatic moment.
+  If you cannot identify a clear punchline or funny moment, do NOT use speed ramping.
 
-  FULL EXAMPLE for a storytime video:
-    [
-      {{"t": 0, "speed": 1.4}},     // fast: setup
-      {{"t": 9.7, "speed": 1.4}},   // HOLD fast until right before reveal
-      {{"t": 10.0, "speed": 0.65}}, // SNAP slow: the big reveal lands
-      {{"t": 12.5, "speed": 0.65}}, // HOLD slow through the moment
-      {{"t": 12.8, "speed": 1.4}},  // SNAP back to fast
-      {{"t": 24.7, "speed": 1.4}},  // HOLD fast until next punchline
-      {{"t": 25.0, "speed": 0.65}}, // SNAP slow: punchline hits
-      {{"t": 27.0, "speed": 0.65}}, // HOLD slow
-      {{"t": 27.3, "speed": 1.4}}   // SNAP back to fast for ending
-    ]
+  THE RAMP:
+  The pipeline smoothly ramps between your keypoints frame-by-frame. The viewer feels the
+  video accelerate and decelerate — this curve is the whole point. The ramp should be quick
+  but noticeable — you feel the gear shift, not a hard snap cut between speeds.
 
-  RULES:
-  - Fast (1.3x-1.4x) is the DEFAULT. Setup, context, filler, transitions — all fast.
-  - Slow (0.6x-0.7x) is RARE and DRAMATIC. Only for: punchlines, reveals, reactions, emotional peaks.
-  - Every transition needs a HOLD+SNAP pair (two keypoints 0.3s apart).
-  - 2-3 slow moments per video, max 4. Each slow moment lasts 1.5-3 seconds.
+  Place keypoints where the speed should be at that moment. The pipeline handles the smooth
+  transition between them automatically.
+
+  Speed range: 0.67x to 1.4x. Never go outside this range.
+
+  LEARN FROM THE EXAMPLES:
+  Study the TikTok example videos injected above. They are PERFECT examples of speed ramping
+  done right — where the fast moments are, where the slow moments are, and how the ramp
+  transitions feel. These are not suggestions, they are the standard. Match their timing
+  patterns and pacing decisions in your edit.
+
+  - Slow moments MUST land on spoken words (the actual punchline), never on silence.
+  - Use the Deepgram word timestamps to place keypoints precisely on the right words.
   - NEVER use 1.0x — every moment is either fast or slow.
-  - Maximum speed is 1.4x. Minimum is 0.6x.
-  - Slow moments must land on WORDS, not silence. Slow down the actual spoken punchline.
 
-  What each speed feels like:
-    1.4x = fast, energetic, pitch rises — use for setup and filler
-    1.3x = comfortably fast — good cruising speed
-    0.7x = noticeably slow, voice deepens — "wait for it" feeling
-    0.65x = very slow, deep voice, maximum impact — the punchline lands
-
-  If speed ramping is not requested, set speed_curve to "none".
+  If speed ramping is not requested in the vibe, set speed_curve to "none".
 
   caption_style — word-by-word animated captions synced to speech:
     none — no captions. Use when captions are already burned into the footage.
@@ -4225,31 +4218,32 @@ def project_source_time_to_final_output(source_t, cuts, effective_durations, spe
 
 
 def split_clips_at_speed_boundaries(cuts, speed_curve):
-    """Split clips at speed curve keypoint boundaries for smooth speed ramping.
+    """Split clips for smooth frame-level speed ramping.
 
-    When a clip spans a speed curve transition (e.g. from 1.4x to 0.7x),
-    the midpoint sampling assigns one wrong speed to the entire clip.
-    By splitting at keypoint boundaries, each sub-clip gets the correct speed.
+    First splits at speed curve keypoint boundaries, then further subdivides
+    any segment where speed is actively changing into ~0.15s micro-segments.
+    Each micro-segment gets its own midpoint-sampled speed, creating a smooth
+    per-frame ramp effect instead of flat speed jumps between clips.
     """
     if not speed_curve or speed_curve == "none" or not isinstance(speed_curve, list):
         return cuts
 
-    keypoint_times = sorted(set(float(kp["t"]) for kp in speed_curve))
-    result = []
-    split_count = 0
+    MICRO_DUR = 0.15  # ~4.5 frames at 30fps — perceptually frame-by-frame
+    SPEED_DELTA_THRESHOLD = 0.03  # min speed difference to trigger subdivision
 
+    keypoint_times = sorted(set(float(kp["t"]) for kp in speed_curve))
+
+    # Step 1: split at keypoint boundaries
+    stage1 = []
     for cut in cuts:
         start = float(cut["source_start"])
         end = float(cut["source_end"])
-
-        # Find speed curve keypoints strictly inside this clip
-        split_points = [t for t in keypoint_times if start + 0.1 < t < end - 0.1]
+        split_points = [t for t in keypoint_times if start + 0.05 < t < end - 0.05]
 
         if not split_points:
-            result.append(cut)
+            stage1.append(cut)
             continue
 
-        # Split at each keypoint
         boundaries = [start] + split_points + [end]
         for i in range(len(boundaries) - 1):
             sub_start = boundaries[i]
@@ -4259,14 +4253,45 @@ def split_clips_at_speed_boundaries(cuts, speed_curve):
             sub_cut = dict(cut)
             sub_cut["source_start"] = round(sub_start, 3)
             sub_cut["source_end"] = round(sub_end, 3)
-            # Only last sub-clip keeps the original transition
             if i < len(boundaries) - 2:
                 sub_cut["transition_out"] = "none"
-            result.append(sub_cut)
-        split_count += 1
+            stage1.append(sub_cut)
 
-    if split_count > 0:
-        print(f"[speed] Split {split_count} clips at speed boundaries → {len(result)} total segments", flush=True)
+    # Step 2: subdivide segments where speed is actively ramping
+    result = []
+    ramp_count = 0
+    for cut in stage1:
+        start = float(cut["source_start"])
+        end = float(cut["source_end"])
+        speed_start = get_speed_for_timestamp(start, speed_curve)
+        speed_end = get_speed_for_timestamp(end, speed_curve)
+
+        if abs(speed_start - speed_end) < SPEED_DELTA_THRESHOLD or (end - start) < MICRO_DUR * 1.5:
+            # Constant speed or too short to subdivide — keep as-is
+            result.append(cut)
+            continue
+
+        # Subdivide into micro-segments for smooth frame-level ramping
+        t = start
+        while t < end - 0.01:
+            sub_end = min(t + MICRO_DUR, end)
+            if end - sub_end < 0.08:  # avoid tiny trailing segment
+                sub_end = end
+            sub_cut = dict(cut)
+            sub_cut["source_start"] = round(t, 3)
+            sub_cut["source_end"] = round(sub_end, 3)
+            if sub_end < end - 0.01:
+                sub_cut["transition_out"] = "none"
+            result.append(sub_cut)
+            t = sub_end
+        ramp_count += 1
+
+    if ramp_count > 0 or len(result) != len(cuts):
+        print(
+            f"[speed] Frame-level speed ramping: {ramp_count} transition zones subdivided → "
+            f"{len(result)} total segments",
+            flush=True,
+        )
     return result
 
 
