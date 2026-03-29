@@ -1437,25 +1437,51 @@ Text overlays:
   appear_at_clip — which clip number
   style — title (72px), callout (56px), cta (64px)
 
-Sound effects — audio accents that punctuate moments. Use the word timestamps to place sounds at the EXACT millisecond.
+Sound effects — audio accents that make the edit feel physical and professional. Every sound must be EARNED — placed at a moment that justifies it. The wrong sound at the wrong time makes the edit feel amateur. The right sound at the right time makes it feel like a Netflix trailer.
 
-  Available sounds: pop, ching, ding, swoosh, thud
+  Available sounds and WHEN to use each:
 
-  ching — cash register. Use when speaker mentions money, prices, "free", "sold", dollar amounts.
-  ding — notification bell. Use when speaker mentions texts, notifications, emails, alerts.
-  pop — bright snap. Use when something new visually appears on screen (screen recording, overlay, PiP).
-  swoosh — air swipe. Use on scene transitions (wipe, fade — not hard cuts).
-  thud — deep bass impact. Use on the BIGGEST emphasis moments — dramatic statements, reveals, punchlines. This is the sound that makes a moment feel physical. Place it on your highest-intensity emphasis_moments.
+  thud — deep bass impact. The most powerful sound in the toolkit. Use it when a statement LANDS — the moment the viewer's jaw should drop. Dramatic reveals, shocking statements, the punchline of a story. Place it at the exact word that carries the weight. Reserve for 1-2 peak moments per video maximum. Overuse kills the impact.
+    Example: "and then she said... I'M PREGNANT" → thud on "pregnant"
+    Example: "they offered me TWO MILLION dollars" → thud on "million"
+
+  reverb_hit — a rising swell with reverb tail. Use it to BUILD tension right before a reveal or punchline. It signals to the viewer "something big is coming." Place it 0.5-1s BEFORE the payoff moment. Pairs well with a thud immediately after.
+    Example: reverb_hit at 5.2s → thud at 5.8s (buildup → impact)
+    Example: speaker pauses for dramatic effect → reverb_hit fills the silence before the reveal
+
+  pop — bright, clean snap. Use when something APPEARS visually — a screen recording pops up, a picture-in-picture opens, a new visual element enters the frame. This is a VISUAL sound, not a speech sound. If nothing new appears on screen, don't use it.
+    Example: speaker pulls out their phone and the screen recording appears → pop
+    Example: split-screen appears showing both speakers → pop
+
+  ching — cash register ka-ching. Use ONLY when money is the topic — speaker says "free", "sold", a dollar amount, "deal", "price", "cost", "paid". The sound reinforces the financial weight of the statement.
+    Example: "I got it for FREE" → ching on "free"
+    Example: "that's a $50,000 car" → ching on "$50,000"
+
+  ding — notification bell. Use ONLY when the speaker references digital communication — "text", "notification", "email", "message", "DM", "alert". The sound mimics the real notification the speaker is describing.
+    Example: "she texted me at 3am" → ding on "texted"
+    Example: "I got a notification" → ding on "notification"
+
+  swoosh — air swipe. Use ONLY on actual scene transitions (wipes, fades). If all transitions are hard cuts, do NOT use swoosh — hard cuts are silent by design. The swoosh sells the motion of a wipe transition.
+
+  shutter — camera shutter click. Use when the speaker references taking a photo, screenshots, or camera-related actions. Also works on visual "freeze frame" moments.
+    Example: "I took a screenshot" → shutter on "screenshot"
+    Example: "look at this photo" → shutter on "photo"
+
+  typing — keyboard typing burst. Use when the speaker references writing, typing, coding, or sending messages. Works for "I googled it", "I typed out a response", etc.
+    Example: "so I looked it up" → typing on "looked"
+    Example: "I wrote back" → typing on "wrote"
 
   Rules:
   - Sound effects should punctuate emphasis_moments. Place sounds where they amplify the moment.
-  - Every sound effect MUST have a "word" field (the trigger word or event description).
-  - Use the word timestamps to place each sound at the EXACT millisecond.
+  - Every sound effect MUST have a "word" field (the trigger word that justifies this sound).
+  - Use the word timestamps to place each sound at the EXACT millisecond of the trigger word.
   - Most videos have 2-5 sound effects. Zero is fine if nothing earns one.
-  - thud is the most impactful — reserve it for 1-2 peak moments per video.
+  - Never stack two sounds within 0.5s of each other — they compete and sound muddy.
+  - thud and reverb_hit are your power tools. ching/ding/shutter/typing are contextual accents.
+  - When in doubt, leave the sound out. Silence is better than a wrong sound.
 
   sound_effects: [
-    {{"t": <seconds>, "sound": "<pop|ching|ding|swoosh|thud>", "word": "<trigger word or event>"}}
+    {{"t": <seconds>, "sound": "<thud|reverb_hit|pop|ching|ding|swoosh|shutter|typing>", "word": "<trigger word>"}}
   ]
 
 === RESPONSE FORMAT ===
@@ -2073,7 +2099,7 @@ RULES FOR USING THESE TIMESTAMPS:
     # ── Parse sound effects ──────────────────────────────────────────────
     raw_sfx = edit_plan.get("sound_effects", [])
     sound_effects = []
-    valid_sounds = {"pop", "ching", "ding", "swoosh", "thud"}
+    valid_sounds = {"pop", "ching", "ding", "swoosh", "thud", "reverb_hit", "shutter", "typing"}
     VALID_CHING_WORDS = {"free", "sold", "dollar", "dollars", "money", "price", "cost", "pay", "paid", "cash", "buy", "bought", "deal"}
     for sfx in raw_sfx:
         if isinstance(sfx, dict) and "t" in sfx and "sound" in sfx:
@@ -2113,8 +2139,23 @@ RULES FOR USING THESE TIMESTAMPS:
                         print(f"[generate-edit] Filtered out swoosh at {t:.1f}s (no wipe/fade transitions)", flush=True)
                         continue
 
-                # thud: always allowed — the AI places these on emphasis moments
-                # pop: always allowed — the AI decides when something visually appears
+                # shutter: only on camera/photo-related trigger words
+                if sound == "shutter":
+                    VALID_SHUTTER_WORDS = {"photo", "picture", "screenshot", "camera", "selfie", "snap", "shot", "pic", "image", "film", "filmed", "record", "recorded"}
+                    word_clean = word.strip(".,!?;:'\"")
+                    if word_clean not in VALID_SHUTTER_WORDS:
+                        print(f"[generate-edit] Filtered out shutter on '{word}' at {t:.1f}s (not a camera trigger)", flush=True)
+                        continue
+
+                # typing: only on writing/typing-related trigger words
+                if sound == "typing":
+                    VALID_TYPING_WORDS = {"typed", "typing", "wrote", "write", "writing", "googled", "searched", "coded", "coding", "texted", "dm", "dmed", "replied", "response", "looked"}
+                    word_clean = word.strip(".,!?;:'\"")
+                    if word_clean not in VALID_TYPING_WORDS:
+                        print(f"[generate-edit] Filtered out typing on '{word}' at {t:.1f}s (not a writing trigger)", flush=True)
+                        continue
+
+                # thud, reverb_hit, pop: always allowed — the AI places these purposefully
 
                 sound_effects.append({"t": t, "sound": sound, "word": word})
     if sound_effects:
