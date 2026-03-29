@@ -3279,7 +3279,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         for word_dict in group:
             dur_s = max(0.05, float(word_dict["end"]) - float(word_dict["start"]))
             dur_ms = max(50, round(dur_s * 1000))
-            clean = str(word_dict["word"]).strip()
+            clean = str(word_dict["word"]).strip().upper()
             word_highlight = _speaker_highlight(highlight_color, word_dict)
 
             pop_in_ms = _pop_in_ms
@@ -3322,7 +3322,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     # ── Group words into batches of max 3 words ─────────────────────────────
     # Split on: pause > 0.3s, sentence end punctuation on previous word, or group size == 3
     PUNCT_END = re.compile(r"[.!?,;:]$")
-    MAX_WORDS = 3
+    MAX_WORDS = 4
 
     def _flush_group(group, ass_acc):
         if not group:
