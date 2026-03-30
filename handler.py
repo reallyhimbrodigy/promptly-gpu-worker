@@ -3139,13 +3139,20 @@ def probe_resolution(file_path):
 def run_ffmpeg(args):
     print(f"[ffmpeg] Running: ffmpeg {' '.join(str(a) for a in args[:10])}...", flush=True)
     t = time.time()
-    result = subprocess.run(["ffmpeg", "-threads", "0"] + [str(a) for a in args], capture_output=True, text=True, timeout=300)
+    result = subprocess.run(
+        ["ffmpeg", "-v", "warning", "-stats", "-threads", "0"] + [str(a) for a in args],
+        capture_output=True, text=True, timeout=300,
+    )
     elapsed = time.time() - t
     if result.returncode != 0:
         print(f"[ffmpeg] FAILED after {elapsed:.1f}s", flush=True)
         _stderr = result.stderr or ""
-        print(f"[ffmpeg] stderr (first 2000):\n{_stderr[:2000]}", flush=True)
-        print(f"[ffmpeg] stderr (last 2000):\n{_stderr[-2000:]}", flush=True)
+        # Extract error/warning lines (skip progress and build config)
+        _err_lines = [ln for ln in _stderr.split("\n")
+                      if any(k in ln.lower() for k in ("error", "invalid", "failed", "cannot", "no such", "warning"))]
+        if _err_lines:
+            print(f"[ffmpeg] errors/warnings:\n" + "\n".join(_err_lines[:30]), flush=True)
+        print(f"[ffmpeg] stderr (last 1500):\n{_stderr[-1500:]}", flush=True)
         raise RuntimeError(f"FFmpeg failed: {_stderr[-500:]}")
     print(f"[ffmpeg] Completed in {elapsed:.1f}s", flush=True)
     return result
@@ -4912,13 +4919,13 @@ def render_png_caption_video(
         return canvas
 
     # ── Pipe raw RGBA frames to FFmpeg → transparent MOV ───────────────────
-    caption_video = os.path.join(work_dir, "caption_overlay.mkv")
+    caption_video = os.path.join(work_dir, "caption_overlay.mov")
     cmd = [
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "warning",
         "-f", "rawvideo", "-pix_fmt", "rgba",
         "-s", f"{w}x{h}", "-r", str(fps),
         "-i", "pipe:0",
-        "-c:v", "png", "-pix_fmt", "rgba",
+        "-c:v", "qtrle", "-pix_fmt", "argb",
         caption_video,
     ]
 
@@ -7466,7 +7473,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     if caption_overlay_path:
         _cap_idx = 1 + len(sfx_input_args) // 2 + (1 if music_input_idx is not None else 0)
         caption_input_args = ["-i", caption_overlay_path]
-        post_filters.append(f"{video_out}[{_cap_idx}:v]overlay=format=auto:shortest=1[video_captioned]")
+        post_filters.append(f"{video_out}[{_cap_idx}:v]overlay=format=auto:eof_action=pass[video_captioned]")
         video_out = "[video_captioned]"
         print(f"[render] PNG caption overlay at input index {_cap_idx}", flush=True)
 
