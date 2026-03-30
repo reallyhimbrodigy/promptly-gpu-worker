@@ -3618,8 +3618,8 @@ def generate_subtitle_file(transcript, caption_style, cuts, effective_durations,
         "clean":          ("&H00FFFFFF", "&H0004C2F7", "&H00000000", 1, 3, 1,   0.3),
         "impact":         ("&H00FFFFFF", "&H0000FFFF", "&H00000000", 1, 4, 1.5, 0.5),
         "keyword_pop":    ("&H00FFFFFF", "&H0000FF00", "&H90000000", 3, 0, 0,  1.2),
-        "captions_clean": ("&H00FFFFFF", "&H00FFCC00", "&H00000000", 1, 0, 0, 0),
-        "captions_dynamic": ("&H00FFFFFF", "&H00FFCC00", "&H00000000", 1, 0, 0, 0),
+        "captions_clean": ("&H00FFFFFF", "&H00FFCC00", "&H80000000", 1, 0, 3, 0),
+        "captions_dynamic": ("&H00FFFFFF", "&H00FFCC00", "&H80000000", 1, 0, 3, 0),
     }
 
     # Per-speaker active word highlight colors (ASS BGR format)
@@ -4276,12 +4276,14 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     elif caption_style == "captions_clean":
         # ── Captions App Clean Style ──────────────────────────────────────
-        # 1-3 words at a time, all lowercase, clean white with subtle shadow
-        # Keywords get inline color change (same size, same position)
+        # 2-4 words at a time, lowercase, mixed-size keywords (1.6x bigger),
+        # two-line stacked layout with keyword on bottom line, subtle shadow
         _KW_COLORS = ["&H0000FFFF", "&H000055FF", "&H00CCCC00"]  # yellow, red, teal (ASS BGR)
         default_color = "&H00FFFFFF"
         keyword_set = _build_keyword_set(words, caption_keywords)
         _kw_color_idx = 0
+        _kw_fs = round(fontsize * 1.6)  # keyword font size = 1.6x base
+        _kw_fs_long = round(fontsize * 1.3)  # for keywords > 12 chars
 
         # Build groups first, then fix overlapping end times
         _groups = []
@@ -4291,7 +4293,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             next_w = words[i + 1] if i + 1 < len(words) else None
             pause = (next_w["start"] - word_dict["end"]) if next_w else 1.0
             ends_sentence = bool(PUNCT_END.search(word_dict.get("word") or ""))
-            if not next_w or pause > 0.25 or ends_sentence or len(group) >= 3:
+            if not next_w or pause > 0.25 or ends_sentence or len(group) >= 4:
                 _groups.append(list(group))
                 group = []
 
@@ -4306,22 +4308,45 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 raw_end = min(raw_end, next_start - 0.01)
             end = max(start + 0.03, raw_end)
 
-            parts = []
-            for wd in grp:
+            # Identify keyword indices in this group
+            _kw_indices = []
+            for wi, wd in enumerate(grp):
+                _w_check = re.sub(r"[.,!?;:'\"\\]", "", str(wd["word"]).strip().lower())
+                if _w_check in keyword_set:
+                    _kw_indices.append(wi)
+
+            has_kw = len(_kw_indices) > 0
+
+            # Build word parts with size overrides
+            regular_parts = []
+            kw_parts = []
+            for wi, wd in enumerate(grp):
                 w_text = str(wd["word"]).strip().lower()
                 _w_check = re.sub(r"[.,!?;:'\"\\]", "", w_text)
                 is_kw = _w_check in keyword_set
                 if is_kw:
                     _kc = _KW_COLORS[_kw_color_idx % len(_KW_COLORS)]
-                    parts.append(f"{{\\1c{_kc}}}{w_text}{{\\1c{default_color}}}")
+                    _this_kw_fs = _kw_fs_long if len(_w_check) > 12 else _kw_fs
+                    kw_parts.append(f"{{\\fs{_this_kw_fs}\\1c{_kc}}}{w_text}{{\\1c{default_color}\\fs{fontsize}}}")
                     _kw_color_idx += 1
                 else:
-                    parts.append(w_text)
-            phrase_text = " ".join(parts)
+                    regular_parts.append(w_text)
+
+            # Two-line stacked layout: regular words on top, keyword on bottom
+            if has_kw and regular_parts:
+                top_line = " ".join(regular_parts)
+                bottom_line = " ".join(kw_parts)
+                phrase_text = f"{top_line}\\N{bottom_line}"
+            elif has_kw:
+                # Only keyword(s), no regular words — single line
+                phrase_text = " ".join(kw_parts)
+            else:
+                # No keywords — single line at base size
+                phrase_text = " ".join(regular_parts)
 
             tag = (
                 f"{{\\an5\\pos({w // 2},{_cy})\\fs{fontsize}"
-                f"\\1c{default_color}\\bord0\\shad1}}"
+                f"\\1c{default_color}\\bord0\\shad3\\4c&H80000000}}"
                 f"{phrase_text}"
             )
             ass_lines.append(
@@ -4329,16 +4354,18 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 f",Default,,0,0,0,,{tag}\n"
             )
         ass += "".join(ass_lines)
-        print(f"[captions] Captions Clean style: {len(ass_lines)} groups, {len(keyword_set)} keywords", flush=True)
+        print(f"[captions] Captions Clean style: {len(ass_lines)} groups, {len(keyword_set)} keywords, kw_fs={_kw_fs}", flush=True)
 
     elif caption_style == "captions_dynamic":
         # ── Captions App Dynamic Style ────────────────────────────────────
-        # 1-3 words at a time, all lowercase, clean bold white with subtle shadow
-        # Keywords get inline color change (yellow/red/teal)
+        # 2-4 words at a time, lowercase, mixed-size keywords (1.6x bigger),
+        # two-line stacked layout with keyword on bottom line, subtle shadow
         _KW_COLORS = ["&H0000FFFF", "&H000055FF", "&H00CCCC00"]  # yellow, red, teal (ASS BGR)
         default_color = "&H00FFFFFF"
         keyword_set = _build_keyword_set(words, caption_keywords)
         _kw_color_idx = 0
+        _kw_fs = round(fontsize * 1.6)  # keyword font size = 1.6x base
+        _kw_fs_long = round(fontsize * 1.3)  # for keywords > 12 chars
 
         # Build groups first, then fix overlapping end times
         _groups = []
@@ -4349,7 +4376,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             pause = (next_w["start"] - wd["end"]) if next_w else 1.0
             ends_sentence = bool(re.search(r"[.!?]$", wd.get("word") or ""))
             _min_met = len(group) >= 1
-            _max_met = len(group) >= 3
+            _max_met = len(group) >= 4
             if not next_w or ends_sentence or _max_met or (_min_met and pause > 0.25):
                 _groups.append(list(group))
                 group = []
@@ -4365,22 +4392,45 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 raw_end = min(raw_end, next_start - 0.01)
             end = max(start + 0.03, raw_end)
 
-            parts = []
-            for _wd in grp:
+            # Identify keyword indices in this group
+            _kw_indices = []
+            for wi, _wd in enumerate(grp):
+                _w_check = re.sub(r"[.,!?;:'\"\\]", "", str(_wd["word"]).strip().lower())
+                if _w_check in keyword_set:
+                    _kw_indices.append(wi)
+
+            has_kw = len(_kw_indices) > 0
+
+            # Build word parts with size overrides
+            regular_parts = []
+            kw_parts = []
+            for wi, _wd in enumerate(grp):
                 w_text = str(_wd["word"]).strip().lower()
                 _w_check = re.sub(r"[.,!?;:'\"\\]", "", w_text)
                 is_kw = _w_check in keyword_set
                 if is_kw:
                     _kc = _KW_COLORS[_kw_color_idx % len(_KW_COLORS)]
-                    parts.append(f"{{\\1c{_kc}}}{w_text}{{\\1c{default_color}}}")
+                    _this_kw_fs = _kw_fs_long if len(_w_check) > 12 else _kw_fs
+                    kw_parts.append(f"{{\\fs{_this_kw_fs}\\1c{_kc}}}{w_text}{{\\1c{default_color}\\fs{fontsize}}}")
                     _kw_color_idx += 1
                 else:
-                    parts.append(w_text)
-            phrase_text = " ".join(parts)
+                    regular_parts.append(w_text)
+
+            # Two-line stacked layout: regular words on top, keyword on bottom
+            if has_kw and regular_parts:
+                top_line = " ".join(regular_parts)
+                bottom_line = " ".join(kw_parts)
+                phrase_text = f"{top_line}\\N{bottom_line}"
+            elif has_kw:
+                # Only keyword(s), no regular words — single line
+                phrase_text = " ".join(kw_parts)
+            else:
+                # No keywords — single line at base size
+                phrase_text = " ".join(regular_parts)
 
             tag = (
                 f"{{\\an5\\pos({w // 2},{_cy})\\fs{fontsize}"
-                f"\\1c{default_color}\\bord0\\shad1}}"
+                f"\\1c{default_color}\\bord0\\shad3\\4c&H80000000}}"
                 f"{phrase_text}"
             )
             ass_lines.append(
@@ -4389,7 +4439,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             )
 
         ass += "".join(ass_lines)
-        print(f"[captions] Captions Dynamic style: {len(ass_lines)} groups, {len(keyword_set)} keywords", flush=True)
+        print(f"[captions] Captions Dynamic style: {len(ass_lines)} groups, {len(keyword_set)} keywords, kw_fs={_kw_fs}", flush=True)
 
     else:
         # All other styles: uniform karaoke groups with the style's secondary colour as highlight
@@ -5799,6 +5849,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         zoom = str(cut.get("zoom") or "none")
         if has_burned_captions and zoom in ["punch_in", "punch_out"]:
             zoom = "slow_in" if zoom == "punch_in" else "slow_out"
+        # Always-on Ken Burns: no clip is ever truly static.
+        # Matches Captions app where every talking-head shot has subtle movement.
+        if zoom == "none" and not cut.get("_is_broll") and not cut.get("_is_hook"):
+            zoom = "slow_in"
 
         eff_dur = effective_durations[i]
         fps = 30
@@ -6145,20 +6199,36 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     video_out = "[video_base]"
     post_filters.append(f"[{tl_video}]null{video_out}")
 
-    # ── Subtle cinematic color grading ─────────────────────────────────
-    # Light contrast boost + slight warmth — makes footage look polished
-    # without being heavy-handed. Matches the subtle grading in Captions app output.
+    # ── Mood-based cinematic color grading ───────────────────────────────
+    # Grade selected based on music mood — warm for hype, cool for cinematic, etc.
     _caption_style_check = str(edit_plan.get("caption_style") or "").lower()
     if _caption_style_check and _caption_style_check != "none":
+        _MOOD_GRADES = {
+            "warm":    "eq=contrast=1.06:brightness=0.02:saturation=1.08,colorbalance=rs=0.04:gs=0.02:bs=-0.03",
+            "cool":    "eq=contrast=1.05:brightness=0.00:saturation=1.03,colorbalance=rs=-0.03:gs=0.00:bs=0.04",
+            "neutral": "eq=contrast=1.04:brightness=0.01:saturation=1.05",
+            "moody":   "eq=contrast=1.08:brightness=-0.02:saturation=0.95,colorbalance=rs=-0.02:gs=-0.01:bs=0.04",
+        }
+        _MOOD_MAP = {
+            "hype": "warm", "upbeat": "warm", "fun": "warm", "warm": "warm", "romantic": "warm",
+            "cinematic": "cool", "moody": "moody",
+            "calm": "neutral", "emotional": "neutral", "clean": "neutral", "none": "neutral",
+        }
+        _music_key = str(edit_plan.get("background_music") or "none")
+        _music_info = MUSIC_LIBRARY.get(_music_key, {})
+        _music_mood = str(_music_info.get("mood") or "none")
+        _grade_name = _MOOD_MAP.get(_music_mood, "neutral")
+        _grade_filter = _MOOD_GRADES[_grade_name]
+
         _grade_label = "[video_graded]"
         post_filters.append(
             f"{video_out}"
-            f"eq=contrast=1.04:brightness=0.01:saturation=1.05,"
+            f"{_grade_filter},"
             f"unsharp=3:3:0.3:3:3:0.0"
             f"{_grade_label}"
         )
         video_out = _grade_label
-        print("[grade] Subtle cinematic color grading applied", flush=True)
+        print(f"[grade] {_grade_name} color grading applied (music_mood={_music_mood})", flush=True)
 
     if edit_plan.get("cinematic_bars"):
         bar_h = int((1920 - int(1080 / 2.35)) / 2)
@@ -6186,11 +6256,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             )
             if _ft_out is None:
                 continue
-            # 0.12s white flash: brightness ramps up then back down
+            # 0.14s white flash: true whiteout via colorlevels crush
             _f_start = max(0, _ft_out - 0.03)
-            _f_end = _ft_out + 0.09
+            _f_end = _ft_out + 0.11
             flash_filter_parts.append(
-                f"curves=preset=lighter:enable='between(t,{_f_start:.3f},{_f_end:.3f})'"
+                f"colorlevels=rimax=0.3:gimax=0.3:bimax=0.3:enable='between(t,{_f_start:.3f},{_f_end:.3f})'"
             )
         if flash_filter_parts:
             if len(flash_filter_parts) == 1:
@@ -6345,20 +6415,26 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             )
             video_out = out_label
 
-    # ── Full-screen text B-roll on emphasis moments ─────────────────────
-    # Giant text that appears on the OPPOSITE side of the face during
-    # high-intensity emphasis moments. Like Captions app: face right → text left,
-    # face left → text right. Cascading repetition effect for visual weight.
+    # ── Cascading emphasis text with blur background ─────────────────────
+    # Captions-app style: blur background + 5 stacked copies of emphasis word
+    # with neon cyan glow, filling the screen vertically. High visual impact.
     _emphasis_moments = edit_plan.get("_emphasis_moments") or []
     _dg_words_render = edit_plan.get("_deepgram_words") or []
+    # Resolve italic font for emphasis cascade (distinct from caption font)
+    _em_italic_font = os.path.join(os.path.dirname(__file__), "assets", "fonts", "Montserrat-BoldItalic.ttf")
+    if not os.path.exists(_em_italic_font):
+        _em_italic_font = OVERLAY_FONT_PATH  # fallback to Black
     if _emphasis_moments and _dg_words_render:
         _em_clip_ranges = get_output_clip_ranges(render_cuts, effective_durations, transition_duration=TRANSITION_DURATION)
         _em_font_clause = (
-            f":fontfile='{OVERLAY_FONT_PATH}'"
-            if os.path.exists(OVERLAY_FONT_PATH)
+            f":fontfile='{_em_italic_font}'"
+            if os.path.exists(_em_italic_font)
             else ""
         )
         _em_idx = 0
+        _CASCADE_LAYERS = 5
+        _CASCADE_Y = [0.12, 0.28, 0.44, 0.60, 0.76]
+        _CASCADE_ALPHA = [0.92, 0.72, 0.52, 0.34, 0.18]
         for em in _emphasis_moments:
             if em.get("intensity") != "high":
                 continue
@@ -6387,56 +6463,60 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             if _em_output_t is None:
                 continue
 
-            # Find face position at this emphasis moment for smart placement
-            _em_face_cx = None
-            _em_face_cy = None
-            if face_positions:
-                _em_best_fp = min(face_positions, key=lambda p: abs(float(p.get("t", 0)) - em_t))
-                if _em_best_fp.get("found") and abs(float(_em_best_fp.get("t", 0)) - em_t) < 2.0:
-                    _em_face_cx = float(_em_best_fp.get("cx", 540))
-                    _em_face_cy = float(_em_best_fp.get("cy", 960))
-
-            # Giant text: quick scale-in, hold, fade out
-            _em_dur = 0.5
+            # Timing
+            _em_dur = 0.6
             _em_start = max(0, _em_output_t - 0.05)
             _em_end = _em_start + _em_dur
-            _em_fade_in = 0.08
-            _em_fade_out = 0.15
-            # Font size: fill available space
+            _em_fade_in = 0.10
+            _em_fade_out = 0.18
+
+            # Font size: large, fills width
             _em_chars = len(em_text)
             if _em_chars <= 5:
-                _em_fs = 200
+                _em_fs = 220
             elif _em_chars <= 10:
-                _em_fs = 160
+                _em_fs = 170
             elif _em_chars <= 15:
-                _em_fs = 120
+                _em_fs = 130
             else:
-                _em_fs = 90
-
-            # Face-aware positioning: place text opposite the face
-            # Always center emphasis text horizontally, place in upper third
-            # to avoid overlapping captions at y=68%
-            _em_x_expr = "(w-tw)/2"
-            _em_y_expr = "h*0.35-th/2"
+                _em_fs = 100
 
             _em_escaped = em_text.replace("\\", "\\\\").replace(":", "\\:").replace(",", "\\,").replace("'", "\u2019").replace('"', "")
-            _em_alpha = (
-                f"if(lt(t-{_em_start:.3f},{_em_fade_in}),(t-{_em_start:.3f})/{_em_fade_in},"
-                f"if(gt(t,{_em_end - _em_fade_out:.3f}),({_em_end:.3f}-t)/{_em_fade_out},1))"
-            )
 
-            # Main emphasis text — clean, big, no outlines or ghost cascade
-            _em_label = f"[video_em_{_em_idx}]"
+            # Step 1: Gaussian blur background during emphasis window
+            _blur_label = f"[video_emblur_{_em_idx}]"
             post_filters.append(
-                f"{video_out}drawtext=text='{_em_escaped}':fontsize={_em_fs}:fontcolor=white@0.95"
-                f"{_em_font_clause}"
-                f":x={_em_x_expr}:y={_em_y_expr}"
-                f":borderw=0"
-                f":alpha='{_em_alpha}'"
-                f":enable='between(t,{_em_start:.3f},{_em_end:.3f})'{_em_label}"
+                f"{video_out}boxblur=luma_radius=20:luma_power=3:chroma_radius=10"
+                f":enable='between(t,{_em_start:.3f},{_em_end:.3f})'{_blur_label}"
             )
-            video_out = _em_label
-            print(f"[text-broll] '{em_text}' at output {_em_output_t:.2f}s ({_em_dur:.1f}s, {_em_fs}px, face={'L' if _em_face_cx and _em_face_cx/1080<0.45 else 'R' if _em_face_cx and _em_face_cx/1080>0.55 else 'C'})", flush=True)
+            video_out = _blur_label
+
+            # Step 2: 5-layer cascading text with neon cyan glow
+            for layer in range(_CASCADE_LAYERS):
+                _ly = _CASCADE_Y[layer]
+                _la = _CASCADE_ALPHA[layer]
+                # Per-layer alpha with fade in/out envelope
+                _layer_alpha = (
+                    f"if(lt(t-{_em_start:.3f},{_em_fade_in}),{_la}*(t-{_em_start:.3f})/{_em_fade_in},"
+                    f"if(gt(t,{_em_end - _em_fade_out:.3f}),{_la}*({_em_end:.3f}-t)/{_em_fade_out},{_la}))"
+                )
+                # Slight size variation per layer for depth
+                _layer_fs = _em_fs + (2 - layer) * 8  # top layers slightly larger
+                _em_label = f"[video_em_{_em_idx}_L{layer}]"
+                post_filters.append(
+                    f"{video_out}drawtext=text='{_em_escaped}'"
+                    f":fontsize={_layer_fs}"
+                    f":fontcolor=0x00FFCC@{_la:.2f}"
+                    f"{_em_font_clause}"
+                    f":x=(w-tw)/2:y=h*{_ly:.2f}-th/2"
+                    f":borderw=3:bordercolor=0x00FFCC@{_la * 0.35:.2f}"
+                    f":shadowcolor=0x00FFCC@{_la * 0.25:.2f}:shadowx=0:shadowy=4"
+                    f":alpha='{_layer_alpha}'"
+                    f":enable='between(t,{_em_start:.3f},{_em_end:.3f})'{_em_label}"
+                )
+                video_out = _em_label
+
+            print(f"[emphasis] CASCADE '{em_text}' at {_em_output_t:.2f}s ({_em_dur:.1f}s, {_em_fs}px, {_CASCADE_LAYERS} layers + blur)", flush=True)
             _em_idx += 1
 
     audio_out = "[audio_timed]"
