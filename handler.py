@@ -19,6 +19,7 @@ os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
 
 HANDLER_VERSION = "3.0.0"
 GEMINI_MODEL = "gemini-3.1-pro-preview"
+GEMINI_FLASH_MODEL = "gemini-2.5-flash-preview-05-20"
 
 print(f"[startup] Python {sys.version}", flush=True)
 print(f"[startup] handler version: {HANDLER_VERSION}", flush=True)
@@ -1410,6 +1411,8 @@ Global parameters:
 
   thumbnail_timestamp — the source timestamp (in seconds) of the single best frame to use as the video's cover image / thumbnail. Pick the frame where the speaker has the most expressive or emotional face — surprise, laughter, intensity, reaction. Avoid frames where eyes are closed, face is blurry, or expression is blank. This frame needs to make someone scrolling stop and click.
 
+  pacing — overall edit rhythm. "fast" = quick cuts every 2-4s, energetic. "medium" = 3-6s per clip, balanced. "slow" = 5-10s per clip, deliberate. Match the speaker's energy.
+
 Emphasis moments — THE MOST IMPORTANT PART OF YOUR EDIT. These are the 2-5 moments in the video that should HIT HARDEST. Every emphasis moment drives caption keyword highlighting, automatic zoom punches, and sound effects simultaneously. Think like a professional editor: which moments make the viewer feel something?
 
   emphasis_moments: [
@@ -1587,6 +1590,7 @@ Then output the JSON:
   "background_music": "none",
   "aspect_ratio": "9:16",
   "speed_curve": [{{"t": <seconds>, "speed": <multiplier>}}, ...] or "none",
+  "pacing": "<fast|medium|slow>",
   "opening_zoom": "<slow_in|slow_out|none>",
   "emphasis_moments": [
     {{"t": <seconds>, "word_indices": [<n>, ...], "type": "<punchline|revelation|statement|reaction|question|transition>", "intensity": "<high|medium>"}}
@@ -1778,7 +1782,7 @@ RULES FOR USING THESE TIMESTAMPS:
 
     last_err = None
     response = None
-    for model_name in [GEMINI_MODEL]:
+    for model_name in [GEMINI_MODEL, GEMINI_FLASH_MODEL]:
         try:
             print(f"[generate-edit] Calling Gemini model={model_name}...", flush=True)
             t = time.time()
@@ -2896,7 +2900,9 @@ def composite_broll(output_path, broll_entries, broll_files, work_dir):
     for entry in entries_with_files:
         input_args += ["-i", entry["local_path"]]
     filter_parts = []
-    BROLL_FADE = 0.3  # seconds for fade in/out
+    BROLL_FADE = 0.4  # seconds for smooth fade in/out
+    # Alternate Ken Burns directions so consecutive B-rolls don't feel repetitive
+    _KB_DIRECTIONS = ["zoom_in", "zoom_out", "pan_right", "pan_left"]
     for i, entry in enumerate(entries_with_files):
         idx = i + 1
         keyword = str(entry.get("keyword") or "broll")
@@ -2920,27 +2926,46 @@ def composite_broll(output_path, broll_entries, broll_files, work_dir):
                 f"[broll] Using '{keyword}' from start ({broll_duration:.1f}s clip, need {needed_duration}s)",
                 flush=True,
             )
-        # Ken Burns: subtle 3% slow zoom over the clip duration to prevent frozen look
-        # Scale to slightly larger than needed, then animate crop position
+        # Ken Burns with directional variety — each clip gets a different motion
         _kb_total_frames = max(1, round(needed_duration * 30))
-        _kb_zoom = 0.03  # 3% zoom range
+        _kb_zoom = 0.04  # 4% zoom range (slightly more dramatic)
         _kb_progress = f"min(n/{_kb_total_frames}\\,1.0)"
         _kb_smooth = f"({_kb_progress}*{_kb_progress}*(3-2*{_kb_progress}))"  # smoothstep
+        _kb_dir = _KB_DIRECTIONS[i % len(_KB_DIRECTIONS)]
         _fade_out_start = max(0, needed_duration - BROLL_FADE)
+        # Calculate directional crop offsets based on Ken Burns direction
+        _extra_px_w = round(1080 * _kb_zoom)
+        _extra_px_h = round(1920 * _kb_zoom)
+        if _kb_dir == "zoom_in":
+            # Start wide, end tight (pan toward center)
+            _crop_x = f"'max(0\\,min({_extra_px_w/2}*{_kb_smooth}\\,iw-1080))'"
+            _crop_y = f"'max(0\\,min({_extra_px_h/2}*{_kb_smooth}\\,ih-1920))'"
+        elif _kb_dir == "zoom_out":
+            # Start tight, end wide (reverse)
+            _crop_x = f"'max(0\\,min({_extra_px_w/2}*(1.0-{_kb_smooth})\\,iw-1080))'"
+            _crop_y = f"'max(0\\,min({_extra_px_h/2}*(1.0-{_kb_smooth})\\,ih-1920))'"
+        elif _kb_dir == "pan_right":
+            # Pan from left to right
+            _crop_x = f"'max(0\\,min({_extra_px_w}*{_kb_smooth}\\,iw-1080))'"
+            _crop_y = f"'max(0\\,(ih-1920)/2)'"
+        else:  # pan_left
+            # Pan from right to left
+            _crop_x = f"'max(0\\,min({_extra_px_w}*(1.0-{_kb_smooth})\\,iw-1080))'"
+            _crop_y = f"'max(0\\,(ih-1920)/2)'"
         filter_parts.append(
             f"[{idx}:v]trim=start={seek_point:.3f}:duration={needed_duration:.3f},"
             f"setpts=PTS-STARTPTS,"
             f"scale=w='trunc(1080*(1.0+{_kb_zoom})/2)*2':h='trunc(1920*(1.0+{_kb_zoom})/2)*2'"
-            f":force_original_aspect_ratio=increase:flags=bicubic,"
-            f"crop=1080:1920:"
-            f"x='max(0\\,min((iw-1080)/2+{round(1080*_kb_zoom/2)}*{_kb_smooth}\\,iw-1080))':"
-            f"y='max(0\\,min((ih-1920)/2+{round(1920*_kb_zoom/2)}*{_kb_smooth}\\,ih-1920))',"
+            f":force_original_aspect_ratio=increase:flags=lanczos,"
+            f"crop=1080:1920:x={_crop_x}:y={_crop_y},"
             f"setsar=1,"
+            f"eq=saturation=0.92:contrast=1.02,"
             f"fade=t=in:st=0:d={BROLL_FADE:.2f}:alpha=1,"
             f"fade=t=out:st={_fade_out_start:.2f}:d={BROLL_FADE:.2f}:alpha=1,"
             f"setpts=PTS-STARTPTS"
             f"[bv{i}]"
         )
+        print(f"[broll] '{keyword}' Ken Burns: {_kb_dir}", flush=True)
     prev = "0:v"
     for i, entry in enumerate(entries_with_files):
         ts    = float(entry["timestamp"])
@@ -3187,11 +3212,13 @@ def normalize_source_video(source_path, work_dir):
     else:
         print("[reframe] Source is native 9:16 — using center crop", flush=True)
 
+    # Use lossless encoding for the normalize intermediate — it's re-encoded
+    # by the main render pass anyway. Faster than "high" with no quality loss.
     normalize_args = [
         "-y","-i",source_path,
         "-vf", normalize_vf,
         "-r","30","-vsync","cfr","-pix_fmt","yuv420p",
-    ] + get_encode_args("high") + [
+    ] + get_encode_args("lossless") + [
         "-c:a","aac","-b:a","192k","-ar","48000","-ac","2",
         "-map","0:v:0",
     ]
@@ -4492,6 +4519,486 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     with open(ass_path, "w", encoding="utf-8") as f:
         f.write(ass)
     return ass_path
+
+
+# ─── Depth-Simulated Background Blur ─────────────────────────────────────────
+# Generates a grayscale mask video (white = sharp, black = blurred) from face
+# positions. Used with FFmpeg maskedmerge to create a shallow-depth-of-field
+# look centered on the speaker. No ML segmentation needed — uses existing face
+# detection data interpolated across frames.
+
+def render_depth_mask_video(
+    face_positions, total_duration, output_res, work_dir, fps=30,
+):
+    """Generate a grayscale mask video for depth-simulated background blur.
+
+    The mask is a soft white oval centered on the detected face, with gaussian
+    falloff to black at the edges. Where the mask is white, the sharp original
+    is kept; where black, a blurred version shows through.
+
+    Returns path to the mask video, or None if face data is insufficient.
+    """
+    from PIL import Image, ImageDraw, ImageFilter
+
+    if not face_positions or total_duration <= 0:
+        return None
+
+    w = output_res.get("width") or 1080
+    h = output_res.get("height") or 1920
+    total_frames = max(1, round(total_duration * fps))
+
+    # Sort face positions by timestamp for interpolation
+    sorted_faces = sorted(
+        [fp for fp in face_positions if fp.get("cx") is not None],
+        key=lambda f: float(f.get("t") or f.get("timestamp") or 0),
+    )
+    if not sorted_faces:
+        return None
+
+    # Build interpolated face center for each frame
+    def _interp_face(frame_t):
+        """Interpolate face center at a given time."""
+        if not sorted_faces:
+            return w / 2, h * 0.35
+        # Find bracketing positions
+        before = None
+        after = None
+        for fp in sorted_faces:
+            ft = float(fp.get("t") or fp.get("timestamp") or 0)
+            if ft <= frame_t:
+                before = fp
+            if ft >= frame_t and after is None:
+                after = fp
+        if before is None:
+            before = sorted_faces[0]
+        if after is None:
+            after = sorted_faces[-1]
+        bt = float(before.get("t") or before.get("timestamp") or 0)
+        at = float(after.get("t") or after.get("timestamp") or 0)
+        if abs(at - bt) < 0.001:
+            alpha = 0.0
+        else:
+            alpha = max(0.0, min(1.0, (frame_t - bt) / (at - bt)))
+        cx = float(before.get("cx") or w / 2) * (1 - alpha) + float(after.get("cx") or w / 2) * alpha
+        cy = float(before.get("cy") or h * 0.35) * (1 - alpha) + float(after.get("cy") or h * 0.35) * alpha
+        return cx, cy
+
+    # Oval dimensions: wide enough for head+shoulders, tall enough for upper body
+    oval_w = int(w * 0.7)   # 70% of frame width
+    oval_h = int(h * 0.65)  # 65% of frame height
+
+    mask_video = os.path.join(work_dir, "depth_mask.mp4")
+    cmd = [
+        "ffmpeg", "-y", "-hide_banner", "-loglevel", "warning",
+        "-f", "rawvideo", "-pix_fmt", "gray",
+        "-s", f"{w}x{h}", "-r", str(fps),
+        "-i", "pipe:0",
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
+        "-pix_fmt", "yuv420p",
+        mask_video,
+    ]
+
+    print(f"[depth-blur] Rendering {total_frames} mask frames ({total_duration:.1f}s)", flush=True)
+    t0 = time.time()
+
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    # Pre-render a base oval mask and just shift it per frame
+    # Create the oval at (0,0) then paste at face position
+    _blur_radius = 40  # Gaussian blur for soft edges
+    _pad = _blur_radius * 3
+    _oval_img = Image.new("L", (oval_w + _pad * 2, oval_h + _pad * 2), 0)
+    _oval_draw = ImageDraw.Draw(_oval_img)
+    _oval_draw.ellipse(
+        [_pad, _pad, _pad + oval_w, _pad + oval_h],
+        fill=255,
+    )
+    _oval_img = _oval_img.filter(ImageFilter.GaussianBlur(radius=_blur_radius))
+
+    last_cx, last_cy = None, None
+    cached_frame = None
+
+    for frame_idx in range(total_frames):
+        frame_t = frame_idx / fps
+        cx, cy = _interp_face(frame_t)
+
+        # Quantize position to reduce unique frames (cache hits)
+        q_cx = round(cx / 4) * 4
+        q_cy = round(cy / 4) * 4
+
+        if q_cx == last_cx and q_cy == last_cy and cached_frame is not None:
+            proc.stdin.write(cached_frame)
+            continue
+
+        # Create frame: black background, paste soft white oval at face position
+        # Shift oval center down by 15% of oval height to include shoulders
+        paste_x = int(q_cx - oval_w / 2 - _pad)
+        paste_y = int(q_cy - oval_h * 0.30 - _pad)  # offset up so face is in top third of oval
+
+        frame = Image.new("L", (w, h), 0)
+        frame.paste(_oval_img, (paste_x, paste_y))
+        frame_bytes = frame.tobytes()
+        proc.stdin.write(frame_bytes)
+
+        last_cx, last_cy = q_cx, q_cy
+        cached_frame = frame_bytes
+
+    proc.stdin.close()
+    proc.wait(timeout=60)
+
+    elapsed = time.time() - t0
+    if proc.returncode != 0:
+        stderr = proc.stderr.read().decode(errors="replace")
+        print(f"[depth-blur] Mask render failed: {stderr[:500]}", flush=True)
+        return None
+
+    if not os.path.exists(mask_video) or os.path.getsize(mask_video) < 1024:
+        return None
+
+    print(f"[depth-blur] Mask rendered in {elapsed:.1f}s", flush=True)
+    return mask_video
+
+
+# ─── PNG Caption Overlay Renderer ─────────────────────────────────────────────
+# Replaces ASS subtitles for captions_dynamic / captions_clean with Pillow-
+# rendered transparent video overlays. Enables rounded-rect backgrounds, glow
+# effects, proper mixed-size typography, and per-word karaoke highlighting that
+# ASS/libass cannot achieve.
+
+def render_png_caption_video(
+    words, caption_style, output_res, caption_keywords, work_dir,
+    face_positions=None, total_duration=0.0, fps=30,
+):
+    """Render captions as a transparent overlay video using Pillow.
+
+    Returns path to a transparent QuickTime Animation (.mov) file with ARGB
+    pixel format, or None if rendering fails (Pillow unavailable, font missing,
+    FFmpeg error). The caller should fall back to ASS subtitles on None.
+    """
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+    except ImportError:
+        print("[captions-png] Pillow not installed — falling back to ASS", flush=True)
+        return None
+
+    if not words:
+        return None
+
+    w = output_res.get("width") or 1080
+    h = output_res.get("height") or 1920
+    total_frames = max(1, round(total_duration * fps))
+
+    # ── Fonts ──────────────────────────────────────────────────────────────
+    font_dir = "/assets/fonts" if os.path.isdir("/assets/fonts") else os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "src", "assets", "fonts")
+
+    base_fs = 90  # matches ASS fontsize for captions_dynamic / captions_clean
+    kw_fs = round(base_fs * 1.6)
+    kw_fs_long = round(base_fs * 1.35)
+
+    try:
+        font_base = ImageFont.truetype(os.path.join(font_dir, "Montserrat-Bold.ttf"), base_fs)
+        font_kw = ImageFont.truetype(os.path.join(font_dir, "Montserrat-ExtraBold.ttf"), kw_fs)
+        font_kw_long = ImageFont.truetype(os.path.join(font_dir, "Montserrat-ExtraBold.ttf"), kw_fs_long)
+    except Exception as e:
+        print(f"[captions-png] Font load failed: {e} — falling back to ASS", flush=True)
+        return None
+
+    # ── Colours ────────────────────────────────────────────────────────────
+    KW_COLORS = [(255, 255, 0), (255, 85, 0), (0, 204, 204), (255, 64, 128)]
+    HIGHLIGHT = (255, 255, 0)
+    WHITE = (255, 255, 255)
+    DIM = (180, 180, 180)
+
+    is_dynamic = caption_style == "captions_dynamic"
+
+    # ── Build word groups (2-4 words) ──────────────────────────────────────
+    keyword_set = _build_keyword_set(words, caption_keywords)
+    groups = []
+    buf = []
+    for i, wd in enumerate(words):
+        buf.append(wd)
+        nxt = words[i + 1] if i + 1 < len(words) else None
+        pause = (nxt["start"] - wd["end"]) if nxt else 1.0
+        ends = bool(re.search(r"[.!?]$", wd.get("word") or ""))
+        if not nxt or ends or len(buf) >= 4 or (len(buf) >= 2 and pause > 0.25):
+            groups.append({"words": list(buf), "start": buf[0]["start"],
+                           "end": buf[-1]["end"] + 0.06})
+            buf = []
+
+    # Trim overlapping ends
+    for gi in range(len(groups) - 1):
+        groups[gi]["end"] = min(groups[gi]["end"], groups[gi + 1]["start"] - 0.01)
+
+    # Pre-assign keyword flags + colours
+    kw_idx = 0
+    for grp in groups:
+        for wd in grp["words"]:
+            clean = re.sub(r"[.,!?;:'\"\\]", "", str(wd.get("word") or "").lower())
+            if clean in keyword_set:
+                wd["_kw"] = True
+                wd["_kw_color"] = KW_COLORS[kw_idx % len(KW_COLORS)]
+                kw_idx += 1
+            else:
+                wd["_kw"] = False
+
+    # ── Face-aware Y position ──────────────────────────────────────────────
+    cy = round(h * 0.72)
+    if face_positions:
+        ys = [float(fp.get("cy", 0)) for fp in face_positions if fp.get("found")]
+        if ys:
+            frac = (sum(ys) / len(ys)) / h
+            if frac > 0.55:
+                cy = round(h * 0.22)
+            elif frac < 0.35:
+                cy = round(h * 0.78)
+
+    max_line_w = w - 80  # 40px margin each side
+
+    # ── Helper: choose font for a word ─────────────────────────────────────
+    def _word_font(wd):
+        if wd.get("_kw"):
+            clean = re.sub(r"[.,!?;:'\"\\]", "", str(wd.get("word") or ""))
+            return font_kw_long if len(clean) > 10 else font_kw
+        return font_base
+
+    # ── Helper: layout a word group → positioned items + bg size ───────────
+    def _layout_group(grp_words, draw):
+        space_w = draw.textlength(" ", font=font_base)
+        items = []
+        for wd in grp_words:
+            f = _word_font(wd)
+            txt = str(wd["word"]).strip().lower()
+            bbox = draw.textbbox((0, 0), txt, font=f)
+            items.append({"wd": wd, "font": f, "text": txt,
+                          "w": bbox[2] - bbox[0], "h": bbox[3] - bbox[1],
+                          "y_off": bbox[1]})
+
+        # Word-wrap into lines
+        lines = [[]]
+        line_w = 0
+        for item in items:
+            test_w = line_w + (space_w if lines[-1] else 0) + item["w"]
+            if test_w > max_line_w and lines[-1]:
+                lines.append([])
+                line_w = 0
+            lines[-1].append(item)
+            line_w += (space_w if len(lines[-1]) > 1 else 0) + item["w"]
+
+        pad_x = round(base_fs * 0.45)
+        pad_y = round(base_fs * 0.30)
+        line_gap = round(base_fs * 0.15)
+        line_widths = [sum(it["w"] for it in ln) + space_w * max(0, len(ln) - 1)
+                       for ln in lines]
+        line_heights = [max(it["h"] for it in ln) for ln in lines]
+        max_lw = max(line_widths) if line_widths else 0
+        total_h = sum(line_heights) + line_gap * max(0, len(lines) - 1)
+        bg_w = max_lw + pad_x * 2
+        bg_h = total_h + pad_y * 2
+
+        positioned = []
+        cur_y = pad_y
+        for li, ln in enumerate(lines):
+            lw = line_widths[li]
+            lh = line_heights[li]
+            x = pad_x + (max_lw - lw) / 2
+            for item in ln:
+                y_adj = cur_y + (lh - item["h"]) / 2 - item["y_off"]
+                positioned.append({**item, "x": round(x), "y": round(y_adj)})
+                x += item["w"] + space_w
+            cur_y += lh + line_gap
+
+        return positioned, bg_w, bg_h
+
+    # ── Render one frame ───────────────────────────────────────────────────
+    # Shared 1×1 image for text measurement (avoids re-creation per frame)
+    _measure_img = Image.new("RGBA", (1, 1))
+    _measure_draw = ImageDraw.Draw(_measure_img)
+
+    def _render_frame(t):
+        """Return an RGBA Image for this timestamp, or None if silent."""
+        active = None
+        for grp in groups:
+            if grp["start"] <= t < grp["end"]:
+                active = grp
+                break
+        if active is None:
+            return None
+
+        age = t - active["start"]
+
+        # Pop-in scale (dynamic only)
+        if is_dynamic:
+            if age < 0.12:
+                scale = 0.85 + 0.18 * (age / 0.12)
+            elif age < 0.22:
+                scale = 1.03 - 0.03 * ((age - 0.12) / 0.10)
+            else:
+                scale = 1.0
+        else:
+            scale = 1.0
+
+        # Fade in / out alpha
+        fade_in, fade_out = 0.08, 0.10
+        remaining = active["end"] - t
+        if age < fade_in:
+            alpha = age / fade_in
+        elif remaining < fade_out:
+            alpha = max(0, remaining / fade_out)
+        else:
+            alpha = 1.0
+        alpha = max(0.0, min(1.0, alpha))
+        if alpha < 0.02:
+            return None
+
+        # Layout
+        positioned, bg_w, bg_h = _layout_group(active["words"], _measure_draw)
+        margin = 14
+        cw, ch = bg_w + margin * 2, bg_h + margin * 2
+        canvas = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(canvas)
+
+        # Rounded-rect background
+        radius = round(base_fs * 0.30)
+        draw.rounded_rectangle(
+            [margin, margin, margin + bg_w, margin + bg_h],
+            radius=radius, fill=(0, 0, 0, round(140 * alpha)),
+        )
+
+        # Draw each word
+        for item in positioned:
+            wd = item["wd"]
+            font = item["font"]
+            txt = item["text"]
+            x = margin + item["x"]
+            y = margin + item["y"]
+
+            ws, we = float(wd["start"]), float(wd["end"])
+
+            # Colour selection
+            if wd.get("_kw"):
+                color = wd["_kw_color"] if t >= ws else (DIM if is_dynamic else WHITE)
+            elif is_dynamic:
+                if ws <= t < we + 0.05:
+                    color = HIGHLIGHT
+                elif t >= we:
+                    color = WHITE
+                else:
+                    color = DIM
+            else:
+                color = WHITE
+
+            a = round(255 * alpha)
+
+            # Glow halo for active keywords
+            if wd.get("_kw") and t >= ws:
+                gc = (*wd["_kw_color"], round(70 * alpha))
+                for dx, dy in [(-2,0),(2,0),(0,-2),(0,2),(-1,-1),(1,1),(-1,1),(1,-1)]:
+                    draw.text((x + dx, y + dy), txt, font=font, fill=gc)
+
+            # Drop shadow
+            draw.text((x + 2, y + 2), txt, font=font, fill=(0, 0, 0, round(150 * alpha)))
+            # Main text
+            draw.text((x, y), txt, font=font, fill=(*color, a))
+
+        # Scale for pop-in animation
+        if abs(scale - 1.0) > 0.01:
+            new_sz = (max(1, round(cw * scale)), max(1, round(ch * scale)))
+            canvas = canvas.resize(new_sz, Image.LANCZOS)
+
+        return canvas
+
+    # ── Pipe raw RGBA frames to FFmpeg → transparent MOV ───────────────────
+    caption_video = os.path.join(work_dir, "caption_overlay.mov")
+    cmd = [
+        "ffmpeg", "-y", "-hide_banner", "-loglevel", "warning",
+        "-f", "rawvideo", "-pix_fmt", "rgba",
+        "-s", f"{w}x{h}", "-r", str(fps),
+        "-i", "pipe:0",
+        "-c:v", "qtrle", "-pix_fmt", "argb",
+        caption_video,
+    ]
+
+    print(f"[captions-png] Rendering {total_frames} frames ({total_duration:.1f}s) "
+          f"for {caption_style}, {len(groups)} groups", flush=True)
+    t0 = time.time()
+
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    empty_frame = bytes(w * h * 4)
+    last_state = None
+    cached_bytes = None
+    n_rendered = 0
+    n_cached = 0
+
+    try:
+        for fi in range(total_frames):
+            t = fi / fps
+
+            # State key for frame caching
+            grp_idx = None
+            word_idx = None
+            for gi, grp in enumerate(groups):
+                if grp["start"] <= t < grp["end"]:
+                    grp_idx = gi
+                    for wi, wd in enumerate(grp["words"]):
+                        if float(wd["start"]) <= t:
+                            word_idx = wi
+                    break
+
+            if grp_idx is not None:
+                age = t - groups[grp_idx]["start"]
+                rem = groups[grp_idx]["end"] - t
+                anim_q = round(age * 15) if age < 0.25 else 100
+                fade_q = round(rem * 15) if rem < 0.12 else 100
+            else:
+                anim_q = fade_q = 0
+
+            state = (grp_idx, word_idx, anim_q, fade_q)
+
+            if state == last_state and cached_bytes is not None:
+                proc.stdin.write(cached_bytes)
+                n_cached += 1
+            else:
+                canvas = _render_frame(t)
+                if canvas is None:
+                    fb = empty_frame
+                else:
+                    frame = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+                    px = (w - canvas.width) // 2
+                    py = cy - canvas.height // 2
+                    py = max(10, min(h - canvas.height - 10, py))
+                    frame.alpha_composite(canvas, (px, py))
+                    fb = frame.tobytes()
+                proc.stdin.write(fb)
+                cached_bytes = fb
+                last_state = state
+                n_rendered += 1
+
+        proc.stdin.close()
+        _, stderr = proc.communicate(timeout=300)
+    except Exception as e:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        print(f"[captions-png] Error during render: {e}", flush=True)
+        return None
+
+    elapsed = time.time() - t0
+    print(f"[captions-png] Done: {n_rendered} unique + {n_cached} cached in {elapsed:.1f}s", flush=True)
+
+    if proc.returncode != 0:
+        print(f"[captions-png] FFmpeg error: {(stderr or b'').decode()[-500:]}", flush=True)
+        return None
+
+    if os.path.exists(caption_video):
+        sz = os.path.getsize(caption_video)
+        print(f"[captions-png] Overlay video: {sz / 1024 / 1024:.1f}MB", flush=True)
+        return caption_video
+    return None
 
 
 def get_output_clip_ranges(cuts, effective_durations, transition_duration=None):
@@ -5928,24 +6435,98 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 print(f"[zoom] clip {i}: downgraded {cut.get('zoom')} → slow_in (no face detected)", flush=True)
             zoom_max = 1.0 + (_base_zoom_max - 1.0) * 0.35
 
-        # Compute face offset for crop targeting
-        face_cx = float(closest_face.get("cx") or 540.0) if closest_face else 540.0
-        face_cy = float(closest_face.get("cy") or 960.0) if closest_face else 960.0
-        offset_x = clamp(face_cx - 540.0, -240.0, 240.0)
-        offset_y = clamp(face_cy - 960.0, -320.0, 320.0)
+        # Compute face offset for crop targeting — interpolate between two nearest
+        # face positions for smooth continuous pan across the clip
+        face_cx = 540.0
+        face_cy = 960.0
+        face_cx_end = 540.0
+        face_cy_end = 960.0
+        _has_face_interp = False
+
         if closest_face:
-            print(f"[zoom] clip {i}: {zoom} → face at ({face_cx:.0f}, {face_cy:.0f})", flush=True)
+            face_cx = float(closest_face.get("cx") or 540.0)
+            face_cy = float(closest_face.get("cy") or 960.0)
+            face_cx_end = face_cx
+            face_cy_end = face_cy
+            # Find next face position after clip midpoint for interpolation
+            if face_positions:
+                clip_mid = (start + end) / 2.0
+                _sorted_fp = sorted(
+                    [fp for fp in face_positions if fp.get("found")],
+                    key=lambda p: float(p.get("t") or 0.0),
+                )
+                _before = None
+                _after = None
+                for fp in _sorted_fp:
+                    ft = float(fp.get("t") or 0.0)
+                    if ft <= clip_mid:
+                        _before = fp
+                    elif _after is None:
+                        _after = fp
+                if _before and _after:
+                    face_cx = float(_before.get("cx") or 540.0)
+                    face_cy = float(_before.get("cy") or 960.0)
+                    face_cx_end = float(_after.get("cx") or 540.0)
+                    face_cy_end = float(_after.get("cy") or 960.0)
+                    _has_face_interp = True
+
+        offset_x_start = clamp(face_cx - 540.0, -240.0, 240.0)
+        offset_y_start = clamp(face_cy - 960.0, -320.0, 320.0)
+        offset_x_end = clamp(face_cx_end - 540.0, -240.0, 240.0)
+        offset_y_end = clamp(face_cy_end - 960.0, -320.0, 320.0)
+        # Legacy single offset for non-interpolated paths
+        offset_x = offset_x_start
+        offset_y = offset_y_start
+
+        # ── Multi-camera simulation ──────────────────────────────────────
+        # Rotate through virtual "camera angles" on consecutive talking-head
+        # clips. Each angle varies crop offset + subtle color tint, creating
+        # the illusion of a multi-camera shoot from a single source.
+        _CAMERA_PRESETS = [
+            {"name": "center",  "ox_shift": 0.0,  "oy_shift": 0.0,  "zoom_add": 0.0,   "tint": ""},
+            {"name": "close",   "ox_shift": 0.0,  "oy_shift": -0.01, "zoom_add": 0.05,  "tint": "colorbalance=rs=0.02:gs=0.01:bs=-0.01"},
+            {"name": "left",    "ox_shift": -0.04, "oy_shift": 0.0,  "zoom_add": 0.02,  "tint": "colorbalance=rs=-0.01:gs=0.00:bs=0.01"},
+            {"name": "right",   "ox_shift": 0.04,  "oy_shift": 0.0,  "zoom_add": 0.02,  "tint": "colorbalance=rs=0.01:gs=0.01:bs=-0.01"},
+        ]
+        cam_preset = None
+        if not cut.get("_is_broll") and not cut.get("_is_hook") and zoom != "cut_zoom":
+            _content_i = cut.get("_original_idx", i)
+            if _content_i >= 0:
+                cam_preset = _CAMERA_PRESETS[_content_i % len(_CAMERA_PRESETS)]
+                if cam_preset["ox_shift"] != 0.0:
+                    offset_x_start += cam_preset["ox_shift"] * 1080
+                    offset_x_end += cam_preset["ox_shift"] * 1080
+                    offset_x_start = clamp(offset_x_start, -240.0, 240.0)
+                    offset_x_end = clamp(offset_x_end, -240.0, 240.0)
+                    offset_x = offset_x_start
+                if cam_preset["oy_shift"] != 0.0:
+                    offset_y_start += cam_preset["oy_shift"] * 1920
+                    offset_y_end += cam_preset["oy_shift"] * 1920
+                    offset_y_start = clamp(offset_y_start, -320.0, 320.0)
+                    offset_y_end = clamp(offset_y_end, -320.0, 320.0)
+                    offset_y = offset_y_start
+                if cam_preset["zoom_add"] > 0 and zoom in ("slow_in", "slow_out", "none"):
+                    zoom_max += cam_preset["zoom_add"]
+
+        if closest_face:
+            _interp_tag = " (interpolated)" if _has_face_interp else ""
+            _cam_tag = f" cam={cam_preset['name']}" if cam_preset else ""
+            print(f"[zoom] clip {i}: {zoom} → face at ({face_cx:.0f}, {face_cy:.0f}){_interp_tag}{_cam_tag}", flush=True)
         elif zoom != "none":
             print(f"[zoom] clip {i}: {zoom} → no face detected, using center", flush=True)
 
         def _face_crop(scale_expr, tf_val, reverse=False):
             """Build a scale+crop filter that targets the detected face.
+            Interpolates face position across the clip for smooth continuous pan.
             reverse=True: start at face, drift to center (for slow_out).
             """
             _t = f"min(n/{tf_val}\\,1.0)"
             progress = f"(1.0-{_t})" if reverse else _t
-            crop_x = f"max(0\\,min((iw-1080)/2+{offset_x:.1f}*{progress}\\,iw-1080))"
-            crop_y = f"max(0\\,min((ih-1920)/2+{offset_y:.1f}*{progress}\\,ih-1920))"
+            # Smoothly interpolate face offset across clip (continuous pan)
+            _ox = f"({offset_x_start:.1f}+({offset_x_end:.1f}-{offset_x_start:.1f})*{_t})"
+            _oy = f"({offset_y_start:.1f}+({offset_y_end:.1f}-{offset_y_start:.1f})*{_t})"
+            crop_x = f"max(0\\,min((iw-1080)/2+{_ox}*{progress}\\,iw-1080))"
+            crop_y = f"max(0\\,min((ih-1920)/2+{_oy}*{progress}\\,ih-1920))"
             return f"{scale_expr}:eval=frame:flags=bicubic,crop=1080:1920:x='{crop_x}':y='{crop_y}'"
 
         if zoom == "slow_in":
@@ -6032,6 +6613,30 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         if zoom_filter:
             v_chain.append(zoom_filter)
         v_chain.append("format=yuv420p")
+        # Per-clip camera tint (multi-camera color variation)
+        if cam_preset and cam_preset.get("tint"):
+            v_chain.append(cam_preset["tint"])
+
+        # ── Emotion-adaptive per-clip color grading ──────────────────────
+        # Derive emotional tone from emphasis moments overlapping this clip.
+        # Subtle color shift per emotion type creates subconscious mood shifts.
+        _EMOTION_GRADES = {
+            "punchline":   "eq=brightness=0.02:saturation=1.06",   # warm pop
+            "revelation":  "eq=brightness=-0.01:saturation=0.96",  # cooler, slightly desaturated
+            "statement":   "",                                      # neutral (no shift)
+            "reaction":    "eq=saturation=1.08:contrast=1.03",     # vivid
+            "question":    "eq=brightness=0.01:saturation=0.98",   # slightly muted
+            "transition":  "",                                      # neutral
+        }
+        if not cut.get("_is_broll") and not cut.get("_is_hook"):
+            _em_all = edit_plan.get("_emphasis_moments") or edit_plan.get("emphasis_moments") or []
+            _clip_em = [em for em in _em_all if start <= float(em.get("t") or 0) <= end]
+            if _clip_em:
+                _dom_type = max(_clip_em, key=lambda e: 1 if e.get("intensity") == "high" else 0).get("type", "")
+                _em_grade = _EMOTION_GRADES.get(_dom_type, "")
+                if _em_grade:
+                    v_chain.append(_em_grade)
+
         if vignette_filter:
             v_chain.append(vignette_filter)
 
@@ -6168,6 +6773,27 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         "zoomin",
     }
 
+    # ── Auto-transition assignment ──────────────────────────────────────
+    # When Gemini assigns "none" (hard cut), auto-upgrade ~30% of cuts to
+    # subtle transitions based on context. This matches the Captions app
+    # where hard cuts are mixed with smooth dissolves for professional flow.
+    _auto_transitions_added = 0
+    _em_all = edit_plan.get("_emphasis_moments") or edit_plan.get("emphasis_moments") or []
+    _SUBTLE_TRANSITIONS = ["dissolve", "smoothleft", "smoothright", "fade"]
+    for _ci in range(1, n):
+        _existing = str(render_cuts[_ci - 1].get("transition_out") or "none").lower()
+        if _existing != "none" or render_cuts[_ci].get("_is_broll") or render_cuts[_ci - 1].get("_is_hook"):
+            continue
+        # Auto-assign at emphasis moments or every 3rd cut (whichever comes first)
+        _cut_source_end = float(render_cuts[_ci - 1].get("source_end") or 0)
+        _near_emphasis = any(abs(float(em.get("t") or 0) - _cut_source_end) < 1.5 for em in _em_all)
+        if _near_emphasis or (_ci % 3 == 0 and _auto_transitions_added < 4):
+            _auto_t = _SUBTLE_TRANSITIONS[_auto_transitions_added % len(_SUBTLE_TRANSITIONS)]
+            render_cuts[_ci - 1]["transition_out"] = _auto_t
+            _auto_transitions_added += 1
+    if _auto_transitions_added:
+        print(f"[transitions] Auto-assigned {_auto_transitions_added} subtle transition(s)", flush=True)
+
     for i in range(1, n):
         transition = str(render_cuts[i-1].get("transition_out") or "none").lower()
         out_v     = "vout" if i == n-1 else f"vx{i}"
@@ -6265,11 +6891,15 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     post_filters.append(
         f"{video_out}"
         f"{_grade_filter},"
-        f"unsharp=3:3:0.3:3:3:0.0"
+        f"unsharp=3:3:0.3:3:3:0.0,"
+        # Always-on subtle vignette — darkens edges for filmic depth separation
+        f"vignette=PI/5,"
+        # Always-on subtle film grain — adds organic texture matching pro editing apps
+        f"noise=c0s=4:c0f=t+u"
         f"{_grade_label}"
     )
     video_out = _grade_label
-    print(f"[grade] {_grade_name} color grading applied (music_mood={_music_mood})", flush=True)
+    print(f"[grade] {_grade_name} color grading + vignette + grain applied (music_mood={_music_mood})", flush=True)
 
     if edit_plan.get("cinematic_bars"):
         bar_h = int((1920 - int(1080 / 2.35)) / 2)
@@ -6346,26 +6976,159 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 video_out = _bl
             print(f"[fx] Added {len(_blur_parts)} emphasis blur pulse(s)", flush=True)
 
+    # ── Audio-reactive zoom pulses ────────────────────────────────────
+    # Subtle 2-3% scale bump at emphasis moments — creates the "breathing"
+    # zoom feel that pro editing apps have. Uses scale+crop with time-gated
+    # enable, targeting face position for the crop center.
+    _all_emphasis = edit_plan.get("emphasis_moments") or edit_plan.get("_parsed_emphasis_moments") or []
+    _zoom_emphasis = [em for em in _all_emphasis if str(em.get("intensity", "")).lower() in ("high", "medium")][:10]
+    if _zoom_emphasis:
+        _zoom_pulses = []
+        for _em in _zoom_emphasis:
+            _em_t = float(_em.get("t") or 0)
+            if _em_t <= 0:
+                continue
+            _em_out = project_source_time_to_final_output(
+                _em_t, render_cuts, effective_durations, speed_curve,
+                hook_offset=float(edit_plan.get("_hook_offset") or 0.0),
+            )
+            if _em_out is None:
+                continue
+            # 0.3s zoom pulse: ease-in 0.1s, hold 0.1s, ease-out 0.1s
+            _zp_start = max(0, _em_out - 0.05)
+            _zp_end = _em_out + 0.25
+            _zp_amt = 0.025 if str(_em.get("intensity", "")).lower() == "high" else 0.018
+            # Smooth envelope: ramp up then down
+            _zp_env = f"min(1,(t-{_zp_start:.3f})/0.08)*min(1,({_zp_end:.3f}-t)/0.08)"
+            _zoom_pulses.append(
+                f"scale=w='trunc(iw*(1.0+{_zp_amt}*{_zp_env})/2)*2'"
+                f":h='trunc(ih*(1.0+{_zp_amt}*{_zp_env})/2)*2'"
+                f":eval=frame:flags=fast_bilinear,"
+                f"crop=1080:1920:(iw-1080)/2:(ih-1920)/2"
+                f":enable='between(t,{_zp_start:.3f},{_zp_end:.3f})'"
+            )
+        if _zoom_pulses:
+            for _zi, _zp in enumerate(_zoom_pulses):
+                _zl = f"[video_zpulse{_zi}]"
+                post_filters.append(f"{video_out}{_zp}{_zl}")
+                video_out = _zl
+            print(f"[fx] Added {len(_zoom_pulses)} audio-reactive zoom pulse(s)", flush=True)
+
+    # ── Beat-synced micro zoom pulses (when background music is set) ──
+    # Subtle 1.2% scale bumps on detected beats give the edit a "music video"
+    # feel. Only activates when background music is present and beats were
+    # detected. Limited to beats during non-speech gaps for subtlety.
+    _source_beats = edit_plan.get("_source_beats") or []
+    _music_track = str(edit_plan.get("background_music") or "none").strip()
+    if _source_beats and _music_track != "none" and len(_source_beats) > 4:
+        _beat_pulses = []
+        _total_dur = sum(effective_durations)
+        # Project beat times to output timeline and limit count
+        for _bt in _source_beats[:30]:  # cap at 30 beats
+            _bt_out = project_source_time_to_final_output(
+                float(_bt), render_cuts, effective_durations, speed_curve,
+                hook_offset=float(edit_plan.get("_hook_offset") or 0.0),
+            )
+            if _bt_out is None or _bt_out <= 0.1 or _bt_out >= _total_dur - 0.1:
+                continue
+            # Skip beats that overlap with emphasis zoom pulses (already covered)
+            _skip = False
+            for _em in (_zoom_emphasis if _zoom_emphasis else []):
+                _em_t = float(_em.get("t") or 0)
+                _em_out2 = project_source_time_to_final_output(
+                    _em_t, render_cuts, effective_durations, speed_curve,
+                    hook_offset=float(edit_plan.get("_hook_offset") or 0.0),
+                )
+                if _em_out2 and abs(_bt_out - _em_out2) < 0.4:
+                    _skip = True
+                    break
+            if _skip:
+                continue
+            # Very subtle: 1.2% scale for 0.15s
+            _bp_start = max(0, _bt_out - 0.02)
+            _bp_end = _bt_out + 0.13
+            _bp_env = f"min(1,(t-{_bp_start:.3f})/0.04)*min(1,({_bp_end:.3f}-t)/0.04)"
+            _beat_pulses.append(
+                f"scale=w='trunc(iw*(1.0+0.012*{_bp_env})/2)*2'"
+                f":h='trunc(ih*(1.0+0.012*{_bp_env})/2)*2'"
+                f":eval=frame:flags=fast_bilinear,"
+                f"crop=1080:1920:(iw-1080)/2:(ih-1920)/2"
+                f":enable='between(t,{_bp_start:.3f},{_bp_end:.3f})'"
+            )
+        if _beat_pulses:
+            for _bi, _bp in enumerate(_beat_pulses):
+                _bl = f"[video_beat{_bi}]"
+                post_filters.append(f"{video_out}{_bp}{_bl}")
+                video_out = _bl
+            print(f"[fx] Added {len(_beat_pulses)} beat-synced micro zoom pulse(s)", flush=True)
+
+    # ── Depth-simulated background blur (face-centered bokeh) ────────
+    # Generate a soft oval mask from face positions, blur the full frame,
+    # then maskedmerge: sharp where face is, blurred at edges. This creates
+    # a professional shallow-depth-of-field look without ML segmentation.
+    depth_mask_path = None
+    if face_positions and len(face_positions) >= 2:
+        depth_mask_path = render_depth_mask_video(
+            face_positions, sum(effective_durations),
+            {"width": 1080, "height": 1920}, work_dir, fps=30,
+        )
+    if depth_mask_path:
+        print(f"[fx] Depth blur mask ready — will apply face-centered bokeh", flush=True)
+
     caption_style = str(edit_plan.get("caption_style") or "none").lower()
+    caption_overlay_path = None
     ass_path = None
     if caption_style != "none" and transcript.get("words"):
-        ass_path = generate_subtitle_file(
-            transcript,
-            caption_style,
-            render_cuts,
-            effective_durations,
-            {"width": 1080, "height": 1920},
-            edit_plan.get("caption_position") or "lower-third",
-            edit_plan.get("caption_keywords") or [],
-            work_dir,
-            hook_offset=float(edit_plan.get("_hook_offset") or 0.0),
-            hook_clip=None,
-            speed_curve=speed_curve,
-            transition_duration=TRANSITION_DURATION,
-            face_positions=face_positions,
-            edit_plan=edit_plan,
-        )
-    if ass_path and os.path.exists(ass_path):
+        # For premium styles, try PNG overlay rendering (Pillow) first
+        if caption_style in ("captions_dynamic", "captions_clean"):
+            _projected_words = project_words_to_output(
+                transcript, render_cuts, effective_durations,
+                hook_offset=float(edit_plan.get("_hook_offset") or 0.0),
+                hook_clip=None, speed_curve=speed_curve,
+                transition_duration=TRANSITION_DURATION,
+            )
+            if _projected_words:
+                # Clean curly braces (ASS override chars)
+                for _wd in _projected_words:
+                    for _k in ("word", "punctuated_word"):
+                        if _k in _wd and ("{" in str(_wd[_k]) or "}" in str(_wd[_k])):
+                            _wd[_k] = str(_wd[_k]).replace("{", "").replace("}", "")
+                # Deduplicate consecutive stutters
+                if len(_projected_words) > 1:
+                    _deduped = [_projected_words[0]]
+                    for _wi in range(1, len(_projected_words)):
+                        _p = re.sub(r"[.,!?;:'\"\\]", "", str(_projected_words[_wi - 1].get("word") or "").lower().strip())
+                        _c = re.sub(r"[.,!?;:'\"\\]", "", str(_projected_words[_wi].get("word") or "").lower().strip())
+                        if _c and _c == _p:
+                            _deduped[-1]["end"] = _projected_words[_wi]["end"]
+                            continue
+                        _deduped.append(_projected_words[_wi])
+                    _projected_words = _deduped
+                caption_overlay_path = render_png_caption_video(
+                    _projected_words, caption_style,
+                    {"width": 1080, "height": 1920},
+                    edit_plan.get("caption_keywords") or [],
+                    work_dir, face_positions=face_positions,
+                    total_duration=sum(effective_durations), fps=30,
+                )
+                if caption_overlay_path:
+                    print(f"[captions] Using PNG overlay for {caption_style}", flush=True)
+
+        # Fall back to ASS if PNG failed or not a premium style
+        if not caption_overlay_path:
+            ass_path = generate_subtitle_file(
+                transcript, caption_style, render_cuts, effective_durations,
+                {"width": 1080, "height": 1920},
+                edit_plan.get("caption_position") or "lower-third",
+                edit_plan.get("caption_keywords") or [],
+                work_dir,
+                hook_offset=float(edit_plan.get("_hook_offset") or 0.0),
+                hook_clip=None, speed_curve=speed_curve,
+                transition_duration=TRANSITION_DURATION,
+                face_positions=face_positions, edit_plan=edit_plan,
+            )
+    # ASS subtitle burn-in (non-PNG path)
+    if not caption_overlay_path and ass_path and os.path.exists(ass_path):
         escaped = ass_path.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
         post_filters.append(f"{video_out}subtitles='{escaped}':fontsdir=/assets/fonts[video_captioned]")
         video_out = "[video_captioned]"
@@ -6621,6 +7384,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         f":link=maximum:knee=3:mix=0.6,"
         f"lowpass=f=14000,"
         f"acompressor=threshold={_level_thresh}dB:ratio=1.8:attack=15:release=80:makeup={_makeup},"
+        f"loudnorm=I=-14:TP=-1:LRA=11:linear=true,"
         f"alimiter=limit=0.95"
     )
     # Force audio duration to match actual video duration (running_dur accounts for
@@ -6670,15 +7434,49 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 f"afade=t=in:st=0:d={_music_fade_in:.1f},"
                 f"afade=t=out:st={fade_out_start:.3f}:d={_music_fade_out:.1f},"
                 f"volume={music_vol:.4f}"
-                f"[music_track]"
+                f"[music_raw]"
+            )
+            # Sidechain ducking: compress music when voice is active.
+            # The voice track controls the compressor on the music — music ducks
+            # during speech and breathes up during pauses. This is the #1 audio
+            # technique that separates pro edits from amateur ones.
+            music_filters.append(
+                f"[music_raw][final_audio]sidechaincompress="
+                f"threshold=0.02:ratio=6:attack=15:release=300:"
+                f"level_sc=0.8:mix=0.7"
+                f"[music_ducked]"
             )
             music_filters.append(
-                f"[final_audio][music_track]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[mixed_audio]"
+                f"[final_audio][music_ducked]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[mixed_audio]"
             )
             audio_out = "[mixed_audio]"
             print(f"[render] background_music={music_track} vol={music_vol} duration={total_duration:.1f}s", flush=True)
         else:
             print(f"[render] WARNING: music track not found at {music_path} — skipping", flush=True)
+
+    # Depth blur mask — add as input, split video, blur, maskedmerge
+    depth_input_args = []
+    if depth_mask_path:
+        _depth_idx = 1 + len(sfx_input_args) // 2 + (1 if music_input_idx is not None else 0)
+        depth_input_args = ["-i", depth_mask_path]
+        # Split current video → blur one copy → maskedmerge with mask
+        # maskedmerge: where mask=white keep first input (sharp), mask=black keep second (blurred)
+        post_filters.append(f"{video_out}split[_db_sharp][_db_src]")
+        post_filters.append(f"[_db_src]gblur=sigma=6[_db_blurred]")
+        post_filters.append(
+            f"[_db_sharp][_db_blurred][{_depth_idx}:v]maskedmerge[video_depth]"
+        )
+        video_out = "[video_depth]"
+        print(f"[render] Depth blur mask at input index {_depth_idx}", flush=True)
+
+    # PNG caption overlay — add as input after all other inputs
+    caption_input_args = []
+    if caption_overlay_path:
+        _cap_idx = 1 + len(sfx_input_args) // 2 + (1 if music_input_idx is not None else 0) + (1 if depth_mask_path else 0)
+        caption_input_args = ["-i", caption_overlay_path]
+        post_filters.append(f"{video_out}[{_cap_idx}:v]overlay=format=auto:shortest=1[video_captioned]")
+        video_out = "[video_captioned]"
+        print(f"[render] PNG caption overlay at input index {_cap_idx}", flush=True)
 
     filter_complex = ";".join(video_filters + audio_filters + transition_filters + sfx_filter_strs + post_filters + music_filters)
     _total_expected_v = sum(round(d * 30) / 30 for d in effective_durations)
@@ -6698,6 +7496,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         ["-y"]
         + input_args
         + sfx_input_args
+        + depth_input_args
+        + caption_input_args
         + ["-filter_complex", filter_complex, "-map", video_out, "-map", audio_out]
         + encode_args
         + [output_path]
@@ -6790,6 +7590,8 @@ def handler(job):
         print(f"\n{'='*80}", flush=True)
         print(f"JOB {job_id}: \"{vibe}\"", flush=True)
         print(f"{'='*80}", flush=True)
+        _pipeline_start = time.time()
+        _timings = {}
         ensure_caption_fonts_registered()
 
         # Step 1 — Download
@@ -6802,10 +7604,12 @@ def handler(job):
             for chunk in r.iter_content(chunk_size=65536):
                 f.write(chunk)
         size_mb = os.path.getsize(source_path) / (1024*1024)
-        print(f"[pipeline] download complete: {size_mb:.1f}MB in {time.time()-t:.1f}s", flush=True)
+        _timings["download"] = time.time() - t
+        print(f"[pipeline] download complete: {size_mb:.1f}MB in {_timings['download']:.1f}s", flush=True)
 
         # Step 2 — Normalize + Transcribe + Gemini upload (parallel)
         send_progress(job_id, "normalize", 12, "Getting everything set up...", app_url)
+        t = time.time()
         print("[pipeline] step=normalize + transcribe + gemini_upload (parallel)", flush=True)
         source_path = normalize_source_video(source_path, work_dir)
         _probe = subprocess.run(
@@ -6892,18 +7696,28 @@ def handler(job):
         def _do_loudness():
             return measure_source_loudness(source_path)
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as early_pool:
+        def _do_beats():
+            try:
+                return detect_beats(source_path)
+            except Exception as _be:
+                print(f"[pipeline] Beat detection failed (non-fatal): {_be}", flush=True)
+                return []
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as early_pool:
             future_transcribe = early_pool.submit(_do_transcribe)
             future_gemini_upload = early_pool.submit(_do_gemini_upload)
             future_loudness = early_pool.submit(_do_loudness)
+            future_beats = early_pool.submit(_do_beats)
             transcript = future_transcribe.result()
             gemini_file_ref = future_gemini_upload.result()
             source_loudness = future_loudness.result()
+            source_beats = future_beats.result()
 
+        _timings["normalize_transcribe_upload"] = time.time() - t
         _dg_words = transcript.get("words", [])
         if len(_dg_words) == 0:
             raise RuntimeError("Deepgram transcription failed — 0 words returned. Cannot proceed without word timestamps.")
-        print(f"[pipeline] Deepgram: {len(_dg_words)} words", flush=True)
+        print(f"[pipeline] Deepgram: {len(_dg_words)} words ({_timings['normalize_transcribe_upload']:.1f}s parallel)", flush=True)
 
         print(f"[edit] User vibe: \"{vibe}\"", flush=True)
 
@@ -6944,7 +7758,9 @@ def handler(job):
         edit_plan["_source_path"] = source_path
         edit_plan["_face_positions"] = face_positions
         edit_plan["_source_loudness"] = source_loudness
-        print(f"[pipeline] edit recipe complete in {time.time()-t:.1f}s", flush=True)
+        edit_plan["_source_beats"] = source_beats
+        _timings["edit_recipe_faces"] = time.time() - t
+        print(f"[pipeline] edit recipe complete in {_timings['edit_recipe_faces']:.1f}s", flush=True)
         analysis = edit_plan.get("analysis_data") or {}
 
         print("[pipeline] step=parallel_render", flush=True)
@@ -6956,6 +7772,7 @@ def handler(job):
         edit_plan["_deepgram_words"] = transcript.get("words", [])
 
         render_elapsed = time.time() - t
+        _timings["render"] = render_elapsed
         print(f"[pipeline] parallel_render complete in {render_elapsed:.1f}s", flush=True)
         _enc_label = "NVENC" if _HAS_NVENC else "libx264/fast"
         print(f"[render] Encoding: {_enc_label} threads=auto", flush=True)
@@ -6990,6 +7807,7 @@ def handler(job):
         final_dur = _rv or (probe_duration(output_path) or 0)
 
         # ── B-roll compositing ────────────────────────────────────────────────────
+        t = time.time()
         broll_clips = edit_plan.get("broll_clips") or []
         if broll_clips:
             print(f"[broll] Fetching {len(broll_clips)} B-roll clip(s) in parallel...", flush=True)
@@ -7046,7 +7864,10 @@ def handler(job):
                 else:
                     print("[broll] No B-roll clips fetched successfully — skipping composite", flush=True)
 
+        _timings["broll"] = time.time() - t
+
         # ── Parallel group 2: cover frame + upload ────────────────────────────────
+        t = time.time()
         thumbnail_source_ts = edit_plan.get("thumbnail_timestamp")
         if thumbnail_source_ts is None:
             thumbnail_source_ts = (source_duration / 3.0) if source_duration > 0 else 1.0
@@ -7107,28 +7928,46 @@ def handler(job):
                 except Exception as thumb_err:
                     print(f"[pipeline] thumbnail upload failed (non-fatal): {thumb_err}", flush=True)
 
-        # Step 13.5 — Additional format exports (only if export_formats provided in job input)
+        # Step 13.5 — Additional format exports (parallelized)
         export_formats   = input_data.get("export_formats") or []
         exported_formats = []
-        for fmt in export_formats:
+
+        def _export_and_upload(fmt):
             ar  = str(fmt.get("aspect_ratio") or "").strip()
             url = str(fmt.get("upload_url") or "").strip()
             if not ar or not url:
-                continue
-            try:
-                fmt_path = os.path.join(work_dir, f"output_{ar.replace(':','x')}.mp4")
-                export_additional_format(output_path, ar, fmt_path)
-                with open(fmt_path, "rb") as f:
-                    fmt_resp = requests.put(url, data=f, headers={"Content-Type": "video/mp4"}, timeout=120)
-                    fmt_resp.raise_for_status()
-                fmt_size = os.path.getsize(fmt_path) / (1024 * 1024)
-                print(f"[pipeline] exported {ar} ({fmt_size:.1f}MB) -> uploaded", flush=True)
-                exported_formats.append({"aspect_ratio": ar, "size_mb": round(fmt_size, 1)})
-            except Exception as fmt_err:
-                print(f"[pipeline] export {ar} failed (non-fatal): {fmt_err}", flush=True)
+                return None
+            fmt_path = os.path.join(work_dir, f"output_{ar.replace(':','x')}.mp4")
+            export_additional_format(output_path, ar, fmt_path)
+            with open(fmt_path, "rb") as f:
+                fmt_resp = requests.put(url, data=f, headers={"Content-Type": "video/mp4"}, timeout=120)
+                fmt_resp.raise_for_status()
+            fmt_size = os.path.getsize(fmt_path) / (1024 * 1024)
+            print(f"[pipeline] exported {ar} ({fmt_size:.1f}MB) -> uploaded", flush=True)
+            return {"aspect_ratio": ar, "size_mb": round(fmt_size, 1)}
+
+        if export_formats:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(3, len(export_formats))) as fmt_executor:
+                fmt_futures = {fmt_executor.submit(_export_and_upload, fmt): fmt for fmt in export_formats}
+                for future in concurrent.futures.as_completed(fmt_futures):
+                    try:
+                        result = future.result()
+                        if result:
+                            exported_formats.append(result)
+                    except Exception as fmt_err:
+                        print(f"[pipeline] format export failed (non-fatal): {fmt_err}", flush=True)
+
+        _timings["upload_export"] = time.time() - t
+        _timings["total"] = time.time() - _pipeline_start
 
         print(f"\n{'='*80}", flush=True)
-        print(f"JOB {job_id} COMPLETE", flush=True)
+        print(f"JOB {job_id} COMPLETE — {_timings['total']:.1f}s total", flush=True)
+        print(f"  download:    {_timings.get('download', 0):.1f}s", flush=True)
+        print(f"  norm+tx+up:  {_timings.get('normalize_transcribe_upload', 0):.1f}s", flush=True)
+        print(f"  edit+faces:  {_timings.get('edit_recipe_faces', 0):.1f}s", flush=True)
+        print(f"  render:      {_timings.get('render', 0):.1f}s", flush=True)
+        print(f"  broll:       {_timings.get('broll', 0):.1f}s", flush=True)
+        print(f"  upload+exp:  {_timings.get('upload_export', 0):.1f}s", flush=True)
         print(f"{'='*80}\n", flush=True)
 
         send_progress(job_id, "complete", 100, "Your video is ready!", app_url)
@@ -7137,6 +7976,7 @@ def handler(job):
             "status": "success",
             "job_id": job_id,
             "render_time": round(render_elapsed, 1),
+            "pipeline_time": round(_timings.get("total", 0), 1),
             "output_size_mb": round(output_size_mb, 1),
             "edit_recipe": {k: v for k, v in edit_plan.items() if k != "analysis_data" and not k.startswith("_")},
             "cover_frame_timestamp": round(cover_frame_ts, 3),

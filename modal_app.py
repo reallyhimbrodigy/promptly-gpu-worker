@@ -6,7 +6,7 @@ import modal
 image = (
     modal.Image.from_registry("nvidia/cuda:12.2.0-runtime-ubuntu22.04", add_python="3.10")
     .run_commands(
-        "echo 'build v7'",
+        "echo 'build v9 - pin ffmpeg 8.1 stable'",
         "apt-get update && apt-get install -y ca-certificates && update-ca-certificates",
     )
     .apt_install(
@@ -33,7 +33,7 @@ image = (
     )
     .run_commands(
         "mkdir -p /opt/ffmpeg",
-        "cd /opt/ffmpeg && wget -q https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz -O ffmpeg.tar.xz",
+        "cd /opt/ffmpeg && wget -q https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz -O ffmpeg.tar.xz",
         "cd /opt/ffmpeg && tar -xJf ffmpeg.tar.xz --strip-components=1",
         "ln -sf /opt/ffmpeg/bin/ffmpeg /usr/local/bin/ffmpeg",
         "ln -sf /opt/ffmpeg/bin/ffprobe /usr/local/bin/ffprobe",
@@ -61,6 +61,7 @@ image = (
         "fastapi",
         "pydantic",
         "tqdm",
+        "Pillow",
     )
     .add_local_dir("src/assets/sounds", "/assets/sounds")
     .add_local_dir("src/assets/fonts", "/assets/fonts")
