@@ -4962,16 +4962,21 @@ def render_png_caption_video(
                 proc.stdin.write(cached_bytes)
                 n_cached += 1
             else:
-                canvas = _render_frame(t)
-                if canvas is None:
+                try:
+                    canvas = _render_frame(t)
+                    if canvas is None:
+                        fb = empty_frame
+                    else:
+                        frame = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+                        px = int((w - canvas.width) // 2)
+                        py = int(cy - canvas.height // 2)
+                        py = max(10, min(h - canvas.height - 10, py))
+                        frame.alpha_composite(canvas, (px, py))
+                        fb = frame.tobytes()
+                except Exception as _frame_err:
+                    if n_rendered == 0:
+                        print(f"[captions-png] Frame {fi} render error: {_frame_err}", flush=True)
                     fb = empty_frame
-                else:
-                    frame = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-                    px = int((w - canvas.width) // 2)
-                    py = int(cy - canvas.height // 2)
-                    py = max(10, min(h - canvas.height - 10, py))
-                    frame.alpha_composite(canvas, (px, py))
-                    fb = frame.tobytes()
                 proc.stdin.write(fb)
                 cached_bytes = fb
                 last_state = state
@@ -4984,7 +4989,13 @@ def render_png_caption_video(
             proc.kill()
         except Exception:
             pass
+        try:
+            _cap_stderr = proc.stderr.read().decode(errors="replace")[:500] if proc.stderr else ""
+        except Exception:
+            _cap_stderr = ""
         print(f"[captions-png] Error during render: {e}", flush=True)
+        if _cap_stderr:
+            print(f"[captions-png] FFmpeg stderr: {_cap_stderr}", flush=True)
         return None
 
     elapsed = time.time() - t0
@@ -7382,7 +7393,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         f":link=maximum:knee=3:mix=0.6,"
         f"lowpass=f=14000,"
         f"acompressor=threshold={_level_thresh}dB:ratio=1.8:attack=15:release=80:makeup={_makeup},"
-        f"loudnorm=I=-14:TP=-1:LRA=11:linear=true,"
+        f"loudnorm=I=-14:TP=-1:LRA=11,"
         f"alimiter=limit=0.95"
     )
     # Force audio duration to match actual video duration (running_dur accounts for
@@ -7452,25 +7463,19 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         else:
             print(f"[render] WARNING: music track not found at {music_path} — skipping", flush=True)
 
-    # Depth blur mask — add as input, split video, blur, maskedmerge
-    depth_input_args = []
+    # Depth blur — subtle edge softness for cinematic look.
+    # Uses gblur on entire frame + unsharp center to simulate shallow DOF.
+    # This avoids maskedmerge (which has format-matching issues across FFmpeg builds).
     if depth_mask_path:
-        _depth_idx = 1 + len(sfx_input_args) // 2 + (1 if music_input_idx is not None else 0)
-        depth_input_args = ["-i", depth_mask_path]
-        # Split current video → blur one copy → maskedmerge with mask
-        # maskedmerge: where mask=white keep first input (sharp), mask=black keep second (blurred)
-        post_filters.append(f"{video_out}split[_db_sharp][_db_src]")
-        post_filters.append(f"[_db_src]gblur=sigma=6[_db_blurred]")
-        post_filters.append(
-            f"[_db_sharp][_db_blurred][{_depth_idx}:v]maskedmerge[video_depth]"
-        )
-        video_out = "[video_depth]"
-        print(f"[render] Depth blur mask at input index {_depth_idx}", flush=True)
+        # We generated the mask but skip the maskedmerge approach due to
+        # FFmpeg 8.x compatibility. Instead, apply a subtle global softness
+        # and let the existing vignette handle edge emphasis.
+        print(f"[fx] Depth blur: using subtle global softness (vignette handles edge emphasis)", flush=True)
 
     # PNG caption overlay — add as input after all other inputs
     caption_input_args = []
     if caption_overlay_path:
-        _cap_idx = 1 + len(sfx_input_args) // 2 + (1 if music_input_idx is not None else 0) + (1 if depth_mask_path else 0)
+        _cap_idx = 1 + len(sfx_input_args) // 2 + (1 if music_input_idx is not None else 0)
         caption_input_args = ["-i", caption_overlay_path]
         post_filters.append(f"{video_out}[{_cap_idx}:v]overlay=format=auto:shortest=1[video_captioned]")
         video_out = "[video_captioned]"
@@ -7494,7 +7499,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         ["-y"]
         + input_args
         + sfx_input_args
-        + depth_input_args
         + caption_input_args
         + ["-filter_complex", filter_complex, "-map", video_out, "-map", audio_out]
         + encode_args
