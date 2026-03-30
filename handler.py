@@ -6374,8 +6374,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         log_prefix="[render]",
     )
 
-    # Single input: source video (no keyframe pre-processing needed)
-    input_args = ["-analyzeduration", "10000000", "-probesize", "10000000", "-i", render_source]
+    # Per-segment inputs with -ss/-t pre-seeking to avoid buffering the entire
+    # source video in memory (15 [0:v]trim= refs would force FFmpeg to keep all
+    # decoded frames until every trim filter has consumed them → OOM on 8GB).
+    input_args = []
     sample_rate = probe_audio_sample_rate(source_path) or 48000
 
     # Compute effective durations from recipe with per-segment speed applied.
@@ -6413,10 +6415,18 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     video_filters = []
     audio_filters = []
     face_positions = edit_plan.get("_face_positions") or []
+    n_segment_inputs = len(render_cuts)  # each segment gets its own input
 
     for i, cut in enumerate(render_cuts):
         start = float(cut["source_start"])
         end = float(cut["source_end"])
+        seg_dur = end - start
+        # Each segment is a separate input with pre-seeking
+        input_args += [
+            "-ss", f"{start:.3f}", "-t", f"{seg_dur:.3f}",
+            "-analyzeduration", "10000000", "-probesize", "10000000",
+            "-i", render_source,
+        ]
         speed = max(0.25, min(4.0, float(cut.get("speed") or 1.0)))
 
         # Build variable-speed setpts expression — speed curve flows continuously
@@ -6634,10 +6644,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             fade_start = max(0, eff_dur - 1.0)
             outro_filter = f"fade=t=out:st={fade_start:.3f}:d=1.0:color={fade_color}"
 
-        # Video: trim from source, then apply per-clip speed + filters
+        # Video: each segment has its own pre-seeked input (no trim needed)
         # fps=30 AFTER speed change to avoid frame count drift at clip boundaries
         v_chain = [
-            f"trim=start={start:.3f}:end={end:.3f}",
             "setpts=PTS-STARTPTS",
         ]
 
@@ -6683,24 +6692,23 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         if outro_filter:
             v_chain.append(outro_filter)
 
-        video_filters.append(f"[0:v]{','.join(v_chain)}[v{i}]")
+        video_filters.append(f"[{i}:v]{','.join(v_chain)}[v{i}]")
 
-        # Audio: trim from source, then apply per-clip filters
-        # asetrate shifts pitch intentionally (chipmunk fast / deep slow = the desired effect)
-        a_chain = [f"atrim=start={start:.3f}:end={end:.3f}", "asetpts=PTS-STARTPTS"]
+        # Audio: each segment has its own pre-seeked input (no atrim needed)
+        a_chain = ["asetpts=PTS-STARTPTS"]
         if abs(combined_speed - 1.0) > 0.001:
             a_chain.append(f"asetrate={sample_rate}*{combined_speed:.4f}")
             a_chain.append(f"aresample={sample_rate}")
         if i == n-1 and outro != "none":
             fade_start = max(0, eff_dur - 1.0)
             a_chain.append(f"afade=t=out:st={fade_start:.3f}:d=1.0")
-        audio_filters.append(f"[0:a]{','.join(a_chain)}[a{i}]")
+        audio_filters.append(f"[{i}:a]{','.join(a_chain)}[a{i}]")
 
     # ── SFX collection ───────────────────────────────────────────────────────
     sfx_input_args   = []
     sfx_filter_strs  = []
     sfx_audio_labels = []
-    extra_input_index = 1  # single input (keyframed source)
+    extra_input_index = n_segment_inputs  # SFX inputs start after segment inputs
 
     if True:
         _speech_segs = speech_segments or (edit_plan.get("analysis_data") or {}).get("speech", {}).get("segments") or []
@@ -7402,13 +7410,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     # Background music mix
     music_input_idx = None
+    music_input_args = []
     music_filters = []
     music_track = str(edit_plan.get("background_music") or "none").strip()
     if music_track != "none" and music_track in MUSIC_LIBRARY:
         music_path = os.path.join(_MUSIC_DIR, f"{music_track}.mp3")
         if os.path.exists(music_path):
-            music_input_idx = 1 + len(sfx_input_args) // 2
-            input_args += ["-stream_loop", "-1", "-i", music_path]
+            music_input_idx = n_segment_inputs + len(sfx_input_args) // 2
+            music_input_args = ["-stream_loop", "-1", "-i", music_path]
             total_duration = sum(effective_durations)
             # Adaptive music fades and volume based on video length
             # Short videos (<15s): quick fades, slightly louder music
@@ -7468,9 +7477,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # and let the existing vignette handle edge emphasis.
         print(f"[fx] Depth blur: using subtle global softness (vignette handles edge emphasis)", flush=True)
 
-    # Caption overlay is applied as a second pass to reduce peak memory.
-    # The main render already has 15+ video segments, xfade transitions, SFX mixing,
-    # and audio processing — adding a qtrle MOV decode on top exceeds 8GB.
+    # PNG caption overlay — single pass, added as last input
+    caption_input_args = []
+    if caption_overlay_path:
+        _cap_idx = n_segment_inputs + len(sfx_input_args) // 2 + len(music_input_args) // 2
+        caption_input_args = ["-i", caption_overlay_path]
+        post_filters.append(f"{video_out}[{_cap_idx}:v]overlay=format=auto:eof_action=pass[video_captioned]")
+        video_out = "[video_captioned]"
+        print(f"[render] PNG caption overlay at input index {_cap_idx}", flush=True)
 
     filter_complex = ";".join(video_filters + audio_filters + transition_filters + sfx_filter_strs + post_filters + music_filters)
     _total_expected_v = sum(round(d * 30) / 30 for d in effective_durations)
@@ -7486,45 +7500,20 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         "-max_muxing_queue_size","1024",
     ]
 
-    # If we have caption overlay, render to a temp file first, then overlay captions
-    if caption_overlay_path:
-        _render_target = os.path.join(work_dir, "render_no_captions.mp4")
-    else:
-        _render_target = output_path
-
     args = (
         ["-y"]
         + input_args
         + sfx_input_args
+        + music_input_args
+        + caption_input_args
         + ["-filter_complex", filter_complex, "-map", video_out, "-map", audio_out]
         + encode_args
-        + [_render_target]
+        + [output_path]
     )
 
-    print(f"[render] Single-pass render: {n} segments from source, ~{running_dur:.1f}s output", flush=True)
+    print(f"[render] Single-pass render: {n} segments ({n_segment_inputs} inputs) from source, ~{running_dur:.1f}s output", flush=True)
 
     run_ffmpeg(args)
-
-    # Second pass: overlay PNG captions onto the rendered video
-    if caption_overlay_path:
-        print(f"[render] Overlaying PNG captions (second pass)...", flush=True)
-        _overlay_args = [
-            "-y",
-            "-i", _render_target,
-            "-i", caption_overlay_path,
-            "-filter_complex", "[0:v][1:v]overlay=format=auto:eof_action=pass[v]",
-            "-map", "[v]", "-map", "0:a", "-c:a", "copy",
-        ] + get_encode_args("high") + [
-            "-pix_fmt", "yuv420p",
-            "-movflags", "+faststart",
-            output_path,
-        ]
-        run_ffmpeg(_overlay_args)
-        # Clean up intermediate file
-        try:
-            os.remove(_render_target)
-        except OSError:
-            pass
 
 
 
