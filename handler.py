@@ -458,6 +458,7 @@ def detect_face_positions(video_path, sample_timestamps):
 
         found = False
         best_cx, best_cy = center_x, center_y
+        best_conf = 0.0
 
         if use_dnn:
             h, w = frame.shape[:2]
@@ -468,7 +469,6 @@ def detect_face_positions(video_path, sample_timestamps):
             net.setInput(blob)
             detections = net.forward()
 
-            best_conf = 0.0
             best_area = 0
             for det_i in range(detections.shape[2]):
                 confidence = float(detections[0, 0, det_i, 2])
@@ -779,7 +779,7 @@ def detect_beats(source_path):
 def detect_scene_cuts(video_path, threshold=3):
     result = subprocess.run(
         ["ffmpeg", "-i", video_path, "-vf", f"scdet=threshold={threshold}", "-f", "null", "-"],
-        capture_output=True, text=True
+        capture_output=True, text=True, timeout=120
     )
     cuts = []
     for m in re.finditer(r"lavfi\.scd\.time:\s*([\d.]+)", result.stderr):
@@ -1242,9 +1242,10 @@ You are a professional short-form editor. You have the exact transcript with mil
 DEAD AIR IN SPEECH CONTENT:
 Look at the gaps between words in the transcript:
 - Under 0.10 seconds between words — natural word spacing. KEEP. This is how speech flows.
-- 0.10 seconds or more between words — this is a pause, breath, or dead air. REMOVE that gap using a remove_words time range.
-- Filler words (uh, um, hmm, er, ah) — remove them using word_index.
-- Stutters and false starts — when the speaker starts a word then restarts it ("she shou- shouldn't", "I said, who is... I said, who is he?", "I'm going to... I'm gonna"), remove the false start word(s) using word_index and keep only the corrected version. This is mandatory — a professional editor never leaves a stutter in the final cut.
+- 0.5 seconds or more between words — this is dead air. REMOVE that gap using a remove_words time range with start/end.
+- Gaps between 0.10 and 0.5 seconds — the pipeline auto-collapses these. Do NOT mark them.
+- Filler words (uh, um, hmm, er, ah) — the pipeline auto-removes these. Do NOT mark them.
+- Stutters and false starts — the pipeline auto-removes these. Do NOT mark them.
 
 HOW TO MARK REMOVALS PRECISELY:
 - Use word_index when removing a specific spoken word.
@@ -1324,8 +1325,8 @@ Word-level edit control:
     - "And then, you know, he just left" → "you know" is FILLER, remove it
 
   REMOVE:
-  - Filler words: "um", "uh", "like" (when filler), "you know" (when filler), "basically", "literally"
-  - ALL silence and dead air — any gap with no speech, no matter how short
+  - Filler words: "like" (when filler), "you know" (when filler), "basically", "literally", "honestly", "obviously"
+  - Silence gaps longer than 0.5 seconds — mark with start/end time ranges. Gaps under 0.5s are auto-collapsed by the pipeline.
   - Genuine off-topic garbage that has nothing to do with the video's subject
 
   KEEP EVERYTHING ELSE. All actual spoken content stays. This includes:
@@ -1373,33 +1374,28 @@ Global parameters:
 
   Speed range: 0.67x to 1.4x. Never go outside this range.
 
-  LEARN FROM THE EXAMPLES:
-  Study the TikTok example videos injected above. They are PERFECT examples of speed ramping
-  done right — where the fast moments are, where the slow moments are, and how the ramp
-  transitions feel. These are not suggestions, they are the standard. Match their timing
-  patterns and pacing decisions in your edit.
-
+  GUIDELINES:
   - Slow moments MUST land on spoken words (the actual punchline), never on silence.
   - Use the Deepgram word timestamps to place keypoints precisely on the right words.
   - NEVER use 1.0x — every moment is either fast or slow.
 
   If speed ramping is not requested in the vibe, set speed_curve to "none".
 
-  caption_style — word-by-word animated captions synced to speech:
-    none — no captions. Use when captions are already burned into the footage.
-    capcut — bold white text with black outline, active word highlighted in yellow with scale bounce animation. This is the standard TikTok/Reels caption style. Use this as the default.
-    word_pop — one word at a time, ALL CAPS, white with black outline, spring bounce animation. Keywords highlighted in yellow. Clean and punchy.
-    hormozi — uppercase bold text, active word pops with scale bounce, keyword words highlighted in orange-red. Aggressive, high-energy style inspired by Alex Hormozi. Use for motivational/business content.
-    dynamic — professional dynamic typography. Words stack vertically and build up on screen. Regular words are small lowercase white. Emphasis keywords are MASSIVE uppercase yellow/gold, filling the frame width. This is the premium Captions-app style — use for high-production content, storytime, anything that should feel professionally edited.
+  caption_style — word-by-word animated captions synced to speech. Choose the style that matches the content:
+    none — no captions. Use ONLY when captions are already burned into the footage.
+    captions_dynamic — THE premium Captions-app style. Two-line stacked groups with mixed font sizes: regular words small on line 1, emphasis keywords MASSIVE on line 2 in cyan-blue. No outline, just subtle shadow. Word echo effect on high-intensity moments. This is the most modern, professional look. Best for: storytime, rants, professional content, product reviews, anything that should look like a premium AI edit.
+    captions_clean — clean Captions-app style. 2-3 words at a time, centered, NO outline (shadow only). Keywords highlighted in cyan-blue with larger font. Smooth fade-in/fade-out, no bouncy animations. Very modern and premium. Best for: calm, thoughtful, serious, documentary-style, interview content.
+    dynamic — dynamic typography with vertical word stacking. Emphasis keywords in yellow/gold. Best for: when the creator specifically wants a more traditional stacking style with visible outlines.
+    clean — elegant, minimal, lowercase flowing text. Keywords get warm gold italic highlight. Best for: when the creator wants a traditional clean look.
+    impact — aggressive ALL CAPS with spring-bounce per word group. Keywords highlighted in yellow. Best for: hype content, announcements, fitness, sports.
+    hormozi — uppercase bold, active word pops with scale bounce, keywords in orange-red. Best for: motivational speeches, business content, high-energy monologues.
+    capcut — bold white with black outline, active word highlighted in yellow. Standard TikTok/Reels style. Best for: casual conversation, vlogs, tutorials, Q&A, interviews.
+    word_pop — one word at a time, ALL CAPS, spring bounce. Best for: fast-paced edits, speed ramping, comedy skits, trend content.
+    keyword_pop — standard text with specific terms highlighted in green. Best for: educational content, listicles, explainers where terms matter.
 
-    Caption style is NOT optional — you MUST choose the right style for the content:
-    - dynamic: storytime, rants, high-energy, professional content, anything that should feel like a premium edit
-    - hormozi: motivational, business, confrontational, high-energy monologues
-    - capcut: casual conversation, vlogs, tutorials, Q&A, interviews
-    - word_pop: fast-paced edits, speed ramping videos, trend content, comedy skits
-    - keyword_pop: educational content, listicles, explainers where specific terms matter
+  STYLE SELECTION GUIDE: Default to "captions_dynamic" for most content — it produces the most modern, professional result. Use "captions_clean" for slower, more thoughtful content. Use "capcut" or "hormozi" only if the vibe specifically requests those styles or the content is a casual storytime/interview. Use "word_pop" only for fast-paced edits with speed ramping.
 
-  caption_position — where captions appear on screen. Always use "lower-third" — this places captions in the safe zone below faces and above the TikTok/Reels platform UI. This is the standard caption placement used by every major short-form editor.
+  caption_position — where captions appear on screen. Use "lower-third" (default) for talking head content. The pipeline automatically adjusts positioning based on face detection to avoid overlap.
 
   audio_denoise: true / false — AI noise removal for room tone, hiss, fan noise.
 
@@ -1414,12 +1410,12 @@ Global parameters:
 Emphasis moments — THE MOST IMPORTANT PART OF YOUR EDIT. These are the 2-5 moments in the video that should HIT HARDEST. Every emphasis moment drives caption keyword highlighting, automatic zoom punches, and sound effects simultaneously. Think like a professional editor: which moments make the viewer feel something?
 
   emphasis_moments: [
-    {{"t": <seconds>, "word_indices": [<n>, ...], "type": "<punchline|reveal|statement|reaction>", "intensity": "<high|medium>"}}
+    {{"t": <seconds>, "word_indices": [<n>, ...], "type": "<punchline|revelation|statement|reaction|question|transition>", "intensity": "<high|medium>"}}
   ]
 
   - t: the source timestamp where the moment peaks (use word timestamps for precision)
   - word_indices: the 1-3 word indices that ARE the emphasis (these become the highlighted keywords in captions)
-  - type: what kind of moment (punchline, reveal, strong statement, emotional reaction)
+  - type: what kind of moment (punchline, revelation, statement, reaction, question, transition)
   - intensity: "high" = the biggest moment (gets cut-zoom + bass hit), "medium" = notable but not peak
 
   Every video MUST have at least 2 emphasis_moments. Most have 3-5. These moments are what separate a professional edit from a raw upload.
@@ -1461,7 +1457,46 @@ Sound effects — audio accents that make the edit feel physical and professiona
     Example: "she texted me at 3am" → ding on "texted"
     Example: "I got a notification" → ding on "notification"
 
-  swoosh — air swipe. Use ONLY on actual scene transitions (wipes, fades). If all transitions are hard cuts, do NOT use swoosh — hard cuts are silent by design. The swoosh sells the motion of a wipe transition.
+  swoosh — air swipe. Use ONLY on actual scene transitions (wipes, fades). If all transitions are hard cuts, do NOT use swoosh — hard cuts are silent by design. The swoosh sells the motion of a wipe transition. Pair each swoosh with the transition it accompanies.
+
+  Transitions — the visual effect between two clips. Most cuts should be HARD CUTS (transition_out: "none") — they're fast, clean, and professional. Transitions are a tool, not decoration. Use them sparingly and with purpose.
+
+  Available transition_out values and when to use each:
+
+  none — hard cut. DEFAULT. Use for 90%+ of cuts. Continuous speech flows best with silent hard cuts. Never add a transition just because you can.
+
+  fadewhite — brief white flash between clips. Use at major topic shifts or emotional resets. Feels like a camera flash or memory shift. 1-2 per video maximum.
+    Example: speaker finishes one story, starts a completely different one → fadewhite
+
+  fadeblack — fade through black. Use for somber or serious tone shifts. Feels like a scene ending in a film.
+    Example: speaker delivers a heavy statement, then shifts to reflection → fadeblack
+
+  dissolve — cross-dissolve blend. Smooth overlap between clips. Use for dreamy, reflective, or nostalgic transitions.
+    Example: speaker reminisces about the past → dissolve
+
+  whip_left — fast wipe with motion blur sweeping left. High-energy, punchy. Use for comedic cuts, rapid topic changes, or "meanwhile" moments.
+    Example: "and then on the OTHER hand..." → whip_left
+
+  whip_right — fast wipe with motion blur sweeping right. Same energy as whip_left but opposite direction. Alternate with whip_left if using multiple whip transitions.
+
+  smoothleft / smoothright / smoothup / smoothdown — smooth directional slides. More subtle than whip transitions. Use for structured content where you're moving through a list or sequence.
+    Example: "first... second... third..." → smoothright between each point
+
+  wipeleft / wiperight / wipeup / wipedown — clean directional wipes without motion blur. More editorial, less energetic than whips. Good for interview-style content.
+
+  flash — brief bright flash (more intense than fadewhite). Use for shock moments or dramatic reveals.
+
+  glitch — pixelated digital glitch effect. Use for tech content, internet culture, or when something "breaks" in the story.
+    Example: "the app completely crashed" → glitch
+
+  zoomin — zoom-in transition between clips. Use for escalation or "zooming in" on a topic.
+
+  Rules:
+  - Default to "none" (hard cut) for every transition. Only add a transition when it EARNS its place.
+  - Never use the same transition type more than 2-3 times in a single video.
+  - Match transition energy to content energy: somber content gets dissolve/fadeblack, high-energy gets whip/flash.
+  - Pair swoosh sound effects with whip/wipe/smooth transitions. Hard cuts are SILENT.
+  - transition_out goes on the clip BEFORE the transition (the outgoing clip).
 
   shutter — camera shutter click. Use when the speaker references taking a photo, screenshots, or camera-related actions. Also works on visual "freeze frame" moments.
     Example: "I took a screenshot" → shutter on "screenshot"
@@ -1483,6 +1518,47 @@ Sound effects — audio accents that make the edit feel physical and professiona
   sound_effects: [
     {{"t": <seconds>, "sound": "<thud|reverb_hit|pop|ching|ding|swoosh|shutter|typing>", "word": "<trigger word>"}}
   ]
+
+B-roll — contextual stock footage overlays that illustrate what the speaker is talking about. B-roll makes the edit feel like a professional production, not just a talking head.
+
+  WHEN TO USE B-ROLL:
+  - When the speaker describes something that isn't visible (a place, an object, a concept)
+  - During topic transitions to create visual variety
+  - When the speaker says "this is what it looks like" or references something external
+  - During longer stretches of talking head where the viewer might get bored
+
+  WHEN NOT TO USE:
+  - When the speaker IS the content (emotional reactions, demonstrations, tutorials)
+  - When the speaker is showing something on screen already
+  - When the video is under 15 seconds (too short for B-roll to add value)
+  - Never more than 3 B-roll clips per video
+
+  Each B-roll clip replaces the video (not audio) for its duration — the speaker's voice continues over the B-roll footage.
+
+  broll_clips: [
+    {{"keyword": "<search term for stock footage>", "timestamp": <source seconds where B-roll starts>, "duration": <seconds, 1-6>}}
+  ]
+
+  Rules:
+  - keyword: descriptive search term for Pexels video search. Be specific ("city skyline night", "person typing laptop", "coffee shop interior"). Avoid abstract terms.
+  - timestamp: source timeline position where this B-roll should appear. Place it DURING speech about the topic, not before.
+  - duration: how long to show the B-roll (1-6 seconds). Shorter is usually better.
+  - Maximum 3 B-roll clips per video. Most videos need 0-2.
+  - Space B-roll clips at least 5 seconds apart.
+
+Visual effects — additional visual treatments for emphasis moments.
+
+  visual_effects: [
+    {{"type": "white_flash", "t": <source seconds>}}
+  ]
+
+  white_flash — a brief brightness spike (like a camera flash) at a specific moment. Use at the peak of a high-intensity emphasis moment to make it hit harder visually. Maximum 1-2 per video.
+    Example: speaker delivers the punchline → white_flash at that exact moment
+
+  Rules:
+  - Use sparingly — 0-2 per video maximum.
+  - Only on "high" intensity emphasis moments.
+  - The flash happens at the source timestamp, the pipeline handles time projection.
 
 === RESPONSE FORMAT ===
 
@@ -1510,13 +1586,22 @@ Then output the JSON:
   "speed_curve": [{{"t": <seconds>, "speed": <multiplier>}}, ...] or "none",
   "opening_zoom": "<slow_in|slow_out|none>",
   "emphasis_moments": [
-    {{"t": <seconds>, "word_indices": [<n>, ...], "type": "<punchline|reveal|statement|reaction>", "intensity": "<high|medium>"}}
+    {{"t": <seconds>, "word_indices": [<n>, ...], "type": "<punchline|revelation|statement|reaction|question|transition>", "intensity": "<high|medium>"}}
   ],
   "text_overlays": [
     {{"text": "<text>", "position": "<pos>", "appear_at_clip": <n>, "style": "<style>"}}
   ],
   "sound_effects": [
     {{"t": <seconds>, "sound": "<sound>", "word": "<trigger>"}}
+  ],
+  "broll_clips": [
+    {{"keyword": "<search term>", "timestamp": <source seconds>, "duration": <seconds>}}
+  ],
+  "visual_effects": [
+    {{"type": "white_flash", "t": <source seconds>}}
+  ],
+  "transitions": [
+    {{"after_word_index": <n>, "type": "<fadewhite|fadeblack|dissolve|whip_left|whip_right|smoothleft|smoothright|smoothup|smoothdown|wipeleft|wiperight|wipeup|wipedown|flash|glitch|zoomin>"}}
   ],
   "remove_words": [
     {{"word_index": <n>, "reason": "<stutter|false_start|filler>"}} or
@@ -1701,6 +1786,7 @@ RULES FOR USING THESE TIMESTAMPS:
                     temperature=0.6,
                     max_output_tokens=16384,
                 ),
+                request_options={"timeout": 300},
             )
             candidates = getattr(response, "candidates", None) or []
             if candidates:
@@ -1713,6 +1799,7 @@ RULES FOR USING THESE TIMESTAMPS:
                             temperature=0.6,
                             max_output_tokens=32768,
                         ),
+                        request_options={"timeout": 300},
                     )
                     retry_candidates = getattr(response, "candidates", None) or []
                     if retry_candidates and getattr(retry_candidates[0], "finish_reason", None) == 2:
@@ -1815,6 +1902,8 @@ RULES FOR USING THESE TIMESTAMPS:
                 if re > rs:
                     if video_duration > 0:
                         re = min(re, video_duration)
+                    if re <= rs:
+                        continue
                     normalized_remove_words.append({
                         "start": round(rs, 3),
                         "end": round(re, 3),
@@ -1871,10 +1960,9 @@ RULES FOR USING THESE TIMESTAMPS:
     elif isinstance(raw_cuts, list):
         print("[generate-edit] WARNING: Gemini returned cuts instead of remove_words — using legacy path", flush=True)
         for clip in raw_cuts:
-            clip["freeze_frame"] = False
-            clip["motion_blur_transition"] = False
-            clip.pop("speed_ramp", None)
             clip.pop("freeze_frame", None)
+            clip.pop("motion_blur_transition", None)
+            clip.pop("speed_ramp", None)
             clip.pop("motion_blur_transition", None)
             clip.pop("speed_segments", None)
 
@@ -1897,6 +1985,12 @@ RULES FOR USING THESE TIMESTAMPS:
                 print(f"[generate-edit] Fixing clip {i} overlap: source_start {curr_start} -> {prev_end}", flush=True)
                 validated_cuts[i]["source_start"] = prev_end
 
+        # Remove clips that ended up with zero or negative duration after overlap fix
+        validated_cuts = [
+            c for c in validated_cuts
+            if float(c["source_end"]) - float(c["source_start"]) > 0.01
+        ]
+
         for i in range(1, len(validated_cuts)):
             prev_end = validated_cuts[i - 1]["source_end"]
             curr_start = validated_cuts[i]["source_start"]
@@ -1911,28 +2005,80 @@ RULES FOR USING THESE TIMESTAMPS:
     else:
         raise ValueError("Gemini response missing both remove_words and cuts")
 
-    vibe_lower = vibe.lower() if isinstance(vibe, str) else ""
-    has_transition_request = any(
-        word in vibe_lower for word in ["transition", "transitions", "white fade", "fadewhite", "whip", "flash"]
-    )
-    if not has_transition_request:
-        for clip in validated_cuts:
-            if clip.get("transition_out") != "none":
-                print(f"[generate-edit] Removing transition '{clip['transition_out']}' (not requested in vibe)", flush=True)
-                clip["transition_out"] = "none"
+    # Apply transitions from Gemini's transitions array onto clips.
+    # Each transition has after_word_index — find the clip whose source range
+    # contains that word's timestamp and set transition_out on it.
+    raw_transitions = edit_plan.get("transitions") or []
+    if raw_transitions and _dg_words:
+        _valid_tr_types = {
+            "none", "fade", "fadeblack", "fadewhite", "dissolve",
+            "wipeleft", "wiperight", "wipeup", "wipedown",
+            "smoothleft", "smoothright", "smoothup", "smoothdown",
+            "whip_left", "whip_right", "flash", "glitch", "zoomin",
+        }
+        # Build set of removed word indices to handle transitions on removed words
+        _tr_removed = set()
+        for rw in (edit_plan.get("remove_words") or []):
+            if "word_index" in rw:
+                _tr_removed.add(int(rw["word_index"]))
+        for tr in raw_transitions:
+            if not isinstance(tr, dict):
+                continue
+            tr_type = str(tr.get("type") or "none").lower()
+            if tr_type not in _valid_tr_types or tr_type == "none":
+                continue
+            awi = tr.get("after_word_index")
+            if awi is None or not isinstance(awi, (int, float)):
+                continue
+            awi = int(awi)
+            if awi < 0 or awi >= len(_dg_words):
+                print(f"[generate-edit] Transition '{tr_type}' skipped — word index {awi} out of bounds", flush=True)
+                continue
+            # If referenced word was removed, find the nearest kept word before it
+            if awi in _tr_removed:
+                _found = False
+                for _wi in range(awi - 1, -1, -1):
+                    if _wi not in _tr_removed:
+                        awi = _wi
+                        _found = True
+                        break
+                if not _found:
+                    print(f"[generate-edit] Transition '{tr_type}' skipped — no kept word before index {tr.get('after_word_index')}", flush=True)
+                    continue
+            word_end = float(_dg_words[awi].get("end") or 0)
+            # Find the clip that contains this word (with 50ms tolerance)
+            _applied = False
+            for ci, clip in enumerate(validated_cuts):
+                cs = float(clip["source_start"])
+                ce = float(clip["source_end"])
+                if cs - 0.05 <= word_end <= ce + 0.05 and ci < len(validated_cuts) - 1:
+                    clip["transition_out"] = tr_type
+                    print(f"[generate-edit] Transition '{tr_type}' applied to clip {ci} (after word {awi})", flush=True)
+                    _applied = True
+                    break
+            if not _applied:
+                print(f"[generate-edit] Transition '{tr_type}' at word {awi} ({word_end:.3f}s) — no matching clip found", flush=True)
 
-    visual_cuts = sorted(float(sc) for sc in (analysis.get("visual_cuts") or []) if sc is not None)
-    if visual_cuts:
-        for i in range(len(validated_cuts) - 1):
-            clip_end = round(validated_cuts[i]["source_end"], 1)
-            has_scene_change = any(abs(clip_end - sc) < 0.5 for sc in visual_cuts)
-            if not has_scene_change and str(validated_cuts[i].get("transition_out") or "none").lower() != "none":
-                print(
-                    f"[generate-edit] Stripping transition={validated_cuts[i]['transition_out']} "
-                    f"from clip {i} (no scene change at {clip_end}s)",
-                    flush=True,
-                )
-                validated_cuts[i]["transition_out"] = "none"
+    # Smart transition limits: max 4 transitions per video, max 2 of the same type.
+    # Prevents Gemini from over-using transitions (which looks amateur, not professional).
+    _MAX_TRANSITIONS = 4
+    _MAX_SAME_TYPE = 2
+    _tr_clips = [(i, c) for i, c in enumerate(validated_cuts) if str(c.get("transition_out") or "none") != "none"]
+    if len(_tr_clips) > _MAX_TRANSITIONS:
+        # Keep only the first N transitions
+        for i, c in _tr_clips[_MAX_TRANSITIONS:]:
+            print(f"[generate-edit] Stripping excess transition '{c['transition_out']}' from clip {i} (>{_MAX_TRANSITIONS} total)", flush=True)
+            c["transition_out"] = "none"
+    # Enforce per-type limit
+    _tr_type_counts = {}
+    for i, c in enumerate(validated_cuts):
+        tr = str(c.get("transition_out") or "none")
+        if tr == "none":
+            continue
+        _tr_type_counts[tr] = _tr_type_counts.get(tr, 0) + 1
+        if _tr_type_counts[tr] > _MAX_SAME_TYPE:
+            print(f"[generate-edit] Stripping duplicate transition '{tr}' from clip {i} (>{_MAX_SAME_TYPE} of same type)", flush=True)
+            c["transition_out"] = "none"
 
     edit_plan.setdefault("background_music", "none")
     edit_plan.setdefault("caption_style", "none")
@@ -1962,10 +2108,40 @@ RULES FOR USING THESE TIMESTAMPS:
     edit_plan["beat_sync"] = False
     edit_plan.setdefault("sound_effects", [])
     edit_plan.setdefault("emphasis_moments", [])
+    edit_plan.setdefault("visual_effects", [])
     edit_plan.pop("teal_orange", None)
     edit_plan.pop("beat_sync", None)
 
-    valid_caption_styles = {"none", "capcut", "word_pop", "hormozi", "keyword_pop", "dynamic"}
+    # ── B-roll clips validation ───────────────────────────────────────────
+    raw_broll = edit_plan.get("broll_clips") or []
+    validated_broll = []
+    for _br in raw_broll:
+        if not isinstance(_br, dict):
+            continue
+        _br_kw = str(_br.get("keyword") or "").strip()
+        _br_ts = float(_br.get("timestamp") or 0)
+        _br_dur = float(_br.get("duration") or 2.0)
+        if _br_kw and _br_ts >= 0 and 1.0 <= _br_dur <= 8.0:
+            validated_broll.append({"keyword": _br_kw, "timestamp": _br_ts, "duration": min(_br_dur, 6.0)})
+    edit_plan["broll_clips"] = validated_broll[:5]  # max 5 B-roll clips
+    if validated_broll:
+        print(f"[broll] Gemini requested {len(validated_broll)} B-roll clip(s)", flush=True)
+
+    # ── Visual effects validation ─────────────────────────────────────────
+    raw_vfx = edit_plan.get("visual_effects") or []
+    validated_vfx = []
+    valid_vfx_types = {"white_flash"}
+    for _vf in raw_vfx:
+        if not isinstance(_vf, dict):
+            continue
+        _vf_type = str(_vf.get("type") or "").strip()
+        if _vf_type in valid_vfx_types:
+            validated_vfx.append(_vf)
+    edit_plan["visual_effects"] = validated_vfx[:10]  # max 10 VFX
+    if validated_vfx:
+        print(f"[fx] Gemini requested {len(validated_vfx)} visual effect(s)", flush=True)
+
+    valid_caption_styles = {"none", "capcut", "word_pop", "hormozi", "keyword_pop", "dynamic", "clean", "impact", "captions_clean", "captions_dynamic"}
     if str(edit_plan.get("caption_style") or "").lower() not in valid_caption_styles:
         edit_plan["caption_style"] = "capcut"
     else:
@@ -2006,7 +2182,7 @@ RULES FOR USING THESE TIMESTAMPS:
                 if ds > 0.3 and dt < MIN_RAMP_SECS:
                     # Spread the two keypoints symmetrically around their midpoint
                     mid_t = (speed_curve[i]["t"] + speed_curve[i + 1]["t"]) / 2
-                    speed_curve[i]["t"] = round(mid_t - MIN_RAMP_SECS / 2, 3)
+                    speed_curve[i]["t"] = round(max(0.0, mid_t - MIN_RAMP_SECS / 2), 3)
                     speed_curve[i + 1]["t"] = round(mid_t + MIN_RAMP_SECS / 2, 3)
 
             speeds = [kp["speed"] for kp in speed_curve]
@@ -2061,6 +2237,8 @@ RULES FOR USING THESE TIMESTAMPS:
         if isinstance(em, dict) and "t" in em:
             try:
                 t = float(em["t"])
+                if t < 0 or (video_duration > 0 and t > video_duration):
+                    continue
                 word_indices = em.get("word_indices", [])
                 if not isinstance(word_indices, list):
                     word_indices = []
@@ -2068,9 +2246,15 @@ RULES FOR USING THESE TIMESTAMPS:
                 if intensity not in ("high", "medium"):
                     intensity = "medium"
                 em_type = str(em.get("type") or "statement").lower()
+                _valid_em_types = {"punchline", "statement", "question", "reaction", "transition", "revelation"}
+                if em_type not in _valid_em_types:
+                    em_type = "statement"
+                _valid_indices = [int(i) for i in word_indices if isinstance(i, (int, float))]
+                if not _valid_indices:
+                    continue
                 emphasis_moments.append({
                     "t": t,
-                    "word_indices": [int(i) for i in word_indices if isinstance(i, (int, float))],
+                    "word_indices": _valid_indices,
                     "type": em_type,
                     "intensity": intensity,
                 })
@@ -2085,12 +2269,18 @@ RULES FOR USING THESE TIMESTAMPS:
 
     # Auto-derive caption_keywords from emphasis_moments if not provided
     if not edit_plan.get("caption_keywords") and emphasis_moments and _dg_words:
+        # Build set of explicitly removed word indices to avoid deriving keywords from them
+        _removed_word_indices = set()
+        for rw in (edit_plan.get("remove_words") or []):
+            if "word_index" in rw:
+                _removed_word_indices.add(int(rw["word_index"]))
+        _KEYWORD_STOPWORDS = {"the", "and", "for", "but", "get", "got", "was", "are", "this", "that", "with", "from", "have", "has", "had", "not", "been", "were", "will", "can", "did", "does", "its", "they", "them", "then", "than", "what", "when", "where", "which", "who", "whom", "how", "all", "each", "every", "both", "few", "more", "most", "some", "such", "only", "very", "just", "also", "into", "over", "like", "about", "know", "think", "said", "says", "going", "really", "actually"}
         auto_keywords = set()
         for em in emphasis_moments:
             for idx in em.get("word_indices", []):
-                if 0 <= idx < len(_dg_words):
+                if 0 <= idx < len(_dg_words) and idx not in _removed_word_indices:
                     kw = re.sub(r"[.,!?;:'\"\\]", "", str(_dg_words[idx].get("word") or "").lower())
-                    if len(kw) >= 3:
+                    if len(kw) >= 4 and kw not in _KEYWORD_STOPWORDS:
                         auto_keywords.add(kw)
         if auto_keywords:
             edit_plan["caption_keywords"] = list(auto_keywords)
@@ -2110,7 +2300,7 @@ RULES FOR USING THESE TIMESTAMPS:
             sound = str(sfx["sound"]).lower()
             # Resolve aliases
             sound = _SFX_ALIASES.get(sound, sound)
-            if sound in valid_sounds and t >= 0:
+            if sound in valid_sounds and t >= 0 and (video_duration <= 0 or t <= video_duration):
                 word = str(sfx.get("word") or "").strip().lower()
 
                 # ching: only on money-related trigger words
@@ -2123,7 +2313,7 @@ RULES FOR USING THESE TIMESTAMPS:
 
                 # ding: only on notification-related trigger words
                 if sound == "ding":
-                    VALID_DING_WORDS = {"text", "notification", "email", "message", "alert", "ping"}
+                    VALID_DING_WORDS = {"text", "texted", "notification", "email", "message", "alert", "ping", "dm"}
                     word_clean = word.strip(".,!?;:'\"")
                     if word_clean not in VALID_DING_WORDS:
                         print(f"[generate-edit] Filtered out ding on '{word}' at {t:.1f}s (not an approved trigger)", flush=True)
@@ -2176,7 +2366,12 @@ RULES FOR USING THESE TIMESTAMPS:
 
     valid_grain = {"none", "subtle", "medium", "heavy"}
     valid_vignette = {"none", "light", "medium", "strong"}
-    valid_transitions = {"none", "fadewhite", "whip_left", "whip_right"}
+    valid_transitions = {
+        "none", "fade", "fadeblack", "fadewhite", "dissolve",
+        "wipeleft", "wiperight", "wipeup", "wipedown",
+        "smoothleft", "smoothright", "smoothup", "smoothdown",
+        "whip_left", "whip_right", "flash", "glitch", "zoomin",
+    }
     if edit_plan.get("grain") not in valid_grain:
         edit_plan["grain"] = "none"
     if edit_plan.get("vignette") not in valid_vignette:
@@ -2193,13 +2388,8 @@ RULES FOR USING THESE TIMESTAMPS:
     for clip_entry in validated_cuts:
         transition = str(clip_entry.get("transition_out") or "").lower()
         if transition not in valid_transitions:
-            if "fade" in transition or "dissolve" in transition:
-                transition = "fadewhite"
-            elif "whip" in transition or "wipe" in transition or "smooth" in transition:
-                transition = "whip_right"
-            else:
-                transition = "none"
-            print(f"[generate-edit] Mapped unsupported transition '{clip_entry.get('transition_out')}' -> '{transition}'", flush=True)
+            print(f"[generate-edit] Unknown transition '{clip_entry.get('transition_out')}' -> 'none'", flush=True)
+            transition = "none"
         speed = max(0.25, min(4.0, float(clip_entry.get("speed") or 1.0)))
         clip_entry["transition_sound"] = "none"
         clip_entry["sfx_style"] = "none"
@@ -2230,6 +2420,10 @@ RULES FOR USING THESE TIMESTAMPS:
     # ── Map emphasis_moments to clips ────────────────────────────────────
     # High-intensity emphasis moments get cut_zoom (instant snap-in zoom)
     # and auto-placed SFX if no sound already exists nearby.
+    # Debounce: require at least 3s gap between emphasis zooms to avoid
+    # jarring rapid-fire zoom snapping.
+    _last_zoom_t = -999.0
+    _MIN_ZOOM_GAP = 3.0
     for em in emphasis_moments:
         em_t = em["t"]
         for clip in final_cuts:
@@ -2237,9 +2431,13 @@ RULES FOR USING THESE TIMESTAMPS:
             ce = float(clip["source_end"])
             if cs <= em_t <= ce:
                 if em["intensity"] == "high" and str(clip.get("zoom") or "none") == "none":
-                    clip["zoom"] = "cut_zoom"
-                    clip["cut_zoom"] = True
-                    print(f"[emphasis] Applied cut_zoom to clip {cs:.1f}-{ce:.1f}s ({em['type']})", flush=True)
+                    if em_t - _last_zoom_t >= _MIN_ZOOM_GAP:
+                        clip["zoom"] = "cut_zoom"
+                        clip["cut_zoom"] = True
+                        _last_zoom_t = em_t
+                        print(f"[emphasis] Applied cut_zoom to clip {cs:.1f}-{ce:.1f}s ({em['type']})", flush=True)
+                    else:
+                        print(f"[emphasis] Skipped cut_zoom at {em_t:.1f}s — too close to previous zoom at {_last_zoom_t:.1f}s", flush=True)
                 break
 
         # Auto-place thud on high-intensity moments that have no SFX nearby
@@ -2266,8 +2464,6 @@ RULES FOR USING THESE TIMESTAMPS:
     if "clips" in edit_plan:
         del edit_plan["clips"]
     edit_plan.pop("remove_words", None)
-    if final_cuts:
-        edit_plan["target_duration"] = final_cuts[-1]["source_end"] - final_cuts[0]["source_start"]
     edit_plan.pop("target_duration", None)
 
     total_clip_duration = sum(max(0, c["source_end"] - c["source_start"]) for c in final_cuts)
@@ -2293,26 +2489,28 @@ RULES FOR USING THESE TIMESTAMPS:
 
 # ─── SFX HELPERS ─────────────────────────────────────────────────────────────
 
+# SFX volumes calibrated for amix normalize=0 (no auto-attenuation).
+# These are absolute mix levels — speech stays at 1.0, SFX sit underneath.
 _SFX_BASE_VOLUMES = {
-    "shutter":    0.66,
-    "swoosh":     0.62,
-    "thud":       0.56,
-    "pop":        0.72,
-    "ding":       0.66,
-    "typing":     0.60,
-    "reverb_hit": 0.58,
-    "ching":      0.72,
+    "shutter":    0.16,
+    "swoosh":     0.15,
+    "thud":       0.14,
+    "pop":        0.18,
+    "ding":       0.16,
+    "typing":     0.15,
+    "reverb_hit": 0.14,
+    "ching":      0.18,
 }
 
 _TEXT_SFX_BASE_VOLUMES = {
-    "pop":        0.64,
-    "ding":       0.60,
-    "ching":      0.66,
-    "typing":     0.58,
-    "reverb_hit": 0.56,
-    "shutter":    0.62,
-    "swoosh":     0.52,
-    "thud":       0.54,
+    "pop":        0.15,
+    "ding":       0.14,
+    "ching":      0.16,
+    "typing":     0.14,
+    "reverb_hit": 0.13,
+    "shutter":    0.15,
+    "swoosh":     0.12,
+    "thud":       0.13,
 }
 
 _SFX_ALIASES = {
@@ -2353,11 +2551,11 @@ def get_sfx_path(sound_name):
 def get_sfx_volume(sound_name, timestamp, speech_segments, is_text_overlay=False):
     normalized = normalize_sfx_style(sound_name)
     if is_text_overlay:
-        base = _TEXT_SFX_BASE_VOLUMES.get(normalized, 0.56)
-        duck = 0.80
-    else:
-        base = _SFX_BASE_VOLUMES.get(normalized, 0.60)
+        base = _TEXT_SFX_BASE_VOLUMES.get(normalized, 0.14)
         duck = 0.75
+    else:
+        base = _SFX_BASE_VOLUMES.get(normalized, 0.15)
+        duck = 0.70
     segs = speech_segments or []
     during_speech = any(
         float(seg.get("start") or 0) <= timestamp <= float(seg.get("end") or 0)
@@ -2601,13 +2799,44 @@ def fetch_broll_clip(keyword, duration_needed, work_dir):
                     except (IndexError, ValueError):
                         pass
 
-            if frame_count < 5:
+            if frame_count < 8:
                 print(
-                    f"[broll] REJECTED '{keyword}': only {frame_count} decoded frames in first 2s — likely a still image",
+                    f"[broll] REJECTED '{keyword}': only {frame_count} decoded frames in first 2s — likely a still image or frozen clip",
                     flush=True,
                 )
                 os.remove(dest)
                 return None
+
+            # Motion check: compare first and last frame to reject frozen/static clips
+            try:
+                _motion_cmd = [
+                    "ffmpeg", "-y", "-i", dest,
+                    "-vf", f"select='eq(n\\,0)+eq(n\\,{max(1, frame_count-1)})',setpts=N/TB",
+                    "-frames:v", "2", "-f", "rawvideo", "-pix_fmt", "gray", "-s", "160x284",
+                    "-loglevel", "warning", os.path.join(work_dir, f"_broll_motion_{safe_kw}.raw"),
+                ]
+                _mr = subprocess.run(_motion_cmd, capture_output=True, timeout=10)
+                _raw_path = os.path.join(work_dir, f"_broll_motion_{safe_kw}.raw")
+                if _mr.returncode == 0 and os.path.exists(_raw_path):
+                    with open(_raw_path, "rb") as _fh:
+                        _raw_data = _fh.read()
+                    _frame_size = 160 * 284
+                    if len(_raw_data) >= _frame_size * 2:
+                        import numpy as np
+                        _f1 = np.frombuffer(_raw_data[:_frame_size], dtype=np.uint8).astype(np.float32)
+                        _f2 = np.frombuffer(_raw_data[_frame_size:_frame_size*2], dtype=np.uint8).astype(np.float32)
+                        _diff = np.mean(np.abs(_f1 - _f2))
+                        if _diff < 2.0:
+                            print(f"[broll] REJECTED '{keyword}': frozen/static clip (frame diff={_diff:.1f})", flush=True)
+                            os.remove(dest)
+                            try: os.remove(_raw_path)
+                            except: pass
+                            return None
+                        print(f"[broll] Motion check OK for '{keyword}': frame diff={_diff:.1f}", flush=True)
+                    try: os.remove(_raw_path)
+                    except: pass
+            except Exception as _me:
+                print(f"[broll] Motion check skipped for '{keyword}': {_me}", flush=True)
 
             is_portrait = stream_h > stream_w
             print(
@@ -2645,7 +2874,13 @@ def get_video_duration(path):
 
 
 def composite_broll(output_path, broll_entries, broll_files, work_dir):
-    """Composite pre-downloaded b-roll clips onto the output video."""
+    """Composite pre-downloaded b-roll clips onto the output video.
+
+    Professional B-roll compositing:
+    - Fade in/out transitions (0.3s) so B-roll doesn't hard-cut
+    - Ken Burns effect (subtle 3% slow zoom) so B-roll feels alive, not frozen
+    - Proper scaling to 9:16 with center crop
+    """
     entries_with_files = []
     for i, entry in enumerate(broll_entries):
         local_path = broll_files.get(i)
@@ -2658,11 +2893,17 @@ def composite_broll(output_path, broll_entries, broll_files, work_dir):
     for entry in entries_with_files:
         input_args += ["-i", entry["local_path"]]
     filter_parts = []
+    BROLL_FADE = 0.3  # seconds for fade in/out
     for i, entry in enumerate(entries_with_files):
         idx = i + 1
         keyword = str(entry.get("keyword") or "broll")
         needed_duration = float(entry.get("duration") or 2.0)
         broll_duration = get_video_duration(entry["local_path"])
+        # Clamp requested duration to available clip length
+        if broll_duration > 0 and needed_duration > broll_duration:
+            print(f"[broll] Clamping '{keyword}' duration: requested {needed_duration:.1f}s but clip is only {broll_duration:.1f}s", flush=True)
+            needed_duration = broll_duration
+            entry["duration"] = needed_duration
         if broll_duration > needed_duration + 1.0:
             seek_point = broll_duration * 0.25
             seek_point = min(seek_point, max(0.0, broll_duration - needed_duration - 0.5))
@@ -2676,10 +2917,26 @@ def composite_broll(output_path, broll_entries, broll_files, work_dir):
                 f"[broll] Using '{keyword}' from start ({broll_duration:.1f}s clip, need {needed_duration}s)",
                 flush=True,
             )
+        # Ken Burns: subtle 3% slow zoom over the clip duration to prevent frozen look
+        # Scale to slightly larger than needed, then animate crop position
+        _kb_total_frames = max(1, round(needed_duration * 30))
+        _kb_zoom = 0.03  # 3% zoom range
+        _kb_progress = f"min(n/{_kb_total_frames}\\,1.0)"
+        _kb_smooth = f"({_kb_progress}*{_kb_progress}*(3-2*{_kb_progress}))"  # smoothstep
+        _fade_out_start = max(0, needed_duration - BROLL_FADE)
         filter_parts.append(
             f"[{idx}:v]trim=start={seek_point:.3f}:duration={needed_duration:.3f},"
-            f"setpts=PTS-STARTPTS,scale=1080:1920:force_original_aspect_ratio=increase,"
-            f"crop=1080:1920:(iw-1080)/2:(ih-1920)/2,setsar=1[bv{i}]"
+            f"setpts=PTS-STARTPTS,"
+            f"scale=w='trunc(1080*(1.0+{_kb_zoom})/2)*2':h='trunc(1920*(1.0+{_kb_zoom})/2)*2'"
+            f":force_original_aspect_ratio=increase:flags=bicubic,"
+            f"crop=1080:1920:"
+            f"x='max(0\\,min((iw-1080)/2+{round(1080*_kb_zoom/2)}*{_kb_smooth}\\,iw-1080))':"
+            f"y='max(0\\,min((ih-1920)/2+{round(1920*_kb_zoom/2)}*{_kb_smooth}\\,ih-1920))',"
+            f"setsar=1,"
+            f"fade=t=in:st=0:d={BROLL_FADE:.2f}:alpha=1,"
+            f"fade=t=out:st={_fade_out_start:.2f}:d={BROLL_FADE:.2f}:alpha=1,"
+            f"setpts=PTS-STARTPTS"
+            f"[bv{i}]"
         )
     prev = "0:v"
     for i, entry in enumerate(entries_with_files):
@@ -2702,7 +2959,7 @@ def composite_broll(output_path, broll_entries, broll_files, work_dir):
         tmp_out,
     ])
     os.replace(tmp_out, output_path)
-    print(f"[broll] Composited {len(entries_with_files)} b-roll clip(s) onto output", flush=True)
+    print(f"[broll] Composited {len(entries_with_files)} b-roll clip(s) with fade+Ken Burns", flush=True)
 
 
 def apply_filler_jump_cuts(cuts, deepgram_words):
@@ -3115,16 +3372,16 @@ def project_words_to_output(transcript, cuts, effective_durations, hook_offset=0
         c_start = float(cut["source_start"])
         c_end   = float(cut["source_end"])
         speed   = max(0.25, min(4.0, float(cut.get("speed") or 1.0)))
-        curve_speed = 1.0
-        if speed_curve and speed_curve != "none":
-            mid = (c_start + c_end) / 2.0
-            curve_speed = max(0.5, min(1.4, get_speed_for_timestamp(mid, speed_curve)))
-        combined_speed = speed * curve_speed
+        _has_curve = speed_curve and speed_curve != "none"
         for w in words:
             ws = float(w.get("start") or 0)
             we = float(w.get("end") or 0)
             if we <= c_start or ws >= c_end:
                 continue
+            # Per-word speed: evaluate curve at each word's midpoint for accurate timing
+            w_mid = (max(ws, c_start) + min(we, c_end)) / 2.0
+            curve_speed = max(0.5, min(1.4, get_speed_for_timestamp(w_mid, speed_curve))) if _has_curve else 1.0
+            combined_speed = speed * curve_speed
             local_s = (max(ws, c_start) - c_start) / combined_speed
             local_e = (min(we, c_end) - c_start) / combined_speed
             projected.append({
@@ -3133,6 +3390,7 @@ def project_words_to_output(transcript, cuts, effective_durations, hook_offset=0
                 "word":  w.get("punctuated_word") or w.get("word") or "",
                 "punctuated_word": w.get("punctuated_word") or w.get("word") or "",
                 "speaker": int(w.get("speaker", 0) or 0),
+                "_source_start": max(ws, c_start),
             })
         dur = effective_durations[i] if i < len(effective_durations) else (c_end - c_start)
         _td = transition_duration if transition_duration is not None else TRANSITION_DURATION_DEFAULT
@@ -3178,11 +3436,56 @@ def format_ass_time(seconds):
     h = int(s // 3600)
     m = int((s % 3600) // 60)
     sec = int(s % 60)
-    cs = round((s % 1) * 100)
+    cs = min(99, round((s % 1) * 100))
     return f"{h}:{m:02d}:{sec:02d}.{cs:02d}"
 
 
-def generate_subtitle_file(transcript, caption_style, cuts, effective_durations, output_res, caption_position, caption_keywords, work_dir, hook_offset=0.0, hook_clip=None, speed_curve=None, transition_duration=None, face_positions=None):
+def _face_at(source_t, fp_list, fallback_cx=540):
+    """Return (cx, cy) at a source timestamp, or (None, None).
+    Shared helper for all face-aware caption styles.
+    """
+    if not fp_list or source_t is None:
+        return None, None
+    best = None
+    best_dt = float("inf")
+    for fp in fp_list:
+        if not fp.get("found"):
+            continue
+        dt = abs(float(fp.get("t", 0)) - source_t)
+        if dt < best_dt:
+            best_dt = dt
+            best = fp
+    if best and best_dt < 2.0:
+        return float(best.get("cx", fallback_cx)), float(best.get("cy", 0))
+    return None, None
+
+
+def _build_keyword_set(words, caption_keywords):
+    """Build a set of lowercase keyword strings for caption highlighting.
+    Shared helper for all caption styles that highlight keywords.
+    """
+    _kw_input = caption_keywords or []
+    if isinstance(_kw_input, str):
+        _kw_input = _kw_input.split()
+    elif not isinstance(_kw_input, (list, tuple)):
+        _kw_input = []
+    keyword_set = set(re.sub(r"[.,!?;:'\"\\]", "", str(k).lower()) for k in _kw_input)
+    if not keyword_set:
+        _sentence_words = []
+        for wd in words:
+            _w_clean = re.sub(r"[.,!?;:'\"\\]", "", str(wd.get("word") or "").lower())
+            _sentence_words.append(_w_clean)
+            _ends_sent = bool(re.search(r"[.!?]$", str(wd.get("word") or "")))
+            if _ends_sent or wd == words[-1]:
+                if _sentence_words:
+                    _best = max(_sentence_words, key=len)
+                    if len(_best) >= 4:
+                        keyword_set.add(_best)
+                _sentence_words = []
+    return keyword_set
+
+
+def generate_subtitle_file(transcript, caption_style, cuts, effective_durations, output_res, caption_position, caption_keywords, work_dir, hook_offset=0.0, hook_clip=None, speed_curve=None, transition_duration=None, face_positions=None, edit_plan=None):
     words = project_words_to_output(
         transcript,
         cuts,
@@ -3195,6 +3498,27 @@ def generate_subtitle_file(transcript, caption_style, cuts, effective_durations,
     if not words:
         return None
 
+    # Escape curly braces in word text — ASS uses {} for override blocks
+    for wd in words:
+        for _k in ("word", "punctuated_word"):
+            if _k in wd and ("{" in str(wd[_k]) or "}" in str(wd[_k])):
+                wd[_k] = str(wd[_k]).replace("{", "").replace("}", "")
+
+    # Deduplicate consecutive stuttered words for clean caption display
+    # e.g. "she's she's crying" → "she's crying", "I I said" → "I said"
+    if len(words) > 1:
+        deduped = [words[0]]
+        for _wi in range(1, len(words)):
+            _prev_clean = re.sub(r"[.,!?;:'\"\\]", "", str(words[_wi - 1].get("word") or "").lower().strip())
+            _curr_clean = re.sub(r"[.,!?;:'\"\\]", "", str(words[_wi].get("word") or "").lower().strip())
+            if _curr_clean and _curr_clean == _prev_clean:
+                # Skip the duplicate — extend the previous word's end time to cover it
+                deduped[-1]["end"] = words[_wi]["end"]
+                print(f"[captions] Removed stutter duplicate: '{words[_wi].get('word')}'", flush=True)
+                continue
+            deduped.append(words[_wi])
+        words = deduped
+
     w = output_res.get("width") or 1080
     h = output_res.get("height") or 1920
 
@@ -3202,11 +3526,15 @@ def generate_subtitle_file(transcript, caption_style, cuts, effective_durations,
     # margin_v is distance from BOTTOM of frame in ASS format
     # Default positions scaled to frame height
     _h_scale = h / 1920.0
+    # MarginV meaning depends on alignment:
+    #   alignment 7/8/9 (top row) → distance from TOP of frame
+    #   alignment 1/2/3 (bottom row) → distance from BOTTOM of frame
+    #   alignment 4/5/6 (middle row) → not used vertically
     pos_margin = {
-        "top": round(1550 * _h_scale),
-        "lower-third": round(400 * _h_scale),
-        "center": round(800 * _h_scale),
-        "bottom": round(100 * _h_scale),
+        "top": round(100 * _h_scale),           # 100px from top (alignment 8)
+        "lower-third": round(400 * _h_scale),    # 400px from bottom (alignment 2)
+        "center": round(100 * _h_scale),          # centered (alignment 5, margin ignored)
+        "bottom": round(100 * _h_scale),          # 100px from bottom (alignment 2)
     }
     # Word pop defaults to lower-middle (between center and lower-third)
     if caption_style == "word_pop":
@@ -3252,16 +3580,14 @@ def generate_subtitle_file(transcript, caption_style, cuts, effective_durations,
 
     styles_map = {
         "capcut":         {"fontsize": 58, "fontname": "Montserrat ExtraBold", "bold": 0, "alignment": 5},
-        "standard":       {"fontsize": 44, "fontname": "Montserrat",           "bold": 0, "alignment": 2},
-        "bold_centered":  {"fontsize": 58, "fontname": "Montserrat Black",     "bold": 0, "alignment": 5},
-        "minimal_bottom": {"fontsize": 36, "fontname": "Montserrat",           "bold": 0, "alignment": 2},
         "word_pop":       {"fontsize": 68, "fontname": "Montserrat Black", "bold": 0, "alignment": 5},
         "hormozi":        {"fontsize": 62, "fontname": "Montserrat Black",     "bold": 0, "alignment": 5},
-        "dynamic":        {"fontsize": 42, "fontname": "Montserrat ExtraBold", "bold": 0, "alignment": 5},
-        "bold_white":     {"fontsize": 60, "fontname": "Montserrat Black",     "bold": 0, "alignment": 5},
-        "bold_yellow":    {"fontsize": 60, "fontname": "Montserrat Black",     "bold": 0, "alignment": 5},
+        "dynamic":        {"fontsize": 48, "fontname": "Montserrat ExtraBold", "bold": 0, "alignment": 5},
+        "clean":          {"fontsize": 52, "fontname": "Montserrat Bold",      "bold": 0, "alignment": 5},
+        "impact":         {"fontsize": 64, "fontname": "Montserrat Black",     "bold": 0, "alignment": 5},
         "keyword_pop":    {"fontsize": 54, "fontname": "Montserrat ExtraBold", "bold": 0, "alignment": 5},
-        "box_caption":    {"fontsize": 46, "fontname": "Montserrat",           "bold": 0, "alignment": 2},
+        "captions_clean": {"fontsize": 60, "fontname": "Montserrat Bold",      "bold": 0, "alignment": 5},
+        "captions_dynamic": {"fontsize": 60, "fontname": "Montserrat Bold", "bold": 0, "alignment": 5},
     }
 
     # Scale caption font sizes proportionally to output resolution (base: 1920px height)
@@ -3285,17 +3611,15 @@ def generate_subtitle_file(transcript, caption_style, cuts, effective_durations,
         #   &H90000000 = ~56% opacity black box
         #   &H00000000 = fully opaque black box
         #   &HA0000000 = ~37% opacity black box
-        "capcut":         ("&H00FFFFFF", "&H0000FFFF", "&H00000000", 1, 5, 0,  0.5),
-        "standard":       ("&H00FFFFFF", "&H0000FFFF", "&H90000000", 3, 0, 0,  1.2),
-        "bold_centered":  ("&H00FFFFFF", "&H0000FFFF", "&H90000000", 3, 0, 0,  1.2),
-        "minimal_bottom": ("&H00FFFFFF", "&H0000CCFF", "&HA0000000", 3, 0, 0,  1.0),
-        "word_pop":       ("&H00FFFFFF", "&H0000FFFF", "&H00000000", 1, 6, 2,  0.5),
-        "hormozi":        ("&H00FFFFFF", "&H0000FFFF", "&H00000000", 1, 5, 0,  0.5),
-        "dynamic":        ("&H00FFFFFF", "&H0004C2F7", "&H00000000", 1, 5, 2,  0.5),
-        "bold_white":     ("&H00FFFFFF", "&H00FFFFFF", "&H90000000", 3, 0, 0,  1.2),
-        "bold_yellow":    ("&H0000FFFF", "&H00FFFFFF", "&H90000000", 3, 0, 0,  1.2),
+        "capcut":         ("&H00FFFFFF", "&H0000FFFF", "&H00000000", 1, 3.5, 0,  0.5),
+        "word_pop":       ("&H00FFFFFF", "&H0000FFFF", "&H00000000", 1, 4, 1.5, 0.5),
+        "hormozi":        ("&H00FFFFFF", "&H0000FFFF", "&H00000000", 1, 3.5, 0,  0.5),
+        "dynamic":        ("&H00FFFFFF", "&H0004C2F7", "&H00000000", 1, 3, 1.5, 0.5),
+        "clean":          ("&H00FFFFFF", "&H0004C2F7", "&H00000000", 1, 3, 1,   0.3),
+        "impact":         ("&H00FFFFFF", "&H0000FFFF", "&H00000000", 1, 4, 1.5, 0.5),
         "keyword_pop":    ("&H00FFFFFF", "&H0000FF00", "&H90000000", 3, 0, 0,  1.2),
-        "box_caption":    ("&H00FFFFFF", "&H0000FFFF", "&HB0000000", 3, 0, 0,  1.0),
+        "captions_clean": ("&H00FFFFFF", "&H00FFCC00", "&H00000000", 1, 0, 0, 0),
+        "captions_dynamic": ("&H00FFFFFF", "&H00FFCC00", "&H00000000", 1, 0, 0, 0),
     }
 
     # Per-speaker active word highlight colors (ASS BGR format)
@@ -3308,10 +3632,10 @@ def generate_subtitle_file(transcript, caption_style, cuts, effective_durations,
         2: "&H0000FF00&",    # speaker 2 → green
         3: "&H00FF00FF&",    # speaker 3 → magenta
         4: "&H000080FF&",    # speaker 4 → orange
-        5: "&H000080FF&",  # orange
+        5: "&H00FF8080&",    # speaker 5 → light blue
     }
 
-    style_meta = styles_map.get(caption_style, styles_map["standard"])
+    style_meta = styles_map.get(caption_style, styles_map["capcut"])
     font_name = style_meta["fontname"]
     fontsize = style_meta["fontsize"]
     bold = style_meta["bold"]
@@ -3319,7 +3643,7 @@ def generate_subtitle_file(transcript, caption_style, cuts, effective_durations,
     position_alignment = {"top": 8, "center": 5, "lower-third": 2, "bottom": 2}
     alignment = position_alignment.get(caption_position or "lower-third", alignment)
 
-    cfg = STYLE_CONFIGS.get(caption_style, STYLE_CONFIGS["standard"])
+    cfg = STYLE_CONFIGS.get(caption_style, STYLE_CONFIGS["capcut"])
     primary, secondary, back_c, border_style, outline_w, shadow, spacing = cfg
     # Scale outline to resolution
     if h != 1920 and outline_w > 0:
@@ -3336,12 +3660,19 @@ def generate_subtitle_file(transcript, caption_style, cuts, effective_durations,
         speaker_color = SPEAKER_HIGHLIGHT_COLORS.get(speaker_id)
         return speaker_color or default_color
 
-    if caption_style in ("capcut", "hormozi", "word_pop", "dynamic"):
-        # Outline for contrast + subtle drop shadow (2px) for depth
+    if caption_style in ("capcut", "hormozi", "word_pop", "dynamic", "impact"):
+        # Outline for contrast + drop shadow for depth
         style_line = (
             f"Style: Default,{font_name},{fontsize},{primary},{secondary},"
             f"&H00000000,&H80000000,{bold},0,0,0,100,100,{spacing},0,"
-            f"1,{outline_w},2,{alignment},30,30,{margin_v},1"
+            f"1,{outline_w},{shadow},{alignment},30,30,{margin_v},1"
+        )
+    elif caption_style in ("captions_clean", "captions_dynamic"):
+        # Clean Captions-app style: NO outline, subtle shadow only
+        style_line = (
+            f"Style: Default,{font_name},{fontsize},{primary},{secondary},"
+            f"&H00000000,&H40000000,{bold},0,0,0,100,100,{spacing},0,"
+            f"1,0,{shadow},{alignment},30,30,{margin_v},1"
         )
     else:
         style_line = (
@@ -3361,25 +3692,28 @@ def generate_subtitle_file(transcript, caption_style, cuts, effective_durations,
         if _speech_dur > 0:
             _word_anim_wpm = len(words) / (_speech_dur / 60.0)
     if _word_anim_wpm > 200:
-        _pop_in_ms, _settle_ms, _pop_scale, _init_scale = 40, 50, 120, 80
+        _pop_in_ms, _settle_ms, _pop_scale, _init_scale = 80, 80, 110, 85
     elif _word_anim_wpm > 160:
-        _pop_in_ms, _settle_ms, _pop_scale, _init_scale = 50, 65, 125, 75
+        _pop_in_ms, _settle_ms, _pop_scale, _init_scale = 100, 90, 112, 82
     elif _word_anim_wpm < 100:
-        _pop_in_ms, _settle_ms, _pop_scale, _init_scale = 80, 100, 140, 60
+        _pop_in_ms, _settle_ms, _pop_scale, _init_scale = 140, 120, 115, 78
     else:
-        _pop_in_ms, _settle_ms, _pop_scale, _init_scale = 60, 80, 130, 70
+        _pop_in_ms, _settle_ms, _pop_scale, _init_scale = 120, 100, 113, 80
     print(f"[captions] WPM={_word_anim_wpm:.0f} → pop_in={_pop_in_ms}ms settle={_settle_ms}ms scale={_init_scale}→{_pop_scale}→100", flush=True)
+
+    _emphasis_style_line = ""
 
     ass = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {w}
 PlayResY: {h}
+ScaledBorderAndShadow: yes
 WrapStyle: 1
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 {style_line}
-
+{_emphasis_style_line}
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
@@ -3393,9 +3727,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         - Outline + shadow for depth
         """
         parts = []
-        cumulative_ms = 0
+        group_start = float(group[0]["start"])
 
         for word_dict in group:
+            # Use elapsed time from group start (includes inter-word gaps)
+            word_start_ms = max(0, round((float(word_dict["start"]) - group_start) * 1000))
             dur_s = max(0.05, float(word_dict["end"]) - float(word_dict["start"]))
             dur_ms = max(50, round(dur_s * 1000))
             clean = str(word_dict["word"]).strip().upper()
@@ -3406,16 +3742,15 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
             word_tag = (
                 f"{{\\fscx{_init_scale}\\fscy{_init_scale}\\1c&H00FFFFFF&}}"
-                f"{{\\t({cumulative_ms},{cumulative_ms + pop_in_ms},"
+                f"{{\\t({word_start_ms},{word_start_ms + pop_in_ms},0.4,"
                 f"\\fscx{_pop_scale}\\fscy{_pop_scale}\\1c{word_highlight})}}"
-                f"{{\\t({cumulative_ms + pop_in_ms},{cumulative_ms + pop_in_ms + settle_ms},"
+                f"{{\\t({word_start_ms + pop_in_ms},{word_start_ms + pop_in_ms + settle_ms},1.5,"
                 f"\\fscx100\\fscy100)}}"
-                f"{{\\t({cumulative_ms + dur_ms - 30},{cumulative_ms + dur_ms},"
+                f"{{\\t({word_start_ms + dur_ms - 60},{word_start_ms + dur_ms},"
                 f"\\1c&H00FFFFFF&)}}"
                 f"{clean} "
             )
             parts.append(word_tag)
-            cumulative_ms += dur_ms
 
         return "".join(parts).rstrip()
 
@@ -3426,7 +3761,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         The entire group gets {\\fad(80,60)} for fade in/out.
         Returns the dialogue text string (without the Dialogue prefix).
         """
-        parts = ["{\\fad(80,60)}"]
+        parts = ["{\\fad(120,80)}"]
         for word_dict in group:
             dur_s  = max(0.05, float(word_dict["end"]) - float(word_dict["start"]))
             dur_cs = max(5, round(dur_s * 100))
@@ -3459,7 +3794,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     if caption_style == "keyword_pop":
         # keyword_pop: same karaoke groups but highlight is keyword color instead of yellow
         # Override secondary color per-word via inline tags
-        keyword_set = set(re.sub(r"[.,!?;:'\"\\]", "", k.lower()) for k in (caption_keywords or []))
+        keyword_set = _build_keyword_set(words, caption_keywords)
         highlight_color = "&H0000FF00"  # green
         normal_color    = "&H00FFFFFF"  # white
 
@@ -3473,7 +3808,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             if not next_w or pause > 0.3 or ends_sentence or len(group) >= MAX_WORDS:
                 start = group[0]["start"]
                 end   = group[-1]["end"] + 0.05
-                parts = ["{\\fad(80,60)}"]
+                parts = ["{\\fad(120,80)}"]
                 for wd in group:
                     dur_cs = max(5, round(max(0.05, float(wd["end"]) - float(wd["start"])) * 100))
                     clean  = re.sub(r"[.,!?;:'\"\\]", "", (wd.get("word") or "").lower())
@@ -3498,23 +3833,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         accent_color = "&H0004C2F7"   # warm yellow (#F7C204 in ASS BGR)
         default_color = "&H00FFFFFF"  # white
 
-        # Build keyword set from Gemini's caption_keywords if provided,
-        # otherwise pick 1-2 emotionally strong words per sentence.
-        keyword_set = set(re.sub(r"[.,!?;:'\"\\]", "", k.lower()) for k in (caption_keywords or []))
-        if not keyword_set:
-            # Auto-detect: pick ~1 keyword per 8-10 words (emotionally charged / long words)
-            _sentence_words = []
-            for wd in words:
-                _w_clean = re.sub(r"[.,!?;:'\"\\]", "", str(wd.get("word") or "").lower())
-                _sentence_words.append(_w_clean)
-                _ends_sent = bool(re.search(r"[.!?]$", str(wd.get("word") or "")))
-                if _ends_sent or wd == words[-1]:
-                    if _sentence_words:
-                        # Pick the longest word in this sentence as keyword
-                        _best = max(_sentence_words, key=len)
-                        if len(_best) >= 4:
-                            keyword_set.add(_best)
-                    _sentence_words = []
+        keyword_set = _build_keyword_set(words, caption_keywords)
 
         ass_lines = []
         for i, word_dict in enumerate(words):
@@ -3528,18 +3847,17 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             word_color = accent_color if is_keyword else default_color
             word_color = _speaker_highlight(word_color, word_dict)
 
-            # Spring bounce: start invisible (0%), overshoot to 115%, settle to 100%
-            # ~5 frames at 30fps = ~150ms total
-            pop_up = min(80, max(40, dur_ms // 4))     # 0% → 115%
-            settle = min(70, max(30, dur_ms // 5))      # 115% → 100%
+            # Spring bounce: start at 78%, ease-out overshoot to 110%, settle to 100%
+            pop_up = min(150, max(100, dur_ms // 3))     # 78% → 110%
+            settle = min(120, max(80, dur_ms // 4))      # 110% → 100%
             word_tag = (
-                f"{{\\an5\\fscx0\\fscy0\\1c{word_color}}}"
-                f"{{\\t(0,{pop_up},\\fscx115\\fscy115)}}"
-                f"{{\\t({pop_up},{pop_up + settle},\\fscx100\\fscy100)}}"
+                f"{{\\an5\\fscx78\\fscy78\\1c{word_color}}}"
+                f"{{\\t(0,{pop_up},0.4,\\fscx110\\fscy110)}}"
+                f"{{\\t({pop_up},{pop_up + settle},1.5,\\fscx100\\fscy100)}}"
                 f"{clean}"
             )
             ass_lines.append(
-                f"Dialogue: 0,{format_ass_time(start)},{format_ass_time(end + 0.02)}"
+                f"Dialogue: 0,{format_ass_time(start)},{format_ass_time(end + 0.04)}"
                 f",Default,,0,0,0,,{word_tag}\n"
             )
         ass += "".join(ass_lines)
@@ -3554,34 +3872,28 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         default_color = "&H00FFFFFF"  # white
         base_fs = fontsize            # regular word font size (~42px at 1920)
         emphasis_fs = round(fontsize * 2.8)  # emphasis font size (~118px at 1920)
+        MAX_VISIBLE_PHRASES = 5       # cap visible lines to prevent overwhelming stacks
 
-        # Build keyword set
-        keyword_set = set(re.sub(r"[.,!?;:'\"\\]", "", k.lower()) for k in (caption_keywords or []))
-        if not keyword_set:
-            # Auto-detect: pick the longest word per ~8 words as keyword
-            _sentence_words = []
-            for wd in words:
-                _w_clean = re.sub(r"[.,!?;:'\"\\]", "", str(wd.get("word") or "").lower())
-                _sentence_words.append(_w_clean)
-                _ends_sent = bool(re.search(r"[.!?]$", str(wd.get("word") or "")))
-                if _ends_sent or wd == words[-1]:
-                    if _sentence_words:
-                        _best = max(_sentence_words, key=len)
-                        if len(_best) >= 4:
-                            keyword_set.add(_best)
-                    _sentence_words = []
+        keyword_set = _build_keyword_set(words, caption_keywords)
 
-        # Group words into phrases (2-3 words each)
+        # Group words into phrases (3-4 words each, smarter splitting)
+        # Only split on sentence-ending punctuation (.!?) or pauses, NOT commas
+        _SENTENCE_END = re.compile(r"[.!?]$")
         phrases = []
         current_phrase = []
         for i, wd in enumerate(words):
             current_phrase.append(wd)
             next_w = words[i + 1] if i + 1 < len(words) else None
             pause = (next_w["start"] - wd["end"]) if next_w else 1.0
-            ends_sentence = bool(PUNCT_END.search(wd.get("word") or ""))
-            if not next_w or pause > 0.3 or ends_sentence or len(current_phrase) >= 3:
+            ends_sentence = bool(_SENTENCE_END.search(wd.get("word") or ""))
+            # Don't flush phrases shorter than 2 words unless sentence ends or no next word
+            _min_met = len(current_phrase) >= 2
+            _max_met = len(current_phrase) >= 4
+            if not next_w or ends_sentence or _max_met or (_min_met and pause > 0.35):
                 phrases.append(current_phrase)
                 current_phrase = []
+        if current_phrase:
+            phrases.append(current_phrase)
 
         # Group phrases into sentences (between sentence-end punctuation)
         sentences = []
@@ -3595,7 +3907,6 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         if current_sent:
             sentences.append(current_sent)
 
-        center_x = w // 2
         ass_lines = []
 
         for sentence_phrases in sentences:
@@ -3614,13 +3925,60 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 line_height = round(fs * 1.4)
                 phrase_info.append({"phrase": phrase, "is_emphasis": has_kw, "fs": fs, "line_height": line_height})
 
-            # Calculate total height for vertical centering
-            total_height = sum(pi["line_height"] for pi in phrase_info)
-            # Start Y: center the stack vertically, offset slightly upward
-            start_y = max(round(200 * _h_scale), (h // 2) - (total_height // 2) - round(50 * _h_scale))
+            # Calculate total height for vertical centering (cap at max visible)
+            _visible = phrase_info[:MAX_VISIBLE_PHRASES] if len(phrase_info) > MAX_VISIBLE_PHRASES else phrase_info
+            total_height = sum(pi["line_height"] for pi in _visible)
+
+            # ── Per-sentence face-aware positioning ──────────────────────
+            # Like Captions app: place text on the OPPOSITE side of the face.
+            # Face on right → text left-aligned. Face on left → text right-aligned.
+            # Face centered → text centered below face.
+            _sent_source_t = sentence_phrases[0][0].get("_source_start")
+            _face_cx, _face_cy = _face_at(_sent_source_t, face_positions)
+
+            # Defaults
+            _text_x = w // 2
+            _an = 5  # center alignment
+
+            if _face_cx is not None and _face_cy is not None:
+                _face_x_frac = _face_cx / w  # 0=left, 1=right
+                _face_y_frac = _face_cy / h  # 0=top, 1=bottom
+
+                # Horizontal: place text on opposite side of face
+                _margin_x = round(60 * _h_scale)
+                if _face_x_frac > 0.6:
+                    # Face is right → text left-aligned
+                    _text_x = _margin_x
+                    _an = 4  # left-center alignment (ASS \an4 = middle-left)
+                elif _face_x_frac < 0.4:
+                    # Face is left → text right-aligned
+                    _text_x = w - _margin_x
+                    _an = 6  # right-center alignment (ASS \an6 = middle-right)
+                else:
+                    # Face centered → text centered
+                    _text_x = w // 2
+                    _an = 5
+
+                # Vertical: place stack in largest gap around face
+                _face_top = max(0, _face_cy - 220 * _h_scale)
+                _face_bot = min(h, _face_cy + 220 * _h_scale)
+                _gap_above = _face_top
+                _gap_below = h - _face_bot
+
+                if _gap_below >= total_height + 80 * _h_scale:
+                    start_y = round(_face_bot + 30 * _h_scale)
+                elif _gap_above >= total_height + 80 * _h_scale:
+                    start_y = round(_face_top - total_height - 30 * _h_scale)
+                else:
+                    # Face fills frame — overlay in lower-third area
+                    start_y = max(round(h * 0.55), h - total_height - round(150 * _h_scale))
+            else:
+                # No face data — default vertical centering
+                start_y = max(round(200 * _h_scale), (h // 2) - (total_height // 2) - round(50 * _h_scale))
 
             current_y = start_y
-            for pi in phrase_info:
+            n_phrases = len(phrase_info)
+            for p_idx, pi in enumerate(phrase_info):
                 phrase = pi["phrase"]
                 is_emphasis = pi["is_emphasis"]
                 fs = pi["fs"]
@@ -3634,7 +3992,6 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 if is_emphasis:
                     phrase_text = " ".join(str(wd["word"]).strip().upper() for wd in phrase)
                     color = accent_color
-                    # Speaker highlight for emphasis
                     speaker_color = _speaker_highlight(color, phrase[0])
                     if speaker_color and speaker_color != color:
                         color = speaker_color
@@ -3646,33 +4003,207 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                         color = speaker_color
 
                 if is_emphasis:
-                    # Emphasis: pop from 0% to 120% to 100% with color
+                    # Emphasis: ease-out pop from 75% to 112% to 100% with color
                     tag = (
-                        f"{{\\an5\\pos({center_x},{current_y})\\fs{fs}\\1c{color}"
-                        f"\\3c&H00000000&\\bord5\\shad2"
-                        f"\\fscx0\\fscy0}}"
-                        f"{{\\t(0,80,\\fscx120\\fscy120)}}"
-                        f"{{\\t(80,160,\\fscx100\\fscy100)}}"
+                        f"{{\\an{_an}\\pos({_text_x},{current_y})\\fs{fs}\\1c{color}"
+                        f"\\3c&H00000000&\\bord3\\shad1.5"
+                        f"\\fscx75\\fscy75}}"
+                        f"{{\\t(0,140,0.4,\\fscx112\\fscy112)}}"
+                        f"{{\\t(140,240,1.5,\\fscx100\\fscy100)}}"
                         f"{phrase_text}"
                     )
                 else:
-                    # Regular: fade in with slight scale up (85% → 100%)
+                    # Regular: fade in with slight scale up (88% → 100%), ease-out
                     tag = (
-                        f"{{\\an5\\pos({center_x},{current_y})\\fs{fs}\\1c{color}"
+                        f"{{\\an{_an}\\pos({_text_x},{current_y})\\fs{fs}\\1c{color}"
                         f"\\3c&H00000000&\\bord3\\shad1"
-                        f"\\alpha&HFF&\\fscx85\\fscy85}}"
-                        f"{{\\t(0,60,\\alpha&H00&\\fscx100\\fscy100)}}"
+                        f"\\alpha&HFF&\\fscx88\\fscy88}}"
+                        f"{{\\t(0,120,0.5,\\alpha&H00&\\fscx100\\fscy100)}}"
                         f"{phrase_text}"
                     )
 
-                # Phrase appears at its start time, stays until sentence ends
+                # Phrase end time: if too many phrases in this sentence,
+                # earlier phrases disappear when a later one pushes past the limit
+                if n_phrases > MAX_VISIBLE_PHRASES and p_idx + MAX_VISIBLE_PHRASES < n_phrases:
+                    # This phrase expires when the phrase MAX_VISIBLE_PHRASES later appears
+                    _expire_phrase = phrase_info[p_idx + MAX_VISIBLE_PHRASES]["phrase"]
+                    phrase_end_t = _expire_phrase[0]["start"]
+                else:
+                    phrase_end_t = sentence_end + 0.08
+
                 ass_lines.append(
-                    f"Dialogue: 0,{format_ass_time(phrase_start)},{format_ass_time(sentence_end + 0.08)}"
+                    f"Dialogue: 0,{format_ass_time(phrase_start)},{format_ass_time(phrase_end_t)}"
                     f",Default,,0,0,0,,{tag}\n"
                 )
 
         ass += "".join(ass_lines)
         print(f"[captions] Dynamic typography: {len(phrases)} phrases, {len(sentences)} sentences, {len(keyword_set)} keywords", flush=True)
+
+    elif caption_style == "clean":
+        # Clean: minimal, elegant lowercase captions with subtle fade-in.
+        # Words flow naturally in 2-4 word groups. Keyword words get a warm
+        # gold color and slightly larger size. No heavy effects — just clean
+        # typography that feels premium. Face-aware horizontal positioning.
+        accent_color = "&H0004C2F7"   # warm gold
+        default_color = "&H00FFFFFF"  # white
+        keyword_set = _build_keyword_set(words, caption_keywords)
+
+        ass_lines = []
+        group = []
+        for i, word_dict in enumerate(words):
+            group.append(word_dict)
+            next_w = words[i + 1] if i + 1 < len(words) else None
+            pause = (next_w["start"] - word_dict["end"]) if next_w else 1.0
+            ends_sentence = bool(PUNCT_END.search(word_dict.get("word") or ""))
+            if not next_w or pause > 0.3 or ends_sentence or len(group) >= 4:
+                start = group[0]["start"]
+                end = group[-1]["end"] + 0.08
+
+                # Face-aware x positioning
+                _src_t = group[0].get("_source_start")
+                _fcx, _fcy = _face_at(_src_t, face_positions)
+                if _fcx is not None:
+                    _fx_frac = _fcx / w
+                    if _fx_frac > 0.6:
+                        _cx = round(80 * _h_scale)
+                        _an = 4  # left-aligned
+                    elif _fx_frac < 0.4:
+                        _cx = w - round(80 * _h_scale)
+                        _an = 6  # right-aligned
+                    else:
+                        _cx = w // 2
+                        _an = 5
+                else:
+                    _cx = w // 2
+                    _an = 5
+
+                # Vertical: place in lower portion, face-aware
+                if _fcy is not None:
+                    _fy_frac = _fcy / h
+                    if _fy_frac > 0.6:
+                        _cy = round(h * 0.25)
+                    else:
+                        _cy = round(h * 0.72)
+                else:
+                    _cy = h - margin_v
+
+                # Build text with keyword highlighting and speaker colors
+                parts = []
+                for wd in group:
+                    w_text = str(wd["word"]).strip().lower()
+                    _w_check = re.sub(r"[.,!?;:'\"\\]", "", str(wd.get("word") or "").lower())
+                    is_kw = _w_check in keyword_set
+                    _sp_color = _speaker_highlight(default_color, wd)
+                    if is_kw:
+                        # Keyword: gold color, slightly larger, italic
+                        kw_fs = round(fontsize * 1.3)
+                        parts.append(f"{{\\1c{accent_color}\\fs{kw_fs}\\i1}}{w_text}{{\\1c{_sp_color}\\fs{fontsize}\\i0}}")
+                    elif _sp_color != default_color:
+                        parts.append(f"{{\\1c{_sp_color}}}{w_text}{{\\1c{default_color}}}")
+                    else:
+                        parts.append(w_text)
+
+                phrase_text = " ".join(parts)
+                # Subtle fade-in with smooth ease-out, plus fade-out exit
+                _fade_out_start = max(80, round((end - start) * 1000) - 80)
+                tag = (
+                    f"{{\\an{_an}\\pos({_cx},{_cy})\\fs{fontsize}"
+                    f"\\1c{default_color}\\3c&H00000000&\\bord3\\shad1"
+                    f"\\alpha&HFF&\\fscx100\\fscy100}}"
+                    f"{{\\t(0,120,0.5,\\alpha&H00&)}}"
+                    f"{{\\t({_fade_out_start},{_fade_out_start + 80},\\alpha&HFF&)}}"
+                    f"{phrase_text}"
+                )
+                ass_lines.append(
+                    f"Dialogue: 0,{format_ass_time(start)},{format_ass_time(end)}"
+                    f",Default,,0,0,0,,{tag}\n"
+                )
+                group = []
+        ass += "".join(ass_lines)
+        print(f"[captions] Clean style: {len(ass_lines)} groups, {len(keyword_set)} keywords", flush=True)
+
+    elif caption_style == "impact":
+        # Impact: aggressive uppercase with scale-pop per word group.
+        # Every word group slams onto screen with a spring bounce.
+        # Keywords get a color highlight. Face-aware positioning.
+        accent_color = "&H0000FFFF"   # yellow
+        default_color = "&H00FFFFFF"  # white
+        keyword_set = _build_keyword_set(words, caption_keywords)
+
+        ass_lines = []
+        group = []
+        for i, word_dict in enumerate(words):
+            group.append(word_dict)
+            next_w = words[i + 1] if i + 1 < len(words) else None
+            pause = (next_w["start"] - word_dict["end"]) if next_w else 1.0
+            ends_sentence = bool(PUNCT_END.search(word_dict.get("word") or ""))
+            if not next_w or pause > 0.3 or ends_sentence or len(group) >= 3:
+                start = group[0]["start"]
+                end = group[-1]["end"] + 0.08
+                dur_ms = max(80, round((end - start) * 1000))
+
+                # Face-aware positioning
+                _src_t = group[0].get("_source_start")
+                _fcx, _fcy = _face_at(_src_t, face_positions)
+                if _fcx is not None:
+                    _fx_frac = _fcx / w
+                    if _fx_frac > 0.6:
+                        _cx = round(80 * _h_scale)
+                        _an = 4
+                    elif _fx_frac < 0.4:
+                        _cx = w - round(80 * _h_scale)
+                        _an = 6
+                    else:
+                        _cx = w // 2
+                        _an = 5
+                else:
+                    _cx = w // 2
+                    _an = 5
+
+                if _fcy is not None:
+                    _fy_frac = _fcy / h
+                    _cy = round(h * 0.25) if _fy_frac > 0.6 else round(h * 0.72)
+                else:
+                    _cy = h - margin_v
+
+                # All caps, check for keywords
+                has_kw = any(
+                    re.sub(r"[.,!?;:'\"\\]", "", str(wd.get("word") or "").lower()) in keyword_set
+                    for wd in group
+                )
+                group_color = accent_color if has_kw else default_color
+                # Build group text with speaker color differentiation
+                if is_multi_speaker:
+                    _gt_parts = []
+                    for wd in group:
+                        _sp_c = _speaker_highlight(group_color, wd)
+                        _w_up = str(wd["word"]).strip().upper()
+                        if _sp_c != group_color:
+                            _gt_parts.append(f"{{\\1c{_sp_c}}}{_w_up}{{\\1c{group_color}}}")
+                        else:
+                            _gt_parts.append(_w_up)
+                    group_text = " ".join(_gt_parts)
+                else:
+                    group_text = " ".join(str(wd["word"]).strip().upper() for wd in group)
+
+                # Spring bounce: 75% → 110% → 100% with ease-out
+                pop_up = min(150, max(100, dur_ms // 3))
+                settle = min(120, max(80, dur_ms // 4))
+                tag = (
+                    f"{{\\an{_an}\\pos({_cx},{_cy})\\fs{fontsize}"
+                    f"\\1c{group_color}\\3c&H00000000&\\bord4\\shad1.5"
+                    f"\\fscx75\\fscy75}}"
+                    f"{{\\t(0,{pop_up},0.4,\\fscx110\\fscy110)}}"
+                    f"{{\\t({pop_up},{pop_up + settle},1.5,\\fscx100\\fscy100)}}"
+                    f"{group_text}"
+                )
+                ass_lines.append(
+                    f"Dialogue: 0,{format_ass_time(start)},{format_ass_time(end)}"
+                    f",Default,,0,0,0,,{tag}\n"
+                )
+                group = []
+        ass += "".join(ass_lines)
+        print(f"[captions] Impact style: {len(ass_lines)} groups, {len(keyword_set)} keywords", flush=True)
 
     elif caption_style == "capcut":
         highlight = "&H0000FFFF"
@@ -3697,7 +4228,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     elif caption_style == "hormozi":
         # Hormozi: uppercase, bold, keyword words highlighted in yellow
         # Active word gets scale bounce + color highlight (like capcut but uppercase + keyword color)
-        keyword_set = set(re.sub(r"[.,!?;:'\"\\]", "", k.lower()) for k in (caption_keywords or []))
+        keyword_set = _build_keyword_set(words, caption_keywords)
         highlight_color = "&H0000FFFF"  # yellow
         keyword_color = "&H004080FF"    # orange-red for keywords
 
@@ -3712,8 +4243,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 start = group[0]["start"]
                 end = group[-1]["end"] + 0.08
                 parts = []
-                cumulative_ms = 0
+                _group_start = float(group[0]["start"])
                 for wd in group:
+                    word_start_ms = max(0, round((float(wd["start"]) - _group_start) * 1000))
                     dur_s = max(0.05, float(wd["end"]) - float(wd["start"]))
                     dur_ms = max(50, round(dur_s * 1000))
                     clean_word = str(wd["word"]).strip().upper()
@@ -3725,16 +4257,15 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     settle_ms = _settle_ms
                     word_tag = (
                         f"{{\\fscx{_init_scale}\\fscy{_init_scale}\\1c&H00FFFFFF&}}"
-                        f"{{\\t({cumulative_ms},{cumulative_ms + pop_in_ms},"
+                        f"{{\\t({word_start_ms},{word_start_ms + pop_in_ms},0.4,"
                         f"\\fscx{_pop_scale}\\fscy{_pop_scale}\\1c{active_color})}}"
-                        f"{{\\t({cumulative_ms + pop_in_ms},{cumulative_ms + pop_in_ms + settle_ms},"
+                        f"{{\\t({word_start_ms + pop_in_ms},{word_start_ms + pop_in_ms + settle_ms},1.5,"
                         f"\\fscx100\\fscy100)}}"
-                        f"{{\\t({cumulative_ms + dur_ms - 30},{cumulative_ms + dur_ms},"
+                        f"{{\\t({word_start_ms + dur_ms - 60},{word_start_ms + dur_ms},"
                         f"\\1c&H00FFFFFF&)}}"
                         f"{clean_word} "
                     )
                     parts.append(word_tag)
-                    cumulative_ms += dur_ms
                 text = "".join(parts).rstrip()
                 ass_lines.append(
                     f"Dialogue: 0,{format_ass_time(start)},{format_ass_time(end)}"
@@ -3742,6 +4273,106 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 )
                 group = []
         ass += "".join(ass_lines)
+
+    elif caption_style == "captions_clean":
+        # ── Captions App Clean Style ──────────────────────────────────────
+        # 1-3 words at a time, all lowercase, clean white, no outlines
+        # Keywords get inline color change (same size, same position)
+        # Matches Captions app exactly
+        _KW_COLORS = ["&H0000FFFF", "&H000055FF", "&H00CCCC00"]  # yellow, red, teal (ASS BGR)
+        default_color = "&H00FFFFFF"
+        keyword_set = _build_keyword_set(words, caption_keywords)
+        _kw_color_idx = 0
+
+        ass_lines = []
+        group = []
+        for i, word_dict in enumerate(words):
+            group.append(word_dict)
+            next_w = words[i + 1] if i + 1 < len(words) else None
+            pause = (next_w["start"] - word_dict["end"]) if next_w else 1.0
+            ends_sentence = bool(PUNCT_END.search(word_dict.get("word") or ""))
+            if not next_w or pause > 0.25 or ends_sentence or len(group) >= 3:
+                start = group[0]["start"]
+                end = group[-1]["end"] + 0.06
+                _cy = round(h * 0.68)
+
+                parts = []
+                for wd in group:
+                    w_text = str(wd["word"]).strip().lower()
+                    _w_check = re.sub(r"[.,!?;:'\"\\]", "", w_text)
+                    is_kw = _w_check in keyword_set
+                    if is_kw:
+                        _kc = _KW_COLORS[_kw_color_idx % len(_KW_COLORS)]
+                        parts.append(f"{{\\1c{_kc}}}{w_text}{{\\1c{default_color}}}")
+                        _kw_color_idx += 1
+                    else:
+                        parts.append(w_text)
+                phrase_text = " ".join(parts)
+
+                tag = (
+                    f"{{\\an5\\pos({w // 2},{_cy})\\fs{fontsize}"
+                    f"\\1c{default_color}\\bord0\\shad0}}"
+                    f"{phrase_text}"
+                )
+                ass_lines.append(
+                    f"Dialogue: 0,{format_ass_time(start)},{format_ass_time(end)}"
+                    f",Default,,0,0,0,,{tag}\n"
+                )
+                group = []
+        ass += "".join(ass_lines)
+        print(f"[captions] Captions Clean style: {len(ass_lines)} groups, {len(keyword_set)} keywords", flush=True)
+
+    elif caption_style == "captions_dynamic":
+        # ── Captions App Dynamic Style ────────────────────────────────────
+        # Identical to Captions app: 1-3 words at a time, all lowercase,
+        # clean bold white, NO outlines/borders/shadows.
+        # Keywords get inline color change (yellow/red/teal) — same font, same size.
+        # No dual layer, no echo cascade, no stacked text.
+        _KW_COLORS = ["&H0000FFFF", "&H000055FF", "&H00CCCC00"]  # yellow, red, teal (ASS BGR)
+        default_color = "&H00FFFFFF"
+        keyword_set = _build_keyword_set(words, caption_keywords)
+        _kw_color_idx = 0
+
+        ass_lines = []
+        group = []
+        for i, wd in enumerate(words):
+            group.append(wd)
+            next_w = words[i + 1] if i + 1 < len(words) else None
+            pause = (next_w["start"] - wd["end"]) if next_w else 1.0
+            ends_sentence = bool(re.search(r"[.!?]$", wd.get("word") or ""))
+            _min_met = len(group) >= 1
+            _max_met = len(group) >= 3
+            if not next_w or ends_sentence or _max_met or (_min_met and pause > 0.25):
+                start = group[0]["start"]
+                end = group[-1]["end"] + 0.06
+                _cy = round(h * 0.68)
+
+                parts = []
+                for _wd in group:
+                    w_text = str(_wd["word"]).strip().lower()
+                    _w_check = re.sub(r"[.,!?;:'\"\\]", "", w_text)
+                    is_kw = _w_check in keyword_set
+                    if is_kw:
+                        _kc = _KW_COLORS[_kw_color_idx % len(_KW_COLORS)]
+                        parts.append(f"{{\\1c{_kc}}}{w_text}{{\\1c{default_color}}}")
+                        _kw_color_idx += 1
+                    else:
+                        parts.append(w_text)
+                phrase_text = " ".join(parts)
+
+                tag = (
+                    f"{{\\an5\\pos({w // 2},{_cy})\\fs{fontsize}"
+                    f"\\1c{default_color}\\bord0\\shad0}}"
+                    f"{phrase_text}"
+                )
+                ass_lines.append(
+                    f"Dialogue: 0,{format_ass_time(start)},{format_ass_time(end)}"
+                    f",Default,,0,0,0,,{tag}\n"
+                )
+                group = []
+
+        ass += "".join(ass_lines)
+        print(f"[captions] Captions Dynamic style: {len(ass_lines)} groups, {len(keyword_set)} keywords", flush=True)
 
     else:
         # All other styles: uniform karaoke groups with the style's secondary colour as highlight
@@ -3868,7 +4499,6 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15):
     removed_indices = set()
 
     # ── Step 1: Apply Gemini's remove_words ───────────────────────────────
-    removal_ranges = []
     for item in remove_words or []:
         if not isinstance(item, dict):
             continue
@@ -3879,14 +4509,6 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15):
                     removed_indices.add(idx)
             except Exception:
                 continue
-        elif "start" in item and "end" in item:
-            try:
-                start = max(0.0, float(item["start"]))
-                end = max(0.0, float(item["end"]))
-            except Exception:
-                continue
-            if end > start:
-                removal_ranges.append((start, end))
 
     # Time ranges only remove silence/dead air — they NEVER remove spoken words.
     # Words can only be removed via explicit word_index. This prevents Gemini's
@@ -3992,7 +4614,7 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15):
     # consonant releases (t, k, p, s) and breaths extend past the endpoint.
     # Pad start by -15ms (catch onset) and end by +40ms (catch release).
     PAD_START = 0.015  # 15ms before first word
-    PAD_END = 0.040    # 40ms after last word
+    PAD_END = 0.060    # 60ms after last word — catches sibilant tails (s, sh, ch)
 
     raw_clips = []
     for word_group in clips:
@@ -4011,17 +4633,28 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15):
 
     # ── Step 6: Merge micro-clips into neighbors ──────────────────────────
     # Any clip shorter than 120ms is too small to be a standalone segment.
-    # Merge it into the nearest neighbor.
+    # Merge it into the nearest neighbor — but ONLY if no removed words
+    # exist in the gap, otherwise we'd re-introduce audio bleed.
     MIN_CLIP_DURATION = 0.120
     merged = []
     for clip in raw_clips:
         dur = clip["padded_end"] - clip["padded_start"]
         if dur < MIN_CLIP_DURATION and merged:
-            # Merge into previous clip (extend its end)
-            merged[-1]["padded_end"] = clip["padded_end"]
-            merged[-1]["raw_end"] = clip["raw_end"]
-            merged[-1]["last_word"] = clip["last_word"]
-            merged[-1]["word_count"] += clip["word_count"]
+            gap_start = merged[-1]["raw_end"]
+            gap_end = clip["raw_start"]
+            has_removed_in_gap = any(
+                w["_word_index"] in removed_indices
+                and w["_end"] > gap_start and w["_start"] < gap_end
+                for w in sorted_words
+            )
+            if has_removed_in_gap:
+                # Can't merge — removed word in the gap. Keep as separate clip.
+                merged.append(clip)
+            else:
+                merged[-1]["padded_end"] = clip["padded_end"]
+                merged[-1]["raw_end"] = clip["raw_end"]
+                merged[-1]["last_word"] = clip["last_word"]
+                merged[-1]["word_count"] += clip["word_count"]
         else:
             merged.append(clip)
     raw_clips = merged
@@ -4446,14 +5079,10 @@ def project_source_time_to_output(source_t, cuts, clip_ranges, speed_curve=None)
         src_start = float(cut["source_start"])
         src_end = float(cut["source_end"])
         speed = max(0.25, float(cut.get("speed") or 1.0))
-        curve_speed = 1.0
-        if speed_curve and speed_curve != "none":
-            mid = (src_start + src_end) / 2.0
-            curve_speed = max(0.5, min(1.4, get_speed_for_timestamp(mid, speed_curve)))
-        combined_speed = speed * curve_speed
 
         if src_start <= source_t <= src_end:
-            local_offset = (source_t - src_start) / combined_speed
+            # Integrate speed from clip start to source_t for accurate offset
+            _, local_offset, _ = build_variable_speed_setpts(src_start, source_t, speed, speed_curve)
             output_t = float(clip_ranges[i]["start"]) + local_offset
             return round(output_t * 1000) / 1000
 
@@ -4481,97 +5110,66 @@ def project_source_time_to_final_output(source_t, cuts, effective_durations, spe
     return round((pre_speed_t + hook_offset) * 1000) / 1000
 
 
-def split_clips_at_speed_boundaries(cuts, speed_curve):
-    """Split clips for smooth frame-level speed ramping.
+def build_variable_speed_setpts(clip_start, clip_end, clip_speed, speed_curve, log=False):
+    """Build a per-frame variable-speed setpts expression for one clip.
 
-    First splits at speed curve keypoint boundaries, then further subdivides
-    any segment where speed is actively changing into ~0.15s micro-segments.
-    Each micro-segment gets its own midpoint-sampled speed, creating a smooth
-    per-frame ramp effect instead of flat speed jumps between clips.
+    The speed curve flows continuously across the entire timeline — it doesn't
+    care about clip boundaries. Each clip samples the curve at multiple points
+    and builds a piecewise setpts expression that smoothly ramps speed within
+    the clip, just like CapCut/Captions frame-level speed ramping.
+
+    Returns (setpts_value, effective_dur, avg_speed):
+        setpts_value: string for setpts=VALUE (None if speed is ~1.0x throughout)
+        effective_dur: output duration after variable speed applied
+        avg_speed: average speed for audio asetrate (audio uses constant speed)
     """
-    if not speed_curve or speed_curve == "none" or not isinstance(speed_curve, list):
-        return cuts
+    dur = clip_end - clip_start
+    if dur <= 0.01:
+        return None, max(dur, 0.001), clip_speed
 
-    MICRO_DUR = 0.15  # ~4.5 frames at 30fps — perceptually frame-by-frame
-    SPEED_DELTA_THRESHOLD = 0.03  # min speed difference to trigger subdivision
+    has_curve = (speed_curve and speed_curve != "none" and isinstance(speed_curve, list))
 
-    keypoint_times = sorted(set(float(kp["t"]) for kp in speed_curve))
+    # Sample speed at multiple points across the clip (~1 sample per 0.4s)
+    n = max(2, min(8, round(dur / 0.4)))
+    interval_dur = dur / n
 
-    # Step 1: split at keypoint boundaries
-    stage1 = []
-    for cut in cuts:
-        start = float(cut["source_start"])
-        end = float(cut["source_end"])
-        split_points = [t for t in keypoint_times if start + 0.05 < t < end - 0.05]
+    speeds = []
+    for i in range(n):
+        t_mid = clip_start + (i + 0.5) * interval_dur
+        curve_speed = 1.0
+        if has_curve:
+            curve_speed = max(0.5, min(1.4, get_speed_for_timestamp(t_mid, speed_curve)))
+        combined = max(0.25, min(4.0, clip_speed * curve_speed))
+        speeds.append(combined)
 
-        if not split_points:
-            stage1.append(cut)
-            continue
+    # Numerical integration for accurate effective duration
+    eff_dur = sum(interval_dur / s for s in speeds)
+    avg_speed = dur / eff_dur if eff_dur > 0 else 1.0
 
-        boundaries = [start] + split_points + [end]
-        for i in range(len(boundaries) - 1):
-            sub_start = boundaries[i]
-            sub_end = boundaries[i + 1]
-            if sub_end - sub_start < 0.05:
-                continue
-            sub_cut = dict(cut)
-            sub_cut["source_start"] = round(sub_start, 3)
-            sub_cut["source_end"] = round(sub_end, 3)
-            if i < len(boundaries) - 2:
-                sub_cut["transition_out"] = "none"
-            stage1.append(sub_cut)
+    # If speed is ~1.0 across the entire clip, skip setpts
+    if all(abs(s - 1.0) < 0.005 for s in speeds):
+        return None, round(eff_dur, 4), avg_speed
 
-    # Step 2: subdivide segments where speed is actively ramping
-    result = []
-    ramp_count = 0
-    for cut in stage1:
-        start = float(cut["source_start"])
-        end = float(cut["source_end"])
-        speed_start = get_speed_for_timestamp(start, speed_curve)
-        speed_end = get_speed_for_timestamp(end, speed_curve)
+    # Use simple CONSTANT*PTS with the curve-integrated average speed.
+    # The numerical integration above already accounts for the speed curve
+    # varying across this clip — avg_speed captures that smoothly.
+    setpts_val = f"{1.0/avg_speed:.4f}*PTS"
+    if log:
+        speed_range = f"{min(speeds):.2f}x-{max(speeds):.2f}x"
+        print(f"[speed] Curve-averaged setpts: {n} samples, {speed_range}, avg={avg_speed:.3f}x, eff={eff_dur:.3f}s", flush=True)
+    return setpts_val, round(eff_dur, 4), avg_speed
 
-        if abs(speed_start - speed_end) < SPEED_DELTA_THRESHOLD or (end - start) < MICRO_DUR * 1.5:
-            # Constant speed or too short to subdivide — keep as-is
-            result.append(cut)
-            continue
-
-        # Subdivide into micro-segments for smooth frame-level ramping
-        t = start
-        while t < end - 0.01:
-            sub_end = min(t + MICRO_DUR, end)
-            if end - sub_end < 0.08:  # avoid tiny trailing segment
-                sub_end = end
-            sub_cut = dict(cut)
-            sub_cut["source_start"] = round(t, 3)
-            sub_cut["source_end"] = round(sub_end, 3)
-            if sub_end < end - 0.01:
-                sub_cut["transition_out"] = "none"
-            result.append(sub_cut)
-            t = sub_end
-        ramp_count += 1
-
-    if ramp_count > 0 or len(result) != len(cuts):
-        print(
-            f"[speed] Frame-level speed ramping: {ramp_count} transition zones subdivided → "
-            f"{len(result)} total segments",
-            flush=True,
-        )
-    return result
 
 
 def compute_effective_durations(cuts, speed_curve=None):
+    """Compute output duration for each clip using numerical integration of speed curve."""
     durations = []
     for cut in (cuts or []):
         src_start = float(cut["source_start"])
         src_end = float(cut["source_end"])
-        raw_dur = src_end - src_start
         clip_speed = max(0.25, min(4.0, float(cut.get("speed") or 1.0)))
-        curve_speed = 1.0
-        if speed_curve and speed_curve != "none":
-            mid = (src_start + src_end) / 2.0
-            curve_speed = max(0.5, min(1.4, get_speed_for_timestamp(mid, speed_curve)))
-        effective_dur = raw_dur / clip_speed / curve_speed
-        durations.append(round(effective_dur, 3))
+        _, eff_dur, _ = build_variable_speed_setpts(src_start, src_end, clip_speed, speed_curve)
+        durations.append(round(eff_dur, 3))
     return durations
 
 
@@ -4700,7 +5298,7 @@ def prepend_hook_clip(output_path, edit_plan, work_dir):
         zoom_vf = (
             f",scale=w='trunc(iw*(1.0+{zr:.4f}*{prog})/2)*2'"
             f":h='trunc(ih*(1.0+{zr:.4f}*{prog})/2)*2'"
-            f":eval=frame:flags=bilinear"
+            f":eval=frame:flags=bicubic"
             f",crop=1080:1920:x='{cx}':y='{cy}'"
         )
         print(f"[zoom] Applying zoom to hook extraction", flush=True)
@@ -4818,6 +5416,7 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
             hook_offset=hook_offset,
             hook_clip=hook_clip,
             speed_curve=speed_curve,
+            edit_plan=edit_plan,
         )
         if ass_path and os.path.exists(ass_path):
             escaped = ass_path.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
@@ -4845,8 +5444,8 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
             text = raw_text.strip()
             if not text:
                 continue
-            start = 0.0
-            end = clip_ranges[0]["end"]
+            start = clip_ranges[clip_idx]["start"]
+            end = clip_ranges[clip_idx]["end"]
             style = str(overlay.get("style") or "callout")
             char_count = len(text)
             # Resolution-relative font sizes (base sizes designed for 1920px height)
@@ -4887,7 +5486,7 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
                 if os.path.exists(OVERLAY_FONT_PATH)
                 else ""
             )
-            escaped_text = text.replace("\\", "\\\\").replace(":", "\\:").replace(",", "\\,").replace("'", "\u2019").replace('"', "")
+            escaped_text = text.replace("\\", "\\\\").replace(":", "\\:").replace(",", "\\,").replace(";", "\\;").replace("[", "\\[").replace("]", "\\]").replace("%", "%%").replace("'", "\u2019").replace('"', "")
             out_label = f"[video_overlay_{i}]"
             alpha_expr = (
                 f"if(lt(t-{start:.3f},{fade_in}),(t-{start:.3f})/{fade_in},"
@@ -4897,8 +5496,7 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
                 f"{video_out}drawtext=text='{escaped_text}':fontsize={font_size}:fontcolor={_fg_color}"
                 f"{_font_clause}"
                 f":x=(w-tw)/2:y={y_expr}"
-                f":borderw=5:bordercolor={_border_color}"
-                f":shadowcolor=black@0.5:shadowx=3:shadowy=3"
+                f":borderw=0"
                 f":alpha='{alpha_expr}'"
                 f":enable='between(t,{start:.3f},{end_t:.3f})'{out_label}"
             )
@@ -5029,7 +5627,7 @@ def mix_sfx_after_speed_curve(output_path, edit_plan, cuts, effective_durations,
     n_inputs = len(labels) + 1
     all_inputs = "[0:a]" + "".join(labels)
     filter_parts.append(
-        f"{all_inputs}amix=inputs={n_inputs}:duration=first:dropout_transition=2[mixed]"
+        f"{all_inputs}amix=inputs={n_inputs}:duration=first:dropout_transition=0:normalize=0[mixed]"
     )
 
     filter_complex = ";".join(filter_parts)
@@ -5041,7 +5639,7 @@ def mix_sfx_after_speed_curve(output_path, edit_plan, cuts, effective_durations,
         "-filter_complex", filter_complex,
         "-map", "0:v", "-map", "[mixed]",
         "-c:v", "copy",
-        "-c:a", "aac", "-b:a", "128k",
+        "-c:a", "aac", "-b:a", "192k",
         "-movflags", "+faststart",
         temp_output,
     ]
@@ -5100,10 +5698,21 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             "speed": 1.0,
             "transition_out": "none",
             "freeze_frame": False,
+            "_is_hook": True,
         }] + render_cuts
 
-    # Split clips at speed curve keypoint boundaries for smooth ramping
-    render_cuts = split_clips_at_speed_boundaries(render_cuts, speed_curve)
+    # Tag each cut with its pre-split index so text overlays can map back
+    # Hook clip(s) get _original_idx = -1; content clips get 0, 1, 2, ...
+    _content_idx = 0
+    for _rc in render_cuts:
+        if _rc.get("_is_hook"):
+            _rc["_original_idx"] = -1
+        else:
+            _rc["_original_idx"] = _content_idx
+            _content_idx += 1
+
+    # Speed ramping is applied per-frame via variable setpts expressions —
+    # no clip splitting needed. Each clip evaluates the speed curve continuously.
 
     n = len(render_cuts)
     source_res = probe_resolution(source_path)
@@ -5126,22 +5735,34 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     sample_rate = probe_audio_sample_rate(source_path) or 48000
 
     # Compute effective durations from recipe with per-segment speed applied.
+    # Frame-quantize to match what fps=30 actually produces — each clip's output
+    # is round(dur * 30) frames, so its true duration is round(dur * 30) / 30.
+    # Without this, xfade offsets can exceed the actual stream duration → EINVAL.
     effective_durations = compute_effective_durations(render_cuts, speed_curve)
+    effective_durations = [round(d * 30) / 30 for d in effective_durations]
     hook_offset = 0.0
     if isinstance(hook_clip, dict) and effective_durations:
-        hook_offset = effective_durations[0]
+        # Sum durations of all hook clip segments
+        for _hi, _hcut in enumerate(render_cuts):
+            if _hcut.get("_is_hook"):
+                hook_offset += effective_durations[_hi] if _hi < len(effective_durations) else 0.0
+            else:
+                break  # hook segments are always at the start
         edit_plan["_hook_offset"] = hook_offset
+    # Store render's split cuts and effective_durations so B-roll/SFX projection
+    # uses the same timeline as the actual render (not the pre-split approximation)
+    edit_plan["_render_cuts"] = render_cuts
+    edit_plan["_render_effective_durations"] = effective_durations
     for i, cut in enumerate(render_cuts):
         src_dur = round((float(cut["source_end"]) - float(cut["source_start"])) * 1000) / 1000
         clip_speed = max(0.25, min(4.0, float(cut.get("speed") or 1.0)))
-        curve_speed = 1.0
-        if speed_curve and speed_curve != "none":
-            _mid = (float(cut["source_start"]) + float(cut["source_end"])) / 2.0
-            curve_speed = max(0.5, min(1.4, get_speed_for_timestamp(_mid, speed_curve)))
+        _, _eff, _avg = build_variable_speed_setpts(
+            float(cut["source_start"]), float(cut["source_end"]), clip_speed, speed_curve
+        )
         eff_dur = effective_durations[i]
         print(
             f"[ffmpeg] Segment {i}: {cut['source_start']:.3f}s->{cut['source_end']:.3f}s "
-            f"(dur={src_dur:.3f}s, eff={eff_dur:.3f}s @ clip={clip_speed}x curve={curve_speed}x)",
+            f"(dur={src_dur:.3f}s, eff={eff_dur:.3f}s @ avg_speed={_avg:.2f}x)",
             flush=True,
         )
 
@@ -5153,25 +5774,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         start = float(cut["source_start"])
         end = float(cut["source_end"])
         speed = max(0.25, min(4.0, float(cut.get("speed") or 1.0)))
-        curve_speed = 1.0
-        if speed_curve and speed_curve != "none":
-            # Sample at clip midpoint for smoother ramping across many small clips
-            mid = (start + end) / 2.0
-            curve_speed = max(0.5, min(1.4, get_speed_for_timestamp(mid, speed_curve)))
-        combined_speed = speed * curve_speed
-        if hook_clip and i > 0:
-            _hook_start = float(hook_clip.get("source_start") or 0.0)
-            _hook_end = float(hook_clip.get("source_end") or 0.0)
-            if start <= _hook_start + 0.1 and end >= _hook_end - 0.1:
-                hook_mid = (_hook_start + _hook_end) / 2.0
-                hook_speed = max(0.5, min(1.4, get_speed_for_timestamp(hook_mid, speed_curve)))
-                if abs(combined_speed - hook_speed) > 0.01:
-                    print(
-                        f"[render] Forcing hook chronological clip to match teaser speed: "
-                        f"{combined_speed:.2f}x -> {hook_speed:.2f}x",
-                        flush=True,
-                    )
-                    combined_speed = hook_speed
+
+        # Build variable-speed setpts expression — speed curve flows continuously
+        # across the timeline, independent of clip boundaries
+        setpts_val, _, avg_speed = build_variable_speed_setpts(start, end, speed, speed_curve, log=True)
+        combined_speed = avg_speed  # for audio (constant) and logging
         zoom = str(cut.get("zoom") or "none")
         if has_burned_captions and zoom in ["punch_in", "punch_out", "cut_zoom"]:
             zoom = "slow_in" if zoom in ("punch_in", "cut_zoom") else "slow_out"
@@ -5186,7 +5793,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         else:
             zoom_scale_factor = 1.0
             total_frames_for_zoom = total_frames
-        _base_zoom_max = 1.07 if has_burned_captions else 1.14
+        _base_zoom_max = 1.05 if has_burned_captions else 1.08
 
         # ── Face-tracked zoom ──────────────────────────────────────────
         # Find the closest face detection to this clip's midpoint.
@@ -5196,7 +5803,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         if zoom != "none" and face_positions:
             clip_mid = (start + end) / 2.0
             closest_face = min(face_positions, key=lambda p: abs(float(p.get("t") or 0.0) - clip_mid))
-            if not closest_face.get("found"):
+            _face_dt = abs(float(closest_face.get("t") or 0.0) - clip_mid)
+            if not closest_face.get("found") or _face_dt > 5.0:
                 closest_face = None
 
         # Adaptive zoom_max: scale based on face detection confidence
@@ -5204,8 +5812,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _face_conf = float(closest_face.get("confidence", 0.5))
             zoom_max = 1.0 + (_base_zoom_max - 1.0) * max(0.5, min(1.0, _face_conf))
         else:
-            # No face: reduce zoom to avoid zooming into empty space
-            zoom_max = 1.0 + (_base_zoom_max - 1.0) * 0.5
+            # No face detected: aggressive zooms (cut_zoom, punch_in) look bad
+            # when targeting dead center — downgrade to gentle slow_in or skip
+            if zoom in ("cut_zoom", "punch_in"):
+                zoom = "slow_in"
+                print(f"[zoom] clip {i}: downgraded {cut.get('zoom')} → slow_in (no face detected)", flush=True)
+            zoom_max = 1.0 + (_base_zoom_max - 1.0) * 0.35
 
         # Compute face offset for crop targeting
         face_cx = float(closest_face.get("cx") or 540.0) if closest_face else 540.0
@@ -5217,72 +5829,73 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         elif zoom != "none":
             print(f"[zoom] clip {i}: {zoom} → no face detected, using center", flush=True)
 
-        def _face_crop(scale_expr, tf_val):
-            """Build a scale+crop filter that targets the detected face."""
-            progress = f"min(n/{tf_val}\\,1.0)"
+        def _face_crop(scale_expr, tf_val, reverse=False):
+            """Build a scale+crop filter that targets the detected face.
+            reverse=True: start at face, drift to center (for slow_out).
+            """
+            _t = f"min(n/{tf_val}\\,1.0)"
+            progress = f"(1.0-{_t})" if reverse else _t
             crop_x = f"max(0\\,min((iw-1080)/2+{offset_x:.1f}*{progress}\\,iw-1080))"
             crop_y = f"max(0\\,min((ih-1920)/2+{offset_y:.1f}*{progress}\\,ih-1920))"
-            return f"{scale_expr}:eval=frame:flags=bilinear,crop=1080:1920:x='{crop_x}':y='{crop_y}'"
+            return f"{scale_expr}:eval=frame:flags=bicubic,crop=1080:1920:x='{crop_x}':y='{crop_y}'"
 
         if zoom == "slow_in":
             tf = max(1, total_frames_for_zoom) if zoom_scale_factor < 1.0 else max(1, total_frames)
             zoom_range = (zoom_max - 1.0) * zoom_scale_factor
-            progress = f"min(n/{tf}\\,1.0)"
+            # Smoothstep easing for buttery smooth zoom
+            _si_p = f"min(n/{tf}\\,1.0)"
+            _si_smooth = f"({_si_p}*{_si_p}*(3-2*{_si_p}))"
             scale_expr = (
-                f"scale=w='trunc(iw*(1.0+{zoom_range:.4f}*{progress})/2)*2'"
-                f":h='trunc(ih*(1.0+{zoom_range:.4f}*{progress})/2)*2'"
+                f"scale=w='trunc(iw*(1.0+{zoom_range:.4f}*{_si_smooth})/2)*2'"
+                f":h='trunc(ih*(1.0+{zoom_range:.4f}*{_si_smooth})/2)*2'"
             )
             zoom_filter = _face_crop(scale_expr, tf)
         elif zoom == "slow_out":
             tf = max(1, total_frames_for_zoom) if zoom_scale_factor < 1.0 else max(1, total_frames)
             zoom_range = (zoom_max - 1.0) * zoom_scale_factor
-            # Smoothstep easing: 3t²-2t³ for natural deceleration
-            smooth = f"(n/{tf})*(n/{tf})*(3-2*(n/{tf}))"
+            # Smoothstep easing: 3t²-2t³ for natural deceleration (clamped to [0,1])
+            smooth = f"(min(n/{tf}\\,1))*(min(n/{tf}\\,1))*(3-2*(min(n/{tf}\\,1)))"
             scale_expr = (
                 f"scale=w='trunc(iw*({1.0 + zoom_range:.4f}-{zoom_range:.4f}*{smooth})/2)*2'"
                 f":h='trunc(ih*({1.0 + zoom_range:.4f}-{zoom_range:.4f}*{smooth})/2)*2'"
             )
-            zoom_filter = _face_crop(scale_expr, tf)
+            zoom_filter = _face_crop(scale_expr, tf, reverse=True)
         elif zoom == "punch_in":
-            punch_range = 0.15 * zoom_scale_factor
+            punch_range = 0.08 * zoom_scale_factor  # gentler punch (was 0.15)
             tf = max(1, total_frames_for_zoom)
+            # Smoothstep ease for natural feel
+            _pi_p = f"min(n/{tf}\\,1.0)"
+            _pi_ease = f"({_pi_p}*{_pi_p}*(3-2*{_pi_p}))"
             scale_expr = (
-                f"scale=w='trunc(iw*(if(lt(n\\,{tf})\\,"
-                f"1.0+{punch_range:.4f}*n/{tf}\\,{1.0 + punch_range:.4f}))/2)*2'"
-                f":h='trunc(ih*(if(lt(n\\,{tf})\\,"
-                f"1.0+{punch_range:.4f}*n/{tf}\\,{1.0 + punch_range:.4f}))/2)*2'"
+                f"scale=w='trunc(iw*(1.0+{punch_range:.4f}*{_pi_ease})/2)*2'"
+                f":h='trunc(ih*(1.0+{punch_range:.4f}*{_pi_ease})/2)*2'"
             )
             zoom_filter = _face_crop(scale_expr, tf)
         elif zoom == "punch_out":
-            punch_range = 0.15 * zoom_scale_factor
+            punch_range = 0.08 * zoom_scale_factor  # gentler punch (was 0.15)
             tf = max(1, total_frames_for_zoom)
+            _po_p = f"min(n/{tf}\\,1.0)"
+            _po_ease = f"({_po_p}*{_po_p}*(3-2*{_po_p}))"
             scale_expr = (
-                f"scale=w='trunc(iw*(if(lt(n\\,{tf})\\,"
-                f"{1.0 + punch_range:.4f}-{punch_range:.4f}*n/{tf}\\,1.0))/2)*2'"
-                f":h='trunc(ih*(if(lt(n\\,{tf})\\,"
-                f"{1.0 + punch_range:.4f}-{punch_range:.4f}*n/{tf}\\,1.0))/2)*2'"
+                f"scale=w='trunc(iw*({1.0 + punch_range:.4f}-{punch_range:.4f}*{_po_ease})/2)*2'"
+                f":h='trunc(ih*({1.0 + punch_range:.4f}-{punch_range:.4f}*{_po_ease})/2)*2'"
             )
-            zoom_filter = _face_crop(scale_expr, tf)
+            zoom_filter = _face_crop(scale_expr, tf, reverse=True)
         elif zoom == "cut_zoom":
-            # Rapid smooth punch-in: 100% → 118% over ~6 frames (200ms at 30fps)
-            # with ease-out, then HOLD at 118% for the rest of the clip.
-            # The rapid motion is what makes it feel impactful — you see the
-            # frame push in. Resets to 100% on the next clip (the "cut" back).
-            cz_target = 0.18  # 18% zoom
-            cz_frames = 6     # ~200ms ramp
-            # Ease-out curve: fast start, smooth stop. Uses smoothstep.
-            # progress = clamp(n/6, 0, 1), eased = 3p²-2p³
+            # Instant snap zoom: 100% → 130% on frame 1, hold for entire clip.
+            # Matches Captions app aggressive cut-zoom style.
+            cz_target = 0.30  # 30% zoom = 130% scale
+            cz_frames = 2     # instant snap (2 frames)
             cz_p = f"min(n/{cz_frames}\\,1.0)"
             cz_ease = f"({cz_p}*{cz_p}*(3-2*{cz_p}))"
             scale_expr = (
                 f"scale=w='trunc(iw*(1.0+{cz_target:.4f}*{cz_ease})/2)*2'"
                 f":h='trunc(ih*(1.0+{cz_target:.4f}*{cz_ease})/2)*2'"
             )
-            # Face-targeted crop that follows the zoom ramp
             cz_crop_x = f"max(0\\,min((iw-1080)/2+{offset_x:.1f}*{cz_ease}\\,iw-1080))"
             cz_crop_y = f"max(0\\,min((ih-1920)/2+{offset_y:.1f}*{cz_ease}\\,ih-1920))"
-            zoom_filter = f"{scale_expr}:eval=frame:flags=bilinear,crop=1080:1920:x='{cz_crop_x}':y='{cz_crop_y}'"
-            print(f"[zoom] clip {i}: cut_zoom → 100%→{1+cz_target:.0%} over {cz_frames} frames, face-tracked", flush=True)
+            zoom_filter = f"{scale_expr}:eval=frame:flags=bicubic,crop=1080:1920:x='{cz_crop_x}':y='{cz_crop_y}'"
+            print(f"[zoom] clip {i}: cut_zoom → 100%→130% instant snap, face-tracked", flush=True)
 
         vignette = str(edit_plan.get("vignette") or "none").lower()
         vignette_filter = None
@@ -5297,15 +5910,15 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             fade_start = max(0, eff_dur - 1.0)
             outro_filter = f"fade=t=out:st={fade_start:.3f}:d=1.0:color={fade_color}"
 
-        # Video: trim from source, then apply per-clip filters
+        # Video: trim from source, then apply per-clip speed + filters
         # fps=30 AFTER speed change to avoid frame count drift at clip boundaries
         v_chain = [
             f"trim=start={start:.3f}:end={end:.3f}",
             "setpts=PTS-STARTPTS",
         ]
 
-        if abs(combined_speed - 1.0) > 0.001:
-            v_chain.append(f"setpts={1.0/combined_speed:.4f}*PTS")
+        if setpts_val:
+            v_chain.append(f"setpts={setpts_val}")
         v_chain.append("fps=30")
         if zoom_filter:
             v_chain.append(zoom_filter)
@@ -5436,11 +6049,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     transition_filters = []
     tl_video = "v0"
     tl_audio = "a0"
-    running_dur = effective_durations[0]
+    running_dur = effective_durations[0] if effective_durations else 0.0
 
     CUSTOM_TRANSITIONS = {"flash", "glitch", "whip_left", "whip_right"}
     XFADE_TRANSITIONS = {
-        "fade","fadeblack","fadewhite","dissolve",
+        "fade","fadeblack","dissolve",
         "wipeleft","wiperight","wipeup","wipedown",
         "smoothleft","smoothright","smoothup","smoothdown",
         "zoomin",
@@ -5451,6 +6064,13 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         out_v     = "vout" if i == n-1 else f"vx{i}"
         out_v_raw = f"{out_v}_raw"
         out_a     = "aout" if i == n-1 else f"ax{i}"
+
+        # Safety: if either clip is shorter than the transition, force hard cut
+        prev_dur = effective_durations[i-1] if i-1 < len(effective_durations) else 1.0
+        curr_dur = effective_durations[i] if i < len(effective_durations) else 1.0
+        if transition != "none" and (prev_dur < TRANSITION_DURATION + 0.1 or curr_dur < TRANSITION_DURATION + 0.1):
+            print(f"[render] Clip {i-1}/{i} too short for {transition} ({prev_dur:.2f}s/{curr_dur:.2f}s) — forcing hard cut", flush=True)
+            transition = "none"
 
         if transition in CUSTOM_TRANSITIONS:
             td = TRANSITION_DURATION
@@ -5463,17 +6083,18 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
             elif transition == "glitch":
                 transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=pixelize:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
-                transition_filters.append(f"[{out_v_raw}]hue=h=0:s=1.4,fps=30[{out_v}]")
+                transition_filters.append(f"[{out_v_raw}]hue=h=0:s=1.4:enable='between(t,{offset:.3f},{offset + td:.3f})',fps=30[{out_v}]")
                 transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
 
             elif transition == "whip_left":
+                # Heavy full-frame motion blur whip — matches Captions app intensity
                 transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=wipeleft:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
-                transition_filters.append(f"[{out_v_raw}]boxblur=luma_radius=6:luma_power=1:chroma_radius=0,fps=30[{out_v}]")
+                transition_filters.append(f"[{out_v_raw}]boxblur=luma_radius=40:luma_power=2:chroma_radius=20,fps=30[{out_v}]")
                 transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
 
             elif transition == "whip_right":
                 transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=wiperight:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
-                transition_filters.append(f"[{out_v_raw}]boxblur=luma_radius=6:luma_power=1:chroma_radius=0,fps=30[{out_v}]")
+                transition_filters.append(f"[{out_v_raw}]boxblur=luma_radius=40:luma_power=2:chroma_radius=20,fps=30[{out_v}]")
                 transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
 
             running_dur = running_dur + effective_durations[i] - td
@@ -5507,6 +6128,21 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     video_out = "[video_base]"
     post_filters.append(f"[{tl_video}]null{video_out}")
 
+    # ── Subtle cinematic color grading ─────────────────────────────────
+    # Light contrast boost + slight warmth — makes footage look polished
+    # without being heavy-handed. Matches the subtle grading in Captions app output.
+    _caption_style_check = str(edit_plan.get("caption_style") or "").lower()
+    if _caption_style_check and _caption_style_check != "none":
+        _grade_label = "[video_graded]"
+        post_filters.append(
+            f"{video_out}"
+            f"eq=contrast=1.04:brightness=0.01:saturation=1.05,"
+            f"unsharp=3:3:0.3:3:3:0.0"
+            f"{_grade_label}"
+        )
+        video_out = _grade_label
+        print("[grade] Subtle cinematic color grading applied", flush=True)
+
     if edit_plan.get("cinematic_bars"):
         bar_h = int((1920 - int(1080 / 2.35)) / 2)
         bars_label = f"[video_bars]"
@@ -5515,6 +6151,41 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             f"drawbox=x=0:y={1920-bar_h}:w=1080:h={bar_h}:color=black:t=fill{bars_label}"
         )
         video_out = bars_label
+
+    # ── Mid-clip white flash effects ──────────────────────────────────────
+    # visual_effects entries with type="white_flash" create a brief brightness spike
+    _visual_effects = edit_plan.get("visual_effects") or []
+    _flash_effects = [ve for ve in _visual_effects if ve.get("type") == "white_flash"]
+    if _flash_effects:
+        flash_filter_parts = []
+        for _fe in _flash_effects:
+            _ft = float(_fe.get("t") or 0)
+            if _ft <= 0:
+                continue
+            # Project source time to output time
+            _ft_out = project_source_time_to_final_output(
+                _ft, render_cuts, effective_durations, speed_curve,
+                hook_offset=float(edit_plan.get("_hook_offset") or 0.0),
+            )
+            if _ft_out is None:
+                continue
+            # 0.12s white flash: brightness ramps up then back down
+            _f_start = max(0, _ft_out - 0.03)
+            _f_end = _ft_out + 0.09
+            flash_filter_parts.append(
+                f"curves=preset=lighter:enable='between(t,{_f_start:.3f},{_f_end:.3f})'"
+            )
+        if flash_filter_parts:
+            if len(flash_filter_parts) == 1:
+                flash_label = "[video_flash]"
+                post_filters.append(f"{video_out}{flash_filter_parts[0]}{flash_label}")
+                video_out = flash_label
+            else:
+                for _fi, _fp in enumerate(flash_filter_parts):
+                    _fl = f"[video_flash{_fi}]"
+                    post_filters.append(f"{video_out}{_fp}{_fl}")
+                    video_out = _fl
+            print(f"[fx] Added {len(flash_filter_parts)} white flash effect(s)", flush=True)
 
     caption_style = str(edit_plan.get("caption_style") or "none").lower()
     ass_path = None
@@ -5528,11 +6199,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             edit_plan.get("caption_position") or "lower-third",
             edit_plan.get("caption_keywords") or [],
             work_dir,
-            hook_offset=0.0,
+            hook_offset=float(edit_plan.get("_hook_offset") or 0.0),
             hook_clip=None,
             speed_curve=speed_curve,
             transition_duration=TRANSITION_DURATION,
             face_positions=face_positions,
+            edit_plan=edit_plan,
         )
     if ass_path and os.path.exists(ass_path):
         escaped = ass_path.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
@@ -5542,26 +6214,44 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     text_overlays = edit_plan.get("text_overlays") or []
     if text_overlays:
         clip_ranges = get_output_clip_ranges(render_cuts, effective_durations, transition_duration=TRANSITION_DURATION)
+        # Build mapping from original content clip index → (first, last) post-split clip range
+        # so Gemini's appear_at_clip correctly spans the full original clip after speed splitting
+        _orig_idx_to_range = {}
+        for _ci, _rc in enumerate(render_cuts):
+            _oi = _rc.get("_original_idx")
+            if _oi is not None and _oi >= 0 and _ci < len(clip_ranges):
+                if _oi not in _orig_idx_to_range:
+                    _orig_idx_to_range[_oi] = (_ci, _ci)
+                else:
+                    _orig_idx_to_range[_oi] = (_orig_idx_to_range[_oi][0], _ci)
         # Sample background brightness once for text overlay color decisions
         _overlay_sample_ts = float(render_cuts[0].get("source_start", 0)) + 0.5
         _y_positions = {"top": 0.10, "center": 0.50, "bottom": 0.75}
         for i, overlay in enumerate(text_overlays):
-            raw_idx = int(overlay.get("appear_at_clip") or 0)
-            clip_idx = max(0, min(raw_idx, len(clip_ranges) - 1))
-            if clip_idx < 0 or clip_idx >= len(clip_ranges):
-                print(f"[render] Text overlay '{overlay.get('text')}' — clip_idx={clip_idx} out of range ({len(clip_ranges)} clips), skipping", flush=True)
+            gemini_idx = int(overlay.get("appear_at_clip") or 0)
+            if not clip_ranges:
+                print(f"[render] Text overlay '{overlay.get('text')}' — no clip ranges, skipping", flush=True)
                 continue
+            # Map Gemini's original clip index to post-split clip range span
+            if gemini_idx in _orig_idx_to_range:
+                first_ci, last_ci = _orig_idx_to_range[gemini_idx]
+            else:
+                # Fallback: find closest original index
+                valid_indices = sorted(_orig_idx_to_range.keys()) if _orig_idx_to_range else [0]
+                closest = min(valid_indices, key=lambda x: abs(x - gemini_idx))
+                first_ci, last_ci = _orig_idx_to_range.get(closest, (0, 0))
+            first_ci = max(0, min(first_ci, len(clip_ranges) - 1))
+            last_ci = max(0, min(last_ci, len(clip_ranges) - 1))
             raw_text = _EMOJI_RE.sub("", str(overlay.get("text") or "")).strip()
             text = raw_text.strip()
             if not text:
                 continue
-            start = 0.0
-            end = clip_ranges[0]["end"]
+            start = clip_ranges[first_ci]["start"]
+            end = clip_ranges[last_ci]["end"]
             style = str(overlay.get("style") or "callout")
             char_count = len(text)
-            # Resolution-relative font sizes (base sizes designed for 1920px height)
-            _overlay_scale = 1920.0 / max(1, 1920)
-            base_size = round((72 if style == "title" else (64 if style == "cta" else 56)) * _overlay_scale)
+            # Font sizes designed for 1080x1920 output (pipeline normalizes to this)
+            base_size = 72 if style == "title" else (64 if style == "cta" else 56)
             if char_count <= 18:
                 font_size = base_size
             elif char_count <= 25:
@@ -5570,9 +6260,31 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 font_size = round(base_size * 0.70)
             else:
                 font_size = round(base_size * 0.60)
-            pos = str(overlay.get("position") or "center")
-            # Resolution-relative Y-positions
-            y_expr = "h*0.10" if pos == "top" else ("(h-th)/2" if pos == "center" else "h*0.75")
+            pos = str(overlay.get("position") or "top")
+            # Face-aware overlay positioning: find face at overlay start time
+            # and place text where it won't block the face
+            _ov_source_t = float(render_cuts[min(first_ci, len(render_cuts) - 1)].get("source_start", 0)) + 0.3
+            _ov_face = None
+            if face_positions:
+                _ov_fp = min(face_positions, key=lambda p: abs(float(p.get("t", 0)) - _ov_source_t))
+                if _ov_fp.get("found") and abs(float(_ov_fp.get("t", 0)) - _ov_source_t) < 2.0:
+                    _ov_face = _ov_fp
+            if _ov_face:
+                _ov_face_y_frac = float(_ov_face.get("cy", 960)) / 1920.0
+                if _ov_face_y_frac < 0.4:
+                    # Face is high — put text below
+                    y_expr = "h*0.65"
+                    pos = "bottom"
+                elif _ov_face_y_frac > 0.6:
+                    # Face is low — put text above
+                    y_expr = "h*0.10"
+                    pos = "top"
+                else:
+                    # Face centered — put text at top (smaller, less intrusive)
+                    y_expr = "h*0.08"
+                    pos = "top"
+            else:
+                y_expr = "h*0.10" if pos == "top" else ("(h-th)/2" if pos == "center" else "h*0.75")
             end_t = max(start + 0.8, end)
             fade_in = 0.15
             fade_out = 0.15
@@ -5600,7 +6312,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 if os.path.exists(OVERLAY_FONT_PATH)
                 else ""
             )
-            escaped_text = text.replace("\\", "\\\\").replace(":", "\\:").replace(",", "\\,").replace("'", "\u2019").replace('"', "")
+            escaped_text = text.replace("\\", "\\\\").replace(":", "\\:").replace(",", "\\,").replace(";", "\\;").replace("[", "\\[").replace("]", "\\]").replace("%", "%%").replace("'", "\u2019").replace('"', "")
             out_label = f"[video_overlay_{i}]"
             alpha_expr = (
                 f"if(lt(t-{start:.3f},{fade_in}),(t-{start:.3f})/{fade_in},"
@@ -5610,12 +6322,120 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 f"{video_out}drawtext=text='{escaped_text}':fontsize={font_size}:fontcolor={_fg_color}"
                 f"{_font_clause}"
                 f":x=(w-tw)/2:y={y_expr}"
-                f":borderw=5:bordercolor={_border_color}"
-                f":shadowcolor=black@0.5:shadowx=3:shadowy=3"
+                f":borderw=0"
                 f":alpha='{alpha_expr}'"
                 f":enable='between(t,{start:.3f},{end_t:.3f})'{out_label}"
             )
             video_out = out_label
+
+    # ── Full-screen text B-roll on emphasis moments ─────────────────────
+    # Giant text that appears on the OPPOSITE side of the face during
+    # high-intensity emphasis moments. Like Captions app: face right → text left,
+    # face left → text right. Cascading repetition effect for visual weight.
+    _emphasis_moments = edit_plan.get("_emphasis_moments") or []
+    _dg_words_render = edit_plan.get("_deepgram_words") or []
+    if _emphasis_moments and _dg_words_render:
+        _em_clip_ranges = get_output_clip_ranges(render_cuts, effective_durations, transition_duration=TRANSITION_DURATION)
+        _em_font_clause = (
+            f":fontfile='{OVERLAY_FONT_PATH}'"
+            if os.path.exists(OVERLAY_FONT_PATH)
+            else ""
+        )
+        _em_idx = 0
+        for em in _emphasis_moments:
+            if em.get("intensity") != "high":
+                continue
+            em_t = float(em["t"])
+            # Get the emphasis word text from word_indices
+            em_words = []
+            for wi in em.get("word_indices", []):
+                if 0 <= wi < len(_dg_words_render):
+                    w_text = str(_dg_words_render[wi].get("punctuated_word") or _dg_words_render[wi].get("word") or "")
+                    w_text = re.sub(r"[.,!?;:'\"\\]", "", w_text).strip().upper()
+                    if w_text:
+                        em_words.append(w_text)
+            if not em_words:
+                continue
+            em_text = " ".join(em_words)
+            # Map source timestamp to output timeline
+            _em_output_t = None
+            for ci, cut in enumerate(render_cuts):
+                cs = float(cut["source_start"])
+                ce = float(cut["source_end"])
+                if cs <= em_t <= ce and ci < len(_em_clip_ranges):
+                    frac = (em_t - cs) / max(0.001, ce - cs)
+                    clip_range = _em_clip_ranges[ci]
+                    _em_output_t = clip_range["start"] + frac * (clip_range["end"] - clip_range["start"])
+                    break
+            if _em_output_t is None:
+                continue
+
+            # Find face position at this emphasis moment for smart placement
+            _em_face_cx = None
+            _em_face_cy = None
+            if face_positions:
+                _em_best_fp = min(face_positions, key=lambda p: abs(float(p.get("t", 0)) - em_t))
+                if _em_best_fp.get("found") and abs(float(_em_best_fp.get("t", 0)) - em_t) < 2.0:
+                    _em_face_cx = float(_em_best_fp.get("cx", 540))
+                    _em_face_cy = float(_em_best_fp.get("cy", 960))
+
+            # Giant text: quick scale-in, hold, fade out
+            _em_dur = 0.5
+            _em_start = max(0, _em_output_t - 0.05)
+            _em_end = _em_start + _em_dur
+            _em_fade_in = 0.08
+            _em_fade_out = 0.15
+            # Font size: fill available space
+            _em_chars = len(em_text)
+            if _em_chars <= 5:
+                _em_fs = 200
+            elif _em_chars <= 10:
+                _em_fs = 160
+            elif _em_chars <= 15:
+                _em_fs = 120
+            else:
+                _em_fs = 90
+
+            # Face-aware positioning: place text opposite the face
+            if _em_face_cx is not None:
+                _em_face_x_frac = _em_face_cx / 1080.0
+                if _em_face_x_frac > 0.55:
+                    # Face right → text left
+                    _em_x_expr = "60"
+                    _em_y_expr = "(h-th)/2" if _em_face_cy is None or _em_face_cy / 1920.0 > 0.5 else "h*0.55"
+                elif _em_face_x_frac < 0.45:
+                    # Face left → text right
+                    _em_x_expr = "w-tw-60"
+                    _em_y_expr = "(h-th)/2" if _em_face_cy is None or _em_face_cy / 1920.0 > 0.5 else "h*0.55"
+                else:
+                    # Face centered → text below face
+                    _em_x_expr = "(w-tw)/2"
+                    _em_face_bottom = min(1920 - 200, (_em_face_cy or 960) + 250)
+                    _em_y_expr = f"min({int(_em_face_bottom)},h-th-20)"
+            else:
+                # No face data — center
+                _em_x_expr = "(w-tw)/2"
+                _em_y_expr = "(h-th)/2"
+
+            _em_escaped = em_text.replace("\\", "\\\\").replace(":", "\\:").replace(",", "\\,").replace("'", "\u2019").replace('"', "")
+            _em_alpha = (
+                f"if(lt(t-{_em_start:.3f},{_em_fade_in}),(t-{_em_start:.3f})/{_em_fade_in},"
+                f"if(gt(t,{_em_end - _em_fade_out:.3f}),({_em_end:.3f}-t)/{_em_fade_out},1))"
+            )
+
+            # Main emphasis text — clean, big, no outlines or ghost cascade
+            _em_label = f"[video_em_{_em_idx}]"
+            post_filters.append(
+                f"{video_out}drawtext=text='{_em_escaped}':fontsize={_em_fs}:fontcolor=white@0.95"
+                f"{_em_font_clause}"
+                f":x={_em_x_expr}:y={_em_y_expr}"
+                f":borderw=0"
+                f":alpha='{_em_alpha}'"
+                f":enable='between(t,{_em_start:.3f},{_em_end:.3f})'{_em_label}"
+            )
+            video_out = _em_label
+            print(f"[text-broll] '{em_text}' at output {_em_output_t:.2f}s ({_em_dur:.1f}s, {_em_fs}px, face={'L' if _em_face_cx and _em_face_cx/1080<0.45 else 'R' if _em_face_cx and _em_face_cx/1080>0.55 else 'C'})", flush=True)
+            _em_idx += 1
 
     audio_out = "[audio_timed]"
     post_filters.append(
@@ -5626,7 +6446,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _n_inputs   = len(sfx_audio_labels) + 1
         _sfx_inputs = audio_out + "".join(sfx_audio_labels)
         post_filters.append(
-            f"{_sfx_inputs}amix=inputs={_n_inputs}:duration=first:dropout_transition=2[audio_sfx_mixed]"
+            f"{_sfx_inputs}amix=inputs={_n_inputs}:duration=first:dropout_transition=0:normalize=0[audio_sfx_mixed]"
         )
         audio_out = "[audio_sfx_mixed]"
         print(f"[sfx] Mixed {len(sfx_audio_labels)} SFX track(s) into audio", flush=True)
@@ -5664,10 +6484,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         f"acompressor=threshold={_level_thresh}dB:ratio=1.8:attack=15:release=80:makeup={_makeup},"
         f"alimiter=limit=0.95"
     )
-    # Calculate frame-quantized video duration so we can force audio to match exactly.
-    # The acrossfade chain and asetrate/aresample introduce cumulative rounding that
-    # drifts audio vs video by up to ~200ms on longer edits. Pad if short, trim if long.
-    _target_v_dur = sum(round(d * 30) / 30 for d in effective_durations)
+    # Force audio duration to match actual video duration (running_dur accounts for
+    # transition overlaps). Frame-quantize to avoid sub-frame drift.
+    _target_v_dur = round(running_dur * 30) / 30
     audio_chain += f",apad=whole_dur={_target_v_dur:.4f},atrim=end={_target_v_dur:.4f}"
 
     post_filters.append(f"{audio_out}{audio_chain}[final_audio]")
@@ -5715,7 +6534,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 f"[music_track]"
             )
             music_filters.append(
-                f"[final_audio][music_track]amix=inputs=2:duration=first:dropout_transition=2[mixed_audio]"
+                f"[final_audio][music_track]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[mixed_audio]"
             )
             audio_out = "[mixed_audio]"
             print(f"[render] background_music={music_track} vol={music_vol} duration={total_duration:.1f}s", flush=True)
@@ -6024,10 +6843,69 @@ def handler(job):
             print("[pipeline] Speed curve applied in single-pass render — skipping post-process", flush=True)
         else:
             print("[pipeline] Speed curve skipped", flush=True)
-        cuts = edit_plan.get("cuts") or []
-        effective_durations = compute_effective_durations(cuts, speed_curve)
+        # Use render's split cuts/durations for accurate timeline projection
+        # (render_multi_clip splits clips at speed boundaries — unsplit cuts give wrong timelines)
+        cuts = edit_plan.get("_render_cuts") or edit_plan.get("cuts") or []
+        effective_durations = edit_plan.get("_render_effective_durations") or compute_effective_durations(cuts, speed_curve)
 
         final_dur = _rv or (probe_duration(output_path) or 0)
+
+        # ── B-roll compositing ────────────────────────────────────────────────────
+        broll_clips = edit_plan.get("broll_clips") or []
+        if broll_clips:
+            print(f"[broll] Fetching {len(broll_clips)} B-roll clip(s) in parallel...", flush=True)
+            broll_files = {}
+            hook_offset_val = float(edit_plan.get("_hook_offset") or 0.0)
+
+            # Project source timestamps to output timeline
+            broll_entries_projected = []
+            for _bi, _bc in enumerate(broll_clips):
+                _src_ts = float(_bc.get("timestamp") or 0)
+                _out_ts = project_source_time_to_final_output(
+                    _src_ts, cuts, effective_durations, speed_curve,
+                    hook_offset=hook_offset_val,
+                )
+                if _out_ts is not None and _out_ts < final_dur:
+                    broll_entries_projected.append({
+                        "keyword": _bc["keyword"],
+                        "timestamp": _out_ts,
+                        "duration": _bc["duration"],
+                        "_idx": _bi,
+                    })
+
+            if broll_entries_projected:
+                # Parallel fetch
+                with concurrent.futures.ThreadPoolExecutor(max_workers=3) as broll_pool:
+                    broll_futures = {}
+                    for _be in broll_entries_projected:
+                        _fut = broll_pool.submit(
+                            fetch_broll_clip,
+                            _be["keyword"],
+                            _be["duration"],
+                            work_dir,
+                        )
+                        broll_futures[_fut] = _be["_idx"]
+                    for _fut in concurrent.futures.as_completed(broll_futures):
+                        _idx = broll_futures[_fut]
+                        try:
+                            _path = _fut.result()
+                            if _path:
+                                broll_files[_idx] = _path
+                        except Exception as _be_err:
+                            print(f"[broll] Fetch error for clip {_idx}: {_be_err}", flush=True)
+
+                if broll_files:
+                    # Remap indices for composite_broll (expects 0-based sequential)
+                    _broll_entries_final = []
+                    _broll_files_final = {}
+                    for _ri, _be in enumerate(broll_entries_projected):
+                        if _be["_idx"] in broll_files:
+                            _broll_entries_final.append(_be)
+                            _broll_files_final[len(_broll_entries_final) - 1] = broll_files[_be["_idx"]]
+
+                    composite_broll(output_path, _broll_entries_final, _broll_files_final, work_dir)
+                else:
+                    print("[broll] No B-roll clips fetched successfully — skipping composite", flush=True)
 
         # ── Parallel group 2: cover frame + upload ────────────────────────────────
         thumbnail_source_ts = edit_plan.get("thumbnail_timestamp")
@@ -6042,7 +6920,7 @@ def handler(job):
             hook_offset=float(edit_plan.get("_hook_offset") or 0.0),
         )
         if cover_frame_ts is None:
-            cover_frame_ts = 1.0
+            cover_frame_ts = min(1.0, max(0.1, final_dur - 0.1))
         cover_frame_b64  = None
         cover_frame_mime = "image/jpeg"
 
@@ -6121,7 +6999,7 @@ def handler(job):
             "job_id": job_id,
             "render_time": round(render_elapsed, 1),
             "output_size_mb": round(output_size_mb, 1),
-            "edit_recipe": {k: v for k, v in edit_plan.items() if k != "analysis_data"},
+            "edit_recipe": {k: v for k, v in edit_plan.items() if k != "analysis_data" and not k.startswith("_")},
             "cover_frame_timestamp": round(cover_frame_ts, 3),
             "thumbnail_timestamp": round(float(thumbnail_source_ts), 3),
         }
