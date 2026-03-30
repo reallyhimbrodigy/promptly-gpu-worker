@@ -3143,8 +3143,10 @@ def run_ffmpeg(args):
     elapsed = time.time() - t
     if result.returncode != 0:
         print(f"[ffmpeg] FAILED after {elapsed:.1f}s", flush=True)
-        print(f"[ffmpeg] stderr (last 800):\n{result.stderr[-800:]}", flush=True)
-        raise RuntimeError(f"FFmpeg failed: {result.stderr[-300:]}")
+        _stderr = result.stderr or ""
+        print(f"[ffmpeg] stderr (first 2000):\n{_stderr[:2000]}", flush=True)
+        print(f"[ffmpeg] stderr (last 2000):\n{_stderr[-2000:]}", flush=True)
+        raise RuntimeError(f"FFmpeg failed: {_stderr[-500:]}")
     print(f"[ffmpeg] Completed in {elapsed:.1f}s", flush=True)
     return result
 
@@ -4910,13 +4912,13 @@ def render_png_caption_video(
         return canvas
 
     # ── Pipe raw RGBA frames to FFmpeg → transparent MOV ───────────────────
-    caption_video = os.path.join(work_dir, "caption_overlay.mov")
+    caption_video = os.path.join(work_dir, "caption_overlay.mkv")
     cmd = [
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "warning",
         "-f", "rawvideo", "-pix_fmt", "rgba",
         "-s", f"{w}x{h}", "-r", str(fps),
         "-i", "pipe:0",
-        "-c:v", "qtrle", "-pix_fmt", "argb",
+        "-c:v", "png", "-pix_fmt", "rgba",
         caption_video,
     ]
 
