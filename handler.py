@@ -4276,15 +4276,15 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     elif caption_style == "captions_clean":
         # ── Captions App Clean Style ──────────────────────────────────────
-        # 1-3 words at a time, all lowercase, clean white, no outlines
+        # 1-3 words at a time, all lowercase, clean white with subtle shadow
         # Keywords get inline color change (same size, same position)
-        # Matches Captions app exactly
         _KW_COLORS = ["&H0000FFFF", "&H000055FF", "&H00CCCC00"]  # yellow, red, teal (ASS BGR)
         default_color = "&H00FFFFFF"
         keyword_set = _build_keyword_set(words, caption_keywords)
         _kw_color_idx = 0
 
-        ass_lines = []
+        # Build groups first, then fix overlapping end times
+        _groups = []
         group = []
         for i, word_dict in enumerate(words):
             group.append(word_dict)
@@ -4292,48 +4292,56 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             pause = (next_w["start"] - word_dict["end"]) if next_w else 1.0
             ends_sentence = bool(PUNCT_END.search(word_dict.get("word") or ""))
             if not next_w or pause > 0.25 or ends_sentence or len(group) >= 3:
-                start = group[0]["start"]
-                end = group[-1]["end"] + 0.06
-                _cy = round(h * 0.68)
-
-                parts = []
-                for wd in group:
-                    w_text = str(wd["word"]).strip().lower()
-                    _w_check = re.sub(r"[.,!?;:'\"\\]", "", w_text)
-                    is_kw = _w_check in keyword_set
-                    if is_kw:
-                        _kc = _KW_COLORS[_kw_color_idx % len(_KW_COLORS)]
-                        parts.append(f"{{\\1c{_kc}}}{w_text}{{\\1c{default_color}}}")
-                        _kw_color_idx += 1
-                    else:
-                        parts.append(w_text)
-                phrase_text = " ".join(parts)
-
-                tag = (
-                    f"{{\\an5\\pos({w // 2},{_cy})\\fs{fontsize}"
-                    f"\\1c{default_color}\\bord0\\shad0}}"
-                    f"{phrase_text}"
-                )
-                ass_lines.append(
-                    f"Dialogue: 0,{format_ass_time(start)},{format_ass_time(end)}"
-                    f",Default,,0,0,0,,{tag}\n"
-                )
+                _groups.append(list(group))
                 group = []
+
+        ass_lines = []
+        _cy = round(h * 0.68)
+        for gi, grp in enumerate(_groups):
+            start = grp[0]["start"]
+            raw_end = grp[-1]["end"] + 0.06
+            # Clamp end so it never overlaps with the next group's start
+            if gi + 1 < len(_groups):
+                next_start = _groups[gi + 1][0]["start"]
+                raw_end = min(raw_end, next_start - 0.01)
+            end = max(start + 0.03, raw_end)
+
+            parts = []
+            for wd in grp:
+                w_text = str(wd["word"]).strip().lower()
+                _w_check = re.sub(r"[.,!?;:'\"\\]", "", w_text)
+                is_kw = _w_check in keyword_set
+                if is_kw:
+                    _kc = _KW_COLORS[_kw_color_idx % len(_KW_COLORS)]
+                    parts.append(f"{{\\1c{_kc}}}{w_text}{{\\1c{default_color}}}")
+                    _kw_color_idx += 1
+                else:
+                    parts.append(w_text)
+            phrase_text = " ".join(parts)
+
+            tag = (
+                f"{{\\an5\\pos({w // 2},{_cy})\\fs{fontsize}"
+                f"\\1c{default_color}\\bord0\\shad1}}"
+                f"{phrase_text}"
+            )
+            ass_lines.append(
+                f"Dialogue: 0,{format_ass_time(start)},{format_ass_time(end)}"
+                f",Default,,0,0,0,,{tag}\n"
+            )
         ass += "".join(ass_lines)
         print(f"[captions] Captions Clean style: {len(ass_lines)} groups, {len(keyword_set)} keywords", flush=True)
 
     elif caption_style == "captions_dynamic":
         # ── Captions App Dynamic Style ────────────────────────────────────
-        # Identical to Captions app: 1-3 words at a time, all lowercase,
-        # clean bold white, NO outlines/borders/shadows.
-        # Keywords get inline color change (yellow/red/teal) — same font, same size.
-        # No dual layer, no echo cascade, no stacked text.
+        # 1-3 words at a time, all lowercase, clean bold white with subtle shadow
+        # Keywords get inline color change (yellow/red/teal)
         _KW_COLORS = ["&H0000FFFF", "&H000055FF", "&H00CCCC00"]  # yellow, red, teal (ASS BGR)
         default_color = "&H00FFFFFF"
         keyword_set = _build_keyword_set(words, caption_keywords)
         _kw_color_idx = 0
 
-        ass_lines = []
+        # Build groups first, then fix overlapping end times
+        _groups = []
         group = []
         for i, wd in enumerate(words):
             group.append(wd)
@@ -4343,33 +4351,42 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             _min_met = len(group) >= 1
             _max_met = len(group) >= 3
             if not next_w or ends_sentence or _max_met or (_min_met and pause > 0.25):
-                start = group[0]["start"]
-                end = group[-1]["end"] + 0.06
-                _cy = round(h * 0.68)
-
-                parts = []
-                for _wd in group:
-                    w_text = str(_wd["word"]).strip().lower()
-                    _w_check = re.sub(r"[.,!?;:'\"\\]", "", w_text)
-                    is_kw = _w_check in keyword_set
-                    if is_kw:
-                        _kc = _KW_COLORS[_kw_color_idx % len(_KW_COLORS)]
-                        parts.append(f"{{\\1c{_kc}}}{w_text}{{\\1c{default_color}}}")
-                        _kw_color_idx += 1
-                    else:
-                        parts.append(w_text)
-                phrase_text = " ".join(parts)
-
-                tag = (
-                    f"{{\\an5\\pos({w // 2},{_cy})\\fs{fontsize}"
-                    f"\\1c{default_color}\\bord0\\shad0}}"
-                    f"{phrase_text}"
-                )
-                ass_lines.append(
-                    f"Dialogue: 0,{format_ass_time(start)},{format_ass_time(end)}"
-                    f",Default,,0,0,0,,{tag}\n"
-                )
+                _groups.append(list(group))
                 group = []
+
+        ass_lines = []
+        _cy = round(h * 0.68)
+        for gi, grp in enumerate(_groups):
+            start = grp[0]["start"]
+            raw_end = grp[-1]["end"] + 0.06
+            # Clamp end so it never overlaps with the next group's start
+            if gi + 1 < len(_groups):
+                next_start = _groups[gi + 1][0]["start"]
+                raw_end = min(raw_end, next_start - 0.01)
+            end = max(start + 0.03, raw_end)
+
+            parts = []
+            for _wd in grp:
+                w_text = str(_wd["word"]).strip().lower()
+                _w_check = re.sub(r"[.,!?;:'\"\\]", "", w_text)
+                is_kw = _w_check in keyword_set
+                if is_kw:
+                    _kc = _KW_COLORS[_kw_color_idx % len(_KW_COLORS)]
+                    parts.append(f"{{\\1c{_kc}}}{w_text}{{\\1c{default_color}}}")
+                    _kw_color_idx += 1
+                else:
+                    parts.append(w_text)
+            phrase_text = " ".join(parts)
+
+            tag = (
+                f"{{\\an5\\pos({w // 2},{_cy})\\fs{fontsize}"
+                f"\\1c{default_color}\\bord0\\shad1}}"
+                f"{phrase_text}"
+            )
+            ass_lines.append(
+                f"Dialogue: 0,{format_ass_time(start)},{format_ass_time(end)}"
+                f",Default,,0,0,0,,{tag}\n"
+            )
 
         ass += "".join(ass_lines)
         print(f"[captions] Captions Dynamic style: {len(ass_lines)} groups, {len(keyword_set)} keywords", flush=True)
@@ -5780,8 +5797,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         setpts_val, _, avg_speed = build_variable_speed_setpts(start, end, speed, speed_curve, log=True)
         combined_speed = avg_speed  # for audio (constant) and logging
         zoom = str(cut.get("zoom") or "none")
-        if has_burned_captions and zoom in ["punch_in", "punch_out", "cut_zoom"]:
-            zoom = "slow_in" if zoom in ("punch_in", "cut_zoom") else "slow_out"
+        if has_burned_captions and zoom in ["punch_in", "punch_out"]:
+            zoom = "slow_in" if zoom == "punch_in" else "slow_out"
 
         eff_dur = effective_durations[i]
         fps = 30
@@ -5884,7 +5901,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         elif zoom == "cut_zoom":
             # Instant snap zoom: 100% → 130% on frame 1, hold for entire clip.
             # Matches Captions app aggressive cut-zoom style.
-            cz_target = 0.30  # 30% zoom = 130% scale
+            cz_target = 0.15  # 15% zoom = 115% scale
             cz_frames = 2     # instant snap (2 frames)
             cz_p = f"min(n/{cz_frames}\\,1.0)"
             cz_ease = f"({cz_p}*{cz_p}*(3-2*{cz_p}))"
@@ -6397,25 +6414,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 _em_fs = 90
 
             # Face-aware positioning: place text opposite the face
-            if _em_face_cx is not None:
-                _em_face_x_frac = _em_face_cx / 1080.0
-                if _em_face_x_frac > 0.55:
-                    # Face right → text left
-                    _em_x_expr = "60"
-                    _em_y_expr = "(h-th)/2" if _em_face_cy is None or _em_face_cy / 1920.0 > 0.5 else "h*0.55"
-                elif _em_face_x_frac < 0.45:
-                    # Face left → text right
-                    _em_x_expr = "w-tw-60"
-                    _em_y_expr = "(h-th)/2" if _em_face_cy is None or _em_face_cy / 1920.0 > 0.5 else "h*0.55"
-                else:
-                    # Face centered → text below face
-                    _em_x_expr = "(w-tw)/2"
-                    _em_face_bottom = min(1920 - 200, (_em_face_cy or 960) + 250)
-                    _em_y_expr = f"min({int(_em_face_bottom)},h-th-20)"
-            else:
-                # No face data — center
-                _em_x_expr = "(w-tw)/2"
-                _em_y_expr = "(h-th)/2"
+            # Always center emphasis text horizontally, place in upper third
+            # to avoid overlapping captions at y=68%
+            _em_x_expr = "(w-tw)/2"
+            _em_y_expr = "h*0.35-th/2"
 
             _em_escaped = em_text.replace("\\", "\\\\").replace(":", "\\:").replace(",", "\\,").replace("'", "\u2019").replace('"', "")
             _em_alpha = (
