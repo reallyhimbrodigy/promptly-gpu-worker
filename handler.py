@@ -4926,8 +4926,13 @@ def render_png_caption_video(
           f"for {caption_style}, {len(groups)} groups", flush=True)
     t0 = time.time()
 
+    # Redirect stderr to a temp file to avoid pipe deadlock — writing 8MB RGBA
+    # frames to stdin while stderr=PIPE causes deadlock when FFmpeg's stderr
+    # buffer fills up (only 64KB on Linux).
+    stderr_path = os.path.join(work_dir, "caption_ffmpeg_stderr.log")
+    stderr_file = open(stderr_path, "w")
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE,
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                            stdout=subprocess.DEVNULL, stderr=stderr_file)
 
     empty_frame = bytes(w * h * 4)
     last_state = None
@@ -4985,26 +4990,35 @@ def render_png_caption_video(
                 n_rendered += 1
 
         proc.stdin.close()
-        _, stderr = proc.communicate(timeout=300)
+        proc.wait(timeout=300)
     except Exception as e:
         try:
             proc.kill()
         except Exception:
             pass
+        stderr_file.close()
+        _cap_stderr = ""
         try:
-            _cap_stderr = proc.stderr.read().decode(errors="replace")[:500] if proc.stderr else ""
+            _cap_stderr = open(stderr_path).read()[:500]
         except Exception:
-            _cap_stderr = ""
+            pass
         print(f"[captions-png] Error during render: {e}", flush=True)
         if _cap_stderr:
             print(f"[captions-png] FFmpeg stderr: {_cap_stderr}", flush=True)
         return None
+    finally:
+        stderr_file.close()
 
     elapsed = time.time() - t0
     print(f"[captions-png] Done: {n_rendered} unique + {n_cached} cached in {elapsed:.1f}s", flush=True)
 
     if proc.returncode != 0:
-        print(f"[captions-png] FFmpeg error: {(stderr or b'').decode()[-500:]}", flush=True)
+        _cap_err = ""
+        try:
+            _cap_err = open(stderr_path).read()[-500:]
+        except Exception:
+            pass
+        print(f"[captions-png] FFmpeg error (rc={proc.returncode}): {_cap_err}", flush=True)
         return None
 
     if os.path.exists(caption_video):
