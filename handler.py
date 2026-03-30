@@ -6835,12 +6835,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             elif transition == "whip_left":
                 # Motion blur only during the transition window, not the entire stream
                 transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=wipeleft:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
-                transition_filters.append(f"[{out_v_raw}]boxblur=luma_radius=30:luma_power=2:chroma_radius=15:enable='between(t,{offset:.3f},{offset + td:.3f})',fps=30[{out_v}]")
+                transition_filters.append(f"[{out_v_raw}]fps=30[{out_v}]")
                 transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
 
             elif transition == "whip_right":
                 transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=wiperight:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
-                transition_filters.append(f"[{out_v_raw}]boxblur=luma_radius=30:luma_power=2:chroma_radius=15:enable='between(t,{offset:.3f},{offset + td:.3f})',fps=30[{out_v}]")
+                transition_filters.append(f"[{out_v_raw}]fps=30[{out_v}]")
                 transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
 
             running_dur = running_dur + effective_durations[i] - td
@@ -6957,35 +6957,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             print(f"[fx] Added {len(flash_filter_parts)} white flash effect(s)", flush=True)
 
     # ── Background blur on emphasis moments ────────────────────────────
-    # Captions app signature: when emphasis text appears, video blurs behind it.
-    # Creates a 0.4s gaussian blur pulse at each high-intensity emphasis moment.
-    _emphasis_moments = edit_plan.get("emphasis_moments") or edit_plan.get("_parsed_emphasis_moments") or []
-    _high_emphasis = [em for em in _emphasis_moments if str(em.get("intensity", "")).lower() == "high"]
-    if _high_emphasis and len(_high_emphasis) <= 8:  # cap at 8 to avoid filter chain bloat
-        _blur_parts = []
-        for _em in _high_emphasis:
-            _em_t = float(_em.get("t") or 0)
-            if _em_t <= 0:
-                continue
-            _em_out = project_source_time_to_final_output(
-                _em_t, render_cuts, effective_durations, speed_curve,
-                hook_offset=float(edit_plan.get("_hook_offset") or 0.0),
-            )
-            if _em_out is None:
-                continue
-            # 0.4s blur pulse: ramp up 0.1s, hold 0.2s, ramp down 0.1s
-            _b_start = max(0, _em_out - 0.05)
-            _b_end = _em_out + 0.35
-            _blur_parts.append(
-                f"boxblur=luma_radius=min(20\\,20*min(1\\,(t-{_b_start:.3f})/0.1)*min(1\\,({_b_end:.3f}-t)/0.1))"
-                f":luma_power=2:enable='between(t,{_b_start:.3f},{_b_end:.3f})'"
-            )
-        if _blur_parts:
-            for _bi, _bp in enumerate(_blur_parts):
-                _bl = f"[video_blur{_bi}]"
-                post_filters.append(f"{video_out}{_bp}{_bl}")
-                video_out = _bl
-            print(f"[fx] Added {len(_blur_parts)} emphasis blur pulse(s)", flush=True)
+    # NOTE: Disabled — boxblur does not support timeline 'enable' in FFmpeg 8.1,
+    # and luma_radius expressions are evaluated once at init, not per-frame.
+    # TODO: Re-implement using gblur (which supports timeline) or overlay approach.
 
     # ── Audio-reactive zoom pulses ────────────────────────────────────
     # Subtle 2-3% scale bump at emphasis moments — creates the "breathing"
@@ -7393,7 +7367,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         f":link=maximum:knee=3:mix=0.6,"
         f"lowpass=f=14000,"
         f"acompressor=threshold={_level_thresh}dB:ratio=1.8:attack=15:release=80:makeup={_makeup},"
-        f"loudnorm=I=-14:TP=-1:LRA=11,"
         f"alimiter=limit=0.95"
     )
     # Force audio duration to match actual video duration (running_dur accounts for
