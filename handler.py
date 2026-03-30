@@ -3586,8 +3586,8 @@ def generate_subtitle_file(transcript, caption_style, cuts, effective_durations,
         "clean":          {"fontsize": 52, "fontname": "Montserrat Bold",      "bold": 0, "alignment": 5},
         "impact":         {"fontsize": 64, "fontname": "Montserrat Black",     "bold": 0, "alignment": 5},
         "keyword_pop":    {"fontsize": 54, "fontname": "Montserrat ExtraBold", "bold": 0, "alignment": 5},
-        "captions_clean": {"fontsize": 60, "fontname": "Montserrat Bold",      "bold": 0, "alignment": 5},
-        "captions_dynamic": {"fontsize": 60, "fontname": "Montserrat Bold", "bold": 0, "alignment": 5},
+        "captions_clean": {"fontsize": 90, "fontname": "Montserrat Bold",      "bold": 0, "alignment": 5},
+        "captions_dynamic": {"fontsize": 90, "fontname": "Montserrat Bold", "bold": 0, "alignment": 5},
     }
 
     # Scale caption font sizes proportionally to output resolution (base: 1920px height)
@@ -6087,14 +6087,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
 
             elif transition == "whip_left":
-                # Heavy full-frame motion blur whip — matches Captions app intensity
+                # Motion blur only during the transition window, not the entire stream
                 transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=wipeleft:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
-                transition_filters.append(f"[{out_v_raw}]boxblur=luma_radius=40:luma_power=2:chroma_radius=20,fps=30[{out_v}]")
+                transition_filters.append(f"[{out_v_raw}]boxblur=luma_radius=30:luma_power=2:chroma_radius=15:enable='between(t,{offset:.3f},{offset + td:.3f})',fps=30[{out_v}]")
                 transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
 
             elif transition == "whip_right":
                 transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=wiperight:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
-                transition_filters.append(f"[{out_v_raw}]boxblur=luma_radius=40:luma_power=2:chroma_radius=20,fps=30[{out_v}]")
+                transition_filters.append(f"[{out_v_raw}]boxblur=luma_radius=30:luma_power=2:chroma_radius=15:enable='between(t,{offset:.3f},{offset + td:.3f})',fps=30[{out_v}]")
                 transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
 
             running_dur = running_dur + effective_durations[i] - td
