@@ -4765,7 +4765,7 @@ def render_png_caption_video(
 
     # ── Helper: layout a word group → positioned items + bg size ───────────
     def _layout_group(grp_words, draw):
-        space_w = draw.textlength(" ", font=font_base)
+        space_w = int(draw.textlength(" ", font=font_base))
         items = []
         for wd in grp_words:
             f = _word_font(wd)
@@ -4794,8 +4794,8 @@ def render_png_caption_video(
         line_heights = [max(it["h"] for it in ln) for ln in lines]
         max_lw = max(line_widths) if line_widths else 0
         total_h = sum(line_heights) + line_gap * max(0, len(lines) - 1)
-        bg_w = max_lw + pad_x * 2
-        bg_h = total_h + pad_y * 2
+        bg_w = int(max_lw + pad_x * 2)
+        bg_h = int(total_h + pad_y * 2)
 
         positioned = []
         cur_y = pad_y
@@ -4855,7 +4855,7 @@ def render_png_caption_video(
         # Layout
         positioned, bg_w, bg_h = _layout_group(active["words"], _measure_draw)
         margin = 14
-        cw, ch = bg_w + margin * 2, bg_h + margin * 2
+        cw, ch = int(bg_w + margin * 2), int(bg_h + margin * 2)
         canvas = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
         draw = ImageDraw.Draw(canvas)
 
@@ -4967,8 +4967,8 @@ def render_png_caption_video(
                     fb = empty_frame
                 else:
                     frame = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-                    px = (w - canvas.width) // 2
-                    py = cy - canvas.height // 2
+                    px = int((w - canvas.width) // 2)
+                    py = int(cy - canvas.height // 2)
                     py = max(10, min(h - canvas.height - 10, py))
                     frame.alpha_composite(canvas, (px, py))
                     fb = frame.tobytes()
@@ -7005,7 +7005,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 f":h='trunc(ih*(1.0+{_zp_amt}*{_zp_env})/2)*2'"
                 f":eval=frame:flags=fast_bilinear,"
                 f"crop=1080:1920:(iw-1080)/2:(ih-1920)/2"
-                f":enable='between(t,{_zp_start:.3f},{_zp_end:.3f})'"
             )
         if _zoom_pulses:
             for _zi, _zp in enumerate(_zoom_pulses):
@@ -7053,7 +7052,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 f":h='trunc(ih*(1.0+0.012*{_bp_env})/2)*2'"
                 f":eval=frame:flags=fast_bilinear,"
                 f"crop=1080:1920:(iw-1080)/2:(ih-1920)/2"
-                f":enable='between(t,{_bp_start:.3f},{_bp_end:.3f})'"
             )
         if _beat_pulses:
             for _bi, _bp in enumerate(_beat_pulses):
