@@ -3145,7 +3145,7 @@ def run_ffmpeg(args):
     )
     elapsed = time.time() - t
     if result.returncode != 0:
-        print(f"[ffmpeg] FAILED after {elapsed:.1f}s", flush=True)
+        print(f"[ffmpeg] FAILED after {elapsed:.1f}s (exit code {result.returncode})", flush=True)
         _stderr = result.stderr or ""
         # Extract error/warning lines (skip progress and build config)
         _err_lines = [ln for ln in _stderr.split("\n")
@@ -7468,14 +7468,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # and let the existing vignette handle edge emphasis.
         print(f"[fx] Depth blur: using subtle global softness (vignette handles edge emphasis)", flush=True)
 
-    # PNG caption overlay — add as input after all other inputs
-    caption_input_args = []
-    if caption_overlay_path:
-        _cap_idx = 1 + len(sfx_input_args) // 2 + (1 if music_input_idx is not None else 0)
-        caption_input_args = ["-i", caption_overlay_path]
-        post_filters.append(f"{video_out}[{_cap_idx}:v]overlay=format=auto:eof_action=pass[video_captioned]")
-        video_out = "[video_captioned]"
-        print(f"[render] PNG caption overlay at input index {_cap_idx}", flush=True)
+    # Caption overlay is applied as a second pass to reduce peak memory.
+    # The main render already has 15+ video segments, xfade transitions, SFX mixing,
+    # and audio processing — adding a qtrle MOV decode on top exceeds 8GB.
 
     filter_complex = ";".join(video_filters + audio_filters + transition_filters + sfx_filter_strs + post_filters + music_filters)
     _total_expected_v = sum(round(d * 30) / 30 for d in effective_durations)
@@ -7491,19 +7486,45 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         "-max_muxing_queue_size","1024",
     ]
 
+    # If we have caption overlay, render to a temp file first, then overlay captions
+    if caption_overlay_path:
+        _render_target = os.path.join(work_dir, "render_no_captions.mp4")
+    else:
+        _render_target = output_path
+
     args = (
         ["-y"]
         + input_args
         + sfx_input_args
-        + caption_input_args
         + ["-filter_complex", filter_complex, "-map", video_out, "-map", audio_out]
         + encode_args
-        + [output_path]
+        + [_render_target]
     )
 
     print(f"[render] Single-pass render: {n} segments from source, ~{running_dur:.1f}s output", flush=True)
 
     run_ffmpeg(args)
+
+    # Second pass: overlay PNG captions onto the rendered video
+    if caption_overlay_path:
+        print(f"[render] Overlaying PNG captions (second pass)...", flush=True)
+        _overlay_args = [
+            "-y",
+            "-i", _render_target,
+            "-i", caption_overlay_path,
+            "-filter_complex", "[0:v][1:v]overlay=format=auto:eof_action=pass[v]",
+            "-map", "[v]", "-map", "0:a", "-c:a", "copy",
+        ] + get_encode_args("high") + [
+            "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart",
+            output_path,
+        ]
+        run_ffmpeg(_overlay_args)
+        # Clean up intermediate file
+        try:
+            os.remove(_render_target)
+        except OSError:
+            pass
 
 
 
