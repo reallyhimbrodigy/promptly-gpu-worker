@@ -4726,25 +4726,28 @@ def render_png_caption_video(
     font_dir = "/assets/fonts" if os.path.isdir("/assets/fonts") else os.path.join(
         os.path.dirname(os.path.abspath(__file__)), "src", "assets", "fonts")
 
-    base_fs = 90  # matches ASS fontsize for captions_dynamic / captions_clean
-    kw_fs = round(base_fs * 1.25)      # keyword emphasis: 125% (was 160% — too jarring)
-    kw_fs_long = round(base_fs * 1.15)  # long keywords: 115% (was 135%)
+    base_fs = 96   # larger base — Captions app text fills more width
+    kw_fs = round(base_fs * 1.40)      # keyword emphasis: 140%
+    kw_fs_long = round(base_fs * 1.25)  # long keywords: 125%
 
     try:
-        font_base = ImageFont.truetype(os.path.join(font_dir, "Montserrat-Bold.ttf"), base_fs)
-        font_kw = ImageFont.truetype(os.path.join(font_dir, "Montserrat-ExtraBold.ttf"), kw_fs)
-        font_kw_long = ImageFont.truetype(os.path.join(font_dir, "Montserrat-ExtraBold.ttf"), kw_fs_long)
+        # Captions app uses heavy weight for ALL text (Black), even heavier for keywords
+        font_base = ImageFont.truetype(os.path.join(font_dir, "Montserrat-ExtraBold.ttf"), base_fs)
+        font_kw = ImageFont.truetype(os.path.join(font_dir, "Montserrat-Black.ttf"), kw_fs)
+        font_kw_long = ImageFont.truetype(os.path.join(font_dir, "Montserrat-Black.ttf"), kw_fs_long)
     except Exception as e:
         print(f"[captions-png] Font load failed: {e} — falling back to ASS", flush=True)
         return None
 
     # ── Colours ────────────────────────────────────────────────────────────
-    KW_COLORS = [(255, 255, 0), (255, 85, 0), (0, 204, 204), (255, 64, 128)]
-    HIGHLIGHT = (255, 255, 0)
+    # Captions-app-style keyword colors: vibrant, high contrast on dark bg
+    KW_COLORS = [(255, 230, 0), (255, 60, 100), (0, 220, 200), (255, 140, 0)]
+    HIGHLIGHT = (255, 255, 255)  # active word = bright white
     WHITE = (255, 255, 255)
-    DIM = (180, 180, 180)
+    DIM = (160, 160, 160)  # unspoken words dimmed more for contrast
 
-    is_dynamic = caption_style == "captions_dynamic"
+    # All premium styles get dynamic animation (pop-in, active highlighting)
+    is_dynamic = caption_style in ("captions_dynamic", "word_pop")
 
     # ── Build word groups (2-4 words) ──────────────────────────────────────
     keyword_set = _build_keyword_set(words, caption_keywords)
@@ -4777,17 +4780,18 @@ def render_png_caption_video(
                 wd["_kw"] = False
 
     # ── Face-aware Y position ──────────────────────────────────────────────
+    # Default: 72% down frame (below face, above TikTok UI)
     cy = round(h * 0.72)
     if face_positions:
         ys = [float(fp.get("cy", 0)) for fp in face_positions if fp.get("found")]
         if ys:
             frac = (sum(ys) / len(ys)) / h
             if frac > 0.55:
-                cy = round(h * 0.22)
+                cy = round(h * 0.22)  # face low → captions high
             elif frac < 0.35:
-                cy = round(h * 0.78)
+                cy = round(h * 0.78)  # face high → captions low
 
-    max_line_w = w - 80  # 40px margin each side
+    max_line_w = w - 60  # 30px margin each side — use more screen width
 
     # ── Helper: choose font for a word ─────────────────────────────────────
     def _word_font(wd):
@@ -4861,12 +4865,14 @@ def render_png_caption_video(
 
         age = t - active["start"]
 
-        # Pop-in scale (dynamic only)
+        # Pop-in scale (dynamic styles) — punchy spring bounce like Captions app
         if is_dynamic:
-            if age < 0.12:
-                scale = 0.85 + 0.18 * (age / 0.12)
-            elif age < 0.22:
-                scale = 1.03 - 0.03 * ((age - 0.12) / 0.10)
+            if age < 0.08:
+                # Fast scale up: 0% → 108%
+                scale = 0.0 + 1.08 * (age / 0.08)
+            elif age < 0.14:
+                # Overshoot settle: 108% → 100%
+                scale = 1.08 - 0.08 * ((age - 0.08) / 0.06)
             else:
                 scale = 1.0
         else:
@@ -4892,11 +4898,11 @@ def render_png_caption_video(
         canvas = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
         draw = ImageDraw.Draw(canvas)
 
-        # Rounded-rect background
-        radius = round(base_fs * 0.30)
+        # Rounded-rect background — darker/more opaque like Captions app
+        radius = round(base_fs * 0.35)
         draw.rounded_rectangle(
             [margin, margin, margin + bg_w, margin + bg_h],
-            radius=radius, fill=(0, 0, 0, round(140 * alpha)),
+            radius=radius, fill=(15, 15, 15, round(200 * alpha)),
         )
 
         # Draw each word
@@ -4924,14 +4930,26 @@ def render_png_caption_video(
 
             a = round(255 * alpha)
 
-            # Glow halo for active keywords
+            # Active word scale: currently-spoken word is 5% larger
+            _word_scale = 1.0
+            if is_dynamic and ws <= t < we + 0.05 and not wd.get("_kw"):
+                _word_scale = 1.05
+
+            # Multi-layer shadow for 3D depth (Captions app signature look)
+            # Layer 1: deep shadow (furthest, most diffuse)
+            draw.text((x + 4, y + 4), txt, font=font, fill=(0, 0, 0, round(80 * alpha)))
+            # Layer 2: mid shadow
+            draw.text((x + 2, y + 3), txt, font=font, fill=(0, 0, 0, round(140 * alpha)))
+            # Layer 3: crisp shadow (closest, sharpest)
+            draw.text((x + 1, y + 1), txt, font=font, fill=(0, 0, 0, round(200 * alpha)))
+
+            # Glow halo for active keywords — larger radius, more passes
             if wd.get("_kw") and t >= ws:
-                gc = (*wd["_kw_color"], round(70 * alpha))
-                for dx, dy in [(-2,0),(2,0),(0,-2),(0,2),(-1,-1),(1,1),(-1,1),(1,-1)]:
+                gc = (*wd["_kw_color"], round(50 * alpha))
+                for dx, dy in [(-3,0),(3,0),(0,-3),(0,3),(-2,-2),(2,2),(-2,2),(2,-2),
+                                (-1,0),(1,0),(0,-1),(0,1)]:
                     draw.text((x + dx, y + dy), txt, font=font, fill=gc)
 
-            # Drop shadow
-            draw.text((x + 2, y + 2), txt, font=font, fill=(0, 0, 0, round(150 * alpha)))
             # Main text
             draw.text((x, y), txt, font=font, fill=(*color, a))
 
@@ -7143,8 +7161,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     caption_overlay_path = None
     ass_path = None
     if caption_style != "none" and transcript.get("words"):
-        # For premium styles, try PNG overlay rendering (Pillow) first
-        if caption_style in ("captions_dynamic", "captions_clean"):
+        # PNG overlay rendering (Pillow) — produces Captions-app-quality results
+        # with rounded pills, keyword sizing, active highlighting, pop-in animation.
+        # ASS subtitles look like basic subtitles; PNG looks professional.
+        if caption_style in ("captions_dynamic", "captions_clean", "word_pop"):
             # hook_offset=0 because render_cuts already includes hook clip
             _projected_words = project_words_to_output(
                 transcript, render_cuts, effective_durations,
