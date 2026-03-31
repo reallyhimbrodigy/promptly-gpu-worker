@@ -1389,19 +1389,31 @@ Global parameters:
 
   If speed ramping is not requested in the vibe, set speed_curve to "none".
 
-  caption_style — word-by-word animated captions synced to speech. Choose the style that matches the content:
+  caption_style — animated captions rendered via Remotion with professional spring/pop/slide/wave animations, keyword glow halos, multi-layer shadows, and pill backgrounds. Choose the style that best matches the vibe:
     none — no captions. Use ONLY when captions are already burned into the footage.
-    captions_dynamic — THE premium Captions-app style. Two-line stacked groups with mixed font sizes: regular words small on line 1, emphasis keywords MASSIVE on line 2 in cyan-blue. No outline, just subtle shadow. Word echo effect on high-intensity moments. This is the most modern, professional look. Best for: storytime, rants, professional content, product reviews, anything that should look like a premium AI edit.
-    captions_clean — clean Captions-app style. 2-3 words at a time, centered, NO outline (shadow only). Keywords highlighted in cyan-blue with larger font. Smooth fade-in/fade-out, no bouncy animations. Very modern and premium. Best for: calm, thoughtful, serious, documentary-style, interview content.
-    dynamic — dynamic typography with vertical word stacking. Emphasis keywords in yellow/gold. Best for: when the creator specifically wants a more traditional stacking style with visible outlines.
-    clean — elegant, minimal, lowercase flowing text. Keywords get warm gold italic highlight. Best for: when the creator wants a traditional clean look.
-    impact — aggressive ALL CAPS with spring-bounce per word group. Keywords highlighted in yellow. Best for: hype content, announcements, fitness, sports.
-    hormozi — uppercase bold, active word pops with scale bounce, keywords in orange-red. Best for: motivational speeches, business content, high-energy monologues.
-    capcut — bold white with black outline, active word highlighted in yellow. Standard TikTok/Reels style. Best for: casual conversation, vlogs, tutorials, Q&A, interviews.
-    word_pop — one word at a time, ALL CAPS, spring bounce. Best for: fast-paced edits, speed ramping, comedy skits, trend content.
-    keyword_pop — standard text with specific terms highlighted in green. Best for: educational content, listicles, explainers where terms matter.
+    captions_dynamic — THE flagship premium style. Spring pop-in animation, dark pill background, mixed font sizes (keywords 140% larger), vibrant keyword colors (yellow/pink/cyan/orange), 12-pass glow halos on keywords, active word highlighting. The most modern, alive, 3D look. DEFAULT CHOICE for most content.
+    captions_clean — professional minimal. Pop-in animation, NO pill background, subtle shadows, keywords highlighted by color only. Clean and premium without being flashy. Best for: calm, thoughtful, serious, documentary, interviews.
+    word_pop — maximum energy word-by-word. Aggressive spring bounce (1.12x overshoot), dark pill, pink glow halos, each word pops in individually. Best for: fast-paced, hype, comedy, trend content, speed ramped edits.
+    hormozi — bold high-impact inspired by Alex Hormozi. Largest text (104px), NO pill, yellow keyword glow, 1.15x active word scale, heavy glow shadows. Best for: motivational, business, high-energy monologues, "listen to me" content.
+    impact — cinematic typewriter reveal. Words appear one by one (no bounce), dark pill, blue keyword glow. Controlled and deliberate. Best for: announcements, reveals, cinematic content, suspenseful moments.
+    slide — words slide up from below with smooth easing. Dark pill, subtle shadows, modern feel. Best for: lifestyle, travel, aesthetic content, chill vibes.
+    wave — cascading wave animation (each word ripples in with slight delay). Dark pill, purple keyword glow. Best for: music-driven content, dance, creative/artistic vibes.
+    capcut — simple bold white on dark pill, minimal pop animation. Standard TikTok/Reels look. Best for: casual vlogs, tutorials, Q&A, when simplicity is the vibe.
+    keyword_pop — standard text with only KEYWORDS getting spring animation + green glow. Regular words stay static. Best for: educational, listicles, explainers where specific terms matter.
+    dynamic — alias for captions_dynamic.
+    clean — alias for captions_clean.
 
-  STYLE SELECTION GUIDE: Default to "captions_dynamic" for most content — it produces the most modern, professional result. Use "captions_clean" for slower, more thoughtful content. Use "capcut" or "hormozi" only if the vibe specifically requests those styles or the content is a casual storytime/interview. Use "word_pop" only for fast-paced edits with speed ramping.
+  STYLE SELECTION GUIDE based on vibe:
+    - "professional", "clean", "business", "corporate" → captions_dynamic (default premium)
+    - "calm", "chill", "thoughtful", "serious", "interview" → captions_clean
+    - "hype", "energy", "fast", "comedy", "trend", "viral" → word_pop
+    - "motivational", "grind", "hustle", "inspirational" → hormozi
+    - "cinematic", "dramatic", "reveal", "suspense" → impact
+    - "aesthetic", "lifestyle", "travel", "chill" → slide
+    - "creative", "artistic", "music", "dance" → wave
+    - "casual", "vlog", "tutorial", "simple" → capcut
+    - "educational", "explainer", "tips", "how-to" → keyword_pop
+    - When unsure, DEFAULT to captions_dynamic — it looks great on everything.
 
   caption_position — where captions appear on screen. Use "lower-third" (default) for talking head content. The pipeline automatically adjusts positioning based on face detection to avoid overlap.
 
@@ -2158,7 +2170,7 @@ RULES FOR USING THESE TIMESTAMPS:
     if validated_vfx:
         print(f"[fx] Gemini requested {len(validated_vfx)} visual effect(s)", flush=True)
 
-    valid_caption_styles = {"none", "capcut", "word_pop", "hormozi", "keyword_pop", "dynamic", "clean", "impact", "captions_clean", "captions_dynamic"}
+    valid_caption_styles = {"none", "capcut", "word_pop", "hormozi", "keyword_pop", "dynamic", "clean", "impact", "captions_clean", "captions_dynamic", "slide", "wave"}
     if str(edit_plan.get("caption_style") or "").lower() not in valid_caption_styles:
         edit_plan["caption_style"] = "captions_dynamic"  # default to premium Captions-app style
     else:
