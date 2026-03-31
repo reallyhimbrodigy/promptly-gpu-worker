@@ -297,52 +297,6 @@ else:
 
 # ─── COLOR INTENTS ────────────────────────────────────────────────────────────
 
-# ─── MUSIC LIBRARY ────────────────────────────────────────────────────────────
-# Tracks stored at /assets/music/<filename>.mp3 in the Docker image.
-# The model picks by filename. Values are for prompt context only — not used in code.
-MUSIC_LIBRARY = {
-    "none": {"mood": "none", "energy": "none", "description": "No background music."},
-
-    # Hype / High energy
-    "hype_trap_01":       {"mood": "hype",      "energy": "high",   "description": "Hard-hitting trap beat, 140bpm, heavy 808s. Feels aggressive, powerful, unstoppable — the kind of energy that makes a viewer sit up straight."},
-    "hype_electronic_01": {"mood": "hype",      "energy": "high",   "description": "Festival electronic drop, 128bpm, euphoric synths. Feels massive and celebratory — pure forward momentum and release."},
-    "upbeat_pop_01":      {"mood": "upbeat",    "energy": "high",   "description": "Bright pop energy, 120bpm, driving beat. Feels fun, alive, and optimistic — like something good is happening right now."},
-    "upbeat_hip_hop_01":  {"mood": "upbeat",    "energy": "high",   "description": "Chill hip-hop groove, 95bpm, confident swagger. Feels cool and self-assured — low-key energy that still moves."},
-
-    # Cinematic / Emotional
-    "cinematic_epic_01":  {"mood": "cinematic", "energy": "high",   "description": "Orchestral swell, 90bpm, building tension. Feels like something significant is unfolding — weight and momentum growing toward a peak."},
-    "cinematic_tense_01": {"mood": "cinematic", "energy": "medium", "description": "Dark atmospheric strings, 80bpm, suspense. Feels heavy and serious — like the air before something important is said."},
-    "emotional_piano_01": {"mood": "emotional", "energy": "low",    "description": "Intimate solo piano, 70bpm, melancholy. Feels quiet and personal — the kind of music that makes a viewer lean in and listen carefully."},
-    "emotional_indie_01": {"mood": "emotional", "energy": "medium", "description": "Indie folk guitar, 85bpm, warmth. Feels genuine and heartfelt — honest emotion without being dramatic."},
-
-    # Calm / Lo-fi
-    "calm_ambient_01":    {"mood": "calm",      "energy": "low",    "description": "Soft ambient pads, no strong beat. Feels spacious and unhurried — the viewer exhales and settles in."},
-    "lo_fi_chill_01":     {"mood": "calm",      "energy": "low",    "description": "Lo-fi hip-hop, 75bpm, warm vinyl texture. Feels comfortable and easy — like a lazy afternoon where nothing is urgent."},
-    "lo_fi_beats_01":     {"mood": "calm",      "energy": "medium", "description": "Lo-fi trap, 85bpm, understated groove. Feels focused and quietly driven — calm on the surface but moving underneath."},
-
-    # Corporate / Clean
-    "corporate_inspire_01": {"mood": "upbeat",  "energy": "medium", "description": "Clean pop production, 110bpm, bright and optimistic. Feels polished and forward-moving — confident without being aggressive."},
-    "corporate_tech_01":    {"mood": "clean",   "energy": "medium", "description": "Minimal electronic, 100bpm, precise and clean. Feels modern and purposeful — steady energy that supports without distracting."},
-
-    # Dark / Moody
-    "dark_moody_01":      {"mood": "moody",     "energy": "medium", "description": "Dark atmospheric hip-hop, 90bpm, brooding bass. Feels mysterious and a little dangerous — tension that never fully releases."},
-    "dark_cinematic_01":  {"mood": "moody",     "energy": "high",   "description": "Dark orchestral, 85bpm, heavy and intense. Feels like something is at stake — the kind of music that makes a moment feel consequential."},
-
-    # Fun / Playful
-    "fun_quirky_01":      {"mood": "fun",       "energy": "high",   "description": "Quirky ukulele pop, 115bpm, bouncy and light. Feels playful and a little silly — instantly puts a viewer in a good mood."},
-    "fun_retro_01":       {"mood": "fun",       "energy": "medium", "description": "Retro synth-pop, 105bpm, nostalgic warmth. Feels familiar and fun — like something from a better, simpler time."},
-
-    # Romantic / Warm
-    "romantic_soft_01":   {"mood": "romantic",  "energy": "low",    "description": "Soft acoustic guitar, 65bpm, tender and intimate. Feels gentle and close — the emotional equivalent of a quiet moment between two people."},
-    "warm_acoustic_01":   {"mood": "warm",      "energy": "medium", "description": "Warm acoustic strumming, 90bpm, feel-good brightness. Feels open-hearted and sincere — the kind of warmth that makes a viewer smile without knowing why."},
-
-    # Epic / Dramatic
-    "epic_trailer_01":    {"mood": "epic",      "energy": "high",   "description": "Orchestral and electronic hybrid, 120bpm, building intensity. Feels like something big is about to happen — anticipation and scale."},
-    "epic_sports_01":     {"mood": "epic",      "energy": "high",   "description": "Stadium-sized energy, 130bpm, relentless drive. Feels like peak physical effort — the music itself is pushing forward."},
-}
-
-_MUSIC_DIR = "/assets/music"
-
 COLOR_INTENTS = {
     "none":      {"brightness": 0,     "contrast": 0,     "saturation": 0,     "gamma": 0,     "color_temperature": None},
     "neutral":   {"brightness": 0,     "contrast": 0,     "saturation": 0,     "gamma": 0,     "color_temperature": "neutral"},
@@ -1277,7 +1231,7 @@ GENERAL RULES:
 - For non-speech sections, remove dead ranges at natural visual break points — scene changes, camera movements, action pauses.
 - The source timeline only moves forward. Removals must stay chronological.
 
-Sound design adds texture. A swoosh on a scene change, a thud when a statement lands, a pop when text appears — these make cuts feel physical instead of digital. But not every cut needs a sound. Continuous speech flows best with silent hard cuts.
+Sound design adds texture. A whoosh on a scene change, a bass_drop when a statement lands, a click when something appears — these make cuts feel physical instead of digital. But not every cut needs a sound. Continuous speech flows best with silent hard cuts.
 
 The ending matters. On these platforms, videos auto-loop. A clean ending that flows back into the opening earns replay credit. Avoid fade to black — it creates a flash before the loop restarts.{trend_block}
 
@@ -1420,8 +1374,6 @@ Global parameters:
 
   outro: none, fade_black, fade_white — none is best for clean looping.
 
-  background_music: always "none" — creators add their own music when posting.
-
   aspect_ratio: always "9:16"
 
   thumbnail_timestamp — the source timestamp (in seconds) of the single best frame to use as the video's cover image / thumbnail. Pick the frame where the speaker has the most expressive or emotional face — surprise, laughter, intensity, reaction. Avoid frames where eyes are closed, face is blurry, or expression is blank. This frame needs to make someone scrolling stop and click.
@@ -1458,27 +1410,58 @@ Sound effects — audio accents that make the edit feel physical and professiona
 
   Available sounds and WHEN to use each:
 
-  thud — deep bass impact. The most powerful sound in the toolkit. Use it when a statement LANDS — the moment the viewer's jaw should drop. Dramatic reveals, shocking statements, the punchline of a story. Place it at the exact word that carries the weight. Reserve for 1-2 peak moments per video maximum. Overuse kills the impact.
-    Example: "and then she said... I'M PREGNANT" → thud on "pregnant"
-    Example: "they offered me TWO MILLION dollars" → thud on "million"
+  bass_drop — deep sub-bass drop impact. The most powerful sound in the toolkit. Use it when a statement LANDS — the moment the viewer's jaw should drop. Dramatic reveals, shocking statements, the punchline of a story. Place it at the exact word that carries the weight. 1 per video MAX.
+    Example: "and then she said... I'M PREGNANT" → bass_drop on "pregnant"
+    Example: "they offered me TWO MILLION dollars" → bass_drop on "million"
 
-  reverb_hit — a rising swell with reverb tail. Use it to BUILD tension right before a reveal or punchline. It signals to the viewer "something big is coming." Place it 0.5-1s BEFORE the payoff moment. Pairs well with a thud immediately after.
-    Example: reverb_hit at 5.2s → thud at 5.8s (buildup → impact)
-    Example: speaker pauses for dramatic effect → reverb_hit fills the silence before the reveal
+  riser — tension-building rising tone (2.5s). Place it 1-2s BEFORE a big reveal. It creates anticipation. Pairs perfectly with bass_drop or stinger immediately after.
+    Example: riser at 12.0s → bass_drop at 13.5s (buildup → payoff)
+    Example: speaker pauses for dramatic effect → riser fills the silence before the reveal
 
-  pop — bright, clean snap. Use when something APPEARS visually — a screen recording pops up, a picture-in-picture opens, a new visual element enters the frame. This is a VISUAL sound, not a speech sound. If nothing new appears on screen, don't use it.
-    Example: speaker pulls out their phone and the screen recording appears → pop
-    Example: split-screen appears showing both speakers → pop
+  riser_short — quick 1-second riser. Use for minor tension moments or rapid buildups in fast-paced content.
 
-  ching — cash register ka-ching. Use ONLY when money is the topic — speaker says "free", "sold", a dollar amount, "deal", "price", "cost", "paid". The sound reinforces the financial weight of the statement.
-    Example: "I got it for FREE" → ching on "free"
-    Example: "that's a $50,000 car" → ching on "$50,000"
+  stinger — dramatic orchestral hit. Use for "movie trailer" moments — big statements, dramatic pauses, or when the speaker drops a bombshell.
+    Example: "I'm starting my OWN company" → stinger on "own"
 
-  ding — notification bell. Use ONLY when the speaker references digital communication — "text", "notification", "email", "message", "DM", "alert". The sound mimics the real notification the speaker is describing.
-    Example: "she texted me at 3am" → ding on "texted"
-    Example: "I got a notification" → ding on "notification"
+  boom — explosive cinematic boom. Use for explosive statements or when something metaphorically "blows up."
+    Example: "the video went VIRAL" → boom on "viral"
 
-  swoosh — air swipe. Use ONLY on actual scene transitions (wipes, fades). If all transitions are hard cuts, do NOT use swoosh — hard cuts are silent by design. The swoosh sells the motion of a wipe transition. Pair each swoosh with the transition it accompanies.
+  punch — physical impact hit. Use for aggressive or confrontational moments.
+    Example: "I told him STRAIGHT to his face" → punch on "straight"
+
+  slam — heavy door slam impact. Powerful and abrupt. Use for finality moments.
+
+  whoosh_fast — fast cinematic whoosh. Use ONLY on actual scene transitions (wipes, fades). If all transitions are hard cuts, do NOT use whoosh_fast — hard cuts are silent by design.
+
+  reveal — sparkle/shimmer discovery sound. Use when something positive is revealed, an answer is given, or a solution is presented.
+    Example: "and the secret is..." → reveal on the answer word
+
+  vinyl_scratch — record scratch. Use for comedy — when the speaker says something unexpected, contradicts themselves, or the story takes a sudden turn.
+    Example: "everything was going great... until it WASN'T" → vinyl_scratch on "wasn't"
+
+  notification — modern UI chime. Use when the speaker references digital communication — "text", "notification", "email", "message", "DM", "alert".
+    Example: "she texted me at 3am" → notification on "texted"
+
+  click — clean digital click. Use when something APPEARS visually or for emphasis on choices/decisions.
+
+  unlock — satisfying achievement chime with sparkle. Use when money is the topic or something positive is achieved.
+    Example: "I got it for FREE" → unlock on "free"
+
+  camera_flash — camera shutter click. Use when the speaker references taking a photo, screenshots, or camera-related actions.
+    Example: "I took a screenshot" → camera_flash on "screenshot"
+
+  text_appear — soft digital text appearing sound. Use when the speaker references writing, typing, coding, or sending messages.
+    Example: "so I looked it up" → text_appear on "looked"
+
+  glitch — digital distortion sound. Use for tech content, internet culture, or when something "breaks."
+    Example: "the app completely crashed" → glitch on "crashed"
+
+  heartbeat — dramatic single heartbeat. Use for suspenseful moments when the stakes are high.
+    Example: "my heart was RACING" → heartbeat on "racing"
+
+  sad_trombone — comedic failure sound. Use for humorous disappointment.
+
+  boing — cartoonish bounce. Use for playful, lighthearted moments.
 
   Transitions — the visual effect between two clips. Most cuts should be HARD CUTS (transition_out: "none") — they're fast, clean, and professional. Transitions are a tool, not decoration. Use them sparingly and with purpose.
 
@@ -1516,53 +1499,8 @@ Sound effects — audio accents that make the edit feel physical and professiona
   - Default to "none" (hard cut) for every transition. Only add a transition when it EARNS its place.
   - Never use the same transition type more than 2-3 times in a single video.
   - Match transition energy to content energy: somber content gets dissolve/fadeblack, high-energy gets whip/flash.
-  - Pair swoosh sound effects with whip/wipe/smooth transitions. Hard cuts are SILENT.
+  - Pair whoosh_fast sound effects with whip/wipe/smooth transitions. Hard cuts are SILENT.
   - transition_out goes on the clip BEFORE the transition (the outgoing clip).
-
-  shutter — camera shutter click. Use when the speaker references taking a photo, screenshots, or camera-related actions. Also works on visual "freeze frame" moments.
-    Example: "I took a screenshot" → shutter on "screenshot"
-    Example: "look at this photo" → shutter on "photo"
-
-  typing — keyboard typing burst. Use when the speaker references writing, typing, coding, or sending messages. Works for "I googled it", "I typed out a response", etc.
-    Example: "so I looked it up" → typing on "looked"
-    Example: "I wrote back" → typing on "wrote"
-
-  === EXPANDED SOUND LIBRARY ===
-
-  whoosh_fast — fast cinematic whoosh. Punchier than swoosh. Use for high-energy transitions (whip_left, whip_right) or quick scene changes.
-
-  bass_drop — deep sub-bass drop. Heavier than thud. Use for the single most dramatic moment in the video — the moment where everything changes. 1 per video MAX.
-    Example: "and that's when I realized... everything was a LIE" → bass_drop on "lie"
-
-  riser — tension-building rising tone (2.5s). Place it 1-2s BEFORE a big reveal. It creates anticipation. Pairs perfectly with thud or bass_drop immediately after.
-    Example: riser at 12.0s → thud at 13.5s (buildup → payoff)
-
-  riser_short — quick 1-second riser. Use for minor tension moments or rapid buildups in fast-paced content.
-
-  stinger — dramatic orchestral hit. Use for "movie trailer" moments — big statements, dramatic pauses, or when the speaker drops a bombshell.
-    Example: "I'm starting my OWN company" → stinger on "own"
-
-  reveal — sparkle/shimmer discovery sound. Use when something positive is revealed, an answer is given, or a solution is presented.
-    Example: "and the secret is..." → reveal on the answer word
-
-  vinyl_scratch — record scratch. Use for comedy — when the speaker says something unexpected, contradicts themselves, or the story takes a sudden turn.
-    Example: "everything was going great... until it WASN'T" → vinyl_scratch on "wasn't"
-
-  boom — explosive cinematic boom. Use for explosive statements or when something metaphorically "blows up."
-    Example: "the video went VIRAL" → boom on "viral"
-
-  punch — physical impact hit. Use for aggressive or confrontational moments.
-    Example: "I told him STRAIGHT to his face" → punch on "straight"
-
-  glitch — digital distortion sound. Use for tech content, internet culture, or when something "breaks."
-    Example: "the app completely crashed" → glitch on "crashed"
-
-  notification — modern UI chime. Softer than ding. Use for casual digital references.
-
-  click — clean digital click. Use for emphasis on choices, decisions, or button-press moments.
-
-  heartbeat — dramatic single heartbeat. Use for suspenseful moments when the stakes are high.
-    Example: "my heart was RACING" → heartbeat on "racing"
 
   Rules:
   - Sound effects should punctuate emphasis_moments. Place sounds where they amplify the moment.
@@ -1570,12 +1508,12 @@ Sound effects — audio accents that make the edit feel physical and professiona
   - Use the word timestamps to place each sound at the EXACT millisecond of the trigger word.
   - Most videos have 3-7 sound effects. Zero is fine if nothing earns one.
   - Never stack two sounds within 0.5s of each other — they compete and sound muddy.
-  - thud/bass_drop/stinger are your power tools. The rest are contextual accents.
-  - riser + impact combos (riser → thud, riser → bass_drop) are the most cinematic pattern.
+  - bass_drop/stinger/boom are your power tools. The rest are contextual accents.
+  - riser + impact combos (riser → bass_drop, riser → stinger) are the most cinematic pattern.
   - When in doubt, leave the sound out. Silence is better than a wrong sound.
 
   sound_effects: [
-    {{"t": <seconds>, "sound": "<thud|reverb_hit|pop|ching|ding|swoosh|shutter|typing|whoosh_fast|bass_drop|riser|riser_short|stinger|reveal|vinyl_scratch|boom|punch|glitch|notification|click|heartbeat>", "word": "<trigger word>"}}
+    {{"t": <seconds>, "sound": "<bass_drop|boom|punch|slam|riser|riser_short|stinger|reveal|whoosh_fast|whoosh_slow|swipe|transition_smooth|vinyl_scratch|sad_trombone|boing|notification|click|unlock|text_appear|camera_flash|glitch|heartbeat|static|thunder|wind_gust|record_stop|switch|page_turn>", "word": "<trigger word>"}}
   ]
 
 B-roll — contextual stock footage overlays that illustrate what the speaker is talking about. B-roll makes the edit feel like a professional production, not just a talking head.
@@ -1640,7 +1578,6 @@ Then output the JSON:
   "caption_keywords": ["<word1>", "<word2>", ...],
   "audio_denoise": <true|false>,
   "outro": "<none|fade_black|fade_white>",
-  "background_music": "none",
   "aspect_ratio": "9:16",
   "speed_curve": [{{"t": <seconds>, "speed": <multiplier>}}, ...] or "none",
   "pacing": "<fast|medium|slow>",
@@ -2146,7 +2083,6 @@ RULES FOR USING THESE TIMESTAMPS:
             print(f"[generate-edit] Stripping duplicate transition '{tr}' from clip {i} (>{_MAX_SAME_TYPE} of same type)", flush=True)
             c["transition_out"] = "none"
 
-    edit_plan.setdefault("background_music", "none")
     edit_plan.setdefault("caption_style", "none")
     edit_plan.setdefault("caption_position", "lower-third")
     edit_plan.setdefault("caption_keywords", [])
@@ -2169,8 +2105,6 @@ RULES FOR USING THESE TIMESTAMPS:
     for _ov in (edit_plan.get("text_overlays") or []):
         if "text" in _ov:
             _ov["text"] = _EMOJI_RE.sub("", str(_ov["text"])).strip()
-    edit_plan["background_music"] = "none"
-    edit_plan["audio_ducking"] = True
     edit_plan["beat_sync"] = False
     edit_plan.setdefault("sound_effects", [])
     edit_plan.setdefault("emphasis_moments", [])
@@ -2356,7 +2290,6 @@ RULES FOR USING THESE TIMESTAMPS:
     raw_sfx = edit_plan.get("sound_effects", [])
     sound_effects = []
     valid_sounds = set(_SFX_BASE_VOLUMES.keys())
-    VALID_CHING_WORDS = {"free", "sold", "dollar", "dollars", "money", "price", "cost", "pay", "paid", "cash", "buy", "bought", "deal"}
     for sfx in raw_sfx:
         if isinstance(sfx, dict) and "t" in sfx and "sound" in sfx:
             try:
@@ -2364,29 +2297,13 @@ RULES FOR USING THESE TIMESTAMPS:
             except Exception:
                 continue
             sound = str(sfx["sound"]).lower()
-            # Resolve aliases
+            # Resolve aliases (including legacy names like thud→bass_drop, swoosh→whoosh_fast, etc.)
             sound = _SFX_ALIASES.get(sound, sound)
             if sound in valid_sounds and t >= 0 and (video_duration <= 0 or t <= video_duration):
                 word = str(sfx.get("word") or "").strip().lower()
 
-                # ching: only on money-related trigger words
-                if sound == "ching":
-                    word_clean = word.strip(".,!?;:'\"")
-                    is_dollar_amount = "$" in word or word_clean.replace(".", "").replace(",", "").isdigit()
-                    if word_clean not in VALID_CHING_WORDS and not is_dollar_amount:
-                        print(f"[generate-edit] Filtered out ching on '{word}' at {t:.1f}s (not an approved trigger)", flush=True)
-                        continue
-
-                # ding: only on notification-related trigger words
-                if sound == "ding":
-                    VALID_DING_WORDS = {"text", "texted", "notification", "email", "message", "alert", "ping", "dm"}
-                    word_clean = word.strip(".,!?;:'\"")
-                    if word_clean not in VALID_DING_WORDS:
-                        print(f"[generate-edit] Filtered out ding on '{word}' at {t:.1f}s (not an approved trigger)", flush=True)
-                        continue
-
-                # swoosh/whoosh_fast/swipe: only with wipe/fade transitions
-                if sound in ("swoosh", "whoosh_fast", "swipe"):
+                # whoosh/swipe/transition: only with wipe/fade transitions
+                if sound in ("whoosh_fast", "whoosh_slow", "swipe", "transition_smooth"):
                     has_transitions = any(
                         str(c.get("transition_out") or "none").lower() not in ("none", "")
                         for c in (edit_plan.get("cuts") or [])
@@ -2395,23 +2312,38 @@ RULES FOR USING THESE TIMESTAMPS:
                         print(f"[generate-edit] Filtered out {sound} at {t:.1f}s (no wipe/fade transitions)", flush=True)
                         continue
 
-                # shutter: only on camera/photo-related trigger words
-                if sound == "shutter":
-                    VALID_SHUTTER_WORDS = {"photo", "picture", "screenshot", "camera", "selfie", "snap", "shot", "pic", "image", "film", "filmed", "record", "recorded"}
+                # camera_flash: only on camera/photo-related trigger words
+                if sound == "camera_flash":
+                    VALID_CAMERA_WORDS = {"photo", "picture", "screenshot", "camera", "selfie", "snap", "shot", "pic", "image", "film", "filmed", "record", "recorded"}
                     word_clean = word.strip(".,!?;:'\"")
-                    if word_clean not in VALID_SHUTTER_WORDS:
-                        print(f"[generate-edit] Filtered out shutter on '{word}' at {t:.1f}s (not a camera trigger)", flush=True)
+                    if word_clean not in VALID_CAMERA_WORDS:
+                        print(f"[generate-edit] Filtered out camera_flash on '{word}' at {t:.1f}s (not a camera trigger)", flush=True)
                         continue
 
-                # typing: only on writing/typing-related trigger words
-                if sound == "typing":
-                    VALID_TYPING_WORDS = {"typed", "typing", "wrote", "write", "writing", "googled", "searched", "coded", "coding", "texted", "dm", "dmed", "replied", "response", "looked"}
+                # text_appear: only on writing/typing-related trigger words
+                if sound == "text_appear":
+                    VALID_TEXT_WORDS = {"typed", "typing", "wrote", "write", "writing", "googled", "searched", "coded", "coding", "texted", "dm", "dmed", "replied", "response", "looked"}
                     word_clean = word.strip(".,!?;:'\"")
-                    if word_clean not in VALID_TYPING_WORDS:
-                        print(f"[generate-edit] Filtered out typing on '{word}' at {t:.1f}s (not a writing trigger)", flush=True)
+                    if word_clean not in VALID_TEXT_WORDS:
+                        print(f"[generate-edit] Filtered out text_appear on '{word}' at {t:.1f}s (not a writing trigger)", flush=True)
                         continue
 
-                # thud, reverb_hit, pop: allowed but capped below
+                # notification: only on digital communication trigger words
+                if sound == "notification":
+                    VALID_NOTIF_WORDS = {"text", "texted", "notification", "email", "message", "alert", "ping", "dm", "phone"}
+                    word_clean = word.strip(".,!?;:'\"")
+                    if word_clean not in VALID_NOTIF_WORDS:
+                        print(f"[generate-edit] Filtered out notification on '{word}' at {t:.1f}s (not a notification trigger)", flush=True)
+                        continue
+
+                # unlock: only on money/achievement-related trigger words
+                if sound == "unlock":
+                    VALID_UNLOCK_WORDS = {"free", "sold", "dollar", "dollars", "money", "price", "cost", "pay", "paid", "cash", "buy", "bought", "deal", "won", "earned", "achieved"}
+                    word_clean = word.strip(".,!?;:'\"")
+                    is_dollar_amount = "$" in word or word_clean.replace(".", "").replace(",", "").isdigit()
+                    if word_clean not in VALID_UNLOCK_WORDS and not is_dollar_amount:
+                        print(f"[generate-edit] Filtered out unlock on '{word}' at {t:.1f}s (not a money/achievement trigger)", flush=True)
+                        continue
 
                 sound_effects.append({"t": t, "sound": sound, "word": word})
 
@@ -2429,8 +2361,8 @@ RULES FOR USING THESE TIMESTAMPS:
         sound_effects = spaced
 
         # 2. Cap heavy impact sounds — overuse kills the punch
-        _MAX_PER_TYPE = {"thud": 2, "reverb_hit": 2, "bass_drop": 1, "stinger": 2,
-                         "boom": 1, "vinyl_scratch": 2, "riser": 2, "heartbeat": 1}
+        _MAX_PER_TYPE = {"bass_drop": 1, "stinger": 2, "boom": 1,
+                         "vinyl_scratch": 2, "riser": 2, "heartbeat": 1, "slam": 2}
         _type_counts = {}
         capped = []
         for sfx in sound_effects:
@@ -2534,12 +2466,12 @@ RULES FOR USING THESE TIMESTAMPS:
                         print(f"[emphasis] Skipped cut_zoom at {em_t:.1f}s — too close to previous zoom at {_last_zoom_t:.1f}s", flush=True)
                 break
 
-        # Auto-place thud on high-intensity moments that have no SFX nearby
+        # Auto-place stinger on high-intensity moments that have no SFX nearby
         if em["intensity"] == "high":
             nearby_sfx = any(abs(sfx["t"] - em_t) < 1.0 for sfx in sound_effects)
             if not nearby_sfx:
-                sound_effects.append({"t": em_t, "sound": "thud", "word": f"emphasis_{em['type']}"})
-                print(f"[emphasis] Auto-placed thud at {em_t:.1f}s ({em['type']})", flush=True)
+                sound_effects.append({"t": em_t, "sound": "stinger", "word": f"emphasis_{em['type']}"})
+                print(f"[emphasis] Auto-placed stinger at {em_t:.1f}s ({em['type']})", flush=True)
 
     # Re-sort and re-store sound effects after emphasis auto-placement
     sound_effects.sort(key=lambda x: x["t"])
@@ -2586,15 +2518,6 @@ RULES FOR USING THESE TIMESTAMPS:
 # SFX volumes calibrated for amix normalize=0 (no auto-attenuation).
 # These are absolute mix levels — speech stays at 1.0, SFX sit underneath.
 _SFX_BASE_VOLUMES = {
-    # Original 8
-    "shutter":    0.16,
-    "swoosh":     0.15,
-    "thud":       0.14,
-    "pop":        0.18,
-    "ding":       0.16,
-    "typing":     0.15,
-    "reverb_hit": 0.14,
-    "ching":      0.18,
     # Transitions
     "whoosh_fast":       0.14,
     "whoosh_slow":       0.10,
@@ -2635,14 +2558,6 @@ _SFX_BASE_VOLUMES = {
 }
 
 _TEXT_SFX_BASE_VOLUMES = {
-    "pop":        0.15,
-    "ding":       0.14,
-    "ching":      0.16,
-    "typing":     0.14,
-    "reverb_hit": 0.13,
-    "shutter":    0.15,
-    "swoosh":     0.12,
-    "thud":       0.13,
     "text_appear": 0.15,
     "click":       0.14,
     "notification": 0.13,
@@ -2650,16 +2565,26 @@ _TEXT_SFX_BASE_VOLUMES = {
 
 _SFX_ALIASES = {
     "whoosh":     "whoosh_fast",
-    "cashier":    "ching",
-    "cash":       "ching",
-    "money":      "ching",
+    # Legacy aliases: old SFX names → new equivalents
+    "thud":       "bass_drop",
+    "reverb_hit": "riser_short",
+    "pop":        "click",
+    "ching":      "unlock",
+    "ding":       "notification",
+    "swoosh":     "whoosh_fast",
+    "shutter":    "camera_flash",
+    "typing":     "text_appear",
+    # Semantic aliases
+    "cashier":    "unlock",
+    "cash":       "unlock",
+    "money":      "unlock",
     "rise":       "riser",
     "rising":     "riser",
     "buildup":    "riser",
     "tension":    "riser",
-    "impact":     "thud",
+    "impact":     "bass_drop",
     "slide":      "swipe",
-    "snap":       "pop",
+    "snap":       "click",
     "tape_stop":  "record_stop",
     "drop":       "bass_drop",
     "bass":       "bass_drop",
@@ -6457,8 +6382,8 @@ def mix_sfx_after_speed_curve(output_path, edit_plan, cuts, effective_durations,
         if is_auto:
             final_t = max(0.0, hook_offset + raw_t)
             sfx_entries.append({
-                "sound": sfx.get("sound", "pop"),
-                "path": get_sfx_path(normalize_sfx_style(sfx.get("sound", "pop"))),
+                "sound": sfx.get("sound", "click"),
+                "path": get_sfx_path(normalize_sfx_style(sfx.get("sound", "click"))),
                 "source_t": raw_t,
                 "final_t": final_t,
             })
@@ -6477,7 +6402,7 @@ def mix_sfx_after_speed_curve(output_path, edit_plan, cuts, effective_durations,
                             nearest_boundary = edge
             source_t = nearest_boundary
             if source_t != raw_t:
-                print(f"[sfx] Snapped swoosh to clip boundary: {raw_t:.3f}s → {source_t:.3f}s", flush=True)
+                print(f"[sfx] Snapped transition sound to clip boundary: {raw_t:.3f}s → {source_t:.3f}s", flush=True)
         else:
             deepgram_words = edit_plan.get("_deepgram_words", [])
             source_t = snap_sfx_to_word(sfx, deepgram_words)
@@ -7252,9 +7177,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     # ── Cinematic color grading (ALWAYS applied) ─────────────────────────
     # Professional videos always have color grading. Grade is selected from:
-    # 1. Music mood (if background music is set)
-    # 2. Content mood from Gemini analysis
-    # 3. Default "warm" grade (universally flattering on mobile screens)
+    # 1. Vibe mood inferred from user's vibe string
+    # 2. Default "warm" grade (universally flattering on mobile screens)
     # Curves-based grades: S-curve with lifted blacks (0→0.06), warm/cool toning
     # via per-channel curves, saturation via eq. Research: lifted blacks at 0.06
     # (≈15/255), S-curve midpoint 0.5→0.52, highlights 0.75→0.82.
@@ -7270,9 +7194,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         "calm": "neutral", "emotional": "neutral", "clean": "neutral", "none": "warm",
     }
 
-    # Determine grade: check vibe keywords, then music mood, then default warm.
-    # Previously only checked music mood — since background_music is always "none",
-    # grade was always "warm". Now we infer mood from the user's vibe string.
+    # Determine color grade from vibe keywords, default warm.
     _vibe = str(edit_plan.get("_user_vibe") or edit_plan.get("notes") or "").lower()
     _vibe_mood = "none"
     if any(kw in _vibe for kw in ("moody", "dark", "dramatic", "intense", "suspense")):
@@ -7283,12 +7205,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _vibe_mood = "calm"
     elif any(kw in _vibe for kw in ("hype", "energy", "viral", "engaging", "fun", "upbeat")):
         _vibe_mood = "hype"
-    _music_key = str(edit_plan.get("background_music") or "none")
-    _music_info = MUSIC_LIBRARY.get(_music_key, {})
-    _music_mood = str(_music_info.get("mood") or "none")
-    # Prefer vibe-derived mood, then music mood
-    _effective_mood = _vibe_mood if _vibe_mood != "none" else _music_mood
-    _grade_name = _MOOD_MAP.get(_effective_mood, "warm")
+    _grade_name = _MOOD_MAP.get(_vibe_mood if _vibe_mood != "none" else "none", "warm")
     _grade_filter = _MOOD_GRADES[_grade_name]
 
     _grade_label = "[video_graded]"
@@ -7303,7 +7220,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         f"{_grade_label}"
     )
     video_out = _grade_label
-    print(f"[grade] {_grade_name} color grading + vignette + grain applied (vibe_mood={_vibe_mood}, music_mood={_music_mood})", flush=True)
+    print(f"[grade] {_grade_name} color grading + vignette + grain applied (vibe_mood={_vibe_mood})", flush=True)
 
     if edit_plan.get("cinematic_bars"):
         bar_h = int((1920 - int(1080 / 2.35)) / 2)
@@ -7391,53 +7308,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 post_filters.append(f"{video_out}{_zp}{_zl}")
                 video_out = _zl
             print(f"[fx] Added {len(_zoom_pulses)} audio-reactive zoom pulse(s)", flush=True)
-
-    # ── Beat-synced micro zoom pulses (when background music is set) ──
-    # Subtle 1.2% scale bumps on detected beats give the edit a "music video"
-    # feel. Only activates when background music is present and beats were
-    # detected. Limited to beats during non-speech gaps for subtlety.
-    _source_beats = edit_plan.get("_source_beats") or []
-    _music_track = str(edit_plan.get("background_music") or "none").strip()
-    if _source_beats and _music_track != "none" and len(_source_beats) > 4:
-        _beat_pulses = []
-        _total_dur = sum(effective_durations)
-        # Project beat times to output timeline and limit count
-        for _bt in _source_beats[:30]:  # cap at 30 beats
-            _bt_out = project_source_time_to_final_output(
-                float(_bt), render_cuts, effective_durations, speed_curve,
-                hook_offset=float(edit_plan.get("_hook_offset") or 0.0),
-            )
-            if _bt_out is None or _bt_out <= 0.1 or _bt_out >= _total_dur - 0.1:
-                continue
-            # Skip beats that overlap with emphasis zoom pulses (already covered)
-            _skip = False
-            for _em in (_zoom_emphasis if _zoom_emphasis else []):
-                _em_t = float(_em.get("t") or 0)
-                _em_out2 = project_source_time_to_final_output(
-                    _em_t, render_cuts, effective_durations, speed_curve,
-                    hook_offset=float(edit_plan.get("_hook_offset") or 0.0),
-                )
-                if _em_out2 and abs(_bt_out - _em_out2) < 0.4:
-                    _skip = True
-                    break
-            if _skip:
-                continue
-            # Very subtle: 1.2% scale for 0.15s
-            _bp_start = max(0, _bt_out - 0.02)
-            _bp_end = _bt_out + 0.13
-            _bp_env = f"max(0,min(1,(t-{_bp_start:.3f})/0.04)*min(1,({_bp_end:.3f}-t)/0.04))"
-            _beat_pulses.append(
-                f"scale=w='trunc(iw*(1.0+0.012*{_bp_env})/2)*2'"
-                f":h='trunc(ih*(1.0+0.012*{_bp_env})/2)*2'"
-                f":eval=frame:flags=fast_bilinear,"
-                f"crop=1080:1920:(iw-1080)/2:(ih-1920)/2"
-            )
-        if _beat_pulses:
-            for _bi, _bp in enumerate(_beat_pulses):
-                _bl = f"[video_beat{_bi}]"
-                post_filters.append(f"{video_out}{_bp}{_bl}")
-                video_out = _bl
-            print(f"[fx] Added {len(_beat_pulses)} beat-synced micro zoom pulse(s)", flush=True)
 
     # Depth blur mask disabled — generated but never used in render (maskedmerge
     # incompatible with FFmpeg 8.x). Vignette handles edge emphasis instead.
@@ -7632,66 +7502,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     post_filters.append(f"{audio_out}{audio_chain}[final_audio]")
     audio_out = "[final_audio]"
 
-    # Background music mix
-    music_input_idx = None
-    music_input_args = []
-    music_filters = []
-    music_track = str(edit_plan.get("background_music") or "none").strip()
-    if music_track != "none" and music_track in MUSIC_LIBRARY:
-        music_path = os.path.join(_MUSIC_DIR, f"{music_track}.mp3")
-        if os.path.exists(music_path):
-            music_input_idx = n_segment_inputs + len(sfx_input_args) // 2
-            music_input_args = ["-stream_loop", "-1", "-i", music_path]
-            total_duration = sum(effective_durations)
-            # Adaptive music fades and volume based on video length
-            # Short videos (<15s): quick fades, slightly louder music
-            # Medium videos (15-45s): standard fades
-            # Long videos (>45s): longer fades for smoother transitions
-            if total_duration < 15:
-                _music_fade_in = 0.8
-                _music_fade_out = 1.0
-                music_vol = 0.06
-            elif total_duration < 45:
-                _music_fade_in = 1.5
-                _music_fade_out = 2.0
-                music_vol = 0.05
-            else:
-                _music_fade_in = 2.5
-                _music_fade_out = 3.0
-                music_vol = 0.04
-            fade_out_start = max(0, total_duration - _music_fade_out)
-            # Also adapt to music energy: high-energy tracks can be slightly louder
-            _music_meta = MUSIC_LIBRARY.get(music_track, {})
-            if _music_meta.get("energy") == "high":
-                music_vol = min(0.08, music_vol * 1.3)
-            elif _music_meta.get("energy") == "low":
-                music_vol = music_vol * 0.8
-            music_filters.append(
-                f"[{music_input_idx}:a]"
-                f"atrim=duration={total_duration:.3f},"
-                f"afade=t=in:st=0:d={_music_fade_in:.1f},"
-                f"afade=t=out:st={fade_out_start:.3f}:d={_music_fade_out:.1f},"
-                f"volume={music_vol:.4f}"
-                f"[music_raw]"
-            )
-            # Sidechain ducking: compress music when voice is active.
-            # The voice track controls the compressor on the music — music ducks
-            # during speech and breathes up during pauses. This is the #1 audio
-            # technique that separates pro edits from amateur ones.
-            music_filters.append(
-                f"[music_raw][final_audio]sidechaincompress="
-                f"threshold=0.02:ratio=6:attack=15:release=300:"
-                f"level_sc=0.8:mix=0.7"
-                f"[music_ducked]"
-            )
-            music_filters.append(
-                f"[final_audio][music_ducked]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[mixed_audio]"
-            )
-            audio_out = "[mixed_audio]"
-            print(f"[render] background_music={music_track} vol={music_vol} duration={total_duration:.1f}s", flush=True)
-        else:
-            print(f"[render] WARNING: music track not found at {music_path} — skipping", flush=True)
-
     # ── B-roll compositing in first pass (no second encode) ──────────────────
     # B-roll fetch was launched in parallel with Remotion. Collect results now,
     # project timestamps, and add overlay filters before captions.
@@ -7702,7 +7512,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         speed_curve = edit_plan.get("_parsed_speed_curve")
         hook_offset_val = float(edit_plan.get("_hook_offset") or 0.0)
         total_duration = sum(effective_durations)
-        _broll_base_idx = n_segment_inputs + len(sfx_input_args) // 2 + len(music_input_args) // 2
+        _broll_base_idx = n_segment_inputs + len(sfx_input_args) // 2
 
         # Collect fetched B-roll files (should be done by now — Remotion took longer)
         _broll_files = {}
@@ -7796,14 +7606,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     caption_input_args = []
     caption_filter_strs = []
     if caption_overlay_path:
-        _cap_idx = n_segment_inputs + len(sfx_input_args) // 2 + len(music_input_args) // 2 + _n_broll_inputs
+        _cap_idx = n_segment_inputs + len(sfx_input_args) // 2 + _n_broll_inputs
         caption_input_args = ["-i", caption_overlay_path]
         caption_filter_strs.append(f"{video_out}[{_cap_idx}:v]overlay=format=auto:eof_action=pass[video_captioned]")
         video_out = "[video_captioned]"
         print(f"[render] Remotion caption overlay at input index {_cap_idx}", flush=True)
 
-    # Order matters: post_filters (zoom pulses etc) → broll → captions → music
-    filter_complex = ";".join(video_filters + audio_filters + transition_filters + sfx_filter_strs + post_filters + broll_filter_strs + caption_filter_strs + music_filters)
+    # Order matters: post_filters (zoom pulses etc) → broll → captions
+    filter_complex = ";".join(video_filters + audio_filters + transition_filters + sfx_filter_strs + post_filters + broll_filter_strs + caption_filter_strs)
     _total_expected_v = sum(round(d * 30) / 30 for d in effective_durations)
     _total_expected_a = sum(effective_durations)
     print(f"[DIAG] Expected totals: video(fps30)={_total_expected_v:.4f}s audio(raw)={_total_expected_a:.4f}s gap={_total_expected_v - _total_expected_a:.6f}s", flush=True)
@@ -7821,7 +7631,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         ["-y"]
         + input_args
         + sfx_input_args
-        + music_input_args
         + broll_input_args
         + caption_input_args
         + ["-filter_complex", filter_complex, "-map", video_out, "-map", audio_out]

@@ -103,7 +103,6 @@ image = (
         "cp /assets/fonts/*.ttf /usr/share/fonts/truetype/ && fc-cache -f",
     )
     .add_local_dir("src/assets/sounds", "/assets/sounds")
-    .add_local_dir("src/assets/music", "/assets/music")
     .add_local_file("handler.py", "/handler.py")
 )
 
