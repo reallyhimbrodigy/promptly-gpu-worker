@@ -90,18 +90,20 @@ image = (
         "tqdm",
         "Pillow",
     )
-    .add_local_dir("src/assets/sounds", "/assets/sounds")
-    .add_local_dir("src/assets/fonts", "/assets/fonts")
-    .add_local_dir("src/assets/music", "/assets/music")
-    .add_local_dir("src/remotion", "/remotion")
+    .add_local_dir("src/remotion", "/remotion", copy=True)
+    .add_local_dir("src/assets/fonts", "/assets/fonts", copy=True)
     .run_commands(
         # Install Remotion npm deps, download Chromium, and pre-bundle at build time
-        "cd /remotion && npm install --prefer-offline 2>&1 | tail -5",
+        "cd /remotion && npm install 2>&1 | tail -5",
         "cd /remotion && npx remotion browser ensure 2>&1 | tail -3",
         "node -e \"require('@remotion/renderer'); console.log('[remotion] renderer OK')\"",
         # Pre-bundle Remotion project → /remotion/bundle/ (saves 5-10s per render)
         "cd /remotion && node prebundle.mjs",
+        # Register Montserrat fonts for Chromium rendering
+        "cp /assets/fonts/*.ttf /usr/share/fonts/truetype/ && fc-cache -f",
     )
+    .add_local_dir("src/assets/sounds", "/assets/sounds")
+    .add_local_dir("src/assets/music", "/assets/music")
     .add_local_file("handler.py", "/handler.py")
 )
 
