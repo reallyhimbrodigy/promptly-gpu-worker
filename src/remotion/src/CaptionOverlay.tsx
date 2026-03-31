@@ -68,27 +68,25 @@ export const CaptionOverlay: React.FC<{
   let kwColorIndex = 0;
 
   return (
-    <FontLoader>
-      <AbsoluteFill style={{ backgroundColor: "transparent" }}>
-        {groups.map((group, gi) => {
-          const startKwIdx = kwColorIndex;
-          // Count keywords in this group to advance the color index
-          for (const w of group.words) {
-            const clean = (w.word || "").toLowerCase().replace(/[.,!?;:'"\\]/g, "");
-            if (keywordSet.has(clean)) kwColorIndex++;
-          }
+    <AbsoluteFill style={{ backgroundColor: "transparent" }}>
+      {groups.map((group, gi) => {
+        const startKwIdx = kwColorIndex;
+        // Count keywords in this group to advance the color index
+        for (const w of group.words) {
+          const clean = (w.word || "").toLowerCase().replace(/[.,!?;:'"\\]/g, "");
+          if (keywordSet.has(clean)) kwColorIndex++;
+        }
 
-          return (
-            <CaptionGroup
-              key={gi}
-              group={group}
-              style={styleConfig}
-              keywordSet={keywordSet}
-              kwColorIndex={startKwIdx}
-            />
-          );
-        })}
-      </AbsoluteFill>
-    </FontLoader>
+        return (
+          <CaptionGroup
+            key={gi}
+            group={group}
+            style={styleConfig}
+            keywordSet={keywordSet}
+            kwColorIndex={startKwIdx}
+          />
+        );
+      })}
+    </AbsoluteFill>
   );
 };

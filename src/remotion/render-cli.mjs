@@ -1,23 +1,12 @@
 #!/usr/bin/env node
 /**
- * Remotion Caption Overlay Render CLI
+ * Remotion Video Overlay Render CLI
+ *
+ * Renders captions + visual effects as a single transparent ProRes 4444 MOV.
  *
  * Usage: node render-cli.mjs --input <json_path> --output <mov_path>
  *
- * Input JSON format:
- * {
- *   "words": [...],          // ProjectedWord[] from project_words_to_output
- *   "style": "captions_dynamic",
- *   "width": 1080,
- *   "height": 1920,
- *   "fps": 30,
- *   "duration": 25.5,        // seconds
- *   "keywords": ["word1", "word2"],
- *   "fontDir": "/assets/fonts"
- * }
- *
- * Output: Transparent ProRes 4444 MOV file for FFmpeg overlay compositing.
- * Uses pre-built bundle from /remotion/bundle/ (created at container build time).
+ * Input JSON: OverlayInput (see types.ts)
  */
 
 import { bundle } from "@remotion/bundler";
@@ -46,17 +35,39 @@ if (!inputPath || !outputPath) {
   process.exit(1);
 }
 
-const input = JSON.parse(readFileSync(inputPath, "utf-8"));
-const durationInFrames = Math.max(1, Math.round((input.duration || 30) * (input.fps || 30)));
+const raw = JSON.parse(readFileSync(inputPath, "utf-8"));
+
+// Normalize input — support both old CaptionInput and new OverlayInput formats
+const input = {
+  words: raw.words || [],
+  captionStyle: raw.captionStyle || raw.style || "captions_dynamic",
+  keywords: raw.keywords || [],
+  effects: raw.effects || [],
+  cuts: raw.cuts || [],
+  emphasisMoments: raw.emphasisMoments || raw.emphasis_moments || [],
+  width: raw.width || 1080,
+  height: raw.height || 1920,
+  fps: raw.fps || 30,
+  duration: raw.duration || 30,
+  durationInFrames: 0, // computed below
+  fontDir: raw.fontDir || "/assets/fonts",
+  vibe: raw.vibe || "",
+};
+input.durationInFrames = Math.max(1, Math.round(input.duration * input.fps));
+
+const effectCount = input.effects.length;
+const cutCount = input.cuts.length;
+const emphasisCount = input.emphasisMoments.length;
 
 console.log(
-  `[remotion] Rendering ${input.style} captions: ${input.words?.length || 0} words, ` +
-  `${durationInFrames} frames (${input.duration?.toFixed(1)}s @ ${input.fps}fps)`
+  `[remotion] Rendering: ${input.captionStyle} captions (${input.words.length} words), ` +
+  `${cutCount} cuts, ${emphasisCount} emphasis moments, vibe="${input.vibe}", ` +
+  `${input.durationInFrames} frames (${input.duration.toFixed(1)}s @ ${input.fps}fps)`
 );
 
 const t0 = Date.now();
 
-// Use pre-built bundle if available (saves 5-10s), otherwise bundle on-the-fly
+// Use pre-built bundle if available
 let bundleLocation;
 if (existsSync(resolve(PREBUNDLE_DIR, "index.html"))) {
   bundleLocation = PREBUNDLE_DIR;
@@ -69,33 +80,21 @@ if (existsSync(resolve(PREBUNDLE_DIR, "index.html"))) {
   });
 }
 
-const inputProps = {
-  input: {
-    words: input.words || [],
-    style: input.style || "captions_dynamic",
-    width: input.width || 1080,
-    height: input.height || 1920,
-    fps: input.fps || 30,
-    durationInFrames,
-    keywords: input.keywords || [],
-    fontDir: input.fontDir || "/assets/fonts",
-  },
-};
+const inputProps = { input };
 
-// Select composition with input props
+// Select the VideoOverlay composition (captions + effects)
 const composition = await selectComposition({
   serveUrl: bundleLocation,
-  id: "CaptionOverlay",
+  id: "VideoOverlay",
   inputProps,
 });
 
-// Override duration/dimensions from input
-composition.durationInFrames = durationInFrames;
-composition.width = input.width || 1080;
-composition.height = input.height || 1920;
-composition.fps = input.fps || 30;
+composition.durationInFrames = input.durationInFrames;
+composition.width = input.width;
+composition.height = input.height;
+composition.fps = input.fps;
 
-// Render to transparent MOV (ProRes 4444 with alpha)
+// Render to transparent ProRes 4444 MOV
 await renderMedia({
   composition,
   serveUrl: bundleLocation,

@@ -57,3 +57,66 @@ export interface StyleConfig {
   fadeInMs: number;
   fadeOutMs: number;
 }
+
+// ─── Visual Effects Types ────────────────────────────────────────────────────
+
+/** A cut/transition point in the output timeline */
+export interface CutPoint {
+  time: number; // seconds in output timeline where this cut happens
+  transition: string; // transition type from edit plan
+  duration: number; // clip duration after this cut
+}
+
+/** An emphasis moment from Gemini's edit plan */
+export interface EmphasisMoment {
+  t: number; // seconds in output timeline
+  type: string; // punchline, revelation, statement, reaction, question, transition
+  intensity: string; // high, medium
+}
+
+/** A single visual effect instance */
+export interface VisualEffect {
+  type: EffectType;
+  start: number; // seconds
+  end: number; // seconds
+  params?: Record<string, unknown>;
+}
+
+export type EffectType =
+  | "light_leak"
+  | "glitch"
+  | "impact_flash"
+  | "particle_burst"
+  | "particle_ambient"
+  | "emoji_pop"
+  | "progress_bar"
+  | "vhs_grain"
+  | "zoom_blur_transition"
+  | "whip_pan"
+  | "vignette_pulse"
+  | "color_flash"
+  | "letterbox_cinematic"
+  | "edge_glow";
+
+/** Full input for the combined overlay renderer */
+export interface OverlayInput {
+  // Captions
+  words: ProjectedWord[];
+  captionStyle: string;
+  keywords: string[];
+  // Visual effects
+  effects: VisualEffect[];
+  // Cuts/transitions timeline
+  cuts: CutPoint[];
+  // Emphasis moments
+  emphasisMoments: EmphasisMoment[];
+  // Video metadata
+  width: number;
+  height: number;
+  fps: number;
+  duration: number;
+  durationInFrames: number;
+  fontDir: string;
+  // Vibe for effect selection
+  vibe: string;
+}
