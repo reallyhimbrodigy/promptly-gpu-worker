@@ -1237,7 +1237,7 @@ As you watch, pay attention to:
 
 The opening is an audition. The first 2 seconds must give the viewer a reason to stay. A visual event, a sonic hit, tighter framing, text that creates curiosity — something that signals this isn't raw footage.
 
-Pacing creates rhythm. Filler and setup should move faster. Key moments — reveals, punchlines, important statements — should breathe. The contrast between fast and slow is what makes pacing feel alive.
+Pacing creates rhythm. For short-form content, the average clip should be 2-3 seconds. The Captions app and top TikTok editors cut every 2-3 seconds — this is the standard. Filler and setup should move even faster (1-2s). Key moments — reveals, punchlines, important statements — should breathe (3-4s max). The contrast between fast and slow is what makes pacing feel alive. When in doubt, cut shorter.
 
 You are the editor. You decide what stays and what gets cut.
 
@@ -1245,9 +1245,9 @@ You are a professional short-form editor. You have the exact transcript with mil
 
 DEAD AIR IN SPEECH CONTENT:
 Look at the gaps between words in the transcript:
-- Under 0.10 seconds between words — natural word spacing. KEEP. This is how speech flows.
-- 0.5 seconds or more between words — this is dead air. REMOVE that gap using a remove_words time range with start/end.
-- Gaps between 0.10 and 0.5 seconds — the pipeline auto-collapses these. Do NOT mark them.
+- Under 0.08 seconds between words — natural word spacing. KEEP. This is how speech flows.
+- 0.3 seconds or more between words — this is dead air. REMOVE that gap using a remove_words time range with start/end. The Captions app removes ALL gaps this long. We must too.
+- Gaps between 0.08 and 0.3 seconds — the pipeline auto-collapses these. Do NOT mark them.
 - Filler words (uh, um, hmm, er, ah) — the pipeline auto-removes these. Do NOT mark them.
 - Stutters and false starts — the pipeline auto-removes these. Do NOT mark them.
 
@@ -1283,17 +1283,21 @@ Sound design adds texture. A swoosh on a scene change, a thud when a statement l
 The ending matters. On these platforms, videos auto-loop. A clean ending that flows back into the opening earns replay credit. Avoid fade to black — it creates a flash before the loop restarts.{trend_block}
 
   HOOK CLIP:
-  BOTH of these conditions must be true to use a hook clip:
-  1. The vibe mentions "viral", "engaging", "captivating", "hook", or "retention"
-  2. The video does NOT already have a strong hook at the beginning — meaning the first 2-3 seconds are slow, boring setup, or dead air rather than something immediately compelling
+  The hook is the single most important part of any short-form video. Research shows >65% 3-second retention = 4-7x more impressions on TikTok/Reels.
 
-  If the video already starts with a strong statement, a provocative question, action, or anything that grabs attention in the first 2 seconds, set hook_clip to null — it doesn't need one.
+  Use a hook clip when:
+  1. The first 2-3 seconds of the video are NOT immediately compelling (slow start, setup, dead air)
+  2. There IS a compelling moment later in the video (punchline, reveal, reaction, shocking statement)
 
-  If BOTH conditions are met: pick the single most captivating 1-2 second moment from the video — the punchline, the reveal, the reaction that makes someone stop scrolling. Set hook_clip to the source_start and source_end of that moment. This clip will play FIRST as a teaser, then the full video plays chronologically from the beginning.
+  If BOTH are true: pick the single most captivating 1-2 second moment — the punchline, reveal, or reaction that makes someone stop scrolling. Set hook_clip source_start/source_end to that moment. This plays FIRST as a teaser, then the full video plays from the beginning.
 
-  The hook clip should be short (1-2 seconds max), impactful, and make the viewer think "HOW did this happen?" It should NOT make sense without context — that's what makes them keep watching.
+  The hook clip MUST:
+  - Be 1-2 seconds max
+  - Start with speech (not silence) — the first word should land within 0.3s
+  - Be something that makes the viewer think "WHAT?" or "HOW?" without context
+  - NOT make sense without the rest of the video — that's what keeps them watching
 
-  If either condition is not met, or if the video doesn't have a clear punchline, set hook_clip to null.
+  If the video already opens with a strong hook (provocative question, action, bold statement in the first 2s), set hook_clip to null.
 
 === TOOLS ===
 
@@ -1411,7 +1415,7 @@ Global parameters:
 
   thumbnail_timestamp — the source timestamp (in seconds) of the single best frame to use as the video's cover image / thumbnail. Pick the frame where the speaker has the most expressive or emotional face — surprise, laughter, intensity, reaction. Avoid frames where eyes are closed, face is blurry, or expression is blank. This frame needs to make someone scrolling stop and click.
 
-  pacing — overall edit rhythm. "fast" = quick cuts every 2-4s, energetic. "medium" = 3-6s per clip, balanced. "slow" = 5-10s per clip, deliberate. Match the speaker's energy.
+  pacing — overall edit rhythm. Default to "fast" for short-form content under 60s. "fast" = cuts every 2-3s, energetic jump cuts, no dead air. "medium" = 3-4s per clip, balanced. "slow" = 4-6s per clip, deliberate. Most TikTok/Reels content should be "fast" — the Captions app averages 2-3 second segments. Only use "slow" for genuinely contemplative content.
 
 Emphasis moments — THE MOST IMPORTANT PART OF YOUR EDIT. These are the 2-5 moments in the video that should HIT HARDEST. Every emphasis moment drives caption keyword highlighting, automatic zoom punches, and sound effects simultaneously. Think like a professional editor: which moments make the viewer feel something?
 
@@ -1922,10 +1926,16 @@ RULES FOR USING THESE TIMESTAMPS:
                     )
 
         edit_plan["remove_words"] = normalized_remove_words
-        # Adapt tightening threshold to speech rate — fast speakers need
-        # a wider gap threshold (their natural pauses are longer relative to
-        # speech), slow speakers need tighter thresholds.
-        _speech_gap = 0.15  # default
+        # Adapt tightening threshold to speech rate AND pacing.
+        # Lower gap = more aggressive silence removal = tighter jump cuts.
+        # Captions app aggressively removes ALL dead air — we match that.
+        _pacing = str(edit_plan.get("pacing") or "fast").lower()
+        if _pacing == "fast":
+            _speech_gap = 0.10  # aggressive — Captions-level tightness
+        elif _pacing == "medium":
+            _speech_gap = 0.13
+        else:
+            _speech_gap = 0.15  # slow pacing — more breathing room
         if len(_dg_words) >= 5:
             _first_t = float(_dg_words[0].get("start", 0))
             _last_t = float(_dg_words[-1].get("end", 0))
@@ -1933,12 +1943,12 @@ RULES FOR USING THESE TIMESTAMPS:
             if _speech_dur > 0:
                 _wpm = len(_dg_words) / (_speech_dur / 60.0)
                 if _wpm > 180:
-                    _speech_gap = 0.20  # very fast — wider gap to preserve phrasing
+                    _speech_gap += 0.05  # very fast talker — widen slightly to preserve phrasing
                 elif _wpm > 150:
-                    _speech_gap = 0.18  # fast
+                    _speech_gap += 0.03  # fast talker
                 elif _wpm < 100:
-                    _speech_gap = 0.12  # slow — tighter gap catches smaller pauses
-                print(f"[tighten] Speech rate: {_wpm:.0f} wpm → gap threshold: {_speech_gap*1000:.0f}ms", flush=True)
+                    _speech_gap = max(0.08, _speech_gap - 0.03)  # slow talker — even tighter
+                print(f"[tighten] Speech rate: {_wpm:.0f} wpm, pacing={_pacing} → gap threshold: {_speech_gap*1000:.0f}ms", flush=True)
         print(
             f"[generate-edit] Building clips: {len(_dg_words)} words, "
             f"{len(normalized_remove_words)} Gemini removals + deterministic tightening",
@@ -2352,11 +2362,38 @@ RULES FOR USING THESE TIMESTAMPS:
                         print(f"[generate-edit] Filtered out typing on '{word}' at {t:.1f}s (not a writing trigger)", flush=True)
                         continue
 
-                # thud, reverb_hit, pop: always allowed — the AI places these purposefully
+                # thud, reverb_hit, pop: allowed but capped below
 
                 sound_effects.append({"t": t, "sound": sound, "word": word})
+
+    # ── Post-filter: enforce caps and minimum spacing ──────────────────
     if sound_effects:
         sound_effects.sort(key=lambda x: x["t"])
+
+        # 1. Remove SFX that are too close together (< 0.5s apart = muddy)
+        spaced = []
+        for sfx in sound_effects:
+            if spaced and sfx["t"] - spaced[-1]["t"] < 0.5:
+                print(f"[sfx-filter] Dropped {sfx['sound']} at {sfx['t']:.1f}s (too close to {spaced[-1]['sound']} at {spaced[-1]['t']:.1f}s)", flush=True)
+                continue
+            spaced.append(sfx)
+        sound_effects = spaced
+
+        # 2. Cap heavy impact sounds — overuse kills the punch
+        _MAX_PER_TYPE = {"thud": 2, "reverb_hit": 2}
+        _type_counts = {}
+        capped = []
+        for sfx in sound_effects:
+            snd = sfx["sound"]
+            cap = _MAX_PER_TYPE.get(snd)
+            if cap is not None:
+                _type_counts[snd] = _type_counts.get(snd, 0) + 1
+                if _type_counts[snd] > cap:
+                    print(f"[sfx-filter] Dropped {snd} at {sfx['t']:.1f}s (max {cap} per video)", flush=True)
+                    continue
+            capped.append(sfx)
+        sound_effects = capped
+
         print(f"[generate-edit] Sound effects: {len(sound_effects)} placements", flush=True)
         for sfx in sound_effects:
             print(f"[generate-edit]   {sfx['t']:.1f}s: {sfx['sound']}", flush=True)
@@ -3569,17 +3606,20 @@ def generate_subtitle_file(transcript, caption_style, cuts, effective_durations,
     #   alignment 7/8/9 (top row) → distance from TOP of frame
     #   alignment 1/2/3 (bottom row) → distance from BOTTOM of frame
     #   alignment 4/5/6 (middle row) → not used vertically
+    # TikTok safe zones: bottom 300-480px is UI (buttons, captions, progress bar).
+    # Captions must sit ABOVE this zone. Research: y≈1200px (62.5% down) is ideal
+    # for 1920px frame, which means margin_v ≈ 620px from bottom.
     pos_margin = {
-        "top": round(100 * _h_scale),           # 100px from top (alignment 8)
-        "lower-third": round(400 * _h_scale),    # 400px from bottom (alignment 2)
-        "center": round(100 * _h_scale),          # centered (alignment 5, margin ignored)
-        "bottom": round(100 * _h_scale),          # 100px from bottom (alignment 2)
+        "top": round(100 * _h_scale),            # 100px from top (alignment 8)
+        "lower-third": round(620 * _h_scale),     # 620px from bottom — above TikTok UI
+        "center": round(100 * _h_scale),           # centered (alignment 5, margin ignored)
+        "bottom": round(350 * _h_scale),           # 350px from bottom (in UI zone, emergency only)
     }
     # Word pop defaults to lower-middle (between center and lower-third)
     if caption_style == "word_pop":
-        margin_v = round(550 * _h_scale)
+        margin_v = round(680 * _h_scale)
     else:
-        margin_v = pos_margin.get(caption_position or "lower-third", round(400 * _h_scale))
+        margin_v = pos_margin.get(caption_position or "lower-third", round(620 * _h_scale))
 
     # Smart face-aware caption placement.
     # margin_v in ASS = distance from BOTTOM of frame.
@@ -4009,8 +4049,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 elif _gap_above >= total_height + 80 * _h_scale:
                     start_y = round(_face_top - total_height - 30 * _h_scale)
                 else:
-                    # Face fills frame — overlay in lower-third area
-                    start_y = max(round(h * 0.55), h - total_height - round(150 * _h_scale))
+                    # Face fills frame — overlay above TikTok UI zone (bottom 480px)
+                    start_y = max(round(h * 0.55), h - total_height - round(500 * _h_scale))
             else:
                 # No face data — default vertical centering
                 start_y = max(round(200 * _h_scale), (h // 2) - (total_height // 2) - round(50 * _h_scale))
@@ -4025,7 +4065,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 current_y += pi["line_height"]
 
                 # Hard cap Y to safe zone — prevents text going off-screen
-                _safe_bottom = h - round(120 * _h_scale)
+                _safe_bottom = h - round(480 * _h_scale)  # TikTok UI safe zone
                 _safe_top = round(80 * _h_scale)
                 current_y = max(_safe_top, min(current_y, _safe_bottom))
 
@@ -4412,8 +4452,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         default_color = "&H00FFFFFF"
         keyword_set = _build_keyword_set(words, caption_keywords)
         _kw_color_idx = 0
-        _kw_fs = round(fontsize * 1.6)  # keyword font size = 1.6x base (inline)
-        _kw_fs_long = round(fontsize * 1.35)  # for keywords > 10 chars
+        _kw_fs = round(fontsize * 1.25)  # keyword font size = 1.25x base (subtle emphasis, not jarring)
+        _kw_fs_long = round(fontsize * 1.15)  # for keywords > 10 chars (subtle)
 
         # Build groups: 2-4 words, split on pauses/punctuation
         _groups = []
@@ -4703,8 +4743,8 @@ def render_png_caption_video(
         os.path.dirname(os.path.abspath(__file__)), "src", "assets", "fonts")
 
     base_fs = 90  # matches ASS fontsize for captions_dynamic / captions_clean
-    kw_fs = round(base_fs * 1.6)
-    kw_fs_long = round(base_fs * 1.35)
+    kw_fs = round(base_fs * 1.25)      # keyword emphasis: 125% (was 160% — too jarring)
+    kw_fs_long = round(base_fs * 1.15)  # long keywords: 115% (was 135%)
 
     try:
         font_base = ImageFont.truetype(os.path.join(font_dir, "Montserrat-Bold.ttf"), base_fs)
@@ -6318,26 +6358,30 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     hook_clip = edit_plan.get("hook_clip")
     if isinstance(hook_clip, dict):
-        hook_zoom = str(edit_plan.get("_hook_zoom") or "none")
-        if hook_zoom == "none":
-            hook_start = float(hook_clip.get("source_start") or 0.0)
-            for cut in render_cuts:
-                cs = float(cut["source_start"])
-                ce = float(cut["source_end"])
-                cut_zoom = str(cut.get("zoom") or "none")
-                if hook_start >= cs - 0.1 and hook_start <= ce and cut_zoom != "none":
-                    hook_zoom = cut_zoom
-                    break
-            if hook_zoom == "none":
-                for cut in render_cuts:
-                    cut_zoom = str(cut.get("zoom") or "none")
-                    if cut_zoom != "none":
-                        hook_zoom = cut_zoom
-                        break
+        # Hook clips ALWAYS get tight zoom (slow_in) — this is the "grab attention"
+        # moment. Research: tight framing + immediate speech = >65% 3-second retention.
+        hook_zoom = "slow_in"
         edit_plan["_hook_zoom"] = hook_zoom
+
+        # Trim hook to start at speech — no dead air before first word in hook
+        _hook_start = float(hook_clip.get("source_start") or 0.0)
+        _hook_end = float(hook_clip.get("source_end") or 0.0)
+        if transcript and isinstance(transcript, dict):
+            _hook_words = transcript.get("words") or []
+            for _hw in _hook_words:
+                _hw_start = float(_hw.get("start") or 0)
+                _hw_end = float(_hw.get("end") or 0)
+                if _hw_start >= _hook_start - 0.05 and _hw_start <= _hook_end:
+                    # Found first word in hook range — start 0.1s before it
+                    _new_start = max(0.0, _hw_start - 0.10)
+                    if _new_start > _hook_start + 0.15:
+                        print(f"[hook] Trimmed hook start {_hook_start:.3f}→{_new_start:.3f} (speech at {_hw_start:.3f})", flush=True)
+                        _hook_start = _new_start
+                    break
+
         render_cuts = [{
-            "source_start": float(hook_clip.get("source_start") or 0.0),
-            "source_end": float(hook_clip.get("source_end") or 0.0),
+            "source_start": _hook_start,
+            "source_end": _hook_end,
             "zoom": hook_zoom,
             "speed": 1.0,
             "transition_out": "none",
@@ -6451,9 +6495,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         else:
             zoom_scale_factor = 1.0
             total_frames_for_zoom = total_frames
-        # More noticeable zoom — Captions app uses ~10-15% zoom range.
-        # 1.05 was too subtle to notice. 1.10-1.12 gives professional punch.
-        _base_zoom_max = 1.08 if has_burned_captions else 1.12
+        # 2-camera simulation: alternate between wide (100%) and tight (115%) per cut.
+        # Tight cuts get a static 15% zoom (instant crop, face-centered) + subtle drift.
+        # Wide cuts get subtle 4-5% Ken Burns drift. Research: 115% is standard reframe.
+        _is_tight_cut = (i % 2 == 1) and zoom not in ("cut_zoom",) and not cut.get("_is_broll") and not cut.get("_is_hook")
+        _base_zoom_max = 1.05 if has_burned_captions else 1.05  # Ken Burns drift: 5% max (was 12%)
 
         # ── Face-tracked zoom ──────────────────────────────────────────
         # Find the closest face detection to this clip's midpoint.
@@ -6478,6 +6524,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 zoom = "slow_in"
                 print(f"[zoom] clip {i}: downgraded {cut.get('zoom')} → slow_in (no face detected)", flush=True)
             zoom_max = 1.0 + (_base_zoom_max - 1.0) * 0.35
+
+        # 2-camera: tight cuts get base 115% zoom (static crop) + tiny drift on top
+        _tight_base = 0.0
+        if _is_tight_cut and closest_face:
+            _tight_base = 0.15  # 15% base zoom for tight framing
 
         # Compute face offset for crop targeting — interpolate between two nearest
         # face positions for smooth continuous pan across the clip
@@ -6579,9 +6630,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             # Smoothstep easing for buttery smooth zoom
             _si_p = f"min(n/{tf}\\,1.0)"
             _si_smooth = f"({_si_p}*{_si_p}*(3-2*{_si_p}))"
+            # _tight_base adds static 15% zoom for tight-framing cuts (2-camera sim)
+            _total_base = _tight_base
             scale_expr = (
-                f"scale=w='trunc(iw*(1.0+{zoom_range:.4f}*{_si_smooth})/2)*2'"
-                f":h='trunc(ih*(1.0+{zoom_range:.4f}*{_si_smooth})/2)*2'"
+                f"scale=w='trunc(iw*({1.0 + _total_base:.4f}+{zoom_range:.4f}*{_si_smooth})/2)*2'"
+                f":h='trunc(ih*({1.0 + _total_base:.4f}+{zoom_range:.4f}*{_si_smooth})/2)*2'"
             )
             zoom_filter = _face_crop(scale_expr, tf)
         elif zoom == "slow_out":
@@ -6617,7 +6670,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             zoom_filter = _face_crop(scale_expr, tf, reverse=True)
         elif zoom == "cut_zoom":
             # Instant snap zoom: 100% → 118% on frame 1, hold for entire clip.
-            # Matches Captions app aggressive cut-zoom style.
+            # Research: 115% is standard reframe, 118% adds punch without quality loss.
             cz_target = 0.18  # 18% zoom = 118% scale — punchy but not distorting
             cz_frames = 2     # instant snap (2 frames)
             cz_p = f"min(n/{cz_frames}\\,1.0)"
@@ -6629,7 +6682,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             cz_crop_x = f"max(0\\,min((iw-1080)/2+{offset_x:.1f}*{cz_ease}\\,iw-1080))"
             cz_crop_y = f"max(0\\,min((ih-1920)/2+{offset_y:.1f}*{cz_ease}\\,ih-1920))"
             zoom_filter = f"{scale_expr}:eval=frame:flags=bicubic,crop=1080:1920:x='{cz_crop_x}':y='{cz_crop_y}'"
-            print(f"[zoom] clip {i}: cut_zoom → 100%→130% instant snap, face-tracked", flush=True)
+            print(f"[zoom] clip {i}: cut_zoom → 100%→118% instant snap, face-tracked", flush=True)
 
         vignette = str(edit_plan.get("vignette") or "none").lower()
         vignette_filter = None
@@ -6910,11 +6963,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # 1. Music mood (if background music is set)
     # 2. Content mood from Gemini analysis
     # 3. Default "warm" grade (universally flattering on mobile screens)
+    # Curves-based grades: S-curve with lifted blacks (0→0.06), warm/cool toning
+    # via per-channel curves, saturation via eq. Research: lifted blacks at 0.06
+    # (≈15/255), S-curve midpoint 0.5→0.52, highlights 0.75→0.82.
     _MOOD_GRADES = {
-        "warm":    "eq=contrast=1.06:brightness=0.02:saturation=1.08,colorbalance=rs=0.04:gs=0.02:bs=-0.03",
-        "cool":    "eq=contrast=1.05:brightness=0.00:saturation=1.03,colorbalance=rs=-0.03:gs=0.00:bs=0.04",
-        "neutral": "eq=contrast=1.04:brightness=0.01:saturation=1.05,colorbalance=rs=0.01:gs=0.01:bs=-0.01",
-        "moody":   "eq=contrast=1.08:brightness=-0.02:saturation=0.95,colorbalance=rs=-0.02:gs=-0.01:bs=0.04",
+        "warm":    "curves=m='0/0.06 0.25/0.22 0.5/0.52 0.75/0.82 1/1':r='0/0.06 0.5/0.53 1/1':b='0/0 0.5/0.47 1/0.96',eq=saturation=1.15",
+        "cool":    "curves=m='0/0.06 0.25/0.22 0.5/0.52 0.75/0.82 1/1':r='0/0 0.5/0.48 1/0.97':b='0/0.04 0.5/0.53 1/1',eq=saturation=1.08",
+        "neutral": "curves=m='0/0.05 0.25/0.22 0.5/0.51 0.75/0.80 1/1',eq=saturation=1.10",
+        "moody":   "curves=m='0/0.04 0.25/0.20 0.5/0.48 0.75/0.78 1/0.97':b='0/0.03 0.5/0.52 1/1',eq=saturation=0.95:contrast=1.05",
     }
     _MOOD_MAP = {
         "hype": "warm", "upbeat": "warm", "fun": "warm", "warm": "warm", "romantic": "warm",
@@ -6934,10 +6990,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         f"{video_out}"
         f"{_grade_filter},"
         f"unsharp=3:3:0.3:3:3:0.0,"
-        # Always-on subtle vignette — darkens edges for filmic depth separation
+        # Vignette: PI/5 (36°) = default, visible on mobile
         f"vignette=PI/5,"
-        # Always-on subtle film grain — adds organic texture matching pro editing apps
-        f"noise=c0s=4:c0f=t+u"
+        # Film grain: c0s=8 luma-only — subtle but visible (c0s=4 was invisible)
+        f"noise=c0s=8:c0f=t+u"
         f"{_grade_label}"
     )
     video_out = _grade_label
@@ -6969,11 +7025,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             )
             if _ft_out is None:
                 continue
-            # 0.14s white flash: true whiteout via colorlevels crush
-            _f_start = max(0, _ft_out - 0.03)
-            _f_end = _ft_out + 0.11
+            # 2-frame (67ms) white flash: additive brightness boost, not destructive crush.
+            # eq brightness=0.35 adds ~35% brightness — visible flash without destroying image.
+            _f_start = max(0, _ft_out - 0.017)
+            _f_end = _ft_out + 0.050
             flash_filter_parts.append(
-                f"colorlevels=rimax=0.3:gimax=0.3:bimax=0.3:enable='between(t,{_f_start:.3f},{_f_end:.3f})'"
+                f"eq=brightness=0.35:enable='between(t,{_f_start:.3f},{_f_end:.3f})'"
             )
         if flash_filter_parts:
             if len(flash_filter_parts) == 1:
@@ -7015,7 +7072,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _zp_end = _em_out + 0.25
             _zp_amt = 0.025 if str(_em.get("intensity", "")).lower() == "high" else 0.018
             # Smooth envelope: ramp up then down
-            _zp_env = f"min(1,(t-{_zp_start:.3f})/0.08)*min(1,({_zp_end:.3f}-t)/0.08)"
+            _zp_env = f"max(0,min(1,(t-{_zp_start:.3f})/0.08)*min(1,({_zp_end:.3f}-t)/0.08))"
             _zoom_pulses.append(
                 f"scale=w='trunc(iw*(1.0+{_zp_amt}*{_zp_env})/2)*2'"
                 f":h='trunc(ih*(1.0+{_zp_amt}*{_zp_env})/2)*2'"
@@ -7062,7 +7119,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             # Very subtle: 1.2% scale for 0.15s
             _bp_start = max(0, _bt_out - 0.02)
             _bp_end = _bt_out + 0.13
-            _bp_env = f"min(1,(t-{_bp_start:.3f})/0.04)*min(1,({_bp_end:.3f}-t)/0.04)"
+            _bp_env = f"max(0,min(1,(t-{_bp_start:.3f})/0.04)*min(1,({_bp_end:.3f}-t)/0.04))"
             _beat_pulses.append(
                 f"scale=w='trunc(iw*(1.0+0.012*{_bp_env})/2)*2'"
                 f":h='trunc(ih*(1.0+0.012*{_bp_env})/2)*2'"
@@ -7076,18 +7133,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 video_out = _bl
             print(f"[fx] Added {len(_beat_pulses)} beat-synced micro zoom pulse(s)", flush=True)
 
-    # ── Depth-simulated background blur (face-centered bokeh) ────────
-    # Generate a soft oval mask from face positions, blur the full frame,
-    # then maskedmerge: sharp where face is, blurred at edges. This creates
-    # a professional shallow-depth-of-field look without ML segmentation.
+    # Depth blur mask disabled — generated but never used in render (maskedmerge
+    # incompatible with FFmpeg 8.x). Vignette handles edge emphasis instead.
     depth_mask_path = None
-    if face_positions and len(face_positions) >= 2:
-        depth_mask_path = render_depth_mask_video(
-            face_positions, sum(effective_durations),
-            {"width": 1080, "height": 1920}, work_dir, fps=30,
-        )
-    if depth_mask_path:
-        print(f"[fx] Depth blur mask ready — will apply face-centered bokeh", flush=True)
 
     caption_style = str(edit_plan.get("caption_style") or "none").lower()
     caption_overlay_path = None
@@ -7141,11 +7189,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 transition_duration=TRANSITION_DURATION,
                 face_positions=face_positions, edit_plan=edit_plan,
             )
-    # ASS subtitle burn-in (non-PNG path)
-    if not caption_overlay_path and ass_path and os.path.exists(ass_path):
-        escaped = ass_path.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
-        post_filters.append(f"{video_out}subtitles='{escaped}':fontsdir=/assets/fonts[video_captioned]")
-        video_out = "[video_captioned]"
 
     text_overlays = edit_plan.get("text_overlays") or []
     if text_overlays:
@@ -7266,92 +7309,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             )
             video_out = out_label
 
-    # ── Single emphasis word splash (Captions-app style) ────────────────
-    # One large word centered on screen with subtle blur background.
-    # Clean, professional — NOT the overwhelming 5-layer cascade that was here before.
-    # Limited to max 2 splashes per video to maintain impact.
-    _emphasis_moments = edit_plan.get("_emphasis_moments") or []
-    _dg_words_render = edit_plan.get("_deepgram_words") or []
-    _em_italic_font = os.path.join(os.path.dirname(__file__), "assets", "fonts", "Montserrat-BoldItalic.ttf")
-    if not os.path.exists(_em_italic_font):
-        _em_italic_font = OVERLAY_FONT_PATH
-    if _emphasis_moments and _dg_words_render:
-        _em_clip_ranges = get_output_clip_ranges(render_cuts, effective_durations, transition_duration=TRANSITION_DURATION)
-        _em_font_clause = (
-            f":fontfile='{_em_italic_font}'"
-            if os.path.exists(_em_italic_font)
-            else ""
-        )
-        _em_idx = 0
-        _MAX_SPLASHES = 2  # max 2 per video — keeps it impactful, not annoying
-        for em in _emphasis_moments:
-            if em.get("intensity") != "high":
-                continue
-            if _em_idx >= _MAX_SPLASHES:
-                break
-            em_t = float(em["t"])
-            em_words = []
-            for wi in em.get("word_indices", []):
-                if 0 <= wi < len(_dg_words_render):
-                    w_text = str(_dg_words_render[wi].get("punctuated_word") or _dg_words_render[wi].get("word") or "")
-                    w_text = re.sub(r"[.,!?;:'\"\\]", "", w_text).strip().upper()
-                    if w_text:
-                        em_words.append(w_text)
-            if not em_words:
-                continue
-            em_text = " ".join(em_words[:3])  # max 3 words to keep it clean
-            _em_output_t = None
-            for ci, cut in enumerate(render_cuts):
-                cs = float(cut["source_start"])
-                ce = float(cut["source_end"])
-                if cs <= em_t <= ce and ci < len(_em_clip_ranges):
-                    frac = (em_t - cs) / max(0.001, ce - cs)
-                    clip_range = _em_clip_ranges[ci]
-                    _em_output_t = clip_range["start"] + frac * (clip_range["end"] - clip_range["start"])
-                    break
-            if _em_output_t is None:
-                continue
-
-            _em_dur = 0.45  # shorter — punchy, not lingering
-            _em_start = max(0, _em_output_t - 0.03)
-            _em_end = _em_start + _em_dur
-            _em_fade_in = 0.08
-            _em_fade_out = 0.15
-
-            # Font size: large but not screen-filling
-            _em_chars = len(em_text)
-            if _em_chars <= 5:
-                _em_fs = 160
-            elif _em_chars <= 10:
-                _em_fs = 120
-            elif _em_chars <= 15:
-                _em_fs = 100
-            else:
-                _em_fs = 80
-
-            _em_escaped = em_text.replace("\\", "\\\\").replace(":", "\\:").replace(",", "\\,").replace("'", "\u2019").replace('"', "")
-
-            # Single centered word with glow — no blur background (captions already handle emphasis)
-            _em_alpha = (
-                f"if(lt(t-{_em_start:.3f},{_em_fade_in}),0.9*(t-{_em_start:.3f})/{_em_fade_in},"
-                f"if(gt(t,{_em_end - _em_fade_out:.3f}),0.9*({_em_end:.3f}-t)/{_em_fade_out},0.9))"
-            )
-            _em_label = f"[video_em_{_em_idx}]"
-            post_filters.append(
-                f"{video_out}drawtext=text='{_em_escaped}'"
-                f":fontsize={_em_fs}"
-                f":fontcolor=white@0.95"
-                f"{_em_font_clause}"
-                f":x=(w-tw)/2:y=(h-th)/2"
-                f":borderw=2:bordercolor=white@0.3"
-                f":shadowcolor=black@0.5:shadowx=0:shadowy=4"
-                f":alpha='{_em_alpha}'"
-                f":enable='between(t,{_em_start:.3f},{_em_end:.3f})'{_em_label}"
-            )
-            video_out = _em_label
-
-            print(f"[emphasis] SPLASH '{em_text}' at {_em_output_t:.2f}s ({_em_dur:.1f}s, {_em_fs}px)", flush=True)
-            _em_idx += 1
+    # Emphasis splash text REMOVED — no professional editing app uses giant centered
+    # text overlays. Emphasis comes from captions (keyword highlight + size), zoom
+    # (punch-in), and audio (SFX). Splash text screams "AI generated."
 
     audio_out = "[audio_timed]"
     post_filters.append(
@@ -7468,16 +7428,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         else:
             print(f"[render] WARNING: music track not found at {music_path} — skipping", flush=True)
 
-    # Depth blur — subtle edge softness for cinematic look.
-    # Uses gblur on entire frame + unsharp center to simulate shallow DOF.
-    # This avoids maskedmerge (which has format-matching issues across FFmpeg builds).
-    if depth_mask_path:
-        # We generated the mask but skip the maskedmerge approach due to
-        # FFmpeg 8.x compatibility. Instead, apply a subtle global softness
-        # and let the existing vignette handle edge emphasis.
-        print(f"[fx] Depth blur: using subtle global softness (vignette handles edge emphasis)", flush=True)
-
-    # PNG caption overlay — single pass, added as last input
+    # Caption overlay or ASS subtitle burn-in
     caption_input_args = []
     if caption_overlay_path:
         _cap_idx = n_segment_inputs + len(sfx_input_args) // 2 + len(music_input_args) // 2
@@ -7485,6 +7436,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         post_filters.append(f"{video_out}[{_cap_idx}:v]overlay=format=auto:eof_action=pass[video_captioned]")
         video_out = "[video_captioned]"
         print(f"[render] PNG caption overlay at input index {_cap_idx}", flush=True)
+    elif ass_path and os.path.exists(ass_path):
+        escaped = ass_path.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+        post_filters.append(f"{video_out}subtitles='{escaped}':fontsdir=/assets/fonts[video_captioned]")
+        video_out = "[video_captioned]"
 
     filter_complex = ";".join(video_filters + audio_filters + transition_filters + sfx_filter_strs + post_filters + music_filters)
     _total_expected_v = sum(round(d * 30) / 30 for d in effective_durations)
