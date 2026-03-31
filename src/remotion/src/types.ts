@@ -89,7 +89,6 @@ export type EffectType =
   | "particle_burst"
   | "particle_ambient"
   | "emoji_pop"
-  | "progress_bar"
   | "vhs_grain"
   | "zoom_blur_transition"
   | "whip_pan"

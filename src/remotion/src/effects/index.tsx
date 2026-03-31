@@ -6,7 +6,6 @@ import { ImpactFlash } from "./ImpactFlash";
 import { ParticleBurst } from "./ParticleBurst";
 import { ParticleAmbient } from "./ParticleAmbient";
 import { EmojiPop } from "./EmojiPop";
-import { ProgressBar } from "./ProgressBar";
 import { ZoomBlurTransition } from "./ZoomBlurTransition";
 import { WhipPan } from "./WhipPan";
 import { VignettePulse } from "./VignettePulse";
@@ -26,7 +25,6 @@ const EFFECT_COMPONENTS: Record<string, React.FC<{ effect: VisualEffect }>> = {
   particle_burst: ParticleBurst,
   particle_ambient: ParticleAmbient,
   emoji_pop: EmojiPop,
-  progress_bar: ProgressBar,
   zoom_blur_transition: ZoomBlurTransition,
   whip_pan: WhipPan,
   vignette_pulse: VignettePulse,

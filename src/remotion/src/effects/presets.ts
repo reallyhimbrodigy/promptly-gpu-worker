@@ -67,14 +67,6 @@ export function generateEffects(input: OverlayInput): VisualEffect[] {
 
   // === AMBIENT EFFECTS (span most of the video) ===
 
-  // Progress bar — all vibes get it
-  effects.push({
-    type: "progress_bar",
-    start: 0,
-    end: duration,
-    params: { position: "top", color: "#FFFFFF", height: 3, opacity: 0.5 },
-  });
-
   // Ambient particles based on vibe
   if (["cinematic", "aesthetic", "dramatic"].includes(vibeCategory)) {
     effects.push({
