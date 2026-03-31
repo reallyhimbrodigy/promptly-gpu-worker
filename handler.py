@@ -3615,41 +3615,25 @@ def generate_subtitle_file(transcript, caption_style, cuts, effective_durations,
         "center": round(100 * _h_scale),           # centered (alignment 5, margin ignored)
         "bottom": round(350 * _h_scale),           # 350px from bottom (in UI zone, emergency only)
     }
-    # Word pop defaults to lower-middle (between center and lower-third)
+    # Word pop: ALWAYS lower-third with alignment 2 (bottom-center).
+    # \an5 (center) puts text on the face — NEVER use center alignment for
+    # talking head content. MarginV with \an2 = distance from bottom of frame.
+    # 500px from bottom = y≈1420 (74% down) = well below face, above TikTok UI.
     if caption_style == "word_pop":
-        margin_v = round(680 * _h_scale)
+        margin_v = round(500 * _h_scale)
+        print(f"[captions] word_pop: fixed lower-third position, margin_v={margin_v}px", flush=True)
     else:
         margin_v = pos_margin.get(caption_position or "lower-third", round(620 * _h_scale))
 
-    # Smart face-aware caption placement.
+    # Smart face-aware caption placement (non-word_pop styles only).
     # margin_v in ASS = distance from BOTTOM of frame.
-    # Goal: never overlap the speaker's face.
-    if face_positions:
+    if face_positions and caption_style != "word_pop":
         _face_ys = [float(fp.get("cy", 0)) for fp in face_positions if fp.get("found")]
         if _face_ys:
             _avg_face_y = sum(_face_ys) / len(_face_ys)
             _face_frac = _avg_face_y / h  # 0=top, 1=bottom
 
-            if caption_style == "word_pop":
-                # Word pop wants center screen. Place captions in the largest
-                # gap (above or below face) to avoid overlap.
-                _face_top = max(0, _avg_face_y - 200 * _h_scale)   # rough face bounds
-                _face_bot = min(h, _avg_face_y + 200 * _h_scale)
-                _gap_above = _face_top                              # space above face
-                _gap_below = h - _face_bot                          # space below face
-                if _gap_below > _gap_above and _gap_below > 300 * _h_scale:
-                    # More room below face — put captions in lower area
-                    margin_v = round((_gap_below / 2) * 0.8)
-                    print(f"[captions] word_pop: face at {_face_frac:.0%} — captions below face, margin_v={margin_v}px", flush=True)
-                elif _gap_above > 300 * _h_scale:
-                    # More room above face — put captions in upper area
-                    margin_v = round(h - _face_top / 2)
-                    print(f"[captions] word_pop: face at {_face_frac:.0%} — captions above face, margin_v={margin_v}px", flush=True)
-                else:
-                    # Face is centered, tight — default to lower-third
-                    margin_v = round(350 * _h_scale)
-                    print(f"[captions] word_pop: face centered — falling back to lower-third, margin_v={margin_v}px", flush=True)
-            elif caption_position in (None, "lower-third", "center"):
+            if caption_position in (None, "lower-third", "center"):
                 if _face_frac > 0.65:
                     margin_v = max(margin_v, round(500 * _h_scale))
                     print(f"[captions] Face low in frame ({_face_frac:.0%}) — margin_v raised to {margin_v}px", flush=True)
@@ -3659,7 +3643,7 @@ def generate_subtitle_file(transcript, caption_style, cuts, effective_durations,
 
     styles_map = {
         "capcut":         {"fontsize": 58, "fontname": "Montserrat ExtraBold", "bold": 0, "alignment": 5},
-        "word_pop":       {"fontsize": 68, "fontname": "Montserrat Black", "bold": 0, "alignment": 5},
+        "word_pop":       {"fontsize": 92, "fontname": "Montserrat Black", "bold": 0, "alignment": 2},
         "hormozi":        {"fontsize": 62, "fontname": "Montserrat Black",     "bold": 0, "alignment": 5},
         "dynamic":        {"fontsize": 48, "fontname": "Montserrat ExtraBold", "bold": 0, "alignment": 5},
         "clean":          {"fontsize": 52, "fontname": "Montserrat Bold",      "bold": 0, "alignment": 5},
@@ -3926,12 +3910,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             word_color = accent_color if is_keyword else default_color
             word_color = _speaker_highlight(word_color, word_dict)
 
-            # Spring bounce: start at 78%, ease-out overshoot to 110%, settle to 100%
-            pop_up = min(150, max(100, dur_ms // 3))     # 78% → 110%
-            settle = min(120, max(80, dur_ms // 4))      # 110% → 100%
+            # Spring bounce: start at 85%, ease-out overshoot to 108%, settle to 100%
+            pop_up = min(150, max(100, dur_ms // 3))
+            settle = min(120, max(80, dur_ms // 4))
             word_tag = (
-                f"{{\\an5\\fscx78\\fscy78\\1c{word_color}}}"
-                f"{{\\t(0,{pop_up},0.4,\\fscx110\\fscy110)}}"
+                f"{{\\an2\\fscx85\\fscy85\\1c{word_color}}}"
+                f"{{\\t(0,{pop_up},0.4,\\fscx108\\fscy108)}}"
                 f"{{\\t({pop_up},{pop_up + settle},1.5,\\fscx100\\fscy100)}}"
                 f"{clean}"
             )
@@ -6499,7 +6483,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # Tight cuts get a static 15% zoom (instant crop, face-centered) + subtle drift.
         # Wide cuts get subtle 4-5% Ken Burns drift. Research: 115% is standard reframe.
         _is_tight_cut = (i % 2 == 1) and zoom not in ("cut_zoom",) and not cut.get("_is_broll") and not cut.get("_is_hook")
-        _base_zoom_max = 1.05 if has_burned_captions else 1.05  # Ken Burns drift: 5% max (was 12%)
+        _base_zoom_max = 1.08 if has_burned_captions else 1.08  # 8% drift — enough room for face tracking
 
         # ── Face-tracked zoom ──────────────────────────────────────────
         # Find the closest face detection to this clip's midpoint.
@@ -6525,10 +6509,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 print(f"[zoom] clip {i}: downgraded {cut.get('zoom')} → slow_in (no face detected)", flush=True)
             zoom_max = 1.0 + (_base_zoom_max - 1.0) * 0.35
 
-        # 2-camera: tight cuts get base 115% zoom (static crop) + tiny drift on top
+        # 2-camera: tight cuts get base 118% zoom (static crop) + drift on top.
+        # 18% creates a visually OBVIOUS framing change between wide/tight shots.
+        # Research: Captions app alternates between full frame and 115-120% tight.
         _tight_base = 0.0
         if _is_tight_cut and closest_face:
-            _tight_base = 0.15  # 15% base zoom for tight framing
+            _tight_base = 0.18  # 18% base zoom for tight framing — clearly different from wide
 
         # Compute face offset for crop targeting — interpolate between two nearest
         # face positions for smooth continuous pan across the clip
@@ -6577,11 +6563,13 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # Rotate through virtual "camera angles" on consecutive talking-head
         # clips. Each angle varies crop offset + subtle color tint, creating
         # the illusion of a multi-camera shoot from a single source.
+        # Camera presets simulate multi-camera by varying crop offset + subtle tint.
+        # Shifts are now larger (8-10% of frame) so the alternation is VISIBLE.
         _CAMERA_PRESETS = [
-            {"name": "center",  "ox_shift": 0.0,  "oy_shift": 0.0,  "zoom_add": 0.0,   "tint": ""},
-            {"name": "close",   "ox_shift": 0.0,  "oy_shift": -0.01, "zoom_add": 0.05,  "tint": "colorbalance=rs=0.02:gs=0.01:bs=-0.01"},
-            {"name": "left",    "ox_shift": -0.04, "oy_shift": 0.0,  "zoom_add": 0.02,  "tint": "colorbalance=rs=-0.01:gs=0.00:bs=0.01"},
-            {"name": "right",   "ox_shift": 0.04,  "oy_shift": 0.0,  "zoom_add": 0.02,  "tint": "colorbalance=rs=0.01:gs=0.01:bs=-0.01"},
+            {"name": "center",  "ox_shift": 0.0,   "oy_shift": 0.0,   "zoom_add": 0.0,   "tint": ""},
+            {"name": "close",   "ox_shift": 0.0,   "oy_shift": -0.02, "zoom_add": 0.06,  "tint": "colorbalance=rs=0.02:gs=0.01:bs=-0.01"},
+            {"name": "left",    "ox_shift": -0.08,  "oy_shift": 0.0,   "zoom_add": 0.03,  "tint": "colorbalance=rs=-0.01:gs=0.00:bs=0.01"},
+            {"name": "right",   "ox_shift": 0.08,   "oy_shift": 0.0,   "zoom_add": 0.03,  "tint": "colorbalance=rs=0.01:gs=0.01:bs=-0.01"},
         ]
         cam_preset = None
         if not cut.get("_is_broll") and not cut.get("_is_hook") and zoom != "cut_zoom":
@@ -6978,11 +6966,25 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         "calm": "neutral", "emotional": "neutral", "clean": "neutral", "none": "warm",
     }
 
-    # Determine grade: prefer music mood, fall back to "warm" (flattering default)
+    # Determine grade: check vibe keywords, then music mood, then default warm.
+    # Previously only checked music mood — since background_music is always "none",
+    # grade was always "warm". Now we infer mood from the user's vibe string.
+    _vibe = str(edit_plan.get("_user_vibe") or edit_plan.get("notes") or "").lower()
+    _vibe_mood = "none"
+    if any(kw in _vibe for kw in ("moody", "dark", "dramatic", "intense", "suspense")):
+        _vibe_mood = "moody"
+    elif any(kw in _vibe for kw in ("cinematic", "film", "movie", "cool", "cold")):
+        _vibe_mood = "cinematic"
+    elif any(kw in _vibe for kw in ("calm", "chill", "clean", "minimal", "soft")):
+        _vibe_mood = "calm"
+    elif any(kw in _vibe for kw in ("hype", "energy", "viral", "engaging", "fun", "upbeat")):
+        _vibe_mood = "hype"
     _music_key = str(edit_plan.get("background_music") or "none")
     _music_info = MUSIC_LIBRARY.get(_music_key, {})
     _music_mood = str(_music_info.get("mood") or "none")
-    _grade_name = _MOOD_MAP.get(_music_mood, "warm")
+    # Prefer vibe-derived mood, then music mood
+    _effective_mood = _vibe_mood if _vibe_mood != "none" else _music_mood
+    _grade_name = _MOOD_MAP.get(_effective_mood, "warm")
     _grade_filter = _MOOD_GRADES[_grade_name]
 
     _grade_label = "[video_graded]"
@@ -6997,7 +6999,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         f"{_grade_label}"
     )
     video_out = _grade_label
-    print(f"[grade] {_grade_name} color grading + vignette + grain applied (music_mood={_music_mood})", flush=True)
+    print(f"[grade] {_grade_name} color grading + vignette + grain applied (vibe_mood={_vibe_mood}, music_mood={_music_mood})", flush=True)
 
     if edit_plan.get("cinematic_bars"):
         bar_h = int((1920 - int(1080 / 2.35)) / 2)
@@ -7143,9 +7145,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     if caption_style != "none" and transcript.get("words"):
         # For premium styles, try PNG overlay rendering (Pillow) first
         if caption_style in ("captions_dynamic", "captions_clean"):
+            # hook_offset=0 because render_cuts already includes hook clip
             _projected_words = project_words_to_output(
                 transcript, render_cuts, effective_durations,
-                hook_offset=float(edit_plan.get("_hook_offset") or 0.0),
+                hook_offset=0.0,
                 hook_clip=None, speed_curve=speed_curve,
                 transition_duration=TRANSITION_DURATION,
             )
@@ -7178,13 +7181,16 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
         # Fall back to ASS if PNG failed or not a premium style
         if not caption_overlay_path:
+            # hook_offset=0 because render_cuts already includes the hook clip
+            # as the first cut — output_cursor in project_words_to_output already
+            # accounts for hook duration. Passing hook_offset would double-shift.
             ass_path = generate_subtitle_file(
                 transcript, caption_style, render_cuts, effective_durations,
                 {"width": 1080, "height": 1920},
                 edit_plan.get("caption_position") or "lower-third",
                 edit_plan.get("caption_keywords") or [],
                 work_dir,
-                hook_offset=float(edit_plan.get("_hook_offset") or 0.0),
+                hook_offset=0.0,
                 hook_clip=None, speed_curve=speed_curve,
                 transition_duration=TRANSITION_DURATION,
                 face_positions=face_positions, edit_plan=edit_plan,
@@ -7718,6 +7724,7 @@ def handler(job):
         else:
             print("[reframe] Source is native 9:16 — using center crop", flush=True)
 
+        edit_plan["_user_vibe"] = vibe
         edit_plan["_source_path"] = source_path
         edit_plan["_face_positions"] = face_positions
         edit_plan["_source_loudness"] = source_loudness
