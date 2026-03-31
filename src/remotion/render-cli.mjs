@@ -22,7 +22,7 @@ const PREBUNDLE_DIR = "/remotion/bundle";
 const args = process.argv.slice(2);
 let inputPath = null;
 let outputPath = null;
-let concurrency = 1;
+let concurrency = 4;
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--input" && args[i + 1]) inputPath = args[++i];

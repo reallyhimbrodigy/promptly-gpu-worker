@@ -170,17 +170,16 @@ def get_encode_args(quality="high"):
         if quality == "lossless":
             return ["-c:v", "h264_nvenc", "-preset", "p1", "-rc", "lossless"]
         else:
-            # p5 = higher quality preset, cq 24 ≈ libx264 CRF 23
-            # Social media re-encodes anyway — CRF 23 is visually lossless on mobile
-            # and cuts file size by ~70% vs CRF 18. Targets ~3-5 Mbps for 1080x1920.
-            return ["-c:v", "h264_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "24", "-b:v", "0", "-maxrate", "6M", "-bufsize", "12M"]
+            # p2 = fast encode, cq 23 ≈ libx264 CRF 22. Social media re-encodes
+            # anyway — p2 is 2-3x faster than p5 with negligible quality loss on mobile.
+            return ["-c:v", "h264_nvenc", "-preset", "p2", "-rc", "vbr", "-cq", "23", "-b:v", "0", "-maxrate", "8M", "-bufsize", "16M"]
     else:
         if quality == "lossless":
             return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "0"]
         else:
-            # CRF 23 with slow preset: excellent quality at ~3-5 Mbps for social media.
-            # Visually indistinguishable from CRF 18 on mobile screens.
-            return ["-c:v", "libx264", "-preset", "medium", "-crf", "23", "-maxrate", "6M", "-bufsize", "12M"]
+            # CRF 22 with fast preset: 40% faster than medium, negligible quality
+            # difference on mobile screens. Social media re-encodes anyway.
+            return ["-c:v", "libx264", "-preset", "fast", "-crf", "22", "-maxrate", "8M", "-bufsize", "16M"]
 
 _EMOJI_RE = re.compile(
     "[\U0001F600-\U0001F64F\U0001F300-\U0001F5FF\U0001F680-\U0001F6FF"
@@ -1528,17 +1527,55 @@ Sound effects — audio accents that make the edit feel physical and professiona
     Example: "so I looked it up" → typing on "looked"
     Example: "I wrote back" → typing on "wrote"
 
+  === EXPANDED SOUND LIBRARY ===
+
+  whoosh_fast — fast cinematic whoosh. Punchier than swoosh. Use for high-energy transitions (whip_left, whip_right) or quick scene changes.
+
+  bass_drop — deep sub-bass drop. Heavier than thud. Use for the single most dramatic moment in the video — the moment where everything changes. 1 per video MAX.
+    Example: "and that's when I realized... everything was a LIE" → bass_drop on "lie"
+
+  riser — tension-building rising tone (2.5s). Place it 1-2s BEFORE a big reveal. It creates anticipation. Pairs perfectly with thud or bass_drop immediately after.
+    Example: riser at 12.0s → thud at 13.5s (buildup → payoff)
+
+  riser_short — quick 1-second riser. Use for minor tension moments or rapid buildups in fast-paced content.
+
+  stinger — dramatic orchestral hit. Use for "movie trailer" moments — big statements, dramatic pauses, or when the speaker drops a bombshell.
+    Example: "I'm starting my OWN company" → stinger on "own"
+
+  reveal — sparkle/shimmer discovery sound. Use when something positive is revealed, an answer is given, or a solution is presented.
+    Example: "and the secret is..." → reveal on the answer word
+
+  vinyl_scratch — record scratch. Use for comedy — when the speaker says something unexpected, contradicts themselves, or the story takes a sudden turn.
+    Example: "everything was going great... until it WASN'T" → vinyl_scratch on "wasn't"
+
+  boom — explosive cinematic boom. Use for explosive statements or when something metaphorically "blows up."
+    Example: "the video went VIRAL" → boom on "viral"
+
+  punch — physical impact hit. Use for aggressive or confrontational moments.
+    Example: "I told him STRAIGHT to his face" → punch on "straight"
+
+  glitch — digital distortion sound. Use for tech content, internet culture, or when something "breaks."
+    Example: "the app completely crashed" → glitch on "crashed"
+
+  notification — modern UI chime. Softer than ding. Use for casual digital references.
+
+  click — clean digital click. Use for emphasis on choices, decisions, or button-press moments.
+
+  heartbeat — dramatic single heartbeat. Use for suspenseful moments when the stakes are high.
+    Example: "my heart was RACING" → heartbeat on "racing"
+
   Rules:
   - Sound effects should punctuate emphasis_moments. Place sounds where they amplify the moment.
   - Every sound effect MUST have a "word" field (the trigger word that justifies this sound).
   - Use the word timestamps to place each sound at the EXACT millisecond of the trigger word.
-  - Most videos have 2-5 sound effects. Zero is fine if nothing earns one.
+  - Most videos have 3-7 sound effects. Zero is fine if nothing earns one.
   - Never stack two sounds within 0.5s of each other — they compete and sound muddy.
-  - thud and reverb_hit are your power tools. ching/ding/shutter/typing are contextual accents.
+  - thud/bass_drop/stinger are your power tools. The rest are contextual accents.
+  - riser + impact combos (riser → thud, riser → bass_drop) are the most cinematic pattern.
   - When in doubt, leave the sound out. Silence is better than a wrong sound.
 
   sound_effects: [
-    {{"t": <seconds>, "sound": "<thud|reverb_hit|pop|ching|ding|swoosh|shutter|typing>", "word": "<trigger word>"}}
+    {{"t": <seconds>, "sound": "<thud|reverb_hit|pop|ching|ding|swoosh|shutter|typing|whoosh_fast|bass_drop|riser|riser_short|stinger|reveal|vinyl_scratch|boom|punch|glitch|notification|click|heartbeat>", "word": "<trigger word>"}}
   ]
 
 B-roll — contextual stock footage overlays that illustrate what the speaker is talking about. B-roll makes the edit feel like a professional production, not just a talking head.
@@ -2318,7 +2355,7 @@ RULES FOR USING THESE TIMESTAMPS:
     # ── Parse sound effects ──────────────────────────────────────────────
     raw_sfx = edit_plan.get("sound_effects", [])
     sound_effects = []
-    valid_sounds = {"pop", "ching", "ding", "swoosh", "thud", "reverb_hit", "shutter", "typing"}
+    valid_sounds = set(_SFX_BASE_VOLUMES.keys())
     VALID_CHING_WORDS = {"free", "sold", "dollar", "dollars", "money", "price", "cost", "pay", "paid", "cash", "buy", "bought", "deal"}
     for sfx in raw_sfx:
         if isinstance(sfx, dict) and "t" in sfx and "sound" in sfx:
@@ -2348,14 +2385,14 @@ RULES FOR USING THESE TIMESTAMPS:
                         print(f"[generate-edit] Filtered out ding on '{word}' at {t:.1f}s (not an approved trigger)", flush=True)
                         continue
 
-                # swoosh: only with wipe/fade transitions
-                if sound == "swoosh":
+                # swoosh/whoosh_fast/swipe: only with wipe/fade transitions
+                if sound in ("swoosh", "whoosh_fast", "swipe"):
                     has_transitions = any(
                         str(c.get("transition_out") or "none").lower() not in ("none", "")
                         for c in (edit_plan.get("cuts") or [])
                     )
                     if not has_transitions:
-                        print(f"[generate-edit] Filtered out swoosh at {t:.1f}s (no wipe/fade transitions)", flush=True)
+                        print(f"[generate-edit] Filtered out {sound} at {t:.1f}s (no wipe/fade transitions)", flush=True)
                         continue
 
                 # shutter: only on camera/photo-related trigger words
@@ -2392,7 +2429,8 @@ RULES FOR USING THESE TIMESTAMPS:
         sound_effects = spaced
 
         # 2. Cap heavy impact sounds — overuse kills the punch
-        _MAX_PER_TYPE = {"thud": 2, "reverb_hit": 2}
+        _MAX_PER_TYPE = {"thud": 2, "reverb_hit": 2, "bass_drop": 1, "stinger": 2,
+                         "boom": 1, "vinyl_scratch": 2, "riser": 2, "heartbeat": 1}
         _type_counts = {}
         capped = []
         for sfx in sound_effects:
@@ -2548,6 +2586,7 @@ RULES FOR USING THESE TIMESTAMPS:
 # SFX volumes calibrated for amix normalize=0 (no auto-attenuation).
 # These are absolute mix levels — speech stays at 1.0, SFX sit underneath.
 _SFX_BASE_VOLUMES = {
+    # Original 8
     "shutter":    0.16,
     "swoosh":     0.15,
     "thud":       0.14,
@@ -2556,6 +2595,43 @@ _SFX_BASE_VOLUMES = {
     "typing":     0.15,
     "reverb_hit": 0.14,
     "ching":      0.18,
+    # Transitions
+    "whoosh_fast":       0.14,
+    "whoosh_slow":       0.10,
+    "transition_smooth": 0.10,
+    "swipe":             0.14,
+    # Impacts
+    "bass_drop":  0.12,
+    "boom":       0.13,
+    "punch":      0.15,
+    "slam":       0.14,
+    # Risers & stingers
+    "riser":       0.10,
+    "riser_short": 0.12,
+    "stinger":     0.12,
+    "reveal":      0.13,
+    # UI & notification
+    "notification": 0.16,
+    "text_appear":  0.18,
+    "click":        0.17,
+    "unlock":       0.15,
+    # Comedy & expressive
+    "vinyl_scratch": 0.15,
+    "sad_trombone":  0.13,
+    "boing":         0.16,
+    "record_stop":   0.12,
+    # Atmospheric
+    "static":     0.10,
+    "tape_rewind": 0.11,
+    "glitch":      0.13,
+    "heartbeat":   0.12,
+    # Nature
+    "wind_gust": 0.08,
+    "thunder":   0.10,
+    # Camera & mechanical
+    "camera_flash": 0.16,
+    "switch":       0.17,
+    "page_turn":    0.15,
 }
 
 _TEXT_SFX_BASE_VOLUMES = {
@@ -2567,22 +2643,44 @@ _TEXT_SFX_BASE_VOLUMES = {
     "shutter":    0.15,
     "swoosh":     0.12,
     "thud":       0.13,
+    "text_appear": 0.15,
+    "click":       0.14,
+    "notification": 0.13,
 }
 
 _SFX_ALIASES = {
-    "whoosh":    "swoosh",
-    "boom":      "thud",
-    "cashier":   "ching",
-    "cash":      "ching",
-    "money":     "ching",
-    "rise":      "reverb_hit",
-    "click":     "pop",
-    "impact":    "thud",
-    "slide":     "swoosh",
-    "snap":      "pop",
-    "glitch":    "swoosh",
-    "tape_stop": "reverb_hit",
-    "drop":      "thud",
+    "whoosh":     "whoosh_fast",
+    "cashier":    "ching",
+    "cash":       "ching",
+    "money":      "ching",
+    "rise":       "riser",
+    "rising":     "riser",
+    "buildup":    "riser",
+    "tension":    "riser",
+    "impact":     "thud",
+    "slide":      "swipe",
+    "snap":       "pop",
+    "tape_stop":  "record_stop",
+    "drop":       "bass_drop",
+    "bass":       "bass_drop",
+    "scratch":    "vinyl_scratch",
+    "flash":      "camera_flash",
+    "camera":     "camera_flash",
+    "sparkle":    "reveal",
+    "magic":      "reveal",
+    "shimmer":    "reveal",
+    "error":      "static",
+    "buzz":       "static",
+    "wind":       "wind_gust",
+    "breeze":     "wind_gust",
+    "button":     "click",
+    "press":      "click",
+    "bounce":     "boing",
+    "fail":       "sad_trombone",
+    "wah":        "sad_trombone",
+    "page":       "page_turn",
+    "flip":       "page_turn",
+    "toggle":     "switch",
 }
 
 
@@ -5164,8 +5262,11 @@ def render_remotion_overlay(
           f"{total_duration:.1f}s @ {fps}fps", flush=True)
     t0 = time.time()
 
+    # Use multiple concurrent browser tabs to render frames in parallel
+    _concurrency = min(8, max(2, (os.cpu_count() or 4) // 2))
     result = subprocess.run(
-        ["node", render_cli, "--input", input_json_path, "--output", output_mov_path],
+        ["node", render_cli, "--input", input_json_path, "--output", output_mov_path,
+         "--concurrency", str(_concurrency)],
         capture_output=True, text=True,
         timeout=180,
         cwd=remotion_dir,
@@ -6463,7 +6564,8 @@ def mix_sfx_after_speed_curve(output_path, edit_plan, cuts, effective_durations,
     print("[sfx] Sound effects mixed successfully", flush=True)
 
 
-def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, work_dir, speech_segments=None):
+def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, work_dir, speech_segments=None,
+                      broll_clips=None, broll_fetch_futures=None):
     speed_curve = edit_plan.get("_parsed_speed_curve")
     # Adaptive transition duration based on Gemini pacing assessment
     TRANSITION_DURATION = get_transition_duration(edit_plan.get("pacing"))
@@ -7590,16 +7692,118 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         else:
             print(f"[render] WARNING: music track not found at {music_path} — skipping", flush=True)
 
+    # ── B-roll compositing in first pass (no second encode) ──────────────────
+    # B-roll fetch was launched in parallel with Remotion. Collect results now,
+    # project timestamps, and add overlay filters before captions.
+    broll_input_args = []
+    broll_filter_strs = []
+    _n_broll_inputs = 0
+    if broll_fetch_futures:
+        speed_curve = edit_plan.get("_parsed_speed_curve")
+        hook_offset_val = float(edit_plan.get("_hook_offset") or 0.0)
+        total_duration = sum(effective_durations)
+        _broll_base_idx = n_segment_inputs + len(sfx_input_args) // 2 + len(music_input_args) // 2
+
+        # Collect fetched B-roll files (should be done by now — Remotion took longer)
+        _broll_files = {}
+        for _fut in concurrent.futures.as_completed(broll_fetch_futures, timeout=30):
+            _idx = broll_fetch_futures[_fut]
+            try:
+                _path = _fut.result()
+                if _path:
+                    _broll_files[_idx] = _path
+            except Exception as _be_err:
+                print(f"[broll] Fetch error for clip {_idx}: {_be_err}", flush=True)
+
+        if _broll_files and broll_clips:
+            # Project timestamps and build filters
+            _KB_DIRECTIONS = ["zoom_in", "zoom_out", "pan_right", "pan_left"]
+            BROLL_FADE = 0.4
+            _broll_overlay_idx = 0
+            for _bi, _bc in enumerate(broll_clips):
+                if _bi not in _broll_files:
+                    continue
+                _local_path = _broll_files[_bi]
+                _src_ts = float(_bc.get("timestamp") or 0)
+                _out_ts = project_source_time_to_final_output(
+                    _src_ts, render_cuts, effective_durations, speed_curve,
+                    hook_offset=hook_offset_val,
+                )
+                if _out_ts is None or _out_ts >= total_duration:
+                    continue
+
+                _input_idx = _broll_base_idx + _n_broll_inputs
+                broll_input_args += ["-i", _local_path]
+                _n_broll_inputs += 1
+
+                needed_duration = float(_bc.get("duration") or 2.0)
+                broll_duration = get_video_duration(_local_path)
+                if broll_duration > 0 and needed_duration > broll_duration:
+                    needed_duration = broll_duration
+                seek_point = 0.0
+                if broll_duration > needed_duration + 1.0:
+                    seek_point = min(broll_duration * 0.25, max(0.0, broll_duration - needed_duration - 0.5))
+
+                # Ken Burns with directional variety
+                _kb_total_frames = max(1, round(needed_duration * 30))
+                _kb_zoom = 0.04
+                _kb_progress = f"min(n/{_kb_total_frames}\\,1.0)"
+                _kb_smooth = f"({_kb_progress}*{_kb_progress}*(3-2*{_kb_progress}))"
+                _kb_dir = _KB_DIRECTIONS[_broll_overlay_idx % len(_KB_DIRECTIONS)]
+                _fade_out_start = max(0, needed_duration - BROLL_FADE)
+                _extra_px_w = round(1080 * _kb_zoom)
+                _extra_px_h = round(1920 * _kb_zoom)
+                if _kb_dir == "zoom_in":
+                    _crop_x = f"'max(0\\,min({_extra_px_w/2}*{_kb_smooth}\\,iw-1080))'"
+                    _crop_y = f"'max(0\\,min({_extra_px_h/2}*{_kb_smooth}\\,ih-1920))'"
+                elif _kb_dir == "zoom_out":
+                    _crop_x = f"'max(0\\,min({_extra_px_w/2}*(1.0-{_kb_smooth})\\,iw-1080))'"
+                    _crop_y = f"'max(0\\,min({_extra_px_h/2}*(1.0-{_kb_smooth})\\,ih-1920))'"
+                elif _kb_dir == "pan_right":
+                    _crop_x = f"'max(0\\,min({_extra_px_w}*{_kb_smooth}\\,iw-1080))'"
+                    _crop_y = f"'max(0\\,(ih-1920)/2)'"
+                else:
+                    _crop_x = f"'max(0\\,min({_extra_px_w}*(1.0-{_kb_smooth})\\,iw-1080))'"
+                    _crop_y = f"'max(0\\,(ih-1920)/2)'"
+
+                _bv_label = f"bv{_broll_overlay_idx}"
+                broll_filter_strs.append(
+                    f"[{_input_idx}:v]trim=start={seek_point:.3f}:duration={needed_duration:.3f},"
+                    f"setpts=PTS-STARTPTS,"
+                    f"scale=w='trunc(1080*(1.0+{_kb_zoom})/2)*2':h='trunc(1920*(1.0+{_kb_zoom})/2)*2'"
+                    f":force_original_aspect_ratio=increase:flags=lanczos,"
+                    f"crop=1080:1920:x={_crop_x}:y={_crop_y},"
+                    f"setsar=1,"
+                    f"eq=saturation=0.92:contrast=1.02,"
+                    f"fade=t=in:st=0:d={BROLL_FADE:.2f}:alpha=1,"
+                    f"fade=t=out:st={_fade_out_start:.2f}:d={BROLL_FADE:.2f}:alpha=1,"
+                    f"setpts=PTS-STARTPTS"
+                    f"[{_bv_label}]"
+                )
+                _ov_label = f"broll_ov{_broll_overlay_idx}"
+                broll_filter_strs.append(
+                    f"{video_out}[{_bv_label}]overlay=0:0:enable='between(t,{_out_ts:.3f},{_out_ts + needed_duration:.3f})'[{_ov_label}]"
+                )
+                video_out = f"[{_ov_label}]"
+                print(f"[broll] '{_bc.get('keyword')}' at {_out_ts:.1f}s ({needed_duration:.1f}s) Ken Burns: {_kb_dir}", flush=True)
+                _broll_overlay_idx += 1
+
+            if _broll_overlay_idx > 0:
+                print(f"[broll] Integrated {_broll_overlay_idx} B-roll clip(s) into first pass", flush=True)
+
     # Caption overlay compositing (Remotion ProRes 4444 with alpha)
+    # Must come AFTER broll overlays in filter chain (captions on top of B-roll)
     caption_input_args = []
+    caption_filter_strs = []
     if caption_overlay_path:
-        _cap_idx = n_segment_inputs + len(sfx_input_args) // 2 + len(music_input_args) // 2
+        _cap_idx = n_segment_inputs + len(sfx_input_args) // 2 + len(music_input_args) // 2 + _n_broll_inputs
         caption_input_args = ["-i", caption_overlay_path]
-        post_filters.append(f"{video_out}[{_cap_idx}:v]overlay=format=auto:eof_action=pass[video_captioned]")
+        caption_filter_strs.append(f"{video_out}[{_cap_idx}:v]overlay=format=auto:eof_action=pass[video_captioned]")
         video_out = "[video_captioned]"
         print(f"[render] Remotion caption overlay at input index {_cap_idx}", flush=True)
 
-    filter_complex = ";".join(video_filters + audio_filters + transition_filters + sfx_filter_strs + post_filters + music_filters)
+    # Order matters: post_filters (zoom pulses etc) → broll → captions → music
+    filter_complex = ";".join(video_filters + audio_filters + transition_filters + sfx_filter_strs + post_filters + broll_filter_strs + caption_filter_strs + music_filters)
     _total_expected_v = sum(round(d * 30) / 30 for d in effective_durations)
     _total_expected_a = sum(effective_durations)
     print(f"[DIAG] Expected totals: video(fps30)={_total_expected_v:.4f}s audio(raw)={_total_expected_a:.4f}s gap={_total_expected_v - _total_expected_a:.6f}s", flush=True)
@@ -7618,6 +7822,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         + input_args
         + sfx_input_args
         + music_input_args
+        + broll_input_args
         + caption_input_args
         + ["-filter_complex", filter_complex, "-map", video_out, "-map", audio_out]
         + encode_args
@@ -7728,29 +7933,17 @@ def handler(job):
         _timings["download"] = time.time() - t
         print(f"[pipeline] download complete: {size_mb:.1f}MB in {_timings['download']:.1f}s", flush=True)
 
-        # Step 2 — Normalize + Transcribe + Gemini upload (parallel)
+        # Step 2 — ALL initialization in parallel (normalize overlaps with everything)
         send_progress(job_id, "normalize", 12, "Getting everything set up...", app_url)
         t = time.time()
-        print("[pipeline] step=normalize + transcribe + gemini_upload (parallel)", flush=True)
-        source_path = normalize_source_video(source_path, work_dir)
-        _probe = subprocess.run(
-            ["ffprobe", "-v", "quiet", "-show_streams", "-show_format", "-print_format", "json", source_path],
-            capture_output=True, text=True, timeout=10)
-        _probe_data = json.loads(_probe.stdout or "{}")
-        print(f"[DIAG] Source probe: {_probe.stdout[:1500]}", flush=True)
+        print("[pipeline] step=normalize + transcribe + gemini_upload + loudness + beats (ALL parallel)", flush=True)
 
-        # Extract duration and resolution from the single probe (no redundant calls)
-        source_duration = 0.0
-        source_res = {"width": 1080, "height": 1920}
-        for _s in (_probe_data.get("streams") or []):
-            if _s.get("codec_type") == "video":
-                source_res = {"width": int(_s.get("width") or 1080), "height": int(_s.get("height") or 1920)}
-                if _s.get("duration"):
-                    source_duration = float(_s["duration"])
-        if not source_duration:
-            _fmt_dur = (_probe_data.get("format") or {}).get("duration")
-            if _fmt_dur:
-                source_duration = float(_fmt_dur)
+        # Quick probe of raw source for duration (needed for face detect timestamps)
+        _raw_probe = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-show_format", "-print_format", "json", source_path],
+            capture_output=True, text=True, timeout=10)
+        _raw_probe_data = json.loads(_raw_probe.stdout or "{}")
+        source_duration = float((_raw_probe_data.get("format") or {}).get("duration") or 0)
         if not source_duration:
             source_duration = get_source_duration(source_path)
         sample_timestamps = [round(i * 4.0, 3) for i in range(int(source_duration / 4.0) + 1)] if source_duration > 0 else []
@@ -7760,11 +7953,18 @@ def handler(job):
         if gemini_api_key:
             genai.configure(api_key=gemini_api_key)
 
-        # Run transcription, Gemini upload, and loudness measurement in parallel
+        # All 5 operations run in parallel — Deepgram, Gemini upload, loudness,
+        # and beats all read from the RAW source (audio is identical pre/post normalize).
+        # Unix file semantics keep the raw file accessible even after normalize unlinks it.
+        _raw_source = source_path  # save raw path — normalize will overwrite source_path
+
+        def _do_normalize():
+            return normalize_source_video(_raw_source, work_dir)
+
         def _do_transcribe():
             audio_path = os.path.join(work_dir, "audio_for_words.wav")
             subprocess.run(
-                ["ffmpeg", "-threads", "0", "-y", "-i", source_path, "-vn", "-acodec", "pcm_s16le", "-ar", "48000", "-ac", "1", audio_path],
+                ["ffmpeg", "-threads", "0", "-y", "-i", _raw_source, "-vn", "-acodec", "pcm_s16le", "-ar", "48000", "-ac", "1", audio_path],
                 capture_output=True, text=True, timeout=30,
             )
             result = transcribe_audio(audio_path)
@@ -7781,12 +7981,11 @@ def handler(job):
 
         def _do_gemini_upload():
             try:
-                # Create a 360p proxy for Gemini — it doesn't need 1080p to make editing decisions
                 proxy_path = os.path.join(work_dir, "gemini_proxy.mp4")
                 print("[pipeline] Creating 240p proxy for Gemini upload...", flush=True)
                 _proxy_t = time.time()
                 _proxy_result = subprocess.run(
-                    ["ffmpeg", "-threads", "0", "-y", "-i", source_path,
+                    ["ffmpeg", "-threads", "0", "-y", "-i", _raw_source,
                      "-vf", "scale=240:426:force_original_aspect_ratio=decrease",
                      "-c:v", "libx264", "-preset", "ultrafast", "-crf", "32",
                      "-c:a", "aac", "-b:a", "32k", "-ar", "16000", "-ac", "1",
@@ -7800,10 +7999,9 @@ def handler(job):
                     upload_path = proxy_path
                 else:
                     print(f"[pipeline] Proxy creation failed — uploading full-res", flush=True)
-                    upload_path = source_path
+                    upload_path = _raw_source
                 gf = genai.upload_file(upload_path)
                 print(f"[pipeline] Gemini upload started: {gf.name}", flush=True)
-                # Clean up proxy
                 if upload_path == proxy_path and os.path.exists(proxy_path):
                     try:
                         os.unlink(proxy_path)
@@ -7815,24 +8013,39 @@ def handler(job):
                 return None
 
         def _do_loudness():
-            return measure_source_loudness(source_path)
+            return measure_source_loudness(_raw_source)
 
         def _do_beats():
             try:
-                return detect_beats(source_path)
+                return detect_beats(_raw_source)
             except Exception as _be:
                 print(f"[pipeline] Beat detection failed (non-fatal): {_be}", flush=True)
                 return []
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as early_pool:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as early_pool:
+            future_normalize = early_pool.submit(_do_normalize)
             future_transcribe = early_pool.submit(_do_transcribe)
             future_gemini_upload = early_pool.submit(_do_gemini_upload)
             future_loudness = early_pool.submit(_do_loudness)
             future_beats = early_pool.submit(_do_beats)
+            source_path = future_normalize.result()
             transcript = future_transcribe.result()
             gemini_file_ref = future_gemini_upload.result()
             source_loudness = future_loudness.result()
             source_beats = future_beats.result()
+
+        # Probe normalized source for resolution verification
+        source_res = {"width": 1080, "height": 1920}
+        _probe = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-show_streams", "-show_format", "-print_format", "json", source_path],
+            capture_output=True, text=True, timeout=10)
+        _probe_data = json.loads(_probe.stdout or "{}")
+        print(f"[DIAG] Source probe: {_probe.stdout[:1500]}", flush=True)
+        for _s in (_probe_data.get("streams") or []):
+            if _s.get("codec_type") == "video":
+                source_res = {"width": int(_s.get("width") or 1080), "height": int(_s.get("height") or 1920)}
+                if _s.get("duration"):
+                    source_duration = float(_s["duration"])
 
         _timings["normalize_transcribe_upload"] = time.time() - t
         _dg_words = transcript.get("words", [])
@@ -7885,12 +8098,33 @@ def handler(job):
         print(f"[pipeline] edit recipe complete in {_timings['edit_recipe_faces']:.1f}s", flush=True)
         analysis = edit_plan.get("analysis_data") or {}
 
+        # ── Start B-roll fetch NOW (parallel with Remotion + FFmpeg) ──────────
+        # B-roll keyword+duration is known from edit plan. Start downloading from
+        # Pexels immediately — clips download while Remotion renders and filters build.
+        _broll_fetch_pool = None
+        _broll_fetch_futures = {}
+        broll_clips = edit_plan.get("broll_clips") or []
+        if broll_clips:
+            print(f"[broll] Starting parallel fetch of {len(broll_clips)} B-roll clip(s) early...", flush=True)
+            _broll_fetch_pool = concurrent.futures.ThreadPoolExecutor(max_workers=3)
+            for _bi, _bc in enumerate(broll_clips):
+                _fut = _broll_fetch_pool.submit(
+                    fetch_broll_clip,
+                    _bc["keyword"],
+                    float(_bc.get("duration") or 2.0),
+                    work_dir,
+                )
+                _broll_fetch_futures[_fut] = _bi
+
         print("[pipeline] step=parallel_render", flush=True)
         send_progress(job_id, "render", 62, "Rendering — almost there...", app_url)
         t = time.time()
         render_multi_clip(
             source_path, edit_plan["cuts"], edit_plan, output_path, transcript, work_dir,
+            broll_clips=broll_clips, broll_fetch_futures=_broll_fetch_futures,
         )
+        if _broll_fetch_pool:
+            _broll_fetch_pool.shutdown(wait=False)
         edit_plan["_deepgram_words"] = transcript.get("words", [])
 
         render_elapsed = time.time() - t
@@ -7928,65 +8162,8 @@ def handler(job):
 
         final_dur = _rv or (probe_duration(output_path) or 0)
 
-        # ── B-roll compositing ────────────────────────────────────────────────────
-        t = time.time()
-        broll_clips = edit_plan.get("broll_clips") or []
-        if broll_clips:
-            print(f"[broll] Fetching {len(broll_clips)} B-roll clip(s) in parallel...", flush=True)
-            broll_files = {}
-            hook_offset_val = float(edit_plan.get("_hook_offset") or 0.0)
-
-            # Project source timestamps to output timeline
-            broll_entries_projected = []
-            for _bi, _bc in enumerate(broll_clips):
-                _src_ts = float(_bc.get("timestamp") or 0)
-                _out_ts = project_source_time_to_final_output(
-                    _src_ts, cuts, effective_durations, speed_curve,
-                    hook_offset=hook_offset_val,
-                )
-                if _out_ts is not None and _out_ts < final_dur:
-                    broll_entries_projected.append({
-                        "keyword": _bc["keyword"],
-                        "timestamp": _out_ts,
-                        "duration": _bc["duration"],
-                        "_idx": _bi,
-                    })
-
-            if broll_entries_projected:
-                # Parallel fetch
-                with concurrent.futures.ThreadPoolExecutor(max_workers=3) as broll_pool:
-                    broll_futures = {}
-                    for _be in broll_entries_projected:
-                        _fut = broll_pool.submit(
-                            fetch_broll_clip,
-                            _be["keyword"],
-                            _be["duration"],
-                            work_dir,
-                        )
-                        broll_futures[_fut] = _be["_idx"]
-                    for _fut in concurrent.futures.as_completed(broll_futures):
-                        _idx = broll_futures[_fut]
-                        try:
-                            _path = _fut.result()
-                            if _path:
-                                broll_files[_idx] = _path
-                        except Exception as _be_err:
-                            print(f"[broll] Fetch error for clip {_idx}: {_be_err}", flush=True)
-
-                if broll_files:
-                    # Remap indices for composite_broll (expects 0-based sequential)
-                    _broll_entries_final = []
-                    _broll_files_final = {}
-                    for _ri, _be in enumerate(broll_entries_projected):
-                        if _be["_idx"] in broll_files:
-                            _broll_entries_final.append(_be)
-                            _broll_files_final[len(_broll_entries_final) - 1] = broll_files[_be["_idx"]]
-
-                    composite_broll(output_path, _broll_entries_final, _broll_files_final, work_dir)
-                else:
-                    print("[broll] No B-roll clips fetched successfully — skipping composite", flush=True)
-
-        _timings["broll"] = time.time() - t
+        # B-roll is now integrated into the first FFmpeg pass (no second encode needed)
+        _timings["broll"] = 0.0
 
         # ── Parallel group 2: cover frame + upload ────────────────────────────────
         t = time.time()
