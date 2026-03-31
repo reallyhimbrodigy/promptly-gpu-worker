@@ -1,0 +1,16 @@
+{
+  "name": "promptly-captions",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "render": "node render-cli.mjs"
+  },
+  "dependencies": {
+    "@remotion/bundler": "4.0.242",
+    "@remotion/cli": "4.0.242",
+    "@remotion/renderer": "4.0.242",
+    "remotion": "4.0.242",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  }
+}

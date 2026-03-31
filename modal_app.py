@@ -1,12 +1,12 @@
 import modal
 
-# rebuild trigger v3
+# rebuild trigger v4 — Remotion captions
 
 # ── Image definition (replaces Dockerfile) ────────────────────────────────────
 image = (
     modal.Image.from_registry("nvidia/cuda:12.2.0-runtime-ubuntu22.04", add_python="3.10")
     .run_commands(
-        "echo 'build v9 - pin ffmpeg 8.1 stable'",
+        "echo 'build v10 - Remotion caption overlay engine'",
         "apt-get update && apt-get install -y ca-certificates && update-ca-certificates",
     )
     .apt_install(
@@ -14,6 +14,7 @@ image = (
         "fontconfig",
         "wget",
         "xz-utils",
+        "curl",
         "libass-dev",
         "libfontconfig1",
         "fonts-dejavu-core",
@@ -30,6 +31,22 @@ image = (
         "libswresample-dev",
         "libsndfile1-dev",
         "libsamplerate0-dev",
+        # Chromium dependencies for Remotion headless rendering
+        "libnss3",
+        "libatk1.0-0",
+        "libatk-bridge2.0-0",
+        "libcups2",
+        "libdrm2",
+        "libxkbcommon0",
+        "libxcomposite1",
+        "libxdamage1",
+        "libxfixes3",
+        "libxrandr2",
+        "libgbm1",
+        "libpango-1.0-0",
+        "libcairo2",
+        "libasound2",
+        "libatspi2.0-0",
     )
     .run_commands(
         "mkdir -p /opt/ffmpeg",
@@ -46,6 +63,16 @@ image = (
         "mkdir -p /models/face_detector",
         "wget -q -O /models/face_detector/deploy.prototxt https://raw.githubusercontent.com/opencv/opencv/master/samples/dnn/face_detector/deploy.prototxt",
         "wget -q -O /models/face_detector/res10_300x300_ssd_iter_140000.caffemodel https://raw.githubusercontent.com/opencv/opencv_3rdparty/dnn_samples_face_detector_20170830/res10_300x300_ssd_iter_140000.caffemodel",
+    )
+    .run_commands(
+        # Install Node.js 20 LTS for Remotion caption rendering
+        "curl -fsSL https://deb.nodesource.com/setup_20.x | bash -",
+        "apt-get install -y nodejs",
+        "node --version && npm --version",
+    )
+    .run_commands(
+        # Install Remotion dependencies + bundle at build time for fast renders
+        "mkdir -p /remotion",
     )
     .pip_install("numpy", "wheel")
     .pip_install("aubio", extra_options="--no-build-isolation")
@@ -66,6 +93,15 @@ image = (
     .add_local_dir("src/assets/sounds", "/assets/sounds")
     .add_local_dir("src/assets/fonts", "/assets/fonts")
     .add_local_dir("src/assets/music", "/assets/music")
+    .add_local_dir("src/remotion", "/remotion")
+    .run_commands(
+        # Install Remotion npm deps, download Chromium, and pre-bundle at build time
+        "cd /remotion && npm install --prefer-offline 2>&1 | tail -5",
+        "cd /remotion && npx remotion browser ensure 2>&1 | tail -3",
+        "node -e \"require('@remotion/renderer'); console.log('[remotion] renderer OK')\"",
+        # Pre-bundle Remotion project → /remotion/bundle/ (saves 5-10s per render)
+        "cd /remotion && node prebundle.mjs",
+    )
     .add_local_file("handler.py", "/handler.py")
 )
 

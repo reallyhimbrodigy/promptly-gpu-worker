@@ -5077,6 +5077,81 @@ def render_png_caption_video(
     return None
 
 
+# ─── REMOTION CAPTION OVERLAY RENDERER ────────────────────────────────────────
+# Professional animated captions rendered via Remotion (React + Chromium).
+# Produces transparent ProRes 4444 MOV overlays with spring animations,
+# keyword glow, per-word highlighting, pill backgrounds — matching Captions app.
+
+def render_remotion_caption_video(
+    words, caption_style, output_res, caption_keywords, work_dir,
+    total_duration=0.0, fps=30,
+):
+    """Render captions as a transparent overlay video using Remotion.
+
+    Returns path to a transparent ProRes 4444 (.mov) file.
+    Raises RuntimeError if rendering fails.
+    """
+    if not words:
+        raise RuntimeError("[remotion] No words provided for caption rendering")
+
+    remotion_dir = "/remotion"
+    render_cli = os.path.join(remotion_dir, "render-cli.mjs")
+
+    if not os.path.exists(render_cli):
+        raise RuntimeError(f"[remotion] render-cli.mjs not found at {render_cli}")
+
+    w = output_res.get("width") or 1080
+    h = output_res.get("height") or 1920
+
+    # Write input JSON for the render CLI
+    input_data = {
+        "words": words,
+        "style": caption_style,
+        "width": w,
+        "height": h,
+        "fps": fps,
+        "duration": total_duration,
+        "keywords": caption_keywords or [],
+        "fontDir": "/assets/fonts",
+    }
+
+    input_json_path = os.path.join(work_dir, "remotion_input.json")
+    output_mov_path = os.path.join(work_dir, "caption_overlay_remotion.mov")
+
+    with open(input_json_path, "w") as f:
+        json.dump(input_data, f)
+
+    print(f"[remotion] Rendering {caption_style} captions: {len(words)} words, "
+          f"{total_duration:.1f}s @ {fps}fps", flush=True)
+    t0 = time.time()
+
+    result = subprocess.run(
+        ["node", render_cli, "--input", input_json_path, "--output", output_mov_path],
+        capture_output=True, text=True,
+        timeout=180,
+        cwd=remotion_dir,
+    )
+
+    # Print Remotion stdout (progress + timing info)
+    if result.stdout:
+        for line in result.stdout.strip().split("\n"):
+            if line.strip():
+                print(f"  {line.strip()}", flush=True)
+
+    if result.returncode != 0:
+        stderr_tail = (result.stderr or "")[-500:]
+        raise RuntimeError(f"[remotion] Render failed (rc={result.returncode}): {stderr_tail}")
+
+    elapsed = time.time() - t0
+
+    if not os.path.exists(output_mov_path):
+        raise RuntimeError("[remotion] Render completed but output file not found")
+
+    sz = os.path.getsize(output_mov_path)
+    print(f"[remotion] Caption overlay: {sz / 1024 / 1024:.1f}MB in {elapsed:.1f}s", flush=True)
+    return output_mov_path
+
+
 def get_output_clip_ranges(cuts, effective_durations, transition_duration=None):
     """
     Return list of {"start": float, "end": float} for each clip's position
@@ -6445,6 +6520,59 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # uses the same timeline as the actual render (not the pre-split approximation)
     edit_plan["_render_cuts"] = render_cuts
     edit_plan["_render_effective_durations"] = effective_durations
+
+    # ── Launch caption rendering in parallel ──────────────────────────────────
+    # Remotion renders a transparent overlay video while we build FFmpeg filters.
+    # This saves 5-10s because caption rendering overlaps with filter computation.
+    _caption_future = None
+    caption_style = str(edit_plan.get("caption_style") or "none").lower()
+    _all_caption_styles = {"captions_dynamic", "captions_clean", "word_pop", "hormozi",
+                           "keyword_pop", "dynamic", "clean", "impact", "capcut",
+                           "slide", "wave"}
+    if caption_style != "none" and caption_style in _all_caption_styles and transcript.get("words"):
+        # Project words to output timeline (milliseconds — not blocking)
+        _projected_words = project_words_to_output(
+            transcript, render_cuts, effective_durations,
+            hook_offset=0.0,
+            hook_clip=None, speed_curve=speed_curve,
+            transition_duration=TRANSITION_DURATION,
+        )
+        if _projected_words:
+            # Clean curly braces (ASS override chars)
+            for _wd in _projected_words:
+                for _k in ("word", "punctuated_word"):
+                    if _k in _wd and ("{" in str(_wd[_k]) or "}" in str(_wd[_k])):
+                        _wd[_k] = str(_wd[_k]).replace("{", "").replace("}", "")
+            # Deduplicate consecutive stutters
+            if len(_projected_words) > 1:
+                _deduped = [_projected_words[0]]
+                for _wi in range(1, len(_projected_words)):
+                    _p = re.sub(r"[.,!?;:'\"\\]", "", str(_projected_words[_wi - 1].get("word") or "").lower().strip())
+                    _c = re.sub(r"[.,!?;:'\"\\]", "", str(_projected_words[_wi].get("word") or "").lower().strip())
+                    if _c and _c == _p:
+                        _deduped[-1]["end"] = _projected_words[_wi]["end"]
+                        continue
+                    _deduped.append(_projected_words[_wi])
+                _projected_words = _deduped
+
+            _total_dur = sum(effective_durations)
+            _cap_kw = edit_plan.get("caption_keywords") or []
+            _cap_fp = edit_plan.get("_face_positions") or []
+
+            def _do_caption_render():
+                """Render caption overlay in background thread via Remotion."""
+                return render_remotion_caption_video(
+                    _projected_words, caption_style,
+                    {"width": 1080, "height": 1920},
+                    _cap_kw, work_dir,
+                    total_duration=_total_dur, fps=30,
+                )
+
+            # Launch in background thread — runs while we build FFmpeg filters
+            _caption_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            _caption_future = _caption_pool.submit(_do_caption_render)
+            print(f"[captions] Background render started for {caption_style} ({len(_projected_words)} words)", flush=True)
+
     for i, cut in enumerate(render_cuts):
         src_dur = round((float(cut["source_end"]) - float(cut["source_start"])) * 1000) / 1000
         clip_speed = max(0.25, min(4.0, float(cut.get("speed") or 1.0)))
@@ -7157,64 +7285,16 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # incompatible with FFmpeg 8.x). Vignette handles edge emphasis instead.
     depth_mask_path = None
 
-    caption_style = str(edit_plan.get("caption_style") or "none").lower()
+    # ── Collect caption overlay from parallel Remotion render ─────────────────
+    # The Remotion render was launched in a background thread early in this
+    # function (right after effective_durations). Now we wait for the result
+    # before building the FFmpeg command. No fallbacks — Remotion must succeed.
     caption_overlay_path = None
     ass_path = None
-    if caption_style != "none" and transcript.get("words"):
-        # PNG overlay rendering (Pillow) — produces Captions-app-quality results
-        # with rounded pills, keyword sizing, active highlighting, pop-in animation.
-        # ASS subtitles look like basic subtitles; PNG looks professional.
-        if caption_style in ("captions_dynamic", "captions_clean", "word_pop"):
-            # hook_offset=0 because render_cuts already includes hook clip
-            _projected_words = project_words_to_output(
-                transcript, render_cuts, effective_durations,
-                hook_offset=0.0,
-                hook_clip=None, speed_curve=speed_curve,
-                transition_duration=TRANSITION_DURATION,
-            )
-            if _projected_words:
-                # Clean curly braces (ASS override chars)
-                for _wd in _projected_words:
-                    for _k in ("word", "punctuated_word"):
-                        if _k in _wd and ("{" in str(_wd[_k]) or "}" in str(_wd[_k])):
-                            _wd[_k] = str(_wd[_k]).replace("{", "").replace("}", "")
-                # Deduplicate consecutive stutters
-                if len(_projected_words) > 1:
-                    _deduped = [_projected_words[0]]
-                    for _wi in range(1, len(_projected_words)):
-                        _p = re.sub(r"[.,!?;:'\"\\]", "", str(_projected_words[_wi - 1].get("word") or "").lower().strip())
-                        _c = re.sub(r"[.,!?;:'\"\\]", "", str(_projected_words[_wi].get("word") or "").lower().strip())
-                        if _c and _c == _p:
-                            _deduped[-1]["end"] = _projected_words[_wi]["end"]
-                            continue
-                        _deduped.append(_projected_words[_wi])
-                    _projected_words = _deduped
-                caption_overlay_path = render_png_caption_video(
-                    _projected_words, caption_style,
-                    {"width": 1080, "height": 1920},
-                    edit_plan.get("caption_keywords") or [],
-                    work_dir, face_positions=face_positions,
-                    total_duration=sum(effective_durations), fps=30,
-                )
-                if caption_overlay_path:
-                    print(f"[captions] Using PNG overlay for {caption_style}", flush=True)
-
-        # Fall back to ASS if PNG failed or not a premium style
-        if not caption_overlay_path:
-            # hook_offset=0 because render_cuts already includes the hook clip
-            # as the first cut — output_cursor in project_words_to_output already
-            # accounts for hook duration. Passing hook_offset would double-shift.
-            ass_path = generate_subtitle_file(
-                transcript, caption_style, render_cuts, effective_durations,
-                {"width": 1080, "height": 1920},
-                edit_plan.get("caption_position") or "lower-third",
-                edit_plan.get("caption_keywords") or [],
-                work_dir,
-                hook_offset=0.0,
-                hook_clip=None, speed_curve=speed_curve,
-                transition_duration=TRANSITION_DURATION,
-                face_positions=face_positions, edit_plan=edit_plan,
-            )
+    if _caption_future is not None:
+        caption_overlay_path = _caption_future.result(timeout=200)
+        _caption_pool.shutdown(wait=False)
+        print(f"[captions] Remotion overlay ready: {caption_overlay_path}", flush=True)
 
     text_overlays = edit_plan.get("text_overlays") or []
     if text_overlays:
@@ -7454,18 +7534,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         else:
             print(f"[render] WARNING: music track not found at {music_path} — skipping", flush=True)
 
-    # Caption overlay or ASS subtitle burn-in
+    # Caption overlay compositing (Remotion ProRes 4444 with alpha)
     caption_input_args = []
     if caption_overlay_path:
         _cap_idx = n_segment_inputs + len(sfx_input_args) // 2 + len(music_input_args) // 2
         caption_input_args = ["-i", caption_overlay_path]
         post_filters.append(f"{video_out}[{_cap_idx}:v]overlay=format=auto:eof_action=pass[video_captioned]")
         video_out = "[video_captioned]"
-        print(f"[render] PNG caption overlay at input index {_cap_idx}", flush=True)
-    elif ass_path and os.path.exists(ass_path):
-        escaped = ass_path.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
-        post_filters.append(f"{video_out}subtitles='{escaped}':fontsdir=/assets/fonts[video_captioned]")
-        video_out = "[video_captioned]"
+        print(f"[render] Remotion caption overlay at input index {_cap_idx}", flush=True)
 
     filter_complex = ";".join(video_filters + audio_filters + transition_filters + sfx_filter_strs + post_filters + music_filters)
     _total_expected_v = sum(round(d * 30) / 30 for d in effective_durations)
