@@ -96,7 +96,7 @@ image = (
         # Install Remotion npm deps, download Chromium, and pre-bundle at build time
         "cd /remotion && npm install 2>&1 | tail -5",
         "cd /remotion && npx remotion browser ensure 2>&1 | tail -3",
-        "node -e \"require('@remotion/renderer'); console.log('[remotion] renderer OK')\"",
+        "cd /remotion && node -e \"require('@remotion/renderer'); console.log('[remotion] renderer OK')\"",
         # Pre-bundle Remotion project → /remotion/bundle/ (saves 5-10s per render)
         "cd /remotion && node prebundle.mjs",
         # Register Montserrat fonts for Chromium rendering
