@@ -5862,7 +5862,13 @@ def render_remotion_overlay(
                 print(f"  {line.strip()}", flush=True)
 
     if result.returncode != 0:
-        stderr_tail = (result.stderr or "")[-500:]
+        full_stderr = result.stderr or ""
+        # Print full stderr for debugging (truncated in the exception)
+        if full_stderr:
+            print(f"[remotion] FULL STDERR ({len(full_stderr)} chars):", flush=True)
+            for line in full_stderr.strip().split("\n")[-30:]:
+                print(f"  {line}", flush=True)
+        stderr_tail = full_stderr[-2000:]
         raise RuntimeError(f"[remotion] Render failed (rc={result.returncode}): {stderr_tail}")
 
     elapsed = time.time() - t0

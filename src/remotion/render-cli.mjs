@@ -103,7 +103,7 @@ await renderMedia({
   pixelFormat: "yuva444p10le",
   outputLocation: outputPath,
   inputProps,
-  concurrency: concurrency || 1,
+  concurrency: null, // let Remotion auto-detect from container CPU limits
   chromiumOptions: {
     gl: "angle",
   },
