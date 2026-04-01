@@ -73,21 +73,21 @@ export function generateEffects(input: OverlayInput): VisualEffect[] {
       type: "particle_ambient",
       start: 0,
       end: duration,
-      params: { style: "bokeh", count: 15, intensity: 0.3 },
+      params: { style: "bokeh", count: 20, intensity: 0.5 },
     });
   } else if (vibeCategory === "chill") {
     effects.push({
       type: "particle_ambient",
       start: 0,
       end: duration,
-      params: { style: "dust", count: 12, intensity: 0.2 },
+      params: { style: "dust", count: 18, intensity: 0.35 },
     });
   } else if (vibeCategory === "retro") {
     effects.push({
       type: "particle_ambient",
       start: 0,
       end: duration,
-      params: { style: "dust", count: 10, intensity: 0.25 },
+      params: { style: "dust", count: 16, intensity: 0.4 },
     });
   }
 
@@ -97,14 +97,14 @@ export function generateEffects(input: OverlayInput): VisualEffect[] {
       type: "vhs_grain",
       start: 0,
       end: duration,
-      params: { style: "vhs", intensity: 0.35 },
+      params: { style: "vhs", intensity: 0.5 },
     });
   } else if (vibeCategory === "cinematic") {
     effects.push({
       type: "vhs_grain",
       start: 0,
       end: duration,
-      params: { style: "film", intensity: 0.15 },
+      params: { style: "film", intensity: 0.25 },
     });
   }
 
@@ -122,21 +122,21 @@ export function generateEffects(input: OverlayInput): VisualEffect[] {
           type: "glitch",
           start: ct - 0.05,
           end: ct + 0.12,
-          params: { intensity: 0.6, color: "rgb" },
+          params: { intensity: 0.8, color: "rgb" },
         });
       } else if (i % 3 === 1) {
         effects.push({
           type: "whip_pan",
           start: ct - 0.08,
           end: ct + 0.08,
-          params: { direction: i % 2 === 0 ? "right" : "left", intensity: 0.5 },
+          params: { direction: i % 2 === 0 ? "right" : "left", intensity: 0.7 },
         });
       } else {
         effects.push({
           type: "impact_flash",
           start: ct - 0.02,
           end: ct + 0.08,
-          params: { color: "white", intensity: 0.4 },
+          params: { color: "white", intensity: 0.65 },
         });
       }
     } else if (vibeCategory === "cinematic" || vibeCategory === "dramatic") {
@@ -146,7 +146,7 @@ export function generateEffects(input: OverlayInput): VisualEffect[] {
           type: "zoom_blur_transition",
           start: ct - 0.1,
           end: ct + 0.1,
-          params: { intensity: 0.4, color: "dark" },
+          params: { intensity: 0.6, color: "dark" },
         });
       }
       if (i % 3 === 0) {
@@ -154,7 +154,7 @@ export function generateEffects(input: OverlayInput): VisualEffect[] {
           type: "light_leak",
           start: ct - 0.2,
           end: ct + 0.8,
-          params: { color: vibeCategory === "dramatic" ? "cool" : "warm", intensity: 0.3 },
+          params: { color: vibeCategory === "dramatic" ? "cool" : "warm", intensity: 0.5 },
         });
       }
     } else if (vibeCategory === "aesthetic" || vibeCategory === "chill") {
@@ -164,7 +164,7 @@ export function generateEffects(input: OverlayInput): VisualEffect[] {
           type: "light_leak",
           start: ct - 0.3,
           end: ct + 1.0,
-          params: { color: "golden", intensity: 0.25 },
+          params: { color: "golden", intensity: 0.4 },
         });
       }
     } else if (vibeCategory === "motivational") {
@@ -174,14 +174,14 @@ export function generateEffects(input: OverlayInput): VisualEffect[] {
           type: "impact_flash",
           start: ct - 0.02,
           end: ct + 0.1,
-          params: { color: "warm", intensity: 0.5 },
+          params: { color: "warm", intensity: 0.7 },
         });
       } else {
         effects.push({
           type: "whip_pan",
           start: ct - 0.06,
           end: ct + 0.06,
-          params: { direction: i % 2 === 0 ? "right" : "left", intensity: 0.4 },
+          params: { direction: i % 2 === 0 ? "right" : "left", intensity: 0.6 },
         });
       }
     } else {
@@ -191,7 +191,7 @@ export function generateEffects(input: OverlayInput): VisualEffect[] {
           type: "zoom_blur_transition",
           start: ct - 0.08,
           end: ct + 0.08,
-          params: { intensity: 0.3 },
+          params: { intensity: 0.5 },
         });
       }
     }
@@ -209,7 +209,7 @@ export function generateEffects(input: OverlayInput): VisualEffect[] {
       start: emT - 0.05,
       end: emT + (isHigh ? 0.5 : 0.3),
       params: {
-        intensity: isHigh ? 0.5 : 0.3,
+        intensity: isHigh ? 0.7 : 0.45,
         color: vibeCategory === "cinematic" ? "cool" : "black",
       },
     });
@@ -232,7 +232,7 @@ export function generateEffects(input: OverlayInput): VisualEffect[] {
         type: "edge_glow",
         start: emT - 0.05,
         end: emT + 0.4,
-        params: { color: glowColors[vibeCategory], intensity: 0.4, pulse: false },
+        params: { color: glowColors[vibeCategory], intensity: 0.6, pulse: false },
       });
     }
 
@@ -242,7 +242,7 @@ export function generateEffects(input: OverlayInput): VisualEffect[] {
         type: "impact_flash",
         start: emT - 0.02,
         end: emT + 0.08,
-        params: { color: "white", intensity: 0.5 },
+        params: { color: "white", intensity: 0.75 },
       });
     }
 
@@ -254,7 +254,7 @@ export function generateEffects(input: OverlayInput): VisualEffect[] {
         end: emT + 0.8,
         params: {
           style: vibeCategory === "comedy" ? "confetti" : "sparkle",
-          count: 25,
+          count: 40,
           originX: 0.5,
           originY: 0.4,
         },
@@ -269,7 +269,7 @@ export function generateEffects(input: OverlayInput): VisualEffect[] {
         type: "emoji_pop",
         start: emT,
         end: emT + 0.8,
-        params: { emoji: emojis[emojiIdx], size: 100, x: 0.8, y: 0.25 },
+        params: { emoji: emojis[emojiIdx], size: 140, x: 0.8, y: 0.25 },
       });
     }
 
@@ -291,7 +291,7 @@ export function generateEffects(input: OverlayInput): VisualEffect[] {
         type: "color_flash",
         start: emT - 0.02,
         end: emT + 0.2,
-        params: { color: flashColors[vibeCategory], intensity: 0.2 },
+        params: { color: flashColors[vibeCategory], intensity: 0.35 },
       });
     }
   }
@@ -325,7 +325,7 @@ export function generateEffects(input: OverlayInput): VisualEffect[] {
         end: lt + 1.5,
         params: {
           color: leakColors[Math.floor(lt / leakInterval) % leakColors.length],
-          intensity: 0.2,
+          intensity: 0.35,
         },
       });
     }

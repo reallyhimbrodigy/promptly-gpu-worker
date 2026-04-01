@@ -7383,7 +7383,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # Tight cuts get a static 15% zoom (instant crop, face-centered) + subtle drift.
         # Wide cuts get subtle 4-5% Ken Burns drift. Research: 115% is standard reframe.
         _is_tight_cut = (i % 2 == 1) and zoom not in ("cut_zoom",) and not cut.get("_is_broll") and not cut.get("_is_hook")
-        _base_zoom_max = 1.08 if has_burned_captions else 1.08  # 8% drift — enough room for face tracking
+        _base_zoom_max = 1.14 if has_burned_captions else 1.14  # 14% drift — visible Ken Burns for Captions-level energy
 
         # ── Face-tracked zoom ──────────────────────────────────────────
         # Find the closest face detection to this clip's midpoint.
@@ -7414,7 +7414,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # Research: Captions app alternates between full frame and 115-120% tight.
         _tight_base = 0.0
         if _is_tight_cut and closest_face:
-            _tight_base = 0.18  # 18% base zoom for tight framing — clearly different from wide
+            _tight_base = 0.28  # 28% base zoom for tight framing — dramatic wide/tight alternation like Captions AI
 
         # Compute face offset for crop targeting — interpolate between two nearest
         # face positions for smooth continuous pan across the clip
@@ -7497,9 +7497,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # Shifts are now larger (8-10% of frame) so the alternation is VISIBLE.
         _CAMERA_PRESETS = [
             {"name": "center",  "ox_shift": 0.0,   "oy_shift": 0.0,   "zoom_add": 0.0,   "tint": ""},
-            {"name": "close",   "ox_shift": 0.0,   "oy_shift": -0.02, "zoom_add": 0.06,  "tint": "colorbalance=rs=0.02:gs=0.01:bs=-0.01"},
-            {"name": "left",    "ox_shift": -0.08,  "oy_shift": 0.0,   "zoom_add": 0.03,  "tint": "colorbalance=rs=-0.01:gs=0.00:bs=0.01"},
-            {"name": "right",   "ox_shift": 0.08,   "oy_shift": 0.0,   "zoom_add": 0.03,  "tint": "colorbalance=rs=0.01:gs=0.01:bs=-0.01"},
+            {"name": "close",   "ox_shift": 0.0,   "oy_shift": -0.03, "zoom_add": 0.12,  "tint": "colorbalance=rs=0.02:gs=0.01:bs=-0.01"},
+            {"name": "left",    "ox_shift": -0.10,  "oy_shift": 0.0,   "zoom_add": 0.06,  "tint": "colorbalance=rs=-0.01:gs=0.00:bs=0.01"},
+            {"name": "right",   "ox_shift": 0.10,   "oy_shift": 0.0,   "zoom_add": 0.06,  "tint": "colorbalance=rs=0.01:gs=0.01:bs=-0.01"},
         ]
         cam_preset = None
         if not cut.get("_is_broll") and not cut.get("_is_hook") and zoom != "cut_zoom":
@@ -7608,7 +7608,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             )
             zoom_filter = _face_crop(scale_expr, tf, reverse=True)
         elif zoom == "punch_in":
-            punch_range = 0.08 * zoom_scale_factor  # gentler punch (was 0.15)
+            punch_range = 0.18 * zoom_scale_factor  # aggressive punch for Captions-level impact
             tf = max(1, total_frames_for_zoom)
             # Smoothstep ease for natural feel
             _pi_p = f"min(n/{tf}\\,1.0)"
@@ -7619,7 +7619,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             )
             zoom_filter = _face_crop(scale_expr, tf)
         elif zoom == "punch_out":
-            punch_range = 0.08 * zoom_scale_factor  # gentler punch (was 0.15)
+            punch_range = 0.18 * zoom_scale_factor  # aggressive punch for Captions-level impact
             tf = max(1, total_frames_for_zoom)
             _po_p = f"min(n/{tf}\\,1.0)"
             _po_ease = f"({_po_p}*{_po_p}*(3-2*{_po_p}))"
@@ -7631,7 +7631,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         elif zoom == "cut_zoom":
             # Instant snap zoom: 100% → 118% on frame 1, hold for entire clip.
             # Research: 115% is standard reframe, 118% adds punch without quality loss.
-            cz_target = 0.18  # 18% zoom = 118% scale — punchy but not distorting
+            cz_target = 0.35  # 35% zoom = 135% scale — Captions AI-level snap zoom
             cz_frames = 2     # instant snap (2 frames)
             cz_p = f"min(n/{cz_frames}\\,1.0)"
             cz_ease = f"({cz_p}*{cz_p}*(3-2*{cz_p}))"
@@ -7642,7 +7642,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             cz_crop_x = f"max(0\\,min((iw-1080)/2+{offset_x:.1f}*{cz_ease}\\,iw-1080))"
             cz_crop_y = f"max(0\\,min((ih-1920)/2+{offset_y:.1f}*{cz_ease}\\,ih-1920))"
             zoom_filter = f"{scale_expr}:eval=frame:flags=bicubic,crop=1080:1920:x='{cz_crop_x}':y='{cz_crop_y}'"
-            print(f"[zoom] clip {i}: cut_zoom → 100%→118% instant snap, face-tracked", flush=True)
+            print(f"[zoom] clip {i}: cut_zoom → 100%→135% instant snap, face-tracked", flush=True)
 
         vignette = str(edit_plan.get("vignette") or "none").lower()
         vignette_filter = None
@@ -7999,12 +7999,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             )
             if _ft_out is None:
                 continue
-            # 2-frame (67ms) white flash: additive brightness boost, not destructive crush.
-            # eq brightness=0.35 adds ~35% brightness — visible flash without destroying image.
-            _f_start = max(0, _ft_out - 0.017)
-            _f_end = _ft_out + 0.050
+            # 4-frame (133ms) white flash: strong brightness spike for Captions AI-level impact.
+            _f_start = max(0, _ft_out - 0.033)
+            _f_end = _ft_out + 0.100
             flash_filter_parts.append(
-                f"eq=brightness=0.35:enable='between(t,{_f_start:.3f},{_f_end:.3f})'"
+                f"eq=brightness=0.55:enable='between(t,{_f_start:.3f},{_f_end:.3f})'"
             )
         if flash_filter_parts:
             if len(flash_filter_parts) == 1:
@@ -8044,7 +8043,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             # 0.3s zoom pulse: ease-in 0.1s, hold 0.1s, ease-out 0.1s
             _zp_start = max(0, _em_out - 0.05)
             _zp_end = _em_out + 0.25
-            _zp_amt = 0.025 if str(_em.get("intensity", "")).lower() == "high" else 0.018
+            _zp_amt = 0.05 if str(_em.get("intensity", "")).lower() == "high" else 0.035
             # Smooth envelope: ramp up then down
             _zp_env = f"max(0,min(1,(t-{_zp_start:.3f})/0.08)*min(1,({_zp_end:.3f}-t)/0.08))"
             _zoom_pulses.append(
@@ -8059,6 +8058,41 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 post_filters.append(f"{video_out}{_zp}{_zl}")
                 video_out = _zl
             print(f"[fx] Added {len(_zoom_pulses)} audio-reactive zoom pulse(s)", flush=True)
+
+    # ── Screen shake on high-intensity emphasis ────────────────────────
+    # Rapid XY displacement for 0.15s — creates visceral impact feel.
+    # Uses crop offset oscillation (no extra scale) so it's lightweight.
+    _shake_moments = [em for em in _all_emphasis if str(em.get("intensity", "")).lower() == "high"][:6]
+    if _shake_moments:
+        _shake_filters = []
+        for _sm in _shake_moments:
+            _sm_t = float(_sm.get("t") or 0)
+            if _sm_t <= 0:
+                continue
+            _sm_out = project_source_time_to_final_output(
+                _sm_t, render_cuts, effective_durations, speed_curve,
+                hook_offset=float(edit_plan.get("_hook_offset") or 0.0),
+            )
+            if _sm_out is None:
+                continue
+            _sh_start = max(0, _sm_out - 0.02)
+            _sh_end = _sm_out + 0.15
+            # Decaying sinusoidal shake: amplitude starts at 8px, decays to 0
+            # freq ~30Hz gives rapid vibration feel
+            _sh_env = f"max(0,({_sh_end:.3f}-t)/({_sh_end:.3f}-{_sh_start:.3f}))"
+            _sh_dx = f"8*sin(t*188)*{_sh_env}"
+            _sh_dy = f"5*sin(t*251)*{_sh_env}"
+            _shake_filters.append(
+                f"crop=w=1064:h=1904:x='8+{_sh_dx}':y='8+{_sh_dy}'"
+                f":enable='between(t,{_sh_start:.3f},{_sh_end:.3f})',"
+                f"scale=1080:1920:flags=fast_bilinear"
+            )
+        if _shake_filters:
+            for _si, _sf in enumerate(_shake_filters):
+                _sl = f"[video_shake{_si}]"
+                post_filters.append(f"{video_out}{_sf}{_sl}")
+                video_out = _sl
+            print(f"[fx] Added {len(_shake_filters)} screen shake(s)", flush=True)
 
     # Depth blur mask disabled — generated but never used in render (maskedmerge
     # incompatible with FFmpeg 8.x). Vignette handles edge emphasis instead.

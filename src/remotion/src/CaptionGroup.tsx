@@ -159,7 +159,7 @@ export const CaptionGroup: React.FC<{
         fps,
         config: { damping: 15, stiffness: 300, mass: 0.5 },
       });
-      wordScale *= interpolate(activeSpring, [0, 1], [1, style.activeWordScale]);
+      wordScale *= interpolate(activeSpring, [0, 1], [0.92, style.activeWordScale]);
     }
 
     // Keyword scaling
@@ -211,7 +211,7 @@ export const CaptionGroup: React.FC<{
       textShadow: shadowCSS + glowCSS + extrudeCSS,
       transform: `scale(${wordScale}) translateY(${wordTranslateY}px)`,
       opacity: wordOpacity,
-      marginRight: wi < group.words.length - 1 ? "0.25em" : 0,
+      marginRight: wi < group.words.length - 1 ? "0.2em" : 0,
       textTransform: style.textTransform,
       lineHeight: style.lineHeight,
       transition: "color 0.06s ease-out",
@@ -310,7 +310,7 @@ export const CaptionGroup: React.FC<{
           flexWrap: isStacked ? "nowrap" : "wrap",
           justifyContent: "center",
           alignItems: isStacked ? "center" : "baseline",
-          maxWidth: "85%",
+          maxWidth: "92%",
           gap: isStacked ? "4px" : "0",
         }}
       >

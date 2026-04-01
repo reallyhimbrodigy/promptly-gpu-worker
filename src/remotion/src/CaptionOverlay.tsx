@@ -21,7 +21,7 @@ function buildWordGroups(words: ProjectedWord[], maxPerGroup: number): WordGroup
     const pause = nxt ? nxt.start - wd.end : 1.0;
     const endsSentence = /[.!?]$/.test(wd.word || "");
 
-    if (!nxt || endsSentence || buf.length >= maxPerGroup || (buf.length >= 2 && pause > 0.25)) {
+    if (!nxt || endsSentence || buf.length >= maxPerGroup || (buf.length >= 2 && pause > 0.15)) {
       groups.push({
         words: [...buf],
         start: buf[0].start,
