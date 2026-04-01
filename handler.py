@@ -18,8 +18,8 @@ os.environ["SSL_CERT_FILE"] = certifi.where()
 os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
 
 HANDLER_VERSION = "3.0.0"
-GEMINI_MODEL = "gemini-3.1-pro-preview"
-GEMINI_FLASH_MODEL = "gemini-2.5-flash-preview-05-20"
+GEMINI_MODEL = "gemini-2.5-pro"
+GEMINI_FLASH_MODEL = "gemini-2.5-flash"
 
 print(f"[startup] Python {sys.version}", flush=True)
 print(f"[startup] handler version: {HANDLER_VERSION}", flush=True)

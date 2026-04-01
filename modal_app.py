@@ -122,7 +122,7 @@ app = modal.App("promptly-gpu-worker", image=image, secrets=secrets)
 
 # ── Web endpoint ───────────────────────────────────────────────────────────────
 @app.function(
-    timeout=120,          # 2 min — pipeline targets 10-20s, 120s is generous safety margin
+    timeout=300,          # 5 min — Gemini can take 30-50s + render time; 300s is safe ceiling
     scaledown_window=120, # keep warm 2 min for back-to-back requests (avoid cold start)
     cpu=16,
     memory=32768,
