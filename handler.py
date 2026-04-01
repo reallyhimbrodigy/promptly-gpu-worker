@@ -8157,12 +8157,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _sh_end = _sm_out + 0.15
             # Decaying sinusoidal shake: amplitude starts at 8px, decays to 0
             # freq ~30Hz gives rapid vibration feel
+            # Gate + envelope baked into x/y expressions because FFmpeg 8.x
+            # doesn't support the `enable` timeline option on the crop filter.
+            _sh_gate = f"between(t,{_sh_start:.3f},{_sh_end:.3f})"
             _sh_env = f"max(0,({_sh_end:.3f}-t)/({_sh_end:.3f}-{_sh_start:.3f}))"
-            _sh_dx = f"8*sin(t*188)*{_sh_env}"
-            _sh_dy = f"5*sin(t*251)*{_sh_env}"
+            _sh_dx = f"8*sin(t*188)*{_sh_env}*{_sh_gate}"
+            _sh_dy = f"5*sin(t*251)*{_sh_env}*{_sh_gate}"
             _shake_filters.append(
-                f"crop=w=1064:h=1904:x='8+{_sh_dx}':y='8+{_sh_dy}'"
-                f":enable='between(t,{_sh_start:.3f},{_sh_end:.3f})',"
+                f"crop=w=1064:h=1904:x='8+{_sh_dx}':y='8+{_sh_dy}',"
                 f"scale=1080:1920:flags=fast_bilinear"
             )
         if _shake_filters:
