@@ -1,42 +1,22 @@
 import React from "react";
-import { AbsoluteFill } from "remotion";
-import { CaptionGroup } from "./CaptionGroup";
-import { FontLoader } from "./FontLoader";
-import type { ProjectedWord, WordGroup, StyleConfig, CaptionInput } from "./types";
+import { AbsoluteFill, useCurrentFrame, useVideoConfig } from "remotion";
+import { createTikTokStyleCaptions } from "@remotion/captions";
+import type { Caption } from "@remotion/captions";
+import { CaptionPage } from "./CaptionPage";
+import type { ProjectedWord, CaptionInput, StyleConfig } from "./types";
 import { getStyleConfig } from "./styles/presets";
 
 /**
- * Groups words into display groups of 2-4 words.
- * Matches the grouping logic from handler.py for consistency.
+ * Convert handler.py's ProjectedWord[] to @remotion/captions Caption[].
  */
-function buildWordGroups(words: ProjectedWord[], maxPerGroup: number): WordGroup[] {
-  const groups: WordGroup[] = [];
-  let buf: ProjectedWord[] = [];
-
-  for (let i = 0; i < words.length; i++) {
-    const wd = words[i];
-    buf.push(wd);
-
-    const nxt = i + 1 < words.length ? words[i + 1] : null;
-    const pause = nxt ? nxt.start - wd.end : 1.0;
-    const endsSentence = /[.!?]$/.test(wd.word || "");
-
-    if (!nxt || endsSentence || buf.length >= maxPerGroup || (buf.length >= 2 && pause > 0.15)) {
-      groups.push({
-        words: [...buf],
-        start: buf[0].start,
-        end: buf[buf.length - 1].end + 0.06,
-      });
-      buf = [];
-    }
-  }
-
-  // Trim overlapping group ends
-  for (let i = 0; i < groups.length - 1; i++) {
-    groups[i].end = Math.min(groups[i].end, groups[i + 1].start - 0.01);
-  }
-
-  return groups;
+function toRemotionCaptions(words: ProjectedWord[]): Caption[] {
+  return words.map((w, i) => ({
+    text: (i === 0 ? "" : " ") + (w.punctuated_word || w.word),
+    startMs: w.start * 1000,
+    endMs: w.end * 1000,
+    timestampMs: ((w.start + w.end) / 2) * 1000,
+    confidence: 1.0,
+  }));
 }
 
 /**
@@ -44,7 +24,6 @@ function buildWordGroups(words: ProjectedWord[], maxPerGroup: number): WordGroup
  */
 function buildKeywordSet(words: ProjectedWord[], keywords: string[]): Set<string> {
   const kws = new Set(keywords.map((k) => k.toLowerCase().replace(/[.,!?;:'"\\]/g, "")));
-  // Also mark words that are explicitly flagged as keywords
   for (const w of words) {
     if (w._kw) {
       kws.add((w.word || "").toLowerCase().replace(/[.,!?;:'"\\]/g, ""));
@@ -55,38 +34,40 @@ function buildKeywordSet(words: ProjectedWord[], keywords: string[]): Set<string
 
 /**
  * Main caption overlay composition.
- * Renders transparent background with animated caption groups.
+ * Uses @remotion/captions for intelligent word grouping,
+ * then renders each page with auto-sizing and word-by-word highlighting.
  */
 export const CaptionOverlay: React.FC<{
   input: CaptionInput;
 }> = ({ input }) => {
   const styleConfig = getStyleConfig(input.style);
-  const groups = buildWordGroups(input.words, styleConfig.maxWordsPerGroup);
   const keywordSet = buildKeywordSet(input.words, input.keywords);
 
-  // Track keyword color index across groups for consistent coloring
-  let kwColorIndex = 0;
+  // Convert to @remotion/captions format and group into pages
+  const captions = toRemotionCaptions(input.words);
+  const { pages } = createTikTokStyleCaptions({
+    captions,
+    combineTokensWithinMilliseconds: 400, // Tight grouping = fewer words per page = bigger text
+  });
+
+  // Map original ProjectedWord data onto pages for speaker/keyword info
+  const wordsByTime = new Map<string, ProjectedWord>();
+  for (const w of input.words) {
+    const key = `${Math.round(w.start * 100)}`;
+    wordsByTime.set(key, w);
+  }
 
   return (
     <AbsoluteFill style={{ backgroundColor: "transparent" }}>
-      {groups.map((group, gi) => {
-        const startKwIdx = kwColorIndex;
-        // Count keywords in this group to advance the color index
-        for (const w of group.words) {
-          const clean = (w.word || "").toLowerCase().replace(/[.,!?;:'"\\]/g, "");
-          if (keywordSet.has(clean)) kwColorIndex++;
-        }
-
-        return (
-          <CaptionGroup
-            key={gi}
-            group={group}
-            style={styleConfig}
-            keywordSet={keywordSet}
-            kwColorIndex={startKwIdx}
-          />
-        );
-      })}
+      {pages.map((page, pi) => (
+        <CaptionPage
+          key={pi}
+          page={page}
+          style={styleConfig}
+          keywordSet={keywordSet}
+          words={input.words}
+        />
+      ))}
     </AbsoluteFill>
   );
 };

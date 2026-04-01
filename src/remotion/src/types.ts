@@ -32,8 +32,8 @@ export interface CaptionInput {
 export interface StyleConfig {
   fontFamily: string;
   fontWeight: number;
-  baseFontSize: number;
-  keywordFontSize: number;
+  baseFontSize?: number;
+  keywordFontSize?: number;
   lineHeight: number;
   textTransform: "uppercase" | "none" | "capitalize";
   maxWordsPerGroup: number;
