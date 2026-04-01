@@ -2739,7 +2739,7 @@ RULES FOR USING THESE TIMESTAMPS:
     # ── Parse sound effects ──────────────────────────────────────────────
     raw_sfx = edit_plan.get("sound_effects", [])
     sound_effects = []
-    valid_sounds = set(_SFX_BASE_VOLUMES.keys())
+    valid_sounds = set(_SFX_CATEGORIES.keys())
     for sfx in raw_sfx:
         if isinstance(sfx, dict) and "t" in sfx and "sound" in sfx:
             try:
