@@ -3531,33 +3531,37 @@ def fetch_broll_clip(keyword, duration_needed, work_dir):
                 os.remove(dest)
                 return None
 
-            # Motion check: compare first and last frame to reject frozen/static clips
+            # Motion check: compare frames at 0.5s and 2.0s to reject frozen/static clips.
+            # Uses timestamp seeks instead of frame-number select (more robust across codecs).
             try:
-                _motion_cmd = [
-                    "ffmpeg", "-y", "-i", dest,
-                    "-vf", f"select='eq(n\\,0)+eq(n\\,{max(1, frame_count-1)})',setpts=N/TB",
-                    "-frames:v", "2", "-f", "rawvideo", "-pix_fmt", "gray", "-s", "160x284",
-                    "-loglevel", "warning", os.path.join(work_dir, f"_broll_motion_{safe_kw}.raw"),
-                ]
-                _mr = subprocess.run(_motion_cmd, capture_output=True, timeout=10)
-                _raw_path = os.path.join(work_dir, f"_broll_motion_{safe_kw}.raw")
-                if _mr.returncode == 0 and os.path.exists(_raw_path):
-                    with open(_raw_path, "rb") as _fh:
-                        _raw_data = _fh.read()
-                    _frame_size = 160 * 284
-                    if len(_raw_data) >= _frame_size * 2:
-                        import numpy as np
-                        _f1 = np.frombuffer(_raw_data[:_frame_size], dtype=np.uint8).astype(np.float32)
-                        _f2 = np.frombuffer(_raw_data[_frame_size:_frame_size*2], dtype=np.uint8).astype(np.float32)
+                import numpy as np
+                _raw_path_a = os.path.join(work_dir, f"_broll_motion_{safe_kw}_a.raw")
+                _raw_path_b = os.path.join(work_dir, f"_broll_motion_{safe_kw}_b.raw")
+                _frame_size = 160 * 284
+                _seek_b = min(2.0, max(0.5, fmt_duration - 1.0))
+                for _seek, _rp in [(0.3, _raw_path_a), (_seek_b, _raw_path_b)]:
+                    subprocess.run(
+                        ["ffmpeg", "-y", "-ss", f"{_seek:.2f}", "-i", dest,
+                         "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "gray", "-s", "160x284",
+                         "-loglevel", "warning", _rp],
+                        capture_output=True, timeout=10)
+                if os.path.exists(_raw_path_a) and os.path.exists(_raw_path_b):
+                    _da = open(_raw_path_a, "rb").read()
+                    _db = open(_raw_path_b, "rb").read()
+                    if len(_da) >= _frame_size and len(_db) >= _frame_size:
+                        _f1 = np.frombuffer(_da[:_frame_size], dtype=np.uint8).astype(np.float32)
+                        _f2 = np.frombuffer(_db[:_frame_size], dtype=np.uint8).astype(np.float32)
                         _diff = np.mean(np.abs(_f1 - _f2))
-                        if _diff < 2.0:
+                        if _diff < 1.5:
                             print(f"[broll] REJECTED '{keyword}': frozen/static clip (frame diff={_diff:.1f})", flush=True)
                             os.remove(dest)
-                            try: os.remove(_raw_path)
-                            except: pass
+                            for _rp in [_raw_path_a, _raw_path_b]:
+                                try: os.remove(_rp)
+                                except: pass
                             return None
                         print(f"[broll] Motion check OK for '{keyword}': frame diff={_diff:.1f}", flush=True)
-                    try: os.remove(_raw_path)
+                for _rp in [_raw_path_a, _raw_path_b]:
+                    try: os.remove(_rp)
                     except: pass
             except Exception as _me:
                 print(f"[broll] Motion check skipped for '{keyword}': {_me}", flush=True)
@@ -7003,9 +7007,9 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
             end = clip_ranges[clip_idx]["end"]
             style = str(overlay.get("style") or "callout")
             char_count = len(text)
-            # Resolution-relative font sizes (base sizes designed for 1920px height)
+            # Font sizes for 1080x1920 — title should be 4-5% of screen height
             _overlay_scale = 1920.0 / max(1, 1920)  # output is always 1920 here
-            base_size = round((72 if style == "title" else (64 if style == "cta" else 56)) * _overlay_scale)
+            base_size = round((84 if style == "title" else (72 if style == "cta" else 60)) * _overlay_scale)
             if char_count <= 18:
                 font_size = base_size
             elif char_count <= 25:
@@ -7049,8 +7053,8 @@ def burn_in_captions(output_path, edit_plan, transcript, work_dir):
             )
             # Professional text overlay with depth: border + shadow
             # Border/shadow scale with font size (~4-5% of fontsize) for consistent look
-            _bw = max(2, round(font_size * 0.045))
-            _sw = max(2, round(font_size * 0.045))
+            _bw = max(3, round(font_size * 0.06))
+            _sw = max(2, round(font_size * 0.04))
             _shadow_color = "black@0.6" if _fg_color == "white" else "white@0.4"
             post_filters.append(
                 f"{video_out}drawtext=text='{escaped_text}':fontsize={font_size}:fontcolor={_fg_color}"
@@ -7567,10 +7571,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # Camera presets simulate multi-camera by varying crop offset + subtle tint.
         # Shifts are now larger (8-10% of frame) so the alternation is VISIBLE.
         _CAMERA_PRESETS = [
-            {"name": "center",  "ox_shift": 0.0,   "oy_shift": 0.0,   "zoom_add": 0.0,   "tint": ""},
-            {"name": "close",   "ox_shift": 0.0,   "oy_shift": -0.03, "zoom_add": 0.12,  "tint": "colorbalance=rs=0.02:gs=0.01:bs=-0.01"},
-            {"name": "left",    "ox_shift": -0.10,  "oy_shift": 0.0,   "zoom_add": 0.06,  "tint": "colorbalance=rs=-0.01:gs=0.00:bs=0.01"},
-            {"name": "right",   "ox_shift": 0.10,   "oy_shift": 0.0,   "zoom_add": 0.06,  "tint": "colorbalance=rs=0.01:gs=0.01:bs=-0.01"},
+            {"name": "center",  "ox_shift": 0.0,    "oy_shift": 0.0,    "zoom_add": 0.0,   "tint": ""},
+            {"name": "close",   "ox_shift": 0.0,    "oy_shift": -0.015,  "zoom_add": 0.06,  "tint": "colorbalance=rs=0.02:gs=0.01:bs=-0.01"},
+            {"name": "left",    "ox_shift": -0.035,  "oy_shift": 0.0,    "zoom_add": 0.03,  "tint": "colorbalance=rs=-0.01:gs=0.00:bs=0.01"},
+            {"name": "right",   "ox_shift": 0.035,   "oy_shift": 0.0,    "zoom_add": 0.03,  "tint": "colorbalance=rs=0.01:gs=0.01:bs=-0.01"},
         ]
         cam_preset = None
         if not cut.get("_is_broll") and not cut.get("_is_hook") and zoom != "cut_zoom":
@@ -7580,14 +7584,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 if cam_preset["ox_shift"] != 0.0:
                     offset_x_start += cam_preset["ox_shift"] * 1080
                     offset_x_end += cam_preset["ox_shift"] * 1080
-                    offset_x_start = clamp(offset_x_start, -240.0, 240.0)
-                    offset_x_end = clamp(offset_x_end, -240.0, 240.0)
+                    offset_x_start = clamp(offset_x_start, -120.0, 120.0)
+                    offset_x_end = clamp(offset_x_end, -120.0, 120.0)
                     offset_x = offset_x_start
                 if cam_preset["oy_shift"] != 0.0:
                     offset_y_start += cam_preset["oy_shift"] * 1920
                     offset_y_end += cam_preset["oy_shift"] * 1920
-                    offset_y_start = clamp(offset_y_start, -320.0, 320.0)
-                    offset_y_end = clamp(offset_y_end, -320.0, 320.0)
+                    offset_y_start = clamp(offset_y_start, -160.0, 160.0)
+                    offset_y_end = clamp(offset_y_end, -160.0, 160.0)
                     offset_y = offset_y_start
                 if cam_preset["zoom_add"] > 0 and zoom in ("slow_in", "slow_out", "none"):
                     zoom_max += cam_preset["zoom_add"]
@@ -7700,10 +7704,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             )
             zoom_filter = _face_crop(scale_expr, tf, reverse=True)
         elif zoom == "cut_zoom":
-            # Instant snap zoom: 100% → 118% on frame 1, hold for entire clip.
-            # Research: 115% is standard reframe, 118% adds punch without quality loss.
-            cz_target = 0.35  # 35% zoom = 135% scale — Captions AI-level snap zoom
-            cz_frames = 2     # instant snap (2 frames)
+            # Rapid punch-in zoom: 100% → 118% over 4 frames, hold for clip.
+            # 115-118% is industry standard (CapCut, Captions, Opus Clip).
+            # 4 frames at 30fps = 0.13s — fast enough to feel instant, smooth enough
+            # to avoid jarring single-frame snaps.
+            cz_target = 0.18  # 18% zoom = 118% scale
+            cz_frames = 4     # rapid snap (4 frames ≈ 0.13s)
             cz_p = f"min(n/{cz_frames}\\,1.0)"
             cz_ease = f"({cz_p}*{cz_p}*(3-2*{cz_p}))"
             scale_expr = (
@@ -7713,7 +7719,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             cz_crop_x = f"max(0\\,min((iw-1080)/2+{offset_x:.1f}*{cz_ease}\\,iw-1080))"
             cz_crop_y = f"max(0\\,min((ih-1920)/2+{offset_y:.1f}*{cz_ease}\\,ih-1920))"
             zoom_filter = f"{scale_expr}:eval=frame:flags=bicubic,crop=1080:1920:x='{cz_crop_x}':y='{cz_crop_y}'"
-            print(f"[zoom] clip {i}: cut_zoom → 100%→135% instant snap, face-tracked", flush=True)
+            print(f"[zoom] clip {i}: cut_zoom → 100%→118% punch-in, face-tracked", flush=True)
 
         vignette = str(edit_plan.get("vignette") or "none").lower()
         vignette_filter = None
@@ -8228,8 +8234,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             end = clip_ranges[last_ci]["end"]
             style = str(overlay.get("style") or "callout")
             char_count = len(text)
-            # Font sizes designed for 1080x1920 output (pipeline normalizes to this)
-            base_size = 72 if style == "title" else (64 if style == "cta" else 56)
+            # Font sizes for 1080x1920 — title should be 4-5% of screen height for impact
+            base_size = 84 if style == "title" else (72 if style == "cta" else 60)
             if char_count <= 18:
                 font_size = base_size
             elif char_count <= 25:
@@ -8297,8 +8303,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 f"if(gt(t,{end_t-fade_out:.3f}),({end_t:.3f}-t)/{fade_out},1))"
             )
             _shadow_color2 = "black@0.6" if _fg_color == "white" else "white@0.4"
-            _bw2 = max(2, round(font_size * 0.045))
-            _sw2 = max(2, round(font_size * 0.045))
+            _bw2 = max(3, round(font_size * 0.06))
+            _sw2 = max(2, round(font_size * 0.04))
             post_filters.append(
                 f"{video_out}drawtext=text='{escaped_text}':fontsize={font_size}:fontcolor={_fg_color}"
                 f"{_font_clause}"
@@ -8491,6 +8497,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         "-c:a","aac","-b:a","128k",
         "-movflags","+faststart",
         "-max_muxing_queue_size","1024",
+        "-shortest",  # stop when video ends — audio pad may overshoot due to xfade timing
     ]
 
     args = (

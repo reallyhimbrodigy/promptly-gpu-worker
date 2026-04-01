@@ -106,7 +106,7 @@ await renderMedia({
   inputProps,
   concurrency: null, // let Remotion auto-detect from container CPU limits
   chromiumOptions: {
-    gl: "angle",
+    gl: "swiftshader",
   },
   onProgress: ({ progress }) => {
     const pct = Math.round(progress * 100);
