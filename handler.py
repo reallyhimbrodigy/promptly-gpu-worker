@@ -68,9 +68,11 @@ try:
 except Exception:
     print("[startup] WARNING: rubberband not found — speed curve will use fallback audio", flush=True)
 
+_HAS_FFMPEG_RUBBERBAND = False
 try:
     ff_check = subprocess.run(["ffmpeg", "-filters"], capture_output=True, text=True, timeout=5)
     if "rubberband" in (ff_check.stdout or ""):
+        _HAS_FFMPEG_RUBBERBAND = True
         print("[startup] FFmpeg rubberband filter: available", flush=True)
     else:
         print("[startup] WARNING: FFmpeg rubberband filter not available", flush=True)
@@ -469,6 +471,182 @@ def detect_face_positions(video_path, sample_timestamps):
     return positions
 
 
+def detect_face_positions_dense(video_path, every_n_frames=5):
+    """
+    Dense face detection: read every Nth frame sequentially (no seeking) for
+    smooth face tracking.  At every_n_frames=5 on 30fps video this gives 6fps
+    detection — roughly 360 detections for a 60s clip at ~3ms each (<3s total).
+
+    Returns list of {"t": float, "cx": float, "cy": float, "found": bool, "confidence": float}.
+    """
+    import cv2
+
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        print("[dense-face] Could not open video for dense face detection", flush=True)
+        return []
+
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    frame_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+    frame_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+    center_x = frame_w // 2 if frame_w > 0 else 540
+    center_y = frame_h // 2 if frame_h > 0 else 960
+
+    PROTOTXT = "/models/face_detector/deploy.prototxt"
+    CAFFEMODEL = "/models/face_detector/res10_300x300_ssd_iter_140000.caffemodel"
+    if not (os.path.exists(PROTOTXT) and os.path.exists(CAFFEMODEL)):
+        print("[dense-face] DNN model not found, cannot run dense detection", flush=True)
+        return []
+
+    net = cv2.dnn.readNetFromCaffe(PROTOTXT, CAFFEMODEL)
+    CONFIDENCE_THRESHOLD = 0.5
+
+    last_cx, last_cy = center_x, center_y
+    positions = []
+    frame_idx = 0
+    _t_start = time.time()
+
+    while True:
+        ret, frame = cap.read()
+        if not ret or frame is None:
+            break
+
+        if frame_idx % every_n_frames == 0:
+            t_sec = frame_idx / fps
+            h, w = frame.shape[:2]
+            blob = cv2.dnn.blobFromImage(
+                cv2.resize(frame, (300, 300)), 1.0, (300, 300),
+                (104.0, 177.0, 123.0), swapRB=False, crop=False
+            )
+            net.setInput(blob)
+            detections = net.forward()
+
+            found = False
+            best_cx, best_cy = center_x, center_y
+            best_conf = 0.0
+            best_area = 0
+
+            for det_i in range(detections.shape[2]):
+                confidence = float(detections[0, 0, det_i, 2])
+                if confidence < CONFIDENCE_THRESHOLD:
+                    continue
+                x1 = int(detections[0, 0, det_i, 3] * w)
+                y1 = int(detections[0, 0, det_i, 4] * h)
+                x2 = int(detections[0, 0, det_i, 5] * w)
+                y2 = int(detections[0, 0, det_i, 6] * h)
+                area = (x2 - x1) * (y2 - y1)
+                if confidence > best_conf or (confidence > CONFIDENCE_THRESHOLD and area > best_area):
+                    best_conf = confidence
+                    best_area = area
+                    best_cx = (x1 + x2) // 2
+                    best_cy = (y1 + y2) // 2
+                    found = True
+
+            if found:
+                last_cx, last_cy = best_cx, best_cy
+
+            positions.append({
+                "t": round(t_sec, 4),
+                "cx": float(best_cx if found else last_cx),
+                "cy": float(best_cy if found else last_cy),
+                "found": found,
+                "confidence": round(best_conf, 4) if found else 0.0,
+            })
+
+        frame_idx += 1
+
+    cap.release()
+    elapsed = time.time() - _t_start
+    found_count = sum(1 for p in positions if p["found"])
+    print(
+        f"[dense-face] {found_count}/{len(positions)} detections in {elapsed:.2f}s "
+        f"({frame_count} total frames, every {every_n_frames}th @ {fps:.1f}fps)",
+        flush=True,
+    )
+    return positions
+
+
+def smooth_face_trajectory(detections, total_duration=0.0, alpha=0.15):
+    """
+    Apply exponential moving average to dense face detections for buttery
+    smooth camera movement.  Gaps (found=False) coast on the last known
+    smoothed position.
+
+    Returns a new list with the same structure but smoothed cx/cy values.
+    """
+    if not detections:
+        return []
+
+    smoothed = []
+    sx, sy = None, None
+
+    for det in detections:
+        cx = float(det.get("cx", 540.0))
+        cy = float(det.get("cy", 960.0))
+        found = det.get("found", False)
+
+        if sx is None:
+            # Initialise with first position
+            sx, sy = cx, cy
+        else:
+            if found:
+                sx = alpha * cx + (1.0 - alpha) * sx
+                sy = alpha * cy + (1.0 - alpha) * sy
+            # else: coast — sx/sy stay unchanged
+
+        smoothed.append({
+            "t": det["t"],
+            "cx": round(sx, 2),
+            "cy": round(sy, 2),
+            "found": found,
+            "confidence": det.get("confidence", 0.0),
+        })
+
+    return smoothed
+
+
+def get_face_position_at_time(face_trajectory, t):
+    """
+    Binary-search the smoothed trajectory for time *t* and linearly interpolate
+    between the two nearest entries.
+
+    Returns (cx, cy, found, confidence).
+    """
+    if not face_trajectory:
+        return (540.0, 960.0, False, 0.0)
+
+    # Binary search for right-insertion point
+    lo, hi = 0, len(face_trajectory)
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if face_trajectory[mid]["t"] < t:
+            lo = mid + 1
+        else:
+            hi = mid
+    # lo = index of first entry with t >= query t
+    if lo == 0:
+        e = face_trajectory[0]
+        return (e["cx"], e["cy"], e["found"], e.get("confidence", 0.0))
+    if lo >= len(face_trajectory):
+        e = face_trajectory[-1]
+        return (e["cx"], e["cy"], e["found"], e.get("confidence", 0.0))
+
+    a = face_trajectory[lo - 1]
+    b = face_trajectory[lo]
+    dt = b["t"] - a["t"]
+    if dt <= 0:
+        return (b["cx"], b["cy"], b["found"], b.get("confidence", 0.0))
+
+    frac = (t - a["t"]) / dt
+    frac = max(0.0, min(1.0, frac))
+    cx = a["cx"] + (b["cx"] - a["cx"]) * frac
+    cy = a["cy"] + (b["cy"] - a["cy"]) * frac
+    conf = a.get("confidence", 0.0) + (b.get("confidence", 0.0) - a.get("confidence", 0.0)) * frac
+    found = a["found"] or b["found"]
+    return (round(cx, 2), round(cy, 2), found, round(conf, 4))
+
+
 def calculate_reframe_crop(face_positions, source_w, source_h, target_w=1080, target_h=1920):
     """
     Calculate a crop window that keeps the detected face near frame center.
@@ -503,6 +681,95 @@ def calculate_reframe_crop(face_positions, source_w, source_h, target_w=1080, ta
         })
 
     return crops
+
+
+def build_dynamic_crop_expr(smoothed_positions, source_w, source_h, target_w=1080, target_h=1920):
+    """
+    Build a dynamic FFmpeg crop expression that follows the face over time.
+    Uses piecewise linear interpolation between keyframes in FFmpeg expression syntax.
+
+    Returns (crop_w, crop_h, x_expr, y_expr) or None if source is already 9:16.
+    The expressions use FFmpeg's 't' variable (time in seconds).
+    """
+    if source_w == target_w and source_h == target_h:
+        return None
+    if not smoothed_positions or len(smoothed_positions) < 2:
+        return None
+
+    target_aspect = target_w / target_h
+    source_aspect = source_w / source_h if source_h else target_aspect
+
+    if source_aspect > target_aspect:
+        crop_h = source_h
+        crop_w = int(source_h * target_aspect)
+    else:
+        crop_w = source_w
+        crop_h = int(source_w / target_aspect) if target_aspect else source_h
+
+    max_x = max(0, source_w - crop_w)
+    max_y = max(0, source_h - crop_h)
+
+    # Convert face positions to crop positions, clamped
+    keyframes = []
+    for pos in smoothed_positions:
+        cx = int(pos["cx"] - crop_w // 2)
+        cy = int(pos["cy"] - crop_h // 2)
+        cx = max(0, min(cx, max_x))
+        cy = max(0, min(cy, max_y))
+        keyframes.append((float(pos["t"]), cx, cy))
+
+    # Subsample: only keep keyframes where position changes significantly
+    # This reduces expression length from hundreds to ~20-50 keyframes
+    MIN_MOVE_PX = 8  # ignore movements smaller than 8px
+    reduced = [keyframes[0]]
+    for kf in keyframes[1:]:
+        prev = reduced[-1]
+        dx = abs(kf[1] - prev[1])
+        dy = abs(kf[2] - prev[2])
+        if dx > MIN_MOVE_PX or dy > MIN_MOVE_PX:
+            reduced.append(kf)
+    # Always include the last keyframe
+    if reduced[-1] != keyframes[-1]:
+        reduced.append(keyframes[-1])
+    keyframes = reduced
+
+    if len(keyframes) < 2:
+        # Static — no movement
+        return (crop_w, crop_h, str(keyframes[0][1]), str(keyframes[0][2]))
+
+    # Build piecewise linear FFmpeg expression
+    # Pattern: if(lt(t,t1), lerp(v0,v1,(t-t0)/(t1-t0)), if(lt(t,t2), lerp(...), vN))
+    def _build_expr(keyframes, val_idx):
+        """Build nested if expression for x (val_idx=1) or y (val_idx=2)."""
+        n = len(keyframes)
+        if n == 1:
+            return str(keyframes[0][val_idx])
+
+        # Build from the last segment backwards (innermost = last value)
+        expr = str(keyframes[-1][val_idx])
+        for i in range(n - 2, -1, -1):
+            t0, v0 = keyframes[i][0], keyframes[i][val_idx]
+            t1, v1 = keyframes[i + 1][0], keyframes[i + 1][val_idx]
+            dt = t1 - t0
+            if dt <= 0 or v0 == v1:
+                # No movement in this segment — just use the value
+                segment = str(v0)
+            else:
+                # lerp: v0 + (v1-v0) * (t-t0)/(t1-t0)
+                segment = f"{v0}+{v1-v0}*(t-{t0:.3f})/{dt:.3f}"
+            expr = f"if(lt(t,{t1:.3f}),{segment},{expr})"
+        return expr
+
+    x_expr = _build_expr(keyframes, 1)
+    y_expr = _build_expr(keyframes, 2)
+
+    print(
+        f"[reframe] Dynamic crop: {len(keyframes)} keyframes, "
+        f"expr_len={len(x_expr)+len(y_expr)} chars",
+        flush=True,
+    )
+
+    return (crop_w, crop_h, x_expr, y_expr)
 
 
 def build_color_grade(baseline, intent_name):
@@ -999,6 +1266,158 @@ def measure_source_loudness(source_path):
         return defaults
 
 
+def auto_detect_hook(emphasis_moments, deepgram_words, source_beats, source_loudness, video_duration):
+    """
+    Score candidate moments and return the best hook segment.
+    Uses emphasis type, audio energy proxy, speech rate changes, and position
+    to pick the most compelling hook moment.
+    Returns ({"source_start": float, "source_end": float}, score) or (None, 0).
+    """
+    if not emphasis_moments or not deepgram_words or video_duration <= 0:
+        return None, 0
+
+    # ── Weight constants ──────────────────────────────────────────────────
+    W_EMPHASIS = 0.35
+    W_ENERGY   = 0.25
+    W_SPEECH   = 0.25
+    W_POSITION = 0.15
+    SCORE_THRESHOLD = 2.0  # minimum weighted score to be considered valid
+
+    # ── Pre-compute words-per-second in 1s buckets for speech-rate signal ─
+    wps_buckets = {}
+    for w in deepgram_words:
+        try:
+            t = float(w.get("start") or 0)
+        except (TypeError, ValueError):
+            continue
+        bucket = int(t)
+        wps_buckets[bucket] = wps_buckets.get(bucket, 0) + 1
+
+    # ── Pre-compute beat density per second (proxy for audio energy) ──────
+    beat_density = {}
+    if isinstance(source_beats, list):
+        for bt in source_beats:
+            try:
+                bucket = int(float(bt))
+                beat_density[bucket] = beat_density.get(bucket, 0) + 1
+            except (TypeError, ValueError):
+                continue
+
+    max_bd = max(beat_density.values()) if beat_density else 1
+    if max_bd == 0:
+        max_bd = 1
+
+    # ── Score each emphasis moment ────────────────────────────────────────
+    _TYPE_SCORES = {
+        "punchline":  10,
+        "revelation": 8,
+        "reaction":   6,
+        "question":   5,
+        "statement":  4,
+        "transition": 2,
+    }
+
+    scored = []
+    for em in emphasis_moments:
+        em_t = float(em["t"])
+        em_type = em.get("type", "statement")
+        em_intensity = em.get("intensity", "medium")
+
+        # 1) Emphasis type score (0-10)
+        base_type = _TYPE_SCORES.get(em_type, 4)
+        if em_intensity == "high":
+            type_score = base_type
+        else:
+            type_score = base_type * 0.5
+
+        # 2) Audio energy score (0-10): beat density around the moment
+        bucket = int(em_t)
+        nearby_beats = sum(beat_density.get(bucket + d, 0) for d in (-1, 0, 1))
+        energy_score = min(10.0, (nearby_beats / max(max_bd, 1)) * 10.0)
+
+        # 3) Speech rate change score (0-10)
+        bucket_before_1 = wps_buckets.get(bucket - 2, 0) + wps_buckets.get(bucket - 1, 0)
+        bucket_at = wps_buckets.get(bucket, 0) + wps_buckets.get(bucket + 1, 0)
+        rate_before = bucket_before_1 / 2.0 if bucket_before_1 > 0 else 0
+        rate_at = bucket_at / 2.0 if bucket_at > 0 else 0
+
+        speech_score = 0.0
+        if rate_before > 0:
+            drop_ratio = 1.0 - (rate_at / rate_before)
+            if drop_ratio > 0.4:
+                speech_score = min(10.0, drop_ratio * 15.0)
+            elif drop_ratio > 0.2:
+                speech_score = min(5.0, drop_ratio * 10.0)
+
+        # 4) Position penalty (0-10)
+        rel_pos = em_t / video_duration
+        if rel_pos < 0.15 or rel_pos > 0.85:
+            position_score = 0.0
+        elif 0.25 <= rel_pos <= 0.75:
+            position_score = 10.0
+        else:
+            position_score = 5.0
+
+        total = (
+            W_EMPHASIS * type_score +
+            W_ENERGY   * energy_score +
+            W_SPEECH   * speech_score +
+            W_POSITION * position_score
+        )
+        scored.append((em, total))
+
+    if not scored:
+        return None, 0
+
+    scored.sort(key=lambda x: x[1], reverse=True)
+    best_em, best_score = scored[0]
+
+    if best_score < SCORE_THRESHOLD:
+        print(f"[hook-auto] Best score {best_score:.2f} below threshold {SCORE_THRESHOLD} — no auto hook", flush=True)
+        return None, 0
+
+    em_t = float(best_em["t"])
+    hook_start = max(0.0, em_t - 0.3)
+    hook_end = min(video_duration, em_t + 2.0)
+
+    # ── Snap to word boundaries ───────────────────────────────────────────
+    best_word_start = hook_start
+    best_word_end = hook_end
+    for w in deepgram_words:
+        try:
+            ws = float(w.get("start") or 0)
+            we = float(w.get("end") or 0)
+        except (TypeError, ValueError):
+            continue
+        if ws <= hook_start + 0.15 and ws >= hook_start - 0.5:
+            best_word_start = ws
+        if we >= hook_end - 0.3 and we <= hook_end + 0.8:
+            best_word_end = we
+            break
+
+    hook_start = max(0.0, best_word_start)
+    hook_end = min(video_duration, best_word_end)
+
+    # Clamp duration to 0.5-3.0s range
+    hook_dur = hook_end - hook_start
+    if hook_dur < 0.5:
+        hook_end = min(video_duration, hook_start + 0.8)
+    elif hook_dur > 3.0:
+        hook_end = hook_start + 2.5
+
+    hook_dur = hook_end - hook_start
+    if hook_dur < 0.5:
+        return None, 0
+
+    result = {
+        "source_start": round(hook_start, 3),
+        "source_end":   round(hook_end, 3),
+    }
+    print(f"[hook-auto] Best moment: {em_t:.2f}s ({best_em.get('type')}/{best_em.get('intensity')}) "
+          f"score={best_score:.2f} → hook {result['source_start']:.3f}-{result['source_end']:.3f}", flush=True)
+    return result, best_score
+
+
 def tighten_transcript(words, scene_cuts=None, shots=None, original_duration=0, source_path=None, noise_floor_db=None):
     scene_cuts = scene_cuts or []
     min_segment = 0.3
@@ -1355,17 +1774,44 @@ Global parameters:
     keyword_pop — standard text with only KEYWORDS getting spring animation + green glow. Regular words stay static. Best for: educational, listicles, explainers where specific terms matter.
     dynamic — alias for captions_dynamic.
     clean — alias for captions_clean.
+    neon_gradient — Poppins ExtraBold, pink-to-cyan gradient text, dark pill, cyan glow. Best for: music, neon aesthetic, nightlife, tech content.
+    sunset_gradient — Montserrat Black, orange-to-pink-to-purple gradient, no pill, pop anim. Best for: lifestyle, aesthetic, sunset/warm vibes.
+    gold_gradient — Playfair Display serif, gold gradient text, gold underline. Best for: luxury, fashion, premium brands, elegant content.
+    outline_bold — Montserrat Black 120px, thick white outline only (transparent fill), spring anim. Best for: hype, motivational, bold statements, overlay on bright footage.
+    outline_neon — Poppins ExtraBold, cyan outline only with glow, transparent fill. Best for: tech, gaming, neon aesthetic, futuristic content.
+    handwritten — PermanentMarker brush font, white text, deep shadow, casual vibe. Best for: comedy, storytelling, casual vlogs, authentic/raw content.
+    marker_highlight — PermanentMarker with yellow highlighter background on each word. Best for: educational, emphasis-heavy content, teacher-style explainers.
+    cinema — Bebas Neue condensed, wide spacing, blue-tint shadow, slide anim. Best for: cinematic, film, dramatic, documentary, trailer-style content.
+    news_ticker — Oswald Bold on red pill, typewriter reveal, news broadcast style. Best for: news, announcements, breaking updates, factual content.
+    comic_pop — Bangers comic font, yellow text, thick black outline, bouncy spring. Best for: comedy, memes, reaction content, fun/playful vibes.
+    meme_bold — Bangers, white text, heavy black outline, pop anim. Best for: memes, impact text, shitposts, humorous content.
+    luxury — Playfair Display serif, white text, subtle gold underline, elegant. Best for: luxury, fashion, beauty, premium lifestyle, high-end brands.
+    editorial — Playfair Display, dark text on white pill (inverted), clean magazine look. Best for: professional, editorial, business, corporate presentations.
+    stacked_bold — Montserrat Black, one word per line stacked vertically, deep shadow. Best for: motivational quotes, powerful single-word emphasis, dramatic reveals.
+    stacked_color — Poppins ExtraBold, stacked vertical, cycling keyword colors, dark pill. Best for: hype, high-energy content with colorful emphasis.
+    retro_3d — Bangers, yellow text with 3D black extruded shadow, retro arcade look. Best for: retro, vintage, throwback, gaming, 80s/90s aesthetic.
+    neon_3d — Space Grotesk, cyan text with glow + subtle 3D extrusion. Best for: tech, futuristic, cyberpunk, gaming.
+    tech_clean — Space Grotesk, white text, thin cyan underline, minimal. Best for: tech, SaaS, product demos, developer content, startup vibes.
+    tech_glow — Space Grotesk Bold, cyan text with glow, modern tech feel. Best for: tech reviews, gaming, futuristic content.
+    minimal_sans — Poppins SemiBold, white text, no pill, no glow, very subtle shadow. Best for: minimal aesthetic, fashion, quiet luxury, art content.
+    minimal_lower — Poppins, tiny dark pill, extremely clean and subtle. Best for: ASMR, cooking, soft-spoken content, when captions should not distract.
 
   STYLE SELECTION GUIDE based on vibe:
-    - "professional", "clean", "business", "corporate" → captions_dynamic (default premium)
-    - "calm", "chill", "thoughtful", "serious", "interview" → captions_clean
-    - "hype", "energy", "fast", "comedy", "trend", "viral" → word_pop
-    - "motivational", "grind", "hustle", "inspirational" → hormozi
-    - "cinematic", "dramatic", "reveal", "suspense" → impact
-    - "aesthetic", "lifestyle", "travel", "chill" → slide
-    - "creative", "artistic", "music", "dance" → wave
-    - "casual", "vlog", "tutorial", "simple" → capcut
-    - "educational", "explainer", "tips", "how-to" → keyword_pop
+    - "professional", "clean", "business", "corporate" → captions_dynamic or editorial or tech_clean
+    - "calm", "chill", "thoughtful", "serious", "interview" → captions_clean or minimal_sans
+    - "hype", "energy", "fast", "comedy", "trend", "viral" → word_pop or comic_pop or stacked_bold
+    - "motivational", "grind", "hustle", "inspirational" → hormozi or outline_bold or stacked_bold or neon_gradient
+    - "cinematic", "dramatic", "reveal", "suspense" → impact or cinema or luxury
+    - "aesthetic", "lifestyle", "travel", "chill" → slide or sunset_gradient or gold_gradient or minimal_lower
+    - "creative", "artistic", "music", "dance" → wave or neon_gradient or neon_3d
+    - "casual", "vlog", "tutorial", "simple" → capcut or handwritten
+    - "educational", "explainer", "tips", "how-to" → keyword_pop or marker_highlight
+    - "comedy", "funny", "humor", "meme" → comic_pop or meme_bold or handwritten
+    - "tech", "startup", "product", "SaaS" → tech_clean or tech_glow or outline_neon
+    - "luxury", "fashion", "beauty", "premium" → luxury or gold_gradient or editorial
+    - "retro", "vintage", "throwback", "80s", "90s" → retro_3d
+    - "gaming", "esports", "stream" → neon_3d or tech_glow or outline_neon
+    - "news", "announcement", "breaking" → news_ticker
     - When unsure, DEFAULT to captions_dynamic — it looks great on everything.
 
   caption_position — where captions appear on screen. Use "lower-third" (default) for talking head content. The pipeline automatically adjusts positioning based on face detection to avoid overlap.
@@ -2141,7 +2587,7 @@ RULES FOR USING THESE TIMESTAMPS:
     if validated_vfx:
         print(f"[fx] Gemini requested {len(validated_vfx)} visual effect(s)", flush=True)
 
-    valid_caption_styles = {"none", "capcut", "word_pop", "hormozi", "keyword_pop", "dynamic", "clean", "impact", "captions_clean", "captions_dynamic", "slide", "wave"}
+    valid_caption_styles = {"none", "capcut", "word_pop", "hormozi", "keyword_pop", "dynamic", "clean", "impact", "captions_clean", "captions_dynamic", "slide", "wave", "neon_gradient", "sunset_gradient", "gold_gradient", "outline_bold", "outline_neon", "handwritten", "marker_highlight", "cinema", "news_ticker", "comic_pop", "meme_bold", "luxury", "editorial", "stacked_bold", "stacked_color", "retro_3d", "neon_3d", "tech_clean", "tech_glow", "minimal_sans", "minimal_lower"}
     if str(edit_plan.get("caption_style") or "").lower() not in valid_caption_styles:
         edit_plan["caption_style"] = "captions_dynamic"  # default to premium Captions-app style
     else:
@@ -2684,6 +3130,137 @@ def extract_cover_frame(source_path, timestamp, work_dir):
     return None, None
 
 
+def generate_styled_thumbnail(source_path, timestamp, face_positions, work_dir, hook_text=None):
+    """
+    Generate an enhanced, styled thumbnail from the video.
+    - Extract frame at AI-selected timestamp
+    - Enhance with Pillow (contrast, brightness, saturation, sharpness)
+    - Add vignette effect (dark edges, bright center)
+    - Optional hook text overlay at bottom
+    Returns (bytes, 'image/jpeg') or falls back to basic extract_cover_frame.
+    """
+    try:
+        from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
+    except ImportError:
+        print("[thumbnail] Pillow not available — using basic extraction", flush=True)
+        return extract_cover_frame(source_path, timestamp, work_dir)
+
+    # Step 1: Extract raw frame via FFmpeg
+    raw_path = os.path.join(work_dir, "thumb_raw.png")
+    result = subprocess.run(
+        ["ffmpeg", "-y", "-ss", str(timestamp), "-i", source_path,
+         "-frames:v", "1", "-vf", "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2",
+         raw_path],
+        capture_output=True, timeout=15,
+    )
+    if result.returncode != 0 or not os.path.exists(raw_path):
+        print("[thumbnail] Frame extraction failed — falling back to basic", flush=True)
+        return extract_cover_frame(source_path, timestamp, work_dir)
+
+    try:
+        img = Image.open(raw_path).convert("RGB")
+    except Exception as e:
+        print(f"[thumbnail] Could not open frame: {e}", flush=True)
+        return extract_cover_frame(source_path, timestamp, work_dir)
+
+    w, h = img.size
+
+    # Step 2: Enhance — subtle but impactful
+    img = ImageEnhance.Contrast(img).enhance(1.12)
+    img = ImageEnhance.Brightness(img).enhance(1.05)
+    img = ImageEnhance.Color(img).enhance(1.18)
+    img = ImageEnhance.Sharpness(img).enhance(1.25)
+
+    # Step 3: Vignette (dark edges, bright center) — cinematic look
+    vignette = Image.new("L", (w, h), 0)
+    vignette_draw = ImageDraw.Draw(vignette)
+    for i in range(40):
+        opacity = int(255 * (1 - i / 40.0) ** 0.6)
+        shrink_x = int(w * 0.05 * i / 40)
+        shrink_y = int(h * 0.05 * i / 40)
+        vignette_draw.ellipse(
+            [shrink_x, shrink_y, w - shrink_x, h - shrink_y],
+            fill=opacity,
+        )
+    vignette = vignette.filter(ImageFilter.GaussianBlur(radius=60))
+    dark = Image.new("RGB", (w, h), (0, 0, 0))
+    img = Image.composite(img, dark, vignette)
+
+    # Step 4: Optional text overlay (hook/title)
+    if hook_text and len(hook_text.strip()) > 0:
+        hook_text = hook_text.strip()[:80]
+        draw = ImageDraw.Draw(img)
+        font = None
+        font_size = 64
+        for font_path in [
+            "/assets/fonts/Montserrat-ExtraBold.ttf",
+            "/assets/fonts/Montserrat-Bold.ttf",
+            "/assets/fonts/Poppins-ExtraBold.ttf",
+        ]:
+            if os.path.exists(font_path):
+                try:
+                    font = ImageFont.truetype(font_path, font_size)
+                    break
+                except Exception:
+                    continue
+        if font is None:
+            try:
+                font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size)
+            except Exception:
+                font = ImageFont.load_default()
+
+        # Word-wrap the text
+        max_width = w - 80
+        words = hook_text.split()
+        lines = []
+        current_line = ""
+        for word in words:
+            test_line = f"{current_line} {word}".strip()
+            bbox = draw.textbbox((0, 0), test_line, font=font)
+            if bbox[2] - bbox[0] <= max_width:
+                current_line = test_line
+            else:
+                if current_line:
+                    lines.append(current_line)
+                current_line = word
+        if current_line:
+            lines.append(current_line)
+
+        # Draw text at bottom third with shadow
+        line_height = font_size + 8
+        total_text_height = len(lines) * line_height
+        y_start = h - total_text_height - 120
+
+        for i, line in enumerate(lines):
+            bbox = draw.textbbox((0, 0), line, font=font)
+            text_w = bbox[2] - bbox[0]
+            x = (w - text_w) // 2
+            y = y_start + i * line_height
+            for offset in [(3, 3), (2, 2), (1, 1)]:
+                draw.text((x + offset[0], y + offset[1]), line, font=font, fill=(0, 0, 0, 180))
+            draw.text((x, y), line, font=font, fill=(255, 255, 255))
+
+    # Step 5: Save as high-quality JPEG
+    thumb_path = os.path.join(work_dir, "styled_thumbnail.jpg")
+    img.save(thumb_path, "JPEG", quality=92, optimize=True)
+
+    with open(thumb_path, "rb") as f:
+        data = f.read()
+
+    for p in [raw_path, thumb_path]:
+        try:
+            os.unlink(p)
+        except Exception:
+            pass
+
+    print(
+        f"[thumbnail] Styled thumbnail: {len(data)//1024}KB, "
+        f"enhanced+vignette{'+text' if hook_text else ''}",
+        flush=True,
+    )
+    return data, "image/jpeg"
+
+
 def fetch_broll_clip(keyword, duration_needed, work_dir):
     """Search Pexels for a portrait video clip. Returns local path or None."""
     pexels_key = os.environ.get("PEXELS_API_KEY")
@@ -2952,12 +3529,66 @@ def get_video_duration(path):
         return 0.0
 
 
+_KB_DIRECTIONS = [
+    "zoom_in", "zoom_out", "pan_right", "pan_left",
+    "zoom_in_pan_right", "zoom_in_pan_left",
+    "zoom_out_pan_right", "zoom_out_pan_left",
+    "pan_up", "pan_down",
+]
+
+
+def _kb_crop_exprs(direction, kb_smooth, extra_px_w, extra_px_h):
+    """Return (crop_x, crop_y) FFmpeg expressions for a Ken Burns direction.
+
+    All expressions use escaped commas (\\,) for FFmpeg filter_complex safety.
+    """
+    # Center offsets for zoom-only directions
+    _half_w = extra_px_w / 2
+    _half_h = extra_px_h / 2
+
+    if direction == "zoom_in":
+        cx = f"'max(0\\,min({_half_w}*{kb_smooth}\\,iw-1080))'"
+        cy = f"'max(0\\,min({_half_h}*{kb_smooth}\\,ih-1920))'"
+    elif direction == "zoom_out":
+        cx = f"'max(0\\,min({_half_w}*(1.0-{kb_smooth})\\,iw-1080))'"
+        cy = f"'max(0\\,min({_half_h}*(1.0-{kb_smooth})\\,ih-1920))'"
+    elif direction == "pan_right":
+        cx = f"'max(0\\,min({extra_px_w}*{kb_smooth}\\,iw-1080))'"
+        cy = f"'max(0\\,(ih-1920)/2)'"
+    elif direction == "pan_left":
+        cx = f"'max(0\\,min({extra_px_w}*(1.0-{kb_smooth})\\,iw-1080))'"
+        cy = f"'max(0\\,(ih-1920)/2)'"
+    elif direction == "pan_up":
+        cx = f"'max(0\\,(iw-1080)/2)'"
+        cy = f"'max(0\\,min({extra_px_h}*(1.0-{kb_smooth})\\,ih-1920))'"
+    elif direction == "pan_down":
+        cx = f"'max(0\\,(iw-1080)/2)'"
+        cy = f"'max(0\\,min({extra_px_h}*{kb_smooth}\\,ih-1920))'"
+    elif direction == "zoom_in_pan_right":
+        cx = f"'max(0\\,min({extra_px_w}*{kb_smooth}\\,iw-1080))'"
+        cy = f"'max(0\\,min({_half_h}*{kb_smooth}\\,ih-1920))'"
+    elif direction == "zoom_in_pan_left":
+        cx = f"'max(0\\,min({extra_px_w}*(1.0-{kb_smooth})\\,iw-1080))'"
+        cy = f"'max(0\\,min({_half_h}*{kb_smooth}\\,ih-1920))'"
+    elif direction == "zoom_out_pan_right":
+        cx = f"'max(0\\,min({extra_px_w}*{kb_smooth}\\,iw-1080))'"
+        cy = f"'max(0\\,min({_half_h}*(1.0-{kb_smooth})\\,ih-1920))'"
+    elif direction == "zoom_out_pan_left":
+        cx = f"'max(0\\,min({extra_px_w}*(1.0-{kb_smooth})\\,iw-1080))'"
+        cy = f"'max(0\\,min({_half_h}*(1.0-{kb_smooth})\\,ih-1920))'"
+    else:
+        # Fallback: gentle zoom in
+        cx = f"'max(0\\,min({_half_w}*{kb_smooth}\\,iw-1080))'"
+        cy = f"'max(0\\,min({_half_h}*{kb_smooth}\\,ih-1920))'"
+    return cx, cy
+
+
 def composite_broll(output_path, broll_entries, broll_files, work_dir):
     """Composite pre-downloaded b-roll clips onto the output video.
 
     Professional B-roll compositing:
-    - Fade in/out transitions (0.3s) so B-roll doesn't hard-cut
-    - Ken Burns effect (subtle 3% slow zoom) so B-roll feels alive, not frozen
+    - Fade in/out transitions (0.4s) so B-roll doesn't hard-cut
+    - Ken Burns effect (6-8% zoom/pan) so B-roll feels alive, not frozen
     - Proper scaling to 9:16 with center crop
     """
     entries_with_files = []
@@ -2973,8 +3604,6 @@ def composite_broll(output_path, broll_entries, broll_files, work_dir):
         input_args += ["-i", entry["local_path"]]
     filter_parts = []
     BROLL_FADE = 0.4  # seconds for smooth fade in/out
-    # Alternate Ken Burns directions so consecutive B-rolls don't feel repetitive
-    _KB_DIRECTIONS = ["zoom_in", "zoom_out", "pan_right", "pan_left"]
     for i, entry in enumerate(entries_with_files):
         idx = i + 1
         keyword = str(entry.get("keyword") or "broll")
@@ -3000,30 +3629,14 @@ def composite_broll(output_path, broll_entries, broll_files, work_dir):
             )
         # Ken Burns with directional variety — each clip gets a different motion
         _kb_total_frames = max(1, round(needed_duration * 30))
-        _kb_zoom = 0.04  # 4% zoom range (slightly more dramatic)
+        _kb_zoom = 0.08  # 8% zoom range for visible movement
         _kb_progress = f"min(n/{_kb_total_frames}\\,1.0)"
         _kb_smooth = f"({_kb_progress}*{_kb_progress}*(3-2*{_kb_progress}))"  # smoothstep
         _kb_dir = _KB_DIRECTIONS[i % len(_KB_DIRECTIONS)]
         _fade_out_start = max(0, needed_duration - BROLL_FADE)
-        # Calculate directional crop offsets based on Ken Burns direction
         _extra_px_w = round(1080 * _kb_zoom)
         _extra_px_h = round(1920 * _kb_zoom)
-        if _kb_dir == "zoom_in":
-            # Start wide, end tight (pan toward center)
-            _crop_x = f"'max(0\\,min({_extra_px_w/2}*{_kb_smooth}\\,iw-1080))'"
-            _crop_y = f"'max(0\\,min({_extra_px_h/2}*{_kb_smooth}\\,ih-1920))'"
-        elif _kb_dir == "zoom_out":
-            # Start tight, end wide (reverse)
-            _crop_x = f"'max(0\\,min({_extra_px_w/2}*(1.0-{_kb_smooth})\\,iw-1080))'"
-            _crop_y = f"'max(0\\,min({_extra_px_h/2}*(1.0-{_kb_smooth})\\,ih-1920))'"
-        elif _kb_dir == "pan_right":
-            # Pan from left to right
-            _crop_x = f"'max(0\\,min({_extra_px_w}*{_kb_smooth}\\,iw-1080))'"
-            _crop_y = f"'max(0\\,(ih-1920)/2)'"
-        else:  # pan_left
-            # Pan from right to left
-            _crop_x = f"'max(0\\,min({_extra_px_w}*(1.0-{_kb_smooth})\\,iw-1080))'"
-            _crop_y = f"'max(0\\,(ih-1920)/2)'"
+        _crop_x, _crop_y = _kb_crop_exprs(_kb_dir, _kb_smooth, _extra_px_w, _extra_px_h)
         filter_parts.append(
             f"[{idx}:v]trim=start={seek_point:.3f}:duration={needed_duration:.3f},"
             f"setpts=PTS-STARTPTS,"
@@ -3271,25 +3884,56 @@ def normalize_source_video(source_path, work_dir):
     normalized_path = os.path.join(work_dir, "normalized_source.mp4")
     print(f"[normalize] Converting {w}x{h} @ {fps:.2f}fps to 1080x1920 @ 30fps", flush=True)
 
-    sample_timestamps = []
+    # Dense face detection for continuous auto-reframe (every 5th frame ≈ 6fps)
     source_duration = probe_duration(source_path) or 0.0
-    if source_duration > 0:
-        sample_timestamps = [round(i * 4.0, 3) for i in range(int(source_duration / 4.0) + 1)]
-    face_positions = detect_face_positions(source_path, sample_timestamps) if sample_timestamps else []
-    reframe_crops = calculate_reframe_crop(face_positions, w, h)
+    raw_faces = detect_face_positions_dense(source_path, every_n_frames=5)
+    smoothed_faces = smooth_face_trajectory(raw_faces, total_duration=source_duration) if raw_faces else []
+
+    # Try dynamic crop first, fall back to static average if expression too long
+    dynamic_crop = build_dynamic_crop_expr(smoothed_faces, w, h) if smoothed_faces else None
 
     normalize_vf = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1"
-    if reframe_crops:
-        avg_crops = [c for c in reframe_crops if c.get("found")] or reframe_crops
-        avg_x = int(sum(c["crop_x"] for c in avg_crops) / len(avg_crops))
-        avg_y = int(sum(c["crop_y"] for c in avg_crops) / len(avg_crops))
-        crop_w = int(reframe_crops[0]["crop_w"])
-        crop_h = int(reframe_crops[0]["crop_h"])
-        normalize_vf = f"crop={crop_w}:{crop_h}:{avg_x}:{avg_y},scale=1080:1920,setsar=1"
-        print(
-            f"[reframe] Smart reframe active in normalize: crop={crop_w}x{crop_h}@({avg_x},{avg_y})",
-            flush=True,
-        )
+    if dynamic_crop:
+        crop_w, crop_h, x_expr, y_expr = dynamic_crop
+        # FFmpeg has a ~65KB expression limit — fall back to static if too long
+        if len(x_expr) + len(y_expr) < 60000:
+            normalize_vf = f"crop={crop_w}:{crop_h}:{x_expr}:{y_expr},scale=1080:1920,setsar=1"
+            print(
+                f"[reframe] Dynamic auto-reframe active: {crop_w}x{crop_h}, "
+                f"{len(smoothed_faces)} face samples",
+                flush=True,
+            )
+        else:
+            # Expression too long — use static average
+            reframe_crops = calculate_reframe_crop(smoothed_faces, w, h)
+            if reframe_crops:
+                avg_crops = [c for c in reframe_crops if c.get("found")] or reframe_crops
+                avg_x = int(sum(c["crop_x"] for c in avg_crops) / len(avg_crops))
+                avg_y = int(sum(c["crop_y"] for c in avg_crops) / len(avg_crops))
+                normalize_vf = f"crop={crop_w}:{crop_h}:{avg_x}:{avg_y},scale=1080:1920,setsar=1"
+                print(
+                    f"[reframe] Expression too long ({len(x_expr)+len(y_expr)} chars) — "
+                    f"using static average crop",
+                    flush=True,
+                )
+    elif w != 1080 or h != 1920:
+        # No face data — fall back to sparse detection
+        sample_timestamps = [round(i * 4.0, 3) for i in range(int(source_duration / 4.0) + 1)] if source_duration > 0 else []
+        face_positions = detect_face_positions(source_path, sample_timestamps) if sample_timestamps else []
+        reframe_crops = calculate_reframe_crop(face_positions, w, h)
+        if reframe_crops:
+            avg_crops = [c for c in reframe_crops if c.get("found")] or reframe_crops
+            avg_x = int(sum(c["crop_x"] for c in avg_crops) / len(avg_crops))
+            avg_y = int(sum(c["crop_y"] for c in avg_crops) / len(avg_crops))
+            crop_w = int(reframe_crops[0]["crop_w"])
+            crop_h = int(reframe_crops[0]["crop_h"])
+            normalize_vf = f"crop={crop_w}:{crop_h}:{avg_x}:{avg_y},scale=1080:1920,setsar=1"
+            print(
+                f"[reframe] Static reframe fallback: crop={crop_w}x{crop_h}@({avg_x},{avg_y})",
+                flush=True,
+            )
+        else:
+            print("[reframe] Source is native 9:16 — using center crop", flush=True)
     else:
         print("[reframe] Source is native 9:16 — using center crop", flush=True)
 
@@ -3352,6 +3996,20 @@ def get_atempo_filter(speed):
         remaining /= 0.5
     parts.append(f"atempo={remaining:.4f}")
     return ",".join(parts)
+
+
+def get_pitch_preserving_speed_filter(speed: float) -> str:
+    """Return FFmpeg audio filter for speed change WITHOUT pitch shift.
+
+    Preferred: rubberband (best quality, preserves formants).
+    Fallback: atempo chain (always available, good quality).
+    Returns empty string if speed is ~1.0x (no filter needed).
+    """
+    if abs(speed - 1.0) < 0.001:
+        return ""
+    if _HAS_FFMPEG_RUBBERBAND:
+        return f"rubberband=tempo={speed:.4f}:pitch=1.0"
+    return get_atempo_filter(speed)
 
 
 def _smoothstep(x):
@@ -5944,7 +6602,7 @@ def build_variable_speed_setpts(clip_start, clip_end, clip_speed, speed_curve, l
     Returns (setpts_value, effective_dur, avg_speed):
         setpts_value: string for setpts=VALUE (None if speed is ~1.0x throughout)
         effective_dur: output duration after variable speed applied
-        avg_speed: average speed for audio asetrate (audio uses constant speed)
+        avg_speed: average speed for audio (constant speed applied via pitch-preserving filter or asetrate for speed ramps)
     """
     dur = clip_end - clip_start
     if dur <= 0.01:
@@ -6594,7 +7252,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     caption_style = str(edit_plan.get("caption_style") or "none").lower()
     _all_caption_styles = {"captions_dynamic", "captions_clean", "word_pop", "hormozi",
                            "keyword_pop", "dynamic", "clean", "impact", "capcut",
-                           "slide", "wave"}
+                           "slide", "wave", "neon_gradient", "sunset_gradient",
+                           "gold_gradient", "outline_bold", "outline_neon",
+                           "handwritten", "marker_highlight", "cinema", "news_ticker",
+                           "comic_pop", "meme_bold", "luxury", "editorial",
+                           "stacked_bold", "stacked_color", "retro_3d", "neon_3d",
+                           "tech_clean", "tech_glow", "minimal_sans", "minimal_lower"}
 
     # Project words to output timeline for captions
     _projected_words = []
@@ -6672,6 +7335,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     video_filters = []
     audio_filters = []
     face_positions = edit_plan.get("_face_positions") or []
+    dense_face_trajectory = edit_plan.get("_dense_face_trajectory") or []
+    _has_dense_trajectory = len(dense_face_trajectory) > 0
     n_segment_inputs = len(render_cuts)  # each segment gets its own input
 
     for i, cut in enumerate(render_cuts):
@@ -6753,6 +7418,36 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         face_cy_end = 960.0
         _has_face_interp = False
 
+        # ── Dense trajectory keyframes for this clip ──────────────────────
+        # Extract keyframes from the smoothed dense trajectory that fall within
+        # this clip's source time range.  Used for piecewise-linear FFmpeg
+        # expressions that smoothly pan the crop across the clip.
+        _clip_dense_kf = []  # list of (frame_number, offset_x, offset_y)
+        _use_dense_pan = False
+        if _has_dense_trajectory and closest_face:
+            _kf_raw = []
+            for dp in dense_face_trajectory:
+                dp_t = dp["t"]
+                if dp_t < start - 0.5 or dp_t > end + 0.5:
+                    continue
+                clip_local_t = max(0.0, dp_t - start)
+                frame_n = round(clip_local_t * fps)
+                ox = clamp(dp["cx"] - 540.0, -240.0, 240.0)
+                oy = clamp(dp["cy"] - 960.0, -320.0, 320.0)
+                _kf_raw.append((frame_n, ox, oy))
+
+            if len(_kf_raw) >= 2:
+                # Compress: only keep keyframes where position changes by >5px
+                _clip_dense_kf = [_kf_raw[0]]
+                for kf in _kf_raw[1:]:
+                    last = _clip_dense_kf[-1]
+                    if abs(kf[1] - last[1]) > 5.0 or abs(kf[2] - last[2]) > 5.0:
+                        _clip_dense_kf.append(kf)
+                # Always include the last keyframe
+                if _clip_dense_kf[-1] != _kf_raw[-1]:
+                    _clip_dense_kf.append(_kf_raw[-1])
+                _use_dense_pan = len(_clip_dense_kf) >= 2
+
         if closest_face:
             face_cx = float(closest_face.get("cx") or 540.0)
             face_cy = float(closest_face.get("cy") or 960.0)
@@ -6821,7 +7516,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                     zoom_max += cam_preset["zoom_add"]
 
         if closest_face:
-            _interp_tag = " (interpolated)" if _has_face_interp else ""
+            _interp_tag = f" (dense:{len(_clip_dense_kf)}kf)" if _use_dense_pan else (" (interpolated)" if _has_face_interp else "")
             _cam_tag = f" cam={cam_preset['name']}" if cam_preset else ""
             print(f"[zoom] clip {i}: {zoom} → face at ({face_cx:.0f}, {face_cy:.0f}){_interp_tag}{_cam_tag}", flush=True)
         elif zoom != "none":
@@ -6829,16 +7524,58 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
         def _face_crop(scale_expr, tf_val, reverse=False):
             """Build a scale+crop filter that targets the detected face.
-            Interpolates face position across the clip for smooth continuous pan.
+            When dense trajectory keyframes are available, generates a piecewise-
+            linear FFmpeg expression for smooth per-frame face panning.
+            Falls back to simple start/end interpolation otherwise.
             reverse=True: start at face, drift to center (for slow_out).
             """
             _t = f"min(n/{tf_val}\\,1.0)"
             progress = f"(1.0-{_t})" if reverse else _t
-            # Smoothly interpolate face offset across clip (continuous pan)
-            _ox = f"({offset_x_start:.1f}+({offset_x_end:.1f}-{offset_x_start:.1f})*{_t})"
-            _oy = f"({offset_y_start:.1f}+({offset_y_end:.1f}-{offset_y_start:.1f})*{_t})"
-            crop_x = f"max(0\\,min((iw-1080)/2+{_ox}*{progress}\\,iw-1080))"
-            crop_y = f"max(0\\,min((ih-1920)/2+{_oy}*{progress}\\,ih-1920))"
+
+            if _use_dense_pan and len(_clip_dense_kf) >= 2:
+                # Build piecewise-linear FFmpeg expression from dense keyframes.
+                # Each segment: if(between(n,F1,F2), lerp(ox1,ox2,(n-F1)/(F2-F1)), ...)
+                # Camera presets shift applied on top.
+                _cam_ox_shift = (cam_preset["ox_shift"] * 1080) if cam_preset and cam_preset.get("ox_shift") else 0.0
+                _cam_oy_shift = (cam_preset["oy_shift"] * 1920) if cam_preset and cam_preset.get("oy_shift") else 0.0
+
+                def _build_dense_expr(coord_idx):
+                    """coord_idx: 1=ox, 2=oy"""
+                    shift = _cam_ox_shift if coord_idx == 1 else _cam_oy_shift
+                    lo_clamp = -240.0 if coord_idx == 1 else -320.0
+                    hi_clamp = 240.0 if coord_idx == 1 else 320.0
+                    segments = []
+                    for si in range(len(_clip_dense_kf) - 1):
+                        f1 = _clip_dense_kf[si][0]
+                        f2 = _clip_dense_kf[si + 1][0]
+                        v1 = clamp(_clip_dense_kf[si][coord_idx] + shift, lo_clamp, hi_clamp)
+                        v2 = clamp(_clip_dense_kf[si + 1][coord_idx] + shift, lo_clamp, hi_clamp)
+                        if f2 <= f1:
+                            continue
+                        frac = f"(n-{f1})/({f2 - f1})"
+                        lerp = f"({v1:.1f}+({v2:.1f}-{v1:.1f})*{frac})"
+                        segments.append(f"if(between(n\\,{f1}\\,{f2})\\,{lerp}")
+                    if not segments:
+                        # Fallback: constant at first keyframe value
+                        v = clamp(_clip_dense_kf[0][coord_idx] + shift, lo_clamp, hi_clamp)
+                        return f"{v:.1f}"
+                    # Last segment is the default (holds last value)
+                    last_v = clamp(_clip_dense_kf[-1][coord_idx] + shift, lo_clamp, hi_clamp)
+                    expr = f"{last_v:.1f}"
+                    for seg in reversed(segments):
+                        expr = f"{seg}\\,{expr})"
+                    return expr
+
+                _dense_ox = _build_dense_expr(1)
+                _dense_oy = _build_dense_expr(2)
+                crop_x = f"max(0\\,min((iw-1080)/2+({_dense_ox})*{progress}\\,iw-1080))"
+                crop_y = f"max(0\\,min((ih-1920)/2+({_dense_oy})*{progress}\\,ih-1920))"
+            else:
+                # Legacy: simple start/end interpolation
+                _ox = f"({offset_x_start:.1f}+({offset_x_end:.1f}-{offset_x_start:.1f})*{_t})"
+                _oy = f"({offset_y_start:.1f}+({offset_y_end:.1f}-{offset_y_start:.1f})*{_t})"
+                crop_x = f"max(0\\,min((iw-1080)/2+{_ox}*{progress}\\,iw-1080))"
+                crop_y = f"max(0\\,min((ih-1920)/2+{_oy}*{progress}\\,ih-1920))"
             return f"{scale_expr}:eval=frame:flags=bicubic,crop=1080:1920:x='{crop_x}':y='{crop_y}'"
 
         if zoom == "slow_in":
@@ -6966,9 +7703,17 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
         # Audio: each segment has its own pre-seeked input (no atrim needed)
         a_chain = ["asetpts=PTS-STARTPTS"]
+        _has_active_speed_curve = (speed_curve and speed_curve != "none" and isinstance(speed_curve, list))
         if abs(combined_speed - 1.0) > 0.001:
-            a_chain.append(f"asetrate={sample_rate}*{combined_speed:.4f}")
-            a_chain.append(f"aresample={sample_rate}")
+            if _has_active_speed_curve:
+                # Speed ramping is active — pitch shift is intentional (the effect)
+                a_chain.append(f"asetrate={sample_rate}*{combined_speed:.4f}")
+                a_chain.append(f"aresample={sample_rate}")
+            else:
+                # Normal clip speed — use pitch-preserving filter
+                _pp_filter = get_pitch_preserving_speed_filter(combined_speed)
+                if _pp_filter:
+                    a_chain.append(_pp_filter)
         if i == n-1 and outro != "none":
             fade_start = max(0, eff_dur - 1.0)
             a_chain.append(f"afade=t=out:st={fade_start:.3f}:d=1.0")
@@ -7527,7 +8272,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
         if _broll_files and broll_clips:
             # Project timestamps and build filters
-            _KB_DIRECTIONS = ["zoom_in", "zoom_out", "pan_right", "pan_left"]
             BROLL_FADE = 0.4
             _broll_overlay_idx = 0
             for _bi, _bc in enumerate(broll_clips):
@@ -7556,25 +8300,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
                 # Ken Burns with directional variety
                 _kb_total_frames = max(1, round(needed_duration * 30))
-                _kb_zoom = 0.04
+                _kb_zoom = 0.08
                 _kb_progress = f"min(n/{_kb_total_frames}\\,1.0)"
                 _kb_smooth = f"({_kb_progress}*{_kb_progress}*(3-2*{_kb_progress}))"
                 _kb_dir = _KB_DIRECTIONS[_broll_overlay_idx % len(_KB_DIRECTIONS)]
                 _fade_out_start = max(0, needed_duration - BROLL_FADE)
                 _extra_px_w = round(1080 * _kb_zoom)
                 _extra_px_h = round(1920 * _kb_zoom)
-                if _kb_dir == "zoom_in":
-                    _crop_x = f"'max(0\\,min({_extra_px_w/2}*{_kb_smooth}\\,iw-1080))'"
-                    _crop_y = f"'max(0\\,min({_extra_px_h/2}*{_kb_smooth}\\,ih-1920))'"
-                elif _kb_dir == "zoom_out":
-                    _crop_x = f"'max(0\\,min({_extra_px_w/2}*(1.0-{_kb_smooth})\\,iw-1080))'"
-                    _crop_y = f"'max(0\\,min({_extra_px_h/2}*(1.0-{_kb_smooth})\\,ih-1920))'"
-                elif _kb_dir == "pan_right":
-                    _crop_x = f"'max(0\\,min({_extra_px_w}*{_kb_smooth}\\,iw-1080))'"
-                    _crop_y = f"'max(0\\,(ih-1920)/2)'"
-                else:
-                    _crop_x = f"'max(0\\,min({_extra_px_w}*(1.0-{_kb_smooth})\\,iw-1080))'"
-                    _crop_y = f"'max(0\\,(ih-1920)/2)'"
+                _crop_x, _crop_y = _kb_crop_exprs(_kb_dir, _kb_smooth, _extra_px_w, _extra_px_h)
 
                 _bv_label = f"bv{_broll_overlay_idx}"
                 broll_filter_strs.append(
@@ -7884,13 +8617,24 @@ def handler(job):
             )
 
         def _do_face_detect():
-            return detect_face_positions(source_path, sample_timestamps) if sample_timestamps else []
+            # Dense detection (every 5th frame = 6fps) for smooth trajectories
+            try:
+                dense = detect_face_positions_dense(source_path, every_n_frames=5)
+                if dense:
+                    smoothed = smooth_face_trajectory(dense, total_duration=source_duration)
+                    print(f"[dense-face] Smoothed trajectory: {len(smoothed)} keyframes", flush=True)
+                    return dense, smoothed
+            except Exception as e:
+                print(f"[dense-face] Dense detection failed ({e}), falling back to sparse", flush=True)
+            # Fallback: sparse detection (old method)
+            sparse = detect_face_positions(source_path, sample_timestamps) if sample_timestamps else []
+            return sparse, []
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as recipe_pool:
             future_edit = recipe_pool.submit(_do_edit_recipe)
             future_faces = recipe_pool.submit(_do_face_detect)
             edit_plan = future_edit.result()
-            face_positions = future_faces.result()
+            face_positions, dense_face_trajectory = future_faces.result()
 
         reframe_crops = calculate_reframe_crop(face_positions, source_res.get("width") or 1080, source_res.get("height") or 1920)
         if reframe_crops:
@@ -7901,10 +8645,70 @@ def handler(job):
         edit_plan["_user_vibe"] = vibe
         edit_plan["_source_path"] = source_path
         edit_plan["_face_positions"] = face_positions
+        edit_plan["_dense_face_trajectory"] = dense_face_trajectory
         edit_plan["_source_loudness"] = source_loudness
         edit_plan["_source_beats"] = source_beats
         _timings["edit_recipe_faces"] = time.time() - t
         print(f"[pipeline] edit recipe complete in {_timings['edit_recipe_faces']:.1f}s", flush=True)
+
+        # ── Auto-hook detection: validate/override Gemini's hook_clip ─────
+        try:
+            _ahook_emphasis = edit_plan.get("_emphasis_moments") or []
+            _ahook_dg_words = edit_plan.get("_deepgram_words") or []
+            _ahook_duration = float(edit_plan.get("analysis_data", {}).get("duration") or source_duration or 0)
+            auto_hook, auto_hook_score = auto_detect_hook(
+                emphasis_moments=_ahook_emphasis,
+                deepgram_words=_ahook_dg_words,
+                source_beats=source_beats,
+                source_loudness=source_loudness,
+                video_duration=_ahook_duration,
+            )
+            gemini_hook = edit_plan.get("hook_clip")
+            if auto_hook:
+                if not isinstance(gemini_hook, dict):
+                    # Gemini didn't provide a hook — use auto-detected
+                    edit_plan["hook_clip"] = auto_hook
+                    print(f"[hook] Gemini picked None, auto-detected "
+                          f"{auto_hook['source_start']:.2f}-{auto_hook['source_end']:.2f} "
+                          f"(score {auto_hook_score:.2f}), using auto", flush=True)
+                else:
+                    # Gemini provided a hook — score it and compare
+                    gemini_t = (float(gemini_hook["source_start"]) + float(gemini_hook["source_end"])) / 2.0
+                    gemini_moment_score = 0.0
+                    # Find the emphasis moment closest to Gemini's hook and get its score
+                    _best_gem_dist = float("inf")
+                    for _em in _ahook_emphasis:
+                        _d = abs(float(_em["t"]) - gemini_t)
+                        if _d < _best_gem_dist:
+                            _best_gem_dist = _d
+                            # Re-score this moment using the same logic
+                            _gem_bucket = int(float(_em["t"]))
+                            _gem_type_scores = {"punchline": 10, "revelation": 8, "reaction": 6, "question": 5, "statement": 4, "transition": 2}
+                            _gem_base = _gem_type_scores.get(_em.get("type", "statement"), 4)
+                            gemini_moment_score = _gem_base * (1.0 if _em.get("intensity") == "high" else 0.5) * 0.35
+                            # Add position component
+                            if _ahook_duration > 0:
+                                _gem_rel = float(_em["t"]) / _ahook_duration
+                                if 0.25 <= _gem_rel <= 0.75:
+                                    gemini_moment_score += 10.0 * 0.15
+                                elif 0.15 <= _gem_rel <= 0.85:
+                                    gemini_moment_score += 5.0 * 0.15
+
+                    if auto_hook_score > gemini_moment_score * 1.5:
+                        edit_plan["hook_clip"] = auto_hook
+                        print(f"[hook] Gemini picked {gemini_hook['source_start']:.2f}-{gemini_hook['source_end']:.2f}, "
+                              f"auto-detected {auto_hook['source_start']:.2f}-{auto_hook['source_end']:.2f} "
+                              f"(score {auto_hook_score:.2f} vs {gemini_moment_score:.2f}), using auto", flush=True)
+                    else:
+                        print(f"[hook] Gemini picked {gemini_hook['source_start']:.2f}-{gemini_hook['source_end']:.2f}, "
+                              f"auto-detected {auto_hook['source_start']:.2f}-{auto_hook['source_end']:.2f} "
+                              f"(score {auto_hook_score:.2f} vs {gemini_moment_score:.2f}), using Gemini", flush=True)
+            else:
+                _gh = gemini_hook if isinstance(gemini_hook, dict) else None
+                _gh_str = f"{_gh['source_start']:.2f}-{_gh['source_end']:.2f}" if _gh else "None"
+                print(f"[hook] Gemini picked {_gh_str}, auto-detected None, using Gemini", flush=True)
+        except Exception as _hook_err:
+            print(f"[hook-auto] Auto-hook detection failed ({_hook_err}) — keeping Gemini's choice", flush=True)
         analysis = edit_plan.get("analysis_data") or {}
 
         # ── Start B-roll fetch NOW (parallel with Remotion + FFmpeg) ──────────
@@ -8006,7 +8810,17 @@ def handler(job):
             print("[pipeline] upload complete", flush=True)
 
         def _extract_cover():
-            data, mime = extract_cover_frame(output_path, cover_frame_ts, work_dir)
+            # Try styled thumbnail first (enhanced + vignette + optional text)
+            _face_pos = edit_plan.get("_face_positions") or []
+            _hook_text = None  # Could use edit_plan hook text if desired
+            try:
+                data, mime = generate_styled_thumbnail(
+                    output_path, cover_frame_ts, _face_pos, work_dir,
+                    hook_text=_hook_text,
+                )
+            except Exception as _thumb_err:
+                print(f"[thumbnail] Styled thumbnail failed ({_thumb_err}), using basic", flush=True)
+                data, mime = extract_cover_frame(output_path, cover_frame_ts, work_dir)
             if data:
                 print(
                     f"[pipeline] cover frame at {cover_frame_ts:.2f}s "

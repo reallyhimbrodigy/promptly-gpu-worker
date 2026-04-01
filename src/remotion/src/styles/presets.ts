@@ -62,6 +62,7 @@ export const STYLE_PRESETS: Record<string, StyleConfig> = {
     glowEnabled: true,
     glowColor: "#FFE600",
     glowRadius: 24,
+    speakerColors: ["#FFCC00", "#00E5FF", "#00FF88", "#FF44FF", "#FF8800"],
   },
 
   /**
@@ -80,6 +81,7 @@ export const STYLE_PRESETS: Record<string, StyleConfig> = {
     glowRadius: 0,
     shadowLayers: SHADOW_SUBTLE,
     activeWordScale: 1.05,
+    speakerColors: ["#FFCC00", "#00E5FF", "#00FF88", "#FF44FF", "#FF8800"],
   },
 
   /**
@@ -99,6 +101,7 @@ export const STYLE_PRESETS: Record<string, StyleConfig> = {
     glowColor: "#FF3C64",
     glowRadius: 28,
     activeWordScale: 1.12,
+    speakerColors: ["#FFCC00", "#00E5FF", "#00FF88", "#FF44FF", "#FF8800"],
   },
 
   /**
@@ -121,6 +124,7 @@ export const STYLE_PRESETS: Record<string, StyleConfig> = {
     keywordColors: ["#FFE600", "#FFE600", "#FFE600", "#FFE600"],
     activeWordScale: 1.15,
     textTransform: "uppercase",
+    speakerColors: ["#FFCC00", "#00E5FF", "#00FF88", "#FF44FF", "#FF8800"],
   },
 
   /**
@@ -141,6 +145,7 @@ export const STYLE_PRESETS: Record<string, StyleConfig> = {
     glowRadius: 20,
     activeWordScale: 1.0,
     shadowLayers: SHADOW_DEEP,
+    speakerColors: ["#FFCC00", "#00E5FF", "#00FF88", "#FF44FF", "#FF8800"],
   },
 
   /**
@@ -160,6 +165,7 @@ export const STYLE_PRESETS: Record<string, StyleConfig> = {
     glowRadius: 0,
     activeWordScale: 1.04,
     shadowLayers: SHADOW_SUBTLE,
+    speakerColors: ["#FFCC00", "#00E5FF", "#00FF88", "#FF44FF", "#FF8800"],
   },
 
   /**
@@ -178,6 +184,7 @@ export const STYLE_PRESETS: Record<string, StyleConfig> = {
     glowColor: "#A855F7",
     glowRadius: 22,
     activeWordScale: 1.06,
+    speakerColors: ["#FFCC00", "#00E5FF", "#00FF88", "#FF44FF", "#FF8800"],
   },
 
   /**
@@ -199,6 +206,7 @@ export const STYLE_PRESETS: Record<string, StyleConfig> = {
     activeWordScale: 1.03,
     shadowLayers: SHADOW_SUBTLE,
     textTransform: "none",
+    speakerColors: ["#FFCC00", "#00E5FF", "#00FF88", "#FF44FF", "#FF8800"],
   },
 
   /**
@@ -217,6 +225,7 @@ export const STYLE_PRESETS: Record<string, StyleConfig> = {
     glowColor: "#00DCC8",
     glowRadius: 30,
     activeWordScale: 1.0, // only keywords scale
+    speakerColors: ["#FFCC00", "#00E5FF", "#00FF88", "#FF44FF", "#FF8800"],
   },
 
   /**
@@ -232,6 +241,7 @@ export const STYLE_PRESETS: Record<string, StyleConfig> = {
     glowEnabled: true,
     glowColor: "#FFE600",
     glowRadius: 24,
+    speakerColors: ["#FFCC00", "#00E5FF", "#00FF88", "#FF44FF", "#FF8800"],
   },
 
   /**
@@ -249,6 +259,492 @@ export const STYLE_PRESETS: Record<string, StyleConfig> = {
     glowRadius: 0,
     shadowLayers: SHADOW_SUBTLE,
     activeWordScale: 1.05,
+    speakerColors: ["#FFCC00", "#00E5FF", "#00FF88", "#FF44FF", "#FF8800"],
+  },
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // NEW STYLES — Gradient
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /** NEON GRADIENT — Poppins ExtraBold, pink→cyan gradient, dark pill, glow */
+  neon_gradient: {
+    ...BASE,
+    fontFamily: "Poppins",
+    fontWeight: 800,
+    baseFontSize: 92,
+    keywordFontSize: 128,
+    animation: "spring",
+    pillEnabled: true,
+    pillColor: "rgba(15, 15, 15, 0.80)",
+    glowEnabled: true,
+    glowColor: "#00D2FF",
+    glowRadius: 24,
+    gradientColors: ["#FF3CAC", "#00D2FF"],
+    gradientDirection: "to right",
+    speakerColors: ["#FF00FF", "#00FFFF", "#FFFF00", "#00FF00", "#FF4400"],
+  },
+
+  /** SUNSET GRADIENT — Montserrat Black, orange→pink→purple, no pill */
+  sunset_gradient: {
+    ...BASE,
+    fontWeight: 900,
+    baseFontSize: 96,
+    keywordFontSize: 134,
+    animation: "pop",
+    pillEnabled: false,
+    pillColor: "transparent",
+    glowEnabled: false,
+    glowColor: "transparent",
+    glowRadius: 0,
+    gradientColors: ["#FF6B35", "#FF3C64", "#8B5CF6"],
+    gradientDirection: "135deg",
+    speakerColors: ["#FF6B6B", "#4ECDC4", "#FFE66D", "#95E1D3", "#F38181"],
+  },
+
+  /** GOLD GRADIENT — Playfair Display Bold, gold→amber, gold underline */
+  gold_gradient: {
+    ...BASE,
+    fontFamily: "Playfair Display",
+    fontWeight: 700,
+    baseFontSize: 86,
+    keywordFontSize: 114,
+    animation: "slide",
+    pillEnabled: false,
+    pillColor: "transparent",
+    glowEnabled: false,
+    glowColor: "transparent",
+    glowRadius: 0,
+    gradientColors: ["#FFD700", "#FFA000"],
+    gradientDirection: "to right",
+    backgroundShape: "underline",
+    underlineColor: "#FFD700",
+    underlineThickness: 4,
+    textTransform: "none",
+    speakerColors: ["#FF6B6B", "#4ECDC4", "#FFE66D", "#95E1D3", "#F38181"],
+  },
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // NEW STYLES — Outline
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /** OUTLINE BOLD — Montserrat Black, thick white outline only */
+  outline_bold: {
+    ...BASE,
+    fontWeight: 900,
+    baseFontSize: 120,
+    keywordFontSize: 156,
+    animation: "spring",
+    pillEnabled: false,
+    pillColor: "transparent",
+    glowEnabled: false,
+    glowColor: "transparent",
+    glowRadius: 0,
+    textStroke: { width: 3, color: "#FFFFFF" },
+    outlineOnly: true,
+    backgroundShape: "none",
+    speakerColors: ["#FFCC00", "#00E5FF", "#00FF88", "#FF44FF", "#FF8800"],
+  },
+
+  /** OUTLINE NEON — Poppins ExtraBold, cyan outline with glow, no fill */
+  outline_neon: {
+    ...BASE,
+    fontFamily: "Poppins",
+    fontWeight: 800,
+    baseFontSize: 96,
+    keywordFontSize: 130,
+    animation: "spring",
+    pillEnabled: false,
+    pillColor: "transparent",
+    glowEnabled: true,
+    glowColor: "#00DCC8",
+    glowRadius: 28,
+    textStroke: { width: 2, color: "#00DCC8" },
+    outlineOnly: true,
+    backgroundShape: "none",
+    speakerColors: ["#FF00FF", "#00FFFF", "#FFFF00", "#00FF00", "#FF4400"],
+  },
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // NEW STYLES — Handwritten / Casual
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /** HANDWRITTEN — PermanentMarker, white text, deep shadow, no pill */
+  handwritten: {
+    ...BASE,
+    fontFamily: "Permanent Marker",
+    fontWeight: 400,
+    baseFontSize: 88,
+    keywordFontSize: 110,
+    animation: "pop",
+    pillEnabled: false,
+    pillColor: "transparent",
+    glowEnabled: false,
+    glowColor: "transparent",
+    glowRadius: 0,
+    shadowLayers: SHADOW_DEEP,
+    textTransform: "none",
+    backgroundShape: "none",
+    speakerColors: ["#2C3E50", "#E74C3C", "#3498DB", "#27AE60", "#F39C12"],
+  },
+
+  /** MARKER HIGHLIGHT — PermanentMarker, yellow highlight background */
+  marker_highlight: {
+    ...BASE,
+    fontFamily: "Permanent Marker",
+    fontWeight: 400,
+    baseFontSize: 84,
+    keywordFontSize: 108,
+    animation: "pop",
+    pillEnabled: false,
+    pillColor: "transparent",
+    glowEnabled: false,
+    glowColor: "transparent",
+    glowRadius: 0,
+    textColor: "#1A1A1A",
+    activeColor: "#1A1A1A",
+    dimColor: "#333333",
+    backgroundShape: "highlight",
+    highlightColor: "#FFE600",
+    shadowLayers: SHADOW_SUBTLE,
+    textTransform: "none",
+    speakerColors: ["#FFD700", "#00FFFF", "#FF4444", "#44FF44", "#FF8C00"],
+  },
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // NEW STYLES — Condensed / Cinema
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /** CINEMA — Bebas Neue, wide spacing, cool blue shadow, no pill */
+  cinema: {
+    ...BASE,
+    fontFamily: "Bebas Neue",
+    fontWeight: 400,
+    baseFontSize: 110,
+    keywordFontSize: 140,
+    animation: "slide",
+    pillEnabled: false,
+    pillColor: "transparent",
+    glowEnabled: false,
+    glowColor: "transparent",
+    glowRadius: 0,
+    shadowLayers: [
+      { x: 0, y: 4, blur: 14, color: "rgba(30, 60, 120, 0.6)" },
+      { x: 0, y: 2, blur: 6, color: "rgba(0, 0, 0, 0.7)" },
+      { x: 0, y: 1, blur: 2, color: "rgba(0, 0, 0, 0.9)" },
+    ],
+    backgroundShape: "none",
+    speakerColors: ["#FFD700", "#87CEEB", "#98FB98", "#DDA0DD", "#F4A460"],
+  },
+
+  /** NEWS TICKER — Oswald Bold, red pill, white text, typewriter */
+  news_ticker: {
+    ...BASE,
+    fontFamily: "Oswald",
+    fontWeight: 700,
+    baseFontSize: 80,
+    keywordFontSize: 100,
+    animation: "typewriter",
+    animationDuration: 60,
+    pillEnabled: true,
+    pillColor: "#CC0000",
+    pillRadius: 6,
+    glowEnabled: false,
+    glowColor: "transparent",
+    glowRadius: 0,
+    activeWordScale: 1.0,
+    backgroundShape: "pill",
+    speakerColors: ["#FFCC00", "#00E5FF", "#00FF88", "#FF44FF", "#FF8800"],
+  },
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // NEW STYLES — Comic / Meme
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /** COMIC POP — Bangers, yellow text, thick black outline, spring bounce */
+  comic_pop: {
+    ...BASE,
+    fontFamily: "Bangers",
+    fontWeight: 400,
+    baseFontSize: 100,
+    keywordFontSize: 136,
+    textColor: "#FFE600",
+    activeColor: "#FFE600",
+    dimColor: "#CCBB00",
+    animation: "spring",
+    animationDuration: 180,
+    pillEnabled: false,
+    pillColor: "transparent",
+    glowEnabled: false,
+    glowColor: "transparent",
+    glowRadius: 0,
+    textStroke: { width: 3, color: "#000000" },
+    activeWordScale: 1.15,
+    backgroundShape: "none",
+    keywordColors: ["#FF3C64", "#00DCC8", "#FF8C00", "#A855F7", "#3B82F6", "#FFE600"],
+    speakerColors: ["#FFD700", "#00FFFF", "#FF4444", "#44FF44", "#FF8C00"],
+  },
+
+  /** MEME BOLD — Bangers, white text, heavy black outline, pop anim */
+  meme_bold: {
+    ...BASE,
+    fontFamily: "Bangers",
+    fontWeight: 400,
+    baseFontSize: 96,
+    keywordFontSize: 128,
+    animation: "pop",
+    pillEnabled: false,
+    pillColor: "transparent",
+    glowEnabled: false,
+    glowColor: "transparent",
+    glowRadius: 0,
+    textStroke: { width: 4, color: "#000000" },
+    backgroundShape: "none",
+    keywordColors: ["#FFE600", "#FF3C64", "#00DCC8", "#FF8C00", "#A855F7", "#3B82F6"],
+    speakerColors: ["#FFD700", "#00FFFF", "#FF4444", "#44FF44", "#FF8C00"],
+  },
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // NEW STYLES — Elegant / Luxury
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /** LUXURY — Playfair Display Bold, white text, subtle gold underline */
+  luxury: {
+    ...BASE,
+    fontFamily: "Playfair Display",
+    fontWeight: 700,
+    baseFontSize: 86,
+    keywordFontSize: 112,
+    animation: "slide",
+    animationDuration: 240,
+    pillEnabled: false,
+    pillColor: "transparent",
+    glowEnabled: false,
+    glowColor: "transparent",
+    glowRadius: 0,
+    shadowLayers: SHADOW_SUBTLE,
+    backgroundShape: "underline",
+    underlineColor: "#D4AF37",
+    underlineThickness: 3,
+    textTransform: "none",
+    keywordColors: ["#D4AF37", "#FFD700", "#D4AF37", "#FFA000", "#D4AF37", "#FFD700"],
+    speakerColors: ["#FFD700", "#87CEEB", "#98FB98", "#DDA0DD", "#F4A460"],
+  },
+
+  /** EDITORIAL — Playfair Display, dark text on white pill (inverted) */
+  editorial: {
+    ...BASE,
+    fontFamily: "Playfair Display",
+    fontWeight: 700,
+    baseFontSize: 80,
+    keywordFontSize: 104,
+    textColor: "#1A1A1A",
+    activeColor: "#000000",
+    dimColor: "#444444",
+    animation: "slide",
+    animationDuration: 220,
+    pillEnabled: true,
+    pillColor: "rgba(255, 255, 255, 0.92)",
+    pillRadius: 12,
+    glowEnabled: false,
+    glowColor: "transparent",
+    glowRadius: 0,
+    shadowLayers: [
+      { x: 0, y: 1, blur: 3, color: "rgba(0, 0, 0, 0.1)" },
+    ],
+    textTransform: "none",
+    keywordColors: ["#8B5CF6", "#3B82F6", "#059669", "#DC2626", "#D97706", "#7C3AED"],
+    speakerColors: ["#FFD700", "#87CEEB", "#98FB98", "#DDA0DD", "#F4A460"],
+  },
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // NEW STYLES — Stacked
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /** STACKED BOLD — Montserrat Black, stacked vertical, deep shadow */
+  stacked_bold: {
+    ...BASE,
+    fontWeight: 900,
+    baseFontSize: 120,
+    keywordFontSize: 156,
+    animation: "spring",
+    pillEnabled: false,
+    pillColor: "transparent",
+    glowEnabled: false,
+    glowColor: "transparent",
+    glowRadius: 0,
+    shadowLayers: SHADOW_DEEP,
+    stackedLayout: true,
+    backgroundShape: "none",
+    activeWordScale: 1.12,
+    speakerColors: ["#FFD700", "#00FFFF", "#FF4444", "#44FF44", "#FF8C00"],
+  },
+
+  /** STACKED COLOR — Poppins ExtraBold, stacked, cycling keyword colors, dark pill */
+  stacked_color: {
+    ...BASE,
+    fontFamily: "Poppins",
+    fontWeight: 800,
+    baseFontSize: 110,
+    keywordFontSize: 142,
+    animation: "pop",
+    pillEnabled: true,
+    pillColor: "rgba(15, 15, 15, 0.80)",
+    glowEnabled: true,
+    glowColor: "#FF3C64",
+    glowRadius: 22,
+    stackedLayout: true,
+    keywordColors: ["#FFE600", "#FF3C64", "#00DCC8", "#FF8C00", "#A855F7", "#3B82F6"],
+    speakerColors: ["#FFD700", "#00FFFF", "#FF4444", "#44FF44", "#FF8C00"],
+  },
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // NEW STYLES — 3D / Extruded
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /** RETRO 3D — Bangers, yellow text, black 3D extrusion, no pill */
+  retro_3d: {
+    ...BASE,
+    fontFamily: "Bangers",
+    fontWeight: 400,
+    baseFontSize: 96,
+    keywordFontSize: 128,
+    textColor: "#FFE600",
+    activeColor: "#FFE600",
+    dimColor: "#CCBB00",
+    animation: "spring",
+    pillEnabled: false,
+    pillColor: "transparent",
+    glowEnabled: false,
+    glowColor: "transparent",
+    glowRadius: 0,
+    shadowExtrude: { angle: 135, distance: 6, color: "#000000" },
+    backgroundShape: "none",
+    keywordColors: ["#FF3C64", "#00DCC8", "#FF8C00", "#A855F7", "#FFE600", "#3B82F6"],
+    speakerColors: ["#FF6B35", "#00D4FF", "#FFDD00", "#FF3366", "#00FF88"],
+  },
+
+  /** NEON 3D — Space Grotesk Bold, cyan text, glow + subtle extrusion */
+  neon_3d: {
+    ...BASE,
+    fontFamily: "Space Grotesk",
+    fontWeight: 700,
+    baseFontSize: 88,
+    keywordFontSize: 118,
+    textColor: "#00DCC8",
+    activeColor: "#00DCC8",
+    dimColor: "#008F80",
+    animation: "spring",
+    pillEnabled: false,
+    pillColor: "transparent",
+    glowEnabled: true,
+    glowColor: "#00DCC8",
+    glowRadius: 24,
+    shadowExtrude: { angle: 135, distance: 2, color: "#005F54" },
+    backgroundShape: "none",
+    keywordColors: ["#00DCC8", "#3B82F6", "#A855F7", "#00DCC8", "#FFE600", "#FF3C64"],
+    speakerColors: ["#FF00FF", "#00FFFF", "#FFFF00", "#00FF00", "#FF4400"],
+  },
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // NEW STYLES — Tech / Modern
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /** TECH CLEAN — Space Grotesk, white text, thin cyan underline, minimal */
+  tech_clean: {
+    ...BASE,
+    fontFamily: "Space Grotesk",
+    fontWeight: 500,
+    baseFontSize: 82,
+    keywordFontSize: 106,
+    animation: "pop",
+    pillEnabled: false,
+    pillColor: "transparent",
+    glowEnabled: false,
+    glowColor: "transparent",
+    glowRadius: 0,
+    shadowLayers: SHADOW_SUBTLE,
+    backgroundShape: "underline",
+    underlineColor: "#00DCC8",
+    underlineThickness: 3,
+    activeWordScale: 1.04,
+    textTransform: "none",
+    keywordColors: ["#00DCC8", "#3B82F6", "#A855F7", "#00DCC8", "#FFE600", "#3B82F6"],
+    speakerColors: ["#00D4FF", "#00FF88", "#FFD700", "#FF44FF", "#FF6B35"],
+  },
+
+  /** TECH GLOW — Space Grotesk Bold, cyan text, glow, no pill */
+  tech_glow: {
+    ...BASE,
+    fontFamily: "Space Grotesk",
+    fontWeight: 700,
+    baseFontSize: 86,
+    keywordFontSize: 114,
+    textColor: "#00DCC8",
+    activeColor: "#00FFEE",
+    dimColor: "#008F80",
+    animation: "pop",
+    pillEnabled: false,
+    pillColor: "transparent",
+    glowEnabled: true,
+    glowColor: "#00DCC8",
+    glowRadius: 22,
+    shadowLayers: SHADOW_GLOW,
+    backgroundShape: "none",
+    keywordColors: ["#00DCC8", "#3B82F6", "#A855F7", "#FFE600", "#00DCC8", "#FF3C64"],
+    speakerColors: ["#FF00FF", "#00FFFF", "#FFFF00", "#00FF00", "#FF4400"],
+  },
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // NEW STYLES — Minimal / Clean
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /** MINIMAL SANS — Poppins SemiBold, white text, no pill, no glow, subtle shadow */
+  minimal_sans: {
+    ...BASE,
+    fontFamily: "Poppins",
+    fontWeight: 600,
+    baseFontSize: 78,
+    keywordFontSize: 100,
+    animation: "pop",
+    animationDuration: 100,
+    pillEnabled: false,
+    pillColor: "transparent",
+    glowEnabled: false,
+    glowColor: "transparent",
+    glowRadius: 0,
+    shadowLayers: [
+      { x: 0, y: 2, blur: 6, color: "rgba(0, 0, 0, 0.5)" },
+    ],
+    activeWordScale: 1.04,
+    textTransform: "none",
+    backgroundShape: "none",
+    keywordColors: ["#FFE600", "#FF3C64", "#00DCC8", "#FF8C00", "#A855F7", "#3B82F6"],
+    speakerColors: ["#FFD700", "#87CEEB", "#98FB98", "#DDA0DD", "#F4A460"],
+  },
+
+  /** MINIMAL LOWER — Poppins, very small dark pill, extremely clean */
+  minimal_lower: {
+    ...BASE,
+    fontFamily: "Poppins",
+    fontWeight: 600,
+    baseFontSize: 72,
+    keywordFontSize: 92,
+    animation: "slide",
+    animationDuration: 180,
+    pillEnabled: true,
+    pillColor: "rgba(10, 10, 10, 0.55)",
+    pillRadius: 10,
+    pillPadding: [18, 8],
+    glowEnabled: false,
+    glowColor: "transparent",
+    glowRadius: 0,
+    shadowLayers: [
+      { x: 0, y: 1, blur: 3, color: "rgba(0, 0, 0, 0.4)" },
+    ],
+    activeWordScale: 1.02,
+    textTransform: "none",
+    keywordColors: ["#FFE600", "#FF3C64", "#00DCC8", "#FF8C00", "#A855F7", "#3B82F6"],
+    speakerColors: ["#FFD700", "#87CEEB", "#98FB98", "#DDA0DD", "#F4A460"],
   },
 };
 

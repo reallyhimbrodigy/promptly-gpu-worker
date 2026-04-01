@@ -56,6 +56,30 @@ export interface StyleConfig {
   activeWordScale: number;
   fadeInMs: number;
   fadeOutMs: number;
+
+  // ─── Extended style properties (optional) ───────────────────────────────
+  // Text fill
+  textStroke?: { width: number; color: string };  // outline stroke
+  gradientColors?: string[];  // gradient text fill (2-3 colors)
+  gradientDirection?: string; // CSS gradient direction (e.g. "to right", "135deg")
+  outlineOnly?: boolean; // stroke only, transparent fill
+
+  // Background variations
+  backgroundShape?: "pill" | "underline" | "highlight" | "box" | "none";
+  highlightColor?: string; // for highlight background shape
+  underlineColor?: string; // for underline background shape
+  underlineThickness?: number;
+
+  // Layout
+  stackedLayout?: boolean; // one word per line, stacked vertically
+
+  // 3D/Depth
+  shadowExtrude?: { angle: number; distance: number; color: string }; // 3D extruded shadow
+
+  // Typography (override default fontFamily at word level is already fontFamily above)
+
+  // Multi-speaker
+  speakerColors?: string[];  // per-speaker active highlight colors
 }
 
 // ─── Visual Effects Types ────────────────────────────────────────────────────

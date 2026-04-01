@@ -39,6 +39,60 @@ const FONT_FACES = `
   font-weight: 800;
   font-style: italic;
 }
+@font-face {
+  font-family: 'Bebas Neue';
+  src: url('file://${FONT_DIR}/BebasNeue-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+}
+@font-face {
+  font-family: 'Permanent Marker';
+  src: url('file://${FONT_DIR}/PermanentMarker-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+}
+@font-face {
+  font-family: 'Poppins';
+  src: url('file://${FONT_DIR}/Poppins-SemiBold.ttf') format('truetype');
+  font-weight: 600;
+  font-style: normal;
+}
+@font-face {
+  font-family: 'Poppins';
+  src: url('file://${FONT_DIR}/Poppins-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+}
+@font-face {
+  font-family: 'Poppins';
+  src: url('file://${FONT_DIR}/Poppins-ExtraBold.ttf') format('truetype');
+  font-weight: 800;
+  font-style: normal;
+}
+@font-face {
+  font-family: 'Bangers';
+  src: url('file://${FONT_DIR}/Bangers-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+}
+@font-face {
+  font-family: 'Oswald';
+  src: url('file://${FONT_DIR}/Oswald-Variable.ttf') format('truetype');
+  font-weight: 200 700;
+  font-style: normal;
+}
+@font-face {
+  font-family: 'Playfair Display';
+  src: url('file://${FONT_DIR}/PlayfairDisplay-Variable.ttf') format('truetype');
+  font-weight: 400 900;
+  font-style: normal;
+}
+@font-face {
+  font-family: 'Space Grotesk';
+  src: url('file://${FONT_DIR}/SpaceGrotesk-Variable.ttf') format('truetype');
+  font-weight: 300 700;
+  font-style: normal;
+}
 `;
 
 export const FontLoader: React.FC<{ children: React.ReactNode }> = ({

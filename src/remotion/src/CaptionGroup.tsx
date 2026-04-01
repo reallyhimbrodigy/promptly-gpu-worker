@@ -9,12 +9,35 @@ import {
 import type { WordGroup, StyleConfig } from "./types";
 
 /**
+ * Generates 3D extruded text-shadow layers from a shadowExtrude config.
+ * Creates 8-12 layers offset along the given angle to simulate depth.
+ */
+function buildExtrudeShadow(
+  extrude: NonNullable<StyleConfig["shadowExtrude"]>
+): string {
+  const layers: string[] = [];
+  const count = Math.max(8, Math.min(12, extrude.distance * 2));
+  const rad = (extrude.angle * Math.PI) / 180;
+  const dx = Math.cos(rad);
+  const dy = Math.sin(rad);
+  for (let i = 1; i <= count; i++) {
+    const px = Math.round(dx * i * (extrude.distance / count));
+    const py = Math.round(dy * i * (extrude.distance / count));
+    layers.push(`${px}px ${py}px 0px ${extrude.color}`);
+  }
+  return layers.join(", ");
+}
+
+/**
  * Renders a single group of 2-4 words with full animation.
  * This is the heart of the caption system — each group gets:
  * - Per-word pop-in/spring/slide/typewriter/wave animation
  * - Active word highlighting (color + scale)
  * - Keyword emphasis (larger size + glow + vibrant color)
- * - Pill background with rounded corners
+ * - Pill / underline / highlight / box / none background
+ * - Gradient text, outline-only text, text stroke
+ * - Stacked (vertical) layout
+ * - 3D extruded shadows
  * - Multi-layer text shadows for depth
  * - Fade in/out at group boundaries
  */
@@ -144,15 +167,18 @@ export const CaptionGroup: React.FC<{
     const fontWeight = isKeyword ? 900 : style.fontWeight;
 
     // Color logic
+    const speakerIdx = word.speaker ?? 0;
+    const speakerActiveColor = style.speakerColors?.[speakerIdx % (style.speakerColors?.length || 1)];
+
     let color = style.dimColor;
     if (isActive) {
       color = isKeyword
         ? style.keywordColors[runningKwIdx % style.keywordColors.length]
-        : style.activeColor;
+        : (speakerActiveColor || style.activeColor);
     } else if (isPast) {
       color = isKeyword
         ? style.keywordColors[runningKwIdx % style.keywordColors.length]
-        : style.textColor;
+        : style.textColor;  // keep textColor for past words regardless of speaker
     }
 
     if (isKeyword) runningKwIdx++;
@@ -168,42 +194,98 @@ export const CaptionGroup: React.FC<{
         ? `, 0 0 ${style.glowRadius}px ${style.glowColor}, 0 0 ${style.glowRadius * 2}px ${style.glowColor}40`
         : "";
 
+    // 3D extruded shadow
+    const extrudeCSS = style.shadowExtrude
+      ? (shadowCSS || glowCSS ? ", " : "") + buildExtrudeShadow(style.shadowExtrude)
+      : "";
+
     const display = word.punctuated_word || word.word;
 
+    // Build the inline style object for this word
+    const wordStyle: React.CSSProperties = {
+      display: "inline-block",
+      fontSize,
+      fontWeight,
+      fontFamily: style.fontFamily,
+      color,
+      textShadow: shadowCSS + glowCSS + extrudeCSS,
+      transform: `scale(${wordScale}) translateY(${wordTranslateY}px)`,
+      opacity: wordOpacity,
+      marginRight: wi < group.words.length - 1 ? "0.25em" : 0,
+      textTransform: style.textTransform,
+      lineHeight: style.lineHeight,
+      transition: "color 0.06s ease-out",
+      willChange: "transform, opacity, color",
+    };
+
+    // ─── Gradient text fill ─────────────────────────────────────────────
+    if (style.gradientColors && style.gradientColors.length >= 2 && !style.outlineOnly) {
+      wordStyle.background = `linear-gradient(${style.gradientDirection || "to right"}, ${style.gradientColors.join(", ")})`;
+      wordStyle.WebkitBackgroundClip = "text";
+      wordStyle.WebkitTextFillColor = "transparent";
+      // Remove color so gradient shows through
+      delete wordStyle.color;
+    }
+
+    // ─── Outline-only text (no fill) ────────────────────────────────────
+    if (style.outlineOnly && style.textStroke) {
+      wordStyle.WebkitTextStroke = `${style.textStroke.width}px ${style.textStroke.color}`;
+      wordStyle.WebkitTextFillColor = "transparent";
+      // Override color for outline-only
+      delete wordStyle.color;
+    }
+    // ─── Text stroke with fill ──────────────────────────────────────────
+    else if (style.textStroke && !style.outlineOnly) {
+      wordStyle.WebkitTextStroke = `${style.textStroke.width}px ${style.textStroke.color}`;
+    }
+
+    // ─── Highlight background per word ──────────────────────────────────
+    if (style.backgroundShape === "highlight" && style.highlightColor) {
+      const rotation = ((wi % 3) - 1) * 1; // -1, 0, or 1 degree
+      wordStyle.backgroundColor = style.highlightColor;
+      wordStyle.padding = "2px 8px";
+      wordStyle.borderRadius = "4px";
+      wordStyle.transform = `scale(${wordScale}) translateY(${wordTranslateY}px) rotate(${rotation}deg)`;
+    }
+
+    // ─── Underline decoration per word ──────────────────────────────────
+    if (style.backgroundShape === "underline" && style.underlineColor) {
+      wordStyle.borderBottom = `${style.underlineThickness || 4}px solid ${style.underlineColor}`;
+      wordStyle.paddingBottom = "4px";
+    }
+
     return (
-      <span
-        key={wi}
-        style={{
-          display: "inline-block",
-          fontSize,
-          fontWeight,
-          fontFamily: style.fontFamily,
-          color,
-          textShadow: shadowCSS + glowCSS,
-          transform: `scale(${wordScale}) translateY(${wordTranslateY}px)`,
-          opacity: wordOpacity,
-          marginRight: wi < group.words.length - 1 ? "0.25em" : 0,
-          textTransform: style.textTransform,
-          lineHeight: style.lineHeight,
-          transition: "color 0.06s ease-out",
-          willChange: "transform, opacity, color",
-        }}
-      >
+      <span key={wi} style={wordStyle}>
         {display}
       </span>
     );
   });
 
-  // Pill background dimensions
-  const pillStyle: React.CSSProperties = style.pillEnabled
-    ? {
-        background: style.pillColor,
-        borderRadius: style.pillRadius,
-        padding: `${style.pillPadding[1]}px ${style.pillPadding[0]}px`,
-      }
-    : {
-        padding: `${style.pillPadding[1]}px ${style.pillPadding[0]}px`,
-      };
+  // ─── Container background style ────────────────────────────────────────
+  const bgShape = style.backgroundShape || (style.pillEnabled ? "pill" : "none");
+  let pillStyle: React.CSSProperties;
+
+  if (bgShape === "pill" && style.pillEnabled) {
+    pillStyle = {
+      background: style.pillColor,
+      borderRadius: style.pillRadius,
+      padding: `${style.pillPadding[1]}px ${style.pillPadding[0]}px`,
+    };
+  } else if (bgShape === "box") {
+    pillStyle = {
+      background: style.pillColor,
+      borderRadius: 0,
+      padding: `${style.pillPadding[1]}px ${style.pillPadding[0]}px`,
+    };
+  } else {
+    // "none", "underline", "highlight" — no container background
+    pillStyle = {
+      padding: `${style.pillPadding[1]}px ${style.pillPadding[0]}px`,
+    };
+  }
+
+  // ─── Stacked layout vs horizontal ─────────────────────────────────────
+  const isStacked = style.stackedLayout === true;
 
   return (
     <div
@@ -216,7 +298,7 @@ export const CaptionGroup: React.FC<{
         opacity,
         display: "flex",
         justifyContent: "center",
-        alignItems: "center",
+        alignItems: isStacked ? "center" : "center",
         willChange: "transform, opacity",
       }}
     >
@@ -224,11 +306,12 @@ export const CaptionGroup: React.FC<{
         style={{
           ...pillStyle,
           display: "inline-flex",
-          flexWrap: "wrap",
+          flexDirection: isStacked ? "column" : "row",
+          flexWrap: isStacked ? "nowrap" : "wrap",
           justifyContent: "center",
-          alignItems: "baseline",
+          alignItems: isStacked ? "center" : "baseline",
           maxWidth: "85%",
-          gap: "0",
+          gap: isStacked ? "4px" : "0",
         }}
       >
         {wordElements}
