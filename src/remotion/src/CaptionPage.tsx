@@ -65,8 +65,9 @@ export const CaptionPage: React.FC<{
   const pageStart = page.startMs / 1000;
   const pageEnd = (page.startMs + page.durationMs) / 1000;
 
-  // Guard: skip pages with zero/negligible duration (prevents interpolate range errors)
-  if (pageEnd - pageStart < 0.01) return null;
+  // Guard: skip pages with NaN, zero, or negligible duration
+  // NaN comparisons always return false, so check isFinite explicitly
+  if (!isFinite(pageStart) || !isFinite(pageEnd) || pageEnd - pageStart < 0.01) return null;
 
   // Fade envelope — clamp durations to fit within page
   const maxFade = (pageEnd - pageStart) / 3;

@@ -10,13 +10,15 @@ import { getStyleConfig } from "./styles/presets";
  * Convert handler.py's ProjectedWord[] to @remotion/captions Caption[].
  */
 function toRemotionCaptions(words: ProjectedWord[]): Caption[] {
-  return words.map((w, i) => ({
-    text: (i === 0 ? "" : " ") + (w.punctuated_word || w.word),
-    startMs: w.start * 1000,
-    endMs: w.end * 1000,
-    timestampMs: ((w.start + w.end) / 2) * 1000,
-    confidence: 1.0,
-  }));
+  return words
+    .filter((w) => typeof w.start === "number" && typeof w.end === "number" && !isNaN(w.start) && !isNaN(w.end) && w.end > w.start)
+    .map((w, i) => ({
+      text: (i === 0 ? "" : " ") + (w.punctuated_word || w.word),
+      startMs: w.start * 1000,
+      endMs: w.end * 1000,
+      timestampMs: ((w.start + w.end) / 2) * 1000,
+      confidence: 1.0,
+    }));
 }
 
 /**
