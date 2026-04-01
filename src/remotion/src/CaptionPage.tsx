@@ -65,9 +65,13 @@ export const CaptionPage: React.FC<{
   const pageStart = page.startMs / 1000;
   const pageEnd = (page.startMs + page.durationMs) / 1000;
 
-  // Fade envelope
-  const fadeInDur = 0.08;
-  const fadeOutDur = 0.10;
+  // Guard: skip pages with zero/negligible duration (prevents interpolate range errors)
+  if (pageEnd - pageStart < 0.01) return null;
+
+  // Fade envelope — clamp durations to fit within page
+  const maxFade = (pageEnd - pageStart) / 3;
+  const fadeInDur = Math.min(0.08, maxFade);
+  const fadeOutDur = Math.min(0.10, maxFade);
   const fadeIn = interpolate(t, [pageStart, pageStart + fadeInDur], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
