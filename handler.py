@@ -84,7 +84,28 @@ print("[startup] all import checks done", flush=True)
 
 # ── GPU / NVENC detection ─────────────────────────────────────────────────────
 _HAS_NVENC = False
+_HAS_HWACCEL = False  # NVDEC hardware decoding
 try:
+    # Print GPU info for diagnostics
+    _smi = subprocess.run(
+        ["nvidia-smi", "--query-gpu=name,driver_version,memory.total", "--format=csv,noheader"],
+        capture_output=True, text=True, timeout=5,
+    )
+    if _smi.returncode == 0:
+        print(f"[startup] GPU: {_smi.stdout.strip()}", flush=True)
+    else:
+        print(f"[startup] nvidia-smi failed: {_smi.stderr.strip()[:200]}", flush=True)
+
+    # Remove any CUDA stub libraries that intercept dlopen before Modal's real drivers
+    for _stub_dir in ["/usr/local/cuda/lib64/stubs", "/usr/local/cuda/targets/x86_64-linux/lib/stubs"]:
+        if os.path.isdir(_stub_dir):
+            for _sf in os.listdir(_stub_dir):
+                if "encode" in _sf.lower() or "cuda.so" in _sf.lower():
+                    try:
+                        os.remove(os.path.join(_stub_dir, _sf))
+                    except Exception:
+                        pass
+
     # Modal mounts NVIDIA drivers at runtime — find the encode library
     _nvidia_lib_dirs = []
     for _search_dir in ["/usr/local/nvidia/lib64", "/usr/lib/x86_64-linux-gnu",
@@ -94,25 +115,22 @@ try:
     if _nvidia_lib_dirs:
         _existing_ldpath = os.environ.get("LD_LIBRARY_PATH", "")
         os.environ["LD_LIBRARY_PATH"] = ":".join(_nvidia_lib_dirs) + (":" + _existing_ldpath if _existing_ldpath else "")
-        print(f"[startup] LD_LIBRARY_PATH set: {os.environ['LD_LIBRARY_PATH'][:200]}", flush=True)
+        print(f"[startup] LD_LIBRARY_PATH: {os.environ['LD_LIBRARY_PATH'][:200]}", flush=True)
 
     # Create soname symlinks for NVIDIA libs (Modal mounts versioned .so but not symlinks)
     for _lib_dir in _nvidia_lib_dirs:
         try:
             for _f in os.listdir(_lib_dir):
-                # e.g. libnvidia-encode.so.580.95.05 → libnvidia-encode.so.1
                 if _f.startswith("libnvidia-") and ".so." in _f and not _f.endswith(".so.1"):
                     _base = _f.split(".so.")[0]
-                    _symlink1 = os.path.join(_lib_dir, f"{_base}.so.1")
-                    _symlink2 = os.path.join(_lib_dir, f"{_base}.so")
                     _target = os.path.join(_lib_dir, _f)
-                    for _sym in [_symlink1, _symlink2]:
+                    for _suf in [".so.1", ".so"]:
+                        _sym = os.path.join(_lib_dir, f"{_base}{_suf}")
                         if not os.path.exists(_sym):
                             try:
                                 os.symlink(_target, _sym)
                             except Exception:
                                 pass
-                # Also handle libcuda.so → libcuda.so.1
                 if _f.startswith("libcuda.so.") and not _f.endswith(".so.1"):
                     _target = os.path.join(_lib_dir, _f)
                     for _sym_name in ["libcuda.so.1", "libcuda.so"]:
@@ -124,9 +142,7 @@ try:
                                 pass
         except Exception:
             pass
-    # Refresh linker cache after creating symlinks
     subprocess.run(["ldconfig"], capture_output=True, timeout=5)
-    print("[startup] NVIDIA driver symlinks created, ldconfig refreshed", flush=True)
 
     _nvenc_check = subprocess.run(
         ["ffmpeg", "-hide_banner", "-encoders"],
@@ -142,23 +158,34 @@ try:
         )
         if _gpu_test.returncode == 0:
             _HAS_NVENC = True
-            print("[startup] NVENC GPU encoder: available", flush=True)
+            print("[startup] NVENC GPU encoder: AVAILABLE", flush=True)
         else:
             _err_snippet = (_gpu_test.stderr or "")[-500:]
-            print(f"[startup] NVENC listed but GPU not accessible — using CPU", flush=True)
-            print(f"[startup] NVENC test error: {_err_snippet}", flush=True)
-            # Check symlinks
+            print(f"[startup] NVENC test failed — using CPU encoder", flush=True)
+            print(f"[startup] NVENC error: {_err_snippet}", flush=True)
             _encode_libs = []
             for _ld in _nvidia_lib_dirs:
                 try:
                     _encode_libs.extend(f for f in os.listdir(_ld) if "encode" in f.lower() or "cuda.so" in f.lower())
                 except Exception:
                     pass
-            print(f"[startup] Encode libs: {sorted(set(_encode_libs))}", flush=True)
+            print(f"[startup] Encode libs found: {sorted(set(_encode_libs))}", flush=True)
     else:
-        print("[startup] NVENC not available in FFmpeg build — using CPU encoder", flush=True)
+        print("[startup] NVENC not in FFmpeg build — using CPU encoder", flush=True)
+
+    # Test NVDEC hardware decoding (works on almost all NVIDIA GPUs even if NVENC fails)
+    _hwaccel_test = subprocess.run(
+        ["ffmpeg", "-y", "-hwaccel", "cuda", "-f", "lavfi", "-i", "color=black:s=64x64:d=0.1",
+         "-f", "null", "-"],
+        capture_output=True, text=True, timeout=10,
+    )
+    if _hwaccel_test.returncode == 0:
+        _HAS_HWACCEL = True
+        print("[startup] CUDA hwaccel decode: AVAILABLE", flush=True)
+    else:
+        print("[startup] CUDA hwaccel decode: not available", flush=True)
 except Exception as _e:
-    print(f"[startup] NVENC check failed: {_e} — using CPU encoder", flush=True)
+    print(f"[startup] GPU check failed: {_e} — using CPU", flush=True)
 
 
 def get_encode_args(quality="high"):
@@ -7445,7 +7472,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         end = float(cut["source_end"])
         seg_dur = end - start
         # Each segment is a separate input with pre-seeking
-        input_args += [
+        # CUDA hwaccel decoding offloads decode to GPU (frames auto-download to CPU for filters)
+        _hwaccel_args = ["-hwaccel", "cuda"] if _HAS_HWACCEL else []
+        input_args += _hwaccel_args + [
             "-ss", f"{start:.3f}", "-t", f"{seg_dur:.3f}",
             "-analyzeduration", "10000000", "-probesize", "10000000",
             "-i", render_source,
@@ -8648,7 +8677,7 @@ def handler(job):
         r = requests.get(video_url, stream=True, timeout=120)
         r.raise_for_status()
         with open(source_path, "wb") as f:
-            for chunk in r.iter_content(chunk_size=65536):
+            for chunk in r.iter_content(chunk_size=1048576):  # 1MB chunks for faster throughput
                 f.write(chunk)
         size_mb = os.path.getsize(source_path) / (1024*1024)
         _timings["download"] = time.time() - t
