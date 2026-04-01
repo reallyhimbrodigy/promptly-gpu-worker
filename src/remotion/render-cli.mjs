@@ -101,6 +101,7 @@ await renderMedia({
   codec: "prores",
   proResProfile: "4444",
   pixelFormat: "yuva444p10le",
+  imageFormat: "png", // required for transparent pixel formats
   outputLocation: outputPath,
   inputProps,
   concurrency: null, // let Remotion auto-detect from container CPU limits
