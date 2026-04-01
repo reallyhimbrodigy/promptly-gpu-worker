@@ -1,12 +1,12 @@
 import modal
 
-# rebuild trigger v4 — Remotion captions
+# rebuild trigger v6 — A10G GPU + 16 CPU + 32GB RAM + GPU Chrome
 
 # ── Image definition (replaces Dockerfile) ────────────────────────────────────
 image = (
     modal.Image.from_registry("nvidia/cuda:12.2.0-runtime-ubuntu22.04", add_python="3.10")
     .run_commands(
-        "echo 'build v10 - Remotion caption overlay engine'",
+        "echo 'build v12 - A10G + 16CPU + GPU Chrome + nonfree FFmpeg'",
         "apt-get update && apt-get install -y ca-certificates && update-ca-certificates",
     )
     .apt_install(
@@ -32,6 +32,10 @@ image = (
         "libsndfile1-dev",
         "libsamplerate0-dev",
         # Chromium dependencies for Remotion headless rendering
+        # EGL/GL libraries for GPU-accelerated Chrome rendering on A10G
+        "libegl1",
+        "libgl1",
+        "libgles2",
         "libnss3",
         "libatk1.0-0",
         "libatk-bridge2.0-0",
@@ -50,6 +54,7 @@ image = (
     )
     .run_commands(
         "mkdir -p /opt/ffmpeg",
+        # GPL build includes h264_nvenc/hevc_nvenc via ffnvcodec headers (runtime needs NVIDIA drivers)
         "cd /opt/ffmpeg && wget -q https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz -O ffmpeg.tar.xz",
         "cd /opt/ffmpeg && tar -xJf ffmpeg.tar.xz --strip-components=1",
         "ln -sf /opt/ffmpeg/bin/ffmpeg /usr/local/bin/ffmpeg",
@@ -104,6 +109,7 @@ image = (
     )
     .add_local_dir("src/assets/sounds", "/assets/sounds")
     .add_local_file("handler.py", "/handler.py")
+    .add_local_file("caption_renderer.py", "/caption_renderer.py")
 )
 
 # ── Secrets ────────────────────────────────────────────────────────────────────
@@ -116,11 +122,11 @@ app = modal.App("promptly-gpu-worker", image=image, secrets=secrets)
 
 # ── Web endpoint ───────────────────────────────────────────────────────────────
 @app.function(
-    timeout=600,
-    scaledown_window=60,
-    cpu=4,
-    memory=8192,
-    gpu="T4",
+    timeout=120,          # 2 min — pipeline targets 10-20s, 120s is generous safety margin
+    scaledown_window=120, # keep warm 2 min for back-to-back requests (avoid cold start)
+    cpu=16,
+    memory=32768,
+    gpu="A10G",
 )
 @modal.concurrent(max_inputs=1)
 @modal.fastapi_endpoint(method="POST")

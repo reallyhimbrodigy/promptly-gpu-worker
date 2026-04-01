@@ -23,11 +23,13 @@ const args = process.argv.slice(2);
 let inputPath = null;
 let outputPath = null;
 let concurrency = 4;
+let glMode = "angle-egl"; // GPU-accelerated; falls back to swiftshader
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--input" && args[i + 1]) inputPath = args[++i];
   else if (args[i] === "--output" && args[i + 1]) outputPath = args[++i];
   else if (args[i] === "--concurrency" && args[i + 1]) concurrency = parseInt(args[++i], 10);
+  else if (args[i] === "--gl" && args[i + 1]) glMode = args[++i];
 }
 
 if (!inputPath || !outputPath) {
@@ -104,9 +106,9 @@ await renderMedia({
   imageFormat: "png", // required for transparent pixel formats
   outputLocation: outputPath,
   inputProps,
-  concurrency: null, // let Remotion auto-detect from container CPU limits
+  concurrency, // passed via --concurrency flag (default: 4)
   chromiumOptions: {
-    gl: "swiftshader",
+    gl: glMode,
   },
   onProgress: ({ progress }) => {
     const pct = Math.round(progress * 100);

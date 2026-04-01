@@ -172,16 +172,22 @@ def get_encode_args(quality="high"):
         if quality == "lossless":
             return ["-c:v", "h264_nvenc", "-preset", "p1", "-rc", "lossless"]
         else:
-            # p2 = fast encode, cq 23 ≈ libx264 CRF 22. Social media re-encodes
-            # anyway — p2 is 2-3x faster than p5 with negligible quality loss on mobile.
-            return ["-c:v", "h264_nvenc", "-preset", "p2", "-rc", "vbr", "-cq", "23", "-b:v", "0", "-maxrate", "8M", "-bufsize", "16M"]
+            # p1 = fastest NVENC preset (hardware encoding — preset barely affects speed
+            # since the ASIC does the work, but p1 minimizes CPU-side overhead).
+            # cq 22 = high quality, maxrate 10M for social media.
+            # A10G NVENC encodes 1080p @ ~300+ fps — the bottleneck is filter_complex, not encoding.
+            return ["-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ll",
+                    "-rc", "vbr", "-cq", "22", "-b:v", "0",
+                    "-maxrate", "10M", "-bufsize", "20M",
+                    "-spatial-aq", "1", "-temporal-aq", "1"]
     else:
         if quality == "lossless":
             return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "0"]
         else:
-            # CRF 22 with fast preset: 40% faster than medium, negligible quality
+            # CRF 22 with veryfast preset: 2x faster than fast, minimal quality
             # difference on mobile screens. Social media re-encodes anyway.
-            return ["-c:v", "libx264", "-preset", "fast", "-crf", "22", "-maxrate", "8M", "-bufsize", "16M"]
+            return ["-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
+                    "-maxrate", "10M", "-bufsize", "20M"]
 
 _EMOJI_RE = re.compile(
     "[\U0001F600-\U0001F64F\U0001F300-\U0001F5FF\U0001F680-\U0001F6FF"
@@ -262,24 +268,32 @@ OVERLAY_FONT_PATH = os.path.join(os.path.dirname(__file__), "assets", "fonts", "
 CAPTION_FONT_DIR = "/usr/local/share/fonts/montserrat"
 
 
+_fonts_registered = False
 def ensure_caption_fonts_registered():
-    """Register mounted caption fonts with fontconfig for libass."""
+    """Register mounted caption fonts with fontconfig for libass.
+    Fonts are pre-registered at container build time (modal_app.py), so this
+    is a fast no-op check in the common case. Only runs once per container.
+    """
+    global _fonts_registered
+    if _fonts_registered:
+        return
+    _fonts_registered = True
     try:
+        # Check if fonts are already registered (build-time registration)
+        fc_check = subprocess.run(
+            ["fc-list", ":family=Montserrat"], capture_output=True, text=True, timeout=5)
+        if "Montserrat" in (fc_check.stdout or ""):
+            print("[fonts] Montserrat already registered (build-time)", flush=True)
+            return
+        # Fallback: register at runtime
         os.makedirs(CAPTION_FONT_DIR, exist_ok=True)
         copied = 0
         for src in glob.glob("/assets/fonts/*.ttf"):
             dst = os.path.join(CAPTION_FONT_DIR, os.path.basename(src))
             shutil.copy2(src, dst)
             copied += 1
-        subprocess.run(["fc-cache", "-f", "-v"], check=False, capture_output=True, text=True, timeout=20)
-        fc_list = subprocess.run(
-            ["bash", "-lc", "fc-list | grep -i montserrat || true"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
+        subprocess.run(["fc-cache", "-f"], check=False, capture_output=True, text=True, timeout=20)
         print(f"[fonts] Registered {copied} caption fonts into {CAPTION_FONT_DIR}", flush=True)
-        print(f"[fonts] fc-list Montserrat: {(fc_list.stdout or '').strip()}", flush=True)
     except Exception as e:
         print(f"[fonts] WARNING: failed to register caption fonts: {e}", flush=True)
 if not os.path.exists(_RNNOISE_MODEL_PATH):
@@ -2222,7 +2236,8 @@ RULES FOR USING THESE TIMESTAMPS:
 
     last_err = None
     response = None
-    for model_name in [GEMINI_MODEL, GEMINI_FLASH_MODEL]:
+    # Flash first — 3-5x faster response time, falls back to Pro on failure
+    for model_name in [GEMINI_FLASH_MODEL, GEMINI_MODEL]:
         try:
             print(f"[generate-edit] Calling Gemini model={model_name}...", flush=True)
             t = time.time()
@@ -3897,7 +3912,7 @@ def run_ffmpeg(args):
     print(f"[ffmpeg] Running: ffmpeg {' '.join(str(a) for a in args[:10])}...", flush=True)
     t = time.time()
     result = subprocess.run(
-        ["ffmpeg", "-v", "warning", "-stats", "-threads", "0"] + [str(a) for a in args],
+        ["ffmpeg", "-v", "warning", "-nostats", "-threads", "0"] + [str(a) for a in args],
         capture_output=True, text=True, timeout=300,
     )
     elapsed = time.time() - t
@@ -3915,7 +3930,20 @@ def run_ffmpeg(args):
     return result
 
 
-def normalize_source_video(source_path, work_dir):
+def analyze_source_video(source_path):
+    """Analyze source video and return metadata + scale/crop filter for the main render.
+
+    Instead of re-encoding the entire source into a normalized intermediate,
+    this returns the FFmpeg filter string that each segment's v_chain should
+    prepend to fold scale/crop/fps conversion into the single render pass.
+    Saves an entire encode/decode cycle (3-10s depending on source length).
+
+    Returns dict with keys:
+        source_path: str — unchanged original path
+        width: int, height: int — original dimensions
+        fps: float — original fps
+        normalize_vf: str or None — filter to prepend (None if already 1080x1920@30fps)
+    """
     result = subprocess.run(
         ["ffprobe","-v","quiet","-print_format","json","-show_streams","-show_format",source_path],
         capture_output=True, text=True
@@ -3923,14 +3951,13 @@ def normalize_source_video(source_path, work_dir):
     info = json.loads(result.stdout or "{}")
     streams = info.get("streams") or []
     video = next((s for s in streams if s.get("codec_type") == "video"), None)
-    audio = next((s for s in streams if s.get("codec_type") == "audio"), None)
     if not video:
         raise RuntimeError("No video stream found in source")
 
     w = int(video.get("width") or 0)
     h = int(video.get("height") or 0)
     if w > h:
-        print(f"[normalize] Landscape input ({w}x{h}) — will center-crop to 9:16", flush=True)
+        print(f"[analyze] Landscape input ({w}x{h}) — will center-crop to 9:16 in render", flush=True)
 
     fps_str = video.get("avg_frame_rate") or video.get("r_frame_rate") or "30/1"
     try:
@@ -3947,52 +3974,60 @@ def normalize_source_video(source_path, work_dir):
         r_fps = fps
 
     is_vfr = abs(fps - r_fps) > 0.5
-    needs_normalize = (w != 1080 or h != 1920 or abs(fps - 30) > 1 or is_vfr)
+    needs_scale_crop = (w != 1080 or h != 1920)
 
-    if not needs_normalize:
-        print(f"[normalize] Source is already {w}x{h} @ {fps:.2f}fps — skipping", flush=True)
-        return source_path
+    if not needs_scale_crop:
+        # fps/VFR conversion is handled by fps=30 filter in render v_chain — no normalize_vf needed
+        if abs(fps - 30) > 1 or is_vfr:
+            print(f"[analyze] Source {w}x{h} @ {fps:.2f}fps (VFR={is_vfr}) — fps=30 filter handles it", flush=True)
+        else:
+            print(f"[analyze] Source is already {w}x{h} @ {fps:.2f}fps — no normalize needed", flush=True)
+        return {"source_path": source_path, "width": w, "height": h, "fps": fps, "normalize_vf": None,
+                "crop_x": 0, "crop_y": 0, "crop_w": 1080, "crop_h": 1920}
 
-    normalized_path = os.path.join(work_dir, "normalized_source.mp4")
-    print(f"[normalize] Converting {w}x{h} @ {fps:.2f}fps to 1080x1920 @ 30fps", flush=True)
+    print(f"[analyze] Source {w}x{h} @ {fps:.2f}fps — will normalize in render pass", flush=True)
 
-    # Dense face detection for continuous auto-reframe (every 5th frame ≈ 6fps)
-    source_duration = probe_duration(source_path) or 0.0
-    raw_faces = detect_face_positions_dense(source_path, every_n_frames=5)
-    smoothed_faces = smooth_face_trajectory(raw_faces, total_duration=source_duration) if raw_faces else []
-
-    # Try dynamic crop first, fall back to static average if expression too long
-    dynamic_crop = build_dynamic_crop_expr(smoothed_faces, w, h) if smoothed_faces else None
+    # Build the scale/crop filter that will be prepended to each segment's v_chain.
+    # Also store transform params so face positions can be mapped to 1080x1920 space.
+    #
+    # Two coordinate systems:
+    #   - "raw": the original source frame pixels
+    #   - "output": 1080x1920 after normalize_vf
+    #
+    # For reframe (face-aware crop): crop in raw space, then scale to 1080x1920
+    #   → transform: new_cx = (raw_cx - crop_x) * (1080 / crop_w)
+    #
+    # For center crop (scale first, then crop): scale to fit, crop center
+    #   → transform: new_cx = raw_cx * scale - crop_offset_in_scaled_space
 
     normalize_vf = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1"
-    if dynamic_crop:
-        crop_w, crop_h, x_expr, y_expr = dynamic_crop
-        # FFmpeg has a ~65KB expression limit — fall back to static if too long
-        if len(x_expr) + len(y_expr) < 60000:
-            normalize_vf = f"crop={crop_w}:{crop_h}:{x_expr}:{y_expr},scale=1080:1920,setsar=1"
-            print(
-                f"[reframe] Dynamic auto-reframe active: {crop_w}x{crop_h}, "
-                f"{len(smoothed_faces)} face samples",
-                flush=True,
-            )
-        else:
-            # Expression too long — use static average
-            reframe_crops = calculate_reframe_crop(smoothed_faces, w, h)
-            if reframe_crops:
-                avg_crops = [c for c in reframe_crops if c.get("found")] or reframe_crops
-                avg_x = int(sum(c["crop_x"] for c in avg_crops) / len(avg_crops))
-                avg_y = int(sum(c["crop_y"] for c in avg_crops) / len(avg_crops))
-                normalize_vf = f"crop={crop_w}:{crop_h}:{avg_x}:{avg_y},scale=1080:1920,setsar=1"
-                print(
-                    f"[reframe] Expression too long ({len(x_expr)+len(y_expr)} chars) — "
-                    f"using static average crop",
-                    flush=True,
-                )
-    elif w != 1080 or h != 1920:
-        # No face data — fall back to sparse detection
-        sample_timestamps = [round(i * 4.0, 3) for i in range(int(source_duration / 4.0) + 1)] if source_duration > 0 else []
-        face_positions = detect_face_positions(source_path, sample_timestamps) if sample_timestamps else []
-        reframe_crops = calculate_reframe_crop(face_positions, w, h)
+    # Default transform: identity (raw == output)
+    _face_transform = {"mode": "identity"}
+
+    if w != 1080 or h != 1920:
+        # Compute what "force_original_aspect_ratio=increase" does:
+        # Scale so the SMALLER dimension fills the target → then crop the overflow
+        scale_x = 1080.0 / w
+        scale_y = 1920.0 / h
+        scale = max(scale_x, scale_y)  # increase = use the larger scale factor
+        scaled_w = round(w * scale)
+        scaled_h = round(h * scale)
+        # Default center crop offset (in post-scale space)
+        _center_crop_x = (scaled_w - 1080) // 2
+        _center_crop_y = (scaled_h - 1920) // 2
+
+        # Default transform for center-crop path
+        _face_transform = {
+            "mode": "scale_then_crop",
+            "scale": scale,
+            "crop_x": _center_crop_x,
+            "crop_y": _center_crop_y,
+        }
+
+        source_duration = probe_duration(source_path) or 0.0
+        _sample_ts = [round(source_duration * f, 3) for f in (0.2, 0.5, 0.8)] if source_duration > 1 else []
+        _sparse_faces = detect_face_positions(source_path, _sample_ts) if _sample_ts else []
+        reframe_crops = calculate_reframe_crop(_sparse_faces, w, h)
         if reframe_crops:
             avg_crops = [c for c in reframe_crops if c.get("found")] or reframe_crops
             avg_x = int(sum(c["crop_x"] for c in avg_crops) / len(avg_crops))
@@ -4000,37 +4035,20 @@ def normalize_source_video(source_path, work_dir):
             crop_w = int(reframe_crops[0]["crop_w"])
             crop_h = int(reframe_crops[0]["crop_h"])
             normalize_vf = f"crop={crop_w}:{crop_h}:{avg_x}:{avg_y},scale=1080:1920,setsar=1"
-            print(
-                f"[reframe] Static reframe fallback: crop={crop_w}x{crop_h}@({avg_x},{avg_y})",
-                flush=True,
-            )
+            _face_transform = {
+                "mode": "crop_then_scale",
+                "crop_x": avg_x, "crop_y": avg_y,
+                "crop_w": crop_w, "crop_h": crop_h,
+            }
+            print(f"[reframe] Static reframe: crop={crop_w}x{crop_h}@({avg_x},{avg_y})", flush=True)
         else:
-            print("[reframe] Source is native 9:16 — using center crop", flush=True)
-    else:
-        print("[reframe] Source is native 9:16 — using center crop", flush=True)
+            print("[reframe] No face found — using center crop", flush=True)
 
-    # Use lossless encoding for the normalize intermediate — it's re-encoded
-    # by the main render pass anyway. Faster than "high" with no quality loss.
-    normalize_args = [
-        "-y","-i",source_path,
-        "-vf", normalize_vf,
-        "-r","30","-vsync","cfr","-pix_fmt","yuv420p",
-    ] + get_encode_args("lossless") + [
-        "-c:a","aac","-b:a","192k","-ar","48000","-ac","2",
-        "-map","0:v:0",
-    ]
-    if audio:
-        normalize_args += ["-map","0:a:0"]
-    normalize_args.append(normalized_path)
-    run_ffmpeg(normalize_args)
-
-    try:
-        os.unlink(source_path)
-    except Exception:
-        pass
-    os.rename(normalized_path, source_path)
-    print("[normalize] Done", flush=True)
-    return source_path
+    return {
+        "source_path": source_path, "width": w, "height": h, "fps": fps,
+        "normalize_vf": normalize_vf,
+        "face_transform": _face_transform,
+    }
 
 
 def create_keyframed_source(source_path, keyframe_timestamps, work_dir):
@@ -5918,14 +5936,35 @@ def render_remotion_overlay(
     t0 = time.time()
 
     # Use multiple concurrent browser tabs to render frames in parallel
-    _concurrency = min(8, max(2, (os.cpu_count() or 4) // 2))
+    # Each Chrome tab needs ~1 CPU core — use 75% of available cores for rendering
+    _concurrency = min(12, max(2, int((os.cpu_count() or 16) * 0.75)))
+
+    # Try GPU-accelerated Chrome first (angle-egl), fall back to SwiftShader (CPU)
+    _gl_mode = "angle-egl" if _HAS_NVENC else "swiftshader"
+    _render_cmd = [
+        "node", render_cli, "--input", input_json_path, "--output", output_mov_path,
+        "--concurrency", str(_concurrency), "--gl", _gl_mode,
+    ]
+    print(f"[remotion] Chrome GL: {_gl_mode}, concurrency: {_concurrency}", flush=True)
     result = subprocess.run(
-        ["node", render_cli, "--input", input_json_path, "--output", output_mov_path,
-         "--concurrency", str(_concurrency)],
+        _render_cmd,
         capture_output=True, text=True,
         timeout=180,
         cwd=remotion_dir,
     )
+
+    # If GPU GL failed, retry with SwiftShader
+    if result.returncode != 0 and _gl_mode == "angle-egl":
+        _stderr_check = (result.stderr or "").lower()
+        if "gl" in _stderr_check or "gpu" in _stderr_check or "egl" in _stderr_check or "angle" in _stderr_check:
+            print("[remotion] GPU GL failed — retrying with SwiftShader (CPU)...", flush=True)
+            _render_cmd[-1] = "swiftshader"
+            result = subprocess.run(
+                _render_cmd,
+                capture_output=True, text=True,
+                timeout=180,
+                cwd=remotion_dir,
+            )
 
     # Print Remotion stdout (progress + timing info)
     if result.stdout:
@@ -7231,6 +7270,7 @@ def mix_sfx_after_speed_curve(output_path, edit_plan, cuts, effective_durations,
 def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, work_dir, speech_segments=None,
                       broll_clips=None, broll_fetch_futures=None):
     speed_curve = edit_plan.get("_parsed_speed_curve")
+    _normalize_vf = edit_plan.get("_normalize_vf")  # scale/crop filter (None if native 1080x1920)
     # Adaptive transition duration based on Gemini pacing assessment
     TRANSITION_DURATION = get_transition_duration(edit_plan.get("pacing"))
     print(f"[render] transition_duration={TRANSITION_DURATION:.2f}s (pacing={edit_plan.get('pacing')})", flush=True)
@@ -7326,10 +7366,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     edit_plan["_render_cuts"] = render_cuts
     edit_plan["_render_effective_durations"] = effective_durations
 
-    # ── Launch Remotion overlay rendering in parallel ────────────────────────
-    # Remotion renders captions + visual effects as a transparent overlay
-    # while we build FFmpeg filters. This saves 5-10s of render time.
-    _overlay_future = None
+    # ── Generate caption PNGs (replaces Remotion Chrome rendering) ───────────
+    # All 30+ style presets are cached in caption_renderer.py as Python dicts.
+    # Pillow renders ~60-80 PNGs in <0.5s vs 40-130s in Chrome.
+    _caption_pngs = []
     caption_style = str(edit_plan.get("caption_style") or "none").lower()
     _all_caption_styles = {"captions_dynamic", "captions_clean", "word_pop", "hormozi",
                            "keyword_pop", "dynamic", "clean", "impact", "capcut",
@@ -7350,7 +7390,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             transition_duration=TRANSITION_DURATION,
         )
         if _projected_words:
-            # Clean curly braces (ASS override chars)
+            # Clean curly braces
             for _wd in _projected_words:
                 for _k in ("word", "punctuated_word"):
                     if _k in _wd and ("{" in str(_wd[_k]) or "}" in str(_wd[_k])):
@@ -7367,38 +7407,30 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                     _deduped.append(_projected_words[_wi])
                 _projected_words = _deduped
 
-    # Always launch Remotion — even without captions, we render visual effects
-    _total_dur = sum(effective_durations)
     _cap_kw = edit_plan.get("caption_keywords") or []
-    _vibe = str(edit_plan.get("_user_vibe") or edit_plan.get("notes") or "")
 
-    # Build cut info with effective durations for Remotion effect timing
-    _cuts_for_remotion = []
-    for _ci, _rc in enumerate(render_cuts):
-        _rc_copy = dict(_rc)
-        _rc_copy["_effective_duration"] = effective_durations[_ci] if _ci < len(effective_durations) else 0
-        _cuts_for_remotion.append(_rc_copy)
-
-    # Get emphasis moments from edit plan (projected to output timeline)
-    _emphasis_moments = edit_plan.get("emphasis_moments") or []
-
-    def _do_overlay_render():
-        """Render full overlay (captions + effects) in background thread."""
-        return render_remotion_overlay(
-            _projected_words, caption_style,
-            {"width": 1080, "height": 1920},
-            _cap_kw, work_dir,
-            total_duration=_total_dur, fps=30,
-            cuts=_cuts_for_remotion,
-            emphasis_moments=_emphasis_moments,
-            vibe=_vibe,
+    _caption_video = None  # single transparent overlay video (replaces 80 individual PNGs)
+    if _projected_words and caption_style in _all_caption_styles:
+        from caption_renderer import generate_caption_pngs, compile_caption_video
+        _caption_pngs = generate_caption_pngs(
+            _projected_words, caption_style, _cap_kw, work_dir,
+            width=1080, height=1920,
         )
+        # Compile PNGs into a single transparent video — replaces 80 overlay filters with 1
+        if _caption_pngs:
+            _total_render_dur = sum(effective_durations)
+            _cap_result = compile_caption_video(
+                _caption_pngs, _total_render_dur, work_dir,
+                fps=30, width=1080, height=1920,
+            )
+            if _cap_result["type"] == "video":
+                _caption_video = _cap_result["path"]
+                _caption_pngs = []  # don't use individual PNGs
+            # else: fall back to individual PNG overlays
+    else:
+        print(f"[captions] No captions (style={caption_style}, words={len(_projected_words)})", flush=True)
 
-    _overlay_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    _overlay_future = _overlay_pool.submit(_do_overlay_render)
-    _n_pw = len(_projected_words)
-    print(f"[remotion] Background overlay render started: {caption_style} ({_n_pw} words), "
-          f"{len(_emphasis_moments)} emphasis, vibe=\"{_vibe[:50]}\"", flush=True)
+    _emphasis_moments = edit_plan.get("emphasis_moments") or []
 
     for i, cut in enumerate(render_cuts):
         src_dur = round((float(cut["source_end"]) - float(cut["source_start"])) * 1000) / 1000
@@ -7735,17 +7767,18 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             outro_filter = f"fade=t=out:st={fade_start:.3f}:d=1.0:color={fade_color}"
 
         # Video: each segment has its own pre-seeked input (no trim needed)
+        # Scale/crop filter folded in from normalize — eliminates separate encode pass
         # fps=30 AFTER speed change to avoid frame count drift at clip boundaries
-        v_chain = [
-            "setpts=PTS-STARTPTS",
-        ]
+        v_chain = []
+        if _normalize_vf:
+            v_chain.append(_normalize_vf)
+        v_chain.append("setpts=PTS-STARTPTS")
 
         if setpts_val:
             v_chain.append(f"setpts={setpts_val}")
         v_chain.append("fps=30")
         if zoom_filter:
             v_chain.append(zoom_filter)
-        v_chain.append("format=yuv420p")
         # Per-clip camera tint (multi-camera color variation)
         if cam_preset and cam_preset.get("tint"):
             v_chain.append(cam_preset["tint"])
@@ -7782,6 +7815,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         if outro_filter:
             v_chain.append(outro_filter)
 
+        # format=yuv420p LAST — after all color grading for maximum fidelity
+        v_chain.append("format=yuv420p")
         video_filters.append(f"[{i}:v]{','.join(v_chain)}[v{i}]")
 
         # Audio: each segment has its own pre-seeked input (no atrim needed)
@@ -8133,7 +8168,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _zoom_pulses.append(
                 f"scale=w='trunc(iw*(1.0+{_zp_amt}*{_zp_env})/2)*2'"
                 f":h='trunc(ih*(1.0+{_zp_amt}*{_zp_env})/2)*2'"
-                f":eval=frame:flags=fast_bilinear,"
+                f":eval=frame:flags=bicubic,"
                 f"crop=1080:1920:(iw-1080)/2:(ih-1920)/2"
             )
         if _zoom_pulses:
@@ -8171,7 +8206,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _sh_dy = f"5*sin(t*251)*{_sh_env}*{_sh_gate}"
             _shake_filters.append(
                 f"crop=w=1064:h=1904:x='8+{_sh_dx}':y='8+{_sh_dy}',"
-                f"scale=1080:1920:flags=fast_bilinear"
+                f"scale=1080:1920:flags=bicubic"
             )
         if _shake_filters:
             for _si, _sf in enumerate(_shake_filters):
@@ -8184,16 +8219,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # incompatible with FFmpeg 8.x). Vignette handles edge emphasis instead.
     depth_mask_path = None
 
-    # ── Collect overlay from parallel Remotion render ─────────────────────────
-    # The Remotion render (captions + visual effects) was launched in a background
-    # thread early in this function. Now we wait for the result before building
-    # the FFmpeg command. No fallbacks — Remotion must succeed.
-    caption_overlay_path = None
-    ass_path = None
-    if _overlay_future is not None:
-        caption_overlay_path = _overlay_future.result(timeout=200)
-        _overlay_pool.shutdown(wait=False)
-        print(f"[remotion] Overlay ready: {caption_overlay_path}", flush=True)
+    # Caption PNGs were already rendered above (instant, no Chrome needed)
 
     text_overlays = edit_plan.get("text_overlays") or []
     if text_overlays:
@@ -8473,16 +8499,36 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             if _broll_overlay_idx > 0:
                 print(f"[broll] Integrated {_broll_overlay_idx} B-roll clip(s) into first pass", flush=True)
 
-    # Caption overlay compositing (Remotion ProRes 4444 with alpha)
-    # Must come AFTER broll overlays in filter chain (captions on top of B-roll)
+    # Caption overlay — single transparent video OR individual PNGs (fallback)
+    # Must come AFTER broll overlays (captions on top of B-roll)
     caption_input_args = []
     caption_filter_strs = []
-    if caption_overlay_path:
-        _cap_idx = n_segment_inputs + len(sfx_input_args) // 2 + _n_broll_inputs
-        caption_input_args = ["-i", caption_overlay_path]
-        caption_filter_strs.append(f"{video_out}[{_cap_idx}:v]overlay=format=auto:eof_action=pass[video_captioned]")
-        video_out = "[video_captioned]"
-        print(f"[render] Remotion caption overlay at input index {_cap_idx}", flush=True)
+    if _caption_video:
+        # Single transparent WebM overlay — ONE overlay filter instead of 60-80
+        _cap_vid_idx = n_segment_inputs + len(sfx_input_args) // 2 + _n_broll_inputs
+        caption_input_args.extend(["-i", _caption_video])
+        _prev_out = video_out
+        _cap_label = "[cap_vid]"
+        caption_filter_strs.append(
+            f"{_prev_out}[{_cap_vid_idx}:v]overlay=format=auto:shortest=1{_cap_label}"
+        )
+        video_out = _cap_label
+        print(f"[render] Single caption overlay video (1 overlay filter)", flush=True)
+    elif _caption_pngs:
+        # Fallback: individual PNG overlays (if video compilation failed)
+        _base_cap_idx = n_segment_inputs + len(sfx_input_args) // 2 + _n_broll_inputs
+        for _ci, _cpng in enumerate(_caption_pngs):
+            _cap_input_idx = _base_cap_idx + _ci
+            caption_input_args.extend(["-i", _cpng["path"]])
+            _prev_out = video_out
+            _cap_label = f"[cap_{_ci}]"
+            caption_filter_strs.append(
+                f"{_prev_out}[{_cap_input_idx}:v]overlay=format=auto:"
+                f"enable='between(t,{_cpng['start']:.3f},{_cpng['end']:.3f})'"
+                f"{_cap_label}"
+            )
+            video_out = _cap_label
+        print(f"[render] {len(_caption_pngs)} caption PNG overlays (fallback)", flush=True)
 
     # Order matters: post_filters (zoom pulses etc) → broll → captions
     filter_complex = ";".join(video_filters + audio_filters + transition_filters + sfx_filter_strs + post_filters + broll_filter_strs + caption_filter_strs)
@@ -8494,19 +8540,23 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     print(f"[DIAG] filter_complex (last 1000): {filter_complex[-1000:]}", flush=True)
     encode_args = get_encode_args("high") + [
         "-pix_fmt","yuv420p",
-        "-c:a","aac","-b:a","128k",
+        "-c:a","aac","-b:a","192k",
         "-movflags","+faststart",
-        "-max_muxing_queue_size","1024",
+        "-max_muxing_queue_size","4096",
         "-shortest",  # stop when video ends — audio pad may overshoot due to xfade timing
     ]
 
+    # Maximize parallelism: all 16 CPU cores for filter graph + decoding
+    _n_threads = os.cpu_count() or 16
     args = (
         ["-y"]
         + input_args
         + sfx_input_args
         + broll_input_args
         + caption_input_args
-        + ["-filter_complex", filter_complex, "-map", video_out, "-map", audio_out]
+        + ["-filter_complex_threads", str(_n_threads),
+           "-filter_complex", filter_complex, "-map", video_out, "-map", audio_out]
+        + ["-threads", str(_n_threads)]
         + encode_args
         + [output_path]
     )
@@ -8558,21 +8608,22 @@ def classify_error(e):
 
 def send_progress(job_id, step, pct, message, app_url):
     """
-    POST progress update to the JS server. Non-fatal — never raises.
-    step: short machine key e.g. 'download', 'analysis', 'render'
-    pct:  integer 0-100
-    message: human-readable string shown to the user
+    POST progress update to the JS server. Fire-and-forget in background thread.
+    Never blocks the main pipeline — progress updates are best-effort only.
     """
     if not app_url:
         return
-    try:
-        requests.post(
-            f"{app_url}/api/modal-progress",
-            json={"job_id": job_id, "step": step, "pct": pct, "message": message},
-            timeout=3,
-        )
-    except Exception:
-        pass  # progress updates are best-effort only
+    import threading
+    def _fire():
+        try:
+            requests.post(
+                f"{app_url}/api/modal-progress",
+                json={"job_id": job_id, "step": step, "pct": pct, "message": message},
+                timeout=3,
+            )
+        except Exception:
+            pass
+    threading.Thread(target=_fire, daemon=True).start()
 
 
 def handler(job):
@@ -8615,10 +8666,13 @@ def handler(job):
         _timings["download"] = time.time() - t
         print(f"[pipeline] download complete: {size_mb:.1f}MB in {_timings['download']:.1f}s", flush=True)
 
-        # Step 2 — ALL initialization in parallel (normalize overlaps with everything)
+        # Step 2 — ALL initialization in ONE mega-parallel phase
+        # Normalize, transcribe, Gemini upload, loudness, beats, edit recipe, face detect
+        # all run concurrently. Edit recipe starts as soon as transcript + upload finish
+        # (doesn't wait for normalize). Face detect starts when normalize finishes.
         send_progress(job_id, "normalize", 12, "Getting everything set up...", app_url)
         t = time.time()
-        print("[pipeline] step=normalize + transcribe + gemini_upload + loudness + beats (ALL parallel)", flush=True)
+        print("[pipeline] step=mega-parallel (normalize + transcribe + upload + edit + faces)", flush=True)
 
         # Quick probe of raw source for duration (needed for face detect timestamps)
         _raw_probe = subprocess.run(
@@ -8638,10 +8692,10 @@ def handler(job):
         # All 5 operations run in parallel — Deepgram, Gemini upload, loudness,
         # and beats all read from the RAW source (audio is identical pre/post normalize).
         # Unix file semantics keep the raw file accessible even after normalize unlinks it.
-        _raw_source = source_path  # save raw path — normalize will overwrite source_path
+        _raw_source = source_path  # raw path — analyze_source_video reads but doesn't modify
 
         def _do_normalize():
-            return normalize_source_video(_raw_source, work_dir)
+            return analyze_source_video(_raw_source)
 
         def _do_transcribe():
             audio_path = os.path.join(work_dir, "audio_for_words.wav")
@@ -8663,32 +8717,11 @@ def handler(job):
 
         def _do_gemini_upload():
             try:
-                proxy_path = os.path.join(work_dir, "gemini_proxy.mp4")
-                print("[pipeline] Creating 240p proxy for Gemini upload...", flush=True)
-                _proxy_t = time.time()
-                _proxy_result = subprocess.run(
-                    ["ffmpeg", "-threads", "0", "-y", "-i", _raw_source,
-                     "-vf", "scale=240:426:force_original_aspect_ratio=decrease",
-                     "-c:v", "libx264", "-preset", "ultrafast", "-crf", "32",
-                     "-c:a", "aac", "-b:a", "32k", "-ar", "16000", "-ac", "1",
-                     "-r", "2",
-                     proxy_path],
-                    capture_output=True, text=True, timeout=30,
-                )
-                if _proxy_result.returncode == 0 and os.path.exists(proxy_path):
-                    _proxy_size = os.path.getsize(proxy_path) / (1024 * 1024)
-                    print(f"[pipeline] Proxy created: {_proxy_size:.1f}MB in {time.time()-_proxy_t:.1f}s", flush=True)
-                    upload_path = proxy_path
-                else:
-                    print(f"[pipeline] Proxy creation failed — uploading full-res", flush=True)
-                    upload_path = _raw_source
-                gf = genai.upload_file(upload_path)
-                print(f"[pipeline] Gemini upload started: {gf.name}", flush=True)
-                if upload_path == proxy_path and os.path.exists(proxy_path):
-                    try:
-                        os.unlink(proxy_path)
-                    except Exception:
-                        pass
+                # Upload raw source directly — eliminates 240p proxy encode pass (~2-3s)
+                # Modal's network is fast enough that upload time < encode time
+                _upload_t = time.time()
+                gf = genai.upload_file(_raw_source)
+                print(f"[pipeline] Gemini upload started: {gf.name} ({time.time()-_upload_t:.1f}s)", flush=True)
                 return gf
             except Exception as e:
                 print(f"[pipeline] Gemini pre-upload failed: {e} — will upload inline", flush=True)
@@ -8704,92 +8737,156 @@ def handler(job):
                 print(f"[pipeline] Beat detection failed (non-fatal): {_be}", flush=True)
                 return []
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as early_pool:
-            future_normalize = early_pool.submit(_do_normalize)
-            future_transcribe = early_pool.submit(_do_transcribe)
-            future_gemini_upload = early_pool.submit(_do_gemini_upload)
-            future_loudness = early_pool.submit(_do_loudness)
-            future_beats = early_pool.submit(_do_beats)
-            source_path = future_normalize.result()
-            transcript = future_transcribe.result()
-            gemini_file_ref = future_gemini_upload.result()
-            source_loudness = future_loudness.result()
-            source_beats = future_beats.result()
+        # ── ALL initialization + Gemini edit in ONE parallel phase ────────────
+        # Gemini starts as soon as transcript + upload + trend context are ready.
+        # Everything runs concurrently — no sequential network calls on main thread.
 
-        # Probe normalized source for resolution verification
-        source_res = {"width": 1080, "height": 1920}
-        _probe = subprocess.run(
-            ["ffprobe", "-v", "quiet", "-show_streams", "-show_format", "-print_format", "json", source_path],
-            capture_output=True, text=True, timeout=10)
-        _probe_data = json.loads(_probe.stdout or "{}")
-        print(f"[DIAG] Source probe: {_probe.stdout[:1500]}", flush=True)
-        for _s in (_probe_data.get("streams") or []):
-            if _s.get("codec_type") == "video":
-                source_res = {"width": int(_s.get("width") or 1080), "height": int(_s.get("height") or 1920)}
-                if _s.get("duration"):
-                    source_duration = float(_s["duration"])
+        # Shared futures — edit recipe and face detect wait on their deps internally
+        future_normalize = None
+        future_transcribe = None
+        future_gemini_upload = None
+        future_trend = None  # trend context fetched in parallel
 
-        _timings["normalize_transcribe_upload"] = time.time() - t
-        _dg_words = transcript.get("words", [])
-        if len(_dg_words) == 0:
-            raise RuntimeError("Deepgram transcription failed — 0 words returned. Cannot proceed without word timestamps.")
-        print(f"[pipeline] Deepgram: {len(_dg_words)} words ({_timings['normalize_transcribe_upload']:.1f}s parallel)", flush=True)
+        def _do_trend_context():
+            tc = get_trend_context()
+            if not tc:
+                print("[trend] WARNING: Style guide not available — Gemini will edit without reference video patterns", flush=True)
+            return tc
 
-        print(f"[edit] User vibe: \"{vibe}\"", flush=True)
-
-        send_progress(job_id, "analysis", 20, "Watching your footage...", app_url)
-        send_progress(job_id, "edit_recipe", 52, "Putting your edit together...", app_url)
-        print("[pipeline] step=edit_recipe + face_detect (parallel)", flush=True)
-        t = time.time()
-        trend_context = get_trend_context()
-        if not trend_context:
-            print("[trend] WARNING: Style guide not available — Gemini will edit without reference video patterns", flush=True)
-
-        def _do_edit_recipe():
+        def _do_edit_recipe_overlapped():
+            """Start Gemini as soon as transcript + upload + trend are ready."""
+            _transcript = future_transcribe.result()
+            _gemini_ref = future_gemini_upload.result()
+            _trend = future_trend.result()
+            _dg_words = _transcript.get("words", [])
+            if len(_dg_words) == 0:
+                raise RuntimeError("Deepgram transcription failed — 0 words returned.")
+            send_progress(job_id, "edit_recipe", 52, "Putting your edit together...", app_url)
+            print(f"[pipeline] Gemini edit starting (transcript ready: {len(_dg_words)} words)", flush=True)
             return generate_edit_gemini(
-                video_path=source_path,
+                video_path=_raw_source,
                 vibe=vibe,
                 duration=source_duration,
-                trend_context=trend_context,
-                deepgram_words=transcript.get("words", []),
+                trend_context=_trend,
+                deepgram_words=_dg_words,
                 face_positions=None,
-                gemini_file=gemini_file_ref,
+                gemini_file=_gemini_ref,
             )
 
-        def _do_face_detect():
-            # Dense detection (every 5th frame = 6fps) for smooth trajectories
+        def _do_face_detect_overlapped():
+            """Run face detection on raw source (no longer waits for normalize)."""
+            send_progress(job_id, "analysis", 20, "Watching your footage...", app_url)
             try:
-                dense = detect_face_positions_dense(source_path, every_n_frames=5)
+                # every_n_frames=10 → 3fps detection on 30fps source (still smooth, 2x faster)
+                dense = detect_face_positions_dense(_raw_source, every_n_frames=10)
                 if dense:
                     smoothed = smooth_face_trajectory(dense, total_duration=source_duration)
                     print(f"[dense-face] Smoothed trajectory: {len(smoothed)} keyframes", flush=True)
                     return dense, smoothed
             except Exception as e:
                 print(f"[dense-face] Dense detection failed ({e}), falling back to sparse", flush=True)
-            # Fallback: sparse detection (old method)
-            sparse = detect_face_positions(source_path, sample_timestamps) if sample_timestamps else []
+            sparse = detect_face_positions(_raw_source, sample_timestamps) if sample_timestamps else []
             return sparse, []
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as recipe_pool:
-            future_edit = recipe_pool.submit(_do_edit_recipe)
-            future_faces = recipe_pool.submit(_do_face_detect)
-            edit_plan = future_edit.result()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as mega_pool:
+            future_normalize = mega_pool.submit(_do_normalize)
+            future_transcribe = mega_pool.submit(_do_transcribe)
+            future_gemini_upload = mega_pool.submit(_do_gemini_upload)
+            future_trend = mega_pool.submit(_do_trend_context)
+            future_loudness = mega_pool.submit(_do_loudness)
+            future_beats = mega_pool.submit(_do_beats)
+            # Edit recipe waits on transcript + upload internally
+            future_edit = mega_pool.submit(_do_edit_recipe_overlapped)
+            # Face detection runs directly on raw source (no normalize dependency)
+            future_faces = mega_pool.submit(_do_face_detect_overlapped)
+
+            # Collect results — get edit_plan FIRST so we can start B-roll fetch early
+            edit_plan = future_edit.result()  # critical path — longest wait (Gemini)
+
+            # Start B-roll fetch IMMEDIATELY while other futures may still be running
+            _broll_fetch_pool = None
+            _broll_fetch_futures = {}
+            broll_clips = edit_plan.get("broll_clips") or []
+            if broll_clips:
+                print(f"[broll] Starting parallel fetch of {len(broll_clips)} B-roll clip(s) (overlapping with face detect)...", flush=True)
+                _broll_fetch_pool = concurrent.futures.ThreadPoolExecutor(max_workers=3)
+                for _bi, _bc in enumerate(broll_clips):
+                    _fut = _broll_fetch_pool.submit(
+                        fetch_broll_clip,
+                        _bc["keyword"],
+                        float(_bc.get("duration") or 2.0),
+                        work_dir,
+                    )
+                    _broll_fetch_futures[_fut] = _bi
+
+            # Now collect remaining futures (may already be done)
+            source_info = future_normalize.result()
+            source_path = source_info["source_path"]
+            _normalize_vf = source_info.get("normalize_vf")
+            transcript = future_transcribe.result()
+            gemini_file_ref = future_gemini_upload.result()
+            source_loudness = future_loudness.result()
+            source_beats = future_beats.result()
             face_positions, dense_face_trajectory = future_faces.result()
 
-        reframe_crops = calculate_reframe_crop(face_positions, source_res.get("width") or 1080, source_res.get("height") or 1920)
-        if reframe_crops:
-            print(f"[reframe] Smart reframe active: {len(reframe_crops)} crop positions", flush=True)
+        # Source res is what it is — normalize filter will handle conversion in render
+        source_res = {"width": source_info["width"], "height": source_info["height"]}
+        print(f"[DIAG] Source: {source_res['width']}x{source_res['height']} @ {source_info['fps']:.1f}fps, normalize_vf={'yes' if _normalize_vf else 'no'}", flush=True)
+
+        # Transform face positions from raw source space → 1080x1920 space
+        # (Face detection ran on the raw source since we no longer pre-encode a normalized copy)
+        _ft = source_info.get("face_transform", {})
+        _ft_mode = _ft.get("mode", "identity")
+        if _ft_mode != "identity" and (face_positions or dense_face_trajectory):
+            if _ft_mode == "crop_then_scale":
+                # Reframe path: crop in raw space, then scale to 1080x1920
+                _cx_off = _ft["crop_x"]
+                _cy_off = _ft["crop_y"]
+                _sx = 1080.0 / _ft["crop_w"] if _ft["crop_w"] > 0 else 1.0
+                _sy = 1920.0 / _ft["crop_h"] if _ft["crop_h"] > 0 else 1.0
+                def _transform_face(fp):
+                    fp["cx"] = round((fp["cx"] - _cx_off) * _sx, 2)
+                    fp["cy"] = round((fp["cy"] - _cy_off) * _sy, 2)
+                    return fp
+            elif _ft_mode == "scale_then_crop":
+                # Center crop path: scale up first, then crop center
+                _scale = _ft["scale"]
+                _cx_off = _ft["crop_x"]  # offset in post-scale space
+                _cy_off = _ft["crop_y"]
+                def _transform_face(fp):
+                    fp["cx"] = round(fp["cx"] * _scale - _cx_off, 2)
+                    fp["cy"] = round(fp["cy"] * _scale - _cy_off, 2)
+                    return fp
+            else:
+                _transform_face = lambda fp: fp
+
+            face_positions = [_transform_face(dict(fp)) for fp in face_positions]
+            dense_face_trajectory = [_transform_face(dict(fp)) for fp in dense_face_trajectory]
+            print(f"[faces] Transformed {len(face_positions)} + {len(dense_face_trajectory)} trajectory points → 1080x1920 ({_ft_mode})", flush=True)
+
+        _timings["normalize_transcribe_upload"] = time.time() - t
+        _dg_words = transcript.get("words", [])
+        if len(_dg_words) == 0:
+            raise RuntimeError("Deepgram transcription failed — 0 words returned. Cannot proceed without word timestamps.")
+        print(f"[pipeline] All init complete: {len(_dg_words)} words, edit recipe + faces done ({_timings['normalize_transcribe_upload']:.1f}s)", flush=True)
+
+        print(f"[edit] User vibe: \"{vibe}\"", flush=True)
+
+        # Face positions are already transformed to 1080x1920 space (normalize_vf handles raw→output)
+        if _normalize_vf:
+            print(f"[reframe] Smart reframe active via normalize_vf (folded into render pass)", flush=True)
         else:
-            print("[reframe] Source is native 9:16 — using center crop", flush=True)
+            print("[reframe] Source is native 9:16 — no reframe needed", flush=True)
 
         edit_plan["_user_vibe"] = vibe
         edit_plan["_source_path"] = source_path
+        edit_plan["_normalize_vf"] = _normalize_vf  # scale/crop filter for render pass (None if native 1080x1920)
         edit_plan["_face_positions"] = face_positions
         edit_plan["_dense_face_trajectory"] = dense_face_trajectory
         edit_plan["_source_loudness"] = source_loudness
         edit_plan["_source_beats"] = source_beats
-        _timings["edit_recipe_faces"] = time.time() - t
-        print(f"[pipeline] edit recipe complete in {_timings['edit_recipe_faces']:.1f}s", flush=True)
+        _timings["edit_recipe_faces"] = 0  # folded into normalize_transcribe_upload
+        print(f"[pipeline] Pipeline init phase complete", flush=True)
 
         # ── Auto-hook detection: validate/override Gemini's hook_clip ─────
         try:
@@ -8851,23 +8948,7 @@ def handler(job):
             print(f"[hook-auto] Auto-hook detection failed ({_hook_err}) — keeping Gemini's choice", flush=True)
         analysis = edit_plan.get("analysis_data") or {}
 
-        # ── Start B-roll fetch NOW (parallel with Remotion + FFmpeg) ──────────
-        # B-roll keyword+duration is known from edit plan. Start downloading from
-        # Pexels immediately — clips download while Remotion renders and filters build.
-        _broll_fetch_pool = None
-        _broll_fetch_futures = {}
-        broll_clips = edit_plan.get("broll_clips") or []
-        if broll_clips:
-            print(f"[broll] Starting parallel fetch of {len(broll_clips)} B-roll clip(s) early...", flush=True)
-            _broll_fetch_pool = concurrent.futures.ThreadPoolExecutor(max_workers=3)
-            for _bi, _bc in enumerate(broll_clips):
-                _fut = _broll_fetch_pool.submit(
-                    fetch_broll_clip,
-                    _bc["keyword"],
-                    float(_bc.get("duration") or 2.0),
-                    work_dir,
-                )
-                _broll_fetch_futures[_fut] = _bi
+        # B-roll fetch already started inside mega-parallel phase (right after edit_plan ready)
 
         print("[pipeline] step=parallel_render", flush=True)
         send_progress(job_id, "render", 62, "Rendering — almost there...", app_url)
@@ -8886,9 +8967,9 @@ def handler(job):
         _enc_label = "NVENC" if _HAS_NVENC else "libx264/fast"
         print(f"[render] Encoding: {_enc_label} threads=auto", flush=True)
         speed_curve = edit_plan.get("_parsed_speed_curve")
-        if not validate_output(output_path, "render"):
-            raise RuntimeError("Main render produced invalid output")
-        # Single probe for both video and audio duration (avoid redundant ffprobe calls)
+        # Validate render output — single ffprobe for file check + duration extraction
+        if not os.path.exists(output_path) or os.path.getsize(output_path) < 100000:
+            raise RuntimeError(f"Main render produced invalid output: {output_path}")
         _rv, _ra = 0.0, 0.0
         try:
             _combined_probe = subprocess.run(
@@ -8900,20 +8981,15 @@ def handler(job):
                     _rv = float(_s["duration"])
                 elif _s.get("codec_type") == "audio" and _s.get("duration"):
                     _ra = float(_s["duration"])
-            print(f"[DIAG] After render: video={_rv:.3f}s audio={_ra:.3f}s diff={_rv - _ra:.4f}s", flush=True)
         except Exception:
             pass
+        if _rv < 1.0:
+            raise RuntimeError(f"Main render output too short: video={_rv:.1f}s")
+        print(f"[render] Output valid: {os.path.getsize(output_path)/1024/1024:.1f}MB, video={_rv:.1f}s audio={_ra:.1f}s", flush=True)
 
-        if speed_curve:
-            print("[pipeline] Speed curve applied in single-pass render — skipping post-process", flush=True)
-        else:
-            print("[pipeline] Speed curve skipped", flush=True)
-        # Use render's split cuts/durations for accurate timeline projection
-        # (render_multi_clip splits clips at speed boundaries — unsplit cuts give wrong timelines)
         cuts = edit_plan.get("_render_cuts") or edit_plan.get("cuts") or []
         effective_durations = edit_plan.get("_render_effective_durations") or compute_effective_durations(cuts, speed_curve)
-
-        final_dur = _rv or (probe_duration(output_path) or 0)
+        final_dur = _rv
 
         # B-roll is now integrated into the first FFmpeg pass (no second encode needed)
         _timings["broll"] = 0.0
