@@ -18,8 +18,7 @@ os.environ["SSL_CERT_FILE"] = certifi.where()
 os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
 
 HANDLER_VERSION = "3.0.0"
-GEMINI_MODEL = "gemini-2.5-pro"
-GEMINI_FLASH_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = "gemini-2.5-flash"
 
 print(f"[startup] Python {sys.version}", flush=True)
 print(f"[startup] handler version: {HANDLER_VERSION}", flush=True)
@@ -2224,55 +2223,44 @@ RULES FOR USING THESE TIMESTAMPS:
         gemini_file = genai.upload_file(video_path)
     else:
         print("[generate-edit] Using pre-uploaded Gemini file", flush=True)
-    deadline = time.time() + 180
+    deadline = time.time() + 60
     while gemini_file.state.name == "PROCESSING":
         if time.time() > deadline:
-            raise RuntimeError("Gemini file upload timed out after 180s")
-        time.sleep(0.5)
+            raise RuntimeError("Gemini file processing timed out after 60s")
+        time.sleep(0.3)
         gemini_file = genai.get_file(gemini_file.name)
     if gemini_file.state.name != "ACTIVE":
         raise RuntimeError(f"Gemini file upload failed: {gemini_file.state.name}")
     print(f"[generate-edit] Video active: {gemini_file.uri}", flush=True)
 
-    last_err = None
-    response = None
-    # Flash first — 3-5x faster response time, falls back to Pro on failure
-    for model_name in [GEMINI_FLASH_MODEL, GEMINI_MODEL]:
-        try:
-            print(f"[generate-edit] Calling Gemini model={model_name}...", flush=True)
-            t = time.time()
-            model = genai.GenerativeModel(model_name)
+    print(f"[generate-edit] Calling Gemini model={GEMINI_MODEL}...", flush=True)
+    t = time.time()
+    model = genai.GenerativeModel(GEMINI_MODEL)
+    response = model.generate_content(
+        [gemini_file, prompt],
+        generation_config=genai.GenerationConfig(
+            temperature=0.6,
+            max_output_tokens=16384,
+        ),
+        request_options={"timeout": 90},
+    )
+    candidates = getattr(response, "candidates", None) or []
+    if candidates:
+        finish_reason = getattr(candidates[0], "finish_reason", None)
+        if finish_reason == 2:
+            print("[generate-edit] WARNING: Gemini response truncated — retrying with higher token limit", flush=True)
             response = model.generate_content(
                 [gemini_file, prompt],
                 generation_config=genai.GenerationConfig(
                     temperature=0.6,
-                    max_output_tokens=16384,
+                    max_output_tokens=32768,
                 ),
-                request_options={"timeout": 300},
+                request_options={"timeout": 90},
             )
-            candidates = getattr(response, "candidates", None) or []
-            if candidates:
-                finish_reason = getattr(candidates[0], "finish_reason", None)
-                if finish_reason == 2:
-                    print("[generate-edit] WARNING: Gemini response truncated — retrying with higher token limit", flush=True)
-                    response = model.generate_content(
-                        [gemini_file, prompt],
-                        generation_config=genai.GenerationConfig(
-                            temperature=0.6,
-                            max_output_tokens=32768,
-                        ),
-                        request_options={"timeout": 300},
-                    )
-                    retry_candidates = getattr(response, "candidates", None) or []
-                    if retry_candidates and getattr(retry_candidates[0], "finish_reason", None) == 2:
-                        raise RuntimeError("Gemini response truncated even with 32768 max tokens")
-            print(f"[generate-edit] Gemini complete in {time.time()-t:.1f}s", flush=True)
-            break
-        except Exception as e:
-            last_err = e
-            print(f"[generate-edit] Gemini model {model_name} failed: {e}", flush=True)
-    if response is None:
-        raise RuntimeError(f"Gemini edit generation failed: {last_err}")
+            retry_candidates = getattr(response, "candidates", None) or []
+            if retry_candidates and getattr(retry_candidates[0], "finish_reason", None) == 2:
+                raise RuntimeError("Gemini response truncated even with 32768 max tokens")
+    print(f"[generate-edit] Gemini complete in {time.time()-t:.1f}s", flush=True)
 
     response_text = str(getattr(response, "text", "") or "").strip()
     try:
@@ -8717,11 +8705,26 @@ def handler(job):
 
         def _do_gemini_upload():
             try:
-                # Upload raw source directly — eliminates 240p proxy encode pass (~2-3s)
-                # Modal's network is fast enough that upload time < encode time
+                # Encode a tiny 360p proxy for Gemini — raw upload triggers 10-30s server-side
+                # processing wait. 360p encodes in <1s and processes in <3s on Gemini side.
+                # Gemini only needs to see composition/content, not pixel quality.
                 _upload_t = time.time()
-                gf = genai.upload_file(_raw_source)
-                print(f"[pipeline] Gemini upload started: {gf.name} ({time.time()-_upload_t:.1f}s)", flush=True)
+                _proxy_path = os.path.join(work_dir, "gemini_proxy.mp4")
+                _proxy_cmd = subprocess.run(
+                    ["ffmpeg", "-y", "-threads", "4", "-i", _raw_source,
+                     "-vf", "scale=360:-2", "-c:v", "libx264", "-preset", "ultrafast",
+                     "-crf", "32", "-c:a", "aac", "-b:a", "48k", "-ac", "1",
+                     "-movflags", "+faststart", _proxy_path],
+                    capture_output=True, text=True, timeout=15,
+                )
+                if _proxy_cmd.returncode == 0 and os.path.exists(_proxy_path):
+                    _proxy_mb = os.path.getsize(_proxy_path) / (1024 * 1024)
+                    print(f"[pipeline] Gemini proxy: 360p {_proxy_mb:.1f}MB in {time.time()-_upload_t:.1f}s", flush=True)
+                    gf = genai.upload_file(_proxy_path)
+                else:
+                    print(f"[pipeline] Proxy encode failed, uploading raw", flush=True)
+                    gf = genai.upload_file(_raw_source)
+                print(f"[pipeline] Gemini upload done: {gf.name} ({time.time()-_upload_t:.1f}s)", flush=True)
                 return gf
             except Exception as e:
                 print(f"[pipeline] Gemini pre-upload failed: {e} — will upload inline", flush=True)
@@ -8777,8 +8780,9 @@ def handler(job):
             """Run face detection on raw source (no longer waits for normalize)."""
             send_progress(job_id, "analysis", 20, "Watching your footage...", app_url)
             try:
-                # every_n_frames=10 → 3fps detection on 30fps source (still smooth, 2x faster)
-                dense = detect_face_positions_dense(_raw_source, every_n_frames=10)
+                # every_n_frames=15 → 2fps detection on 30fps source — smooth enough for zoom
+                # tracking, saves ~3s on a 30s video vs every_n_frames=10
+                dense = detect_face_positions_dense(_raw_source, every_n_frames=15)
                 if dense:
                     smoothed = smooth_face_trajectory(dense, total_duration=source_duration)
                     print(f"[dense-face] Smoothed trajectory: {len(smoothed)} keyframes", flush=True)
