@@ -93,19 +93,19 @@ export const CaptionPage: React.FC<{
   const opacity = fadeIn * fadeOut;
   if (opacity <= 0) return null;
 
-  // ── Page entrance ──────────────────────────────────────────────────────
+  // ── Page entrance (punchy spring with visible overshoot) ───────────────
   const pageAge = Math.max(0, frame - Math.round(pageStart * fps));
   const entranceSpring = spring({
     frame: pageAge,
     fps,
-    config: { damping: 14, stiffness: 170, mass: 0.7 },
+    config: { damping: 9, stiffness: 220, mass: 0.6 },
   });
-  const pageScale = interpolate(entranceSpring, [0, 1], [0.88, 1]);
-  const pageTranslateY = interpolate(entranceSpring, [0, 1], [12, 0]);
+  const pageScale = interpolate(entranceSpring, [0, 1], [0.65, 1]);
+  const pageTranslateY = interpolate(entranceSpring, [0, 1], [20, 0]);
 
-  // ── Organic sway ──────────────────────────────────────────────────────
-  const swayX = noise2D("sx", frame * 0.006, 0) * 1.5;
-  const swayY = noise2D("sy", 0, frame * 0.006) * 1.2;
+  // ── Organic sway (subtle living motion) ──────────────────────────────
+  const swayX = noise2D("sx", frame * 0.008, 0) * 2.0;
+  const swayY = noise2D("sy", 0, frame * 0.008) * 1.5;
 
   const tokens = page.tokens;
   const tokenCount = tokens.length;
@@ -163,27 +163,28 @@ export const CaptionPage: React.FC<{
     const originalWord = findOriginalWord(token.fromMs, words);
     const speakerIdx = originalWord?.speaker ?? 0;
 
-    // ── Per-word scale animation ───────────────────────────────────────
+    // ── Per-word scale animation (bouncy spring with overshoot) ────────
     const wordActiveScale = isKeyword
-      ? Math.min(style.activeWordScale * 1.08, 1.22)
-      : Math.min(style.activeWordScale, 1.15);
+      ? Math.min(style.activeWordScale * 1.12, 1.3)
+      : Math.min(style.activeWordScale * 1.05, 1.2);
 
     let wordScale = 1;
 
     if (isActive) {
       const activeAge = Math.max(0, frame - Math.round(tokenStart * fps));
+      // Low damping = visible overshoot bounce, feels alive
       const activeSpring = spring({
         frame: activeAge,
         fps,
-        config: { damping: 10, stiffness: 200, mass: 0.5 },
+        config: { damping: 7, stiffness: 260, mass: 0.45 },
       });
-      wordScale = interpolate(activeSpring, [0, 1], [0.92, wordActiveScale]);
+      wordScale = interpolate(activeSpring, [0, 1], [0.85, wordActiveScale]);
     } else if (isPast) {
       const pastAge = Math.max(0, frame - Math.round((tokenEnd + 0.04) * fps));
       const settleSpring = spring({
         frame: pastAge,
         fps,
-        config: { damping: 18, stiffness: 200, mass: 0.6 },
+        config: { damping: 14, stiffness: 200, mass: 0.5 },
       });
       wordScale = interpolate(settleSpring, [0, 1], [wordActiveScale, 1]);
     }
@@ -234,14 +235,21 @@ export const CaptionPage: React.FC<{
       (s) => `${s.x}px ${s.y}px ${s.blur}px ${s.color}`
     );
 
-    // Active word glow
-    if (isActive && style.glowEnabled && style.glowColor !== "transparent") {
-      const glowSize1 = Math.round(wordFontSize * 0.12);
-      const glowSize2 = Math.round(wordFontSize * 0.25);
-      shadowParts.push(
-        `0 0 ${glowSize1}px ${style.glowColor}`,
-        `0 0 ${glowSize2}px ${style.glowColor}60`
-      );
+    // Active word glow — always add a subtle white glow pulse for "alive" feel
+    if (isActive) {
+      // Subtle white glow on every active word (the "alive" pulse)
+      const subtleGlow = Math.round(wordFontSize * 0.08);
+      shadowParts.push(`0 0 ${subtleGlow}px rgba(255,255,255,0.3)`);
+
+      // Stronger colored glow when style has glow enabled
+      if (style.glowEnabled && style.glowColor !== "transparent") {
+        const glowSize1 = Math.round(wordFontSize * 0.15);
+        const glowSize2 = Math.round(wordFontSize * 0.3);
+        shadowParts.push(
+          `0 0 ${glowSize1}px ${style.glowColor}`,
+          `0 0 ${glowSize2}px ${style.glowColor}60`
+        );
+      }
     }
     // Keyword glow persists after active (dimmer)
     if (isPast && isKeyword && style.glowEnabled && style.glowColor !== "transparent") {
