@@ -105,11 +105,11 @@ composition.width = input.width;
 composition.height = input.height;
 composition.fps = input.fps;
 
-// Render to transparent VP9 WebM — proper alpha channel support
+// Render to transparent VP8 WebM — fast encode, alpha via libvpx
 await renderMedia({
   composition,
   serveUrl: bundleLocation,
-  codec: "vp9",
+  codec: "vp8",
   pixelFormat: "yuva420p",
   imageFormat: "png",
   outputLocation: outputPath,

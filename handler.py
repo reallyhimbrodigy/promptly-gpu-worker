@@ -4141,7 +4141,7 @@ def render_remotion_overlay(
     result = subprocess.run(
         _render_cmd,
         capture_output=True, text=True,
-        timeout=180,
+        timeout=300,
         cwd=remotion_dir,
     )
 
@@ -4154,7 +4154,7 @@ def render_remotion_overlay(
             result = subprocess.run(
                 _render_cmd,
                 capture_output=True, text=True,
-                timeout=180,
+                timeout=300,
                 cwd=remotion_dir,
             )
 
@@ -6430,7 +6430,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _cap_idx = n_segment_inputs + len(sfx_input_args) // 2 + _n_broll_inputs
         caption_input_args = ["-i", caption_overlay_path]
         caption_filter_strs.append(
-            f"{video_out}[{_cap_idx}:v]overlay=format=auto:eof_action=pass[video_captioned]"
+            f"{video_out}[{_cap_idx}:v]overlay=format=rgb:eof_action=pass[video_captioned]"
         )
         video_out = "[video_captioned]"
         print(f"[render] Remotion caption overlay at input index {_cap_idx}", flush=True)
@@ -6852,15 +6852,11 @@ def handler(job):
                                 elif 0.15 <= _gem_rel <= 0.85:
                                     gemini_moment_score += 5.0 * 0.15
 
-                    if auto_hook_score > gemini_moment_score * 1.5:
-                        edit_plan["hook_clip"] = auto_hook
-                        print(f"[hook] Gemini picked {gemini_hook['source_start']:.2f}-{gemini_hook['source_end']:.2f}, "
-                              f"auto-detected {auto_hook['source_start']:.2f}-{auto_hook['source_end']:.2f} "
-                              f"(score {auto_hook_score:.2f} vs {gemini_moment_score:.2f}), using auto", flush=True)
-                    else:
-                        print(f"[hook] Gemini picked {gemini_hook['source_start']:.2f}-{gemini_hook['source_end']:.2f}, "
-                              f"auto-detected {auto_hook['source_start']:.2f}-{auto_hook['source_end']:.2f} "
-                              f"(score {auto_hook_score:.2f} vs {gemini_moment_score:.2f}), using Gemini", flush=True)
+                    # Always trust Gemini's hook selection — it understands content semantics
+                    # (e.g., "who the fuck is Stelius?" is a better hook than a setup line)
+                    print(f"[hook] Gemini picked {gemini_hook['source_start']:.2f}-{gemini_hook['source_end']:.2f}, "
+                          f"auto-detected {auto_hook['source_start']:.2f}-{auto_hook['source_end']:.2f} "
+                          f"(score {auto_hook_score:.2f} vs {gemini_moment_score:.2f}), using Gemini", flush=True)
             else:
                 _gh = gemini_hook if isinstance(gemini_hook, dict) else None
                 _gh_str = f"{_gh['source_start']:.2f}-{_gh['source_end']:.2f}" if _gh else "None"
