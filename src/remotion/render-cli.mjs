@@ -42,7 +42,7 @@ const raw = JSON.parse(readFileSync(inputPath, "utf-8"));
 // Normalize input — support both old CaptionInput and new OverlayInput formats
 const input = {
   words: raw.words || [],
-  captionStyle: raw.captionStyle || raw.style || "captions_dynamic",
+  captionStyle: raw.captionStyle || raw.style || "volt",
   keywords: raw.keywords || [],
   effects: raw.effects || [],
   cuts: raw.cuts || [],

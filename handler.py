@@ -1725,58 +1725,30 @@ Global parameters:
 
   If speed ramping is not requested in the vibe, set speed_curve to "none".
 
-  caption_style — animated captions rendered via Remotion with professional spring/pop/slide/wave animations, keyword glow halos, multi-layer shadows, and pill backgrounds. Choose the style that best matches the vibe:
+  caption_style — animated captions rendered via Remotion. Choose the style that best matches the vibe:
     none — no captions. Use ONLY when captions are already burned into the footage.
-    captions_dynamic — THE flagship premium style. Spring pop-in animation, dark pill background, mixed font sizes (keywords 140% larger), vibrant keyword colors (yellow/pink/cyan/orange), 12-pass glow halos on keywords, active word highlighting. The most modern, alive, 3D look. DEFAULT CHOICE for most content.
-    captions_clean — professional minimal. Pop-in animation, NO pill background, subtle shadows, keywords highlighted by color only. Clean and premium without being flashy. Best for: calm, thoughtful, serious, documentary, interviews.
-    word_pop — maximum energy word-by-word. Aggressive spring bounce (1.12x overshoot), dark pill, pink glow halos, each word pops in individually. Best for: fast-paced, hype, comedy, trend content, speed ramped edits.
-    hormozi — bold high-impact inspired by Alex Hormozi. Largest text (104px), NO pill, yellow keyword glow, 1.15x active word scale, heavy glow shadows. Best for: motivational, business, high-energy monologues, "listen to me" content.
-    impact — cinematic typewriter reveal. Words appear one by one (no bounce), dark pill, blue keyword glow. Controlled and deliberate. Best for: announcements, reveals, cinematic content, suspenseful moments.
-    slide — words slide up from below with smooth easing. Dark pill, subtle shadows, modern feel. Best for: lifestyle, travel, aesthetic content, chill vibes.
-    wave — cascading wave animation (each word ripples in with slight delay). Dark pill, purple keyword glow. Best for: music-driven content, dance, creative/artistic vibes.
-    capcut — simple bold white on dark pill, minimal pop animation. Standard TikTok/Reels look. Best for: casual vlogs, tutorials, Q&A, when simplicity is the vibe.
-    keyword_pop — standard text with only KEYWORDS getting spring animation + green glow. Regular words stay static. Best for: educational, listicles, explainers where specific terms matter.
-    dynamic — alias for captions_dynamic.
-    clean — alias for captions_clean.
-    neon_gradient — Poppins ExtraBold, pink-to-cyan gradient text, dark pill, cyan glow. Best for: music, neon aesthetic, nightlife, tech content.
-    sunset_gradient — Montserrat Black, orange-to-pink-to-purple gradient, no pill, pop anim. Best for: lifestyle, aesthetic, sunset/warm vibes.
-    gold_gradient — Playfair Display serif, gold gradient text, gold underline. Best for: luxury, fashion, premium brands, elegant content.
-    outline_bold — Montserrat Black 120px, thick white outline only (transparent fill), spring anim. Best for: hype, motivational, bold statements, overlay on bright footage.
-    outline_neon — Poppins ExtraBold, cyan outline only with glow, transparent fill. Best for: tech, gaming, neon aesthetic, futuristic content.
-    handwritten — PermanentMarker brush font, white text, deep shadow, casual vibe. Best for: comedy, storytelling, casual vlogs, authentic/raw content.
-    marker_highlight — PermanentMarker with yellow highlighter background on each word. Best for: educational, emphasis-heavy content, teacher-style explainers.
-    cinema — Bebas Neue condensed, wide spacing, blue-tint shadow, slide anim. Best for: cinematic, film, dramatic, documentary, trailer-style content.
-    news_ticker — Oswald Bold on red pill, typewriter reveal, news broadcast style. Best for: news, announcements, breaking updates, factual content.
-    comic_pop — Bangers comic font, yellow text, thick black outline, bouncy spring. Best for: comedy, memes, reaction content, fun/playful vibes.
-    meme_bold — Bangers, white text, heavy black outline, pop anim. Best for: memes, impact text, shitposts, humorous content.
-    luxury — Playfair Display serif, white text, subtle gold underline, elegant. Best for: luxury, fashion, beauty, premium lifestyle, high-end brands.
-    editorial — Playfair Display, dark text on white pill (inverted), clean magazine look. Best for: professional, editorial, business, corporate presentations.
-    stacked_bold — Montserrat Black, one word per line stacked vertically, deep shadow. Best for: motivational quotes, powerful single-word emphasis, dramatic reveals.
-    stacked_color — Poppins ExtraBold, stacked vertical, cycling keyword colors, dark pill. Best for: hype, high-energy content with colorful emphasis.
-    retro_3d — Bangers, yellow text with 3D black extruded shadow, retro arcade look. Best for: retro, vintage, throwback, gaming, 80s/90s aesthetic.
-    neon_3d — Space Grotesk, cyan text with glow + subtle 3D extrusion. Best for: tech, futuristic, cyberpunk, gaming.
-    tech_clean — Space Grotesk, white text, thin cyan underline, minimal. Best for: tech, SaaS, product demos, developer content, startup vibes.
-    tech_glow — Space Grotesk Bold, cyan text with glow, modern tech feel. Best for: tech reviews, gaming, futuristic content.
-    minimal_sans — Poppins SemiBold, white text, no pill, no glow, very subtle shadow. Best for: minimal aesthetic, fashion, quiet luxury, art content.
-    minimal_lower — Poppins, tiny dark pill, extremely clean and subtle. Best for: ASMR, cooking, soft-spoken content, when captions should not distract.
+    volt — THE flagship premium style. Bold Montserrat, lowercase, white text with cyan/teal keyword highlights, spring animation, cascade layout (small context words + large keywords), strong shadow. Modern, clean, high-energy. DEFAULT CHOICE for most content.
+    clarity — ultra-clean minimal. Poppins SemiBold, lowercase, white text, centered on screen, 1-2 words at a time, very subtle shadow, no pill/glow. Premium understated feel. Best for: calm, thoughtful, interviews, podcasts, ASMR, minimal aesthetic.
+    impact — bold punchy Montserrat Black, lowercase, white text with RED keyword highlights, heavy shadow, cascade layout. Attention-grabbing. Best for: motivational, business, high-energy, announcements, bold statements.
+    ember — elegant serif (Playfair Display), lowercase, white text with warm gold keywords, medium shadow. Premium editorial feel. Best for: luxury, fashion, beauty, storytelling, documentary, elegant content.
+    velocity — maximum energy Montserrat Black, UPPERCASE, white text with yellow keyword highlights + yellow glow, heavy shadow. Loud and bold. Best for: hype, fast-paced, comedy, gaming, sports, trend content.
+    archive — condensed Oswald, UPPERCASE, off-white text with gold keyword accents, strong shadow. Documentary/cinematic feel. Best for: cinematic, dramatic, serious, documentary, historical, news.
+    lumen — clean Poppins Bold, lowercase, white text on semi-transparent dark pill, teal/green keywords, wave animation. Modern and readable. Best for: educational, tutorials, explainers, tech, lifestyle.
+    rebel — bold Montserrat, lowercase, white text with lime/green keyword highlights + green glow. Edgy and youthful. Best for: creative, artistic, music, dance, nightlife, alternative content.
 
   STYLE SELECTION GUIDE based on vibe:
-    - "professional", "clean", "business", "corporate" → captions_dynamic or editorial or tech_clean
-    - "calm", "chill", "thoughtful", "serious", "interview" → captions_clean or minimal_sans
-    - "hype", "energy", "fast", "comedy", "trend", "viral" → word_pop or comic_pop or stacked_bold
-    - "motivational", "grind", "hustle", "inspirational" → hormozi or outline_bold or stacked_bold or neon_gradient
-    - "cinematic", "dramatic", "reveal", "suspense" → impact or cinema or luxury
-    - "aesthetic", "lifestyle", "travel", "chill" → slide or sunset_gradient or gold_gradient or minimal_lower
-    - "creative", "artistic", "music", "dance" → wave or neon_gradient or neon_3d
-    - "casual", "vlog", "tutorial", "simple" → capcut or handwritten
-    - "educational", "explainer", "tips", "how-to" → keyword_pop or marker_highlight
-    - "comedy", "funny", "humor", "meme" → comic_pop or meme_bold or handwritten
-    - "tech", "startup", "product", "SaaS" → tech_clean or tech_glow or outline_neon
-    - "luxury", "fashion", "beauty", "premium" → luxury or gold_gradient or editorial
-    - "retro", "vintage", "throwback", "80s", "90s" → retro_3d
-    - "gaming", "esports", "stream" → neon_3d or tech_glow or outline_neon
-    - "news", "announcement", "breaking" → news_ticker
-    - When unsure, DEFAULT to captions_dynamic — it looks great on everything.
+    - "professional", "clean", "business", "corporate" → volt or archive
+    - "calm", "chill", "thoughtful", "serious", "interview", "podcast" → clarity or ember
+    - "hype", "energy", "fast", "comedy", "trend", "viral" → velocity or rebel
+    - "motivational", "grind", "hustle", "inspirational" → impact or velocity
+    - "cinematic", "dramatic", "reveal", "suspense", "documentary" → archive or ember
+    - "aesthetic", "lifestyle", "travel", "minimal" → clarity or ember
+    - "creative", "artistic", "music", "dance" → rebel or lumen
+    - "casual", "vlog", "tutorial", "simple", "educational" → lumen or volt
+    - "tech", "startup", "product", "SaaS" → lumen or clarity
+    - "luxury", "fashion", "beauty", "premium" → ember or archive
+    - "gaming", "esports", "stream" → velocity or rebel
+    - When unsure, DEFAULT to volt — it looks great on everything.
 
   caption_position — where captions appear on screen. Use "lower-third" (default) for talking head content. The pipeline automatically adjusts positioning based on face detection to avoid overlap.
 
@@ -2545,9 +2517,9 @@ RULES FOR USING THESE TIMESTAMPS:
     if validated_vfx:
         print(f"[fx] Gemini requested {len(validated_vfx)} visual effect(s)", flush=True)
 
-    valid_caption_styles = {"none", "capcut", "word_pop", "hormozi", "keyword_pop", "dynamic", "clean", "impact", "captions_clean", "captions_dynamic", "slide", "wave", "neon_gradient", "sunset_gradient", "gold_gradient", "outline_bold", "outline_neon", "handwritten", "marker_highlight", "cinema", "news_ticker", "comic_pop", "meme_bold", "luxury", "editorial", "stacked_bold", "stacked_color", "retro_3d", "neon_3d", "tech_clean", "tech_glow", "minimal_sans", "minimal_lower"}
+    valid_caption_styles = {"none", "volt", "clarity", "impact", "ember", "velocity", "archive", "lumen", "rebel"}
     if str(edit_plan.get("caption_style") or "").lower() not in valid_caption_styles:
-        edit_plan["caption_style"] = "captions_dynamic"  # default to premium Captions-app style
+        edit_plan["caption_style"] = "volt"  # default to Volt — the flagship Captions AI style
     else:
         edit_plan["caption_style"] = str(edit_plan.get("caption_style") or "none").lower()
 
@@ -5411,14 +5383,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     _caption_pngs = []
     caption_style = str(edit_plan.get("caption_style") or "none").lower()
-    _all_caption_styles = {"captions_dynamic", "captions_clean", "word_pop", "hormozi",
-                           "keyword_pop", "dynamic", "clean", "impact", "capcut",
-                           "slide", "wave", "neon_gradient", "sunset_gradient",
-                           "gold_gradient", "outline_bold", "outline_neon",
-                           "handwritten", "marker_highlight", "cinema", "news_ticker",
-                           "comic_pop", "meme_bold", "luxury", "editorial",
-                           "stacked_bold", "stacked_color", "retro_3d", "neon_3d",
-                           "tech_clean", "tech_glow", "minimal_sans", "minimal_lower"}
+    _all_caption_styles = {"volt", "clarity", "impact", "ember", "velocity",
+                           "archive", "lumen", "rebel"}
 
     # Project words to output timeline for captions
     _projected_words = []

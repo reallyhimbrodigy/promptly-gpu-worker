@@ -1,687 +1,342 @@
 import type { StyleConfig } from "../types";
 
 /**
- * Caption style presets — tuned to match Captions AI quality.
+ * Caption style presets — each one is a faithful recreation of a
+ * specific Captions AI style, built from actual reference videos.
  *
- * Design principles (from studying Captions AI output):
- * - Subtle scale pops (1.08-1.15) feel premium; large jumps (1.3+) look cheap
- * - One accent color per style, not rainbow
- * - Strong black outline (2-3px) is non-negotiable for readability
- * - Glow on active word, not just keywords
- * - Past words return to full white/bright (not dimmed gray)
- * - Spring damping ~10-12 with visible overshoot = organic, alive
- * - Font sizes auto-computed by CaptionPage based on word count
+ * Reference videos analyzed:
+ *   V1: snaptik_7610116468012780813 — Volt style (confirmed via app UI)
+ *   V2: snaptik_7610117567755111700 — Volt style (confirmed via "Edit style: Volt")
+ *   V3: snaptik_7621679615941053726 — Clarity-like minimal style
+ *   V4: snaptik_7621683684067904799 — Impact style (red keywords)
+ *   Style picker thumbnails visible across V1, V2, V4
  */
 
-const KEYWORD_COLORS = ["#FFD700", "#FF3C64", "#00DCC8", "#FF8C00", "#A855F7", "#3B82F6"];
+// ─── Shadow presets ──────────────────────────────────────────────────────────
 
-// Shadow presets — heavy enough for any background
 const SHADOW_STRONG: StyleConfig["shadowLayers"] = [
   { x: 0, y: 2, blur: 8, color: "rgba(0,0,0,0.9)" },
   { x: 0, y: 4, blur: 16, color: "rgba(0,0,0,0.5)" },
 ];
 
 const SHADOW_MEDIUM: StyleConfig["shadowLayers"] = [
-  { x: 0, y: 2, blur: 6, color: "rgba(0,0,0,0.7)" },
   { x: 0, y: 1, blur: 3, color: "rgba(0,0,0,0.9)" },
+  { x: 0, y: 2, blur: 6, color: "rgba(0,0,0,0.7)" },
 ];
 
 const SHADOW_SOFT: StyleConfig["shadowLayers"] = [
   { x: 0, y: 1, blur: 4, color: "rgba(0,0,0,0.5)" },
 ];
 
-const SPEAKER_COLORS = ["#FFD700", "#00E5FF", "#00FF88", "#FF44FF", "#FF8800"];
+const SHADOW_HEAVY: StyleConfig["shadowLayers"] = [
+  { x: 0, y: 2, blur: 4, color: "rgba(0,0,0,1)" },
+  { x: 0, y: 4, blur: 12, color: "rgba(0,0,0,0.7)" },
+  { x: 0, y: 6, blur: 24, color: "rgba(0,0,0,0.3)" },
+];
 
-// ─── Base config ─────────────────────────────────────────────────────────────
-const BASE: Omit<StyleConfig, "animation" | "pillEnabled" | "pillColor" | "glowEnabled" | "glowColor" | "glowRadius"> = {
-  fontFamily: "Montserrat",
-  fontWeight: 800,
-  lineHeight: 1.1,
-  textTransform: "uppercase",
-  maxWordsPerGroup: 3,
-  position: "lower-third",
-  yPercent: 75,
-  pillRadius: 14,
-  pillPadding: [24, 12],
-  textColor: "#FFFFFF",
-  activeColor: "#FFD700",        // Yellow active = the Captions AI signature
-  dimColor: "rgba(255,255,255,0.45)", // Future words: visible but clearly not active
-  keywordColors: KEYWORD_COLORS,
-  shadowLayers: SHADOW_STRONG,
-  animationDuration: 140,
-  activeWordScale: 1.12,         // Subtle pop = premium feel
-  fadeInMs: 90,
-  fadeOutMs: 110,
-};
+const SPEAKER_COLORS = ["#FFD700", "#00E5FF", "#00FF88", "#FF44FF", "#FF8800"];
 
 // ─── Presets ─────────────────────────────────────────────────────────────────
 
 export const STYLE_PRESETS: Record<string, StyleConfig> = {
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // SIGNATURE STYLES (the ones that should look as good as Captions AI)
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  /** BOLD — The flagship. White text, yellow active, black outline, spring pop, warm glow.
-   *  This is the "Captions AI look" — the one that should be indistinguishable. */
-  captions_dynamic: {
-    ...BASE,
-    animation: "spring",
-    pillEnabled: false,
-    pillColor: "transparent",
-    glowEnabled: true,
-    glowColor: "#FFD700",
-    glowRadius: 20,
-    activeWordScale: 1.12,
-    speakerColors: SPEAKER_COLORS,
-  },
-
-  /** BOLD PILL — Same as bold but with dark pill behind text */
-  captions_pill: {
-    ...BASE,
-    animation: "spring",
-    pillEnabled: true,
-    pillColor: "rgba(0,0,0,0.6)",
-    glowEnabled: true,
-    glowColor: "#FFD700",
-    glowRadius: 18,
-    activeWordScale: 1.10,
-    speakerColors: SPEAKER_COLORS,
-  },
-
-  /** CLEAN — Minimal. White on white, no glow, barely any scale. Professional/corporate. */
-  captions_clean: {
-    ...BASE,
-    animation: "spring",
-    activeColor: "#FFFFFF",
-    dimColor: "rgba(255,255,255,0.5)",
-    pillEnabled: false,
-    pillColor: "transparent",
-    glowEnabled: false,
-    glowColor: "transparent",
-    glowRadius: 0,
-    activeWordScale: 1.06,
-    shadowLayers: SHADOW_MEDIUM,
-    speakerColors: SPEAKER_COLORS,
-  },
-
-  // Aliases
-  dynamic: {
-    ...BASE,
-    animation: "spring",
-    pillEnabled: false,
-    pillColor: "transparent",
-    glowEnabled: true,
-    glowColor: "#FFD700",
-    glowRadius: 20,
-    activeWordScale: 1.12,
-    speakerColors: SPEAKER_COLORS,
-  },
-
-  clean: {
-    ...BASE,
-    animation: "spring",
-    activeColor: "#FFFFFF",
-    dimColor: "rgba(255,255,255,0.5)",
-    pillEnabled: false,
-    pillColor: "transparent",
-    glowEnabled: false,
-    glowColor: "transparent",
-    glowRadius: 0,
-    activeWordScale: 1.06,
-    shadowLayers: SHADOW_MEDIUM,
-    speakerColors: SPEAKER_COLORS,
-  },
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // ENERGETIC
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  /** HYPE — Slightly more aggressive pop, pink-red glow, for high-energy content */
-  word_pop: {
-    ...BASE,
-    animation: "spring",
-    activeColor: "#FF3C64",
-    pillEnabled: true,
-    pillColor: "rgba(10,10,10,0.7)",
-    glowEnabled: true,
-    glowColor: "#FF3C64",
-    glowRadius: 22,
-    activeWordScale: 1.15,
-    speakerColors: SPEAKER_COLORS,
-  },
-
-  /** HORMOZI — Bold yellow emphasis, thick outlines, readable on any bg.
-   *  Inspired by Alex Hormozi's video style: bold, high-contrast, impactful. */
-  hormozi: {
-    ...BASE,
-    fontWeight: 900,
-    animation: "spring",
-    activeColor: "#FFD700",
-    textColor: "#FFFFFF",
-    pillEnabled: true,
-    pillColor: "rgba(0,0,0,0.65)",
-    pillRadius: 16,
-    glowEnabled: true,
-    glowColor: "#FFD700",
-    glowRadius: 14,               // Tighter glow — crisp, not blurry
-    activeWordScale: 1.12,
-    textStroke: { width: 3, color: "rgba(0,0,0,0.95)" },
-    keywordColors: ["#FFD700", "#FF3C64", "#00DCC8", "#FF8C00"],
-    shadowLayers: [
-      { x: 0, y: 3, blur: 10, color: "rgba(0,0,0,0.95)" },
-      { x: 0, y: 6, blur: 20, color: "rgba(0,0,0,0.5)" },
-    ],
-    speakerColors: SPEAKER_COLORS,
-  },
-
-  /** KEYWORD POP — Regular words stay still, only keywords animate */
-  keyword_pop: {
-    ...BASE,
-    animation: "spring",
-    activeColor: "#FFFFFF",
-    pillEnabled: true,
-    pillColor: "rgba(10,10,10,0.65)",
-    glowEnabled: true,
-    glowColor: "#00DCC8",
-    glowRadius: 20,
-    activeWordScale: 1.0,  // No scale on regular words
-    speakerColors: SPEAKER_COLORS,
-  },
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // CINEMATIC / BROADCAST
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  /** IMPACT — Dark pill, typewriter reveal, blue keyword glow */
-  impact: {
-    ...BASE,
-    animation: "typewriter",
-    pillEnabled: true,
-    pillColor: "rgba(0,0,0,0.8)",
-    pillRadius: 10,
-    glowEnabled: true,
-    glowColor: "#3B82F6",
-    glowRadius: 16,
-    activeWordScale: 1.0,
-    activeColor: "#FFFFFF",
-    speakerColors: SPEAKER_COLORS,
-  },
-
-  /** SLIDE — Words slide up smoothly */
-  slide: {
-    ...BASE,
-    animation: "slide",
-    pillEnabled: true,
-    pillColor: "rgba(15,15,15,0.65)",
-    pillRadius: 16,
-    glowEnabled: false,
-    glowColor: "transparent",
-    glowRadius: 0,
-    activeWordScale: 1.05,
-    shadowLayers: SHADOW_MEDIUM,
-    speakerColors: SPEAKER_COLORS,
-  },
-
-  /** WAVE — Cascading entrance per word */
-  wave: {
-    ...BASE,
-    animation: "wave",
-    pillEnabled: true,
-    pillColor: "rgba(8,8,8,0.7)",
-    glowEnabled: true,
-    glowColor: "#A855F7",
-    glowRadius: 18,
-    activeWordScale: 1.08,
-    speakerColors: SPEAKER_COLORS,
-  },
-
-  /** CINEMA — Bebas Neue, cool blue shadow, cinematic feel */
-  cinema: {
-    ...BASE,
-    fontFamily: "Bebas Neue",
-    fontWeight: 400,
-    animation: "spring",
-    pillEnabled: false,
-    pillColor: "transparent",
-    glowEnabled: false,
-    glowColor: "transparent",
-    glowRadius: 0,
-    activeColor: "#87CEEB",
-    shadowLayers: [
-      { x: 0, y: 3, blur: 12, color: "rgba(20,40,80,0.6)" },
-      { x: 0, y: 1, blur: 4, color: "rgba(0,0,0,0.9)" },
-    ],
-    activeWordScale: 1.08,
-    speakerColors: ["#87CEEB", "#FFD700", "#FF8C00", "#00FF88", "#FF44FF"],
-  },
-
-  /** CAPCUT — Simple, effective, lowercase-friendly */
-  capcut: {
-    ...BASE,
-    animation: "spring",
-    pillEnabled: true,
-    pillColor: "rgba(0,0,0,0.6)",
-    pillRadius: 10,
-    glowEnabled: false,
-    glowColor: "transparent",
-    glowRadius: 0,
-    activeWordScale: 1.06,
-    shadowLayers: SHADOW_MEDIUM,
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // VOLT — Reference: V1 (confirmed), V2 (confirmed via app UI)
+  //
+  // White bold Montserrat, lowercase. Keywords pop in bright cyan/teal.
+  // Strong black shadow ensures readability on any background.
+  // Cascade layout: context words smaller on top line, keywords larger below.
+  // Active word gets a subtle spring scale-up.
+  // This is the most popular/default Captions AI style.
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  volt: {
+    fontFamily: "Montserrat",
+    fontWeight: 800,
+    lineHeight: 1.1,
     textTransform: "none",
+    maxWordsPerGroup: 4,
+    position: "lower-third",
+    yPercent: 72,
+    pillEnabled: false,
+    pillColor: "transparent",
+    pillRadius: 0,
+    pillPadding: [0, 0],
+    textColor: "#FFFFFF",
+    activeColor: "#FFFFFF",
+    dimColor: "rgba(255,255,255,0.50)",
+    keywordColors: ["#00D4FF", "#00E5FF", "#00BCD4"],
+    shadowLayers: SHADOW_STRONG,
+    glowEnabled: false,
+    glowColor: "transparent",
+    glowRadius: 0,
+    animation: "spring",
+    animationDuration: 200,
+    activeWordScale: 1.1,
+    fadeInMs: 80,
+    fadeOutMs: 100,
+    textStroke: { width: 2, color: "rgba(0,0,0,0.8)" },
     speakerColors: SPEAKER_COLORS,
   },
 
-  /** NEWS — Oswald, red pill, typewriter */
-  news_ticker: {
-    ...BASE,
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // CLARITY — Reference: V3 (clean minimal single-word style)
+  //
+  // Ultra-clean, minimal. White Poppins SemiBold, lowercase, centered.
+  // Shows 1-2 words at a time for maximum readability.
+  // Keywords get a soft teal color. Very subtle shadow, no stroke.
+  // No pill, no glow — pure text on video. Premium, understated feel.
+  // Position is center-screen (~55%) rather than lower-third.
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  clarity: {
+    fontFamily: "Poppins",
+    fontWeight: 600,
+    lineHeight: 1.15,
+    textTransform: "none",
+    maxWordsPerGroup: 2,
+    position: "center",
+    yPercent: 55,
+    pillEnabled: false,
+    pillColor: "transparent",
+    pillRadius: 0,
+    pillPadding: [0, 0],
+    textColor: "#FFFFFF",
+    activeColor: "#FFFFFF",
+    dimColor: "rgba(255,255,255,0.40)",
+    keywordColors: ["#5DADE2", "#48C9B0", "#45B7D1"],
+    shadowLayers: SHADOW_SOFT,
+    glowEnabled: false,
+    glowColor: "transparent",
+    glowRadius: 0,
+    animation: "spring",
+    animationDuration: 180,
+    activeWordScale: 1.08,
+    fadeInMs: 60,
+    fadeOutMs: 80,
+    speakerColors: SPEAKER_COLORS,
+  },
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // IMPACT — Reference: V4 (white bold + red keywords)
+  //
+  // Bold Montserrat Black, lowercase. Keywords are vivid RED.
+  // Heavy shadow for outdoor/bright backgrounds. Cascade layout.
+  // "content in a click" → "content" red + large, "in a click" white + smaller.
+  // Punchy, attention-grabbing. No glow, just raw bold text + red pop.
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  impact: {
+    fontFamily: "Montserrat",
+    fontWeight: 900,
+    lineHeight: 1.05,
+    textTransform: "none",
+    maxWordsPerGroup: 3,
+    position: "lower-third",
+    yPercent: 78,
+    pillEnabled: false,
+    pillColor: "transparent",
+    pillRadius: 0,
+    pillPadding: [0, 0],
+    textColor: "#FFFFFF",
+    activeColor: "#FFFFFF",
+    dimColor: "rgba(255,255,255,0.45)",
+    keywordColors: ["#E53935", "#FF1744", "#D50000"],
+    shadowLayers: SHADOW_HEAVY,
+    glowEnabled: false,
+    glowColor: "transparent",
+    glowRadius: 0,
+    animation: "pop",
+    animationDuration: 150,
+    activeWordScale: 1.12,
+    fadeInMs: 60,
+    fadeOutMs: 80,
+    textStroke: { width: 2.5, color: "rgba(0,0,0,0.85)" },
+    speakerColors: SPEAKER_COLORS,
+  },
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // EMBER — Reference: V2 bottom captions (serif italic style)
+  //
+  // Elegant Playfair Display, lowercase italic feel. White text.
+  // Keywords in warm gold. Positioned lower. Subtle shadow.
+  // Smaller, refined text — premium/editorial vibe.
+  // Used in V2 for the in-video captions (serif italic visible).
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ember: {
+    fontFamily: "Playfair Display",
+    fontWeight: 700,
+    lineHeight: 1.15,
+    textTransform: "none",
+    maxWordsPerGroup: 3,
+    position: "lower-third",
+    yPercent: 78,
+    pillEnabled: false,
+    pillColor: "transparent",
+    pillRadius: 0,
+    pillPadding: [0, 0],
+    textColor: "#FFFFFF",
+    activeColor: "#FFFFFF",
+    dimColor: "rgba(255,255,255,0.45)",
+    keywordColors: ["#FFD700", "#FFA726", "#FFAB40"],
+    shadowLayers: SHADOW_MEDIUM,
+    glowEnabled: false,
+    glowColor: "transparent",
+    glowRadius: 0,
+    animation: "spring",
+    animationDuration: 200,
+    activeWordScale: 1.08,
+    fadeInMs: 80,
+    fadeOutMs: 100,
+    textStroke: { width: 1.5, color: "rgba(0,0,0,0.7)" },
+    speakerColors: SPEAKER_COLORS,
+  },
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // VELOCITY — Reference: V4 style picker thumbnail
+  //   "GROWTH GROWTH / BOOST YOUR BUSINESS" — bold uppercase, yellow + cyan
+  //
+  // High-energy Montserrat Black, UPPERCASE. Yellow keyword highlights.
+  // Strong shadow + subtle glow on active words. Maximum impact.
+  // Cascade layout with tight line height for stacked text blocks.
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  velocity: {
+    fontFamily: "Montserrat",
+    fontWeight: 900,
+    lineHeight: 1.0,
+    textTransform: "uppercase",
+    maxWordsPerGroup: 3,
+    position: "lower-third",
+    yPercent: 70,
+    pillEnabled: false,
+    pillColor: "transparent",
+    pillRadius: 0,
+    pillPadding: [0, 0],
+    textColor: "#FFFFFF",
+    activeColor: "#FFD700",
+    dimColor: "rgba(255,255,255,0.50)",
+    keywordColors: ["#FFD700", "#00E5FF", "#FFC107"],
+    shadowLayers: SHADOW_HEAVY,
+    glowEnabled: true,
+    glowColor: "#FFD700",
+    glowRadius: 12,
+    animation: "pop",
+    animationDuration: 150,
+    activeWordScale: 1.12,
+    fadeInMs: 60,
+    fadeOutMs: 80,
+    textStroke: { width: 3, color: "rgba(0,0,0,0.9)" },
+    speakerColors: SPEAKER_COLORS,
+  },
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // ARCHIVE — Reference: V1/V4 style picker thumbnail
+  //   "THE GUIDELINE TO ACHIEVE" — condensed uppercase, gold accent, dark mood
+  //
+  // Oswald condensed, uppercase, off-white with gold keyword accents.
+  // Strong shadow for dramatic/cinematic feel. No glow, no pill.
+  // Documentary/archive aesthetic — serious, authoritative.
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  archive: {
     fontFamily: "Oswald",
     fontWeight: 700,
-    animation: "typewriter",
-    pillEnabled: true,
-    pillColor: "#CC0000",
-    pillRadius: 6,
+    lineHeight: 1.05,
+    textTransform: "uppercase",
+    maxWordsPerGroup: 4,
+    position: "lower-third",
+    yPercent: 75,
+    pillEnabled: false,
+    pillColor: "transparent",
+    pillRadius: 0,
+    pillPadding: [0, 0],
+    textColor: "#E8E8E8",
+    activeColor: "#FFFFFF",
+    dimColor: "rgba(255,255,255,0.40)",
+    keywordColors: ["#C8AA6E", "#D4AF37", "#BFA15A"],
+    shadowLayers: SHADOW_STRONG,
     glowEnabled: false,
     glowColor: "transparent",
     glowRadius: 0,
-    activeWordScale: 1.0,
+    animation: "spring",
+    animationDuration: 200,
+    activeWordScale: 1.1,
+    fadeInMs: 80,
+    fadeOutMs: 100,
+    textStroke: { width: 2, color: "rgba(0,0,0,0.85)" },
+    speakerColors: SPEAKER_COLORS,
+  },
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // LUMEN — Reference: V2/V4 style picker thumbnail
+  //   "one thing I can do" + "ENCOURAGE" label — teal/green accent, pill bg
+  //
+  // Clean Poppins, lowercase. Teal/green keyword colors.
+  // Semi-transparent dark pill background for text readability.
+  // Wave animation for smooth word-by-word reveal. Elegant, modern.
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  lumen: {
+    fontFamily: "Poppins",
+    fontWeight: 700,
+    lineHeight: 1.15,
+    textTransform: "none",
+    maxWordsPerGroup: 4,
+    position: "center",
+    yPercent: 65,
+    pillEnabled: true,
+    pillColor: "rgba(0,0,0,0.35)",
+    pillRadius: 12,
+    pillPadding: [16, 10],
+    textColor: "#FFFFFF",
     activeColor: "#FFFFFF",
+    dimColor: "rgba(255,255,255,0.50)",
+    keywordColors: ["#00E5A0", "#00D4AA", "#26A69A"],
+    shadowLayers: SHADOW_SOFT,
+    glowEnabled: false,
+    glowColor: "transparent",
+    glowRadius: 0,
+    animation: "wave",
+    animationDuration: 180,
+    activeWordScale: 1.06,
+    fadeInMs: 80,
+    fadeOutMs: 100,
     backgroundShape: "pill",
     speakerColors: SPEAKER_COLORS,
   },
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // GRADIENT
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  /** NEON GRADIENT — Pink-to-cyan gradient, dark pill, cyan glow */
-  neon_gradient: {
-    ...BASE,
-    fontFamily: "Poppins",
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // REBEL — Reference: V2 style picker thumbnail
+  //   Bold green/lime text, energetic, italic feel
+  //
+  // Montserrat ExtraBold, lowercase. Lime/green keyword pops.
+  // Subtle glow on keywords. Strong shadow. Edgy, youthful.
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  rebel: {
+    fontFamily: "Montserrat",
     fontWeight: 800,
-    animation: "spring",
-    pillEnabled: true,
-    pillColor: "rgba(10,10,10,0.75)",
+    lineHeight: 1.05,
+    textTransform: "none",
+    maxWordsPerGroup: 3,
+    position: "lower-third",
+    yPercent: 72,
+    pillEnabled: false,
+    pillColor: "transparent",
+    pillRadius: 0,
+    pillPadding: [0, 0],
+    textColor: "#FFFFFF",
+    activeColor: "#CDDC39",
+    dimColor: "rgba(255,255,255,0.45)",
+    keywordColors: ["#CDDC39", "#76FF03", "#C6FF00"],
+    shadowLayers: SHADOW_STRONG,
     glowEnabled: true,
-    glowColor: "#00D2FF",
-    glowRadius: 20,
-    gradientColors: ["#FF3CAC", "#00D2FF"],
-    gradientDirection: "to right",
-    activeWordScale: 1.10,
-    speakerColors: SPEAKER_COLORS,
-  },
-
-  /** SUNSET — Warm orange-pink-purple gradient */
-  sunset_gradient: {
-    ...BASE,
-    fontWeight: 900,
+    glowColor: "#76FF03",
+    glowRadius: 10,
     animation: "spring",
-    pillEnabled: false,
-    pillColor: "transparent",
-    glowEnabled: false,
-    glowColor: "transparent",
-    glowRadius: 0,
-    gradientColors: ["#FF6B35", "#FF3C64", "#8B5CF6"],
-    gradientDirection: "135deg",
-    activeWordScale: 1.10,
-    speakerColors: SPEAKER_COLORS,
-  },
-
-  /** GOLD — Playfair Display, gold gradient, gold underline */
-  gold_gradient: {
-    ...BASE,
-    fontFamily: "Playfair Display",
-    fontWeight: 700,
-    animation: "spring",
-    pillEnabled: false,
-    pillColor: "transparent",
-    glowEnabled: false,
-    glowColor: "transparent",
-    glowRadius: 0,
-    gradientColors: ["#FFD700", "#FFA000"],
-    gradientDirection: "to right",
-    backgroundShape: "underline",
-    underlineColor: "#FFD700",
-    underlineThickness: 4,
-    textTransform: "none",
-    activeWordScale: 1.08,
-    speakerColors: SPEAKER_COLORS,
-  },
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // OUTLINE
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  /** OUTLINE BOLD — Thick white outline, no fill */
-  outline_bold: {
-    ...BASE,
-    fontWeight: 900,
-    animation: "spring",
-    pillEnabled: false,
-    pillColor: "transparent",
-    glowEnabled: false,
-    glowColor: "transparent",
-    glowRadius: 0,
-    textStroke: { width: 3, color: "#FFFFFF" },
-    outlineOnly: true,
-    activeWordScale: 1.12,
-    speakerColors: SPEAKER_COLORS,
-  },
-
-  /** OUTLINE NEON — Cyan outline with glow */
-  outline_neon: {
-    ...BASE,
-    fontFamily: "Poppins",
-    fontWeight: 800,
-    animation: "spring",
-    pillEnabled: false,
-    pillColor: "transparent",
-    glowEnabled: true,
-    glowColor: "#00DCC8",
-    glowRadius: 22,
-    textStroke: { width: 2, color: "#00DCC8" },
-    outlineOnly: true,
-    activeWordScale: 1.10,
-    speakerColors: SPEAKER_COLORS,
-  },
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // HANDWRITTEN / CASUAL
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  /** HANDWRITTEN — Permanent Marker, organic feel */
-  handwritten: {
-    ...BASE,
-    fontFamily: "Permanent Marker",
-    fontWeight: 400,
-    animation: "spring",
-    pillEnabled: false,
-    pillColor: "transparent",
-    glowEnabled: false,
-    glowColor: "transparent",
-    glowRadius: 0,
-    textTransform: "none",
-    activeWordScale: 1.10,
-    speakerColors: SPEAKER_COLORS,
-  },
-
-  /** MARKER HIGHLIGHT — Dark text on yellow highlight */
-  marker_highlight: {
-    ...BASE,
-    fontFamily: "Permanent Marker",
-    fontWeight: 400,
-    animation: "spring",
-    textColor: "#1A1A1A",
-    activeColor: "#1A1A1A",
-    dimColor: "rgba(50,50,50,0.6)",
-    pillEnabled: false,
-    pillColor: "transparent",
-    glowEnabled: false,
-    glowColor: "transparent",
-    glowRadius: 0,
-    backgroundShape: "highlight",
-    highlightColor: "#FFD700",
-    shadowLayers: SHADOW_SOFT,
-    textTransform: "none",
-    activeWordScale: 1.08,
-    speakerColors: SPEAKER_COLORS,
-  },
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // COMIC / MEME
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  /** COMIC — Bangers font, yellow text, thick black outline */
-  comic_pop: {
-    ...BASE,
-    fontFamily: "Bangers",
-    fontWeight: 400,
-    textColor: "#FFD700",
-    activeColor: "#FFD700",
-    dimColor: "rgba(200,180,0,0.5)",
-    animation: "spring",
-    pillEnabled: false,
-    pillColor: "transparent",
-    glowEnabled: false,
-    glowColor: "transparent",
-    glowRadius: 0,
-    textStroke: { width: 3, color: "#000000" },
-    activeWordScale: 1.15,
-    keywordColors: ["#FF3C64", "#00DCC8", "#FF8C00", "#A855F7", "#3B82F6"],
-    speakerColors: SPEAKER_COLORS,
-  },
-
-  /** MEME — Heavy black outline, white fill */
-  meme_bold: {
-    ...BASE,
-    fontFamily: "Bangers",
-    fontWeight: 400,
-    animation: "spring",
-    pillEnabled: false,
-    pillColor: "transparent",
-    glowEnabled: false,
-    glowColor: "transparent",
-    glowRadius: 0,
-    textStroke: { width: 4, color: "#000000" },
-    activeWordScale: 1.10,
-    speakerColors: SPEAKER_COLORS,
-  },
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // ELEGANT
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  /** LUXURY — Playfair Display, gold underline */
-  luxury: {
-    ...BASE,
-    fontFamily: "Playfair Display",
-    fontWeight: 700,
-    animation: "spring",
-    pillEnabled: false,
-    pillColor: "transparent",
-    glowEnabled: false,
-    glowColor: "transparent",
-    glowRadius: 0,
-    shadowLayers: SHADOW_MEDIUM,
-    backgroundShape: "underline",
-    underlineColor: "#D4AF37",
-    underlineThickness: 3,
-    textTransform: "none",
-    activeColor: "#FFD700",
-    activeWordScale: 1.08,
-    keywordColors: ["#D4AF37", "#FFD700", "#D4AF37", "#FFA000"],
-    speakerColors: SPEAKER_COLORS,
-  },
-
-  /** EDITORIAL — Dark text on white pill, refined */
-  editorial: {
-    ...BASE,
-    fontFamily: "Playfair Display",
-    fontWeight: 700,
-    textColor: "#1A1A1A",
-    activeColor: "#000000",
-    dimColor: "rgba(80,80,80,0.5)",
-    animation: "spring",
-    pillEnabled: true,
-    pillColor: "rgba(255,255,255,0.9)",
-    pillRadius: 10,
-    glowEnabled: false,
-    glowColor: "transparent",
-    glowRadius: 0,
-    shadowLayers: SHADOW_SOFT,
-    textTransform: "none",
-    activeWordScale: 1.06,
-    keywordColors: ["#8B5CF6", "#3B82F6", "#059669", "#DC2626"],
-    speakerColors: SPEAKER_COLORS,
-  },
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // STACKED
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  /** STACKED BOLD — One word per line, bold impact */
-  stacked_bold: {
-    ...BASE,
-    fontWeight: 900,
-    animation: "spring",
-    pillEnabled: false,
-    pillColor: "transparent",
-    glowEnabled: false,
-    glowColor: "transparent",
-    glowRadius: 0,
-    stackedLayout: true,
-    activeWordScale: 1.15,
-    speakerColors: SPEAKER_COLORS,
-  },
-
-  /** STACKED COLOR — Stacked with color cycling and glow */
-  stacked_color: {
-    ...BASE,
-    fontFamily: "Poppins",
-    fontWeight: 800,
-    animation: "spring",
-    pillEnabled: true,
-    pillColor: "rgba(10,10,10,0.7)",
-    glowEnabled: true,
-    glowColor: "#FF3C64",
-    glowRadius: 18,
-    stackedLayout: true,
-    activeWordScale: 1.12,
-    speakerColors: SPEAKER_COLORS,
-  },
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // 3D / EXTRUDED
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  /** RETRO 3D — Yellow text, black 3D shadow */
-  retro_3d: {
-    ...BASE,
-    fontFamily: "Bangers",
-    fontWeight: 400,
-    textColor: "#FFD700",
-    activeColor: "#FFD700",
-    dimColor: "rgba(200,180,0,0.5)",
-    animation: "spring",
-    pillEnabled: false,
-    pillColor: "transparent",
-    glowEnabled: false,
-    glowColor: "transparent",
-    glowRadius: 0,
-    shadowExtrude: { angle: 135, distance: 5, color: "#000000" },
-    activeWordScale: 1.12,
-    keywordColors: ["#FF3C64", "#00DCC8", "#FF8C00", "#A855F7"],
-    speakerColors: SPEAKER_COLORS,
-  },
-
-  /** NEON 3D — Cyan text, glow + subtle extrusion */
-  neon_3d: {
-    ...BASE,
-    fontFamily: "Space Grotesk",
-    fontWeight: 700,
-    textColor: "#00DCC8",
-    activeColor: "#00FFEE",
-    dimColor: "rgba(0,140,128,0.5)",
-    animation: "spring",
-    pillEnabled: false,
-    pillColor: "transparent",
-    glowEnabled: true,
-    glowColor: "#00DCC8",
-    glowRadius: 20,
-    shadowExtrude: { angle: 135, distance: 2, color: "#005F54" },
-    activeWordScale: 1.10,
-    keywordColors: ["#00DCC8", "#3B82F6", "#A855F7", "#FFD700"],
-    speakerColors: SPEAKER_COLORS,
-  },
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // TECH / MODERN
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  /** TECH CLEAN — Space Grotesk, cyan underline */
-  tech_clean: {
-    ...BASE,
-    fontFamily: "Space Grotesk",
-    fontWeight: 500,
-    animation: "spring",
-    pillEnabled: false,
-    pillColor: "transparent",
-    glowEnabled: false,
-    glowColor: "transparent",
-    glowRadius: 0,
-    shadowLayers: SHADOW_MEDIUM,
-    backgroundShape: "underline",
-    underlineColor: "#00DCC8",
-    underlineThickness: 3,
-    activeWordScale: 1.06,
-    textTransform: "none",
-    activeColor: "#00DCC8",
-    keywordColors: ["#00DCC8", "#3B82F6", "#A855F7", "#FFD700"],
-    speakerColors: SPEAKER_COLORS,
-  },
-
-  /** TECH GLOW — Cyan text with glow */
-  tech_glow: {
-    ...BASE,
-    fontFamily: "Space Grotesk",
-    fontWeight: 700,
-    textColor: "#00DCC8",
-    activeColor: "#00FFEE",
-    dimColor: "rgba(0,140,128,0.5)",
-    animation: "spring",
-    pillEnabled: false,
-    pillColor: "transparent",
-    glowEnabled: true,
-    glowColor: "#00DCC8",
-    glowRadius: 20,
-    activeWordScale: 1.08,
-    keywordColors: ["#00DCC8", "#3B82F6", "#A855F7", "#FFD700"],
-    speakerColors: SPEAKER_COLORS,
-  },
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // MINIMAL
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  /** MINIMAL SANS — Poppins, clean, barely there animation */
-  minimal_sans: {
-    ...BASE,
-    fontFamily: "Poppins",
-    fontWeight: 600,
-    animation: "spring",
-    pillEnabled: false,
-    pillColor: "transparent",
-    glowEnabled: false,
-    glowColor: "transparent",
-    glowRadius: 0,
-    shadowLayers: SHADOW_MEDIUM,
-    activeWordScale: 1.05,
-    textTransform: "none",
-    activeColor: "#FFFFFF",
-    speakerColors: SPEAKER_COLORS,
-  },
-
-  /** MINIMAL LOWER — Small pill, extremely clean */
-  minimal_lower: {
-    ...BASE,
-    fontFamily: "Poppins",
-    fontWeight: 600,
-    animation: "spring",
-    pillEnabled: true,
-    pillColor: "rgba(8,8,8,0.5)",
-    pillRadius: 8,
-    pillPadding: [16, 8],
-    glowEnabled: false,
-    glowColor: "transparent",
-    glowRadius: 0,
-    shadowLayers: SHADOW_SOFT,
-    activeWordScale: 1.04,
-    textTransform: "none",
-    activeColor: "#FFFFFF",
+    animationDuration: 180,
+    activeWordScale: 1.1,
+    fadeInMs: 70,
+    fadeOutMs: 90,
+    textStroke: { width: 2.5, color: "rgba(0,0,0,0.85)" },
     speakerColors: SPEAKER_COLORS,
   },
 };
 
 export function getStyleConfig(styleName: string): StyleConfig {
-  return STYLE_PRESETS[styleName] || STYLE_PRESETS["captions_dynamic"];
+  const first = Object.values(STYLE_PRESETS)[0];
+  return STYLE_PRESETS[styleName] || first;
 }

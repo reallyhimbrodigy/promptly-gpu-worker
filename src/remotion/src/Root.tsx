@@ -23,7 +23,7 @@ export const RemotionRoot: React.FC = () => {
         defaultProps={{
           input: {
             words: [],
-            captionStyle: "captions_dynamic",
+            captionStyle: "volt",
             keywords: [],
             effects: [],
             cuts: [],
@@ -49,7 +49,7 @@ export const RemotionRoot: React.FC = () => {
         defaultProps={{
           input: {
             words: [],
-            style: "captions_dynamic",
+            style: "volt",
             width: 1080,
             height: 1920,
             fps: 30,
