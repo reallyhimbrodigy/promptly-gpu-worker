@@ -105,11 +105,11 @@ composition.width = input.width;
 composition.height = input.height;
 composition.fps = input.fps;
 
-// Render to transparent VP8 WebM — ~15x smaller than ProRes 4444
+// Render to transparent VP9 WebM — proper alpha channel support
 await renderMedia({
   composition,
   serveUrl: bundleLocation,
-  codec: "vp8",
+  codec: "vp9",
   pixelFormat: "yuva420p",
   imageFormat: "png",
   outputLocation: outputPath,
