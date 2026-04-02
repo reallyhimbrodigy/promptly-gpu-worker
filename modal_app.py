@@ -1,12 +1,12 @@
 import modal
 
-# rebuild trigger v10 — A10G GPU + NVENC + 16 CPU + 32GB RAM + Remotion captions (tuned)
+# rebuild trigger v11 — A10G GPU + NVENC + 16 CPU + 32GB RAM + Remotion captions (clean)
 
 # ── Image definition (replaces Dockerfile) ────────────────────────────────────
 image = (
     modal.Image.from_registry("nvidia/cuda:12.6.3-runtime-ubuntu22.04", add_python="3.10")
     .run_commands(
-        "echo 'build v17 - A10G + NVENC + 16CPU + Remotion captions (Captions AI quality)'",
+        "echo 'build v18 - A10G + NVENC + 16CPU + Remotion clean (no color grade/effects)'",
         "apt-get update && apt-get install -y ca-certificates && update-ca-certificates",
         # Remove CUDA stubs AND compat libs that intercept dlopen before Modal's real driver libs
         "rm -rf /usr/local/cuda/lib64/stubs/libnvidia-encode* /usr/local/cuda/lib64/stubs/libcuda* /usr/local/cuda/compat/libcuda* /usr/local/cuda/lib64/libcuda.so* 2>/dev/null || true",

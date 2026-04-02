@@ -8224,56 +8224,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     video_out = "[video_base]"
     post_filters.append(f"[{tl_video}]null{video_out}")
 
-    # ── Cinematic color grading (ALWAYS applied) ─────────────────────────
-    # Professional videos always have color grading. Grade is selected from:
-    # 1. Vibe mood inferred from user's vibe string
-    # 2. Default "warm" grade (universally flattering on mobile screens)
-    # Curves-based grades: S-curve with lifted blacks (0→0.06), warm/cool toning
-    # via per-channel curves, saturation via eq. Research: lifted blacks at 0.06
-    # (≈15/255), S-curve midpoint 0.5→0.52, highlights 0.75→0.82.
-    _MOOD_GRADES = {
-        "warm":    "curves=m='0/0.06 0.25/0.22 0.5/0.52 0.75/0.82 1/1':r='0/0.06 0.5/0.53 1/1':b='0/0 0.5/0.47 1/0.96',eq=saturation=1.15",
-        "cool":    "curves=m='0/0.06 0.25/0.22 0.5/0.52 0.75/0.82 1/1':r='0/0 0.5/0.48 1/0.97':b='0/0.04 0.5/0.53 1/1',eq=saturation=1.08",
-        "neutral": "curves=m='0/0.05 0.25/0.22 0.5/0.51 0.75/0.80 1/1',eq=saturation=1.10",
-        "moody":   "curves=m='0/0.04 0.25/0.20 0.5/0.48 0.75/0.78 1/0.97':b='0/0.03 0.5/0.52 1/1',eq=saturation=0.95:contrast=1.05",
-    }
-    _MOOD_MAP = {
-        "hype": "warm", "upbeat": "warm", "fun": "warm", "warm": "warm", "romantic": "warm",
-        "cinematic": "cool", "moody": "moody",
-        "calm": "neutral", "emotional": "neutral", "clean": "neutral", "none": "warm",
-    }
-
-    # Determine color grade from vibe keywords, default warm.
-    _vibe = str(edit_plan.get("_user_vibe") or edit_plan.get("notes") or "").lower()
-    _vibe_mood = "none"
-    if any(kw in _vibe for kw in ("moody", "dark", "dramatic", "intense", "suspense")):
-        _vibe_mood = "moody"
-    elif any(kw in _vibe for kw in ("cinematic", "film", "movie", "cool", "cold")):
-        _vibe_mood = "cinematic"
-    elif any(kw in _vibe for kw in ("calm", "chill", "clean", "minimal", "soft")):
-        _vibe_mood = "calm"
-    elif any(kw in _vibe for kw in ("hype", "energy", "viral", "engaging", "fun", "upbeat")):
-        _vibe_mood = "hype"
-    _grade_name = _MOOD_MAP.get(_vibe_mood if _vibe_mood != "none" else "none", "warm")
-    _grade_filter = _MOOD_GRADES[_grade_name]
-
-    _grade_label = "[video_graded]"
-    post_filters.append(
-        f"{video_out}"
-        f"{_grade_filter},"
-        # Sharpening: 3x3 kernel, 0.3 strength — standard for social media delivery
-        # (broadcast uses 0.2-0.5; web/mobile benefits from slight sharpening post-encode)
-        f"unsharp=3:3:0.3:3:3:0.0,"
-        # Vignette: PI/5 (36°) = medium intensity — standard cinematic framing
-        # (PI/4=light, PI/5=medium, PI/6=strong per FFmpeg vignette docs)
-        f"vignette=PI/5,"
-        # Film grain: c0s=8 luma-only — industry standard for "filmic" look
-        # (c0s 4-6=subtle, 8-10=medium/cinematic, 12-16=heavy/vintage)
-        f"noise=c0s=8:c0f=t+u"
-        f"{_grade_label}"
-    )
-    video_out = _grade_label
-    print(f"[grade] {_grade_name} color grading + vignette + grain applied (vibe_mood={_vibe_mood})", flush=True)
+    # ── Color grading DISABLED ─────────────────────────────────────────
+    # Was applying curves + saturation + vignette + grain which washed out the video.
+    # Captions AI preserves original video colors — we should too.
+    print("[grade] Color grading disabled — preserving original video colors", flush=True)
 
     if edit_plan.get("cinematic_bars"):
         bar_h = int((1920 - int(1080 / 2.35)) / 2)
@@ -8284,121 +8238,22 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         )
         video_out = bars_label
 
-    # ── Mid-clip white flash effects ──────────────────────────────────────
-    # visual_effects entries with type="white_flash" create a brief brightness spike
-    _visual_effects = edit_plan.get("visual_effects") or []
-    _flash_effects = [ve for ve in _visual_effects if ve.get("type") == "white_flash"]
-    if _flash_effects:
-        flash_filter_parts = []
-        for _fe in _flash_effects:
-            _ft = float(_fe.get("t") or 0)
-            if _ft <= 0:
-                continue
-            # Project source time to output time
-            _ft_out = project_source_time_to_final_output(
-                _ft, render_cuts, effective_durations, speed_curve,
-                hook_offset=float(edit_plan.get("_hook_offset") or 0.0),
-            )
-            if _ft_out is None:
-                continue
-            # 4-frame (133ms) white flash: brightness spike for impact.
-            # 0.35 = upper end of professional range (0.2-0.35) per broadcast VFX standards.
-            # Higher values (0.5+) blow out skin tones and look amateurish.
-            _f_start = max(0, _ft_out - 0.033)
-            _f_end = _ft_out + 0.100
-            flash_filter_parts.append(
-                f"eq=brightness=0.35:enable='between(t,{_f_start:.3f},{_f_end:.3f})'"
-            )
-        if flash_filter_parts:
-            if len(flash_filter_parts) == 1:
-                flash_label = "[video_flash]"
-                post_filters.append(f"{video_out}{flash_filter_parts[0]}{flash_label}")
-                video_out = flash_label
-            else:
-                for _fi, _fp in enumerate(flash_filter_parts):
-                    _fl = f"[video_flash{_fi}]"
-                    post_filters.append(f"{video_out}{_fp}{_fl}")
-                    video_out = _fl
-            print(f"[fx] Added {len(flash_filter_parts)} white flash effect(s)", flush=True)
+    # ── White flash effects DISABLED ──────────────────────────────────────
+    # Captions AI doesn't use brightness spike flashes — they blow out the video.
+    print("[fx] White flash effects disabled", flush=True)
 
     # ── Background blur on emphasis moments ────────────────────────────
     # NOTE: Disabled — boxblur does not support timeline 'enable' in FFmpeg 8.1,
     # and luma_radius expressions are evaluated once at init, not per-frame.
     # TODO: Re-implement using gblur (which supports timeline) or overlay approach.
 
-    # ── Audio-reactive zoom pulses ────────────────────────────────────
-    # Subtle 2-3% scale bump at emphasis moments — creates the "breathing"
-    # zoom feel that pro editing apps have. Uses scale+crop with time-gated
-    # enable, targeting face position for the crop center.
-    _all_emphasis = edit_plan.get("emphasis_moments") or edit_plan.get("_parsed_emphasis_moments") or []
-    _zoom_emphasis = [em for em in _all_emphasis if str(em.get("intensity", "")).lower() in ("high", "medium")][:10]
-    if _zoom_emphasis:
-        _zoom_pulses = []
-        for _em in _zoom_emphasis:
-            _em_t = float(_em.get("t") or 0)
-            if _em_t <= 0:
-                continue
-            _em_out = project_source_time_to_final_output(
-                _em_t, render_cuts, effective_durations, speed_curve,
-                hook_offset=float(edit_plan.get("_hook_offset") or 0.0),
-            )
-            if _em_out is None:
-                continue
-            # 0.3s zoom pulse: ease-in 0.1s, hold 0.1s, ease-out 0.1s
-            _zp_start = max(0, _em_out - 0.05)
-            _zp_end = _em_out + 0.25
-            _zp_amt = 0.05 if str(_em.get("intensity", "")).lower() == "high" else 0.035
-            # Smooth envelope: ramp up then down
-            _zp_env = f"max(0,min(1,(t-{_zp_start:.3f})/0.08)*min(1,({_zp_end:.3f}-t)/0.08))"
-            _zoom_pulses.append(
-                f"scale=w='trunc(iw*(1.0+{_zp_amt}*{_zp_env})/2)*2'"
-                f":h='trunc(ih*(1.0+{_zp_amt}*{_zp_env})/2)*2'"
-                f":eval=frame:flags=bicubic,"
-                f"crop=1080:1920:(iw-1080)/2:(ih-1920)/2"
-            )
-        if _zoom_pulses:
-            for _zi, _zp in enumerate(_zoom_pulses):
-                _zl = f"[video_zpulse{_zi}]"
-                post_filters.append(f"{video_out}{_zp}{_zl}")
-                video_out = _zl
-            print(f"[fx] Added {len(_zoom_pulses)} audio-reactive zoom pulse(s)", flush=True)
+    # ── Zoom pulses DISABLED ────────────────────────────────────────────
+    # Captions AI doesn't use zoom pulses — they look amateur on short-form content.
+    print("[fx] Zoom pulses disabled", flush=True)
 
-    # ── Screen shake on high-intensity emphasis ────────────────────────
-    # Rapid XY displacement for 0.15s — creates visceral impact feel.
-    # Uses crop offset oscillation (no extra scale) so it's lightweight.
-    _shake_moments = [em for em in _all_emphasis if str(em.get("intensity", "")).lower() == "high"][:6]
-    if _shake_moments:
-        _shake_filters = []
-        for _sm in _shake_moments:
-            _sm_t = float(_sm.get("t") or 0)
-            if _sm_t <= 0:
-                continue
-            _sm_out = project_source_time_to_final_output(
-                _sm_t, render_cuts, effective_durations, speed_curve,
-                hook_offset=float(edit_plan.get("_hook_offset") or 0.0),
-            )
-            if _sm_out is None:
-                continue
-            _sh_start = max(0, _sm_out - 0.02)
-            _sh_end = _sm_out + 0.15
-            # Decaying sinusoidal shake: amplitude starts at 8px, decays to 0
-            # freq ~30Hz gives rapid vibration feel
-            # Gate + envelope baked into x/y expressions because FFmpeg 8.x
-            # doesn't support the `enable` timeline option on the crop filter.
-            _sh_gate = f"between(t,{_sh_start:.3f},{_sh_end:.3f})"
-            _sh_env = f"max(0,({_sh_end:.3f}-t)/({_sh_end:.3f}-{_sh_start:.3f}))"
-            _sh_dx = f"8*sin(t*188)*{_sh_env}*{_sh_gate}"
-            _sh_dy = f"5*sin(t*251)*{_sh_env}*{_sh_gate}"
-            _shake_filters.append(
-                f"crop=w=1064:h=1904:x='8+{_sh_dx}':y='8+{_sh_dy}',"
-                f"scale=1080:1920:flags=bicubic"
-            )
-        if _shake_filters:
-            for _si, _sf in enumerate(_shake_filters):
-                _sl = f"[video_shake{_si}]"
-                post_filters.append(f"{video_out}{_sf}{_sl}")
-                video_out = _sl
-            print(f"[fx] Added {len(_shake_filters)} screen shake(s)", flush=True)
+    # ── Screen shakes DISABLED ───────────────────────────────────────────
+    # Captions AI doesn't use screen shakes — they distract from content.
+    print("[fx] Screen shakes disabled", flush=True)
 
     # Depth blur mask disabled — generated but never used in render (maskedmerge
     # incompatible with FFmpeg 8.x). Vignette handles edge emphasis instead.

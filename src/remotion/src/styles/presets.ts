@@ -40,7 +40,7 @@ const BASE: Omit<StyleConfig, "animation" | "pillEnabled" | "pillColor" | "glowE
   textTransform: "uppercase",
   maxWordsPerGroup: 3,
   position: "lower-third",
-  yPercent: 68,
+  yPercent: 75,
   pillRadius: 14,
   pillPadding: [24, 12],
   textColor: "#FFFFFF",
