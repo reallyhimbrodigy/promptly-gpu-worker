@@ -310,7 +310,7 @@ CAPTION_FONT_DIR = "/usr/local/share/fonts/montserrat"
 
 _fonts_registered = False
 def ensure_caption_fonts_registered():
-    """Register mounted caption fonts with fontconfig for libass.
+    """Register mounted caption fonts with fontconfig.
     Fonts are pre-registered at container build time (modal_app.py), so this
     is a fast no-op check in the common case. Only runs once per container.
     """
@@ -6422,16 +6422,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             print(f"[remotion] Overlay ready: {caption_overlay_path}", flush=True)
         except Exception as _ov_err:
             print(f"[remotion] Overlay failed: {_ov_err}", flush=True)
-            # Fallback to ASS captions (fast, lower quality)
-            try:
-                from ass_caption_engine import generate_ass_file as _generate_ass
-                _ass_out = os.path.join(work_dir, "captions_fallback.ass")
-                _generate_ass(_projected_words, caption_style, _cap_kw, _ass_out,
-                              width=1080, height=1920, fps=30)
-                _esc_ass = _ass_out.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
-                print(f"[captions] ASS fallback generated: {_ass_out}", flush=True)
-            except Exception as _fb_err:
-                print(f"[captions] ASS fallback also failed: {_fb_err}", flush=True)
 
     # Caption overlay — transparent video from Remotion
     caption_input_args = []
