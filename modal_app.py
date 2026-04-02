@@ -101,12 +101,18 @@ image = (
         "cd /remotion && npm install 2>&1 | tail -5",
         # Remove macOS Chrome cache copied from local machine, then download Linux version
         "rm -rf /remotion/node_modules/.remotion 2>/dev/null || true",
-        "cd /remotion && npx remotion browser ensure 2>&1 | tail -3",
-        # Find Chrome binary wherever Remotion cached it and symlink for runtime discovery
-        "CHROME_BIN=$(find / -name 'chrome-headless-shell' -type f 2>/dev/null | head -1) && "
+        # Download Chrome Headless Shell via Remotion's Node API (more reliable than CLI)
+        "cd /remotion && node -e \""
+        "const {ensureBrowser} = require('@remotion/renderer');"
+        "ensureBrowser().then(()=>console.log('[remotion] Browser downloaded OK'))"
+        ".catch(e=>{console.error('[remotion] Browser download failed:', e.message); process.exit(1)})"
+        "\"",
+        # Find and symlink the Chrome binary for reliable runtime discovery
+        "CHROME_BIN=$(find / -path '*/node_modules/.remotion/*' -name 'chrome-headless-shell' -type f 2>/dev/null | grep linux | head -1) && "
+        "if [ -z \"$CHROME_BIN\" ]; then CHROME_BIN=$(find / -name 'chrome-headless-shell' -type f 2>/dev/null | head -1); fi && "
         "if [ -n \"$CHROME_BIN\" ]; then ln -sf \"$CHROME_BIN\" /usr/local/bin/chrome-headless-shell && "
-        "echo \"[remotion] Chrome symlinked: $CHROME_BIN → /usr/local/bin/chrome-headless-shell\"; "
-        "else echo '[remotion] WARNING: Chrome binary not found, will download at runtime'; fi",
+        "echo \"[remotion] Chrome symlinked: $CHROME_BIN\"; "
+        "else echo '[remotion] WARNING: Chrome binary not found'; fi",
         'cd /remotion && node -e "require(\'@remotion/renderer\'); console.log(\'[remotion] renderer OK\')"',
         "cd /remotion && node prebundle.mjs",
     )
