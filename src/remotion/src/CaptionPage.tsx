@@ -14,15 +14,20 @@ import type { ProjectedWord, StyleConfig } from "./types";
  * Compute base font size from token count.
  * Fewer words = bigger text. Sized for 1080px wide screen.
  */
+/**
+ * Compute base font size from token count.
+ * Sized for 1080px wide screen. Reference: Captions AI uses ~60-80px
+ * for regular text, never exceeding ~100px even for single words.
+ */
 function autoFontSize(tokenCount: number): number {
   const sizes: Record<number, number> = {
-    1: 180,
-    2: 145,
-    3: 118,
-    4: 100,
-    5: 88,
+    1: 90,
+    2: 78,
+    3: 68,
+    4: 62,
+    5: 56,
   };
-  return sizes[Math.min(tokenCount, 5)] || 88;
+  return sizes[Math.min(tokenCount, 5)] || 56;
 }
 
 /**
@@ -358,12 +363,18 @@ export const CaptionPage: React.FC<{
       )}
     </>
   ) : (
-    // Flat layout: one word per line, stacked vertically
-    allElements.map((el, i) => (
-      <div key={i} style={{ display: "block", textAlign: "center" }}>
-        {el}
-      </div>
-    ))
+    // Flat layout: words flow horizontally with wrapping
+    <div
+      style={{
+        display: "flex",
+        flexWrap: "wrap",
+        justifyContent: "center",
+        alignItems: "baseline",
+        gap: "8px",
+      }}
+    >
+      {allElements}
+    </div>
   );
 
   return (

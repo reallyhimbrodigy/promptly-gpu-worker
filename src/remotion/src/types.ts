@@ -35,7 +35,7 @@ export interface StyleConfig {
   baseFontSize?: number;
   keywordFontSize?: number;
   lineHeight: number;
-  textTransform: "uppercase" | "none" | "capitalize";
+  textTransform: "uppercase" | "lowercase" | "none" | "capitalize";
   maxWordsPerGroup: number;
   position: "lower-third" | "center" | "bottom";
   yPercent: number;
