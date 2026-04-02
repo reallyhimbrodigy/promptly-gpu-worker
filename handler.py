@@ -2386,22 +2386,22 @@ RULES FOR USING THESE TIMESTAMPS:
                     )
             elif "start" in item and "end" in item:
                 try:
-                    rs = max(0.0, float(item["start"]))
-                    re = max(0.0, float(item["end"]))
+                    rw_s = max(0.0, float(item["start"]))
+                    rw_e = max(0.0, float(item["end"]))
                 except Exception:
                     continue
-                if re > rs:
+                if rw_e > rw_s:
                     if video_duration > 0:
-                        re = min(re, video_duration)
-                    if re <= rs:
+                        rw_e = min(rw_e, video_duration)
+                    if rw_e <= rw_s:
                         continue
                     normalized_remove_words.append({
-                        "start": round(rs, 3),
-                        "end": round(re, 3),
+                        "start": round(rw_s, 3),
+                        "end": round(rw_e, 3),
                         "reason": str(item.get("reason") or "remove"),
                     })
                     print(
-                        f"[remove] Removing range {rs:.2f}-{re:.2f} ({item.get('reason', 'unknown')})",
+                        f"[remove] Removing range {rw_s:.2f}-{rw_e:.2f} ({item.get('reason', 'unknown')})",
                         flush=True,
                     )
 
