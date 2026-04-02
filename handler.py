@@ -7426,22 +7426,29 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     _caption_video = None  # single transparent overlay video (replaces 80 individual PNGs)
     if _projected_words and caption_style in _all_caption_styles:
-        from caption_renderer import generate_caption_pngs, compile_caption_video
-        _caption_pngs = generate_caption_pngs(
+        from caption_renderer import generate_animated_caption_video
+        _total_render_dur = sum(effective_durations)
+        _cap_result = generate_animated_caption_video(
             _projected_words, caption_style, _cap_kw, work_dir,
-            width=1080, height=1920,
+            total_duration=_total_render_dur, fps=30, width=1080, height=1920,
         )
-        # Compile PNGs into a single transparent video — replaces 80 overlay filters with 1
-        if _caption_pngs:
-            _total_render_dur = sum(effective_durations)
-            _cap_result = compile_caption_video(
-                _caption_pngs, _total_render_dur, work_dir,
-                fps=30, width=1080, height=1920,
+        if _cap_result["type"] == "video":
+            _caption_video = _cap_result["path"]
+        else:
+            # Fallback to static PNGs
+            from caption_renderer import generate_caption_pngs, compile_caption_video
+            _caption_pngs = generate_caption_pngs(
+                _projected_words, caption_style, _cap_kw, work_dir,
+                width=1080, height=1920,
             )
-            if _cap_result["type"] == "video":
-                _caption_video = _cap_result["path"]
-                _caption_pngs = []  # don't use individual PNGs
-            # else: fall back to individual PNG overlays
+            if _caption_pngs:
+                _cap_result = compile_caption_video(
+                    _caption_pngs, _total_render_dur, work_dir,
+                    fps=30, width=1080, height=1920,
+                )
+                if _cap_result["type"] == "video":
+                    _caption_video = _cap_result["path"]
+                    _caption_pngs = []
     else:
         print(f"[captions] No captions (style={caption_style}, words={len(_projected_words)})", flush=True)
 
