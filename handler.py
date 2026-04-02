@@ -1887,15 +1887,22 @@ Global parameters:
 Emphasis moments — THE MOST IMPORTANT PART OF YOUR EDIT. These are the 2-5 moments in the video that should HIT HARDEST. Every emphasis moment drives caption keyword highlighting, automatic zoom punches, and sound effects simultaneously. Think like a professional editor: which moments make the viewer feel something?
 
   emphasis_moments: [
-    {{"t": <seconds>, "word_indices": [<n>, ...], "type": "<punchline|revelation|statement|reaction|question|transition>", "intensity": "<high|medium>"}}
+    {{"t": <seconds>, "word_indices": [<n>, ...], "type": "<punchline|revelation|statement|reaction|question|transition>", "intensity": "<high|medium>", "duration": <seconds>}}
   ]
 
   - t: the source timestamp where the moment peaks (use word timestamps for precision)
-  - word_indices: the 1-3 word indices that ARE the emphasis (these become the highlighted keywords in captions)
-  - type: what kind of moment (punchline, revelation, statement, reaction, question, transition)
-  - intensity: "high" = the biggest moment (gets cut-zoom + bass hit), "medium" = notable but not peak
+  - word_indices: the 1-3 word indices that ARE the emphasis (these become the highlighted keywords in captions AND drive dramatic text overlays)
+  - type: what kind of moment — this controls the visual effect:
+    * "punchline" or "revelation" (high intensity) → dramatic stacked cascade text (word repeated 5x with decreasing opacity, like Captions AI "SKEPTIC" effect)
+    * "statement" (high intensity) → full-screen impact text (huge bold text overlay, like "EASY EDITING")
+    * "statement" (medium intensity) → blur card (blurred background with sharp text)
+    * Other types → vignette pulse + impact flash
+  - intensity: "high" = the biggest moment (gets cascade/impact text + cut-zoom + bass hit), "medium" = notable but subtler
+  - duration: how long the emphasis visual should hold (1.5-3.0 seconds, default 2.5 for high, 1.5 for medium)
 
-  Every video MUST have at least 2 emphasis_moments. Most have 3-5. These moments are what separate a professional edit from a raw upload.
+  IMPORTANT: Choose word_indices that point to a SINGLE powerful word (1-2 words max) for high-intensity moments. "SKEPTIC", "RESULT", "EDITING", "SAVED" — short, punchy words that look dramatic when displayed large. Do NOT pick long phrases.
+
+  Every video MUST have at least 3 emphasis_moments. Most have 4-6. These moments are what separate a professional edit from a raw upload.
 
   caption_keywords — list of words that should be visually emphasized in captions (larger, colored). These are auto-derived from emphasis_moments word_indices, but you can add extra keywords here for words that should stand out even outside emphasis moments.
 
@@ -2087,7 +2094,7 @@ Then output the JSON:
   "pacing": "<fast|medium|slow>",
   "opening_zoom": "<slow_in|slow_out|none>",
   "emphasis_moments": [
-    {{"t": <seconds>, "word_indices": [<n>, ...], "type": "<punchline|revelation|statement|reaction|question|transition>", "intensity": "<high|medium>"}}
+    {{"t": <seconds>, "word_indices": [<n>, ...], "type": "<punchline|revelation|statement|reaction|question|transition>", "intensity": "<high|medium>", "duration": <seconds>}}
   ],
   "text_overlays": [
     {{"text": "<text>", "position": "<pos>", "appear_at_clip": <n>, "style": "<style>"}}
@@ -2746,11 +2753,22 @@ RULES FOR USING THESE TIMESTAMPS:
                 _valid_indices = [int(i) for i in word_indices if isinstance(i, (int, float))]
                 if not _valid_indices:
                     continue
+                # Extract the actual emphasized word(s) from Deepgram transcript
+                _em_word_parts = []
+                for idx in _valid_indices:
+                    if _dg_words and 0 <= idx < len(_dg_words):
+                        w = str(_dg_words[idx].get("punctuated_word") or _dg_words[idx].get("word") or "").strip()
+                        if w:
+                            _em_word_parts.append(w)
+                _em_word = " ".join(_em_word_parts) if _em_word_parts else ""
+                _em_duration = float(em.get("duration") or (2.5 if intensity == "high" else 1.5))
                 emphasis_moments.append({
                     "t": t,
                     "word_indices": _valid_indices,
                     "type": em_type,
                     "intensity": intensity,
+                    "word": _em_word,
+                    "duration": _em_duration,
                 })
             except Exception:
                 continue
@@ -5930,11 +5948,16 @@ def render_remotion_overlay(
     em_list = []
     if emphasis_moments:
         for em in emphasis_moments:
-            em_list.append({
+            _em_entry = {
                 "t": float(em.get("t") or 0),
                 "type": str(em.get("type") or "statement"),
                 "intensity": str(em.get("intensity") or "medium"),
-            })
+            }
+            if em.get("word"):
+                _em_entry["word"] = str(em["word"])
+            if em.get("duration"):
+                _em_entry["duration"] = float(em["duration"])
+            em_list.append(_em_entry)
 
     # Write input JSON for the render CLI (OverlayInput format)
     input_data = {
@@ -5966,7 +5989,7 @@ def render_remotion_overlay(
 
     # Use multiple concurrent browser tabs to render frames in parallel
     # Each Chrome tab needs ~1 CPU core — use 75% of available cores for rendering
-    _concurrency = min(12, max(2, int((os.cpu_count() or 16) * 0.75)))
+    _concurrency = min(16, max(4, os.cpu_count() or 16))
 
     # Try GPU-accelerated Chrome first (angle-egl), fall back to SwiftShader (CPU)
     _gl_mode = "angle-egl" if _HAS_NVENC else "swiftshader"
@@ -7332,11 +7355,16 @@ def render_remotion_overlay(
     em_list = []
     if emphasis_moments:
         for em in emphasis_moments:
-            em_list.append({
+            _em_entry = {
                 "t": float(em.get("t") or 0),
                 "type": str(em.get("type") or "statement"),
                 "intensity": str(em.get("intensity") or "medium"),
-            })
+            }
+            if em.get("word"):
+                _em_entry["word"] = str(em["word"])
+            if em.get("duration"):
+                _em_entry["duration"] = float(em["duration"])
+            em_list.append(_em_entry)
 
     input_data = {
         "words": words or [],
@@ -7366,7 +7394,7 @@ def render_remotion_overlay(
     t0 = time.time()
 
     # High concurrency: use most of 16 CPUs for parallel Chromium tab rendering
-    _concurrency = min(12, max(4, os.cpu_count() or 8))
+    _concurrency = min(16, max(4, os.cpu_count() or 16))
 
     # Try GPU-accelerated GL first (angle-egl on A10G), fall back to swiftshader
     for _gl_mode in ["angle-egl", "swiftshader"]:
@@ -7994,6 +8022,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     sfx_input_args   = []
     sfx_filter_strs  = []
     sfx_audio_labels = []
+    sfx_timestamps   = []  # collect timestamps for audio ducking
     extra_input_index = n_segment_inputs  # SFX inputs start after segment inputs
 
     if True:
@@ -8026,6 +8055,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 f"[{extra_input_index}:a]volume={_vol:.3f},adelay={_offset_ms}|{_offset_ms}{_label}"
             )
             sfx_audio_labels.append(_label)
+            sfx_timestamps.append(_event_time)
             print(f"[sfx] transition {_i}: {_sound_style} vol={_vol:.3f} at {_event_time:.3f}s", flush=True)
             extra_input_index += 1
 
@@ -8049,6 +8079,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 f"[{extra_input_index}:a]volume={_vol:.3f},adelay={_offset_ms}|{_offset_ms}{_label}"
             )
             sfx_audio_labels.append(_label)
+            sfx_timestamps.append(_ts)
             print(f"[sfx] text_overlay {_i}: {_sfx_style} vol={_vol:.3f} at {_ts:.3f}s", flush=True)
             extra_input_index += 1
 
@@ -8082,6 +8113,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 f"[{extra_input_index}:a]volume={_vol:.3f},adelay={_offset_ms}|{_offset_ms}{_label}"
             )
             sfx_audio_labels.append(_label)
+            sfx_timestamps.append(_ts)
             print(
                 f"[sfx] sound_effect: {_sound_style} vol={_vol:.3f} at source={_source_t:.3f}s → output={_ts:.3f}s",
                 flush=True,
@@ -8505,6 +8537,31 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     )
 
     if sfx_audio_labels:
+        # ── Audio ducking: dip voice volume at SFX timestamps (Captions AI V1/V2 pattern) ──
+        # Build a volume expression that dips ~7dB for 0.3s around each SFX hit.
+        # This mimics the "silence-then-spike" pattern observed in professional edits.
+        if sfx_timestamps:
+            _duck_parts = []
+            for _dt in sorted(set(sfx_timestamps)):
+                # Dip: starts 0.05s before SFX, deepest at SFX time, recovers over 0.25s
+                _dip_start = max(0, _dt - 0.05)
+                _dip_end = _dt + 0.25
+                # Smooth envelope: ramp down then back up. Min volume = 0.45 (~7dB dip)
+                _duck_parts.append(
+                    f"if(between(t,{_dip_start:.3f},{_dip_end:.3f}),"
+                    f"0.45+0.55*max(0,min(abs(t-{_dt:.3f})/0.15,1)),"
+                    f"1)"
+                )
+            if _duck_parts:
+                # Multiply all duck envelopes together (concurrent SFX stack)
+                _duck_expr = "*".join(_duck_parts[:20])  # limit to 20 to avoid expr overflow
+                _duck_label = "[audio_ducked]"
+                post_filters.append(
+                    f"{audio_out}volume='{_duck_expr}':eval=frame{_duck_label}"
+                )
+                audio_out = _duck_label
+                print(f"[sfx] Audio ducking: {len(_duck_parts)} dip point(s)", flush=True)
+
         _n_inputs   = len(sfx_audio_labels) + 1
         _sfx_inputs = audio_out + "".join(sfx_audio_labels)
         post_filters.append(
@@ -8661,27 +8718,18 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             print(f"[remotion] Overlay ready: {caption_overlay_path}", flush=True)
         except Exception as _ov_err:
             print(f"[remotion] Overlay failed: {_ov_err}", flush=True)
-            print(f"[remotion] Falling back to static PNG captions", flush=True)
-            # Fallback to static PNGs
+            # Fallback to ASS captions (fast, lower quality)
             try:
-                from caption_renderer import generate_caption_pngs, compile_caption_video
-                _caption_pngs = generate_caption_pngs(
-                    _projected_words, caption_style, _cap_kw, work_dir,
-                    width=1080, height=1920,
-                )
-                if _caption_pngs:
-                    _cap_result = compile_caption_video(
-                        _caption_pngs, _total_render_dur, work_dir,
-                        fps=30, width=1080, height=1920,
-                    )
-                    if _cap_result.get("type") == "video":
-                        caption_overlay_path = _cap_result["path"]
-                        _caption_pngs = []
+                from ass_caption_engine import generate_ass_file as _generate_ass
+                _ass_out = os.path.join(work_dir, "captions_fallback.ass")
+                _generate_ass(_projected_words, caption_style, _cap_kw, _ass_out,
+                              width=1080, height=1920, fps=30)
+                _esc_ass = _ass_out.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+                print(f"[captions] ASS fallback generated: {_ass_out}", flush=True)
             except Exception as _fb_err:
-                print(f"[captions] PNG fallback also failed: {_fb_err}", flush=True)
+                print(f"[captions] ASS fallback also failed: {_fb_err}", flush=True)
 
-    # Caption overlay — single transparent video (Remotion ProRes or compiled PNG video)
-    # Must come AFTER broll overlays (captions on top of B-roll)
+    # Caption overlay — transparent video from Remotion
     caption_input_args = []
     caption_filter_strs = []
     if caption_overlay_path:
@@ -8692,21 +8740,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         )
         video_out = "[video_captioned]"
         print(f"[render] Remotion caption overlay at input index {_cap_idx}", flush=True)
-    elif _caption_pngs:
-        # Emergency fallback: individual PNG overlays
-        _base_cap_idx = n_segment_inputs + len(sfx_input_args) // 2 + _n_broll_inputs
-        for _ci, _cpng in enumerate(_caption_pngs):
-            _cap_input_idx = _base_cap_idx + _ci
-            caption_input_args.extend(["-i", _cpng["path"]])
-            _prev_out = video_out
-            _cap_label = f"[cap_{_ci}]"
-            caption_filter_strs.append(
-                f"{_prev_out}[{_cap_input_idx}:v]overlay=format=auto:"
-                f"enable='between(t,{_cpng['start']:.3f},{_cpng['end']:.3f})'"
-                f"{_cap_label}"
-            )
-            video_out = _cap_label
-        print(f"[render] {len(_caption_pngs)} caption PNG overlays (fallback)", flush=True)
 
     # Order matters: post_filters (zoom pulses etc) → broll → captions
     filter_complex = ";".join(video_filters + audio_filters + transition_filters + sfx_filter_strs + post_filters + broll_filter_strs + caption_filter_strs)

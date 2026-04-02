@@ -11,27 +11,18 @@ import type { TikTokPage } from "@remotion/captions";
 import type { ProjectedWord, StyleConfig } from "./types";
 
 /**
- * Compute font size from token count.
- * Fewer words = bigger text. This replaces all hardcoded font sizes.
+ * Compute base font size from token count.
+ * Fewer words = bigger text. Sized for 1080px wide screen.
  */
-function autoFontSize(tokenCount: number, scale: number = 1.0): number {
-  // Base: 200px for 1 word on 1080px wide screen
+function autoFontSize(tokenCount: number): number {
   const sizes: Record<number, number> = {
-    1: 200,
-    2: 155,
-    3: 125,
-    4: 105,
-    5: 90,
+    1: 180,
+    2: 145,
+    3: 118,
+    4: 100,
+    5: 88,
   };
-  const base = sizes[Math.min(tokenCount, 5)] || 90;
-  return Math.round(base * scale);
-}
-
-/**
- * Build text shadow CSS from style config shadow layers.
- */
-function buildShadowCSS(layers: StyleConfig["shadowLayers"]): string {
-  return layers.map((s) => `${s.x}px ${s.y}px ${s.blur}px ${s.color}`).join(", ");
+  return sizes[Math.min(tokenCount, 5)] || 88;
 }
 
 /**
@@ -42,14 +33,27 @@ function findOriginalWord(
   words: ProjectedWord[]
 ): ProjectedWord | undefined {
   const tokenStartS = tokenStartMs / 1000;
-  return words.find(
-    (w) => Math.abs(w.start - tokenStartS) < 0.08
-  );
+  return words.find((w) => Math.abs(w.start - tokenStartS) < 0.08);
 }
 
 /**
- * Renders a single page of captions with auto-sizing and word-by-word highlighting.
- * This is the heart of the caption system.
+ * Renders a single page of captions with Captions AI-quality animation.
+ *
+ * KEY FEATURE: Mixed-size cascade layout (the Captions AI signature)
+ * - Regular/context words are rendered at a smaller base size
+ * - Keywords/emphasis words are rendered 1.6-2x larger
+ * - When there are both regular and keyword tokens, they stack:
+ *   Line 1 (top): smaller context words
+ *   Line 2 (bottom): LARGE keyword/emphasis word
+ * - This creates the distinctive two-tier visual hierarchy seen in every
+ *   Captions AI video analyzed (V1-V4)
+ *
+ * Other principles:
+ * - Subtle scale pops (1.08-1.15) feel premium; giant jumps look cheap
+ * - Active word gets simultaneous scale + color + glow
+ * - Strong black outline ensures readability on any background
+ * - Past words return to full brightness (not dimmed)
+ * - Spring physics with visible overshoot = organic, alive
  */
 export const CaptionPage: React.FC<{
   page: TikTokPage;
@@ -60,19 +64,19 @@ export const CaptionPage: React.FC<{
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const t = frame / fps;
-  const tMs = t * 1000;
 
   const pageStart = page.startMs / 1000;
-  const pageEnd = (page.startMs + page.durationMs) / 1000;
+  // Compute page end from last token's end time (TikTokPage has no durationMs)
+  const lastToken = page.tokens[page.tokens.length - 1];
+  const pageEnd = lastToken ? lastToken.toMs / 1000 : pageStart + 0.5;
 
-  // Guard: skip pages with NaN, zero, or negligible duration
-  // NaN comparisons always return false, so check isFinite explicitly
-  if (!isFinite(pageStart) || !isFinite(pageEnd) || pageEnd - pageStart < 0.01) return null;
+  if (!isFinite(pageStart) || !isFinite(pageEnd) || pageEnd - pageStart < 0.01)
+    return null;
 
-  // Fade envelope — clamp durations to fit within page
+  // ── Fade envelope ──────────────────────────────────────────────────────
   const maxFade = (pageEnd - pageStart) / 3;
-  const fadeInDur = Math.min(0.08, maxFade);
-  const fadeOutDur = Math.min(0.10, maxFade);
+  const fadeInDur = Math.min(0.1, maxFade);
+  const fadeOutDur = Math.min(0.12, maxFade);
   const fadeIn = interpolate(t, [pageStart, pageStart + fadeInDur], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
@@ -84,166 +88,282 @@ export const CaptionPage: React.FC<{
   const opacity = fadeIn * fadeOut;
   if (opacity <= 0) return null;
 
-  // Page entrance animation
+  // ── Page entrance ──────────────────────────────────────────────────────
   const pageAge = Math.max(0, frame - Math.round(pageStart * fps));
-  let pageScale = 1;
-  let pageTranslateY = 0;
+  const entranceSpring = spring({
+    frame: pageAge,
+    fps,
+    config: { damping: 14, stiffness: 170, mass: 0.7 },
+  });
+  const pageScale = interpolate(entranceSpring, [0, 1], [0.88, 1]);
+  const pageTranslateY = interpolate(entranceSpring, [0, 1], [12, 0]);
 
-  if (style.animation === "spring" || style.animation === "pop") {
-    const springVal = spring({
-      frame: pageAge,
-      fps,
-      config: {
-        damping: style.animation === "spring" ? 12 : 18,
-        stiffness: style.animation === "spring" ? 180 : 260,
-        mass: 0.8,
-      },
-    });
-    pageScale = interpolate(springVal, [0, 1], [0.3, 1]);
-  } else if (style.animation === "slide") {
-    const slideP = interpolate(pageAge / fps, [0, 0.15], [0, 1], {
-      extrapolateLeft: "clamp",
-      extrapolateRight: "clamp",
-      easing: Easing.out(Easing.cubic),
-    });
-    pageTranslateY = interpolate(slideP, [0, 1], [40, 0]);
-    pageScale = interpolate(slideP, [0, 1], [0.8, 1]);
-  }
-
-  // Subtle organic sway using noise (replaces static positioning)
-  const swayX = noise2D("sway-x", frame * 0.008, 0) * 2;
-  const swayY = noise2D("sway-y", 0, frame * 0.008) * 1.5;
+  // ── Organic sway ──────────────────────────────────────────────────────
+  const swayX = noise2D("sx", frame * 0.006, 0) * 1.5;
+  const swayY = noise2D("sy", 0, frame * 0.006) * 1.2;
 
   const tokens = page.tokens;
   const tokenCount = tokens.length;
-  const fontSize = autoFontSize(tokenCount);
+  const baseFontSize = autoFontSize(tokenCount);
 
-  // Track keyword color index
+  // ── Classify tokens into context vs emphasis ──────────────────────────
+  // This drives the mixed-size cascade layout
+  const tokenMeta = tokens.map((token) => {
+    const cleanWord = token.text
+      .trim()
+      .replace(/[.,!?;:'"\\]/g, "")
+      .toLowerCase();
+    const isKeyword = keywordSet.has(cleanWord);
+    return { token, cleanWord, isKeyword };
+  });
+
+  const hasKeywords = tokenMeta.some((m) => m.isKeyword);
+  const keywordCount = tokenMeta.filter((m) => m.isKeyword).length;
+  const contextCount = tokenCount - keywordCount;
+
+  // Mixed-size cascade: if we have both keywords AND context words,
+  // use the two-tier layout (small context line + large keyword line)
+  const useCascadeLayout = hasKeywords && contextCount > 0 && tokenCount >= 2;
+
+  // Font sizes for the cascade layout
+  // Context words: smaller (the "regular" line)
+  // Keywords: 1.6-2x larger (the "emphasis" line)
+  const contextFontSize = useCascadeLayout
+    ? Math.round(baseFontSize * 0.72)
+    : baseFontSize;
+  const keywordFontSize = useCascadeLayout
+    ? Math.round(baseFontSize * 1.35)
+    : Math.round(baseFontSize * 1.15);
+
+  // Keyword color cycling
   let kwIdx = 0;
 
-  const wordElements = tokens.map((token, ti) => {
+  // ── Build word elements ────────────────────────────────────────────────
+  // In cascade mode, we split into two rows:
+  //   Row 1: context words (smaller, lighter)
+  //   Row 2: keyword words (larger, colored)
+  // In non-cascade mode, all words render in a single column
+
+  const contextElements: React.ReactNode[] = [];
+  const keywordElements: React.ReactNode[] = [];
+  const allElements: React.ReactNode[] = [];
+
+  tokenMeta.forEach(({ token, cleanWord, isKeyword }, ti) => {
     const tokenStart = token.fromMs / 1000;
     const tokenEnd = token.toMs / 1000;
-    const isActive = t >= tokenStart && t < tokenEnd + 0.05;
-    const isPast = t >= tokenEnd + 0.05;
-    const isFuture = t < tokenStart;
+    const isActive = t >= tokenStart && t < tokenEnd + 0.04;
+    const isPast = t >= tokenEnd + 0.04;
 
-    const cleanWord = token.text.trim().replace(/[.,!?;:'"\\]/g, "").toLowerCase();
-    const isKeyword = keywordSet.has(cleanWord);
     const originalWord = findOriginalWord(token.fromMs, words);
     const speakerIdx = originalWord?.speaker ?? 0;
 
-    // Per-word animation
-    let wordScale = 1;
-    let wordOpacity = 1;
+    // ── Per-word scale animation ───────────────────────────────────────
+    const wordActiveScale = isKeyword
+      ? Math.min(style.activeWordScale * 1.08, 1.22)
+      : Math.min(style.activeWordScale, 1.15);
 
+    let wordScale = 1;
+
+    if (isActive) {
+      const activeAge = Math.max(0, frame - Math.round(tokenStart * fps));
+      const activeSpring = spring({
+        frame: activeAge,
+        fps,
+        config: { damping: 10, stiffness: 200, mass: 0.5 },
+      });
+      wordScale = interpolate(activeSpring, [0, 1], [0.92, wordActiveScale]);
+    } else if (isPast) {
+      const pastAge = Math.max(0, frame - Math.round((tokenEnd + 0.04) * fps));
+      const settleSpring = spring({
+        frame: pastAge,
+        fps,
+        config: { damping: 18, stiffness: 200, mass: 0.6 },
+      });
+      wordScale = interpolate(settleSpring, [0, 1], [wordActiveScale, 1]);
+    }
+
+    // ── Typewriter / Wave special modes ────────────────────────────────
+    let wordOpacity = 1;
     if (style.animation === "typewriter") {
       wordOpacity = t >= tokenStart ? 1 : 0;
     } else if (style.animation === "wave") {
-      const waveDelay = ti * 0.06;
-      const waveAge = Math.max(0, (t - pageStart) - waveDelay);
-      const waveP = interpolate(waveAge, [0, 0.2], [0, 1], {
+      const waveDelay = ti * 0.05;
+      const waveAge = Math.max(0, t - pageStart - waveDelay);
+      const waveP = interpolate(waveAge, [0, 0.18], [0, 1], {
         extrapolateLeft: "clamp",
         extrapolateRight: "clamp",
-        easing: Easing.out(Easing.back(1.5)),
+        easing: Easing.out(Easing.back(1.3)),
       });
-      wordScale = interpolate(waveP, [0, 1], [0.5, 1]);
-      wordOpacity = waveP;
+      if (!isActive && !isPast) {
+        wordScale *= interpolate(waveP, [0, 1], [0.6, 1]);
+        wordOpacity = waveP;
+      }
     }
 
-    // Active word emphasis — the signature Captions AI effect
-    const activeScale = 1.3;
-    if (isActive) {
-      const activeSpring = spring({
-        frame: Math.max(0, frame - Math.round(tokenStart * fps)),
-        fps,
-        config: { damping: 14, stiffness: 300, mass: 0.5 },
-      });
-      wordScale *= interpolate(activeSpring, [0, 1], [0.88, activeScale]);
-    }
+    // ── Font size (cascade-aware) ────────────────────────────────────────
+    const wordFontSize = isKeyword ? keywordFontSize : contextFontSize;
 
-    // Font size: keywords get 1.35x
-    const wordFontSize = isKeyword ? Math.round(fontSize * 1.35) : fontSize;
+    // ── Color logic ──────────────────────────────────────────────────────
+    const kColors = style.keywordColors;
+    const speakerColor =
+      style.speakerColors?.[speakerIdx % (style.speakerColors?.length || 1)];
 
-    // Color logic
-    const speakerActiveColor = style.speakerColors?.[speakerIdx % (style.speakerColors?.length || 1)];
-    let color = style.dimColor;
+    let color: string;
     if (isActive) {
       color = isKeyword
-        ? style.keywordColors[kwIdx % style.keywordColors.length]
-        : (speakerActiveColor || style.activeColor);
+        ? kColors[kwIdx % kColors.length]
+        : speakerColor || style.activeColor;
     } else if (isPast) {
       color = isKeyword
-        ? style.keywordColors[kwIdx % style.keywordColors.length]
+        ? kColors[kwIdx % kColors.length]
         : style.textColor;
+    } else {
+      // Future words: dim in cascade context row, bright dim in keyword row
+      color = isKeyword ? `${kColors[kwIdx % kColors.length]}70` : style.dimColor;
     }
     if (isKeyword) kwIdx++;
 
-    // Shadow + glow
-    const shadowCSS = buildShadowCSS(style.shadowLayers);
-    const glowCSS =
-      isKeyword && style.glowEnabled && (isActive || isPast)
-        ? `, 0 0 ${Math.round(wordFontSize * 0.18)}px ${style.glowColor}, 0 0 ${Math.round(wordFontSize * 0.35)}px ${style.glowColor}40`
-        : "";
+    // ── Shadow layers ────────────────────────────────────────────────────
+    const shadowParts: string[] = style.shadowLayers.map(
+      (s) => `${s.x}px ${s.y}px ${s.blur}px ${s.color}`
+    );
 
+    // Active word glow
+    if (isActive && style.glowEnabled && style.glowColor !== "transparent") {
+      const glowSize1 = Math.round(wordFontSize * 0.12);
+      const glowSize2 = Math.round(wordFontSize * 0.25);
+      shadowParts.push(
+        `0 0 ${glowSize1}px ${style.glowColor}`,
+        `0 0 ${glowSize2}px ${style.glowColor}60`
+      );
+    }
+    // Keyword glow persists after active (dimmer)
+    if (isPast && isKeyword && style.glowEnabled && style.glowColor !== "transparent") {
+      const glowSize = Math.round(wordFontSize * 0.15);
+      shadowParts.push(`0 0 ${glowSize}px ${style.glowColor}40`);
+    }
+
+    const textShadow = shadowParts.join(", ");
     const display = token.text.trim();
 
+    // ── Build word style ─────────────────────────────────────────────────
     const wordStyle: React.CSSProperties = {
-      display: "block",
+      display: "inline-block",
       fontSize: wordFontSize,
       fontWeight: isKeyword ? 900 : style.fontWeight,
       fontFamily: style.fontFamily,
       color,
-      textShadow: shadowCSS + glowCSS,
-      transform: `scale(${wordScale})`,
+      textShadow,
+      transform: `scale(${wordScale.toFixed(4)})`,
       opacity: wordOpacity,
       textTransform: style.textTransform,
       lineHeight: style.lineHeight,
-      transition: "color 0.06s ease-out",
       willChange: "transform, opacity, color",
       textAlign: "center",
       whiteSpace: "nowrap",
+      WebkitTextStroke: "0px transparent",
+      // In cascade mode, keywords get extra letter spacing for impact
+      letterSpacing: useCascadeLayout && isKeyword ? "0.02em" : "normal",
     };
 
-    // Gradient text
-    if (style.gradientColors && style.gradientColors.length >= 2 && !style.outlineOnly) {
+    // ── Text stroke / outline ────────────────────────────────────────────
+    if (style.outlineOnly && style.textStroke) {
+      wordStyle.WebkitTextStroke = `${style.textStroke.width}px ${style.textStroke.color}`;
+      wordStyle.WebkitTextFillColor = "transparent";
+      delete wordStyle.color;
+    } else if (style.textStroke) {
+      wordStyle.WebkitTextStroke = `${style.textStroke.width}px ${style.textStroke.color}`;
+    } else {
+      wordStyle.WebkitTextStroke = "2px rgba(0,0,0,0.8)";
+    }
+
+    // ── Gradient text ────────────────────────────────────────────────────
+    if (
+      style.gradientColors &&
+      style.gradientColors.length >= 2 &&
+      !style.outlineOnly
+    ) {
       wordStyle.background = `linear-gradient(${style.gradientDirection || "to right"}, ${style.gradientColors.join(", ")})`;
       wordStyle.WebkitBackgroundClip = "text";
       wordStyle.WebkitTextFillColor = "transparent";
       delete wordStyle.color;
     }
 
-    // Outline-only
-    if (style.outlineOnly && style.textStroke) {
-      wordStyle.WebkitTextStroke = `${style.textStroke.width}px ${style.textStroke.color}`;
-      wordStyle.WebkitTextFillColor = "transparent";
-      delete wordStyle.color;
-    } else if (style.textStroke && !style.outlineOnly) {
-      wordStyle.WebkitTextStroke = `${style.textStroke.width}px ${style.textStroke.color}`;
-    }
-
-    return (
+    const element = (
       <span key={ti} style={wordStyle}>
         {display}
       </span>
     );
+
+    if (useCascadeLayout) {
+      if (isKeyword) {
+        keywordElements.push(element);
+      } else {
+        contextElements.push(element);
+      }
+    }
+    allElements.push(element);
   });
 
-  // Container background
-  const bgShape = style.backgroundShape || (style.pillEnabled ? "pill" : "none");
+  // ── Container / pill background ──────────────────────────────────────────
+  const bgShape =
+    style.backgroundShape || (style.pillEnabled ? "pill" : "none");
   let containerBg: React.CSSProperties = {};
   if (bgShape === "pill" && style.pillEnabled) {
     containerBg = {
       background: style.pillColor,
       borderRadius: style.pillRadius,
-      padding: `${Math.round(fontSize * 0.08)}px ${Math.round(fontSize * 0.16)}px`,
+      padding: `${Math.round(baseFontSize * 0.1)}px ${Math.round(baseFontSize * 0.2)}px`,
     };
   } else if (bgShape === "box") {
     containerBg = {
       background: style.pillColor,
-      padding: `${Math.round(fontSize * 0.08)}px ${Math.round(fontSize * 0.16)}px`,
+      padding: `${Math.round(baseFontSize * 0.1)}px ${Math.round(baseFontSize * 0.2)}px`,
     };
   }
+
+  // ── Cascade vs flat layout ───────────────────────────────────────────────
+  // Cascade: two rows (context words on top, keywords on bottom)
+  // Flat: all words stacked vertically (one word per line)
+  const innerContent = useCascadeLayout ? (
+    <>
+      {/* Context line (smaller, top) */}
+      {contextElements.length > 0 && (
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            justifyContent: "center",
+            alignItems: "baseline",
+            gap: "8px",
+          }}
+        >
+          {contextElements}
+        </div>
+      )}
+      {/* Keyword line (larger, bottom) — the emphasis row */}
+      {keywordElements.length > 0 && (
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            justifyContent: "center",
+            alignItems: "baseline",
+            gap: "10px",
+          }}
+        >
+          {keywordElements}
+        </div>
+      )}
+    </>
+  ) : (
+    // Flat layout: one word per line, stacked vertically
+    allElements.map((el, i) => (
+      <div key={i} style={{ display: "block", textAlign: "center" }}>
+        {el}
+      </div>
+    ))
+  );
 
   return (
     <div
@@ -252,7 +372,7 @@ export const CaptionPage: React.FC<{
         left: 0,
         right: 0,
         top: `${style.yPercent}%`,
-        transform: `translateY(-50%) scale(${pageScale}) translate(${swayX}px, ${pageTranslateY + swayY}px)`,
+        transform: `translateY(-50%) scale(${pageScale.toFixed(4)}) translate(${swayX.toFixed(2)}px, ${(pageTranslateY + swayY).toFixed(2)}px)`,
         opacity,
         display: "flex",
         justifyContent: "center",
@@ -267,10 +387,10 @@ export const CaptionPage: React.FC<{
           flexDirection: "column",
           alignItems: "center",
           maxWidth: "92%",
-          gap: "2px",
+          gap: useCascadeLayout ? "2px" : "4px",
         }}
       >
-        {wordElements}
+        {innerContent}
       </div>
     </div>
   );

@@ -7,18 +7,26 @@ import {
 } from "remotion";
 import { noise2D } from "@remotion/noise";
 import type { VisualEffect } from "../types";
+import { CascadeEcho } from "../CascadeEcho";
+import { ImpactText } from "../ImpactText";
+import { BlurCard } from "../BlurCard";
 
 /**
- * Compact, high-impact visual effects using Remotion primitives + noise.
- * Replaces 13 hand-rolled components with 4 clean inline effects.
+ * Visual effects layer — Captions AI quality.
  *
- * Design principle: each effect is a simple CSS overlay.
- * No complex canvas drawing, no particle systems.
- * Just opacity, color, blur, and transform — what actually reads on screen.
+ * Effects observed across V1-V4:
+ * - Impact flash (white/warm flash on cuts and emphasis)
+ * - Color flash (tinted overlay for reactions/reveals)
+ * - Warm flash / light leak (orange/amber flash as scene divider — V1 frame 101)
+ * - Whip pan blur (horizontal motion blur simulating fast camera movement — V3)
+ * - Vignette pulse (darkened edges on emphasis)
+ * - Glitch (RGB shift + scanline displacement)
+ * - Cascade echo (word repeated 4-7x with decreasing opacity — V1 SKEPTIC/RESULT)
+ * - Impact text (full-screen large bold text — V2 EASY EDITING, V4 dynamic transitions)
+ * - Blur card (heavy blur + sharp text overlay — V4)
  */
 
 // ─── Impact Flash ────────────────────────────────────────────────────────────
-// Brief white/color flash overlay. The most visible, most important effect.
 const ImpactFlash: React.FC<{ effect: VisualEffect }> = ({ effect }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
@@ -30,7 +38,6 @@ const ImpactFlash: React.FC<{ effect: VisualEffect }> = ({ effect }) => {
 
   const duration = end - start;
   const progress = (t - start) / duration;
-  // Sharp attack, smooth decay
   const intensity = progress < 0.2
     ? interpolate(progress, [0, 0.2], [0, 1])
     : interpolate(progress, [0.2, 1], [1, 0]);
@@ -51,8 +58,127 @@ const ImpactFlash: React.FC<{ effect: VisualEffect }> = ({ effect }) => {
   );
 };
 
+// ─── Warm Flash / Light Leak ────────────────────────────────────────────────
+// Observed in V1 (frame ~101): warm orange/amber flash used as scene divider.
+// Covers entire frame, washes to bright amber then fades back.
+const WarmFlash: React.FC<{ effect: VisualEffect }> = ({ effect }) => {
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+  const t = frame / fps;
+
+  const start = effect.start;
+  const end = effect.end;
+  if (t < start || t > end) return null;
+
+  const duration = end - start;
+  const progress = (t - start) / duration;
+
+  // Sharp attack to peak at 25%, then smooth exponential decay
+  const envelope = progress < 0.25
+    ? interpolate(progress, [0, 0.25], [0, 1])
+    : interpolate(progress, [0.25, 1], [1, 0], {
+        extrapolateLeft: "clamp",
+        extrapolateRight: "clamp",
+      });
+
+  const baseIntensity = (effect.params?.intensity as number) || 0.85;
+  const alpha = envelope * baseIntensity;
+
+  // Warm amber/orange color — the V1 signature light leak
+  return (
+    <AbsoluteFill
+      style={{
+        background: `radial-gradient(ellipse at 50% 40%,
+          rgba(255, 180, 60, ${alpha}) 0%,
+          rgba(255, 140, 30, ${alpha * 0.7}) 40%,
+          rgba(255, 100, 20, ${alpha * 0.4}) 70%,
+          rgba(200, 60, 10, ${alpha * 0.15}) 100%
+        )`,
+        mixBlendMode: "screen",
+      }}
+    />
+  );
+};
+
+// ─── Whip Pan Blur ───────────────────────────────────────────────────────────
+// Observed in V3: extreme horizontal motion blur simulating a fast camera whip.
+// Renders as horizontal streaks with directional noise.
+const WhipPanBlur: React.FC<{ effect: VisualEffect }> = ({ effect }) => {
+  const frame = useCurrentFrame();
+  const { fps, width, height } = useVideoConfig();
+  const t = frame / fps;
+
+  const start = effect.start;
+  const end = effect.end;
+  if (t < start || t > end) return null;
+
+  const duration = end - start;
+  const progress = (t - start) / duration;
+
+  // Quick envelope: peak in the middle
+  const envelope = progress < 0.4
+    ? interpolate(progress, [0, 0.4], [0, 1])
+    : interpolate(progress, [0.4, 1], [1, 0]);
+
+  const intensity = ((effect.params?.intensity as number) || 0.8) * envelope;
+  const direction = (effect.params?.direction as string) || "right";
+  const xOffset = direction === "left" ? -1 : 1;
+
+  // Render horizontal streak bars at noise-driven positions
+  const streakCount = 8;
+  const streaks = Array.from({ length: streakCount }, (_, i) => {
+    const yPos = noise2D("whip-y", i * 0.5, frame * 0.3) * 0.5 + 0.5;
+    const barHeight = 20 + Math.abs(noise2D("whip-h", i, frame * 0.2)) * 60;
+    const xShift = noise2D("whip-x", i * 0.3, frame * 0.5) * width * 0.3 * xOffset;
+
+    return (
+      <div
+        key={i}
+        style={{
+          position: "absolute",
+          left: 0,
+          right: 0,
+          top: `${yPos * 100}%`,
+          height: barHeight * intensity,
+          background: `linear-gradient(${direction === "left" ? "to left" : "to right"},
+            transparent,
+            rgba(255,255,255,${0.06 * intensity}),
+            rgba(255,255,255,${0.12 * intensity}),
+            rgba(255,255,255,${0.06 * intensity}),
+            transparent
+          )`,
+          transform: `translateX(${xShift}px)`,
+        }}
+      />
+    );
+  });
+
+  return (
+    <AbsoluteFill
+      style={{
+        overflow: "hidden",
+        opacity: intensity,
+        mixBlendMode: "screen",
+      }}
+    >
+      {streaks}
+      {/* Overall directional tint */}
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          background: `linear-gradient(${direction === "left" ? "to left" : "to right"},
+            transparent 20%,
+            rgba(255,255,255,${0.04 * intensity}) 50%,
+            transparent 80%
+          )`,
+        }}
+      />
+    </AbsoluteFill>
+  );
+};
+
 // ─── Vignette Pulse ──────────────────────────────────────────────────────────
-// Darkening edges that pulse on emphasis. Focuses attention on center.
 const VignettePulse: React.FC<{ effect: VisualEffect }> = ({ effect }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
@@ -80,7 +206,6 @@ const VignettePulse: React.FC<{ effect: VisualEffect }> = ({ effect }) => {
 };
 
 // ─── Color Flash ─────────────────────────────────────────────────────────────
-// Brief color tint overlay for reactions/reveals.
 const ColorFlash: React.FC<{ effect: VisualEffect }> = ({ effect }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
@@ -122,7 +247,6 @@ const ColorFlash: React.FC<{ effect: VisualEffect }> = ({ effect }) => {
 };
 
 // ─── Glitch ──────────────────────────────────────────────────────────────────
-// Quick RGB shift + noise displacement. Organic via noise2D.
 const Glitch: React.FC<{ effect: VisualEffect }> = ({ effect }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
@@ -137,14 +261,12 @@ const Glitch: React.FC<{ effect: VisualEffect }> = ({ effect }) => {
   const intensity = ((effect.params?.intensity as number) || 0.7) *
     (progress < 0.3 ? interpolate(progress, [0, 0.3], [0, 1]) : interpolate(progress, [0.3, 1], [1, 0]));
 
-  // Noise-driven scanline position and RGB offset
   const scanY = noise2D("glitch-scan", frame * 0.3, 0) * 0.5 + 0.5;
   const rgbShift = noise2D("glitch-rgb", 0, frame * 0.5) * 8 * intensity;
   const barHeight = 40 + Math.abs(noise2D("glitch-bar", frame * 0.2, 1)) * 80;
 
   return (
     <AbsoluteFill style={{ overflow: "hidden", mixBlendMode: "screen" }}>
-      {/* Horizontal glitch bar */}
       <div
         style={{
           position: "absolute",
@@ -156,7 +278,6 @@ const Glitch: React.FC<{ effect: VisualEffect }> = ({ effect }) => {
           transform: `translateX(${rgbShift * 3}px)`,
         }}
       />
-      {/* RGB channel ghosts */}
       <div
         style={{
           position: "absolute",
@@ -187,19 +308,25 @@ const Glitch: React.FC<{ effect: VisualEffect }> = ({ effect }) => {
 
 const EFFECT_COMPONENTS: Record<string, React.FC<{ effect: VisualEffect }>> = {
   impact_flash: ImpactFlash,
+  warm_flash: WarmFlash,
+  whip_pan_blur: WhipPanBlur,
   vignette_pulse: VignettePulse,
   color_flash: ColorFlash,
   glitch: Glitch,
+  // Emphasis overlays
+  cascade_echo: CascadeEcho,
+  impact_text: ImpactText,
+  blur_card: BlurCard,
   // Legacy names map to closest equivalent
-  light_leak: ColorFlash,
+  light_leak: WarmFlash,
   edge_glow: VignettePulse,
-  whip_pan: Glitch,
+  whip_pan: WhipPanBlur,
   zoom_blur_transition: ImpactFlash,
   particle_burst: ImpactFlash,
-  particle_ambient: () => null,  // ambient particles removed — too subtle to matter
-  emoji_pop: () => null,         // emojis removed — unprofessional
-  vhs_grain: () => null,         // grain handled by FFmpeg
-  letterbox_cinematic: () => null, // letterbox handled by FFmpeg
+  particle_ambient: () => null,
+  emoji_pop: () => null,
+  vhs_grain: () => null,
+  letterbox_cinematic: () => null,
 };
 
 /**

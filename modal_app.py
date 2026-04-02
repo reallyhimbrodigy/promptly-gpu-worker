@@ -1,12 +1,12 @@
 import modal
 
-# rebuild trigger v8 — A10G GPU + NVENC + 16 CPU + 32GB RAM + Remotion captions
+# rebuild trigger v10 — A10G GPU + NVENC + 16 CPU + 32GB RAM + Remotion captions (tuned)
 
 # ── Image definition (replaces Dockerfile) ────────────────────────────────────
 image = (
     modal.Image.from_registry("nvidia/cuda:12.6.3-runtime-ubuntu22.04", add_python="3.10")
     .run_commands(
-        "echo 'build v14 - A10G + NVENC + 16CPU + Remotion captions'",
+        "echo 'build v16 - A10G + NVENC + 16CPU + Remotion captions (Captions AI quality)'",
         "apt-get update && apt-get install -y ca-certificates && update-ca-certificates",
         # Remove CUDA stubs AND compat libs that intercept dlopen before Modal's real driver libs
         "rm -rf /usr/local/cuda/lib64/stubs/libnvidia-encode* /usr/local/cuda/lib64/stubs/libcuda* /usr/local/cuda/compat/libcuda* /usr/local/cuda/lib64/libcuda.so* 2>/dev/null || true",
@@ -59,7 +59,7 @@ image = (
         "ln -sf /opt/ffmpeg/bin/ffprobe /usr/local/bin/ffprobe",
         "ffmpeg -version | head -1",
         "ffmpeg -encoders 2>/dev/null | grep nvenc || echo 'WARNING: nvenc not in build'",
-        "ffmpeg -filters 2>/dev/null | grep subtitles || echo 'WARNING: subtitles filter not found'",
+        "ffmpeg -filters 2>/dev/null | grep ass || echo 'WARNING: ass filter not found'",
         "fc-cache -f",
     )
     .run_commands(
@@ -92,7 +92,7 @@ image = (
     )
     .add_local_dir("src/assets/fonts", "/assets/fonts", copy=True)
     .run_commands(
-        # Register fonts system-wide for both Remotion (Chromium) and Pillow
+        # Register fonts system-wide for both Remotion (Chromium) and FFmpeg libass
         "cp /assets/fonts/*.ttf /usr/share/fonts/truetype/ && fc-cache -f",
     )
     # Remotion: copy source, install deps, download Chromium, pre-bundle
@@ -106,6 +106,7 @@ image = (
     .add_local_dir("src/assets/sounds", "/assets/sounds")
     .add_local_file("handler.py", "/handler.py")
     .add_local_file("caption_renderer.py", "/caption_renderer.py")
+    .add_local_file("ass_caption_engine.py", "/ass_caption_engine.py")
 )
 
 # ── Secrets ────────────────────────────────────────────────────────────────────

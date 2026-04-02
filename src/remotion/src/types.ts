@@ -96,6 +96,8 @@ export interface EmphasisMoment {
   t: number; // seconds in output timeline
   type: string; // punchline, revelation, statement, reaction, question, transition
   intensity: string; // high, medium
+  word?: string; // the key word/phrase to display (for cascade echo / impact text)
+  duration?: number; // how long the emphasis lasts (seconds)
 }
 
 /** A single visual effect instance */
@@ -116,10 +118,15 @@ export type EffectType =
   | "vhs_grain"
   | "zoom_blur_transition"
   | "whip_pan"
+  | "whip_pan_blur"
   | "vignette_pulse"
   | "color_flash"
+  | "warm_flash"
   | "letterbox_cinematic"
-  | "edge_glow";
+  | "edge_glow"
+  | "cascade_echo"
+  | "impact_text"
+  | "blur_card";
 
 /** Full input for the combined overlay renderer */
 export interface OverlayInput {
