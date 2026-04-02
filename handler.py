@@ -5976,7 +5976,7 @@ def render_remotion_overlay(
     }
 
     input_json_path = os.path.join(work_dir, "remotion_input.json")
-    output_mov_path = os.path.join(work_dir, "overlay_remotion.mov")
+    output_mov_path = os.path.join(work_dir, "overlay_remotion.webm")
 
     with open(input_json_path, "w") as f:
         json.dump(input_data, f)
@@ -7382,7 +7382,7 @@ def render_remotion_overlay(
     }
 
     input_json_path = os.path.join(work_dir, "remotion_input.json")
-    output_mov_path = os.path.join(work_dir, "overlay_remotion.mov")
+    output_mov_path = os.path.join(work_dir, "overlay_remotion.webm")
 
     with open(input_json_path, "w") as f:
         json.dump(input_data, f)

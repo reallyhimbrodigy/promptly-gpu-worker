@@ -84,11 +84,20 @@ if (existsSync(resolve(PREBUNDLE_DIR, "index.html"))) {
 
 const inputProps = { input };
 
+// Detect pre-installed Chrome Headless Shell to avoid runtime download
+const chromePath = existsSync("/usr/local/bin/chrome-headless-shell")
+  ? "/usr/local/bin/chrome-headless-shell"
+  : undefined;
+if (chromePath) console.log("[remotion] Using pre-installed Chrome:", chromePath);
+
 // Select the VideoOverlay composition (captions + effects)
 const composition = await selectComposition({
   serveUrl: bundleLocation,
   id: "VideoOverlay",
   inputProps,
+  chromiumOptions: {
+    ...(chromePath ? { executablePath: chromePath } : {}),
+  },
 });
 
 composition.durationInFrames = input.durationInFrames;
@@ -96,19 +105,19 @@ composition.width = input.width;
 composition.height = input.height;
 composition.fps = input.fps;
 
-// Render to transparent ProRes 4444 MOV
+// Render to transparent VP8 WebM — ~15x smaller than ProRes 4444
 await renderMedia({
   composition,
   serveUrl: bundleLocation,
-  codec: "prores",
-  proResProfile: "4444",
-  pixelFormat: "yuva444p10le",
-  imageFormat: "png", // required for transparent pixel formats
+  codec: "vp8",
+  pixelFormat: "yuva420p",
+  imageFormat: "png",
   outputLocation: outputPath,
   inputProps,
-  concurrency, // passed via --concurrency flag (default: 4)
+  concurrency,
   chromiumOptions: {
     gl: glMode,
+    ...(chromePath ? { executablePath: chromePath } : {}),
   },
   onProgress: ({ progress }) => {
     const pct = Math.round(progress * 100);

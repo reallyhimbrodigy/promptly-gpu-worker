@@ -6,7 +6,7 @@ import modal
 image = (
     modal.Image.from_registry("nvidia/cuda:12.6.3-runtime-ubuntu22.04", add_python="3.10")
     .run_commands(
-        "echo 'build v16 - A10G + NVENC + 16CPU + Remotion captions (Captions AI quality)'",
+        "echo 'build v17 - A10G + NVENC + 16CPU + Remotion captions (Captions AI quality)'",
         "apt-get update && apt-get install -y ca-certificates && update-ca-certificates",
         # Remove CUDA stubs AND compat libs that intercept dlopen before Modal's real driver libs
         "rm -rf /usr/local/cuda/lib64/stubs/libnvidia-encode* /usr/local/cuda/lib64/stubs/libcuda* /usr/local/cuda/compat/libcuda* /usr/local/cuda/lib64/libcuda.so* 2>/dev/null || true",
@@ -99,7 +99,10 @@ image = (
     .add_local_dir("src/remotion", "/remotion", copy=True)
     .run_commands(
         "cd /remotion && npm install 2>&1 | tail -5",
+        # Download Chrome Headless Shell and symlink to a fixed path for runtime
         "cd /remotion && npx remotion browser ensure 2>&1 | tail -3",
+        "find /root -name 'chrome-headless-shell' -type f 2>/dev/null | head -1 | xargs -I{} ln -sf {} /usr/local/bin/chrome-headless-shell",
+        "ls -la /usr/local/bin/chrome-headless-shell && echo '[remotion] Chrome symlinked OK'",
         'cd /remotion && node -e "require(\'@remotion/renderer\'); console.log(\'[remotion] renderer OK\')"',
         "cd /remotion && node prebundle.mjs",
     )
@@ -119,7 +122,7 @@ app = modal.App("promptly-gpu-worker", image=image, secrets=secrets)
 
 # ── Web endpoint ───────────────────────────────────────────────────────────────
 @app.function(
-    timeout=300,          # 5 min — Gemini can take 30-50s + render time; 300s is safe ceiling
+    timeout=600,          # 10 min — Gemini (30-50s) + Remotion overlay (~60-90s) + FFmpeg render (~120s)
     scaledown_window=120, # keep warm 2 min for back-to-back requests (avoid cold start)
     cpu=16,
     memory=32768,
