@@ -4094,7 +4094,7 @@ def render_remotion_overlay(
                 "intensity": str(em.get("intensity") or "medium"),
             }
             if em.get("word"):
-                _em_entry["word"] = str(em["word"])
+                _em_entry["word"] = re.sub(r"[.,!?;:'\"\\]", "", str(em["word"])).strip()
             if em.get("duration"):
                 _em_entry["duration"] = float(em["duration"])
             em_list.append(_em_entry)
@@ -5450,7 +5450,20 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _cap_kw = edit_plan.get("caption_keywords") or []
     _total_render_dur = sum(effective_durations)
     _vibe = str(edit_plan.get("_user_vibe") or edit_plan.get("notes") or "")
-    _emphasis_moments = edit_plan.get("emphasis_moments") or []
+    _emphasis_moments_raw = edit_plan.get("emphasis_moments") or []
+
+    # Project emphasis moment timestamps from source time → output timeline
+    # (Gemini gives source timestamps, but Remotion overlay uses output timeline)
+    _clip_ranges_for_em = get_output_clip_ranges(render_cuts, effective_durations, transition_duration=TRANSITION_DURATION)
+    _emphasis_moments = []
+    for _em in _emphasis_moments_raw:
+        _em_copy = dict(_em)
+        _src_t = float(_em.get("t") or 0)
+        _out_t = project_source_time_to_output(_src_t, render_cuts, _clip_ranges_for_em, speed_curve)
+        if _out_t is not None:
+            _em_copy["t"] = _out_t
+            _emphasis_moments.append(_em_copy)
+            print(f"[emphasis] Projected {_src_t:.2f}s → {_out_t:.2f}s ({_em.get('type')}/{_em.get('intensity')})", flush=True)
 
     # Build cut info with effective durations for Remotion effect timing
     _cuts_for_remotion = []
@@ -6423,17 +6436,20 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         except Exception as _ov_err:
             print(f"[remotion] Overlay failed: {_ov_err}", flush=True)
 
-    # Caption overlay — transparent video from Remotion
+    # Caption overlay — transparent video from Remotion (VP8 WebM with alpha)
     caption_input_args = []
     caption_filter_strs = []
     if caption_overlay_path:
         _cap_idx = n_segment_inputs + len(sfx_input_args) // 2 + _n_broll_inputs
-        caption_input_args = ["-i", caption_overlay_path]
+        # Force libvpx decoder — FFmpeg's native vp8 decoder strips alpha channel
+        caption_input_args = ["-c:v", "libvpx", "-i", caption_overlay_path]
+        # Ensure alpha channel is preserved through format conversion
         caption_filter_strs.append(
-            f"{video_out}[{_cap_idx}:v]overlay=format=rgb:eof_action=pass[video_captioned]"
+            f"[{_cap_idx}:v]format=yuva420p[_cap_alpha];"
+            f"{video_out}[_cap_alpha]overlay=eof_action=pass[video_captioned]"
         )
         video_out = "[video_captioned]"
-        print(f"[render] Remotion caption overlay at input index {_cap_idx}", flush=True)
+        print(f"[render] Remotion caption overlay at input index {_cap_idx} (libvpx decoder)", flush=True)
 
     # Order matters: post_filters (zoom pulses etc) → broll → captions
     filter_complex = ";".join(video_filters + audio_filters + transition_filters + sfx_filter_strs + post_filters + broll_filter_strs + caption_filter_strs)
