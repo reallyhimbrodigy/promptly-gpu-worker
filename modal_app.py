@@ -101,8 +101,11 @@ image = (
         "cd /remotion && npm install 2>&1 | tail -5",
         # Download Chrome Headless Shell and symlink to a fixed path for runtime
         "cd /remotion && npx remotion browser ensure 2>&1 | tail -3",
-        "find /root -name 'chrome-headless-shell' -type f 2>/dev/null | head -1 | xargs -I{} ln -sf {} /usr/local/bin/chrome-headless-shell",
-        "ls -la /usr/local/bin/chrome-headless-shell && echo '[remotion] Chrome symlinked OK'",
+        # Find Chrome binary wherever Remotion cached it and symlink for runtime discovery
+        "CHROME_BIN=$(find / -name 'chrome-headless-shell' -type f 2>/dev/null | head -1) && "
+        "if [ -n \"$CHROME_BIN\" ]; then ln -sf \"$CHROME_BIN\" /usr/local/bin/chrome-headless-shell && "
+        "echo \"[remotion] Chrome symlinked: $CHROME_BIN → /usr/local/bin/chrome-headless-shell\"; "
+        "else echo '[remotion] WARNING: Chrome binary not found, will download at runtime'; fi",
         'cd /remotion && node -e "require(\'@remotion/renderer\'); console.log(\'[remotion] renderer OK\')"',
         "cd /remotion && node prebundle.mjs",
     )
