@@ -118,7 +118,6 @@ image = (
     )
     .add_local_dir("src/assets/sounds", "/assets/sounds")
     .add_local_file("handler.py", "/handler.py")
-    .add_local_file("caption_renderer.py", "/caption_renderer.py")
     .add_local_file("ass_caption_engine.py", "/ass_caption_engine.py")
 )
 
