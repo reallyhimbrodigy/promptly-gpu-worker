@@ -1203,10 +1203,9 @@ def measure_source_loudness(source_path):
         stderr = result.stderr
 
         # Parse peak and RMS from astats output
-        import re as _re
-        peak_matches = _re.findall(r"lavfi\.astats\.Overall\.Peak_level=([-\d.]+)", stderr)
-        rms_matches = _re.findall(r"lavfi\.astats\.Overall\.RMS_level=([-\d.]+)", stderr)
-        noise_matches = _re.findall(r"lavfi\.astats\.Overall\.Noise_floor=([-\d.]+)", stderr)
+        peak_matches = re.findall(r"lavfi\.astats\.Overall\.Peak_level=([-\d.]+)", stderr)
+        rms_matches = re.findall(r"lavfi\.astats\.Overall\.RMS_level=([-\d.]+)", stderr)
+        noise_matches = re.findall(r"lavfi\.astats\.Overall\.Noise_floor=([-\d.]+)", stderr)
 
         peak_db = float(peak_matches[-1]) if peak_matches else defaults["peak_db"]
         rms_db = float(rms_matches[-1]) if rms_matches else defaults["rms_db"]
@@ -2513,12 +2512,9 @@ RULES FOR USING THESE TIMESTAMPS:
     for _ov in (edit_plan.get("text_overlays") or []):
         if "text" in _ov:
             _ov["text"] = _EMOJI_RE.sub("", str(_ov["text"])).strip()
-    edit_plan["beat_sync"] = False
     edit_plan.setdefault("sound_effects", [])
     edit_plan.setdefault("emphasis_moments", [])
     edit_plan.setdefault("visual_effects", [])
-    edit_plan.pop("teal_orange", None)
-    edit_plan.pop("beat_sync", None)
 
     # ── B-roll clips validation ───────────────────────────────────────────
     raw_broll = edit_plan.get("broll_clips") or []
@@ -2826,7 +2822,6 @@ RULES FOR USING THESE TIMESTAMPS:
         if overlay.get("position") == "center":
             print(f"[generate-edit] Moving text overlay '{overlay.get('text', '')}' from center to top (talking head safety)", flush=True)
             overlay["position"] = "top"
-        overlay.setdefault("sfx_style", "none")
         overlay["sfx_style"] = "none"
 
     final_cuts = []
@@ -3622,6 +3617,8 @@ def _kb_crop_exprs(direction, kb_smooth, extra_px_w, extra_px_h):
         cx = f"'max(0\\,min({_half_w}*{kb_smooth}\\,iw-1080))'"
         cy = f"'max(0\\,min({_half_h}*{kb_smooth}\\,ih-1920))'"
     return cx, cy
+
+TRANSITION_DURATION_DEFAULT = 0.3
 
 def get_transition_duration(pacing=None):
     """Adaptive transition duration based on video pacing.
@@ -6098,11 +6095,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     video_out = "[video_base]"
     post_filters.append(f"[{tl_video}]null{video_out}")
 
-    # ── Color grading DISABLED ─────────────────────────────────────────
-    # Was applying curves + saturation + vignette + grain which washed out the video.
-    # Captions AI preserves original video colors — we should too.
-    print("[grade] Color grading disabled — preserving original video colors", flush=True)
-
     if edit_plan.get("cinematic_bars"):
         bar_h = int((1920 - int(1080 / 2.35)) / 2)
         bars_label = f"[video_bars]"
@@ -6111,23 +6103,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             f"drawbox=x=0:y={1920-bar_h}:w=1080:h={bar_h}:color=black:t=fill{bars_label}"
         )
         video_out = bars_label
-
-    # ── White flash effects DISABLED ──────────────────────────────────────
-    # Captions AI doesn't use brightness spike flashes — they blow out the video.
-    print("[fx] White flash effects disabled", flush=True)
-
-    # ── Background blur on emphasis moments ────────────────────────────
-    # NOTE: Disabled — boxblur does not support timeline 'enable' in FFmpeg 8.1,
-    # and luma_radius expressions are evaluated once at init, not per-frame.
-    # TODO: Re-implement using gblur (which supports timeline) or overlay approach.
-
-    # ── Zoom pulses DISABLED ────────────────────────────────────────────
-    # Captions AI doesn't use zoom pulses — they look amateur on short-form content.
-    print("[fx] Zoom pulses disabled", flush=True)
-
-    # ── Screen shakes DISABLED ───────────────────────────────────────────
-    # Captions AI doesn't use screen shakes — they distract from content.
-    print("[fx] Screen shakes disabled", flush=True)
 
     # Depth blur mask disabled — generated but never used in render (maskedmerge
     # incompatible with FFmpeg 8.x). Vignette handles edge emphasis instead.
