@@ -7438,31 +7438,25 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     _cap_kw = edit_plan.get("caption_keywords") or []
 
-    _caption_video = None  # single transparent overlay video (replaces 80 individual PNGs)
+    _caption_video = None
+    _caption_pngs = []
     if _projected_words and caption_style in _all_caption_styles:
-        from caption_renderer import generate_animated_caption_video
+        from caption_renderer import generate_caption_pngs, compile_caption_video
         _total_render_dur = sum(effective_durations)
-        _cap_result = generate_animated_caption_video(
+        # Use static PNG overlays — fast (<2s) and reliable
+        # Animated video approach disabled: 90s+ overhead, black frame issues
+        _caption_pngs = generate_caption_pngs(
             _projected_words, caption_style, _cap_kw, work_dir,
-            total_duration=_total_render_dur, fps=30, width=1080, height=1920,
+            width=1080, height=1920,
         )
-        if _cap_result["type"] == "video":
-            _caption_video = _cap_result["path"]
-        else:
-            # Fallback to static PNGs
-            from caption_renderer import generate_caption_pngs, compile_caption_video
-            _caption_pngs = generate_caption_pngs(
-                _projected_words, caption_style, _cap_kw, work_dir,
-                width=1080, height=1920,
+        if _caption_pngs:
+            _cap_result = compile_caption_video(
+                _caption_pngs, _total_render_dur, work_dir,
+                fps=30, width=1080, height=1920,
             )
-            if _caption_pngs:
-                _cap_result = compile_caption_video(
-                    _caption_pngs, _total_render_dur, work_dir,
-                    fps=30, width=1080, height=1920,
-                )
-                if _cap_result["type"] == "video":
-                    _caption_video = _cap_result["path"]
-                    _caption_pngs = []
+            if _cap_result["type"] == "video":
+                _caption_video = _cap_result["path"]
+                _caption_pngs = []
     else:
         print(f"[captions] No captions (style={caption_style}, words={len(_projected_words)})", flush=True)
 
@@ -7493,9 +7487,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         end = float(cut["source_end"])
         seg_dur = end - start
         # Each segment is a separate input with pre-seeking
-        # CUDA hwaccel decoding offloads decode to GPU (frames auto-download to CPU for filters)
-        _hwaccel_args = ["-hwaccel", "cuda"] if _HAS_HWACCEL else []
-        input_args += _hwaccel_args + [
+        # NOTE: -hwaccel cuda causes black frames with complex filter chains (zoompan/xfade/overlay)
+        # because decoded frames stay in GPU memory. Disabled until we add hwdownload filters.
+        input_args += [
             "-ss", f"{start:.3f}", "-t", f"{seg_dur:.3f}",
             "-analyzeduration", "10000000", "-probesize", "10000000",
             "-i", render_source,
