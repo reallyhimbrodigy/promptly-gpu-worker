@@ -1,15 +1,14 @@
 import modal
 
-# rebuild trigger v7 — A10G GPU + NVENC + 16 CPU + 32GB RAM (no Remotion)
+# rebuild trigger v8 — A10G GPU + NVENC + 16 CPU + 32GB RAM + Remotion captions
 
 # ── Image definition (replaces Dockerfile) ────────────────────────────────────
 image = (
     modal.Image.from_registry("nvidia/cuda:12.6.3-runtime-ubuntu22.04", add_python="3.10")
     .run_commands(
-        "echo 'build v13 - A10G + NVENC + 16CPU + Pillow captions (no Remotion)'",
+        "echo 'build v14 - A10G + NVENC + 16CPU + Remotion captions'",
         "apt-get update && apt-get install -y ca-certificates && update-ca-certificates",
         # Remove CUDA stubs AND compat libs that intercept dlopen before Modal's real driver libs
-        # The compat package ships libcuda.so.560.x which shadows the real Modal driver (580.x)
         "rm -rf /usr/local/cuda/lib64/stubs/libnvidia-encode* /usr/local/cuda/lib64/stubs/libcuda* /usr/local/cuda/compat/libcuda* /usr/local/cuda/lib64/libcuda.so* 2>/dev/null || true",
     )
     .apt_install(
@@ -34,11 +33,26 @@ image = (
         "libswresample-dev",
         "libsndfile1-dev",
         "libsamplerate0-dev",
+        # Chromium dependencies for Remotion headless rendering
+        "libnss3",
+        "libatk1.0-0",
+        "libatk-bridge2.0-0",
+        "libcups2",
+        "libdrm2",
+        "libxkbcommon0",
+        "libxcomposite1",
+        "libxdamage1",
+        "libxfixes3",
+        "libxrandr2",
+        "libgbm1",
+        "libpango-1.0-0",
+        "libcairo2",
+        "libasound2",
+        "libatspi2.0-0",
     )
     .run_commands(
         "mkdir -p /opt/ffmpeg",
         # n7.1 GPL build — NVENC API 12.2 (driver ≥550, Modal has 580.95.05)
-        # n8.1 required NVENC API 13.0 which caused EINVAL with CUDA 12.2 stubs
         "cd /opt/ffmpeg && wget -q https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n7.1-latest-linux64-gpl-7.1.tar.xz -O ffmpeg.tar.xz",
         "cd /opt/ffmpeg && tar -xJf ffmpeg.tar.xz --strip-components=1",
         "ln -sf /opt/ffmpeg/bin/ffmpeg /usr/local/bin/ffmpeg",
@@ -47,6 +61,12 @@ image = (
         "ffmpeg -encoders 2>/dev/null | grep nvenc || echo 'WARNING: nvenc not in build'",
         "ffmpeg -filters 2>/dev/null | grep subtitles || echo 'WARNING: subtitles filter not found'",
         "fc-cache -f",
+    )
+    .run_commands(
+        # Install Node.js 20 LTS for Remotion caption rendering
+        "curl -fsSL https://deb.nodesource.com/setup_20.x | bash -",
+        "apt-get install -y nodejs",
+        "node --version && npm --version",
     )
     .run_commands(
         # Download OpenCV DNN face detector model (much more accurate than Haar cascades)
@@ -72,8 +92,16 @@ image = (
     )
     .add_local_dir("src/assets/fonts", "/assets/fonts", copy=True)
     .run_commands(
-        # Register Montserrat fonts system-wide for Pillow caption rendering
+        # Register fonts system-wide for both Remotion (Chromium) and Pillow
         "cp /assets/fonts/*.ttf /usr/share/fonts/truetype/ && fc-cache -f",
+    )
+    # Remotion: copy source, install deps, download Chromium, pre-bundle
+    .add_local_dir("src/remotion", "/remotion", copy=True)
+    .run_commands(
+        "cd /remotion && npm install 2>&1 | tail -5",
+        "cd /remotion && npx remotion browser ensure 2>&1 | tail -3",
+        'cd /remotion && node -e "require(\'@remotion/renderer\'); console.log(\'[remotion] renderer OK\')"',
+        "cd /remotion && node prebundle.mjs",
     )
     .add_local_dir("src/assets/sounds", "/assets/sounds")
     .add_local_file("handler.py", "/handler.py")
