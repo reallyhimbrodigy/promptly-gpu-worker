@@ -126,14 +126,15 @@ export const CaptionPage: React.FC<{
   const useCascadeLayout = hasKeywords && contextCount > 0 && tokenCount >= 2;
 
   // Font sizes for the cascade layout
-  // Context words: smaller (the "regular" line)
-  // Keywords: 1.6-2x larger (the "emphasis" line)
+  // Context words: slightly smaller (the "regular" line)
+  // Keywords: moderately larger (the "emphasis" line)
+  // Tighter ratio (0.82/1.22) looks professional; extreme ratios look amateur
   const contextFontSize = useCascadeLayout
-    ? Math.round(baseFontSize * 0.72)
+    ? Math.round(baseFontSize * 0.82)
     : baseFontSize;
   const keywordFontSize = useCascadeLayout
-    ? Math.round(baseFontSize * 1.35)
-    : Math.round(baseFontSize * 1.15);
+    ? Math.round(baseFontSize * 1.22)
+    : Math.round(baseFontSize * 1.12);
 
   // Keyword color cycling
   let kwIdx = 0;
@@ -387,7 +388,7 @@ export const CaptionPage: React.FC<{
           flexDirection: "column",
           alignItems: "center",
           maxWidth: "92%",
-          gap: useCascadeLayout ? "2px" : "4px",
+          gap: useCascadeLayout ? "6px" : "4px",
         }}
       >
         {innerContent}

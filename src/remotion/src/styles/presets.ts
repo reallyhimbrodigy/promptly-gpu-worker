@@ -151,19 +151,27 @@ export const STYLE_PRESETS: Record<string, StyleConfig> = {
     speakerColors: SPEAKER_COLORS,
   },
 
-  /** HORMOZI — Bold yellow emphasis, aggressive but controlled */
+  /** HORMOZI — Bold yellow emphasis, thick outlines, readable on any bg.
+   *  Inspired by Alex Hormozi's video style: bold, high-contrast, impactful. */
   hormozi: {
     ...BASE,
     fontWeight: 900,
     animation: "spring",
     activeColor: "#FFD700",
-    pillEnabled: false,
-    pillColor: "transparent",
+    textColor: "#FFFFFF",
+    pillEnabled: true,
+    pillColor: "rgba(0,0,0,0.65)",
+    pillRadius: 16,
     glowEnabled: true,
     glowColor: "#FFD700",
-    glowRadius: 24,
-    activeWordScale: 1.15,
-    keywordColors: ["#FFD700", "#FFD700", "#FFD700", "#FFD700"],
+    glowRadius: 14,               // Tighter glow — crisp, not blurry
+    activeWordScale: 1.12,
+    textStroke: { width: 3, color: "rgba(0,0,0,0.95)" },
+    keywordColors: ["#FFD700", "#FF3C64", "#00DCC8", "#FF8C00"],
+    shadowLayers: [
+      { x: 0, y: 3, blur: 10, color: "rgba(0,0,0,0.95)" },
+      { x: 0, y: 6, blur: 20, color: "rgba(0,0,0,0.5)" },
+    ],
     speakerColors: SPEAKER_COLORS,
   },
 
