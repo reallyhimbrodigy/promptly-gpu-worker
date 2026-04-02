@@ -99,7 +99,8 @@ image = (
     .add_local_dir("src/remotion", "/remotion", copy=True)
     .run_commands(
         "cd /remotion && npm install 2>&1 | tail -5",
-        # Download Chrome Headless Shell and symlink to a fixed path for runtime
+        # Remove macOS Chrome cache copied from local machine, then download Linux version
+        "rm -rf /remotion/node_modules/.remotion 2>/dev/null || true",
         "cd /remotion && npx remotion browser ensure 2>&1 | tail -3",
         # Find Chrome binary wherever Remotion cached it and symlink for runtime discovery
         "CHROME_BIN=$(find / -name 'chrome-headless-shell' -type f 2>/dev/null | head -1) && "
