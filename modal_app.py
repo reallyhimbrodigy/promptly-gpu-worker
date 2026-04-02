@@ -8,8 +8,9 @@ image = (
     .run_commands(
         "echo 'build v13 - A10G + NVENC + 16CPU + Pillow captions (no Remotion)'",
         "apt-get update && apt-get install -y ca-certificates && update-ca-certificates",
-        # Remove CUDA stubs that can intercept dlopen before Modal's real driver libs
-        "rm -rf /usr/local/cuda/lib64/stubs/libnvidia-encode* /usr/local/cuda/lib64/stubs/libcuda* 2>/dev/null || true",
+        # Remove CUDA stubs AND compat libs that intercept dlopen before Modal's real driver libs
+        # The compat package ships libcuda.so.560.x which shadows the real Modal driver (580.x)
+        "rm -rf /usr/local/cuda/lib64/stubs/libnvidia-encode* /usr/local/cuda/lib64/stubs/libcuda* /usr/local/cuda/compat/libcuda* /usr/local/cuda/lib64/libcuda.so* 2>/dev/null || true",
     )
     .apt_install(
         "ca-certificates",

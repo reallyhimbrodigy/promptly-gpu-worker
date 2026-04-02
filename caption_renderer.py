@@ -1332,9 +1332,17 @@ def generate_animated_caption_video(projected_words, style_name, keywords, work_
                                 int(pd["underline_y"] + page_translate_y + sway_y),
                                 page_opacity)
 
-            proc.stdin.write(frame_arr.tobytes())
+            try:
+                proc.stdin.write(frame_arr.tobytes())
+            except (BrokenPipeError, OSError):
+                print(f"[captions-anim] FFmpeg pipe broke at frame {fi}/{total_frames}", flush=True)
+                break
 
-        proc.stdin.close()
+        try:
+            proc.stdin.close()
+        except Exception:
+            pass
+        proc.stdin = None  # prevent communicate() from trying to flush closed stdin
         _, stderr = proc.communicate(timeout=60)
 
         frames_elapsed = _time.time() - t_frames

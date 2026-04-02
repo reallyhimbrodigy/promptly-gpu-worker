@@ -96,8 +96,11 @@ try:
     else:
         print(f"[startup] nvidia-smi failed: {_smi.stderr.strip()[:200]}", flush=True)
 
-    # Remove any CUDA stub libraries that intercept dlopen before Modal's real drivers
-    for _stub_dir in ["/usr/local/cuda/lib64/stubs", "/usr/local/cuda/targets/x86_64-linux/lib/stubs"]:
+    # Remove CUDA stub/compat libraries that intercept dlopen before Modal's real drivers
+    # The CUDA 12.6 base image ships libcuda.so.560.x in /usr/local/cuda — must be removed
+    # so FFmpeg picks up the real Modal-mounted driver (580.x) from /usr/local/nvidia/
+    for _stub_dir in ["/usr/local/cuda/lib64/stubs", "/usr/local/cuda/targets/x86_64-linux/lib/stubs",
+                      "/usr/local/cuda/compat"]:
         if os.path.isdir(_stub_dir):
             for _sf in os.listdir(_stub_dir):
                 if "encode" in _sf.lower() or "cuda.so" in _sf.lower():
@@ -105,11 +108,21 @@ try:
                         os.remove(os.path.join(_stub_dir, _sf))
                     except Exception:
                         pass
+    # Also remove compat libcuda from the main CUDA lib dir
+    for _cuda_dir in ["/usr/local/cuda/lib64", "/usr/local/cuda/targets/x86_64-linux/lib"]:
+        if os.path.isdir(_cuda_dir):
+            for _sf in os.listdir(_cuda_dir):
+                if _sf.startswith("libcuda.so"):
+                    try:
+                        os.remove(os.path.join(_cuda_dir, _sf))
+                    except Exception:
+                        pass
 
-    # Modal mounts NVIDIA drivers at runtime — find the encode library
+    # Modal mounts NVIDIA drivers at runtime — real driver is in /usr/local/nvidia/
+    # CRITICAL: NVIDIA dirs must come FIRST so the real driver (580.x) is found before any stale libs
     _nvidia_lib_dirs = []
-    for _search_dir in ["/usr/local/nvidia/lib64", "/usr/lib/x86_64-linux-gnu",
-                        "/usr/lib64", "/usr/local/cuda/lib64"]:
+    for _search_dir in ["/usr/local/nvidia/lib", "/usr/local/nvidia/lib64",
+                        "/usr/lib/x86_64-linux-gnu", "/usr/lib64", "/usr/local/cuda/lib64"]:
         if os.path.isdir(_search_dir):
             _nvidia_lib_dirs.append(_search_dir)
     if _nvidia_lib_dirs:
@@ -151,8 +164,8 @@ try:
     if "h264_nvenc" in (_nvenc_check.stdout or ""):
         # Verify actual GPU access with a tiny encode
         _gpu_test = subprocess.run(
-            ["ffmpeg", "-y", "-f", "lavfi", "-i", "color=black:s=64x64:d=0.1",
-             "-pix_fmt", "yuv420p", "-c:v", "h264_nvenc", "-f", "null", "-"],
+            ["ffmpeg", "-y", "-f", "lavfi", "-i", "color=black:s=256x256:d=0.1",
+             "-c:v", "h264_nvenc", "-gpu", "0", "-f", "null", "-"],
             capture_output=True, text=True, timeout=10,
             env={**os.environ},
         )
@@ -160,9 +173,10 @@ try:
             _HAS_NVENC = True
             print("[startup] NVENC GPU encoder: AVAILABLE", flush=True)
         else:
-            _err_snippet = (_gpu_test.stderr or "")[-500:]
+            _full_err = (_gpu_test.stderr or "")
+            # Print last 800 chars to capture the full error chain
             print(f"[startup] NVENC test failed — using CPU encoder", flush=True)
-            print(f"[startup] NVENC error: {_err_snippet}", flush=True)
+            print(f"[startup] NVENC error: {_full_err[-800:]}", flush=True)
             _encode_libs = []
             for _ld in _nvidia_lib_dirs:
                 try:
