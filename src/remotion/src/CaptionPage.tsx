@@ -93,19 +93,19 @@ export const CaptionPage: React.FC<{
   const opacity = fadeIn * fadeOut;
   if (opacity <= 0) return null;
 
-  // ── Page entrance (punchy spring with visible overshoot) ───────────────
+  // ── Page entrance (clean, fast pop — NOT bouncy) ───────────────────────
   const pageAge = Math.max(0, frame - Math.round(pageStart * fps));
   const entranceSpring = spring({
     frame: pageAge,
     fps,
-    config: { damping: 9, stiffness: 220, mass: 0.6 },
+    config: { damping: 18, stiffness: 300, mass: 0.5 },
   });
-  const pageScale = interpolate(entranceSpring, [0, 1], [0.65, 1]);
-  const pageTranslateY = interpolate(entranceSpring, [0, 1], [20, 0]);
+  const pageScale = interpolate(entranceSpring, [0, 1], [0.92, 1]);
+  const pageTranslateY = interpolate(entranceSpring, [0, 1], [8, 0]);
 
-  // ── Organic sway (subtle living motion) ──────────────────────────────
-  const swayX = noise2D("sx", frame * 0.008, 0) * 2.0;
-  const swayY = noise2D("sy", 0, frame * 0.008) * 1.5;
+  // ── Organic sway (very subtle, barely perceptible) ────────────────────
+  const swayX = noise2D("sx", frame * 0.005, 0) * 1.0;
+  const swayY = noise2D("sy", 0, frame * 0.005) * 0.8;
 
   const tokens = page.tokens;
   const tokenCount = tokens.length;
@@ -163,28 +163,28 @@ export const CaptionPage: React.FC<{
     const originalWord = findOriginalWord(token.fromMs, words);
     const speakerIdx = originalWord?.speaker ?? 0;
 
-    // ── Per-word scale animation (bouncy spring with overshoot) ────────
+    // ── Per-word scale animation (clean, snappy pop — like Captions AI) ──
     const wordActiveScale = isKeyword
-      ? Math.min(style.activeWordScale * 1.12, 1.3)
-      : Math.min(style.activeWordScale * 1.05, 1.2);
+      ? Math.min(style.activeWordScale * 1.05, 1.18)
+      : style.activeWordScale;
 
     let wordScale = 1;
 
     if (isActive) {
       const activeAge = Math.max(0, frame - Math.round(tokenStart * fps));
-      // Low damping = visible overshoot bounce, feels alive
+      // High damping + high stiffness = fast snap, no visible bounce
       const activeSpring = spring({
         frame: activeAge,
         fps,
-        config: { damping: 7, stiffness: 260, mass: 0.45 },
+        config: { damping: 16, stiffness: 280, mass: 0.4 },
       });
-      wordScale = interpolate(activeSpring, [0, 1], [0.85, wordActiveScale]);
+      wordScale = interpolate(activeSpring, [0, 1], [0.94, wordActiveScale]);
     } else if (isPast) {
       const pastAge = Math.max(0, frame - Math.round((tokenEnd + 0.04) * fps));
       const settleSpring = spring({
         frame: pastAge,
         fps,
-        config: { damping: 14, stiffness: 200, mass: 0.5 },
+        config: { damping: 20, stiffness: 200, mass: 0.5 },
       });
       wordScale = interpolate(settleSpring, [0, 1], [wordActiveScale, 1]);
     }
@@ -217,16 +217,19 @@ export const CaptionPage: React.FC<{
 
     let color: string;
     if (isActive) {
+      // Currently spoken word — bright white or keyword color
       color = isKeyword
         ? kColors[kwIdx % kColors.length]
         : speakerColor || style.activeColor;
     } else if (isPast) {
+      // Already spoken — keywords keep color, regular words dim to gray
+      // This is how Captions AI works: past words fade, active word pops
       color = isKeyword
         ? kColors[kwIdx % kColors.length]
-        : style.textColor;
+        : "rgba(255,255,255,0.55)";
     } else {
-      // Future words: dim in cascade context row, bright dim in keyword row
-      color = isKeyword ? `${kColors[kwIdx % kColors.length]}70` : style.dimColor;
+      // Future words — very dim, waiting to be spoken
+      color = isKeyword ? `${kColors[kwIdx % kColors.length]}50` : style.dimColor;
     }
     if (isKeyword) kwIdx++;
 
@@ -235,21 +238,14 @@ export const CaptionPage: React.FC<{
       (s) => `${s.x}px ${s.y}px ${s.blur}px ${s.color}`
     );
 
-    // Active word glow — always add a subtle white glow pulse for "alive" feel
-    if (isActive) {
-      // Subtle white glow on every active word (the "alive" pulse)
-      const subtleGlow = Math.round(wordFontSize * 0.08);
-      shadowParts.push(`0 0 ${subtleGlow}px rgba(255,255,255,0.3)`);
-
-      // Stronger colored glow when style has glow enabled
-      if (style.glowEnabled && style.glowColor !== "transparent") {
-        const glowSize1 = Math.round(wordFontSize * 0.15);
-        const glowSize2 = Math.round(wordFontSize * 0.3);
-        shadowParts.push(
-          `0 0 ${glowSize1}px ${style.glowColor}`,
-          `0 0 ${glowSize2}px ${style.glowColor}60`
-        );
-      }
+    // Active word glow (only when style explicitly enables glow)
+    if (isActive && style.glowEnabled && style.glowColor !== "transparent") {
+      const glowSize1 = Math.round(wordFontSize * 0.12);
+      const glowSize2 = Math.round(wordFontSize * 0.25);
+      shadowParts.push(
+        `0 0 ${glowSize1}px ${style.glowColor}`,
+        `0 0 ${glowSize2}px ${style.glowColor}60`
+      );
     }
     // Keyword glow persists after active (dimmer)
     if (isPast && isKeyword && style.glowEnabled && style.glowColor !== "transparent") {
