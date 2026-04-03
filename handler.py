@@ -4109,7 +4109,7 @@ def render_remotion_overlay(
     # Use multiple concurrent browser tabs to render frames in parallel.
     # Remotion caps concurrency at the system core count (Node's os.cpus().length).
     # Modal H100 reports 32 cores to Node even though Python sees 48.
-    _concurrency = min(48, max(4, os.cpu_count() or 32))
+    _concurrency = min(32, max(4, os.cpu_count() or 32))
 
     _render_cmd = [
         "node", render_cli, "--input", input_json_path, "--output", output_mov_path,
