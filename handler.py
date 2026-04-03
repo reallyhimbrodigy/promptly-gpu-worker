@@ -162,13 +162,20 @@ try:
         capture_output=True, text=True, timeout=5,
     )
     if "h264_nvenc" in (_nvenc_check.stdout or ""):
-        # Verify actual GPU access with a tiny encode
+        # Verify actual GPU access with a tiny encode to a real file
+        # Using -f null can fail on some driver versions; write to a temp file instead
+        import tempfile as _tmpmod
+        _nvenc_tmp = os.path.join(_tmpmod.gettempdir(), "_nvenc_test.mp4")
         _gpu_test = subprocess.run(
-            ["ffmpeg", "-y", "-f", "lavfi", "-i", "color=black:s=256x256:d=0.1",
-             "-c:v", "h264_nvenc", "-gpu", "0", "-f", "null", "-"],
+            ["ffmpeg", "-y", "-f", "lavfi", "-i", "color=black:s=256x256:d=0.1:r=30",
+             "-c:v", "h264_nvenc", "-gpu", "0", "-preset", "p1", _nvenc_tmp],
             capture_output=True, text=True, timeout=10,
             env={**os.environ},
         )
+        try:
+            os.remove(_nvenc_tmp)
+        except Exception:
+            pass
         if _gpu_test.returncode == 0:
             _HAS_NVENC = True
             print("[startup] NVENC GPU encoder: AVAILABLE", flush=True)
@@ -4113,8 +4120,9 @@ def render_remotion_overlay(
     # (rest reserved for FFmpeg filter_complex running in parallel).
     _concurrency = min(24, max(4, int((os.cpu_count() or 16) * 0.75)))
 
-    # Try GPU-accelerated Chrome first (angle-egl), fall back to SwiftShader (CPU)
-    _gl_mode = "angle-egl" if _HAS_NVENC else "swiftshader"
+    # Always try GPU-accelerated Chrome (angle-egl) when a GPU is present.
+    # NVENC encode may fail while EGL rendering still works (different GPU subsystem).
+    _gl_mode = "angle-egl" if _HAS_HWACCEL else "swiftshader"
     _render_cmd = [
         "node", render_cli, "--input", input_json_path, "--output", output_mov_path,
         "--concurrency", str(_concurrency), "--gl", _gl_mode,
@@ -5895,7 +5903,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # filter_complex scheduler processing them sequentially.
     # The concat pass then only handles transitions, overlays, and final
     # encoding — no per-segment processing needed, so it's blazing fast.
-    _PARALLEL_RENDER = _HAS_NVENC and n >= 2
+    _PARALLEL_RENDER = n >= 2  # parallel pre-render works with both NVENC and CPU encoder
 
     if _PARALLEL_RENDER:
         _n_cores = os.cpu_count() or 32
@@ -5905,17 +5913,24 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _seg_paths = [None] * n
         _seg_errors = []
 
+        # Choose lossless encoder: NVENC if available, otherwise libx264 ultrafast crf 0
+        _seg_venc = (
+            ["-c:v", "h264_nvenc", "-preset", "p1", "-rc", "lossless"]
+            if _HAS_NVENC else
+            ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "0"]
+        )
+
         def _render_one_segment(seg_idx):
-            """Render one segment to lossless intermediate (NVENC + PCM audio)."""
+            """Render one segment to lossless intermediate."""
             seg_out = os.path.join(work_dir, f"_seg_{seg_idx}.mkv")
             sd = _segment_data[seg_idx]
             fc = f"[0:v]{sd['v_chain']}[outv];[0:a]{sd['a_chain']}[outa]"
             cmd = (
                 ["ffmpeg", "-y", "-v", "warning", "-nostats", "-threads", "3"]
                 + sd["input_args"]
-                + ["-filter_complex", fc, "-map", "[outv]", "-map", "[outa]",
-                   "-c:v", "h264_nvenc", "-preset", "p1", "-rc", "lossless",
-                   "-c:a", "pcm_s16le", seg_out]
+                + ["-filter_complex", fc, "-map", "[outv]", "-map", "[outa]"]
+                + _seg_venc
+                + ["-c:a", "pcm_s16le", seg_out]
             )
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=120,
                                     env={**os.environ})
