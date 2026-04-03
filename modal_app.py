@@ -1,6 +1,6 @@
 import modal
 
-# rebuild trigger v17 — FFmpeg source-only, explicit --enable-filter=drawtext + H100 GPU + 32 CPU + 64GB
+# rebuild trigger v18 — FFmpeg source-only, drawtext needs libharfbuzz + H100 GPU + 32 CPU + 64GB
 
 # ── Image definition (replaces Dockerfile) ────────────────────────────────────
 image = (
@@ -56,7 +56,7 @@ image = (
     .run_commands(
         # Build FFmpeg from source WITH NVENC support (nonfree, not available in prebuilts)
         # Install NVIDIA codec headers (nv-codec-headers) for NVENC/NVDEC
-        "apt-get install -y nasm yasm libx264-dev libx265-dev libfdk-aac-dev libmp3lame-dev libopus-dev libvpx-dev libass-dev libfreetype6-dev libfontconfig1-dev libfribidi-dev git",
+        "apt-get install -y nasm yasm libx264-dev libx265-dev libfdk-aac-dev libmp3lame-dev libopus-dev libvpx-dev libass-dev libfreetype6-dev libfontconfig1-dev libfribidi-dev libharfbuzz-dev git",
         "git clone --depth 1 https://git.videolan.org/git/ffmpeg/nv-codec-headers.git /tmp/nv-codec-headers",
         "cd /tmp/nv-codec-headers && make install",
         # Build FFmpeg with NVENC + NVDEC + key codecs
@@ -67,7 +67,7 @@ image = (
         "--enable-nvenc --enable-nvdec --enable-cuda --enable-cuvid "
         "--enable-libx264 --enable-libx265 --enable-libfdk-aac --enable-libmp3lame "
         "--enable-libopus --enable-libvpx --enable-libass --enable-librubberband "
-        "--enable-libfreetype --enable-libfontconfig --enable-libfribidi "
+        "--enable-libfreetype --enable-libfontconfig --enable-libfribidi --enable-libharfbuzz "
         "--enable-filter=drawtext --enable-filter=ass --enable-filter=subtitles "
         "--disable-doc --disable-debug --enable-optimizations "
         "&& make -j$(nproc) && make install",
