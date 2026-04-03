@@ -6596,11 +6596,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     _has_captions = _overlay_future is not None
     if _has_captions:
-        # Pass 1: encode to fast intermediate (Remotion still rendering in background)
-        _pass1_path = os.path.join(work_dir, "_pass1_no_captions.mp4")
-        _pass1_encode = get_encode_args("high") + [
+        # Pass 1: lossless intermediate (Remotion still rendering in background)
+        # NO quality loss — lossless codec, uncompressed audio. Only encode happens in pass 2.
+        _pass1_path = os.path.join(work_dir, "_pass1_no_captions.mkv")
+        _pass1_encode = get_encode_args("lossless") + [
             "-pix_fmt", "yuv420p",
-            "-c:a", "aac", "-b:a", "192k",
+            "-c:a", "pcm_s16le",
             "-max_muxing_queue_size", "4096",
             "-shortest",
         ]
@@ -6616,7 +6617,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             + [_pass1_path]
         )
 
-        _mode = "PASS 1 (no captions)" if _PARALLEL_RENDER else "Single-pass"
+        _mode = "PASS 1 lossless (no captions)" if _PARALLEL_RENDER else "Single-pass"
         print(f"[render] {_mode}: {n} segments, ~{running_dur:.1f}s output", flush=True)
         run_ffmpeg(args_pass1)
         print(f"[render] Pass 1 complete → {_pass1_path}", flush=True)
@@ -6631,8 +6632,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             print(f"[remotion] Overlay failed: {_ov_err} — delivering without captions", flush=True)
 
         if caption_overlay_path:
-            # Pass 2: fast overlay of Remotion captions onto pass 1 output
-            print(f"[render] PASS 2: overlaying captions onto video", flush=True)
+            # Pass 2: overlay captions + single final encode (the ONLY lossy encode)
+            print(f"[render] PASS 2: overlay captions + final encode", flush=True)
             _pass2_fc = (
                 "[1:v]format=yuva420p[_cap_alpha];"
                 "[0:v][_cap_alpha]overlay=eof_action=pass[vout]"
@@ -6644,7 +6645,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                  "-threads", str(_n_threads)]
                 + get_encode_args("high")
                 + ["-pix_fmt", "yuv420p",
-                   "-c:a", "copy",  # audio already encoded, just copy
+                   "-c:a", "aac", "-b:a", "192k",
                    "-movflags", "+faststart",
                    "-max_muxing_queue_size", "4096",
                    "-shortest",
@@ -6652,9 +6653,18 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             )
             run_ffmpeg(args_pass2)
         else:
-            # No captions — just move pass 1 to final
-            import shutil
-            shutil.move(_pass1_path, output_path)
+            # No captions — encode pass 1 lossless to final output
+            print(f"[render] No captions — encoding final output", flush=True)
+            _final_args = (
+                ["-y", "-i", _pass1_path,
+                 "-threads", str(_n_threads)]
+                + get_encode_args("high")
+                + ["-pix_fmt", "yuv420p",
+                   "-c:a", "aac", "-b:a", "192k",
+                   "-movflags", "+faststart",
+                   output_path]
+            )
+            run_ffmpeg(_final_args)
 
         # Clean up intermediate
         try:
