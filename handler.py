@@ -68,13 +68,31 @@ except Exception:
     print("[startup] WARNING: rubberband not found — speed curve will use fallback audio", flush=True)
 
 _HAS_FFMPEG_RUBBERBAND = False
+_HAS_DRAWTEXT = False
 try:
+    # Log which ffmpeg binary we're actually using
+    _which_ff = subprocess.run(["which", "ffmpeg"], capture_output=True, text=True, timeout=5)
+    _ff_path = (_which_ff.stdout or "").strip()
+    _ff_ver = subprocess.run(["ffmpeg", "-version"], capture_output=True, text=True, timeout=5)
+    _ff_ver_line = (_ff_ver.stdout or "").split("\n")[0] if _ff_ver.stdout else "unknown"
+    print(f"[startup] FFmpeg binary: {_ff_path} ({_ff_ver_line})", flush=True)
+
     ff_check = subprocess.run(["ffmpeg", "-filters"], capture_output=True, text=True, timeout=5)
-    if "rubberband" in (ff_check.stdout or ""):
+    _ff_filters = ff_check.stdout or ""
+    if "rubberband" in _ff_filters:
         _HAS_FFMPEG_RUBBERBAND = True
         print("[startup] FFmpeg rubberband filter: available", flush=True)
     else:
         print("[startup] WARNING: FFmpeg rubberband filter not available", flush=True)
+    if "drawtext" in _ff_filters:
+        _HAS_DRAWTEXT = True
+        print("[startup] FFmpeg drawtext filter: available", flush=True)
+    else:
+        print("[startup] WARNING: FFmpeg drawtext filter NOT available — text overlays will be skipped", flush=True)
+        # Print FFmpeg configuration for debugging
+        _config_line = [l for l in (_ff_ver.stdout or "").split("\n") if "configuration:" in l]
+        if _config_line:
+            print(f"[startup] FFmpeg config: {_config_line[0][:300]}", flush=True)
 except Exception:
     pass
 
@@ -6187,6 +6205,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # Caption PNGs were already rendered above (instant, no Chrome needed)
 
     text_overlays = edit_plan.get("text_overlays") or []
+    if text_overlays and not _HAS_DRAWTEXT:
+        print(f"[render] Skipping {len(text_overlays)} text overlay(s) — drawtext filter not available", flush=True)
+        text_overlays = []
     if text_overlays:
         clip_ranges = get_output_clip_ranges(render_cuts, effective_durations, transition_duration=TRANSITION_DURATION)
         # Build mapping from original content clip index → (first, last) post-split clip range
