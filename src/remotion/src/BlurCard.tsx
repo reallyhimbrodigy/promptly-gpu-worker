@@ -73,7 +73,7 @@ export const BlurCard: React.FC<{ effect: VisualEffect }> = ({ effect }) => {
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
-        willChange: "opacity",
+        // willChange removed for faster compositing
       }}
     >
       {/* Dark frosted overlay */}
@@ -98,7 +98,7 @@ export const BlurCard: React.FC<{ effect: VisualEffect }> = ({ effect }) => {
           alignItems: "center",
           gap: "12px",
           padding: "0 5%",
-          willChange: "transform",
+          // willChange removed for faster compositing
         }}
       >
         {lines.map((line, i) => (

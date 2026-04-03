@@ -100,7 +100,7 @@ export const ImpactText: React.FC<{ effect: VisualEffect }> = ({
         `0 4px 12px rgba(0,0,0,0.6)`,
       ].join(", "),
       letterSpacing: "0.03em",
-      willChange: "transform",
+      // willChange removed for faster compositing
     };
 
     // Scanline texture: horizontal stripes via repeating gradient on text
@@ -138,7 +138,7 @@ export const ImpactText: React.FC<{ effect: VisualEffect }> = ({
         flexDirection: "column",
         alignItems: "center",
         gap: "8px",
-        willChange: "transform, opacity",
+        // willChange removed for faster compositing
       }}
     >
       {lineElements}

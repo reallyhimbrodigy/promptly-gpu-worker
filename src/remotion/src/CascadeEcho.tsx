@@ -99,7 +99,7 @@ export const CascadeEcho: React.FC<{ effect: VisualEffect }> = ({
       lineHeight: 1,
       opacity: rowOpacity * rowSpring,
       transform: `scale(${scale.toFixed(3)}) translateY(${translateY.toFixed(1)}px)`,
-      willChange: "transform, opacity",
+      // willChange removed for faster compositing
       letterSpacing: "0.02em",
     };
 
@@ -148,7 +148,7 @@ export const CascadeEcho: React.FC<{ effect: VisualEffect }> = ({
         flexDirection: "column",
         alignItems: "center",
         gap: `${Math.round(lineHeight * 0.05)}px`,
-        willChange: "opacity",
+        // willChange removed for faster compositing
       }}
     >
       {rowElements}

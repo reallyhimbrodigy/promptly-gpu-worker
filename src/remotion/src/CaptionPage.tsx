@@ -6,7 +6,6 @@ import {
   spring,
   Easing,
 } from "remotion";
-import { noise2D } from "@remotion/noise";
 import type { TikTokPage } from "@remotion/captions";
 import type { ProjectedWord, StyleConfig } from "./types";
 
@@ -31,14 +30,30 @@ function autoFontSize(tokenCount: number): number {
 }
 
 /**
- * Find the original ProjectedWord that matches a token's timing.
+ * Build a Map for O(1) lookup of ProjectedWord by token start time.
+ * Keys are rounded to 10ms buckets for fuzzy matching.
  */
+export function buildWordLookup(words: ProjectedWord[]): Map<number, ProjectedWord> {
+  const map = new Map<number, ProjectedWord>();
+  for (const w of words) {
+    // Bucket by 10ms for fuzzy match (±80ms tolerance = check ±8 buckets)
+    const bucket = Math.round(w.start * 100);
+    map.set(bucket, w);
+  }
+  return map;
+}
+
 function findOriginalWord(
   tokenStartMs: number,
-  words: ProjectedWord[]
+  lookup: Map<number, ProjectedWord>
 ): ProjectedWord | undefined {
-  const tokenStartS = tokenStartMs / 1000;
-  return words.find((w) => Math.abs(w.start - tokenStartS) < 0.08);
+  const bucket = Math.round(tokenStartMs / 10);
+  // Check nearby buckets for fuzzy match (±80ms = ±8 buckets)
+  for (let d = 0; d <= 8; d++) {
+    const w = lookup.get(bucket + d) || lookup.get(bucket - d);
+    if (w) return w;
+  }
+  return undefined;
 }
 
 /**
@@ -65,7 +80,8 @@ export const CaptionPage: React.FC<{
   style: StyleConfig;
   keywordSet: Set<string>;
   words: ProjectedWord[];
-}> = ({ page, style, keywordSet, words }) => {
+  wordLookup: Map<number, ProjectedWord>;
+}> = ({ page, style, keywordSet, words, wordLookup }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const t = frame / fps;
@@ -103,9 +119,10 @@ export const CaptionPage: React.FC<{
   const pageScale = interpolate(entranceSpring, [0, 1], [0.92, 1]);
   const pageTranslateY = interpolate(entranceSpring, [0, 1], [8, 0]);
 
-  // ── Organic sway (very subtle, barely perceptible) ────────────────────
-  const swayX = noise2D("sx", frame * 0.005, 0) * 1.0;
-  const swayY = noise2D("sy", 0, frame * 0.005) * 0.8;
+  // Organic sway removed — 1px max displacement was imperceptible but
+  // cost a Perlin noise calculation per page per frame
+  const swayX = 0;
+  const swayY = 0;
 
   const tokens = page.tokens;
   const tokenCount = tokens.length;
@@ -160,7 +177,7 @@ export const CaptionPage: React.FC<{
     const isActive = t >= tokenStart && t < tokenEnd + 0.04;
     const isPast = t >= tokenEnd + 0.04;
 
-    const originalWord = findOriginalWord(token.fromMs, words);
+    const originalWord = findOriginalWord(token.fromMs, wordLookup);
     const speakerIdx = originalWord?.speaker ?? 0;
 
     // ── Per-word scale animation (clean, snappy pop — like Captions AI) ──
@@ -181,12 +198,16 @@ export const CaptionPage: React.FC<{
       wordScale = interpolate(activeSpring, [0, 1], [0.94, wordActiveScale]);
     } else if (isPast) {
       const pastAge = Math.max(0, frame - Math.round((tokenEnd + 0.04) * fps));
-      const settleSpring = spring({
-        frame: pastAge,
-        fps,
-        config: { damping: 20, stiffness: 200, mass: 0.5 },
-      });
-      wordScale = interpolate(settleSpring, [0, 1], [wordActiveScale, 1]);
+      // Spring converges within ~15 frames — skip calculation after that
+      if (pastAge < 15) {
+        const settleSpring = spring({
+          frame: pastAge,
+          fps,
+          config: { damping: 20, stiffness: 200, mass: 0.5 },
+        });
+        wordScale = interpolate(settleSpring, [0, 1], [wordActiveScale, 1]);
+      }
+      // else: wordScale stays at 1 (already settled)
     }
 
     // ── Typewriter / Wave special modes ────────────────────────────────
@@ -268,7 +289,7 @@ export const CaptionPage: React.FC<{
       opacity: wordOpacity,
       textTransform: style.textTransform,
       lineHeight: style.lineHeight,
-      willChange: "transform, opacity, color",
+      // willChange removed — per-word GPU layers hurt batch text rendering
       textAlign: "center",
       whiteSpace: "nowrap",
       WebkitTextStroke: "0px transparent",
@@ -393,7 +414,7 @@ export const CaptionPage: React.FC<{
         display: "flex",
         justifyContent: "center",
         alignItems: "center",
-        willChange: "transform, opacity",
+        // willChange removed — reduces GPU layer count for faster compositing
       }}
     >
       <div

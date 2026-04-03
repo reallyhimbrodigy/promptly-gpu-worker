@@ -2,7 +2,7 @@ import React from "react";
 import { AbsoluteFill, useCurrentFrame, useVideoConfig } from "remotion";
 import { createTikTokStyleCaptions } from "@remotion/captions";
 import type { Caption } from "@remotion/captions";
-import { CaptionPage } from "./CaptionPage";
+import { CaptionPage, buildWordLookup } from "./CaptionPage";
 import type { ProjectedWord, CaptionInput, StyleConfig } from "./types";
 import { getStyleConfig } from "./styles/presets";
 
@@ -52,12 +52,8 @@ export const CaptionOverlay: React.FC<{
     combineTokensWithinMilliseconds: 400, // Tight grouping = fewer words per page = bigger text
   });
 
-  // Map original ProjectedWord data onto pages for speaker/keyword info
-  const wordsByTime = new Map<string, ProjectedWord>();
-  for (const w of input.words) {
-    const key = `${Math.round(w.start * 100)}`;
-    wordsByTime.set(key, w);
-  }
+  // Build O(1) word lookup for fast per-token matching
+  const wordLookup = buildWordLookup(input.words);
 
   return (
     <AbsoluteFill style={{ backgroundColor: "transparent" }}>
@@ -68,6 +64,7 @@ export const CaptionOverlay: React.FC<{
           style={styleConfig}
           keywordSet={keywordSet}
           words={input.words}
+          wordLookup={wordLookup}
         />
       ))}
     </AbsoluteFill>
