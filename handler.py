@@ -4116,9 +4116,10 @@ def render_remotion_overlay(
     t0 = time.time()
 
     # Use multiple concurrent browser tabs to render frames in parallel.
-    # Each Chrome tab needs ~1 CPU core. With 32 cores, use ~75% for Remotion
-    # (rest reserved for FFmpeg filter_complex running in parallel).
-    _concurrency = min(24, max(4, int((os.cpu_count() or 16) * 0.75)))
+    # Each Chrome tab needs ~1 CPU core. Remotion runs for 90%+ of render time,
+    # so give it most cores. Parallel segment pre-render finishes in ~15s and
+    # the concat pass is lightweight, so 85% of cores to Remotion is safe.
+    _concurrency = min(40, max(4, int((os.cpu_count() or 16) * 0.85)))
 
     # Always try GPU-accelerated Chrome (angle-egl) when a GPU is present.
     # NVENC encode may fail while EGL rendering still works (different GPU subsystem).

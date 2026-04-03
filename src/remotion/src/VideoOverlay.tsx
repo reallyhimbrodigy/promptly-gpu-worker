@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { AbsoluteFill } from "remotion";
 import { CaptionOverlay } from "./CaptionOverlay";
 import { EffectsLayer } from "./effects";
@@ -17,10 +17,11 @@ import type { OverlayInput, CaptionInput, VisualEffect } from "./types";
 export const VideoOverlay: React.FC<{
   input: OverlayInput;
 }> = ({ input }) => {
-  // Auto-generate effects from vibe + cuts + emphasis moments
-  // These are combined with any explicitly passed effects
-  const autoEffects = generateEffects(input);
-  const allEffects: VisualEffect[] = [...autoEffects, ...(input.effects || [])];
+  // Auto-generate effects from vibe + cuts + emphasis moments (memoized — static per video)
+  const allEffects = useMemo<VisualEffect[]>(() => {
+    const auto = generateEffects(input);
+    return [...auto, ...(input.effects || [])];
+  }, [input]);
 
   // Build caption input from overlay input
   const captionInput: CaptionInput = {

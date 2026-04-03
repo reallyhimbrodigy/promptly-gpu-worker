@@ -1,6 +1,6 @@
 import modal
 
-# rebuild trigger v12 — H100 GPU + NVENC/NVDEC + 32 CPU + 64GB RAM + Remotion captions
+# rebuild trigger v13 — NONFREE FFmpeg with real NVENC + H100 GPU + 32 CPU + 64GB RAM
 
 # ── Image definition (replaces Dockerfile) ────────────────────────────────────
 image = (
@@ -52,8 +52,8 @@ image = (
     )
     .run_commands(
         "mkdir -p /opt/ffmpeg",
-        # n7.1 GPL build — NVENC API 12.2 (driver ≥550, Modal has 580.95.05)
-        "cd /opt/ffmpeg && wget -q https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n7.1-latest-linux64-gpl-7.1.tar.xz -O ffmpeg.tar.xz",
+        # n7.1 NONFREE build — includes NVENC/NVDEC (proprietary), NVENC API 12.2 (driver ≥550)
+        "cd /opt/ffmpeg && wget -q https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n7.1-latest-linux64-nonfree-7.1.tar.xz -O ffmpeg.tar.xz",
         "cd /opt/ffmpeg && tar -xJf ffmpeg.tar.xz --strip-components=1",
         "ln -sf /opt/ffmpeg/bin/ffmpeg /usr/local/bin/ffmpeg",
         "ln -sf /opt/ffmpeg/bin/ffprobe /usr/local/bin/ffprobe",
