@@ -22,7 +22,7 @@ const PREBUNDLE_DIR = "/remotion/bundle";
 const args = process.argv.slice(2);
 let inputPath = null;
 let outputPath = null;
-let concurrency = 16;
+let concurrency = 24;
 let glMode = "angle-egl"; // GPU-accelerated; falls back to swiftshader
 
 for (let i = 0; i < args.length; i++) {

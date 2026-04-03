@@ -93,6 +93,24 @@ const FONT_FACES = `
   font-weight: 300 700;
   font-style: normal;
 }
+@font-face {
+  font-family: 'Nunito';
+  src: url('file://${FONT_DIR}/Nunito-Variable.ttf') format('truetype');
+  font-weight: 200 900;
+  font-style: normal;
+}
+@font-face {
+  font-family: 'Inter';
+  src: url('file://${FONT_DIR}/Inter-Variable.ttf') format('truetype');
+  font-weight: 100 900;
+  font-style: normal;
+}
+@font-face {
+  font-family: 'Anton';
+  src: url('file://${FONT_DIR}/Anton-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+}
 `;
 
 export const FontLoader: React.FC<{ children: React.ReactNode }> = ({

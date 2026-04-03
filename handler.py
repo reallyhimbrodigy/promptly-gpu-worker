@@ -205,29 +205,29 @@ except Exception as _e:
 def get_encode_args(quality="high"):
     """Return encoder args for FFmpeg. Uses NVENC when GPU is available.
 
-    quality="high"     → final output (CRF 23 equivalent — optimized for social media delivery)
-    quality="lossless" → intermediate files (CRF 0 equivalent)
+    quality="high"     → final output (CQ 18 — maximum quality for social media)
+    quality="lossless" → intermediate files (lossless preset)
     """
     if _HAS_NVENC:
         if quality == "lossless":
             return ["-c:v", "h264_nvenc", "-preset", "p1", "-rc", "lossless"]
         else:
-            # p1 = fastest NVENC preset (hardware encoding — preset barely affects speed
-            # since the ASIC does the work, but p1 minimizes CPU-side overhead).
-            # cq 22 = high quality, maxrate 10M for social media.
-            # A10G NVENC encodes 1080p @ ~300+ fps — the bottleneck is filter_complex, not encoding.
-            return ["-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ll",
-                    "-rc", "vbr", "-cq", "22", "-b:v", "0",
-                    "-maxrate", "10M", "-bufsize", "20M",
-                    "-spatial-aq", "1", "-temporal-aq", "1"]
+            # p4 = high quality NVENC preset. H100 NVENC is so fast that p4 adds
+            # negligible time vs p1 but produces significantly better quality.
+            # CQ 18 = visually lossless on mobile. Higher bitrate ceiling (15M)
+            # ensures complex scenes (fast motion, particle effects) don't starve.
+            # H100 NVENC encodes 1080p @ 500+ fps — encoding is never the bottleneck.
+            return ["-c:v", "h264_nvenc", "-preset", "p4", "-tune", "hq",
+                    "-rc", "vbr", "-cq", "18", "-b:v", "0",
+                    "-maxrate", "15M", "-bufsize", "30M",
+                    "-spatial-aq", "1", "-temporal-aq", "1",
+                    "-b_ref_mode", "middle"]
     else:
         if quality == "lossless":
             return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "0"]
         else:
-            # CRF 22 with veryfast preset: 2x faster than fast, minimal quality
-            # difference on mobile screens. Social media re-encodes anyway.
-            return ["-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
-                    "-maxrate", "10M", "-bufsize", "20M"]
+            return ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+                    "-maxrate", "15M", "-bufsize", "30M"]
 
 _EMOJI_RE = re.compile(
     "[\U0001F600-\U0001F64F\U0001F300-\U0001F5FF\U0001F680-\U0001F6FF"
@@ -1728,12 +1728,12 @@ Global parameters:
   caption_style — animated captions rendered via Remotion. Choose the style that best matches the vibe:
     none — no captions. Use ONLY when captions are already burned into the footage.
     volt — THE flagship premium style. Bold Montserrat, lowercase, white text with cyan/teal keyword highlights, spring animation, cascade layout (small context words + large keywords), strong shadow. Modern, clean, high-energy. DEFAULT CHOICE for most content.
-    clarity — ultra-clean minimal. Poppins SemiBold, lowercase, white text, centered on screen, 1-2 words at a time, very subtle shadow, no pill/glow. Premium understated feel. Best for: calm, thoughtful, interviews, podcasts, ASMR, minimal aesthetic.
-    impact — bold punchy Montserrat Black, lowercase, white text with RED keyword highlights, heavy shadow, cascade layout. Attention-grabbing. Best for: motivational, business, high-energy, announcements, bold statements.
+    clarity — ultra-clean minimal. Nunito Bold (rounded sans-serif), lowercase, white text, centered on screen, 1-2 words at a time, very subtle shadow, no pill/glow. Soft, friendly, premium feel. Best for: calm, thoughtful, interviews, podcasts, ASMR, minimal aesthetic.
+    impact — bold punchy Anton (condensed display), lowercase, white text with RED keyword highlights, heavy shadow, cascade layout. Attention-grabbing. Best for: motivational, business, high-energy, announcements, bold statements.
     ember — elegant serif (Playfair Display), lowercase, white text with warm gold keywords, medium shadow. Premium editorial feel. Best for: luxury, fashion, beauty, storytelling, documentary, elegant content.
     velocity — maximum energy Montserrat Black, UPPERCASE, white text with yellow keyword highlights + yellow glow, heavy shadow. Loud and bold. Best for: hype, fast-paced, comedy, gaming, sports, trend content.
     archive — condensed Oswald, UPPERCASE, off-white text with gold keyword accents, strong shadow. Documentary/cinematic feel. Best for: cinematic, dramatic, serious, documentary, historical, news.
-    lumen — clean Poppins Bold, lowercase, white text on semi-transparent dark pill, teal/green keywords, wave animation. Modern and readable. Best for: educational, tutorials, explainers, tech, lifestyle.
+    lumen — clean Inter Bold, lowercase, white text on semi-transparent dark pill, teal/green keywords, wave animation. Modern and readable. Best for: educational, tutorials, explainers, tech, lifestyle.
     rebel — bold Montserrat, lowercase, white text with lime/green keyword highlights + green glow. Edgy and youthful. Best for: creative, artistic, music, dance, nightlife, alternative content.
 
   STYLE SELECTION GUIDE based on vibe:
@@ -2150,10 +2150,12 @@ RULES FOR USING THESE TIMESTAMPS:
     else:
         print("[generate-edit] Using pre-uploaded Gemini file", flush=True)
     deadline = time.time() + 60
+    _poll_delay = 0.2  # start fast, back off exponentially
     while gemini_file.state.name == "PROCESSING":
         if time.time() > deadline:
             raise RuntimeError("Gemini file processing timed out after 60s")
-        time.sleep(0.3)
+        time.sleep(_poll_delay)
+        _poll_delay = min(_poll_delay * 1.5, 3.0)  # cap at 3s between polls
         gemini_file = genai.get_file(gemini_file.name)
     if gemini_file.state.name != "ACTIVE":
         raise RuntimeError(f"Gemini file upload failed: {gemini_file.state.name}")
@@ -3410,15 +3412,7 @@ def fetch_broll_clip(keyword, duration_needed, work_dir):
         print(f"[broll] Downloaded '{keyword}': {total_bytes / 1024:.0f}KB -> {dest}", flush=True)
 
         try:
-            probe_cmd = [
-                "ffprobe", "-v", "quiet",
-                "-show_entries", "stream=codec_type,duration,width,height,r_frame_rate,codec_name",
-                "-show_entries", "format=duration",
-                "-of", "json",
-                dest,
-            ]
-            probe_result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=10)
-            probe_data = json.loads(probe_result.stdout)
+            probe_data = _probe_full(dest)
 
             video_stream = None
             for stream in probe_data.get("streams", []):
@@ -3527,14 +3521,7 @@ def fetch_broll_clip(keyword, duration_needed, work_dir):
 
 def get_video_duration(path):
     """Get duration of a video file in seconds."""
-    try:
-        result = subprocess.run(
-            ["ffprobe", "-v", "quiet", "-show_entries", "format=duration", "-of", "csv=p=0", path],
-            capture_output=True, text=True, timeout=10,
-        )
-        return float(result.stdout.strip())
-    except Exception:
-        return 0.0
+    return probe_duration(path) or 0.0
 
 
 _KB_DIRECTIONS = [
@@ -3602,33 +3589,66 @@ def get_transition_duration(pacing=None):
     return TRANSITION_DURATION_DEFAULT
 
 
-def probe_duration(file_path):
+# ── Probe cache — eliminates redundant ffprobe calls on the same file ─────────
+# One comprehensive ffprobe call returns streams + format; subsequent queries
+# for duration, sample_rate, resolution, etc. pull from the cached result.
+_probe_cache = {}  # path → {"streams": [...], "format": {...}}
+
+
+def _probe_full(file_path):
+    """Run a single comprehensive ffprobe and cache the result."""
+    if file_path in _probe_cache:
+        return _probe_cache[file_path]
     result = subprocess.run(
-        ["ffprobe","-v","error","-show_entries","format=duration",
-         "-of","default=noprint_wrappers=1:nokey=1",file_path],
-        capture_output=True, text=True, timeout=10
+        ["ffprobe", "-v", "quiet", "-print_format", "json",
+         "-show_streams", "-show_format", file_path],
+        capture_output=True, text=True, timeout=10,
     )
     try:
-        d = float(result.stdout.strip())
-        return d if d > 0 else None
+        data = json.loads(result.stdout or "{}")
     except Exception:
-        return None
+        data = {}
+    _probe_cache[file_path] = data
+    return data
+
+
+def probe_cache_clear(file_path=None):
+    """Clear cache for a specific file (after re-encode) or all files."""
+    if file_path:
+        _probe_cache.pop(file_path, None)
+    else:
+        _probe_cache.clear()
+
+
+def probe_duration(file_path):
+    data = _probe_full(file_path)
+    # Try format duration first, then video stream duration
+    try:
+        d = float((data.get("format") or {}).get("duration") or 0)
+        if d > 0:
+            return d
+    except Exception:
+        pass
+    for s in (data.get("streams") or []):
+        try:
+            d = float(s.get("duration") or 0)
+            if d > 0:
+                return d
+        except Exception:
+            continue
+    return None
 
 
 def probe_audio_sample_rate(file_path):
-    result = subprocess.run(
-        [
-            "ffprobe", "-v", "error", "-select_streams", "a:0",
-            "-show_entries", "stream=sample_rate",
-            "-of", "default=noprint_wrappers=1:nokey=1", file_path,
-        ],
-        capture_output=True, text=True, timeout=10
-    )
-    try:
-        sample_rate = int((result.stdout or "").strip())
-        return sample_rate if sample_rate > 0 else None
-    except Exception:
-        return None
+    data = _probe_full(file_path)
+    for s in (data.get("streams") or []):
+        if s.get("codec_type") == "audio":
+            try:
+                sr = int(s.get("sample_rate") or 0)
+                return sr if sr > 0 else None
+            except Exception:
+                pass
+    return None
 
 
 def validate_output(path, step_name, min_size_bytes=100000):
@@ -3654,17 +3674,11 @@ def get_source_duration(video_path):
 
 
 def probe_resolution(file_path):
-    result = subprocess.run(
-        ["ffprobe","-v","error","-select_streams","v:0",
-         "-show_entries","stream=width,height","-of","json",file_path],
-        capture_output=True, text=True, timeout=10
-    )
-    try:
-        data = json.loads(result.stdout)
-        s = (data.get("streams") or [{}])[0]
-        return {"width": s.get("width") or 1080, "height": s.get("height") or 1920}
-    except Exception:
-        return {"width": 1080, "height": 1920}
+    data = _probe_full(file_path)
+    for s in (data.get("streams") or []):
+        if s.get("codec_type") == "video":
+            return {"width": s.get("width") or 1080, "height": s.get("height") or 1920}
+    return {"width": 1080, "height": 1920}
 
 
 def run_ffmpeg(args):
@@ -3703,11 +3717,7 @@ def analyze_source_video(source_path):
         fps: float — original fps
         normalize_vf: str or None — filter to prepend (None if already 1080x1920@30fps)
     """
-    result = subprocess.run(
-        ["ffprobe","-v","quiet","-print_format","json","-show_streams","-show_format",source_path],
-        capture_output=True, text=True
-    )
-    info = json.loads(result.stdout or "{}")
+    info = _probe_full(source_path)
     streams = info.get("streams") or []
     video = next((s for s in streams if s.get("codec_type") == "video"), None)
     if not video:
@@ -3823,10 +3833,9 @@ def create_keyframed_source(source_path, keyframe_timestamps, work_dir):
         "-c:a","copy",
         keyframed_path,
     ])
-    _kprobe = subprocess.run(
-        ["ffprobe", "-v", "quiet", "-show_streams", "-print_format", "json", keyframed_path],
-        capture_output=True, text=True, timeout=10)
-    print(f"[DIAG] Keyframed source probe: {_kprobe.stdout[:1500]}", flush=True)
+    _kpd = _probe_full(keyframed_path)
+    _kvs = next((s for s in (_kpd.get("streams") or []) if s.get("codec_type") == "video"), {})
+    print(f"[DIAG] Keyframed source: codec={_kvs.get('codec_name')} dur={(_kpd.get('format') or {}).get('duration')}", flush=True)
     return keyframed_path
 
 
@@ -4099,9 +4108,10 @@ def render_remotion_overlay(
           f"{total_duration:.1f}s @ {fps}fps", flush=True)
     t0 = time.time()
 
-    # Use multiple concurrent browser tabs to render frames in parallel
-    # Each Chrome tab needs ~1 CPU core — use 75% of available cores for rendering
-    _concurrency = min(16, max(4, os.cpu_count() or 16))
+    # Use multiple concurrent browser tabs to render frames in parallel.
+    # Each Chrome tab needs ~1 CPU core. With 32 cores, use ~75% for Remotion
+    # (rest reserved for FFmpeg filter_complex running in parallel).
+    _concurrency = min(24, max(4, int((os.cpu_count() or 16) * 0.75)))
 
     # Try GPU-accelerated Chrome first (angle-egl), fall back to SwiftShader (CPU)
     _gl_mode = "angle-egl" if _HAS_NVENC else "swiftshader"
@@ -5097,9 +5107,9 @@ def prepend_hook_clip(output_path, edit_plan, work_dir):
         return
 
     hook_actual_dur = probe_duration(hook_path) or hook_render_dur
+    # Stream-level diagnostics from cached probe (no extra ffprobe call)
     try:
-        _hp = subprocess.run(["ffprobe","-v","quiet","-show_entries","stream=codec_type,duration","-of","json",hook_path],capture_output=True,text=True,timeout=10)
-        _hpd = json.loads(_hp.stdout or "{}")
+        _hpd = _probe_full(hook_path)
         _hcv = _hca = 0.0
         for _hs in (_hpd.get("streams") or []):
             if _hs.get("codec_type") == "video" and _hs.get("duration"): _hcv = float(_hs["duration"])
@@ -5130,9 +5140,9 @@ def prepend_hook_clip(output_path, edit_plan, work_dir):
         return
 
     os.replace(hooked_output, output_path)
+    probe_cache_clear(output_path)  # file changed — invalidate cache
     try:
-        _hcp = subprocess.run(["ffprobe","-v","quiet","-show_entries","stream=codec_type,duration","-of","json",output_path],capture_output=True,text=True,timeout=10)
-        _hcpd = json.loads(_hcp.stdout or "{}")
+        _hcpd = _probe_full(output_path)
         _hv = _ha = 0.0
         for _hs in (_hcpd.get("streams") or []):
             if _hs.get("codec_type") == "video" and _hs.get("duration"): _hv = float(_hs["duration"])
@@ -5343,12 +5353,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     source_res = probe_resolution(source_path)
     # Skip keyframe forcing — trim filter works on decoded frames, always frame-accurate
     render_source = source_path
-    _detailed_probe = subprocess.run(
-        ["ffprobe", "-v", "quiet", "-select_streams", "v:0",
-         "-show_entries", "stream=time_base,start_pts,start_time,duration,duration_ts,nb_frames,r_frame_rate,avg_frame_rate,codec_name,pix_fmt",
-         "-of", "json", render_source],
-        capture_output=True, text=True, timeout=10)
-    print(f"[DIAG] Render source probe: {_detailed_probe.stdout.strip()}", flush=True)
+    # Diagnostic probe uses cached data — no extra ffprobe call
+    _cached = _probe_full(render_source)
+    _vs = next((s for s in (_cached.get("streams") or []) if s.get("codec_type") == "video"), {})
+    print(f"[DIAG] Render source: codec={_vs.get('codec_name')} pix_fmt={_vs.get('pix_fmt')} fps={_vs.get('r_frame_rate')}", flush=True)
     has_burned_captions = infer_has_burned_captions(
         edit_plan,
         edit_plan.get("analysis_data") or {},
@@ -5476,6 +5484,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     video_filters = []
     audio_filters = []
+    _segment_data = []  # per-segment data for parallel rendering
     face_positions = edit_plan.get("_face_positions") or []
     dense_face_trajectory = edit_plan.get("_dense_face_trajectory") or []
     _has_dense_trajectory = len(dense_face_trajectory) > 0
@@ -5485,14 +5494,18 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         start = float(cut["source_start"])
         end = float(cut["source_end"])
         seg_dur = end - start
-        # Each segment is a separate input with pre-seeking
-        # NOTE: -hwaccel cuda causes black frames with complex filter chains (zoompan/xfade/overlay)
-        # because decoded frames stay in GPU memory. Disabled until we add hwdownload filters.
-        input_args += [
-            "-ss", f"{start:.3f}", "-t", f"{seg_dur:.3f}",
-            "-analyzeduration", "10000000", "-probesize", "10000000",
-            "-i", render_source,
-        ]
+        # Each segment is a separate input with pre-seeking.
+        # NVDEC hardware decode: GPU decodes video → auto-transfers to CPU for filter chain.
+        # Using -hwaccel cuda (without -hwaccel_output_format cuda) so frames land in system
+        # memory automatically — no hwdownload filter needed, works with all filter chains.
+        _hw_args = ["-hwaccel", "cuda"] if _HAS_HWACCEL else []
+        _seg_input = (
+            _hw_args
+            + ["-ss", f"{start:.3f}", "-t", f"{seg_dur:.3f}",
+               "-analyzeduration", "5000000", "-probesize", "5000000",
+               "-i", render_source]
+        )
+        input_args += _seg_input
         speed = max(0.25, min(4.0, float(cut.get("speed") or 1.0)))
 
         # Build variable-speed setpts expression — speed curve flows continuously
@@ -5867,6 +5880,74 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             fade_start = max(0, eff_dur - 1.0)
             a_chain.append(f"afade=t=out:st={fade_start:.3f}:d=1.0")
         audio_filters.append(f"[{i}:a]{','.join(a_chain)}[a{i}]")
+
+        # Collect per-segment data for parallel rendering
+        _segment_data.append({
+            "input_args": list(_seg_input),
+            "v_chain": ','.join(v_chain),
+            "a_chain": ','.join(a_chain),
+        })
+
+    # ── Parallel segment pre-rendering ─────────────────────────────────────
+    # When GPU is available, render each segment independently in parallel.
+    # This distributes heavy per-frame work (zoompan, scale, speed curves)
+    # across all CPU cores simultaneously instead of the single-threaded
+    # filter_complex scheduler processing them sequentially.
+    # The concat pass then only handles transitions, overlays, and final
+    # encoding — no per-segment processing needed, so it's blazing fast.
+    _PARALLEL_RENDER = _HAS_NVENC and n >= 2
+
+    if _PARALLEL_RENDER:
+        _n_cores = os.cpu_count() or 32
+        _max_workers = min(n, 8, _n_cores // 3)  # 3 threads per worker
+        print(f"[render] PARALLEL MODE: {n} segments, {_max_workers} workers, {_n_cores} cores", flush=True)
+        _seg_t0 = time.time()
+        _seg_paths = [None] * n
+        _seg_errors = []
+
+        def _render_one_segment(seg_idx):
+            """Render one segment to lossless intermediate (NVENC + PCM audio)."""
+            seg_out = os.path.join(work_dir, f"_seg_{seg_idx}.mkv")
+            sd = _segment_data[seg_idx]
+            fc = f"[0:v]{sd['v_chain']}[outv];[0:a]{sd['a_chain']}[outa]"
+            cmd = (
+                ["ffmpeg", "-y", "-v", "warning", "-nostats", "-threads", "3"]
+                + sd["input_args"]
+                + ["-filter_complex", fc, "-map", "[outv]", "-map", "[outa]",
+                   "-c:v", "h264_nvenc", "-preset", "p1", "-rc", "lossless",
+                   "-c:a", "pcm_s16le", seg_out]
+            )
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120,
+                                    env={**os.environ})
+            if result.returncode != 0:
+                raise RuntimeError(f"Segment {seg_idx}: {(result.stderr or '')[-500:]}")
+            return seg_out
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=_max_workers) as seg_pool:
+            _seg_futures = {seg_pool.submit(_render_one_segment, i): i for i in range(n)}
+            for fut in concurrent.futures.as_completed(_seg_futures):
+                idx = _seg_futures[fut]
+                try:
+                    _seg_paths[idx] = fut.result()
+                except Exception as seg_err:
+                    _seg_errors.append((idx, str(seg_err)))
+                    print(f"[render] Segment {idx} FAILED: {seg_err}", flush=True)
+
+        _seg_elapsed = time.time() - _seg_t0
+
+        if _seg_errors:
+            print(f"[render] {len(_seg_errors)} segment(s) failed in {_seg_elapsed:.1f}s — falling back to single-pass", flush=True)
+            _PARALLEL_RENDER = False
+        else:
+            print(f"[render] Parallel pre-render: {n} segments in {_seg_elapsed:.1f}s", flush=True)
+            # Replace inputs with pre-rendered segments (no hwaccel needed)
+            input_args = []
+            for _sp in _seg_paths:
+                input_args += ["-i", _sp]
+            # Replace per-segment filters with identity (all processing already done)
+            video_filters = [f"[{i}:v]null[v{i}]" for i in range(n)]
+            audio_filters = [f"[{i}:a]asetpts=PTS-STARTPTS[a{i}]" for i in range(n)]
+            print(f"[render] Concat pass: transitions + overlay + SFX + final encode", flush=True)
 
     # ── SFX collection ───────────────────────────────────────────────────────
     sfx_input_args   = []
@@ -6396,7 +6477,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     caption_overlay_path = None
     if _overlay_future is not None:
         try:
-            caption_overlay_path = _overlay_future.result(timeout=200)
+            caption_overlay_path = _overlay_future.result(timeout=180)
             _overlay_pool.shutdown(wait=False)
             print(f"[remotion] Overlay ready: {caption_overlay_path}", flush=True)
         except Exception as _ov_err:
@@ -6433,8 +6514,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         "-shortest",  # stop when video ends — audio pad may overshoot due to xfade timing
     ]
 
-    # Maximize parallelism: all 16 CPU cores for filter graph + decoding
-    _n_threads = os.cpu_count() or 16
+    # Maximize parallelism: all available CPU cores for filter graph + decoding
+    _n_threads = os.cpu_count() or 32
     args = (
         ["-y"]
         + input_args
@@ -6448,7 +6529,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         + [output_path]
     )
 
-    print(f"[render] Single-pass render: {n} segments ({n_segment_inputs} inputs) from source, ~{running_dur:.1f}s output", flush=True)
+    _mode = "CONCAT pass (segments pre-rendered)" if _PARALLEL_RENDER else "Single-pass"
+    print(f"[render] {_mode}: {n} segments, ~{running_dur:.1f}s output", flush=True)
 
     run_ffmpeg(args)
 
@@ -6547,7 +6629,7 @@ def handler(job):
         r = requests.get(video_url, stream=True, timeout=120)
         r.raise_for_status()
         with open(source_path, "wb") as f:
-            for chunk in r.iter_content(chunk_size=1048576):  # 1MB chunks for faster throughput
+            for chunk in r.iter_content(chunk_size=4194304):  # 4MB chunks for maximum throughput
                 f.write(chunk)
         size_mb = os.path.getsize(source_path) / (1024*1024)
         _timings["download"] = time.time() - t
@@ -6562,13 +6644,8 @@ def handler(job):
         print("[pipeline] step=mega-parallel (normalize + transcribe + upload + edit + faces)", flush=True)
 
         # Quick probe of raw source for duration (needed for face detect timestamps)
-        _raw_probe = subprocess.run(
-            ["ffprobe", "-v", "quiet", "-show_format", "-print_format", "json", source_path],
-            capture_output=True, text=True, timeout=10)
-        _raw_probe_data = json.loads(_raw_probe.stdout or "{}")
-        source_duration = float((_raw_probe_data.get("format") or {}).get("duration") or 0)
-        if not source_duration:
-            source_duration = get_source_duration(source_path)
+        # Uses cached probe — same data reused by analyze_source_video, probe_resolution, etc.
+        source_duration = probe_duration(source_path) or 0
         sample_timestamps = [round(i * 4.0, 3) for i in range(int(source_duration / 4.0) + 1)] if source_duration > 0 else []
 
         # Configure Gemini API early so we can pre-upload
@@ -6586,8 +6663,10 @@ def handler(job):
 
         def _do_transcribe():
             audio_path = os.path.join(work_dir, "audio_for_words.wav")
+            # -vn skips video decode entirely — no need for hwaccel here
             subprocess.run(
-                ["ffmpeg", "-threads", "0", "-y", "-i", _raw_source, "-vn", "-acodec", "pcm_s16le", "-ar", "48000", "-ac", "1", audio_path],
+                ["ffmpeg", "-threads", "0", "-y", "-i", _raw_source,
+                 "-vn", "-acodec", "pcm_s16le", "-ar", "48000", "-ac", "1", audio_path],
                 capture_output=True, text=True, timeout=30,
             )
             result = transcribe_audio(audio_path)
@@ -6609,10 +6688,14 @@ def handler(job):
                 # Gemini only needs to see composition/content, not pixel quality.
                 _upload_t = time.time()
                 _proxy_path = os.path.join(work_dir, "gemini_proxy.mp4")
+                # Use NVENC for proxy encode if available — instant on H100
+                _proxy_venc = (["-c:v", "h264_nvenc", "-preset", "p1", "-rc", "vbr", "-cq", "35"]
+                               if _HAS_NVENC else
+                               ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "32"])
                 _proxy_cmd = subprocess.run(
                     ["ffmpeg", "-y", "-threads", "4", "-i", _raw_source,
-                     "-vf", "scale=360:-2", "-c:v", "libx264", "-preset", "ultrafast",
-                     "-crf", "32", "-c:a", "aac", "-b:a", "48k", "-ac", "1",
+                     "-vf", "scale=360:-2"] + _proxy_venc + [
+                     "-c:a", "aac", "-b:a", "48k", "-ac", "1",
                      "-movflags", "+faststart", _proxy_path],
                     capture_output=True, text=True, timeout=15,
                 )
@@ -6871,10 +6954,8 @@ def handler(job):
             raise RuntimeError(f"Main render produced invalid output: {output_path}")
         _rv, _ra = 0.0, 0.0
         try:
-            _combined_probe = subprocess.run(
-                ["ffprobe", "-v", "quiet", "-show_entries", "stream=codec_type,duration", "-of", "json", output_path],
-                capture_output=True, text=True, timeout=10)
-            _cp = json.loads(_combined_probe.stdout or "{}")
+            probe_cache_clear(output_path)  # freshly rendered — clear stale cache
+            _cp = _probe_full(output_path)
             for _s in (_cp.get("streams") or []):
                 if _s.get("codec_type") == "video" and _s.get("duration"):
                     _rv = float(_s["duration"])

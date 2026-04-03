@@ -1,12 +1,12 @@
 import modal
 
-# rebuild trigger v11 — A10G GPU + NVENC + 16 CPU + 32GB RAM + Remotion captions (clean)
+# rebuild trigger v12 — H100 GPU + NVENC/NVDEC + 32 CPU + 64GB RAM + Remotion captions
 
 # ── Image definition (replaces Dockerfile) ────────────────────────────────────
 image = (
     modal.Image.from_registry("nvidia/cuda:12.6.3-runtime-ubuntu22.04", add_python="3.10")
     .run_commands(
-        "echo 'build v18 - A10G + NVENC + 16CPU + Remotion clean (no color grade/effects)'",
+        "echo 'build v19 - H100 + NVENC/NVDEC + 32CPU + 64GB + Remotion'",
         "apt-get update && apt-get install -y ca-certificates && update-ca-certificates",
         # Remove CUDA stubs AND compat libs that intercept dlopen before Modal's real driver libs
         "rm -rf /usr/local/cuda/lib64/stubs/libnvidia-encode* /usr/local/cuda/lib64/stubs/libcuda* /usr/local/cuda/compat/libcuda* /usr/local/cuda/lib64/libcuda.so* 2>/dev/null || true",
@@ -130,11 +130,11 @@ app = modal.App("promptly-gpu-worker", image=image, secrets=secrets)
 
 # ── Web endpoint ───────────────────────────────────────────────────────────────
 @app.function(
-    timeout=600,          # 10 min — Gemini (30-50s) + Remotion overlay (~60-90s) + FFmpeg render (~120s)
+    timeout=600,          # 10 min — target <120s with H100 + NVDEC + 32 cores
     scaledown_window=120, # keep warm 2 min for back-to-back requests (avoid cold start)
-    cpu=16,
-    memory=32768,
-    gpu="A10G",
+    cpu=32,
+    memory=65536,         # 64GB — headroom for parallel segment renders + Remotion Chrome tabs
+    gpu="H100",
 )
 @modal.concurrent(max_inputs=1)
 @modal.fastapi_endpoint(method="POST")

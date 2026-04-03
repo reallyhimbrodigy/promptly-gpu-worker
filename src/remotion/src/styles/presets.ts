@@ -80,15 +80,16 @@ export const STYLE_PRESETS: Record<string, StyleConfig> = {
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   // CLARITY — Reference: V3 (clean minimal single-word style)
   //
-  // Ultra-clean, minimal. White Poppins SemiBold, lowercase, centered.
+  // Ultra-clean, minimal. White Nunito Bold, lowercase, centered.
+  // Rounded terminals give a soft, friendly, premium feel.
   // Shows 1-2 words at a time for maximum readability.
   // Keywords get a soft teal color. Very subtle shadow, no stroke.
   // No pill, no glow — pure text on video. Premium, understated feel.
   // Position is center-screen (~55%) rather than lower-third.
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   clarity: {
-    fontFamily: "Poppins",
-    fontWeight: 600,
+    fontFamily: "Nunito",
+    fontWeight: 700,
     lineHeight: 1.15,
     textTransform: "lowercase",
     maxWordsPerGroup: 2,
@@ -117,14 +118,14 @@ export const STYLE_PRESETS: Record<string, StyleConfig> = {
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   // IMPACT — Reference: V4 (white bold + red keywords)
   //
-  // Bold Montserrat Black, lowercase. Keywords are vivid RED.
+  // Bold Anton, lowercase. Keywords are vivid RED.
   // Heavy shadow for outdoor/bright backgrounds. Cascade layout.
   // "content in a click" → "content" red + large, "in a click" white + smaller.
   // Punchy, attention-grabbing. No glow, just raw bold text + red pop.
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   impact: {
-    fontFamily: "Montserrat",
-    fontWeight: 900,
+    fontFamily: "Anton",
+    fontWeight: 400,
     lineHeight: 1.05,
     textTransform: "lowercase",
     maxWordsPerGroup: 3,
@@ -266,12 +267,12 @@ export const STYLE_PRESETS: Record<string, StyleConfig> = {
   // LUMEN — Reference: V2/V4 style picker thumbnail
   //   "one thing I can do" + "ENCOURAGE" label — teal/green accent, pill bg
   //
-  // Clean Poppins, lowercase. Teal/green keyword colors.
+  // Clean Inter, lowercase. Teal/green keyword colors.
   // Semi-transparent dark pill background for text readability.
   // Wave animation for smooth word-by-word reveal. Elegant, modern.
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   lumen: {
-    fontFamily: "Poppins",
+    fontFamily: "Inter",
     fontWeight: 700,
     lineHeight: 1.15,
     textTransform: "lowercase",
