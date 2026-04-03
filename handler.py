@@ -249,7 +249,10 @@ def get_encode_args(quality="high"):
                     "-b_ref_mode", "middle"]
     else:
         if quality == "lossless":
-            return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "0"]
+            # CRF 2 is visually lossless but 5-10x smaller files than CRF 0.
+            # Since intermediates get re-encoded to CRF 18 final, the difference
+            # between CRF 0 and CRF 2 is completely invisible in the output.
+            return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "2"]
         else:
             return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
                     "-maxrate", "15M", "-bufsize", "30M"]
@@ -4102,55 +4105,110 @@ def render_remotion_overlay(
           f"{total_duration:.1f}s @ {fps}fps ({_total_frames} frames)", flush=True)
     t0 = time.time()
 
-    # Always try GPU-accelerated Chrome (angle-egl) when a GPU is present.
-    # NVENC encode may fail while EGL rendering still works (different GPU subsystem).
+    # GPU-accelerated Chrome compositing when CUDA hwaccel is available.
     _gl_mode = "angle-egl" if _HAS_HWACCEL else "swiftshader"
 
-    # Use multiple concurrent browser tabs to render frames in parallel.
-    # Remotion caps concurrency at the system core count (Node's os.cpus().length).
-    # Modal H100 reports 32 cores to Node even though Python sees 48.
-    _concurrency = min(32, max(4, os.cpu_count() or 32))
+    # ── Parallel chunk rendering ─────────────────────────────────────────
+    # Split total frames across N parallel Node processes, each running
+    # its own set of Chrome tabs. Same total work, but separate V8 heaps,
+    # separate memory pools, and separate GC pressure = much less contention.
+    # Chunks are concatenated with -c copy (zero re-encode, zero quality loss).
+    _n_cores = os.cpu_count() or 32
+    _n_chunks = min(4, max(1, _total_frames // 200))  # ~200+ frames per chunk, max 4 chunks
+    _per_chunk_concurrency = max(4, min(32, _n_cores // _n_chunks))
 
-    _render_cmd = [
-        "node", render_cli, "--input", input_json_path, "--output", output_mov_path,
-        "--concurrency", str(_concurrency), "--gl", _gl_mode,
-    ]
-    print(f"[remotion] Chrome GL: {_gl_mode}, concurrency: {_concurrency}", flush=True)
-    result = subprocess.run(
-        _render_cmd,
-        capture_output=True, text=True,
-        timeout=300,
-        cwd=remotion_dir,
-    )
+    if _n_chunks <= 1:
+        # Short video — single process is fine
+        _n_chunks = 1
+        _per_chunk_concurrency = min(32, max(4, _n_cores))
 
-    # If GPU GL failed, retry with SwiftShader
-    if result.returncode != 0 and _gl_mode == "angle-egl":
-        _stderr_check = (result.stderr or "").lower()
-        if "gl" in _stderr_check or "gpu" in _stderr_check or "egl" in _stderr_check or "angle" in _stderr_check:
-            print("[remotion] GPU GL failed — retrying with SwiftShader (CPU)...", flush=True)
-            _render_cmd[-1] = "swiftshader"
-            result = subprocess.run(
-                _render_cmd,
-                capture_output=True, text=True,
-                timeout=300,
-                cwd=remotion_dir,
-            )
+    print(f"[remotion] Chrome GL: {_gl_mode}, {_n_chunks} chunk(s), "
+          f"concurrency: {_per_chunk_concurrency}/chunk ({_per_chunk_concurrency * _n_chunks} total tabs)",
+          flush=True)
 
-    # Print Remotion stdout (progress + timing info)
-    if result.stdout:
-        for line in result.stdout.strip().split("\n"):
-            if line.strip():
-                print(f"  {line.strip()}", flush=True)
+    # Build chunk frame ranges
+    _chunk_size = _total_frames // _n_chunks
+    _chunk_ranges = []
+    for ci in range(_n_chunks):
+        _start = ci * _chunk_size
+        _end = (ci + 1) * _chunk_size - 1 if ci < _n_chunks - 1 else _total_frames - 1
+        _chunk_ranges.append((_start, _end))
 
-    if result.returncode != 0:
-        full_stderr = result.stderr or ""
-        # Print full stderr for debugging (truncated in the exception)
-        if full_stderr:
-            print(f"[remotion] FULL STDERR ({len(full_stderr)} chars):", flush=True)
-            for line in full_stderr.strip().split("\n")[-30:]:
-                print(f"  {line}", flush=True)
-        stderr_tail = full_stderr[-2000:]
-        raise RuntimeError(f"[remotion] Render failed (rc={result.returncode}): {stderr_tail}")
+    def _render_chunk(chunk_idx, frame_start, frame_end):
+        """Render a frame range to a separate WebM file."""
+        chunk_out = os.path.join(work_dir, f"overlay_chunk_{chunk_idx}.webm")
+        cmd = [
+            "node", render_cli,
+            "--input", input_json_path,
+            "--output", chunk_out,
+            "--concurrency", str(_per_chunk_concurrency),
+            "--gl", _gl_mode,
+            "--frame-range", f"{frame_start}-{frame_end}",
+        ]
+        ct0 = time.time()
+        res = subprocess.run(
+            cmd, capture_output=True, text=True,
+            timeout=300, cwd=remotion_dir,
+        )
+        chunk_elapsed = time.time() - ct0
+        chunk_frames = frame_end - frame_start + 1
+        chunk_fps = chunk_frames / chunk_elapsed if chunk_elapsed > 0 else 0
+
+        if res.returncode != 0:
+            _err = (res.stderr or "")[-1000:]
+            print(f"[remotion] Chunk {chunk_idx} FAILED ({chunk_frames} frames): {_err}", flush=True)
+            raise RuntimeError(f"[remotion] Chunk {chunk_idx} failed (rc={res.returncode}): {_err}")
+
+        # Print stdout (progress info)
+        if res.stdout:
+            for line in res.stdout.strip().split("\n"):
+                if line.strip():
+                    print(f"  [chunk{chunk_idx}] {line.strip()}", flush=True)
+
+        print(f"[remotion] Chunk {chunk_idx}: {chunk_frames} frames in {chunk_elapsed:.1f}s ({chunk_fps:.1f} fps)",
+              flush=True)
+        return chunk_out
+
+    if _n_chunks == 1:
+        # Single chunk — render directly to output (no concat needed)
+        output_path = _render_chunk(0, _chunk_ranges[0][0], _chunk_ranges[0][1])
+        # Rename to expected output path
+        if output_path != output_mov_path:
+            os.rename(output_path, output_mov_path)
+    else:
+        # Parallel chunk rendering
+        _chunk_paths = [None] * _n_chunks
+        with concurrent.futures.ThreadPoolExecutor(max_workers=_n_chunks) as chunk_pool:
+            _chunk_futures = {
+                chunk_pool.submit(_render_chunk, ci, _chunk_ranges[ci][0], _chunk_ranges[ci][1]): ci
+                for ci in range(_n_chunks)
+            }
+            for fut in concurrent.futures.as_completed(_chunk_futures):
+                ci = _chunk_futures[fut]
+                _chunk_paths[ci] = fut.result()  # raises if chunk failed
+
+        # Concat chunks with ffmpeg -c copy (zero re-encode)
+        _concat_list = os.path.join(work_dir, "overlay_concat.txt")
+        with open(_concat_list, "w") as f:
+            for cp in _chunk_paths:
+                f.write(f"file '{cp}'\n")
+
+        _concat_t0 = time.time()
+        _concat_result = subprocess.run(
+            ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", _concat_list,
+             "-c", "copy", output_mov_path],
+            capture_output=True, text=True, timeout=30,
+        )
+        if _concat_result.returncode != 0:
+            raise RuntimeError(f"[remotion] Chunk concat failed: {(_concat_result.stderr or '')[-500:]}")
+        print(f"[remotion] Chunk concat: {time.time() - _concat_t0:.1f}s", flush=True)
+
+        # Clean up chunk files
+        for cp in _chunk_paths:
+            try:
+                os.remove(cp)
+            except OSError:
+                pass
 
     elapsed = time.time() - t0
 
@@ -4158,7 +4216,9 @@ def render_remotion_overlay(
         raise RuntimeError("[remotion] Render completed but output file not found")
 
     sz = os.path.getsize(output_mov_path)
-    print(f"[remotion] Caption overlay: {sz / 1024 / 1024:.1f}MB in {elapsed:.1f}s", flush=True)
+    _effective_fps = _total_frames / elapsed if elapsed > 0 else 0
+    print(f"[remotion] Caption overlay: {sz / 1024 / 1024:.1f}MB in {elapsed:.1f}s "
+          f"({_effective_fps:.1f} fps effective)", flush=True)
     return output_mov_path
 
 
@@ -5901,11 +5961,13 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _seg_paths = [None] * n
         _seg_errors = []
 
-        # Choose lossless encoder: NVENC if available, otherwise libx264 ultrafast crf 0
+        # Choose fast intermediate encoder: NVENC lossless if available,
+        # otherwise libx264 ultrafast CRF 2 (visually lossless, 5-10x smaller
+        # files than CRF 0 — the CRF 18 final encode makes CRF 0 vs 2 invisible)
         _seg_venc = (
             ["-c:v", "h264_nvenc", "-preset", "p1", "-rc", "lossless"]
             if _HAS_NVENC else
-            ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "0"]
+            ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "2"]
         )
 
         def _render_one_segment(seg_idx):
@@ -6483,12 +6545,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # Wait for Remotion overlay render (launched in background thread earlier)
     caption_overlay_path = None
     if _overlay_future is not None:
+        _ov_wait_t0 = time.time()
         try:
             caption_overlay_path = _overlay_future.result(timeout=180)
             _overlay_pool.shutdown(wait=False)
-            print(f"[remotion] Overlay ready: {caption_overlay_path}", flush=True)
+            _ov_wait = time.time() - _ov_wait_t0
+            print(f"[remotion] Overlay ready: {caption_overlay_path} (waited {_ov_wait:.1f}s for it)", flush=True)
         except Exception as _ov_err:
-            print(f"[remotion] Overlay failed: {_ov_err}", flush=True)
+            print(f"[remotion] Overlay failed after {time.time() - _ov_wait_t0:.1f}s: {_ov_err}", flush=True)
 
     # Caption overlay — transparent video from Remotion (VP8 WebM with alpha)
     caption_input_args = []
@@ -6806,7 +6870,9 @@ def handler(job):
             future_faces = mega_pool.submit(_do_face_detect_overlapped)
 
             # Collect results — get edit_plan FIRST so we can start B-roll fetch early
+            _mega_t0 = time.time()
             edit_plan = future_edit.result()  # critical path — longest wait (Gemini)
+            print(f"[TIMING] edit_plan ready in {time.time() - _mega_t0:.1f}s (critical path)", flush=True)
 
             # Start B-roll fetch IMMEDIATELY while other futures may still be running
             _broll_fetch_pool = None
@@ -6825,6 +6891,7 @@ def handler(job):
                     _broll_fetch_futures[_fut] = _bi
 
             # Now collect remaining futures (may already be done)
+            _collect_t0 = time.time()
             source_info = future_normalize.result()
             source_path = source_info["source_path"]
             _normalize_vf = source_info.get("normalize_vf")
@@ -6833,6 +6900,9 @@ def handler(job):
             source_loudness = future_loudness.result()
             source_beats = future_beats.result()
             face_positions, dense_face_trajectory = future_faces.result()
+            _collect_elapsed = time.time() - _collect_t0
+            if _collect_elapsed > 1.0:
+                print(f"[TIMING] Remaining futures collected in {_collect_elapsed:.1f}s (should be ~0s if overlapped)", flush=True)
 
         # Source res is what it is — normalize filter will handle conversion in render
         source_res = {"width": source_info["width"], "height": source_info["height"]}
