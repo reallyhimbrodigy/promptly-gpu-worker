@@ -5512,7 +5512,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 _projected_words, caption_style,
                 {"width": 1080, "height": 1920},
                 _cap_kw, work_dir,
-                total_duration=_total_render_dur, fps=30,
+                total_duration=_total_render_dur, fps=20,  # 20fps for text overlay = 33% fewer frames; FFmpeg holds frames via WebM timestamps
                 cuts=_cuts_for_remotion,
                 emphasis_moments=_emphasis_moments,
                 vibe=_vibe,
@@ -6754,8 +6754,8 @@ def handler(job):
 
         def _do_gemini_upload():
             try:
-                # Encode a tiny 360p proxy for Gemini — raw upload triggers 10-30s server-side
-                # processing wait. 360p encodes in <1s and processes in <3s on Gemini side.
+                # Encode a tiny 240p@10fps proxy for Gemini — raw upload triggers 10-30s server-side
+                # processing wait. 240p@10fps encodes instantly and uploads in <2s.
                 # Gemini only needs to see composition/content, not pixel quality.
                 _upload_t = time.time()
                 _proxy_path = os.path.join(work_dir, "gemini_proxy.mp4")
@@ -6765,14 +6765,14 @@ def handler(job):
                                ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "32"])
                 _proxy_cmd = subprocess.run(
                     ["ffmpeg", "-y", "-threads", "4", "-i", _raw_source,
-                     "-vf", "scale=360:-2"] + _proxy_venc + [
-                     "-c:a", "aac", "-b:a", "48k", "-ac", "1",
+                     "-vf", "scale=240:-2,fps=10"] + _proxy_venc + [
+                     "-c:a", "aac", "-b:a", "32k", "-ac", "1",
                      "-movflags", "+faststart", _proxy_path],
                     capture_output=True, text=True, timeout=15,
                 )
                 if _proxy_cmd.returncode == 0 and os.path.exists(_proxy_path):
                     _proxy_mb = os.path.getsize(_proxy_path) / (1024 * 1024)
-                    print(f"[pipeline] Gemini proxy: 360p {_proxy_mb:.1f}MB in {time.time()-_upload_t:.1f}s", flush=True)
+                    print(f"[pipeline] Gemini proxy: 240p@10fps {_proxy_mb:.1f}MB in {time.time()-_upload_t:.1f}s", flush=True)
                     gf = genai.upload_file(_proxy_path)
                 else:
                     print(f"[pipeline] Proxy encode failed, uploading raw", flush=True)
