@@ -1,6 +1,6 @@
 import modal
 
-# rebuild trigger v16 — FFmpeg source-only (no prebuilt), NVENC + libfreetype/drawtext + H100 GPU + 32 CPU + 64GB
+# rebuild trigger v17 — FFmpeg source-only, explicit --enable-filter=drawtext + H100 GPU + 32 CPU + 64GB
 
 # ── Image definition (replaces Dockerfile) ────────────────────────────────────
 image = (
@@ -68,13 +68,13 @@ image = (
         "--enable-libx264 --enable-libx265 --enable-libfdk-aac --enable-libmp3lame "
         "--enable-libopus --enable-libvpx --enable-libass --enable-librubberband "
         "--enable-libfreetype --enable-libfontconfig --enable-libfribidi "
-        "--enable-filter=ass --enable-filter=subtitles "
+        "--enable-filter=drawtext --enable-filter=ass --enable-filter=subtitles "
         "--disable-doc --disable-debug --enable-optimizations "
         "&& make -j$(nproc) && make install",
         "ldconfig",
         "which ffmpeg && which ffprobe",
         "ffmpeg -version | head -3",
-        "ffmpeg -filters 2>/dev/null | grep drawtext && echo 'DRAWTEXT: OK' || (echo 'DRAWTEXT: MISSING — FATAL' && exit 1)",
+        "ffmpeg -filters 2>/dev/null | grep drawtext && echo 'DRAWTEXT: OK' || (echo 'DRAWTEXT: MISSING' && ffmpeg -version | head -5 && ffmpeg -filters 2>/dev/null | grep -i 'draw' && exit 1)",
         "ffmpeg -filters 2>/dev/null | grep -E 'ass|subtitles' || echo 'WARNING: ass/subtitles filters not found'",
         "ffmpeg -encoders 2>/dev/null | grep nvenc && echo 'NVENC: OK' || echo 'NVENC: MISSING'",
     )
