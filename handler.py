@@ -4029,251 +4029,6 @@ def _build_keyword_set(words, caption_keywords):
                 _sentence_words = []
     return keyword_set
 
-# ─── ASS CAPTION GENERATION ──────────────────────────────────────────────────
-# Native FFmpeg/libass caption rendering — eliminates 60s Chrome/Remotion render.
-# Produces identical word-by-word highlighting with karaoke timing, keyword
-# coloring, text shadows, and outlines. Runs inside FFmpeg's encode pass at
-# zero additional time cost.
-
-def _ass_time(sec):
-    """Format seconds → ASS timestamp (H:MM:SS.cc)."""
-    sec = max(0.0, float(sec))
-    h = int(sec // 3600)
-    m = int((sec % 3600) // 60)
-    s = sec % 60
-    return f"{h}:{m:02d}:{s:05.2f}"
-
-def _hex_to_ass(hex_str):
-    """Convert #RRGGBB or #RRGGBBAA → ASS &HAABBGGRR color."""
-    hex_str = hex_str.lstrip('#')
-    if len(hex_str) >= 8:
-        r, g, b = int(hex_str[0:2], 16), int(hex_str[2:4], 16), int(hex_str[4:6], 16)
-        a = int(hex_str[6:8], 16)
-        ass_a = 255 - a
-    elif len(hex_str) == 6:
-        r, g, b = int(hex_str[0:2], 16), int(hex_str[2:4], 16), int(hex_str[4:6], 16)
-        ass_a = 0
-    else:
-        r, g, b, ass_a = 255, 255, 255, 0
-    return f"&H{ass_a:02X}{b:02X}{g:02X}{r:02X}"
-
-def _rgba_to_ass(rgba_str):
-    """Convert 'rgba(R,G,B,A)' → ASS &HAABBGGRR color."""
-    inner = rgba_str.strip().replace('rgba(', '').replace('rgb(', '').rstrip(')')
-    parts = [p.strip() for p in inner.split(',')]
-    r, g, b = int(parts[0]), int(parts[1]), int(parts[2])
-    a = float(parts[3]) if len(parts) > 3 else 1.0
-    ass_a = int((1.0 - a) * 255)
-    return f"&H{ass_a:02X}{b:02X}{g:02X}{r:02X}"
-
-def _color_to_ass(color_str):
-    """Convert any CSS color (hex or rgba) to ASS color."""
-    if 'rgba(' in color_str or 'rgb(' in color_str:
-        return _rgba_to_ass(color_str)
-    return _hex_to_ass(color_str)
-
-# Style configs for ASS — mirrors src/remotion/src/styles/presets.ts
-_ASS_STYLES = {
-    'volt': {
-        'font': 'Montserrat', 'bold': 1, 'size': 62,
-        'primary': '#FFFFFF', 'dim': 'rgba(255,255,255,0.50)',
-        'kw_colors': ['#00D4FF', '#00E5FF', '#00BCD4'],
-        'outline_w': 2.0, 'outline_c': 'rgba(0,0,0,0.8)',
-        'shadow_d': 1, 'shadow_c': 'rgba(0,0,0,0.9)',
-        'y_pct': 72, 'upper': False, 'max_words': 4, 'kw_scale': 1.22,
-    },
-    'clarity': {
-        'font': 'Montserrat', 'bold': 1, 'size': 62,
-        'primary': '#FFFFFF', 'dim': 'rgba(255,255,255,0.40)',
-        'kw_colors': ['#5DADE2', '#48C9B0', '#45B7D1'],
-        'outline_w': 0, 'outline_c': 'rgba(0,0,0,0)',
-        'shadow_d': 1, 'shadow_c': 'rgba(0,0,0,0.5)',
-        'y_pct': 55, 'upper': False, 'max_words': 2, 'kw_scale': 1.12,
-    },
-    'impact': {
-        'font': 'Montserrat', 'bold': 1, 'size': 66,
-        'primary': '#FFFFFF', 'dim': 'rgba(255,255,255,0.45)',
-        'kw_colors': ['#E53935', '#FF1744', '#D50000'],
-        'outline_w': 2.5, 'outline_c': 'rgba(0,0,0,0.85)',
-        'shadow_d': 2, 'shadow_c': 'rgba(0,0,0,1)',
-        'y_pct': 78, 'upper': False, 'max_words': 3, 'kw_scale': 1.22,
-    },
-    'ember': {
-        'font': 'Montserrat', 'bold': 1, 'size': 60,
-        'primary': '#FFFFFF', 'dim': 'rgba(255,255,255,0.45)',
-        'kw_colors': ['#FFD700', '#FFA726', '#FFAB40'],
-        'outline_w': 1.5, 'outline_c': 'rgba(0,0,0,0.7)',
-        'shadow_d': 1, 'shadow_c': 'rgba(0,0,0,0.7)',
-        'y_pct': 78, 'upper': False, 'max_words': 3, 'kw_scale': 1.15,
-    },
-    'velocity': {
-        'font': 'Montserrat', 'bold': 1, 'size': 64,
-        'primary': '#FFFFFF', 'dim': 'rgba(255,255,255,0.50)',
-        'kw_colors': ['#FFD700', '#00E5FF', '#FFC107'],
-        'outline_w': 3.0, 'outline_c': 'rgba(0,0,0,0.9)',
-        'shadow_d': 2, 'shadow_c': 'rgba(0,0,0,1)',
-        'y_pct': 70, 'upper': True, 'max_words': 3, 'kw_scale': 1.22,
-    },
-    'archive': {
-        'font': 'Montserrat', 'bold': 1, 'size': 64,
-        'primary': '#E8E8E8', 'dim': 'rgba(255,255,255,0.40)',
-        'kw_colors': ['#C8AA6E', '#D4AF37', '#BFA15A'],
-        'outline_w': 2.0, 'outline_c': 'rgba(0,0,0,0.85)',
-        'shadow_d': 1, 'shadow_c': 'rgba(0,0,0,0.9)',
-        'y_pct': 75, 'upper': True, 'max_words': 4, 'kw_scale': 1.18,
-    },
-    'lumen': {
-        'font': 'Montserrat', 'bold': 1, 'size': 58,
-        'primary': '#FFFFFF', 'dim': 'rgba(255,255,255,0.50)',
-        'kw_colors': ['#00E5A0', '#00D4AA', '#26A69A'],
-        'outline_w': 0, 'outline_c': 'rgba(0,0,0,0)',
-        'shadow_d': 1, 'shadow_c': 'rgba(0,0,0,0.5)',
-        'y_pct': 65, 'upper': False, 'max_words': 4, 'kw_scale': 1.12,
-    },
-    'rebel': {
-        'font': 'Montserrat', 'bold': 1, 'size': 62,
-        'primary': '#FFFFFF', 'dim': 'rgba(255,255,255,0.45)',
-        'kw_colors': ['#CDDC39', '#76FF03', '#C6FF00'],
-        'outline_w': 2.5, 'outline_c': 'rgba(0,0,0,0.85)',
-        'shadow_d': 1, 'shadow_c': 'rgba(0,0,0,0.9)',
-        'y_pct': 72, 'upper': False, 'max_words': 3, 'kw_scale': 1.18,
-    },
-}
-
-def _ass_group_words(words, max_gap_ms=400, max_words=4):
-    """Group projected words into caption pages (TikTok-style grouping)."""
-    pages = []
-    current = []
-    for w in words:
-        if not isinstance(w.get('start'), (int, float)) or not isinstance(w.get('end'), (int, float)):
-            continue
-        if w['end'] <= w['start']:
-            continue
-        if not current:
-            current.append(w)
-            continue
-        gap_ms = (w['start'] - current[-1]['end']) * 1000
-        if gap_ms > max_gap_ms or len(current) >= max_words:
-            pages.append(current)
-            current = [w]
-        else:
-            current.append(w)
-    if current:
-        pages.append(current)
-    return pages
-
-_PUNCT_STRIP = str.maketrans('', '', '.,!?;:\'"\\')
-
-def generate_ass_captions(projected_words, style_name, keywords, total_duration, output_path, width=1080, height=1920):
-    """Generate ASS subtitle file with word-by-word karaoke captions.
-
-    Replaces Chrome/Remotion rendering. Runs inside FFmpeg's ass= filter
-    at zero additional cost during the existing encode pass.
-    """
-    t0 = time.time()
-    conf = _ASS_STYLES.get(style_name, _ASS_STYLES['volt'])
-
-    # Build keyword set
-    kw_set = set()
-    for k in keywords:
-        kw_set.add(k.lower().translate(_PUNCT_STRIP))
-    for w in projected_words:
-        if w.get('_kw'):
-            kw_set.add((w.get('word') or '').lower().translate(_PUNCT_STRIP))
-
-    # Group into pages
-    pages = _ass_group_words(projected_words, max_gap_ms=400, max_words=conf['max_words'])
-
-    # ASS colors
-    primary_c = _color_to_ass(conf['primary'])
-    dim_c = _color_to_ass(conf['dim'])
-    outline_c = _color_to_ass(conf['outline_c'])
-    shadow_c = _color_to_ass(conf['shadow_c'])
-
-    # Margin from bottom (y_pct from top → MarginV from bottom for alignment 2)
-    margin_v = int(height * (1.0 - conf['y_pct'] / 100.0))
-
-    lines = []
-    lines.append('[Script Info]')
-    lines.append('ScriptType: v4.00+')
-    lines.append(f'PlayResX: {width}')
-    lines.append(f'PlayResY: {height}')
-    lines.append('WrapStyle: 0')
-    lines.append('ScaledBorderAndShadow: yes')
-    lines.append('')
-    lines.append('[V4+ Styles]')
-    lines.append('Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding')
-    lines.append(
-        f'Style: Caption,{conf["font"]},{conf["size"]},'
-        f'{primary_c},{dim_c},{outline_c},{shadow_c},'
-        f'{conf["bold"]},0,0,0,100,100,0,0,1,'
-        f'{conf["outline_w"]},{conf["shadow_d"]},2,40,40,{margin_v},1'
-    )
-    lines.append('')
-    lines.append('[Events]')
-    lines.append('Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text')
-
-    kw_idx = 0
-
-    for page in pages:
-        if not page:
-            continue
-        page_start = page[0]['start']
-        page_end = page[-1]['end']
-        if page_end <= page_start:
-            continue
-
-        # Fade buffer
-        fade_in_ms, fade_out_ms = 80, 100
-        display_start = max(0, page_start - fade_in_ms / 1000)
-        display_end = min(total_duration, page_end + fade_out_ms / 1000)
-
-        start_ts = _ass_time(display_start)
-        end_ts = _ass_time(display_end)
-
-        # Build karaoke text
-        parts = [f'{{\\fad({fade_in_ms},{fade_out_ms})}}']
-
-        # Initial delay from display_start to first word
-        init_cs = max(0, int((page_start - display_start) * 100))
-        if init_cs > 0:
-            parts.append(f'{{\\k{init_cs}}}')
-
-        for i, w in enumerate(page):
-            word_text = w.get('punctuated_word') or w.get('word') or ''
-            if conf['upper']:
-                word_text = word_text.upper()
-
-            # Karaoke duration (centiseconds until next word starts)
-            if i < len(page) - 1:
-                dur_cs = max(1, int((page[i + 1]['start'] - w['start']) * 100))
-            else:
-                dur_cs = max(1, int((w['end'] - w['start']) * 100))
-
-            clean = word_text.lower().translate(_PUNCT_STRIP)
-            is_kw = clean in kw_set or w.get('_kw', False)
-
-            if is_kw:
-                kw_color = conf['kw_colors'][kw_idx % len(conf['kw_colors'])]
-                kw_c = _hex_to_ass(kw_color)
-                kw_size = int(conf['size'] * conf['kw_scale'])
-                kw_idx += 1
-                parts.append(f'{{\\1c{kw_c}\\fs{kw_size}\\k{dur_cs}}}{word_text}{{\\r}} ')
-            else:
-                parts.append(f'{{\\k{dur_cs}}}{word_text} ')
-
-        text = ''.join(parts).rstrip()
-        lines.append(f'Dialogue: 0,{start_ts},{end_ts},Caption,,0,0,0,,{text}')
-
-    with open(output_path, 'w', encoding='utf-8') as f:
-        f.write('\n'.join(lines) + '\n')
-
-    elapsed = time.time() - t0
-    print(f"[captions] ASS generated: {len(pages)} pages, {len(projected_words)} words "
-          f"in {elapsed*1000:.0f}ms → {output_path}", flush=True)
-    return output_path
-
-
 def render_remotion_overlay(
     words, caption_style, output_res, caption_keywords, work_dir,
     total_duration=0.0, fps=30, cuts=None, emphasis_moments=None, vibe="",
@@ -5747,19 +5502,26 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _rc_copy["_effective_duration"] = effective_durations[_ci] if _ci < len(effective_durations) else 0
         _cuts_for_remotion.append(_rc_copy)
 
-    # ── Caption rendering: ASS subtitles (instant) ──────────────────────────
-    # ASS replaces the 60s Chrome/Remotion render. Word-by-word karaoke
-    # highlighting runs natively inside FFmpeg's libass at zero extra cost.
-    _ass_path = None
+    # Launch Remotion overlay render in background thread (captions + visual effects)
     _overlay_future = None
     _caption_video = None
     _caption_pngs = []
     if _projected_words and caption_style:
-        _ass_path = os.path.join(work_dir, "captions.ass")
-        generate_ass_captions(
-            _projected_words, caption_style, _cap_kw,
-            _total_render_dur, _ass_path,
-        )
+        def _do_overlay_render():
+            return render_remotion_overlay(
+                _projected_words, caption_style,
+                {"width": 1080, "height": 1920},
+                _cap_kw, work_dir,
+                total_duration=_total_render_dur, fps=30,
+                cuts=_cuts_for_remotion,
+                emphasis_moments=_emphasis_moments,
+                vibe=_vibe,
+            )
+
+        _overlay_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        _overlay_future = _overlay_pool.submit(_do_overlay_render)
+        print(f"[remotion] Background render started: {caption_style} ({len(_projected_words)} words), "
+              f"{len(_emphasis_moments)} emphasis, vibe=\"{_vibe[:50]}\"", flush=True)
     else:
         print(f"[captions] No captions (style={caption_style}, words={len(_projected_words)})", flush=True)
 
@@ -6780,17 +6542,32 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             if _broll_overlay_idx > 0:
                 print(f"[broll] Integrated {_broll_overlay_idx} B-roll clip(s) into first pass", flush=True)
 
-    # Caption overlay — ASS subtitles rendered natively by FFmpeg/libass
+    # Wait for Remotion overlay render (launched in background thread earlier)
+    caption_overlay_path = None
+    if _overlay_future is not None:
+        _ov_wait_t0 = time.time()
+        try:
+            caption_overlay_path = _overlay_future.result(timeout=180)
+            _overlay_pool.shutdown(wait=False)
+            _ov_wait = time.time() - _ov_wait_t0
+            print(f"[remotion] Overlay ready: {caption_overlay_path} (waited {_ov_wait:.1f}s for it)", flush=True)
+        except Exception as _ov_err:
+            print(f"[remotion] Overlay failed after {time.time() - _ov_wait_t0:.1f}s: {_ov_err}", flush=True)
+
+    # Caption overlay — transparent video from Remotion (VP8 WebM with alpha)
     caption_input_args = []
     caption_filter_strs = []
-    if _ass_path and os.path.exists(_ass_path):
-        # Escape path for FFmpeg filter syntax (colons need escaping)
-        _esc_ass = _ass_path.replace("'", "'\\''").replace(':', '\\:')
+    if caption_overlay_path:
+        _cap_idx = n_segment_inputs + len(sfx_input_args) // 2 + _n_broll_inputs
+        # Force libvpx decoder — FFmpeg's native vp8 decoder strips alpha channel
+        caption_input_args = ["-c:v", "libvpx", "-i", caption_overlay_path]
+        # Ensure alpha channel is preserved through format conversion
         caption_filter_strs.append(
-            f"{video_out}ass={_esc_ass}[video_captioned]"
+            f"[{_cap_idx}:v]format=yuva420p[_cap_alpha];"
+            f"{video_out}[_cap_alpha]overlay=eof_action=pass[video_captioned]"
         )
         video_out = "[video_captioned]"
-        print(f"[render] ASS caption overlay via libass (zero extra render cost)", flush=True)
+        print(f"[render] Remotion caption overlay at input index {_cap_idx} (libvpx decoder)", flush=True)
 
     # Order matters: post_filters (zoom pulses etc) → broll → captions
     filter_complex = ";".join(video_filters + audio_filters + transition_filters + sfx_filter_strs + post_filters + broll_filter_strs + caption_filter_strs)
