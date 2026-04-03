@@ -2,9 +2,10 @@
 /**
  * Remotion Video Overlay Render CLI
  *
- * Renders captions + visual effects as a single transparent ProRes 4444 MOV.
+ * Renders captions + visual effects as a single transparent VP8 WebM.
  *
- * Usage: node render-cli.mjs --input <json_path> --output <mov_path>
+ * Usage: node render-cli.mjs --input <json_path> --output <webm_path>
+ *        [--concurrency N] [--gl mode] [--frame-range start-end]
  *
  * Input JSON: OverlayInput (see types.ts)
  */
@@ -24,16 +25,23 @@ let inputPath = null;
 let outputPath = null;
 let concurrency = 24;
 let glMode = "angle-egl"; // GPU-accelerated; falls back to swiftshader
+let frameRange = null; // [startFrame, endFrame] for chunk rendering
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--input" && args[i + 1]) inputPath = args[++i];
   else if (args[i] === "--output" && args[i + 1]) outputPath = args[++i];
   else if (args[i] === "--concurrency" && args[i + 1]) concurrency = parseInt(args[++i], 10);
   else if (args[i] === "--gl" && args[i + 1]) glMode = args[++i];
+  else if (args[i] === "--frame-range" && args[i + 1]) {
+    const parts = args[++i].split("-").map(Number);
+    if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+      frameRange = parts;
+    }
+  }
 }
 
 if (!inputPath || !outputPath) {
-  console.error("Usage: node render-cli.mjs --input <json> --output <mov>");
+  console.error("Usage: node render-cli.mjs --input <json> --output <webm> [--frame-range start-end]");
   process.exit(1);
 }
 
@@ -57,14 +65,14 @@ const input = {
 };
 input.durationInFrames = Math.max(1, Math.round(input.duration * input.fps));
 
-const effectCount = input.effects.length;
-const cutCount = input.cuts.length;
-const emphasisCount = input.emphasisMoments.length;
+const rangeStr = frameRange
+  ? ` [chunk ${frameRange[0]}-${frameRange[1]} of ${input.durationInFrames}]`
+  : "";
 
 console.log(
   `[remotion] Rendering: ${input.captionStyle} captions (${input.words.length} words), ` +
-  `${cutCount} cuts, ${emphasisCount} emphasis moments, vibe="${input.vibe}", ` +
-  `${input.durationInFrames} frames (${input.duration.toFixed(1)}s @ ${input.fps}fps)`
+  `${input.cuts.length} cuts, ${input.emphasisMoments.length} emphasis moments, vibe="${input.vibe}", ` +
+  `${input.durationInFrames} frames (${input.duration.toFixed(1)}s @ ${input.fps}fps)${rangeStr}`
 );
 
 const t0 = Date.now();
@@ -106,7 +114,7 @@ composition.height = input.height;
 composition.fps = input.fps;
 
 // Render to transparent VP8 WebM — fast encode, alpha via libvpx
-await renderMedia({
+const renderOptions = {
   composition,
   serveUrl: bundleLocation,
   codec: "vp8",
@@ -125,7 +133,17 @@ await renderMedia({
       process.stdout.write(`\r[remotion] ${pct}%`);
     }
   },
-});
+};
+
+// Add frame range for chunk rendering
+if (frameRange) {
+  renderOptions.frameRange = frameRange;
+}
+
+await renderMedia(renderOptions);
 
 const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
-console.log(`\n[remotion] Done in ${elapsed}s → ${outputPath}`);
+const framesRendered = frameRange
+  ? frameRange[1] - frameRange[0] + 1
+  : input.durationInFrames;
+console.log(`\n[remotion] Done in ${elapsed}s (${framesRendered} frames) → ${outputPath}`);

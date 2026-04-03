@@ -251,7 +251,7 @@ def get_encode_args(quality="high"):
         if quality == "lossless":
             return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "0"]
         else:
-            return ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+            return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
                     "-maxrate", "15M", "-bufsize", "30M"]
 
 _EMOJI_RE = re.compile(
@@ -4128,59 +4128,124 @@ def render_remotion_overlay(
         json.dump(input_data, f)
 
     _n_words = len(words) if words else 0
+    _total_frames = max(1, round(total_duration * fps))
     print(f"[remotion] Rendering overlay: {caption_style} captions ({_n_words} words), "
           f"{len(cut_points)} cuts, {len(em_list)} emphasis, vibe=\"{vibe}\", "
-          f"{total_duration:.1f}s @ {fps}fps", flush=True)
+          f"{total_duration:.1f}s @ {fps}fps ({_total_frames} frames)", flush=True)
     t0 = time.time()
-
-    # Use multiple concurrent browser tabs to render frames in parallel.
-    # Remotion caps concurrency at the system core count (Node's os.cpus().length).
-    # Modal H100 reports 32 cores to Node even though Python sees 48.
-    _concurrency = min(32, max(4, int((os.cpu_count() or 16) * 0.85)))
 
     # Always try GPU-accelerated Chrome (angle-egl) when a GPU is present.
     # NVENC encode may fail while EGL rendering still works (different GPU subsystem).
     _gl_mode = "angle-egl" if _HAS_HWACCEL else "swiftshader"
-    _render_cmd = [
-        "node", render_cli, "--input", input_json_path, "--output", output_mov_path,
-        "--concurrency", str(_concurrency), "--gl", _gl_mode,
-    ]
-    print(f"[remotion] Chrome GL: {_gl_mode}, concurrency: {_concurrency}", flush=True)
-    result = subprocess.run(
-        _render_cmd,
-        capture_output=True, text=True,
-        timeout=300,
-        cwd=remotion_dir,
-    )
 
-    # If GPU GL failed, retry with SwiftShader
-    if result.returncode != 0 and _gl_mode == "angle-egl":
-        _stderr_check = (result.stderr or "").lower()
-        if "gl" in _stderr_check or "gpu" in _stderr_check or "egl" in _stderr_check or "angle" in _stderr_check:
-            print("[remotion] GPU GL failed — retrying with SwiftShader (CPU)...", flush=True)
-            _render_cmd[-1] = "swiftshader"
-            result = subprocess.run(
-                _render_cmd,
-                capture_output=True, text=True,
-                timeout=300,
-                cwd=remotion_dir,
-            )
+    # ── Parallel chunk rendering ───────────────────────────────────────────
+    # Split the render into N chunks, each running a separate Node process.
+    # Each chunk gets its own VP8 encoder (parallelizes the encode bottleneck)
+    # and its own set of Chrome tabs.
+    _n_cores = os.cpu_count() or 32
+    _node_cores = min(32, _n_cores)  # Node sees max 32 on Modal
+    # Use 4 chunks for videos > 600 frames, 2 for shorter, 1 for very short
+    if _total_frames >= 600:
+        _n_chunks = 4
+    elif _total_frames >= 200:
+        _n_chunks = 2
+    else:
+        _n_chunks = 1
+    _concurrency_per_chunk = max(2, _node_cores // _n_chunks)
 
-    # Print Remotion stdout (progress + timing info)
-    if result.stdout:
-        for line in result.stdout.strip().split("\n"):
-            if line.strip():
-                print(f"  {line.strip()}", flush=True)
+    print(f"[remotion] Chrome GL: {_gl_mode}, chunks: {_n_chunks}, "
+          f"concurrency/chunk: {_concurrency_per_chunk}", flush=True)
 
-    if result.returncode != 0:
-        full_stderr = result.stderr or ""
-        # Print full stderr for debugging (truncated in the exception)
-        if full_stderr:
-            print(f"[remotion] FULL STDERR ({len(full_stderr)} chars):", flush=True)
-            for line in full_stderr.strip().split("\n")[-30:]:
-                print(f"  {line}", flush=True)
-        stderr_tail = full_stderr[-2000:]
-        raise RuntimeError(f"[remotion] Render failed (rc={result.returncode}): {stderr_tail}")
+    def _render_chunk(chunk_idx, frame_start, frame_end, chunk_output):
+        """Render a single frame range chunk."""
+        _cmd = [
+            "node", render_cli, "--input", input_json_path, "--output", chunk_output,
+            "--concurrency", str(_concurrency_per_chunk), "--gl", _gl_mode,
+            "--frame-range", f"{frame_start}-{frame_end}",
+        ]
+        _res = subprocess.run(
+            _cmd, capture_output=True, text=True,
+            timeout=300, cwd=remotion_dir,
+        )
+        # If GPU GL failed, retry with SwiftShader
+        if _res.returncode != 0 and _gl_mode == "angle-egl":
+            _se = (_res.stderr or "").lower()
+            if any(k in _se for k in ("gl", "gpu", "egl", "angle")):
+                print(f"[remotion] Chunk {chunk_idx}: GPU GL failed — retrying with SwiftShader", flush=True)
+                _cmd[-3] = "swiftshader"  # replace gl mode
+                _res = subprocess.run(
+                    _cmd, capture_output=True, text=True,
+                    timeout=300, cwd=remotion_dir,
+                )
+        if _res.stdout:
+            for _line in _res.stdout.strip().split("\n"):
+                if _line.strip() and ("[remotion] Done" in _line or "[remotion] Rendering" in _line):
+                    print(f"  [chunk {chunk_idx}] {_line.strip()}", flush=True)
+        if _res.returncode != 0:
+            _err = (_res.stderr or "")[-1000:]
+            raise RuntimeError(f"[remotion] Chunk {chunk_idx} failed (rc={_res.returncode}): {_err}")
+        return chunk_output
+
+    if _n_chunks == 1:
+        # Single chunk — no splitting overhead
+        _render_chunk(0, 0, _total_frames - 1, output_mov_path)
+    else:
+        # Split into chunks and render in parallel
+        _frames_per_chunk = _total_frames // _n_chunks
+        _chunk_paths = []
+        _chunk_ranges = []
+        for _ci in range(_n_chunks):
+            _start = _ci * _frames_per_chunk
+            _end = (_ci + 1) * _frames_per_chunk - 1 if _ci < _n_chunks - 1 else _total_frames - 1
+            _chunk_path = os.path.join(work_dir, f"_overlay_chunk_{_ci}.webm")
+            _chunk_paths.append(_chunk_path)
+            _chunk_ranges.append((_start, _end))
+
+        print(f"[remotion] Launching {_n_chunks} parallel chunks: "
+              + ", ".join(f"{s}-{e}" for s, e in _chunk_ranges), flush=True)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=_n_chunks) as chunk_pool:
+            _chunk_futures = {
+                chunk_pool.submit(_render_chunk, _ci, _chunk_ranges[_ci][0], _chunk_ranges[_ci][1], _chunk_paths[_ci]): _ci
+                for _ci in range(_n_chunks)
+            }
+            for fut in concurrent.futures.as_completed(_chunk_futures):
+                _ci = _chunk_futures[fut]
+                try:
+                    fut.result()
+                    print(f"[remotion] Chunk {_ci} complete", flush=True)
+                except Exception as _ce:
+                    raise RuntimeError(f"[remotion] Chunk {_ci} failed: {_ce}")
+
+        # Concatenate chunks with ffmpeg (preserves alpha)
+        print(f"[remotion] Concatenating {_n_chunks} chunks...", flush=True)
+        _concat_inputs = []
+        for _cp in _chunk_paths:
+            _concat_inputs += ["-i", _cp]
+        _concat_fc = ";".join(
+            [f"[{i}:v]setpts=PTS-STARTPTS[v{i}]" for i in range(_n_chunks)]
+            + [f"[{i}:a]asetpts=PTS-STARTPTS[a{i}]" for i in range(_n_chunks) if False]  # VP8 WebM has no audio
+            + ["".join(f"[v{i}]" for i in range(_n_chunks)) + f"concat=n={_n_chunks}:v=1:a=0[outv]"]
+        )
+        _concat_cmd = (
+            ["ffmpeg", "-y", "-v", "warning"]
+            + _concat_inputs
+            + ["-filter_complex", _concat_fc, "-map", "[outv]",
+               "-c:v", "libvpx", "-auto-alt-ref", "0", "-pix_fmt", "yuva420p",
+               output_mov_path]
+        )
+        _concat_res = subprocess.run(
+            _concat_cmd, capture_output=True, text=True, timeout=60,
+        )
+        if _concat_res.returncode != 0:
+            print(f"[remotion] Chunk concat failed: {(_concat_res.stderr or '')[-500:]}", flush=True)
+            raise RuntimeError("[remotion] Chunk concatenation failed")
+        # Clean up chunk files
+        for _cp in _chunk_paths:
+            try:
+                os.remove(_cp)
+            except Exception:
+                pass
 
     elapsed = time.time() - t0
 
@@ -6510,66 +6575,116 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             if _broll_overlay_idx > 0:
                 print(f"[broll] Integrated {_broll_overlay_idx} B-roll clip(s) into first pass", flush=True)
 
-    # Wait for Remotion overlay render (launched in background thread earlier)
-    caption_overlay_path = None
-    if _overlay_future is not None:
-        try:
-            caption_overlay_path = _overlay_future.result(timeout=180)
-            _overlay_pool.shutdown(wait=False)
-            print(f"[remotion] Overlay ready: {caption_overlay_path}", flush=True)
-        except Exception as _ov_err:
-            print(f"[remotion] Overlay failed: {_ov_err}", flush=True)
+    # ── Two-pass architecture: run main concat NOW, overlay captions AFTER ──
+    # Pass 1: Concat segments + transitions + SFX + text overlays → intermediate
+    #   (runs immediately — no waiting for Remotion)
+    # Pass 2: Overlay Remotion captions → final output
+    #   (fast — just a simple alpha overlay on the encoded video)
+    # This eliminates 60-90s of dead wait time.
 
-    # Caption overlay — transparent video from Remotion (VP8 WebM with alpha)
-    caption_input_args = []
-    caption_filter_strs = []
-    if caption_overlay_path:
-        _cap_idx = n_segment_inputs + len(sfx_input_args) // 2 + _n_broll_inputs
-        # Force libvpx decoder — FFmpeg's native vp8 decoder strips alpha channel
-        caption_input_args = ["-c:v", "libvpx", "-i", caption_overlay_path]
-        # Ensure alpha channel is preserved through format conversion
-        caption_filter_strs.append(
-            f"[{_cap_idx}:v]format=yuva420p[_cap_alpha];"
-            f"{video_out}[_cap_alpha]overlay=eof_action=pass[video_captioned]"
-        )
-        video_out = "[video_captioned]"
-        print(f"[render] Remotion caption overlay at input index {_cap_idx} (libvpx decoder)", flush=True)
-
-    # Order matters: post_filters (zoom pulses etc) → broll → captions
-    filter_complex = ";".join(video_filters + audio_filters + transition_filters + sfx_filter_strs + post_filters + broll_filter_strs + caption_filter_strs)
+    # Order matters: post_filters (zoom pulses etc) → broll (no captions yet)
+    filter_complex = ";".join(video_filters + audio_filters + transition_filters + sfx_filter_strs + post_filters + broll_filter_strs)
     _total_expected_v = sum(round(d * 30) / 30 for d in effective_durations)
     _total_expected_a = sum(effective_durations)
     print(f"[DIAG] Expected totals: video(fps30)={_total_expected_v:.4f}s audio(raw)={_total_expected_a:.4f}s gap={_total_expected_v - _total_expected_a:.6f}s", flush=True)
     print(f"[DIAG] filter_complex: {len(filter_complex)} chars, {len(video_filters)} v_filters, {len(audio_filters)} a_filters, {len(transition_filters)} transitions", flush=True)
     print(f"[DIAG] filter_complex (first 2000): {filter_complex[:2000]}", flush=True)
     print(f"[DIAG] filter_complex (last 1000): {filter_complex[-1000:]}", flush=True)
-    encode_args = get_encode_args("high") + [
-        "-pix_fmt","yuv420p",
-        "-c:a","aac","-b:a","192k",
-        "-movflags","+faststart",
-        "-max_muxing_queue_size","4096",
-        "-shortest",  # stop when video ends — audio pad may overshoot due to xfade timing
-    ]
 
     # Maximize parallelism: all available CPU cores for filter graph + decoding
     _n_threads = os.cpu_count() or 32
-    args = (
-        ["-y"]
-        + input_args
-        + sfx_input_args
-        + broll_input_args
-        + caption_input_args
-        + ["-filter_complex_threads", str(_n_threads),
-           "-filter_complex", filter_complex, "-map", video_out, "-map", audio_out]
-        + ["-threads", str(_n_threads)]
-        + encode_args
-        + [output_path]
-    )
 
-    _mode = "CONCAT pass (segments pre-rendered)" if _PARALLEL_RENDER else "Single-pass"
-    print(f"[render] {_mode}: {n} segments, ~{running_dur:.1f}s output", flush=True)
+    _has_captions = _overlay_future is not None
+    if _has_captions:
+        # Pass 1: encode to fast intermediate (Remotion still rendering in background)
+        _pass1_path = os.path.join(work_dir, "_pass1_no_captions.mp4")
+        _pass1_encode = get_encode_args("high") + [
+            "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "192k",
+            "-max_muxing_queue_size", "4096",
+            "-shortest",
+        ]
+        args_pass1 = (
+            ["-y"]
+            + input_args
+            + sfx_input_args
+            + broll_input_args
+            + ["-filter_complex_threads", str(_n_threads),
+               "-filter_complex", filter_complex, "-map", video_out, "-map", audio_out]
+            + ["-threads", str(_n_threads)]
+            + _pass1_encode
+            + [_pass1_path]
+        )
 
-    run_ffmpeg(args)
+        _mode = "PASS 1 (no captions)" if _PARALLEL_RENDER else "Single-pass"
+        print(f"[render] {_mode}: {n} segments, ~{running_dur:.1f}s output", flush=True)
+        run_ffmpeg(args_pass1)
+        print(f"[render] Pass 1 complete → {_pass1_path}", flush=True)
+
+        # Now wait for Remotion (may already be done while pass 1 was encoding)
+        caption_overlay_path = None
+        try:
+            caption_overlay_path = _overlay_future.result(timeout=180)
+            _overlay_pool.shutdown(wait=False)
+            print(f"[remotion] Overlay ready: {caption_overlay_path}", flush=True)
+        except Exception as _ov_err:
+            print(f"[remotion] Overlay failed: {_ov_err} — delivering without captions", flush=True)
+
+        if caption_overlay_path:
+            # Pass 2: fast overlay of Remotion captions onto pass 1 output
+            print(f"[render] PASS 2: overlaying captions onto video", flush=True)
+            _pass2_fc = (
+                "[1:v]format=yuva420p[_cap_alpha];"
+                "[0:v][_cap_alpha]overlay=eof_action=pass[vout]"
+            )
+            args_pass2 = (
+                ["-y", "-i", _pass1_path, "-c:v", "libvpx", "-i", caption_overlay_path,
+                 "-filter_complex_threads", str(_n_threads),
+                 "-filter_complex", _pass2_fc, "-map", "[vout]", "-map", "0:a",
+                 "-threads", str(_n_threads)]
+                + get_encode_args("high")
+                + ["-pix_fmt", "yuv420p",
+                   "-c:a", "copy",  # audio already encoded, just copy
+                   "-movflags", "+faststart",
+                   "-max_muxing_queue_size", "4096",
+                   "-shortest",
+                   output_path]
+            )
+            run_ffmpeg(args_pass2)
+        else:
+            # No captions — just move pass 1 to final
+            import shutil
+            shutil.move(_pass1_path, output_path)
+
+        # Clean up intermediate
+        try:
+            os.remove(_pass1_path)
+        except Exception:
+            pass
+    else:
+        # No captions — single pass with everything
+        encode_args = get_encode_args("high") + [
+            "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "192k",
+            "-movflags", "+faststart",
+            "-max_muxing_queue_size", "4096",
+            "-shortest",
+        ]
+        args = (
+            ["-y"]
+            + input_args
+            + sfx_input_args
+            + broll_input_args
+            + ["-filter_complex_threads", str(_n_threads),
+               "-filter_complex", filter_complex, "-map", video_out, "-map", audio_out]
+            + ["-threads", str(_n_threads)]
+            + encode_args
+            + [output_path]
+        )
+
+        _mode = "CONCAT pass (segments pre-rendered)" if _PARALLEL_RENDER else "Single-pass"
+        print(f"[render] {_mode}: {n} segments, ~{running_dur:.1f}s output", flush=True)
+        run_ffmpeg(args)
 
 
 
