@@ -1973,14 +1973,7 @@ Visual effects — additional visual treatments for emphasis moments.
 
 === RESPONSE FORMAT ===
 
-First, write a <vision> block with your editorial analysis:
-- HOOK: What makes someone stop scrolling in the first 2 seconds
-- STORY ARC: Setup → Buildup → Payoff → Resolution
-- EMOTIONAL BEATS: List each moment where the viewer should feel something (timestamp + what they feel)
-- EMPHASIS MOMENTS: The 2-5 moments that should hit hardest — these drive zooms, sound effects, and keyword highlighting
-- PACING MAP: Which sections should move fast (setup/filler) vs slow (payoff/reveal)
-
-Then output the JSON:
+Output ONLY the JSON below — no commentary, no analysis, no explanation. Just the JSON block:
 
 ```json
 {{
@@ -2172,18 +2165,19 @@ RULES FOR USING THESE TIMESTAMPS:
     if gemini_file is None:
         print("[generate-edit] Uploading video to Gemini...", flush=True)
         gemini_file = genai.upload_file(video_path)
+        # Poll for ACTIVE (only hits this path if pre-upload failed)
+        _poll_delay = 0.2
+        _poll_deadline = time.time() + 60
+        while gemini_file.state.name == "PROCESSING":
+            if time.time() > _poll_deadline:
+                raise RuntimeError("Gemini file processing timed out after 60s")
+            time.sleep(_poll_delay)
+            _poll_delay = min(_poll_delay * 1.5, 2.0)
+            gemini_file = genai.get_file(gemini_file.name)
+        if gemini_file.state.name != "ACTIVE":
+            raise RuntimeError(f"Gemini file upload failed: {gemini_file.state.name}")
     else:
-        print("[generate-edit] Using pre-uploaded Gemini file", flush=True)
-    deadline = time.time() + 60
-    _poll_delay = 0.2  # start fast, back off exponentially
-    while gemini_file.state.name == "PROCESSING":
-        if time.time() > deadline:
-            raise RuntimeError("Gemini file processing timed out after 60s")
-        time.sleep(_poll_delay)
-        _poll_delay = min(_poll_delay * 1.5, 3.0)  # cap at 3s between polls
-        gemini_file = genai.get_file(gemini_file.name)
-    if gemini_file.state.name != "ACTIVE":
-        raise RuntimeError(f"Gemini file upload failed: {gemini_file.state.name}")
+        print("[generate-edit] Using pre-uploaded Gemini file (already ACTIVE)", flush=True)
     print(f"[generate-edit] Video active: {gemini_file.uri}", flush=True)
 
     print(f"[generate-edit] Calling Gemini model={GEMINI_MODEL}...", flush=True)
@@ -2193,26 +2187,10 @@ RULES FOR USING THESE TIMESTAMPS:
         [gemini_file, prompt],
         generation_config=genai.GenerationConfig(
             temperature=0.6,
-            max_output_tokens=16384,
+            max_output_tokens=32768,
         ),
         request_options={"timeout": 90},
     )
-    candidates = getattr(response, "candidates", None) or []
-    if candidates:
-        finish_reason = getattr(candidates[0], "finish_reason", None)
-        if finish_reason == 2:
-            print("[generate-edit] WARNING: Gemini response truncated — retrying with higher token limit", flush=True)
-            response = model.generate_content(
-                [gemini_file, prompt],
-                generation_config=genai.GenerationConfig(
-                    temperature=0.6,
-                    max_output_tokens=32768,
-                ),
-                request_options={"timeout": 90},
-            )
-            retry_candidates = getattr(response, "candidates", None) or []
-            if retry_candidates and getattr(retry_candidates[0], "finish_reason", None) == 2:
-                raise RuntimeError("Gemini response truncated even with 32768 max tokens")
     print(f"[generate-edit] Gemini complete in {time.time()-t:.1f}s", flush=True)
 
     response_text = str(getattr(response, "text", "") or "").strip()
@@ -2237,16 +2215,6 @@ RULES FOR USING THESE TIMESTAMPS:
     if not response_text:
         raise RuntimeError("Empty Gemini response")
 
-    vision_text = ""
-    if "<vision>" in response_text and "</vision>" in response_text:
-        try:
-            vision_start = response_text.index("<vision>") + len("<vision>")
-            vision_end = response_text.index("</vision>", vision_start)
-            vision_text = response_text[vision_start:vision_end].strip()
-        except Exception:
-            vision_text = ""
-    if vision_text:
-        print(f"[generate-edit] VISION: {vision_text}", flush=True)
     print(f"[generate-edit] RAW RESPONSE:\n{response_text}\n[generate-edit] END RESPONSE", flush=True)
 
     edit_plan = extract_json(response_text)
@@ -4141,7 +4109,7 @@ def render_remotion_overlay(
     # Use multiple concurrent browser tabs to render frames in parallel.
     # Remotion caps concurrency at the system core count (Node's os.cpus().length).
     # Modal H100 reports 32 cores to Node even though Python sees 48.
-    _concurrency = min(32, max(4, int((os.cpu_count() or 16) * 0.85)))
+    _concurrency = min(48, max(4, os.cpu_count() or 32))
 
     _render_cmd = [
         "node", render_cli, "--input", input_json_path, "--output", output_mov_path,
@@ -5950,7 +5918,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 + sd["input_args"]
                 + ["-filter_complex", fc, "-map", "[outv]", "-map", "[outa]"]
                 + _seg_venc
-                + ["-c:a", "pcm_s16le", seg_out]
+                + ["-c:a", "aac", "-b:a", "192k", seg_out]
             )
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=120,
                                     env={**os.environ})
@@ -6745,7 +6713,19 @@ def handler(job):
                 else:
                     print(f"[pipeline] Proxy encode failed, uploading raw", flush=True)
                     gf = genai.upload_file(_raw_source)
-                print(f"[pipeline] Gemini upload done: {gf.name} ({time.time()-_upload_t:.1f}s)", flush=True)
+                # Poll for ACTIVE here (overlaps with transcription, beats, face detect)
+                # instead of blocking inside generate_edit_gemini on the critical path
+                _poll_delay = 0.2
+                _poll_deadline = time.time() + 60
+                while gf.state.name == "PROCESSING":
+                    if time.time() > _poll_deadline:
+                        raise RuntimeError("Gemini file processing timed out after 60s")
+                    time.sleep(_poll_delay)
+                    _poll_delay = min(_poll_delay * 1.5, 2.0)
+                    gf = genai.get_file(gf.name)
+                if gf.state.name != "ACTIVE":
+                    raise RuntimeError(f"Gemini file upload failed: {gf.state.name}")
+                print(f"[pipeline] Gemini upload done + ACTIVE: {gf.name} ({time.time()-_upload_t:.1f}s)", flush=True)
                 return gf
             except Exception as e:
                 print(f"[pipeline] Gemini pre-upload failed: {e} — will upload inline", flush=True)
