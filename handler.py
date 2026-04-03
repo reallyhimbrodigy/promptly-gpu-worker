@@ -5512,7 +5512,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 _projected_words, caption_style,
                 {"width": 1080, "height": 1920},
                 _cap_kw, work_dir,
-                total_duration=_total_render_dur, fps=20,  # 20fps for text overlay = 33% fewer frames; FFmpeg holds frames via WebM timestamps
+                total_duration=_total_render_dur, fps=30,
                 cuts=_cuts_for_remotion,
                 emphasis_moments=_emphasis_moments,
                 vibe=_vibe,
