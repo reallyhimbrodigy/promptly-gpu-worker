@@ -5959,8 +5959,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             input_args = []
             for _sp in _seg_paths:
                 input_args += ["-i", _sp]
-            # Replace per-segment filters with identity (all processing already done)
-            video_filters = [f"[{i}:v]null[v{i}]" for i in range(n)]
+            # Replace per-segment filters with fps=30 to normalize timebase to 1/30
+            # (MKV intermediates default to 1/1000 timebase which breaks xfade)
+            video_filters = [f"[{i}:v]fps=30[v{i}]" for i in range(n)]
             audio_filters = [f"[{i}:a]asetpts=PTS-STARTPTS[a{i}]" for i in range(n)]
             print(f"[render] Concat pass: transitions + overlay + SFX + final encode", flush=True)
 
