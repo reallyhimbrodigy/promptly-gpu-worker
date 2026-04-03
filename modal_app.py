@@ -1,6 +1,6 @@
 import modal
 
-# rebuild trigger v13 — NONFREE FFmpeg with real NVENC + H100 GPU + 32 CPU + 64GB RAM
+# rebuild trigger v14 — FFmpeg built from source with NVENC + H100 GPU + 32 CPU + 64GB
 
 # ── Image definition (replaces Dockerfile) ────────────────────────────────────
 image = (
@@ -52,15 +52,36 @@ image = (
     )
     .run_commands(
         "mkdir -p /opt/ffmpeg",
-        # n7.1 NONFREE build — includes NVENC/NVDEC (proprietary), NVENC API 12.2 (driver ≥550)
-        "cd /opt/ffmpeg && wget -q https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n7.1-latest-linux64-nonfree-7.1.tar.xz -O ffmpeg.tar.xz",
+        # n7.1 GPL build (prebuilt) — no NVENC (proprietary)
+        "cd /opt/ffmpeg && wget -q https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n7.1-latest-linux64-gpl-7.1.tar.xz -O ffmpeg.tar.xz",
         "cd /opt/ffmpeg && tar -xJf ffmpeg.tar.xz --strip-components=1",
         "ln -sf /opt/ffmpeg/bin/ffmpeg /usr/local/bin/ffmpeg",
         "ln -sf /opt/ffmpeg/bin/ffprobe /usr/local/bin/ffprobe",
         "ffmpeg -version | head -1",
-        "ffmpeg -encoders 2>/dev/null | grep nvenc || echo 'WARNING: nvenc not in build'",
+        "ffmpeg -encoders 2>/dev/null | grep nvenc || echo 'NOTE: nvenc not in prebuilt (using CPU encoder)'",
         "ffmpeg -filters 2>/dev/null | grep ass || echo 'WARNING: ass filter not found'",
         "fc-cache -f",
+    )
+    .run_commands(
+        # Build FFmpeg from source WITH NVENC support (nonfree, not available in prebuilts)
+        # Install NVIDIA codec headers (nv-codec-headers) for NVENC/NVDEC
+        "apt-get install -y nasm yasm libx264-dev libx265-dev libfdk-aac-dev libmp3lame-dev libopus-dev libvpx-dev libass-dev git",
+        "git clone --depth 1 https://git.videolan.org/git/ffmpeg/nv-codec-headers.git /tmp/nv-codec-headers",
+        "cd /tmp/nv-codec-headers && make install",
+        # Build FFmpeg with NVENC + NVDEC + key codecs
+        "git clone --depth 1 --branch n7.1 https://git.ffmpeg.org/ffmpeg.git /tmp/ffmpeg-src",
+        "cd /tmp/ffmpeg-src && ./configure "
+        "--prefix=/usr/local "
+        "--enable-nonfree --enable-gpl "
+        "--enable-nvenc --enable-nvdec --enable-cuda --enable-cuvid "
+        "--enable-libx264 --enable-libx265 --enable-libfdk-aac --enable-libmp3lame "
+        "--enable-libopus --enable-libvpx --enable-libass --enable-librubberband "
+        "--enable-filter=ass --enable-filter=subtitles "
+        "--disable-doc --disable-debug --enable-optimizations "
+        "&& make -j$(nproc) && make install",
+        "ldconfig",
+        "ffmpeg -version | head -3",
+        "ffmpeg -encoders 2>/dev/null | grep nvenc && echo 'NVENC: OK' || echo 'NVENC: MISSING'",
     )
     .run_commands(
         # Install Node.js 20 LTS for Remotion caption rendering
