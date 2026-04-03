@@ -1,6 +1,6 @@
 import modal
 
-# rebuild trigger v15 — FFmpeg built from source with NVENC + libfreetype/fontconfig + H100 GPU + 32 CPU + 64GB
+# rebuild trigger v16 — FFmpeg source-only (no prebuilt), NVENC + libfreetype/drawtext + H100 GPU + 32 CPU + 64GB
 
 # ── Image definition (replaces Dockerfile) ────────────────────────────────────
 image = (
@@ -51,15 +51,6 @@ image = (
         "libatspi2.0-0",
     )
     .run_commands(
-        "mkdir -p /opt/ffmpeg",
-        # n7.1 GPL build (prebuilt) — no NVENC (proprietary)
-        "cd /opt/ffmpeg && wget -q https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n7.1-latest-linux64-gpl-7.1.tar.xz -O ffmpeg.tar.xz",
-        "cd /opt/ffmpeg && tar -xJf ffmpeg.tar.xz --strip-components=1",
-        "ln -sf /opt/ffmpeg/bin/ffmpeg /usr/local/bin/ffmpeg",
-        "ln -sf /opt/ffmpeg/bin/ffprobe /usr/local/bin/ffprobe",
-        "ffmpeg -version | head -1",
-        "ffmpeg -encoders 2>/dev/null | grep nvenc || echo 'NOTE: nvenc not in prebuilt (using CPU encoder)'",
-        "ffmpeg -filters 2>/dev/null | grep ass || echo 'WARNING: ass filter not found'",
         "fc-cache -f",
     )
     .run_commands(
@@ -81,7 +72,10 @@ image = (
         "--disable-doc --disable-debug --enable-optimizations "
         "&& make -j$(nproc) && make install",
         "ldconfig",
+        "which ffmpeg && which ffprobe",
         "ffmpeg -version | head -3",
+        "ffmpeg -filters 2>/dev/null | grep drawtext && echo 'DRAWTEXT: OK' || (echo 'DRAWTEXT: MISSING — FATAL' && exit 1)",
+        "ffmpeg -filters 2>/dev/null | grep -E 'ass|subtitles' || echo 'WARNING: ass/subtitles filters not found'",
         "ffmpeg -encoders 2>/dev/null | grep nvenc && echo 'NVENC: OK' || echo 'NVENC: MISSING'",
     )
     .run_commands(
