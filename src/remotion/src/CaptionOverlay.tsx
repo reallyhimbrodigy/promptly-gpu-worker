@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { AbsoluteFill, useCurrentFrame, useVideoConfig } from "remotion";
 import { createTikTokStyleCaptions } from "@remotion/captions";
 import type { Caption } from "@remotion/captions";
@@ -42,31 +42,44 @@ function buildKeywordSet(words: ProjectedWord[], keywords: string[]): Set<string
 export const CaptionOverlay: React.FC<{
   input: CaptionInput;
 }> = ({ input }) => {
-  const styleConfig = getStyleConfig(input.style);
-  const keywordSet = buildKeywordSet(input.words, input.keywords);
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+  const t = frame / fps;
 
-  // Convert to @remotion/captions format and group into pages
-  const captions = toRemotionCaptions(input.words);
-  const { pages } = createTikTokStyleCaptions({
-    captions,
-    combineTokensWithinMilliseconds: 400, // Tight grouping = fewer words per page = bigger text
-  });
-
-  // Build O(1) word lookup for fast per-token matching
-  const wordLookup = buildWordLookup(input.words);
+  // Memoize expensive computations that don't change between frames
+  const styleConfig = useMemo(() => getStyleConfig(input.style), [input.style]);
+  const keywordSet = useMemo(() => buildKeywordSet(input.words, input.keywords), [input.words, input.keywords]);
+  const captions = useMemo(() => toRemotionCaptions(input.words), [input.words]);
+  const pages = useMemo(() => {
+    const result = createTikTokStyleCaptions({
+      captions,
+      combineTokensWithinMilliseconds: 400,
+    });
+    return result.pages;
+  }, [captions]);
+  const wordLookup = useMemo(() => buildWordLookup(input.words), [input.words]);
 
   return (
     <AbsoluteFill style={{ backgroundColor: "transparent" }}>
-      {pages.map((page, pi) => (
-        <CaptionPage
-          key={pi}
-          page={page}
-          style={styleConfig}
-          keywordSet={keywordSet}
-          words={input.words}
-          wordLookup={wordLookup}
-        />
-      ))}
+      {pages.map((page, pi) => {
+        // Skip pages far from current time — avoids mounting ~30 unused React
+        // components per frame, each with hooks, springs, and DOM output.
+        const pageStart = page.startMs / 1000;
+        const lastToken = page.tokens[page.tokens.length - 1];
+        const pageEnd = lastToken ? lastToken.toMs / 1000 : pageStart + 0.5;
+        if (t < pageStart - 0.5 || t > pageEnd + 0.5) return null;
+
+        return (
+          <CaptionPage
+            key={pi}
+            page={page}
+            style={styleConfig}
+            keywordSet={keywordSet}
+            words={input.words}
+            wordLookup={wordLookup}
+          />
+        );
+      })}
     </AbsoluteFill>
   );
 };

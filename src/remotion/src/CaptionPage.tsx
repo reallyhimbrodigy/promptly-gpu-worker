@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 import {
   useCurrentFrame,
   useVideoConfig,
@@ -129,15 +129,16 @@ export const CaptionPage: React.FC<{
   const baseFontSize = autoFontSize(tokenCount);
 
   // ── Classify tokens into context vs emphasis ──────────────────────────
-  // This drives the mixed-size cascade layout
-  const tokenMeta = tokens.map((token) => {
+  // Memoized: token classification + word lookup don't change between frames
+  const tokenMeta = useMemo(() => tokens.map((token) => {
     const cleanWord = token.text
       .trim()
       .replace(/[.,!?;:'"\\]/g, "")
       .toLowerCase();
     const isKeyword = keywordSet.has(cleanWord);
-    return { token, cleanWord, isKeyword };
-  });
+    const originalWord = findOriginalWord(token.fromMs, wordLookup);
+    return { token, cleanWord, isKeyword, originalWord };
+  }), [tokens, keywordSet, wordLookup]);
 
   const hasKeywords = tokenMeta.some((m) => m.isKeyword);
   const keywordCount = tokenMeta.filter((m) => m.isKeyword).length;
@@ -171,13 +172,12 @@ export const CaptionPage: React.FC<{
   const keywordElements: React.ReactNode[] = [];
   const allElements: React.ReactNode[] = [];
 
-  tokenMeta.forEach(({ token, cleanWord, isKeyword }, ti) => {
+  tokenMeta.forEach(({ token, cleanWord, isKeyword, originalWord }, ti) => {
     const tokenStart = token.fromMs / 1000;
     const tokenEnd = token.toMs / 1000;
     const isActive = t >= tokenStart && t < tokenEnd + 0.04;
     const isPast = t >= tokenEnd + 0.04;
 
-    const originalWord = findOriginalWord(token.fromMs, wordLookup);
     const speakerIdx = originalWord?.speaker ?? 0;
 
     // ── Per-word scale animation (clean, snappy pop — like Captions AI) ──
