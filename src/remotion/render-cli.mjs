@@ -130,6 +130,7 @@ const renderOptions = {
   outputLocation: outputPath,
   inputProps,
   concurrency,
+  logLevel: "verbose",
   chromiumOptions: {
     gl: glMode,
     ...(chromePath ? { executablePath: chromePath } : {}),

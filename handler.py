@@ -4062,9 +4062,9 @@ def render_remotion_overlay(
         chunk_fps = chunk_frames / chunk_elapsed if chunk_elapsed > 0 else 0
 
         if res.returncode != 0:
-            _err = (res.stderr or "")[-1000:]
-            print(f"[remotion] Chunk {chunk_idx} FAILED ({chunk_frames} frames): {_err}", flush=True)
-            raise RuntimeError(f"[remotion] Chunk {chunk_idx} failed (rc={res.returncode}): {_err}")
+            _all_output = (res.stdout or "") + "\n" + (res.stderr or "")
+            print(f"[remotion] Chunk {chunk_idx} FAILED ({chunk_frames} frames):\n{_all_output[-3000:]}", flush=True)
+            raise RuntimeError(f"[remotion] Chunk {chunk_idx} failed (rc={res.returncode}): {_all_output[-1500:]}")
 
         # Print stdout (progress info)
         if res.stdout:
@@ -5998,21 +5998,24 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             offset = max(0, running_dur - td)
 
             if transition == "flash":
-                transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=fadewhite:duration={td:.3f}:offset={offset:.3f}[{out_v}]")
+                transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=fadewhite:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
+                transition_filters.append(f"[{out_v_raw}]fps=30[{out_v}]")
                 transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
 
             elif transition == "glitch":
                 transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=pixelize:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
                 # Glitch saturation boost: 1.25x (professional range 1.2-1.3 for digital distortion)
-                transition_filters.append(f"[{out_v_raw}]hue=h=0:s=1.25:enable='between(t,{offset:.3f},{offset + td:.3f})'[{out_v}]")
+                transition_filters.append(f"[{out_v_raw}]hue=h=0:s=1.25:enable='between(t,{offset:.3f},{offset + td:.3f})',fps=30[{out_v}]")
                 transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
 
             elif transition == "whip_left":
-                transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=wipeleft:duration={td:.3f}:offset={offset:.3f}[{out_v}]")
+                transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=wipeleft:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
+                transition_filters.append(f"[{out_v_raw}]fps=30[{out_v}]")
                 transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
 
             elif transition == "whip_right":
-                transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=wiperight:duration={td:.3f}:offset={offset:.3f}[{out_v}]")
+                transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=wiperight:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
+                transition_filters.append(f"[{out_v_raw}]fps=30[{out_v}]")
                 transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
 
             running_dur = running_dur + effective_durations[i] - td
@@ -6020,7 +6023,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         elif transition in XFADE_TRANSITIONS:
             td = TRANSITION_DURATION
             offset = max(0, running_dur - td)
-            transition_filters.append(f"[{tl_video}][v{i}]xfade=transition={transition}:duration={td:.3f}:offset={offset:.3f}[{out_v}]")
+            transition_filters.append(f"[{tl_video}][v{i}]xfade=transition={transition}:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
+            transition_filters.append(f"[{out_v_raw}]fps=30[{out_v}]")
             transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
             running_dur = running_dur + effective_durations[i] - td
 
@@ -6029,7 +6033,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             # crossfade to eliminate splice clicks/pops at the cut point.
             # 4ms is imperceptible as a fade but smooths the waveform
             # discontinuity where two audio segments meet.
-            transition_filters.append(f"[{tl_video}][v{i}]concat=n=2:v=1:a=0[{out_v}]")
+            transition_filters.append(f"[{tl_video}][v{i}]concat=n=2:v=1:a=0[{out_v_raw}]")
+            transition_filters.append(f"[{out_v_raw}]fps=30[{out_v}]")
             transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d=0.004:c1=tri:c2=tri[{out_a}]")
             running_dur = running_dur + effective_durations[i]
 
@@ -6039,14 +6044,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     if n == 1:
         tl_video = "v0"
         tl_audio = "a0"
-
-    # Single fps=30 to stabilize timestamps after all transitions.
-    # Applied once here instead of after every transition — avoids reprocessing
-    # the entire accumulated stream N times (was a major filter graph bottleneck).
-    if n > 1:
-        _fps_label = "[vfps]"
-        transition_filters.append(f"[{tl_video}]fps=30{_fps_label}")
-        tl_video = "vfps"
 
     post_filters = []
     video_out = "[video_base]"
