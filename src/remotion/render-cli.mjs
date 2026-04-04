@@ -2,17 +2,19 @@
 /**
  * Remotion Video Overlay Render CLI
  *
- * Renders captions + visual effects as a single transparent VP8 WebM.
+ * Renders captions + visual effects as a PNG sequence with alpha transparency.
+ * PNG output eliminates VP8 encoding entirely — Chrome screenshots are the only work.
  *
- * Usage: node render-cli.mjs --input <json_path> --output <webm_path>
- *        [--concurrency N] [--gl mode] [--frame-range start-end]
+ * Usage: node render-cli.mjs --input <json_path> --output <png_dir>
+ *        [--concurrency N] [--gl mode]
  *
  * Input JSON: OverlayInput (see types.ts)
+ * Output: directory of element-NNNNNN.png files with RGBA transparency
  */
 
 import { bundle } from "@remotion/bundler";
-import { renderMedia, selectComposition } from "@remotion/renderer";
-import { readFileSync, existsSync } from "fs";
+import { renderFrames, selectComposition } from "@remotion/renderer";
+import { readFileSync, existsSync, mkdirSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 
@@ -25,23 +27,16 @@ let inputPath = null;
 let outputPath = null;
 let concurrency = 24;
 let glMode = "angle-egl"; // GPU-accelerated; falls back to swiftshader
-let frameRange = null; // [startFrame, endFrame] for chunk rendering
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--input" && args[i + 1]) inputPath = args[++i];
   else if (args[i] === "--output" && args[i + 1]) outputPath = args[++i];
   else if (args[i] === "--concurrency" && args[i + 1]) concurrency = parseInt(args[++i], 10);
   else if (args[i] === "--gl" && args[i + 1]) glMode = args[++i];
-  else if (args[i] === "--frame-range" && args[i + 1]) {
-    const parts = args[++i].split("-").map(Number);
-    if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
-      frameRange = parts;
-    }
-  }
 }
 
 if (!inputPath || !outputPath) {
-  console.error("Usage: node render-cli.mjs --input <json> --output <webm> [--frame-range start-end]");
+  console.error("Usage: node render-cli.mjs --input <json> --output <png_dir> [--concurrency N]");
   process.exit(1);
 }
 
@@ -65,14 +60,10 @@ const input = {
 };
 input.durationInFrames = Math.max(1, Math.round(input.duration * input.fps));
 
-const rangeStr = frameRange
-  ? ` [chunk ${frameRange[0]}-${frameRange[1]} of ${input.durationInFrames}]`
-  : "";
-
 console.log(
   `[remotion] Rendering: ${input.captionStyle} captions (${input.words.length} words), ` +
   `${input.cuts.length} cuts, ${input.emphasisMoments.length} emphasis moments, vibe="${input.vibe}", ` +
-  `${input.durationInFrames} frames (${input.duration.toFixed(1)}s @ ${input.fps}fps)${rangeStr}`
+  `${input.durationInFrames} frames (${input.duration.toFixed(1)}s @ ${input.fps}fps)`
 );
 
 const t0 = Date.now();
@@ -116,19 +107,20 @@ composition.width = input.width;
 composition.height = input.height;
 composition.fps = input.fps;
 
-// Render to transparent VP8 WebM — fast encode, alpha via libvpx
-// CRF 16: this is an intermediate overlay composited into the final video.
-// The final FFmpeg pass determines visible quality, not this encode.
-// CRF 16 vs default 9 = ~2x faster encode, no perceptible difference after compositing.
-const renderOptions = {
-  composition,
+// Create output directory for PNG frames
+mkdirSync(outputPath, { recursive: true });
+
+// Render to PNG sequence — no video encoding, just Chrome screenshots.
+// Each PNG has full RGBA transparency. This eliminates the VP8 stitching
+// bottleneck entirely (was 219s for 106 frames with VP8, now 0s).
+let lastPct = -1;
+const tRender = Date.now();
+await renderFrames({
   serveUrl: bundleLocation,
-  codec: "vp8",
-  crf: 16,
-  pixelFormat: "yuva420p",
-  imageFormat: "png",
-  outputLocation: outputPath,
+  composition,
   inputProps,
+  outputDir: outputPath,
+  imageFormat: "png",
   concurrency,
   logLevel: "verbose",
   chromiumOptions: {
@@ -137,33 +129,18 @@ const renderOptions = {
     disableWebSecurity: true,
     enableMultiProcessOnLinux: true,
   },
-  // Speed up libvpx: deadline=realtime + cpu-used=8 = ~2-3x faster VP8 encode.
-  // Safe because this is an intermediate overlay, not the final deliverable.
-  ffmpegOverride: ({ type, args }) => {
-    if (type === "stitcher") {
-      return [...args, "-deadline", "realtime", "-cpu-used", "8"];
-    }
-    return args;
+  onStart: ({ frameCount }) => {
+    console.log(`[remotion] Rendering ${frameCount} PNG frames (concurrency=${concurrency})`);
   },
-  onProgress: ({ progress }) => {
-    const pct = Math.round(progress * 100);
-    if (pct % 10 === 0) {
+  onFrameUpdate: (rendered) => {
+    const pct = Math.round(rendered / composition.durationInFrames * 100);
+    if (pct % 10 === 0 && pct !== lastPct) {
+      lastPct = pct;
       process.stdout.write(`\r[remotion] ${pct}%`);
     }
   },
-};
-
-// Add frame range for chunk rendering
-if (frameRange) {
-  renderOptions.frameRange = frameRange;
-}
-
-const tRender = Date.now();
-await renderMedia(renderOptions);
+});
 const renderElapsed = ((Date.now() - tRender) / 1000).toFixed(2);
 
 const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
-const framesRendered = frameRange
-  ? frameRange[1] - frameRange[0] + 1
-  : input.durationInFrames;
-console.log(`\n[remotion] renderMedia: ${renderElapsed}s | total: ${elapsed}s (${framesRendered} frames) → ${outputPath}`);
+console.log(`\n[remotion] renderFrames: ${renderElapsed}s | total: ${elapsed}s (${input.durationInFrames} frames) → ${outputPath}`);

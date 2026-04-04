@@ -91,6 +91,25 @@ export const CaptionPage: React.FC<{
   const lastToken = page.tokens[page.tokens.length - 1];
   const pageEnd = lastToken ? lastToken.toMs / 1000 : pageStart + 0.5;
 
+  const tokens = page.tokens;
+  const tokenCount = tokens.length;
+  const baseFontSize = autoFontSize(tokenCount);
+
+  // ── Classify tokens into context vs emphasis ──────────────────────────
+  // Memoized: token classification + word lookup don't change between frames
+  // NOTE: useMemo must be called before any early returns to satisfy React's
+  // Rules of Hooks (hooks must be called in the same order every render).
+  const tokenMeta = useMemo(() => tokens.map((token) => {
+    const cleanWord = token.text
+      .trim()
+      .replace(/[.,!?;:'"\\]/g, "")
+      .toLowerCase();
+    const isKeyword = keywordSet.has(cleanWord);
+    const originalWord = findOriginalWord(token.fromMs, wordLookup);
+    return { token, cleanWord, isKeyword, originalWord };
+  }), [tokens, keywordSet, wordLookup]);
+
+  // ── Early returns (AFTER all hooks) ─────────────────────────────────────
   if (!isFinite(pageStart) || !isFinite(pageEnd) || pageEnd - pageStart < 0.01)
     return null;
 
@@ -119,26 +138,8 @@ export const CaptionPage: React.FC<{
   const pageScale = interpolate(entranceSpring, [0, 1], [0.92, 1]);
   const pageTranslateY = interpolate(entranceSpring, [0, 1], [8, 0]);
 
-  // Organic sway removed — 1px max displacement was imperceptible but
-  // cost a Perlin noise calculation per page per frame
   const swayX = 0;
   const swayY = 0;
-
-  const tokens = page.tokens;
-  const tokenCount = tokens.length;
-  const baseFontSize = autoFontSize(tokenCount);
-
-  // ── Classify tokens into context vs emphasis ──────────────────────────
-  // Memoized: token classification + word lookup don't change between frames
-  const tokenMeta = useMemo(() => tokens.map((token) => {
-    const cleanWord = token.text
-      .trim()
-      .replace(/[.,!?;:'"\\]/g, "")
-      .toLowerCase();
-    const isKeyword = keywordSet.has(cleanWord);
-    const originalWord = findOriginalWord(token.fromMs, wordLookup);
-    return { token, cleanWord, isKeyword, originalWord };
-  }), [tokens, keywordSet, wordLookup]);
 
   const hasKeywords = tokenMeta.some((m) => m.isKeyword);
   const keywordCount = tokenMeta.filter((m) => m.isKeyword).length;

@@ -5,8 +5,11 @@ import modal
 # ── Image definition (replaces Dockerfile) ────────────────────────────────────
 image = (
     modal.Image.from_registry("nvidia/cuda:12.6.3-runtime-ubuntu22.04", add_python="3.10")
+    # CRITICAL: 'video' capability tells nvidia-container-toolkit to mount libnvidia-encode.so
+    # Without this, NVENC silently fails and pipeline falls back to CPU encoding (10-15x slower)
+    .env({"NVIDIA_DRIVER_CAPABILITIES": "all"})
     .run_commands(
-        "echo 'build v19 - H100 + NVENC/NVDEC + 32CPU + 64GB + Remotion'",
+        "echo 'build v20 - H100 + NVENC/NVDEC + 32CPU + 64GB + Remotion + genai SDK'",
         "apt-get update && apt-get install -y ca-certificates && update-ca-certificates",
         # Remove CUDA stubs AND compat libs that intercept dlopen before Modal's real driver libs
         "rm -rf /usr/local/cuda/lib64/stubs/libnvidia-encode* /usr/local/cuda/lib64/stubs/libcuda* /usr/local/cuda/compat/libcuda* /usr/local/cuda/lib64/libcuda.so* 2>/dev/null || true",
@@ -97,7 +100,7 @@ image = (
         "opencv-python-headless",
         "requests",
         "anthropic",
-        "google-generativeai",
+        "google-genai",
         "deepgram-sdk==3.4.0",
         "supabase",
         "httpx",

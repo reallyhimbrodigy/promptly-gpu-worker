@@ -11,6 +11,7 @@ import shutil
 import json
 import re
 import concurrent.futures
+import signal
 from datetime import datetime
 import certifi
 
@@ -18,17 +19,34 @@ os.environ["SSL_CERT_FILE"] = certifi.where()
 os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
 
 HANDLER_VERSION = "3.0.0"
-GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = "gemini-3-flash-preview"
 
 print(f"[startup] Python {sys.version}", flush=True)
 print(f"[startup] handler version: {HANDLER_VERSION}", flush=True)
 print(f"[startup] Gemini model: {GEMINI_MODEL}", flush=True)
 
 try:
-    import google.generativeai as genai
-    print("[startup] google.generativeai OK", flush=True)
+    from google import genai as genai_client_mod
+    from google.genai import types as genai_types
+    _genai_client = None  # lazily initialized with API key
+    print("[startup] google-genai SDK OK", flush=True)
 except Exception as e:
-    print(f"[startup] google.generativeai FAILED: {e}", flush=True)
+    print(f"[startup] google-genai SDK FAILED: {e}", flush=True)
+    genai_client_mod = None
+    genai_types = None
+
+def _get_genai_client():
+    """Get or create the Gemini API client (lazy init with API key from env)."""
+    global _genai_client
+    if _genai_client is None:
+        api_key = os.environ.get("GEMINI_API_KEY")
+        if not api_key:
+            raise RuntimeError("GEMINI_API_KEY not set")
+        _genai_client = genai_client_mod.Client(
+            api_key=api_key,
+            http_options=genai_types.HttpOptions(timeout=120_000),
+        )
+    return _genai_client
 
 supabase = None
 try:
@@ -248,14 +266,19 @@ def get_encode_args(quality="high"):
                     "-spatial-aq", "1", "-temporal-aq", "1",
                     "-b_ref_mode", "middle"]
     else:
+        # H100 has no NVENC hardware — CPU encoding is the only option.
+        # threads=0 lets x264 auto-detect optimal thread count.
+        _x264_threads = "threads=0"
         if quality == "lossless":
-            # Intermediates get re-encoded to CRF 18 final — using CRF 18 here
-            # is 30-40% faster to encode than CRF 2 with zero visible difference
-            # in the final output (both are re-encoded identically).
-            return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "18"]
+            return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
+                    "-x264-params", _x264_threads]
         else:
             return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
-                    "-maxrate", "15M", "-bufsize", "30M"]
+                    "-maxrate", "15M", "-bufsize", "30M",
+                    "-x264-params", _x264_threads]
+
+# Module-level: tracks active Remotion chunk subprocesses for cleanup on timeout
+_overlay_chunk_procs = []
 
 _EMOJI_RE = re.compile(
     "[\U0001F600-\U0001F64F\U0001F300-\U0001F5FF\U0001F680-\U0001F6FF"
@@ -2059,11 +2082,7 @@ def build_analysis_from_gemini_recipe(edit_plan, duration):
 
 
 def generate_edit_gemini(video_path, vibe, duration, trend_context=None, deepgram_words=None, face_positions=None, gemini_file=None):
-    gemini_api_key = os.environ.get("GEMINI_API_KEY")
-    if not gemini_api_key:
-        raise RuntimeError("GEMINI_API_KEY not set")
-
-    genai.configure(api_key=gemini_api_key)
+    client = _get_genai_client()
     prompt = build_gemini_edit_prompt(
         vibe=vibe,
         duration=duration,
@@ -2132,16 +2151,20 @@ RULES FOR USING THESE TIMESTAMPS:
         raise RuntimeError("Gemini file upload was not completed — gemini_file is None")
     print(f"[generate-edit] Using pre-uploaded Gemini file: {gemini_file.uri}", flush=True)
 
-    print(f"[generate-edit] Calling Gemini model={GEMINI_MODEL}...", flush=True)
+    print(f"[generate-edit] Calling Gemini model={GEMINI_MODEL} (thinking=LOW)...", flush=True)
     t = time.time()
-    model = genai.GenerativeModel(GEMINI_MODEL)
-    response = model.generate_content(
-        [gemini_file, prompt],
-        generation_config=genai.GenerationConfig(
+    response = client.models.generate_content(
+        model=GEMINI_MODEL,
+        contents=[gemini_file, prompt],
+        config=genai_types.GenerateContentConfig(
             temperature=0.6,
             max_output_tokens=32768,
+            # thinking_level=LOW → minimal reasoning overhead for structured JSON output
+            thinking_config=genai_types.ThinkingConfig(thinking_level="LOW"),
+            # low resolution → Gemini tokenizes at ~66 tokens/frame instead of ~258
+            # proxy is already 240p so no visual information is lost
+            media_resolution="MEDIA_RESOLUTION_LOW",
         ),
-        request_options={"timeout": 90},
     )
     print(f"[generate-edit] Gemini complete in {time.time()-t:.1f}s", flush=True)
 
@@ -2152,9 +2175,9 @@ RULES FOR USING THESE TIMESTAMPS:
             finish_reason = getattr(candidates[0], "finish_reason", None)
             print(f"[generate-edit] Gemini finish_reason={finish_reason}", flush=True)
             fr_str = str(finish_reason).upper()
-            if "MAX" in fr_str or finish_reason == 2:
+            if "MAX" in fr_str:
                 print("[generate-edit] WARNING: Gemini response TRUNCATED — increase max_output_tokens", flush=True)
-            elif "SAFETY" in fr_str or finish_reason == 3:
+            elif "SAFETY" in fr_str:
                 print("[generate-edit] WARNING: Gemini response blocked by safety filter", flush=True)
     except Exception:
         pass
@@ -3584,7 +3607,7 @@ def run_ffmpeg(args):
     print(f"[ffmpeg] Running: ffmpeg {' '.join(str(a) for a in args[:10])}...", flush=True)
     t = time.time()
     result = subprocess.run(
-        ["ffmpeg", "-v", "warning", "-nostats", "-threads", "0"] + [str(a) for a in args],
+        ["ffmpeg", "-v", "warning", "-stats", "-threads", "0", "-benchmark"] + [str(a) for a in args],
         capture_output=True, text=True, timeout=300,
     )
     elapsed = time.time() - t
@@ -3598,6 +3621,12 @@ def run_ffmpeg(args):
             print(f"[ffmpeg] errors/warnings:\n" + "\n".join(_err_lines[:30]), flush=True)
         print(f"[ffmpeg] stderr (last 1500):\n{_stderr[-1500:]}", flush=True)
         raise RuntimeError(f"FFmpeg failed: {_stderr[-500:]}")
+    # Print benchmark/stats lines from stderr for timing diagnostics
+    _stderr = result.stderr or ""
+    for _line in _stderr.split("\n"):
+        _ll = _line.strip()
+        if _ll and ("bench" in _ll.lower() or "speed=" in _ll or "time=" in _ll):
+            print(f"[ffmpeg] {_ll}", flush=True)
     print(f"[ffmpeg] Completed in {elapsed:.1f}s", flush=True)
     return result
 
@@ -3936,9 +3965,9 @@ def render_remotion_overlay(
     words, caption_style, output_res, caption_keywords, work_dir,
     total_duration=0.0, fps=30, cuts=None, emphasis_moments=None, vibe="",
 ):
-    """Render captions + visual effects as a transparent overlay video.
+    """Render captions + visual effects as a PNG sequence with alpha transparency.
 
-    Returns path to a transparent ProRes 4444 (.mov) file.
+    Returns path to the PNG directory (element-NNNNNN.png files).
     Raises RuntimeError if rendering fails.
     """
     remotion_dir = "/remotion"
@@ -3996,7 +4025,7 @@ def render_remotion_overlay(
     }
 
     input_json_path = os.path.join(work_dir, "remotion_input.json")
-    output_mov_path = os.path.join(work_dir, "overlay_remotion.webm")
+    output_png_dir = os.path.join(work_dir, "overlay_frames")
 
     with open(input_json_path, "w") as f:
         json.dump(input_data, f)
@@ -4011,122 +4040,92 @@ def render_remotion_overlay(
     # GPU-accelerated Chrome compositing when CUDA hwaccel is available.
     _gl_mode = "angle-egl" if _HAS_HWACCEL else "swiftshader"
 
-    # ── Parallel chunk rendering ─────────────────────────────────────────
-    # Split total frames across N parallel Node processes, each running
-    # its own set of Chrome tabs. Same total work, but separate V8 heaps,
-    # separate memory pools, and separate GC pressure = much less contention.
-    # Chunks are concatenated with -c copy (zero re-encode, zero quality loss).
-    _n_cores = os.cpu_count() or 32
-    # More chunks = shorter worst-case (bounded by slowest chunk).
-    # All chunks run in parallel — Chrome startup is paid once in wall-clock time.
-    # ~100 frames per chunk minimum to justify Chrome startup overhead.
-    # Cap at 12 to stay within RAM (~200-500MB per Chrome, 64GB available).
-    _n_chunks = min(12, max(1, _total_frames // 100))
-    _per_chunk_concurrency = max(2, min(16, _n_cores // _n_chunks))
+    # Single process, high concurrency — no chunks, no VP8 encoding.
+    # renderFrames outputs PNGs directly (Chrome screenshots only).
+    # No video encoding step = no CPU contention.
+    # Modal container has 32 cores (os.cpu_count() reports 48 = host, not container)
+    _concurrency = 32
 
-    if _n_chunks <= 1:
-        # Short video — single process is fine
-        _n_chunks = 1
-        _per_chunk_concurrency = min(32, max(4, _n_cores))
-
-    print(f"[remotion] Chrome GL: {_gl_mode}, {_n_chunks} chunk(s), "
-          f"concurrency: {_per_chunk_concurrency}/chunk ({_per_chunk_concurrency * _n_chunks} total tabs)",
+    print(f"[remotion] Chrome GL: {_gl_mode}, concurrency: {_concurrency} tabs, PNG output",
           flush=True)
 
-    # Build chunk frame ranges
-    _chunk_size = _total_frames // _n_chunks
-    _chunk_ranges = []
-    for ci in range(_n_chunks):
-        _start = ci * _chunk_size
-        _end = (ci + 1) * _chunk_size - 1 if ci < _n_chunks - 1 else _total_frames - 1
-        _chunk_ranges.append((_start, _end))
+    os.makedirs(output_png_dir, exist_ok=True)
 
-    def _render_chunk(chunk_idx, frame_start, frame_end):
-        """Render a frame range to a separate WebM file."""
-        chunk_out = os.path.join(work_dir, f"overlay_chunk_{chunk_idx}.webm")
-        cmd = [
-            "node", render_cli,
-            "--input", input_json_path,
-            "--output", chunk_out,
-            "--concurrency", str(_per_chunk_concurrency),
-            "--gl", _gl_mode,
-            "--frame-range", f"{frame_start}-{frame_end}",
-        ]
-        ct0 = time.time()
-        res = subprocess.run(
-            cmd, capture_output=True, text=True,
-            timeout=300, cwd=remotion_dir,
-        )
-        chunk_elapsed = time.time() - ct0
-        chunk_frames = frame_end - frame_start + 1
-        chunk_fps = chunk_frames / chunk_elapsed if chunk_elapsed > 0 else 0
+    cmd = [
+        "node", render_cli,
+        "--input", input_json_path,
+        "--output", output_png_dir,
+        "--concurrency", str(_concurrency),
+        "--gl", _gl_mode,
+    ]
 
-        if res.returncode != 0:
-            _all_output = (res.stdout or "") + "\n" + (res.stderr or "")
-            print(f"[remotion] Chunk {chunk_idx} FAILED ({chunk_frames} frames):\n{_all_output[-3000:]}", flush=True)
-            raise RuntimeError(f"[remotion] Chunk {chunk_idx} failed (rc={res.returncode}): {_all_output[-1500:]}")
+    # Track process for cleanup on timeout
+    _overlay_chunk_procs.clear()
+    proc = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, cwd=remotion_dir, start_new_session=True,
+    )
+    _overlay_chunk_procs.append(proc)
 
-        # Print stdout (progress info)
-        if res.stdout:
-            for line in res.stdout.strip().split("\n"):
-                if line.strip():
-                    print(f"  [chunk{chunk_idx}] {line.strip()}", flush=True)
-
-        print(f"[remotion] Chunk {chunk_idx}: {chunk_frames} frames in {chunk_elapsed:.1f}s ({chunk_fps:.1f} fps)",
-              flush=True)
-        return chunk_out
-
-    if _n_chunks == 1:
-        # Single chunk — render directly to output (no concat needed)
-        output_path = _render_chunk(0, _chunk_ranges[0][0], _chunk_ranges[0][1])
-        # Rename to expected output path
-        if output_path != output_mov_path:
-            os.rename(output_path, output_mov_path)
-    else:
-        # Parallel chunk rendering
-        _chunk_paths = [None] * _n_chunks
-        with concurrent.futures.ThreadPoolExecutor(max_workers=_n_chunks) as chunk_pool:
-            _chunk_futures = {
-                chunk_pool.submit(_render_chunk, ci, _chunk_ranges[ci][0], _chunk_ranges[ci][1]): ci
-                for ci in range(_n_chunks)
-            }
-            for fut in concurrent.futures.as_completed(_chunk_futures):
-                ci = _chunk_futures[fut]
-                _chunk_paths[ci] = fut.result()  # raises if chunk failed
-
-        # Concat chunks with ffmpeg -c copy (zero re-encode)
-        _concat_list = os.path.join(work_dir, "overlay_concat.txt")
-        with open(_concat_list, "w") as f:
-            for cp in _chunk_paths:
-                f.write(f"file '{cp}'\n")
-
-        _concat_t0 = time.time()
-        _concat_result = subprocess.run(
-            ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", _concat_list,
-             "-c", "copy", output_mov_path],
-            capture_output=True, text=True, timeout=30,
-        )
-        if _concat_result.returncode != 0:
-            raise RuntimeError(f"[remotion] Chunk concat failed: {(_concat_result.stderr or '')[-500:]}")
-        print(f"[remotion] Chunk concat: {time.time() - _concat_t0:.1f}s", flush=True)
-
-        # Clean up chunk files
-        for cp in _chunk_paths:
-            try:
-                os.remove(cp)
-            except OSError:
-                pass
+    try:
+        stdout, stderr = proc.communicate(timeout=180)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.communicate()
+        raise RuntimeError("[remotion] Render timed out (180s)")
 
     elapsed = time.time() - t0
 
-    if not os.path.exists(output_mov_path):
-        raise RuntimeError("[remotion] Render completed but output file not found")
+    if proc.returncode != 0:
+        _all_output = (stdout or "") + "\n" + (stderr or "")
+        print(f"[remotion] Render FAILED:\n{_all_output[-3000:]}", flush=True)
+        raise RuntimeError(f"[remotion] Render failed (rc={proc.returncode}): {_all_output[-1500:]}")
 
-    sz = os.path.getsize(output_mov_path)
-    _effective_fps = _total_frames / elapsed if elapsed > 0 else 0
-    print(f"[remotion] Caption overlay: {sz / 1024 / 1024:.1f}MB in {elapsed:.1f}s "
+    # Print stdout (progress info)
+    if stdout:
+        for line in stdout.strip().split("\n"):
+            if line.strip():
+                print(f"  [remotion] {line.strip()}", flush=True)
+
+    # Verify PNGs exist
+    _png_files = sorted(glob.glob(os.path.join(output_png_dir, "element-*.png")))
+    if not _png_files:
+        raise RuntimeError(f"[remotion] No PNG frames found in {output_png_dir}")
+
+    _effective_fps = len(_png_files) / elapsed if elapsed > 0 else 0
+    print(f"[remotion] Caption overlay: {len(_png_files)} PNGs in {elapsed:.1f}s "
           f"({_effective_fps:.1f} fps effective)", flush=True)
-    return output_mov_path
+
+    # ── Pre-stitch PNGs into a single lossless video with alpha ────────────
+    # This runs in the background thread BEFORE the main FFmpeg starts.
+    # Converts 1620 individual file reads (each: open + zlib decompress + RGBA→yuva420p)
+    # into a single sequential video decode. Saves ~40-50s in the main FFmpeg render.
+    _first_name = os.path.basename(_png_files[0])
+    _digits = len(_first_name.split("-")[1].split(".")[0])
+    _pattern = os.path.join(output_png_dir, f"element-%0{_digits}d.png")
+    _overlay_video = os.path.join(work_dir, "caption_overlay.mkv")
+
+    _stitch_t0 = time.time()
+    _stitch_cmd = [
+        "ffmpeg", "-y",
+        "-f", "image2", "-framerate", str(fps),
+        "-i", _pattern,
+        "-c:v", "ffv1", "-pix_fmt", "yuva420p",
+        _overlay_video,
+    ]
+    _stitch_proc = subprocess.run(
+        _stitch_cmd, capture_output=True, text=True, timeout=120,
+    )
+    if _stitch_proc.returncode != 0:
+        raise RuntimeError(
+            f"[remotion] Pre-stitch failed (rc={_stitch_proc.returncode}): "
+            f"{_stitch_proc.stderr[-500:]}"
+        )
+
+    _stitch_elapsed = time.time() - _stitch_t0
+    print(f"[remotion] Pre-stitched {len(_png_files)} PNGs → {_overlay_video} "
+          f"in {_stitch_elapsed:.1f}s (FFV1 yuva420p)", flush=True)
+    return _overlay_video
 
 
 def get_output_clip_ranges(cuts, effective_durations, transition_duration=None):
@@ -6381,21 +6380,27 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             print(f"[remotion] Overlay ready: {caption_overlay_path} (waited {_ov_wait:.1f}s for it)", flush=True)
         except Exception as _ov_err:
             print(f"[remotion] Overlay failed after {time.time() - _ov_wait_t0:.1f}s: {_ov_err}", flush=True)
+            # Kill the render process to free CPU for FFmpeg
+            for _proc in _overlay_chunk_procs:
+                try:
+                    os.killpg(os.getpgid(_proc.pid), signal.SIGKILL)
+                except (ProcessLookupError, OSError, PermissionError):
+                    pass
+            _overlay_chunk_procs.clear()
+            _overlay_pool.shutdown(wait=False)
 
-    # Caption overlay — transparent video from Remotion (VP8 WebM with alpha)
+    # Caption overlay — pre-stitched lossless video (FFV1 yuva420p, single file decode)
     caption_input_args = []
     caption_filter_strs = []
-    if caption_overlay_path:
+    if caption_overlay_path and os.path.isfile(caption_overlay_path):
         _cap_idx = n_segment_inputs + len(sfx_input_args) // 2 + _n_broll_inputs
-        # Force libvpx decoder — FFmpeg's native vp8 decoder strips alpha channel
-        caption_input_args = ["-c:v", "libvpx", "-i", caption_overlay_path]
-        # Ensure alpha channel is preserved through format conversion
+        caption_input_args = ["-i", caption_overlay_path]
+        # No format conversion needed — FFV1 pre-stitch already encodes as yuva420p
         caption_filter_strs.append(
-            f"[{_cap_idx}:v]format=yuva420p[_cap_alpha];"
-            f"{video_out}[_cap_alpha]overlay=eof_action=pass[video_captioned]"
+            f"{video_out}[{_cap_idx}:v]overlay=eof_action=pass[video_captioned]"
         )
         video_out = "[video_captioned]"
-        print(f"[render] Remotion caption overlay at input index {_cap_idx} (libvpx decoder)", flush=True)
+        print(f"[render] Caption overlay: pre-stitched video at input index {_cap_idx}", flush=True)
 
     # Order matters: post_filters (zoom pulses etc) → broll → captions
     filter_complex = ";".join(video_filters + audio_filters + transition_filters + sfx_filter_strs + post_filters + broll_filter_strs + caption_filter_strs)
@@ -6413,17 +6418,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         "-shortest",  # stop when video ends — audio pad may overshoot due to xfade timing
     ]
 
-    # Maximize parallelism: all available CPU cores for filter graph + decoding
-    _n_threads = os.cpu_count() or 32
     args = (
         ["-y"]
         + input_args
         + sfx_input_args
         + broll_input_args
         + caption_input_args
-        + ["-filter_complex_threads", str(_n_threads),
+        + ["-threads", "0",
            "-filter_complex", filter_complex, "-map", video_out, "-map", audio_out]
-        + ["-threads", str(_n_threads)]
         + encode_args
         + [output_path]
     )
@@ -6546,10 +6548,8 @@ def handler(job):
         source_duration = probe_duration(source_path) or 0
         sample_timestamps = [round(i * 4.0, 3) for i in range(int(source_duration / 4.0) + 1)] if source_duration > 0 else []
 
-        # Configure Gemini API early so we can pre-upload
-        gemini_api_key = os.environ.get("GEMINI_API_KEY")
-        if gemini_api_key:
-            genai.configure(api_key=gemini_api_key)
+        # Initialize Gemini client early so we can pre-upload
+        _get_genai_client()  # ensures client is ready for upload + generate
 
         # All 5 operations run in parallel — Deepgram, Gemini upload, loudness,
         # and beats all read from the RAW source (audio is identical pre/post normalize).
@@ -6588,7 +6588,7 @@ def handler(job):
                                ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "32"])
                 _proxy_cmd = subprocess.run(
                     ["ffmpeg", "-y", "-threads", "0", "-i", _raw_source,
-                     "-vf", "scale=240:-2,fps=10"] + _proxy_venc + [
+                     "-vf", "scale=240:-2,fps=1"] + _proxy_venc + [
                      "-c:a", "aac", "-b:a", "32k", "-ac", "1",
                      "-movflags", "+faststart", _proxy_path],
                     capture_output=True, text=True, timeout=15,
@@ -6596,16 +6596,17 @@ def handler(job):
                 if _proxy_cmd.returncode != 0 or not os.path.exists(_proxy_path):
                     raise RuntimeError(f"Gemini proxy encode failed: {(_proxy_cmd.stderr or '')[-300:]}")
                 _proxy_mb = os.path.getsize(_proxy_path) / (1024 * 1024)
-                print(f"[pipeline] Gemini proxy: 240p@10fps {_proxy_mb:.1f}MB in {time.time()-_upload_t:.1f}s", flush=True)
-                gf = genai.upload_file(_proxy_path)
+                print(f"[pipeline] Gemini proxy: 240p@1fps {_proxy_mb:.1f}MB in {time.time()-_upload_t:.1f}s", flush=True)
+                _gclient = _get_genai_client()
+                gf = _gclient.files.upload(file=_proxy_path)
                 # Poll for ACTIVE here (overlaps with transcription, beats, face detect)
                 # instead of blocking inside generate_edit_gemini on the critical path
                 _poll_deadline = time.time() + 60
                 while gf.state.name == "PROCESSING":
                     if time.time() > _poll_deadline:
                         raise RuntimeError("Gemini file processing timed out after 60s")
-                    time.sleep(0.3)  # Fixed interval — exponential backoff added 2-5s of artificial delay
-                    gf = genai.get_file(gf.name)
+                    time.sleep(0.3)
+                    gf = _gclient.files.get(name=gf.name)
                 if gf.state.name != "ACTIVE":
                     raise RuntimeError(f"Gemini file upload failed: {gf.state.name}")
                 print(f"[pipeline] Gemini upload done + ACTIVE: {gf.name} ({time.time()-_upload_t:.1f}s)", flush=True)
@@ -6845,8 +6846,8 @@ def handler(job):
         render_elapsed = time.time() - t
         _timings["render"] = render_elapsed
         print(f"[pipeline] parallel_render complete in {render_elapsed:.1f}s", flush=True)
-        _enc_label = "NVENC" if _HAS_NVENC else "libx264/fast"
-        print(f"[render] Encoding: {_enc_label} threads=auto", flush=True)
+        _enc_label = "NVENC" if _HAS_NVENC else "libx264/ultrafast threads=auto"
+        print(f"[render] Encoding: {_enc_label}", flush=True)
         speed_curve = edit_plan.get("_parsed_speed_curve")
         # Validate render output — single ffprobe for file check + duration extraction
         if not os.path.exists(output_path) or os.path.getsize(output_path) < 100000:
