@@ -99,14 +99,17 @@ const chromePath = existsSync("/usr/local/bin/chrome-headless-shell")
 if (chromePath) console.log("[remotion] Using pre-installed Chrome:", chromePath);
 
 // Select the VideoOverlay composition (captions + effects)
+const tComp = Date.now();
 const composition = await selectComposition({
   serveUrl: bundleLocation,
   id: "VideoOverlay",
   inputProps,
   chromiumOptions: {
     ...(chromePath ? { executablePath: chromePath } : {}),
+    disableWebSecurity: true,
   },
 });
+console.log(`[remotion] selectComposition: ${((Date.now() - tComp) / 1000).toFixed(2)}s`);
 
 composition.durationInFrames = input.durationInFrames;
 composition.width = input.width;
@@ -114,10 +117,14 @@ composition.height = input.height;
 composition.fps = input.fps;
 
 // Render to transparent VP8 WebM — fast encode, alpha via libvpx
+// CRF 16: this is an intermediate overlay composited into the final video.
+// The final FFmpeg pass determines visible quality, not this encode.
+// CRF 16 vs default 9 = ~2x faster encode, no perceptible difference after compositing.
 const renderOptions = {
   composition,
   serveUrl: bundleLocation,
   codec: "vp8",
+  crf: 16,
   pixelFormat: "yuva420p",
   imageFormat: "png",
   outputLocation: outputPath,
@@ -126,6 +133,16 @@ const renderOptions = {
   chromiumOptions: {
     gl: glMode,
     ...(chromePath ? { executablePath: chromePath } : {}),
+    disableWebSecurity: true,
+    enableMultiProcessOnLinux: true,
+  },
+  // Speed up libvpx: deadline=realtime + cpu-used=8 = ~2-3x faster VP8 encode.
+  // Safe because this is an intermediate overlay, not the final deliverable.
+  ffmpegOverride: ({ type, args }) => {
+    if (type === "stitcher") {
+      return [...args, "-deadline", "realtime", "-cpu-used", "8"];
+    }
+    return args;
   },
   onProgress: ({ progress }) => {
     const pct = Math.round(progress * 100);
@@ -140,10 +157,12 @@ if (frameRange) {
   renderOptions.frameRange = frameRange;
 }
 
+const tRender = Date.now();
 await renderMedia(renderOptions);
+const renderElapsed = ((Date.now() - tRender) / 1000).toFixed(2);
 
 const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
 const framesRendered = frameRange
   ? frameRange[1] - frameRange[0] + 1
   : input.durationInFrames;
-console.log(`\n[remotion] Done in ${elapsed}s (${framesRendered} frames) → ${outputPath}`);
+console.log(`\n[remotion] renderMedia: ${renderElapsed}s | total: ${elapsed}s (${framesRendered} frames) → ${outputPath}`);
