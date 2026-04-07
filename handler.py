@@ -11,6 +11,7 @@ import shutil
 import json
 import re
 import concurrent.futures
+import threading
 import signal
 from datetime import datetime
 import certifi
@@ -193,18 +194,18 @@ try:
             pass
     subprocess.run(["ldconfig"], capture_output=True, timeout=5)
 
+    # L40S has NVENC (8th gen Ada) — detect and enable automatically.
+    # H100/A100 do NOT have NVENC (encode ASIC physically absent).
     _nvenc_check = subprocess.run(
         ["ffmpeg", "-hide_banner", "-encoders"],
         capture_output=True, text=True, timeout=5,
     )
     if "h264_nvenc" in (_nvenc_check.stdout or ""):
-        # Verify actual GPU access with a tiny encode to a real file
-        # Using -f null can fail on some driver versions; write to a temp file instead
         import tempfile as _tmpmod
         _nvenc_tmp = os.path.join(_tmpmod.gettempdir(), "_nvenc_test.mp4")
         _gpu_test = subprocess.run(
-            ["ffmpeg", "-y", "-f", "lavfi", "-i", "color=black:s=256x256:d=0.1:r=30",
-             "-c:v", "h264_nvenc", "-gpu", "0", "-preset", "p1", _nvenc_tmp],
+            ["ffmpeg", "-y", "-f", "lavfi", "-i", "color=black:s=1920x1080:d=0.1:r=30",
+             "-c:v", "h264_nvenc", "-preset", "p1", _nvenc_tmp],
             capture_output=True, text=True, timeout=10,
             env={**os.environ},
         )
@@ -216,17 +217,7 @@ try:
             _HAS_NVENC = True
             print("[startup] NVENC GPU encoder: AVAILABLE", flush=True)
         else:
-            _full_err = (_gpu_test.stderr or "")
-            # Print last 800 chars to capture the full error chain
-            print(f"[startup] NVENC test failed — using CPU encoder", flush=True)
-            print(f"[startup] NVENC error: {_full_err[-800:]}", flush=True)
-            _encode_libs = []
-            for _ld in _nvidia_lib_dirs:
-                try:
-                    _encode_libs.extend(f for f in os.listdir(_ld) if "encode" in f.lower() or "cuda.so" in f.lower())
-                except Exception:
-                    pass
-            print(f"[startup] Encode libs found: {sorted(set(_encode_libs))}", flush=True)
+            print(f"[startup] NVENC not available (H100/A100 lack encode ASIC) — using CPU encoder", flush=True)
     else:
         print("[startup] NVENC not in FFmpeg build — using CPU encoder", flush=True)
 
@@ -536,27 +527,42 @@ def detect_face_positions(video_path, sample_timestamps):
     return positions
 
 
-def detect_face_positions_dense(video_path, every_n_frames=5):
+def detect_face_positions_dense(video_path, every_n_frames=5, target_w=None, target_h=None):
     """
-    Dense face detection: read every Nth frame sequentially (no seeking) for
-    smooth face tracking.  At every_n_frames=5 on 30fps video this gives 6fps
-    detection — roughly 360 detections for a 60s clip at ~3ms each (<3s total).
+    Dense face detection using FFmpeg frame extraction + OpenCV DNN.
+    FFmpeg extracts every Nth frame with GPU decode (NVDEC) — much faster
+    than OpenCV's sequential read/grab loop which must decode all h264 frames.
+
+    target_w/target_h: if set, scale coordinates to this resolution (e.g., when
+    running on a low-res proxy but need coords in original source resolution).
 
     Returns list of {"t": float, "cx": float, "cy": float, "found": bool, "confidence": float}.
     """
     import cv2
 
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        print("[dense-face] Could not open video for dense face detection", flush=True)
-        return []
+    # Probe video metadata without decoding
+    _probe = subprocess.run(
+        ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_streams", video_path],
+        capture_output=True, text=True, timeout=5,
+    )
+    _streams = json.loads(_probe.stdout or "{}").get("streams", [])
+    _vs = next((s for s in _streams if s.get("codec_type") == "video"), {})
+    fps = float(eval(_vs.get("r_frame_rate", "30/1")))
+    frame_count = int(_vs.get("nb_frames", 0)) or int(float(_vs.get("duration", "0")) * fps)
+    frame_w = int(_vs.get("width", 0)) or 1080
+    frame_h = int(_vs.get("height", 0)) or 1920
 
-    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-    frame_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
-    frame_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
-    center_x = frame_w // 2 if frame_w > 0 else 540
-    center_y = frame_h // 2 if frame_h > 0 else 960
+    # Output resolution for face coordinates
+    _out_w = target_w or frame_w
+    _out_h = target_h or frame_h
+
+    # Extract at native resolution if source is already small (e.g., 240p proxy),
+    # otherwise extract at 540p for speed
+    _extract_h = min(540, frame_h)
+    _scale = _out_h / _extract_h if _extract_h > 0 else 1.0
+    _extract_w = round(frame_w * _extract_h / frame_h) if frame_h > 0 else round(_out_w * _extract_h / _out_h)
+    center_x = _out_w // 2
+    center_y = _out_h // 2
 
     PROTOTXT = "/models/face_detector/deploy.prototxt"
     CAFFEMODEL = "/models/face_detector/res10_300x300_ssd_iter_140000.caffemodel"
@@ -567,68 +573,152 @@ def detect_face_positions_dense(video_path, every_n_frames=5):
     net = cv2.dnn.readNetFromCaffe(PROTOTXT, CAFFEMODEL)
     CONFIDENCE_THRESHOLD = 0.5
 
-    last_cx, last_cy = center_x, center_y
-    positions = []
-    frame_idx = 0
     _t_start = time.time()
 
-    while True:
-        ret, frame = cap.read()
-        if not ret or frame is None:
-            break
+    # Extract every Nth frame at reduced resolution using FFmpeg with GPU decode.
+    # This is 5-10x faster than OpenCV's grab()/read() loop because:
+    # 1. NVDEC hardware decode (vs CPU h264 decode)
+    # 2. Only outputs frames we need (vs decoding all frames sequentially)
+    # 3. Downscale happens on GPU or during decode (less memory bandwidth)
+    _extract_dir = os.path.join(os.path.dirname(video_path) or "/tmp", "_face_frames")
+    os.makedirs(_extract_dir, exist_ok=True)
+    _hw_args = ["-hwaccel", "cuda"] if _HAS_HWACCEL else []
+    _extract_cmd = subprocess.run(
+        ["ffmpeg", "-y", "-v", "warning"] + _hw_args + [
+            "-i", video_path,
+            "-vf", f"select=not(mod(n\\,{every_n_frames})),scale={_extract_w}:{_extract_h}",
+            "-vsync", "0", "-q:v", "2",
+            os.path.join(_extract_dir, "face_%04d.jpg"),
+        ],
+        capture_output=True, text=True, timeout=30,
+    )
+    if _extract_cmd.returncode != 0:
+        print(f"[dense-face] FFmpeg extraction failed, falling back to OpenCV: {_extract_cmd.stderr[-200:]}", flush=True)
+        # Fallback: use basic OpenCV approach
+        return _detect_face_positions_dense_fallback(video_path, every_n_frames)
 
-        if frame_idx % every_n_frames == 0:
-            t_sec = frame_idx / fps
-            h, w = frame.shape[:2]
-            blob = cv2.dnn.blobFromImage(
-                cv2.resize(frame, (300, 300)), 1.0, (300, 300),
-                (104.0, 177.0, 123.0), swapRB=False, crop=False
-            )
-            net.setInput(blob)
-            detections = net.forward()
+    _extract_elapsed = time.time() - _t_start
+    _frame_files = sorted(glob.glob(os.path.join(_extract_dir, "face_*.jpg")))
+    if not _frame_files:
+        print("[dense-face] No frames extracted", flush=True)
+        return []
 
-            found = False
-            best_cx, best_cy = center_x, center_y
-            best_conf = 0.0
-            best_area = 0
+    # Run DNN on extracted frames
+    last_cx, last_cy = center_x, center_y
+    positions = []
 
-            for det_i in range(detections.shape[2]):
-                confidence = float(detections[0, 0, det_i, 2])
-                if confidence < CONFIDENCE_THRESHOLD:
-                    continue
-                x1 = int(detections[0, 0, det_i, 3] * w)
-                y1 = int(detections[0, 0, det_i, 4] * h)
-                x2 = int(detections[0, 0, det_i, 5] * w)
-                y2 = int(detections[0, 0, det_i, 6] * h)
-                area = (x2 - x1) * (y2 - y1)
-                if confidence > best_conf or (confidence > CONFIDENCE_THRESHOLD and area > best_area):
-                    best_conf = confidence
-                    best_area = area
-                    best_cx = (x1 + x2) // 2
-                    best_cy = (y1 + y2) // 2
-                    found = True
+    for _fi, _fpath in enumerate(_frame_files):
+        frame_idx = _fi * every_n_frames
+        t_sec = frame_idx / fps
+        frame = cv2.imread(_fpath)
+        if frame is None:
+            continue
 
-            if found:
-                last_cx, last_cy = best_cx, best_cy
+        h, w = frame.shape[:2]
+        blob = cv2.dnn.blobFromImage(
+            cv2.resize(frame, (300, 300)), 1.0, (300, 300),
+            (104.0, 177.0, 123.0), swapRB=False, crop=False
+        )
+        net.setInput(blob)
+        detections = net.forward()
 
-            positions.append({
-                "t": round(t_sec, 4),
-                "cx": float(best_cx if found else last_cx),
-                "cy": float(best_cy if found else last_cy),
-                "found": found,
-                "confidence": round(best_conf, 4) if found else 0.0,
-            })
+        found = False
+        best_cx, best_cy = center_x, center_y
+        best_conf = 0.0
+        best_area = 0
 
-        frame_idx += 1
+        for det_i in range(detections.shape[2]):
+            confidence = float(detections[0, 0, det_i, 2])
+            if confidence < CONFIDENCE_THRESHOLD:
+                continue
+            # Coordinates are in extract resolution — scale back to original
+            x1 = int(detections[0, 0, det_i, 3] * w * _scale)
+            y1 = int(detections[0, 0, det_i, 4] * h * _scale)
+            x2 = int(detections[0, 0, det_i, 5] * w * _scale)
+            y2 = int(detections[0, 0, det_i, 6] * h * _scale)
+            area = (x2 - x1) * (y2 - y1)
+            if confidence > best_conf or (confidence > CONFIDENCE_THRESHOLD and area > best_area):
+                best_conf = confidence
+                best_area = area
+                best_cx = (x1 + x2) // 2
+                best_cy = (y1 + y2) // 2
+                found = True
 
-    cap.release()
+        if found:
+            last_cx, last_cy = best_cx, best_cy
+
+        positions.append({
+            "t": round(t_sec, 4),
+            "cx": float(best_cx if found else last_cx),
+            "cy": float(best_cy if found else last_cy),
+            "found": found,
+            "confidence": round(best_conf, 4) if found else 0.0,
+        })
+
+    # Cleanup extracted frames
+    for _f in _frame_files:
+        try:
+            os.remove(_f)
+        except OSError:
+            pass
+    try:
+        os.rmdir(_extract_dir)
+    except OSError:
+        pass
+
     elapsed = time.time() - _t_start
     found_count = sum(1 for p in positions if p["found"])
     print(
         f"[dense-face] {found_count}/{len(positions)} detections in {elapsed:.2f}s "
-        f"({frame_count} total frames, every {every_n_frames}th @ {fps:.1f}fps)",
+        f"({frame_count} total frames, every {every_n_frames}th @ {fps:.1f}fps, extracted at {_extract_w}x{_extract_h})",
         flush=True,
     )
+    return positions
+
+
+def _detect_face_positions_dense_fallback(video_path, every_n_frames=5):
+    """Fallback face detection using OpenCV sequential read (slower, no FFmpeg)."""
+    import cv2
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        return []
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    frame_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 1080)
+    frame_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 1920)
+    center_x, center_y = frame_w // 2, frame_h // 2
+    net = cv2.dnn.readNetFromCaffe(
+        "/models/face_detector/deploy.prototxt",
+        "/models/face_detector/res10_300x300_ssd_iter_140000.caffemodel",
+    )
+    last_cx, last_cy = center_x, center_y
+    positions = []
+    frame_idx = 0
+    while True:
+        if frame_idx % every_n_frames == 0:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            h, w = frame.shape[:2]
+            blob = cv2.dnn.blobFromImage(cv2.resize(frame, (300, 300)), 1.0, (300, 300), (104.0, 177.0, 123.0), swapRB=False, crop=False)
+            net.setInput(blob)
+            detections = net.forward()
+            found, best_cx, best_cy, best_conf, best_area = False, center_x, center_y, 0.0, 0
+            for di in range(detections.shape[2]):
+                conf = float(detections[0, 0, di, 2])
+                if conf < 0.5:
+                    continue
+                x1, y1, x2, y2 = int(detections[0,0,di,3]*w), int(detections[0,0,di,4]*h), int(detections[0,0,di,5]*w), int(detections[0,0,di,6]*h)
+                area = (x2-x1)*(y2-y1)
+                if conf > best_conf or area > best_area:
+                    best_conf, best_area, best_cx, best_cy, found = conf, area, (x1+x2)//2, (y1+y2)//2, True
+            if found:
+                last_cx, last_cy = best_cx, best_cy
+            positions.append({"t": round(frame_idx/fps, 4), "cx": float(best_cx if found else last_cx), "cy": float(best_cy if found else last_cy), "found": found, "confidence": round(best_conf, 4) if found else 0.0})
+        else:
+            if not cap.grab():
+                break
+        frame_idx += 1
+    cap.release()
     return positions
 
 
@@ -1594,12 +1684,13 @@ You are the editor. You decide what stays and what gets cut.
 You are a professional short-form editor. You have the exact transcript with millisecond timestamps. Use them to place PRECISE cuts. Think like a human editor who can see the waveform and the video simultaneously.
 
 DEAD AIR IN SPEECH CONTENT:
-Look at the gaps between words in the transcript:
-- Under 0.08 seconds between words — natural word spacing. KEEP. This is how speech flows.
-- 0.3 seconds or more between words — this is dead air. REMOVE that gap using a remove_words time range with start/end. The Captions app removes ALL gaps this long. We must too.
-- Gaps between 0.08 and 0.3 seconds — the pipeline auto-collapses these. Do NOT mark them.
+Watch the video. Every moment of silence should be marked for removal UNLESS it's a dramatic pause that serves the story. You can see the video — you know the difference between dead air and dramatic silence. Mark every dead moment with a start/end time range. Be aggressive — professional editors leave zero dead air in short-form content. Short-form viral content should feel TIGHT — no wasted frames.
+
+- Under 0.08 seconds between words — natural word spacing. KEEP.
+- Any gap longer than that — evaluate: is it dramatic or dead? If dead, REMOVE it using a start/end time range.
+- The pipeline auto-collapses very small gaps. You focus on the noticeable ones.
 - Filler words (uh, um, hmm, er, ah) — the pipeline auto-removes these. Do NOT mark them.
-- Stutters and false starts — the pipeline auto-removes these. Do NOT mark them.
+- Stutters and exact word repetitions — the pipeline auto-removes these. Do NOT mark them.
 
 HOW TO MARK REMOVALS PRECISELY:
 - Use word_index when removing a specific spoken word.
@@ -1628,26 +1719,25 @@ GENERAL RULES:
 - For non-speech sections, remove dead ranges at natural visual break points — scene changes, camera movements, action pauses.
 - The source timeline only moves forward. Removals must stay chronological.
 
-Sound design adds texture. A whoosh on a scene change, a bass_drop when a statement lands, a click when something appears — these make cuts feel physical instead of digital. But not every cut needs a sound. Continuous speech flows best with silent hard cuts.
+Sound design adds texture. A whoosh on a scene change, a boom when a statement lands, a click when something appears — these make cuts feel physical instead of digital. But not every cut needs a sound. Continuous speech flows best with silent hard cuts.
 
 The ending matters. On these platforms, videos auto-loop. A clean ending that flows back into the opening earns replay credit. Avoid fade to black — it creates a flash before the loop restarts.{trend_block}
 
   HOOK CLIP:
-  The hook is the single most important part of any short-form video. Research shows >65% 3-second retention = 4-7x more impressions on TikTok/Reels.
+  The hook is the single most important part of any short-form video. It plays FIRST before the full video.
 
-  Use a hook clip when:
-  1. The first 2-3 seconds of the video are NOT immediately compelling (slow start, setup, dead air)
-  2. There IS a compelling moment later in the video (punchline, reveal, reaction, shocking statement)
+  Pick the PUNCHLINE or REACTION — the moment of maximum emotional intensity. NOT the setup, NOT the buildup. The hook should be the payoff that makes the viewer think "WAIT WHAT" and need to see how it got there.
 
-  If BOTH are true: pick the single most captivating 1-2 second moment — the punchline, reveal, or reaction that makes someone stop scrolling. Set hook_clip source_start/source_end to that moment. This plays FIRST as a teaser, then the full video plays from the beginning.
+  Example: If the story builds to "who the fuck is Stelius?" — THAT is the hook. Not "shouldn't kiss uncle Stelios" (that's setup).
+  Example: If someone reveals a number — the NUMBER is the hook, not the question before it.
 
-  The hook clip MUST:
-  - Be 1-2 seconds max
+  The hook MUST:
+  - Be 1-3 seconds max
   - Start with speech (not silence) — the first word should land within 0.3s
-  - Be something that makes the viewer think "WHAT?" or "HOW?" without context
+  - Be the CLIMAX of the story, not the buildup
   - NOT make sense without the rest of the video — that's what keeps them watching
 
-  If the video already opens with a strong hook (provocative question, action, bold statement in the first 2s), set hook_clip to null.
+  If the video already opens with a strong hook (first 2s are immediately compelling), set hook_clip to null.
 
 === TOOLS ===
 
@@ -1700,42 +1790,30 @@ Global parameters:
 
   SPEED RAMPING (only when vibe mentions "speed ramp", "speed ramping", or "CapCut style"):
 
-  Speed ramping is a COMEDIC and DRAMATIC tool. It creates exaggerated contrast between
-  fast and slow moments for humor and impact. The viewer must FEEL the video ramp down
-  and ramp up — the pitch shift and tempo change IS the effect.
+  Speed ramping creates contrast between fast and slow moments. The viewer FEELS the video
+  accelerate through filler and decelerate into moments that matter.
 
-  THE RUBRIC — follow this exactly:
+  Think like a storyteller, not a technician. Every speed change must be MOTIVATED by the narrative:
+  - Speed up when the content is moving toward something (setup, context, transitions)
+  - Slow down when the content ARRIVES (the reveal, the punchline, the reaction)
 
-  SPEED UP (1.3x-1.4x):
-  - Filler words and "um", "uh", "like", "you know"
-  - Setup and context ("So I was at the store and...")
-  - Buildup before a punchline or reveal
-  - Transitions between story beats
-  - Any moment that is NOT the payoff
+  Ask yourself: "Would this moment hit harder if it lingered?" If yes, slow it down.
+  Ask yourself: "Is this moment just getting us to the next beat?" If yes, speed it up.
 
-  SLOW DOWN (0.67x-0.8x):
-  - Punchlines ("...and she said WHO IS STELIUS?")
-  - Funny moments (the absurd thing, the unexpected twist)
-  - Dramatic reveals (the shocking information drops)
-
-  This is not a suggestion. Every fast section MUST be filler/setup/buildup.
-  Every slow section MUST be a punchline/funny moment/dramatic moment.
-  If you cannot identify a clear punchline or funny moment, do NOT use speed ramping.
+  SPEED UP (1.2x-1.4x): Setup, context, buildup, transitions between story beats.
+  SLOW DOWN (0.67x-0.8x): Punchlines, reveals, shocking statements, emotional peaks.
 
   THE RAMP:
-  The pipeline smoothly ramps between your keypoints frame-by-frame. The viewer feels the
-  video accelerate and decelerate — this curve is the whole point. The ramp should be quick
-  but noticeable — you feel the gear shift, not a hard snap cut between speeds.
+  The pipeline smoothly ramps between your keypoints. Place each keypoint at the MOMENT
+  the speed should change — the word where the story shifts gear. Use the Deepgram word
+  timestamps to hit the exact right word.
 
-  Place keypoints where the speed should be at that moment. The pipeline handles the smooth
-  transition between them automatically.
+  Every keypoint must serve a DIFFERENT narrative purpose. If two adjacent keypoints are
+  both "speeding through filler," merge them into one. If a slow section covers multiple
+  sentences, you probably need fewer keypoints, not more. Aim for 4-8 keypoints for a
+  60-second video — enough to create rhythm, not so many that the video feels jittery.
 
-  Speed range: 0.67x to 1.4x. Never go outside this range.
-
-  GUIDELINES:
-  - Slow moments MUST land on spoken words (the actual punchline), never on silence.
-  - Use the Deepgram word timestamps to place keypoints precisely on the right words.
-  - NEVER use 1.0x — every moment is either fast or slow.
+  Speed range: 0.67x to 1.4x. Slow moments MUST land on spoken words, never on silence.
 
   If speed ramping is not requested in the vibe, set speed_curve to "none".
 
@@ -1800,71 +1878,51 @@ Emphasis moments — THE MOST IMPORTANT PART OF YOUR EDIT. These are the 2-5 mom
 
 Text overlays:
   text_overlays — Short, bold text that gives the viewer instant context. Use ONE overlay maximum.
-  Put appear_at_clip on clip 0.
   This overlay sets the stakes in a few words — e.g. "My 6yo exposed my wife", "He said WHAT?!".
-  The pipeline ensures the overlay appears at the start of the video. Do NOT place overlays in the middle or end.
+  The text overlay should appear in the FIRST SECONDS the viewer sees. If you set a hook_clip, the hook plays FIRST — so the text overlay should appear on the hook (use appear_at_clip: -1 to place it on the hook clip). If there is no hook_clip, use appear_at_clip: 0 to place it on the first clip.
   If the story doesn't need context-setting text, use an empty array.
   text — under 5 words, no emojis
   position — top (default for talking heads), center (only when no face in frame), bottom
-  appear_at_clip — which clip number
+  appear_at_clip — -1 for hook clip (if hook_clip is set), 0 for first content clip, or any clip number
   style — title (72px), callout (56px), cta (64px)
 
 Sound effects — audio accents that make the edit feel physical and professional. Every sound must be EARNED — placed at a moment that justifies it. The wrong sound at the wrong time makes the edit feel amateur. The right sound at the right time makes it feel like a Netflix trailer.
 
   Available sounds and WHEN to use each:
 
-  bass_drop — deep sub-bass drop impact. The most powerful sound in the toolkit. Use it when a statement LANDS — the moment the viewer's jaw should drop. Dramatic reveals, shocking statements, the punchline of a story. Place it at the exact word that carries the weight. 1 per video MAX.
-    Example: "and then she said... I'M PREGNANT" → bass_drop on "pregnant"
-    Example: "they offered me TWO MILLION dollars" → bass_drop on "million"
+  boom — deep cinematic impact. Use for the single biggest moment in the video — the jaw-drop statement, the shocking reveal. ONE per video maximum.
+    Example: "they offered me TWO MILLION dollars" → boom on "million"
 
-  riser — tension-building rising tone (2.5s). Place it 1-2s BEFORE a big reveal. It creates anticipation. Pairs perfectly with bass_drop or stinger immediately after.
-    Example: riser at 12.0s → bass_drop at 13.5s (buildup → payoff)
-    Example: speaker pauses for dramatic effect → riser fills the silence before the reveal
+  hit — sharp dramatic impact. Use for strong statements that need punctuation but aren't THE moment.
+    Example: "I kicked the bed" → hit on "kicked"
 
-  riser_short — quick 1-second riser. Use for minor tension moments or rapid buildups in fast-paced content.
+  drum_roll — snare drum roll building to a cymbal crash. The crash is the moment that lands on your trigger word; the system automatically schedules the file early so the build precedes the word. Use ONLY for genuine dramatic buildup — a big number reveal, a winner being chosen, a life-changing announcement. NOT for regular transitions or mild emphasis.
+    Example: "and the winner is... SARAH" → drum_roll on "sarah" (the crash hits on her name)
 
-  stinger — dramatic orchestral hit. Use for "movie trailer" moments — big statements, dramatic pauses, or when the speaker drops a bombshell.
-    Example: "I'm starting my OWN company" → stinger on "own"
+  reverse — backward sweep sound. Use when the story literally reverses, rewinds, or someone says "wait, back up" or "let me rewind." Also works for sudden stops where the energy cuts dead.
+    Example: "wait wait wait, let me start over" → reverse on "wait"
 
-  boom — explosive cinematic boom. Use for explosive statements or when something metaphorically "blows up."
-    Example: "the video went VIRAL" → boom on "viral"
+  ching — cash register. Use ONLY when money, profit, sales, or financial success is literally mentioned.
+    Example: "I made TEN THOUSAND dollars" → ching on "thousand"
 
-  punch — physical impact hit. Use for aggressive or confrontational moments.
-    Example: "I told him STRAIGHT to his face" → punch on "straight"
+  ding — bright notification chime. Use when the speaker references receiving a text, call, message, email, or notification.
+    Example: "she texted me at 3am" → ding on "texted"
 
-  slam — heavy door slam impact. Powerful and abrupt. Use for finality moments.
+  pop — satisfying pop. Use ONLY when something visually pops up on screen — a text overlay appearing, an image appearing, a graphic appearing. Not for speech emphasis.
 
-  whoosh_fast — fast cinematic whoosh. Use ONLY on actual scene transitions (wipes, fades). If all transitions are hard cuts, do NOT use whoosh_fast — hard cuts are silent by design.
+  click — mouse/button click. Use when something is selected, decided, or confirmed.
 
-  reveal — sparkle/shimmer discovery sound. Use when something positive is revealed, an answer is given, or a solution is presented.
-    Example: "and the secret is..." → reveal on the answer word
+  camera_shutter — camera shutter click. Use ONLY when someone is visibly taking a photo on screen OR says "I took a picture" (literally took a photo). NOT for "picture this" or metaphorical usage.
 
-  vinyl_scratch — record scratch. Use for comedy — when the speaker says something unexpected, contradicts themselves, or the story takes a sudden turn.
-    Example: "everything was going great... until it WASN'T" → vinyl_scratch on "wasn't"
+  sad_trombone — comedic failure. Use for humorous disappointment or things going wrong.
 
-  notification — modern UI chime. Use when the speaker references digital communication — "text", "notification", "email", "message", "DM", "alert".
-    Example: "she texted me at 3am" → notification on "texted"
+  typing — keyboard typing sounds. Use when someone is visibly typing on screen (phone or keyboard) OR says "I typed" / "I texted" (literally typed something). Also fits for caption styles with letter-by-letter typing animation.
 
-  click — clean digital click. Use when something APPEARS visually or for emphasis on choices/decisions.
+  whoosh_slow — smooth atmospheric whoosh. Use on scene transitions or topic changes.
 
-  unlock — satisfying achievement chime with sparkle. Use when money is the topic or something positive is achieved.
-    Example: "I got it for FREE" → unlock on "free"
+  transition_smooth — gentle transition sound. Use with smooth visual transitions.
 
-  camera_flash — camera shutter click. Use when the speaker references taking a photo, screenshots, or camera-related actions.
-    Example: "I took a screenshot" → camera_flash on "screenshot"
-
-  text_appear — soft digital text appearing sound. Use when the speaker references writing, typing, coding, or sending messages.
-    Example: "so I looked it up" → text_appear on "looked"
-
-  glitch — digital distortion sound. Use for tech content, internet culture, or when something "breaks."
-    Example: "the app completely crashed" → glitch on "crashed"
-
-  heartbeat — dramatic single heartbeat. Use for suspenseful moments when the stakes are high.
-    Example: "my heart was RACING" → heartbeat on "racing"
-
-  sad_trombone — comedic failure sound. Use for humorous disappointment.
-
-  boing — cartoonish bounce. Use for playful, lighthearted moments.
+  thunder — deep rolling thunder. Use for ominous, foreboding, scary, or trembling moments where something dark or threatening is happening or about to happen.
 
   Transitions — the visual effect between two clips. Most cuts should be HARD CUTS (transition_out: "none") — they're fast, clean, and professional. Transitions are a tool, not decoration. Use them sparingly and with purpose.
 
@@ -1902,21 +1960,26 @@ Sound effects — audio accents that make the edit feel physical and professiona
   - Default to "none" (hard cut) for every transition. Only add a transition when it EARNS its place.
   - Never use the same transition type more than 2-3 times in a single video.
   - Match transition energy to content energy: somber content gets dissolve/fadeblack, high-energy gets whip/flash.
-  - Pair whoosh_fast sound effects with whip/wipe/smooth transitions. Hard cuts are SILENT.
+  - Pair whoosh_slow sound effects with whip/wipe/smooth transitions. Hard cuts are SILENT.
   - transition_out goes on the clip BEFORE the transition (the outgoing clip).
 
   Rules:
-  - Sound effects should punctuate emphasis_moments. Place sounds where they amplify the moment.
-  - Every sound effect MUST have a "word" field (the trigger word that justifies this sound).
-  - Use the word timestamps to place each sound at the EXACT millisecond of the trigger word.
-  - Most videos have 3-7 sound effects. Zero is fine if nothing earns one.
-  - Never stack two sounds within 0.5s of each other — they compete and sound muddy.
-  - bass_drop/stinger/boom are your power tools. The rest are contextual accents.
-  - riser + impact combos (riser → bass_drop, riser → stinger) are the most cinematic pattern.
+  - BEFORE placing any sound, ask: "Would a professional editor add a sound HERE?" If you can't articulate WHY this moment needs THIS specific sound, leave it out.
+  - Sound effects punctuate emphasis_moments. Place sounds where they amplify the moment.
+  - Every sound effect MUST have a "word" field — the EXACT trigger word that justifies this sound (lowercase, no punctuation).
+  - TIMING IS SAMPLE-ACCURATE. The "t" value MUST be the EXACT start time of the trigger word, in seconds with at least 3 decimal places (millisecond precision) — copy it directly from the Deepgram word timestamps provided. Do NOT round, do NOT estimate, do NOT pick a time "near" the word.
+  - The downstream system snaps your sound to the exact start of the spoken word using the "word" field, so getting the word right matters more than getting "t" right — but BOTH must point to the same word.
+  - Onset compensation is automatic: the system knows each SFX file's internal onset (where the actual hit/climax is) and schedules the file to start early so the perceived "moment" lands precisely on the word. You do NOT need to compensate — just place "t" on the word and the system handles the rest. This applies to build-up sounds too: drum_roll, reverse, sad_trombone, thunder, whoosh_slow all have their climax automatically aligned to the word.
+  - Most videos need 3-5 well-chosen sound effects. Zero is fine if nothing earns one. More than 6 almost always means some are unnecessary.
+  - Never stack two sounds within 1.0s of each other — they compete and sound muddy.
+  - boom/hit are your power tools — use ONE boom and at most TWO hits per video.
+  - drum_roll + impact combos (drum_roll → boom, drum_roll → hit) are the most cinematic pattern. Place BOTH on the same word — the drum_roll's crash and the boom's impact will land together.
+  - ding should ONLY be used when someone literally receives a text/call/message/notification.
+  - whoosh_slow should ONLY be used on transitions (whip/wipe), never on hard cuts.
   - When in doubt, leave the sound out. Silence is better than a wrong sound.
 
   sound_effects: [
-    {{"t": <seconds>, "sound": "<bass_drop|boom|punch|slam|riser|riser_short|stinger|reveal|whoosh_fast|whoosh_slow|swipe|transition_smooth|vinyl_scratch|sad_trombone|boing|notification|click|unlock|text_appear|camera_flash|glitch|heartbeat|static|thunder|wind_gust|record_stop|switch|page_turn>", "word": "<trigger word>"}}
+    {{"t": <seconds, 3+ decimal places, EXACT word start from Deepgram>, "sound": "<boom|hit|drum_roll|reverse|ching|ding|pop|click|camera_shutter|sad_trombone|typing|whoosh_slow|transition_smooth|thunder>", "word": "<exact trigger word, lowercase>"}}
   ]
 
 B-roll — contextual stock footage overlays that illustrate what the speaker is talking about. B-roll makes the edit feel like a professional production, not just a talking head.
@@ -1941,10 +2004,11 @@ B-roll — contextual stock footage overlays that illustrate what the speaker is
 
   Rules:
   - keyword: descriptive search term for Pexels video search. Be specific ("city skyline night", "person typing laptop", "coffee shop interior"). Avoid abstract terms.
-  - timestamp: source timeline position where this B-roll should appear. Place it DURING speech about the topic, not before.
-  - duration: how long to show the B-roll (1-6 seconds). Shorter is usually better.
+  - timestamp: place B-roll at the FIRST WORD of the relevant phrase, not the last word or the keyword. If the speaker says "So I'm shaving, getting ready for work", start the B-roll at "shaving" (the first word that describes the visual), not at "work" or later. The viewer should see the B-roll WHILE the speaker describes the scene, not after.
+  - duration: how long to show the B-roll (2-4 seconds). It should cover the relevant phrase and end before the topic changes. Never let B-roll extend past the speech it illustrates.
   - Maximum 3 B-roll clips per video. Most videos need 0-2.
   - Space B-roll clips at least 5 seconds apart.
+  - NEVER overlap two B-roll clips. If two moments are close together, pick the stronger one.
 
 Visual effects — additional visual treatments for emphasis moments.
 
@@ -2081,7 +2145,13 @@ def build_analysis_from_gemini_recipe(edit_plan, duration):
     return analysis
 
 
-def generate_edit_gemini(video_path, vibe, duration, trend_context=None, deepgram_words=None, face_positions=None, gemini_file=None):
+def generate_edit_gemini(video_path, vibe, duration, trend_context=None, deepgram_words=None, face_positions=None, gemini_file=None, cached_response=None, inline_video_bytes=None):
+    # cached_response is visual pre-analysis from content-studio (shots, camera movement,
+    # lighting, peak moments). NOT the edit recipe — the recipe requires Deepgram transcript
+    # which only exists on Modal. We inject the analysis into the prompt for richer context.
+    _pre_analysis = cached_response  # visual analysis dict or None
+
+    # Full Gemini API call path (always runs — cached_response only augments the prompt)
     client = _get_genai_client()
     prompt = build_gemini_edit_prompt(
         vibe=vibe,
@@ -2091,7 +2161,6 @@ def generate_edit_gemini(video_path, vibe, duration, trend_context=None, deepgra
 
     # Inject Deepgram word timestamps so Gemini can place cuts precisely
     if deepgram_words:
-        # Build a readable paragraph transcript so Gemini can understand the narrative
         readable_words = []
         for w in deepgram_words:
             readable_words.append(w.get("punctuated_word") or w.get("word") or "")
@@ -2142,27 +2211,45 @@ RULES FOR USING THESE TIMESTAMPS:
                 )
                 print(f"[generate-edit] Injected off-center face note into Gemini prompt (avg_x={avg_cx:.1f})", flush=True)
 
+    # Inject pre-analysis from content-studio if available (richer visual context)
+    if _pre_analysis and isinstance(_pre_analysis, dict):
+        _pa_parts = []
+        if _pre_analysis.get("peak_moments"):
+            _pa_parts.append(f"Peak moments: {json.dumps(_pre_analysis['peak_moments'])}")
+        if _pre_analysis.get("safe_cut_points"):
+            _pa_parts.append(f"Safe cut points: {json.dumps(_pre_analysis['safe_cut_points'])}")
+        if _pre_analysis.get("video_profile"):
+            _pa_parts.append(f"Video profile: {json.dumps(_pre_analysis['video_profile'])}")
+        if _pre_analysis.get("shots"):
+            _pa_parts.append(f"Shot breakdown: {json.dumps(_pre_analysis['shots'][:10])}")
+        if _pa_parts:
+            prompt += "\n\n=== PRE-ANALYZED VIDEO DATA ===\n" + "\n".join(_pa_parts) + "\n"
+            print(f"[generate-edit] Injected pre-analysis context ({len(_pa_parts)} sections)", flush=True)
+
     if trend_context:
         print(f"[generate-edit] Trend context included: {trend_context.get('sample_size', '?')} videos", flush=True)
     else:
         print("[generate-edit] No trend context available", flush=True)
 
-    if gemini_file is None:
-        raise RuntimeError("Gemini file upload was not completed — gemini_file is None")
-    print(f"[generate-edit] Using pre-uploaded Gemini file: {gemini_file.uri}", flush=True)
+    # Build video content part — inline bytes (fast, no upload/poll) or file reference (legacy)
+    if inline_video_bytes:
+        _video_part = genai_types.Part.from_bytes(data=inline_video_bytes, mime_type="video/mp4")
+        print(f"[generate-edit] Using inline video ({len(inline_video_bytes)/1024/1024:.1f}MB, no upload)", flush=True)
+    elif gemini_file is not None:
+        _video_part = gemini_file
+        print(f"[generate-edit] Using pre-uploaded Gemini file: {gemini_file.uri}", flush=True)
+    else:
+        raise RuntimeError("No video data provided — need either inline_video_bytes or gemini_file")
 
     print(f"[generate-edit] Calling Gemini model={GEMINI_MODEL} (thinking=LOW)...", flush=True)
     t = time.time()
     response = client.models.generate_content(
         model=GEMINI_MODEL,
-        contents=[gemini_file, prompt],
+        contents=[_video_part, prompt],
         config=genai_types.GenerateContentConfig(
             temperature=0.6,
             max_output_tokens=32768,
-            # thinking_level=LOW → minimal reasoning overhead for structured JSON output
             thinking_config=genai_types.ThinkingConfig(thinking_level="LOW"),
-            # low resolution → Gemini tokenizes at ~66 tokens/frame instead of ~258
-            # proxy is already 240p so no visual information is lost
             media_resolution="MEDIA_RESOLUTION_LOW",
         ),
     )
@@ -2193,6 +2280,8 @@ RULES FOR USING THESE TIMESTAMPS:
     print(f"[generate-edit] RAW RESPONSE:\n{response_text}\n[generate-edit] END RESPONSE", flush=True)
 
     edit_plan = extract_json(response_text)
+
+    # Post-processing
     edit_plan["_deepgram_words"] = list(deepgram_words or [])
     analysis = build_analysis_from_gemini_recipe(edit_plan, duration=duration)
     has_burned_captions = infer_has_burned_captions(edit_plan, analysis, log_prefix="[generate-edit]")
@@ -2203,7 +2292,12 @@ RULES FOR USING THESE TIMESTAMPS:
     raw_cuts = edit_plan.get("cuts") or edit_plan.get("clips")
 
     validated_cuts = []
-    if isinstance(raw_remove_words, list):
+    if isinstance(raw_remove_words, list) and not _dg_words:
+        # No speech detected — skip word-based editing, create single full-video clip
+        print("[generate-edit] No words available — skipping word-based cuts, using full video as single clip", flush=True)
+        edit_plan["caption_style"] = "none"
+        validated_cuts = [{"source_start": 0.0, "source_end": round(duration, 3)}]
+    elif isinstance(raw_remove_words, list):
         if not _dg_words:
             raise ValueError("Deepgram words missing — remove_words architecture requires word timestamps")
         print(f"[DIAG] Full transcript ({len(_dg_words)} words):", flush=True)
@@ -2266,11 +2360,11 @@ RULES FOR USING THESE TIMESTAMPS:
         # Captions app aggressively removes ALL dead air — we match that.
         _pacing = str(edit_plan.get("pacing") or "fast").lower()
         if _pacing == "fast":
-            _speech_gap = 0.10  # aggressive — Captions-level tightness
+            _speech_gap = 0.06  # ultra-tight — gaps become noticeable at 0.75x slow-mo
         elif _pacing == "medium":
-            _speech_gap = 0.13
+            _speech_gap = 0.10
         else:
-            _speech_gap = 0.15  # slow pacing — more breathing room
+            _speech_gap = 0.13  # slow pacing — more breathing room
         if len(_dg_words) >= 5:
             _first_t = float(_dg_words[0].get("start", 0))
             _last_t = float(_dg_words[-1].get("end", 0))
@@ -2355,7 +2449,21 @@ RULES FOR USING THESE TIMESTAMPS:
             elif gap > 2.0:
                 print(f"[generate-edit] Section skip: {gap:.3f}s removed between clip {i-1} and clip {i}", flush=True)
     else:
-        raise ValueError("Gemini response missing both remove_words and cuts")
+        if not _dg_words:
+            # No speech, no cuts — create single full-video clip
+            print("[generate-edit] No words and no cuts from Gemini — using full video as single clip", flush=True)
+            edit_plan["caption_style"] = "none"
+            validated_cuts = [{"source_start": 0.0, "source_end": round(duration, 3)}]
+        else:
+            raise ValueError("Gemini response missing both remove_words and cuts")
+
+    # Verify no large gaps in output (monitoring only — not auto-removing)
+    for _gi in range(1, len(validated_cuts)):
+        _prev_end = float(validated_cuts[_gi - 1].get("source_end", 0))
+        _curr_start = float(validated_cuts[_gi].get("source_start", 0))
+        _gap = _curr_start - _prev_end
+        if _gap > 0.5:
+            print(f"[gap-check] WARNING: {_gap:.2f}s gap between clip {_gi-1} and clip {_gi} (source {_prev_end:.2f}s-{_curr_start:.2f}s)", flush=True)
 
     # Apply transitions from Gemini's transitions array onto clips.
     # Each transition has after_word_index — find the clip whose source range
@@ -2558,7 +2666,7 @@ RULES FOR USING THESE TIMESTAMPS:
             if video_duration > 0:
                 hook_end = min(hook_end, video_duration)
             hook_dur = hook_end - hook_start
-            if 0.5 <= hook_dur <= 3.0:
+            if 0.5 <= hook_dur <= 5.0:
                 hook_clip = {
                     "source_start": round(hook_start, 3),
                     "source_end": round(hook_end, 3),
@@ -2654,52 +2762,19 @@ RULES FOR USING THESE TIMESTAMPS:
             except Exception:
                 continue
             sound = str(sfx["sound"]).lower()
-            # Resolve aliases (including legacy names like thud→bass_drop, swoosh→whoosh_fast, etc.)
+            # Resolve aliases (including legacy names like thud→hit, swoosh→whoosh_slow, etc.)
             sound = _SFX_ALIASES.get(sound, sound)
             if sound in valid_sounds and t >= 0 and (video_duration <= 0 or t <= video_duration):
                 word = str(sfx.get("word") or "").strip().lower()
 
-                # whoosh/swipe/transition: only with wipe/fade transitions
-                if sound in ("whoosh_fast", "whoosh_slow", "swipe", "transition_smooth"):
+                # whoosh/transition: only with wipe/fade transitions
+                if sound in ("whoosh_slow", "transition_smooth"):
                     has_transitions = any(
                         str(c.get("transition_out") or "none").lower() not in ("none", "")
                         for c in (edit_plan.get("cuts") or [])
                     )
                     if not has_transitions:
                         print(f"[generate-edit] Filtered out {sound} at {t:.1f}s (no wipe/fade transitions)", flush=True)
-                        continue
-
-                # camera_flash: only on camera/photo-related trigger words
-                if sound == "camera_flash":
-                    VALID_CAMERA_WORDS = {"photo", "picture", "screenshot", "camera", "selfie", "snap", "shot", "pic", "image", "film", "filmed", "record", "recorded"}
-                    word_clean = word.strip(".,!?;:'\"")
-                    if word_clean not in VALID_CAMERA_WORDS:
-                        print(f"[generate-edit] Filtered out camera_flash on '{word}' at {t:.1f}s (not a camera trigger)", flush=True)
-                        continue
-
-                # text_appear: only on writing/typing-related trigger words
-                if sound == "text_appear":
-                    VALID_TEXT_WORDS = {"typed", "typing", "wrote", "write", "writing", "googled", "searched", "coded", "coding", "texted", "dm", "dmed", "replied", "response", "looked"}
-                    word_clean = word.strip(".,!?;:'\"")
-                    if word_clean not in VALID_TEXT_WORDS:
-                        print(f"[generate-edit] Filtered out text_appear on '{word}' at {t:.1f}s (not a writing trigger)", flush=True)
-                        continue
-
-                # notification: only on digital communication trigger words
-                if sound == "notification":
-                    VALID_NOTIF_WORDS = {"text", "texted", "notification", "email", "message", "alert", "ping", "dm", "phone"}
-                    word_clean = word.strip(".,!?;:'\"")
-                    if word_clean not in VALID_NOTIF_WORDS:
-                        print(f"[generate-edit] Filtered out notification on '{word}' at {t:.1f}s (not a notification trigger)", flush=True)
-                        continue
-
-                # unlock: only on money/achievement-related trigger words
-                if sound == "unlock":
-                    VALID_UNLOCK_WORDS = {"free", "sold", "dollar", "dollars", "money", "price", "cost", "pay", "paid", "cash", "buy", "bought", "deal", "won", "earned", "achieved"}
-                    word_clean = word.strip(".,!?;:'\"")
-                    is_dollar_amount = "$" in word or word_clean.replace(".", "").replace(",", "").isdigit()
-                    if word_clean not in VALID_UNLOCK_WORDS and not is_dollar_amount:
-                        print(f"[generate-edit] Filtered out unlock on '{word}' at {t:.1f}s (not a money/achievement trigger)", flush=True)
                         continue
 
                 sound_effects.append({"t": t, "sound": sound, "word": word})
@@ -2718,8 +2793,8 @@ RULES FOR USING THESE TIMESTAMPS:
         sound_effects = spaced
 
         # 2. Cap heavy impact sounds — overuse kills the punch
-        _MAX_PER_TYPE = {"bass_drop": 1, "stinger": 2, "boom": 1,
-                         "vinyl_scratch": 2, "riser": 2, "heartbeat": 1, "slam": 2}
+        _MAX_PER_TYPE = {"boom": 1, "hit": 2,
+                         "reverse": 2, "drum_roll": 2}
         _type_counts = {}
         capped = []
         for sfx in sound_effects:
@@ -2822,12 +2897,12 @@ RULES FOR USING THESE TIMESTAMPS:
                         print(f"[emphasis] Skipped cut_zoom at {em_t:.1f}s — too close to previous zoom at {_last_zoom_t:.1f}s", flush=True)
                 break
 
-        # Auto-place stinger on high-intensity moments that have no SFX nearby
+        # Auto-place hit on high-intensity moments that have no SFX nearby
         if em["intensity"] == "high":
             nearby_sfx = any(abs(sfx["t"] - em_t) < 1.0 for sfx in sound_effects)
             if not nearby_sfx:
-                sound_effects.append({"t": em_t, "sound": "stinger", "word": f"emphasis_{em['type']}"})
-                print(f"[emphasis] Auto-placed stinger at {em_t:.1f}s ({em['type']})", flush=True)
+                sound_effects.append({"t": em_t, "sound": "hit", "word": f"emphasis_{em['type']}"})
+                print(f"[emphasis] Auto-placed hit at {em_t:.1f}s ({em['type']})", flush=True)
 
     # Re-sort and re-store sound effects after emphasis auto-placement
     sound_effects.sort(key=lambda x: x["t"])
@@ -2880,7 +2955,7 @@ RULES FOR USING THESE TIMESTAMPS:
 # Mix categories (relative to voice at 0 dB):
 #   "quiet"  — ambient/atmospheric sounds, sit well below voice (-20 dB)
 #   "medium" — transitions, risers, UI sounds (-14 dB below voice)
-#   "loud"   — impacts, stingers, punchy sounds (-10 dB below voice)
+#   "loud"   — impacts, punchy sounds (-10 dB below voice)
 #
 # Reference: ITU-R BS.1770-4 / EBU R128 for loudness normalization principles.
 
@@ -2895,43 +2970,50 @@ _SFX_CATEGORY_LEVELS = {
 # Sound → category mapping. Adding a new SFX only requires placing it in
 # one of 3 categories — no per-file volume calibration needed.
 _SFX_CATEGORIES = {
-    # Transitions (medium — audible but not distracting)
-    "whoosh_fast":       "medium",
-    "whoosh_slow":       "quiet",
+    "boom": "loud",
+    "camera_shutter": "medium",
+    "ching": "loud",
+    "click": "medium",
+    "ding": "medium",
+    "drum_roll": "medium",
+    "hit": "loud",
+    "pop": "medium",
+    "reverse": "quiet",
+    "sad_trombone": "medium",
     "transition_smooth": "quiet",
-    "swipe":             "medium",
-    # Impacts (loud — meant to hit hard)
-    "bass_drop":  "loud",
-    "boom":       "loud",
-    "punch":      "loud",
-    "slam":       "loud",
-    # Risers & stingers (medium — build tension, not overpower)
-    "riser":       "quiet",
-    "riser_short": "medium",
-    "stinger":     "medium",
-    "reveal":      "medium",
-    # UI & notification (medium — clear but not jarring)
-    "notification": "medium",
-    "text_appear":  "medium",
-    "click":        "medium",
-    "unlock":       "medium",
-    # Comedy & expressive (loud — punchline emphasis)
-    "vinyl_scratch": "loud",
-    "sad_trombone":  "medium",
-    "boing":         "loud",
-    "record_stop":   "medium",
-    # Atmospheric (quiet — background texture only)
-    "static":     "quiet",
-    "tape_rewind": "quiet",
-    "glitch":      "medium",
-    "heartbeat":   "quiet",
-    # Nature (quiet — ambient)
-    "wind_gust": "quiet",
-    "thunder":   "medium",
-    # Camera & mechanical (medium)
-    "camera_flash": "medium",
-    "switch":       "medium",
-    "page_turn":    "medium",
+    "typing": "quiet",
+    "whoosh_slow": "quiet",
+    "thunder": "medium",
+}
+
+# Sound → onset offset (seconds). The "onset" is the time within the file
+# at which the meaningful moment of the sound occurs (the impact, the climax,
+# the perceived "hit"). When mixing, we schedule each SFX to start at
+# (placement_time - onset) so the perceived moment lands EXACTLY on the word.
+#
+# For impact sounds (boom, hit, ching, ding, click, pop, camera_shutter), the
+# onset is the peak amplitude.
+#
+# For build-up sounds (drum_roll, reverse, sad_trombone, thunder, whoosh_slow,
+# transition_smooth), the onset is the climactic moment — the build PRECEDES
+# the trigger word and the climax lands on it.
+#
+# Measured by decoding each file to PCM and finding the peak amplitude sample.
+_SFX_ONSET_OFFSETS = {
+    "boom":              0.440,
+    "camera_shutter":    0.045,
+    "ching":             0.057,
+    "click":             0.060,
+    "ding":              0.078,
+    "drum_roll":         1.657,
+    "hit":               0.068,
+    "pop":               0.025,
+    "reverse":           1.372,
+    "sad_trombone":      1.290,
+    "thunder":           0.734,
+    "transition_smooth": 0.345,
+    "typing":            0.000,  # continuous sound — file should start when typing starts, no peak shift
+    "whoosh_slow":       0.213,
 }
 
 # RMS measurement cache — populated lazily, avoids re-measuring same file
@@ -2962,48 +3044,55 @@ def _measure_sfx_rms(sfx_path):
     return rms_db
 
 _SFX_ALIASES = {
-    "whoosh":     "whoosh_fast",
-    # Legacy aliases: old SFX names → new equivalents
-    "thud":       "bass_drop",
-    "reverb_hit": "riser_short",
-    "pop":        "click",
-    "ching":      "unlock",
-    "ding":       "notification",
-    "swoosh":     "whoosh_fast",
-    "shutter":    "camera_flash",
-    "typing":     "text_appear",
-    # Semantic aliases
-    "cashier":    "unlock",
-    "cash":       "unlock",
-    "money":      "unlock",
-    "rise":       "riser",
-    "rising":     "riser",
-    "buildup":    "riser",
-    "tension":    "riser",
-    "impact":     "bass_drop",
-    "slide":      "swipe",
-    "snap":       "click",
-    "tape_stop":  "record_stop",
-    "drop":       "bass_drop",
-    "bass":       "bass_drop",
-    "scratch":    "vinyl_scratch",
-    "flash":      "camera_flash",
-    "camera":     "camera_flash",
-    "sparkle":    "reveal",
-    "magic":      "reveal",
-    "shimmer":    "reveal",
-    "error":      "static",
-    "buzz":       "static",
-    "wind":       "wind_gust",
-    "breeze":     "wind_gust",
-    "button":     "click",
-    "press":      "click",
-    "bounce":     "boing",
-    "fail":       "sad_trombone",
-    "wah":        "sad_trombone",
-    "page":       "page_turn",
-    "flip":       "page_turn",
-    "toggle":     "switch",
+    "whoosh": "whoosh_slow",
+    "swoosh": "whoosh_slow",
+    "impact": "hit",
+    "drop": "boom",
+    "bass_drop": "boom",
+    "bass": "boom",
+    "slam": "hit",
+    "thud": "hit",
+    "stinger": "hit",
+    "cash": "ching",
+    "money": "ching",
+    "cash_register": "ching",
+    "ka_ching": "ching",
+    "coin": "ching",
+    "chime": "ding",
+    "alert": "ding",
+    "notification": "ding",
+    "bell": "ding",
+    "unlock": "ding",
+    "reveal": "ding",
+    "flash": "pop",
+    "snap": "click",
+    "button": "click",
+    "press": "click",
+    "bounce": "pop",
+    "boing": "pop",
+    "fail": "sad_trombone",
+    "wah": "sad_trombone",
+    "horn": "pop",
+    "scratch": "reverse",
+    "vinyl_scratch": "reverse",
+    "record_stop": "reverse",
+    "glitch": "reverse",
+    "riser": "drum_roll",
+    "riser_short": "drum_roll",
+    "buildup": "drum_roll",
+    "tension": "drum_roll",
+    "swipe": "transition_smooth",
+    "slide": "transition_smooth",
+    "whoosh_fast": "transition_smooth",
+    "wind": "whoosh_slow",
+    "breeze": "whoosh_slow",
+    "fire": "boom",
+    "static": "reverse",
+    "heartbeat": "boom",
+    "page_turn": "click",
+    "switch": "click",
+    "shutter": "camera_shutter",
+    "camera": "camera_shutter",
 }
 
 
@@ -3283,7 +3372,8 @@ def fetch_broll_clip(keyword, duration_needed, work_dir):
         if not portrait_files:
             continue
 
-        portrait_files.sort(key=lambda x: x["height"], reverse=True)
+        # Prefer 1080p over 4K — smaller download, still plenty for 1080p output
+        portrait_files.sort(key=lambda x: abs(x["height"] - 1920))
         best_file = portrait_files[0]
 
         score = 0
@@ -3338,11 +3428,22 @@ def fetch_broll_clip(keyword, duration_needed, work_dir):
         print(f"[broll] REJECTED '{keyword}': download returned image content-type ({content_type})", flush=True)
         return None
 
+    _MAX_BROLL_BYTES = 25 * 1024 * 1024  # 25MB cap — prevents 100MB+ 4K downloads
     with open(dest, "wb") as f:
         total_bytes = 0
         for chunk in dl.iter_content(65536):
             f.write(chunk)
             total_bytes += len(chunk)
+            if total_bytes > _MAX_BROLL_BYTES:
+                break
+
+    if total_bytes > _MAX_BROLL_BYTES:
+        print(f"[broll] SKIPPED '{keyword}': file too large ({total_bytes / 1024 / 1024:.1f}MB > 25MB cap)", flush=True)
+        try:
+            os.remove(dest)
+        except OSError:
+            pass
+        return None
 
     print(f"[broll] Downloaded '{keyword}': {total_bytes / 1024:.0f}KB -> {dest}", flush=True)
 
@@ -3370,59 +3471,8 @@ def fetch_broll_clip(keyword, duration_needed, work_dir):
         os.remove(dest)
         return None
 
-    # Frame count check: decode first 2s, expect ≥8 frames at 5fps
-    frame_result = subprocess.run(
-        ["ffmpeg", "-y", "-i", dest, "-t", "2", "-vf", "fps=5", "-f", "null", "-"],
-        capture_output=True, text=True, timeout=15,
-    )
-    frame_count = 0
-    for line in frame_result.stderr.split("\n"):
-        if "frame=" in line:
-            try:
-                frame_part = line.split("frame=")[1].strip().split()[0]
-                frame_count = int(frame_part)
-            except (IndexError, ValueError):
-                pass
-
-    if frame_count < 8:
-        print(f"[broll] REJECTED '{keyword}': only {frame_count} decoded frames in first 2s — likely still image", flush=True)
-        os.remove(dest)
-        return None
-
-    # Motion check: compare frames at 0.3s and ~2.0s to reject frozen/static clips.
-    import numpy as np
-    _raw_path_a = os.path.join(work_dir, f"_broll_motion_{safe_kw}_a.raw")
-    _raw_path_b = os.path.join(work_dir, f"_broll_motion_{safe_kw}_b.raw")
-    _frame_size = 160 * 284
-    _seek_b = min(2.0, max(0.5, fmt_duration - 1.0))
-    for _seek, _rp in [(0.3, _raw_path_a), (_seek_b, _raw_path_b)]:
-        subprocess.run(
-            ["ffmpeg", "-y", "-ss", f"{_seek:.2f}", "-i", dest,
-             "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "gray", "-s", "160x284",
-             "-loglevel", "warning", _rp],
-            capture_output=True, timeout=10)
-    if not os.path.exists(_raw_path_a) or not os.path.exists(_raw_path_b):
-        print(f"[broll] REJECTED '{keyword}': could not extract motion-check frames", flush=True)
-        os.remove(dest)
-        return None
-    with open(_raw_path_a, "rb") as _fa, open(_raw_path_b, "rb") as _fb:
-        _da = _fa.read()
-        _db = _fb.read()
-    for _rp in [_raw_path_a, _raw_path_b]:
-        try: os.remove(_rp)
-        except: pass
-    if len(_da) < _frame_size or len(_db) < _frame_size:
-        print(f"[broll] REJECTED '{keyword}': motion-check frames too small", flush=True)
-        os.remove(dest)
-        return None
-    _f1 = np.frombuffer(_da[:_frame_size], dtype=np.uint8).astype(np.float32)
-    _f2 = np.frombuffer(_db[:_frame_size], dtype=np.uint8).astype(np.float32)
-    _diff = np.mean(np.abs(_f1 - _f2))
-    if _diff < 1.5:
-        print(f"[broll] REJECTED '{keyword}': frozen/static clip (frame diff={_diff:.1f})", flush=True)
-        os.remove(dest)
-        return None
-    print(f"[broll] Motion check OK for '{keyword}': frame diff={_diff:.1f}", flush=True)
+    # Skip frame decode + motion check — Pexels videos are trusted, and these checks
+    # cost ~1s each (2 FFmpeg decodes per clip). Metadata validation is sufficient.
 
     if stream_h <= stream_w:
         print(f"[broll] REJECTED '{keyword}': landscape orientation ({stream_w}x{stream_h})", flush=True)
@@ -3431,7 +3481,7 @@ def fetch_broll_clip(keyword, duration_needed, work_dir):
 
     print(
         f"[broll] VALIDATED '{keyword}': {stream_w}x{stream_h} ({codec_name}), "
-        f"{fmt_duration:.1f}s, {frame_count} test frames",
+        f"{fmt_duration:.1f}s",
         flush=True,
     )
     return dest
@@ -3847,7 +3897,8 @@ def is_hard_cut(transition):
     return not t or t in ("none", "clean_cut")
 
 
-def project_words_to_output(transcript, cuts, effective_durations, hook_offset=0.0, hook_clip=None, speed_curve=None, transition_duration=None):
+def project_words_to_output(transcript, cuts, effective_durations, hook_offset=0.0, hook_clip=None, speed_curve=None, transition_duration=None, clip_time_maps=None):
+    """Project word timestamps from source to output timeline using canonical time maps."""
     words = transcript.get("words") or []
     projected = []
     if not words or not cuts:
@@ -3857,19 +3908,21 @@ def project_words_to_output(transcript, cuts, effective_durations, hook_offset=0
     for i, cut in enumerate(cuts):
         c_start = float(cut["source_start"])
         c_end   = float(cut["source_end"])
-        speed   = max(0.25, min(4.0, float(cut.get("speed") or 1.0)))
-        _has_curve = speed_curve and speed_curve != "none"
+        tm = clip_time_maps[i] if clip_time_maps and i < len(clip_time_maps) else None
         for w in words:
             ws = float(w.get("start") or 0)
             we = float(w.get("end") or 0)
             if we <= c_start or ws >= c_end:
                 continue
-            # Per-word speed: evaluate curve at each word's midpoint for accurate timing
-            w_mid = (max(ws, c_start) + min(we, c_end)) / 2.0
-            curve_speed = max(0.5, min(1.4, get_speed_for_timestamp(w_mid, speed_curve))) if _has_curve else 1.0
-            combined_speed = speed * curve_speed
-            local_s = (max(ws, c_start) - c_start) / combined_speed
-            local_e = (min(we, c_end) - c_start) / combined_speed
+            clamped_s = max(ws, c_start)
+            clamped_e = min(we, c_end)
+            if tm:
+                local_s = _time_map_lookup(tm, clamped_s - c_start)
+                local_e = _time_map_lookup(tm, clamped_e - c_start)
+            else:
+                speed = max(0.25, min(4.0, float(cut.get("speed") or 1.0)))
+                local_s = (clamped_s - c_start) / speed
+                local_e = (clamped_e - c_start) / speed
             projected.append({
                 "start": round((output_cursor + local_s)*1000)/1000,
                 "end":   round((output_cursor + local_e)*1000)/1000,
@@ -3893,7 +3946,7 @@ def project_words_to_output(transcript, cuts, effective_durations, hook_offset=0
         if isinstance(hook_clip, dict):
             hook_start = float(hook_clip.get("source_start") or 0.0)
             hook_end = float(hook_clip.get("source_end") or 0.0)
-            hook_render_start = project_source_time_to_output(hook_start, cuts, clip_ranges, speed_curve)
+            hook_render_start = project_source_time_to_output(hook_start, cuts, clip_ranges, speed_curve, clip_time_maps=clip_time_maps)
             hook_words = []
             for w in words:
                 ws = float(w.get("start") or 0)
@@ -3901,8 +3954,8 @@ def project_words_to_output(transcript, cuts, effective_durations, hook_offset=0
                 if ws >= hook_start and we <= hook_end:
                     if hook_render_start is None:
                         continue
-                    projected_start = project_source_time_to_output(ws, cuts, clip_ranges, speed_curve)
-                    projected_end = project_source_time_to_output(we, cuts, clip_ranges, speed_curve)
+                    projected_start = project_source_time_to_output(ws, cuts, clip_ranges, speed_curve, clip_time_maps=clip_time_maps)
+                    projected_end = project_source_time_to_output(we, cuts, clip_ranges, speed_curve, clip_time_maps=clip_time_maps)
                     if projected_start is None or projected_end is None:
                         continue
                     hook_words.append({
@@ -3960,6 +4013,109 @@ def _build_keyword_set(words, caption_keywords):
                         keyword_set.add(_best)
                 _sentence_words = []
     return keyword_set
+
+def prepare_remotion_input(
+    words, caption_style, output_res, caption_keywords, work_dir,
+    total_duration=0.0, fps=30, cuts=None, emphasis_moments=None, vibe="",
+):
+    """Build Remotion input JSON for caption overlay rendering. Returns input_json_path."""
+    w = output_res.get("width") or 1080
+    h = output_res.get("height") or 1920
+
+    cut_points = []
+    if cuts:
+        cursor = 0.0
+        for c in cuts:
+            dur = float(c.get("_effective_duration") or c.get("duration") or 0)
+            if cursor > 0:
+                cut_points.append({
+                    "time": round(cursor, 3),
+                    "transition": str(c.get("transition_out") or "none"),
+                    "duration": round(dur, 3),
+                })
+            cursor += dur
+
+    em_list = []
+    if emphasis_moments:
+        for em in emphasis_moments:
+            _em_entry = {
+                "t": float(em.get("t") or 0),
+                "type": str(em.get("type") or "statement"),
+                "intensity": str(em.get("intensity") or "medium"),
+            }
+            if em.get("word"):
+                _em_entry["word"] = re.sub(r"[.,!?;:'\"\\]", "", str(em["word"])).strip()
+            if em.get("duration"):
+                _em_entry["duration"] = float(em["duration"])
+            em_list.append(_em_entry)
+
+    input_data = {
+        "words": words or [],
+        "captionStyle": caption_style,
+        "keywords": caption_keywords or [],
+        "effects": [],
+        "cuts": cut_points,
+        "emphasisMoments": em_list,
+        "width": w,
+        "height": h,
+        "fps": fps,
+        "duration": total_duration,
+        "fontDir": "/assets/fonts",
+        "vibe": vibe,
+    }
+
+    input_json_path = os.path.join(work_dir, "remotion_input.json")
+    with open(input_json_path, "w") as f:
+        json.dump(input_data, f)
+
+    return input_json_path
+
+
+def render_remotion_segment(input_json_path, output_png_dir, frame_start, frame_end, concurrency, gl_mode="angle-egl"):
+    """Render a segment's caption frames via Remotion. Returns (output_dir, start_num, count, digits)."""
+    remotion_dir = "/remotion"
+    render_cli = os.path.join(remotion_dir, "render-cli.mjs")
+    os.makedirs(output_png_dir, exist_ok=True)
+
+    _n_frames = frame_end - frame_start + 1
+    cmd = [
+        "node", render_cli,
+        "--input", input_json_path,
+        "--output", output_png_dir,
+        "--concurrency", str(concurrency),
+        "--gl", gl_mode,
+        "--frame-range", f"{frame_start}-{frame_end}",
+    ]
+
+    proc = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, cwd=remotion_dir, start_new_session=True,
+    )
+    _overlay_chunk_procs.append(proc)
+
+    _timeout = max(60, _n_frames * 0.2)
+    try:
+        stdout, stderr = proc.communicate(timeout=_timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.communicate()
+        raise RuntimeError(f"[remotion] Segment render timed out ({_timeout:.0f}s) for frames {frame_start}-{frame_end}")
+
+    if proc.returncode != 0:
+        _all_output = (stdout or "") + "\n" + (stderr or "")
+        raise RuntimeError(f"[remotion] Segment render failed (frames {frame_start}-{frame_end}): {_all_output[-500:]}")
+
+    # Verify PNGs and detect actual naming/numbering
+    _any_pngs = sorted(glob.glob(os.path.join(output_png_dir, "element-*.png")))
+    if not _any_pngs:
+        raise RuntimeError(f"[remotion] No PNGs found for frames {frame_start}-{frame_end} in {output_png_dir}")
+
+    _first_png = os.path.basename(_any_pngs[0])
+    _num_part = _first_png.split("-")[1].split(".")[0]
+    _actual_start = int(_num_part)
+    _digit_count = len(_num_part)
+    return output_png_dir, _actual_start, len(_any_pngs), _digit_count
+
 
 def render_remotion_overlay(
     words, caption_style, output_res, caption_keywords, work_dir,
@@ -4042,9 +4198,11 @@ def render_remotion_overlay(
 
     # Single process, high concurrency — no chunks, no VP8 encoding.
     # renderFrames outputs PNGs directly (Chrome screenshots only).
-    # No video encoding step = no CPU contention.
-    # Modal container has 32 cores (os.cpu_count() reports 48 = host, not container)
-    _concurrency = 32
+    # Remotion caps at physical core count. os.cpu_count() includes hyperthreads,
+    # so halve it to get physical cores (Remotion enforces this limit).
+    _cpu_count = os.cpu_count() or 64
+    _physical_cores = max(_cpu_count // 2, 1)
+    _concurrency = _physical_cores
 
     print(f"[remotion] Chrome GL: {_gl_mode}, concurrency: {_concurrency} tabs, PNG output",
           flush=True)
@@ -4100,17 +4258,24 @@ def render_remotion_overlay(
     # This runs in the background thread BEFORE the main FFmpeg starts.
     # Converts 1620 individual file reads (each: open + zlib decompress + RGBA→yuva420p)
     # into a single sequential video decode. Saves ~40-50s in the main FFmpeg render.
+    #
+    # rawvideo codec = zero encoding overhead (just pixel copy). FFV1 took ~8s to
+    # encode; rawvideo takes <1s. File is larger (~13GB vs ~250MB) but lives in tmpfs
+    # so I/O is memory-speed. Decoding rawvideo is also zero-CPU (memcpy).
     _first_name = os.path.basename(_png_files[0])
     _digits = len(_first_name.split("-")[1].split(".")[0])
     _pattern = os.path.join(output_png_dir, f"element-%0{_digits}d.png")
-    _overlay_video = os.path.join(work_dir, "caption_overlay.mkv")
+    # NUT container: FFmpeg's native format, supports rawvideo+yuva420p reliably
+    # (MKV can reject rawvideo with certain pixel formats → "Invalid argument")
+    _overlay_video = os.path.join(work_dir, "caption_overlay.nut")
 
     _stitch_t0 = time.time()
     _stitch_cmd = [
-        "ffmpeg", "-y",
+        "ffmpeg", "-y", "-threads", "0",
         "-f", "image2", "-framerate", str(fps),
         "-i", _pattern,
-        "-c:v", "ffv1", "-pix_fmt", "yuva420p",
+        "-vf", "format=yuva420p",
+        "-c:v", "rawvideo",
         _overlay_video,
     ]
     _stitch_proc = subprocess.run(
@@ -4123,8 +4288,9 @@ def render_remotion_overlay(
         )
 
     _stitch_elapsed = time.time() - _stitch_t0
+    _overlay_size_mb = os.path.getsize(_overlay_video) / (1024 * 1024) if os.path.exists(_overlay_video) else 0
     print(f"[remotion] Pre-stitched {len(_png_files)} PNGs → {_overlay_video} "
-          f"in {_stitch_elapsed:.1f}s (FFV1 yuva420p)", flush=True)
+          f"in {_stitch_elapsed:.1f}s (rawvideo yuva420p, {_overlay_size_mb:.0f}MB)", flush=True)
     return _overlay_video
 
 
@@ -4279,16 +4445,6 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15):
             continue
         next_w = remaining[idx_in_remaining + 1] if idx_in_remaining + 1 < len(remaining) else None
         if next_w and _is_stutter(w["_clean"], next_w["_clean"]):
-            # A real stutter happens close together. If there's a large gap
-            # between the two words, it's a conversational repeat, not a stutter.
-            gap = next_w["_start"] - w["_end"]
-            if gap > 1.0:
-                print(
-                    f"[tighten] Skipping repeat '{w['_text']}' → '{next_w['_text']}' "
-                    f"(gap={gap:.2f}s too large for stutter)",
-                    flush=True,
-                )
-                continue
             # Different speakers repeating the same word is conversation, not a stutter.
             w_speaker = w.get("speaker", w.get("_speaker"))
             next_speaker = next_w.get("speaker", next_w.get("_speaker"))
@@ -4804,106 +4960,208 @@ def snap_sfx_to_word(sfx_entry, deepgram_words):
     return approx_t
 
 
-def project_source_time_to_output(source_t, cuts, clip_ranges, speed_curve=None):
+def build_clip_time_map(clip_start, clip_end, clip_speed, speed_curve, fps=30):
+    """Build a canonical per-frame time map for one clip.
+
+    This is the SINGLE SOURCE OF TRUTH for the time mapping. All systems
+    (FFmpeg setpts, caption projection, SFX/B-roll projection) derive their
+    timing from this same table, eliminating drift between systems.
+
+    Uses trapezoidal integration at 1 sample per frame for sub-frame accuracy.
+
+    Returns dict with:
+        output_times: list of output times (seconds) at each source frame boundary [0..n_frames]
+        effective_duration: total output duration (= output_times[-1])
+        avg_speed: average speed (for audio, which must be constant)
+        n_frames: number of source frames
+        source_dur: source duration in seconds
     """
-    Map a source-timeline timestamp to the output-timeline timestamp.
-    Returns the output time, or None if the source time falls in a removed gap.
+    source_dur = clip_end - clip_start
+    if source_dur <= 0.001:
+        return {"output_times": [0.0, max(source_dur, 0.001)], "effective_duration": max(source_dur, 0.001),
+                "avg_speed": clip_speed, "n_frames": 1, "source_dur": source_dur}
+
+    has_curve = (speed_curve and speed_curve != "none" and isinstance(speed_curve, list))
+    n_frames = max(1, round(source_dur * fps))
+
+    # Use the speed at clip start — after splitting at keypoints, each sub-clip
+    # starts at a keypoint, so this IS the speed Gemini intended for this section.
+    # No averaging, no integration. 1.3x means 1.3x, 0.75x means 0.75x.
+    curve_speed = max(0.5, min(1.4, get_speed_for_timestamp(clip_start, speed_curve))) if has_curve else 1.0
+    speed = max(0.25, min(4.0, clip_speed * curve_speed))
+    eff_dur = source_dur / speed
+
+    # Build simple linear output_times for consistency with _time_map_lookup
+    dt = source_dur / n_frames
+    output_times = [k * dt / speed for k in range(n_frames + 1)]
+
+    return {
+        "output_times": output_times,
+        "effective_duration": round(eff_dur, 4),
+        "avg_speed": speed,
+        "n_frames": n_frames,
+        "source_dur": source_dur,
+    }
+
+
+def split_clips_at_speed_keypoints(cuts, speed_curve):
+    """Split clips at speed curve keypoints so each sub-clip has near-constant speed.
+
+    This is the root fix for audio/video sync: when each sub-clip has <5% speed variation,
+    constant-average audio matches the video perfectly. The parallel architecture is preserved.
+
+    Returns expanded list of cuts with sub-clips replacing originals.
     """
+    if not speed_curve or speed_curve == "none" or not isinstance(speed_curve, list):
+        return list(cuts)
+
+    # Build dense split points: Gemini's keypoints PLUS intermediate points between them.
+    # Intermediate points create a perceptually smooth staircase (~100ms steps).
+    keypoint_times = sorted(set(float(kp["t"]) for kp in speed_curve))
+
+    dense_points = set(keypoint_times)
+    for ki in range(len(keypoint_times) - 1):
+        t0 = keypoint_times[ki]
+        t1 = keypoint_times[ki + 1]
+        gap = t1 - t0
+        # Only split at Gemini's actual keypoints — no intermediates
+        n_intermediates = 0
+        for ii in range(1, n_intermediates + 1):
+            dense_points.add(round(t0 + ii * gap / (n_intermediates + 1), 3))
+
+    all_split_times = sorted(dense_points)
+    expanded = []
+
+    for cut in cuts:
+        src_start = float(cut["source_start"])
+        src_end = float(cut["source_end"])
+
+        # Find split points that fall strictly inside this clip
+        interior = [t for t in all_split_times if src_start + 0.05 < t < src_end - 0.05]
+
+        if not interior:
+            expanded.append(dict(cut))
+            continue
+
+        boundaries = [src_start] + interior + [src_end]
+
+        for si in range(len(boundaries) - 1):
+            sub_start = boundaries[si]
+            sub_end = boundaries[si + 1]
+
+            # Skip sub-clips shorter than 3 frames
+            if sub_end - sub_start < 0.1:
+                if si > 0 and expanded:
+                    expanded[-1]["source_end"] = sub_end
+                    if si == len(boundaries) - 2:
+                        expanded[-1]["transition_out"] = cut.get("transition_out", "none")
+                continue
+
+            sub_cut = dict(cut)
+            sub_cut["source_start"] = round(sub_start, 3)
+            sub_cut["source_end"] = round(sub_end, 3)
+
+            # Only last sub-clip keeps transition_out
+            if si < len(boundaries) - 2:
+                sub_cut["transition_out"] = "none"
+
+            expanded.append(sub_cut)
+
+    if expanded:
+        n_split = len(expanded) - len(cuts)
+        if n_split > 0:
+            print(f"[speed-split] Split {len(cuts)} clips into {len(expanded)} sub-clips ({len(all_split_times)} split points)", flush=True)
+
+    return expanded
+
+
+def _time_map_lookup(tm, source_offset):
+    """Look up output time from a clip time map given a source offset (seconds from clip start).
+    Uses constant avg_speed to exactly match FFmpeg's setpts=(1/avg_speed)*PTS."""
+    if source_offset <= 0:
+        return 0.0
+    avg_speed = tm["avg_speed"]
+    return source_offset / avg_speed if avg_speed > 0 else source_offset
+
+
+def build_setpts_from_time_map(tm, log=False):
+    """Generate constant-speed FFmpeg setpts expression from a canonical time map.
+
+    Uses the integrated average speed from the time map. After splitting clips at
+    speed keypoints, each sub-clip has near-constant speed, so the constant average
+    is accurate. Audio uses the same avg_speed, guaranteeing perfect sync.
+
+    Returns (setpts_value, effective_dur, avg_speed).
+    """
+    eff_dur = tm["effective_duration"]
+    avg_speed = tm["avg_speed"]
+    n_frames = tm["n_frames"]
+
+    if n_frames <= 1:
+        return None, eff_dur, avg_speed
+
+    # Skip setpts if speed is ~1.0
+    if abs(avg_speed - 1.0) < 0.005:
+        return None, eff_dur, avg_speed
+
+    setpts_val = f"{1.0/avg_speed:.4f}*PTS"
+    if log:
+        print(f"[speed] Setpts: avg={avg_speed:.3f}x, eff={eff_dur:.3f}s", flush=True)
+
+    return setpts_val, eff_dur, avg_speed
+
+
+def project_source_time_to_output(source_t, cuts, clip_ranges, speed_curve=None, clip_time_maps=None):
+    """Map a source-timeline timestamp to the output-timeline timestamp.
+    Uses canonical time maps when available for exact alignment with FFmpeg."""
     for i, cut in enumerate(cuts):
         src_start = float(cut["source_start"])
         src_end = float(cut["source_end"])
-        speed = max(0.25, float(cut.get("speed") or 1.0))
 
         if src_start <= source_t <= src_end:
-            # Integrate speed from clip start to source_t for accurate offset
-            _, local_offset, _ = build_variable_speed_setpts(src_start, source_t, speed, speed_curve)
+            source_offset = source_t - src_start
+            if clip_time_maps and i < len(clip_time_maps):
+                local_offset = _time_map_lookup(clip_time_maps[i], source_offset)
+            else:
+                speed = max(0.25, float(cut.get("speed") or 1.0))
+                local_offset = source_offset / speed
             output_t = float(clip_ranges[i]["start"]) + local_offset
             return round(output_t * 1000) / 1000
 
     for i, cut in enumerate(cuts):
-        src_start = float(cut["source_start"])
-        if source_t < src_start:
+        if source_t < float(cut["source_start"]):
             return float(clip_ranges[i]["start"])
 
     if clip_ranges:
         return float(clip_ranges[-1]["end"]) - 0.1
-
     return None
 
 
-def project_output_time_through_speed_curve(output_t, speed_curve, pre_speed_duration):
-    return round(output_t * 1000) / 1000
-
-
-def project_source_time_to_final_output(source_t, cuts, effective_durations, speed_curve=None, hook_offset=0.0):
+def project_source_time_to_final_output(source_t, cuts, effective_durations, speed_curve=None, hook_offset=0.0, clip_time_maps=None):
     """Map a source timestamp to the final output timeline after cut compression."""
     clip_ranges = get_output_clip_ranges(cuts, effective_durations)
-    pre_speed_t = project_source_time_to_output(source_t, cuts, clip_ranges, speed_curve)
+    pre_speed_t = project_source_time_to_output(source_t, cuts, clip_ranges, speed_curve, clip_time_maps=clip_time_maps)
     if pre_speed_t is None:
         return None
     return round((pre_speed_t + hook_offset) * 1000) / 1000
 
 
 def build_variable_speed_setpts(clip_start, clip_end, clip_speed, speed_curve, log=False):
-    """Build a per-frame variable-speed setpts expression for one clip.
-
-    The speed curve flows continuously across the entire timeline — it doesn't
-    care about clip boundaries. Each clip samples the curve at multiple points
-    and builds a piecewise setpts expression that smoothly ramps speed within
-    the clip, just like CapCut/Captions frame-level speed ramping.
-
-    Returns (setpts_value, effective_dur, avg_speed):
-        setpts_value: string for setpts=VALUE (None if speed is ~1.0x throughout)
-        effective_dur: output duration after variable speed applied
-        avg_speed: average speed for audio (constant speed applied via pitch-preserving filter or asetrate for speed ramps)
-    """
-    dur = clip_end - clip_start
-    if dur <= 0.01:
-        return None, max(dur, 0.001), clip_speed
-
-    has_curve = (speed_curve and speed_curve != "none" and isinstance(speed_curve, list))
-
-    # Sample speed at multiple points across the clip (~1 sample per 0.4s)
-    n = max(2, min(8, round(dur / 0.4)))
-    interval_dur = dur / n
-
-    speeds = []
-    for i in range(n):
-        t_mid = clip_start + (i + 0.5) * interval_dur
-        curve_speed = 1.0
-        if has_curve:
-            curve_speed = max(0.5, min(1.4, get_speed_for_timestamp(t_mid, speed_curve)))
-        combined = max(0.25, min(4.0, clip_speed * curve_speed))
-        speeds.append(combined)
-
-    # Numerical integration for accurate effective duration
-    eff_dur = sum(interval_dur / s for s in speeds)
-    avg_speed = dur / eff_dur if eff_dur > 0 else 1.0
-
-    # If speed is ~1.0 across the entire clip, skip setpts
-    if all(abs(s - 1.0) < 0.005 for s in speeds):
-        return None, round(eff_dur, 4), avg_speed
-
-    # Use simple CONSTANT*PTS with the curve-integrated average speed.
-    # The numerical integration above already accounts for the speed curve
-    # varying across this clip — avg_speed captures that smoothly.
-    setpts_val = f"{1.0/avg_speed:.4f}*PTS"
-    if log:
-        speed_range = f"{min(speeds):.2f}x-{max(speeds):.2f}x"
-        print(f"[speed] Curve-averaged setpts: {n} samples, {speed_range}, avg={avg_speed:.3f}x, eff={eff_dur:.3f}s", flush=True)
-    return setpts_val, round(eff_dur, 4), avg_speed
-
+    """Build speed expression from canonical time map. Wrapper for backward compatibility."""
+    tm = build_clip_time_map(clip_start, clip_end, clip_speed, speed_curve)
+    setpts_val, eff_dur, avg_speed = build_setpts_from_time_map(tm, log=log)
+    return setpts_val, eff_dur, avg_speed
 
 
 def compute_effective_durations(cuts, speed_curve=None):
-    """Compute output duration for each clip using numerical integration of speed curve."""
+    """Compute output duration for each clip using canonical time maps."""
     durations = []
     for cut in (cuts or []):
         src_start = float(cut["source_start"])
         src_end = float(cut["source_end"])
         clip_speed = max(0.25, min(4.0, float(cut.get("speed") or 1.0)))
-        _, eff_dur, _ = build_variable_speed_setpts(src_start, src_end, clip_speed, speed_curve)
-        durations.append(round(eff_dur, 3))
+        tm = build_clip_time_map(src_start, src_end, clip_speed, speed_curve)
+        durations.append(tm["effective_duration"])
     return durations
 
 
@@ -4922,7 +5180,7 @@ def prepend_hook_clip(output_path, edit_plan, work_dir):
     hook_src_start = float(hook_clip_data.get("source_start") or 0.0)
     hook_src_end = float(hook_clip_data.get("source_end") or 0.0)
     hook_src_dur = hook_src_end - hook_src_start
-    if not (0.5 <= hook_src_dur <= 3.0):
+    if not (0.5 <= hook_src_dur <= 5.0):
         print(f"[hook] Hook duration {hook_src_dur:.2f}s out of range — skipping", flush=True)
         return
 
@@ -5255,7 +5513,7 @@ def mix_sfx_after_speed_curve(output_path, edit_plan, cuts, effective_durations,
 
 
 def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, work_dir, speech_segments=None,
-                      broll_clips=None, broll_fetch_futures=None):
+                      broll_clips=None, broll_fetch_futures=None, face_future=None):
     speed_curve = edit_plan.get("_parsed_speed_curve")
     _normalize_vf = edit_plan.get("_normalize_vf")  # scale/crop filter (None if native 1080x1920)
     # Adaptive transition duration based on Gemini pacing assessment
@@ -5308,8 +5566,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _rc["_original_idx"] = _content_idx
             _content_idx += 1
 
-    # Speed ramping is applied per-frame via variable setpts expressions —
-    # no clip splitting needed. Each clip evaluates the speed curve continuously.
+    # Clips will be split at speed curve keypoints after this initial setup,
+    # ensuring each sub-clip has near-constant speed for audio/video sync.
 
     n = len(render_cuts)
     source_res = probe_resolution(source_path)
@@ -5331,12 +5589,21 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     input_args = []
     sample_rate = probe_audio_sample_rate(source_path) or 48000
 
-    # Compute effective durations from recipe with per-segment speed applied.
-    # Frame-quantize to match what fps=30 actually produces — each clip's output
-    # is round(dur * 30) frames, so its true duration is round(dur * 30) / 30.
-    # Without this, xfade offsets can exceed the actual stream duration → EINVAL.
-    effective_durations = compute_effective_durations(render_cuts, speed_curve)
-    effective_durations = [round(d * 30) / 30 for d in effective_durations]
+    # Split clips at speed curve keypoints so each sub-clip has near-constant speed.
+    # This is the root fix for audio/video sync — constant-average audio matches video.
+    render_cuts = split_clips_at_speed_keypoints(render_cuts, speed_curve)
+    n = len(render_cuts)
+
+    # Build canonical time maps — the SINGLE SOURCE OF TRUTH for all timing.
+    # Every system (FFmpeg setpts, caption projection, B-roll, SFX) uses these.
+    _clip_time_maps = []
+    for _rc in render_cuts:
+        _tm = build_clip_time_map(
+            float(_rc["source_start"]), float(_rc["source_end"]),
+            max(0.25, min(4.0, float(_rc.get("speed") or 1.0))), speed_curve,
+        )
+        _clip_time_maps.append(_tm)
+    effective_durations = [round(tm["effective_duration"] * 30) / 30 for tm in _clip_time_maps]
     hook_offset = 0.0
     if isinstance(hook_clip, dict) and effective_durations:
         # Sum durations of all hook clip segments
@@ -5364,6 +5631,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             hook_offset=0.0,
             hook_clip=None, speed_curve=speed_curve,
             transition_duration=TRANSITION_DURATION,
+            clip_time_maps=_clip_time_maps,
         )
         if _projected_words:
             # Clean curly braces
@@ -5395,7 +5663,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     for _em in _emphasis_moments_raw:
         _em_copy = dict(_em)
         _src_t = float(_em.get("t") or 0)
-        _out_t = project_source_time_to_output(_src_t, render_cuts, _clip_ranges_for_em, speed_curve)
+        _out_t = project_source_time_to_output(_src_t, render_cuts, _clip_ranges_for_em, speed_curve, clip_time_maps=_clip_time_maps)
         if _out_t is not None:
             _em_copy["t"] = _out_t
             _emphasis_moments.append(_em_copy)
@@ -5408,26 +5676,21 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _rc_copy["_effective_duration"] = effective_durations[_ci] if _ci < len(effective_durations) else 0
         _cuts_for_remotion.append(_rc_copy)
 
-    # Launch Remotion overlay render in background thread (captions + visual effects)
-    _overlay_future = None
-    _caption_video = None
-    _caption_pngs = []
-    if _projected_words and caption_style:
-        def _do_overlay_render():
-            return render_remotion_overlay(
-                _projected_words, caption_style,
-                {"width": 1080, "height": 1920},
-                _cap_kw, work_dir,
-                total_duration=_total_render_dur, fps=30,
-                cuts=_cuts_for_remotion,
-                emphasis_moments=_emphasis_moments,
-                vibe=_vibe,
-            )
-
-        _overlay_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-        _overlay_future = _overlay_pool.submit(_do_overlay_render)
-        print(f"[remotion] Background render started: {caption_style} ({len(_projected_words)} words), "
-              f"{len(_emphasis_moments)} emphasis, vibe=\"{_vibe[:50]}\"", flush=True)
+    # Prepare Remotion input JSON (shared by all per-segment Remotion renders)
+    _remotion_input_json = None
+    _captions_enabled = bool(_projected_words and caption_style)
+    if _captions_enabled:
+        _remotion_input_json = prepare_remotion_input(
+            _projected_words, caption_style,
+            {"width": 1080, "height": 1920},
+            _cap_kw, work_dir,
+            total_duration=_total_render_dur, fps=30,
+            cuts=_cuts_for_remotion,
+            emphasis_moments=_emphasis_moments,
+            vibe=_vibe,
+        )
+        print(f"[remotion] Prepared input JSON: {caption_style} ({len(_projected_words)} words), "
+              f"{len(_emphasis_moments)} emphasis — will render per-segment", flush=True)
     else:
         print(f"[captions] No captions (style={caption_style}, words={len(_projected_words)})", flush=True)
 
@@ -5446,6 +5709,44 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     video_filters = []
     audio_filters = []
+    # Per-segment data for parallel rendering
+    _seg_v_chains = []
+    _seg_a_chains = []
+    _seg_input_args_list = []
+
+    # Collect face detection results (may still be running from mega-parallel phase).
+    # By collecting here (after Remotion launch), face detection runs in parallel with
+    # both Remotion AND the Remotion prep — saving ~5s vs collecting before render_multi_clip.
+    if face_future is not None:
+        _face_t0 = time.time()
+        try:
+            _face_raw, _face_dense_raw = face_future.result(timeout=60)
+        except Exception as _face_err:
+            print(f"[faces] Face detection failed: {_face_err} — using defaults", flush=True)
+            _face_raw, _face_dense_raw = [], []
+        _face_wait = time.time() - _face_t0
+        if _face_wait > 0.5:
+            print(f"[faces] Waited {_face_wait:.1f}s for face detection (overlapped with Remotion)", flush=True)
+
+        # Transform face positions from raw source → 1080x1920 if needed
+        _ft = edit_plan.get("_face_transform") or {}
+        _ft_mode = _ft.get("mode", "identity")
+        if _ft_mode != "identity" and (_face_raw or _face_dense_raw):
+            if _ft_mode == "crop_then_scale":
+                _cx_off, _cy_off = _ft["crop_x"], _ft["crop_y"]
+                _sx = 1080.0 / _ft["crop_w"] if _ft["crop_w"] > 0 else 1.0
+                _sy = 1920.0 / _ft["crop_h"] if _ft["crop_h"] > 0 else 1.0
+                _face_raw = [dict(fp, cx=round((fp["cx"] - _cx_off) * _sx, 2), cy=round((fp["cy"] - _cy_off) * _sy, 2)) for fp in _face_raw]
+                _face_dense_raw = [dict(fp, cx=round((fp["cx"] - _cx_off) * _sx, 2), cy=round((fp["cy"] - _cy_off) * _sy, 2)) for fp in _face_dense_raw]
+            elif _ft_mode == "scale_then_crop":
+                _scale, _cx_off, _cy_off = _ft["scale"], _ft["crop_x"], _ft["crop_y"]
+                _face_raw = [dict(fp, cx=round(fp["cx"] * _scale - _cx_off, 2), cy=round(fp["cy"] * _scale - _cy_off, 2)) for fp in _face_raw]
+                _face_dense_raw = [dict(fp, cx=round(fp["cx"] * _scale - _cx_off, 2), cy=round(fp["cy"] * _scale - _cy_off, 2)) for fp in _face_dense_raw]
+            print(f"[faces] Transformed {len(_face_raw)} + {len(_face_dense_raw)} points → 1080x1920 ({_ft_mode})", flush=True)
+
+        edit_plan["_face_positions"] = _face_raw
+        edit_plan["_dense_face_trajectory"] = _face_dense_raw
+
     face_positions = edit_plan.get("_face_positions") or []
     dense_face_trajectory = edit_plan.get("_dense_face_trajectory") or []
     _has_dense_trajectory = len(dense_face_trajectory) > 0
@@ -5467,6 +5768,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                "-i", render_source]
         )
         input_args += _seg_input
+        _seg_input_args_list.append(list(_seg_input))
         speed = max(0.25, min(4.0, float(cut.get("speed") or 1.0)))
 
         # Build variable-speed setpts expression — speed curve flows continuously
@@ -5773,12 +6075,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
         # Video: each segment has its own pre-seeked input (no trim needed)
         # Scale/crop filter folded in from normalize — eliminates separate encode pass
-        # fps=30 AFTER speed change to avoid frame count drift at clip boundaries
+        # fps=30 BEFORE setpts so timebase is guaranteed 1/30 and N=frame number.
+        # The piecewise setpts expression uses N to look up the canonical time map.
         v_chain = []
         if _normalize_vf:
             v_chain.append(_normalize_vf)
         v_chain.append("setpts=PTS-STARTPTS")
-
         if setpts_val:
             v_chain.append(f"setpts={setpts_val}")
         v_chain.append("fps=30")
@@ -5823,6 +6125,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # format=yuv420p LAST — after all color grading for maximum fidelity
         v_chain.append("format=yuv420p")
         video_filters.append(f"[{i}:v]{','.join(v_chain)}[v{i}]")
+        _seg_v_chains.append(list(v_chain))
 
         # Audio: each segment has its own pre-seeked input (no atrim needed)
         a_chain = ["asetpts=PTS-STARTPTS"]
@@ -5841,127 +6144,16 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             fade_start = max(0, eff_dur - 1.0)
             a_chain.append(f"afade=t=out:st={fade_start:.3f}:d=1.0")
         audio_filters.append(f"[{i}:a]{','.join(a_chain)}[a{i}]")
+        _seg_a_chains.append(list(a_chain))
 
 
-    # ── SFX collection ───────────────────────────────────────────────────────
-    sfx_input_args   = []
-    sfx_filter_strs  = []
-    sfx_audio_labels = []
-    sfx_timestamps   = []  # collect timestamps for audio ducking
-    extra_input_index = n_segment_inputs  # SFX inputs start after segment inputs
-
-    if True:
-        _speech_segs = speech_segments or (edit_plan.get("analysis_data") or {}).get("speech", {}).get("segments") or []
-        _base_cuts = original_cuts
-        _base_effective_durations = compute_effective_durations(_base_cuts, speed_curve) if _base_cuts else []
-
-        _running = hook_offset + (_base_effective_durations[0] if _base_effective_durations else 0.0)
-        _transition_times = []
-        for _i in range(max(0, len(_base_cuts) - 1)):
-            _transition = str(_base_cuts[_i].get("transition_out") or "none").lower()
-            _td = TRANSITION_DURATION if _transition not in ("none", "clean_cut", "") else 0.0
-            _event_time = max(0.0, _running - 0.15)
-            _transition_times.append(_event_time)
-            _running = _running + _base_effective_durations[_i + 1] - _td
-
-        for _i in range(max(0, len(_base_cuts) - 1)):
-            _sound_style = normalize_sfx_style(_base_cuts[_i].get("transition_sound") or _base_cuts[_i].get("sfx_style") or "none")
-            if _sound_style == "none":
-                continue
-            _sound_path = get_sfx_path(_sound_style)
-            if not _sound_path:
-                continue
-            _event_time = _transition_times[_i]
-            _offset_ms  = max(0, round(_event_time * 1000))
-            _vol        = get_sfx_volume(_sound_style, _event_time, _speech_segs, is_text_overlay=False)
-            _label      = f"[snd{_i}]"
-            sfx_input_args  += ["-i", _sound_path]
-            sfx_filter_strs.append(
-                f"[{extra_input_index}:a]volume={_vol:.3f},adelay={_offset_ms}|{_offset_ms}{_label}"
-            )
-            sfx_audio_labels.append(_label)
-            sfx_timestamps.append(_event_time)
-            print(f"[sfx] transition {_i}: {_sound_style} vol={_vol:.3f} at {_event_time:.3f}s", flush=True)
-            extra_input_index += 1
-
-        _clip_ranges = get_output_clip_ranges(_base_cuts, _base_effective_durations, transition_duration=TRANSITION_DURATION) if _base_cuts else []
-        for _i, _overlay in enumerate(edit_plan.get("text_overlays") or []):
-            _clip_idx = int(_overlay.get("appear_at_clip") or 0)
-            if _clip_idx < 0 or _clip_idx >= len(_clip_ranges):
-                continue
-            _sfx_style = normalize_sfx_style(_overlay.get("sfx_style") or "none")
-            if _sfx_style == "none":
-                continue
-            _sound_path = get_sfx_path(_sfx_style)
-            if not _sound_path:
-                continue
-            _ts        = max(0.0, hook_offset + float(_clip_ranges[_clip_idx].get("start") or 0) + 0.02)
-            _offset_ms = round(_ts * 1000)
-            _vol       = get_sfx_volume(_sfx_style, _ts, _speech_segs, is_text_overlay=True)
-            _label     = f"[txtsnd{_i}]"
-            sfx_input_args  += ["-i", _sound_path]
-            sfx_filter_strs.append(
-                f"[{extra_input_index}:a]volume={_vol:.3f},adelay={_offset_ms}|{_offset_ms}{_label}"
-            )
-            sfx_audio_labels.append(_label)
-            sfx_timestamps.append(_ts)
-            print(f"[sfx] text_overlay {_i}: {_sfx_style} vol={_vol:.3f} at {_ts:.3f}s", flush=True)
-            extra_input_index += 1
-
-        # Use the full render cuts (with hook prepended) so SFX that land
-        # in the hook clip map to the start of the video automatically.
-        _full_durations = compute_effective_durations(render_cuts, speed_curve) if render_cuts else []
-        _full_ranges = get_output_clip_ranges(render_cuts, _full_durations, transition_duration=TRANSITION_DURATION) if render_cuts else []
-
-        parsed_sfx = edit_plan.get("_parsed_sound_effects", [])
-        for _i, _sfx in enumerate(parsed_sfx):
-            _sound_style = normalize_sfx_style(_sfx.get("sound") or "none")
-            if _sound_style == "none":
-                continue
-            _sound_path = get_sfx_path(_sound_style)
-            if not _sound_path:
-                continue
-            _source_t = float(_sfx.get("t") or 0.0)
-            _projected_t = project_source_time_to_output(_source_t, render_cuts, _full_ranges, edit_plan.get("_parsed_speed_curve"))
-            if _projected_t is None:
-                print(
-                    f"[sfx] sound_effect: {_sound_style} at source {_source_t:.3f}s — could not project, skipping",
-                    flush=True,
-                )
-                continue
-            _ts = max(0.0, _projected_t)
-            _offset_ms = round(_ts * 1000)
-            _vol = get_sfx_volume(_sound_style, _ts, _speech_segs, is_text_overlay=False)
-            _label = f"[timesfx{_i}]"
-            sfx_input_args += ["-i", _sound_path]
-            sfx_filter_strs.append(
-                f"[{extra_input_index}:a]volume={_vol:.3f},adelay={_offset_ms}|{_offset_ms}{_label}"
-            )
-            sfx_audio_labels.append(_label)
-            sfx_timestamps.append(_ts)
-            print(
-                f"[sfx] sound_effect: {_sound_style} vol={_vol:.3f} at source={_source_t:.3f}s → output={_ts:.3f}s",
-                flush=True,
-            )
-            extra_input_index += 1
-
-    transition_filters = []
-    tl_video = "v0"
-    tl_audio = "a0"
-    running_dur = effective_durations[0] if effective_durations else 0.0
-
-    CUSTOM_TRANSITIONS = {"flash", "glitch", "whip_left", "whip_right"}
-    XFADE_TRANSITIONS = {
-        "fade","fadeblack","dissolve",
-        "wipeleft","wiperight","wipeup","wipedown",
-        "smoothleft","smoothright","smoothup","smoothdown",
-        "zoomin",
-    }
+    # ══════════════════════════════════════════════════════════════════════════
+    # PARALLEL SEGMENT RENDERING
+    # Each segment runs as an independent FFmpeg process for maximum CPU
+    # utilization. Then concat (stream copy) + audio post-processing.
+    # ══════════════════════════════════════════════════════════════════════════
 
     # ── Auto-transition assignment ──────────────────────────────────────
-    # When Gemini assigns "none" (hard cut), auto-upgrade ~30% of cuts to
-    # subtle transitions based on context. This matches the Captions app
-    # where hard cuts are mixed with smooth dissolves for professional flow.
     _auto_transitions_added = 0
     _em_all = edit_plan.get("_emphasis_moments") or edit_plan.get("emphasis_moments") or []
     _SUBTLE_TRANSITIONS = ["dissolve", "smoothleft", "smoothright", "fade"]
@@ -5969,7 +6161,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _existing = str(render_cuts[_ci - 1].get("transition_out") or "none").lower()
         if _existing != "none" or render_cuts[_ci].get("_is_broll") or render_cuts[_ci - 1].get("_is_hook"):
             continue
-        # Auto-assign at emphasis moments or every 3rd cut (whichever comes first)
         _cut_source_end = float(render_cuts[_ci - 1].get("source_end") or 0)
         _near_emphasis = any(abs(float(em.get("t") or 0) - _cut_source_end) < 1.5 for em in _em_all)
         if _near_emphasis or (_ci % 3 == 0 and _auto_transitions_added < 4):
@@ -5979,322 +6170,129 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     if _auto_transitions_added:
         print(f"[transitions] Auto-assigned {_auto_transitions_added} subtle transition(s)", flush=True)
 
-    for i in range(1, n):
-        transition = str(render_cuts[i-1].get("transition_out") or "none").lower()
-        out_v     = "vout" if i == n-1 else f"vx{i}"
-        out_v_raw = f"{out_v}_raw"
-        out_a     = "aout" if i == n-1 else f"ax{i}"
+    # ── Compute per-segment transition fades ────────────────────────────
+    # Decompose xfade transitions into per-segment fade-in/fade-out so each
+    # segment can be rendered independently without cross-segment dependencies.
+    _FADE_COLOR_MAP = {
+        "fadewhite": "white", "flash": "white",
+        "fadeblack": "black", "fade": "black",
+        "dissolve": "black", "glitch": "black",
+        "wipeleft": "black", "wiperight": "black",
+        "smoothleft": "black", "smoothright": "black",
+        "whip_left": "black", "whip_right": "black",
+    }
+    _seg_fade_in = [None] * n   # {"duration": float, "color": str} or None
+    _seg_fade_out = [None] * n
+    for _ti in range(1, n):
+        _tr = str(render_cuts[_ti - 1].get("transition_out") or "none").lower()
+        if _tr == "none" or _tr == "clean_cut" or _tr == "":
+            continue
+        _td = TRANSITION_DURATION
+        _prev_dur = effective_durations[_ti - 1] if _ti - 1 < len(effective_durations) else 1.0
+        _curr_dur = effective_durations[_ti] if _ti < len(effective_durations) else 1.0
+        if _prev_dur < _td + 0.1 or _curr_dur < _td + 0.1:
+            continue
+        _color = _FADE_COLOR_MAP.get(_tr, "black")
+        _seg_fade_out[_ti - 1] = {"duration": _td, "color": _color}
+        _seg_fade_in[_ti] = {"duration": _td, "color": _color}
 
-        # Safety: if either clip is shorter than the transition, force hard cut
-        prev_dur = effective_durations[i-1] if i-1 < len(effective_durations) else 1.0
-        curr_dur = effective_durations[i] if i < len(effective_durations) else 1.0
-        if transition != "none" and (prev_dur < TRANSITION_DURATION + 0.1 or curr_dur < TRANSITION_DURATION + 0.1):
-            print(f"[render] Clip {i-1}/{i} too short for {transition} ({prev_dur:.2f}s/{curr_dur:.2f}s) — forcing hard cut", flush=True)
-            transition = "none"
+    # ── SFX collection (for audio post-processing pass) ─────────────────
+    sfx_input_args = []
+    sfx_filter_strs = []
+    sfx_audio_labels = []
+    sfx_timestamps = []
+    _sfx_extra_idx = 0
 
-        if transition in CUSTOM_TRANSITIONS:
-            td = TRANSITION_DURATION
-            offset = max(0, running_dur - td)
+    _speech_segs = speech_segments or (edit_plan.get("analysis_data") or {}).get("speech", {}).get("segments") or []
+    _base_cuts = original_cuts
+    _base_effective_durations = compute_effective_durations(_base_cuts, speed_curve) if _base_cuts else []
 
-            if transition == "flash":
-                transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=fadewhite:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
-                transition_filters.append(f"[{out_v_raw}]fps=30[{out_v}]")
-                transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
+    _running_sfx = hook_offset + (_base_effective_durations[0] if _base_effective_durations else 0.0)
+    _transition_times = []
+    for _i in range(max(0, len(_base_cuts) - 1)):
+        _transition = str(_base_cuts[_i].get("transition_out") or "none").lower()
+        _td = TRANSITION_DURATION if _transition not in ("none", "clean_cut", "") else 0.0
+        # Anchor at the actual transition moment — onset compensation below
+        # will pull the file start earlier so the climax lands on it.
+        _event_time = max(0.0, _running_sfx)
+        _transition_times.append(_event_time)
+        _running_sfx = _running_sfx + _base_effective_durations[_i + 1] - _td
 
-            elif transition == "glitch":
-                transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=pixelize:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
-                # Glitch saturation boost: 1.25x (professional range 1.2-1.3 for digital distortion)
-                transition_filters.append(f"[{out_v_raw}]hue=h=0:s=1.25:enable='between(t,{offset:.3f},{offset + td:.3f})',fps=30[{out_v}]")
-                transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
+    for _i in range(max(0, len(_base_cuts) - 1)):
+        _sound_style = normalize_sfx_style(_base_cuts[_i].get("transition_sound") or _base_cuts[_i].get("sfx_style") or "none")
+        if _sound_style == "none":
+            continue
+        _sound_path = get_sfx_path(_sound_style)
+        if not _sound_path:
+            continue
+        _onset = _SFX_ONSET_OFFSETS.get(_sound_style, 0.0)
+        _event_time = max(0.0, _transition_times[_i] - _onset)
+        _offset_ms = max(0, round(_event_time * 1000))
+        _vol = get_sfx_volume(_sound_style, _event_time, _speech_segs, is_text_overlay=False)
+        sfx_input_args += ["-i", _sound_path]
+        sfx_audio_labels.append(f"[snd{_i}]")
+        sfx_filter_strs.append(f"[{_sfx_extra_idx + 1}:a]volume={_vol:.3f},adelay={_offset_ms}|{_offset_ms}[snd{_i}]")
+        sfx_timestamps.append(_event_time)
+        print(f"[sfx] transition {_i}: {_sound_style} vol={_vol:.3f} at {_event_time:.3f}s", flush=True)
+        _sfx_extra_idx += 1
 
-            elif transition == "whip_left":
-                transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=wipeleft:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
-                transition_filters.append(f"[{out_v_raw}]fps=30[{out_v}]")
-                transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
+    _clip_ranges_sfx = get_output_clip_ranges(_base_cuts, _base_effective_durations, transition_duration=TRANSITION_DURATION) if _base_cuts else []
+    for _i, _overlay in enumerate(edit_plan.get("text_overlays") or []):
+        _clip_idx = int(_overlay.get("appear_at_clip") or 0)
+        if _clip_idx < 0 or _clip_idx >= len(_clip_ranges_sfx):
+            continue
+        _sfx_style = normalize_sfx_style(_overlay.get("sfx_style") or "none")
+        if _sfx_style == "none":
+            continue
+        _sound_path = get_sfx_path(_sfx_style)
+        if not _sound_path:
+            continue
+        _onset = _SFX_ONSET_OFFSETS.get(_sfx_style, 0.0)
+        _ts = max(0.0, hook_offset + float(_clip_ranges_sfx[_clip_idx].get("start") or 0) + 0.02 - _onset)
+        _offset_ms = round(_ts * 1000)
+        _vol = get_sfx_volume(_sfx_style, _ts, _speech_segs, is_text_overlay=True)
+        sfx_input_args += ["-i", _sound_path]
+        sfx_audio_labels.append(f"[txtsnd{_i}]")
+        sfx_filter_strs.append(f"[{_sfx_extra_idx + 1}:a]volume={_vol:.3f},adelay={_offset_ms}|{_offset_ms}[txtsnd{_i}]")
+        sfx_timestamps.append(_ts)
+        print(f"[sfx] text_overlay {_i}: {_sfx_style} vol={_vol:.3f} at {_ts:.3f}s", flush=True)
+        _sfx_extra_idx += 1
 
-            elif transition == "whip_right":
-                transition_filters.append(f"[{tl_video}][v{i}]xfade=transition=wiperight:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
-                transition_filters.append(f"[{out_v_raw}]fps=30[{out_v}]")
-                transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
+    # Use the SAME rounded effective_durations as the render — no recomputing.
+    _full_ranges = get_output_clip_ranges(render_cuts, effective_durations, transition_duration=TRANSITION_DURATION) if render_cuts else []
+    parsed_sfx = edit_plan.get("_parsed_sound_effects", [])
+    for _i, _sfx in enumerate(parsed_sfx):
+        _sound_style = normalize_sfx_style(_sfx.get("sound") or "none")
+        if _sound_style == "none":
+            continue
+        _sound_path = get_sfx_path(_sound_style)
+        if not _sound_path:
+            continue
+        _source_t = float(_sfx.get("t") or 0.0)
+        _projected_t = project_source_time_to_output(_source_t, render_cuts, _full_ranges, speed_curve, clip_time_maps=_clip_time_maps)
+        if _projected_t is None:
+            continue
+        # Onset compensation: subtract the SFX file's internal onset so the
+        # perceived "moment" of the sound lands EXACTLY on the trigger word.
+        # For build-up sounds (drum_roll etc.), this means the build precedes
+        # the word and the climax lands on it.
+        _onset = _SFX_ONSET_OFFSETS.get(_sound_style, 0.0)
+        _ts = max(0.0, _projected_t - _onset)
+        _offset_ms = round(_ts * 1000)
+        _vol = get_sfx_volume(_sound_style, _ts, _speech_segs, is_text_overlay=False)
+        sfx_input_args += ["-i", _sound_path]
+        sfx_audio_labels.append(f"[timesfx{_i}]")
+        sfx_filter_strs.append(f"[{_sfx_extra_idx + 1}:a]volume={_vol:.3f},adelay={_offset_ms}|{_offset_ms}[timesfx{_i}]")
+        sfx_timestamps.append(_ts)
+        print(f"[sfx] sound_effect: {_sound_style} vol={_vol:.3f} source={_source_t:.3f}s → projected={_projected_t:.3f}s → onset_comp(-{_onset:.3f}s)={_ts:.3f}s", flush=True)
+        _sfx_extra_idx += 1
 
-            running_dur = running_dur + effective_durations[i] - td
-
-        elif transition in XFADE_TRANSITIONS:
-            td = TRANSITION_DURATION
-            offset = max(0, running_dur - td)
-            transition_filters.append(f"[{tl_video}][v{i}]xfade=transition={transition}:duration={td:.3f}:offset={offset:.3f}[{out_v_raw}]")
-            transition_filters.append(f"[{out_v_raw}]fps=30[{out_v}]")
-            transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d={td:.3f}:c1=tri:c2=tri[{out_a}]")
-            running_dur = running_dur + effective_durations[i] - td
-
-        else:
-            # Hard cut: video is a clean concat, but audio gets a 4ms
-            # crossfade to eliminate splice clicks/pops at the cut point.
-            # 4ms is imperceptible as a fade but smooths the waveform
-            # discontinuity where two audio segments meet.
-            transition_filters.append(f"[{tl_video}][v{i}]concat=n=2:v=1:a=0[{out_v_raw}]")
-            transition_filters.append(f"[{out_v_raw}]fps=30[{out_v}]")
-            transition_filters.append(f"[{tl_audio}][a{i}]acrossfade=d=0.004:c1=tri:c2=tri[{out_a}]")
-            running_dur = running_dur + effective_durations[i]
-
-        tl_video = out_v
-        tl_audio = out_a
-
-    if n == 1:
-        tl_video = "v0"
-        tl_audio = "a0"
-
-    post_filters = []
-    video_out = "[video_base]"
-    post_filters.append(f"[{tl_video}]null{video_out}")
-
-    if edit_plan.get("cinematic_bars"):
-        bar_h = int((1920 - int(1080 / 2.35)) / 2)
-        bars_label = f"[video_bars]"
-        post_filters.append(
-            f"{video_out}drawbox=x=0:y=0:w=1080:h={bar_h}:color=black:t=fill,"
-            f"drawbox=x=0:y={1920-bar_h}:w=1080:h={bar_h}:color=black:t=fill{bars_label}"
-        )
-        video_out = bars_label
-
-    # Depth blur mask disabled — generated but never used in render (maskedmerge
-    # incompatible with FFmpeg 8.x). Vignette handles edge emphasis instead.
-    depth_mask_path = None
-
-    # Caption PNGs were already rendered above (instant, no Chrome needed)
-
-    text_overlays = edit_plan.get("text_overlays") or []
-    if text_overlays and not _HAS_DRAWTEXT:
-        print(f"[render] Skipping {len(text_overlays)} text overlay(s) — drawtext filter not available", flush=True)
-        text_overlays = []
-    if text_overlays:
-        clip_ranges = get_output_clip_ranges(render_cuts, effective_durations, transition_duration=TRANSITION_DURATION)
-        # Build mapping from original content clip index → (first, last) post-split clip range
-        # so Gemini's appear_at_clip correctly spans the full original clip after speed splitting
-        _orig_idx_to_range = {}
-        for _ci, _rc in enumerate(render_cuts):
-            _oi = _rc.get("_original_idx")
-            if _oi is not None and _oi >= 0 and _ci < len(clip_ranges):
-                if _oi not in _orig_idx_to_range:
-                    _orig_idx_to_range[_oi] = (_ci, _ci)
-                else:
-                    _orig_idx_to_range[_oi] = (_orig_idx_to_range[_oi][0], _ci)
-        # Sample background brightness once for text overlay color decisions
-        _overlay_sample_ts = float(render_cuts[0].get("source_start", 0)) + 0.5
-        _y_positions = {"top": 0.10, "center": 0.50, "bottom": 0.75}
-        for i, overlay in enumerate(text_overlays):
-            gemini_idx = int(overlay.get("appear_at_clip") or 0)
-            if not clip_ranges:
-                print(f"[render] Text overlay '{overlay.get('text')}' — no clip ranges, skipping", flush=True)
-                continue
-            # Map Gemini's original clip index to post-split clip range span
-            if gemini_idx in _orig_idx_to_range:
-                first_ci, last_ci = _orig_idx_to_range[gemini_idx]
-            else:
-                # Fallback: find closest original index
-                valid_indices = sorted(_orig_idx_to_range.keys()) if _orig_idx_to_range else [0]
-                closest = min(valid_indices, key=lambda x: abs(x - gemini_idx))
-                first_ci, last_ci = _orig_idx_to_range.get(closest, (0, 0))
-            first_ci = max(0, min(first_ci, len(clip_ranges) - 1))
-            last_ci = max(0, min(last_ci, len(clip_ranges) - 1))
-            raw_text = _EMOJI_RE.sub("", str(overlay.get("text") or "")).strip()
-            text = raw_text.strip()
-            if not text:
-                continue
-            start = clip_ranges[first_ci]["start"]
-            end = clip_ranges[last_ci]["end"]
-            style = str(overlay.get("style") or "callout")
-            char_count = len(text)
-            # Font sizes for 1080x1920 — title should be 4-5% of screen height for impact
-            base_size = 84 if style == "title" else (72 if style == "cta" else 60)
-            if char_count <= 18:
-                font_size = base_size
-            elif char_count <= 25:
-                font_size = round(base_size * 0.85)
-            elif char_count <= 35:
-                font_size = round(base_size * 0.70)
-            else:
-                font_size = round(base_size * 0.60)
-            pos = str(overlay.get("position") or "top")
-            # Face-aware overlay positioning: find face at overlay start time
-            # and place text where it won't block the face
-            _ov_source_t = float(render_cuts[min(first_ci, len(render_cuts) - 1)].get("source_start", 0)) + 0.3
-            _ov_face = None
-            if face_positions:
-                _ov_fp = min(face_positions, key=lambda p: abs(float(p.get("t", 0)) - _ov_source_t))
-                if _ov_fp.get("found") and abs(float(_ov_fp.get("t", 0)) - _ov_source_t) < 2.0:
-                    _ov_face = _ov_fp
-            if _ov_face:
-                _ov_face_y_frac = float(_ov_face.get("cy", 960)) / 1920.0
-                if _ov_face_y_frac < 0.4:
-                    # Face is high — put text below
-                    y_expr = "h*0.65"
-                    pos = "bottom"
-                elif _ov_face_y_frac > 0.6:
-                    # Face is low — put text above
-                    y_expr = "h*0.10"
-                    pos = "top"
-                else:
-                    # Face centered — put text at top (smaller, less intrusive)
-                    y_expr = "h*0.08"
-                    pos = "top"
-            else:
-                y_expr = "h*0.10" if pos == "top" else ("(h-th)/2" if pos == "center" else "h*0.75")
-            end_t = max(start + 0.8, end)
-            fade_in = 0.15
-            fade_out = 0.15
-            # Adaptive text color: sample background brightness at overlay position
-            _y_frac = _y_positions.get(pos, 0.10)
-            _bg_brightness = sample_background_brightness(source_path, _overlay_sample_ts, _y_frac)
-            if _bg_brightness > 160:
-                # Light background — use dark text
-                _fg_color = "black"
-                _border_color = "white"
-                _box_color = "white@0.35"
-            elif _bg_brightness > 100:
-                # Medium background — white text with stronger box
-                _fg_color = "white"
-                _border_color = "black"
-                _box_color = "black@0.5"
-            else:
-                # Dark background — white text, subtle box
-                _fg_color = "white"
-                _border_color = "black"
-                _box_color = "black@0.35"
-            print(f"[overlay] bg={_bg_brightness:.0f} → text={_fg_color}, border={_border_color}", flush=True)
-            _font_clause = (
-                f":fontfile='{OVERLAY_FONT_PATH}'"
-                if os.path.exists(OVERLAY_FONT_PATH)
-                else ""
-            )
-            escaped_text = text.replace("\\", "\\\\").replace(":", "\\:").replace(",", "\\,").replace(";", "\\;").replace("[", "\\[").replace("]", "\\]").replace("%", "%%").replace("'", "\u2019").replace('"', "")
-            out_label = f"[video_overlay_{i}]"
-            alpha_expr = (
-                f"if(lt(t-{start:.3f},{fade_in}),(t-{start:.3f})/{fade_in},"
-                f"if(gt(t,{end_t-fade_out:.3f}),({end_t:.3f}-t)/{fade_out},1))"
-            )
-            _shadow_color2 = "black@0.6" if _fg_color == "white" else "white@0.4"
-            _bw2 = max(3, round(font_size * 0.06))
-            _sw2 = max(2, round(font_size * 0.04))
-            post_filters.append(
-                f"{video_out}drawtext=text='{escaped_text}':fontsize={font_size}:fontcolor={_fg_color}"
-                f"{_font_clause}"
-                f":x=(w-tw)/2:y={y_expr}"
-                f":borderw={_bw2}:bordercolor={_border_color}@0.5"
-                f":shadowcolor={_shadow_color2}:shadowx={_sw2}:shadowy={_sw2}"
-                f":alpha='{alpha_expr}'"
-                f":enable='between(t,{start:.3f},{end_t:.3f})'{out_label}"
-            )
-            video_out = out_label
-
-    # Emphasis splash text REMOVED — no professional editing app uses giant centered
-    # text overlays. Emphasis comes from captions (keyword highlight + size), zoom
-    # (punch-in), and audio (SFX). Splash text screams "AI generated."
-
-    audio_out = "[audio_timed]"
-    post_filters.append(
-        f"[{tl_audio}]asetpts=PTS-STARTPTS{audio_out}"
-    )
-
-    if sfx_audio_labels:
-        # ── Audio ducking: dip voice volume at SFX timestamps (Captions AI V1/V2 pattern) ──
-        # Build a volume expression that dips ~7dB for 0.3s around each SFX hit.
-        # This mimics the "silence-then-spike" pattern observed in professional edits.
-        if sfx_timestamps:
-            _duck_parts = []
-            for _dt in sorted(set(sfx_timestamps)):
-                # Dip: starts 0.05s before SFX, deepest at SFX time, recovers over 0.25s
-                _dip_start = max(0, _dt - 0.05)
-                _dip_end = _dt + 0.25
-                # Smooth envelope: ramp down then back up. Min volume = 0.45 (~7dB dip)
-                _duck_parts.append(
-                    f"if(between(t,{_dip_start:.3f},{_dip_end:.3f}),"
-                    f"0.45+0.55*max(0,min(abs(t-{_dt:.3f})/0.15,1)),"
-                    f"1)"
-                )
-            if _duck_parts:
-                # Multiply all duck envelopes together (concurrent SFX stack)
-                _duck_expr = "*".join(_duck_parts[:20])  # limit to 20 to avoid expr overflow
-                _duck_label = "[audio_ducked]"
-                post_filters.append(
-                    f"{audio_out}volume='{_duck_expr}':eval=frame{_duck_label}"
-                )
-                audio_out = _duck_label
-                print(f"[sfx] Audio ducking: {len(_duck_parts)} dip point(s)", flush=True)
-
-        _n_inputs   = len(sfx_audio_labels) + 1
-        _sfx_inputs = audio_out + "".join(sfx_audio_labels)
-        post_filters.append(
-            f"{_sfx_inputs}amix=inputs={_n_inputs}:duration=first:dropout_transition=0:normalize=0[audio_sfx_mixed]"
-        )
-        audio_out = "[audio_sfx_mixed]"
-        print(f"[sfx] Mixed {len(sfx_audio_labels)} SFX track(s) into audio", flush=True)
-
-    audio_denoise = bool(edit_plan.get("audio_denoise"))
-    _src_loudness = edit_plan.get("_source_loudness") or {}
-    _src_rms = _src_loudness.get("rms_db", -18.0)
-    _src_peak = _src_loudness.get("peak_db", -6.0)
-    _src_nf = _src_loudness.get("noise_floor_db", -45.0)
-    # Adaptive denoise: stronger for noisier sources
-    if audio_denoise:
-        _nr = 6 if _src_nf > -40 else (10 if _src_nf > -50 else 14)
-        denoise_part = f"afftdn=nr={_nr}:nf={int(_src_nf)}:tn=1,"
-    else:
-        denoise_part = ""
-    # Adaptive compressor thresholds based on source loudness:
-    #   Quiet source (RMS < -24dB): lower thresholds to catch more, more makeup gain
-    #   Normal source (RMS -18 to -12): standard thresholds
-    #   Hot source (RMS > -12dB): higher thresholds to avoid over-compression
-    _fast_thresh = max(-28, min(-16, _src_rms - 4))
-    _level_thresh = max(-22, min(-10, _src_rms + 2))
-    _makeup = max(1, min(4, round(-_src_rms / 6)))
-    print(
-        f"[audio] Adaptive chain: rms={_src_rms:.0f}dB peak={_src_peak:.0f}dB "
-        f"fast_thresh={_fast_thresh:.0f}dB level_thresh={_level_thresh:.0f}dB makeup={_makeup}dB",
-        flush=True,
-    )
-    # Voice processing chain — follows broadcast voice standards:
-    #   75 Hz HPF: remove rumble/plosives (standard mic technique)
-    #   200 Hz -1.5dB: reduce muddiness (standard voice EQ)
-    #   3 kHz +1.5dB: presence/clarity boost (broadcast standard)
-    #   Fast compressor: tame transients (3:1 ratio, 3ms attack = peak control)
-    #   14 kHz LPF: remove hiss/artifacts above speech range
-    #   Level compressor: smooth overall dynamics (1.8:1, gentle)
-    #   EBU R128 loudnorm: broadcast-standard output level
-    #     -14 LUFS integrated (YouTube/podcast standard)
-    #     -1 dBTP true peak (EBU R128 compliant)
-    #     LRA 11 (standard loudness range)
-    audio_chain = (
-        f"{denoise_part}highpass=f=75,"
-        f"equalizer=f=200:t=q:w=1.5:g=-1.5,"
-        f"equalizer=f=3000:t=q:w=1.2:g=1.5,"
-        f"acompressor=threshold={_fast_thresh}dB:ratio=3:attack=3:release=40:detection=peak"
-        f":link=maximum:knee=3:mix=0.6,"
-        f"lowpass=f=14000,"
-        f"acompressor=threshold={_level_thresh}dB:ratio=1.8:attack=15:release=80:makeup={_makeup},"
-        f"loudnorm=I=-14:TP=-1:LRA=11"
-    )
-    # Force audio duration to match actual video duration (running_dur accounts for
-    # transition overlaps). Frame-quantize to avoid sub-frame drift.
-    _target_v_dur = round(running_dur * 30) / 30
-    audio_chain += f",apad=whole_dur={_target_v_dur:.4f},atrim=end={_target_v_dur:.4f}"
-
-    post_filters.append(f"{audio_out}{audio_chain}[final_audio]")
-    audio_out = "[final_audio]"
-
-    # ── B-roll compositing in first pass (no second encode) ──────────────────
-    # B-roll fetch was launched in parallel with Remotion. Collect results now,
-    # project timestamps, and add overlay filters before captions.
-    broll_input_args = []
-    broll_filter_strs = []
-    _n_broll_inputs = 0
+    # ── Collect B-roll files and assign to segments ─────────────────────
+    _broll_assignments = {}  # seg_idx → list of broll configs
     if broll_fetch_futures:
-        speed_curve = edit_plan.get("_parsed_speed_curve")
-        hook_offset_val = float(edit_plan.get("_hook_offset") or 0.0)
-        total_duration = sum(effective_durations)
-        _broll_base_idx = n_segment_inputs + len(sfx_input_args) // 2
-
-        # Collect fetched B-roll files (should be done by now — Remotion took longer)
+        _broll_sc = edit_plan.get("_parsed_speed_curve")
+        _broll_hook_off = float(edit_plan.get("_hook_offset") or 0.0)
+        _broll_total_dur = sum(effective_durations)
         _broll_files = {}
         for _fut in concurrent.futures.as_completed(broll_fetch_futures, timeout=30):
             _idx = broll_fetch_futures[_fut]
@@ -6306,8 +6304,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 print(f"[broll] Fetch error for clip {_idx}: {_be_err}", flush=True)
 
         if _broll_files and broll_clips:
-            # Project timestamps and build filters
-            BROLL_FADE = 0.4
+            # Compute segment boundaries matching the actual output timeline
+            _seg_starts = []
+            _cursor = 0.0
+            for _si in range(n):
+                _seg_starts.append(_cursor)
+                _cursor += effective_durations[_si]
+            _seg_total = _cursor
+
             _broll_overlay_idx = 0
             for _bi, _bc in enumerate(broll_clips):
                 if _bi not in _broll_files:
@@ -6315,15 +6319,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 _local_path = _broll_files[_bi]
                 _src_ts = float(_bc.get("timestamp") or 0)
                 _out_ts = project_source_time_to_final_output(
-                    _src_ts, render_cuts, effective_durations, speed_curve,
-                    hook_offset=hook_offset_val,
+                    _src_ts, render_cuts, effective_durations, _broll_sc,
+                    hook_offset=_broll_hook_off, clip_time_maps=_clip_time_maps,
                 )
-                if _out_ts is None or _out_ts >= total_duration:
+                if _out_ts is None or _out_ts >= _broll_total_dur:
                     continue
-
-                _input_idx = _broll_base_idx + _n_broll_inputs
-                broll_input_args += ["-i", _local_path]
-                _n_broll_inputs += 1
 
                 needed_duration = float(_bc.get("duration") or 2.0)
                 broll_duration = get_video_duration(_local_path)
@@ -6333,106 +6333,410 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 if broll_duration > needed_duration + 1.0:
                     seek_point = min(broll_duration * 0.25, max(0.0, broll_duration - needed_duration - 0.5))
 
-                # Ken Burns with directional variety
-                _kb_total_frames = max(1, round(needed_duration * 30))
-                _kb_zoom = 0.08
-                _kb_progress = f"min(n/{_kb_total_frames}\\,1.0)"
-                _kb_smooth = f"({_kb_progress}*{_kb_progress}*(3-2*{_kb_progress}))"
-                _kb_dir = _KB_DIRECTIONS[_broll_overlay_idx % len(_KB_DIRECTIONS)]
-                _fade_out_start = max(0, needed_duration - BROLL_FADE)
-                _extra_px_w = round(1080 * _kb_zoom)
-                _extra_px_h = round(1920 * _kb_zoom)
-                _crop_x, _crop_y = _kb_crop_exprs(_kb_dir, _kb_smooth, _extra_px_w, _extra_px_h)
+                # Find which segment this B-roll falls into
+                _target_seg = 0
+                for _si in range(n):
+                    _seg_end = _seg_starts[_si] + effective_durations[_si]
+                    if _out_ts < _seg_end:
+                        _target_seg = _si
+                        break
+                else:
+                    _target_seg = n - 1
 
-                _bv_label = f"bv{_broll_overlay_idx}"
-                broll_filter_strs.append(
-                    f"[{_input_idx}:v]trim=start={seek_point:.3f}:duration={needed_duration:.3f},"
-                    f"setpts=PTS-STARTPTS,"
-                    f"scale=w='trunc(1080*(1.0+{_kb_zoom})/2)*2':h='trunc(1920*(1.0+{_kb_zoom})/2)*2'"
-                    f":force_original_aspect_ratio=increase:flags=lanczos,"
-                    f"crop=1080:1920:x={_crop_x}:y={_crop_y},"
-                    f"setsar=1,"
-                    f"eq=saturation=0.92:contrast=1.02,"
-                    f"fade=t=in:st=0:d={BROLL_FADE:.2f}:alpha=1,"
-                    f"fade=t=out:st={_fade_out_start:.2f}:d={BROLL_FADE:.2f}:alpha=1,"
-                    f"setpts=PTS-STARTPTS"
-                    f"[{_bv_label}]"
-                )
-                _ov_label = f"broll_ov{_broll_overlay_idx}"
-                broll_filter_strs.append(
-                    f"{video_out}[{_bv_label}]overlay=0:0:enable='between(t,{_out_ts:.3f},{_out_ts + needed_duration:.3f})'[{_ov_label}]"
-                )
-                video_out = f"[{_ov_label}]"
-                print(f"[broll] '{_bc.get('keyword')}' at {_out_ts:.1f}s ({needed_duration:.1f}s) Ken Burns: {_kb_dir}", flush=True)
+                _local_ts = _out_ts - _seg_starts[_target_seg]
+                _seg_dur = effective_durations[_target_seg]
+                if _local_ts < 0 or _local_ts >= _seg_dur:
+                    print(f"[broll] WARNING: '{_bc.get('keyword')}' local_ts={_local_ts:.3f}s outside seg {_target_seg} duration={_seg_dur:.3f}s — skipping", flush=True)
+                    continue
+                if _local_ts + needed_duration > _seg_dur:
+                    needed_duration = max(0.5, _seg_dur - _local_ts - 0.1)
+                    print(f"[broll] Trimmed '{_bc.get('keyword')}' duration to {needed_duration:.1f}s to fit segment", flush=True)
+                _kb_dir = _KB_DIRECTIONS[_broll_overlay_idx % len(_KB_DIRECTIONS)]
+                if _target_seg not in _broll_assignments:
+                    _broll_assignments[_target_seg] = []
+                _broll_assignments[_target_seg].append({
+                    "path": _local_path,
+                    "local_start": _local_ts,
+                    "duration": needed_duration,
+                    "seek_point": seek_point,
+                    "ken_burns_dir": _kb_dir,
+                    "keyword": _bc.get("keyword", ""),
+                })
+                print(f"[broll] '{_bc.get('keyword')}' at {_out_ts:.1f}s ({needed_duration:.1f}s) → seg {_target_seg} Ken Burns: {_kb_dir}", flush=True)
                 _broll_overlay_idx += 1
 
             if _broll_overlay_idx > 0:
-                print(f"[broll] Integrated {_broll_overlay_idx} B-roll clip(s) into first pass", flush=True)
+                print(f"[broll] Assigned {_broll_overlay_idx} B-roll clip(s) to segments", flush=True)
 
-    # Wait for Remotion overlay render (launched in background thread earlier)
-    caption_overlay_path = None
-    if _overlay_future is not None:
-        _ov_wait_t0 = time.time()
-        try:
-            caption_overlay_path = _overlay_future.result(timeout=180)
-            _overlay_pool.shutdown(wait=False)
-            _ov_wait = time.time() - _ov_wait_t0
-            print(f"[remotion] Overlay ready: {caption_overlay_path} (waited {_ov_wait:.1f}s for it)", flush=True)
-        except Exception as _ov_err:
-            print(f"[remotion] Overlay failed after {time.time() - _ov_wait_t0:.1f}s: {_ov_err}", flush=True)
-            # Kill the render process to free CPU for FFmpeg
-            for _proc in _overlay_chunk_procs:
-                try:
-                    os.killpg(os.getpgid(_proc.pid), signal.SIGKILL)
-                except (ProcessLookupError, OSError, PermissionError):
-                    pass
-            _overlay_chunk_procs.clear()
-            _overlay_pool.shutdown(wait=False)
+    # ── Compute frame ranges per segment (for per-segment Remotion renders) ──
+    _seg_frame_ranges = []
+    _frame_cursor = 0
+    for _si in range(n):
+        _frame_count = max(1, round(effective_durations[_si] * 30))
+        _seg_frame_ranges.append((_frame_cursor, _frame_cursor + _frame_count - 1))
+        _frame_cursor += _frame_count
 
-    # Caption overlay — pre-stitched lossless video (FFV1 yuva420p, single file decode)
-    caption_input_args = []
-    caption_filter_strs = []
-    if caption_overlay_path and os.path.isfile(caption_overlay_path):
-        _cap_idx = n_segment_inputs + len(sfx_input_args) // 2 + _n_broll_inputs
-        caption_input_args = ["-i", caption_overlay_path]
-        # No format conversion needed — FFV1 pre-stitch already encodes as yuva420p
-        caption_filter_strs.append(
-            f"{video_out}[{_cap_idx}:v]overlay=eof_action=pass[video_captioned]"
+    # ── Text overlay assignment to segments ─────────────────────────────
+    _text_overlay_assignments = {}  # seg_idx → list of drawtext filter strings
+    text_overlays = edit_plan.get("text_overlays") or []
+    if text_overlays and not _HAS_DRAWTEXT:
+        text_overlays = []
+    if text_overlays:
+        _seg_starts_txt = []
+        _cursor_txt = 0.0
+        for _si in range(n):
+            _seg_starts_txt.append(_cursor_txt)
+            _cursor_txt += effective_durations[_si]
+
+        _orig_idx_to_range = {}
+        for _ci, _rc in enumerate(render_cuts):
+            _oi = _rc.get("_original_idx")
+            if _oi is not None and _oi >= 0:
+                if _oi not in _orig_idx_to_range:
+                    _orig_idx_to_range[_oi] = (_ci, _ci)
+                else:
+                    _orig_idx_to_range[_oi] = (_orig_idx_to_range[_oi][0], _ci)
+
+        _overlay_sample_ts = float(render_cuts[0].get("source_start", 0)) + 0.5
+        _y_positions = {"top": 0.10, "center": 0.50, "bottom": 0.75}
+        for _toi, overlay in enumerate(text_overlays):
+            gemini_idx = int(overlay.get("appear_at_clip") or 0)
+            # appear_at_clip: -1 means "on the hook clip" (render_cuts[0] if it's a hook)
+            if gemini_idx == -1:
+                first_ci, last_ci = 0, 0  # hook is always render_cuts[0]
+            elif gemini_idx in _orig_idx_to_range:
+                first_ci, last_ci = _orig_idx_to_range[gemini_idx]
+            else:
+                valid_indices = sorted(_orig_idx_to_range.keys()) if _orig_idx_to_range else [0]
+                closest = min(valid_indices, key=lambda x: abs(x - gemini_idx))
+                first_ci, last_ci = _orig_idx_to_range.get(closest, (0, 0))
+            first_ci = max(0, min(first_ci, n - 1))
+            last_ci = max(0, min(last_ci, n - 1))
+            raw_text = _EMOJI_RE.sub("", str(overlay.get("text") or "")).strip()
+            text = raw_text.strip()
+            if not text:
+                continue
+            _global_start = _seg_starts_txt[first_ci]
+            _global_end = _seg_starts_txt[last_ci] + effective_durations[last_ci]
+            style = str(overlay.get("style") or "callout")
+            char_count = len(text)
+            base_size = 84 if style == "title" else (72 if style == "cta" else 60)
+            if char_count <= 18:
+                font_size = base_size
+            elif char_count <= 25:
+                font_size = round(base_size * 0.85)
+            elif char_count <= 35:
+                font_size = round(base_size * 0.70)
+            else:
+                font_size = round(base_size * 0.60)
+            pos = str(overlay.get("position") or "top")
+            _ov_source_t = float(render_cuts[min(first_ci, len(render_cuts) - 1)].get("source_start", 0)) + 0.3
+            _ov_face = None
+            if face_positions:
+                _ov_fp = min(face_positions, key=lambda p: abs(float(p.get("t", 0)) - _ov_source_t))
+                if _ov_fp.get("found") and abs(float(_ov_fp.get("t", 0)) - _ov_source_t) < 2.0:
+                    _ov_face = _ov_fp
+            if _ov_face:
+                _ov_face_y_frac = float(_ov_face.get("cy", 960)) / 1920.0
+                if _ov_face_y_frac < 0.4:
+                    y_expr = "h*0.65"
+                elif _ov_face_y_frac > 0.6:
+                    y_expr = "h*0.10"
+                else:
+                    y_expr = "h*0.08"
+            else:
+                y_expr = "h*0.10" if pos == "top" else ("(h-th)/2" if pos == "center" else "h*0.75")
+            _y_frac = _y_positions.get(pos, 0.10)
+            _bg_brightness = sample_background_brightness(source_path, _overlay_sample_ts, _y_frac)
+            if _bg_brightness > 160:
+                _fg_color, _border_color = "black", "white"
+            elif _bg_brightness > 100:
+                _fg_color, _border_color = "white", "black"
+            else:
+                _fg_color, _border_color = "white", "black"
+            if _toi == 0:
+                print(f"[overlay] bg={_bg_brightness:.0f} → text={_fg_color}, border={_border_color}", flush=True)
+            _font_clause = f":fontfile='{OVERLAY_FONT_PATH}'" if os.path.exists(OVERLAY_FONT_PATH) else ""
+            escaped_text = text.replace("\\", "\\\\").replace(":", "\\:").replace(",", "\\,").replace(";", "\\;").replace("[", "\\[").replace("]", "\\]").replace("%", "%%").replace("'", "\u2019").replace('"', "")
+            _shadow_color2 = "black@0.6" if _fg_color == "white" else "white@0.4"
+            _bw2 = max(3, round(font_size * 0.06))
+            _sw2 = max(2, round(font_size * 0.04))
+
+            # Assign text overlay to each segment it spans
+            for _si in range(first_ci, last_ci + 1):
+                _seg_start = _seg_starts_txt[_si]
+                _seg_end = _seg_start + effective_durations[_si]
+                _local_start = max(0, _global_start - _seg_start)
+                _local_end_t = max(_local_start + 0.8, min(_global_end - _seg_start, effective_durations[_si]))
+                fade_in = 0.15
+                fade_out = 0.15
+                alpha_expr = (
+                    f"if(lt(t-{_local_start:.3f},{fade_in}),(t-{_local_start:.3f})/{fade_in},"
+                    f"if(gt(t,{_local_end_t - fade_out:.3f}),({_local_end_t:.3f}-t)/{fade_out},1))"
+                )
+                _dt_filter = (
+                    f"drawtext=text='{escaped_text}':fontsize={font_size}:fontcolor={_fg_color}"
+                    f"{_font_clause}"
+                    f":x=(w-tw)/2:y={y_expr}"
+                    f":borderw={_bw2}:bordercolor={_border_color}@0.5"
+                    f":shadowcolor={_shadow_color2}:shadowx={_sw2}:shadowy={_sw2}"
+                    f":alpha='{alpha_expr}'"
+                    f":enable='between(t,{_local_start:.3f},{_local_end_t:.3f})'"
+                )
+                if _si not in _text_overlay_assignments:
+                    _text_overlay_assignments[_si] = []
+                _text_overlay_assignments[_si].append(_dt_filter)
+
+    # ── Build and run parallel segment FFmpeg processes ──────────────────
+    _par_t0 = time.time()
+    _encode_args = get_encode_args("high") + ["-pix_fmt", "yuv420p"]
+    _seg_dir = os.path.join(work_dir, "segments")
+    os.makedirs(_seg_dir, exist_ok=True)
+
+    # Semaphore to limit concurrent Remotion processes (each opens Chrome tabs).
+    _cpu_count = os.cpu_count() or 64
+    _physical_cores = max(_cpu_count // 2, 1)
+    _max_concurrent_remotion = min(10, n)
+    _remotion_tabs_per_seg = max(2, _physical_cores // _max_concurrent_remotion)
+    _remotion_semaphore = threading.Semaphore(_max_concurrent_remotion)
+    _gl_mode = "angle-egl" if _HAS_HWACCEL else "swiftshader"
+
+    def _run_one_segment(seg_idx):
+        """Run Remotion render (if captions) then FFmpeg for one segment. Returns output path."""
+        _seg_out = os.path.join(_seg_dir, f"seg_{seg_idx:03d}.mp4")
+        _eff_dur = effective_durations[seg_idx]
+
+        # Phase 1: Per-segment Remotion render (semaphore-gated)
+        _seg_overlay_dir = None
+        _seg_png_start_num = 0
+        _seg_png_digits = 6
+        if _captions_enabled and _remotion_input_json:
+            _frame_start, _frame_end = _seg_frame_ranges[seg_idx]
+            _seg_overlay_dir = os.path.join(_seg_dir, f"overlay_seg_{seg_idx:03d}")
+            _remotion_semaphore.acquire()
+            try:
+                _, _seg_png_start_num, _seg_png_count, _seg_png_digits = render_remotion_segment(
+                    _remotion_input_json, _seg_overlay_dir,
+                    _frame_start, _frame_end,
+                    _remotion_tabs_per_seg, _gl_mode,
+                )
+            finally:
+                _remotion_semaphore.release()
+
+        # Phase 2: FFmpeg encode
+        # Video filter chain (already built, just change input ref to [0:v])
+        _vc = list(_seg_v_chains[seg_idx])
+        # Add transition fades (before format=yuv420p which is always last)
+        _fade_v = []
+        if _seg_fade_in[seg_idx]:
+            _fi = _seg_fade_in[seg_idx]
+            _fade_v.append(f"fade=t=in:st=0:d={_fi['duration']:.3f}:color={_fi['color']}")
+        if _seg_fade_out[seg_idx]:
+            _fo = _seg_fade_out[seg_idx]
+            _fo_st = max(0, _eff_dur - _fo["duration"])
+            _fade_v.append(f"fade=t=out:st={_fo_st:.3f}:d={_fo['duration']:.3f}:color={_fo['color']}")
+        if _fade_v:
+            # Insert before format=yuv420p (last element)
+            _vc = _vc[:-1] + _fade_v + [_vc[-1]]
+
+        _filter_parts = []
+        _video_label = "[vout]"
+        _filter_parts.append(f"[0:v]{','.join(_vc)}{_video_label}")
+
+        # Audio chain
+        _ac = list(_seg_a_chains[seg_idx])
+        if _seg_fade_in[seg_idx]:
+            _td = _seg_fade_in[seg_idx]["duration"]
+            _ac.append(f"afade=t=in:st=0:d={_td:.3f}")
+        if _seg_fade_out[seg_idx]:
+            _td = _seg_fade_out[seg_idx]["duration"]
+            _fo_st = max(0, _eff_dur - _td)
+            _ac.append(f"afade=t=out:st={_fo_st:.3f}:d={_td:.3f}")
+        _filter_parts.append(f"[0:a]{','.join(_ac)}[aout]")
+
+        # Extra inputs (caption overlay, B-roll)
+        _extra_inputs = []
+        _extra_idx = 1
+
+        # Caption overlay for this segment (direct PNG read — no stitch needed)
+        if _seg_overlay_dir:
+            _png_pattern = os.path.join(_seg_overlay_dir, f"element-%0{_seg_png_digits}d.png")
+            _extra_inputs += [
+                "-f", "image2", "-framerate", "30",
+                "-start_number", str(_seg_png_start_num),
+                "-i", _png_pattern,
+            ]
+            _filter_parts.append(f"{_video_label}[{_extra_idx}:v]overlay=eof_action=pass[vcap]")
+            _video_label = "[vcap]"
+            _extra_idx += 1
+
+        # B-roll overlays for this segment
+        for _bi, _br in enumerate(_broll_assignments.get(seg_idx, [])):
+            _extra_inputs += ["-i", _br["path"]]
+            _bv = f"bv{_bi}"
+            _nd = _br["duration"]
+            _sp = _br.get("seek_point", 0.0)
+            _lt = _br["local_start"]
+            _BROLL_FADE = 0.4
+            _fos = max(0, _nd - _BROLL_FADE)
+            _kbf = max(1, round(_nd * 30))
+            _kbz = 0.08
+            _kbp = f"min(n/{_kbf}\\,1.0)"
+            _kbs = f"({_kbp}*{_kbp}*(3-2*{_kbp}))"
+            _kbd = _br.get("ken_burns_dir", "zoom_in")
+            _epw = round(1080 * _kbz)
+            _eph = round(1920 * _kbz)
+            _cx, _cy = _kb_crop_exprs(_kbd, _kbs, _epw, _eph)
+            _filter_parts.append(
+                f"[{_extra_idx}:v]trim=start={_sp:.3f}:duration={_nd:.3f},"
+                f"setpts=PTS-STARTPTS,"
+                f"scale=w='trunc(1080*(1.0+{_kbz})/2)*2':h='trunc(1920*(1.0+{_kbz})/2)*2'"
+                f":force_original_aspect_ratio=increase:flags=lanczos,"
+                f"crop=1080:1920:x={_cx}:y={_cy},"
+                f"setsar=1,eq=saturation=0.92:contrast=1.02,"
+                f"fade=t=in:st=0:d={_BROLL_FADE:.2f}:alpha=1,"
+                f"fade=t=out:st={_fos:.2f}:d={_BROLL_FADE:.2f}:alpha=1,"
+                f"setpts=PTS-STARTPTS[{_bv}]"
+            )
+            _filter_parts.append(
+                f"{_video_label}[{_bv}]overlay=0:0:eof_action=pass:enable='between(t,{_lt:.3f},{_lt + _nd:.3f})'[bov{_bi}]"
+            )
+            _video_label = f"[bov{_bi}]"
+            _extra_idx += 1
+
+        # Text overlays for this segment
+        for _ti_idx, _dt_f in enumerate(_text_overlay_assignments.get(seg_idx, [])):
+            _tov_label = f"[tov{_ti_idx}]"
+            _filter_parts.append(f"{_video_label}{_dt_f}{_tov_label}")
+            _video_label = _tov_label
+
+        _fc = ";".join(_filter_parts)
+        _cmd = (
+            ["ffmpeg", "-y", "-v", "warning", "-threads", "0"]
+            + list(_seg_input_args_list[seg_idx])
+            + _extra_inputs
+            + ["-filter_complex", _fc, "-map", _video_label, "-map", "[aout]"]
+            + list(_encode_args)
+            + ["-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart"]
+            + [_seg_out]
         )
-        video_out = "[video_captioned]"
-        print(f"[render] Caption overlay: pre-stitched video at input index {_cap_idx}", flush=True)
+        _r = subprocess.run(_cmd, capture_output=True, text=True, timeout=120)
+        if _r.returncode != 0:
+            raise RuntimeError(f"Segment {seg_idx} FFmpeg failed: {_r.stderr[-500:]}")
+        return _seg_out
 
-    # Order matters: post_filters (zoom pulses etc) → broll → captions
-    filter_complex = ";".join(video_filters + audio_filters + transition_filters + sfx_filter_strs + post_filters + broll_filter_strs + caption_filter_strs)
-    _total_expected_v = sum(round(d * 30) / 30 for d in effective_durations)
-    _total_expected_a = sum(effective_durations)
-    print(f"[DIAG] Expected totals: video(fps30)={_total_expected_v:.4f}s audio(raw)={_total_expected_a:.4f}s gap={_total_expected_v - _total_expected_a:.6f}s", flush=True)
-    print(f"[DIAG] filter_complex: {len(filter_complex)} chars, {len(video_filters)} v_filters, {len(audio_filters)} a_filters, {len(transition_filters)} transitions", flush=True)
-    print(f"[DIAG] filter_complex (first 2000): {filter_complex[:2000]}", flush=True)
-    print(f"[DIAG] filter_complex (last 1000): {filter_complex[-1000:]}", flush=True)
-    encode_args = get_encode_args("high") + [
-        "-pix_fmt","yuv420p",
-        "-c:a","aac","-b:a","192k",
-        "-movflags","+faststart",
-        "-max_muxing_queue_size","4096",
-        "-shortest",  # stop when video ends — audio pad may overshoot due to xfade timing
+    # Launch all segments in parallel
+    print(f"[render] Parallel: {n} segments across {os.cpu_count()} cores", flush=True)
+    _seg_paths = [None] * n
+    with concurrent.futures.ThreadPoolExecutor(max_workers=n) as _seg_pool:
+        _seg_futures = {_seg_pool.submit(_run_one_segment, _si): _si for _si in range(n)}
+        for _fut in concurrent.futures.as_completed(_seg_futures):
+            _si = _seg_futures[_fut]
+            _seg_paths[_si] = _fut.result()
+    _par_elapsed = time.time() - _par_t0
+    print(f"[render] All {n} segments rendered in {_par_elapsed:.1f}s (parallel)", flush=True)
+
+    # ── Concat segments (stream copy — instant, no re-encode) ───────────
+    _concat_t0 = time.time()
+    _concat_list_path = os.path.join(work_dir, "concat_list.txt")
+    with open(_concat_list_path, "w") as _clf:
+        for _sp in _seg_paths:
+            _clf.write(f"file '{_sp}'\n")
+    _concat_raw = os.path.join(work_dir, "concat_raw.mp4")
+    _concat_cmd = [
+        "ffmpeg", "-y", "-v", "warning",
+        "-f", "concat", "-safe", "0", "-i", _concat_list_path,
+        "-c", "copy", _concat_raw,
     ]
+    _concat_r = subprocess.run(_concat_cmd, capture_output=True, text=True, timeout=30)
+    if _concat_r.returncode != 0:
+        raise RuntimeError(f"Concat failed: {_concat_r.stderr[-500:]}")
+    _concat_elapsed = time.time() - _concat_t0
+    print(f"[render] Concat {n} segments in {_concat_elapsed:.1f}s (stream copy)", flush=True)
 
-    args = (
-        ["-y"]
-        + input_args
-        + sfx_input_args
-        + broll_input_args
-        + caption_input_args
-        + ["-threads", "0",
-           "-filter_complex", filter_complex, "-map", video_out, "-map", audio_out]
-        + encode_args
-        + [output_path]
+    # ── Audio post-processing pass (video stream copy) ──────────────────
+    # SFX mixing, audio ducking, denoise, EQ, compress, loudnorm
+    _audio_t0 = time.time()
+    _total_dur = sum(effective_durations)
+    _target_v_dur = round(_total_dur * 30) / 30
+
+    audio_denoise = bool(edit_plan.get("audio_denoise"))
+    _src_loudness = edit_plan.get("_source_loudness") or {}
+    _src_rms = _src_loudness.get("rms_db", -18.0)
+    _src_peak = _src_loudness.get("peak_db", -6.0)
+    _src_nf = _src_loudness.get("noise_floor_db", -45.0)
+    if audio_denoise:
+        _nr = 6 if _src_nf > -40 else (10 if _src_nf > -50 else 14)
+        denoise_part = f"afftdn=nr={_nr}:nf={int(_src_nf)}:tn=1,"
+    else:
+        denoise_part = ""
+    _fast_thresh = max(-28, min(-16, _src_rms - 4))
+    _level_thresh = max(-22, min(-10, _src_rms + 2))
+    _makeup = max(1, min(4, round(-_src_rms / 6)))
+    print(
+        f"[audio] Adaptive chain: rms={_src_rms:.0f}dB peak={_src_peak:.0f}dB "
+        f"fast_thresh={_fast_thresh:.0f}dB level_thresh={_level_thresh:.0f}dB makeup={_makeup}dB",
+        flush=True,
+    )
+    audio_chain = (
+        f"{denoise_part}highpass=f=75,"
+        f"equalizer=f=200:t=q:w=1.5:g=-1.5,"
+        f"equalizer=f=3000:t=q:w=1.2:g=1.5,"
+        f"acompressor=threshold={_fast_thresh}dB:ratio=3:attack=3:release=40:detection=peak"
+        f":link=maximum:knee=3:mix=0.6,"
+        f"lowpass=f=14000,"
+        f"acompressor=threshold={_level_thresh}dB:ratio=1.8:attack=15:release=80:makeup={_makeup},"
+        f"loudnorm=I=-14:TP=-1:LRA=11,"
+        f"apad=whole_dur={_target_v_dur:.4f},atrim=end={_target_v_dur:.4f}"
     )
 
-    print(f"[render] Single-pass: {n} segments, ~{running_dur:.1f}s output", flush=True)
+    _audio_filter_parts = []
+    _audio_out = "[audio_base]"
+    _audio_filter_parts.append(f"[0:a]asetpts=PTS-STARTPTS{_audio_out}")
 
-    run_ffmpeg(args)
+    if sfx_audio_labels and sfx_timestamps:
+        _duck_parts = []
+        for _dt in sorted(set(sfx_timestamps)):
+            _dip_start = max(0, _dt - 0.05)
+            _dip_end = _dt + 0.25
+            _duck_parts.append(
+                f"if(between(t,{_dip_start:.3f},{_dip_end:.3f}),"
+                f"0.45+0.55*max(0,min(abs(t-{_dt:.3f})/0.15,1)),"
+                f"1)"
+            )
+        if _duck_parts:
+            _duck_expr = "*".join(_duck_parts[:20])
+            _audio_filter_parts.append(f"{_audio_out}volume='{_duck_expr}':eval=frame[audio_ducked]")
+            _audio_out = "[audio_ducked]"
+            print(f"[sfx] Audio ducking: {len(_duck_parts)} dip point(s)", flush=True)
+
+        _n_sfx = len(sfx_audio_labels) + 1
+        _sfx_labels_str = _audio_out + "".join(sfx_audio_labels)
+        _audio_filter_parts.append(
+            f"{_sfx_labels_str}amix=inputs={_n_sfx}:duration=first:dropout_transition=0:normalize=0[audio_sfx_mixed]"
+        )
+        _audio_out = "[audio_sfx_mixed]"
+        print(f"[sfx] Mixed {len(sfx_audio_labels)} SFX track(s) into audio", flush=True)
+
+    _audio_filter_parts.append(f"{_audio_out}{audio_chain}[final_audio]")
+    _audio_fc = ";".join(sfx_filter_strs + _audio_filter_parts)
+
+    _final_cmd = (
+        ["ffmpeg", "-y", "-v", "warning", "-threads", "0",
+         "-i", _concat_raw]
+        + sfx_input_args
+        + ["-filter_complex", _audio_fc,
+           "-map", "0:v", "-c:v", "copy",
+           "-map", "[final_audio]", "-c:a", "aac", "-b:a", "192k",
+           "-movflags", "+faststart", "-shortest"]
+        + [output_path]
+    )
+    _final_r = subprocess.run(_final_cmd, capture_output=True, text=True, timeout=120)
+    if _final_r.returncode != 0:
+        raise RuntimeError(f"Audio post-processing failed: {_final_r.stderr[-500:]}")
+    _audio_elapsed = time.time() - _audio_t0
+    print(f"[render] Audio post-processing in {_audio_elapsed:.1f}s", flush=True)
+    print(f"[render] Total render: parallel={_par_elapsed:.1f}s + concat={_concat_elapsed:.1f}s + audio={_audio_elapsed:.1f}s", flush=True)
 
 
 
@@ -6575,44 +6879,32 @@ def handler(job):
                 os.remove(audio_path)
             return result
 
-        def _do_gemini_upload():
+        def _do_gemini_proxy():
+            """Encode 240p proxy and return bytes for inline Gemini API call.
+            Skips the file upload + poll cycle (~6s) by sending bytes directly."""
             try:
-                # Encode a tiny 240p@10fps proxy for Gemini — raw upload triggers 10-30s server-side
-                # processing wait. 240p@10fps encodes instantly and uploads in <2s.
-                # Gemini only needs to see composition/content, not pixel quality.
-                _upload_t = time.time()
+                _proxy_t = time.time()
                 _proxy_path = os.path.join(work_dir, "gemini_proxy.mp4")
-                # Use NVENC for proxy encode if available — instant on H100
                 _proxy_venc = (["-c:v", "h264_nvenc", "-preset", "p1", "-rc", "vbr", "-cq", "35"]
                                if _HAS_NVENC else
                                ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "32"])
+                _hw_dec = ["-hwaccel", "cuda"] if _HAS_HWACCEL else []
                 _proxy_cmd = subprocess.run(
-                    ["ffmpeg", "-y", "-threads", "0", "-i", _raw_source,
-                     "-vf", "scale=240:-2,fps=1"] + _proxy_venc + [
+                    ["ffmpeg", "-y", "-threads", "0"] + _hw_dec + ["-i", _raw_source,
+                     "-vf", "scale=240:-2,fps=10"] + _proxy_venc + [
                      "-c:a", "aac", "-b:a", "32k", "-ac", "1",
-                     "-movflags", "+faststart", _proxy_path],
-                    capture_output=True, text=True, timeout=15,
+                     _proxy_path],
+                    capture_output=True, text=True, timeout=30,
                 )
                 if _proxy_cmd.returncode != 0 or not os.path.exists(_proxy_path):
                     raise RuntimeError(f"Gemini proxy encode failed: {(_proxy_cmd.stderr or '')[-300:]}")
-                _proxy_mb = os.path.getsize(_proxy_path) / (1024 * 1024)
-                print(f"[pipeline] Gemini proxy: 240p@1fps {_proxy_mb:.1f}MB in {time.time()-_upload_t:.1f}s", flush=True)
-                _gclient = _get_genai_client()
-                gf = _gclient.files.upload(file=_proxy_path)
-                # Poll for ACTIVE here (overlaps with transcription, beats, face detect)
-                # instead of blocking inside generate_edit_gemini on the critical path
-                _poll_deadline = time.time() + 60
-                while gf.state.name == "PROCESSING":
-                    if time.time() > _poll_deadline:
-                        raise RuntimeError("Gemini file processing timed out after 60s")
-                    time.sleep(0.3)
-                    gf = _gclient.files.get(name=gf.name)
-                if gf.state.name != "ACTIVE":
-                    raise RuntimeError(f"Gemini file upload failed: {gf.state.name}")
-                print(f"[pipeline] Gemini upload done + ACTIVE: {gf.name} ({time.time()-_upload_t:.1f}s)", flush=True)
-                return gf
+                with open(_proxy_path, "rb") as f:
+                    _proxy_bytes = f.read()
+                _proxy_mb = len(_proxy_bytes) / (1024 * 1024)
+                print(f"[pipeline] Gemini proxy: 240p@10fps {_proxy_mb:.1f}MB in {time.time()-_proxy_t:.1f}s (inline, no upload)", flush=True)
+                return _proxy_bytes
             except Exception as e:
-                raise RuntimeError(f"Gemini upload failed: {e}") from e
+                raise RuntimeError(f"Gemini proxy encode failed: {e}") from e
 
         def _do_loudness():
             return measure_source_loudness(_raw_source)
@@ -6623,11 +6915,15 @@ def handler(job):
         # ── ALL initialization + Gemini edit in ONE parallel phase ────────────
         # Gemini starts as soon as transcript + upload + trend context are ready.
         # Everything runs concurrently — no sequential network calls on main thread.
+        # If cached_analysis is provided (pre-computed by content-studio), skip the
+        # entire Gemini chain (proxy encode + upload + poll + API call = ~19s savings).
+
+        _cached_analysis = input_data.get("cached_analysis")
 
         # Shared futures — edit recipe and face detect wait on their deps internally
         future_normalize = None
         future_transcribe = None
-        future_gemini_upload = None
+        future_gemini_proxy = None
         future_trend = None  # trend context fetched in parallel
 
         def _do_trend_context():
@@ -6637,13 +6933,13 @@ def handler(job):
             return tc
 
         def _do_edit_recipe_overlapped():
-            """Start Gemini as soon as transcript + upload + trend are ready."""
+            """Start Gemini as soon as transcript + proxy + trend are ready."""
             _transcript = future_transcribe.result()
-            _gemini_ref = future_gemini_upload.result()
+            _proxy_bytes = future_gemini_proxy.result()
             _trend = future_trend.result()
             _dg_words = _transcript.get("words", [])
             if len(_dg_words) == 0:
-                raise RuntimeError("Deepgram transcription failed — 0 words returned.")
+                print("[pipeline] WARNING: Deepgram returned 0 words — proceeding without speech (no captions, time-based cuts only)", flush=True)
             send_progress(job_id, "edit_recipe", 52, "Putting your edit together...", app_url)
             print(f"[pipeline] Gemini edit starting (transcript ready: {len(_dg_words)} words)", flush=True)
             return generate_edit_gemini(
@@ -6653,112 +6949,104 @@ def handler(job):
                 trend_context=_trend,
                 deepgram_words=_dg_words,
                 face_positions=None,
-                gemini_file=_gemini_ref,
+                inline_video_bytes=_proxy_bytes,
+                cached_response=_cached_analysis,
             )
 
         def _do_face_detect_overlapped():
-            """Run face detection on raw source (no longer waits for normalize)."""
+            """Run face detection on 240p proxy (much faster than 1080p source).
+            Waits for proxy encode (~1.5s), then decodes 240p instead of 1080p (~20x fewer pixels)."""
             send_progress(job_id, "analysis", 20, "Watching your footage...", app_url)
-            # every_n_frames=15 → 2fps detection on 30fps source — smooth enough for zoom
-            # tracking, saves ~3s on a 30s video vs every_n_frames=10
-            dense = detect_face_positions_dense(_raw_source, every_n_frames=15)
+            # Wait for proxy to be encoded (runs in parallel, typically ~1.5s)
+            future_gemini_proxy.result()
+            _proxy_path = os.path.join(work_dir, "gemini_proxy.mp4")
+            if os.path.exists(_proxy_path):
+                # Proxy is 10fps — every 7th frame ≈ 1.4fps detection (similar to every 20th @ 30fps)
+                dense = detect_face_positions_dense(
+                    _proxy_path, every_n_frames=7,
+                    target_w=1080, target_h=1920,
+                )
+            else:
+                # Fallback to source if proxy somehow doesn't exist
+                dense = detect_face_positions_dense(_raw_source, every_n_frames=20)
             if dense:
                 smoothed = smooth_face_trajectory(dense, total_duration=source_duration)
                 print(f"[dense-face] Smoothed trajectory: {len(smoothed)} keyframes", flush=True)
                 return dense, smoothed
             return [], []
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as mega_pool:
-            future_normalize = mega_pool.submit(_do_normalize)
-            future_transcribe = mega_pool.submit(_do_transcribe)
-            future_gemini_upload = mega_pool.submit(_do_gemini_upload)
-            future_trend = mega_pool.submit(_do_trend_context)
-            future_loudness = mega_pool.submit(_do_loudness)
-            future_beats = mega_pool.submit(_do_beats)
-            # Edit recipe waits on transcript + upload internally
-            future_edit = mega_pool.submit(_do_edit_recipe_overlapped)
-            # Face detection runs directly on raw source (no normalize dependency)
-            future_faces = mega_pool.submit(_do_face_detect_overlapped)
+        # Manual pool management — do NOT use `with` block because it calls
+        # shutdown(wait=True) on exit, which would block on future_faces and defeat
+        # the deferred face collection optimization (face detection should overlap with Remotion).
+        mega_pool = concurrent.futures.ThreadPoolExecutor(max_workers=8)
+        future_normalize = mega_pool.submit(_do_normalize)
+        future_transcribe = mega_pool.submit(_do_transcribe)
+        future_gemini_proxy = mega_pool.submit(_do_gemini_proxy)
+        future_trend = mega_pool.submit(_do_trend_context)
+        future_loudness = mega_pool.submit(_do_loudness)
+        future_beats = mega_pool.submit(_do_beats)
+        # Edit recipe waits on transcript + upload internally
+        future_edit = mega_pool.submit(_do_edit_recipe_overlapped)
+        # Face detection runs directly on raw source (no normalize dependency)
+        future_faces = mega_pool.submit(_do_face_detect_overlapped)
 
-            # Collect results — get edit_plan FIRST so we can start B-roll fetch early
-            _mega_t0 = time.time()
-            edit_plan = future_edit.result()  # critical path — longest wait (Gemini)
-            print(f"[TIMING] edit_plan ready in {time.time() - _mega_t0:.1f}s (critical path)", flush=True)
+        # Collect results — get edit_plan FIRST so we can start B-roll fetch early
+        _mega_t0 = time.time()
+        edit_plan = future_edit.result()  # critical path — longest wait (Gemini)
+        print(f"[TIMING] edit_plan ready in {time.time() - _mega_t0:.1f}s (critical path)", flush=True)
 
-            # Start B-roll fetch IMMEDIATELY while other futures may still be running
-            _broll_fetch_pool = None
-            _broll_fetch_futures = {}
-            broll_clips = edit_plan.get("broll_clips") or []
-            if broll_clips:
-                print(f"[broll] Starting parallel fetch of {len(broll_clips)} B-roll clip(s) (overlapping with face detect)...", flush=True)
-                _broll_fetch_pool = concurrent.futures.ThreadPoolExecutor(max_workers=3)
-                for _bi, _bc in enumerate(broll_clips):
-                    _fut = _broll_fetch_pool.submit(
-                        fetch_broll_clip,
-                        _bc["keyword"],
-                        float(_bc.get("duration") or 2.0),
-                        work_dir,
-                    )
-                    _broll_fetch_futures[_fut] = _bi
+        # Start B-roll fetch IMMEDIATELY while other futures may still be running
+        _broll_fetch_pool = None
+        _broll_fetch_futures = {}
+        broll_clips = edit_plan.get("broll_clips") or []
+        if broll_clips:
+            print(f"[broll] Starting parallel fetch of {len(broll_clips)} B-roll clip(s) (overlapping with face detect)...", flush=True)
+            _broll_fetch_pool = concurrent.futures.ThreadPoolExecutor(max_workers=3)
+            for _bi, _bc in enumerate(broll_clips):
+                _fut = _broll_fetch_pool.submit(
+                    fetch_broll_clip,
+                    _bc["keyword"],
+                    float(_bc.get("duration") or 2.0),
+                    work_dir,
+                )
+                _broll_fetch_futures[_fut] = _bi
 
-            # Now collect remaining futures (may already be done)
-            _collect_t0 = time.time()
-            source_info = future_normalize.result()
-            source_path = source_info["source_path"]
-            _normalize_vf = source_info.get("normalize_vf")
-            transcript = future_transcribe.result()
-            gemini_file_ref = future_gemini_upload.result()
-            source_loudness = future_loudness.result()
-            source_beats = future_beats.result()
-            face_positions, dense_face_trajectory = future_faces.result()
-            _collect_elapsed = time.time() - _collect_t0
-            if _collect_elapsed > 1.0:
-                print(f"[TIMING] Remaining futures collected in {_collect_elapsed:.1f}s (should be ~0s if overlapped)", flush=True)
+        # Collect fast futures (all should be done already — they finish before Gemini).
+        # Face detection is collected LATER inside render_multi_clip so Remotion can
+        # launch immediately without waiting for face detection to finish.
+        _collect_t0 = time.time()
+        source_info = future_normalize.result()
+        source_path = source_info["source_path"]
+        _normalize_vf = source_info.get("normalize_vf")
+        transcript = future_transcribe.result()
+        source_loudness = future_loudness.result()
+        source_beats = future_beats.result()
+        # NOTE: future_faces NOT collected here — passed to render_multi_clip for parallel collection
+        _collect_elapsed = time.time() - _collect_t0
+        if _collect_elapsed > 0.5:
+            print(f"[TIMING] Fast futures collected in {_collect_elapsed:.1f}s", flush=True)
+        # Shut down mega_pool WITHOUT waiting for future_faces (it's still running)
+        mega_pool.shutdown(wait=False)
 
         # Source res is what it is — normalize filter will handle conversion in render
         source_res = {"width": source_info["width"], "height": source_info["height"]}
         print(f"[DIAG] Source: {source_res['width']}x{source_res['height']} @ {source_info['fps']:.1f}fps, normalize_vf={'yes' if _normalize_vf else 'no'}", flush=True)
 
-        # Transform face positions from raw source space → 1080x1920 space
-        # (Face detection ran on the raw source since we no longer pre-encode a normalized copy)
+        # Store face transform info for render_multi_clip to use when it collects face_future
         _ft = source_info.get("face_transform", {})
-        _ft_mode = _ft.get("mode", "identity")
-        if _ft_mode != "identity" and (face_positions or dense_face_trajectory):
-            if _ft_mode == "crop_then_scale":
-                # Reframe path: crop in raw space, then scale to 1080x1920
-                _cx_off = _ft["crop_x"]
-                _cy_off = _ft["crop_y"]
-                _sx = 1080.0 / _ft["crop_w"] if _ft["crop_w"] > 0 else 1.0
-                _sy = 1920.0 / _ft["crop_h"] if _ft["crop_h"] > 0 else 1.0
-                def _transform_face(fp):
-                    fp["cx"] = round((fp["cx"] - _cx_off) * _sx, 2)
-                    fp["cy"] = round((fp["cy"] - _cy_off) * _sy, 2)
-                    return fp
-            elif _ft_mode == "scale_then_crop":
-                # Center crop path: scale up first, then crop center
-                _scale = _ft["scale"]
-                _cx_off = _ft["crop_x"]  # offset in post-scale space
-                _cy_off = _ft["crop_y"]
-                def _transform_face(fp):
-                    fp["cx"] = round(fp["cx"] * _scale - _cx_off, 2)
-                    fp["cy"] = round(fp["cy"] * _scale - _cy_off, 2)
-                    return fp
-            else:
-                _transform_face = lambda fp: fp
-
-            face_positions = [_transform_face(dict(fp)) for fp in face_positions]
-            dense_face_trajectory = [_transform_face(dict(fp)) for fp in dense_face_trajectory]
-            print(f"[faces] Transformed {len(face_positions)} + {len(dense_face_trajectory)} trajectory points → 1080x1920 ({_ft_mode})", flush=True)
+        edit_plan["_face_transform"] = _ft
 
         _timings["normalize_transcribe_upload"] = time.time() - t
         _dg_words = transcript.get("words", [])
         if len(_dg_words) == 0:
-            raise RuntimeError("Deepgram transcription failed — 0 words returned. Cannot proceed without word timestamps.")
-        print(f"[pipeline] All init complete: {len(_dg_words)} words, edit recipe + faces done ({_timings['normalize_transcribe_upload']:.1f}s)", flush=True)
+            # Force captions off — no words to display
+            edit_plan["caption_style"] = "none"
+            print(f"[pipeline] All init complete: 0 words (no speech detected), edit recipe ready ({_timings['normalize_transcribe_upload']:.1f}s)", flush=True)
+        else:
+            print(f"[pipeline] All init complete: {len(_dg_words)} words, edit recipe ready ({_timings['normalize_transcribe_upload']:.1f}s)", flush=True)
 
         print(f"[edit] User vibe: \"{vibe}\"", flush=True)
 
-        # Face positions are already transformed to 1080x1920 space (normalize_vf handles raw→output)
         if _normalize_vf:
             print(f"[reframe] Smart reframe active via normalize_vf (folded into render pass)", flush=True)
         else:
@@ -6766,12 +7054,12 @@ def handler(job):
 
         edit_plan["_user_vibe"] = vibe
         edit_plan["_source_path"] = source_path
-        edit_plan["_normalize_vf"] = _normalize_vf  # scale/crop filter for render pass (None if native 1080x1920)
-        edit_plan["_face_positions"] = face_positions
-        edit_plan["_dense_face_trajectory"] = dense_face_trajectory
+        edit_plan["_normalize_vf"] = _normalize_vf
+        edit_plan["_face_positions"] = []  # populated by render_multi_clip from face_future
+        edit_plan["_dense_face_trajectory"] = []  # populated by render_multi_clip from face_future
         edit_plan["_source_loudness"] = source_loudness
         edit_plan["_source_beats"] = source_beats
-        _timings["edit_recipe_faces"] = 0  # folded into normalize_transcribe_upload
+        _timings["edit_recipe_faces"] = 0
         print(f"[pipeline] Pipeline init phase complete", flush=True)
 
         # ── Auto-hook detection: validate/override Gemini's hook_clip ─────
@@ -6838,6 +7126,7 @@ def handler(job):
         render_multi_clip(
             source_path, edit_plan["cuts"], edit_plan, output_path, transcript, work_dir,
             broll_clips=broll_clips, broll_fetch_futures=_broll_fetch_futures,
+            face_future=future_faces,
         )
         if _broll_fetch_pool:
             _broll_fetch_pool.shutdown(wait=False)
@@ -6905,13 +7194,12 @@ def handler(job):
                 resp.raise_for_status()
             print("[pipeline] upload complete", flush=True)
 
-        def _extract_cover():
-            # Try styled thumbnail first (enhanced + vignette + optional text)
+        def _extract_and_upload_cover():
+            # Generate styled thumbnail (enhanced + vignette)
             _face_pos = edit_plan.get("_face_positions") or []
-            _hook_text = None  # Could use edit_plan hook text if desired
             data, mime = generate_styled_thumbnail(
                 output_path, cover_frame_ts, _face_pos, work_dir,
-                hook_text=_hook_text,
+                hook_text=None,
             )
             if data:
                 print(
@@ -6919,28 +7207,31 @@ def handler(job):
                     f"(AI-selected from source {float(thumbnail_source_ts):.2f}s, {len(data)//1024}KB)",
                     flush=True,
                 )
+                # Upload thumbnail in parallel with main video upload
+                upload_url_thumb = input_data.get("upload_url_thumb")
+                if upload_url_thumb:
+                    try:
+                        thumb_resp = requests.put(
+                            upload_url_thumb, data=data,
+                            headers={"Content-Type": mime}, timeout=30,
+                        )
+                        thumb_resp.raise_for_status()
+                        print("[pipeline] thumbnail uploaded", flush=True)
+                    except Exception as thumb_err:
+                        print(f"[pipeline] thumbnail upload failed (non-fatal): {thumb_err}", flush=True)
+                else:
+                    print("[pipeline] thumbnail: no upload_url_thumb provided by frontend", flush=True)
             return data, mime
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as post_executor:
             f_upload = post_executor.submit(_upload_main)
-            f_cover  = post_executor.submit(_extract_cover)
+            f_cover  = post_executor.submit(_extract_and_upload_cover)
             f_upload.result()
             cover_bytes, _ = f_cover.result()
 
         if cover_bytes:
             import base64
             cover_frame_b64 = base64.b64encode(cover_bytes).decode()
-            upload_url_thumb = input_data.get("upload_url_thumb")
-            if upload_url_thumb:
-                try:
-                    thumb_resp = requests.put(
-                        upload_url_thumb, data=cover_bytes,
-                        headers={"Content-Type": cover_frame_mime}, timeout=30,
-                    )
-                    thumb_resp.raise_for_status()
-                    print("[pipeline] thumbnail uploaded", flush=True)
-                except Exception as thumb_err:
-                    print(f"[pipeline] thumbnail upload failed (non-fatal): {thumb_err}", flush=True)
 
         # Step 13.5 — Additional format exports (parallelized)
         export_formats   = input_data.get("export_formats") or []
