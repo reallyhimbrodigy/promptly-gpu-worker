@@ -5699,58 +5699,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             "freeze_frame": False,
             "_is_hook": True,
         }] + render_cuts
-
-        # ROOT FIX: hook range exclusivity. Any main-timeline cut that
-        # overlaps [_hook_start, _hook_end] would cause those source seconds
-        # to play TWICE in the final video — once in the hook teaser, once
-        # in the main timeline — and produce duplicate captions. We split
-        # or trim those cuts here so the hook range exists in exactly ONE
-        # cut (the hook itself).
-        _hook_range_start = _hook_start
-        _hook_range_end = _hook_end
-        _resolved = [render_cuts[0]]  # keep the hook cut itself
-        for _rc in render_cuts[1:]:
-            _cs = float(_rc.get("source_start") or 0.0)
-            _ce = float(_rc.get("source_end") or 0.0)
-            # Case 1: no overlap
-            if _ce <= _hook_range_start or _cs >= _hook_range_end:
-                _resolved.append(_rc)
-                continue
-            # Case 2: cut entirely inside hook range — drop it
-            if _cs >= _hook_range_start and _ce <= _hook_range_end:
-                print(f"[hook] Dropped main cut {_cs:.3f}-{_ce:.3f} (fully inside hook range)", flush=True)
-                continue
-            # Case 3: cut spans the hook range — split into two
-            if _cs < _hook_range_start and _ce > _hook_range_end:
-                _left = dict(_rc)
-                _left["source_end"] = round(_hook_range_start * 1000) / 1000
-                _right = dict(_rc)
-                _right["source_start"] = round(_hook_range_end * 1000) / 1000
-                # Only the second half keeps any transition_out
-                _left["transition_out"] = "none"
-                if _left["source_end"] - _left["source_start"] >= 0.1:
-                    _resolved.append(_left)
-                if _right["source_end"] - _right["source_start"] >= 0.1:
-                    _resolved.append(_right)
-                print(f"[hook] Split main cut {_cs:.3f}-{_ce:.3f} around hook range", flush=True)
-                continue
-            # Case 4: cut overlaps left edge of hook → trim end
-            if _cs < _hook_range_start <= _ce <= _hook_range_end:
-                _trimmed = dict(_rc)
-                _trimmed["source_end"] = round(_hook_range_start * 1000) / 1000
-                if _trimmed["source_end"] - _trimmed["source_start"] >= 0.1:
-                    _resolved.append(_trimmed)
-                    print(f"[hook] Trimmed main cut end {_ce:.3f}→{_hook_range_start:.3f} (hook overlap)", flush=True)
-                continue
-            # Case 5: cut overlaps right edge of hook → trim start
-            if _hook_range_start <= _cs <= _hook_range_end < _ce:
-                _trimmed = dict(_rc)
-                _trimmed["source_start"] = round(_hook_range_end * 1000) / 1000
-                if _trimmed["source_end"] - _trimmed["source_start"] >= 0.1:
-                    _resolved.append(_trimmed)
-                    print(f"[hook] Trimmed main cut start {_cs:.3f}→{_hook_range_end:.3f} (hook overlap)", flush=True)
-                continue
-        render_cuts = _resolved
+        # NOTE: the hook range CAN and SHOULD overlap main-timeline cuts.
+        # A hook is a teaser — its whole purpose is to preview a dramatic
+        # moment at the start, then play that same content again in narrative
+        # context later. The user expects to hear the line twice. Captions
+        # naturally show the line twice in sync with both occurrences, which
+        # is correct behavior.
 
     # Tag each cut with its pre-split index so text overlays can map back
     # Hook clip(s) get _original_idx = -1; content clips get 0, 1, 2, ...
