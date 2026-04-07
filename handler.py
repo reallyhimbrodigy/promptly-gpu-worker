@@ -4685,50 +4685,22 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15, v
     # ── Step 5: Add audio padding ─────────────────────────────────────────
     # Deepgram's word boundaries mark where acoustic energy is detected, but
     # consonant releases (t, k, p, s) and breaths extend past the endpoint.
-    # We pad each clip by -15ms before its first word and +60ms after its
-    # last word to catch onsets and sibilant tails.
-    #
-    # CRITICAL: padding MUST NOT extend into the territory of any adjacent
-    # word in source order — even if that adjacent word was removed. If we
-    # padded past the next word's start, we'd pull the start of that word
-    # into the clip and the listener would hear "residue" at the clip
-    # boundary. The fix: clamp PAD_END to the gap between the last kept
-    # word's end and the immediately-following source word's start. Same
-    # for PAD_START on the other side.
-    PAD_START = 0.015
-    PAD_END = 0.060
-
-    # Position lookup: sorted_words is already sorted by _start time, so its
-    # index IS the source-order position. Map each word_index → sorted-pos.
-    _sorted_pos = {w["_word_index"]: i for i, w in enumerate(sorted_words)}
+    # Pad start by -15ms (catch onset) and end by +40ms (catch release).
+    PAD_START = 0.015  # 15ms before first word
+    PAD_END = 0.060    # 60ms after last word — catches sibilant tails (s, sh, ch)
 
     raw_clips = []
     for word_group in clips:
-        first_w = word_group[0]
-        last_w = word_group[-1]
-        first_start = first_w["_start"]
-        last_end = last_w["_end"]
-
-        # Find adjacent source words (kept OR removed) to clamp padding
-        first_pos = _sorted_pos[first_w["_word_index"]]
-        last_pos = _sorted_pos[last_w["_word_index"]]
-        prev_src = sorted_words[first_pos - 1] if first_pos > 0 else None
-        next_src = sorted_words[last_pos + 1] if last_pos + 1 < len(sorted_words) else None
-
-        gap_before = (first_start - prev_src["_end"]) if prev_src else float("inf")
-        gap_after = (next_src["_start"] - last_end) if next_src else float("inf")
-
-        # Clamp pads to not encroach on adjacent word audio
-        eff_pad_start = min(PAD_START, max(0.0, gap_before))
-        eff_pad_end = min(PAD_END, max(0.0, gap_after))
+        first_start = word_group[0]["_start"]
+        last_end = word_group[-1]["_end"]
 
         raw_clips.append({
             "raw_start": first_start,
             "raw_end": last_end,
-            "padded_start": max(0.0, first_start - eff_pad_start),
-            "padded_end": last_end + eff_pad_end,
-            "first_word": first_w["_text"],
-            "last_word": last_w["_text"],
+            "padded_start": max(0.0, first_start - PAD_START),
+            "padded_end": last_end + PAD_END,
+            "first_word": word_group[0]["_text"],
+            "last_word": word_group[-1]["_text"],
             "word_count": len(word_group),
         })
 
