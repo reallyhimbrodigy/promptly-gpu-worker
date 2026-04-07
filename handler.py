@@ -5869,13 +5869,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # Project emphasis moment timestamps from source time → output timeline
     # (Gemini gives source timestamps, but Remotion overlay uses output timeline)
     _clip_ranges_for_em = get_output_clip_ranges(render_cuts, effective_durations, transition_duration=TRANSITION_DURATION)
-    # VERIFICATION: dump the timeline state every projection consumer sees.
-    # After Fix 1, all 4 consumers (captions, emphasis, SFX, video render)
-    # should see IDENTICAL render_cuts and clip_ranges. Drift = bug.
-    _n_with_trans = sum(1 for c in render_cuts if str(c.get("transition_out") or "none").lower() not in ("none", "clean_cut", ""))
-    print(f"[verify] EMPHASIS site: {len(render_cuts)} cuts, {_n_with_trans} with transitions, total_eff_dur={sum(effective_durations):.3f}s", flush=True)
-    if _clip_ranges_for_em:
-        print(f"[verify] EMPHASIS first range: {_clip_ranges_for_em[0]} last: {_clip_ranges_for_em[-1]}", flush=True)
     _emphasis_moments = []
     for _em in _emphasis_moments_raw:
         _em_copy = dict(_em)
@@ -6460,11 +6453,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     # Use the SAME rounded effective_durations as the render — no recomputing.
     _full_ranges = get_output_clip_ranges(render_cuts, effective_durations, transition_duration=TRANSITION_DURATION) if render_cuts else []
-    # VERIFICATION: this should match the EMPHASIS site exactly (Fix 1).
-    _n_with_trans_sfx = sum(1 for c in render_cuts if str(c.get("transition_out") or "none").lower() not in ("none", "clean_cut", ""))
-    print(f"[verify] SFX site:      {len(render_cuts)} cuts, {_n_with_trans_sfx} with transitions, total_eff_dur={sum(effective_durations):.3f}s", flush=True)
-    if _full_ranges:
-        print(f"[verify] SFX first range:      {_full_ranges[0]} last: {_full_ranges[-1]}", flush=True)
     parsed_sfx = edit_plan.get("_parsed_sound_effects", [])
     for _i, _sfx in enumerate(parsed_sfx):
         _sound_style = normalize_sfx_style(_sfx.get("sound") or "none")
@@ -6841,46 +6829,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _par_elapsed = time.time() - _par_t0
     print(f"[render] All {n} segments rendered in {_par_elapsed:.1f}s (parallel)", flush=True)
 
-    # ── VERIFY: probe each segment's actual duration vs predicted ──────
-    # Investigation for the 1.97s timeline mismatch. Predicted timeline
-    # (sum of effective_durations) = ~53.5s but final video = ~51.5s.
-    # Whichever segment is short relative to its predicted eff is the bug.
-    _verify_total_predicted = 0.0
-    _verify_total_actual_v = 0.0
-    _verify_total_actual_a = 0.0
-    for _si, _sp in enumerate(_seg_paths):
-        try:
-            _probe = _probe_full(_sp)
-            _v_dur = 0.0
-            _a_dur = 0.0
-            for _stream in (_probe.get("streams") or []):
-                _ct = _stream.get("codec_type")
-                _d = float(_stream.get("duration") or 0.0) if _stream.get("duration") else 0.0
-                if _ct == "video" and _d > _v_dur:
-                    _v_dur = _d
-                elif _ct == "audio" and _d > _a_dur:
-                    _a_dur = _d
-            _pred = effective_durations[_si] if _si < len(effective_durations) else 0.0
-            _delta_v = _v_dur - _pred
-            _delta_a = _a_dur - _pred
-            _verify_total_predicted += _pred
-            _verify_total_actual_v += _v_dur
-            _verify_total_actual_a += _a_dur
-            _flag = " ⚠️" if abs(_delta_v) > 0.05 or abs(_delta_a) > 0.05 else ""
-            print(
-                f"[verify-seg {_si:2d}] predicted={_pred:6.3f}s  v={_v_dur:6.3f}s "
-                f"(Δ{_delta_v:+.3f})  a={_a_dur:6.3f}s (Δ{_delta_a:+.3f}){_flag}",
-                flush=True,
-            )
-        except Exception as _ve:
-            print(f"[verify-seg {_si}] probe failed: {_ve}", flush=True)
-    print(
-        f"[verify-seg TOTAL] predicted={_verify_total_predicted:.3f}s  "
-        f"actual_v={_verify_total_actual_v:.3f}s (Δ{_verify_total_actual_v - _verify_total_predicted:+.3f})  "
-        f"actual_a={_verify_total_actual_a:.3f}s (Δ{_verify_total_actual_a - _verify_total_predicted:+.3f})",
-        flush=True,
-    )
-
     # ── Concat segments (stream copy — instant, no re-encode) ───────────
     _concat_t0 = time.time()
     _concat_list_path = os.path.join(work_dir, "concat_list.txt")
@@ -6898,26 +6846,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         raise RuntimeError(f"Concat failed: {_concat_r.stderr[-500:]}")
     _concat_elapsed = time.time() - _concat_t0
     print(f"[render] Concat {n} segments in {_concat_elapsed:.1f}s (stream copy)", flush=True)
-    # VERIFY: probe the concat output
-    try:
-        _concat_probe = _probe_full(_concat_raw)
-        _cv = 0.0
-        _ca = 0.0
-        for _stream in (_concat_probe.get("streams") or []):
-            _d = float(_stream.get("duration") or 0.0) if _stream.get("duration") else 0.0
-            if _stream.get("codec_type") == "video" and _d > _cv:
-                _cv = _d
-            elif _stream.get("codec_type") == "audio" and _d > _ca:
-                _ca = _d
-        _pred_total = sum(effective_durations)
-        print(
-            f"[verify-concat] predicted={_pred_total:.3f}s  "
-            f"v={_cv:.3f}s (Δ{_cv - _pred_total:+.3f})  "
-            f"a={_ca:.3f}s (Δ{_ca - _pred_total:+.3f})",
-            flush=True,
-        )
-    except Exception as _ce:
-        print(f"[verify-concat] probe failed: {_ce}", flush=True)
 
     # ── Audio post-processing pass (video stream copy) ──────────────────
     # SFX mixing, audio ducking, denoise, EQ, compress, loudnorm
