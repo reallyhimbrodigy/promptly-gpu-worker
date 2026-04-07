@@ -4682,13 +4682,14 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15, v
     if current_words:
         clips.append(current_words)
 
-    # ── Step 5: Add audio padding ─────────────────────────────────────────
-    # Deepgram's word boundaries mark where acoustic energy is detected, but
-    # consonant releases (t, k, p, s) and breaths extend past the endpoint.
-    # Pad start by -15ms (catch onset) and end by +40ms (catch release).
-    PAD_START = 0.015  # 15ms before first word
-    PAD_END = 0.060    # 60ms after last word — catches sibilant tails (s, sh, ch)
-
+    # ── Step 5: Build raw clips at exact word boundaries ──────────────────
+    # No padding. Cuts land at Deepgram's word.start and word.end exactly.
+    # The render pipeline (PCM-audio segments + AAC-once final encode) is
+    # sample-accurate, so the boundary in the rendered video matches the
+    # boundary we ask for here. Previously we added 15ms / 60ms padding to
+    # mask AAC priming-delay artifacts (~21ms per segment) that bled into
+    # boundaries when AAC segments were stream-copy concatenated. With PCM
+    # intermediates that mechanism no longer exists, so the padding is gone.
     raw_clips = []
     for word_group in clips:
         first_start = word_group[0]["_start"]
@@ -4697,8 +4698,8 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15, v
         raw_clips.append({
             "raw_start": first_start,
             "raw_end": last_end,
-            "padded_start": max(0.0, first_start - PAD_START),
-            "padded_end": last_end + PAD_END,
+            "padded_start": first_start,
+            "padded_end": last_end,
             "first_word": word_group[0]["_text"],
             "last_word": word_group[-1]["_text"],
             "word_count": len(word_group),
@@ -4740,30 +4741,6 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15, v
             mid = (raw_clips[i - 1]["raw_end"] + raw_clips[i]["raw_start"]) / 2
             raw_clips[i - 1]["padded_end"] = round(mid * 1000) / 1000
             raw_clips[i]["padded_start"] = round(mid * 1000) / 1000
-
-    # ── Step 8: Mid-word boundary safety ──────────────────────────────────
-    # If any clip boundary lands inside a word (shouldn't happen with this
-    # approach, but as a safety net), expand the clip to include the full word.
-    for rc in raw_clips:
-        for w in sorted_words:
-            if w["_word_index"] in removed_indices:
-                continue
-            # Check start boundary
-            if w["_start"] < rc["padded_start"] < w["_end"]:
-                old = rc["padded_start"]
-                rc["padded_start"] = max(0.0, w["_start"] - 0.01)
-                print(
-                    f"[tighten] Safety: expanded clip start {old:.3f}s → {rc['padded_start']:.3f}s to include '{w['_text']}'",
-                    flush=True,
-                )
-            # Check end boundary
-            if w["_start"] < rc["padded_end"] < w["_end"]:
-                old = rc["padded_end"]
-                rc["padded_end"] = w["_end"] + 0.01
-                print(
-                    f"[tighten] Safety: expanded clip end {old:.3f}s → {rc['padded_end']:.3f}s to include '{w['_text']}'",
-                    flush=True,
-                )
 
     # ── Build final clip dicts ────────────────────────────────────────────
     final_clips = []
@@ -6709,7 +6686,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     def _run_one_segment(seg_idx):
         """Run Remotion render (if captions) then FFmpeg for one segment. Returns output path."""
-        _seg_out = os.path.join(_seg_dir, f"seg_{seg_idx:03d}.mp4")
+        _seg_out = os.path.join(_seg_dir, f"seg_{seg_idx:03d}.mkv")
         _eff_dur = effective_durations[seg_idx]
 
         # Phase 1: Per-segment Remotion render (semaphore-gated)
@@ -6817,13 +6794,19 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _video_label = _tov_label
 
         _fc = ";".join(_filter_parts)
+        # Audio encoded as PCM (not AAC) to eliminate per-segment AAC priming
+        # delay (~21ms per segment) that previously bled into clip boundaries
+        # when stream-copy concatenated. PCM has no priming, no codec state,
+        # and is sample-accurate at every boundary. The final output pass
+        # re-encodes audio to AAC once, applying its single priming delay
+        # only at the file start (handled correctly by the MP4 edit list).
         _cmd = (
             ["ffmpeg", "-y", "-v", "warning", "-threads", "0"]
             + list(_seg_input_args_list[seg_idx])
             + _extra_inputs
             + ["-filter_complex", _fc, "-map", _video_label, "-map", "[aout]"]
             + list(_encode_args)
-            + ["-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart"]
+            + ["-c:a", "pcm_s16le", "-ar", "48000"]
             + [_seg_out]
         )
         _r = subprocess.run(_cmd, capture_output=True, text=True, timeout=120)
@@ -6848,7 +6831,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     with open(_concat_list_path, "w") as _clf:
         for _sp in _seg_paths:
             _clf.write(f"file '{_sp}'\n")
-    _concat_raw = os.path.join(work_dir, "concat_raw.mp4")
+    # MKV intermediate — supports PCM audio cleanly (MP4 does not in our profile)
+    _concat_raw = os.path.join(work_dir, "concat_raw.mkv")
     _concat_cmd = [
         "ffmpeg", "-y", "-v", "warning",
         "-f", "concat", "-safe", "0", "-i", _concat_list_path,
