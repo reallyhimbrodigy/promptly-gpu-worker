@@ -4419,14 +4419,18 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15):
 
     # ── Step 1: Apply Gemini's remove_words ───────────────────────────────
     # Context-filler validator: when Gemini wants to remove a word from
-    # CONTEXT_FILLER ("like", "just", "really", "literally", etc.), we
-    # validate against an objective acoustic signal — true filler usage is
-    # bracketed by micro-pauses. "I felt LIKE I had been electrocuted"
-    # (comparative — content) has no pauses around "like", so it's KEPT.
-    # "I was, like, walking" (filler) has gaps before AND after, so it's
-    # REMOVED. This protects against Gemini's occasional misjudgment of
-    # comparative/clausal usage as filler.
-    PAUSE_BRACKET_THRESHOLD = 0.08  # 80ms — same threshold as detect_filler_words
+    # CONTEXT_FILLER ("like", "just", "really", etc.), we validate against
+    # OBJECTIVE evidence that the word is set apart from surrounding speech.
+    # Two independent signals both indicate filler usage:
+    #   1. Acoustic pause bracket: ≥80ms gap before AND after the word
+    #      ("I was, [pause] like [pause] walking")
+    #   2. Punctuation bracket: the word is wrapped in commas in Deepgram's
+    #      punctuated output ("calling me, like, calling me")
+    # If EITHER signal is present, the removal is allowed. If NEITHER, the
+    # word is treated as content and the removal is rejected. This protects
+    # comparative/clausal usage ("I felt LIKE I had been electrocuted") which
+    # has no surrounding pauses and no surrounding commas.
+    PAUSE_BRACKET_THRESHOLD = 0.08
     _filler_validator_rejected = 0
     for item in remove_words or []:
         if not isinstance(item, dict):
@@ -4440,22 +4444,32 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15):
                 continue
             _w = sorted_words[idx]
             _w_clean = _w["_clean"]
-            # Only validate if it's a context-filler word (the ambiguous ones).
-            # ALWAYS_FILLER and non-filler words pass through unchecked.
             if _w_clean in CONTEXT_FILLER:
                 _w_start = _w["_start"]
                 _w_end = _w["_end"]
-                # Find immediate neighbors in source order (regardless of removal)
-                _prev_end = sorted_words[idx - 1]["_end"] if idx > 0 else _w_start
-                _next_start = sorted_words[idx + 1]["_start"] if idx + 1 < len(sorted_words) else _w_end
+                _prev = sorted_words[idx - 1] if idx > 0 else None
+                _nxt  = sorted_words[idx + 1] if idx + 1 < len(sorted_words) else None
+                _prev_end = _prev["_end"] if _prev else _w_start
+                _next_start = _nxt["_start"] if _nxt else _w_end
                 _gap_before = _w_start - _prev_end
                 _gap_after = _next_start - _w_end
-                if _gap_before < PAUSE_BRACKET_THRESHOLD or _gap_after < PAUSE_BRACKET_THRESHOLD:
+                _pause_bracketed = (_gap_before >= PAUSE_BRACKET_THRESHOLD and _gap_after >= PAUSE_BRACKET_THRESHOLD)
+
+                # Punctuation bracket: prev word ends with a comma AND
+                # current word ends with a comma. Deepgram emits
+                # "calling me," for word index 198 and "like," for word
+                # index 199 — both end in commas, signalling the filler is
+                # set apart by punctuation even if spoken at full speed.
+                _prev_punct = str(_prev.get("punctuated_word") or _prev.get("_text") or "") if _prev else ""
+                _curr_punct = str(_w.get("punctuated_word") or _w.get("_text") or "")
+                _comma_bracketed = _prev_punct.rstrip().endswith(",") and _curr_punct.rstrip().endswith(",")
+
+                if not (_pause_bracketed or _comma_bracketed):
                     print(
                         f"[tighten] REJECTED Gemini removal of '{_w['_text']}' at "
-                        f"{_w_start:.3f}s — no pause bracket "
-                        f"(gap_before={_gap_before*1000:.0f}ms, gap_after={_gap_after*1000:.0f}ms) "
-                        f"— likely content, not filler",
+                        f"{_w_start:.3f}s — not bracketed "
+                        f"(gap_before={_gap_before*1000:.0f}ms, gap_after={_gap_after*1000:.0f}ms, "
+                        f"comma_bracket={_comma_bracketed}) — likely content, not filler",
                         flush=True,
                     )
                     _filler_validator_rejected += 1
@@ -4540,7 +4554,7 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15):
     for idx_in_remaining, w in enumerate(remaining):
         if w["_word_index"] in _restart_removed:
             continue
-        for phrase_len in (3, 2):  # try longer phrases first (more confident)
+        for phrase_len in (4, 3, 2):  # try longest first to avoid orphan words
             if idx_in_remaining + phrase_len > len(remaining):
                 continue
             phrase_words = remaining[idx_in_remaining : idx_in_remaining + phrase_len]
@@ -6808,6 +6822,46 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _par_elapsed = time.time() - _par_t0
     print(f"[render] All {n} segments rendered in {_par_elapsed:.1f}s (parallel)", flush=True)
 
+    # ── VERIFY: probe each segment's actual duration vs predicted ──────
+    # Investigation for the 1.97s timeline mismatch. Predicted timeline
+    # (sum of effective_durations) = ~53.5s but final video = ~51.5s.
+    # Whichever segment is short relative to its predicted eff is the bug.
+    _verify_total_predicted = 0.0
+    _verify_total_actual_v = 0.0
+    _verify_total_actual_a = 0.0
+    for _si, _sp in enumerate(_seg_paths):
+        try:
+            _probe = _probe_full(_sp)
+            _v_dur = 0.0
+            _a_dur = 0.0
+            for _stream in (_probe.get("streams") or []):
+                _ct = _stream.get("codec_type")
+                _d = float(_stream.get("duration") or 0.0) if _stream.get("duration") else 0.0
+                if _ct == "video" and _d > _v_dur:
+                    _v_dur = _d
+                elif _ct == "audio" and _d > _a_dur:
+                    _a_dur = _d
+            _pred = effective_durations[_si] if _si < len(effective_durations) else 0.0
+            _delta_v = _v_dur - _pred
+            _delta_a = _a_dur - _pred
+            _verify_total_predicted += _pred
+            _verify_total_actual_v += _v_dur
+            _verify_total_actual_a += _a_dur
+            _flag = " ⚠️" if abs(_delta_v) > 0.05 or abs(_delta_a) > 0.05 else ""
+            print(
+                f"[verify-seg {_si:2d}] predicted={_pred:6.3f}s  v={_v_dur:6.3f}s "
+                f"(Δ{_delta_v:+.3f})  a={_a_dur:6.3f}s (Δ{_delta_a:+.3f}){_flag}",
+                flush=True,
+            )
+        except Exception as _ve:
+            print(f"[verify-seg {_si}] probe failed: {_ve}", flush=True)
+    print(
+        f"[verify-seg TOTAL] predicted={_verify_total_predicted:.3f}s  "
+        f"actual_v={_verify_total_actual_v:.3f}s (Δ{_verify_total_actual_v - _verify_total_predicted:+.3f})  "
+        f"actual_a={_verify_total_actual_a:.3f}s (Δ{_verify_total_actual_a - _verify_total_predicted:+.3f})",
+        flush=True,
+    )
+
     # ── Concat segments (stream copy — instant, no re-encode) ───────────
     _concat_t0 = time.time()
     _concat_list_path = os.path.join(work_dir, "concat_list.txt")
@@ -6825,6 +6879,26 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         raise RuntimeError(f"Concat failed: {_concat_r.stderr[-500:]}")
     _concat_elapsed = time.time() - _concat_t0
     print(f"[render] Concat {n} segments in {_concat_elapsed:.1f}s (stream copy)", flush=True)
+    # VERIFY: probe the concat output
+    try:
+        _concat_probe = _probe_full(_concat_raw)
+        _cv = 0.0
+        _ca = 0.0
+        for _stream in (_concat_probe.get("streams") or []):
+            _d = float(_stream.get("duration") or 0.0) if _stream.get("duration") else 0.0
+            if _stream.get("codec_type") == "video" and _d > _cv:
+                _cv = _d
+            elif _stream.get("codec_type") == "audio" and _d > _ca:
+                _ca = _d
+        _pred_total = sum(effective_durations)
+        print(
+            f"[verify-concat] predicted={_pred_total:.3f}s  "
+            f"v={_cv:.3f}s (Δ{_cv - _pred_total:+.3f})  "
+            f"a={_ca:.3f}s (Δ{_ca - _pred_total:+.3f})",
+            flush=True,
+        )
+    except Exception as _ce:
+        print(f"[verify-concat] probe failed: {_ce}", flush=True)
 
     # ── Audio post-processing pass (video stream copy) ──────────────────
     # SFX mixing, audio ducking, denoise, EQ, compress, loudnorm
