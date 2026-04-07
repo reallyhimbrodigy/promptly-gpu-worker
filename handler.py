@@ -3941,9 +3941,9 @@ def project_words_to_output(transcript, cuts, effective_durations, hook_offset=0
                 "_source_start": max(ws, c_start),
             })
         dur = effective_durations[i] if i < len(effective_durations) else (c_end - c_start)
-        _td = transition_duration if transition_duration is not None else TRANSITION_DURATION_DEFAULT
-        overlap = _td if i < len(cuts)-1 and not is_hard_cut(cut.get("transition_out")) else 0
-        output_cursor = round((output_cursor + dur - overlap)*1000)/1000
+        # Stream-copy concat — segments do not overlap. Cursor advances by
+        # the full effective duration. See get_output_clip_ranges() docstring.
+        output_cursor = round((output_cursor + dur)*1000)/1000
 
     projected = [w for w in projected if w["end"] > w["start"]]
     if hook_offset > 0:
@@ -4308,9 +4308,20 @@ def render_remotion_overlay(
 def get_output_clip_ranges(cuts, effective_durations, transition_duration=None):
     """
     Return list of {"start": float, "end": float} for each clip's position
-    in the output timeline, accounting for transition overlap.
+    in the output timeline.
+
+    The actual ffmpeg pipeline concatenates segments with `-f concat -c copy`
+    (stream copy), which does NOT cross-fade. Transitions are decomposed into
+    per-segment fade-in/fade-out *within* each segment — they consume time
+    inside the segment but the segment's total playback duration is unchanged.
+    Therefore the cursor must advance by the FULL effective duration with no
+    overlap subtraction. Subtracting overlap was the bug that caused captions
+    and SFX to drift earlier by (n_transitions × transition_duration).
+
+    The transition_duration parameter is kept for API compatibility but is
+    intentionally unused.
     """
-    _td_base = transition_duration if transition_duration is not None else TRANSITION_DURATION_DEFAULT
+    _ = transition_duration  # intentionally unused — see docstring
     ranges = []
     cursor = 0.0
     for i, cut in enumerate(cuts):
@@ -4318,10 +4329,7 @@ def get_output_clip_ranges(cuts, effective_durations, transition_duration=None):
         start = round(cursor * 1000) / 1000
         end   = round((cursor + dur) * 1000) / 1000
         ranges.append({"start": start, "end": end})
-        transition = str(cut.get("transition_out") or "none").lower()
-        td      = _td_base if transition not in ("none", "clean_cut", "") else 0.0
-        overlap = td if i < len(cuts) - 1 else 0.0
-        cursor  = round((end - overlap) * 1000) / 1000
+        cursor = end
     return ranges
 
 
@@ -4508,19 +4516,25 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15):
             )
 
     # ── Step 3b: Phrasal restart detection (N-gram lookahead) ─────────────
-    # _is_stutter only catches single-word patterns. This pass catches 2- and
-    # 3-word phrasal restarts where the speaker says a phrase, breaks, then
-    # restarts the same phrase. Example from a real transcript:
+    # Catches 2- and 3-word phrasal restarts where the speaker abandons a
+    # phrase mid-thought and restarts it. Example:
     #   [141] who  [142] is  [143] I  [144] said  [145] who  [146] is  [147] he?
-    # The phrase "who is" appears at 141-142 and again at 145-146 — the FIRST
-    # occurrence is the false start and should be removed, leaving the cleaner
-    # "I said, who is he?" The single-word _is_stutter pass cannot see this
-    # because it only looks at consecutive word pairs.
+    # "who is" at 141-142 was abandoned and restarted at 145-146.
     #
-    # Algorithm: for each kept word position i, try matching phrases of length
-    # 2 then 3 against any starting position j in the next ~5 kept words. If
-    # the same phrase repeats, remove the first occurrence (the false start).
-    # Same speaker only — different speakers repeating each other is dialogue.
+    # CRITICAL DISCRIMINATOR: a true restart abandons the first phrase mid-
+    # thought. A parallel structure ("what are you gonna do? what are you
+    # gonna learn?") COMPLETES the first sentence with sentence-ending
+    # punctuation (?, ., !) before the next begins. We reject any match
+    # where any word in the gap between the first and second occurrence has
+    # sentence-ending punctuation — that signals the first sentence finished.
+    #
+    # Constraints (tight to avoid false positives):
+    #   - phrase length 2 or 3 words
+    #   - lookahead window: next 3 word positions only
+    #   - time gap between phrases: ≤1.5s
+    #   - same speaker
+    #   - NO sentence-ending punctuation in the gap words
+    _SENTENCE_END_RE = re.compile(r"[.!?]\s*$")
     remaining = [w for w in sorted_words if w["_word_index"] not in removed_indices]
     _restart_removed = set()
     for idx_in_remaining, w in enumerate(remaining):
@@ -4530,17 +4544,21 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15):
             if idx_in_remaining + phrase_len > len(remaining):
                 continue
             phrase_words = remaining[idx_in_remaining : idx_in_remaining + phrase_len]
-            # Skip phrases containing already-removed words
             if any(pw["_word_index"] in _restart_removed for pw in phrase_words):
                 continue
-            # Need real word content (not punctuation-only)
             phrase_text = tuple(pw["_clean"] for pw in phrase_words)
             if not all(phrase_text):
                 continue
+            # If the LAST word of the candidate phrase already has sentence-
+            # ending punctuation, the phrase is a complete thought — not an
+            # abandoned restart. Skip.
+            _last_phrase_punct = str(phrase_words[-1].get("punctuated_word") or phrase_words[-1].get("_text") or "")
+            if _SENTENCE_END_RE.search(_last_phrase_punct):
+                continue
             phrase_speaker = phrase_words[0].get("speaker", phrase_words[0].get("_speaker"))
-            # Look for the same phrase starting in the next 1-5 word positions
             _matched = False
-            for scan_idx in range(idx_in_remaining + phrase_len, min(idx_in_remaining + phrase_len + 5, len(remaining))):
+            # TIGHT lookahead: only check the next 3 positions, not 5
+            for scan_idx in range(idx_in_remaining + phrase_len, min(idx_in_remaining + phrase_len + 3, len(remaining))):
                 if scan_idx + phrase_len > len(remaining):
                     break
                 cand_words = remaining[scan_idx : scan_idx + phrase_len]
@@ -4549,20 +4567,32 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15):
                 cand_text = tuple(cw["_clean"] for cw in cand_words)
                 if cand_text != phrase_text:
                     continue
-                # Same speaker check — cross-speaker is dialogue, not a restart
                 cand_speaker = cand_words[0].get("speaker", cand_words[0].get("_speaker"))
                 if phrase_speaker is not None and cand_speaker is not None and phrase_speaker != cand_speaker:
                     continue
-                # Time gap sanity: the restart must be within ~3s of the original
-                if cand_words[0]["_start"] - phrase_words[-1]["_end"] > 3.0:
+                # TIGHT time gap: ≤1.5s (true restarts are quick)
+                _time_gap = cand_words[0]["_start"] - phrase_words[-1]["_end"]
+                if _time_gap > 1.5 or _time_gap < 0:
                     continue
-                # Remove the FIRST occurrence (false start), keep the second
+                # CRITICAL: reject if any word in the gap has sentence-ending
+                # punctuation. That means the first sentence completed and
+                # this is parallel structure, not a restart.
+                _gap_words = remaining[idx_in_remaining + phrase_len : scan_idx]
+                _sentence_completed = False
+                for _gw in _gap_words:
+                    _gw_punct = str(_gw.get("punctuated_word") or _gw.get("_text") or "")
+                    if _SENTENCE_END_RE.search(_gw_punct):
+                        _sentence_completed = True
+                        break
+                if _sentence_completed:
+                    continue
+                # Validated restart — remove the FIRST occurrence (false start)
                 for pw in phrase_words:
                     _restart_removed.add(pw["_word_index"])
                 print(
                     f"[tighten] Phrasal restart '{' '.join(phrase_text)}' at "
                     f"{phrase_words[0]['_start']:.3f}s removed "
-                    f"(repeats at {cand_words[0]['_start']:.3f}s)",
+                    f"(repeats at {cand_words[0]['_start']:.3f}s, gap={_time_gap*1000:.0f}ms)",
                     flush=True,
                 )
                 _matched = True
