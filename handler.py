@@ -1970,10 +1970,9 @@ Sound effects — audio accents that make the edit feel physical and professiona
   - TIMING IS SAMPLE-ACCURATE. The "t" value MUST be the EXACT start time of the trigger word, in seconds with at least 3 decimal places (millisecond precision) — copy it directly from the Deepgram word timestamps provided. Do NOT round, do NOT estimate, do NOT pick a time "near" the word.
   - The downstream system snaps your sound to the exact start of the spoken word using the "word" field, so getting the word right matters more than getting "t" right — but BOTH must point to the same word.
   - Onset compensation is automatic: the system knows each SFX file's internal onset (where the actual hit/climax is) and schedules the file to start early so the perceived "moment" lands precisely on the word. You do NOT need to compensate — just place "t" on the word and the system handles the rest. This applies to build-up sounds too: drum_roll, reverse, sad_trombone, thunder, whoosh_slow all have their climax automatically aligned to the word.
-  - Most videos need 3-5 well-chosen sound effects. Zero is fine if nothing earns one. More than 6 almost always means some are unnecessary.
-  - Never stack two sounds within 1.0s of each other — they compete and sound muddy.
-  - boom/hit are your power tools — use ONE boom and at most TWO hits per video.
-  - drum_roll + impact combos (drum_roll → boom, drum_roll → hit) are the most cinematic pattern. Place BOTH on the same word — the drum_roll's crash and the boom's impact will land together.
+  - There is NO upper cap on sound effects and NO per-type limit. Place as many as the edit truly justifies. Quality over quantity — every sound must be earned, but if 8 moments earn a sound, place 8 sounds.
+  - CRITICAL: NEVER place two sound effects on the same word or within 200ms of each other. Two sounds that overlap in time will sound like one muddy hit and the system will silently drop the second. If you want a layered impact, choose ONE sound that already has the layers built in (e.g. drum_roll already builds to a crash — you do NOT need to add boom on the same word; thunder already rumbles into a hit — you do NOT need to add hit on top of it).
+  - Spread sounds across the video. Two sounds in adjacent words is almost always wrong. A good rhythm is one impact every 4-8 seconds at most.
   - ding should ONLY be used when someone literally receives a text/call/message/notification.
   - whoosh_slow should ONLY be used on transitions (whip/wipe), never on hard cuts.
   - When in doubt, leave the sound out. Silence is better than a wrong sound.
@@ -2780,38 +2779,10 @@ RULES FOR USING THESE TIMESTAMPS:
 
                 sound_effects.append({"t": t, "sound": sound, "word": word})
 
-    # ── Post-filter: enforce caps and minimum spacing ──────────────────
-    if sound_effects:
-        sound_effects.sort(key=lambda x: x["t"])
-
-        # 1. Remove SFX that are too close together (< 0.5s apart = muddy)
-        spaced = []
-        for sfx in sound_effects:
-            if spaced and sfx["t"] - spaced[-1]["t"] < 0.5:
-                print(f"[sfx-filter] Dropped {sfx['sound']} at {sfx['t']:.1f}s (too close to {spaced[-1]['sound']} at {spaced[-1]['t']:.1f}s)", flush=True)
-                continue
-            spaced.append(sfx)
-        sound_effects = spaced
-
-        # 2. Cap heavy impact sounds — overuse kills the punch
-        _MAX_PER_TYPE = {"boom": 1, "hit": 2,
-                         "reverse": 2, "drum_roll": 2}
-        _type_counts = {}
-        capped = []
-        for sfx in sound_effects:
-            snd = sfx["sound"]
-            cap = _MAX_PER_TYPE.get(snd)
-            if cap is not None:
-                _type_counts[snd] = _type_counts.get(snd, 0) + 1
-                if _type_counts[snd] > cap:
-                    print(f"[sfx-filter] Dropped {snd} at {sfx['t']:.1f}s (max {cap} per video)", flush=True)
-                    continue
-            capped.append(sfx)
-        sound_effects = capped
-
-        print(f"[generate-edit] Sound effects: {len(sound_effects)} placements", flush=True)
-        for sfx in sound_effects:
-            print(f"[generate-edit]   {sfx['t']:.1f}s: {sfx['sound']}", flush=True)
+    # SFX dedup is deferred until after auto-placement (see below).
+    # No per-type caps. No early spacing pass. The single dedup chokepoint
+    # below catches both Gemini-placed and auto-placed sounds, preventing
+    # ANY two SFX from firing within SFX_MIN_SPACING of each other.
     edit_plan["sound_effects"] = sound_effects
     edit_plan["_parsed_sound_effects"] = sound_effects
 
@@ -2898,15 +2869,78 @@ RULES FOR USING THESE TIMESTAMPS:
                         print(f"[emphasis] Skipped cut_zoom at {em_t:.1f}s — too close to previous zoom at {_last_zoom_t:.1f}s", flush=True)
                 break
 
-        # Auto-place hit on high-intensity moments that have no SFX nearby
+        # Auto-place hit on high-intensity moments that have no SFX nearby.
+        # The single dedup chokepoint below will drop this if it collides
+        # with a Gemini-placed sound, so we only need a loose proximity
+        # check here as a quick optimization.
         if em["intensity"] == "high":
             nearby_sfx = any(abs(sfx["t"] - em_t) < 1.0 for sfx in sound_effects)
             if not nearby_sfx:
-                sound_effects.append({"t": em_t, "sound": "hit", "word": f"emphasis_{em['type']}"})
+                sound_effects.append({"t": em_t, "sound": "hit", "word": f"emphasis_{em['type']}", "_auto": True})
                 print(f"[emphasis] Auto-placed hit at {em_t:.1f}s ({em['type']})", flush=True)
 
-    # Re-sort and re-store sound effects after emphasis auto-placement
-    sound_effects.sort(key=lambda x: x["t"])
+    # ── SFX dedup chokepoint ───────────────────────────────────────────
+    # The ONE place where the "no two SFX on the same moment" rule is
+    # enforced. Both Gemini-placed and auto-placed sounds flow through
+    # here. Any future code path that adds SFX must also pass through
+    # this chokepoint or the rule can be bypassed.
+    #
+    # SFX_MIN_SPACING (200ms) is the acoustic transient overlap window —
+    # impact sounds closer than this perceptually merge into one muddy hit.
+    # Tight rapid sequences (e.g. drum_roll → boom 0.4s later) still work.
+    #
+    # Tie-break rule: when two SFX collide, the FIRST in source-time order
+    # wins, with one exception — if a Gemini-placed sound and an auto-placed
+    # sound collide, the Gemini sound always wins regardless of order
+    # (Gemini's choice is intentional editorial; auto-placement is filler).
+    SFX_MIN_SPACING = 0.20
+    if sound_effects:
+        sound_effects.sort(key=lambda x: x["t"])
+        deduped = []
+        for sfx in sound_effects:
+            collision = None
+            for kept in deduped:
+                if abs(sfx["t"] - kept["t"]) < SFX_MIN_SPACING:
+                    collision = kept
+                    break
+            if collision is None:
+                deduped.append(sfx)
+                continue
+            # Collision: Gemini-placed beats auto-placed
+            sfx_is_auto = bool(sfx.get("_auto"))
+            kept_is_auto = bool(collision.get("_auto"))
+            if sfx_is_auto and not kept_is_auto:
+                # Drop the new (auto) sound; keep the Gemini sound
+                print(
+                    f"[sfx-dedup] Dropped auto {sfx['sound']} at {sfx['t']:.2f}s "
+                    f"(within {SFX_MIN_SPACING:.2f}s of {collision['sound']} at {collision['t']:.2f}s)",
+                    flush=True,
+                )
+                continue
+            if kept_is_auto and not sfx_is_auto:
+                # Replace the auto sound with this Gemini sound
+                deduped.remove(collision)
+                deduped.append(sfx)
+                print(
+                    f"[sfx-dedup] Replaced auto {collision['sound']} at {collision['t']:.2f}s "
+                    f"with {sfx['sound']} at {sfx['t']:.2f}s (Gemini-placed)",
+                    flush=True,
+                )
+                continue
+            # Same-priority collision: first in source-time wins (kept stays)
+            print(
+                f"[sfx-dedup] Dropped {sfx['sound']} at {sfx['t']:.2f}s "
+                f"(within {SFX_MIN_SPACING:.2f}s of {collision['sound']} at {collision['t']:.2f}s)",
+                flush=True,
+            )
+        deduped.sort(key=lambda x: x["t"])
+        sound_effects = deduped
+
+    if sound_effects:
+        print(f"[generate-edit] Sound effects: {len(sound_effects)} placements", flush=True)
+        for sfx in sound_effects:
+            print(f"[generate-edit]   {sfx['t']:.1f}s: {sfx['sound']}", flush=True)
+
     edit_plan["sound_effects"] = sound_effects
     edit_plan["_parsed_sound_effects"] = sound_effects
 
@@ -4494,9 +4528,46 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15, v
     if _filler_validator_rejected:
         print(f"[tighten] Context-filler validator rejected {_filler_validator_rejected} Gemini removal(s)", flush=True)
 
-    # Time ranges only remove silence/dead air — they NEVER remove spoken words.
-    # Words can only be removed via explicit word_index. This prevents Gemini's
-    # slightly-off timestamps from accidentally killing real content.
+    # ── Step 1b: Time-range removals (section_skip / dead_air / non_speech_gap) ──
+    # Gemini can also send {"start": X, "end": Y, "reason": "..."} entries.
+    # Originally these were silently ignored (only word_index removed words),
+    # but the prompt advertises section_skip and Gemini relies on it.
+    #
+    # SAFETY: only remove words whose ENTIRE acoustic span [start, end] is
+    # FULLY CONTAINED inside the requested range. A word that partially
+    # overlaps the boundary is kept. This is the protection that the original
+    # silent-ignore was trying to provide — Gemini's slightly-off timestamps
+    # cannot accidentally clip content at the edges.
+    _range_removed_count = 0
+    for item in remove_words or []:
+        if not isinstance(item, dict):
+            continue
+        if "word_index" in item:
+            continue  # already handled in Step 1
+        if "start" not in item or "end" not in item:
+            continue
+        try:
+            _r_start = float(item["start"])
+            _r_end = float(item["end"])
+        except Exception:
+            continue
+        if _r_end <= _r_start:
+            continue
+        _reason = str(item.get("reason") or "range_remove")
+        for _w in sorted_words:
+            if _w["_word_index"] in removed_indices:
+                continue
+            # Strict containment: word must be entirely inside the range
+            if _w["_start"] >= _r_start and _w["_end"] <= _r_end:
+                removed_indices.add(_w["_word_index"])
+                _range_removed_count += 1
+                print(
+                    f"[tighten] Word '{_w['_text']}' at {_w['_start']:.3f}s removed "
+                    f"(inside {_reason} range {_r_start:.3f}-{_r_end:.3f}s)",
+                    flush=True,
+                )
+    if _range_removed_count:
+        print(f"[tighten] Range removals removed {_range_removed_count} word(s)", flush=True)
 
     gemini_removed = set(removed_indices)
 
@@ -4619,6 +4690,27 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15, v
                 # Validated restart — remove the FIRST occurrence (false start)
                 for pw in phrase_words:
                     _restart_removed.add(pw["_word_index"])
+                # Also remove orphan fillers in the gap between false start and
+                # restart. Example: "calling me, like, calling me" — once the
+                # first "calling me" is removed, "like" becomes an orphan
+                # discourse marker dangling between "started" and "calling me".
+                # Its grammatical role was to bridge the false start to its
+                # restart; with the false start gone, it serves no purpose.
+                # We do NOT apply the pause-bracket validator here because the
+                # word is provably orphaned by structural evidence (between a
+                # confirmed false start and its restart). Meaningful conjunctions
+                # like "but", "and", "however" are not in either filler set,
+                # so they're kept.
+                for _gw in _gap_words:
+                    _gw_clean = _gw["_clean"]
+                    if _gw_clean in ALWAYS_FILLER or _gw_clean in CONTEXT_FILLER:
+                        _restart_removed.add(_gw["_word_index"])
+                        print(
+                            f"[tighten] Orphan filler '{_gw['_text']}' at "
+                            f"{_gw['_start']:.3f}s removed "
+                            f"(gap between false start and restart)",
+                            flush=True,
+                        )
                 print(
                     f"[tighten] Phrasal restart '{' '.join(phrase_text)}' at "
                     f"{phrase_words[0]['_start']:.3f}s removed "
