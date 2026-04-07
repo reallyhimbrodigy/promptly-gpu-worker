@@ -2383,7 +2383,8 @@ RULES FOR USING THESE TIMESTAMPS:
             f"{len(normalized_remove_words)} Gemini removals + deterministic tightening",
             flush=True,
         )
-        validated_cuts = build_clips_from_words(_dg_words, normalized_remove_words, max_silence_gap=_speech_gap)
+        validated_cuts, _removed_word_indices = build_clips_from_words(_dg_words, normalized_remove_words, max_silence_gap=_speech_gap)
+        edit_plan["_removed_word_indices"] = _removed_word_indices
         for i, clip in enumerate(validated_cuts):
             clip_start = float(clip["source_start"])
             clip_end = float(clip["source_end"])
@@ -3897,19 +3898,27 @@ def is_hard_cut(transition):
     return not t or t in ("none", "clean_cut")
 
 
-def project_words_to_output(transcript, cuts, effective_durations, hook_offset=0.0, hook_clip=None, speed_curve=None, transition_duration=None, clip_time_maps=None):
-    """Project word timestamps from source to output timeline using canonical time maps."""
+def project_words_to_output(transcript, cuts, effective_durations, hook_offset=0.0, hook_clip=None, speed_curve=None, transition_duration=None, clip_time_maps=None, removed_word_indices=None):
+    """Project word timestamps from source to output timeline using canonical time maps.
+
+    If removed_word_indices is provided, words at those indices are excluded.
+    This is the SAME source of truth used by build_clips_from_words, so the
+    caption projection cannot emit fragments of removed words.
+    """
     words = transcript.get("words") or []
     projected = []
     if not words or not cuts:
         return projected
+    _removed = removed_word_indices if isinstance(removed_word_indices, (set, frozenset)) else set(removed_word_indices or [])
     clip_ranges = get_output_clip_ranges(cuts, effective_durations, transition_duration=transition_duration)
     output_cursor = 0.0
     for i, cut in enumerate(cuts):
         c_start = float(cut["source_start"])
         c_end   = float(cut["source_end"])
         tm = clip_time_maps[i] if clip_time_maps and i < len(clip_time_maps) else None
-        for w in words:
+        for word_idx, w in enumerate(words):
+            if word_idx in _removed:
+                continue
             ws = float(w.get("start") or 0)
             we = float(w.get("end") or 0)
             if we <= c_start or ws >= c_end:
@@ -3948,7 +3957,9 @@ def project_words_to_output(transcript, cuts, effective_durations, hook_offset=0
             hook_end = float(hook_clip.get("source_end") or 0.0)
             hook_render_start = project_source_time_to_output(hook_start, cuts, clip_ranges, speed_curve, clip_time_maps=clip_time_maps)
             hook_words = []
-            for w in words:
+            for word_idx, w in enumerate(words):
+                if word_idx in _removed:
+                    continue
                 ws = float(w.get("start") or 0)
                 we = float(w.get("end") or 0)
                 if ws >= hook_start and we <= hook_end:
@@ -4399,16 +4410,51 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15):
     removed_indices = set()
 
     # ── Step 1: Apply Gemini's remove_words ───────────────────────────────
+    # Context-filler validator: when Gemini wants to remove a word from
+    # CONTEXT_FILLER ("like", "just", "really", "literally", etc.), we
+    # validate against an objective acoustic signal — true filler usage is
+    # bracketed by micro-pauses. "I felt LIKE I had been electrocuted"
+    # (comparative — content) has no pauses around "like", so it's KEPT.
+    # "I was, like, walking" (filler) has gaps before AND after, so it's
+    # REMOVED. This protects against Gemini's occasional misjudgment of
+    # comparative/clausal usage as filler.
+    PAUSE_BRACKET_THRESHOLD = 0.08  # 80ms — same threshold as detect_filler_words
+    _filler_validator_rejected = 0
     for item in remove_words or []:
         if not isinstance(item, dict):
             continue
         if "word_index" in item:
             try:
                 idx = int(item["word_index"])
-                if 0 <= idx < len(sorted_words):
-                    removed_indices.add(idx)
             except Exception:
                 continue
+            if not (0 <= idx < len(sorted_words)):
+                continue
+            _w = sorted_words[idx]
+            _w_clean = _w["_clean"]
+            # Only validate if it's a context-filler word (the ambiguous ones).
+            # ALWAYS_FILLER and non-filler words pass through unchecked.
+            if _w_clean in CONTEXT_FILLER:
+                _w_start = _w["_start"]
+                _w_end = _w["_end"]
+                # Find immediate neighbors in source order (regardless of removal)
+                _prev_end = sorted_words[idx - 1]["_end"] if idx > 0 else _w_start
+                _next_start = sorted_words[idx + 1]["_start"] if idx + 1 < len(sorted_words) else _w_end
+                _gap_before = _w_start - _prev_end
+                _gap_after = _next_start - _w_end
+                if _gap_before < PAUSE_BRACKET_THRESHOLD or _gap_after < PAUSE_BRACKET_THRESHOLD:
+                    print(
+                        f"[tighten] REJECTED Gemini removal of '{_w['_text']}' at "
+                        f"{_w_start:.3f}s — no pause bracket "
+                        f"(gap_before={_gap_before*1000:.0f}ms, gap_after={_gap_after*1000:.0f}ms) "
+                        f"— likely content, not filler",
+                        flush=True,
+                    )
+                    _filler_validator_rejected += 1
+                    continue
+            removed_indices.add(idx)
+    if _filler_validator_rejected:
+        print(f"[tighten] Context-filler validator rejected {_filler_validator_rejected} Gemini removal(s)", flush=True)
 
     # Time ranges only remove silence/dead air — they NEVER remove spoken words.
     # Words can only be removed via explicit word_index. This prevents Gemini's
@@ -4460,6 +4506,70 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15):
                 f"[tighten] Stutter '{w['_text']}' before '{next_w['_text']}' at {w['_start']:.3f}s removed",
                 flush=True,
             )
+
+    # ── Step 3b: Phrasal restart detection (N-gram lookahead) ─────────────
+    # _is_stutter only catches single-word patterns. This pass catches 2- and
+    # 3-word phrasal restarts where the speaker says a phrase, breaks, then
+    # restarts the same phrase. Example from a real transcript:
+    #   [141] who  [142] is  [143] I  [144] said  [145] who  [146] is  [147] he?
+    # The phrase "who is" appears at 141-142 and again at 145-146 — the FIRST
+    # occurrence is the false start and should be removed, leaving the cleaner
+    # "I said, who is he?" The single-word _is_stutter pass cannot see this
+    # because it only looks at consecutive word pairs.
+    #
+    # Algorithm: for each kept word position i, try matching phrases of length
+    # 2 then 3 against any starting position j in the next ~5 kept words. If
+    # the same phrase repeats, remove the first occurrence (the false start).
+    # Same speaker only — different speakers repeating each other is dialogue.
+    remaining = [w for w in sorted_words if w["_word_index"] not in removed_indices]
+    _restart_removed = set()
+    for idx_in_remaining, w in enumerate(remaining):
+        if w["_word_index"] in _restart_removed:
+            continue
+        for phrase_len in (3, 2):  # try longer phrases first (more confident)
+            if idx_in_remaining + phrase_len > len(remaining):
+                continue
+            phrase_words = remaining[idx_in_remaining : idx_in_remaining + phrase_len]
+            # Skip phrases containing already-removed words
+            if any(pw["_word_index"] in _restart_removed for pw in phrase_words):
+                continue
+            # Need real word content (not punctuation-only)
+            phrase_text = tuple(pw["_clean"] for pw in phrase_words)
+            if not all(phrase_text):
+                continue
+            phrase_speaker = phrase_words[0].get("speaker", phrase_words[0].get("_speaker"))
+            # Look for the same phrase starting in the next 1-5 word positions
+            _matched = False
+            for scan_idx in range(idx_in_remaining + phrase_len, min(idx_in_remaining + phrase_len + 5, len(remaining))):
+                if scan_idx + phrase_len > len(remaining):
+                    break
+                cand_words = remaining[scan_idx : scan_idx + phrase_len]
+                if any(cw["_word_index"] in _restart_removed for cw in cand_words):
+                    continue
+                cand_text = tuple(cw["_clean"] for cw in cand_words)
+                if cand_text != phrase_text:
+                    continue
+                # Same speaker check — cross-speaker is dialogue, not a restart
+                cand_speaker = cand_words[0].get("speaker", cand_words[0].get("_speaker"))
+                if phrase_speaker is not None and cand_speaker is not None and phrase_speaker != cand_speaker:
+                    continue
+                # Time gap sanity: the restart must be within ~3s of the original
+                if cand_words[0]["_start"] - phrase_words[-1]["_end"] > 3.0:
+                    continue
+                # Remove the FIRST occurrence (false start), keep the second
+                for pw in phrase_words:
+                    _restart_removed.add(pw["_word_index"])
+                print(
+                    f"[tighten] Phrasal restart '{' '.join(phrase_text)}' at "
+                    f"{phrase_words[0]['_start']:.3f}s removed "
+                    f"(repeats at {cand_words[0]['_start']:.3f}s)",
+                    flush=True,
+                )
+                _matched = True
+                break
+            if _matched:
+                break  # don't also try shorter phrase length at this position
+    removed_indices |= _restart_removed
 
     deterministic_removed = removed_indices - gemini_removed
 
@@ -4624,7 +4734,11 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15):
         flush=True,
     )
 
-    return final_clips
+    # Return clips AND the set of removed word indices so downstream consumers
+    # (caption projection, SFX word-snapping) can use the SAME source of truth
+    # as the cut builder. Without this, the caption projection iterates the
+    # full Deepgram transcript and emits fragments of removed words.
+    return final_clips, set(removed_indices)
 
 
 def tighten_clips_with_deepgram(cuts, deepgram_words, min_silence_to_remove=0.08):
@@ -5556,6 +5670,58 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             "_is_hook": True,
         }] + render_cuts
 
+        # ROOT FIX: hook range exclusivity. Any main-timeline cut that
+        # overlaps [_hook_start, _hook_end] would cause those source seconds
+        # to play TWICE in the final video — once in the hook teaser, once
+        # in the main timeline — and produce duplicate captions. We split
+        # or trim those cuts here so the hook range exists in exactly ONE
+        # cut (the hook itself).
+        _hook_range_start = _hook_start
+        _hook_range_end = _hook_end
+        _resolved = [render_cuts[0]]  # keep the hook cut itself
+        for _rc in render_cuts[1:]:
+            _cs = float(_rc.get("source_start") or 0.0)
+            _ce = float(_rc.get("source_end") or 0.0)
+            # Case 1: no overlap
+            if _ce <= _hook_range_start or _cs >= _hook_range_end:
+                _resolved.append(_rc)
+                continue
+            # Case 2: cut entirely inside hook range — drop it
+            if _cs >= _hook_range_start and _ce <= _hook_range_end:
+                print(f"[hook] Dropped main cut {_cs:.3f}-{_ce:.3f} (fully inside hook range)", flush=True)
+                continue
+            # Case 3: cut spans the hook range — split into two
+            if _cs < _hook_range_start and _ce > _hook_range_end:
+                _left = dict(_rc)
+                _left["source_end"] = round(_hook_range_start * 1000) / 1000
+                _right = dict(_rc)
+                _right["source_start"] = round(_hook_range_end * 1000) / 1000
+                # Only the second half keeps any transition_out
+                _left["transition_out"] = "none"
+                if _left["source_end"] - _left["source_start"] >= 0.1:
+                    _resolved.append(_left)
+                if _right["source_end"] - _right["source_start"] >= 0.1:
+                    _resolved.append(_right)
+                print(f"[hook] Split main cut {_cs:.3f}-{_ce:.3f} around hook range", flush=True)
+                continue
+            # Case 4: cut overlaps left edge of hook → trim end
+            if _cs < _hook_range_start <= _ce <= _hook_range_end:
+                _trimmed = dict(_rc)
+                _trimmed["source_end"] = round(_hook_range_start * 1000) / 1000
+                if _trimmed["source_end"] - _trimmed["source_start"] >= 0.1:
+                    _resolved.append(_trimmed)
+                    print(f"[hook] Trimmed main cut end {_ce:.3f}→{_hook_range_start:.3f} (hook overlap)", flush=True)
+                continue
+            # Case 5: cut overlaps right edge of hook → trim start
+            if _hook_range_start <= _cs <= _hook_range_end < _ce:
+                _trimmed = dict(_rc)
+                _trimmed["source_start"] = round(_hook_range_end * 1000) / 1000
+                if _trimmed["source_end"] - _trimmed["source_start"] >= 0.1:
+                    _resolved.append(_trimmed)
+                    print(f"[hook] Trimmed main cut start {_cs:.3f}→{_hook_range_end:.3f} (hook overlap)", flush=True)
+                continue
+        render_cuts = _resolved
+
     # Tag each cut with its pre-split index so text overlays can map back
     # Hook clip(s) get _original_idx = -1; content clips get 0, 1, 2, ...
     _content_idx = 0
@@ -5593,6 +5759,32 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # This is the root fix for audio/video sync — constant-average audio matches video.
     render_cuts = split_clips_at_speed_keypoints(render_cuts, speed_curve)
     n = len(render_cuts)
+
+    # ── Auto-transition assignment (MOVED UPSTREAM) ─────────────────────
+    # ROOT FIX: this loop mutates render_cuts[i]["transition_out"] in place.
+    # Previously it ran AFTER caption/emphasis projection, so those consumers
+    # saw a render_cuts state where transition_out was still "none", but the
+    # SFX projection and the actual rendered video saw the post-mutation
+    # state where transitions exist. The result was a growing drift between
+    # captions and the rendered video equal to (n_transitions * 0.20s).
+    #
+    # Solution: mutate FIRST, then every downstream consumer sees the same
+    # final render_cuts. There is no longer a "before" and "after" state.
+    _auto_transitions_added = 0
+    _em_all_for_auto = edit_plan.get("_emphasis_moments") or edit_plan.get("emphasis_moments") or []
+    _SUBTLE_TRANSITIONS_AUTO = ["dissolve", "smoothleft", "smoothright", "fade"]
+    for _ci in range(1, n):
+        _existing = str(render_cuts[_ci - 1].get("transition_out") or "none").lower()
+        if _existing != "none" or render_cuts[_ci].get("_is_broll") or render_cuts[_ci - 1].get("_is_hook"):
+            continue
+        _cut_source_end = float(render_cuts[_ci - 1].get("source_end") or 0)
+        _near_emphasis = any(abs(float(em.get("t") or 0) - _cut_source_end) < 1.5 for em in _em_all_for_auto)
+        if _near_emphasis or (_ci % 3 == 0 and _auto_transitions_added < 4):
+            _auto_t = _SUBTLE_TRANSITIONS_AUTO[_auto_transitions_added % len(_SUBTLE_TRANSITIONS_AUTO)]
+            render_cuts[_ci - 1]["transition_out"] = _auto_t
+            _auto_transitions_added += 1
+    if _auto_transitions_added:
+        print(f"[transitions] Auto-assigned {_auto_transitions_added} subtle transition(s)", flush=True)
 
     # Build canonical time maps — the SINGLE SOURCE OF TRUTH for all timing.
     # Every system (FFmpeg setpts, caption projection, B-roll, SFX) uses these.
@@ -5632,6 +5824,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             hook_clip=None, speed_curve=speed_curve,
             transition_duration=TRANSITION_DURATION,
             clip_time_maps=_clip_time_maps,
+            removed_word_indices=edit_plan.get("_removed_word_indices") or set(),
         )
         if _projected_words:
             # Clean curly braces
@@ -5659,6 +5852,13 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # Project emphasis moment timestamps from source time → output timeline
     # (Gemini gives source timestamps, but Remotion overlay uses output timeline)
     _clip_ranges_for_em = get_output_clip_ranges(render_cuts, effective_durations, transition_duration=TRANSITION_DURATION)
+    # VERIFICATION: dump the timeline state every projection consumer sees.
+    # After Fix 1, all 4 consumers (captions, emphasis, SFX, video render)
+    # should see IDENTICAL render_cuts and clip_ranges. Drift = bug.
+    _n_with_trans = sum(1 for c in render_cuts if str(c.get("transition_out") or "none").lower() not in ("none", "clean_cut", ""))
+    print(f"[verify] EMPHASIS site: {len(render_cuts)} cuts, {_n_with_trans} with transitions, total_eff_dur={sum(effective_durations):.3f}s", flush=True)
+    if _clip_ranges_for_em:
+        print(f"[verify] EMPHASIS first range: {_clip_ranges_for_em[0]} last: {_clip_ranges_for_em[-1]}", flush=True)
     _emphasis_moments = []
     for _em in _emphasis_moments_raw:
         _em_copy = dict(_em)
@@ -6153,23 +6353,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # utilization. Then concat (stream copy) + audio post-processing.
     # ══════════════════════════════════════════════════════════════════════════
 
-    # ── Auto-transition assignment ──────────────────────────────────────
-    _auto_transitions_added = 0
-    _em_all = edit_plan.get("_emphasis_moments") or edit_plan.get("emphasis_moments") or []
-    _SUBTLE_TRANSITIONS = ["dissolve", "smoothleft", "smoothright", "fade"]
-    for _ci in range(1, n):
-        _existing = str(render_cuts[_ci - 1].get("transition_out") or "none").lower()
-        if _existing != "none" or render_cuts[_ci].get("_is_broll") or render_cuts[_ci - 1].get("_is_hook"):
-            continue
-        _cut_source_end = float(render_cuts[_ci - 1].get("source_end") or 0)
-        _near_emphasis = any(abs(float(em.get("t") or 0) - _cut_source_end) < 1.5 for em in _em_all)
-        if _near_emphasis or (_ci % 3 == 0 and _auto_transitions_added < 4):
-            _auto_t = _SUBTLE_TRANSITIONS[_auto_transitions_added % len(_SUBTLE_TRANSITIONS)]
-            render_cuts[_ci - 1]["transition_out"] = _auto_t
-            _auto_transitions_added += 1
-    if _auto_transitions_added:
-        print(f"[transitions] Auto-assigned {_auto_transitions_added} subtle transition(s)", flush=True)
-
     # ── Compute per-segment transition fades ────────────────────────────
     # Decompose xfade transitions into per-segment fade-in/fade-out so each
     # segment can be rendered independently without cross-segment dependencies.
@@ -6260,6 +6443,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     # Use the SAME rounded effective_durations as the render — no recomputing.
     _full_ranges = get_output_clip_ranges(render_cuts, effective_durations, transition_duration=TRANSITION_DURATION) if render_cuts else []
+    # VERIFICATION: this should match the EMPHASIS site exactly (Fix 1).
+    _n_with_trans_sfx = sum(1 for c in render_cuts if str(c.get("transition_out") or "none").lower() not in ("none", "clean_cut", ""))
+    print(f"[verify] SFX site:      {len(render_cuts)} cuts, {_n_with_trans_sfx} with transitions, total_eff_dur={sum(effective_durations):.3f}s", flush=True)
+    if _full_ranges:
+        print(f"[verify] SFX first range:      {_full_ranges[0]} last: {_full_ranges[-1]}", flush=True)
     parsed_sfx = edit_plan.get("_parsed_sound_effects", [])
     for _i, _sfx in enumerate(parsed_sfx):
         _sound_style = normalize_sfx_style(_sfx.get("sound") or "none")
