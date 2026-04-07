@@ -2383,7 +2383,7 @@ RULES FOR USING THESE TIMESTAMPS:
             f"{len(normalized_remove_words)} Gemini removals + deterministic tightening",
             flush=True,
         )
-        validated_cuts, _removed_word_indices = build_clips_from_words(_dg_words, normalized_remove_words, max_silence_gap=_speech_gap)
+        validated_cuts, _removed_word_indices = build_clips_from_words(_dg_words, normalized_remove_words, max_silence_gap=_speech_gap, video_duration=video_duration)
         edit_plan["_removed_word_indices"] = _removed_word_indices
         for i, clip in enumerate(validated_cuts):
             clip_start = float(clip["source_start"])
@@ -4382,7 +4382,7 @@ def _is_stutter(current_word, next_word):
     return False
 
 
-def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15):
+def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15, video_duration=0.0):
     """
     Deterministic, CapCut-quality clip builder.
 
@@ -4395,18 +4395,31 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15):
       6. Merge micro-clips (< 120ms) into neighbors
       7. Fix overlaps between adjacent clips
       8. Final safety: expand any boundary that lands mid-word
+
+    video_duration (when > 0) clamps every word's end timestamp so that
+    no clip ever requests source frames past the actual end of the video.
+    Without this, ffmpeg silently produces a shorter segment than predicted
+    when the last word's Deepgram-reported end exceeds the actual video
+    length, causing a downstream timeline mismatch.
     """
     if not deepgram_words:
         return []
 
+    _vd = float(video_duration or 0.0)
+
     # ── Step 0: Prepare sorted word list with metadata ────────────────────
+    def _clamp_end(_v):
+        if _vd > 0 and _v > _vd:
+            return _vd
+        return _v
+
     sorted_words = sorted(
         [
             {
                 **w,
                 "_word_index": i,
                 "_start": float(w.get("start") or 0.0),
-                "_end": float(w.get("end") or 0.0),
+                "_end": _clamp_end(float(w.get("end") or 0.0)),
                 "_text": str(w.get("punctuated_word") or w.get("word") or "").strip(),
                 "_clean": re.sub(r"[^a-z']", "", str(w.get("word") or w.get("punctuated_word") or "").strip().lower()),
             }
@@ -4414,6 +4427,9 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15):
         ],
         key=lambda w: w["_start"],
     )
+    # Drop any word whose start is past video_duration entirely (rare edge case)
+    if _vd > 0:
+        sorted_words = [w for w in sorted_words if w["_start"] < _vd and w["_end"] > w["_start"]]
 
     removed_indices = set()
 
@@ -4741,6 +4757,9 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15):
     for rc in raw_clips:
         s = round(rc["padded_start"] * 1000) / 1000
         e = round(rc["padded_end"] * 1000) / 1000
+        # Final clamp: padding may have pushed end past video_duration
+        if _vd > 0 and e > _vd:
+            e = round(_vd * 1000) / 1000
         if e - s < 0.05:
             continue
         final_clips.append({
