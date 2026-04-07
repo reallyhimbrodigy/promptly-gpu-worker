@@ -1890,13 +1890,13 @@ Sound effects — audio accents that make the edit feel physical and professiona
 
   Available sounds and WHEN to use each:
 
-  boom — deep cinematic impact. Use for the single biggest moment in the video — the jaw-drop statement, the shocking reveal. ONE per video maximum.
+  boom — deep cinematic impact. Use for the biggest moments in the video — the jaw-drop statements, the shocking reveals.
     Example: "they offered me TWO MILLION dollars" → boom on "million"
 
   hit — sharp dramatic impact. Use for strong statements that need punctuation but aren't THE moment.
     Example: "I kicked the bed" → hit on "kicked"
 
-  drum_roll — snare drum roll building to a cymbal crash. The crash is the moment that lands on your trigger word; the system automatically schedules the file early so the build precedes the word. Use ONLY for genuine dramatic buildup — a big number reveal, a winner being chosen, a life-changing announcement. NOT for regular transitions or mild emphasis.
+  drum_roll — snare drum roll building to a cymbal crash. The crash is the moment that lands on your trigger word; the system automatically schedules the file early so the build precedes the word. Use for genuine dramatic buildup — a big number reveal, a winner being chosen, a life-changing announcement. Not for regular transitions or mild emphasis.
     Example: "and the winner is... SARAH" → drum_roll on "sarah" (the crash hits on her name)
 
   reverse — backward sweep sound. Use when the story literally reverses, rewinds, or someone says "wait, back up" or "let me rewind." Also works for sudden stops where the energy cuts dead.
@@ -1971,10 +1971,10 @@ Sound effects — audio accents that make the edit feel physical and professiona
   - The downstream system snaps your sound to the exact start of the spoken word using the "word" field, so getting the word right matters more than getting "t" right — but BOTH must point to the same word.
   - Onset compensation is automatic: the system knows each SFX file's internal onset (where the actual hit/climax is) and schedules the file to start early so the perceived "moment" lands precisely on the word. You do NOT need to compensate — just place "t" on the word and the system handles the rest. This applies to build-up sounds too: drum_roll, reverse, sad_trombone, thunder, whoosh_slow all have their climax automatically aligned to the word.
   - There is NO upper cap on sound effects and NO per-type limit. Place as many as the edit truly justifies. Quality over quantity — every sound must be earned, but if 8 moments earn a sound, place 8 sounds.
-  - CRITICAL: NEVER place two sound effects on the same word or within 200ms of each other. Two sounds that overlap in time will sound like one muddy hit and the system will silently drop the second. If you want a layered impact, choose ONE sound that already has the layers built in (e.g. drum_roll already builds to a crash — you do NOT need to add boom on the same word; thunder already rumbles into a hit — you do NOT need to add hit on top of it).
-  - Spread sounds across the video. Two sounds in adjacent words is almost always wrong. A good rhythm is one impact every 4-8 seconds at most.
+  - Do not place 2 sounds on 1 moment. That will never work. If you want a layered impact, pick a single sound that already has the layers built in (drum_roll already builds to a crash; thunder already rumbles into a hit).
   - ding should ONLY be used when someone literally receives a text/call/message/notification.
-  - whoosh_slow should ONLY be used on transitions (whip/wipe), never on hard cuts.
+  - whoosh_slow REQUIRES a wipe/fade/whip/smooth transition on the same clip. Never place it on a hard cut — there is no visual movement to sell the sound and it will play over silence.
+  - transition_smooth follows the same rule as whoosh_slow — REQUIRES a wipe/fade/whip/smooth transition on the same clip.
   - When in doubt, leave the sound out. Silence is better than a wrong sound.
 
   sound_effects: [
@@ -2766,23 +2766,17 @@ RULES FOR USING THESE TIMESTAMPS:
             sound = _SFX_ALIASES.get(sound, sound)
             if sound in valid_sounds and t >= 0 and (video_duration <= 0 or t <= video_duration):
                 word = str(sfx.get("word") or "").strip().lower()
-
-                # whoosh/transition: only with wipe/fade transitions
-                if sound in ("whoosh_slow", "transition_smooth"):
-                    has_transitions = any(
-                        str(c.get("transition_out") or "none").lower() not in ("none", "")
-                        for c in (edit_plan.get("cuts") or [])
-                    )
-                    if not has_transitions:
-                        print(f"[generate-edit] Filtered out {sound} at {t:.1f}s (no wipe/fade transitions)", flush=True)
-                        continue
-
                 sound_effects.append({"t": t, "sound": sound, "word": word})
 
-    # SFX dedup is deferred until after auto-placement (see below).
-    # No per-type caps. No early spacing pass. The single dedup chokepoint
-    # below catches both Gemini-placed and auto-placed sounds, preventing
-    # ANY two SFX from firing within SFX_MIN_SPACING of each other.
+    # Sound effects are taken EXACTLY as Gemini provided them. No caps,
+    # no spacing filter, no auto-placement, no dedup. The Gemini prompt is
+    # the single source of truth for SFX placement rules — if a placement
+    # is wrong, the fix is the prompt.
+    if sound_effects:
+        sound_effects.sort(key=lambda x: x["t"])
+        print(f"[generate-edit] Sound effects: {len(sound_effects)} placements", flush=True)
+        for sfx in sound_effects:
+            print(f"[generate-edit]   {sfx['t']:.1f}s: {sfx['sound']}", flush=True)
     edit_plan["sound_effects"] = sound_effects
     edit_plan["_parsed_sound_effects"] = sound_effects
 
@@ -2846,9 +2840,11 @@ RULES FOR USING THESE TIMESTAMPS:
         final_cuts[target_idx]["zoom"] = opening_zoom
         print(f"[generate-edit] Assigned opening_zoom={opening_zoom} to clip {target_idx}", flush=True)
 
-    # ── Map emphasis_moments to clips ────────────────────────────────────
-    # High-intensity emphasis moments get cut_zoom (instant snap-in zoom)
-    # and auto-placed SFX if no sound already exists nearby.
+    # ── Map emphasis_moments to cut_zoom on the containing clip ──────────
+    # cut_zoom is the renderer's interpretation of "this is a high-intensity
+    # moment" — same as how SFX onset compensation interprets "place sound
+    # at word X". It is NOT auto-placement of new content; it implements the
+    # render decision implied by Gemini's emphasis_moments declaration.
     # Debounce: require at least 3s gap between emphasis zooms to avoid
     # jarring rapid-fire zoom snapping.
     _last_zoom_t = -999.0
@@ -2868,81 +2864,6 @@ RULES FOR USING THESE TIMESTAMPS:
                     else:
                         print(f"[emphasis] Skipped cut_zoom at {em_t:.1f}s — too close to previous zoom at {_last_zoom_t:.1f}s", flush=True)
                 break
-
-        # Auto-place hit on high-intensity moments that have no SFX nearby.
-        # The single dedup chokepoint below will drop this if it collides
-        # with a Gemini-placed sound, so we only need a loose proximity
-        # check here as a quick optimization.
-        if em["intensity"] == "high":
-            nearby_sfx = any(abs(sfx["t"] - em_t) < 1.0 for sfx in sound_effects)
-            if not nearby_sfx:
-                sound_effects.append({"t": em_t, "sound": "hit", "word": f"emphasis_{em['type']}", "_auto": True})
-                print(f"[emphasis] Auto-placed hit at {em_t:.1f}s ({em['type']})", flush=True)
-
-    # ── SFX dedup chokepoint ───────────────────────────────────────────
-    # The ONE place where the "no two SFX on the same moment" rule is
-    # enforced. Both Gemini-placed and auto-placed sounds flow through
-    # here. Any future code path that adds SFX must also pass through
-    # this chokepoint or the rule can be bypassed.
-    #
-    # SFX_MIN_SPACING (200ms) is the acoustic transient overlap window —
-    # impact sounds closer than this perceptually merge into one muddy hit.
-    # Tight rapid sequences (e.g. drum_roll → boom 0.4s later) still work.
-    #
-    # Tie-break rule: when two SFX collide, the FIRST in source-time order
-    # wins, with one exception — if a Gemini-placed sound and an auto-placed
-    # sound collide, the Gemini sound always wins regardless of order
-    # (Gemini's choice is intentional editorial; auto-placement is filler).
-    SFX_MIN_SPACING = 0.20
-    if sound_effects:
-        sound_effects.sort(key=lambda x: x["t"])
-        deduped = []
-        for sfx in sound_effects:
-            collision = None
-            for kept in deduped:
-                if abs(sfx["t"] - kept["t"]) < SFX_MIN_SPACING:
-                    collision = kept
-                    break
-            if collision is None:
-                deduped.append(sfx)
-                continue
-            # Collision: Gemini-placed beats auto-placed
-            sfx_is_auto = bool(sfx.get("_auto"))
-            kept_is_auto = bool(collision.get("_auto"))
-            if sfx_is_auto and not kept_is_auto:
-                # Drop the new (auto) sound; keep the Gemini sound
-                print(
-                    f"[sfx-dedup] Dropped auto {sfx['sound']} at {sfx['t']:.2f}s "
-                    f"(within {SFX_MIN_SPACING:.2f}s of {collision['sound']} at {collision['t']:.2f}s)",
-                    flush=True,
-                )
-                continue
-            if kept_is_auto and not sfx_is_auto:
-                # Replace the auto sound with this Gemini sound
-                deduped.remove(collision)
-                deduped.append(sfx)
-                print(
-                    f"[sfx-dedup] Replaced auto {collision['sound']} at {collision['t']:.2f}s "
-                    f"with {sfx['sound']} at {sfx['t']:.2f}s (Gemini-placed)",
-                    flush=True,
-                )
-                continue
-            # Same-priority collision: first in source-time wins (kept stays)
-            print(
-                f"[sfx-dedup] Dropped {sfx['sound']} at {sfx['t']:.2f}s "
-                f"(within {SFX_MIN_SPACING:.2f}s of {collision['sound']} at {collision['t']:.2f}s)",
-                flush=True,
-            )
-        deduped.sort(key=lambda x: x["t"])
-        sound_effects = deduped
-
-    if sound_effects:
-        print(f"[generate-edit] Sound effects: {len(sound_effects)} placements", flush=True)
-        for sfx in sound_effects:
-            print(f"[generate-edit]   {sfx['t']:.1f}s: {sfx['sound']}", flush=True)
-
-    edit_plan["sound_effects"] = sound_effects
-    edit_plan["_parsed_sound_effects"] = sound_effects
 
     # Color grading disabled — phone cameras already auto-correct color,
     # and artistic grades consistently make talking-head content look worse.
