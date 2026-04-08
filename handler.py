@@ -6167,15 +6167,17 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         end = float(cut["source_end"])
         seg_dur = end - start
         # Each segment is a separate input with pre-seeking.
-        # NVDEC hardware decode: GPU decodes video → auto-transfers to CPU for filter chain.
-        # Using -hwaccel cuda (without -hwaccel_output_format cuda) so frames land in system
-        # memory automatically — no hwdownload filter needed, works with all filter chains.
-        _hw_args = ["-hwaccel", "cuda"] if _HAS_HWACCEL else []
+        # IMPORTANT: NVDEC hwaccel is NOT used here. We have ~30-60 parallel
+        # ffmpeg processes, and each NVDEC context init takes ~500-1000ms
+        # plus the H100's NVDEC engines serialize when contended. With 37
+        # processes contending, NVDEC becomes the bottleneck (~36s render
+        # time observed). CPU decode of small H.264 slices (1-3s each) is
+        # fast — 80 CPU cores eat that easily in parallel — and avoids the
+        # GPU contention entirely.
         _seg_input = (
-            _hw_args
-            + ["-ss", f"{start:.3f}", "-t", f"{seg_dur:.3f}",
-               "-analyzeduration", "1000000", "-probesize", "1000000",
-               "-i", render_source]
+            ["-ss", f"{start:.3f}", "-t", f"{seg_dur:.3f}",
+             "-analyzeduration", "1000000", "-probesize", "1000000",
+             "-i", render_source]
         )
         input_args += _seg_input
         _seg_input_args_list.append(list(_seg_input))
