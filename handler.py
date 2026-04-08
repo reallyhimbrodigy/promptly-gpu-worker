@@ -1823,23 +1823,23 @@ Global parameters:
 
   Example for a 60-second clip with three ramps:
   ```
-    {"t": 0.08,  "speed": 1.3},   // start fast (setup)
-    {"t": 11.2,  "speed": 1.3},   // hold fast — no ramp here yet
-    {"t": 12.0,  "speed": 0.75},  // RAMP DOWN over 0.8s into the slow moment
-    {"t": 17.0,  "speed": 0.75},  // hold slow
-    {"t": 17.8,  "speed": 1.3},   // RAMP UP over 0.8s back to fast
-    {"t": 32.5,  "speed": 1.3},   // hold fast
-    {"t": 33.4,  "speed": 0.7},   // RAMP DOWN over 0.9s into the punchline
-    {"t": 35.5,  "speed": 0.7},   // hold slow on the reveal
-    {"t": 36.3,  "speed": 1.2},   // RAMP UP over 0.8s back to medium-fast
-    {"t": 58.0,  "speed": 1.2}    // hold to end
+    {{"t": 0.08,  "speed": 1.3}},   // start fast (setup)
+    {{"t": 11.2,  "speed": 1.3}},   // hold fast — no ramp here yet
+    {{"t": 12.0,  "speed": 0.75}},  // RAMP DOWN over 0.8s into the slow moment
+    {{"t": 17.0,  "speed": 0.75}},  // hold slow
+    {{"t": 17.8,  "speed": 1.3}},   // RAMP UP over 0.8s back to fast
+    {{"t": 32.5,  "speed": 1.3}},   // hold fast
+    {{"t": 33.4,  "speed": 0.7}},   // RAMP DOWN over 0.9s into the punchline
+    {{"t": 35.5,  "speed": 0.7}},   // hold slow on the reveal
+    {{"t": 36.3,  "speed": 1.2}},   // RAMP UP over 0.8s back to medium-fast
+    {{"t": 58.0,  "speed": 1.2}}    // hold to end
   ```
 
   WRONG pattern: do NOT place keypoints far apart and expect a fast transition.
   The ramp will smear across the entire gap and feel glacial.
   ```
-    {"t": 11.0, "speed": 0.8},
-    {"t": 17.0, "speed": 1.3}   // 6 seconds of slow drift — wrong, feels boring
+    {{"t": 11.0, "speed": 0.8}},
+    {{"t": 17.0, "speed": 1.3}}   // 6 seconds of slow drift — wrong, feels boring
   ```
 
   CRITICAL: every keypoint speed MUST be either slowed down (0.67x-0.8x) or sped
