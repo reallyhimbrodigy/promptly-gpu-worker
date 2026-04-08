@@ -2631,29 +2631,39 @@ RULES FOR USING THESE TIMESTAMPS:
         else:
             speed_curve.sort(key=lambda x: x["t"])
 
-            # Snap each keypoint to the nearest Deepgram word start. Gemini
-            # places keypoints at word boundaries per the prompt, but rounds
-            # to ~2 decimal places, while the cut builder uses exact word
-            # starts (3+ decimals). The two systems then disagreed by a few
-            # ms, causing get_speed_for_timestamp to miss keypoints when
-            # called with a clip's source_start and return the previous
-            # keypoint's speed (e.g. a clip starting at 23.835 would miss
-            # a keypoint at 23.840 and play the entire clip at the prior
-            # speed). Snapping at parse time eliminates the disagreement
-            # at the source — every keypoint is now bit-exact to a real
-            # word start that the cut builder also uses.
-            _dg_word_starts = sorted(float(w.get("start") or 0.0) for w in (_dg_words or []))
-            if _dg_word_starts:
+            # Snap each keypoint to the nearest Deepgram word BOUNDARY
+            # (start OR end). Gemini places keypoints at word boundaries
+            # per the prompt, but rounds to ~2 decimal places. Sometimes
+            # Gemini means "the moment X starts" (word start) and
+            # sometimes "the moment X ends, then change" (word end). The
+            # snap considers both — whichever is closer is the boundary
+            # Gemini meant. The cut builder uses both word starts (for
+            # clip beginnings) and word ends (for clip endings), so
+            # snapping to either is bit-exact to a real cut boundary.
+            #
+            # Without considering word ends, a keypoint placed at the END
+            # of a word like "lips," (e.g. 17.110, where the word ends at
+            # 17.115) would snap BACKWARD to the word's start (16.475),
+            # changing speed in the MIDDLE of the word.
+            _dg_boundaries = []
+            for w in (_dg_words or []):
+                _ws = float(w.get("start") or 0.0)
+                _we = float(w.get("end") or 0.0)
+                if _we > _ws:
+                    _dg_boundaries.append(_ws)
+                    _dg_boundaries.append(_we)
+            _dg_boundaries.sort()
+            if _dg_boundaries:
                 _snap_count = 0
                 for kp in speed_curve:
                     _orig_t = kp["t"]
-                    _nearest = min(_dg_word_starts, key=lambda ws: abs(ws - _orig_t))
+                    _nearest = min(_dg_boundaries, key=lambda b: abs(b - _orig_t))
                     if abs(_nearest - _orig_t) > 0.0005:
                         kp["t"] = _nearest
                         _snap_count += 1
                         print(
                             f"[speed-curve] Snapped keypoint {_orig_t:.3f}s → {_nearest:.3f}s "
-                            f"(nearest Deepgram word start)",
+                            f"(nearest Deepgram word boundary)",
                             flush=True,
                         )
                 if _snap_count:
