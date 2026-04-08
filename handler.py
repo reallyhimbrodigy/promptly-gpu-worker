@@ -1811,25 +1811,46 @@ Global parameters:
   SLOW DOWN (0.67x-0.8x): Punchlines, reveals, shocking statements, emotional peaks.
 
   THE RAMP:
-  Between any two of your keypoints the pipeline LINEARLY INTERPOLATES the speed
-  to produce a perceptually smooth ramp (the same way CapCut, Premiere, and DaVinci
-  do continuous speed curves). Each keypoint represents the speed AT that moment;
-  the speed glides linearly from one keypoint's value to the next over the time
-  between them.
+  A speed ramp is a SHORT transition (0.4-1.2 seconds) between two held speeds.
+  The pipeline linearly interpolates between adjacent keypoints, so the time
+  between any two keypoints IS the ramp duration. Long gaps between keypoints
+  produce slow drifty speed changes that feel boring and amateur.
 
-  This means: if you set keypoint A at t=10s with speed 0.8, and keypoint B at
-  t=14s with speed 1.4, the speed at t=12s will be exactly 1.1 (halfway). If you
-  want the speed to HOLD at one value for a while and then change, place TWO
-  keypoints with the same speed at the start and end of the hold section, then a
-  new keypoint where the change should happen.
+  CORRECT pattern: each speed change is a PAIR of keypoints placed close together
+  (≤1.2 seconds apart). The first keypoint of the pair holds the previous speed;
+  the second keypoint snaps to the new speed. Between pairs, the speed HOLDS at
+  whatever value the most recent keypoint set.
+
+  Example for a 60-second clip with three ramps:
+  ```
+    {"t": 0.08,  "speed": 1.3},   // start fast (setup)
+    {"t": 11.2,  "speed": 1.3},   // hold fast — no ramp here yet
+    {"t": 12.0,  "speed": 0.75},  // RAMP DOWN over 0.8s into the slow moment
+    {"t": 17.0,  "speed": 0.75},  // hold slow
+    {"t": 17.8,  "speed": 1.3},   // RAMP UP over 0.8s back to fast
+    {"t": 32.5,  "speed": 1.3},   // hold fast
+    {"t": 33.4,  "speed": 0.7},   // RAMP DOWN over 0.9s into the punchline
+    {"t": 35.5,  "speed": 0.7},   // hold slow on the reveal
+    {"t": 36.3,  "speed": 1.2},   // RAMP UP over 0.8s back to medium-fast
+    {"t": 58.0,  "speed": 1.2}    // hold to end
+  ```
+
+  WRONG pattern: do NOT place keypoints far apart and expect a fast transition.
+  The ramp will smear across the entire gap and feel glacial.
+  ```
+    {"t": 11.0, "speed": 0.8},
+    {"t": 17.0, "speed": 1.3}   // 6 seconds of slow drift — wrong, feels boring
+  ```
+
+  CRITICAL: every keypoint speed MUST be either slowed down (0.67x-0.8x) or sped
+  up (1.2x-1.4x). NEVER use 1.0x — the video should never play at normal speed.
+  Speed ramping means the entire video is either fast or slow at every moment.
 
   Place each keypoint at the exact word where the speed should be at that target
   value. Use the Deepgram word timestamps to hit the exact right word.
 
-  Every keypoint must serve a DIFFERENT narrative purpose. If two adjacent keypoints are
-  both "speeding through filler," merge them into one. If a slow section covers multiple
-  sentences, you probably need fewer keypoints, not more. Aim for 4-8 keypoints for a
-  60-second video — enough to create rhythm, not so many that the video feels jittery.
+  Aim for 8-14 keypoints total for a 60-second video — that's 3-5 "ramp pairs"
+  plus the held sections in between.
 
   Speed range: 0.67x to 1.4x. Slow moments MUST land on spoken words, never on silence.
 
