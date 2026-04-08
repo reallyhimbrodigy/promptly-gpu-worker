@@ -4212,30 +4212,20 @@ def prepare_remotion_input(
     return input_json_path
 
 
-def render_remotion_full_timeline(input_json_path, output_png_dir, total_frames, concurrency, gl_mode="angle-egl"):
-    """Render the ENTIRE output timeline in ONE Node process with ONE Chrome browser.
-
-    This is the optimal Remotion strategy: pay Chrome boot ONCE, render all output
-    frames in a single renderFrames call with high tab concurrency. Each ffmpeg
-    segment then reads its slice from the shared PNG dir using -start_number with
-    its global frame offset.
-
-    Replaces the per-segment Remotion approach which paid ~3s of Chrome boot per
-    segment (47 boots × 3s = 141s of waste, plus 10-wide semaphore queueing).
-
-    Returns (start_num, count, digits).
-    """
+def render_remotion_segment(input_json_path, output_png_dir, frame_start, frame_end, concurrency, gl_mode="angle-egl"):
+    """Render a segment's caption frames via Remotion. Returns (output_dir, start_num, count, digits)."""
     remotion_dir = "/remotion"
     render_cli = os.path.join(remotion_dir, "render-cli.mjs")
     os.makedirs(output_png_dir, exist_ok=True)
 
+    _n_frames = frame_end - frame_start + 1
     cmd = [
         "node", render_cli,
         "--input", input_json_path,
         "--output", output_png_dir,
         "--concurrency", str(concurrency),
         "--gl", gl_mode,
-        "--frame-range", f"0-{total_frames - 1}",
+        "--frame-range", f"{frame_start}-{frame_end}",
     ]
 
     proc = subprocess.Popen(
@@ -4244,29 +4234,28 @@ def render_remotion_full_timeline(input_json_path, output_png_dir, total_frames,
     )
     _overlay_chunk_procs.append(proc)
 
-    _timeout = max(120, total_frames * 0.2)
+    _timeout = max(60, _n_frames * 0.2)
     try:
         stdout, stderr = proc.communicate(timeout=_timeout)
     except subprocess.TimeoutExpired:
         proc.kill()
         proc.communicate()
-        raise RuntimeError(f"[remotion] Full-timeline render timed out ({_timeout:.0f}s) for {total_frames} frames")
+        raise RuntimeError(f"[remotion] Segment render timed out ({_timeout:.0f}s) for frames {frame_start}-{frame_end}")
 
     if proc.returncode != 0:
         _all_output = (stdout or "") + "\n" + (stderr or "")
-        raise RuntimeError(f"[remotion] Full-timeline render failed: {_all_output[-800:]}")
+        raise RuntimeError(f"[remotion] Segment render failed (frames {frame_start}-{frame_end}): {_all_output[-500:]}")
 
-    if stdout:
-        for _line in stdout.strip().split("\n")[-5:]:
-            if _line.strip():
-                print(_line, flush=True)
+    # Verify PNGs and detect actual naming/numbering
+    _any_pngs = sorted(glob.glob(os.path.join(output_png_dir, "element-*.png")))
+    if not _any_pngs:
+        raise RuntimeError(f"[remotion] No PNGs found for frames {frame_start}-{frame_end} in {output_png_dir}")
 
-    _pngs = sorted(glob.glob(os.path.join(output_png_dir, "element-*.png")))
-    if not _pngs:
-        raise RuntimeError(f"[remotion] No PNGs found in {output_png_dir}")
-    _first = os.path.basename(_pngs[0])
-    _num_part = _first.split("-")[1].split(".")[0]
-    return int(_num_part), len(_pngs), len(_num_part)
+    _first_png = os.path.basename(_any_pngs[0])
+    _num_part = _first_png.split("-")[1].split(".")[0]
+    _actual_start = int(_num_part)
+    _digit_count = len(_num_part)
+    return output_png_dir, _actual_start, len(_any_pngs), _digit_count
 
 
 def render_remotion_overlay(
@@ -6926,43 +6915,13 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _seg_dir = os.path.join(work_dir, "segments")
     os.makedirs(_seg_dir, exist_ok=True)
 
-    # Single full-timeline Remotion render: ONE Node process + ONE Chrome
-    # browser renders the ENTIRE output timeline as one PNG sequence. Each
-    # ffmpeg segment then reads its slice from the shared dir using
-    # -start_number set to its global frame offset.
-    #
-    # Why this is the right architecture: timing instrumentation showed the
-    # per-segment approach was dominated by Chrome boot waste (~3-5s of boot
-    # to render 3-12 frames for short ramp sub-clips) plus semaphore queueing.
-    # Total output is only ~1300-1800 frames; rendering them in one shot at
-    # high tab concurrency takes ~5-10s wall vs the previous ~30-40s.
+    # Semaphore to limit concurrent Remotion processes (each opens Chrome tabs).
     _cpu_count = os.cpu_count() or 64
     _physical_cores = max(_cpu_count // 2, 1)
+    _max_concurrent_remotion = min(10, n)
+    _remotion_tabs_per_seg = max(2, _physical_cores // _max_concurrent_remotion)
+    _remotion_semaphore = threading.Semaphore(_max_concurrent_remotion)
     _gl_mode = "angle-egl" if _HAS_HWACCEL else "swiftshader"
-
-    # Shared full-timeline overlay PNG dir (rendered once, used by all segments)
-    _full_overlay_dir = None
-    _full_overlay_start_num = 0
-    _full_overlay_digits = 6
-    _total_overlay_frames = 0
-    if _captions_enabled and _remotion_input_json:
-        _total_overlay_frames = sum(_fe - _fs + 1 for _fs, _fe in _seg_frame_ranges)
-        _full_overlay_dir = os.path.join(_seg_dir, "overlay_full")
-        # Saturate physical cores with one Node process. Cap at 32 — beyond
-        # that, Chrome tab overhead exceeds per-frame compute and we hit
-        # diminishing returns.
-        _full_concurrency = max(8, min(_physical_cores, 32))
-        print(
-            f"[remotion] Full-timeline render: {_total_overlay_frames} frames "
-            f"in 1 Node process (concurrency={_full_concurrency})",
-            flush=True,
-        )
-        _full_t0 = time.time()
-        _full_overlay_start_num, _full_count, _full_overlay_digits = render_remotion_full_timeline(
-            _remotion_input_json, _full_overlay_dir,
-            _total_overlay_frames, _full_concurrency, _gl_mode,
-        )
-        print(f"[remotion] Full-timeline render complete in {time.time() - _full_t0:.2f}s ({_full_count} PNGs)", flush=True)
 
     # Timing instrumentation: capture per-segment phase timings so we can
     # see where the render time is actually going (Remotion wait vs Remotion
@@ -6982,17 +6941,26 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _seg_out = os.path.join(_seg_dir, f"seg_{seg_idx:03d}.mkv")
         _eff_dur = effective_durations[seg_idx]
 
-        # Phase 1: Pre-rendered Remotion overlays — read from the shared
-        # full-timeline PNG dir starting at this segment's global frame offset.
-        # No per-segment Remotion call: the entire output timeline was rendered
-        # once before the parallel pool launched.
-        _seg_overlay_dir = _full_overlay_dir
-        _seg_png_digits = _full_overlay_digits
-        if _full_overlay_dir:
-            _seg_frame_start_global, _ = _seg_frame_ranges[seg_idx]
-            _seg_png_start_num = _full_overlay_start_num + _seg_frame_start_global
-        else:
-            _seg_png_start_num = 0
+        # Phase 1: Per-segment Remotion render (semaphore-gated)
+        _seg_overlay_dir = None
+        _seg_png_start_num = 0
+        _seg_png_digits = 6
+        if _captions_enabled and _remotion_input_json:
+            _frame_start, _frame_end = _seg_frame_ranges[seg_idx]
+            _seg_overlay_dir = os.path.join(_seg_dir, f"overlay_seg_{seg_idx:03d}")
+            _t_sem = time.time()
+            _remotion_semaphore.acquire()
+            _t_remotion_wait = time.time() - _t_sem
+            try:
+                _t_rem = time.time()
+                _, _seg_png_start_num, _seg_png_count, _seg_png_digits = render_remotion_segment(
+                    _remotion_input_json, _seg_overlay_dir,
+                    _frame_start, _frame_end,
+                    _remotion_tabs_per_seg, _gl_mode,
+                )
+                _t_remotion_run = time.time() - _t_rem
+            finally:
+                _remotion_semaphore.release()
 
         # Phase 2: FFmpeg encode
         # Video filter chain (already built, just change input ref to [0:v])
