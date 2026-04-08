@@ -5922,16 +5922,33 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     #
     # Solution: mutate FIRST, then every downstream consumer sees the same
     # final render_cuts. There is no longer a "before" and "after" state.
+    # Auto-transitions are visual breaks between Gemini's narrative clips,
+    # not between speed-curve sub-clips. After densification, render_cuts
+    # contains many sub-clips per Gemini clip — each sub-clip carries the
+    # parent's _original_idx. A "real" clip boundary is a transition from
+    # one _original_idx to another. We only consider those positions as
+    # candidates for auto-transitions.
     _auto_transitions_added = 0
     _em_all_for_auto = edit_plan.get("_emphasis_moments") or edit_plan.get("emphasis_moments") or []
     _SUBTLE_TRANSITIONS_AUTO = ["dissolve", "smoothleft", "smoothright", "fade"]
+    _real_boundary_idx = 0  # counts only real clip boundaries, for the % 3 pattern
     for _ci in range(1, n):
+        _prev_oi = render_cuts[_ci - 1].get("_original_idx", -2)
+        _curr_oi = render_cuts[_ci].get("_original_idx", -2)
+        if _prev_oi == _curr_oi:
+            continue  # sub-clip split inside the same Gemini clip — not a real boundary
+        _real_boundary_idx += 1
         _existing = str(render_cuts[_ci - 1].get("transition_out") or "none").lower()
         if _existing != "none" or render_cuts[_ci].get("_is_broll") or render_cuts[_ci - 1].get("_is_hook"):
             continue
         _cut_source_end = float(render_cuts[_ci - 1].get("source_end") or 0)
         _near_emphasis = any(abs(float(em.get("t") or 0) - _cut_source_end) < 1.5 for em in _em_all_for_auto)
-        if _near_emphasis or (_ci % 3 == 0 and _auto_transitions_added < 4):
+        # Hard cap of 4 auto-transitions per video — visual variety
+        # without becoming busy. Applies to both the emphasis-driven
+        # path and the every-3rd-cut pattern.
+        if _auto_transitions_added >= 4:
+            continue
+        if _near_emphasis or (_real_boundary_idx % 3 == 0):
             _auto_t = _SUBTLE_TRANSITIONS_AUTO[_auto_transitions_added % len(_SUBTLE_TRANSITIONS_AUTO)]
             render_cuts[_ci - 1]["transition_out"] = _auto_t
             _auto_transitions_added += 1
@@ -6982,12 +6999,15 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             raise RuntimeError(f"Segment {seg_idx} FFmpeg failed: {_r.stderr[-500:]}")
         return _seg_out
 
-    # Launch all segments in parallel.
-    # max_workers cap: with speed_curve densification, n can exceed 200.
-    # Spawning 200+ ffmpeg processes against 80 cores causes thrashing and
-    # context-switch overhead that swamps the actual encode work. Cap at
-    # CPU count so threads queue cleanly into batches matching the hardware.
-    _max_workers = min(n, os.cpu_count() or 16)
+    # Launch segments in parallel.
+    # libx264 with the ultrafast preset internally uses ~3-4 CPU threads
+    # per encoder. On 80 cores, ~20 simultaneous encoders saturate the
+    # hardware; beyond that we lose throughput to context-switching and
+    # memory bandwidth contention. With speed_curve densification we
+    # routinely have 60+ sub-clips, so cap workers at a fixed batch size
+    # rather than scaling to segment count.
+    _MAX_PARALLEL_RENDER_WORKERS = 16
+    _max_workers = min(n, _MAX_PARALLEL_RENDER_WORKERS)
     print(f"[render] Parallel: {n} segments, {_max_workers} workers, {os.cpu_count()} cores", flush=True)
     _seg_paths = [None] * n
     with concurrent.futures.ThreadPoolExecutor(max_workers=_max_workers) as _seg_pool:
