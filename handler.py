@@ -2631,6 +2631,55 @@ RULES FOR USING THESE TIMESTAMPS:
         else:
             speed_curve.sort(key=lambda x: x["t"])
 
+            # Snap each keypoint to the nearest Deepgram word start. Gemini
+            # places keypoints at word boundaries per the prompt, but rounds
+            # to ~2 decimal places, while the cut builder uses exact word
+            # starts (3+ decimals). The two systems then disagreed by a few
+            # ms, causing get_speed_for_timestamp to miss keypoints when
+            # called with a clip's source_start and return the previous
+            # keypoint's speed (e.g. a clip starting at 23.835 would miss
+            # a keypoint at 23.840 and play the entire clip at the prior
+            # speed). Snapping at parse time eliminates the disagreement
+            # at the source — every keypoint is now bit-exact to a real
+            # word start that the cut builder also uses.
+            _dg_word_starts = sorted(float(w.get("start") or 0.0) for w in (_dg_words or []))
+            if _dg_word_starts:
+                _snap_count = 0
+                for kp in speed_curve:
+                    _orig_t = kp["t"]
+                    _nearest = min(_dg_word_starts, key=lambda ws: abs(ws - _orig_t))
+                    if abs(_nearest - _orig_t) > 0.0005:
+                        kp["t"] = _nearest
+                        _snap_count += 1
+                        print(
+                            f"[speed-curve] Snapped keypoint {_orig_t:.3f}s → {_nearest:.3f}s "
+                            f"(nearest Deepgram word start)",
+                            flush=True,
+                        )
+                if _snap_count:
+                    # Re-sort in case snapping reordered any keypoints
+                    speed_curve.sort(key=lambda x: x["t"])
+                    # De-duplicate keypoints that snapped to the same word start
+                    _dedup = []
+                    for kp in speed_curve:
+                        if _dedup and abs(_dedup[-1]["t"] - kp["t"]) < 0.0005:
+                            # Same word — keep the LATER speed value (newer intent)
+                            _dedup[-1] = kp
+                        else:
+                            _dedup.append(kp)
+                    if len(_dedup) != len(speed_curve):
+                        print(
+                            f"[speed-curve] {len(speed_curve) - len(_dedup)} keypoint(s) "
+                            f"de-duplicated after snapping (collided on same word)",
+                            flush=True,
+                        )
+                    speed_curve = _dedup
+
+            # If dedup left too few keypoints, disable speed curve
+            if len(speed_curve) < 2:
+                speed_curve = None
+
+        if speed_curve and len(speed_curve) >= 2:
             # Enforce minimum ramp duration for large speed changes.
             # Going from 1.3x to 0.7x in 0.3s sounds jarring (pitch shifts
             # too fast). Spread keypoints apart so the ramp is at least 0.6s
