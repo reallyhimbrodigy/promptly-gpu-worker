@@ -1810,9 +1810,20 @@ Global parameters:
   SLOW DOWN (0.67x-0.8x): Punchlines, reveals, shocking statements, emotional peaks.
 
   THE RAMP:
-  The pipeline smoothly ramps between your keypoints. Place each keypoint at the MOMENT
-  the speed should change — the word where the story shifts gear. Use the Deepgram word
-  timestamps to hit the exact right word.
+  Between any two of your keypoints the pipeline LINEARLY INTERPOLATES the speed
+  to produce a perceptually smooth ramp (the same way CapCut, Premiere, and DaVinci
+  do continuous speed curves). Each keypoint represents the speed AT that moment;
+  the speed glides linearly from one keypoint's value to the next over the time
+  between them.
+
+  This means: if you set keypoint A at t=10s with speed 0.8, and keypoint B at
+  t=14s with speed 1.4, the speed at t=12s will be exactly 1.1 (halfway). If you
+  want the speed to HOLD at one value for a while and then change, place TWO
+  keypoints with the same speed at the start and end of the hold section, then a
+  new keypoint where the change should happen.
+
+  Place each keypoint at the exact word where the speed should be at that target
+  value. Use the Deepgram word timestamps to hit the exact right word.
 
   Every keypoint must serve a DIFFERENT narrative purpose. If two adjacent keypoints are
   both "speeding through filler," merge them into one. If a slow section covers multiple
@@ -2703,6 +2714,22 @@ RULES FOR USING THESE TIMESTAMPS:
                     mid_t = (speed_curve[i]["t"] + speed_curve[i + 1]["t"]) / 2
                     speed_curve[i]["t"] = round(max(0.0, mid_t - MIN_RAMP_SECS / 2), 3)
                     speed_curve[i + 1]["t"] = round(mid_t + MIN_RAMP_SECS / 2, 3)
+
+            # Densify with linear interpolation: insert intermediate keypoints
+            # at ~250ms intervals between Gemini's keypoints. The cut builder
+            # splits at every keypoint, so each sub-clip plays at the
+            # interpolated speed for its time slice. Speed delta per sub-clip
+            # stays below 0.025x on typical ramps — well below human tempo
+            # discrimination threshold (~5%) — producing perceptually
+            # buttery-smooth ramps.
+            _gemini_kp_count = len(speed_curve)
+            speed_curve = densify_speed_curve(speed_curve, target_step=0.25)
+            if len(speed_curve) > _gemini_kp_count:
+                print(
+                    f"[speed-curve] Densified {_gemini_kp_count} Gemini keypoints → "
+                    f"{len(speed_curve)} interpolated keypoints (smooth ramping)",
+                    flush=True,
+                )
 
             speeds = [kp["speed"] for kp in speed_curve]
             print(
@@ -3869,16 +3896,49 @@ def get_pitch_preserving_speed_filter(speed: float) -> str:
     return get_atempo_filter(speed)
 
 
-def _smoothstep(x):
-    """Attempt smoothstep easing: ease-in and ease-out (3x² - 2x³).
+def densify_speed_curve(speed_curve, target_step=0.25):
+    """Insert linearly-interpolated intermediate keypoints between Gemini's
+    keypoints so the speed curve becomes a perceptually smooth ramp instead
+    of discrete jumps.
 
-    Converts linear fraction [0,1] into a smooth S-curve that starts
-    slow, accelerates through the middle, and decelerates at the end.
-    This makes speed ramps feel organic — like a natural gear shift
-    instead of a constant mechanical ramp.
+    Each intermediate keypoint is the linear interpolation of the surrounding
+    Gemini keypoints. The cut builder splits clips at every keypoint, so
+    after densification each sub-clip plays at the interpolated speed for
+    its time slice. Step interval ~250ms keeps the speed delta per sub-clip
+    well below human tempo discrimination threshold (~5%) on typical ramps.
+
+    Hold sections (consecutive keypoints with the same speed) are NOT
+    densified — splitting a constant-speed region into many sub-clips
+    wastes CPU and produces no perceptual benefit.
+
+    Returns a new list with the original keypoints plus inserted intermediates.
     """
-    x = max(0.0, min(1.0, x))
-    return x * x * (3.0 - 2.0 * x)
+    if not speed_curve or len(speed_curve) < 2:
+        return list(speed_curve or [])
+
+    densified = [dict(speed_curve[0])]
+    for i in range(len(speed_curve) - 1):
+        t_a = float(speed_curve[i]["t"])
+        s_a = float(speed_curve[i]["speed"])
+        t_b = float(speed_curve[i + 1]["t"])
+        s_b = float(speed_curve[i + 1]["speed"])
+        gap = t_b - t_a
+
+        # Hold section or too-narrow gap: just append next keypoint, no insertions
+        if abs(s_b - s_a) < 0.01 or gap <= target_step * 1.5:
+            densified.append(dict(speed_curve[i + 1]))
+            continue
+
+        # Insert intermediates at target_step intervals
+        n_inter = int(gap / target_step)
+        for k in range(1, n_inter):
+            frac = (k * target_step) / gap
+            t_new = t_a + k * target_step
+            s_new = s_a + (s_b - s_a) * frac
+            densified.append({"t": round(t_new, 3), "speed": round(s_new, 4)})
+        densified.append(dict(speed_curve[i + 1]))
+
+    return densified
 
 
 def get_speed_for_timestamp(t, speed_curve):
@@ -5247,21 +5307,11 @@ def split_clips_at_speed_keypoints(cuts, speed_curve):
     if not speed_curve or speed_curve == "none" or not isinstance(speed_curve, list):
         return list(cuts)
 
-    # Build dense split points: Gemini's keypoints PLUS intermediate points between them.
-    # Intermediate points create a perceptually smooth staircase (~100ms steps).
-    keypoint_times = sorted(set(float(kp["t"]) for kp in speed_curve))
-
-    dense_points = set(keypoint_times)
-    for ki in range(len(keypoint_times) - 1):
-        t0 = keypoint_times[ki]
-        t1 = keypoint_times[ki + 1]
-        gap = t1 - t0
-        # Only split at Gemini's actual keypoints — no intermediates
-        n_intermediates = 0
-        for ii in range(1, n_intermediates + 1):
-            dense_points.add(round(t0 + ii * gap / (n_intermediates + 1), 3))
-
-    all_split_times = sorted(dense_points)
+    # Split at every keypoint in the speed curve. The speed curve has
+    # already been densified at parse time (densify_speed_curve) — Gemini's
+    # original keypoints + linearly-interpolated intermediates at ~250ms
+    # intervals — so this loop produces enough sub-clips for smooth ramping.
+    all_split_times = sorted(set(float(kp["t"]) for kp in speed_curve))
     expanded = []
 
     for cut in cuts:
@@ -6926,10 +6976,15 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             raise RuntimeError(f"Segment {seg_idx} FFmpeg failed: {_r.stderr[-500:]}")
         return _seg_out
 
-    # Launch all segments in parallel
-    print(f"[render] Parallel: {n} segments across {os.cpu_count()} cores", flush=True)
+    # Launch all segments in parallel.
+    # max_workers cap: with speed_curve densification, n can exceed 200.
+    # Spawning 200+ ffmpeg processes against 80 cores causes thrashing and
+    # context-switch overhead that swamps the actual encode work. Cap at
+    # CPU count so threads queue cleanly into batches matching the hardware.
+    _max_workers = min(n, os.cpu_count() or 16)
+    print(f"[render] Parallel: {n} segments, {_max_workers} workers, {os.cpu_count()} cores", flush=True)
     _seg_paths = [None] * n
-    with concurrent.futures.ThreadPoolExecutor(max_workers=n) as _seg_pool:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=_max_workers) as _seg_pool:
         _seg_futures = {_seg_pool.submit(_run_one_segment, _si): _si for _si in range(n)}
         for _fut in concurrent.futures.as_completed(_seg_futures):
             _si = _seg_futures[_fut]
