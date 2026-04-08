@@ -6999,15 +6999,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             raise RuntimeError(f"Segment {seg_idx} FFmpeg failed: {_r.stderr[-500:]}")
         return _seg_out
 
-    # Launch segments in parallel.
-    # libx264 with the ultrafast preset internally uses ~3-4 CPU threads
-    # per encoder. On 80 cores, ~20 simultaneous encoders saturate the
-    # hardware; beyond that we lose throughput to context-switching and
-    # memory bandwidth contention. With speed_curve densification we
-    # routinely have 60+ sub-clips, so cap workers at a fixed batch size
-    # rather than scaling to segment count.
-    _MAX_PARALLEL_RENDER_WORKERS = 16
-    _max_workers = min(n, _MAX_PARALLEL_RENDER_WORKERS)
+    # Launch all segments in parallel. With speed_curve densification we
+    # routinely have 60+ sub-clips. Each ffmpeg invocation has ~500ms of
+    # fixed startup overhead (process spawn + NVDEC init + libx264 init)
+    # that dominates the actual encode time for short sub-clips, so we
+    # need maximum parallelism to amortize that cost. Capping workers
+    # makes render time WORSE because it forces sub-clips to queue into
+    # sequential batches each paying their own startup cost.
+    _max_workers = min(n, os.cpu_count() or 16)
     print(f"[render] Parallel: {n} segments, {_max_workers} workers, {os.cpu_count()} cores", flush=True)
     _seg_paths = [None] * n
     with concurrent.futures.ThreadPoolExecutor(max_workers=_max_workers) as _seg_pool:
