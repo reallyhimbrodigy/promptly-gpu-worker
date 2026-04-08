@@ -2710,12 +2710,14 @@ RULES FOR USING THESE TIMESTAMPS:
             # keypoints away from word boundaries, defeating the snap-to-
             # word fix.
 
-            # Densify with linear interpolation. Adaptive sub-step sizing:
-            # each ramp is split into enough sub-clips that the per-step
-            # speed delta stays below 0.04 (well under the 5% perceptual
-            # threshold). Hold sections produce no intermediates.
+            # Densify with linear interpolation. BUDGETED allocation: a
+            # global cap of 50 intermediate keypoints distributed across
+            # ramps proportional to each ramp's speed delta. This bounds
+            # total sub-clip count regardless of how many keypoints
+            # Gemini sends, making render time predictable. Steeper ramps
+            # get more sub-steps where smoothness matters most.
             _gemini_kp_count = len(speed_curve)
-            speed_curve = densify_speed_curve(speed_curve, max_speed_delta=0.04, min_step=0.10)
+            speed_curve = densify_speed_curve(speed_curve, max_intermediates=50, min_step=0.10)
             if len(speed_curve) > _gemini_kp_count:
                 print(
                     f"[speed-curve] Densified {_gemini_kp_count} Gemini keypoints → "
@@ -3888,21 +3890,23 @@ def get_pitch_preserving_speed_filter(speed: float) -> str:
     return get_atempo_filter(speed)
 
 
-def densify_speed_curve(speed_curve, max_speed_delta=0.04, min_step=0.10):
+def densify_speed_curve(speed_curve, max_intermediates=50, min_step=0.10):
     """Insert linearly-interpolated intermediate keypoints between Gemini's
     keypoints so the speed curve becomes a perceptually smooth ramp instead
     of discrete jumps.
 
-    Adaptive step sizing: each ramp is split into enough equal sub-steps
-    that the speed delta between consecutive sub-clips never exceeds
-    max_speed_delta. 0.04 is well below the human tempo discrimination
-    threshold (~0.05 = 5%), so the listener cannot perceive the discrete
-    steps as anything other than a continuous ramp.
+    BUDGETED proportional allocation: a global cap of max_intermediates
+    intermediate keypoints is distributed across all the ramps in
+    proportion to each ramp's speed delta. Steeper ramps get more sub-steps
+    (where smoothness matters most), gentler ramps get fewer. Hold sections
+    get zero. This guarantees the total sub-clip count is bounded
+    independently of how many keypoints Gemini sends, so render time is
+    predictable.
 
-    For a 0.6 speed jump (e.g. 0.7 → 1.3), this produces 15 sub-steps.
-    For a 0.1 speed jump, this produces 3 sub-steps. For a hold section,
-    no intermediates at all. The total sub-clip count scales with how
-    aggressive Gemini's ramps are, not with video length.
+    With a budget of 50 across typical 6-9 keypoint Gemini curves, the
+    max per-step speed delta lands around 0.05 — at or just under the
+    human tempo discrimination threshold. Steep ramps where smoothness
+    matters most get the densest allocation; gentle ramps barely need any.
 
     min_step (100ms) clamps the minimum sub-clip duration so the splitter's
     micro-clip merger doesn't drop sub-clips smaller than 3 frames.
@@ -3912,7 +3916,10 @@ def densify_speed_curve(speed_curve, max_speed_delta=0.04, min_step=0.10):
     if not speed_curve or len(speed_curve) < 2:
         return list(speed_curve or [])
 
-    densified = [dict(speed_curve[0])]
+    # First pass: compute each ramp's speed_delta and gap so we can
+    # allocate the intermediate budget proportionally.
+    ramps = []
+    total_delta = 0.0
     for i in range(len(speed_curve) - 1):
         t_a = float(speed_curve[i]["t"])
         s_a = float(speed_curve[i]["speed"])
@@ -3920,29 +3927,41 @@ def densify_speed_curve(speed_curve, max_speed_delta=0.04, min_step=0.10):
         s_b = float(speed_curve[i + 1]["speed"])
         gap = t_b - t_a
         speed_delta = abs(s_b - s_a)
+        is_hold = speed_delta < 0.01
+        ramps.append({
+            "i": i, "t_a": t_a, "s_a": s_a, "t_b": t_b, "s_b": s_b,
+            "gap": gap, "delta": speed_delta, "is_hold": is_hold,
+            "n_steps": 1,  # default: no intermediates (just the endpoint)
+        })
+        if not is_hold:
+            total_delta += speed_delta
 
-        # Hold section: same speed, no insertions
-        if speed_delta < 0.01:
-            densified.append(dict(speed_curve[i + 1]))
-            continue
+    # Second pass: allocate budget proportional to each ramp's delta.
+    # Each ramp's n_steps is the number of equal sub-slices it gets
+    # divided into (so n_steps - 1 intermediate keypoints inserted).
+    if total_delta > 0:
+        for r in ramps:
+            if r["is_hold"]:
+                continue
+            # Ramp's share of the budget, proportional to its speed delta
+            share = (r["delta"] / total_delta) * max_intermediates
+            # n_steps = share + 1 (since we add (n_steps - 1) intermediates)
+            n_steps = max(2, round(share) + 1)
+            # Clamp by min_step so we don't create micro-clips smaller than 100ms
+            n_steps_time = max(2, int(r["gap"] / min_step))
+            r["n_steps"] = min(n_steps, n_steps_time)
 
-        # Compute number of equal sub-steps to keep per-step speed delta
-        # below max_speed_delta. Then clamp so each sub-step is at least
-        # min_step seconds long (avoids micro-clips that would be merged).
-        n_steps_speed = max(2, math.ceil(speed_delta / max_speed_delta))
-        n_steps_time = max(2, int(gap / min_step))
-        n_steps = min(n_steps_speed, n_steps_time)
-
-        if n_steps < 2:
-            densified.append(dict(speed_curve[i + 1]))
-            continue
-
-        for k in range(1, n_steps):
-            frac = k / n_steps
-            t_new = t_a + frac * gap
-            s_new = s_a + (s_b - s_a) * frac
-            densified.append({"t": round(t_new, 3), "speed": round(s_new, 4)})
-        densified.append(dict(speed_curve[i + 1]))
+    # Third pass: emit the densified curve
+    densified = [dict(speed_curve[0])]
+    for r in ramps:
+        n_steps = r["n_steps"]
+        if n_steps >= 2:
+            for k in range(1, n_steps):
+                frac = k / n_steps
+                t_new = r["t_a"] + frac * r["gap"]
+                s_new = r["s_a"] + (r["s_b"] - r["s_a"]) * frac
+                densified.append({"t": round(t_new, 3), "speed": round(s_new, 4)})
+        densified.append(dict(speed_curve[r["i"] + 1]))
 
     return densified
 
