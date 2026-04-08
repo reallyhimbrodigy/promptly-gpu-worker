@@ -3823,35 +3823,35 @@ def _smoothstep(x):
 
 
 def get_speed_for_timestamp(t, speed_curve):
-    """Smoothly interpolate speed at time t from keypoints.
+    """Return the speed in effect at time t.
 
-    Uses smoothstep easing between keypoints so speed ramps accelerate
-    and decelerate naturally. Fast→slow transitions build anticipation
-    before dropping into the slow moment. Slow→fast transitions snap
-    out with energy. This is what separates CapCut-level speed ramping
-    from flat mechanical ramps.
+    Speed keypoints are HOLD-and-snap: a keypoint at time T with speed S
+    means "from T onward, play at speed S, until the next keypoint takes
+    effect." This matches the Gemini prompt's stated intent ("place each
+    keypoint at the MOMENT the speed should change") and the user's
+    mental model of speed ramping.
+
+    Previously this function smoothstep-interpolated between adjacent
+    keypoints, which produced speed values in the MIDDLE of a ramp that
+    averaged toward 1.0 — meaning a clip whose start time fell between
+    two keypoints would play at near-normal speed regardless of what
+    Gemini set on either side.
     """
     if not speed_curve or speed_curve == "none":
         return 1.0
     if not isinstance(speed_curve, list) or len(speed_curve) == 0:
         return 1.0
-    # Before first keypoint
-    if t <= float(speed_curve[0]["t"]):
+    if t < float(speed_curve[0]["t"]):
         return float(speed_curve[0]["speed"])
-    # After last keypoint
-    if t >= float(speed_curve[-1]["t"]):
-        return float(speed_curve[-1]["speed"])
-    # Interpolate between surrounding keypoints with smoothstep easing
-    for i in range(len(speed_curve) - 1):
-        t0 = float(speed_curve[i]["t"])
-        t1 = float(speed_curve[i + 1]["t"])
-        if t0 <= t <= t1:
-            frac = (t - t0) / (t1 - t0) if t1 != t0 else 0.0
-            frac = _smoothstep(frac)
-            s0 = float(speed_curve[i]["speed"])
-            s1 = float(speed_curve[i + 1]["speed"])
-            return s0 + (s1 - s0) * frac
-    return 1.0
+    # Walk forward and return the speed of the most recent keypoint at or
+    # before t. Keypoints are sorted by time at parse time.
+    current = float(speed_curve[0]["speed"])
+    for kp in speed_curve:
+        if float(kp["t"]) <= t:
+            current = float(kp["speed"])
+        else:
+            break
+    return current
 
 
 def is_hard_cut(transition):
