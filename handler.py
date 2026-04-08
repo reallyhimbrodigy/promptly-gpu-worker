@@ -5313,21 +5313,21 @@ def project_source_time_to_final_output(source_t, cuts, effective_durations, spe
     return round((pre_speed_t + hook_offset) * 1000) / 1000
 
 
-def build_variable_speed_setpts(clip_start, clip_end, clip_speed, speed_curve, log=False):
+def build_variable_speed_setpts(clip_start, clip_end, clip_speed, speed_curve, log=False, fps=30):
     """Build speed expression from canonical time map. Wrapper for backward compatibility."""
-    tm = build_clip_time_map(clip_start, clip_end, clip_speed, speed_curve)
+    tm = build_clip_time_map(clip_start, clip_end, clip_speed, speed_curve, fps=fps)
     setpts_val, eff_dur, avg_speed = build_setpts_from_time_map(tm, log=log)
     return setpts_val, eff_dur, avg_speed
 
 
-def compute_effective_durations(cuts, speed_curve=None):
+def compute_effective_durations(cuts, speed_curve=None, fps=30):
     """Compute output duration for each clip using canonical time maps."""
     durations = []
     for cut in (cuts or []):
         src_start = float(cut["source_start"])
         src_end = float(cut["source_end"])
         clip_speed = max(0.25, min(4.0, float(cut.get("speed") or 1.0)))
-        tm = build_clip_time_map(src_start, src_end, clip_speed, speed_curve)
+        tm = build_clip_time_map(src_start, src_end, clip_speed, speed_curve, fps=fps)
         durations.append(tm["effective_duration"])
     return durations
 
@@ -5750,6 +5750,25 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _cached = _probe_full(render_source)
     _vs = next((s for s in (_cached.get("streams") or []) if s.get("codec_type") == "video"), {})
     print(f"[DIAG] Render source: codec={_vs.get('codec_name')} pix_fmt={_vs.get('pix_fmt')} fps={_vs.get('r_frame_rate')}", flush=True)
+    # Detect source fps once and propagate as the unified frame rate for the
+    # entire render. This eliminates the audio/video/caption drift caused by
+    # forcing a 30fps grid on a 29.97fps source. Every fps consumer (the
+    # video filter chain's fps= filter, build_clip_time_map, the PNG overlay
+    # framerate, and Remotion's caption rendering) uses the SAME value, so
+    # there is exactly one timeline and they cannot drift relative to each
+    # other.
+    _src_fps_str = _vs.get("r_frame_rate") or "30/1"
+    try:
+        if "/" in _src_fps_str:
+            _num, _den = _src_fps_str.split("/")
+            source_fps = float(_num) / float(_den)
+        else:
+            source_fps = float(_src_fps_str)
+    except Exception:
+        source_fps = 30.0
+    if source_fps <= 0 or source_fps > 240:
+        source_fps = 30.0
+    print(f"[render] Unified source fps: {source_fps:.4f} (raw: {_src_fps_str})", flush=True)
     has_burned_captions = infer_has_burned_captions(
         edit_plan,
         edit_plan.get("analysis_data") or {},
@@ -5800,9 +5819,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _tm = build_clip_time_map(
             float(_rc["source_start"]), float(_rc["source_end"]),
             max(0.25, min(4.0, float(_rc.get("speed") or 1.0))), speed_curve,
+            fps=source_fps,
         )
         _clip_time_maps.append(_tm)
-    effective_durations = [round(tm["effective_duration"] * 30) / 30 for tm in _clip_time_maps]
+    # Round each effective duration to a source-fps frame boundary so the
+    # predicted timeline matches the actual rendered video frame count.
+    effective_durations = [round(tm["effective_duration"] * source_fps) / source_fps for tm in _clip_time_maps]
     hook_offset = 0.0
     if isinstance(hook_clip, dict) and effective_durations:
         # Sum durations of all hook clip segments
@@ -5884,7 +5906,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _projected_words, caption_style,
             {"width": 1080, "height": 1920},
             _cap_kw, work_dir,
-            total_duration=_total_render_dur, fps=30,
+            total_duration=_total_render_dur, fps=source_fps,
             cuts=_cuts_for_remotion,
             emphasis_moments=_emphasis_moments,
             vibe=_vibe,
@@ -5898,7 +5920,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         src_dur = round((float(cut["source_end"]) - float(cut["source_start"])) * 1000) / 1000
         clip_speed = max(0.25, min(4.0, float(cut.get("speed") or 1.0)))
         _, _eff, _avg = build_variable_speed_setpts(
-            float(cut["source_start"]), float(cut["source_end"]), clip_speed, speed_curve
+            float(cut["source_start"]), float(cut["source_end"]), clip_speed, speed_curve,
+            fps=source_fps,
         )
         eff_dur = effective_durations[i]
         print(
@@ -5973,7 +5996,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
         # Build variable-speed setpts expression — speed curve flows continuously
         # across the timeline, independent of clip boundaries
-        setpts_val, _, avg_speed = build_variable_speed_setpts(start, end, speed, speed_curve, log=True)
+        setpts_val, _, avg_speed = build_variable_speed_setpts(start, end, speed, speed_curve, log=True, fps=source_fps)
         combined_speed = avg_speed  # for audio (constant) and logging
         zoom = str(cut.get("zoom") or "none")
         if has_burned_captions and zoom in ["punch_in", "punch_out"]:
@@ -5984,9 +6007,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             zoom = "slow_in"
 
         eff_dur = effective_durations[i]
-        fps = 30
+        fps = source_fps
         total_frames = max(1, round(eff_dur * fps))
-        MIN_ZOOM_FRAMES = 90
+        MIN_ZOOM_FRAMES = max(1, round(3.0 * source_fps))  # ~3 seconds, scaled to source fps
         if zoom != "none" and total_frames < MIN_ZOOM_FRAMES:
             zoom_scale_factor = total_frames / MIN_ZOOM_FRAMES
             total_frames_for_zoom = MIN_ZOOM_FRAMES
@@ -6283,7 +6306,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         v_chain.append("setpts=PTS-STARTPTS")
         if setpts_val:
             v_chain.append(f"setpts={setpts_val}")
-        v_chain.append("fps=30")
+        # Use the detected source fps as the unified frame rate normalizer.
+        # Forcing fps=30 on a 29.97 source created a video timeline that
+        # didn't match audio (sample-accurate), causing captions to drift.
+        v_chain.append(f"fps={source_fps:.5f}")
         if zoom_filter:
             v_chain.append(zoom_filter)
         # Per-clip camera tint (multi-camera color variation)
@@ -6552,10 +6578,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 print(f"[broll] Assigned {_broll_overlay_idx} B-roll clip(s) to segments", flush=True)
 
     # ── Compute frame ranges per segment (for per-segment Remotion renders) ──
+    # Use the unified source fps so caption frame count matches video frame count.
     _seg_frame_ranges = []
     _frame_cursor = 0
     for _si in range(n):
-        _frame_count = max(1, round(effective_durations[_si] * 30))
+        _frame_count = max(1, round(effective_durations[_si] * source_fps))
         _seg_frame_ranges.append((_frame_cursor, _frame_cursor + _frame_count - 1))
         _frame_cursor += _frame_count
 
@@ -6745,7 +6772,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         if _seg_overlay_dir:
             _png_pattern = os.path.join(_seg_overlay_dir, f"element-%0{_seg_png_digits}d.png")
             _extra_inputs += [
-                "-f", "image2", "-framerate", "30",
+                "-f", "image2", "-framerate", f"{source_fps:.5f}",
                 "-start_number", str(_seg_png_start_num),
                 "-i", _png_pattern,
             ]
@@ -6762,7 +6789,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _lt = _br["local_start"]
             _BROLL_FADE = 0.4
             _fos = max(0, _nd - _BROLL_FADE)
-            _kbf = max(1, round(_nd * 30))
+            _kbf = max(1, round(_nd * source_fps))
             _kbz = 0.08
             _kbp = f"min(n/{_kbf}\\,1.0)"
             _kbs = f"({_kbp}*{_kbp}*(3-2*{_kbp}))"
@@ -6847,8 +6874,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # ── Audio post-processing pass (video stream copy) ──────────────────
     # SFX mixing, audio ducking, denoise, EQ, compress, loudnorm
     _audio_t0 = time.time()
-    _total_dur = sum(effective_durations)
-    _target_v_dur = round(_total_dur * 30) / 30
 
     audio_denoise = bool(edit_plan.get("audio_denoise"))
     _src_loudness = edit_plan.get("_source_loudness") or {}
@@ -6868,6 +6893,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         f"fast_thresh={_fast_thresh:.0f}dB level_thresh={_level_thresh:.0f}dB makeup={_makeup}dB",
         flush=True,
     )
+    # No apad/atrim — let the audio be exactly the length the filters
+    # naturally produce. Forcing a target duration was cutting off the
+    # last word's natural decay.
     audio_chain = (
         f"{denoise_part}highpass=f=75,"
         f"equalizer=f=200:t=q:w=1.5:g=-1.5,"
@@ -6876,8 +6904,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         f":link=maximum:knee=3:mix=0.6,"
         f"lowpass=f=14000,"
         f"acompressor=threshold={_level_thresh}dB:ratio=1.8:attack=15:release=80:makeup={_makeup},"
-        f"loudnorm=I=-14:TP=-1:LRA=11,"
-        f"apad=whole_dur={_target_v_dur:.4f},atrim=end={_target_v_dur:.4f}"
+        f"loudnorm=I=-14:TP=-1:LRA=11"
     )
 
     _audio_filter_parts = []
@@ -6911,6 +6938,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _audio_filter_parts.append(f"{_audio_out}{audio_chain}[final_audio]")
     _audio_fc = ";".join(sfx_filter_strs + _audio_filter_parts)
 
+    # No -shortest: let video and audio be their natural lengths so the
+    # tail of the last word is not silently truncated when the audio
+    # happens to be slightly longer than the video timeline.
     _final_cmd = (
         ["ffmpeg", "-y", "-v", "warning", "-threads", "0",
          "-i", _concat_raw]
@@ -6918,7 +6948,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         + ["-filter_complex", _audio_fc,
            "-map", "0:v", "-c:v", "copy",
            "-map", "[final_audio]", "-c:a", "aac", "-b:a", "192k",
-           "-movflags", "+faststart", "-shortest"]
+           "-movflags", "+faststart"]
         + [output_path]
     )
     _final_r = subprocess.run(_final_cmd, capture_output=True, text=True, timeout=120)
