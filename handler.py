@@ -259,13 +259,19 @@ def get_encode_args(quality="high"):
     else:
         # H100 has no NVENC hardware — CPU encoding is the only option.
         # threads=0 lets x264 auto-detect optimal thread count.
+        # -fps_mode passthrough: honor filter graph PTS exactly. Without
+        # this, libx264 forces CFR by duplicating/dropping frames to fit
+        # the output frame rate, which re-introduces the quantization
+        # drift the speed-warped setpts was supposed to eliminate.
         _x264_threads = "threads=0"
         if quality == "lossless":
             return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
+                    "-fps_mode", "passthrough",
                     "-x264-params", _x264_threads]
         else:
             return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
                     "-maxrate", "15M", "-bufsize", "30M",
+                    "-fps_mode", "passthrough",
                     "-x264-params", _x264_threads]
 
 # Module-level: tracks active Remotion chunk subprocesses for cleanup on timeout
@@ -5271,7 +5277,12 @@ def build_setpts_from_time_map(tm, log=False):
     if abs(avg_speed - 1.0) < 0.005:
         return None, eff_dur, avg_speed
 
-    setpts_val = f"{1.0/avg_speed:.4f}*PTS"
+    # Full float precision (10 decimals) so the audio asetrate and the
+    # video setpts agree on the playback rate to sub-microsecond accuracy.
+    # Previously :.4f rounded both values independently in opposite
+    # directions, producing different effective playback rates that drifted
+    # by ~1-10ms per minute of segment.
+    setpts_val = f"{1.0/avg_speed:.10f}*PTS"
     if log:
         print(f"[speed] Setpts: avg={avg_speed:.3f}x, eff={eff_dur:.3f}s", flush=True)
 
@@ -6008,7 +6019,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
         eff_dur = effective_durations[i]
         fps = source_fps
-        total_frames = max(1, round(eff_dur * fps))
+        # total_frames is the OUTPUT frame count, which without fps= filter
+        # equals the SOURCE frame count (setpts only relabels timestamps).
+        # Source frame count = round(source_dur * source_fps).
+        _seg_source_dur = float(cut["source_end"]) - float(cut["source_start"])
+        total_frames = max(1, round(_seg_source_dur * source_fps))
         MIN_ZOOM_FRAMES = max(1, round(3.0 * source_fps))  # ~3 seconds, scaled to source fps
         if zoom != "none" and total_frames < MIN_ZOOM_FRAMES:
             zoom_scale_factor = total_frames / MIN_ZOOM_FRAMES
@@ -6306,10 +6321,19 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         v_chain.append("setpts=PTS-STARTPTS")
         if setpts_val:
             v_chain.append(f"setpts={setpts_val}")
-        # Use the detected source fps as the unified frame rate normalizer.
-        # Forcing fps=30 on a 29.97 source created a video timeline that
-        # didn't match audio (sample-accurate), causing captions to drift.
-        v_chain.append(f"fps={source_fps:.5f}")
+        # NO fps= filter. Previously fps=30 quantized the video stream's
+        # duration to 1/30s frame boundaries, while audio's asetrate/aresample
+        # produced sample-accurate output. Per segment, video and audio
+        # diverged by up to ±16.67ms (half a frame), and across N segments
+        # the cumulative drift reached ~100ms — exactly the user's complaint.
+        #
+        # Without fps=, setpts only RELABELS frame timestamps without
+        # dropping or duplicating frames. Output frame count = source frame
+        # count. Output stream duration = source_dur / avg_speed (matches
+        # audio sample-accurately). The output is VFR (variable frame rate)
+        # which all modern players (TikTok, Instagram, browsers) handle
+        # natively. The encoder needs -fps_mode passthrough to honor the
+        # filter graph timestamps instead of forcing CFR.
         if zoom_filter:
             v_chain.append(zoom_filter)
         # Per-clip camera tint (multi-camera color variation)
@@ -6358,8 +6382,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _has_active_speed_curve = (speed_curve and speed_curve != "none" and isinstance(speed_curve, list))
         if abs(combined_speed - 1.0) > 0.001:
             if _has_active_speed_curve:
-                # Speed ramping is active — pitch shift is intentional (the effect)
-                a_chain.append(f"asetrate={sample_rate}*{combined_speed:.4f}")
+                # Speed ramping is active — pitch shift is intentional (the effect).
+                # Full float precision (10 decimals) so audio playback rate
+                # agrees with the video setpts rate to sub-microsecond accuracy.
+                a_chain.append(f"asetrate={sample_rate}*{combined_speed:.10f}")
                 a_chain.append(f"aresample={sample_rate}")
             else:
                 # Normal clip speed — use pitch-preserving filter
