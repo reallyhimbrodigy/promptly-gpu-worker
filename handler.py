@@ -6923,8 +6923,21 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _remotion_semaphore = threading.Semaphore(_max_concurrent_remotion)
     _gl_mode = "angle-egl" if _HAS_HWACCEL else "swiftshader"
 
+    # Timing instrumentation: capture per-segment phase timings so we can
+    # see where the render time is actually going (Remotion wait vs Remotion
+    # render vs ffmpeg invocation). The data goes into _seg_timings as
+    # (seg_idx, start_offset, remotion_wait, remotion_run, ffmpeg_run, total).
+    _seg_timings = []
+    _seg_timings_lock = threading.Lock()
+
     def _run_one_segment(seg_idx):
         """Run Remotion render (if captions) then FFmpeg for one segment. Returns output path."""
+        _t_start = time.time()
+        _t_start_offset = _t_start - _par_t0
+        _t_remotion_wait = 0.0
+        _t_remotion_run = 0.0
+        _t_ffmpeg_run = 0.0
+
         _seg_out = os.path.join(_seg_dir, f"seg_{seg_idx:03d}.mkv")
         _eff_dur = effective_durations[seg_idx]
 
@@ -6935,13 +6948,17 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         if _captions_enabled and _remotion_input_json:
             _frame_start, _frame_end = _seg_frame_ranges[seg_idx]
             _seg_overlay_dir = os.path.join(_seg_dir, f"overlay_seg_{seg_idx:03d}")
+            _t_sem = time.time()
             _remotion_semaphore.acquire()
+            _t_remotion_wait = time.time() - _t_sem
             try:
+                _t_rem = time.time()
                 _, _seg_png_start_num, _seg_png_count, _seg_png_digits = render_remotion_segment(
                     _remotion_input_json, _seg_overlay_dir,
                     _frame_start, _frame_end,
                     _remotion_tabs_per_seg, _gl_mode,
                 )
+                _t_remotion_run = time.time() - _t_rem
             finally:
                 _remotion_semaphore.release()
 
@@ -7048,9 +7065,15 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             + ["-c:a", "pcm_s16le", "-ar", "48000"]
             + [_seg_out]
         )
+        _t_ff = time.time()
         _r = subprocess.run(_cmd, capture_output=True, text=True, timeout=120)
+        _t_ffmpeg_run = time.time() - _t_ff
         if _r.returncode != 0:
             raise RuntimeError(f"Segment {seg_idx} FFmpeg failed: {_r.stderr[-500:]}")
+        _t_total = time.time() - _t_start
+        with _seg_timings_lock:
+            _seg_timings.append((seg_idx, _t_start_offset, _t_remotion_wait,
+                                 _t_remotion_run, _t_ffmpeg_run, _t_total))
         return _seg_out
 
     # Launch all segments in parallel. With speed_curve densification we
@@ -7070,6 +7093,23 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _seg_paths[_si] = _fut.result()
     _par_elapsed = time.time() - _par_t0
     print(f"[render] All {n} segments rendered in {_par_elapsed:.1f}s (parallel)", flush=True)
+
+    # ── Per-segment timing report ────────────────────────────────────────
+    # Diagnostic instrumentation: shows where each segment's time went so
+    # we can identify the actual bottleneck (Remotion wait? Remotion run?
+    # FFmpeg subprocess?). Sorted by total time descending so the slowest
+    # are at the top. Remove once perf is satisfactory.
+    if _seg_timings:
+        _seg_timings.sort(key=lambda r: -r[5])
+        _wait_total = sum(r[2] for r in _seg_timings)
+        _rem_total  = sum(r[3] for r in _seg_timings)
+        _ff_total   = sum(r[4] for r in _seg_timings)
+        _all_total  = sum(r[5] for r in _seg_timings)
+        print(f"[seg-timing] phases summed across all segments: rem_wait={_wait_total:.1f}s rem_run={_rem_total:.1f}s ffmpeg={_ff_total:.1f}s total={_all_total:.1f}s", flush=True)
+        print(f"[seg-timing] top 10 slowest segments (idx | start_offset | rem_wait | rem_run | ffmpeg | total):", flush=True)
+        for r in _seg_timings[:10]:
+            _idx, _so, _rw, _rr, _fr, _tot = r
+            print(f"[seg-timing]   seg {_idx:3d}  start@{_so:5.2f}s  wait={_rw:5.2f}s  rem={_rr:5.2f}s  ff={_fr:5.2f}s  total={_tot:5.2f}s", flush=True)
 
     # ── Concat segments (stream copy — instant, no re-encode) ───────────
     _concat_t0 = time.time()
