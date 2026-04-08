@@ -237,7 +237,7 @@ except Exception as _e:
     print(f"[startup] GPU check failed: {_e} — using CPU", flush=True)
 
 
-def get_encode_args(quality="high"):
+def get_encode_args(quality="high", threads=0):
     """Return encoder args for FFmpeg. Uses NVENC when GPU is available.
 
     quality="high"     → final output (CQ 18 — maximum quality for social media)
@@ -259,12 +259,16 @@ def get_encode_args(quality="high"):
                     "-b_ref_mode", "middle"]
     else:
         # H100 has no NVENC hardware — CPU encoding is the only option.
-        # threads=0 lets x264 auto-detect optimal thread count.
+        # threads=0 lets x264 auto-detect (use all cores). Pass an explicit
+        # value when running many ffmpeg processes in parallel — otherwise
+        # each process tries to claim every core, producing massive
+        # context-switch contention (60 processes × 80 threads each =
+        # 4800 threads competing for 80 cores, render time blows up).
         # -fps_mode passthrough: honor filter graph PTS exactly. Without
         # this, libx264 forces CFR by duplicating/dropping frames to fit
         # the output frame rate, which re-introduces the quantization
         # drift the speed-warped setpts was supposed to eliminate.
-        _x264_threads = "threads=0"
+        _x264_threads = f"threads={threads}"
         if quality == "lossless":
             return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
                     "-fps_mode", "passthrough",
@@ -6897,7 +6901,15 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     # ── Build and run parallel segment FFmpeg processes ──────────────────
     _par_t0 = time.time()
-    _encode_args = get_encode_args("high") + ["-pix_fmt", "yuv420p"]
+    # Per-segment thread budget: divide cores evenly across the parallel
+    # ffmpeg processes. Without this, each process used threads=0 ("all
+    # cores") and 60 processes oversubscribed the machine 60x, blowing
+    # up render time. Minimum 1 thread, maximum 4 (libx264 ultrafast
+    # parallelizes well up to ~4 threads, beyond which gains diminish).
+    _seg_count_for_threads = len(render_cuts)
+    _seg_threads = max(1, min(4, (os.cpu_count() or 16) // max(1, _seg_count_for_threads)))
+    _encode_args = get_encode_args("high", threads=_seg_threads) + ["-pix_fmt", "yuv420p"]
+    print(f"[render] Per-segment threads: {_seg_threads} ({_seg_count_for_threads} segments × {_seg_threads} threads ≤ {os.cpu_count()} cores)", flush=True)
     _seg_dir = os.path.join(work_dir, "segments")
     os.makedirs(_seg_dir, exist_ok=True)
 
@@ -7026,7 +7038,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # re-encodes audio to AAC once, applying its single priming delay
         # only at the file start (handled correctly by the MP4 edit list).
         _cmd = (
-            ["ffmpeg", "-y", "-v", "warning", "-threads", "0"]
+            ["ffmpeg", "-y", "-v", "warning", "-threads", str(_seg_threads)]
             + list(_seg_input_args_list[seg_idx])
             + _extra_inputs
             + ["-filter_complex", _fc, "-map", _video_label, "-map", "[aout]"]
