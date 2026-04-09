@@ -6916,10 +6916,18 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     os.makedirs(_seg_dir, exist_ok=True)
 
     # Semaphore to limit concurrent Remotion processes (each opens Chrome tabs).
+    # Per-segment timing instrumentation showed Remotion was the dominant
+    # bottleneck (~35s of 42s render phase). With 47 segments and a 10-wide
+    # semaphore, segments queued into ~5 sequential waves; the slowest waited
+    # ~22s for a slot. Bumping to 12 cuts this to ~4 waves while keeping the
+    # tab count per segment fixed at 4 (vs the proportional formula which
+    # would reduce tabs and slow each segment). 12 procs × 4 tabs = 48 tabs
+    # on 40 physical cores = mild 1.2× oversubscription, well below the
+    # 1.5× threshold where Chrome thrashing was previously observed.
     _cpu_count = os.cpu_count() or 64
     _physical_cores = max(_cpu_count // 2, 1)
-    _max_concurrent_remotion = min(10, n)
-    _remotion_tabs_per_seg = max(2, _physical_cores // _max_concurrent_remotion)
+    _max_concurrent_remotion = min(12, n)
+    _remotion_tabs_per_seg = 4
     _remotion_semaphore = threading.Semaphore(_max_concurrent_remotion)
     _gl_mode = "angle-egl" if _HAS_HWACCEL else "swiftshader"
 
