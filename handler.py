@@ -1893,7 +1893,43 @@ Global parameters:
 
   aspect_ratio: always "9:16"
 
-  thumbnail_timestamp — the source timestamp (in seconds) of the single best frame to use as the video's cover image / thumbnail. Pick the frame where the speaker has the most expressive or emotional face — surprise, laughter, intensity, reaction. Avoid frames where eyes are closed, face is blurry, or expression is blank. This frame needs to make someone scrolling stop and click.
+  thumbnail_timestamp — the SOURCE timestamp (in seconds) of the SINGLE best frame to use as the video's cover image. This is the most important visual decision in the entire edit. It's what makes someone scrolling stop and click. A bad thumbnail will tank the video no matter how good the edit is.
+
+  CRITICAL INSIGHT — DO NOT PICK THE PUNCHLINE WORD ITSELF.
+  A common mistake is to pick the timestamp where the most dramatic WORD is being spoken. This is almost always WRONG because:
+    - Mid-syllable mouths are in awkward shapes (open mid-vowel, contorted mid-consonant)
+    - Speaking causes head movement and motion blur
+    - Eyes squint from vocal effort
+    - The narratively-peak word is usually the visually-WORST moment
+
+  INSTEAD, scan for the VISUAL peak, which almost always falls in one of these three zones:
+
+  1. PRE-REVEAL ANTICIPATION (0.3 to 1.5 seconds BEFORE a dramatic word):
+     The speaker is leaning into the camera, eyes WIDE, mouth set/closed, building tension. Just before they say the shocking thing. Their face shows the EMOTION without the speaking distortion. Best for reveals, punchlines, and shocking statements.
+
+  2. POST-REVEAL REACTION (0.3 to 1.5 seconds AFTER a dramatic word):
+     The speaker is REACTING to what they just said. Often the most extreme expression of the entire video — eyes huge, jaw set, head tilted in disbelief, scowl, smirk, raised eyebrows. The aftermath of the statement, not the statement itself.
+
+  3. MID-EMOTION SILENT PAUSE:
+     Between sentences when the speaker shows pure emotion (anger, disgust, shock, joy, contempt) with mouth closed or in a non-speaking expressive shape (gritted teeth, dropped jaw with no sound, set lips). These are gold.
+
+  A GREAT thumbnail frame has ALL of these:
+    ✓ Face is BIG in the frame (close-up framing — Ken Burns may have already zoomed in here)
+    ✓ Eyes WIDE OPEN, looking at or near the camera lens
+    ✓ Extreme facial expression — shock, anger, disgust, surprise, contempt, joy. NOT neutral, NOT "talking face"
+    ✓ Mouth in an EXPRESSIVE shape: gritted teeth, jaw dropped (silent), smirk, scowl, lips pressed — NOT mid-syllable
+    ✓ Head STILL (no motion blur from gesturing or moving)
+    ✓ Face well-LIT (not in shadow)
+
+  A BAD thumbnail frame:
+    ✗ Mid-word with mouth in awkward syllable shape (vowel-O, consonant-clicks, etc.)
+    ✗ Eyes half-closed mid-blink, or looking down/away
+    ✗ Wide shot where the face is small
+    ✗ Neutral "speaking" expression (not extreme)
+    ✗ Mid-gesture motion blur from moving hands or head
+    ✗ Face partially obscured (hand in front, glare, etc.)
+
+  Pick the EXACT timestamp where the visual peak occurs. BE PRECISE — being 0.2s off can be the difference between a great frame and a mid-syllable mouth. Scrub the pre-reveal and post-reveal windows of the most emotional moments and pick the best face. The system will fine-tune within ±0.6s of your pick, so get within ~0.5s of the actual best frame.
 
   pacing — overall edit rhythm. Default to "fast" for short-form content under 60s. "fast" = cuts every 2-3s, energetic jump cuts, no dead air. "medium" = 3-4s per clip, balanced. "slow" = 4-6s per clip, deliberate. Most TikTok/Reels content should be "fast" — the Captions app averages 2-3 second segments. Only use "slow" for genuinely contemplative content.
 
