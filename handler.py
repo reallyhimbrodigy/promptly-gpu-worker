@@ -2290,7 +2290,11 @@ RULES FOR USING THESE TIMESTAMPS:
         contents=[_video_part, prompt],
         config=genai_types.GenerateContentConfig(
             temperature=0.6,
-            max_output_tokens=32768,
+            # Edit plans serialize to 2-5KB JSON. 4096 tokens is comfortably above the
+            # observed maximum and reduces tokenizer overhead vs the previous 32768
+            # over-allocation. Gemini will return finish_reason=MAX_TOKENS if exceeded
+            # — handler logs that and we can bump back up if it ever triggers.
+            max_output_tokens=4096,
             thinking_config=genai_types.ThinkingConfig(thinking_level="LOW"),
             media_resolution="MEDIA_RESOLUTION_LOW",
         ),
@@ -7260,24 +7264,17 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _idx, _so, _rw, _rr, _fr, _tot = r
             print(f"[seg-timing]   seg {_idx:3d}  start@{_so:5.2f}s  wait={_rw:5.2f}s  rem={_rr:5.2f}s  ff={_fr:5.2f}s  total={_tot:5.2f}s", flush=True)
 
-    # ── Concat segments (stream copy — instant, no re-encode) ───────────
-    _concat_t0 = time.time()
+    # ── Build concat list (consumed directly by audio_post via concat demuxer) ─
+    # Previously this was a separate ffmpeg invocation that wrote concat_raw.mkv
+    # then audio_post read it back — ~1.6s of pure overhead. The concat demuxer
+    # handles the same job inline as audio_post's input, eliminating the
+    # intermediate file and the second ffmpeg process. The segments are all
+    # encoded with identical codec/timebase (libx264 + PCM @ 48kHz) so concat
+    # demuxer compatibility is unchanged from the standalone concat call.
     _concat_list_path = os.path.join(work_dir, "concat_list.txt")
     with open(_concat_list_path, "w") as _clf:
         for _sp in _seg_paths:
             _clf.write(f"file '{_sp}'\n")
-    # MKV intermediate — supports PCM audio cleanly (MP4 does not in our profile)
-    _concat_raw = os.path.join(work_dir, "concat_raw.mkv")
-    _concat_cmd = [
-        "ffmpeg", "-y", "-v", "warning",
-        "-f", "concat", "-safe", "0", "-i", _concat_list_path,
-        "-c", "copy", _concat_raw,
-    ]
-    _concat_r = subprocess.run(_concat_cmd, capture_output=True, text=True, timeout=30)
-    if _concat_r.returncode != 0:
-        raise RuntimeError(f"Concat failed: {_concat_r.stderr[-500:]}")
-    _concat_elapsed = time.time() - _concat_t0
-    print(f"[render] Concat {n} segments in {_concat_elapsed:.1f}s (stream copy)", flush=True)
 
     # ── Audio post-processing pass (video stream copy) ──────────────────
     # SFX mixing, audio ducking, denoise, EQ, compress, loudnorm
@@ -7351,7 +7348,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # happens to be slightly longer than the video timeline.
     _final_cmd = (
         ["ffmpeg", "-y", "-v", "warning", "-threads", "0",
-         "-i", _concat_raw]
+         "-f", "concat", "-safe", "0", "-i", _concat_list_path]
         + sfx_input_args
         + ["-filter_complex", _audio_fc,
            "-map", "0:v", "-c:v", "copy",
@@ -7363,8 +7360,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     if _final_r.returncode != 0:
         raise RuntimeError(f"Audio post-processing failed: {_final_r.stderr[-500:]}")
     _audio_elapsed = time.time() - _audio_t0
-    print(f"[render] Audio post-processing in {_audio_elapsed:.1f}s", flush=True)
-    print(f"[render] Total render: parallel={_par_elapsed:.1f}s + concat={_concat_elapsed:.1f}s + audio={_audio_elapsed:.1f}s", flush=True)
+    print(f"[render] Audio post-processing in {_audio_elapsed:.1f}s (concat demuxer inline)", flush=True)
+    print(f"[render] Total render: parallel={_par_elapsed:.1f}s + audio={_audio_elapsed:.1f}s", flush=True)
 
 
 
