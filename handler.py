@@ -3368,12 +3368,15 @@ def select_best_thumbnail_frame(video_path, seed_ts, work_dir):
     if not _cand_files:
         raise RuntimeError("[thumbnail] no candidate frames extracted")
 
-    # ── Score each candidate ────────────────────────────────────────────
+    # ── Pass 1: Collect raw metrics for every candidate ─────────────────
+    # We do TWO passes: first collect raw values, then normalize relatively.
+    # Relative normalization means the SHARPEST frame in the window wins, the
+    # LARGEST face wins, etc. — instead of a "good enough" threshold that
+    # produces ties at 1.0 and arbitrary tiebreaking.
     _t_score = time.time()
-    _scored = []  # list of (score, candidate_ts, breakdown_dict)
+    _raw = []  # list of dicts with raw per-candidate metrics
 
     for _ci, _cpath in enumerate(_cand_files):
-        # Reconstruct timestamp from frame index (fps was forced to _candidate_fps)
         _cand_ts = _window_start + (_ci / _candidate_fps)
 
         _frame = cv2.imread(_cpath)
@@ -3381,7 +3384,7 @@ def select_best_thumbnail_frame(video_path, seed_ts, work_dir):
             continue
         _h, _w = _frame.shape[:2]
 
-        # ── Face detection ─────────────────────────────────────────────
+        # Face detection
         _face_conf = 0.0
         _face_bbox = None
         if _face_net is not None:
@@ -3404,27 +3407,19 @@ def select_best_thumbnail_frame(video_path, seed_ts, work_dir):
                 if _x2 <= _x1 or _y2 <= _y1:
                     continue
                 _area = (_x2 - _x1) * (_y2 - _y1)
-                # Pick the largest high-confidence face (handles multi-person)
                 if _face_bbox is None or _area > ((_face_bbox[2] - _face_bbox[0]) * (_face_bbox[3] - _face_bbox[1])):
                     _face_conf = _conf
                     _face_bbox = (_x1, _y1, _x2, _y2)
 
-        # ── Compute metrics ────────────────────────────────────────────
         if _face_bbox is not None:
             _fx1, _fy1, _fx2, _fy2 = _face_bbox
             _face_region = _frame[_fy1:_fy2, _fx1:_fx2]
             _face_gray = cv2.cvtColor(_face_region, cv2.COLOR_BGR2GRAY)
 
-            # 1. Face confidence (DNN output, already in [0.5, 1.0])
-            _conf_score = (_face_conf - 0.5) / 0.5  # rescale to [0, 1]
-
-            # 2. Face area, capped at 15% of frame area
             _face_area = (_fx2 - _fx1) * (_fy2 - _fy1)
             _frame_area = _w * _h
             _area_ratio = _face_area / _frame_area
-            _area_score = min(_area_ratio / 0.15, 1.0)
 
-            # 3. Centeredness — distance from frame center, normalized
             _face_cx = (_fx1 + _fx2) / 2
             _face_cy = (_fy1 + _fy2) / 2
             _frame_cx = _w / 2
@@ -3433,26 +3428,10 @@ def select_best_thumbnail_frame(video_path, seed_ts, work_dir):
             _dist = ((_face_cx - _frame_cx) ** 2 + (_face_cy - _frame_cy) ** 2) ** 0.5
             _center_score = max(0.0, 1.0 - (_dist / _max_dist))
 
-            # 4. Sharpness — Laplacian variance on face region
-            # >300 is sharp, <100 is blurry; we cap and normalize
             _lap_var = float(cv2.Laplacian(_face_gray, cv2.CV_64F).var())
-            _sharp_score = min(_lap_var / 300.0, 1.0)
-
-            # 5. Brightness sweet-spot — face region mean luma in [60, 200]
             _mean_lum = float(_face_gray.mean())
-            if _mean_lum < 30 or _mean_lum > 230:
-                _bright_score = 0.0
-            elif 90 <= _mean_lum <= 170:
-                _bright_score = 1.0
-            else:
-                # Linear ramp from edges
-                if _mean_lum < 90:
-                    _bright_score = (_mean_lum - 30) / 60
-                else:
-                    _bright_score = (230 - _mean_lum) / 60
-                _bright_score = max(0.0, min(1.0, _bright_score))
 
-            # 6. Eye openness — Haar cascade. 2 eyes = open, 1 = partial, 0 = blink
+            # Eye detection: 2 eyes = open, 1 = partial, 0 = blink
             _eye_score = 0.7  # neutral default if cascade unavailable
             if _eye_cascade is not None and _face_gray.size > 0:
                 _eyes = _eye_cascade.detectMultiScale(
@@ -3467,44 +3446,92 @@ def select_best_thumbnail_frame(video_path, seed_ts, work_dir):
                 else:
                     _eye_score = 0.15
 
+            _raw.append({
+                "ts": _cand_ts,
+                "has_face": True,
+                "face_conf": _face_conf,
+                "area_ratio": _area_ratio,
+                "center": _center_score,
+                "lap_var": _lap_var,
+                "mean_lum": _mean_lum,
+                "eye_score": _eye_score,
+            })
+        else:
+            _gray = cv2.cvtColor(_frame, cv2.COLOR_BGR2GRAY)
+            _lap_var = float(cv2.Laplacian(_gray, cv2.CV_64F).var())
+            _mean_lum = float(_gray.mean())
+            _raw.append({
+                "ts": _cand_ts,
+                "has_face": False,
+                "lap_var": _lap_var,
+                "mean_lum": _mean_lum,
+            })
+
+    if not _raw:
+        raise RuntimeError("[thumbnail] no scorable candidates")
+
+    # ── Pass 2: Normalize relatively + score ────────────────────────────
+    # Sharpness and face area are normalized against the BEST candidate in
+    # the window so the sharpest/largest-face frame gets 1.0 and others get
+    # proportional credit. This eliminates the "many candidates tie at 1.0"
+    # problem caused by absolute thresholds.
+    _face_candidates = [r for r in _raw if r["has_face"]]
+    _max_lap = max((r["lap_var"] for r in _raw), default=1.0) or 1.0
+    _max_area = max((r["area_ratio"] for r in _face_candidates), default=0.15) or 0.15
+
+    def _brightness_score(_lum):
+        # Tighter sweet-spot: peak at 130, falls off symmetrically
+        if _lum < 40 or _lum > 220:
+            return 0.0
+        if 110 <= _lum <= 160:
+            return 1.0
+        if _lum < 110:
+            return max(0.0, (_lum - 40) / 70)
+        return max(0.0, (220 - _lum) / 60)
+
+    _scored = []  # list of (score, ts, breakdown)
+    for _r in _raw:
+        if _r["has_face"]:
+            _conf_score = (_r["face_conf"] - 0.5) / 0.5  # [0.5,1] → [0,1]
+            _area_score = min(_r["area_ratio"] / _max_area, 1.0)
+            _sharp_score = min(_r["lap_var"] / _max_lap, 1.0)
+            _bright_score = _brightness_score(_r["mean_lum"])
+
+            # Seed proximity tiebreaker (only matters when other metrics tie)
+            # Distance from seed in seconds → score in [0, 1]
+            _seed_dist = abs(_r["ts"] - seed_ts)
+            _proximity = max(0.0, 1.0 - _seed_dist / _window)
+
             _total = (
-                0.25 * _conf_score
-                + 0.10 * _area_score
-                + 0.10 * _center_score
+                0.20 * _conf_score
+                + 0.12 * _area_score
+                + 0.10 * _r["center"]
                 + 0.25 * _sharp_score
-                + 0.15 * _bright_score
-                + 0.15 * _eye_score
+                + 0.13 * _bright_score
+                + 0.15 * _r["eye_score"]
+                + 0.05 * _proximity
             )
             _breakdown = {
-                "conf": _conf_score, "area": _area_score, "center": _center_score,
-                "sharp": _sharp_score, "bright": _bright_score, "eye": _eye_score,
-                "lap_var": _lap_var, "mean_lum": _mean_lum,
-                "face_conf": _face_conf,
+                "has_face": True,
+                "conf": _conf_score, "area": _area_score, "center": _r["center"],
+                "sharp": _sharp_score, "bright": _bright_score, "eye": _r["eye_score"],
+                "proximity": _proximity,
+                "lap_var": _r["lap_var"], "mean_lum": _r["mean_lum"],
+                "face_conf": _r["face_conf"],
             }
         else:
             # No face — use sharpness + brightness on full frame.
-            # Such a frame can never beat a face-frame, so we cap the no-face
-            # score at 0.5 to give face-frames preference.
-            _gray = cv2.cvtColor(_frame, cv2.COLOR_BGR2GRAY)
-            _lap_var = float(cv2.Laplacian(_gray, cv2.CV_64F).var())
-            _sharp_score = min(_lap_var / 300.0, 1.0)
-            _mean_lum = float(_gray.mean())
-            if 80 <= _mean_lum <= 180:
-                _bright_score = 1.0
-            else:
-                _bright_score = max(0.0, 1.0 - abs(_mean_lum - 130) / 100)
+            # Capped at 0.5 so any face-frame still wins when available.
+            _sharp_score = min(_r["lap_var"] / _max_lap, 1.0)
+            _bright_score = _brightness_score(_r["mean_lum"])
             _total = 0.5 * (0.6 * _sharp_score + 0.4 * _bright_score)
             _breakdown = {
-                "no_face": True, "sharp": _sharp_score,
-                "bright": _bright_score, "lap_var": _lap_var, "mean_lum": _mean_lum,
+                "has_face": False, "sharp": _sharp_score, "bright": _bright_score,
+                "lap_var": _r["lap_var"], "mean_lum": _r["mean_lum"],
             }
-
-        _scored.append((_total, _cand_ts, _breakdown))
+        _scored.append((_total, _r["ts"], _breakdown))
 
     _t_score = time.time() - _t_score
-
-    if not _scored:
-        raise RuntimeError("[thumbnail] no scorable candidates")
 
     # Sort by score descending, pick winner
     _scored.sort(key=lambda r: -r[0])
@@ -3546,7 +3573,7 @@ def select_best_thumbnail_frame(video_path, seed_ts, work_dir):
     except Exception:
         pass
 
-    _has_face = "no_face" not in _winner_breakdown
+    _has_face = _winner_breakdown.get("has_face", False)
     print(
         f"[thumbnail] Selected best frame at {_winner_ts:.3f}s "
         f"(seed={seed_ts:.2f}s, window=±{_window:.1f}s, {len(_scored)} candidates) "
@@ -3560,9 +3587,19 @@ def select_best_thumbnail_frame(video_path, seed_ts, work_dir):
             f"area={_winner_breakdown['area']:.2f} center={_winner_breakdown['center']:.2f} "
             f"sharp={_winner_breakdown['sharp']:.2f}(lap={_winner_breakdown['lap_var']:.0f}) "
             f"bright={_winner_breakdown['bright']:.2f}(lum={_winner_breakdown['mean_lum']:.0f}) "
-            f"eye={_winner_breakdown['eye']:.2f}",
+            f"eye={_winner_breakdown['eye']:.2f} "
+            f"prox={_winner_breakdown['proximity']:.2f}",
             flush=True,
         )
+        # Log top 3 candidates for debugging — helps diagnose unexpected picks
+        for _idx, (_s, _ts, _b) in enumerate(_scored[:3]):
+            if _b.get("has_face"):
+                print(
+                    f"[thumbnail]   #{_idx+1} t={_ts:.3f}s score={_s:.3f} "
+                    f"sharp={_b['sharp']:.2f} bright={_b['bright']:.2f} "
+                    f"eye={_b['eye']:.2f} prox={_b['proximity']:.2f}",
+                    flush=True,
+                )
 
     return _data, "image/jpeg"
 
@@ -8001,11 +8038,15 @@ def handler(job):
             print("[pipeline] upload complete", flush=True)
 
         def _extract_and_upload_cover():
-            # Pick the visually best frame in a window around Gemini's recommended
-            # cover_frame_ts. NO post-processing — just the raw frame.
+            # Pick the visually best frame from the SOURCE video around Gemini's
+            # recommended SOURCE timestamp. We deliberately use the source (not
+            # the rendered output) so the scorer never sees b-roll, transitions,
+            # caption overlays, or speed-warped frames — just the raw subject at
+            # the dramatic moment Gemini identified. NO post-processing.
+            _thumb_seed = float(thumbnail_source_ts)
             try:
                 data, mime = select_best_thumbnail_frame(
-                    output_path, cover_frame_ts, work_dir,
+                    _raw_source, _thumb_seed, work_dir,
                 )
             except Exception as _thumb_err:
                 # Last-resort fallback: extract a single frame at the seed timestamp
@@ -8015,7 +8056,7 @@ def handler(job):
                 _fallback_path = os.path.join(work_dir, "thumbnail_fallback.jpg")
                 _r = subprocess.run(
                     ["ffmpeg", "-y", "-v", "warning",
-                     "-ss", f"{cover_frame_ts:.3f}", "-i", output_path,
+                     "-ss", f"{_thumb_seed:.3f}", "-i", _raw_source,
                      "-frames:v", "1", "-q:v", "2", _fallback_path],
                     capture_output=True, text=True, timeout=10,
                 )
