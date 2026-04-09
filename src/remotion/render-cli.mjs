@@ -27,12 +27,23 @@ let inputPath = null;
 let outputPath = null;
 let concurrency = 24;
 let glMode = "angle-egl"; // GPU-accelerated; falls back to swiftshader
+let frameRangeArg = null; // "start-end" for per-segment rendering
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--input" && args[i + 1]) inputPath = args[++i];
   else if (args[i] === "--output" && args[i + 1]) outputPath = args[++i];
   else if (args[i] === "--concurrency" && args[i + 1]) concurrency = parseInt(args[++i], 10);
   else if (args[i] === "--gl" && args[i + 1]) glMode = args[++i];
+  else if (args[i] === "--frame-range" && args[i + 1]) frameRangeArg = args[++i];
+}
+
+// Parse frame range if provided (format: "start-end")
+let frameRange = null;
+if (frameRangeArg) {
+  const parts = frameRangeArg.split("-").map(Number);
+  if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+    frameRange = [parts[0], parts[1]];
+  }
 }
 
 if (!inputPath || !outputPath) {
@@ -89,7 +100,7 @@ const chromePath = existsSync("/usr/local/bin/chrome-headless-shell")
   : undefined;
 if (chromePath) console.log("[remotion] Using pre-installed Chrome:", chromePath);
 
-// Select the VideoOverlay composition (captions + effects)
+// Select the VideoOverlay composition (resolves React component + props)
 const tComp = Date.now();
 const composition = await selectComposition({
   serveUrl: bundleLocation,
@@ -113,6 +124,10 @@ mkdirSync(outputPath, { recursive: true });
 // Render to PNG sequence — no video encoding, just Chrome screenshots.
 // Each PNG has full RGBA transparency. This eliminates the VP8 stitching
 // bottleneck entirely (was 219s for 106 frames with VP8, now 0s).
+const actualFrameCount = frameRange
+  ? (frameRange[1] - frameRange[0] + 1)
+  : composition.durationInFrames;
+
 let lastPct = -1;
 const tRender = Date.now();
 await renderFrames({
@@ -122,6 +137,7 @@ await renderFrames({
   outputDir: outputPath,
   imageFormat: "png",
   concurrency,
+  ...(frameRange ? { frameRange } : {}),
   logLevel: "verbose",
   chromiumOptions: {
     gl: glMode,
@@ -130,10 +146,10 @@ await renderFrames({
     enableMultiProcessOnLinux: true,
   },
   onStart: ({ frameCount }) => {
-    console.log(`[remotion] Rendering ${frameCount} PNG frames (concurrency=${concurrency})`);
+    console.log(`[remotion] Rendering ${frameCount} PNG frames (concurrency=${concurrency})${frameRange ? ` [frames ${frameRange[0]}-${frameRange[1]}]` : ""}`);
   },
   onFrameUpdate: (rendered) => {
-    const pct = Math.round(rendered / composition.durationInFrames * 100);
+    const pct = Math.round(rendered / actualFrameCount * 100);
     if (pct % 10 === 0 && pct !== lastPct) {
       lastPct = pct;
       process.stdout.write(`\r[remotion] ${pct}%`);

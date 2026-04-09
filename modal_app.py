@@ -1,6 +1,6 @@
 import modal
 
-# rebuild trigger v18 — FFmpeg source-only, drawtext needs libharfbuzz + H100 GPU + 32 CPU + 64GB
+# rebuild trigger v20 — H100 + 64 CPU + 128GB (CPU-bound pipeline, NVENC irrelevant)
 
 # ── Image definition (replaces Dockerfile) ────────────────────────────────────
 image = (
@@ -9,7 +9,7 @@ image = (
     # Without this, NVENC silently fails and pipeline falls back to CPU encoding (10-15x slower)
     .env({"NVIDIA_DRIVER_CAPABILITIES": "all"})
     .run_commands(
-        "echo 'build v20 - H100 + NVENC/NVDEC + 32CPU + 64GB + Remotion + genai SDK'",
+        "echo 'build v23 - H100 + 64CPU + 128GB + Remotion + genai SDK'",
         "apt-get update && apt-get install -y ca-certificates && update-ca-certificates",
         # Remove CUDA stubs AND compat libs that intercept dlopen before Modal's real driver libs
         "rm -rf /usr/local/cuda/lib64/stubs/libnvidia-encode* /usr/local/cuda/lib64/stubs/libcuda* /usr/local/cuda/compat/libcuda* /usr/local/cuda/lib64/libcuda.so* 2>/dev/null || true",
@@ -92,6 +92,9 @@ image = (
         "mkdir -p /models/face_detector",
         "wget -q -O /models/face_detector/deploy.prototxt https://raw.githubusercontent.com/opencv/opencv/master/samples/dnn/face_detector/deploy.prototxt",
         "wget -q -O /models/face_detector/res10_300x300_ssd_iter_140000.caffemodel https://raw.githubusercontent.com/opencv/opencv_3rdparty/dnn_samples_face_detector_20170830/res10_300x300_ssd_iter_140000.caffemodel",
+        # Pre-cache arnndn noise reduction model (avoids runtime download on every cold start)
+        "mkdir -p /usr/share/rnnoise",
+        "wget -q -O /usr/share/rnnoise/bd.rnnn https://github.com/GregorR/rnnoise-models/raw/master/beguiling-drafter-2018-08-30/bd.rnnn",
     )
     .pip_install("numpy", "wheel")
     .pip_install("aubio", extra_options="--no-build-isolation")
@@ -103,6 +106,7 @@ image = (
         "google-genai",
         "deepgram-sdk==3.4.0",
         "supabase",
+        "boto3",
         "httpx",
         "fastapi",
         "pydantic",
@@ -149,11 +153,12 @@ app = modal.App("promptly-gpu-worker", image=image, secrets=secrets)
 
 # ── Web endpoint ───────────────────────────────────────────────────────────────
 @app.function(
-    timeout=600,          # 10 min — target <120s with H100 + NVDEC + 32 cores
+    timeout=600,          # 10 min — target <60s with H100 + max cores
     scaledown_window=120, # keep warm 2 min for back-to-back requests (avoid cold start)
-    cpu=32,
-    memory=65536,         # 64GB — headroom for parallel segment renders + Remotion Chrome tabs
-    gpu="H100",
+    cpu=64,
+    memory=131072,        # 128GB — headroom for parallel segment renders + Remotion Chrome tabs
+    gpu="H100",           # H100 has fastest CPUs — bottleneck is filter_complex, not encoding
+    region="us-west",     # colocate with Supabase (West US) for minimal network latency
 )
 @modal.concurrent(max_inputs=1)
 @modal.fastapi_endpoint(method="POST")

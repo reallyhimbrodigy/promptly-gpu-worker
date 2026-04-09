@@ -67,6 +67,72 @@ try:
 except Exception as e:
     print(f"[startup] supabase unavailable: {e}", flush=True)
 
+# ── S3-compatible Supabase Storage client ────────────────────────────────
+# Uses Supabase's S3 protocol for same-region transfers over AWS internal
+# network (via Modal's S3 gateway endpoints). Falls back to HTTP if S3
+# credentials are not configured.
+_s3_client = None
+_s3_project_ref = None
+try:
+    import boto3
+    from botocore.config import Config as BotoConfig
+    _s3_access_key = os.environ.get("SUPABASE_S3_ACCESS_KEY")
+    _s3_secret_key = os.environ.get("SUPABASE_S3_SECRET_KEY")
+    _s3_region = os.environ.get("SUPABASE_S3_REGION", "us-west-1")
+    _supabase_url_raw = os.environ.get("SUPABASE_URL", "")
+    # Extract project ref from https://XXXXXX.supabase.co
+    import re as _re_s3
+    _ref_match = _re_s3.match(r"https://([^.]+)\.supabase\.co", _supabase_url_raw)
+    if _ref_match:
+        _s3_project_ref = _ref_match.group(1)
+    if _s3_access_key and _s3_secret_key and _s3_project_ref:
+        _s3_endpoint = f"https://{_s3_project_ref}.storage.supabase.co/storage/v1/s3"
+        _s3_client = boto3.client(
+            "s3",
+            endpoint_url=_s3_endpoint,
+            region_name=_s3_region,
+            aws_access_key_id=_s3_access_key,
+            aws_secret_access_key=_s3_secret_key,
+            config=BotoConfig(s3={"addressing_style": "path"}),
+        )
+        print(f"[startup] S3 storage OK (endpoint={_s3_endpoint}, region={_s3_region})", flush=True)
+    else:
+        _missing = []
+        if not _s3_access_key: _missing.append("SUPABASE_S3_ACCESS_KEY")
+        if not _s3_secret_key: _missing.append("SUPABASE_S3_SECRET_KEY")
+        if not _s3_project_ref: _missing.append("SUPABASE_URL (invalid format)")
+        print(f"[startup] S3 storage unavailable: missing {', '.join(_missing)} — will use HTTP", flush=True)
+except ImportError:
+    print("[startup] S3 storage unavailable: boto3 not installed — will use HTTP", flush=True)
+except Exception as e:
+    print(f"[startup] S3 storage init failed: {e} — will use HTTP", flush=True)
+
+
+def _parse_supabase_storage_url(url):
+    """Extract (bucket, key) from a Supabase storage URL.
+    Handles all known Supabase storage URL formats:
+      https://XXXX.supabase.co/storage/v1/object/public/BUCKET/KEY
+      https://XXXX.supabase.co/storage/v1/object/sign/BUCKET/KEY?token=...
+      https://XXXX.supabase.co/storage/v1/object/authenticated/BUCKET/KEY
+      https://XXXX.supabase.co/storage/v1/upload/resumable/BUCKET/KEY?token=...
+      https://XXXX.supabase.co/object/upload/sign/BUCKET/KEY?token=...
+      https://XXXX.supabase.co/storage/v1/object/upload/sign/BUCKET/KEY?token=...
+    Returns (bucket, key) or (None, None) if not a recognized Supabase storage URL.
+    """
+    import re as _re_parse
+    # Try all known path patterns. The /storage/v1/ prefix may or may not be present.
+    patterns = [
+        r"/storage/v1/object/(?:public|sign|authenticated)/([^/]+)/(.+?)(?:\?|$)",
+        r"/storage/v1/(?:object/)?upload/(?:sign|resumable)/([^/]+)/(.+?)(?:\?|$)",
+        r"/object/upload/sign/([^/]+)/(.+?)(?:\?|$)",
+        r"/object/(?:public|sign|authenticated)/([^/]+)/(.+?)(?:\?|$)",
+    ]
+    for pat in patterns:
+        m = _re_parse.search(pat, url)
+        if m:
+            return m.group(1), m.group(2)
+    return None, None
+
 DeepgramClient = None
 PrerecordedOptions = None
 try:
@@ -1692,16 +1758,17 @@ Pacing creates rhythm. For short-form content, the average clip should be 2-3 se
 
 You are the editor. You decide what stays and what gets cut.
 
+Your goal: make the final transcript as tight and to the point as possible without cutting actual valuable content. You understand the emotion and humor of what's being said — you know the difference between filler and content that matters. Every "um", every stutter, every false start, every meaningless pause gets cut. Every joke, every emotional beat, every setup that pays off later stays.
+
 You are a professional short-form editor. You have the exact transcript with millisecond timestamps. Use them to place PRECISE cuts. Think like a human editor who can see the waveform and the video simultaneously.
 
 DEAD AIR IN SPEECH CONTENT:
-Watch the video. Every moment of silence should be marked for removal UNLESS it's a dramatic pause that serves the story. You can see the video — you know the difference between dead air and dramatic silence. Mark every dead moment with a start/end time range. Be aggressive — professional editors leave zero dead air in short-form content. Short-form viral content should feel TIGHT — no wasted frames.
+ALL silence is bad unless it's a deliberate comedic or dramatic pause that serves the story. You have millisecond-accurate word timestamps — use them. Find EVERY gap between words and mark it for removal. Professional short-form editors leave ZERO dead air. The video should feel like a continuous stream of speech with no wasted frames.
 
 - Under 0.08 seconds between words — natural word spacing. KEEP.
-- Any gap longer than that — evaluate: is it dramatic or dead? If dead, REMOVE it using a start/end time range.
-- The pipeline auto-collapses very small gaps. You focus on the noticeable ones.
-- Filler words (uh, um, hmm, er, ah) — the pipeline auto-removes these. Do NOT mark them.
-- Stutters and exact word repetitions — the pipeline auto-removes these. Do NOT mark them.
+- 0.08–0.3 seconds — these feel like pauses to the viewer. REMOVE unless the pause is clearly dramatic.
+- Over 0.3 seconds — these are dead air. ALWAYS REMOVE using a start/end time range.
+- Scan the ENTIRE transcript systematically. Do not skip any gaps. Every gap between every pair of adjacent words must be evaluated.
 
 HOW TO MARK REMOVALS PRECISELY:
 - Use word_index when removing a specific spoken word.
@@ -1766,16 +1833,17 @@ Word-level edit control:
 
   Rules for remove_words:
 
-  The pipeline already handles these AUTOMATICALLY — do NOT mark them:
-  - "uh", "um", "er", "ah", "hmm", "uhh", "umm", "mhm" and similar non-word fillers
-  - Stutters where a word is repeated exactly ("I I", "the the")
-  - False starts where a partial word precedes the full word ("shou-" before "shouldn't")
-  These are removed deterministically by the pipeline. You do not need to include them.
+  YOU are responsible for removing ALL disfluencies. The pipeline trusts your decisions completely. Do not leave any of these in the transcript:
 
-  YOUR JOB — context-dependent filler words:
-  The pipeline cannot tell if "like", "so", "basically", "you know", "I mean", "right",
-  "literally", "actually", "honestly", "obviously", "just", "really", "kind of", "sort of"
-  are filler or content. YOU decide based on the sentence:
+  ALWAYS REMOVE (these are NEVER content):
+  - Non-word fillers: "um", "uh", "er", "ah", "hmm", "uhh", "umm", "erm", "mhm", "hm", "mm", "mmm", "ahh", "huh" — every single one, no exceptions
+  - Exact-word stutters: "I I", "the the", "and and" — where the same word is spoken twice consecutively, remove the first occurrence
+  - False starts: "shou-" before "shouldn't", "I was go-" before "I was going to" — where a partial word/phrase is abandoned and restarted, remove the abandoned attempt
+  - Phrasal restarts: "I said, who is — I said, who is he?" — where a multi-word phrase is started, abandoned, and restarted, remove the first attempt
+
+  CONTEXT-DEPENDENT (you decide based on the sentence):
+  - "like", "so", "basically", "you know", "I mean", "right", "literally", "actually", "honestly", "obviously", "just", "really", "kind of", "sort of"
+  - These CAN be filler or content depending on context:
     - "I was like walking down the street" → "like" is FILLER, remove it
     - "I like this color" → "like" is CONTENT, keep it
     - "So basically what happened was" → "so basically" is FILLER, remove both
@@ -1783,8 +1851,7 @@ Word-level edit control:
     - "You know what I mean?" → "you know" is CONTENT (question), keep it
     - "And then, you know, he just left" → "you know" is FILLER, remove it
 
-  REMOVE:
-  - Filler words: "like" (when filler), "you know" (when filler), "basically", "literally", "honestly", "obviously"
+  ALSO REMOVE:
   - Silence gaps longer than 0.5 seconds — mark with start/end time ranges. Gaps under 0.5s are auto-collapsed by the pipeline.
   - Genuine off-topic garbage that has nothing to do with the video's subject
 
@@ -1815,36 +1882,17 @@ Global parameters:
   SLOW DOWN (0.67x-0.8x): Punchlines, reveals, shocking statements, emotional peaks.
 
   THE RAMP:
-  A speed ramp is a SHORT transition (0.4-1.2 seconds) between two held speeds.
-  The pipeline linearly interpolates between adjacent keypoints, so the time
-  between any two keypoints IS the ramp duration. Long gaps between keypoints
-  produce slow drifty speed changes that feel boring and amateur.
+  A speed ramp is a SHORT transition between two held speeds. The pipeline
+  linearly interpolates between adjacent keypoints, so the time between any
+  two keypoints IS the ramp duration. Long gaps between keypoints produce
+  slow drifty speed changes that feel boring and amateur.
 
-  CORRECT pattern: each speed change is a PAIR of keypoints placed close together
-  (≤1.2 seconds apart). The first keypoint of the pair holds the previous speed;
-  the second keypoint snaps to the new speed. Between pairs, the speed HOLDS at
-  whatever value the most recent keypoint set.
+  A speed ramp is a SHORT transition (0.4–1.2 seconds) between two held speeds.
 
-  Example for a 60-second clip with three ramps:
-  ```
-    {{"t": 0.08,  "speed": 1.3}},   // start fast (setup)
-    {{"t": 11.2,  "speed": 1.3}},   // hold fast — no ramp here yet
-    {{"t": 12.0,  "speed": 0.75}},  // RAMP DOWN over 0.8s into the slow moment
-    {{"t": 17.0,  "speed": 0.75}},  // hold slow
-    {{"t": 17.8,  "speed": 1.3}},   // RAMP UP over 0.8s back to fast
-    {{"t": 32.5,  "speed": 1.3}},   // hold fast
-    {{"t": 33.4,  "speed": 0.7}},   // RAMP DOWN over 0.9s into the punchline
-    {{"t": 35.5,  "speed": 0.7}},   // hold slow on the reveal
-    {{"t": 36.3,  "speed": 1.2}},   // RAMP UP over 0.8s back to medium-fast
-    {{"t": 58.0,  "speed": 1.2}}    // hold to end
-  ```
-
-  WRONG pattern: do NOT place keypoints far apart and expect a fast transition.
-  The ramp will smear across the entire gap and feel glacial.
-  ```
-    {{"t": 11.0, "speed": 0.8}},
-    {{"t": 17.0, "speed": 1.3}}   // 6 seconds of slow drift — wrong, feels boring
-  ```
+  CORRECT pattern: each speed change is a PAIR of keypoints placed close together.
+  The first keypoint of the pair holds the previous speed; the second keypoint
+  sets the new speed. Between pairs, the speed HOLDS at whatever value the most
+  recent keypoint set.
 
   CRITICAL: every keypoint speed MUST be either slowed down (0.67x-0.8x) or sped
   up (1.2x-1.4x). NEVER use 1.0x — the video should never play at normal speed.
@@ -1952,6 +2000,7 @@ Emphasis moments — THE MOST IMPORTANT PART OF YOUR EDIT. These are the 2-5 mom
   IMPORTANT: Choose word_indices that point to a SINGLE powerful word (1-2 words max) for high-intensity moments. "SKEPTIC", "RESULT", "EDITING", "SAVED" — short, punchy words that look dramatic when displayed large. Do NOT pick long phrases.
 
   Every video MUST have at least 3 emphasis_moments. Most have 4-6. These moments are what separate a professional edit from a raw upload.
+  Space high-intensity emphasis moments at least 3 seconds apart — rapid-fire zooms look jarring and cheap, not dramatic.
 
   caption_keywords — list of words that should be visually emphasized in captions (larger, colored). These are auto-derived from emphasis_moments word_indices, but you can add extra keywords here for words that should stand out even outside emphasis moments.
 
@@ -1961,16 +2010,32 @@ Text overlays:
   The text overlay should appear in the FIRST SECONDS the viewer sees. If you set a hook_clip, the hook plays FIRST — so the text overlay should appear on the hook (use appear_at_clip: -1 to place it on the hook clip). If there is no hook_clip, use appear_at_clip: 0 to place it on the first clip.
   If the story doesn't need context-setting text, use an empty array.
   text — under 5 words, no emojis
-  position — top (default for talking heads), center (only when no face in frame), bottom
+  position — top or bottom ONLY for talking-head content (center blocks the speaker's face). Use center only if there is genuinely no face in the frame.
   appear_at_clip — -1 for hook clip (if hook_clip is set), 0 for first content clip, or any clip number
   style — title (72px), callout (56px), cta (64px)
 
 Sound effects — audio accents that make the edit feel physical and professional. Every sound must be EARNED — placed at a moment that justifies it. The wrong sound at the wrong time makes the edit feel amateur. The right sound at the right time makes it feel like a Netflix trailer.
 
+  === THE #1 RULE: MATCH THE EMOTION, NOT THE WORDS ===
+
+  Every sound must match the speaker's ACTUAL EMOTION in that moment, not the literal words being said. The same word carries completely different emotions depending on context:
+  - "She's crying" when the speaker caught his wife cheating = VINDICATION, not sadness. No sad_trombone.
+  - "I killed it" = TRIUMPH, not death. Use boom, not something dark.
+  - "That's crazy" = AMAZEMENT. Not literal insanity.
+  - "I died" = slang for laughing hard. Not actual death.
+
+  Before placing ANY sound, identify the speaker's emotion: Are they triumphant? Disappointed? Shocked? Amused? Furious? Satisfied? Then pick a sound that AMPLIFIES that exact emotion. If the emotion is complex or ambiguous, use NO sound — silence is always safe and often more powerful than the wrong sound.
+
+  SILENCE is the most powerful sound effect. Use it when:
+  - The speaker's delivery already carries all the energy
+  - The moment is genuinely emotional or vulnerable
+  - You're not sure the sound matches the emotion (when in doubt, leave it out)
+
   Available sounds and WHEN to use each:
 
-  boom — deep cinematic impact. Use for the biggest moments in the video — the jaw-drop statements, the shocking reveals.
+  boom — deep cinematic impact. Use for the biggest moments in the video — the jaw-drop statements, the shocking reveals, the mic-drop lines.
     Example: "they offered me TWO MILLION dollars" → boom on "million"
+    Example: "she should be crying" (vindicated speaker) → boom on "crying" (this is a mic-drop, not sadness)
 
   hit — sharp dramatic impact. Use for strong statements that need punctuation but aren't THE moment.
     Example: "I kicked the bed" → hit on "kicked"
@@ -1993,7 +2058,11 @@ Sound effects — audio accents that make the edit feel physical and professiona
 
   camera_shutter — camera shutter click. Use ONLY when someone is visibly taking a photo on screen OR says "I took a picture" (literally took a photo). NOT for "picture this" or metaphorical usage.
 
-  sad_trombone — comedic failure. Use for humorous disappointment or things going wrong.
+  sad_trombone — the classic "wah-wah-wah" comedic failure sound. Use ONLY when the speaker is describing a lighthearted, clearly comedic failure that THEY find funny. The speaker's tone must be playful or self-deprecating, NOT genuinely upset, NOT angry, NOT vindicated. This is a COMEDY sound — it trivializes the moment.
+    CORRECT: "I tried to flip the pancake and it landed on the floor" → sad_trombone (funny failure, speaker is laughing)
+    CORRECT: "I asked her out and she said 'who are you?'" → sad_trombone (comedic rejection, speaker finds it funny)
+    WRONG: "She's crying" (speaker caught cheating wife) → NOT sad_trombone. Speaker is vindicated/satisfied, not experiencing comedic failure.
+    WRONG: "I lost my job" (genuinely devastated) → NOT sad_trombone. Real pain, not comedy.
 
   typing — keyboard typing sounds. Use when someone is visibly typing on screen (phone or keyboard) OR says "I typed" / "I texted" (literally typed something). Also fits for caption styles with letter-by-letter typing animation.
 
@@ -2060,33 +2129,71 @@ Sound effects — audio accents that make the edit feel physical and professiona
     {{"t": <seconds, 3+ decimal places, EXACT word start from Deepgram>, "sound": "<boom|hit|drum_roll|reverse|ching|ding|pop|click|camera_shutter|sad_trombone|typing|whoosh_slow|transition_smooth|thunder>", "word": "<exact trigger word, lowercase>"}}
   ]
 
-B-roll — contextual stock footage overlays that illustrate what the speaker is talking about. B-roll makes the edit feel like a professional production, not just a talking head.
+B-roll — contextual stock footage overlays that illustrate what the speaker is talking about. B-roll is the single biggest lever you have to make a talking-head video feel like a professional production. You are the expert. Every decision is yours, and the system honors your decisions exactly — no clamps, no fallbacks, no second-guessing. So make them right.
 
-  WHEN TO USE B-ROLL:
-  - When the speaker describes something that isn't visible (a place, an object, a concept)
-  - During topic transitions to create visual variety
-  - When the speaker says "this is what it looks like" or references something external
-  - During longer stretches of talking head where the viewer might get bored
+  === CORE PRINCIPLE: YOUR DECISIONS INTERACT ===
 
-  WHEN NOT TO USE:
-  - When the speaker IS the content (emotional reactions, demonstrations, tutorials)
-  - When the speaker is showing something on screen already
-  - When the video is under 15 seconds (too short for B-roll to add value)
-  - Never more than 3 B-roll clips per video
+  In this same response you decide cuts (remove_words), the speed_curve, AND broll_clips. These are not independent — they all play out on the same final timeline that the viewer sees. You must reason about all three together:
 
-  Each B-roll clip replaces the video (not audio) for its duration — the speaker's voice continues over the B-roll footage.
+  - B-roll plays at the same playback speed as the underlying video. If you put a 3-second b-roll on top of a section you've sped up to 2x, the viewer only sees ~1.5 seconds of b-roll. Either lengthen the duration to compensate, OR (much better) place b-roll on real-time (1.0x) sections of your own edit.
+  - If you've placed a hard cut in the middle of where you want b-roll, the b-roll will continue smoothly across the cut while the underlying speech jumps. This can be a feature (smooths over the jump cut) or a bug (b-roll sits on top of two unrelated sentences). Be deliberate.
+  - Place b-roll on calm, uncut, real-time sections of your own edit unless you have a specific reason to do otherwise.
+
+  === WHEN TO USE B-ROLL ===
+
+  - When the speaker describes something visual that isn't on camera (a place, an object, an action, a concept)
+  - During topic transitions to create visual variety and re-engage the eye
+  - When the speaker references something external ("this is what it looks like", "imagine a...", "back when I was at...")
+  - During longer stretches of talking head where retention drops
+
+  === WHEN NOT TO USE ===
+
+  - When the speaker IS the content (emotional reactions, facial expressions, physical demonstrations, dramatic reveals). The viewer needs to see the speaker's face during these moments — cutting away destroys the tension.
+  - When the speaker is already showing something on camera
+  - When the moment is a dramatic reveal or punchline — the speaker's expression AS they deliver the line is what hooks the audience. Never cut away to stock footage during the most important moments.
+  - When the keyword would be abstract, metaphorical, or emotional rather than a concrete physical thing. "I felt electrocuted" does NOT mean you should search for "shocked person face" — that returns a generic stock photo of a stranger that looks random and accidental, not professional. If the speaker is using a metaphor or describing an emotion, there is no literal visual to show. Skip the b-roll.
+  - When you can't find a search term that describes a SPECIFIC PHYSICAL THING that exists in the real world (a place, an object, an action). If your best keyword is about an emotion, a reaction, a feeling, or an abstract concept — that's your signal to skip b-roll for this moment. Better no b-roll than a mismatched generic clip.
+
+  === DURATION (THE MOST COMMON MISTAKE) ===
+
+  Target 2.0–3.0 seconds per cutaway. This is the sweet spot. Anything under ~1.2 seconds reads as a flash or a glitch — the viewer's eye literally cannot parse a sub-second cutaway as an intentional edit. Anything over ~5 seconds in short-form loses punch and feels like you've abandoned the speaker.
+
+  Hard guidance you should internalize:
+  - Default to 2.5 seconds unless you have a reason to differ.
+  - Never go below 1.2 seconds. If a phrase is too short for 1.2s of b-roll, don't use b-roll for it.
+  - Rarely exceed 4 seconds. Only longer if the speaker is genuinely dwelling on the visual concept.
+
+  === COVERAGE (THE SECOND MOST COMMON MISTAKE) ===
+
+  Target roughly 30–50% of the total video runtime covered by b-roll, with ~40% being the empirically-validated sweet spot for retention. Below 30% leaves the talking head feeling static. ABOVE 50% actively HURTS retention because the viewer feels like they've lost the human connection. More b-roll is NOT better — 70% coverage performs worse than 0% coverage in tests. Be disciplined.
+
+  For a 30s video that's roughly 12s of b-roll across 4–5 cutaways. For a 60s video, ~24s across 8–10 cutaways. Scale accordingly. Most videos need more than 0–2 b-roll clips, but never pile them on.
+
+  === PLACEMENT PRECISION ===
+
+  - Use the WORD-BY-WORD TIMESTAMPS you have above. The "timestamp" field MUST equal the EXACT `start` value of a real word from that list. Never approximate. Never guess.
+  - Start the b-roll at the FIRST word of the relevant phrase, OR up to 200ms BEFORE that word. Never after — late b-roll feels sloppy. If the speaker says "So I'm shaving, getting ready for work", the b-roll for "shaving in the bathroom" starts at the word "shaving", not "work" or later.
+  - End the b-roll on a word boundary too — the end time (timestamp + duration) should land in a gap between words from the word list, never mid-word.
+  - Leave at least 3 seconds between adjacent b-roll clips. Two b-rolls close together looks chaotic and unprofessional — give the viewer time to re-connect with the speaker between cutaways.
+  - NEVER overlap two b-roll clips. If two moments are close together, pick the stronger one.
+  - Prefer cutting in on natural pauses, breaths, or emphasis beats from the speaker.
+
+  === KEYWORD CRAFT ===
+
+  - The keyword MUST describe a concrete, physical, visible thing: a place, an object, an action happening in the real world. "man shaving in bathroom mirror", "little boy sitting on floor", "car driving on highway" — these are real scenes that stock footage can show.
+  - NEVER use keywords about emotions, reactions, or states of mind: "shocked person", "sad face", "happy couple", "angry man" — these return generic stock photos of actors making faces, which look random and unprofessional next to real storytelling.
+  - NEVER use keywords that are metaphors for what the speaker said: "I felt electrocuted" does NOT mean search for "electric shock" or "shocked face." The speaker is using a metaphor. There is no literal visual. Skip the b-roll.
+  - If the speaker mentions a specific place/object/action, search for THAT exact thing.
+
+  === REASONING (REQUIRED) ===
+
+  Every b-roll clip must include a "reason" field explaining WHY you chose that moment, WHY that duration, and WHY that keyword. This forces you to think about each placement deliberately. Example: "Speaker says 'I was sitting in the coffee shop' at t=12.34s — perfect literal match, 2.5s covers the full phrase, calm 1.0x section of edit so duration plays at face value."
+
+  === SCHEMA ===
 
   broll_clips: [
-    {{"keyword": "<search term for stock footage>", "timestamp": <source seconds where B-roll starts>, "duration": <seconds, 1-6>}}
+    {{"keyword": "<specific visual search term for Pexels>", "timestamp": <EXACT word start time in source seconds>, "duration": <seconds, target 2.0-3.0, never below 1.2, rarely above 4.0>, "reason": "<one sentence: why this moment, why this duration, why this keyword>"}}
   ]
-
-  Rules:
-  - keyword: descriptive search term for Pexels video search. Be specific ("city skyline night", "person typing laptop", "coffee shop interior"). Avoid abstract terms.
-  - timestamp: place B-roll at the FIRST WORD of the relevant phrase, not the last word or the keyword. If the speaker says "So I'm shaving, getting ready for work", start the B-roll at "shaving" (the first word that describes the visual), not at "work" or later. The viewer should see the B-roll WHILE the speaker describes the scene, not after.
-  - duration: how long to show the B-roll (2-4 seconds). It should cover the relevant phrase and end before the topic changes. Never let B-roll extend past the speech it illustrates.
-  - Maximum 3 B-roll clips per video. Most videos need 0-2.
-  - Space B-roll clips at least 5 seconds apart.
-  - NEVER overlap two B-roll clips. If two moments are close together, pick the stronger one.
 
 Visual effects — additional visual treatments for emphasis moments.
 
@@ -2130,7 +2237,7 @@ Output ONLY the JSON below — no commentary, no analysis, no explanation. Just 
     {{"t": <seconds>, "sound": "<sound>", "word": "<trigger>"}}
   ],
   "broll_clips": [
-    {{"keyword": "<search term>", "timestamp": <source seconds>, "duration": <seconds>}}
+    {{"keyword": "<specific visual search term>", "timestamp": <EXACT word start in source seconds>, "duration": <seconds, target 2.0-3.0>, "reason": "<one sentence justifying moment, duration, keyword>"}}
   ],
   "visual_effects": [
     {{"type": "white_flash", "t": <source seconds>}}
@@ -2602,26 +2709,7 @@ RULES FOR USING THESE TIMESTAMPS:
             if not _applied:
                 print(f"[generate-edit] Transition '{tr_type}' at word {awi} ({word_end:.3f}s) — no matching clip found", flush=True)
 
-    # Smart transition limits: max 4 transitions per video, max 2 of the same type.
-    # Prevents Gemini from over-using transitions (which looks amateur, not professional).
-    _MAX_TRANSITIONS = 4
-    _MAX_SAME_TYPE = 2
-    _tr_clips = [(i, c) for i, c in enumerate(validated_cuts) if str(c.get("transition_out") or "none") != "none"]
-    if len(_tr_clips) > _MAX_TRANSITIONS:
-        # Keep only the first N transitions
-        for i, c in _tr_clips[_MAX_TRANSITIONS:]:
-            print(f"[generate-edit] Stripping excess transition '{c['transition_out']}' from clip {i} (>{_MAX_TRANSITIONS} total)", flush=True)
-            c["transition_out"] = "none"
-    # Enforce per-type limit
-    _tr_type_counts = {}
-    for i, c in enumerate(validated_cuts):
-        tr = str(c.get("transition_out") or "none")
-        if tr == "none":
-            continue
-        _tr_type_counts[tr] = _tr_type_counts.get(tr, 0) + 1
-        if _tr_type_counts[tr] > _MAX_SAME_TYPE:
-            print(f"[generate-edit] Stripping duplicate transition '{tr}' from clip {i} (>{_MAX_SAME_TYPE} of same type)", flush=True)
-            c["transition_out"] = "none"
+    # Transition count/variety is Gemini's decision — the prompt teaches restraint.
 
     edit_plan.setdefault("caption_style", "none")
     edit_plan.setdefault("caption_position", "lower-third")
@@ -2650,19 +2738,41 @@ RULES FOR USING THESE TIMESTAMPS:
     edit_plan.setdefault("visual_effects", [])
 
     # ── B-roll clips validation ───────────────────────────────────────────
+    # Type/sanity checks only — no value clamps. Gemini owns every creative
+    # decision (duration, count, placement). We only filter entries that
+    # would crash the renderer or are physically impossible (negative time,
+    # zero duration, NaN, past end of video, malformed JSON types).
     raw_broll = edit_plan.get("broll_clips") or []
     validated_broll = []
     for _br in raw_broll:
         if not isinstance(_br, dict):
             continue
         _br_kw = str(_br.get("keyword") or "").strip()
-        _br_ts = float(_br.get("timestamp") or 0)
-        _br_dur = float(_br.get("duration") or 2.0)
-        if _br_kw and _br_ts >= 0 and 1.0 <= _br_dur <= 8.0:
-            validated_broll.append({"keyword": _br_kw, "timestamp": _br_ts, "duration": min(_br_dur, 6.0)})
-    edit_plan["broll_clips"] = validated_broll[:5]  # max 5 B-roll clips
+        if not _br_kw:
+            continue
+        try:
+            _br_ts = float(_br.get("timestamp"))
+            _br_dur = float(_br.get("duration"))
+        except (TypeError, ValueError):
+            continue
+        if not (math.isfinite(_br_ts) and math.isfinite(_br_dur)):
+            continue
+        if _br_ts < 0 or _br_dur <= 0:
+            continue
+        if video_duration > 0 and _br_ts >= video_duration:
+            continue
+        validated_broll.append({
+            "keyword": _br_kw,
+            "timestamp": _br_ts,
+            "duration": _br_dur,
+            "reason": str(_br.get("reason") or "").strip(),
+        })
+    edit_plan["broll_clips"] = validated_broll
     if validated_broll:
         print(f"[broll] Gemini requested {len(validated_broll)} B-roll clip(s)", flush=True)
+        for _vb in validated_broll:
+            _r = _vb.get("reason") or "(no reason given)"
+            print(f"[broll]   → '{_vb['keyword']}' @ {_vb['timestamp']:.2f}s for {_vb['duration']:.2f}s — {_r}", flush=True)
 
     # ── Visual effects validation ─────────────────────────────────────────
     raw_vfx = edit_plan.get("visual_effects") or []
@@ -2674,7 +2784,7 @@ RULES FOR USING THESE TIMESTAMPS:
         _vf_type = str(_vf.get("type") or "").strip()
         if _vf_type in valid_vfx_types:
             validated_vfx.append(_vf)
-    edit_plan["visual_effects"] = validated_vfx[:10]  # max 10 VFX
+    edit_plan["visual_effects"] = validated_vfx
     if validated_vfx:
         print(f"[fx] Gemini requested {len(validated_vfx)} visual effect(s)", flush=True)
 
@@ -2699,7 +2809,7 @@ RULES FOR USING THESE TIMESTAMPS:
             if isinstance(kp, dict) and "t" in kp and ("speed" in kp or "s" in kp):
                 try:
                     t = max(0.0, float(kp["t"]))
-                    s = max(0.5, min(1.4, float(kp.get("speed") or kp.get("s"))))
+                    s = max(0.25, min(2.0, float(kp.get("speed") or kp.get("s"))))
                     speed_curve.append({"t": t, "speed": s})
                 except Exception:
                     continue
@@ -2708,63 +2818,17 @@ RULES FOR USING THESE TIMESTAMPS:
         else:
             speed_curve.sort(key=lambda x: x["t"])
 
-            # Snap each keypoint to the nearest Deepgram word BOUNDARY
-            # (start OR end). Gemini places keypoints at word boundaries
-            # per the prompt, but rounds to ~2 decimal places. Sometimes
-            # Gemini means "the moment X starts" (word start) and
-            # sometimes "the moment X ends, then change" (word end). The
-            # snap considers both — whichever is closer is the boundary
-            # Gemini meant. The cut builder uses both word starts (for
-            # clip beginnings) and word ends (for clip endings), so
-            # snapping to either is bit-exact to a real cut boundary.
-            #
-            # Without considering word ends, a keypoint placed at the END
-            # of a word like "lips," (e.g. 17.110, where the word ends at
-            # 17.115) would snap BACKWARD to the word's start (16.475),
-            # changing speed in the MIDDLE of the word.
-            _dg_boundaries = []
-            for w in (_dg_words or []):
-                _ws = float(w.get("start") or 0.0)
-                _we = float(w.get("end") or 0.0)
-                if _we > _ws:
-                    _dg_boundaries.append(_ws)
-                    _dg_boundaries.append(_we)
-            _dg_boundaries.sort()
-            if _dg_boundaries:
-                _snap_count = 0
-                for kp in speed_curve:
-                    _orig_t = kp["t"]
-                    _nearest = min(_dg_boundaries, key=lambda b: abs(b - _orig_t))
-                    if abs(_nearest - _orig_t) > 0.0005:
-                        kp["t"] = _nearest
-                        _snap_count += 1
-                        print(
-                            f"[speed-curve] Snapped keypoint {_orig_t:.3f}s → {_nearest:.3f}s "
-                            f"(nearest Deepgram word boundary)",
-                            flush=True,
-                        )
-                if _snap_count:
-                    # Re-sort in case snapping reordered any keypoints
-                    speed_curve.sort(key=lambda x: x["t"])
-                    # De-duplicate keypoints that snapped to the same word start
-                    _dedup = []
-                    for kp in speed_curve:
-                        if _dedup and abs(_dedup[-1]["t"] - kp["t"]) < 0.0005:
-                            # Same word — keep the LATER speed value (newer intent)
-                            _dedup[-1] = kp
-                        else:
-                            _dedup.append(kp)
-                    if len(_dedup) != len(speed_curve):
-                        print(
-                            f"[speed-curve] {len(speed_curve) - len(_dedup)} keypoint(s) "
-                            f"de-duplicated after snapping (collided on same word)",
-                            flush=True,
-                        )
-                    speed_curve = _dedup
-
-            # If dedup left too few keypoints, disable speed curve
-            if len(speed_curve) < 2:
-                speed_curve = None
+            # Gemini already has word-level timestamps at 3-decimal
+            # precision and places keypoints directly on them. Any
+            # rounding error is ≤1 frame (33ms) — imperceptible in a
+            # speed ramp. The old snapping code corrected this tiny
+            # error but caused a catastrophic bug: when a snap-back
+            # keypoint fell in a dead-air gap (removed silence between
+            # clips), it got pulled onto its partner's timestamp and
+            # the ramp pair collapsed into a single keypoint. The
+            # densifier then saw a long gap and filled it with a
+            # gradual 10-second drift instead of a sharp snap. Gemini
+            # is the expert — trust its timestamps exactly.
 
         if speed_curve and len(speed_curve) >= 2:
             # MIN_RAMP_SECS spreading was removed. It existed to prevent
@@ -2953,9 +3017,6 @@ RULES FOR USING THESE TIMESTAMPS:
         edit_plan["vignette"] = "none"
 
     for overlay in edit_plan.get("text_overlays", []):
-        if overlay.get("position") == "center":
-            print(f"[generate-edit] Moving text overlay '{overlay.get('text', '')}' from center to top (talking head safety)", flush=True)
-            overlay["position"] = "top"
         overlay["sfx_style"] = "none"
 
     final_cuts = []
@@ -2996,10 +3057,9 @@ RULES FOR USING THESE TIMESTAMPS:
     # moment" — same as how SFX onset compensation interprets "place sound
     # at word X". It is NOT auto-placement of new content; it implements the
     # render decision implied by Gemini's emphasis_moments declaration.
-    # Debounce: require at least 3s gap between emphasis zooms to avoid
-    # jarring rapid-fire zoom snapping.
-    _last_zoom_t = -999.0
-    _MIN_ZOOM_GAP = 3.0
+    # Apply cut_zoom to clips containing high-intensity emphasis moments.
+    # Gemini owns the spacing of emphasis moments — the prompt teaches it
+    # to space them appropriately. No debounce needed.
     for em in emphasis_moments:
         em_t = em["t"]
         for clip in final_cuts:
@@ -3007,19 +3067,14 @@ RULES FOR USING THESE TIMESTAMPS:
             ce = float(clip["source_end"])
             if cs <= em_t <= ce:
                 if em["intensity"] == "high" and str(clip.get("zoom") or "none") == "none":
-                    if em_t - _last_zoom_t >= _MIN_ZOOM_GAP:
-                        clip["zoom"] = "cut_zoom"
-                        clip["cut_zoom"] = True
-                        _last_zoom_t = em_t
-                        print(f"[emphasis] Applied cut_zoom to clip {cs:.1f}-{ce:.1f}s ({em['type']})", flush=True)
-                    else:
-                        print(f"[emphasis] Skipped cut_zoom at {em_t:.1f}s — too close to previous zoom at {_last_zoom_t:.1f}s", flush=True)
+                    clip["zoom"] = "cut_zoom"
+                    clip["cut_zoom"] = True
+                    print(f"[emphasis] Applied cut_zoom to clip {cs:.1f}-{ce:.1f}s ({em['type']})", flush=True)
                 break
 
-    # Color grading disabled — phone cameras already auto-correct color,
-    # and artistic grades consistently make talking-head content look worse.
-    edit_plan["color_intent"] = "none"
-    edit_plan["color_grade"] = {}
+    # Color grading is Gemini's decision — the prompt teaches it that phone
+    # cameras auto-white-balance and grading talking-head content usually
+    # makes it worse. If Gemini still picks a grade, trust the choice.
     edit_plan["cuts"] = final_cuts
     edit_plan.pop("teal_orange", None)
     edit_plan.pop("beat_sync", None)
@@ -3660,7 +3715,7 @@ def fetch_broll_clip(keyword, duration_needed, work_dir):
             "query": keyword,
             "per_page": 15,
             "orientation": "portrait",
-            "size": "medium",
+            "size": "large",
         },
         timeout=25,
     )
@@ -4461,6 +4516,7 @@ def prepare_remotion_input(
         "effects": [],
         "cuts": cut_points,
         "emphasisMoments": em_list,
+        "textOverlays": [],  # populated by caller if text overlays exist
         "width": w,
         "height": h,
         "fps": fps,
@@ -4950,20 +5006,9 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15, v
     removed_indices = set()
 
     # ── Step 1: Apply Gemini's remove_words ───────────────────────────────
-    # Context-filler validator: when Gemini wants to remove a word from
-    # CONTEXT_FILLER ("like", "just", "really", etc.), we validate against
-    # OBJECTIVE evidence that the word is set apart from surrounding speech.
-    # Two independent signals both indicate filler usage:
-    #   1. Acoustic pause bracket: ≥80ms gap before AND after the word
-    #      ("I was, [pause] like [pause] walking")
-    #   2. Punctuation bracket: the word is wrapped in commas in Deepgram's
-    #      punctuated output ("calling me, like, calling me")
-    # If EITHER signal is present, the removal is allowed. If NEITHER, the
-    # word is treated as content and the removal is rejected. This protects
-    # comparative/clausal usage ("I felt LIKE I had been electrocuted") which
-    # has no surrounding pauses and no surrounding commas.
-    PAUSE_BRACKET_THRESHOLD = 0.08
-    _filler_validator_rejected = 0
+    # Gemini's word removal decisions are trusted. No code-side validation
+    # or rejection of filler calls — if Gemini says a word is filler, it is.
+    # If filler detection is wrong, the fix is the prompt, not code heuristics.
     for item in remove_words or []:
         if not isinstance(item, dict):
             continue
@@ -4974,41 +5019,7 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15, v
                 continue
             if not (0 <= idx < len(sorted_words)):
                 continue
-            _w = sorted_words[idx]
-            _w_clean = _w["_clean"]
-            if _w_clean in CONTEXT_FILLER:
-                _w_start = _w["_start"]
-                _w_end = _w["_end"]
-                _prev = sorted_words[idx - 1] if idx > 0 else None
-                _nxt  = sorted_words[idx + 1] if idx + 1 < len(sorted_words) else None
-                _prev_end = _prev["_end"] if _prev else _w_start
-                _next_start = _nxt["_start"] if _nxt else _w_end
-                _gap_before = _w_start - _prev_end
-                _gap_after = _next_start - _w_end
-                _pause_bracketed = (_gap_before >= PAUSE_BRACKET_THRESHOLD and _gap_after >= PAUSE_BRACKET_THRESHOLD)
-
-                # Punctuation bracket: prev word ends with a comma AND
-                # current word ends with a comma. Deepgram emits
-                # "calling me," for word index 198 and "like," for word
-                # index 199 — both end in commas, signalling the filler is
-                # set apart by punctuation even if spoken at full speed.
-                _prev_punct = str(_prev.get("punctuated_word") or _prev.get("_text") or "") if _prev else ""
-                _curr_punct = str(_w.get("punctuated_word") or _w.get("_text") or "")
-                _comma_bracketed = _prev_punct.rstrip().endswith(",") and _curr_punct.rstrip().endswith(",")
-
-                if not (_pause_bracketed or _comma_bracketed):
-                    print(
-                        f"[tighten] REJECTED Gemini removal of '{_w['_text']}' at "
-                        f"{_w_start:.3f}s — not bracketed "
-                        f"(gap_before={_gap_before*1000:.0f}ms, gap_after={_gap_after*1000:.0f}ms, "
-                        f"comma_bracket={_comma_bracketed}) — likely content, not filler",
-                        flush=True,
-                    )
-                    _filler_validator_rejected += 1
-                    continue
             removed_indices.add(idx)
-    if _filler_validator_rejected:
-        print(f"[tighten] Context-filler validator rejected {_filler_validator_rejected} Gemini removal(s)", flush=True)
 
     # ── Step 1b: Time-range removals (section_skip / dead_air / non_speech_gap) ──
     # Gemini can also send {"start": X, "end": Y, "reason": "..."} entries.
@@ -5715,7 +5726,7 @@ def build_clip_time_map(clip_start, clip_end, clip_speed, speed_curve, fps=30):
     # Use the speed at clip start — after splitting at keypoints, each sub-clip
     # starts at a keypoint, so this IS the speed Gemini intended for this section.
     # No averaging, no integration. 1.3x means 1.3x, 0.75x means 0.75x.
-    curve_speed = max(0.5, min(1.4, get_speed_for_timestamp(clip_start, speed_curve))) if has_curve else 1.0
+    curve_speed = max(0.25, min(2.0, get_speed_for_timestamp(clip_start, speed_curve))) if has_curve else 1.0
     speed = max(0.25, min(4.0, clip_speed * curve_speed))
     eff_dur = source_dur / speed
 
@@ -5963,7 +5974,7 @@ def prepend_hook_clip(output_path, edit_plan, work_dir):
     curve_speed = 1.0
     if speed_curve and speed_curve != "none":
         clip_mid = (clip_src_start + clip_src_end) / 2.0
-        curve_speed = max(0.5, min(1.4, get_speed_for_timestamp(clip_mid, speed_curve)))
+        curve_speed = max(0.25, min(2.0, get_speed_for_timestamp(clip_mid, speed_curve)))
     combined_speed = clip_speed * curve_speed
 
     clip_render_start = float(clip_ranges[hook_clip_idx]["start"])
@@ -6398,15 +6409,15 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # Round each effective duration to a source-fps frame boundary so the
     # predicted timeline matches the actual rendered video frame count.
     effective_durations = [round(tm["effective_duration"] * source_fps) / source_fps for tm in _clip_time_maps]
-    hook_offset = 0.0
-    if isinstance(hook_clip, dict) and effective_durations:
-        # Sum durations of all hook clip segments
-        for _hi, _hcut in enumerate(render_cuts):
-            if _hcut.get("_is_hook"):
-                hook_offset += effective_durations[_hi] if _hi < len(effective_durations) else 0.0
-            else:
-                break  # hook segments are always at the start
-        edit_plan["_hook_offset"] = hook_offset
+    # _hook_offset is structurally 0 in the current architecture: the hook is
+    # inlined into render_cuts at the front (see line 6345), so clip_ranges
+    # already accounts for the hook position. The legacy non-zero value was
+    # left over from when prepend_hook_clip post-prepended the hook to the
+    # output FILE — that path is no longer used (prepend_hook_clip is dead
+    # code). Adding a non-zero hook_offset on top of the inline-hook
+    # projection caused b-roll and thumbnail picks to land 2.6s late.
+    edit_plan["_hook_offset"] = 0.0
+    hook_offset = 0.0  # local alias — SFX code below reads this directly
     # Store render's split cuts and effective_durations so B-roll/SFX projection
     # uses the same timeline as the actual render (not the pre-split approximation)
     edit_plan["_render_cuts"] = render_cuts
@@ -6484,6 +6495,63 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             emphasis_moments=_emphasis_moments,
             vibe=_vibe,
         )
+        # Inject text overlays into Remotion input so they render as part of
+        # the caption PNG sequence — continuous across segments, no flashing.
+        text_overlays = edit_plan.get("text_overlays") or []
+        if text_overlays and _remotion_input_json:
+            # Compute output-time window for each text overlay
+            _seg_starts_ov = []
+            _cursor_ov = 0.0
+            for _si_ov in range(n):
+                _seg_starts_ov.append(_cursor_ov)
+                _cursor_ov += effective_durations[_si_ov]
+            _orig_idx_to_range_ov = {}
+            _hook_ci_range_ov = None
+            for _ci_ov, _rc_ov in enumerate(render_cuts):
+                _oi_ov = _rc_ov.get("_original_idx")
+                if _oi_ov is not None and _oi_ov >= 0:
+                    if _oi_ov not in _orig_idx_to_range_ov:
+                        _orig_idx_to_range_ov[_oi_ov] = (_ci_ov, _ci_ov)
+                    else:
+                        _orig_idx_to_range_ov[_oi_ov] = (_orig_idx_to_range_ov[_oi_ov][0], _ci_ov)
+                elif _oi_ov == -1:
+                    if _hook_ci_range_ov is None:
+                        _hook_ci_range_ov = (_ci_ov, _ci_ov)
+                    else:
+                        _hook_ci_range_ov = (_hook_ci_range_ov[0], _ci_ov)
+            _remotion_text_overlays = []
+            for _ov in text_overlays:
+                _gem_idx = int(_ov.get("appear_at_clip") or 0)
+                if _gem_idx == -1:
+                    _f, _l = _hook_ci_range_ov if _hook_ci_range_ov else (0, 0)
+                elif _gem_idx in _orig_idx_to_range_ov:
+                    _f, _l = _orig_idx_to_range_ov[_gem_idx]
+                else:
+                    _valid = sorted(_orig_idx_to_range_ov.keys()) if _orig_idx_to_range_ov else [0]
+                    _closest = min(_valid, key=lambda x: abs(x - _gem_idx))
+                    _f, _l = _orig_idx_to_range_ov.get(_closest, (0, 0))
+                _f = max(0, min(_f, n - 1))
+                _l = max(0, min(_l, n - 1))
+                _ov_text = _EMOJI_RE.sub("", str(_ov.get("text") or "")).strip()
+                if not _ov_text:
+                    continue
+                _ov_start = _seg_starts_ov[_f]
+                _ov_end = _seg_starts_ov[_l] + effective_durations[_l]
+                _remotion_text_overlays.append({
+                    "text": _ov_text,
+                    "start": round(_ov_start, 3),
+                    "end": round(_ov_end, 3),
+                    "position": str(_ov.get("position") or "top"),
+                    "style": str(_ov.get("style") or "callout"),
+                })
+            if _remotion_text_overlays:
+                # Re-write the Remotion JSON with text overlays included
+                with open(_remotion_input_json, "r") as _rjf:
+                    _rj_data = json.load(_rjf)
+                _rj_data["textOverlays"] = _remotion_text_overlays
+                with open(_remotion_input_json, "w") as _rjf:
+                    json.dump(_rj_data, _rjf)
+                print(f"[remotion] Injected {len(_remotion_text_overlays)} text overlay(s) into Remotion input", flush=True)
         print(f"[remotion] Prepared input JSON: {caption_style} ({len(_projected_words)} words), "
               f"{len(_emphasis_moments)} emphasis — will render per-segment", flush=True)
     else:
@@ -7086,12 +7154,28 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         print(f"[sfx] sound_effect: {_sound_style} vol={_vol:.3f} source={_source_t:.3f}s → projected={_projected_t:.3f}s → onset_comp(-{_onset:.3f}s)={_ts:.3f}s", flush=True)
         _sfx_extra_idx += 1
 
-    # ── Collect B-roll files and assign to segments ─────────────────────
-    _broll_assignments = {}  # seg_idx → list of broll configs
+    # ── Collect B-roll files and build TIMELINE-LEVEL overlay list ──────
+    # B-roll is a timeline overlay, NOT a per-segment overlay. Each entry
+    # has an output-time start/end. The per-segment renderer slices the
+    # overlay against its own output-time window — a 3s b-roll that
+    # crosses a sub-clip boundary naturally splits across multiple
+    # segments with the correct seek_point offset for each. No trimming,
+    # no min duration, no fit-to-segment math. Gemini's intent is honored
+    # exactly.
+    #
+    # Compute segment output-time boundaries unconditionally so they're
+    # available to _run_one_segment whether or not b-roll exists.
+    _seg_starts = []
+    _cursor_ss = 0.0
+    for _si in range(n):
+        _seg_starts.append(_cursor_ss)
+        _cursor_ss += effective_durations[_si]
+    _seg_total_dur = _cursor_ss
+
+    _broll_overlays = []  # list of {path, out_start, out_end, seek_point, ken_burns_dir, keyword}
     if broll_fetch_futures:
         _broll_sc = edit_plan.get("_parsed_speed_curve")
         _broll_hook_off = float(edit_plan.get("_hook_offset") or 0.0)
-        _broll_total_dur = sum(effective_durations)
         _broll_files = {}
         for _fut in concurrent.futures.as_completed(broll_fetch_futures, timeout=30):
             _idx = broll_fetch_futures[_fut]
@@ -7103,75 +7187,70 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 print(f"[broll] Fetch error for clip {_idx}: {_be_err}", flush=True)
 
         if _broll_files and broll_clips:
-            # Compute segment boundaries matching the actual output timeline
-            _seg_starts = []
-            _cursor = 0.0
-            for _si in range(n):
-                _seg_starts.append(_cursor)
-                _cursor += effective_durations[_si]
-            _seg_total = _cursor
-
-            _broll_overlay_idx = 0
             for _bi, _bc in enumerate(broll_clips):
                 if _bi not in _broll_files:
                     continue
                 _local_path = _broll_files[_bi]
                 _src_ts = float(_bc.get("timestamp") or 0)
-                _out_ts = project_source_time_to_final_output(
+                _out_start = project_source_time_to_final_output(
                     _src_ts, render_cuts, effective_durations, _broll_sc,
                     hook_offset=_broll_hook_off, clip_time_maps=_clip_time_maps,
                 )
-                if _out_ts is None or _out_ts >= _broll_total_dur:
+                if _out_start is None or _out_start >= _seg_total_dur:
+                    print(f"[broll] '{_bc.get('keyword')}' projected output time invalid — skipping", flush=True)
                     continue
 
-                needed_duration = float(_bc.get("duration") or 2.0)
-                broll_duration = get_video_duration(_local_path)
-                if broll_duration > 0 and needed_duration > broll_duration:
-                    needed_duration = broll_duration
+                # Honor Gemini's duration exactly. Only constraints:
+                #   1) Don't extend past the end of the rendered timeline.
+                #   2) Don't exceed the available footage in the Pexels file.
+                # Both are physical impossibilities, not creative judgments.
+                requested_duration = float(_bc.get("duration") or 0)
+                if requested_duration <= 0:
+                    continue
+                broll_file_duration = get_video_duration(_local_path)
+                effective_duration = requested_duration
+                if broll_file_duration > 0 and effective_duration > broll_file_duration:
+                    effective_duration = broll_file_duration
+                # Clip to remaining timeline (rare; only triggers if Gemini
+                # placed a b-roll right at the end of the video).
+                _max_remaining = _seg_total_dur - _out_start
+                if effective_duration > _max_remaining:
+                    effective_duration = _max_remaining
+                if effective_duration <= 0:
+                    continue
+
+                # Pick a seek_point within the source clip that gives a
+                # visually interesting middle slice rather than the first
+                # frame (which is often a fade-in or static intro).
                 seek_point = 0.0
-                if broll_duration > needed_duration + 1.0:
-                    seek_point = min(broll_duration * 0.25, max(0.0, broll_duration - needed_duration - 0.5))
+                if broll_file_duration > effective_duration + 1.0:
+                    seek_point = min(
+                        broll_file_duration * 0.25,
+                        max(0.0, broll_file_duration - effective_duration - 0.5)
+                    )
 
-                # Find which segment this B-roll falls into
-                _target_seg = 0
-                for _si in range(n):
-                    _seg_end = _seg_starts[_si] + effective_durations[_si]
-                    if _out_ts < _seg_end:
-                        _target_seg = _si
-                        break
-                else:
-                    _target_seg = n - 1
-
-                _local_ts = _out_ts - _seg_starts[_target_seg]
-                _seg_dur = effective_durations[_target_seg]
-                if _local_ts < 0 or _local_ts >= _seg_dur:
-                    print(f"[broll] WARNING: '{_bc.get('keyword')}' local_ts={_local_ts:.3f}s outside seg {_target_seg} duration={_seg_dur:.3f}s — skipping", flush=True)
-                    continue
-                if _local_ts + needed_duration > _seg_dur:
-                    needed_duration = max(0.5, _seg_dur - _local_ts - 0.1)
-                    print(f"[broll] Trimmed '{_bc.get('keyword')}' duration to {needed_duration:.1f}s to fit segment", flush=True)
-                _kb_dir = _KB_DIRECTIONS[_broll_overlay_idx % len(_KB_DIRECTIONS)]
-                if _target_seg not in _broll_assignments:
-                    _broll_assignments[_target_seg] = []
-                _broll_assignments[_target_seg].append({
+                _kb_dir = _KB_DIRECTIONS[len(_broll_overlays) % len(_KB_DIRECTIONS)]
+                _out_end = _out_start + effective_duration
+                _broll_overlays.append({
                     "path": _local_path,
-                    "local_start": _local_ts,
-                    "duration": needed_duration,
+                    "out_start": _out_start,
+                    "out_end": _out_end,
                     "seek_point": seek_point,
                     "ken_burns_dir": _kb_dir,
                     "keyword": _bc.get("keyword", ""),
                 })
-                # Record output-time range so the thumbnail scorer can avoid
-                # b-roll regions (we want a frame of the speaker, not stock).
-                _broll_out_start = _seg_starts[_target_seg] + _local_ts
+                # Record output-time range so the thumbnail scorer can
+                # avoid b-roll regions (we want speaker frames, not stock).
                 edit_plan.setdefault("_broll_output_ranges", []).append(
-                    (_broll_out_start, _broll_out_start + needed_duration)
+                    (_out_start, _out_end)
                 )
-                print(f"[broll] '{_bc.get('keyword')}' at {_out_ts:.1f}s ({needed_duration:.1f}s) → seg {_target_seg} Ken Burns: {_kb_dir}", flush=True)
-                _broll_overlay_idx += 1
+                _kw = _bc.get("keyword", "")
+                _reason = _bc.get("reason") or ""
+                _reason_str = f" — {_reason}" if _reason else ""
+                print(f"[broll] '{_kw}' out=[{_out_start:.2f}s..{_out_end:.2f}s] dur={effective_duration:.2f}s seek={seek_point:.2f}s kb={_kb_dir}{_reason_str}", flush=True)
 
-            if _broll_overlay_idx > 0:
-                print(f"[broll] Assigned {_broll_overlay_idx} B-roll clip(s) to segments", flush=True)
+            if _broll_overlays:
+                print(f"[broll] Built {len(_broll_overlays)} timeline overlay(s) — will slice across segments as needed", flush=True)
 
     # ── Compute frame ranges per segment (for per-segment Remotion renders) ──
     # Use the unified source fps so caption frame count matches video frame count.
@@ -7182,116 +7261,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _seg_frame_ranges.append((_frame_cursor, _frame_cursor + _frame_count - 1))
         _frame_cursor += _frame_count
 
-    # ── Text overlay assignment to segments ─────────────────────────────
-    _text_overlay_assignments = {}  # seg_idx → list of drawtext filter strings
-    text_overlays = edit_plan.get("text_overlays") or []
-    if text_overlays and not _HAS_DRAWTEXT:
-        text_overlays = []
-    if text_overlays:
-        _seg_starts_txt = []
-        _cursor_txt = 0.0
-        for _si in range(n):
-            _seg_starts_txt.append(_cursor_txt)
-            _cursor_txt += effective_durations[_si]
-
-        _orig_idx_to_range = {}
-        for _ci, _rc in enumerate(render_cuts):
-            _oi = _rc.get("_original_idx")
-            if _oi is not None and _oi >= 0:
-                if _oi not in _orig_idx_to_range:
-                    _orig_idx_to_range[_oi] = (_ci, _ci)
-                else:
-                    _orig_idx_to_range[_oi] = (_orig_idx_to_range[_oi][0], _ci)
-
-        _overlay_sample_ts = float(render_cuts[0].get("source_start", 0)) + 0.5
-        _y_positions = {"top": 0.10, "center": 0.50, "bottom": 0.75}
-        for _toi, overlay in enumerate(text_overlays):
-            gemini_idx = int(overlay.get("appear_at_clip") or 0)
-            # appear_at_clip: -1 means "on the hook clip" (render_cuts[0] if it's a hook)
-            if gemini_idx == -1:
-                first_ci, last_ci = 0, 0  # hook is always render_cuts[0]
-            elif gemini_idx in _orig_idx_to_range:
-                first_ci, last_ci = _orig_idx_to_range[gemini_idx]
-            else:
-                valid_indices = sorted(_orig_idx_to_range.keys()) if _orig_idx_to_range else [0]
-                closest = min(valid_indices, key=lambda x: abs(x - gemini_idx))
-                first_ci, last_ci = _orig_idx_to_range.get(closest, (0, 0))
-            first_ci = max(0, min(first_ci, n - 1))
-            last_ci = max(0, min(last_ci, n - 1))
-            raw_text = _EMOJI_RE.sub("", str(overlay.get("text") or "")).strip()
-            text = raw_text.strip()
-            if not text:
-                continue
-            _global_start = _seg_starts_txt[first_ci]
-            _global_end = _seg_starts_txt[last_ci] + effective_durations[last_ci]
-            style = str(overlay.get("style") or "callout")
-            char_count = len(text)
-            base_size = 84 if style == "title" else (72 if style == "cta" else 60)
-            if char_count <= 18:
-                font_size = base_size
-            elif char_count <= 25:
-                font_size = round(base_size * 0.85)
-            elif char_count <= 35:
-                font_size = round(base_size * 0.70)
-            else:
-                font_size = round(base_size * 0.60)
-            pos = str(overlay.get("position") or "top")
-            _ov_source_t = float(render_cuts[min(first_ci, len(render_cuts) - 1)].get("source_start", 0)) + 0.3
-            _ov_face = None
-            if face_positions:
-                _ov_fp = min(face_positions, key=lambda p: abs(float(p.get("t", 0)) - _ov_source_t))
-                if _ov_fp.get("found") and abs(float(_ov_fp.get("t", 0)) - _ov_source_t) < 2.0:
-                    _ov_face = _ov_fp
-            if _ov_face:
-                _ov_face_y_frac = float(_ov_face.get("cy", 960)) / 1920.0
-                if _ov_face_y_frac < 0.4:
-                    y_expr = "h*0.65"
-                elif _ov_face_y_frac > 0.6:
-                    y_expr = "h*0.10"
-                else:
-                    y_expr = "h*0.08"
-            else:
-                y_expr = "h*0.10" if pos == "top" else ("(h-th)/2" if pos == "center" else "h*0.75")
-            _y_frac = _y_positions.get(pos, 0.10)
-            _bg_brightness = sample_background_brightness(source_path, _overlay_sample_ts, _y_frac)
-            if _bg_brightness > 160:
-                _fg_color, _border_color = "black", "white"
-            elif _bg_brightness > 100:
-                _fg_color, _border_color = "white", "black"
-            else:
-                _fg_color, _border_color = "white", "black"
-            if _toi == 0:
-                print(f"[overlay] bg={_bg_brightness:.0f} → text={_fg_color}, border={_border_color}", flush=True)
-            _font_clause = f":fontfile='{OVERLAY_FONT_PATH}'" if os.path.exists(OVERLAY_FONT_PATH) else ""
-            escaped_text = text.replace("\\", "\\\\").replace(":", "\\:").replace(",", "\\,").replace(";", "\\;").replace("[", "\\[").replace("]", "\\]").replace("%", "%%").replace("'", "\u2019").replace('"', "")
-            _shadow_color2 = "black@0.6" if _fg_color == "white" else "white@0.4"
-            _bw2 = max(3, round(font_size * 0.06))
-            _sw2 = max(2, round(font_size * 0.04))
-
-            # Assign text overlay to each segment it spans
-            for _si in range(first_ci, last_ci + 1):
-                _seg_start = _seg_starts_txt[_si]
-                _seg_end = _seg_start + effective_durations[_si]
-                _local_start = max(0, _global_start - _seg_start)
-                _local_end_t = max(_local_start + 0.8, min(_global_end - _seg_start, effective_durations[_si]))
-                fade_in = 0.15
-                fade_out = 0.15
-                alpha_expr = (
-                    f"if(lt(t-{_local_start:.3f},{fade_in}),(t-{_local_start:.3f})/{fade_in},"
-                    f"if(gt(t,{_local_end_t - fade_out:.3f}),({_local_end_t:.3f}-t)/{fade_out},1))"
-                )
-                _dt_filter = (
-                    f"drawtext=text='{escaped_text}':fontsize={font_size}:fontcolor={_fg_color}"
-                    f"{_font_clause}"
-                    f":x=(w-tw)/2:y={y_expr}"
-                    f":borderw={_bw2}:bordercolor={_border_color}@0.5"
-                    f":shadowcolor={_shadow_color2}:shadowx={_sw2}:shadowy={_sw2}"
-                    f":alpha='{alpha_expr}'"
-                    f":enable='between(t,{_local_start:.3f},{_local_end_t:.3f})'"
-                )
-                if _si not in _text_overlay_assignments:
-                    _text_overlay_assignments[_si] = []
-                _text_overlay_assignments[_si].append(_dt_filter)
+    # Text overlays are now rendered by Remotion as part of the caption
+    # PNG sequence (injected into the Remotion input JSON above). This
+    # eliminates the per-segment drawtext flashing at segment boundaries.
+    _text_overlay_assignments = {}  # empty — no per-segment drawtext filters
 
     # ── Build and run parallel segment FFmpeg processes ──────────────────
     _par_t0 = time.time()
@@ -7428,39 +7401,80 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _video_label = "[vcap]"
             _extra_idx += 1
 
-        # B-roll overlays for this segment
-        for _bi, _br in enumerate(_broll_assignments.get(seg_idx, [])):
-            _extra_inputs += ["-i", _br["path"]]
-            _bv = f"bv{_bi}"
-            _nd = _br["duration"]
-            _sp = _br.get("seek_point", 0.0)
-            _lt = _br["local_start"]
-            _BROLL_FADE = 0.4
-            _fos = max(0, _nd - _BROLL_FADE)
-            _kbf = max(1, round(_nd * source_fps))
+        # B-roll overlays for this segment.
+        #
+        # B-roll lives on the GLOBAL output timeline. Each overlay has an
+        # absolute output-time window [out_start, out_end]. For this
+        # segment we compute the intersection between that window and the
+        # segment's own output-time window [seg_out_start, seg_out_end].
+        # If they overlap, we render a slice of the source clip starting
+        # at the right offset, with the right duration, and (importantly)
+        # with the fade-in/fade-out only on the slices that touch the
+        # original boundaries — middle slices have neither fade so the
+        # b-roll appears continuous to the viewer across segment joins.
+        _seg_out_start = _seg_starts[seg_idx]
+        _seg_out_end = _seg_out_start + _eff_dur
+        _BROLL_EPS = 0.001  # 1ms tolerance for boundary equality
+        _bi_emitted = 0
+        for _br in _broll_overlays:
+            _ov_start = _br["out_start"]
+            _ov_end = _br["out_end"]
+            # Intersect with this segment's output-time window
+            _slice_start = max(_ov_start, _seg_out_start)
+            _slice_end = min(_ov_end, _seg_out_end)
+            if _slice_end - _slice_start <= _BROLL_EPS:
+                continue  # no overlap with this segment
+            _slice_dur = _slice_end - _slice_start
+            # Local time within this segment (where the slice begins)
+            _local_start = _slice_start - _seg_out_start
+            # Where to seek into the Pexels source clip: the overlay's
+            # original seek_point plus however far into the overlay this
+            # segment slice begins.
+            _slice_seek = _br["seek_point"] + (_slice_start - _ov_start)
+            # Ken Burns animation runs across the FULL overlay duration,
+            # not the slice duration, so motion stays continuous across
+            # segment joins. Compute progress relative to the overlay
+            # start, expressed in this slice's local frames.
+            _ov_total_dur = _ov_end - _ov_start
+            _ov_total_frames = max(1, round(_ov_total_dur * source_fps))
+            _frame_offset_in_overlay = round((_slice_start - _ov_start) * source_fps)
             _kbz = 0.08
-            _kbp = f"min(n/{_kbf}\\,1.0)"
+            # Progress expression: ((n + frame_offset) / total_frames), clamped to [0,1]
+            _kbp = f"min((n+{_frame_offset_in_overlay})/{_ov_total_frames}\\,1.0)"
             _kbs = f"({_kbp}*{_kbp}*(3-2*{_kbp}))"
             _kbd = _br.get("ken_burns_dir", "zoom_in")
             _epw = round(1080 * _kbz)
             _eph = round(1920 * _kbz)
             _cx, _cy = _kb_crop_exprs(_kbd, _kbs, _epw, _eph)
+
+            _extra_inputs += ["-i", _br["path"]]
+            _bv = f"bv{_bi_emitted}"
             _filter_parts.append(
-                f"[{_extra_idx}:v]trim=start={_sp:.3f}:duration={_nd:.3f},"
+                f"[{_extra_idx}:v]trim=start={_slice_seek:.3f}:duration={_slice_dur:.3f},"
                 f"setpts=PTS-STARTPTS,"
                 f"scale=w='trunc(1080*(1.0+{_kbz})/2)*2':h='trunc(1920*(1.0+{_kbz})/2)*2'"
                 f":force_original_aspect_ratio=increase:flags=lanczos,"
                 f"crop=1080:1920:x={_cx}:y={_cy},"
                 f"setsar=1,eq=saturation=0.92:contrast=1.02,"
-                f"fade=t=in:st=0:d={_BROLL_FADE:.2f}:alpha=1,"
-                f"fade=t=out:st={_fos:.2f}:d={_BROLL_FADE:.2f}:alpha=1,"
                 f"setpts=PTS-STARTPTS[{_bv}]"
             )
-            _filter_parts.append(
-                f"{_video_label}[{_bv}]overlay=0:0:eof_action=pass:enable='between(t,{_lt:.3f},{_lt + _nd:.3f})'[bov{_bi}]"
-            )
-            _video_label = f"[bov{_bi}]"
+            # For continuation slices (b-roll starts at the segment boundary),
+            # _local_start is 0 and the overlay covers the full segment. Don't
+            # use an enable expression — it's timing-sensitive and can miss the
+            # first/last frame at VFR segment boundaries, causing a 1-frame flash.
+            # The trim filter already limits the b-roll to exactly _slice_dur;
+            # eof_action=pass handles the natural end.
+            if _local_start < 0.01:
+                _filter_parts.append(
+                    f"{_video_label}[{_bv}]overlay=0:0:eof_action=pass[bov{_bi_emitted}]"
+                )
+            else:
+                _filter_parts.append(
+                    f"{_video_label}[{_bv}]overlay=0:0:eof_action=pass:enable='between(t,{_local_start:.3f},{_local_start + _slice_dur:.3f})'[bov{_bi_emitted}]"
+                )
+            _video_label = f"[bov{_bi_emitted}]"
             _extra_idx += 1
+            _bi_emitted += 1
 
         # Text overlays for this segment
         for _ti_idx, _dt_f in enumerate(_text_overlay_assignments.get(seg_idx, [])):
@@ -7717,18 +7731,29 @@ def handler(job):
         _timings = {}
         ensure_caption_fonts_registered()
 
-        # Step 1 — Download
+        # Step 1 — Download (S3 internal network if available, HTTP fallback)
         send_progress(job_id, "download", 5, "Got your video, loading it in...", app_url)
         t = time.time()
         print("[pipeline] step=download", flush=True)
-        r = requests.get(video_url, stream=True, timeout=120)
-        r.raise_for_status()
-        with open(source_path, "wb") as f:
-            for chunk in r.iter_content(chunk_size=4194304):  # 4MB chunks for maximum throughput
-                f.write(chunk)
+        _dl_method = "http"
+        if _s3_client:
+            _dl_bucket, _dl_key = _parse_supabase_storage_url(video_url)
+            if _dl_bucket and _dl_key:
+                try:
+                    _s3_client.download_file(_dl_bucket, _dl_key, source_path)
+                    _dl_method = "s3"
+                except Exception as _s3_err:
+                    print(f"[pipeline] S3 download failed ({_s3_err}), falling back to HTTP", flush=True)
+                    _dl_method = "http"
+        if _dl_method == "http":
+            r = requests.get(video_url, stream=True, timeout=120)
+            r.raise_for_status()
+            with open(source_path, "wb") as f:
+                for chunk in r.iter_content(chunk_size=4194304):
+                    f.write(chunk)
         size_mb = os.path.getsize(source_path) / (1024*1024)
         _timings["download"] = time.time() - t
-        print(f"[pipeline] download complete: {size_mb:.1f}MB in {_timings['download']:.1f}s", flush=True)
+        print(f"[pipeline] download complete: {size_mb:.1f}MB in {_timings['download']:.1f}s ({_dl_method})", flush=True)
 
         # Step 2 — ALL initialization in ONE mega-parallel phase
         # Normalize, transcribe, Gemini upload, loudness, beats, edit recipe, face detect
@@ -8080,10 +8105,24 @@ def handler(job):
 
         def _upload_main():
             print("[pipeline] step=upload", flush=True)
-            with open(output_path, "rb") as f:
-                resp = requests.put(upload_url, data=f, headers={"Content-Type": "video/mp4"}, timeout=120)
-                resp.raise_for_status()
-            print("[pipeline] upload complete", flush=True)
+            _ul_method = "http"
+            if _s3_client:
+                _ul_bucket, _ul_key = _parse_supabase_storage_url(upload_url)
+                if _ul_bucket and _ul_key:
+                    try:
+                        _s3_client.upload_file(
+                            output_path, _ul_bucket, _ul_key,
+                            ExtraArgs={"ContentType": "video/mp4"},
+                        )
+                        _ul_method = "s3"
+                    except Exception as _s3_err:
+                        print(f"[pipeline] S3 upload failed ({_s3_err}), falling back to HTTP", flush=True)
+                        _ul_method = "http"
+            if _ul_method == "http":
+                with open(output_path, "rb") as f:
+                    resp = requests.put(upload_url, data=f, headers={"Content-Type": "video/mp4"}, timeout=120)
+                    resp.raise_for_status()
+            print(f"[pipeline] upload complete ({_ul_method})", flush=True)
 
         def _extract_and_upload_cover():
             # Pick the visually best frame from the FINAL RENDERED OUTPUT around
@@ -8144,15 +8183,30 @@ def handler(job):
                 # Upload thumbnail in parallel with main video upload
                 upload_url_thumb = input_data.get("upload_url_thumb")
                 if upload_url_thumb:
-                    try:
-                        thumb_resp = requests.put(
-                            upload_url_thumb, data=data,
-                            headers={"Content-Type": mime}, timeout=30,
-                        )
-                        thumb_resp.raise_for_status()
-                        print("[pipeline] thumbnail uploaded", flush=True)
-                    except Exception as thumb_err:
-                        print(f"[pipeline] thumbnail upload failed (non-fatal): {thumb_err}", flush=True)
+                    _thumb_uploaded = False
+                    if _s3_client:
+                        _tb, _tk = _parse_supabase_storage_url(upload_url_thumb)
+                        if _tb and _tk:
+                            try:
+                                import io as _io_thumb
+                                _s3_client.upload_fileobj(
+                                    _io_thumb.BytesIO(data), _tb, _tk,
+                                    ExtraArgs={"ContentType": mime},
+                                )
+                                print("[pipeline] thumbnail uploaded (s3)", flush=True)
+                                _thumb_uploaded = True
+                            except Exception as _s3_thumb_err:
+                                print(f"[pipeline] S3 thumbnail upload failed ({_s3_thumb_err}), falling back to HTTP", flush=True)
+                    if not _thumb_uploaded:
+                        try:
+                            thumb_resp = requests.put(
+                                upload_url_thumb, data=data,
+                                headers={"Content-Type": mime}, timeout=30,
+                            )
+                            thumb_resp.raise_for_status()
+                            print("[pipeline] thumbnail uploaded (http)", flush=True)
+                        except Exception as thumb_err:
+                            print(f"[pipeline] thumbnail upload failed (non-fatal): {thumb_err}", flush=True)
                 else:
                     print("[pipeline] thumbnail: no upload_url_thumb provided by frontend", flush=True)
             return data, mime
@@ -8178,9 +8232,19 @@ def handler(job):
                 return None
             fmt_path = os.path.join(work_dir, f"output_{ar.replace(':','x')}.mp4")
             export_additional_format(output_path, ar, fmt_path)
-            with open(fmt_path, "rb") as f:
-                fmt_resp = requests.put(url, data=f, headers={"Content-Type": "video/mp4"}, timeout=120)
-                fmt_resp.raise_for_status()
+            _fmt_uploaded = False
+            if _s3_client:
+                _fb, _fk = _parse_supabase_storage_url(url)
+                if _fb and _fk:
+                    try:
+                        _s3_client.upload_file(fmt_path, _fb, _fk, ExtraArgs={"ContentType": "video/mp4"})
+                        _fmt_uploaded = True
+                    except Exception:
+                        pass
+            if not _fmt_uploaded:
+                with open(fmt_path, "rb") as f:
+                    fmt_resp = requests.put(url, data=f, headers={"Content-Type": "video/mp4"}, timeout=120)
+                    fmt_resp.raise_for_status()
             fmt_size = os.path.getsize(fmt_path) / (1024 * 1024)
             print(f"[pipeline] exported {ar} ({fmt_size:.1f}MB) -> uploaded", flush=True)
             return {"aspect_ratio": ar, "size_mb": round(fmt_size, 1)}

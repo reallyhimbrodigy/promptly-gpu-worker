@@ -128,6 +128,15 @@ export type EffectType =
   | "impact_text"
   | "blur_card";
 
+/** A text overlay (title, CTA, callout) rendered on screen for a time range */
+export interface TextOverlay {
+  text: string;
+  start: number; // seconds in output timeline
+  end: number;   // seconds in output timeline
+  position: string; // "top" | "center" | "bottom"
+  style: string; // "title" | "callout" | "cta"
+}
+
 /** Full input for the combined overlay renderer */
 export interface OverlayInput {
   // Captions
@@ -140,6 +149,8 @@ export interface OverlayInput {
   cuts: CutPoint[];
   // Emphasis moments
   emphasisMoments: EmphasisMoment[];
+  // Text overlays
+  textOverlays?: TextOverlay[];
   // Video metadata
   width: number;
   height: number;
