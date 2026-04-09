@@ -7125,6 +7125,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                     "ken_burns_dir": _kb_dir,
                     "keyword": _bc.get("keyword", ""),
                 })
+                # Record output-time range so the thumbnail scorer can avoid
+                # b-roll regions (we want a frame of the speaker, not stock).
+                _broll_out_start = _seg_starts[_target_seg] + _local_ts
+                edit_plan.setdefault("_broll_output_ranges", []).append(
+                    (_broll_out_start, _broll_out_start + needed_duration)
+                )
                 print(f"[broll] '{_bc.get('keyword')}' at {_out_ts:.1f}s ({needed_duration:.1f}s) → seg {_target_seg} Ken Burns: {_kb_dir}", flush=True)
                 _broll_overlay_idx += 1
 
@@ -8044,15 +8050,33 @@ def handler(job):
             print("[pipeline] upload complete", flush=True)
 
         def _extract_and_upload_cover():
-            # Pick the visually best frame from the SOURCE video around Gemini's
-            # recommended SOURCE timestamp. We deliberately use the source (not
-            # the rendered output) so the scorer never sees b-roll, transitions,
-            # caption overlays, or speed-warped frames — just the raw subject at
-            # the dramatic moment Gemini identified. NO post-processing.
-            _thumb_seed = float(thumbnail_source_ts)
+            # Pick the visually best frame from the FINAL RENDERED OUTPUT around
+            # Gemini's projected timestamp. The output has captions burned in,
+            # speed warps applied, and zoom effects — exactly what makes a great
+            # social-media thumbnail. NO additional post-processing.
+            #
+            # If Gemini's seed lands inside a b-roll segment, shift it to the
+            # nearest moment showing the speaker (not the b-roll content).
+            _thumb_seed = float(cover_frame_ts)
+            _broll_ranges = edit_plan.get("_broll_output_ranges") or []
+            for _br_start, _br_end in _broll_ranges:
+                if _br_start <= _thumb_seed <= _br_end:
+                    # Shift to whichever side of the b-roll is closer
+                    _dist_before = _thumb_seed - _br_start
+                    _dist_after = _br_end - _thumb_seed
+                    if _dist_before <= _dist_after:
+                        _thumb_seed = max(0.1, _br_start - 0.3)
+                    else:
+                        _thumb_seed = min(final_dur - 0.1, _br_end + 0.3)
+                    print(
+                        f"[thumbnail] Seed was inside b-roll [{_br_start:.2f}, {_br_end:.2f}], "
+                        f"shifted to {_thumb_seed:.2f}s",
+                        flush=True,
+                    )
+                    break
             try:
                 data, mime = select_best_thumbnail_frame(
-                    _raw_source, _thumb_seed, work_dir,
+                    output_path, _thumb_seed, work_dir,
                 )
             except Exception as _thumb_err:
                 # Last-resort fallback: extract a single frame at the seed timestamp
@@ -8062,7 +8086,7 @@ def handler(job):
                 _fallback_path = os.path.join(work_dir, "thumbnail_fallback.jpg")
                 _r = subprocess.run(
                     ["ffmpeg", "-y", "-v", "warning",
-                     "-ss", f"{_thumb_seed:.3f}", "-i", _raw_source,
+                     "-ss", f"{_thumb_seed:.3f}", "-i", output_path,
                      "-frames:v", "1", "-q:v", "2", _fallback_path],
                     capture_output=True, text=True, timeout=10,
                 )
