@@ -3324,16 +3324,20 @@ def select_best_thumbnail_frame(video_path, seed_ts, work_dir):
         _duration = 60.0
 
     # ── Compute scan window ─────────────────────────────────────────────
-    # ±2s around the seed, clamped to video bounds. ~40 candidates @ 10fps
-    # gives 0.1s granularity which is finer than typical mouth-state changes.
-    _window = 2.0
+    # TIGHT window of ±0.6s around Gemini's seed. The user explicitly wants
+    # the dramatic moment Gemini identified, not "any clean face frame nearby".
+    # ±0.6s × 15 fps = ~18 candidates. That's enough density to skip a blink
+    # frame or motion blur, but narrow enough that the picker can't drift to
+    # a totally different sentence (which is what happened with ±2s — the
+    # picker chose 32.41s "And" instead of 33.91s "Stelius?").
+    _window = 0.6
     _window_start = max(0.05, seed_ts - _window)
     _window_end = min(max(0.1, _duration - 0.05), seed_ts + _window)
     if _window_end <= _window_start:
-        _window_start = max(0.05, seed_ts - 0.5)
-        _window_end = min(_duration - 0.05, seed_ts + 0.5)
+        _window_start = max(0.05, seed_ts - 0.3)
+        _window_end = min(_duration - 0.05, seed_ts + 0.3)
     _window_dur = _window_end - _window_start
-    _candidate_fps = 10.0  # 10 candidates per second within the window
+    _candidate_fps = 15.0  # 15 candidates per second within the narrow window
 
     # ── Extract candidates in ONE ffmpeg call ───────────────────────────
     # Use a moderate scoring resolution (540 wide for 9:16 = 540x960). This
@@ -3497,19 +3501,21 @@ def select_best_thumbnail_frame(video_path, seed_ts, work_dir):
             _sharp_score = min(_r["lap_var"] / _max_lap, 1.0)
             _bright_score = _brightness_score(_r["mean_lum"])
 
-            # Seed proximity tiebreaker (only matters when other metrics tie)
-            # Distance from seed in seconds → score in [0, 1]
+            # Seed proximity is HEAVILY weighted: Gemini chose this exact
+            # timestamp for narrative reasons. We only deviate to skip frames
+            # with objective failure modes (blinks, motion blur, bad lighting).
+            # Distance from seed in seconds → score in [0, 1].
             _seed_dist = abs(_r["ts"] - seed_ts)
             _proximity = max(0.0, 1.0 - _seed_dist / _window)
 
             _total = (
-                0.20 * _conf_score
-                + 0.12 * _area_score
-                + 0.10 * _r["center"]
-                + 0.25 * _sharp_score
-                + 0.13 * _bright_score
-                + 0.15 * _r["eye_score"]
-                + 0.05 * _proximity
+                0.10 * _conf_score
+                + 0.10 * _area_score
+                + 0.05 * _r["center"]
+                + 0.20 * _sharp_score
+                + 0.10 * _bright_score
+                + 0.20 * _r["eye_score"]
+                + 0.25 * _proximity
             )
             _breakdown = {
                 "has_face": True,
