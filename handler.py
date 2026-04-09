@@ -3264,126 +3264,307 @@ def extract_cover_frame(source_path, timestamp, work_dir):
     return None, None
 
 
-def generate_styled_thumbnail(source_path, timestamp, face_positions, work_dir, hook_text=None):
-    """
-    Generate an enhanced, styled thumbnail from the video.
-    - Extract frame at AI-selected timestamp
-    - Enhance with Pillow (contrast, brightness, saturation, sharpness)
-    - Add vignette effect (dark edges, bright center)
-    - Optional hook text overlay at bottom
+def select_best_thumbnail_frame(video_path, seed_ts, work_dir):
+    """Pick the visually best frame for a thumbnail by scanning a window around
+    Gemini's recommended `seed_ts` and scoring each candidate on multiple
+    objective visual quality metrics.
+
+    NO post-processing whatsoever — the winning frame is extracted at full
+    resolution from the video and saved as a high-quality JPEG, exactly as
+    it appears in the rendered output.
+
+    Scoring metrics (weights sum to 1.0):
+      - Face DNN confidence (25%)            — is there a clearly detectable face?
+      - Face area (capped) (10%)             — is the face large enough to fill?
+      - Face centeredness (10%)              — is the face well-positioned?
+      - Sharpness on face region (25%)       — Laplacian variance, penalizes motion blur
+      - Brightness sweet-spot (15%)          — penalizes under/over-exposed faces
+      - Eye openness (15%)                   — Haar cascade, 2 eyes detected = blinks penalized
+
+    For videos with no detectable face (b-roll, landscape), falls back to
+    sharpness + brightness only on the full frame.
+
     Returns (bytes, 'image/jpeg').
     """
-    from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
+    import cv2
+    import numpy as np
 
-    # Step 1: Extract raw frame via FFmpeg
-    raw_path = os.path.join(work_dir, "thumb_raw.png")
-    result = subprocess.run(
-        ["ffmpeg", "-y", "-ss", str(timestamp), "-i", source_path,
-         "-frames:v", "1", "-vf", "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2",
-         raw_path],
-        capture_output=True, timeout=15,
-    )
-    if result.returncode != 0 or not os.path.exists(raw_path):
-        raise RuntimeError(f"Thumbnail frame extraction failed: {(result.stderr or b'').decode()[-300:]}")
-
-    img = Image.open(raw_path).convert("RGB")
-
-    w, h = img.size
-
-    # Step 2: Enhance — subtle but impactful
-    img = ImageEnhance.Contrast(img).enhance(1.12)
-    img = ImageEnhance.Brightness(img).enhance(1.05)
-    img = ImageEnhance.Color(img).enhance(1.18)
-    img = ImageEnhance.Sharpness(img).enhance(1.25)
-
-    # Step 3: Vignette (dark edges, bright center) — cinematic look
-    vignette = Image.new("L", (w, h), 0)
-    vignette_draw = ImageDraw.Draw(vignette)
-    for i in range(40):
-        opacity = int(255 * (1 - i / 40.0) ** 0.6)
-        shrink_x = int(w * 0.05 * i / 40)
-        shrink_y = int(h * 0.05 * i / 40)
-        vignette_draw.ellipse(
-            [shrink_x, shrink_y, w - shrink_x, h - shrink_y],
-            fill=opacity,
-        )
-    vignette = vignette.filter(ImageFilter.GaussianBlur(radius=60))
-    dark = Image.new("RGB", (w, h), (0, 0, 0))
-    img = Image.composite(img, dark, vignette)
-
-    # Step 4: Optional text overlay (hook/title)
-    if hook_text and len(hook_text.strip()) > 0:
-        hook_text = hook_text.strip()[:80]
-        draw = ImageDraw.Draw(img)
-        font = None
-        font_size = 64
-        for font_path in [
-            "/assets/fonts/Montserrat-ExtraBold.ttf",
-            "/assets/fonts/Montserrat-Bold.ttf",
-            "/assets/fonts/Poppins-ExtraBold.ttf",
-        ]:
-            if os.path.exists(font_path):
-                try:
-                    font = ImageFont.truetype(font_path, font_size)
-                    break
-                except Exception:
-                    continue
-        if font is None:
-            try:
-                font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size)
-            except Exception:
-                font = ImageFont.load_default()
-
-        # Word-wrap the text
-        max_width = w - 80
-        words = hook_text.split()
-        lines = []
-        current_line = ""
-        for word in words:
-            test_line = f"{current_line} {word}".strip()
-            bbox = draw.textbbox((0, 0), test_line, font=font)
-            if bbox[2] - bbox[0] <= max_width:
-                current_line = test_line
-            else:
-                if current_line:
-                    lines.append(current_line)
-                current_line = word
-        if current_line:
-            lines.append(current_line)
-
-        # Draw text at bottom third with shadow
-        line_height = font_size + 8
-        total_text_height = len(lines) * line_height
-        y_start = h - total_text_height - 120
-
-        for i, line in enumerate(lines):
-            bbox = draw.textbbox((0, 0), line, font=font)
-            text_w = bbox[2] - bbox[0]
-            x = (w - text_w) // 2
-            y = y_start + i * line_height
-            for offset in [(3, 3), (2, 2), (1, 1)]:
-                draw.text((x + offset[0], y + offset[1]), line, font=font, fill=(0, 0, 0, 180))
-            draw.text((x, y), line, font=font, fill=(255, 255, 255))
-
-    # Step 5: Save as high-quality JPEG
-    thumb_path = os.path.join(work_dir, "styled_thumbnail.jpg")
-    img.save(thumb_path, "JPEG", quality=92, optimize=True)
-
-    with open(thumb_path, "rb") as f:
-        data = f.read()
-
-    for p in [raw_path, thumb_path]:
+    # ── Load detectors ──────────────────────────────────────────────────
+    PROTOTXT = "/models/face_detector/deploy.prototxt"
+    CAFFEMODEL = "/models/face_detector/res10_300x300_ssd_iter_140000.caffemodel"
+    _face_net = None
+    if os.path.exists(PROTOTXT) and os.path.exists(CAFFEMODEL):
         try:
-            os.unlink(p)
+            _face_net = cv2.dnn.readNetFromCaffe(PROTOTXT, CAFFEMODEL)
+        except Exception as _e:
+            print(f"[thumbnail] WARNING: face DNN load failed: {_e}", flush=True)
+
+    _eye_cascade = None
+    try:
+        _eye_xml = os.path.join(cv2.data.haarcascades, "haarcascade_eye.xml")
+        if os.path.exists(_eye_xml):
+            _eye_cascade = cv2.CascadeClassifier(_eye_xml)
+            if _eye_cascade.empty():
+                _eye_cascade = None
+    except Exception:
+        _eye_cascade = None
+
+    # ── Probe video duration ────────────────────────────────────────────
+    _probe = subprocess.run(
+        ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_streams", video_path],
+        capture_output=True, text=True, timeout=5,
+    )
+    try:
+        _streams = json.loads(_probe.stdout or "{}").get("streams", [])
+        _vs = next((s for s in _streams if s.get("codec_type") == "video"), {})
+        _duration = float(_vs.get("duration") or 0.0)
+        if _duration <= 0:
+            _duration = float(_vs.get("nb_frames", 0)) / float(eval(_vs.get("r_frame_rate", "30/1")))
+    except Exception:
+        _duration = 60.0
+
+    # ── Compute scan window ─────────────────────────────────────────────
+    # ±2s around the seed, clamped to video bounds. ~40 candidates @ 10fps
+    # gives 0.1s granularity which is finer than typical mouth-state changes.
+    _window = 2.0
+    _window_start = max(0.05, seed_ts - _window)
+    _window_end = min(max(0.1, _duration - 0.05), seed_ts + _window)
+    if _window_end <= _window_start:
+        _window_start = max(0.05, seed_ts - 0.5)
+        _window_end = min(_duration - 0.05, seed_ts + 0.5)
+    _window_dur = _window_end - _window_start
+    _candidate_fps = 10.0  # 10 candidates per second within the window
+
+    # ── Extract candidates in ONE ffmpeg call ───────────────────────────
+    # Use a moderate scoring resolution (540 wide for 9:16 = 540x960). This
+    # gives the DNN plenty of pixels to detect faces accurately, the eye
+    # cascade enough resolution for blink detection, and Laplacian a real
+    # signal — while keeping decode + scoring under ~2 seconds total.
+    _cand_dir = os.path.join(work_dir, "_thumb_candidates")
+    os.makedirs(_cand_dir, exist_ok=True)
+    # Clear any stale frames from prior jobs
+    for _stale in glob.glob(os.path.join(_cand_dir, "*.jpg")):
+        try:
+            os.unlink(_stale)
         except Exception:
             pass
 
+    _t_extract = time.time()
+    _extract_cmd = subprocess.run(
+        ["ffmpeg", "-y", "-v", "warning",
+         "-ss", f"{_window_start:.3f}",
+         "-t", f"{_window_dur:.3f}",
+         "-i", video_path,
+         "-vf", f"fps={_candidate_fps},scale=540:-2",
+         "-q:v", "3",
+         os.path.join(_cand_dir, "cand_%04d.jpg")],
+        capture_output=True, text=True, timeout=15,
+    )
+    if _extract_cmd.returncode != 0:
+        raise RuntimeError(f"[thumbnail] candidate extraction failed: {(_extract_cmd.stderr or '')[-300:]}")
+    _t_extract = time.time() - _t_extract
+
+    _cand_files = sorted(glob.glob(os.path.join(_cand_dir, "cand_*.jpg")))
+    if not _cand_files:
+        raise RuntimeError("[thumbnail] no candidate frames extracted")
+
+    # ── Score each candidate ────────────────────────────────────────────
+    _t_score = time.time()
+    _scored = []  # list of (score, candidate_ts, breakdown_dict)
+
+    for _ci, _cpath in enumerate(_cand_files):
+        # Reconstruct timestamp from frame index (fps was forced to _candidate_fps)
+        _cand_ts = _window_start + (_ci / _candidate_fps)
+
+        _frame = cv2.imread(_cpath)
+        if _frame is None:
+            continue
+        _h, _w = _frame.shape[:2]
+
+        # ── Face detection ─────────────────────────────────────────────
+        _face_conf = 0.0
+        _face_bbox = None
+        if _face_net is not None:
+            _blob = cv2.dnn.blobFromImage(
+                cv2.resize(_frame, (300, 300)), 1.0, (300, 300),
+                (104.0, 177.0, 123.0), swapRB=False, crop=False,
+            )
+            _face_net.setInput(_blob)
+            _detections = _face_net.forward()
+            for _di in range(_detections.shape[2]):
+                _conf = float(_detections[0, 0, _di, 2])
+                if _conf < 0.5:
+                    continue
+                _x1 = int(_detections[0, 0, _di, 3] * _w)
+                _y1 = int(_detections[0, 0, _di, 4] * _h)
+                _x2 = int(_detections[0, 0, _di, 5] * _w)
+                _y2 = int(_detections[0, 0, _di, 6] * _h)
+                _x1, _y1 = max(0, _x1), max(0, _y1)
+                _x2, _y2 = min(_w, _x2), min(_h, _y2)
+                if _x2 <= _x1 or _y2 <= _y1:
+                    continue
+                _area = (_x2 - _x1) * (_y2 - _y1)
+                # Pick the largest high-confidence face (handles multi-person)
+                if _face_bbox is None or _area > ((_face_bbox[2] - _face_bbox[0]) * (_face_bbox[3] - _face_bbox[1])):
+                    _face_conf = _conf
+                    _face_bbox = (_x1, _y1, _x2, _y2)
+
+        # ── Compute metrics ────────────────────────────────────────────
+        if _face_bbox is not None:
+            _fx1, _fy1, _fx2, _fy2 = _face_bbox
+            _face_region = _frame[_fy1:_fy2, _fx1:_fx2]
+            _face_gray = cv2.cvtColor(_face_region, cv2.COLOR_BGR2GRAY)
+
+            # 1. Face confidence (DNN output, already in [0.5, 1.0])
+            _conf_score = (_face_conf - 0.5) / 0.5  # rescale to [0, 1]
+
+            # 2. Face area, capped at 15% of frame area
+            _face_area = (_fx2 - _fx1) * (_fy2 - _fy1)
+            _frame_area = _w * _h
+            _area_ratio = _face_area / _frame_area
+            _area_score = min(_area_ratio / 0.15, 1.0)
+
+            # 3. Centeredness — distance from frame center, normalized
+            _face_cx = (_fx1 + _fx2) / 2
+            _face_cy = (_fy1 + _fy2) / 2
+            _frame_cx = _w / 2
+            _frame_cy = _h / 2
+            _max_dist = ((_w / 2) ** 2 + (_h / 2) ** 2) ** 0.5
+            _dist = ((_face_cx - _frame_cx) ** 2 + (_face_cy - _frame_cy) ** 2) ** 0.5
+            _center_score = max(0.0, 1.0 - (_dist / _max_dist))
+
+            # 4. Sharpness — Laplacian variance on face region
+            # >300 is sharp, <100 is blurry; we cap and normalize
+            _lap_var = float(cv2.Laplacian(_face_gray, cv2.CV_64F).var())
+            _sharp_score = min(_lap_var / 300.0, 1.0)
+
+            # 5. Brightness sweet-spot — face region mean luma in [60, 200]
+            _mean_lum = float(_face_gray.mean())
+            if _mean_lum < 30 or _mean_lum > 230:
+                _bright_score = 0.0
+            elif 90 <= _mean_lum <= 170:
+                _bright_score = 1.0
+            else:
+                # Linear ramp from edges
+                if _mean_lum < 90:
+                    _bright_score = (_mean_lum - 30) / 60
+                else:
+                    _bright_score = (230 - _mean_lum) / 60
+                _bright_score = max(0.0, min(1.0, _bright_score))
+
+            # 6. Eye openness — Haar cascade. 2 eyes = open, 1 = partial, 0 = blink
+            _eye_score = 0.7  # neutral default if cascade unavailable
+            if _eye_cascade is not None and _face_gray.size > 0:
+                _eyes = _eye_cascade.detectMultiScale(
+                    _face_gray, scaleFactor=1.1, minNeighbors=5,
+                    minSize=(int((_fx2 - _fx1) * 0.1), int((_fy2 - _fy1) * 0.05)),
+                )
+                _n_eyes = len(_eyes)
+                if _n_eyes >= 2:
+                    _eye_score = 1.0
+                elif _n_eyes == 1:
+                    _eye_score = 0.55
+                else:
+                    _eye_score = 0.15
+
+            _total = (
+                0.25 * _conf_score
+                + 0.10 * _area_score
+                + 0.10 * _center_score
+                + 0.25 * _sharp_score
+                + 0.15 * _bright_score
+                + 0.15 * _eye_score
+            )
+            _breakdown = {
+                "conf": _conf_score, "area": _area_score, "center": _center_score,
+                "sharp": _sharp_score, "bright": _bright_score, "eye": _eye_score,
+                "lap_var": _lap_var, "mean_lum": _mean_lum,
+                "face_conf": _face_conf,
+            }
+        else:
+            # No face — use sharpness + brightness on full frame.
+            # Such a frame can never beat a face-frame, so we cap the no-face
+            # score at 0.5 to give face-frames preference.
+            _gray = cv2.cvtColor(_frame, cv2.COLOR_BGR2GRAY)
+            _lap_var = float(cv2.Laplacian(_gray, cv2.CV_64F).var())
+            _sharp_score = min(_lap_var / 300.0, 1.0)
+            _mean_lum = float(_gray.mean())
+            if 80 <= _mean_lum <= 180:
+                _bright_score = 1.0
+            else:
+                _bright_score = max(0.0, 1.0 - abs(_mean_lum - 130) / 100)
+            _total = 0.5 * (0.6 * _sharp_score + 0.4 * _bright_score)
+            _breakdown = {
+                "no_face": True, "sharp": _sharp_score,
+                "bright": _bright_score, "lap_var": _lap_var, "mean_lum": _mean_lum,
+            }
+
+        _scored.append((_total, _cand_ts, _breakdown))
+
+    _t_score = time.time() - _t_score
+
+    if not _scored:
+        raise RuntimeError("[thumbnail] no scorable candidates")
+
+    # Sort by score descending, pick winner
+    _scored.sort(key=lambda r: -r[0])
+    _winner_score, _winner_ts, _winner_breakdown = _scored[0]
+
+    # Cleanup candidate frames
+    for _f in _cand_files:
+        try:
+            os.unlink(_f)
+        except Exception:
+            pass
+    try:
+        os.rmdir(_cand_dir)
+    except Exception:
+        pass
+
+    # ── Re-extract winning frame at FULL resolution ─────────────────────
+    # The candidate scoring used 540p; the actual thumbnail must be the full
+    # 1080x1920 frame from the video. NO post-processing applied.
+    _final_path = os.path.join(work_dir, "thumbnail_final.jpg")
+    _t_final = time.time()
+    _final_cmd = subprocess.run(
+        ["ffmpeg", "-y", "-v", "warning",
+         "-ss", f"{_winner_ts:.3f}",
+         "-i", video_path,
+         "-frames:v", "1",
+         "-q:v", "2",  # JPEG quality scale 2 = ~95%
+         _final_path],
+        capture_output=True, text=True, timeout=10,
+    )
+    _t_final = time.time() - _t_final
+    if _final_cmd.returncode != 0 or not os.path.exists(_final_path):
+        raise RuntimeError(f"[thumbnail] final frame extract failed: {(_final_cmd.stderr or '')[-300:]}")
+
+    with open(_final_path, "rb") as f:
+        _data = f.read()
+    try:
+        os.unlink(_final_path)
+    except Exception:
+        pass
+
+    _has_face = "no_face" not in _winner_breakdown
     print(
-        f"[thumbnail] Styled thumbnail: {len(data)//1024}KB, "
-        f"enhanced+vignette{'+text' if hook_text else ''}",
+        f"[thumbnail] Selected best frame at {_winner_ts:.3f}s "
+        f"(seed={seed_ts:.2f}s, window=±{_window:.1f}s, {len(_scored)} candidates) "
+        f"score={_winner_score:.3f} face={_has_face} "
+        f"extract={_t_extract:.2f}s score={_t_score:.2f}s final={_t_final:.2f}s",
         flush=True,
     )
-    return data, "image/jpeg"
+    if _has_face:
+        print(
+            f"[thumbnail]   metrics: conf={_winner_breakdown['conf']:.2f} "
+            f"area={_winner_breakdown['area']:.2f} center={_winner_breakdown['center']:.2f} "
+            f"sharp={_winner_breakdown['sharp']:.2f}(lap={_winner_breakdown['lap_var']:.0f}) "
+            f"bright={_winner_breakdown['bright']:.2f}(lum={_winner_breakdown['mean_lum']:.0f}) "
+            f"eye={_winner_breakdown['eye']:.2f}",
+            flush=True,
+        )
+
+    return _data, "image/jpeg"
 
 
 def fetch_broll_clip(keyword, duration_needed, work_dir):
@@ -7820,12 +8001,33 @@ def handler(job):
             print("[pipeline] upload complete", flush=True)
 
         def _extract_and_upload_cover():
-            # Generate styled thumbnail (enhanced + vignette)
-            _face_pos = edit_plan.get("_face_positions") or []
-            data, mime = generate_styled_thumbnail(
-                output_path, cover_frame_ts, _face_pos, work_dir,
-                hook_text=None,
-            )
+            # Pick the visually best frame in a window around Gemini's recommended
+            # cover_frame_ts. NO post-processing — just the raw frame.
+            try:
+                data, mime = select_best_thumbnail_frame(
+                    output_path, cover_frame_ts, work_dir,
+                )
+            except Exception as _thumb_err:
+                # Last-resort fallback: extract a single frame at the seed timestamp
+                # without any scoring. Should be very rare (only triggers on cv2/ffprobe
+                # failures, not on bad-quality frames).
+                print(f"[thumbnail] WARNING: scorer failed ({_thumb_err}) — using seed frame", flush=True)
+                _fallback_path = os.path.join(work_dir, "thumbnail_fallback.jpg")
+                _r = subprocess.run(
+                    ["ffmpeg", "-y", "-v", "warning",
+                     "-ss", f"{cover_frame_ts:.3f}", "-i", output_path,
+                     "-frames:v", "1", "-q:v", "2", _fallback_path],
+                    capture_output=True, text=True, timeout=10,
+                )
+                if _r.returncode != 0 or not os.path.exists(_fallback_path):
+                    raise RuntimeError(f"Thumbnail fallback failed: {(_r.stderr or '')[-300:]}")
+                with open(_fallback_path, "rb") as f:
+                    data = f.read()
+                try:
+                    os.unlink(_fallback_path)
+                except Exception:
+                    pass
+                mime = "image/jpeg"
             if data:
                 print(
                     f"[pipeline] cover frame at {cover_frame_ts:.2f}s "
