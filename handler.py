@@ -994,7 +994,7 @@ def transcribe_audio(source_path):
         print("[pipeline] transcription skipped: deepgram not available", flush=True)
         return {"text": "", "words": []}
     try:
-        dg = DeepgramClient(api_key=os.environ["DEEPGRAM_API_KEY"], timeout=120.0)
+        dg = DeepgramClient(api_key=os.environ["DEEPGRAM_API_KEY"])
         with open(source_path, "rb") as f:
             audio_bytes = f.read()
         print(f"[deepgram] Sending {len(audio_bytes) / 1024:.0f}KB audio", flush=True)
@@ -1002,20 +1002,7 @@ def transcribe_audio(source_path):
             model="nova-3", detect_language=True,
             smart_format=True, utterances=True, punctuate=True, diarize=True,
         )
-        # Single retry on timeout — with compressed Opus audio (~240KB vs ~5.5MB WAV),
-        # timeouts should be extremely rare. The retry catches transient network blips.
-        _last_err = None
-        for _attempt in range(2):
-            try:
-                resp = dg.listen.prerecorded.v("1").transcribe_file({"buffer": audio_bytes}, options)
-                break
-            except Exception as _dg_err:
-                _last_err = _dg_err
-                if _attempt == 0:
-                    print(f"[deepgram] Attempt 1 failed ({_dg_err}), retrying...", flush=True)
-                    time.sleep(1)
-        else:
-            raise _last_err
+        resp = dg.listen.prerecorded.v("1").transcribe_file({"buffer": audio_bytes}, options)
         alt = resp.results.channels[0].alternatives[0]
         raw_words = alt.words or []
         words = [
