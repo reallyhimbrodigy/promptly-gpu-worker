@@ -5283,6 +5283,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _seg_v_chains = []
     _seg_a_chains = []
     _seg_input_args_list = []
+    _seg_speeds = []  # avg speed per segment (for caption PNG framerate matching)
 
     # Collect face detection results (may still be running from mega-parallel phase).
     # By collecting here (after Remotion launch), face detection runs in parallel with
@@ -5714,6 +5715,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         v_chain.append("format=yuv420p")
         video_filters.append(f"[{i}:v]{','.join(v_chain)}[v{i}]")
         _seg_v_chains.append(list(v_chain))
+        _seg_speeds.append(combined_speed)
 
         # Audio: each segment has its own pre-seeked input (no atrim needed)
         a_chain = ["asetpts=PTS-STARTPTS"]
@@ -6151,11 +6153,16 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _extra_idx += 1
             _bi_emitted += 1
 
-        # Caption + text overlay PNGs (applied LAST, always on top of everything)
+        # Caption + text overlay PNGs (applied LAST, always on top of everything).
+        # The PNG framerate must match the video's speed-warped playback rate.
+        # Without this, sped-up segments exhaust their PNGs before the video
+        # ends, causing captions to flash off on the last frames.
         if _seg_overlay_dir:
             _png_pattern = os.path.join(_seg_overlay_dir, f"element-%0{_seg_png_digits}d.png")
+            _seg_speed = _seg_speeds[seg_idx] if seg_idx < len(_seg_speeds) else 1.0
+            _png_fps = source_fps * _seg_speed
             _extra_inputs += [
-                "-f", "image2", "-framerate", f"{source_fps:.5f}",
+                "-f", "image2", "-framerate", f"{_png_fps:.5f}",
                 "-start_number", str(_seg_png_start_num),
                 "-i", _png_pattern,
             ]
