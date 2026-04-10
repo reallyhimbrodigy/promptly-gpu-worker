@@ -1418,7 +1418,7 @@ Global parameters:
 
   To hold a speed: place two keypoints at the same speed value, one at the start and one at the end of the section you want held constant.
 
-  To change speed: place the end-of-hold keypoint and the new-speed keypoint 0.4–1.2 seconds apart. The gap between these two keypoints MUST be at least 0.4 seconds — the pipeline interpolates linearly between them, and gaps shorter than 0.4s produce audible audio artifacts instead of a smooth ramp. If the nearest word boundary is less than 0.4s away, move the target keypoint further out until the gap is at least 0.4s.
+  To change speed: place the end-of-hold keypoint and the new-speed keypoint 0.55–1.2 seconds apart. The gap between these two keypoints MUST be at least 0.55 seconds — the pipeline interpolates between them with easing, and gaps shorter than 0.55s produce audible audio artifacts instead of a smooth ramp. If the nearest word boundary is less than 0.55s away, move the target keypoint further out until the gap is at least 0.55s.
 
   Every speed change needs a ramp pair. Every held section needs matching start and end keypoints. The full curve alternates: hold fast → ramp down → hold slow → ramp up → hold fast. Each transition is a pair of close keypoints. Each held section is a pair of matching keypoints.
 
@@ -3716,15 +3716,20 @@ def densify_speed_curve(speed_curve, max_intermediates=50, min_step=0.10):
             n_steps_time = max(4, int(r["gap"] / min_step))
             r["n_steps"] = min(n_steps, n_steps_time)
 
-    # Third pass: emit the densified curve
+    # Third pass: emit the densified curve using smoothstep (ease-in-out)
+    # interpolation. Linear interpolation has instant acceleration at ramp
+    # boundaries which sounds/looks abrupt. Smoothstep (3t²-2t³) eases in
+    # and out so the speed change is gentle at both ends of every ramp.
     densified = [dict(speed_curve[0])]
     for r in ramps:
         n_steps = r["n_steps"]
         if n_steps >= 2:
             for k in range(1, n_steps):
                 frac = k / n_steps
-                t_new = r["t_a"] + frac * r["gap"]
-                s_new = r["s_a"] + (r["s_b"] - r["s_a"]) * frac
+                # Smoothstep: 3t² - 2t³ (ease-in-out)
+                smooth_frac = frac * frac * (3.0 - 2.0 * frac)
+                t_new = r["t_a"] + frac * r["gap"]  # time stays linear
+                s_new = r["s_a"] + (r["s_b"] - r["s_a"]) * smooth_frac
                 densified.append({"t": round(t_new, 3), "speed": round(s_new, 4)})
         densified.append(dict(speed_curve[r["i"] + 1]))
 
