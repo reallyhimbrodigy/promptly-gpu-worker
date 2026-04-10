@@ -5965,10 +5965,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _seg_frame_ranges.append((_frame_cursor, _frame_cursor + _frame_count - 1))
         _frame_cursor += _frame_count
 
-    # Text overlays are now rendered by Remotion as part of the caption
-    # PNG sequence (injected into the Remotion input JSON above). This
-    # eliminates the per-segment drawtext flashing at segment boundaries.
-    _text_overlay_assignments = {}  # empty — no per-segment drawtext filters
+    # Text overlays are rendered by Remotion as part of the caption PNG
+    # sequence (injected into the Remotion input JSON above).
 
     # ── Build and run parallel segment FFmpeg processes ──────────────────
     _par_t0 = time.time()
@@ -6089,33 +6087,20 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _ac.append(f"afade=t=out:st={_fo_st:.3f}:d={_td:.3f}")
         _filter_parts.append(f"[0:a]{','.join(_ac)}[aout]")
 
-        # Extra inputs (caption overlay, B-roll)
+        # Extra inputs (B-roll, then caption overlay)
+        # ORDER MATTERS: b-roll composites FIRST (replaces video), then
+        # captions render ON TOP so they're always visible even during
+        # b-roll cutaways. Text overlays are part of the caption PNGs
+        # (rendered by Remotion), so they also stay on top.
         _extra_inputs = []
         _extra_idx = 1
 
-        # Caption overlay for this segment (direct PNG read — no stitch needed)
-        if _seg_overlay_dir:
-            _png_pattern = os.path.join(_seg_overlay_dir, f"element-%0{_seg_png_digits}d.png")
-            _extra_inputs += [
-                "-f", "image2", "-framerate", f"{source_fps:.5f}",
-                "-start_number", str(_seg_png_start_num),
-                "-i", _png_pattern,
-            ]
-            _filter_parts.append(f"{_video_label}[{_extra_idx}:v]overlay=eof_action=pass[vcap]")
-            _video_label = "[vcap]"
-            _extra_idx += 1
-
-        # B-roll overlays for this segment.
+        # B-roll overlays for this segment (applied FIRST, underneath captions).
         #
         # B-roll lives on the GLOBAL output timeline. Each overlay has an
         # absolute output-time window [out_start, out_end]. For this
         # segment we compute the intersection between that window and the
         # segment's own output-time window [seg_out_start, seg_out_end].
-        # If they overlap, we render a slice of the source clip starting
-        # at the right offset, with the right duration, and (importantly)
-        # with the fade-in/fade-out only on the slices that touch the
-        # original boundaries — middle slices have neither fade so the
-        # b-roll appears continuous to the viewer across segment joins.
         _seg_out_start = _seg_starts[seg_idx]
         _seg_out_end = _seg_out_start + _eff_dur
         _BROLL_EPS = 0.001  # 1ms tolerance for boundary equality
@@ -6123,27 +6108,17 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         for _br in _broll_overlays:
             _ov_start = _br["out_start"]
             _ov_end = _br["out_end"]
-            # Intersect with this segment's output-time window
             _slice_start = max(_ov_start, _seg_out_start)
             _slice_end = min(_ov_end, _seg_out_end)
             if _slice_end - _slice_start <= _BROLL_EPS:
-                continue  # no overlap with this segment
+                continue
             _slice_dur = _slice_end - _slice_start
-            # Local time within this segment (where the slice begins)
             _local_start = _slice_start - _seg_out_start
-            # Where to seek into the Pexels source clip: the overlay's
-            # original seek_point plus however far into the overlay this
-            # segment slice begins.
             _slice_seek = _br["seek_point"] + (_slice_start - _ov_start)
-            # Ken Burns animation runs across the FULL overlay duration,
-            # not the slice duration, so motion stays continuous across
-            # segment joins. Compute progress relative to the overlay
-            # start, expressed in this slice's local frames.
             _ov_total_dur = _ov_end - _ov_start
             _ov_total_frames = max(1, round(_ov_total_dur * source_fps))
             _frame_offset_in_overlay = round((_slice_start - _ov_start) * source_fps)
             _kbz = 0.08
-            # Progress expression: ((n + frame_offset) / total_frames), clamped to [0,1]
             _kbp = f"min((n+{_frame_offset_in_overlay})/{_ov_total_frames}\\,1.0)"
             _kbs = f"({_kbp}*{_kbp}*(3-2*{_kbp}))"
             _kbd = _br.get("ken_burns_dir", "zoom_in")
@@ -6162,12 +6137,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 f"setsar=1,eq=saturation=0.92:contrast=1.02,"
                 f"setpts=PTS-STARTPTS[{_bv}]"
             )
-            # For continuation slices (b-roll starts at the segment boundary),
-            # _local_start is 0 and the overlay covers the full segment. Don't
-            # use an enable expression — it's timing-sensitive and can miss the
-            # first/last frame at VFR segment boundaries, causing a 1-frame flash.
-            # The trim filter already limits the b-roll to exactly _slice_dur;
-            # eof_action=pass handles the natural end.
             if _local_start < 0.01:
                 _filter_parts.append(
                     f"{_video_label}[{_bv}]overlay=0:0:eof_action=pass[bov{_bi_emitted}]"
@@ -6180,11 +6149,17 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _extra_idx += 1
             _bi_emitted += 1
 
-        # Text overlays for this segment
-        for _ti_idx, _dt_f in enumerate(_text_overlay_assignments.get(seg_idx, [])):
-            _tov_label = f"[tov{_ti_idx}]"
-            _filter_parts.append(f"{_video_label}{_dt_f}{_tov_label}")
-            _video_label = _tov_label
+        # Caption + text overlay PNGs (applied LAST, always on top of everything)
+        if _seg_overlay_dir:
+            _png_pattern = os.path.join(_seg_overlay_dir, f"element-%0{_seg_png_digits}d.png")
+            _extra_inputs += [
+                "-f", "image2", "-framerate", f"{source_fps:.5f}",
+                "-start_number", str(_seg_png_start_num),
+                "-i", _png_pattern,
+            ]
+            _filter_parts.append(f"{_video_label}[{_extra_idx}:v]overlay=eof_action=pass[vcap]")
+            _video_label = "[vcap]"
+            _extra_idx += 1
 
         _fc = ";".join(_filter_parts)
         # Audio encoded as PCM (not AAC) to eliminate per-segment AAC priming
