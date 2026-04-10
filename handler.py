@@ -4906,10 +4906,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     _cap_kw = edit_plan.get("caption_keywords") or []
     _total_render_dur = sum(effective_durations)
-    # Remotion's durationInFrames must match the total SOURCE frame count
-    # (not effective), because _seg_frame_ranges uses source durations so
-    # that every video frame gets a corresponding caption PNG.
-    _total_source_dur = sum(float(rc["source_end"]) - float(rc["source_start"]) for rc in render_cuts)
     _vibe = str(edit_plan.get("_user_vibe") or edit_plan.get("notes") or "")
     _emphasis_moments_raw = edit_plan.get("emphasis_moments") or []
 
@@ -4941,7 +4937,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _projected_words, caption_style,
             {"width": 1080, "height": 1920},
             _cap_kw, work_dir,
-            total_duration=_total_source_dur, fps=source_fps,
+            total_duration=_total_render_dur, fps=source_fps,
             cuts=_cuts_for_remotion,
             emphasis_moments=_emphasis_moments,
             vibe=_vibe,
@@ -5706,18 +5702,17 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 print(f"[broll] Built {len(_broll_overlays)} timeline overlay(s) — will slice across segments as needed", flush=True)
 
     # ── Compute frame ranges per segment (for per-segment Remotion renders) ──
-    # Frame count MUST match the VIDEO frame count, which is source_duration *
-    # source_fps (since there's no fps= filter — setpts only relabels timestamps
-    # without dropping or duplicating frames). Previously this used effective_duration
-    # which is the OUTPUT duration after speed scaling — producing fewer PNGs than
-    # video frames on sped-up segments. The mismatch caused eof_action=repeat to
-    # show a stale caption frame at the end of each segment, flashing at concat
-    # boundaries when the next segment's fresh caption frame appeared.
+    # Frame count uses effective_duration (output time after speed scaling).
+    # Remotion renders captions on the OUTPUT timeline — each PNG corresponds
+    # to an output timestamp. FFmpeg's overlay matches PNGs to video frames
+    # by PTS (timestamp), not frame number, so the different frame counts
+    # (source vs effective) don't matter. eof_action=repeat on the overlay
+    # bridges any PTS gap at the segment boundary where the video has a few
+    # more frames than PNGs.
     _seg_frame_ranges = []
     _frame_cursor = 0
     for _si in range(n):
-        _seg_source_dur = float(render_cuts[_si]["source_end"]) - float(render_cuts[_si]["source_start"])
-        _frame_count = max(1, round(_seg_source_dur * source_fps))
+        _frame_count = max(1, round(effective_durations[_si] * source_fps))
         _seg_frame_ranges.append((_frame_cursor, _frame_cursor + _frame_count - 1))
         _frame_cursor += _frame_count
 
