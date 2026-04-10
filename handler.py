@@ -1411,7 +1411,11 @@ Global parameters:
 
   SPEED RAMPING (only when vibe mentions "speed ramp", "speed ramping", or "CapCut style"):
 
-  Speed ramping alternates between fast sections (setup, context, transitions at 1.2x-1.4x) and slow sections (reveals, punchlines, emotional peaks at 0.67x-0.8x). Every section is either fast or slow — the video never plays at normal speed.
+  Speed ramping is storytelling through pacing. Speed up when the content is moving TOWARD something — setup, context, transitions between story beats. Slow down when the content ARRIVES — the reveal, the punchline, the reaction. The contrast between fast and slow is what makes each moment land. Every speed change must be motivated by the narrative.
+
+  The slow section should begin 0.3–0.5 seconds BEFORE the key word or phrase, so the viewer feels the deceleration building into the moment. By the time the punchline word lands, the video is already in slow-mo and the moment has weight. Starting the slow-mo exactly on the word is too late — the viewer misses the buildup.
+
+  Fast sections: 1.2x-1.4x. Slow sections: 0.67x-0.8x. Every section is either fast or slow — the video never plays at normal speed.
 
   The system linearly interpolates between adjacent keypoints. Two keypoints far apart produce a gradual drift. Two keypoints at the same speed produce a held section. Two keypoints close together at different speeds produce a deliberate ramp. You control the speed curve by combining these three building blocks.
 
@@ -1629,23 +1633,23 @@ Sound effects — audio accents that make the edit feel physical and professiona
     {{"t": <seconds, 3+ decimal places, EXACT word start from Deepgram>, "sound": "<boom|hit|drum_roll|reverse|ching|ding|pop|click|camera_shutter|sad_trombone|typing|whoosh_slow|transition_smooth|thunder>", "word": "<exact trigger word, lowercase>"}}
   ]
 
-B-roll — stock footage cutaways that show what the speaker is describing. B-roll replaces the video (not audio) for its duration — the speaker's voice continues over the footage. The viewer should see the b-roll WHILE the speaker describes the scene, so the visual and audio reinforce each other simultaneously.
+B-roll — stock footage cutaways that show what the speaker is describing. B-roll replaces the video (not audio) for its duration — the speaker's voice continues over the footage.
 
-  B-roll works when the speaker describes a concrete, physical thing that exists in the real world — a place, an object, an action. The keyword you write is a Pexels video search query. It must describe exactly what you want the viewer to see: the subject, the action, and enough visual detail that Pexels returns a clip showing that specific scene. Vague keywords return random clips. Specific keywords return relevant clips.
+  Good b-roll candidates are moments where the speaker describes a concrete, physical, filmable scene — a place, an object, a person doing a specific action. Scan the transcript for phrases that paint a picture: someone doing something somewhere. Those are your b-roll moments. Dialogue, emotions, reactions, metaphors, and abstract statements have no filmable scene and should stay on the speaker's face.
 
-  B-roll belongs on setup and context moments where the speaker is describing a scene or action. The speaker's face matters most during emotional beats, reveals, punchlines, and reactions — those moments stay on the speaker.
+  The speaker's face is the most important visual during emotional beats, reveals, punchlines, and reactions. B-roll belongs on setup and context — the descriptive moments that establish a scene, not the dramatic moments that deliver the payoff.
 
-  Only use b-roll when a real, filmable scene matches what the speaker is saying. Metaphors, emotions, and abstract concepts have no filmable scene — skip b-roll for those moments entirely. A mismatched clip is worse than no clip.
+  The keyword is a Pexels video search query. It must describe the exact shot you want the viewer to see: the subject, what they're doing, and where. Include enough visual specificity that the search returns a clip of that specific scene. The more precise the keyword, the more relevant the clip.
 
-  Timing: the b-roll must be on screen BEFORE the viewer hears the key phrase, so the visual context is already established when the words land. Place the timestamp at the start of the phrase that introduces the visual concept — typically the first word of the relevant sentence or clause. Use the exact `start` value from the Deepgram word list (3+ decimal places).
+  Timing: the b-roll must be on screen BEFORE the viewer hears the relevant words, so the visual context is already established when the phrase lands. Place the timestamp at the first word of the sentence or clause that introduces the visual concept. The viewer should already be watching the b-roll by the time the descriptive words arrive. Use the exact `start` value from the Deepgram word list (3+ decimal places). End the b-roll in a gap between words — the cut back to the speaker should land between words, not mid-word. Prefer cutting in and out during natural micro-pauses in the speaker's rhythm.
 
   Duration: 2.0–3.0 seconds per cutaway. Below 1.2 seconds reads as a flash. Above 4 seconds loses energy.
 
-  Spacing: at least 3 seconds of speaker face time between adjacent b-roll clips. Each cutaway needs breathing room. If two good b-roll moments are close together, pick the stronger one.
+  Spacing: at least 3 seconds of speaker face time between adjacent b-roll clips. Each cutaway needs breathing room before the next. If two good b-roll moments are close together, use the stronger one.
 
-  Coverage: aim for ~40% of the video runtime covered by b-roll. This is the retention sweet spot. Scale linearly — a 30s video gets ~12s of b-roll across 4-5 clips, a 60s video gets ~24s across 8-10 clips.
+  Coverage: aim for ~40% of the video runtime covered by b-roll. Scale linearly — a 30s video gets ~12s across 4-5 clips, a 60s video gets ~24s across 8-10 clips.
 
-  B-roll plays at the same speed as the underlying video. Place b-roll on held-speed sections of your speed curve, not during ramps.
+  B-roll plays at the same speed as the underlying video. If you place b-roll on a section you've sped up to 1.3x, the viewer sees only ~1.9 seconds of a 2.5-second b-roll. Place b-roll on held-speed sections of your speed curve so the duration plays at face value. Placing b-roll during a speed ramp causes the clip to change speed mid-playback, which looks wrong.
 
   Every clip must include a "reason" field: one sentence explaining why this moment, this duration, and this keyword.
 
