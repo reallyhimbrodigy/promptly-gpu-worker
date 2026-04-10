@@ -2625,20 +2625,25 @@ _SFX_CATEGORIES = {
 #
 # Measured by decoding each file to PCM and finding the peak amplitude sample.
 _SFX_ONSET_OFFSETS = {
+    # Short impacts — offset to ATTACK (first audible transient on the word)
+    "hit":               0.000,
+    "ching":             0.000,
+    "ding":              0.000,
+    "click":             0.052,
+    "pop":               0.013,
+    "camera_shutter":    0.012,
+    # Cinematic impacts — offset to PEAK (crash/hit lands on the word, buildup precedes)
     "boom":              0.440,
-    "camera_shutter":    0.045,
-    "ching":             0.057,
-    "click":             0.060,
-    "ding":              0.078,
+    "thunder":           0.734,
+    # Build-up sounds — offset to CLIMAX (the payoff moment lands on the word)
     "drum_roll":         1.657,
-    "hit":               0.068,
-    "pop":               0.025,
     "reverse":           1.372,
     "sad_trombone":      1.290,
-    "thunder":           0.734,
-    "transition_smooth": 0.345,
-    "typing":            0.000,  # continuous sound — file should start when typing starts, no peak shift
-    "whoosh_slow":       0.213,
+    # Atmospheric — offset to ONSET (first audible whoosh on the word)
+    "transition_smooth": 0.089,
+    "whoosh_slow":       0.034,
+    # Continuous — no offset
+    "typing":            0.000,
 }
 
 # RMS measurement cache — populated lazily, avoids re-measuring same file
