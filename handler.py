@@ -6154,19 +6154,19 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _bi_emitted += 1
 
         # Caption + text overlay PNGs (applied LAST, always on top of everything).
-        # The PNG framerate must match the video's speed-warped playback rate.
-        # Without this, sped-up segments exhaust their PNGs before the video
-        # ends, causing captions to flash off on the last frames.
+        # PNGs are presented at source_fps (matching Remotion's render rate).
+        # eof_action=repeat keeps the last caption frame visible at segment
+        # boundaries where VFR PTS discontinuities could otherwise cause a
+        # 1-frame gap. Repeating the last frame is invisible because caption
+        # content doesn't change within a single sub-clip.
         if _seg_overlay_dir:
             _png_pattern = os.path.join(_seg_overlay_dir, f"element-%0{_seg_png_digits}d.png")
-            _seg_speed = _seg_speeds[seg_idx] if seg_idx < len(_seg_speeds) else 1.0
-            _png_fps = source_fps * _seg_speed
             _extra_inputs += [
-                "-f", "image2", "-framerate", f"{_png_fps:.5f}",
+                "-f", "image2", "-framerate", f"{source_fps:.5f}",
                 "-start_number", str(_seg_png_start_num),
                 "-i", _png_pattern,
             ]
-            _filter_parts.append(f"{_video_label}[{_extra_idx}:v]overlay=eof_action=pass[vcap]")
+            _filter_parts.append(f"{_video_label}[{_extra_idx}:v]overlay=eof_action=repeat[vcap]")
             _video_label = "[vcap]"
             _extra_idx += 1
 
