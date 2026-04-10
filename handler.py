@@ -1392,7 +1392,7 @@ Word-level edit control:
 
   CONTEXT-DEPENDENT (you decide based on the sentence):
   - "like", "so", "basically", "you know", "I mean", "right", "literally", "actually", "honestly", "obviously", "just", "really", "kind of", "sort of"
-  - These words are filler when they add no meaning and could be removed without changing the sentence. They are content when they serve a grammatical or semantic purpose (comparison, question, verb). You understand language — use that understanding to decide.
+  - Before removing any of these words, read the full sentence it appears in. Remove the word mentally and check if the sentence still makes grammatical sense and means the same thing. If removing the word breaks the sentence or changes its meaning, it is content and must stay. "I felt like I had been electrocuted" — remove "like" and you get "I felt I had been electrocuted" which changes the sentence structure. That "like" is a grammatical comparison, not filler. Only remove these words when they genuinely add nothing to the meaning.
 
   ALSO REMOVE:
   - Silence gaps longer than 0.5 seconds — mark with start/end time ranges. Gaps under 0.5s are auto-collapsed by the pipeline.
