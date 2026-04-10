@@ -4853,9 +4853,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             fps=source_fps,
         )
         _clip_time_maps.append(_tm)
-    # Round each effective duration to a source-fps frame boundary so the
-    # predicted timeline matches the actual rendered video frame count.
-    effective_durations = [round(tm["effective_duration"] * source_fps) / source_fps for tm in _clip_time_maps]
+    # Use raw effective durations — no frame-boundary rounding. With 80+
+    # micro-segments from speed curve densification, rounding each duration
+    # to 1/30s accumulated ~1.2s of cumulative error by segment 69, causing
+    # b-roll overlays to appear ~1.4s late in the rendered video.
+    effective_durations = [tm["effective_duration"] for tm in _clip_time_maps]
     # _hook_offset is structurally 0 in the current architecture: the hook is
     # inlined into render_cuts at the front (see line 6345), so clip_ranges
     # already accounts for the hook position. The legacy non-zero value was
