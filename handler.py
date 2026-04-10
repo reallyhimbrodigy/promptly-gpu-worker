@@ -4641,7 +4641,13 @@ def build_setpts_from_time_map(tm, log=False):
 
 def project_source_time_to_output(source_t, cuts, clip_ranges, speed_curve=None, clip_time_maps=None):
     """Map a source-timeline timestamp to the output-timeline timestamp.
-    Uses canonical time maps when available for exact alignment with FFmpeg."""
+    Uses canonical time maps when available for exact alignment with FFmpeg.
+
+    When a hook clip duplicates a source range at the start of the timeline,
+    multiple cuts can contain the same source timestamp. We prefer the LAST
+    (narrative) match so that b-roll, SFX, and emphasis moments land at the
+    correct narrative position rather than the hook preview position."""
+    best_output_t = None
     for i, cut in enumerate(cuts):
         src_start = float(cut["source_start"])
         src_end = float(cut["source_end"])
@@ -4653,8 +4659,10 @@ def project_source_time_to_output(source_t, cuts, clip_ranges, speed_curve=None,
             else:
                 speed = max(0.25, float(cut.get("speed") or 1.0))
                 local_offset = source_offset / speed
-            output_t = float(clip_ranges[i]["start"]) + local_offset
-            return round(output_t * 1000) / 1000
+            best_output_t = round((float(clip_ranges[i]["start"]) + local_offset) * 1000) / 1000
+
+    if best_output_t is not None:
+        return best_output_t
 
     for i, cut in enumerate(cuts):
         if source_t < float(cut["source_start"]):
@@ -5938,29 +5946,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             + ["-c:a", "pcm_s16le", "-ar", "48000"]
             + [_seg_out]
         )
-        # Debug: log full FFmpeg command for segments with b-roll overlays
-        if _bi_emitted > 0:
-            _src_start = float(render_cuts[seg_idx]["source_start"])
-            _src_end = float(render_cuts[seg_idx]["source_end"])
-            print(
-                f"[BROLL-DEBUG] seg={seg_idx} source=[{_src_start:.3f},{_src_end:.3f}] "
-                f"seg_out_start={_seg_out_start:.4f} seg_out_end={_seg_out_end:.4f} "
-                f"eff_dur={_eff_dur:.4f} speed={_seg_speeds[seg_idx]:.4f}",
-                flush=True,
-            )
-            for _dbr in _broll_overlays:
-                _dslice_start = max(_dbr["out_start"], _seg_out_start)
-                _dslice_end = min(_dbr["out_end"], _seg_out_end)
-                if _dslice_end - _dslice_start > 0.001:
-                    _dlocal = _dslice_start - _seg_out_start
-                    print(
-                        f"[BROLL-DEBUG]   overlay out=[{_dbr['out_start']:.4f},{_dbr['out_end']:.4f}] "
-                        f"slice=[{_dslice_start:.4f},{_dslice_end:.4f}] "
-                        f"local_start={_dlocal:.4f} slice_dur={_dslice_end-_dslice_start:.4f} "
-                        f"keyword='{_dbr.get('keyword','')[:40]}'",
-                        flush=True,
-                    )
-            print(f"[BROLL-DEBUG]   filter_complex={_fc[:500]}", flush=True)
         _t_ff = time.time()
         _r = subprocess.run(_cmd, capture_output=True, text=True, timeout=120)
         _t_ffmpeg_run = time.time() - _t_ff
