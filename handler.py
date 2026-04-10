@@ -1601,8 +1601,10 @@ Sound effects — audio accents that make the edit feel physical and professiona
   ching — cash register. Use ONLY when money, profit, sales, or financial success is literally mentioned.
     Example: "I made TEN THOUSAND dollars" → ching on "thousand"
 
-  ding — bright notification chime. Use when the speaker references receiving a text, call, message, email, or notification.
+  ding — bright notification chime. Use ONLY when a DEVICE produces a notification — a phone ringing, a text arriving, an email pinging, a voicemail alert. The trigger word must be the device action itself ("texted", "called", "voicemail", "notification"), NOT a person delivering a message in person. A secretary walking into an office is NOT a notification. A phone going to voicemail IS.
     Example: "she texted me at 3am" → ding on "texted"
+    Example: "I'd let it go to voicemail" → ding on "voicemail"
+    WRONG: "the secretary came into my office" → NOT ding. A person walking in is not a device notification.
 
   pop — satisfying pop. Use ONLY when something visually pops up on screen — a text overlay appearing, an image appearing, a graphic appearing. Not for speech emphasis.
 
@@ -1733,6 +1735,7 @@ B-roll — contextual stock footage overlays that illustrate what the speaker is
   === KEYWORD CRAFT ===
 
   - The keyword MUST describe a concrete, physical, visible thing: a place, an object, an action happening in the real world. "man shaving in bathroom mirror", "little boy sitting on floor", "car driving on highway" — these are real scenes that stock footage can show.
+  - Be EXTREMELY specific. The keyword must describe exactly what you want the viewer to SEE — the main subject, the action, and the setting. "phone ringing desk" is too vague — it could return any desk scene. "smartphone screen vibrating incoming call close up" tells Pexels exactly what the shot should look like. The more specific your keyword, the better the clip.
   - NEVER use keywords about emotions, reactions, or states of mind: "shocked person", "sad face", "happy couple", "angry man" — these return generic stock photos of actors making faces, which look random and unprofessional next to real storytelling.
   - NEVER use keywords that are metaphors for what the speaker said: "I felt electrocuted" does NOT mean search for "electric shock" or "shocked face." The speaker is using a metaphor. There is no literal visual. Skip the b-roll.
   - If the speaker mentions a specific place/object/action, search for THAT exact thing.
