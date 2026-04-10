@@ -1411,47 +1411,17 @@ Global parameters:
 
   SPEED RAMPING (only when vibe mentions "speed ramp", "speed ramping", or "CapCut style"):
 
-  Speed ramping creates contrast between fast and slow moments. The viewer FEELS the video
-  accelerate through filler and decelerate into moments that matter.
+  Speed ramping alternates between fast sections (setup, context, transitions at 1.2x-1.4x) and slow sections (reveals, punchlines, emotional peaks at 0.67x-0.8x). Every section is either fast or slow — the video never plays at normal speed.
 
-  Think like a storyteller, not a technician. Every speed change must be MOTIVATED by the narrative:
-  - Speed up when the content is moving toward something (setup, context, transitions)
-  - Slow down when the content ARRIVES (the reveal, the punchline, the reaction)
+  The system linearly interpolates between adjacent keypoints. Two keypoints far apart produce a gradual drift. Two keypoints at the same speed produce a held section. Two keypoints close together at different speeds produce a deliberate ramp. You control the speed curve by combining these three building blocks.
 
-  Ask yourself: "Would this moment hit harder if it lingered?" If yes, slow it down.
-  Ask yourself: "Is this moment just getting us to the next beat?" If yes, speed it up.
+  To hold a speed: place two keypoints at the same speed value, one at the start and one at the end of the section you want held constant.
 
-  SPEED UP (1.2x-1.4x): Setup, context, buildup, transitions between story beats.
-  SLOW DOWN (0.67x-0.8x): Punchlines, reveals, shocking statements, emotional peaks.
+  To change speed: place the end-of-hold keypoint and the new-speed keypoint 0.4–1.2 seconds apart. This close pair creates a smooth, intentional ramp between the two speeds.
 
-  HOW THE SPEED CURVE WORKS (you MUST understand this):
-  The pipeline linearly interpolates between adjacent keypoints. If you place a keypoint at t=5 with speed 1.3 and the next keypoint at t=15 with speed 0.7, the system will GRADUALLY change speed from 1.3 to 0.7 over those 10 seconds. It will NOT hold at 1.3 and then jump to 0.7. Every pair of adjacent keypoints creates a smooth ramp between them.
+  Every speed change needs a ramp pair. Every held section needs matching start and end keypoints. The full curve alternates: hold fast → ramp down → hold slow → ramp up → hold fast. Each transition is a pair of close keypoints. Each held section is a pair of matching keypoints.
 
-  This means: to HOLD a speed for a section of the video, you need TWO keypoints at the SAME speed — one at the start and one at the end of the hold. To CHANGE speed, you place the end-of-hold keypoint and the start-of-new-speed keypoint close together (0.4–1.2 seconds apart). That close pair IS the ramp.
-
-  Every speed change requires TWO keypoints close together forming a ramp pair:
-  1. A HOLD keypoint — same speed as the section before it, placed at the moment you want the ramp to BEGIN
-  2. A TARGET keypoint — the new speed, placed 0.4–1.2 seconds after the hold keypoint
-
-  Between ramp pairs, you MUST have two keypoints at the same speed to create a held section. A single keypoint alone does NOTHING useful — it just creates a long gradual drift to/from the neighboring keypoints.
-
-  Structure for a speed-ramped video:
-  - Start with a keypoint at the opening speed
-  - HOLD that speed with a second keypoint at the same speed where you want the first ramp to begin
-  - RAMP to the new speed with a keypoint 0.4–1.2 seconds later at the target speed
-  - HOLD the new speed with another keypoint at the same speed where you want the next ramp
-  - Repeat for each speed change
-  - End with a keypoint at the final speed
-
-  NEVER place a single keypoint at a new speed without a preceding hold keypoint. That creates a long gradual drift instead of a deliberate speed change.
-
-  Speed values: NEVER use 1.0x. Every section is either sped up (1.2x-1.4x) or slowed down (0.67x-0.8x). Speed ramping means the entire video alternates between fast and slow.
-
-  Place each keypoint at the exact word timestamp from the Deepgram word list. Use 3+ decimal places.
-
-  Aim for 10-16 keypoints for a 60-second video — that's 3-5 ramp pairs plus the held sections between them.
-
-  Speed range: 0.67x to 1.4x. Slow moments MUST land on spoken words, never on silence.
+  Use exact word timestamps from the Deepgram list (3+ decimal places). Slow sections must land on spoken words. Speed range: 0.67x to 1.4x. Aim for 10-16 keypoints per 60 seconds (3-5 ramp pairs with held sections between them).
 
   If speed ramping is not requested in the vibe, set speed_curve to "none".
 
@@ -1659,71 +1629,28 @@ Sound effects — audio accents that make the edit feel physical and professiona
     {{"t": <seconds, 3+ decimal places, EXACT word start from Deepgram>, "sound": "<boom|hit|drum_roll|reverse|ching|ding|pop|click|camera_shutter|sad_trombone|typing|whoosh_slow|transition_smooth|thunder>", "word": "<exact trigger word, lowercase>"}}
   ]
 
-B-roll — contextual stock footage overlays that illustrate what the speaker is talking about. B-roll is the single biggest lever you have to make a talking-head video feel like a professional production. You are the expert. Every decision is yours, and the system honors your decisions exactly — no clamps, no fallbacks, no second-guessing. So make them right.
+B-roll — stock footage cutaways that show what the speaker is describing. B-roll replaces the video (not audio) for its duration — the speaker's voice continues over the footage. The viewer should see the b-roll WHILE the speaker describes the scene, so the visual and audio reinforce each other simultaneously.
 
-  === CORE PRINCIPLE: YOUR DECISIONS INTERACT ===
+  B-roll works when the speaker describes a concrete, physical thing that exists in the real world — a place, an object, an action. The keyword you write is a Pexels video search query. It must describe exactly what you want the viewer to see: the subject, the action, and enough visual detail that Pexels returns a clip showing that specific scene. Vague keywords return random clips. Specific keywords return relevant clips.
 
-  In this same response you decide cuts (remove_words), the speed_curve, AND broll_clips. These are not independent — they all play out on the same final timeline that the viewer sees. You must reason about all three together:
+  B-roll belongs on setup and context moments where the speaker is describing a scene or action. The speaker's face matters most during emotional beats, reveals, punchlines, and reactions — those moments stay on the speaker.
 
-  - B-roll plays at the same playback speed as the underlying video. If you put a 3-second b-roll on top of a section you've sped up to 2x, the viewer only sees ~1.5 seconds of b-roll. Either lengthen the duration to compensate, OR (much better) place b-roll on real-time (1.0x) sections of your own edit.
-  - If you've placed a hard cut in the middle of where you want b-roll, the b-roll will continue smoothly across the cut while the underlying speech jumps. This can be a feature (smooths over the jump cut) or a bug (b-roll sits on top of two unrelated sentences). Be deliberate.
-  - Place b-roll on calm, uncut, real-time sections of your own edit unless you have a specific reason to do otherwise.
+  Only use b-roll when a real, filmable scene matches what the speaker is saying. Metaphors, emotions, and abstract concepts have no filmable scene — skip b-roll for those moments entirely. A mismatched clip is worse than no clip.
 
-  === WHEN TO USE B-ROLL ===
+  Timing: the b-roll must be on screen BEFORE the viewer hears the key phrase, so the visual context is already established when the words land. Place the timestamp at the start of the phrase that introduces the visual concept — typically the first word of the relevant sentence or clause. Use the exact `start` value from the Deepgram word list (3+ decimal places).
 
-  - When the speaker describes something visual that isn't on camera (a place, an object, an action, a concept)
-  - During topic transitions to create visual variety and re-engage the eye
-  - When the speaker references something external ("this is what it looks like", "imagine a...", "back when I was at...")
-  - During longer stretches of talking head where retention drops
+  Duration: 2.0–3.0 seconds per cutaway. Below 1.2 seconds reads as a flash. Above 4 seconds loses energy.
 
-  === WHEN NOT TO USE ===
+  Spacing: at least 3 seconds of speaker face time between adjacent b-roll clips. Each cutaway needs breathing room. If two good b-roll moments are close together, pick the stronger one.
 
-  - When the speaker IS the content (emotional reactions, facial expressions, physical demonstrations, dramatic reveals). The viewer needs to see the speaker's face during these moments — cutting away destroys the tension.
-  - When the speaker is already showing something on camera
-  - When the moment is a dramatic reveal or punchline — the speaker's expression AS they deliver the line is what hooks the audience. Never cut away to stock footage during the most important moments.
-  - When the keyword would be abstract, metaphorical, or emotional rather than a concrete physical thing. "I felt electrocuted" does NOT mean you should search for "shocked person face" — that returns a generic stock photo of a stranger that looks random and accidental, not professional. If the speaker is using a metaphor or describing an emotion, there is no literal visual to show. Skip the b-roll.
-  - When you can't find a search term that describes a SPECIFIC PHYSICAL THING that exists in the real world (a place, an object, an action). If your best keyword is about an emotion, a reaction, a feeling, or an abstract concept — that's your signal to skip b-roll for this moment. Better no b-roll than a mismatched generic clip.
+  Coverage: aim for ~40% of the video runtime covered by b-roll. This is the retention sweet spot. Scale linearly — a 30s video gets ~12s of b-roll across 4-5 clips, a 60s video gets ~24s across 8-10 clips.
 
-  === DURATION (THE MOST COMMON MISTAKE) ===
+  B-roll plays at the same speed as the underlying video. Place b-roll on held-speed sections of your speed curve, not during ramps.
 
-  Target 2.0–3.0 seconds per cutaway. This is the sweet spot. Anything under ~1.2 seconds reads as a flash or a glitch — the viewer's eye literally cannot parse a sub-second cutaway as an intentional edit. Anything over ~5 seconds in short-form loses punch and feels like you've abandoned the speaker.
-
-  Hard guidance you should internalize:
-  - Default to 2.5 seconds unless you have a reason to differ.
-  - Never go below 1.2 seconds. If a phrase is too short for 1.2s of b-roll, don't use b-roll for it.
-  - Rarely exceed 4 seconds. Only longer if the speaker is genuinely dwelling on the visual concept.
-
-  === COVERAGE (THE SECOND MOST COMMON MISTAKE) ===
-
-  Target roughly 30–50% of the total video runtime covered by b-roll, with ~40% being the empirically-validated sweet spot for retention. Below 30% leaves the talking head feeling static. ABOVE 50% actively HURTS retention because the viewer feels like they've lost the human connection. More b-roll is NOT better — 70% coverage performs worse than 0% coverage in tests. Be disciplined.
-
-  For a 30s video that's roughly 12s of b-roll across 4–5 cutaways. For a 60s video, ~24s across 8–10 cutaways. Scale accordingly. Most videos need more than 0–2 b-roll clips, but never pile them on.
-
-  === PLACEMENT PRECISION ===
-
-  - Use the WORD-BY-WORD TIMESTAMPS you have above. The "timestamp" field MUST equal the EXACT `start` value of a real word from that list. Never approximate. Never guess.
-  - Start the b-roll at the FIRST word of the relevant phrase, OR up to 200ms BEFORE that word. Never after — late b-roll feels sloppy. If the speaker says "So I'm shaving, getting ready for work", the b-roll for "shaving in the bathroom" starts at the word "shaving", not "work" or later.
-  - End the b-roll on a word boundary too — the end time (timestamp + duration) should land in a gap between words from the word list, never mid-word.
-  - Leave at least 3 seconds between adjacent b-roll clips. Two b-rolls close together looks chaotic and unprofessional — give the viewer time to re-connect with the speaker between cutaways.
-  - NEVER overlap two b-roll clips. If two moments are close together, pick the stronger one.
-  - Prefer cutting in on natural pauses, breaths, or emphasis beats from the speaker.
-
-  === KEYWORD CRAFT ===
-
-  - The keyword MUST describe a concrete, physical, visible thing: a place, an object, an action happening in the real world. "man shaving in bathroom mirror", "little boy sitting on floor", "car driving on highway" — these are real scenes that stock footage can show.
-  - Be EXTREMELY specific. The keyword must describe exactly what you want the viewer to SEE — the main subject, the action, and the setting. "phone ringing desk" is too vague — it could return any desk scene. "smartphone screen vibrating incoming call close up" tells Pexels exactly what the shot should look like. The more specific your keyword, the better the clip.
-  - NEVER use keywords about emotions, reactions, or states of mind: "shocked person", "sad face", "happy couple", "angry man" — these return generic stock photos of actors making faces, which look random and unprofessional next to real storytelling.
-  - NEVER use keywords that are metaphors for what the speaker said: "I felt electrocuted" does NOT mean search for "electric shock" or "shocked face." The speaker is using a metaphor. There is no literal visual. Skip the b-roll.
-  - If the speaker mentions a specific place/object/action, search for THAT exact thing.
-
-  === REASONING (REQUIRED) ===
-
-  Every b-roll clip must include a "reason" field explaining WHY you chose that moment, WHY that duration, and WHY that keyword. This forces you to think about each placement deliberately.
-
-  === SCHEMA ===
+  Every clip must include a "reason" field: one sentence explaining why this moment, this duration, and this keyword.
 
   broll_clips: [
-    {{"keyword": "<specific visual search term for Pexels>", "timestamp": <EXACT word start time in source seconds>, "duration": <seconds, target 2.0-3.0, never below 1.2, rarely above 4.0>, "reason": "<one sentence: why this moment, why this duration, why this keyword>"}}
+    {{"keyword": "<specific Pexels search: subject + action + setting + camera angle>", "timestamp": <word start time in source seconds, 3+ decimals>, "duration": <seconds>, "reason": "<why this moment, duration, and keyword>"}}
   ]
 
 Visual effects — additional visual treatments for emphasis moments.
