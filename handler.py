@@ -1050,10 +1050,6 @@ CONTEXT_FILLER = {"like","right","so","basically","literally","actually","honest
 MULTI_WORD_FILLER = [["you","know"],["i","mean"],["kind","of"],["sort","of"]]
 
 
-def normalize_token(raw):
-    return re.sub(r"[^a-z]", "", str(raw or "").lower().replace("'","").replace('"',""))
-
-
 def measure_source_loudness(source_path):
     """
     Measure the source audio's peak level, RMS, and noise floor using ffmpeg.
@@ -3474,11 +3470,6 @@ def validate_output(path, step_name, min_size_bytes=100000):
     return True
 
 
-def get_source_duration(video_path):
-    """Get duration of source video in seconds."""
-    return probe_duration(video_path) or 0.0
-
-
 def probe_resolution(file_path):
     data = _probe_full(file_path)
     for s in (data.get("streams") or []):
@@ -3630,25 +3621,6 @@ def analyze_source_video(source_path):
         "normalize_vf": normalize_vf,
         "face_transform": _face_transform,
     }
-
-
-def create_keyframed_source(source_path, keyframe_timestamps, work_dir):
-    unique_kf = sorted(set(round(t*1000)/1000 for t in keyframe_timestamps if t > 0))
-    kf_str = ",".join(str(t) for t in unique_kf)
-    keyframed_path = os.path.join(work_dir, "keyframed_source.mp4")
-    print(f"[ffmpeg] Forcing keyframes at {len(unique_kf)} cut points", flush=True)
-    run_ffmpeg([
-        "-y","-i",source_path,
-    ] + get_encode_args("lossless") + [
-        "-force_key_frames",kf_str,
-        "-r","30","-vsync","cfr","-pix_fmt","yuv420p",
-        "-c:a","copy",
-        keyframed_path,
-    ])
-    _kpd = _probe_full(keyframed_path)
-    _kvs = next((s for s in (_kpd.get("streams") or []) if s.get("codec_type") == "video"), {})
-    print(f"[DIAG] Keyframed source: codec={_kvs.get('codec_name')} dur={(_kpd.get('format') or {}).get('duration')}", flush=True)
-    return keyframed_path
 
 
 
@@ -3871,51 +3843,6 @@ def project_words_to_output(transcript, cuts, effective_durations, hook_offset=0
             projected = hook_words + projected
 
     return projected
-
-
-def _face_at(source_t, fp_list, fallback_cx=540):
-    """Return (cx, cy) at a source timestamp, or (None, None).
-    Shared helper for all face-aware caption styles.
-    """
-    if not fp_list or source_t is None:
-        return None, None
-    best = None
-    best_dt = float("inf")
-    for fp in fp_list:
-        if not fp.get("found"):
-            continue
-        dt = abs(float(fp.get("t", 0)) - source_t)
-        if dt < best_dt:
-            best_dt = dt
-            best = fp
-    if best and best_dt < 2.0:
-        return float(best.get("cx", fallback_cx)), float(best.get("cy", 0))
-    return None, None
-
-
-def _build_keyword_set(words, caption_keywords):
-    """Build a set of lowercase keyword strings for caption highlighting.
-    Shared helper for all caption styles that highlight keywords.
-    """
-    _kw_input = caption_keywords or []
-    if isinstance(_kw_input, str):
-        _kw_input = _kw_input.split()
-    elif not isinstance(_kw_input, (list, tuple)):
-        _kw_input = []
-    keyword_set = set(re.sub(r"[.,!?;:'\"\\]", "", str(k).lower()) for k in _kw_input)
-    if not keyword_set:
-        _sentence_words = []
-        for wd in words:
-            _w_clean = re.sub(r"[.,!?;:'\"\\]", "", str(wd.get("word") or "").lower())
-            _sentence_words.append(_w_clean)
-            _ends_sent = bool(re.search(r"[.!?]$", str(wd.get("word") or "")))
-            if _ends_sent or wd == words[-1]:
-                if _sentence_words:
-                    _best = max(_sentence_words, key=len)
-                    if len(_best) >= 4:
-                        keyword_set.add(_best)
-                _sentence_words = []
-    return keyword_set
 
 def prepare_remotion_input(
     words, caption_style, output_res, caption_keywords, work_dir,
@@ -4570,60 +4497,6 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15, v
     return final_clips, set(removed_indices)
 
 
-def snap_sfx_to_word(sfx_entry, deepgram_words):
-    """
-    Snap a sound effect to the exact timestamp of a spoken word using Deepgram.
-
-    Args:
-        sfx_entry: dict with "t" (approx timestamp), "sound", and optionally "word"
-        deepgram_words: list of {"word": str, "start": float, "end": float, "punctuated_word": str}
-
-    Returns:
-        float: the exact source timestamp to place the sound, or the original "t" as fallback
-    """
-    target_word = str(sfx_entry.get("word") or "").strip().lower()
-    approx_t = float(sfx_entry.get("t") or 0.0)
-
-    if not deepgram_words:
-        return approx_t
-
-    # Strategy 1: Find the exact word near the approximate timestamp
-    if target_word:
-        # Search for the word within ±3 seconds of the approximate timestamp
-        candidates = []
-        for w in deepgram_words:
-            w_text = str(w.get("punctuated_word") or w.get("word") or "").strip().lower()
-            w_text_clean = w_text.strip(".,!?;:'\"")
-            w_start = float(w.get("start") or 0)
-
-            if w_text_clean == target_word or target_word in w_text_clean:
-                distance = abs(w_start - approx_t)
-                if distance < 3.0:
-                    candidates.append({"start": w_start, "distance": distance, "word": w_text})
-
-        if candidates:
-            # Pick the closest match to the approximate timestamp
-            best = min(candidates, key=lambda c: c["distance"])
-            return best["start"]
-
-    # Strategy 2: No word match found — snap to the nearest word boundary
-    # Find the word whose start time is closest to the approximate timestamp
-    nearest = None
-    nearest_dist = float("inf")
-    for w in deepgram_words:
-        w_start = float(w.get("start") or 0)
-        dist = abs(w_start - approx_t)
-        if dist < nearest_dist:
-            nearest_dist = dist
-            nearest = w_start
-
-    if nearest is not None and nearest_dist < 1.0:
-        return nearest
-
-    # Strategy 3: Nothing close — use the original timestamp
-    return approx_t
-
-
 def build_clip_time_map(clip_start, clip_end, clip_speed, speed_curve, fps=30):
     """Build a canonical per-frame time map for one clip.
 
@@ -4817,144 +4690,6 @@ def compute_effective_durations(cuts, speed_curve=None, fps=30):
         tm = build_clip_time_map(src_start, src_end, clip_speed, speed_curve, fps=fps)
         durations.append(tm["effective_duration"])
     return durations
-
-
-def mix_sfx_after_speed_curve(output_path, edit_plan, cuts, effective_durations, work_dir):
-    """
-    Mix sound effects into the final video AFTER the speed curve has been applied.
-    Uses -c:v copy so the video stream is not re-encoded.
-    Timestamps are projected from source time to final output time.
-    """
-    clip_ranges = get_output_clip_ranges(cuts, effective_durations)
-    parsed_sfx = list(edit_plan.get("_parsed_sound_effects", []))
-    hook_offset = float(edit_plan.get("_hook_offset") or 0.0)
-    speech_segments = (edit_plan.get("analysis_data") or {}).get("speech", {}).get("segments") or []
-
-    if not parsed_sfx:
-        print("[sfx] No sound effects to mix", flush=True)
-        return
-
-    sfx_entries = []
-    for sfx in parsed_sfx:
-        sound_style = normalize_sfx_style(sfx.get("sound") or "none")
-        if sound_style == "none":
-            continue
-        sound_path = get_sfx_path(sound_style)
-        if not sound_path:
-            continue
-
-        raw_t = float(sfx.get("t") or 0.0)
-        word = str(sfx.get("word") or "")
-        is_auto = sfx.get("_auto", False)
-
-        if is_auto:
-            final_t = max(0.0, hook_offset + raw_t)
-            sfx_entries.append({
-                "sound": sfx.get("sound", "click"),
-                "path": get_sfx_path(normalize_sfx_style(sfx.get("sound", "click"))),
-                "source_t": raw_t,
-                "final_t": final_t,
-            })
-            if sfx_entries[-1]["path"]:
-                print(f"[sfx] auto {sfx.get('sound')}: output={final_t:.3f}s (text overlay)", flush=True)
-            else:
-                sfx_entries.pop()
-            continue
-
-        if word == "scene_change":
-            nearest_boundary = raw_t
-            for cr in clip_ranges:
-                for edge in [float(cr["start"]), float(cr["end"])]:
-                    if abs(edge - raw_t) < abs(nearest_boundary - raw_t) or nearest_boundary == raw_t:
-                        if abs(edge - raw_t) < 2.0:
-                            nearest_boundary = edge
-            source_t = nearest_boundary
-            if source_t != raw_t:
-                print(f"[sfx] Snapped transition sound to clip boundary: {raw_t:.3f}s → {source_t:.3f}s", flush=True)
-        else:
-            deepgram_words = edit_plan.get("_deepgram_words", [])
-            source_t = snap_sfx_to_word(sfx, deepgram_words)
-            if source_t != raw_t:
-                print(
-                    f"[sfx] Snapped {sfx.get('sound')} from {raw_t:.3f}s to {source_t:.3f}s (word='{word}')",
-                    flush=True,
-                )
-
-        # Step 1: Project source time → pre-speed-curve output time (accounts for tightening)
-        pre_sc_t = project_source_time_to_output(source_t, cuts, clip_ranges, edit_plan.get("_parsed_speed_curve"))
-        if pre_sc_t is None:
-            print(f"[sfx] {sound_style} at source={source_t:.3f}s — could not project, skipping", flush=True)
-            continue
-
-        final_t = hook_offset + pre_sc_t
-        final_t = max(0.0, final_t)
-
-        sfx_entries.append({
-            "sound": sound_style,
-            "path": sound_path,
-            "source_t": source_t,
-            "final_t": final_t,
-        })
-        print(
-            f"[sfx] {sound_style}: source={source_t:.3f}s → tightened={pre_sc_t:.3f}s → final={final_t:.3f}s",
-            flush=True,
-        )
-
-    if not sfx_entries:
-        print("[sfx] No valid sound effects after projection", flush=True)
-        return
-
-    input_args = ["-i", output_path]
-    filter_parts = []
-    labels = []
-
-    for i, entry in enumerate(sfx_entries):
-        input_args += ["-i", entry["path"]]
-        offset_ms = round(entry["final_t"] * 1000)
-        label = f"[sfx{i}]"
-        _vol = get_sfx_volume(entry["sound"], entry["final_t"], speech_segments, is_text_overlay=False)
-        filter_parts.append(
-            f"[{i + 1}:a]volume={_vol:.3f},adelay={offset_ms}|{offset_ms}{label}"
-        )
-        labels.append(label)
-
-    n_inputs = len(labels) + 1
-    all_inputs = "[0:a]" + "".join(labels)
-    filter_parts.append(
-        f"{all_inputs}amix=inputs={n_inputs}:duration=first:dropout_transition=0:normalize=0[mixed]"
-    )
-
-    filter_complex = ";".join(filter_parts)
-
-    temp_output = os.path.join(work_dir, "sfx_mixed.mp4")
-    cmd = [
-        "ffmpeg", "-threads", "0", "-y",
-        *input_args,
-        "-filter_complex", filter_complex,
-        "-map", "0:v", "-map", "[mixed]",
-        "-c:v", "copy",
-        "-c:a", "aac", "-b:a", "192k",
-        "-movflags", "+faststart",
-        temp_output,
-    ]
-
-    print(f"[sfx] Mixing {len(sfx_entries)} sound effect(s) into final video...", flush=True)
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-
-    if result.returncode != 0:
-        print(f"[sfx] Mix failed: {result.stderr[-300:]}", flush=True)
-        print("[sfx] Keeping video without sound effects", flush=True)
-        if os.path.exists(temp_output):
-            os.remove(temp_output)
-        return
-
-    if not validate_output(temp_output, "sfx_mix"):
-        if os.path.exists(temp_output):
-            os.remove(temp_output)
-        return
-
-    os.replace(temp_output, output_path)
-    print("[sfx] Sound effects mixed successfully", flush=True)
 
 
 def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, work_dir, speech_segments=None,
