@@ -5961,11 +5961,18 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 print(f"[broll] Built {len(_broll_overlays)} timeline overlay(s) — will slice across segments as needed", flush=True)
 
     # ── Compute frame ranges per segment (for per-segment Remotion renders) ──
-    # Use the unified source fps so caption frame count matches video frame count.
+    # Frame count MUST match the VIDEO frame count, which is source_duration *
+    # source_fps (since there's no fps= filter — setpts only relabels timestamps
+    # without dropping or duplicating frames). Previously this used effective_duration
+    # which is the OUTPUT duration after speed scaling — producing fewer PNGs than
+    # video frames on sped-up segments. The mismatch caused eof_action=repeat to
+    # show a stale caption frame at the end of each segment, flashing at concat
+    # boundaries when the next segment's fresh caption frame appeared.
     _seg_frame_ranges = []
     _frame_cursor = 0
     for _si in range(n):
-        _frame_count = max(1, round(effective_durations[_si] * source_fps))
+        _seg_source_dur = float(render_cuts[_si]["source_end"]) - float(render_cuts[_si]["source_start"])
+        _frame_count = max(1, round(_seg_source_dur * source_fps))
         _seg_frame_ranges.append((_frame_cursor, _frame_cursor + _frame_count - 1))
         _frame_cursor += _frame_count
 
