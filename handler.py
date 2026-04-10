@@ -5866,25 +5866,20 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _slice_dur = _slice_end - _slice_start
             _local_start = _slice_start - _seg_out_start
             _slice_seek = _br["seek_point"] + (_slice_start - _ov_start)
-            _ov_total_dur = _ov_end - _ov_start
-            _ov_total_frames = max(1, round(_ov_total_dur * source_fps))
-            _frame_offset_in_overlay = round((_slice_start - _ov_start) * source_fps)
-            _kbz = 0.08
-            _kbp = f"min((n+{_frame_offset_in_overlay})/{_ov_total_frames}\\,1.0)"
-            _kbs = f"({_kbp}*{_kbp}*(3-2*{_kbp}))"
-            _kbd = _br.get("ken_burns_dir", "zoom_in")
-            _epw = round(1080 * _kbz)
-            _eph = round(1920 * _kbz)
-            _cx, _cy = _kb_crop_exprs(_kbd, _kbs, _epw, _eph)
 
+            # No Ken Burns on b-roll. Pexels clips have their own camera
+            # movement baked in. Ken Burns added a frame-dependent smoothstep
+            # crop that recalculated per-segment, causing crop coordinate
+            # discontinuities at every segment boundary (visible as flashing
+            # with 80+ micro-segments from speed curve densification).
+            # Simple center-crop to 1080x1920 is clean and consistent.
             _extra_inputs += ["-i", _br["path"]]
             _bv = f"bv{_bi_emitted}"
             _filter_parts.append(
                 f"[{_extra_idx}:v]trim=start={_slice_seek:.3f}:duration={_slice_dur:.3f},"
                 f"setpts=PTS-STARTPTS,"
-                f"scale=w='trunc(1080*(1.0+{_kbz})/2)*2':h='trunc(1920*(1.0+{_kbz})/2)*2'"
-                f":force_original_aspect_ratio=increase:flags=lanczos,"
-                f"crop=1080:1920:x={_cx}:y={_cy},"
+                f"scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos,"
+                f"crop=1080:1920,"
                 f"setsar=1,eq=saturation=0.92:contrast=1.02,"
                 f"setpts=PTS-STARTPTS[{_bv}]"
             )
