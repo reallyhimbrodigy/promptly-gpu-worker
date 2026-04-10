@@ -4787,13 +4787,8 @@ def split_clips_at_speed_keypoints(cuts, speed_curve):
             sub_start = boundaries[si]
             sub_end = boundaries[si + 1]
 
-            # Skip sub-clips shorter than 3 frames
-            if sub_end - sub_start < 0.1:
-                if si > 0 and expanded:
-                    expanded[-1]["source_end"] = sub_end
-                    if si == len(boundaries) - 2:
-                        expanded[-1]["transition_out"] = cut.get("transition_out", "none")
-                continue
+            if sub_end - sub_start < 0.001:
+                continue  # skip zero-length clips (floating point edge case)
 
             sub_cut = dict(cut)
             sub_cut["source_start"] = round(sub_start, 3)
