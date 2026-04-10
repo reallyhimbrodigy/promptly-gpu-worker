@@ -6149,10 +6149,15 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 f"setpts=PTS-STARTPTS[{_bv}]"
             )
             if _local_start < 0.01:
+                # Continuation slice: b-roll starts at segment boundary.
+                # eof_action=repeat keeps the last b-roll frame visible if
+                # the trim runs out 1 frame before the segment ends (VFR PTS gap).
                 _filter_parts.append(
-                    f"{_video_label}[{_bv}]overlay=0:0:eof_action=pass[bov{_bi_emitted}]"
+                    f"{_video_label}[{_bv}]overlay=0:0:eof_action=repeat[bov{_bi_emitted}]"
                 )
             else:
+                # First slice: b-roll starts mid-segment, needs enable gate.
+                # eof_action=pass so the overlay disappears when the b-roll ends.
                 _filter_parts.append(
                     f"{_video_label}[{_bv}]overlay=0:0:eof_action=pass:enable='between(t,{_local_start:.3f},{_local_start + _slice_dur:.3f})'[bov{_bi_emitted}]"
                 )
