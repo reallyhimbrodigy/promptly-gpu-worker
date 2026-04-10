@@ -4906,6 +4906,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     _cap_kw = edit_plan.get("caption_keywords") or []
     _total_render_dur = sum(effective_durations)
+    # Remotion's durationInFrames must match the total SOURCE frame count
+    # (not effective), because _seg_frame_ranges uses source durations so
+    # that every video frame gets a corresponding caption PNG.
+    _total_source_dur = sum(float(rc["source_end"]) - float(rc["source_start"]) for rc in render_cuts)
     _vibe = str(edit_plan.get("_user_vibe") or edit_plan.get("notes") or "")
     _emphasis_moments_raw = edit_plan.get("emphasis_moments") or []
 
@@ -4937,7 +4941,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _projected_words, caption_style,
             {"width": 1080, "height": 1920},
             _cap_kw, work_dir,
-            total_duration=_total_render_dur, fps=source_fps,
+            total_duration=_total_source_dur, fps=source_fps,
             cuts=_cuts_for_remotion,
             emphasis_moments=_emphasis_moments,
             vibe=_vibe,
