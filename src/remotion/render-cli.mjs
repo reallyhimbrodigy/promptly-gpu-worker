@@ -61,6 +61,7 @@ const input = {
   effects: raw.effects || [],
   cuts: raw.cuts || [],
   emphasisMoments: raw.emphasisMoments || raw.emphasis_moments || [],
+  textOverlays: raw.textOverlays || [],
   width: raw.width || 1080,
   height: raw.height || 1920,
   fps: raw.fps || 30,

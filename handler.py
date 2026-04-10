@@ -3800,9 +3800,9 @@ def densify_speed_curve(speed_curve, max_intermediates=50, min_step=0.10):
             # Ramp's share of the budget, proportional to its speed delta
             share = (r["delta"] / total_delta) * max_intermediates
             # n_steps = share + 1 (since we add (n_steps - 1) intermediates)
-            n_steps = max(2, round(share) + 1)
-            # Clamp by min_step so we don't create micro-clips smaller than 100ms
-            n_steps_time = max(2, int(r["gap"] / min_step))
+            n_steps = max(4, round(share) + 1)
+            # Clamp by min_step so we don't create micro-clips smaller than min_step
+            n_steps_time = max(4, int(r["gap"] / min_step))
             r["n_steps"] = min(n_steps, n_steps_time)
 
     # Third pass: emit the densified curve
