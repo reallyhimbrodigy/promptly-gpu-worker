@@ -1418,7 +1418,7 @@ Global parameters:
 
   To hold a speed: place two keypoints at the same speed value, one at the start and one at the end of the section you want held constant.
 
-  To change speed: place the end-of-hold keypoint and the new-speed keypoint 0.4–1.2 seconds apart. This close pair creates a smooth, intentional ramp between the two speeds.
+  To change speed: place the end-of-hold keypoint and the new-speed keypoint 0.4–1.2 seconds apart. The gap between these two keypoints MUST be at least 0.4 seconds — the pipeline interpolates linearly between them, and gaps shorter than 0.4s produce audible audio artifacts instead of a smooth ramp. If the nearest word boundary is less than 0.4s away, move the target keypoint further out until the gap is at least 0.4s.
 
   Every speed change needs a ramp pair. Every held section needs matching start and end keypoints. The full curve alternates: hold fast → ramp down → hold slow → ramp up → hold fast. Each transition is a pair of close keypoints. Each held section is a pair of matching keypoints.
 
