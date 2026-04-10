@@ -4907,7 +4907,13 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 _projected_words = _deduped
 
     _cap_kw = edit_plan.get("caption_keywords") or []
-    _total_render_dur = sum(effective_durations)
+    # Compute total render duration from per-segment frame counts (not raw sum
+    # of effective_durations) so Remotion's durationInFrames exactly matches
+    # the total frames requested in _seg_frame_ranges. Without this, rounding
+    # each segment's frame count independently can accumulate to more frames
+    # than round(total_duration * fps), causing frame range overflow.
+    _total_seg_frames = sum(max(1, round(ed * source_fps)) for ed in effective_durations)
+    _total_render_dur = _total_seg_frames / source_fps
     _vibe = str(edit_plan.get("_user_vibe") or edit_plan.get("notes") or "")
     _emphasis_moments_raw = edit_plan.get("emphasis_moments") or []
 
