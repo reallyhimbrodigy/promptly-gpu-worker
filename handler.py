@@ -1651,6 +1651,8 @@ B-roll — stock footage cutaways that show what the speaker is describing. B-ro
 
   B-roll plays at the same speed as the underlying video. If you place b-roll on a section you've sped up to 1.3x, the viewer sees only ~1.9 seconds of a 2.5-second b-roll. Place b-roll on held-speed sections of your speed curve so the duration plays at face value. Placing b-roll during a speed ramp causes the clip to change speed mid-playback, which looks wrong.
 
+  Each b-roll clip must describe a visually distinct scene. Two clips about the same subject (both about shaving, both about driving) will return the same stock footage, which looks like a production error. Every keyword should depict a different scene from a different part of the story.
+
   Every clip must include a "reason" field: one sentence explaining why this moment, this duration, and this keyword.
 
   broll_clips: [

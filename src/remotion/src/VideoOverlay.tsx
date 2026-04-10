@@ -22,13 +22,9 @@ const TextOverlayElement: React.FC<{
 
   if (currentTime < overlay.start || currentTime > overlay.end) return null;
 
-  const elapsed = currentTime - overlay.start;
-  const remaining = overlay.end - currentTime;
-  const fadeIn = 0.15;
-  const fadeOut = 0.15;
-  let opacity = 1;
-  if (elapsed < fadeIn) opacity = elapsed / fadeIn;
-  if (remaining < fadeOut) opacity = Math.min(opacity, remaining / fadeOut);
+  // No fade — text appears and disappears instantly. Fades on short
+  // hook sub-clips caused visible flashing at segment boundaries.
+  const opacity = 1;
 
   const isTitle = overlay.style === "title";
   const isCta = overlay.style === "cta";
