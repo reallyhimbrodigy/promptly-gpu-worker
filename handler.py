@@ -1356,10 +1356,7 @@ The ending matters. On these platforms, videos auto-loop. A clean ending that fl
   HOOK CLIP:
   The hook is the single most important part of any short-form video. It plays FIRST before the full video.
 
-  Pick the PUNCHLINE or REACTION — the moment of maximum emotional intensity. NOT the setup, NOT the buildup. The hook should be the payoff that makes the viewer think "WAIT WHAT" and need to see how it got there.
-
-  Example: If the story builds to "who the fuck is Stelius?" — THAT is the hook. Not "shouldn't kiss uncle Stelios" (that's setup).
-  Example: If someone reveals a number — the NUMBER is the hook, not the question before it.
+  Pick the PUNCHLINE or REACTION — the moment of maximum emotional intensity. NOT the setup, NOT the buildup. The hook should be the payoff that makes the viewer think "WAIT WHAT" and need to see how it got there. Always pick the climax or reveal, never the question or context that leads to it.
 
   The hook MUST:
   - Be 1-3 seconds max
@@ -1395,13 +1392,7 @@ Word-level edit control:
 
   CONTEXT-DEPENDENT (you decide based on the sentence):
   - "like", "so", "basically", "you know", "I mean", "right", "literally", "actually", "honestly", "obviously", "just", "really", "kind of", "sort of"
-  - These CAN be filler or content depending on context:
-    - "I was like walking down the street" → "like" is FILLER, remove it
-    - "I like this color" → "like" is CONTENT, keep it
-    - "So basically what happened was" → "so basically" is FILLER, remove both
-    - "So here's the plan" → "so" is CONTENT (sentence opener), keep it
-    - "You know what I mean?" → "you know" is CONTENT (question), keep it
-    - "And then, you know, he just left" → "you know" is FILLER, remove it
+  - These words are filler when they add no meaning and could be removed without changing the sentence. They are content when they serve a grammatical or semantic purpose (comparison, question, verb). You understand language — use that understanding to decide.
 
   ALSO REMOVE:
   - Silence gaps longer than 0.5 seconds — mark with start/end time ranges. Gaps under 0.5s are auto-collapsed by the pipeline.
@@ -1585,46 +1576,33 @@ Sound effects — audio accents that make the edit feel physical and professiona
 
   Available sounds and WHEN to use each:
 
-  boom — deep cinematic impact. Use for the biggest moments in the video — the jaw-drop statements, the shocking reveals, the mic-drop lines.
-    Example: "they offered me TWO MILLION dollars" → boom on "million"
-    Example: "she should be crying" (vindicated speaker) → boom on "crying" (this is a mic-drop, not sadness)
+  boom — deep cinematic impact. Use for the biggest moments in the video — jaw-drop statements, shocking reveals, mic-drop lines. Place on the single word that carries the most weight in the moment.
 
-  hit — sharp dramatic impact. Use for strong statements that need punctuation but aren't THE moment.
-    Example: "I kicked the bed" → hit on "kicked"
+  hit — sharp dramatic impact. Use for strong statements that need punctuation but aren't THE biggest moment. A notch below boom in intensity.
 
-  drum_roll — snare drum roll building to a cymbal crash. The crash is the moment that lands on your trigger word; the system automatically schedules the file early so the build precedes the word. Use for genuine dramatic buildup — a big number reveal, a winner being chosen, a life-changing announcement. Not for regular transitions or mild emphasis.
-    Example: "and the winner is... SARAH" → drum_roll on "sarah" (the crash hits on her name)
+  drum_roll — snare drum roll building to a cymbal crash. The crash lands on your trigger word; the system starts the file early automatically. Use for genuine dramatic buildup before a big reveal, announcement, or life-changing number. Not for regular transitions or mild emphasis.
 
-  reverse — backward sweep sound. Use when the story literally reverses, rewinds, or someone says "wait, back up" or "let me rewind." Also works for sudden stops where the energy cuts dead.
-    Example: "wait wait wait, let me start over" → reverse on "wait"
+  reverse — backward sweep sound. Use when the story literally reverses or rewinds, or for sudden stops where energy cuts dead.
 
-  ching — cash register. Use ONLY when money, profit, sales, or financial success is literally mentioned.
-    Example: "I made TEN THOUSAND dollars" → ching on "thousand"
+  ching — cash register. Use ONLY when money, profit, sales, or financial success is literally mentioned. The trigger word must be the money-related word itself.
 
-  ding — bright notification chime. Use ONLY when a DEVICE produces a notification — a phone ringing, a text arriving, an email pinging, a voicemail alert. The trigger word must be the device action itself ("texted", "called", "voicemail", "notification"), NOT a person delivering a message in person. A secretary walking into an office is NOT a notification. A phone going to voicemail IS.
-    Example: "she texted me at 3am" → ding on "texted"
-    Example: "I'd let it go to voicemail" → ding on "voicemail"
-    WRONG: "the secretary came into my office" → NOT ding. A person walking in is not a device notification.
+  ding — bright notification chime. Use ONLY when a DEVICE produces a notification — a phone ringing, a text arriving, an email pinging, a voicemail alert. The trigger word must be the device action word ("texted", "called", "voicemail", "notification"). A human delivering a message in person is NOT a device notification and should NEVER get a ding.
 
-  pop — satisfying pop. Use ONLY when something visually pops up on screen — a text overlay appearing, an image appearing, a graphic appearing. Not for speech emphasis.
+  pop — satisfying pop. Use ONLY when something visually pops up on screen — a text overlay appearing, a graphic appearing. Not for speech emphasis.
 
   click — mouse/button click. Use when something is selected, decided, or confirmed.
 
-  camera_shutter — camera shutter click. Use ONLY when someone is visibly taking a photo on screen OR says "I took a picture" (literally took a photo). NOT for "picture this" or metaphorical usage.
+  camera_shutter — camera shutter click. Use ONLY when someone is visibly taking a photo on screen or literally describes taking a photo. Not for metaphorical usage like "picture this."
 
-  sad_trombone — the classic "wah-wah-wah" comedic failure sound. Use ONLY when the speaker is describing a lighthearted, clearly comedic failure that THEY find funny. The speaker's tone must be playful or self-deprecating, NOT genuinely upset, NOT angry, NOT vindicated. This is a COMEDY sound — it trivializes the moment.
-    CORRECT: "I tried to flip the pancake and it landed on the floor" → sad_trombone (funny failure, speaker is laughing)
-    CORRECT: "I asked her out and she said 'who are you?'" → sad_trombone (comedic rejection, speaker finds it funny)
-    WRONG: "She's crying" (speaker caught cheating wife) → NOT sad_trombone. Speaker is vindicated/satisfied, not experiencing comedic failure.
-    WRONG: "I lost my job" (genuinely devastated) → NOT sad_trombone. Real pain, not comedy.
+  sad_trombone — comedic failure sound. Use ONLY when the speaker is describing a lighthearted failure that THEY find funny. The speaker's tone must be playful or self-deprecating. NEVER use when the speaker is genuinely upset, angry, vindicated, or in pain. This sound trivializes the moment — only place it where trivializing is the intended comedic effect.
 
-  typing — keyboard typing sounds. Use when someone is visibly typing on screen (phone or keyboard) OR says "I typed" / "I texted" (literally typed something). Also fits for caption styles with letter-by-letter typing animation.
+  typing — keyboard typing sounds. Use when someone is visibly typing on screen or literally describes typing/texting something.
 
   whoosh_slow — smooth atmospheric whoosh. Use on scene transitions or topic changes.
 
   transition_smooth — gentle transition sound. Use with smooth visual transitions.
 
-  thunder — deep rolling thunder. Use for ominous, foreboding, scary, or trembling moments where something dark or threatening is happening or about to happen.
+  thunder — deep rolling thunder. Use for ominous, foreboding, or threatening moments where something dark is happening or about to happen.
 
   Transitions — the visual effect between two clips. Most cuts should be HARD CUTS (transition_out: "none") — they're fast, clean, and professional. Transitions are a tool, not decoration. Use them sparingly and with purpose.
 
@@ -1632,29 +1610,23 @@ Sound effects — audio accents that make the edit feel physical and professiona
 
   none — hard cut. DEFAULT. Use for 90%+ of cuts. Continuous speech flows best with silent hard cuts. Never add a transition just because you can.
 
-  fadewhite — brief white flash between clips. Use at major topic shifts or emotional resets. Feels like a camera flash or memory shift. 1-2 per video maximum.
-    Example: speaker finishes one story, starts a completely different one → fadewhite
+  fadewhite — brief white flash between clips. Use at major topic shifts or emotional resets. 1-2 per video maximum.
 
-  fadeblack — fade through black. Use for somber or serious tone shifts. Feels like a scene ending in a film.
-    Example: speaker delivers a heavy statement, then shifts to reflection → fadeblack
+  fadeblack — fade through black. Use for somber or serious tone shifts.
 
-  dissolve — cross-dissolve blend. Smooth overlap between clips. Use for dreamy, reflective, or nostalgic transitions.
-    Example: speaker reminisces about the past → dissolve
+  dissolve — cross-dissolve blend. Use for dreamy, reflective, or nostalgic transitions.
 
-  whip_left — fast wipe with motion blur sweeping left. High-energy, punchy. Use for comedic cuts, rapid topic changes, or "meanwhile" moments.
-    Example: "and then on the OTHER hand..." → whip_left
+  whip_left — fast wipe with motion blur sweeping left. High-energy, punchy. Use for comedic cuts, rapid topic changes.
 
-  whip_right — fast wipe with motion blur sweeping right. Same energy as whip_left but opposite direction. Alternate with whip_left if using multiple whip transitions.
+  whip_right — fast wipe with motion blur sweeping right. Same energy as whip_left but opposite direction. Alternate with whip_left if using multiple.
 
-  smoothleft / smoothright / smoothup / smoothdown — smooth directional slides. More subtle than whip transitions. Use for structured content where you're moving through a list or sequence.
-    Example: "first... second... third..." → smoothright between each point
+  smoothleft / smoothright / smoothup / smoothdown — smooth directional slides. More subtle than whips. Use for structured content moving through a list or sequence.
 
   wipeleft / wiperight / wipeup / wipedown — clean directional wipes without motion blur. More editorial, less energetic than whips. Good for interview-style content.
 
   flash — brief bright flash (more intense than fadewhite). Use for shock moments or dramatic reveals.
 
-  glitch — pixelated digital glitch effect. Use for tech content, internet culture, or when something "breaks" in the story.
-    Example: "the app completely crashed" → glitch
+  glitch — pixelated digital glitch effect. Use for tech content, internet culture, or when something breaks in the story.
 
   zoomin — zoom-in transition between clips. Use for escalation or "zooming in" on a topic.
 
@@ -1742,7 +1714,7 @@ B-roll — contextual stock footage overlays that illustrate what the speaker is
 
   === REASONING (REQUIRED) ===
 
-  Every b-roll clip must include a "reason" field explaining WHY you chose that moment, WHY that duration, and WHY that keyword. This forces you to think about each placement deliberately. Example: "Speaker says 'I was sitting in the coffee shop' at t=12.34s — perfect literal match, 2.5s covers the full phrase, calm 1.0x section of edit so duration plays at face value."
+  Every b-roll clip must include a "reason" field explaining WHY you chose that moment, WHY that duration, and WHY that keyword. This forces you to think about each placement deliberately.
 
   === SCHEMA ===
 
@@ -1756,8 +1728,7 @@ Visual effects — additional visual treatments for emphasis moments.
     {{"type": "white_flash", "t": <source seconds>}}
   ]
 
-  white_flash — a brief brightness spike (like a camera flash) at a specific moment. Use at the peak of a high-intensity emphasis moment to make it hit harder visually. Maximum 1-2 per video.
-    Example: speaker delivers the punchline → white_flash at that exact moment
+  white_flash — a brief brightness spike at the peak of a high-intensity emphasis moment. Makes the moment hit harder visually. Maximum 1-2 per video.
 
   Rules:
   - Use sparingly — 0-2 per video maximum.
