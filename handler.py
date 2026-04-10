@@ -1424,28 +1424,32 @@ Global parameters:
   SPEED UP (1.2x-1.4x): Setup, context, buildup, transitions between story beats.
   SLOW DOWN (0.67x-0.8x): Punchlines, reveals, shocking statements, emotional peaks.
 
-  THE RAMP:
-  A speed ramp is a SHORT transition between two held speeds. The pipeline
-  linearly interpolates between adjacent keypoints, so the time between any
-  two keypoints IS the ramp duration. Long gaps between keypoints produce
-  slow drifty speed changes that feel boring and amateur.
+  HOW THE SPEED CURVE WORKS (you MUST understand this):
+  The pipeline linearly interpolates between adjacent keypoints. If you place a keypoint at t=5 with speed 1.3 and the next keypoint at t=15 with speed 0.7, the system will GRADUALLY change speed from 1.3 to 0.7 over those 10 seconds. It will NOT hold at 1.3 and then jump to 0.7. Every pair of adjacent keypoints creates a smooth ramp between them.
 
-  A speed ramp is a SHORT transition (0.4–1.2 seconds) between two held speeds.
+  This means: to HOLD a speed for a section of the video, you need TWO keypoints at the SAME speed — one at the start and one at the end of the hold. To CHANGE speed, you place the end-of-hold keypoint and the start-of-new-speed keypoint close together (0.4–1.2 seconds apart). That close pair IS the ramp.
 
-  CORRECT pattern: each speed change is a PAIR of keypoints placed close together.
-  The first keypoint of the pair holds the previous speed; the second keypoint
-  sets the new speed. Between pairs, the speed HOLDS at whatever value the most
-  recent keypoint set.
+  Every speed change requires TWO keypoints close together forming a ramp pair:
+  1. A HOLD keypoint — same speed as the section before it, placed at the moment you want the ramp to BEGIN
+  2. A TARGET keypoint — the new speed, placed 0.4–1.2 seconds after the hold keypoint
 
-  CRITICAL: every keypoint speed MUST be either slowed down (0.67x-0.8x) or sped
-  up (1.2x-1.4x). NEVER use 1.0x — the video should never play at normal speed.
-  Speed ramping means the entire video is either fast or slow at every moment.
+  Between ramp pairs, you MUST have two keypoints at the same speed to create a held section. A single keypoint alone does NOTHING useful — it just creates a long gradual drift to/from the neighboring keypoints.
 
-  Place each keypoint at the exact word where the speed should be at that target
-  value. Use the Deepgram word timestamps to hit the exact right word.
+  Structure for a speed-ramped video:
+  - Start with a keypoint at the opening speed
+  - HOLD that speed with a second keypoint at the same speed where you want the first ramp to begin
+  - RAMP to the new speed with a keypoint 0.4–1.2 seconds later at the target speed
+  - HOLD the new speed with another keypoint at the same speed where you want the next ramp
+  - Repeat for each speed change
+  - End with a keypoint at the final speed
 
-  Aim for 8-14 keypoints total for a 60-second video — that's 3-5 "ramp pairs"
-  plus the held sections in between.
+  NEVER place a single keypoint at a new speed without a preceding hold keypoint. That creates a long gradual drift instead of a deliberate speed change.
+
+  Speed values: NEVER use 1.0x. Every section is either sped up (1.2x-1.4x) or slowed down (0.67x-0.8x). Speed ramping means the entire video alternates between fast and slow.
+
+  Place each keypoint at the exact word timestamp from the Deepgram word list. Use 3+ decimal places.
+
+  Aim for 10-16 keypoints for a 60-second video — that's 3-5 ramp pairs plus the held sections between them.
 
   Speed range: 0.67x to 1.4x. Slow moments MUST land on spoken words, never on silence.
 
