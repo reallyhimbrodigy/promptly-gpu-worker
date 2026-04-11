@@ -2306,7 +2306,7 @@ RULES FOR USING THESE TIMESTAMPS:
             # Gemini sends, making render time predictable. Steeper ramps
             # get more sub-steps where smoothness matters most.
             _gemini_kp_count = len(speed_curve)
-            speed_curve = densify_speed_curve(speed_curve, max_intermediates=250, min_step=0.02)
+            speed_curve = densify_speed_curve(speed_curve, max_intermediates=150, min_step=0.04)
             if len(speed_curve) > _gemini_kp_count:
                 print(
                     f"[speed-curve] Densified {_gemini_kp_count} Gemini keypoints → "
