@@ -4630,12 +4630,19 @@ def build_setpts_from_time_map(tm, log=False):
 
 def project_source_time_to_output(source_t, cuts, clip_ranges, speed_curve=None, clip_time_maps=None):
     """Map a source-timeline timestamp to the output-timeline timestamp.
-    Uses canonical time maps when available for exact alignment with FFmpeg.
+    Uses canonical time maps for exact alignment with FFmpeg.
+
+    clip_time_maps is REQUIRED — it contains the combined clip_speed *
+    curve_speed used by FFmpeg's setpts. Without it, the projection
+    would use cut["speed"] (always 1.0 when speed_curve is active),
+    ignoring the speed curve entirely and placing b-roll/SFX late.
 
     When a hook clip duplicates a source range at the start of the timeline,
     multiple cuts can contain the same source timestamp. We prefer the LAST
     (narrative) match so that b-roll, SFX, and emphasis moments land at the
     correct narrative position rather than the hook preview position."""
+    if not clip_time_maps:
+        raise ValueError("project_source_time_to_output requires clip_time_maps")
     best_output_t = None
     for i, cut in enumerate(cuts):
         src_start = float(cut["source_start"])
@@ -4643,11 +4650,7 @@ def project_source_time_to_output(source_t, cuts, clip_ranges, speed_curve=None,
 
         if src_start <= source_t <= src_end:
             source_offset = source_t - src_start
-            if clip_time_maps and i < len(clip_time_maps):
-                local_offset = _time_map_lookup(clip_time_maps[i], source_offset)
-            else:
-                speed = max(0.25, float(cut.get("speed") or 1.0))
-                local_offset = source_offset / speed
+            local_offset = _time_map_lookup(clip_time_maps[i], source_offset)
             best_output_t = float(clip_ranges[i]["start"]) + local_offset
 
     if best_output_t is not None:
@@ -4901,6 +4904,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # uses the same timeline as the actual render (not the pre-split approximation)
     edit_plan["_render_cuts"] = render_cuts
     edit_plan["_render_effective_durations"] = effective_durations
+    edit_plan["_render_clip_time_maps"] = _clip_time_maps
 
     _caption_pngs = []
     caption_style = str(edit_plan.get("caption_style") or "none").lower()
@@ -6602,6 +6606,7 @@ def handler(job):
             cuts,
             effective_durations,
             speed_curve,
+            clip_time_maps=edit_plan.get("_render_clip_time_maps"),
         )
         if cover_frame_ts is None:
             cover_frame_ts = min(1.0, max(0.1, final_dur - 0.1))
