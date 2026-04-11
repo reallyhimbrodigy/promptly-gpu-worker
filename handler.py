@@ -3768,7 +3768,7 @@ def get_speed_for_timestamp(t, speed_curve):
     return current
 
 
-def project_words_to_output(transcript, cuts, effective_durations, hook_offset=0.0, hook_clip=None, speed_curve=None, transition_duration=None, clip_time_maps=None, removed_word_indices=None):
+def project_words_to_output(transcript, cuts, effective_durations, hook_offset=0.0, hook_clip=None, speed_curve=None, transition_duration=None, clip_time_maps=None, removed_word_indices=None, fps=30.0):
     """Project word timestamps from source to output timeline using canonical time maps.
 
     If removed_word_indices is provided, words at those indices are excluded.
@@ -3811,9 +3811,11 @@ def project_words_to_output(transcript, cuts, effective_durations, hook_offset=0
                 "_source_start": max(ws, c_start),
             })
         dur = effective_durations[i] if i < len(effective_durations) else (c_end - c_start)
-        # Stream-copy concat — segments do not overlap. Cursor advances by
-        # the full effective duration. See get_output_clip_ranges() docstring.
-        output_cursor = output_cursor + dur
+        # Snap cursor to frame boundaries so word timestamps live on the
+        # SAME quantized timeline as Remotion's frame ranges and FFmpeg's
+        # segment durations. Without this, raw float accumulation drifts
+        # from the integer-frame accumulation over 100+ segments.
+        output_cursor = round((output_cursor + dur) * fps) / fps
 
     projected = [w for w in projected if w["end"] > w["start"]]
     if hook_offset > 0:
@@ -4900,6 +4902,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             transition_duration=TRANSITION_DURATION,
             clip_time_maps=_clip_time_maps,
             removed_word_indices=edit_plan.get("_removed_word_indices") or set(),
+            fps=source_fps,
         )
         if _projected_words:
             # Clean curly braces
@@ -5942,14 +5945,21 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 f"setpts=PTS-STARTPTS[{_bv}]"
             )
             if _local_start < 0.01:
+                # B-roll starts at segment beginning — no enable gate needed.
+                # eof_action=repeat holds the last b-roll frame if the trim
+                # runs short by a fraction of a frame (due to .3f formatting).
+                # Previously eof_action=pass caused 1-frame flashes at segment
+                # boundaries. Repeat is safe because Ken Burns was removed —
+                # the repeated frame has the same center-crop as the last real frame.
                 _filter_parts.append(
-                    f"{_video_label}[{_bv}]overlay=0:0:eof_action=pass[bov{_bi_emitted}]"
+                    f"{_video_label}[{_bv}]overlay=0:0:eof_action=repeat[bov{_bi_emitted}]"
                 )
             else:
-                # First slice: b-roll starts mid-segment, needs enable gate.
-                # eof_action=pass so the overlay disappears when the b-roll ends.
+                # B-roll starts mid-segment — enable gate windows it.
+                # eof_action=repeat holds the last frame within the enable
+                # window, preventing flash if trim is fractionally short.
                 _filter_parts.append(
-                    f"{_video_label}[{_bv}]overlay=0:0:eof_action=pass:enable='between(t,{_local_start:.3f},{_local_start + _slice_dur:.3f})'[bov{_bi_emitted}]"
+                    f"{_video_label}[{_bv}]overlay=0:0:eof_action=repeat:enable='between(t,{_local_start:.3f},{_local_start + _slice_dur:.3f})'[bov{_bi_emitted}]"
                 )
             _video_label = f"[bov{_bi_emitted}]"
             _extra_idx += 1
