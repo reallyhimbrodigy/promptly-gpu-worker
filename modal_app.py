@@ -152,19 +152,27 @@ secrets = [
 app = modal.App("promptly-gpu-worker", image=image, secrets=secrets)
 
 # ── Web endpoint ───────────────────────────────────────────────────────────────
-@app.function(
+@app.cls(
     timeout=600,          # 10 min — target <60s with H100 + max cores
     scaledown_window=120, # keep warm 2 min for back-to-back requests (avoid cold start)
     cpu=64,
     memory=131072,        # 128GB — headroom for parallel segment renders + Remotion Chrome tabs
     gpu="H100",           # H100 has fastest CPUs — bottleneck is filter_complex, not encoding
     region="us-west",     # colocate with Supabase (West US) for minimal network latency
+    concurrency_limit=1,
 )
-@modal.concurrent(max_inputs=1)
-@modal.fastapi_endpoint(method="POST")
-def run_job(body: dict):
-    import sys
-    sys.path.insert(0, "/")
-    from handler import handler as pipeline_handler
-    result = pipeline_handler({"input": body})
-    return result
+class PromptlyWorker:
+    @modal.enter()
+    def startup(self):
+        """Import handler at container startup, not per-request. Saves ~10-12s
+        of Python import overhead (opencv, numpy, google-genai, deepgram, etc.)
+        that was being paid on EVERY request even on warm containers."""
+        import sys
+        sys.path.insert(0, "/")
+        from handler import handler as _h
+        self._handler = _h
+
+    @modal.fastapi_endpoint(method="POST")
+    def run_job(self, body: dict):
+        result = self._handler({"input": body})
+        return result
