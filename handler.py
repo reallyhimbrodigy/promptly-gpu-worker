@@ -5944,23 +5944,16 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 f"setsar=1,eq=saturation=0.92:contrast=1.02,"
                 f"setpts=PTS-STARTPTS[{_bv}]"
             )
-            if _local_start < 0.01:
-                # B-roll starts at segment beginning — no enable gate needed.
-                # eof_action=repeat holds the last b-roll frame if the trim
-                # runs short by a fraction of a frame (due to .3f formatting).
-                # Previously eof_action=pass caused 1-frame flashes at segment
-                # boundaries. Repeat is safe because Ken Burns was removed —
-                # the repeated frame has the same center-crop as the last real frame.
-                _filter_parts.append(
-                    f"{_video_label}[{_bv}]overlay=0:0:eof_action=repeat[bov{_bi_emitted}]"
-                )
-            else:
-                # B-roll starts mid-segment — enable gate windows it.
-                # eof_action=repeat holds the last frame within the enable
-                # window, preventing flash if trim is fractionally short.
-                _filter_parts.append(
-                    f"{_video_label}[{_bv}]overlay=0:0:eof_action=repeat:enable='between(t,{_local_start:.3f},{_local_start + _slice_dur:.3f})'[bov{_bi_emitted}]"
-                )
+            # ALWAYS use an enable gate to window the overlay to the b-roll's
+            # actual duration within the segment. eof_action=repeat holds the
+            # last frame if the trim is fractionally short (prevents flash),
+            # and the enable gate turns off the overlay at the correct end
+            # time (prevents freeze). Without the gate on the _local_start<0.01
+            # path, eof_action=repeat froze the last b-roll frame for the
+            # remainder of the segment (visible as 3-4 second freeze).
+            _filter_parts.append(
+                f"{_video_label}[{_bv}]overlay=0:0:eof_action=repeat:enable='between(t,{_local_start:.3f},{_local_start + _slice_dur:.3f})'[bov{_bi_emitted}]"
+            )
             _video_label = f"[bov{_bi_emitted}]"
             _extra_idx += 1
             _bi_emitted += 1
