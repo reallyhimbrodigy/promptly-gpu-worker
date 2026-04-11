@@ -2357,8 +2357,6 @@ RULES FOR USING THESE TIMESTAMPS:
     edit_plan["hook_clip"] = hook_clip
     edit_plan["cuts"] = list(validated_cuts)
 
-    edit_plan["_hook_offset"] = 0.0
-
     # ── Parse emphasis moments ─────────────────────────────────────────────
     raw_emphasis = edit_plan.get("emphasis_moments", [])
     emphasis_moments = []
@@ -3768,7 +3766,7 @@ def get_speed_for_timestamp(t, speed_curve):
     return current
 
 
-def project_words_to_output(transcript, cuts, effective_durations, hook_offset=0.0, hook_clip=None, speed_curve=None, transition_duration=None, clip_time_maps=None, removed_word_indices=None, fps=30.0):
+def project_words_to_output(transcript, cuts, effective_durations, speed_curve=None, transition_duration=None, clip_time_maps=None, removed_word_indices=None, fps=30.0):
     """Project word timestamps from source to output timeline using canonical time maps.
 
     If removed_word_indices is provided, words at those indices are excluded.
@@ -3818,38 +3816,6 @@ def project_words_to_output(transcript, cuts, effective_durations, hook_offset=0
         output_cursor = round((output_cursor + dur) * fps) / fps
 
     projected = [w for w in projected if w["end"] > w["start"]]
-    if hook_offset > 0:
-        for w in projected:
-            w["start"] = round((w["start"] + hook_offset) * 1000) / 1000
-            w["end"] = round((w["end"] + hook_offset) * 1000) / 1000
-        print(f"[hook] Shifted caption timestamps by +{hook_offset:.2f}s for hook", flush=True)
-
-        if isinstance(hook_clip, dict):
-            hook_start = float(hook_clip.get("source_start") or 0.0)
-            hook_end = float(hook_clip.get("source_end") or 0.0)
-            hook_render_start = project_source_time_to_output(hook_start, cuts, clip_ranges, speed_curve, clip_time_maps=clip_time_maps)
-            hook_words = []
-            for word_idx, w in enumerate(words):
-                if word_idx in _removed:
-                    continue
-                ws = float(w.get("start") or 0)
-                we = float(w.get("end") or 0)
-                if ws >= hook_start and we <= hook_end:
-                    if hook_render_start is None:
-                        continue
-                    projected_start = project_source_time_to_output(ws, cuts, clip_ranges, speed_curve, clip_time_maps=clip_time_maps)
-                    projected_end = project_source_time_to_output(we, cuts, clip_ranges, speed_curve, clip_time_maps=clip_time_maps)
-                    if projected_start is None or projected_end is None:
-                        continue
-                    hook_words.append({
-                        "start": round((projected_start - hook_render_start) * 1000) / 1000,
-                        "end": round((projected_end - hook_render_start) * 1000) / 1000,
-                        "word": w.get("punctuated_word") or w.get("word") or "",
-                        "punctuated_word": w.get("punctuated_word") or w.get("word") or "",
-                        "speaker": int(w.get("speaker", 0) or 0),
-                    })
-            projected = hook_words + projected
-
     return projected
 
 def prepare_remotion_input(
@@ -4680,13 +4646,10 @@ def project_source_time_to_output(source_t, cuts, clip_ranges, speed_curve=None,
     return None
 
 
-def project_source_time_to_final_output(source_t, cuts, effective_durations, speed_curve=None, hook_offset=0.0, clip_time_maps=None):
+def project_source_time_to_final_output(source_t, cuts, effective_durations, speed_curve=None, clip_time_maps=None):
     """Map a source timestamp to the final output timeline after cut compression."""
     clip_ranges = get_output_clip_ranges(cuts, effective_durations)
-    pre_speed_t = project_source_time_to_output(source_t, cuts, clip_ranges, speed_curve, clip_time_maps=clip_time_maps)
-    if pre_speed_t is None:
-        return None
-    return pre_speed_t + hook_offset
+    return project_source_time_to_output(source_t, cuts, clip_ranges, speed_curve, clip_time_maps=clip_time_maps)
 
 
 def build_variable_speed_setpts(clip_start, clip_end, clip_speed, speed_curve, log=False, fps=30):
@@ -4717,8 +4680,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     print(f"[render] transition_duration={TRANSITION_DURATION:.2f}s (pacing={edit_plan.get('pacing')})", flush=True)
     original_cuts = list(cuts)
     render_cuts = list(cuts)
-    edit_plan["_hook_offset"] = 0.0
-
     hook_clip = edit_plan.get("hook_clip")
     if isinstance(hook_clip, dict):
         # Hook clips ALWAYS get tight zoom (slow_in) — this is the "grab attention"
@@ -4726,37 +4687,38 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         hook_zoom = "slow_in"
         edit_plan["_hook_zoom"] = hook_zoom
 
-        # Trim hook to start at speech — no dead air before first word in hook
         _hook_start = float(hook_clip.get("source_start") or 0.0)
         _hook_end = float(hook_clip.get("source_end") or 0.0)
-        if transcript and isinstance(transcript, dict):
-            _hook_words = transcript.get("words") or []
-            for _hw in _hook_words:
-                _hw_start = float(_hw.get("start") or 0)
-                _hw_end = float(_hw.get("end") or 0)
-                if _hw_start >= _hook_start - 0.05 and _hw_start <= _hook_end:
-                    # Found first word in hook range — start 0.1s before it
-                    _new_start = max(0.0, _hw_start - 0.10)
-                    if _new_start > _hook_start + 0.15:
-                        print(f"[hook] Trimmed hook start {_hook_start:.3f}→{_new_start:.3f} (speech at {_hw_start:.3f})", flush=True)
-                        _hook_start = _new_start
-                    break
 
-        render_cuts = [{
-            "source_start": _hook_start,
-            "source_end": _hook_end,
-            "zoom": hook_zoom,
-            "speed": 1.0,
-            "transition_out": "none",
-            "freeze_frame": False,
-            "_is_hook": True,
-        }] + render_cuts
-        # NOTE: the hook range CAN and SHOULD overlap main-timeline cuts.
-        # A hook is a teaser — its whole purpose is to preview a dramatic
-        # moment at the start, then play that same content again in narrative
-        # context later. The user expects to hear the line twice. Captions
-        # naturally show the line twice in sync with both occurrences, which
-        # is correct behavior.
+        # Build hook from NARRATIVE clips that overlap the hook's source range.
+        # This guarantees the hook is identical to the narrative: word removals,
+        # speed ramping, captions, and effects are all baked in. The old approach
+        # rendered one raw-source segment covering the full hook range, which
+        # included false starts and dead air that had been removed from the
+        # narrative clips.
+        _hook_clips = []
+        for _nc in render_cuts:
+            _nc_start = float(_nc["source_start"])
+            _nc_end = float(_nc["source_end"])
+            # Check overlap with hook range
+            _overlap_start = max(_nc_start, _hook_start)
+            _overlap_end = min(_nc_end, _hook_end)
+            if _overlap_end - _overlap_start > 0.05:
+                _hc = dict(_nc)
+                _hc["source_start"] = _overlap_start
+                _hc["source_end"] = _overlap_end
+                _hc["zoom"] = hook_zoom
+                _hc["transition_out"] = "none"
+                _hc["freeze_frame"] = False
+                _hc["_is_hook"] = True
+                _hook_clips.append(_hc)
+
+        if _hook_clips:
+            _hook_dur = sum(float(h["source_end"]) - float(h["source_start"]) for h in _hook_clips)
+            print(f"[hook] Built hook from {len(_hook_clips)} narrative clip(s) covering {_hook_dur:.2f}s", flush=True)
+            render_cuts = _hook_clips + render_cuts
+        else:
+            print(f"[hook] No narrative clips overlap hook range {_hook_start:.3f}-{_hook_end:.3f} — skipping hook", flush=True)
 
     # Tag each cut with its pre-split index so text overlays can map back
     # Hook clip(s) get _original_idx = -1; content clips get 0, 1, 2, ...
@@ -4873,15 +4835,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # to 1/30s accumulated ~1.2s of cumulative error by segment 69, causing
     # b-roll overlays to appear ~1.4s late in the rendered video.
     effective_durations = [tm["effective_duration"] for tm in _clip_time_maps]
-    # _hook_offset is structurally 0 in the current architecture: the hook is
-    # inlined into render_cuts at the front (see line 6345), so clip_ranges
-    # already accounts for the hook position. The legacy non-zero value was
-    # left over from when prepend_hook_clip post-prepended the hook to the
-    # output FILE — that path is no longer used (prepend_hook_clip is dead
-    # code). Adding a non-zero hook_offset on top of the inline-hook
-    # projection caused b-roll and thumbnail picks to land 2.6s late.
-    edit_plan["_hook_offset"] = 0.0
-    hook_offset = 0.0  # local alias — SFX code below reads this directly
     # Store render's split cuts and effective_durations so B-roll/SFX projection
     # uses the same timeline as the actual render (not the pre-split approximation)
     edit_plan["_render_cuts"] = render_cuts
@@ -4897,8 +4850,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     if caption_style != "none" and caption_style in _all_caption_styles and transcript.get("words"):
         _projected_words = project_words_to_output(
             transcript, render_cuts, effective_durations,
-            hook_offset=0.0,
-            hook_clip=None, speed_curve=speed_curve,
+            speed_curve=speed_curve,
             transition_duration=TRANSITION_DURATION,
             clip_time_maps=_clip_time_maps,
             removed_word_indices=edit_plan.get("_removed_word_indices") or set(),
@@ -5584,7 +5536,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _base_cuts = original_cuts
     _base_effective_durations = compute_effective_durations(_base_cuts, speed_curve) if _base_cuts else []
 
-    _running_sfx = hook_offset + (_base_effective_durations[0] if _base_effective_durations else 0.0)
+    _running_sfx = _base_effective_durations[0] if _base_effective_durations else 0.0
     _transition_times = []
     for _i in range(max(0, len(_base_cuts) - 1)):
         _transition = str(_base_cuts[_i].get("transition_out") or "none").lower()
@@ -5625,7 +5577,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         if not _sound_path:
             continue
         _onset = _SFX_ONSET_OFFSETS.get(_sfx_style, 0.0)
-        _ts = max(0.0, hook_offset + float(_clip_ranges_sfx[_clip_idx].get("start") or 0) + 0.02 - _onset)
+        _ts = max(0.0, float(_clip_ranges_sfx[_clip_idx].get("start") or 0) + 0.02 - _onset)
         _offset_ms = round(_ts * 1000)
         _vol = get_sfx_volume(_sfx_style, _ts, _speech_segs, is_text_overlay=True)
         sfx_input_args += ["-i", _sound_path]
@@ -5685,7 +5637,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _broll_overlays = []  # list of {path, out_start, out_end, seek_point, ken_burns_dir, keyword}
     if broll_fetch_futures:
         _broll_sc = edit_plan.get("_parsed_speed_curve")
-        _broll_hook_off = float(edit_plan.get("_hook_offset") or 0.0)
         _broll_files = {}
         for _fut in concurrent.futures.as_completed(broll_fetch_futures, timeout=30):
             _idx = broll_fetch_futures[_fut]
@@ -5704,7 +5655,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 _src_ts = float(_bc.get("timestamp") or 0)
                 _out_start = project_source_time_to_final_output(
                     _src_ts, render_cuts, effective_durations, _broll_sc,
-                    hook_offset=_broll_hook_off, clip_time_maps=_clip_time_maps,
+                    clip_time_maps=_clip_time_maps,
                 )
                 if _out_start is None or _out_start >= _seg_total_dur:
                     print(f"[broll] '{_bc.get('keyword')}' projected output time invalid — skipping", flush=True)
@@ -5953,11 +5904,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 f"setpts=PTS-STARTPTS{_broll_pts_offset}[{_bv}]"
             )
             # Enable gate windows the overlay to the b-roll's actual
-            # duration. eof_action=repeat holds the last frame if the
-            # trim is fractionally short (prevents flash). The PTS offset
-            # above ensures b-roll frames are available when the gate opens.
+            # duration. eof_action=pass shows the main video if the b-roll
+            # trim ends 1-2 frames early (invisible — same scene underneath).
+            # The PTS offset above ensures b-roll frames are available when
+            # the gate opens (prevents the old consumption/freeze bug).
             _filter_parts.append(
-                f"{_video_label}[{_bv}]overlay=0:0:eof_action=repeat:enable='between(t,{_local_start:.3f},{_local_start + _slice_dur:.3f})'[bov{_bi_emitted}]"
+                f"{_video_label}[{_bv}]overlay=0:0:eof_action=pass:enable='between(t,{_local_start:.3f},{_local_start + _slice_dur:.3f})'[bov{_bi_emitted}]"
             )
             _video_label = f"[bov{_bi_emitted}]"
             _extra_idx += 1
@@ -6588,7 +6540,6 @@ def handler(job):
             cuts,
             effective_durations,
             speed_curve,
-            hook_offset=float(edit_plan.get("_hook_offset") or 0.0),
         )
         if cover_frame_ts is None:
             cover_frame_ts = min(1.0, max(0.1, final_dur - 0.1))
