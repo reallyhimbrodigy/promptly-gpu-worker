@@ -5719,6 +5719,21 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                     continue
                 _local_path = _broll_files[_bi]
                 _src_ts = float(_bc.get("timestamp") or 0)
+                # DIAGNOSTIC: trace every match for this b-roll timestamp
+                _diag_clip_ranges = get_output_clip_ranges(render_cuts, effective_durations)
+                _diag_matches = []
+                for _di, _dc in enumerate(render_cuts):
+                    _ds = float(_dc["source_start"])
+                    _de = float(_dc["source_end"])
+                    if _ds <= _src_ts <= _de:
+                        _d_offset = _src_ts - _ds
+                        _d_local = _time_map_lookup(_clip_time_maps[_di], _d_offset)
+                        _d_out = float(_diag_clip_ranges[_di]["start"]) + _d_local
+                        _diag_matches.append(f"  cut[{_di}] src=[{_ds:.3f},{_de:.3f}] speed={_clip_time_maps[_di]['avg_speed']:.3f} offset={_d_offset:.3f} local={_d_local:.3f} range_start={_diag_clip_ranges[_di]['start']:.3f} → out={_d_out:.3f} hook={_dc.get('_is_hook', False)}")
+                if _diag_matches:
+                    print(f"[BROLL-DIAG] '{_bc.get('keyword','')[:40]}' src_ts={_src_ts:.3f} matches:", flush=True)
+                    for _dm in _diag_matches:
+                        print(f"[BROLL-DIAG] {_dm}", flush=True)
                 _out_start = project_source_time_to_final_output(
                     _src_ts, render_cuts, effective_durations, _broll_sc,
                     clip_time_maps=_clip_time_maps,
