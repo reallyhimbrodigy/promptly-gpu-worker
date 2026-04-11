@@ -1636,7 +1636,23 @@ B-roll — stock footage cutaways that show what the speaker is describing. B-ro
 
   The speaker's face is the most important visual during emotional beats, reveals, punchlines, and reactions. B-roll belongs on setup and context — the descriptive moments that establish a scene, not the dramatic moments that deliver the payoff. The hook clip is always the highest-impact moment in the video and must show the speaker's face — b-roll timestamps should only fall within the main body content, after the hook has played.
 
-  The keyword is a Pexels video search query. Describe what the CAMERA sees, not what the story is about. Stock footage is indexed by visual composition — what's in the frame, the motion, the environment. For "I got in the car and went to work," the camera sees highway traffic flowing at speed, dashboard lights, road lines blurring — NOT a man's face behind a steering wheel. For "she was sleeping," the camera sees white bedsheets, a dark bedroom, soft breathing motion — NOT a woman's face. For "he started calling me," the camera sees a phone screen lighting up with an incoming call notification — NOT a person holding a phone. Always describe the visual — the objects, the environment, the motion, the light — that makes the shot cinematic. A keyword should be 10-15 words describing what the lens captures.
+  The keyword is a Pexels video search query. Describe what the CAMERA LENS captures: the specific objects, textures, motion, and lighting in the frame. Stock footage is indexed by visual composition — not by story context. Be hyper-specific about what is physically visible.
+
+  Structure every keyword as: [specific subject] + [specific action or state] + [specific setting/surface] + [camera angle or framing] + [lighting or mood word]. The more concrete and physical the description, the better the Pexels match.
+
+  WRONG: "man shaving face close up cinematic" — too generic, returns random grooming clips.
+  RIGHT: "razor blade gliding through white shaving foam on jaw extreme close up" — specific object, action, texture, framing.
+
+  WRONG: "car driving fast on highway" — generic, returns aerial highway shots.
+  RIGHT: "dashboard POV headlights reflecting on wet highway at night motion blur" — specific POV, surface detail, lighting.
+
+  WRONG: "woman sleeping in bed" — generic, returns posed stock models.
+  RIGHT: "white bedsheets rising and falling dark bedroom soft morning light through curtains" — specific textures, motion, light.
+
+  WRONG: "smartphone incoming call notification" — generic, could return anything phone-related.
+  RIGHT: "phone screen glowing in dark room incoming call vibrating on wooden table" — specific surface, lighting, context.
+
+  Every keyword should be 12-18 words. Lead with the most visually distinctive element — the thing that makes THIS shot different from every other stock clip. Avoid generic words like "cinematic" or "beautiful" — they don't help search. Instead use specific textures (foam, glass, asphalt), specific light (golden hour, neon, overcast), and specific motion (sliding, trembling, flowing).
 
   Timing: the b-roll must be on screen BEFORE the viewer hears the relevant words, so the visual context is already established when the phrase lands. Place the timestamp at the first word of the sentence or clause that introduces the visual concept. The viewer should already be watching the b-roll by the time the descriptive words arrive. Use the exact `start` value from the Deepgram word list (3+ decimal places). End the b-roll in a gap between words — the cut back to the speaker should land between words, not mid-word. Prefer cutting in and out during natural micro-pauses in the speaker's rhythm.
 
