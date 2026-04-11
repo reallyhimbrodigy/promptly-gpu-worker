@@ -5887,26 +5887,31 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             print(f"[remotion-pool] Launching {len(_worker_procs)} workers "
                   f"({_pool_tabs_per_worker} tabs each) for {len(_pool_segments)} segments", flush=True)
 
-            # Wait for each worker and set events for its segments immediately
+            # Poll all workers and release segments as each finishes (not in order).
+            # Using threads to wait on each process so whichever finishes first
+            # releases its FFmpeg segments immediately.
             _total_frames = sum(s["frameEnd"] - s["frameStart"] + 1 for s in _pool_segments)
             _timeout = max(180, _total_frames * 0.3)
             _failures = []
-            for _bi, _batch, _proc in _worker_procs:
+            _failures_lock = threading.Lock()
+
+            def _wait_worker(_bi, _batch, _proc):
                 try:
                     _stdout, _stderr = _proc.communicate(timeout=_timeout)
                 except subprocess.TimeoutExpired:
                     _proc.kill()
                     _proc.communicate()
-                    _failures.append(f"worker {_bi} timed out")
-                    # Still set events so FFmpeg threads don't hang
+                    with _failures_lock:
+                        _failures.append(f"worker {_bi} timed out")
                     for _seg in _batch:
                         _seg_png_ready[_seg["_orig_idx"]].set()
-                    continue
+                    return
                 if _proc.returncode != 0:
-                    _failures.append(f"worker {_bi} failed (rc={_proc.returncode})")
+                    with _failures_lock:
+                        _failures.append(f"worker {_bi} failed (rc={_proc.returncode})")
                     for _seg in _batch:
                         _seg_png_ready[_seg["_orig_idx"]].set()
-                    continue
+                    return
                 if _stdout:
                     for _line in _stdout.strip().split("\n"):
                         if "All " in _line and "rendered in" in _line:
@@ -5921,6 +5926,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                         _num_part = _first.split("-")[1].split(".")[0]
                         _seg_overlay_meta[_oi] = (int(_num_part), len(_pngs), len(_num_part))
                     _seg_png_ready[_oi].set()
+
+            _wait_threads = []
+            for _bi, _batch, _proc in _worker_procs:
+                _wt = threading.Thread(target=_wait_worker, args=(_bi, _batch, _proc), daemon=True)
+                _wt.start()
+                _wait_threads.append(_wt)
+            for _wt in _wait_threads:
+                _wt.join(timeout=_timeout + 10)
 
             if _failures:
                 print(f"[remotion-pool] WARNINGS: {'; '.join(_failures)}", flush=True)
