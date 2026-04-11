@@ -5812,29 +5812,24 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     os.makedirs(_seg_dir, exist_ok=True)
 
     # Pool-based Remotion render: 10 long-lived workers, each handling ~5 segments
-    # by reusing a single Chrome browser via puppeteerInstance. Renders ALL segment
-    # PNGs upfront (in parallel), before the ffmpeg pool launches.
+    # by reusing a single Chrome browser via puppeteerInstance.
     #
-    # Why this is the right architecture (per data from prior failed experiments):
-    #   - 1-process batch (commit 15896b0): Chrome doesn't actually parallelize 32
-    #     tabs in a single process — total throughput dropped from 146 fps to 53 fps.
-    #   - Bumped semaphore to 12 (commit 3412f96): each process slowed by ~21% from
-    #     CPU oversubscription, eating the queue-depth savings.
-    #   - This pool: same 10 processes × ~4 tabs as the working baseline (no
-    #     oversubscription), but each process pays Chrome boot ONCE and then renders
-    #     multiple segments using the same browser. Boot waste drops from
-    #     ~150-180s of cumulative work (~15-18s wall) to ~30s (~3s wall).
+    # OVERLAPPED with FFmpeg: Remotion pool runs in a background thread. Each
+    # segment's FFmpeg waits on a per-segment Event for its PNGs to be ready.
+    # When a Remotion worker finishes its batch, all its segments' events are
+    # set immediately, letting those FFmpeg threads proceed while other workers
+    # are still rendering. This overlaps Remotion and FFmpeg, saving ~15s.
     _cpu_count = os.cpu_count() or 64
     _physical_cores = max(_cpu_count // 2, 1)
     _pool_workers = min(10, n)
     _pool_tabs_per_worker = max(2, _physical_cores // _pool_workers)
     _gl_mode = "angle-egl" if _HAS_HWACCEL else "swiftshader"
 
-    # Pre-rendered overlay metadata (start_num, count, digits) per segment.
-    # Filled BEFORE the ffmpeg pool launches; ffmpeg side reads from per-segment
-    # dirs as before — no shared-dir contention, no other behavior changes.
     _seg_overlay_meta = [None] * n
     _seg_overlay_dirs = [None] * n
+    _seg_png_ready = [threading.Event() for _ in range(n)]  # per-segment readiness
+
+    _remotion_bg_thread = None
     if _captions_enabled and _remotion_input_json:
         _pool_t0 = time.time()
         _pool_segments = []
@@ -5848,16 +5843,96 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 "outputDir": _odir,
                 "_orig_idx": _si,
             })
-        _meta_list = render_remotion_pool(
-            _remotion_input_json, _pool_segments,
-            num_workers=_pool_workers,
-            concurrency_per_worker=_pool_tabs_per_worker,
-            gl_mode=_gl_mode,
-        )
-        for _si, _meta in enumerate(_meta_list):
-            _seg_overlay_meta[_si] = _meta
-        print(f"[remotion-pool] Pool render complete in {time.time() - _pool_t0:.2f}s "
-              f"({_pool_workers} workers × {_pool_tabs_per_worker} tabs)", flush=True)
+
+        def _run_remotion_pool():
+            """Background thread: runs Remotion pool, sets per-segment events
+            incrementally as each worker batch completes."""
+            import glob as _glob_mod
+            _remotion_dir = "/remotion"
+            _render_batch = os.path.join(_remotion_dir, "render-batch.mjs")
+
+            # Distribute segments round-robin across workers
+            _n_workers = min(_pool_workers, len(_pool_segments))
+            _batches = [[] for _ in range(_n_workers)]
+            for _i, _seg in enumerate(_pool_segments):
+                _batches[_i % _n_workers].append(_seg)
+
+            for _seg in _pool_segments:
+                os.makedirs(_seg["outputDir"], exist_ok=True)
+
+            # Write batch JSON files and launch workers
+            _work_dir = os.path.dirname(_remotion_input_json)
+            _worker_procs = []
+            for _bi, _batch in enumerate(_batches):
+                if not _batch:
+                    continue
+                _bp = os.path.join(_work_dir, f"remotion_batch_{_bi:02d}.json")
+                with open(_bp, "w") as _f:
+                    json.dump([{"frameStart": s["frameStart"],
+                                "frameEnd": s["frameEnd"],
+                                "outputDir": s["outputDir"]} for s in _batch], _f)
+                _cmd = [
+                    "node", _render_batch,
+                    "--input", _remotion_input_json,
+                    "--segments", _bp,
+                    "--concurrency", str(_pool_tabs_per_worker),
+                    "--gl", _gl_mode,
+                ]
+                _proc = subprocess.Popen(
+                    _cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    text=True, cwd=_remotion_dir, start_new_session=True,
+                )
+                _worker_procs.append((_bi, _batch, _proc))
+
+            print(f"[remotion-pool] Launching {len(_worker_procs)} workers "
+                  f"({_pool_tabs_per_worker} tabs each) for {len(_pool_segments)} segments", flush=True)
+
+            # Wait for each worker and set events for its segments immediately
+            _total_frames = sum(s["frameEnd"] - s["frameStart"] + 1 for s in _pool_segments)
+            _timeout = max(180, _total_frames * 0.3)
+            _failures = []
+            for _bi, _batch, _proc in _worker_procs:
+                try:
+                    _stdout, _stderr = _proc.communicate(timeout=_timeout)
+                except subprocess.TimeoutExpired:
+                    _proc.kill()
+                    _proc.communicate()
+                    _failures.append(f"worker {_bi} timed out")
+                    # Still set events so FFmpeg threads don't hang
+                    for _seg in _batch:
+                        _seg_png_ready[_seg["_orig_idx"]].set()
+                    continue
+                if _proc.returncode != 0:
+                    _failures.append(f"worker {_bi} failed (rc={_proc.returncode})")
+                    for _seg in _batch:
+                        _seg_png_ready[_seg["_orig_idx"]].set()
+                    continue
+                if _stdout:
+                    for _line in _stdout.strip().split("\n"):
+                        if "All " in _line and "rendered in" in _line:
+                            print(f"[remotion-pool] worker {_bi}: {_line.strip()}", flush=True)
+                # Collect PNG metadata and signal each segment in this batch
+                for _seg in _batch:
+                    _odir = _seg["outputDir"]
+                    _oi = _seg["_orig_idx"]
+                    _pngs = sorted(_glob_mod.glob(os.path.join(_odir, "element-*.png")))
+                    if _pngs:
+                        _first = os.path.basename(_pngs[0])
+                        _num_part = _first.split("-")[1].split(".")[0]
+                        _seg_overlay_meta[_oi] = (int(_num_part), len(_pngs), len(_num_part))
+                    _seg_png_ready[_oi].set()
+
+            if _failures:
+                print(f"[remotion-pool] WARNINGS: {'; '.join(_failures)}", flush=True)
+            print(f"[remotion-pool] Pool render complete in {time.time() - _pool_t0:.2f}s "
+                  f"({_pool_workers} workers × {_pool_tabs_per_worker} tabs)", flush=True)
+
+        _remotion_bg_thread = threading.Thread(target=_run_remotion_pool, daemon=True)
+        _remotion_bg_thread.start()
+    else:
+        # No captions — mark all segments as ready immediately
+        for _ev in _seg_png_ready:
+            _ev.set()
 
     # Timing instrumentation: capture per-segment phase timings so we can
     # see where the render time is actually going (Remotion wait vs Remotion
@@ -5867,7 +5942,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _seg_timings_lock = threading.Lock()
 
     def _run_one_segment(seg_idx):
-        """Run Remotion render (if captions) then FFmpeg for one segment. Returns output path."""
+        """Wait for Remotion PNGs then run FFmpeg for one segment. Returns output path."""
         _t_start = time.time()
         _t_start_offset = _t_start - _par_t0
         _t_remotion_wait = 0.0
@@ -5877,8 +5952,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _seg_out = os.path.join(_seg_dir, f"seg_{seg_idx:03d}.mkv")
         _eff_dur = effective_durations[seg_idx]
 
-        # Phase 1: Pre-rendered Remotion overlays (rendered upfront by worker pool).
-        # Each segment still has its own per-segment dir, so ffmpeg side is unchanged.
+        # Phase 1: Wait for this segment's Remotion PNGs (rendered by background pool).
+        # The event is set as soon as the Remotion worker handling this segment's
+        # batch completes. Fast batches release their segments immediately while
+        # slower batches are still rendering — this is the overlap.
+        _seg_png_ready[seg_idx].wait(timeout=300)
+        _t_remotion_wait = time.time() - _t_start
         _seg_overlay_dir = _seg_overlay_dirs[seg_idx]
         _seg_png_start_num = 0
         _seg_png_digits = 6
@@ -6040,6 +6119,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         for _fut in concurrent.futures.as_completed(_seg_futures):
             _si = _seg_futures[_fut]
             _seg_paths[_si] = _fut.result()
+    # Ensure Remotion background thread is fully done before proceeding
+    if _remotion_bg_thread is not None:
+        _remotion_bg_thread.join(timeout=10)
     _par_elapsed = time.time() - _par_t0
     print(f"[render] All {n} segments rendered in {_par_elapsed:.1f}s (parallel)", flush=True)
 
