@@ -4788,34 +4788,51 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     input_args = []
     sample_rate = probe_audio_sample_rate(source_path) or 48000
 
-    # Bridge speed curve gaps: when content removal creates a gap between clips,
-    # a speed ramp can span the gap. The ramp's transition happens in invisible
-    # content, so the viewer sees a speed step at the clip boundary. Fix: insert
-    # a keypoint at each clip's source_start with the speed that was in effect
-    # at the previous clip's source_end. This compresses the full ramp into the
-    # visible portion — the densifier will smoothstep from the bridge keypoint
-    # to the next real keypoint, producing a smooth audible ramp.
+    # Shift speed ramps that span removed-content gaps into the tail of the
+    # preceding clip. When Gemini places a slow-down ramp (e.g., 1.3→0.75)
+    # across dead air, the entire ramp is invisible. The viewer hears a hard
+    # step at the clip boundary. Fix: for speed DECREASES across gaps, move
+    # the ramp into the last ~0.4s of the preceding clip. The deceleration
+    # plays on the final spoken words before the cut — exactly what a human
+    # editor would do. Speed INCREASES across gaps need no fix (a hard
+    # speed-up at a visual cut is natural).
     if speed_curve and isinstance(speed_curve, list) and len(speed_curve) >= 2 and len(render_cuts) >= 2:
-        _bridge_added = 0
+        _ramps_shifted = 0
         for _bi in range(1, len(render_cuts)):
+            _prev_start = float(render_cuts[_bi - 1]["source_start"])
             _prev_end = float(render_cuts[_bi - 1]["source_end"])
             _curr_start = float(render_cuts[_bi]["source_start"])
             _gap = _curr_start - _prev_end
-            if _gap > 0.05:  # meaningful gap (removed content)
-                _speed_at_prev_end = get_speed_for_timestamp(_prev_end, speed_curve)
-                _speed_at_curr_start = get_speed_for_timestamp(_curr_start, speed_curve)
-                if abs(_speed_at_prev_end - _speed_at_curr_start) > 0.03:
-                    # Insert bridge keypoint so ramp starts from the right speed
-                    speed_curve.append({"t": round(_curr_start, 3), "speed": round(_speed_at_prev_end, 4)})
-                    _bridge_added += 1
-        if _bridge_added > 0:
+            if _gap < 0.05:
+                continue
+            _speed_at_prev_end = get_speed_for_timestamp(_prev_end, speed_curve)
+            _speed_at_curr_start = get_speed_for_timestamp(_curr_start, speed_curve)
+            _delta = _speed_at_curr_start - _speed_at_prev_end
+            if _delta >= -0.03:
+                continue  # speed increase or negligible — skip
+            # Speed decrease across gap: shift ramp into preceding clip tail
+            _prev_dur = _prev_end - _prev_start
+            _ramp_dur = min(0.4, _prev_dur * 0.3)
+            if _ramp_dur < 0.08:
+                continue  # clip too short for a ramp
+            _ramp_start = round(_prev_end - _ramp_dur, 3)
+            _target_speed = _speed_at_curr_start
+            # Remove existing densified keypoints in the ramp zone so we
+            # don't create duplicates or conflicts
+            speed_curve = [kp for kp in speed_curve
+                           if not (_ramp_start < float(kp["t"]) <= _prev_end)]
+            # Insert smoothstep-eased ramp (8 steps)
+            _n_steps = 8
+            for _si in range(_n_steps + 1):
+                _frac = _si / _n_steps
+                _smooth = _frac * _frac * (3.0 - 2.0 * _frac)
+                _t = _ramp_start + _frac * _ramp_dur
+                _s = _speed_at_prev_end + (_target_speed - _speed_at_prev_end) * _smooth
+                speed_curve.append({"t": round(_t, 3), "speed": round(_s, 4)})
+            _ramps_shifted += 1
+        if _ramps_shifted > 0:
             speed_curve.sort(key=lambda x: float(x["t"]))
-            # Do NOT re-densify — the curve is already densified with smooth
-            # ramps. The bridge keypoints just need to exist as split points
-            # so the splitter starts the sub-clip at the correct speed.
-            # Re-densifying an already-dense curve explodes keypoint count
-            # (115 → 1285 → 616 sub-clips of 3ms each).
-            print(f"[speed-curve] Inserted {_bridge_added} bridge keypoint(s) at clip gaps ({len(speed_curve)} total)", flush=True)
+            print(f"[speed-curve] Shifted {_ramps_shifted} ramp(s) into preceding clip tails ({len(speed_curve)} keypoints)", flush=True)
 
     # Split clips at speed curve keypoints so each sub-clip has near-constant speed.
     # This is the root fix for audio/video sync — constant-average audio matches video.
