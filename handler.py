@@ -4772,6 +4772,32 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     input_args = []
     sample_rate = probe_audio_sample_rate(source_path) or 48000
 
+    # Bridge speed curve gaps: when content removal creates a gap between clips,
+    # a speed ramp can span the gap. The ramp's transition happens in invisible
+    # content, so the viewer sees a speed step at the clip boundary. Fix: insert
+    # a keypoint at each clip's source_start with the speed that was in effect
+    # at the previous clip's source_end. This compresses the full ramp into the
+    # visible portion — the densifier will smoothstep from the bridge keypoint
+    # to the next real keypoint, producing a smooth audible ramp.
+    if speed_curve and isinstance(speed_curve, list) and len(speed_curve) >= 2 and len(render_cuts) >= 2:
+        _bridge_added = 0
+        for _bi in range(1, len(render_cuts)):
+            _prev_end = float(render_cuts[_bi - 1]["source_end"])
+            _curr_start = float(render_cuts[_bi]["source_start"])
+            _gap = _curr_start - _prev_end
+            if _gap > 0.05:  # meaningful gap (removed content)
+                _speed_at_prev_end = get_speed_for_timestamp(_prev_end, speed_curve)
+                _speed_at_curr_start = get_speed_for_timestamp(_curr_start, speed_curve)
+                if abs(_speed_at_prev_end - _speed_at_curr_start) > 0.03:
+                    # Insert bridge keypoint so ramp starts from the right speed
+                    speed_curve.append({"t": round(_curr_start, 3), "speed": round(_speed_at_prev_end, 4)})
+                    _bridge_added += 1
+        if _bridge_added > 0:
+            speed_curve.sort(key=lambda x: float(x["t"]))
+            # Re-densify with the bridge keypoints included
+            speed_curve = densify_speed_curve(speed_curve, max_intermediates=150, min_step=0.04)
+            print(f"[speed-curve] Inserted {_bridge_added} bridge keypoint(s) at clip gaps, re-densified to {len(speed_curve)}", flush=True)
+
     # Split clips at speed curve keypoints so each sub-clip has near-constant speed.
     # This is the root fix for audio/video sync — constant-average audio matches video.
     render_cuts = split_clips_at_speed_keypoints(render_cuts, speed_curve)
