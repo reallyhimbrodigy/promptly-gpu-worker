@@ -159,7 +159,6 @@ app = modal.App("promptly-gpu-worker", image=image, secrets=secrets)
     memory=131072,        # 128GB — headroom for parallel segment renders + Remotion Chrome tabs
     gpu="H100",           # H100 has fastest CPUs — bottleneck is filter_complex, not encoding
     region="us-west",     # colocate with Supabase (West US) for minimal network latency
-    concurrency_limit=1,
 )
 class PromptlyWorker:
     @modal.enter()
