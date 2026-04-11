@@ -4810,9 +4810,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                     _bridge_added += 1
         if _bridge_added > 0:
             speed_curve.sort(key=lambda x: float(x["t"]))
-            # Re-densify with the bridge keypoints included
-            speed_curve = densify_speed_curve(speed_curve, max_intermediates=150, min_step=0.04)
-            print(f"[speed-curve] Inserted {_bridge_added} bridge keypoint(s) at clip gaps, re-densified to {len(speed_curve)}", flush=True)
+            # Do NOT re-densify — the curve is already densified with smooth
+            # ramps. The bridge keypoints just need to exist as split points
+            # so the splitter starts the sub-clip at the correct speed.
+            # Re-densifying an already-dense curve explodes keypoint count
+            # (115 → 1285 → 616 sub-clips of 3ms each).
+            print(f"[speed-curve] Inserted {_bridge_added} bridge keypoint(s) at clip gaps ({len(speed_curve)} total)", flush=True)
 
     # Split clips at speed curve keypoints so each sub-clip has near-constant speed.
     # This is the root fix for audio/video sync — constant-average audio matches video.
