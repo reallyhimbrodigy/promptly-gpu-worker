@@ -5936,21 +5936,26 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             # Simple center-crop to 1080x1920 is clean and consistent.
             _extra_inputs += ["-i", _br["path"]]
             _bv = f"bv{_bi_emitted}"
+            # Offset the b-roll's PTS by _local_start so its timestamps
+            # align with the main video's timeline at the overlay point.
+            # Without this, the b-roll starts at PTS=0 but the overlay's
+            # enable gate doesn't open until t=_local_start. FFmpeg's
+            # overlay consumes b-roll frames trying to sync to the main
+            # video's PTS, exhausting the b-roll before the gate opens.
+            # eof_action=repeat then freezes the last frame.
+            _broll_pts_offset = f"+{_local_start:.3f}" if _local_start >= 0.01 else ""
             _filter_parts.append(
                 f"[{_extra_idx}:v]trim=start={_slice_seek:.3f}:duration={_slice_dur:.3f},"
                 f"setpts=PTS-STARTPTS,"
                 f"scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos,"
                 f"crop=1080:1920,"
                 f"setsar=1,eq=saturation=0.92:contrast=1.02,"
-                f"setpts=PTS-STARTPTS[{_bv}]"
+                f"setpts=PTS-STARTPTS{_broll_pts_offset}[{_bv}]"
             )
-            # ALWAYS use an enable gate to window the overlay to the b-roll's
-            # actual duration within the segment. eof_action=repeat holds the
-            # last frame if the trim is fractionally short (prevents flash),
-            # and the enable gate turns off the overlay at the correct end
-            # time (prevents freeze). Without the gate on the _local_start<0.01
-            # path, eof_action=repeat froze the last b-roll frame for the
-            # remainder of the segment (visible as 3-4 second freeze).
+            # Enable gate windows the overlay to the b-roll's actual
+            # duration. eof_action=repeat holds the last frame if the
+            # trim is fractionally short (prevents flash). The PTS offset
+            # above ensures b-roll frames are available when the gate opens.
             _filter_parts.append(
                 f"{_video_label}[{_bv}]overlay=0:0:eof_action=repeat:enable='between(t,{_local_start:.3f},{_local_start + _slice_dur:.3f})'[bov{_bi_emitted}]"
             )
