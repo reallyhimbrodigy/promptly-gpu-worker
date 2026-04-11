@@ -3813,7 +3813,7 @@ def project_words_to_output(transcript, cuts, effective_durations, hook_offset=0
         dur = effective_durations[i] if i < len(effective_durations) else (c_end - c_start)
         # Stream-copy concat — segments do not overlap. Cursor advances by
         # the full effective duration. See get_output_clip_ranges() docstring.
-        output_cursor = round((output_cursor + dur)*1000)/1000
+        output_cursor = output_cursor + dur
 
     projected = [w for w in projected if w["end"] > w["start"]]
     if hook_offset > 0:
@@ -4664,7 +4664,7 @@ def project_source_time_to_output(source_t, cuts, clip_ranges, speed_curve=None,
             else:
                 speed = max(0.25, float(cut.get("speed") or 1.0))
                 local_offset = source_offset / speed
-            best_output_t = round((float(clip_ranges[i]["start"]) + local_offset) * 1000) / 1000
+            best_output_t = float(clip_ranges[i]["start"]) + local_offset
 
     if best_output_t is not None:
         return best_output_t
@@ -4684,7 +4684,7 @@ def project_source_time_to_final_output(source_t, cuts, effective_durations, spe
     pre_speed_t = project_source_time_to_output(source_t, cuts, clip_ranges, speed_curve, clip_time_maps=clip_time_maps)
     if pre_speed_t is None:
         return None
-    return round((pre_speed_t + hook_offset) * 1000) / 1000
+    return pre_speed_t + hook_offset
 
 
 def build_variable_speed_setpts(clip_start, clip_end, clip_speed, speed_curve, log=False, fps=30):
@@ -5912,14 +5912,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # segment's own output-time window [seg_out_start, seg_out_end].
         _seg_out_start = _seg_starts[seg_idx]
         _seg_out_end = _seg_out_start + _eff_dur
-        _BROLL_EPS = 0.001  # 1ms tolerance for boundary equality
+        _BROLL_MIN_DUR = 1.5 / source_fps  # minimum 1.5 frames — shorter slices produce zero frames and flash
         _bi_emitted = 0
         for _br in _broll_overlays:
             _ov_start = _br["out_start"]
             _ov_end = _br["out_end"]
             _slice_start = max(_ov_start, _seg_out_start)
             _slice_end = min(_ov_end, _seg_out_end)
-            if _slice_end - _slice_start <= _BROLL_EPS:
+            if _slice_end - _slice_start <= _BROLL_MIN_DUR:
                 continue
             _slice_dur = _slice_end - _slice_start
             _local_start = _slice_start - _seg_out_start
