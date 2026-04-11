@@ -1518,7 +1518,7 @@ Emphasis moments — THE MOST IMPORTANT PART OF YOUR EDIT. These are the 2-5 mom
   IMPORTANT: Choose word_indices that point to a SINGLE powerful word (1-2 words max) for high-intensity moments. "SKEPTIC", "RESULT", "EDITING", "SAVED" — short, punchy words that look dramatic when displayed large. Do NOT pick long phrases.
 
   Every video MUST have at least 3 emphasis_moments. Most have 4-6. These moments are what separate a professional edit from a raw upload.
-  Space high-intensity emphasis moments at least 3 seconds apart — rapid-fire zooms look jarring and cheap, not dramatic.
+  Space ALL emphasis moments (high AND medium) at least 4 seconds apart. Each emphasis triggers a zoom punch — when two land within 3 seconds, the viewer sees rapid-fire zooming that looks broken, not dramatic. Check every emphasis moment's timestamp against the previous one before finalizing.
 
   caption_keywords — list of words that should be visually emphasized in captions (larger, colored). These are auto-derived from emphasis_moments word_indices, but you can add extra keywords here for words that should stand out even outside emphasis moments.
 
@@ -2306,7 +2306,7 @@ RULES FOR USING THESE TIMESTAMPS:
             # Gemini sends, making render time predictable. Steeper ramps
             # get more sub-steps where smoothness matters most.
             _gemini_kp_count = len(speed_curve)
-            speed_curve = densify_speed_curve(speed_curve, max_intermediates=150, min_step=0.03)
+            speed_curve = densify_speed_curve(speed_curve, max_intermediates=250, min_step=0.02)
             if len(speed_curve) > _gemini_kp_count:
                 print(
                     f"[speed-curve] Densified {_gemini_kp_count} Gemini keypoints → "
@@ -3711,9 +3711,9 @@ def densify_speed_curve(speed_curve, max_intermediates=50, min_step=0.10):
             # Ramp's share of the budget, proportional to its speed delta
             share = (r["delta"] / total_delta) * max_intermediates
             # n_steps = share + 1 (since we add (n_steps - 1) intermediates)
-            n_steps = max(4, round(share) + 1)
+            n_steps = max(12, round(share) + 1)
             # Clamp by min_step so we don't create micro-clips smaller than min_step
-            n_steps_time = max(4, int(r["gap"] / min_step))
+            n_steps_time = max(12, int(r["gap"] / min_step))
             r["n_steps"] = min(n_steps, n_steps_time)
 
     # Third pass: emit the densified curve using smoothstep (ease-in-out)
@@ -4051,8 +4051,8 @@ def get_output_clip_ranges(cuts, effective_durations, transition_duration=None):
     cursor = 0.0
     for i, cut in enumerate(cuts):
         dur   = effective_durations[i] if i < len(effective_durations) else 0.0
-        start = round(cursor * 1000) / 1000
-        end   = round((cursor + dur) * 1000) / 1000
+        start = cursor
+        end   = cursor + dur
         ranges.append({"start": start, "end": end})
         cursor = end
     return ranges
@@ -5085,6 +5085,27 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _has_dense_trajectory = len(dense_face_trajectory) > 0
     n_segment_inputs = len(render_cuts)  # each segment gets its own input
 
+    # Precompute per-original-cut metadata so sub-clips from the same
+    # parent cut share continuous zoom (no per-subclip reset).
+    # _orig_cut_info[orig_idx] = {"total_source_dur": float, "source_start": float}
+    # _subclip_frame_offset[i] = frame offset of sub-clip i within its parent cut
+    _orig_cut_info = {}
+    for _oi, _oc in enumerate(render_cuts):
+        _oidx = _oc.get("_original_idx", _oi)
+        _oc_dur = float(_oc["source_end"]) - float(_oc["source_start"])
+        if _oidx not in _orig_cut_info:
+            _orig_cut_info[_oidx] = {"total_source_dur": 0.0, "source_start": float(_oc["source_start"])}
+        _orig_cut_info[_oidx]["total_source_dur"] += _oc_dur
+
+    _subclip_frame_offset = []
+    _orig_frame_cursor = {}
+    for _oi, _oc in enumerate(render_cuts):
+        _oidx = _oc.get("_original_idx", _oi)
+        _offset = _orig_frame_cursor.get(_oidx, 0)
+        _subclip_frame_offset.append(_offset)
+        _oc_dur = float(_oc["source_end"]) - float(_oc["source_start"])
+        _orig_frame_cursor[_oidx] = _offset + max(1, round(_oc_dur * source_fps))
+
     for i, cut in enumerate(render_cuts):
         start = float(cut["source_start"])
         end = float(cut["source_end"])
@@ -5120,11 +5141,19 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
         eff_dur = effective_durations[i]
         fps = source_fps
-        # total_frames is the OUTPUT frame count, which without fps= filter
-        # equals the SOURCE frame count (setpts only relabels timestamps).
-        # Source frame count = round(source_dur * source_fps).
-        _seg_source_dur = float(cut["source_end"]) - float(cut["source_start"])
-        total_frames = max(1, round(_seg_source_dur * source_fps))
+        # Use the ORIGINAL cut's total source duration for zoom, not the
+        # sub-clip's. After speed-curve splitting, sub-clips are 20-250ms.
+        # Using the sub-clip's frame count would complete a full Ken Burns
+        # zoom in 30ms, then reset on the next sub-clip — causing rapid
+        # zoom flickering. The original cut's duration gives a smooth,
+        # continuous zoom across all its sub-clips.
+        _orig_idx = cut.get("_original_idx", i)
+        _orig_info = _orig_cut_info.get(_orig_idx)
+        _orig_total_dur = _orig_info["total_source_dur"] if _orig_info else (float(cut["source_end"]) - float(cut["source_start"]))
+        total_frames = max(1, round(_orig_total_dur * source_fps))
+        # Frame offset: where this sub-clip starts within the original cut's
+        # zoom expression. Zoom uses (n + offset) so it's continuous.
+        _zoom_frame_offset = _subclip_frame_offset[i]
         MIN_ZOOM_FRAMES = max(1, round(3.0 * source_fps))  # ~3 seconds, scaled to source fps
         if zoom != "none" and total_frames < MIN_ZOOM_FRAMES:
             zoom_scale_factor = total_frames / MIN_ZOOM_FRAMES
@@ -5135,7 +5164,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # 2-camera simulation: alternate between wide (100%) and tight (115%) per cut.
         # Tight cuts get a static 15% zoom (instant crop, face-centered) + subtle drift.
         # Wide cuts get subtle 4-5% Ken Burns drift. Research: 115% is standard reframe.
-        _is_tight_cut = (i % 2 == 1) and zoom not in ("cut_zoom",) and not cut.get("_is_broll") and not cut.get("_is_hook")
+        # Use _original_idx so sub-clips from the same parent cut share the same camera angle.
+        _is_tight_cut = (_orig_idx % 2 == 1) and zoom not in ("cut_zoom",) and not cut.get("_is_broll") and not cut.get("_is_hook")
         _base_zoom_max = 1.14 if has_burned_captions else 1.14  # 14% drift — visible Ken Burns for Captions-level energy
 
         # ── Face-tracked zoom ──────────────────────────────────────────
@@ -5288,7 +5318,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             Falls back to simple start/end interpolation otherwise.
             reverse=True: start at face, drift to center (for slow_out).
             """
-            _t = f"min(n/{tf_val}\\,1.0)"
+            # Use (n+offset) so sub-clips from the same parent cut have
+            # continuous zoom/pan instead of resetting at each sub-clip boundary.
+            _nvar = f"(n+{_zoom_frame_offset})" if _zoom_frame_offset > 0 else "n"
+            _t = f"min({_nvar}/{tf_val}\\,1.0)"
             progress = f"(1.0-{_t})" if reverse else _t
 
             if _use_dense_pan and len(_clip_dense_kf) >= 2:
@@ -5337,11 +5370,15 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 crop_y = f"max(0\\,min((ih-1920)/2+{_oy}*{progress}\\,ih-1920))"
             return f"{scale_expr}:eval=frame:flags=bicubic,crop=1080:1920:x='{crop_x}':y='{crop_y}'"
 
+        # All zoom expressions use _nvar so sub-clips from the same parent
+        # cut produce a continuous zoom instead of resetting at each boundary.
+        _nvar = f"(n+{_zoom_frame_offset})" if _zoom_frame_offset > 0 else "n"
+
         if zoom == "slow_in":
             tf = max(1, total_frames_for_zoom) if zoom_scale_factor < 1.0 else max(1, total_frames)
             zoom_range = (zoom_max - 1.0) * zoom_scale_factor
             # Smoothstep easing for buttery smooth zoom
-            _si_p = f"min(n/{tf}\\,1.0)"
+            _si_p = f"min({_nvar}/{tf}\\,1.0)"
             _si_smooth = f"({_si_p}*{_si_p}*(3-2*{_si_p}))"
             # _tight_base adds static 15% zoom for tight-framing cuts (2-camera sim)
             _total_base = _tight_base
@@ -5354,7 +5391,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             tf = max(1, total_frames_for_zoom) if zoom_scale_factor < 1.0 else max(1, total_frames)
             zoom_range = (zoom_max - 1.0) * zoom_scale_factor
             # Smoothstep easing: 3t²-2t³ for natural deceleration (clamped to [0,1])
-            smooth = f"(min(n/{tf}\\,1))*(min(n/{tf}\\,1))*(3-2*(min(n/{tf}\\,1)))"
+            smooth = f"(min({_nvar}/{tf}\\,1))*(min({_nvar}/{tf}\\,1))*(3-2*(min({_nvar}/{tf}\\,1)))"
             scale_expr = (
                 f"scale=w='trunc(iw*({1.0 + zoom_range:.4f}-{zoom_range:.4f}*{smooth})/2)*2'"
                 f":h='trunc(ih*({1.0 + zoom_range:.4f}-{zoom_range:.4f}*{smooth})/2)*2'"
@@ -5364,7 +5401,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             punch_range = 0.18 * zoom_scale_factor  # aggressive punch for Captions-level impact
             tf = max(1, total_frames_for_zoom)
             # Smoothstep ease for natural feel
-            _pi_p = f"min(n/{tf}\\,1.0)"
+            _pi_p = f"min({_nvar}/{tf}\\,1.0)"
             _pi_ease = f"({_pi_p}*{_pi_p}*(3-2*{_pi_p}))"
             scale_expr = (
                 f"scale=w='trunc(iw*(1.0+{punch_range:.4f}*{_pi_ease})/2)*2'"
@@ -5374,7 +5411,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         elif zoom == "punch_out":
             punch_range = 0.18 * zoom_scale_factor  # aggressive punch for Captions-level impact
             tf = max(1, total_frames_for_zoom)
-            _po_p = f"min(n/{tf}\\,1.0)"
+            _po_p = f"min({_nvar}/{tf}\\,1.0)"
             _po_ease = f"({_po_p}*{_po_p}*(3-2*{_po_p}))"
             scale_expr = (
                 f"scale=w='trunc(iw*({1.0 + punch_range:.4f}-{punch_range:.4f}*{_po_ease})/2)*2'"
@@ -5388,7 +5425,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             # to avoid jarring single-frame snaps.
             cz_target = 0.18  # 18% zoom = 118% scale
             cz_frames = 4     # rapid snap (4 frames ≈ 0.13s)
-            cz_p = f"min(n/{cz_frames}\\,1.0)"
+            cz_p = f"min({_nvar}/{cz_frames}\\,1.0)"
             cz_ease = f"({cz_p}*{cz_p}*(3-2*{cz_p}))"
             scale_expr = (
                 f"scale=w='trunc(iw*(1.0+{cz_target:.4f}*{cz_ease})/2)*2'"
