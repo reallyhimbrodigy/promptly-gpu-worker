@@ -1630,9 +1630,11 @@ Sound effects — audio accents that make the edit feel physical and professiona
     {{"t": <seconds, 3+ decimal places, EXACT word start from Deepgram>, "sound": "<boom|hit|drum_roll|reverse|ching|ding|pop|click|camera_shutter|sad_trombone|typing|whoosh_slow|transition_smooth|thunder>", "word": "<exact trigger word, lowercase>"}}
   ]
 
-B-roll — stock footage cutaways that show what the speaker is describing. B-roll replaces the video (not audio) for its duration — the speaker's voice continues over the footage.
+B-roll — stock footage cutaways that visually ground the viewer in the physical scene. B-roll replaces the video (not audio) for its duration — the speaker's voice continues over the footage.
 
-  Good b-roll candidates are moments where the speaker describes a concrete, physical, filmable scene — a place, an object, a person doing a specific action. Scan the transcript for phrases that paint a picture: someone doing something somewhere. Those are your b-roll moments. Dialogue, emotions, reactions, metaphors, and abstract statements have no filmable scene and should stay on the speaker's face.
+  Before writing each keyword, visualize yourself standing in the room during this moment. What do you physically see? The objects, the surfaces, the textures, the lighting, the movement, the people, the body language, the environment, the weather, the time of day. Search for THAT — not the concept the speaker is talking about.
+
+  Good b-roll candidates are moments where the speaker describes a concrete, physical, filmable scene. Dialogue, emotions, reactions, metaphors, and abstract statements have no filmable scene and should stay on the speaker's face.
 
   The speaker's face is the most important visual during emotional beats, reveals, punchlines, and reactions. B-roll belongs on setup and context — the descriptive moments that establish a scene, not the dramatic moments that deliver the payoff. The hook clip is always the highest-impact moment in the video and must show the speaker's face — b-roll timestamps should only fall within the main body content, after the hook has played.
 
@@ -1640,7 +1642,7 @@ B-roll — stock footage cutaways that show what the speaker is describing. B-ro
 
   Structure every keyword as: [specific subject] + [specific action or state] + [specific setting/surface] + [camera angle or framing] + [lighting or mood word]. The more concrete and physical the description, the better the Pexels match.
 
-  Think about what stock footage creators actually film. Pexels has millions of clips of common setups: hands on surfaces, screens lighting up, doors opening, feet walking, traffic flowing, objects on tables. It does NOT have niche narrative scenes. Never search for a character doing a story-specific action — search for the generic visual element that represents the moment. "Secretary came into my office" is NOT a secretary walking in — it's a door handle turning in an office hallway, or shoes walking on office carpet, or a desk phone ringing with an office background.
+  Think about what stock footage creators actually film. Pexels has millions of clips of common setups: hands on surfaces, screens lighting up, doors opening, feet walking, traffic flowing, objects on tables. It does NOT have niche narrative scenes. Never search for a character doing a story-specific action — search for the generic visual element that represents the moment.
 
   Every keyword should be 12-18 words. Lead with the most visually distinctive element — the thing that makes THIS shot different from every other stock clip. Avoid generic words like "cinematic" or "beautiful" — they don't help search. Instead use specific textures (foam, glass, asphalt), specific light (golden hour, neon, overcast), and specific motion (sliding, trembling, flowing).
 
