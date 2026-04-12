@@ -393,9 +393,6 @@ def format_trend_section(trend_context):
             if not style_guide:
                 return ""
 
-            # Log what's in the style guide so we can see what Gemini receives
-            print(f"[trend] Style guide first 1000 chars: {style_guide[:1000]}", flush=True)
-
             return f"""
 
 === WHAT'S WORKING ON TIKTOK RIGHT NOW ===
@@ -1900,7 +1897,7 @@ RULES FOR USING THESE TIMESTAMPS:
             # over-allocation. Gemini will return finish_reason=MAX_TOKENS if exceeded
             # — handler logs that and we can bump back up if it ever triggers.
             max_output_tokens=4096,
-            thinking_config=genai_types.ThinkingConfig(thinking_level="LOW"),
+            thinking_config=genai_types.ThinkingConfig(thinking_level="MEDIUM"),
             media_resolution="MEDIA_RESOLUTION_LOW",
         ),
     )
