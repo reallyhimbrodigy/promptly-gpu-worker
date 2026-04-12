@@ -1646,12 +1646,12 @@ B-roll — stock footage cutaways that visually ground the viewer in the physica
 
   B-roll plays at the same speed as the underlying video. If you place b-roll on a section you've sped up to 1.3x, the viewer sees only ~1.9 seconds of a 2.5-second b-roll. Place b-roll on held-speed sections of your speed curve so the duration plays at face value. Placing b-roll during a speed ramp causes the clip to change speed mid-playback, which looks wrong.
 
-  Each b-roll clip must describe a visually distinct scene. Two clips about the same subject (both about shaving, both about driving) will return the same stock footage, which looks like a production error. Every keyword should depict a different scene from a different part of the story.
+  Each b-roll clip must describe a visually distinct scene. Two clips about the same subject will return the same stock footage, which looks like a production error. Every keyword should depict a different visual from a different part of the story.
 
-  Every clip must include a "reason" field: one sentence explaining why this moment, this duration, and this keyword.
+  Every clip must include a "reason" field: one sentence describing what physical action is happening in the scene at this moment.
 
   broll_clips: [
-    {{"keyword": "<Pexels search query>", "timestamp": <word start time in source seconds, 3+ decimals>, "duration": <seconds>, "reason": "<why this moment, duration, and keyword>"}}
+    {{"keyword": "<Pexels search query>", "timestamp": <word start time in source seconds, 3+ decimals>, "duration": <seconds>, "reason": "<what physical action is happening in the scene>"}}
   ]
 
 Visual effects — additional visual treatments for emphasis moments.
@@ -1695,7 +1695,7 @@ Output ONLY the JSON below — no commentary, no analysis, no explanation. Just 
     {{"t": <seconds>, "sound": "<sound>", "word": "<trigger>"}}
   ],
   "broll_clips": [
-    {{"keyword": "<specific visual search term>", "timestamp": <EXACT word start in source seconds>, "duration": <seconds, target 2.0-3.0>, "reason": "<one sentence justifying moment, duration, keyword>"}}
+    {{"keyword": "<Pexels search query>", "timestamp": <EXACT word start in source seconds>, "duration": <seconds, target 2.0-3.0>, "reason": "<what physical action is happening in the scene>"}}
   ],
   "visual_effects": [
     {{"type": "white_flash", "t": <source seconds>}}
@@ -1863,8 +1863,9 @@ RULES FOR USING THESE TIMESTAMPS:
             _pa_parts.append(f"Safe cut points: {json.dumps(_pre_analysis['safe_cut_points'])}")
         if _pre_analysis.get("video_profile"):
             _pa_parts.append(f"Video profile: {json.dumps(_pre_analysis['video_profile'])}")
-        if _pre_analysis.get("shots"):
-            _pa_parts.append(f"Shot breakdown: {json.dumps(_pre_analysis['shots'][:10])}")
+        # Shot breakdown intentionally excluded — narrative "action" descriptions
+        # from content-studio leak into Gemini's b-roll keyword generation,
+        # overriding the stock-footage-title instructions.
         if _pa_parts:
             prompt += "\n\n=== PRE-ANALYZED VIDEO DATA ===\n" + "\n".join(_pa_parts) + "\n"
             print(f"[generate-edit] Injected pre-analysis context ({len(_pa_parts)} sections)", flush=True)
