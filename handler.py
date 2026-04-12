@@ -1885,7 +1885,10 @@ RULES FOR USING THESE TIMESTAMPS:
     else:
         raise RuntimeError("No video data provided — need either inline_video_bytes or gemini_file")
 
-    print(f"[generate-edit] Calling Gemini model={GEMINI_MODEL} (thinking=LOW)...", flush=True)
+    # Log prompt size and verify b-roll instructions are present
+    _broll_check = "stock footage creator would title" in prompt
+    print(f"[generate-edit] Prompt length: {len(prompt)} chars, b-roll instructions present: {_broll_check}", flush=True)
+    print(f"[generate-edit] Calling Gemini model={GEMINI_MODEL} (thinking=MEDIUM)...", flush=True)
     t = time.time()
     response = client.models.generate_content(
         model=GEMINI_MODEL,
