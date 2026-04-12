@@ -1636,21 +1636,9 @@ B-roll — stock footage cutaways that show what the speaker is describing. B-ro
 
   The speaker's face is the most important visual during emotional beats, reveals, punchlines, and reactions. B-roll belongs on setup and context — the descriptive moments that establish a scene, not the dramatic moments that deliver the payoff. The hook clip is always the highest-impact moment in the video and must show the speaker's face — b-roll timestamps should only fall within the main body content, after the hook has played.
 
-  The keyword is a Pexels video search query. Describe what the CAMERA LENS captures: the specific objects, textures, motion, and lighting in the frame. Stock footage is indexed by visual composition — not by story context. Be hyper-specific about what is physically visible.
+  The keyword is a Pexels video search query. Describe what the CAMERA LENS sees in the exact shot you want returned. The keyword must be specific enough that only ONE type of clip matches — if your keyword could return 10 different scenes, it's too vague. Name the exact subject, what it's doing, the surface or environment it's in, and how the shot is framed. Every word in the keyword should narrow the results. Stock footage is indexed by visual composition — not by story context.
 
   Structure every keyword as: [specific subject] + [specific action or state] + [specific setting/surface] + [camera angle or framing] + [lighting or mood word]. The more concrete and physical the description, the better the Pexels match.
-
-  WRONG: "man shaving face close up cinematic" — too generic, returns random grooming clips.
-  RIGHT: "razor blade gliding through white shaving foam on jaw extreme close up" — specific object, action, texture, framing.
-
-  WRONG: "car driving fast on highway" — generic, returns aerial highway shots.
-  RIGHT: "dashboard POV headlights reflecting on wet highway at night motion blur" — specific POV, surface detail, lighting.
-
-  WRONG: "woman sleeping in bed" — generic, returns posed stock models.
-  RIGHT: "white bedsheets rising and falling dark bedroom soft morning light through curtains" — specific textures, motion, light.
-
-  WRONG: "smartphone incoming call notification" — generic, could return anything phone-related.
-  RIGHT: "phone screen glowing in dark room incoming call vibrating on wooden table" — specific surface, lighting, context.
 
   Every keyword should be 12-18 words. Lead with the most visually distinctive element — the thing that makes THIS shot different from every other stock clip. Avoid generic words like "cinematic" or "beautiful" — they don't help search. Instead use specific textures (foam, glass, asphalt), specific light (golden hour, neon, overcast), and specific motion (sliding, trembling, flowing).
 
