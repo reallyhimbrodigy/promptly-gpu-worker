@@ -1638,13 +1638,7 @@ B-roll — stock footage cutaways that visually ground the viewer in the physica
 
   The speaker's face is the most important visual during emotional beats, reveals, punchlines, and reactions. B-roll belongs on setup and context — the descriptive moments that establish a scene, not the dramatic moments that deliver the payoff. The hook clip is always the highest-impact moment in the video and must show the speaker's face — b-roll timestamps should only fall within the main body content, after the hook has played.
 
-  The keyword is a Pexels video search query. Describe what the CAMERA LENS sees in the exact shot you want returned. The keyword must be specific enough that only ONE type of clip matches — if your keyword could return 10 different scenes, it's too vague. Name the exact subject, what it's doing, the surface or environment it's in, and how the shot is framed. Every word in the keyword should narrow the results. Stock footage is indexed by visual composition — not by story context.
-
-  The keyword should match how stock footage creators TITLE their uploads. They title clips by what's physically in the shot — they never title clips by story context or narrative meaning. Write keywords the way a stock footage creator would title the exact clip you want to find.
-
-  Think about what stock footage creators actually film. Pexels has millions of clips of common setups: hands on surfaces, screens lighting up, doors opening, feet walking, traffic flowing, objects on tables. It does NOT have niche narrative scenes. Never search for a character doing a story-specific action — search for the generic visual element that represents the moment.
-
-  Every keyword should be 12-18 words. Lead with the most visually distinctive element — the thing that makes THIS shot different from every other stock clip. Avoid generic words like "cinematic" or "beautiful" — they don't help search. Instead use specific textures (foam, glass, asphalt), specific light (golden hour, neon, overcast), and specific motion (sliding, trembling, flowing).
+  The keyword is a Pexels video search query. Write it the way a stock footage creator would TITLE their upload — by what's physically in the shot, never by story context or narrative meaning. The keyword must be specific enough that only ONE type of clip matches. Pexels has millions of clips of common setups but does NOT have niche narrative scenes. Never search for a character doing a story-specific action — search for the generic visual element that represents the moment. Every keyword should be 8-14 words.
 
   Timing: the b-roll must be on screen BEFORE the viewer hears the relevant words, so the visual context is already established when the phrase lands. Place the timestamp at the first word of the sentence or clause that introduces the visual concept. The viewer should already be watching the b-roll by the time the descriptive words arrive. Use the exact `start` value from the Deepgram word list (3+ decimal places). End the b-roll in a gap between words — the cut back to the speaker should land between words, not mid-word. Prefer cutting in and out during natural micro-pauses in the speaker's rhythm.
 
@@ -1661,7 +1655,7 @@ B-roll — stock footage cutaways that visually ground the viewer in the physica
   Every clip must include a "reason" field: one sentence explaining why this moment, this duration, and this keyword.
 
   broll_clips: [
-    {{"keyword": "<specific Pexels search: subject + action + setting + camera angle>", "timestamp": <word start time in source seconds, 3+ decimals>, "duration": <seconds>, "reason": "<why this moment, duration, and keyword>"}}
+    {{"keyword": "<Pexels search query>", "timestamp": <word start time in source seconds, 3+ decimals>, "duration": <seconds>, "reason": "<why this moment, duration, and keyword>"}}
   ]
 
 Visual effects — additional visual treatments for emphasis moments.
