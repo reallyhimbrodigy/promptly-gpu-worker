@@ -4516,15 +4516,23 @@ def build_clip_time_map(clip_start, clip_end, clip_speed, speed_curve, fps=30):
     # No averaging, no integration. 1.3x means 1.3x, 0.75x means 0.75x.
     curve_speed = max(0.25, min(2.0, get_speed_for_timestamp(clip_start, speed_curve))) if has_curve else 1.0
     speed = max(0.25, min(4.0, clip_speed * curve_speed))
-    eff_dur = source_dur / speed
+
+    # Compute effective_duration from the frame-quantized source duration,
+    # not the raw float. FFmpeg outputs exactly n_frames frames (each segment
+    # is decoded to n_frames source frames, then setpts relabels them).
+    # The actual encoded duration is n_frames / (fps * speed). Using
+    # source_dur / speed instead diverges by up to 16ms per segment, which
+    # accumulates to ~1s over 70+ micro-segments — causing b-roll to appear
+    # late and enable gates to misalign (flashing).
+    eff_dur = n_frames / (fps * speed)
 
     # Build simple linear output_times for consistency with _time_map_lookup
-    dt = source_dur / n_frames
-    output_times = [k * dt / speed for k in range(n_frames + 1)]
+    dt = n_frames / fps  # frame-quantized source duration
+    output_times = [k * (dt / n_frames) / speed for k in range(n_frames + 1)]
 
     return {
         "output_times": output_times,
-        "effective_duration": round(eff_dur, 4),
+        "effective_duration": eff_dur,
         "avg_speed": speed,
         "n_frames": n_frames,
         "source_dur": source_dur,
@@ -5719,21 +5727,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                     continue
                 _local_path = _broll_files[_bi]
                 _src_ts = float(_bc.get("timestamp") or 0)
-                # DIAGNOSTIC: trace every match for this b-roll timestamp
-                _diag_clip_ranges = get_output_clip_ranges(render_cuts, effective_durations)
-                _diag_matches = []
-                for _di, _dc in enumerate(render_cuts):
-                    _ds = float(_dc["source_start"])
-                    _de = float(_dc["source_end"])
-                    if _ds <= _src_ts <= _de:
-                        _d_offset = _src_ts - _ds
-                        _d_local = _time_map_lookup(_clip_time_maps[_di], _d_offset)
-                        _d_out = float(_diag_clip_ranges[_di]["start"]) + _d_local
-                        _diag_matches.append(f"  cut[{_di}] src=[{_ds:.3f},{_de:.3f}] speed={_clip_time_maps[_di]['avg_speed']:.3f} offset={_d_offset:.3f} local={_d_local:.3f} range_start={_diag_clip_ranges[_di]['start']:.3f} → out={_d_out:.3f} hook={_dc.get('_is_hook', False)}")
-                if _diag_matches:
-                    print(f"[BROLL-DIAG] '{_bc.get('keyword','')[:40]}' src_ts={_src_ts:.3f} matches:", flush=True)
-                    for _dm in _diag_matches:
-                        print(f"[BROLL-DIAG] {_dm}", flush=True)
                 _out_start = project_source_time_to_final_output(
                     _src_ts, render_cuts, effective_durations, _broll_sc,
                     clip_time_maps=_clip_time_maps,
