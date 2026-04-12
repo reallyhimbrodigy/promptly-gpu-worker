@@ -5983,12 +5983,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 f"setpts=PTS-STARTPTS{_broll_pts_offset}[{_bv}]"
             )
             # Enable gate windows the overlay to the b-roll's actual
-            # duration. eof_action=pass shows the main video if the b-roll
-            # trim ends 1-2 frames early (invisible — same scene underneath).
-            # The PTS offset above ensures b-roll frames are available when
-            # the gate opens (prevents the old consumption/freeze bug).
+            # duration within the segment. eof_action=repeat holds the last
+            # b-roll frame if the trim runs 1 frame short (prevents flash).
+            # The enable gate turns off the overlay at the b-roll end time
+            # (prevents freeze). This is safe because b-roll split points
+            # guarantee local_start≈0 — no large PTS offset that previously
+            # caused the overlay sync/freeze bug.
             _filter_parts.append(
-                f"{_video_label}[{_bv}]overlay=0:0:eof_action=pass:enable='between(t,{_local_start:.3f},{_local_start + _slice_dur:.3f})'[bov{_bi_emitted}]"
+                f"{_video_label}[{_bv}]overlay=0:0:eof_action=repeat:enable='between(t,{_local_start:.3f},{_local_start + _slice_dur:.3f})'[bov{_bi_emitted}]"
             )
             _video_label = f"[bov{_bi_emitted}]"
             _extra_idx += 1
