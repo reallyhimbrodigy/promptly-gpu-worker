@@ -1632,7 +1632,7 @@ Sound effects — audio accents that make the edit feel physical and professiona
 
 B-roll — stock footage cutaways that visually ground the viewer in the physical scene. B-roll replaces the video (not audio) for its duration — the speaker's voice continues over the footage.
 
-  Only place b-roll on moments where something physical is happening in the story. Ask: is there a real object doing a real thing in a real place right now? If yes, that's a b-roll moment. If the speaker is expressing an opinion, emotion, or abstract idea, stay on their face. The speaker's face is the most important visual during emotional beats, reveals, punchlines, and reactions. B-roll belongs on setup and context — the descriptive moments that establish a scene, not the dramatic moments that deliver the payoff. The hook clip is always the highest-impact moment in the video and must show the speaker's face — b-roll timestamps should only fall within the main body content, after the hook has played.
+  Only place b-roll on moments where something physical is happening. Ask: is there a real object doing a real thing in a real place right now? If yes, that's a b-roll moment. If the speaker is expressing an opinion, emotion, or abstract idea, stay on their face. The speaker's face is the most important visual during emotional beats, reveals, punchlines, and reactions. B-roll belongs on descriptive moments, not dramatic moments. The hook clip is always the highest-impact moment in the video and must show the speaker's face — b-roll timestamps should only fall within the main body content, after the hook has played.
 
   Before writing each keyword, visualize yourself standing in the room during this moment. What do you physically see? The objects, the surfaces, the textures, the lighting, the movement, the people, the body language, the environment, the weather, the time of day. Now pick the ONE most visually striking element in that scene and describe it the way a stock footage creator would title their upload. The keyword goes directly into a Pexels search bar — it must return the exact clip you're imagining. If you can't picture a specific clip existing on a stock footage site, pick a different visual element. Pexels has millions of clips of common setups but does NOT have niche narrative scenes. Never search for a character doing a story-specific action — search for the generic visual element that represents the moment. Every keyword should be 8-14 words.
 
@@ -1646,12 +1646,12 @@ B-roll — stock footage cutaways that visually ground the viewer in the physica
 
   B-roll plays at the same speed as the underlying video. If you place b-roll on a section you've sped up to 1.3x, the viewer sees only ~1.9 seconds of a 2.5-second b-roll. Place b-roll on held-speed sections of your speed curve so the duration plays at face value. Placing b-roll during a speed ramp causes the clip to change speed mid-playback, which looks wrong.
 
-  Each b-roll clip must describe a visually distinct scene. Two clips about the same subject will return the same stock footage, which looks like a production error. Every keyword should depict a different visual from a different part of the story.
+  Each b-roll clip must return visually distinct footage. Two clips about the same subject will return the same stock footage, which looks like a production error. Every keyword should depict a different visual from a different part of the video.
 
-  Every clip must include a "reason" field: one sentence describing what physical action is happening in the scene at this moment.
+  Every clip must include a "reason" field: one sentence describing what physical action is happening at this point in the video.
 
   broll_clips: [
-    {{"keyword": "<Pexels search query>", "timestamp": <word start time in source seconds, 3+ decimals>, "duration": <seconds>, "reason": "<what physical action is happening in the scene>"}}
+    {{"keyword": "<Pexels search query>", "timestamp": <word start time in source seconds, 3+ decimals>, "duration": <seconds>, "reason": "<what physical action is happening at this point>"}}
   ]
 
 Visual effects — additional visual treatments for emphasis moments.
@@ -1695,7 +1695,7 @@ Output ONLY the JSON below — no commentary, no analysis, no explanation. Just 
     {{"t": <seconds>, "sound": "<sound>", "word": "<trigger>"}}
   ],
   "broll_clips": [
-    {{"keyword": "<Pexels search query>", "timestamp": <EXACT word start in source seconds>, "duration": <seconds, target 2.0-3.0>, "reason": "<what physical action is happening in the scene>"}}
+    {{"keyword": "<Pexels search query>", "timestamp": <EXACT word start in source seconds>, "duration": <seconds, target 2.0-3.0>, "reason": "<what physical action is happening at this point>"}}
   ],
   "visual_effects": [
     {{"type": "white_flash", "t": <source seconds>}}
