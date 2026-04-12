@@ -5982,16 +5982,23 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 f"setsar=1,eq=saturation=0.92:contrast=1.02,"
                 f"setpts=PTS-STARTPTS{_broll_pts_offset}[{_bv}]"
             )
-            # Enable gate windows the overlay to the b-roll's actual
-            # duration within the segment. eof_action=repeat holds the last
-            # b-roll frame if the trim runs 1 frame short (prevents flash).
-            # The enable gate turns off the overlay at the b-roll end time
-            # (prevents freeze). This is safe because b-roll split points
-            # guarantee local_start≈0 — no large PTS offset that previously
-            # caused the overlay sync/freeze bug.
-            _filter_parts.append(
-                f"{_video_label}[{_bv}]overlay=0:0:eof_action=repeat:enable='between(t,{_local_start:.3f},{_local_start + _slice_dur:.3f})'[bov{_bi_emitted}]"
-            )
+            # B-roll split points guarantee local_start≈0 for most slices.
+            # When b-roll covers the full segment (local_start < 0.01), use
+            # a simple overlay with no enable gate — the b-roll plays from
+            # start to end, and eof_action=repeat holds the last frame if
+            # the trim is fractionally short. No enable gate means no
+            # timing-dependent glitches on micro-segments.
+            # When b-roll starts mid-segment (rare after split points),
+            # use enable gate + PTS offset as before.
+            if _local_start < 0.01 and abs(_slice_dur - _eff_dur) < 0.02:
+                # B-roll covers full segment — no enable gate needed
+                _filter_parts.append(
+                    f"{_video_label}[{_bv}]overlay=0:0:eof_action=repeat[bov{_bi_emitted}]"
+                )
+            else:
+                _filter_parts.append(
+                    f"{_video_label}[{_bv}]overlay=0:0:eof_action=repeat:enable='between(t,{_local_start:.3f},{_local_start + _slice_dur:.3f})'[bov{_bi_emitted}]"
+                )
             _video_label = f"[bov{_bi_emitted}]"
             _extra_idx += 1
             _bi_emitted += 1
