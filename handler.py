@@ -5973,6 +5973,15 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _video_label = f"[bov{_bi_emitted}]"
             _extra_idx += 1
             _bi_emitted += 1
+            print(
+                f"[BROLL-SEG] seg={seg_idx} seg_out=[{_seg_out_start:.3f},{_seg_out_end:.3f}] "
+                f"eff_dur={_eff_dur:.4f} broll='{_br.get('keyword','')[:30]}' "
+                f"ov=[{_ov_start:.3f},{_ov_end:.3f}] slice=[{_slice_start:.3f},{_slice_end:.3f}] "
+                f"local_start={_local_start:.3f} slice_dur={_slice_dur:.3f} "
+                f"enable=between(t,{_local_start:.3f},{_local_start + _slice_dur:.3f}) "
+                f"pts_offset='{_broll_pts_offset}'",
+                flush=True,
+            )
 
         # Caption + text overlay PNGs (applied LAST, always on top of everything).
         # PNGs are presented at source_fps (matching Remotion's render rate).
@@ -6035,6 +6044,26 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _seg_paths[_si] = _fut.result()
     _par_elapsed = time.time() - _par_t0
     print(f"[render] All {n} segments rendered in {_par_elapsed:.1f}s (parallel)", flush=True)
+
+    # ── Segment duration drift check ─────────────────────────────────────
+    # Compare computed effective_duration to actual MKV duration to find
+    # cumulative drift that causes b-roll to appear late.
+    _cum_computed = 0.0
+    _cum_actual = 0.0
+    _drift_log = []
+    for _di in range(n):
+        _sp = _seg_paths[_di]
+        _computed = effective_durations[_di]
+        _cum_computed += _computed
+        _actual_dur = get_video_duration(_sp) if _sp and os.path.exists(_sp) else _computed
+        _cum_actual += _actual_dur
+        _drift = _cum_actual - _cum_computed
+        if abs(_drift) > 0.1 or _di == n - 1:
+            _drift_log.append(f"seg={_di} computed={_computed:.4f} actual={_actual_dur:.4f} cum_drift={_drift:.3f}s")
+    if _drift_log:
+        print(f"[DRIFT-CHECK] Segments with >0.1s cumulative drift:", flush=True)
+        for _dl in _drift_log:
+            print(f"[DRIFT-CHECK]   {_dl}", flush=True)
 
     # ── Per-segment timing report ────────────────────────────────────────
     # Diagnostic instrumentation: shows where each segment's time went so
