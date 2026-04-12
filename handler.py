@@ -4845,6 +4845,26 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             speed_curve.sort(key=lambda x: float(x["t"]))
             print(f"[speed-curve] Shifted {_ramps_shifted} ramp(s) into preceding clip tails ({len(speed_curve)} keypoints)", flush=True)
 
+    # Inject b-roll source timestamps as speed curve keypoints so the splitter
+    # creates a segment boundary exactly where each b-roll starts. This ensures
+    # b-roll always begins at local_start≈0 (segment beginning), avoiding the
+    # FFmpeg overlay bug where PTS-offset b-roll silently fails to render when
+    # the offset is >2s into a segment.
+    _broll_clips_for_split = edit_plan.get("broll_clips") or []
+    if _broll_clips_for_split and speed_curve and isinstance(speed_curve, list):
+        _broll_splits_added = 0
+        _existing_times = set(float(kp["t"]) for kp in speed_curve)
+        for _bc in _broll_clips_for_split:
+            _bts = float(_bc.get("timestamp") or 0)
+            if _bts > 0 and _bts not in _existing_times:
+                _speed_at_bts = get_speed_for_timestamp(_bts, speed_curve)
+                speed_curve.append({"t": round(_bts, 3), "speed": round(_speed_at_bts, 4)})
+                _existing_times.add(_bts)
+                _broll_splits_added += 1
+        if _broll_splits_added > 0:
+            speed_curve.sort(key=lambda x: float(x["t"]))
+            print(f"[speed-curve] Added {_broll_splits_added} b-roll split point(s) ({len(speed_curve)} keypoints)", flush=True)
+
     # Split clips at speed curve keypoints so each sub-clip has near-constant speed.
     # This is the root fix for audio/video sync — constant-average audio matches video.
     render_cuts = split_clips_at_speed_keypoints(render_cuts, speed_curve)
@@ -5973,15 +5993,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _video_label = f"[bov{_bi_emitted}]"
             _extra_idx += 1
             _bi_emitted += 1
-            print(
-                f"[BROLL-SEG] seg={seg_idx} seg_out=[{_seg_out_start:.3f},{_seg_out_end:.3f}] "
-                f"eff_dur={_eff_dur:.4f} broll='{_br.get('keyword','')[:30]}' "
-                f"ov=[{_ov_start:.3f},{_ov_end:.3f}] slice=[{_slice_start:.3f},{_slice_end:.3f}] "
-                f"local_start={_local_start:.3f} slice_dur={_slice_dur:.3f} "
-                f"enable=between(t,{_local_start:.3f},{_local_start + _slice_dur:.3f}) "
-                f"pts_offset='{_broll_pts_offset}'",
-                flush=True,
-            )
 
         # Caption + text overlay PNGs (applied LAST, always on top of everything).
         # PNGs are presented at source_fps (matching Remotion's render rate).
@@ -6044,26 +6055,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _seg_paths[_si] = _fut.result()
     _par_elapsed = time.time() - _par_t0
     print(f"[render] All {n} segments rendered in {_par_elapsed:.1f}s (parallel)", flush=True)
-
-    # ── Segment duration drift check ─────────────────────────────────────
-    # Compare computed effective_duration to actual MKV duration to find
-    # cumulative drift that causes b-roll to appear late.
-    _cum_computed = 0.0
-    _cum_actual = 0.0
-    _drift_log = []
-    for _di in range(n):
-        _sp = _seg_paths[_di]
-        _computed = effective_durations[_di]
-        _cum_computed += _computed
-        _actual_dur = get_video_duration(_sp) if _sp and os.path.exists(_sp) else _computed
-        _cum_actual += _actual_dur
-        _drift = _cum_actual - _cum_computed
-        if abs(_drift) > 0.1 or _di == n - 1:
-            _drift_log.append(f"seg={_di} computed={_computed:.4f} actual={_actual_dur:.4f} cum_drift={_drift:.3f}s")
-    if _drift_log:
-        print(f"[DRIFT-CHECK] Segments with >0.1s cumulative drift:", flush=True)
-        for _dl in _drift_log:
-            print(f"[DRIFT-CHECK]   {_dl}", flush=True)
 
     # ── Per-segment timing report ────────────────────────────────────────
     # Diagnostic instrumentation: shows where each segment's time went so
