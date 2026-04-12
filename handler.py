@@ -1640,7 +1640,7 @@ B-roll — stock footage cutaways that visually ground the viewer in the physica
 
   The keyword is a Pexels video search query. Describe what the CAMERA LENS sees in the exact shot you want returned. The keyword must be specific enough that only ONE type of clip matches — if your keyword could return 10 different scenes, it's too vague. Name the exact subject, what it's doing, the surface or environment it's in, and how the shot is framed. Every word in the keyword should narrow the results. Stock footage is indexed by visual composition — not by story context.
 
-  Structure every keyword as: [specific subject] + [specific action or state] + [specific setting/surface] + [camera angle or framing] + [lighting or mood word]. The more concrete and physical the description, the better the Pexels match.
+  The keyword should match how stock footage creators TITLE their uploads. They title clips by what's physically in the shot — they never title clips by story context or narrative meaning. Write keywords the way a stock footage creator would title the exact clip you want to find.
 
   Think about what stock footage creators actually film. Pexels has millions of clips of common setups: hands on surfaces, screens lighting up, doors opening, feet walking, traffic flowing, objects on tables. It does NOT have niche narrative scenes. Never search for a character doing a story-specific action — search for the generic visual element that represents the moment.
 
