@@ -1630,30 +1630,24 @@ Sound effects — audio accents that make the edit feel physical and professiona
     {{"t": <seconds, 3+ decimal places, EXACT word start from Deepgram>, "sound": "<boom|hit|drum_roll|reverse|ching|ding|pop|click|camera_shutter|sad_trombone|typing|whoosh_slow|transition_smooth|thunder>", "word": "<exact trigger word, lowercase>"}}
   ]
 
-B-roll — stock footage cutaways sourced from Pexels.com. The keyword you write gets typed directly into the Pexels search bar. B-roll replaces the video (not audio) for its duration — the speaker's voice continues playing over the footage.
+B-roll — stock footage cutaways sourced from Pexels.com. The keyword gets typed directly into the Pexels search bar. B-roll replaces the video (not audio) for its duration — the speaker's voice plays over the footage.
 
-  The b-roll clip MUST depict EXACTLY what the speaker is describing at that moment. Not the general topic — the EXACT scenario. Listen to what the speaker literally says is happening and search for that precise scene. If the speaker says "I wiped the shaving cream off my face," search for a man wiping shaving cream off his face after shaving — not a man mid-shave, not a razor, not a bathroom. The EXACT action being described.
+  RULE 1 — TRANSCRIPT ONLY: Every single word in your keyword must come from something the speaker LITERALLY said. Do not add adjectives, emotions, moods, or context the speaker didn't say. If the speaker says "I got in the car and went to work," the keyword is about a man getting into a car and driving — NOT "angry man driving fast looking distressed." The speaker did not say angry, fast, or distressed. If the speaker says "he's sitting on the floor next to me watching me shave," the keyword is about a young boy sitting on a bathroom floor watching a man shave — NOT "boy looking up at father in morning routine." The speaker did not say looking up or morning routine. ZERO invented details.
 
-  NEVER invent details that aren't in the transcript. If the speaker says their son is "sitting on the floor watching me shave," the b-roll must show a child watching someone — NOT a child playing with toys, NOT a child in a generic room. Every detail in your keyword must come directly from the speaker's words.
+  RULE 2 — EXACT ACTION: The b-roll must depict the SPECIFIC physical action being described, not the general topic. If the speaker says "I wiped the shaving cream off my face," search for a man using a towel to wipe shaving cream off his face — not a man shaving, not a razor, not a bathroom sink. The action is WIPING OFF cream, not applying it. Get the verb right.
 
-  Keywords should be 15-20 words. Be hyper-specific: include the action, the subject, the setting, the objects involved, the body position, the time of day, and any other detail the speaker mentions. More words = more precise Pexels results. A vague 5-word query returns random clips. A precise 18-word query returns the exact scene.
+  RULE 3 — PEXELS REALITY CHECK: Before writing each keyword, ask: "Would a stock footage creator have filmed exactly this?" Pexels has millions of clips of everyday actions (driving, cooking, walking, working, talking on phone, using devices). Pexels does NOT have clips of unusual specific actions like "man kicking a bed" or "person stubbing their toe on furniture." If the exact action wouldn't exist on a stock footage site, find the closest common action from the transcript. "I kicked the bed" → search for a man walking angrily into a dark bedroom (the entering-the-room part IS on Pexels; the kicking part is not).
 
-  Only place b-roll on moments where something PHYSICAL is happening — a real action in a real place. If the speaker is expressing an emotion, opinion, or abstract idea, stay on their face. B-roll belongs on descriptive action moments, not emotional beats. The speaker's face must be visible during reveals, punchlines, and reactions. B-roll timestamps should fall within the main body content, not during the hook.
+  RULE 4 — KEYWORD LENGTH 20-25 WORDS: Long, specific queries return precise results. Include: the subject, the exact action verb, the objects involved, the setting, and any physical details the speaker mentioned. A 5-word query returns random clips. A 22-word query returns the exact scene.
+
+  Only place b-roll on moments where something PHYSICAL is happening — a real action in a real place. If the speaker is expressing an emotion, opinion, or abstract idea, stay on their face. The speaker's face must be visible during reveals, punchlines, and reactions. B-roll timestamps should fall within the main body content, not during the hook.
 
   Timing: place b-roll so the visual is on screen BEFORE the viewer hears the relevant words. Use the exact `start` value from the Deepgram word list (3+ decimal places). Cut back to the speaker between words, not mid-word.
 
-  Duration: 2.0–3.0 seconds per cutaway.
-
-  Spacing: at least 3 seconds of speaker face time between adjacent b-roll clips.
-
-  Coverage: aim for ~40% of the video runtime covered by b-roll. Scale linearly — a 30s video gets ~12s across 4-5 clips, a 60s video gets ~24s across 8-10 clips.
-
-  B-roll plays at the same speed as the underlying video. Place b-roll on held-speed sections of your speed curve, not during speed ramps.
-
-  Each b-roll clip must be visually distinct — no two clips about the same subject.
+  Duration: 2.0–3.0 seconds per cutaway. Spacing: at least 3 seconds of speaker face time between clips. Coverage: aim for ~40% of the video runtime. Place b-roll on held-speed sections of your speed curve, not during speed ramps. Each clip must be visually distinct.
 
   broll_clips: [
-    {{"keyword": "<hyper-specific Pexels search query, 15-20 words>", "timestamp": <word start time in source seconds, 3+ decimals>, "duration": <seconds>, "reason": "<what EXACT action from the transcript is being depicted>"}}
+    {{"keyword": "<hyper-specific Pexels search, 20-25 words, ONLY details from transcript>", "timestamp": <word start time in source seconds, 3+ decimals>, "duration": <seconds>, "reason": "<quote the speaker's EXACT words being depicted>"}}
   ]
 
 Visual effects — additional visual treatments for emphasis moments.
@@ -1697,7 +1691,7 @@ Output ONLY the JSON below — no commentary, no analysis, no explanation. Just 
     {{"t": <seconds>, "sound": "<sound>", "word": "<trigger>"}}
   ],
   "broll_clips": [
-    {{"keyword": "<hyper-specific Pexels search query, 15-20 words>", "timestamp": <EXACT word start in source seconds>, "duration": <seconds, target 2.0-3.0>, "reason": "<what EXACT action from the transcript is being depicted>"}}
+    {{"keyword": "<hyper-specific Pexels search, 20-25 words, ONLY details from transcript>", "timestamp": <EXACT word start in source seconds>, "duration": <seconds, target 2.0-3.0>, "reason": "<quote the speaker's EXACT words being depicted>"}}
   ],
   "visual_effects": [
     {{"type": "white_flash", "t": <source seconds>}}
