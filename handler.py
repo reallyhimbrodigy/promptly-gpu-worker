@@ -1630,28 +1630,30 @@ Sound effects — audio accents that make the edit feel physical and professiona
     {{"t": <seconds, 3+ decimal places, EXACT word start from Deepgram>, "sound": "<boom|hit|drum_roll|reverse|ching|ding|pop|click|camera_shutter|sad_trombone|typing|whoosh_slow|transition_smooth|thunder>", "word": "<exact trigger word, lowercase>"}}
   ]
 
-B-roll — stock footage cutaways sourced from Pexels.com. The keyword you write is typed directly into the Pexels search bar. If your keyword is wrong, the wrong clip plays in the video. You are not describing what you want — you are searching a stock footage database. B-roll replaces the video (not audio) for its duration — the speaker's voice continues over the footage.
+B-roll — stock footage cutaways sourced from Pexels.com. The keyword you write gets typed directly into the Pexels search bar. B-roll replaces the video (not audio) for its duration — the speaker's voice continues playing over the footage.
 
-  Only place b-roll on moments where something physical is happening. Ask: is there a real object doing a real thing in a real place right now? If yes, that's a b-roll moment. If the speaker is expressing an opinion, emotion, or abstract idea, stay on their face. The speaker's face is the most important visual during emotional beats, reveals, punchlines, and reactions. B-roll belongs on descriptive moments, not dramatic moments. The hook clip is always the highest-impact moment in the video and must show the speaker's face — b-roll timestamps should only fall within the main body content, after the hook has played.
+  The b-roll clip MUST depict EXACTLY what the speaker is describing at that moment. Not the general topic — the EXACT scenario. Listen to what the speaker literally says is happening and search for that precise scene. If the speaker says "I wiped the shaving cream off my face," search for a man wiping shaving cream off his face after shaving — not a man mid-shave, not a razor, not a bathroom. The EXACT action being described.
 
-  Before writing each keyword, visualize yourself standing in the room during this moment. What do you physically see? The objects, the surfaces, the textures, the lighting, the movement, the people, the body language, the environment, the weather, the time of day. Now pick the ONE most visually striking element in that scene and describe it the way a stock footage creator would title their upload. The keyword goes directly into a Pexels search bar — it must return the exact clip you're imagining. If you can't picture a specific clip existing on a stock footage site, pick a different visual element. Pexels has millions of clips of common setups but does NOT have niche narrative scenes. Never search for a character doing a story-specific action — search for the generic visual element that represents the moment. Every keyword should be 8-14 words.
+  NEVER invent details that aren't in the transcript. If the speaker says their son is "sitting on the floor watching me shave," the b-roll must show a child watching someone — NOT a child playing with toys, NOT a child in a generic room. Every detail in your keyword must come directly from the speaker's words.
 
-  Timing: the b-roll must be on screen BEFORE the viewer hears the relevant words, so the visual context is already established when the phrase lands. Place the timestamp at the first word of the sentence or clause that introduces the visual concept. The viewer should already be watching the b-roll by the time the descriptive words arrive. Use the exact `start` value from the Deepgram word list (3+ decimal places). End the b-roll in a gap between words — the cut back to the speaker should land between words, not mid-word. Prefer cutting in and out during natural micro-pauses in the speaker's rhythm.
+  Keywords should be 15-20 words. Be hyper-specific: include the action, the subject, the setting, the objects involved, the body position, the time of day, and any other detail the speaker mentions. More words = more precise Pexels results. A vague 5-word query returns random clips. A precise 18-word query returns the exact scene.
 
-  Duration: 2.0–3.0 seconds per cutaway. Below 1.2 seconds reads as a flash. Above 4 seconds loses energy.
+  Only place b-roll on moments where something PHYSICAL is happening — a real action in a real place. If the speaker is expressing an emotion, opinion, or abstract idea, stay on their face. B-roll belongs on descriptive action moments, not emotional beats. The speaker's face must be visible during reveals, punchlines, and reactions. B-roll timestamps should fall within the main body content, not during the hook.
 
-  Spacing: at least 3 seconds of speaker face time between adjacent b-roll clips. Each cutaway needs breathing room before the next. If two good b-roll moments are close together, use the stronger one.
+  Timing: place b-roll so the visual is on screen BEFORE the viewer hears the relevant words. Use the exact `start` value from the Deepgram word list (3+ decimal places). Cut back to the speaker between words, not mid-word.
+
+  Duration: 2.0–3.0 seconds per cutaway.
+
+  Spacing: at least 3 seconds of speaker face time between adjacent b-roll clips.
 
   Coverage: aim for ~40% of the video runtime covered by b-roll. Scale linearly — a 30s video gets ~12s across 4-5 clips, a 60s video gets ~24s across 8-10 clips.
 
-  B-roll plays at the same speed as the underlying video. If you place b-roll on a section you've sped up to 1.3x, the viewer sees only ~1.9 seconds of a 2.5-second b-roll. Place b-roll on held-speed sections of your speed curve so the duration plays at face value. Placing b-roll during a speed ramp causes the clip to change speed mid-playback, which looks wrong.
+  B-roll plays at the same speed as the underlying video. Place b-roll on held-speed sections of your speed curve, not during speed ramps.
 
-  Each b-roll clip must return visually distinct footage. Two clips about the same subject will return the same stock footage, which looks like a production error. Every keyword should depict a different visual from a different part of the video.
-
-  Every clip must include a "reason" field: one sentence describing what physical action is happening at this point in the video.
+  Each b-roll clip must be visually distinct — no two clips about the same subject.
 
   broll_clips: [
-    {{"keyword": "<Pexels search query>", "timestamp": <word start time in source seconds, 3+ decimals>, "duration": <seconds>, "reason": "<what physical action is happening at this point>"}}
+    {{"keyword": "<hyper-specific Pexels search query, 15-20 words>", "timestamp": <word start time in source seconds, 3+ decimals>, "duration": <seconds>, "reason": "<what EXACT action from the transcript is being depicted>"}}
   ]
 
 Visual effects — additional visual treatments for emphasis moments.
@@ -1695,7 +1697,7 @@ Output ONLY the JSON below — no commentary, no analysis, no explanation. Just 
     {{"t": <seconds>, "sound": "<sound>", "word": "<trigger>"}}
   ],
   "broll_clips": [
-    {{"keyword": "<Pexels search query>", "timestamp": <EXACT word start in source seconds>, "duration": <seconds, target 2.0-3.0>, "reason": "<what physical action is happening at this point>"}}
+    {{"keyword": "<hyper-specific Pexels search query, 15-20 words>", "timestamp": <EXACT word start in source seconds>, "duration": <seconds, target 2.0-3.0>, "reason": "<what EXACT action from the transcript is being depicted>"}}
   ],
   "visual_effects": [
     {{"type": "white_flash", "t": <source seconds>}}
