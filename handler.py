@@ -2199,13 +2199,17 @@ RULES FOR USING THESE TIMESTAMPS:
     raw_broll = edit_plan.get("broll_clips") or []
     validated_broll = []
     _broll_dg_words = edit_plan.get("_deepgram_words") or []
+    _broll_removed = edit_plan.get("_removed_word_indices") or set()
     for _br in raw_broll:
         if not isinstance(_br, dict):
             continue
         _br_kw = str(_br.get("keyword") or "").strip()
         if not _br_kw:
             continue
-        # Word-index timing — compute exact start/end from Deepgram words
+        # Word-index timing — compute exact start/end from KEPT Deepgram words.
+        # Gemini may select a range that includes removed words. We find the
+        # first kept word for the start and last kept word for the end so the
+        # timestamps are guaranteed to exist in a clip.
         try:
             _sw = int(_br["start_word_index"])
             _ew = int(_br["end_word_index"])
@@ -2214,12 +2218,23 @@ RULES FOR USING THESE TIMESTAMPS:
         if _sw < 0 or _ew < _sw or _sw >= len(_broll_dg_words):
             continue
         _ew = min(_ew, len(_broll_dg_words) - 1)
-        _br_ts = float(_broll_dg_words[_sw].get("start") or 0)
-        _br_end = float(_broll_dg_words[_ew].get("end") or 0)
+        # Find first KEPT word from start
+        _sw_kept = _sw
+        while _sw_kept <= _ew and _sw_kept in _broll_removed:
+            _sw_kept += 1
+        # Find last KEPT word from end
+        _ew_kept = _ew
+        while _ew_kept >= _sw_kept and _ew_kept in _broll_removed:
+            _ew_kept -= 1
+        if _sw_kept > _ew_kept:
+            print(f"[broll] All words [{_sw}]-[{_ew}] removed — skipping '{_br_kw}'", flush=True)
+            continue
+        _br_ts = float(_broll_dg_words[_sw_kept].get("start") or 0)
+        _br_end = float(_broll_dg_words[_ew_kept].get("end") or 0)
         _br_dur = _br_end - _br_ts
         if _br_dur <= 0:
             continue
-        print(f"[broll] Word-index timing: [{_sw}]-[{_ew}] → {_br_ts:.3f}s-{_br_end:.3f}s ({_br_dur:.2f}s)", flush=True)
+        print(f"[broll] Word-index timing: [{_sw_kept}]-[{_ew_kept}] → {_br_ts:.3f}s-{_br_end:.3f}s ({_br_dur:.2f}s)", flush=True)
         if not (math.isfinite(_br_ts) and math.isfinite(_br_dur)):
             continue
         if _br_ts < 0 or _br_dur <= 0:
@@ -4745,39 +4760,20 @@ def project_source_time_to_output(source_t, cuts, clip_ranges, speed_curve=None,
     correct narrative position rather than the hook preview position."""
     if not clip_time_maps:
         raise ValueError("project_source_time_to_output requires clip_time_maps")
-    _EPS = 0.02  # 20ms tolerance for floating-point boundary mismatches
     best_output_t = None
     for i, cut in enumerate(cuts):
         src_start = float(cut["source_start"])
         src_end = float(cut["source_end"])
 
-        if src_start - _EPS <= source_t <= src_end + _EPS:
-            source_offset = max(0.0, min(source_t - src_start, src_end - src_start))
+        if src_start <= source_t <= src_end:
+            source_offset = source_t - src_start
             local_offset = _time_map_lookup(clip_time_maps[i], source_offset)
             best_output_t = float(clip_ranges[i]["start"]) + local_offset
 
     if best_output_t is not None:
         return best_output_t
 
-    # Timestamp falls in a removed-word gap between two cuts.
-    # Find the nearest cut boundary and project from there.
-    _nearest_dist = float("inf")
-    _nearest_output = None
-    for i, cut in enumerate(cuts):
-        src_start = float(cut["source_start"])
-        src_end = float(cut["source_end"])
-        # Distance to this cut's start
-        _d_start = abs(source_t - src_start)
-        if _d_start < _nearest_dist:
-            _nearest_dist = _d_start
-            _nearest_output = float(clip_ranges[i]["start"])
-        # Distance to this cut's end
-        _d_end = abs(source_t - src_end)
-        if _d_end < _nearest_dist:
-            _nearest_dist = _d_end
-            _nearest_output = float(clip_ranges[i]["end"])
-
-    return _nearest_output
+    return None
 
 
 def project_source_time_to_final_output(source_t, cuts, effective_durations, speed_curve=None, clip_time_maps=None):
