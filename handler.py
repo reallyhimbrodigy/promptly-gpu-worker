@@ -1830,8 +1830,7 @@ Output ONLY a JSON array — no commentary:
 
     response_text = str(getattr(response, "text", "") or "").strip()
     # Extract JSON from response
-    import re as _re_broll
-    _json_match = _re_broll.search(r'\[.*\]', response_text, _re_broll.DOTALL)
+    _json_match = re.search(r'\[.*\]', response_text, re.DOTALL)
     if not _json_match:
         print(f"[broll-gemini] No JSON array found in response", flush=True)
         return []
@@ -4938,7 +4937,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             continue  # sub-clip split inside the same Gemini clip — not a real boundary
         _real_boundary_idx += 1
         _existing = str(render_cuts[_ci - 1].get("transition_out") or "none").lower()
-        if _existing != "none" or render_cuts[_ci].get("_is_broll") or render_cuts[_ci - 1].get("_is_hook"):
+        if _existing != "none" or render_cuts[_ci - 1].get("_is_hook"):
             continue
         _cut_source_end = float(render_cuts[_ci - 1].get("source_end") or 0)
         _near_emphasis = any(abs(float(em.get("t") or 0) - _cut_source_end) < 1.5 for em in _em_all_for_auto)
@@ -5226,7 +5225,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             zoom = "slow_in" if zoom == "punch_in" else "slow_out"
         # Always-on Ken Burns: no clip is ever truly static.
         # Matches Captions app where every talking-head shot has subtle movement.
-        if zoom == "none" and not cut.get("_is_broll") and not cut.get("_is_hook"):
+        if zoom == "none" and not cut.get("_is_hook"):
             zoom = "slow_in"
 
         eff_dur = effective_durations[i]
@@ -5255,7 +5254,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # Tight cuts get a static 15% zoom (instant crop, face-centered) + subtle drift.
         # Wide cuts get subtle 4-5% Ken Burns drift. Research: 115% is standard reframe.
         # Use _original_idx so sub-clips from the same parent cut share the same camera angle.
-        _is_tight_cut = (_orig_idx % 2 == 1) and zoom not in ("cut_zoom",) and not cut.get("_is_broll") and not cut.get("_is_hook")
+        _is_tight_cut = (_orig_idx % 2 == 1) and zoom not in ("cut_zoom",) and not cut.get("_is_hook")
         _base_zoom_max = 1.14 if has_burned_captions else 1.14  # 14% drift — visible Ken Burns for Captions-level energy
 
         # ── Face-tracked zoom ──────────────────────────────────────────
@@ -5375,7 +5374,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             {"name": "right",   "ox_shift": 0.035,   "oy_shift": 0.0,    "zoom_add": 0.03,  "tint": "colorbalance=rs=0.01:gs=0.01:bs=-0.01"},
         ]
         cam_preset = None
-        if not cut.get("_is_broll") and not cut.get("_is_hook") and zoom != "cut_zoom":
+        if not cut.get("_is_hook") and zoom != "cut_zoom":
             _content_i = cut.get("_original_idx", i)
             if _content_i >= 0:
                 cam_preset = _CAMERA_PRESETS[_content_i % len(_CAMERA_PRESETS)]
@@ -5579,7 +5578,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             "question":    "eq=brightness=0.01:saturation=0.98",   # slightly muted
             "transition":  "",                                      # neutral
         }
-        if not cut.get("_is_broll") and not cut.get("_is_hook"):
+        if not cut.get("_is_hook"):
             _em_all = edit_plan.get("_emphasis_moments") or edit_plan.get("emphasis_moments") or []
             _clip_em = [em for em in _em_all if start <= float(em.get("t") or 0) <= end]
             if _clip_em:
