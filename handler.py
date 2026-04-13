@@ -5734,30 +5734,39 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                     continue
                 _local_path = _broll_files[_bi]
                 _src_ts = float(_bc.get("timestamp") or 0)
+                _src_dur = float(_bc.get("duration") or 0)
+                if _src_dur <= 0:
+                    continue
+                _src_end = _src_ts + _src_dur
+
+                # Project BOTH start and end through the speed curve independently.
+                # Source duration ≠ output duration when speed ramping is active.
+                # A 1.76s source window at 1.25x becomes 1.41s in output.
                 _out_start = project_source_time_to_final_output(
                     _src_ts, render_cuts, effective_durations, _broll_sc,
                     clip_time_maps=_clip_time_maps,
                 )
+                _out_end = project_source_time_to_final_output(
+                    _src_end, render_cuts, effective_durations, _broll_sc,
+                    clip_time_maps=_clip_time_maps,
+                )
                 if _out_start is None or _out_start >= _seg_total_dur:
-                    print(f"[broll] '{_bc.get('keyword')}' projected output time invalid — skipping", flush=True)
+                    print(f"[broll] '{_bc.get('keyword')}' projected output start invalid — skipping", flush=True)
                     continue
+                if _out_end is None or _out_end <= _out_start:
+                    # End projection failed — fall back to projecting duration at avg speed
+                    _out_end = _out_start + _src_dur
+                    print(f"[broll] '{_bc.get('keyword')}' end projection failed, using source duration", flush=True)
 
-                # Honor Gemini's duration exactly. Only constraints:
-                #   1) Don't extend past the end of the rendered timeline.
-                #   2) Don't exceed the available footage in the Pexels file.
-                # Both are physical impossibilities, not creative judgments.
-                requested_duration = float(_bc.get("duration") or 0)
-                if requested_duration <= 0:
-                    continue
+                effective_duration = _out_end - _out_start
                 broll_file_duration = get_video_duration(_local_path)
-                effective_duration = requested_duration
                 if broll_file_duration > 0 and effective_duration > broll_file_duration:
                     effective_duration = broll_file_duration
-                # Clip to remaining timeline (rare; only triggers if Gemini
-                # placed a b-roll right at the end of the video).
+                    _out_end = _out_start + effective_duration
                 _max_remaining = _seg_total_dur - _out_start
                 if effective_duration > _max_remaining:
                     effective_duration = _max_remaining
+                    _out_end = _out_start + effective_duration
                 if effective_duration <= 0:
                     continue
 
@@ -5772,7 +5781,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                     )
 
                 _kb_dir = _KB_DIRECTIONS[len(_broll_overlays) % len(_KB_DIRECTIONS)]
-                _out_end = _out_start + effective_duration
                 _broll_overlays.append({
                     "path": _local_path,
                     "out_start": _out_start,
