@@ -1638,6 +1638,8 @@ B-roll — stock footage cutaways from Pexels.com. Your keyword gets typed direc
 
   Each keyword MUST be at least 20 words long. Use the extra words to add context that steers Pexels toward the right clip — describe the setting, the mood, the type of person, the relationship, the time of day. The goal: a simple scene, described precisely enough that Pexels can't return something misleading.
 
+  DISAMBIGUATE every keyword. Think about what ELSE Pexels might return for the words you're using, and add words to prevent that. "Calling" could return a bell, a video call, or a phone — if the speaker means phone calls, say "smartphone" "incoming call" "ringing phone screen." If two moments in the same video involve similar objects, make sure each keyword focuses on the DIFFERENT part — the specific action that distinguishes this moment from the other. No two keywords should return the same clip from Pexels.
+
   Only place b-roll on physical action moments. Stay on the speaker's face during emotional beats, opinions, punchlines, reveals, and reactions — the speaker's expression IS the content. B-roll timestamps in the main body only, not during the hook.
 
   Timing: b-roll on screen BEFORE the viewer hears the words. Use exact `start` values from Deepgram (3+ decimals). Cut back between words, not mid-word.
