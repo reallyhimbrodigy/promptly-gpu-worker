@@ -1640,11 +1640,11 @@ B-roll — stock footage cutaways from Pexels.com. Your keyword gets typed into 
 
   Only place b-roll on physical action moments. Stay on the speaker's face during emotional beats, opinions, punchlines, reveals, and reactions. B-roll in the main body only, not during the hook.
 
-  Timing: b-roll on screen BEFORE the viewer hears the words. Use exact `start` values from Deepgram (3+ decimals). Cut back between words, not mid-word.
-  Duration: 2.0–3.0s. Spacing: 3+ seconds of speaker face between clips. Coverage: ~40% of runtime. Place on held-speed sections, not ramps. Each clip visually distinct.
+  Timing: b-roll appears the EXACT millisecond the first relevant word starts and disappears the EXACT millisecond the last relevant word ends. Use start_word_index and end_word_index from the Deepgram word list to define the window precisely. The pipeline computes exact timing from these indices — do not provide a duration, it is calculated automatically.
+  Spacing: 3+ seconds of speaker face between clips. Coverage: ~40% of runtime. Place on held-speed sections, not ramps. Each clip visually distinct.
 
   broll_clips: [
-    {{"keyword": "<minimum 16 words — clip must match what viewer hears at this moment>", "timestamp": <word start time in source seconds, 3+ decimals>, "duration": <seconds>, "reason": "<quote the speaker's exact words>"}}
+    {{"keyword": "<minimum 16 words — clip must match what viewer hears at this moment>", "start_word_index": <index of first word the b-roll covers>, "end_word_index": <index of last word the b-roll covers>, "reason": "<quote the speaker's exact words>"}}
   ]
 
 Visual effects — additional visual treatments for emphasis moments.
@@ -1688,7 +1688,7 @@ Output ONLY the JSON below — no commentary, no analysis, no explanation. Just 
     {{"t": <seconds>, "sound": "<sound>", "word": "<trigger>"}}
   ],
   "broll_clips": [
-    {{"keyword": "<minimum 16 words — clip must match what viewer hears at this moment>", "timestamp": <EXACT word start in source seconds>, "duration": <seconds, target 2.0-3.0>, "reason": "<quote the speaker's exact words>"}}
+    {{"keyword": "<minimum 16 words — clip must match what viewer hears at this moment>", "start_word_index": <index of first word>, "end_word_index": <index of last word>, "reason": "<quote the speaker's exact words>"}}
   ],
   "visual_effects": [
     {{"type": "white_flash", "t": <source seconds>}}
@@ -2196,17 +2196,37 @@ RULES FOR USING THESE TIMESTAMPS:
     # zero duration, NaN, past end of video, malformed JSON types).
     raw_broll = edit_plan.get("broll_clips") or []
     validated_broll = []
+    _broll_dg_words = edit_plan.get("_deepgram_words") or []
     for _br in raw_broll:
         if not isinstance(_br, dict):
             continue
         _br_kw = str(_br.get("keyword") or "").strip()
         if not _br_kw:
             continue
-        try:
-            _br_ts = float(_br.get("timestamp"))
-            _br_dur = float(_br.get("duration"))
-        except (TypeError, ValueError):
-            continue
+        # Support both new word-index format and legacy timestamp/duration format
+        _has_word_indices = _br.get("start_word_index") is not None and _br.get("end_word_index") is not None
+        if _has_word_indices and _broll_dg_words:
+            try:
+                _sw = int(_br["start_word_index"])
+                _ew = int(_br["end_word_index"])
+            except (TypeError, ValueError):
+                continue
+            if _sw < 0 or _ew < _sw or _sw >= len(_broll_dg_words):
+                continue
+            _ew = min(_ew, len(_broll_dg_words) - 1)
+            _br_ts = float(_broll_dg_words[_sw].get("start") or 0)
+            _br_end = float(_broll_dg_words[_ew].get("end") or 0)
+            _br_dur = _br_end - _br_ts
+            if _br_dur <= 0:
+                continue
+            print(f"[broll] Word-index timing: [{_sw}]-[{_ew}] → {_br_ts:.3f}s-{_br_end:.3f}s ({_br_dur:.2f}s)", flush=True)
+        else:
+            # Legacy: timestamp + duration
+            try:
+                _br_ts = float(_br.get("timestamp"))
+                _br_dur = float(_br.get("duration"))
+            except (TypeError, ValueError):
+                continue
         if not (math.isfinite(_br_ts) and math.isfinite(_br_dur)):
             continue
         if _br_ts < 0 or _br_dur <= 0:
