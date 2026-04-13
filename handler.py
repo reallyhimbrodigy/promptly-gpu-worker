@@ -3176,6 +3176,12 @@ def fetch_broll_clip(keyword, duration_needed, work_dir):
 
     print(f"[broll] Pexels returned {len(videos)} results for '{keyword}'", flush=True)
 
+    # Extract key words from the keyword for tag matching
+    _kw_words = set(keyword.lower().split())
+    # Remove common stop words that don't help with matching
+    _stop_words = {"a", "an", "the", "in", "on", "of", "with", "and", "to", "for", "up", "at", "by", "from", "into", "is", "it", "close"}
+    _kw_match_words = _kw_words - _stop_words
+
     best_match = None
     best_score = -1
     for vid_idx, video in enumerate(videos):
@@ -3220,6 +3226,23 @@ def fetch_broll_clip(keyword, duration_needed, work_dir):
         elif best_file["height"] >= 1080:
             score += 3
         score += max(0, 10 - vid_idx)
+
+        # Tag relevance — score higher when Pexels tags match our keyword words.
+        # This breaks ties between results that all score 25 on technical metrics,
+        # ensuring a "smartphone ringing" query picks the phone clip over a bell clip.
+        _vid_tags = set()
+        for _tag_obj in (video.get("tags") or []):
+            if isinstance(_tag_obj, dict):
+                _vid_tags.update(_tag_obj.get("name", "").lower().split())
+            elif isinstance(_tag_obj, str):
+                _vid_tags.update(_tag_obj.lower().split())
+        # Also check the video URL slug — Pexels encodes descriptive words in the URL
+        _vid_url = str(video.get("url") or "").lower()
+        _vid_url_words = set(re.split(r'[-/]', _vid_url.split("pexels.com/")[-1] if "pexels.com/" in _vid_url else ""))
+        _all_vid_words = _vid_tags | _vid_url_words
+        if _all_vid_words and _kw_match_words:
+            _tag_matches = len(_kw_match_words & _all_vid_words)
+            score += _tag_matches * 3  # 3 points per matching word
 
         if score > best_score:
             best_match = {
