@@ -1630,13 +1630,13 @@ Sound effects — audio accents that make the edit feel physical and professiona
     {{"t": <seconds, 3+ decimal places, EXACT word start from Deepgram>, "sound": "<boom|hit|drum_roll|reverse|ching|ding|pop|click|camera_shutter|sad_trombone|typing|whoosh_slow|transition_smooth|thunder>", "word": "<exact trigger word, lowercase>"}}
   ]
 
-B-roll — stock footage cutaways from Pexels.com. Your keyword gets typed directly into the Pexels search bar, the top result plays in the video while the speaker's voice continues over it. A bad query returns a clip that doesn't match the speaker's words, and the video looks broken.
+B-roll — stock footage cutaways from Pexels.com. Your keyword gets typed directly into the Pexels search bar, the top result plays in the video while the speaker's voice continues over it.
 
-  Your keyword is a literal description of what the speaker said is physically happening at that moment. Use ONLY details from the transcript. If the speaker didn't say it, don't put it in the keyword. Every invented word steers Pexels toward the wrong clip.
+  Search for SIMPLE, obvious scenes. Do not try to recreate the exact narrative — find the simplest, cleanest visual that represents what the speaker is talking about. If the speaker says "I'm shaving," search for a man shaving. If the speaker says "I wiped the shaving cream off my face," search for a man drying his face with a towel after shaving. If the speaker says "my son is sitting next to me on the floor watching me shave," search for a cute little boy looking up at the camera. Simple, clean, obvious.
 
-  Get the VERB right. If the speaker says "I wiped the shaving cream off my face," the action is wiping/removing — not shaving, not applying. If the speaker says "I got in the car," the action is getting into a car — not driving fast. The verb drives the entire search result.
+  The viewer watches your clip with ZERO context beyond what they see on screen and what the speaker is saying. If the clip introduces something the speaker didn't mention, it confuses the viewer and ruins the video. If the speaker says "she kept calling me every five seconds" and the clip shows a phone dialing 911, the viewer thinks someone is calling the police — a completely different story. Your keyword must steer Pexels toward clips that tell the SAME story as the speaker. For repeated phone calls from a wife, include words like "wife" "husband" "missed calls" "couple" "relationship" to steer away from emergency or business contexts.
 
-  Each keyword MUST be at least 20 words. Include the subject, the exact action verb, every object the speaker mentioned, and the setting. Short queries return random clips. Long specific queries return the exact scene you want.
+  Each keyword MUST be at least 20 words long. Use the extra words to add context that steers Pexels toward the right clip — describe the setting, the mood, the type of person, the relationship, the time of day. The goal: a simple scene, described precisely enough that Pexels can't return something misleading.
 
   Only place b-roll on physical action moments. Stay on the speaker's face during emotional beats, opinions, punchlines, reveals, and reactions — the speaker's expression IS the content. B-roll timestamps in the main body only, not during the hook.
 
@@ -1644,7 +1644,7 @@ B-roll — stock footage cutaways from Pexels.com. Your keyword gets typed direc
   Duration: 2.0–3.0s. Spacing: 3+ seconds of speaker face between clips. Coverage: ~40% of runtime. Place on held-speed sections, not ramps. Each clip visually distinct.
 
   broll_clips: [
-    {{"keyword": "<minimum 20 words — Pexels search query using ONLY details from the transcript>", "timestamp": <word start time in source seconds, 3+ decimals>, "duration": <seconds>, "reason": "<quote the speaker's exact words>"}}
+    {{"keyword": "<minimum 20 words — simple scene, described precisely to steer Pexels toward the right clip>", "timestamp": <word start time in source seconds, 3+ decimals>, "duration": <seconds>, "reason": "<quote the speaker's exact words>"}}
   ]
 
 Visual effects — additional visual treatments for emphasis moments.
@@ -1688,7 +1688,7 @@ Output ONLY the JSON below — no commentary, no analysis, no explanation. Just 
     {{"t": <seconds>, "sound": "<sound>", "word": "<trigger>"}}
   ],
   "broll_clips": [
-    {{"keyword": "<minimum 20 words — Pexels search using ONLY details from transcript>", "timestamp": <EXACT word start in source seconds>, "duration": <seconds, target 2.0-3.0>, "reason": "<quote the speaker's exact words>"}}
+    {{"keyword": "<minimum 20 words — simple scene described precisely to steer Pexels right>", "timestamp": <EXACT word start in source seconds>, "duration": <seconds, target 2.0-3.0>, "reason": "<quote the speaker's exact words>"}}
   ],
   "visual_effects": [
     {{"type": "white_flash", "t": <source seconds>}}
