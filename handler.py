@@ -3149,7 +3149,7 @@ def select_best_thumbnail_frame(video_path, seed_ts, work_dir):
     return _data, "image/jpeg"
 
 
-def fetch_broll_clip(keyword, duration_needed, work_dir):
+def fetch_broll_clip(keyword, duration_needed, work_dir, dialogue_reason=""):
     """Search Pexels for a portrait video clip. Returns local path or None."""
     pexels_key = os.environ.get("PEXELS_API_KEY")
     if not pexels_key:
@@ -3288,7 +3288,8 @@ def fetch_broll_clip(keyword, duration_needed, work_dir):
         if _poster_images and len(_poster_images) >= 2:
             try:
                 _pick_client = _get_genai_client()
-                _parts = [f'Which image best depicts "{keyword}"? Reply with ONLY the number (1-{len(_poster_images)}).']
+                _dialogue_ctx = f' The speaker says: "{dialogue_reason}".' if dialogue_reason else ""
+                _parts = [f'This clip plays over a talking-head video while the viewer hears the dialogue.{_dialogue_ctx} Which image best matches what the viewer should see for "{keyword}"? Reply with ONLY the number (1-{len(_poster_images)}).']
                 _poster_idx_map = {}
                 _num = 1
                 for _pi in sorted(_poster_images.keys()):
@@ -6563,6 +6564,7 @@ def handler(job):
                     _bc["keyword"],
                     float(_bc.get("duration") or 2.0),
                     work_dir,
+                    dialogue_reason=str(_bc.get("reason") or ""),
                 )
                 _broll_fetch_futures[_fut] = _bi
 
