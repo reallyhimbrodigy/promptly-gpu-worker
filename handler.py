@@ -1630,25 +1630,21 @@ Sound effects — audio accents that make the edit feel physical and professiona
     {{"t": <seconds, 3+ decimal places, EXACT word start from Deepgram>, "sound": "<boom|hit|drum_roll|reverse|ching|ding|pop|click|camera_shutter|sad_trombone|typing|whoosh_slow|transition_smooth|thunder>", "word": "<exact trigger word, lowercase>"}}
   ]
 
-B-roll — stock footage cutaways from Pexels.com. Your keyword gets typed directly into the Pexels search bar, the top result plays in the video while the speaker's voice continues over it.
+B-roll — stock footage cutaways from Pexels.com. Your keyword gets typed into the Pexels search bar and the top result plays in the video OVER the speaker's dialogue. The viewer hears the speaker's words while watching your clip. Your clip must match what the speaker is saying.
 
-  Search for SIMPLE, obvious scenes. Do not try to recreate the exact narrative — find the simplest, cleanest visual that represents what the speaker is talking about. Simple, clean, obvious. The simpler the scene, the less likely Pexels returns something wrong.
+  For each b-roll placement, read the speaker's EXACT words at that timestamp and ask: "If a viewer watches this stock footage clip while hearing these words, does it make sense?" If the speaker says "he's sitting on the floor next to me watching me shave" and the clip shows a boy playing with toys, that does NOT match — the viewer hears "watching me shave" while seeing a child playing, which is confusing. The clip must depict something compatible with the words the viewer is hearing at that moment.
 
-  You can simplify an action, but the simplified version must still be COMPATIBLE with what the speaker said. The simplified scene must still make sense when the viewer hears the speaker's words over it. If the viewer hears the speaker describe one action but sees a completely different action on screen, the video looks broken.
+  Search for simple, obvious scenes. The simpler the scene, the less likely Pexels returns something wrong. You can simplify an action, but the simplified version must still match what the viewer hears. Use context words (setting, type of person, relationship) to steer Pexels away from unrelated results. Disambiguate ambiguous words — "calling" needs "smartphone ringing" to avoid bells or video calls.
 
-  The viewer watches your clip with ZERO context beyond what they see on screen and what the speaker is saying. If the clip introduces something the speaker didn't mention, it confuses the viewer and ruins the video. Your keyword must steer Pexels toward clips that tell the SAME story as the speaker. Use context words (relationship, setting, type of person, time of day) to steer Pexels away from unrelated scenarios that happen to share the same action.
+  Each keyword MUST be at least 16 words long. Only add details that help Pexels find the right clip. Do not add filler adjectives that steer Pexels toward aesthetic lifestyle footage instead of the action you need. No two keywords should return the same clip.
 
-  Each keyword MUST be at least 16 words long. Use the extra words to add context that helps Pexels return the right clip — the core action, the type of person, the setting. Only add details that help Pexels find the right clip. Do not add random filler details like "curiously" "peacefully" "serious expression" "morning light" "white linens" — these steer Pexels toward aesthetic lifestyle footage instead of the specific action you need. Every word should either describe the action or disambiguate what Pexels returns.
-
-  DISAMBIGUATE every keyword. Think about what ELSE Pexels might return for the words you're using, and add words to prevent that. "Calling" could return a bell, a video call, or a phone — if the speaker means phone calls, say "smartphone" "incoming call" "ringing phone screen." If two moments in the same video involve similar objects, make sure each keyword focuses on the DIFFERENT part — the specific action that distinguishes this moment from the other. No two keywords should return the same clip from Pexels.
-
-  Only place b-roll on physical action moments. Stay on the speaker's face during emotional beats, opinions, punchlines, reveals, and reactions — the speaker's expression IS the content. B-roll timestamps in the main body only, not during the hook.
+  Only place b-roll on physical action moments. Stay on the speaker's face during emotional beats, opinions, punchlines, reveals, and reactions. B-roll in the main body only, not during the hook.
 
   Timing: b-roll on screen BEFORE the viewer hears the words. Use exact `start` values from Deepgram (3+ decimals). Cut back between words, not mid-word.
   Duration: 2.0–3.0s. Spacing: 3+ seconds of speaker face between clips. Coverage: ~40% of runtime. Place on held-speed sections, not ramps. Each clip visually distinct.
 
   broll_clips: [
-    {{"keyword": "<minimum 16 words — simple scene, every word helps Pexels find the right clip>", "timestamp": <word start time in source seconds, 3+ decimals>, "duration": <seconds>, "reason": "<quote the speaker's exact words>"}}
+    {{"keyword": "<minimum 16 words — clip must match what viewer hears at this moment>", "timestamp": <word start time in source seconds, 3+ decimals>, "duration": <seconds>, "reason": "<quote the speaker's exact words>"}}
   ]
 
 Visual effects — additional visual treatments for emphasis moments.
@@ -1692,7 +1688,7 @@ Output ONLY the JSON below — no commentary, no analysis, no explanation. Just 
     {{"t": <seconds>, "sound": "<sound>", "word": "<trigger>"}}
   ],
   "broll_clips": [
-    {{"keyword": "<minimum 16 words — simple scene, every word helps Pexels find the right clip>", "timestamp": <EXACT word start in source seconds>, "duration": <seconds, target 2.0-3.0>, "reason": "<quote the speaker's exact words>"}}
+    {{"keyword": "<minimum 16 words — clip must match what viewer hears at this moment>", "timestamp": <EXACT word start in source seconds>, "duration": <seconds, target 2.0-3.0>, "reason": "<quote the speaker's exact words>"}}
   ],
   "visual_effects": [
     {{"type": "white_flash", "t": <source seconds>}}
