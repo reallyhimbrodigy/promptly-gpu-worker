@@ -1630,29 +1630,7 @@ Sound effects — audio accents that make the edit feel physical and professiona
     {{"t": <seconds, 3+ decimal places, EXACT word start from Deepgram>, "sound": "<boom|hit|drum_roll|reverse|ching|ding|pop|click|camera_shutter|sad_trombone|typing|whoosh_slow|transition_smooth|thunder>", "word": "<exact trigger word, lowercase>"}}
   ]
 
-B-roll — stock footage cutaways sourced from Pexels.com. The keyword you write is typed directly into the Pexels search bar. If your keyword is wrong, the wrong clip plays in the video. You are not describing what you want — you are searching a stock footage database. B-roll replaces the video (not audio) for its duration — the speaker's voice continues over the footage.
-
-  Only place b-roll on moments where something physical is happening. Ask: is there a real object doing a real thing in a real place right now? If yes, that's a b-roll moment. If the speaker is expressing an opinion, emotion, or abstract idea, stay on their face. The speaker's face is the most important visual during emotional beats, reveals, punchlines, and reactions. B-roll belongs on descriptive moments, not dramatic moments. The hook clip is always the highest-impact moment in the video and must show the speaker's face — b-roll timestamps should only fall within the main body content, after the hook has played.
-
-  Before writing each keyword, visualize yourself standing in the room during this moment. What do you physically see? The objects, the surfaces, the textures, the lighting, the movement, the people, the body language, the environment, the weather, the time of day. Now pick the ONE most visually striking element in that scene and describe it the way a stock footage creator would title their upload. The keyword goes directly into a Pexels search bar — it must return the exact clip you're imagining. If you can't picture a specific clip existing on a stock footage site, pick a different visual element. Pexels has millions of clips of common setups but does NOT have niche narrative scenes. Never search for a character doing a story-specific action — search for the generic visual element that represents the moment. Every keyword should be 8-14 words.
-
-  Timing: the b-roll must be on screen BEFORE the viewer hears the relevant words, so the visual context is already established when the phrase lands. Place the timestamp at the first word of the sentence or clause that introduces the visual concept. The viewer should already be watching the b-roll by the time the descriptive words arrive. Use the exact `start` value from the Deepgram word list (3+ decimal places). End the b-roll in a gap between words — the cut back to the speaker should land between words, not mid-word. Prefer cutting in and out during natural micro-pauses in the speaker's rhythm.
-
-  Duration: 2.0–3.0 seconds per cutaway. Below 1.2 seconds reads as a flash. Above 4 seconds loses energy.
-
-  Spacing: at least 3 seconds of speaker face time between adjacent b-roll clips. Each cutaway needs breathing room before the next. If two good b-roll moments are close together, use the stronger one.
-
-  Coverage: aim for ~40% of the video runtime covered by b-roll. Scale linearly — a 30s video gets ~12s across 4-5 clips, a 60s video gets ~24s across 8-10 clips.
-
-  B-roll plays at the same speed as the underlying video. If you place b-roll on a section you've sped up to 1.3x, the viewer sees only ~1.9 seconds of a 2.5-second b-roll. Place b-roll on held-speed sections of your speed curve so the duration plays at face value. Placing b-roll during a speed ramp causes the clip to change speed mid-playback, which looks wrong.
-
-  Each b-roll clip must return visually distinct footage. Two clips about the same subject will return the same stock footage, which looks like a production error. Every keyword should depict a different visual from a different part of the video.
-
-  Every clip must include a "reason" field: one sentence describing what physical action is happening at this point in the video.
-
-  broll_clips: [
-    {{"keyword": "<Pexels search query>", "timestamp": <word start time in source seconds, 3+ decimals>, "duration": <seconds>, "reason": "<what physical action is happening at this point>"}}
-  ]
+B-roll is handled by a separate system — leave broll_clips as an empty array [].
 
 Visual effects — additional visual treatments for emphasis moments.
 
@@ -1694,9 +1672,7 @@ Output ONLY the JSON below — no commentary, no analysis, no explanation. Just 
   "sound_effects": [
     {{"t": <seconds>, "sound": "<sound>", "word": "<trigger>"}}
   ],
-  "broll_clips": [
-    {{"keyword": "<Pexels search query>", "timestamp": <EXACT word start in source seconds>, "duration": <seconds, target 2.0-3.0>, "reason": "<what physical action is happening at this point>"}}
-  ],
+  "broll_clips": [],
   "visual_effects": [
     {{"type": "white_flash", "t": <source seconds>}}
   ],
@@ -1786,6 +1762,88 @@ def build_analysis_from_gemini_recipe(edit_plan, duration):
     analysis["tightened_timeline"] = {}
     analysis["content_mode"] = "speech"
     return analysis
+
+
+def generate_broll_gemini(deepgram_words, duration):
+    """Dedicated Gemini call for b-roll keyword generation.
+    Runs in parallel with the main edit recipe call. Text-only (no video),
+    tiny prompt, completes in 2-3s. Returns list of broll_clips dicts."""
+    if not deepgram_words:
+        return []
+
+    client = _get_genai_client()
+
+    # Build readable transcript with timestamps
+    word_lines = []
+    for idx, w in enumerate(deepgram_words):
+        word_text = w.get("punctuated_word") or w.get("word") or ""
+        start = float(w.get("start") or 0)
+        end = float(w.get("end") or 0)
+        word_lines.append(f"  [{idx}] {start:.2f}-{end:.2f}: {word_text}")
+    transcript_block = "\n".join(word_lines)
+
+    prompt = f"""You are a stock footage search expert for Promptly, an AI video editing platform that creates professional short-form content for TikTok and Instagram Reels.
+
+Your ONLY job: write Pexels.com search queries that return the perfect stock footage clips to overlay on a talking-head video. The speaker's voice plays over the footage — you are choosing what the viewer SEES while they listen.
+
+The keyword you write gets typed directly into the Pexels search bar at pexels.com/search/videos. If your keyword is bad, the wrong clip plays. You are not describing what you want — you are literally typing a search query into a stock footage database.
+
+RULES:
+- Only place b-roll on moments where something PHYSICAL is happening. A real object doing a real thing in a real place.
+- Before writing each keyword, visualize yourself standing in the room. What do you physically see? The objects, surfaces, textures, lighting, movement, people, body language, environment. Pick the ONE most visually striking element and write it as a search query.
+- Pexels has common setups (hands, screens, doors, feet, traffic, objects on tables) but NOT niche narrative clips. Never search for a character doing a story-specific action.
+- Each keyword should be 8-14 words.
+- Duration: 2.0-3.0 seconds per clip.
+- Space clips at least 3 seconds apart.
+- Aim for ~40% coverage of the {duration:.0f}s video runtime.
+- Use the EXACT word start timestamps from the list below (3+ decimal places).
+- Place b-roll BEFORE the viewer hears the relevant words.
+- Each clip must be visually distinct — no two clips about the same subject.
+
+=== TRANSCRIPT WITH TIMESTAMPS ===
+
+{transcript_block}
+
+=== RESPONSE FORMAT ===
+
+Output ONLY a JSON array — no commentary:
+
+```json
+[
+  {{"keyword": "<Pexels search query>", "timestamp": <source seconds>, "duration": <seconds>, "reason": "<what physical action is happening>"}}
+]
+```"""
+
+    print(f"[broll-gemini] Calling Gemini for b-roll keywords ({len(deepgram_words)} words)...", flush=True)
+    t = time.time()
+    response = client.models.generate_content(
+        model=GEMINI_MODEL,
+        contents=[prompt],
+        config=genai_types.GenerateContentConfig(
+            temperature=0.7,
+            max_output_tokens=1024,
+            thinking_config=genai_types.ThinkingConfig(thinking_level="LOW"),
+        ),
+    )
+    elapsed = time.time() - t
+    print(f"[broll-gemini] Complete in {elapsed:.1f}s", flush=True)
+
+    response_text = str(getattr(response, "text", "") or "").strip()
+    # Extract JSON from response
+    import re as _re_broll
+    _json_match = _re_broll.search(r'\[.*\]', response_text, _re_broll.DOTALL)
+    if not _json_match:
+        print(f"[broll-gemini] No JSON array found in response", flush=True)
+        return []
+    try:
+        broll_clips = json.loads(_json_match.group())
+        print(f"[broll-gemini] Generated {len(broll_clips)} b-roll clips", flush=True)
+        for _bc in broll_clips:
+            print(f"[broll-gemini]   → '{_bc.get('keyword', '')[:60]}' @ {_bc.get('timestamp', 0):.2f}s for {_bc.get('duration', 0):.1f}s", flush=True)
+        return broll_clips
+    except json.JSONDecodeError as e:
+        print(f"[broll-gemini] JSON parse error: {e}", flush=True)
+        return []
 
 
 def generate_edit_gemini(video_path, vibe, duration, trend_context=None, deepgram_words=None, face_positions=None, gemini_file=None, cached_response=None, inline_video_bytes=None):
@@ -6422,8 +6480,19 @@ def handler(job):
         future_trend = mega_pool.submit(_do_trend_context)
         future_loudness = mega_pool.submit(_do_loudness)
         future_beats = mega_pool.submit(_do_beats)
+        # B-roll keywords: separate focused Gemini call (text-only, ~2-3s).
+        # Runs fully in parallel with the main edit recipe call.
+        def _do_broll_keywords():
+            """Generate b-roll keywords in parallel with main edit call."""
+            _dg = future_transcribe.result()
+            _words = _dg.get("words", [])
+            if not _words:
+                return []
+            return generate_broll_gemini(_words, source_duration)
+
         # Edit recipe waits on transcript + upload internally
         future_edit = mega_pool.submit(_do_edit_recipe_overlapped)
+        future_broll_kw = mega_pool.submit(_do_broll_keywords)
         # Face detection runs directly on raw source (no normalize dependency)
         future_faces = mega_pool.submit(_do_face_detect_overlapped)
 
@@ -6431,6 +6500,12 @@ def handler(job):
         _mega_t0 = time.time()
         edit_plan = future_edit.result()  # critical path — longest wait (Gemini)
         print(f"[TIMING] edit_plan ready in {time.time() - _mega_t0:.1f}s (critical path)", flush=True)
+
+        # Merge b-roll keywords from the parallel call into the edit plan
+        _broll_from_dedicated = future_broll_kw.result()
+        if _broll_from_dedicated:
+            edit_plan["broll_clips"] = _broll_from_dedicated
+            print(f"[broll] Using {len(_broll_from_dedicated)} clips from dedicated b-roll call", flush=True)
 
         # Start B-roll fetch IMMEDIATELY while other futures may still be running
         _broll_fetch_pool = None
