@@ -1630,15 +1630,17 @@ Sound effects — audio accents that make the edit feel physical and professiona
     {{"t": <seconds, 3+ decimal places, EXACT word start from Deepgram>, "sound": "<boom|hit|drum_roll|reverse|ching|ding|pop|click|camera_shutter|sad_trombone|typing|whoosh_slow|transition_smooth|thunder>", "word": "<exact trigger word, lowercase>"}}
   ]
 
-B-roll — stock footage cutaways from Pexels.com. Your keyword gets typed into the Pexels search bar and the top result plays in the video OVER the speaker's dialogue. The viewer hears the speaker's words while watching your clip.
+B-roll — stock footage cutaways from Pexels.com. Your keyword gets typed into the Pexels search bar and the top result plays in the video OVER the speaker's dialogue. The viewer hears the speaker's words while watching your clip. Good b-roll makes the viewer FEEL the words — the clip reinforces and amplifies what the speaker is saying.
 
-  The VERB in the dialogue is the most important part of your keyword. The verb determines whether the clip matches or clashes with what the viewer hears. When the speaker says "watching me shave," the verb is WATCHING — the clip must show someone watching or looking at something. When the speaker says "I got in the car," the verb is GETTING IN — the clip must show someone getting into a car. When the speaker says "she was sleeping," the verb is SLEEPING — the clip must show someone asleep. Start your keyword with the correct verb from the dialogue, then add the subject and setting around it. The verb anchors the whole search.
+  The VERB in the dialogue is the most important part of your keyword. The verb is what the viewer hears and what the clip must show. Start building your keyword from the verb in the speaker's dialogue, then add the subject and setting around it. The verb anchors the entire search — if the verb is wrong, the clip will clash with the dialogue and the video looks broken.
 
-  Keep it simple. Search for one clear action, one subject, one setting. The simpler the scene, the less likely Pexels returns something wrong. Use context words (type of person, setting, relationship) to steer Pexels away from unrelated results. Disambiguate ambiguous words — "calling" needs "smartphone ringing" to avoid bells or video calls.
+  Search for ONE clear filmable scene: one action, one subject, one setting. The simpler the scene, the better the Pexels result. Never search for abstract concepts or emotions as keywords — "frustration" "success" "happiness" return cheesy corporate stock. Search for concrete physical things: objects, actions, locations, people doing specific things. Use context words (type of person, setting, relationship) to disambiguate — "calling" needs "smartphone ringing" to avoid bells or video calls.
 
-  Each keyword MUST be at least 16 words long. Only add details that help Pexels find the right clip. No two keywords should return the same clip.
+  Each keyword MUST be at least 16 words long. Only add details that help Pexels find the right clip. No two keywords should return the same clip. Each clip should be visually distinct — different settings, different subjects, different types of shots.
 
-  Only place b-roll on physical action moments. Stay on the speaker's face during emotional beats, opinions, punchlines, reveals, and reactions. B-roll in the main body only, not during the hook.
+  Only place b-roll on moments where the speaker describes a physical action or concrete scene. Stay on the speaker's face during emotional beats, opinions, punchlines, reveals, and reactions — during those moments the speaker's facial expression IS the content and cutting away destroys the impact. B-roll in the main body only, not during the hook.
+
+  Select b-roll windows of roughly 4-8 words (1.5-3 seconds of dialogue). Shorter than 4 words feels like a flash. Longer than 10 words loses the speaker's presence for too long.
 
   Timing: b-roll appears the EXACT millisecond the first relevant word starts and disappears the EXACT millisecond the last relevant word ends. Use start_word_index and end_word_index from the Deepgram word list to define the window precisely. The pipeline computes exact timing from these indices — do not provide a duration, it is calculated automatically.
   Spacing: 3+ seconds of speaker face between clips. Coverage: ~40% of runtime. Place on held-speed sections, not ramps. Each clip visually distinct.
