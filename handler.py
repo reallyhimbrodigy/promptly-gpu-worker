@@ -1630,13 +1630,13 @@ Sound effects — audio accents that make the edit feel physical and professiona
     {{"t": <seconds, 3+ decimal places, EXACT word start from Deepgram>, "sound": "<boom|hit|drum_roll|reverse|ching|ding|pop|click|camera_shutter|sad_trombone|typing|whoosh_slow|transition_smooth|thunder>", "word": "<exact trigger word, lowercase>"}}
   ]
 
-B-roll — stock footage cutaways from Pexels.com. Your keyword gets typed into the Pexels search bar and the top result plays in the video OVER the speaker's dialogue. The viewer hears the speaker's words while watching your clip. Your clip must match what the speaker is saying.
+B-roll — stock footage cutaways from Pexels.com. Your keyword gets typed into the Pexels search bar and the top result plays in the video OVER the speaker's dialogue. The viewer hears the speaker's words while watching your clip.
 
-  For each b-roll placement, read the speaker's EXACT words at that timestamp and ask: "If a viewer watches this stock footage clip while hearing these words, does it make sense?" If the speaker says "he's sitting on the floor next to me watching me shave" and the clip shows a boy playing with toys, that does NOT match — the viewer hears "watching me shave" while seeing a child playing, which is confusing. The clip must depict something compatible with the words the viewer is hearing at that moment.
+  The VERB in the dialogue is the most important part of your keyword. The verb determines whether the clip matches or clashes with what the viewer hears. When the speaker says "watching me shave," the verb is WATCHING — the clip must show someone watching or looking at something. When the speaker says "I got in the car," the verb is GETTING IN — the clip must show someone getting into a car. When the speaker says "she was sleeping," the verb is SLEEPING — the clip must show someone asleep. Start your keyword with the correct verb from the dialogue, then add the subject and setting around it. The verb anchors the whole search.
 
-  Search for simple, obvious scenes. The simpler the scene, the less likely Pexels returns something wrong. You can simplify an action, but the simplified version must still match what the viewer hears. Use context words (setting, type of person, relationship) to steer Pexels away from unrelated results. Disambiguate ambiguous words — "calling" needs "smartphone ringing" to avoid bells or video calls.
+  Keep it simple. Search for one clear action, one subject, one setting. The simpler the scene, the less likely Pexels returns something wrong. Use context words (type of person, setting, relationship) to steer Pexels away from unrelated results. Disambiguate ambiguous words — "calling" needs "smartphone ringing" to avoid bells or video calls.
 
-  Each keyword MUST be at least 16 words long. Only add details that help Pexels find the right clip. Do not add filler adjectives that steer Pexels toward aesthetic lifestyle footage instead of the action you need. No two keywords should return the same clip.
+  Each keyword MUST be at least 16 words long. Only add details that help Pexels find the right clip. No two keywords should return the same clip.
 
   Only place b-roll on physical action moments. Stay on the speaker's face during emotional beats, opinions, punchlines, reveals, and reactions. B-roll in the main body only, not during the hook.
 
