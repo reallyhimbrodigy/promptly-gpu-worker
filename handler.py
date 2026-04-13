@@ -4745,26 +4745,39 @@ def project_source_time_to_output(source_t, cuts, clip_ranges, speed_curve=None,
     correct narrative position rather than the hook preview position."""
     if not clip_time_maps:
         raise ValueError("project_source_time_to_output requires clip_time_maps")
+    _EPS = 0.02  # 20ms tolerance for floating-point boundary mismatches
     best_output_t = None
     for i, cut in enumerate(cuts):
         src_start = float(cut["source_start"])
         src_end = float(cut["source_end"])
 
-        if src_start <= source_t <= src_end:
-            source_offset = source_t - src_start
+        if src_start - _EPS <= source_t <= src_end + _EPS:
+            source_offset = max(0.0, min(source_t - src_start, src_end - src_start))
             local_offset = _time_map_lookup(clip_time_maps[i], source_offset)
             best_output_t = float(clip_ranges[i]["start"]) + local_offset
 
     if best_output_t is not None:
         return best_output_t
 
+    # Timestamp falls in a removed-word gap between two cuts.
+    # Find the nearest cut boundary and project from there.
+    _nearest_dist = float("inf")
+    _nearest_output = None
     for i, cut in enumerate(cuts):
-        if source_t < float(cut["source_start"]):
-            return float(clip_ranges[i]["start"])
+        src_start = float(cut["source_start"])
+        src_end = float(cut["source_end"])
+        # Distance to this cut's start
+        _d_start = abs(source_t - src_start)
+        if _d_start < _nearest_dist:
+            _nearest_dist = _d_start
+            _nearest_output = float(clip_ranges[i]["start"])
+        # Distance to this cut's end
+        _d_end = abs(source_t - src_end)
+        if _d_end < _nearest_dist:
+            _nearest_dist = _d_end
+            _nearest_output = float(clip_ranges[i]["end"])
 
-    if clip_ranges:
-        return float(clip_ranges[-1]["end"]) - 0.1
-    return None
+    return _nearest_output
 
 
 def project_source_time_to_final_output(source_t, cuts, effective_durations, speed_curve=None, clip_time_maps=None):
@@ -5861,9 +5874,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                     print(f"[broll] '{_bc.get('keyword')}' projected output start invalid — skipping", flush=True)
                     continue
                 if _out_end is None or _out_end <= _out_start:
-                    # End projection failed — fall back to projecting duration at avg speed
-                    _out_end = _out_start + _src_dur
-                    print(f"[broll] '{_bc.get('keyword')}' end projection failed, using source duration", flush=True)
+                    print(f"[broll] '{_bc.get('keyword')}' projected output end invalid — skipping", flush=True)
+                    continue
 
                 effective_duration = _out_end - _out_start
                 broll_file_duration = get_video_duration(_local_path)
