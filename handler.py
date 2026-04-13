@@ -1630,25 +1630,40 @@ Sound effects — audio accents that make the edit feel physical and professiona
     {{"t": <seconds, 3+ decimal places, EXACT word start from Deepgram>, "sound": "<boom|hit|drum_roll|reverse|ching|ding|pop|click|camera_shutter|sad_trombone|typing|whoosh_slow|transition_smooth|thunder>", "word": "<exact trigger word, lowercase>"}}
   ]
 
-B-roll — stock footage cutaways from Pexels.com. Your keyword gets typed into the Pexels search bar, the #1 result plays in the video while the speaker's voice continues. The viewer watches your chosen clip while hearing the speaker's words. If the clip doesn't match what the speaker is describing, the video looks broken.
+B-roll — stock footage cutaways from Pexels.com. Your keyword gets typed directly into the Pexels search bar, the top result plays in the video while the speaker's voice continues over it.
 
-  Here is how to think about each b-roll clip:
+  Your keyword is a Pexels search query. The quality of the final video depends entirely on how well your query matches what the speaker is describing at that moment. A bad query returns a clip that doesn't match the speaker's words, and the video looks amateur and confusing.
 
-  Step 1 — WHAT DID THE SPEAKER LITERALLY SAY? Read the exact transcript words at this timestamp. The speaker's own words are your only source of truth. If the speaker says "he's sitting on the floor next to me watching me shave," the scene is: a young boy, on a floor, next to an adult, watching that adult shave. Nothing else. Not "looking up" (the speaker didn't say that). Not "morning routine" (the speaker didn't say that). Not "playing with toys" (the speaker didn't say that). If a detail isn't in the transcript, it doesn't exist.
+  Here is an example of a transcript and the PERFECT b-roll for it:
 
-  Step 2 — WHAT IS THE EXACT VERB? The most common mistake is getting the action wrong. If the speaker says "I wiped the shaving cream off my face," the verb is WIPING OFF — the cream is being removed. If you search "man shaving face with razor," Pexels returns a man applying cream and shaving, which is the OPPOSITE action. The viewer hears "wiped the cream off" while watching someone put cream ON. That mismatch makes the video feel amateur. Instead, think about what a stock footage creator would title a video of someone REMOVING shaving cream — something like "man cleaning shaving cream off face with towel after shaving in bathroom." The verb drives the entire search result.
+  EXAMPLE TRANSCRIPT: "So I'm making breakfast, and my daughter walks into the kitchen, she climbs up on the counter, and she grabs the cereal box off the top shelf. Then I drove to the store to get milk because we were completely out."
 
-  Step 3 — WOULD THIS CLIP EXIST ON PEXELS? Stock footage creators film everyday actions: driving, cooking, walking, working at a desk, using a phone, opening a door, sitting in a room. They do NOT film unusual narrative actions like kicking furniture or stubbing a toe. If the transcript describes an action that wouldn't be on a stock footage site, shift to the closest filmable moment from the same sentence. "I went into the bedroom, she was sleeping, and I kicked the bed" — the filmable part is a man walking into a dark bedroom where a woman is sleeping in bed. The kicking wouldn't exist as stock footage, but the entering-the-room part would.
+  PERFECT B-ROLL:
+  - At "making breakfast": "close up of hands cracking eggs into frying pan on kitchen stove with breakfast ingredients on counter in morning light" (22 words) — describes EXACTLY what the speaker said: making breakfast. The verb is "making/cooking," the setting is "kitchen," the details are from the transcript.
+  - At "climbs up on the counter": "small young girl child climbing up onto kitchen counter reaching for high cabinet shelf in home kitchen" (17 words) — the verb is "climbing up onto counter" and "reaching for shelf," exactly matching the transcript.
+  - At "I drove to the store": "person driving car on suburban road heading to grocery store errand during the daytime" (14 words) — the speaker said "drove to the store." The keyword matches that action and destination exactly.
 
-  Step 4 — WRITE A LONG, PRECISE KEYWORD (20-25 words). Short queries return random results. "Man shaving bathroom" could return any of 500 shaving clips. "Man using towel to wipe white shaving cream off his face after shaving looking in bathroom mirror" returns that specific moment. Include: the subject, the exact action verb, every object the speaker mentioned, the setting, and the physical state of things. More words narrow the Pexels results toward exactly the clip you want.
+  BAD B-ROLL for the same transcript (and why):
+  - "family breakfast kitchen morning" — too short, returns random breakfast clips, not the specific action
+  - "cute little girl in kitchen with dad cooking together" — the speaker did NOT say they were cooking together, and "cute" is an invented detail
+  - "man driving fast angry upset on highway" — the speaker said nothing about being angry, upset, fast, or a highway. These are invented emotions and details.
 
-  Only place b-roll on moments where a physical action is happening in a real place. When the speaker is expressing emotion, giving an opinion, or building to a punchline, stay on their face — those are the moments where the speaker's expression IS the content. B-roll timestamps should fall within the main body, not during the hook.
+  THE KEY PRINCIPLE: Your keyword should be a literal description of what the speaker said is physically happening — using ONLY details from their words. If the speaker didn't say it, don't search for it. Every word you add that the speaker didn't say steers Pexels toward the wrong clip.
 
-  Timing: the b-roll should be on screen BEFORE the viewer hears the relevant words. Use exact `start` values from the Deepgram word list (3+ decimal places). Cut back to speaker between words, not mid-word.
-  Duration: 2.0–3.0 seconds per cutaway. Spacing: at least 3 seconds of speaker face time between clips. Coverage: ~40% of video runtime. Place on held-speed sections, not during speed ramps. Each clip visually distinct.
+  For each b-roll clip, follow these steps:
+  1. Read the transcript words at this timestamp. What physical action did the speaker describe?
+  2. Write the keyword using ONLY the nouns, verbs, and details from the speaker's words. Do not add emotions, adjectives, or context they didn't say.
+  3. Get the VERB right — "wiped cream off" is not "shaving." "Got in the car" is not "driving fast." The action matters.
+  4. Check: does Pexels have this? Stock footage covers everyday actions (cooking, driving, walking, working, phone calls). If the action is unusual (kicking furniture, etc.), shift to the closest filmable part of the same sentence.
+  5. Make the keyword 20-25 words long. Short queries return random clips. Long specific queries return the exact scene.
+
+  Only place b-roll on physical action moments. Stay on the speaker's face during emotional beats, opinions, punchlines, reveals, and reactions — the speaker's expression IS the content during those moments. B-roll timestamps in the main body only, not during the hook.
+
+  Timing: b-roll on screen BEFORE the viewer hears the words. Use exact `start` values from Deepgram (3+ decimals). Cut back between words, not mid-word.
+  Duration: 2.0–3.0s. Spacing: 3+ seconds of speaker face between clips. Coverage: ~40% of runtime. Place on held-speed sections, not ramps. Each clip visually distinct.
 
   broll_clips: [
-    {{"keyword": "<20-25 word Pexels search query built ONLY from transcript details>", "timestamp": <word start time in source seconds, 3+ decimals>, "duration": <seconds>, "reason": "<quote the speaker's exact words this clip depicts>"}}
+    {{"keyword": "<20-25 word Pexels search query using ONLY details from the transcript>", "timestamp": <word start time in source seconds, 3+ decimals>, "duration": <seconds>, "reason": "<quote the speaker's exact words>"}}
   ]
 
 Visual effects — additional visual treatments for emphasis moments.
@@ -1692,7 +1707,7 @@ Output ONLY the JSON below — no commentary, no analysis, no explanation. Just 
     {{"t": <seconds>, "sound": "<sound>", "word": "<trigger>"}}
   ],
   "broll_clips": [
-    {{"keyword": "<20-25 word Pexels search built ONLY from transcript details>", "timestamp": <EXACT word start in source seconds>, "duration": <seconds, target 2.0-3.0>, "reason": "<quote the speaker's exact words>"}}
+    {{"keyword": "<20-25 word Pexels search using ONLY details from transcript>", "timestamp": <EXACT word start in source seconds>, "duration": <seconds, target 2.0-3.0>, "reason": "<quote the speaker's exact words>"}}
   ],
   "visual_effects": [
     {{"type": "white_flash", "t": <source seconds>}}
@@ -1894,7 +1909,7 @@ RULES FOR USING THESE TIMESTAMPS:
             # over-allocation. Gemini will return finish_reason=MAX_TOKENS if exceeded
             # — handler logs that and we can bump back up if it ever triggers.
             max_output_tokens=4096,
-            thinking_config=genai_types.ThinkingConfig(thinking_level="LOW"),
+            thinking_config=genai_types.ThinkingConfig(thinking_level="MEDIUM"),
             media_resolution="MEDIA_RESOLUTION_LOW",
         ),
     )
