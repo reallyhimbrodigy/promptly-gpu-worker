@@ -1630,7 +1630,7 @@ Sound effects — audio accents that make the edit feel physical and professiona
     {{"t": <seconds, 3+ decimal places, EXACT word start from Deepgram>, "sound": "<boom|hit|drum_roll|reverse|ching|ding|pop|click|camera_shutter|sad_trombone|typing|whoosh_slow|transition_smooth|thunder>", "word": "<exact trigger word, lowercase>"}}
   ]
 
-B-roll — stock footage cutaways that visually ground the viewer in the physical scene. B-roll replaces the video (not audio) for its duration — the speaker's voice continues over the footage.
+B-roll — stock footage cutaways sourced from Pexels.com. The keyword you write is typed directly into the Pexels search bar. If your keyword is wrong, the wrong clip plays in the video. You are not describing what you want — you are searching a stock footage database. B-roll replaces the video (not audio) for its duration — the speaker's voice continues over the footage.
 
   Only place b-roll on moments where something physical is happening. Ask: is there a real object doing a real thing in a real place right now? If yes, that's a b-roll moment. If the speaker is expressing an opinion, emotion, or abstract idea, stay on their face. The speaker's face is the most important visual during emotional beats, reveals, punchlines, and reactions. B-roll belongs on descriptive moments, not dramatic moments. The hook clip is always the highest-impact moment in the video and must show the speaker's face — b-roll timestamps should only fall within the main body content, after the hook has played.
 
@@ -1885,10 +1885,7 @@ RULES FOR USING THESE TIMESTAMPS:
     else:
         raise RuntimeError("No video data provided — need either inline_video_bytes or gemini_file")
 
-    # Log prompt size and verify b-roll instructions are present
-    _broll_check = "stock footage creator would title" in prompt
-    print(f"[generate-edit] Prompt length: {len(prompt)} chars, b-roll instructions present: {_broll_check}", flush=True)
-    print(f"[generate-edit] Calling Gemini model={GEMINI_MODEL} (thinking=MEDIUM)...", flush=True)
+    print(f"[generate-edit] Calling Gemini model={GEMINI_MODEL} (thinking=LOW)...", flush=True)
     t = time.time()
     response = client.models.generate_content(
         model=GEMINI_MODEL,
@@ -1900,7 +1897,7 @@ RULES FOR USING THESE TIMESTAMPS:
             # over-allocation. Gemini will return finish_reason=MAX_TOKENS if exceeded
             # — handler logs that and we can bump back up if it ever triggers.
             max_output_tokens=4096,
-            thinking_config=genai_types.ThinkingConfig(thinking_level="MEDIUM"),
+            thinking_config=genai_types.ThinkingConfig(thinking_level="LOW"),
             media_resolution="MEDIA_RESOLUTION_LOW",
         ),
     )
