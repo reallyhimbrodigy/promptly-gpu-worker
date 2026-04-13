@@ -1636,7 +1636,7 @@ B-roll — stock footage cutaways from Pexels.com. Your keyword gets typed direc
 
   The viewer watches your clip with ZERO context beyond what they see on screen and what the speaker is saying. If the clip introduces something the speaker didn't mention, it confuses the viewer and ruins the video. Your keyword must steer Pexels toward clips that tell the SAME story as the speaker. Use context words (relationship, setting, type of person, time of day) to steer Pexels away from unrelated scenarios that happen to share the same action.
 
-  Each keyword MUST be at least 20 words long. Use the extra words to add context that steers Pexels toward the right clip — describe the setting, the mood, the type of person, the relationship, the time of day. The goal: a simple scene, described precisely enough that Pexels can't return something misleading.
+  Each keyword MUST be at least 16 words long. Use the extra words to add context that helps Pexels return the right clip — the core action, the type of person, the setting. Only add details that help Pexels find the right clip. Do not add random filler details like "curiously" "peacefully" "serious expression" "morning light" "white linens" — these steer Pexels toward aesthetic lifestyle footage instead of the specific action you need. Every word should either describe the action or disambiguate what Pexels returns.
 
   DISAMBIGUATE every keyword. Think about what ELSE Pexels might return for the words you're using, and add words to prevent that. "Calling" could return a bell, a video call, or a phone — if the speaker means phone calls, say "smartphone" "incoming call" "ringing phone screen." If two moments in the same video involve similar objects, make sure each keyword focuses on the DIFFERENT part — the specific action that distinguishes this moment from the other. No two keywords should return the same clip from Pexels.
 
@@ -1646,7 +1646,7 @@ B-roll — stock footage cutaways from Pexels.com. Your keyword gets typed direc
   Duration: 2.0–3.0s. Spacing: 3+ seconds of speaker face between clips. Coverage: ~40% of runtime. Place on held-speed sections, not ramps. Each clip visually distinct.
 
   broll_clips: [
-    {{"keyword": "<minimum 20 words — simple scene, described precisely to steer Pexels toward the right clip>", "timestamp": <word start time in source seconds, 3+ decimals>, "duration": <seconds>, "reason": "<quote the speaker's exact words>"}}
+    {{"keyword": "<minimum 16 words — simple scene, every word helps Pexels find the right clip>", "timestamp": <word start time in source seconds, 3+ decimals>, "duration": <seconds>, "reason": "<quote the speaker's exact words>"}}
   ]
 
 Visual effects — additional visual treatments for emphasis moments.
@@ -1690,7 +1690,7 @@ Output ONLY the JSON below — no commentary, no analysis, no explanation. Just 
     {{"t": <seconds>, "sound": "<sound>", "word": "<trigger>"}}
   ],
   "broll_clips": [
-    {{"keyword": "<minimum 20 words — simple scene described precisely to steer Pexels right>", "timestamp": <EXACT word start in source seconds>, "duration": <seconds, target 2.0-3.0>, "reason": "<quote the speaker's exact words>"}}
+    {{"keyword": "<minimum 16 words — simple scene, every word helps Pexels find the right clip>", "timestamp": <EXACT word start in source seconds>, "duration": <seconds, target 2.0-3.0>, "reason": "<quote the speaker's exact words>"}}
   ],
   "visual_effects": [
     {{"type": "white_flash", "t": <source seconds>}}
