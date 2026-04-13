@@ -2203,30 +2203,21 @@ RULES FOR USING THESE TIMESTAMPS:
         _br_kw = str(_br.get("keyword") or "").strip()
         if not _br_kw:
             continue
-        # Support both new word-index format and legacy timestamp/duration format
-        _has_word_indices = _br.get("start_word_index") is not None and _br.get("end_word_index") is not None
-        if _has_word_indices and _broll_dg_words:
-            try:
-                _sw = int(_br["start_word_index"])
-                _ew = int(_br["end_word_index"])
-            except (TypeError, ValueError):
-                continue
-            if _sw < 0 or _ew < _sw or _sw >= len(_broll_dg_words):
-                continue
-            _ew = min(_ew, len(_broll_dg_words) - 1)
-            _br_ts = float(_broll_dg_words[_sw].get("start") or 0)
-            _br_end = float(_broll_dg_words[_ew].get("end") or 0)
-            _br_dur = _br_end - _br_ts
-            if _br_dur <= 0:
-                continue
-            print(f"[broll] Word-index timing: [{_sw}]-[{_ew}] → {_br_ts:.3f}s-{_br_end:.3f}s ({_br_dur:.2f}s)", flush=True)
-        else:
-            # Legacy: timestamp + duration
-            try:
-                _br_ts = float(_br.get("timestamp"))
-                _br_dur = float(_br.get("duration"))
-            except (TypeError, ValueError):
-                continue
+        # Word-index timing — compute exact start/end from Deepgram words
+        try:
+            _sw = int(_br["start_word_index"])
+            _ew = int(_br["end_word_index"])
+        except (TypeError, ValueError, KeyError):
+            continue
+        if _sw < 0 or _ew < _sw or _sw >= len(_broll_dg_words):
+            continue
+        _ew = min(_ew, len(_broll_dg_words) - 1)
+        _br_ts = float(_broll_dg_words[_sw].get("start") or 0)
+        _br_end = float(_broll_dg_words[_ew].get("end") or 0)
+        _br_dur = _br_end - _br_ts
+        if _br_dur <= 0:
+            continue
+        print(f"[broll] Word-index timing: [{_sw}]-[{_ew}] → {_br_ts:.3f}s-{_br_end:.3f}s ({_br_dur:.2f}s)", flush=True)
         if not (math.isfinite(_br_ts) and math.isfinite(_br_dur)):
             continue
         if _br_ts < 0 or _br_dur <= 0:
