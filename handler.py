@@ -1634,7 +1634,7 @@ B-roll — stock footage cutaways from Pexels.com. Your keyword gets typed direc
 
   Search for SIMPLE, obvious scenes. Do not try to recreate the exact narrative — find the simplest, cleanest visual that represents what the speaker is talking about. Simple, clean, obvious. The simpler the scene, the less likely Pexels returns something wrong.
 
-  You can simplify an action, but the simplified version must still be COMPATIBLE with what the speaker said. If the speaker says "watching me shave," you can simplify to a boy looking up at someone — that is compatible with watching. You cannot change it to a boy playing with toys — that is a completely different action that contradicts the speaker's words. The simplified scene must still make sense when the viewer hears the speaker's words over it.
+  You can simplify an action, but the simplified version must still be COMPATIBLE with what the speaker said. The simplified scene must still make sense when the viewer hears the speaker's words over it. If the viewer hears the speaker describe one action but sees a completely different action on screen, the video looks broken.
 
   The viewer watches your clip with ZERO context beyond what they see on screen and what the speaker is saying. If the clip introduces something the speaker didn't mention, it confuses the viewer and ruins the video. Your keyword must steer Pexels toward clips that tell the SAME story as the speaker. Use context words (relationship, setting, type of person, time of day) to steer Pexels away from unrelated scenarios that happen to share the same action.
 
