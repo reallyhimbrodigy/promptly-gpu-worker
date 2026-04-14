@@ -1544,7 +1544,7 @@ Sound effects amplify the speaker's energy at key moments. Match each sound to t
 
   ching — cash register ring. Use only when the speaker mentions a specific financial gain, profit, or money earned. The trigger word must be the money word itself. Not for financial losses, costs, or spending.
 
-  ding — short digital notification chime. Use only when the speaker describes receiving a phone call, text message, email, or app notification. The trigger word must be the action word — "called," "texted," "rang." A person delivering a message in person is not a notification.
+  ding — short digital notification chime. Use only when a specific single notification moment happens in the story — a text message arrives, an email pops up, a voicemail lands, a specific alert goes off. The speaker must be describing ONE distinct notification event, not a general pattern of calling or texting. Repeatedly calling someone is not a notification.
 
   click — crisp mouse click. Use only when the speaker describes interacting with a device — clicking a button, tapping a screen, pressing a key. Not for abstract concepts like making a decision.
 
