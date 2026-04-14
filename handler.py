@@ -1634,7 +1634,9 @@ B-roll — stock footage cutaways from Pexels.com. Your keyword gets typed into 
 
   The VERB in the dialogue is the most important part of your keyword. The verb is what the viewer hears and what the clip must show. Start building your keyword from the verb in the speaker's dialogue, then add the subject and setting around it. The verb anchors the entire search — if the verb is wrong, the clip will clash with the dialogue and the video looks broken.
 
-  B-roll should be VERY simple and general. One subject doing one thing — nothing more. Do not build complex scenes with multiple actions or props. Strip the keyword down to the core subject and the core verb from the dialogue. The simpler and more general the clip, the better it works over any dialogue. If the dialogue mentions a person, search for that type of person doing the ONE action the speaker described — nothing else added. Never search for abstract concepts or emotions — "frustration" "success" "happiness" return cheesy corporate stock. Use context words only to disambiguate — "calling" needs "smartphone ringing" to avoid bells or video calls.
+  The keyword (Pexels search) should be simple and general — one subject doing one thing. Do not build complex scenes with multiple actions or props. Never search for abstract concepts or emotions. Use context words only to disambiguate.
+
+  The word window (start_word_index to end_word_index) is SEPARATE from the keyword. The word window defines how long the b-roll stays on screen. It must span the COMPLETE sentence or clause the b-roll covers — every word from the beginning to the end of the thought. The keyword can be simple, but the window must be wide.
 
   Each keyword MUST be at least 16 words long. Only add details that help Pexels find the right clip. No two keywords should return the same clip. Each clip should be visually distinct — different settings, different subjects, different types of shots.
 
@@ -3257,8 +3259,13 @@ def fetch_broll_clip(keyword, duration_needed, work_dir, dialogue_reason=""):
             _tag_matches = len(_kw_match_words & _all_vid_words)
             score += _tag_matches * 3
 
-        # Get poster thumbnail URL for visual scoring
+        # Get poster thumbnail URL and video_pictures for visual scoring
         _poster_url = str(video.get("image") or "")
+        # Build human-readable description from URL slug
+        _slug = _vid_url.split("pexels.com/")[-1] if "pexels.com/" in _vid_url else ""
+        _slug_desc = " ".join(w for w in re.split(r'[-/]', _slug) if w and not w.isdigit() and w != "video")
+        # Get video_pictures (multiple preview frames)
+        _vid_pics = [str(p.get("picture") or "") for p in (video.get("video_pictures") or []) if p.get("picture")]
 
         _candidates.append({
             "video_id": vid_id,
@@ -3268,18 +3275,19 @@ def fetch_broll_clip(keyword, duration_needed, work_dir, dialogue_reason=""):
             "score": score,
             "poster_url": _poster_url,
             "url_words": _all_vid_words,
+            "slug_desc": _slug_desc,
+            "video_pictures": _vid_pics[:3],  # first 3 preview frames
         })
 
-    # Visual scoring: fetch poster thumbnails for top candidates and use
-    # Gemini to pick the best match. This is a single tiny API call with
-    # ~3 small JPEG thumbnails — completes in <1s, no video downloads.
+    # Visual scoring: fetch thumbnails for top candidates, send to Gemini
+    # with URL descriptions so it can pick the best match visually.
     if _candidates and _kw_match_words:
         _candidates.sort(key=lambda x: x["score"], reverse=True)
-        _top_n = _candidates[:5]  # top 5 candidates
-        _poster_images = {}
+        _top_n = _candidates[:5]
+        _poster_images = {}  # idx → list of image bytes
 
-        # Fetch poster thumbnails in parallel (~5KB each, <200ms total)
-        def _fetch_poster(idx_url):
+        # Fetch thumbnails in parallel — poster + up to 2 video_pictures per candidate
+        def _fetch_img(idx_url):
             _idx, _url = idx_url
             if not _url:
                 return _idx, None
@@ -3291,41 +3299,55 @@ def fetch_broll_clip(keyword, duration_needed, work_dir, dialogue_reason=""):
                 pass
             return _idx, None
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as _poster_pool:
-            _poster_futs = [_poster_pool.submit(_fetch_poster, (i, c["poster_url"])) for i, c in enumerate(_top_n)]
+        _fetch_tasks = []
+        for i, c in enumerate(_top_n):
+            # Poster image
+            if c["poster_url"]:
+                _fetch_tasks.append((i, c["poster_url"]))
+            # First 2 video_pictures for motion context
+            for _vp_url in c.get("video_pictures", [])[:2]:
+                if _vp_url:
+                    _fetch_tasks.append((i, _vp_url))
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as _poster_pool:
+            _poster_futs = [_poster_pool.submit(_fetch_img, t) for t in _fetch_tasks]
             for _fut in concurrent.futures.as_completed(_poster_futs, timeout=5):
                 try:
                     _pi, _pdata = _fut.result()
                     if _pdata:
-                        _poster_images[_pi] = _pdata
+                        _poster_images.setdefault(_pi, []).append(_pdata)
                 except Exception:
                     pass
 
-        # Use Gemini to pick the best thumbnail match (single fast call)
+        # Use Gemini to pick the best candidate — images + URL descriptions
         if _poster_images and len(_poster_images) >= 2:
             try:
                 _pick_client = _get_genai_client()
                 _dialogue_ctx = f' The speaker says: "{dialogue_reason}".' if dialogue_reason else ""
 
-                # Build image labels for the prompt text
+                # Build content: for each candidate, show images + text description
                 _poster_idx_map = {}
-                _image_parts = []
+                _content_parts = []
                 _num = 1
                 for _pi in sorted(_poster_images.keys()):
-                    _image_parts.append(genai_types.Part.from_bytes(data=_poster_images[_pi], mime_type="image/jpeg"))
-                    _image_parts.append(genai_types.Part.from_text(data=f"(Image {_num})"))
+                    _desc = _top_n[_pi].get("slug_desc", "")
+                    _content_parts.append(f"\nOption {_num} — Pexels description: \"{_desc}\"")
+                    for _img_bytes in _poster_images[_pi][:3]:
+                        _content_parts.append(genai_types.Part.from_bytes(
+                            data=_img_bytes, mime_type="image/jpeg"
+                        ))
                     _poster_idx_map[_num] = _pi
                     _num += 1
 
-                _prompt_text = genai_types.Part.from_text(
-                    data=f'Above are {_num - 1} stock footage thumbnails. This clip plays over a talking-head video.{_dialogue_ctx} Which image best depicts "{keyword}"? Reply with ONLY the image number.'
+                _content_parts.append(
+                    f'\nThis stock footage clip plays over a talking-head video.{_dialogue_ctx} '
+                    f'Which option best depicts "{keyword}"? Reply with ONLY the option number.'
                 )
-                _all_parts = _image_parts + [_prompt_text]
 
                 _pick_t0 = time.time()
                 _pick_resp = _pick_client.models.generate_content(
                     model=GEMINI_MODEL,
-                    contents=_all_parts,
+                    contents=_content_parts,
                     config=genai_types.GenerateContentConfig(
                         temperature=0.0,
                         max_output_tokens=16,
@@ -3333,7 +3355,6 @@ def fetch_broll_clip(keyword, duration_needed, work_dir, dialogue_reason=""):
                 )
                 _pick_elapsed = time.time() - _pick_t0
                 _pick_text = str(getattr(_pick_resp, "text", "") or "").strip()
-                # Extract the number from response
                 _pick_num = None
                 for _ch in _pick_text:
                     if _ch.isdigit():
@@ -3342,13 +3363,12 @@ def fetch_broll_clip(keyword, duration_needed, work_dir, dialogue_reason=""):
                 if _pick_num and _pick_num in _poster_idx_map:
                     _winner_idx = _poster_idx_map[_pick_num]
                     _top_n[_winner_idx]["score"] += 50
-                    print(f"[broll] Gemini visual pick: #{_pick_num} (candidate {_winner_idx}) in {_pick_elapsed:.1f}s for '{keyword}'", flush=True)
+                    print(f"[broll] Gemini visual pick: #{_pick_num} (candidate {_winner_idx}, desc='{_top_n[_winner_idx].get('slug_desc','')}') in {_pick_elapsed:.1f}s for '{keyword}'", flush=True)
                 else:
                     print(f"[broll] Gemini visual pick: unclear response '{_pick_text}' in {_pick_elapsed:.1f}s for '{keyword}'", flush=True)
             except Exception as _pick_err:
                 print(f"[broll] Gemini visual pick failed: {_pick_err}", flush=True)
 
-        # Put scored candidates back
         _candidates = _top_n + _candidates[5:]
 
     # Pick the best candidate
