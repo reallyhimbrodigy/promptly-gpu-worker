@@ -1640,7 +1640,7 @@ B-roll — stock footage cutaways from Pexels.com. Your keyword gets typed into 
 
   Only place b-roll on moments where the speaker describes a physical action or concrete scene. Stay on the speaker's face during emotional beats, opinions, punchlines, reveals, and reactions — during those moments the speaker's facial expression IS the content and cutting away destroys the impact. B-roll in the main body only, not during the hook.
 
-  Select b-roll windows of roughly 4-8 words (1.5-3 seconds of dialogue). Shorter than 4 words feels like a flash. Longer than 10 words loses the speaker's presence for too long.
+  The b-roll must cover the FULL phrase or sentence it makes sense for — from the first word to the last word of the complete thought. Do not cut the word window short mid-phrase. If the speaker describes a scene across a full sentence, the b-roll covers that entire sentence. Cutting b-roll short mid-phrase looks like a glitch. The start_word_index should be the first word of the relevant sentence/clause and end_word_index should be the last word of that sentence/clause.
 
   Timing: b-roll appears the EXACT millisecond the first relevant word starts and disappears the EXACT millisecond the last relevant word ends. Use start_word_index and end_word_index from the Deepgram word list to define the window precisely. The pipeline computes exact timing from these indices — do not provide a duration, it is calculated automatically.
   Spacing: 3+ seconds of speaker face between clips. Coverage: ~40% of runtime. Place on held-speed sections, not ramps. Each clip visually distinct.
