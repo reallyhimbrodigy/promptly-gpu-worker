@@ -3150,25 +3150,47 @@ def fetch_broll_clip(keyword, duration_needed, work_dir, dialogue_reason=""):
         print(f"[broll] PEXELS_API_KEY not set — skipping '{keyword}'", flush=True)
         return None
 
-    resp = requests.get(
-        "https://api.pexels.com/videos/search",
-        headers={"Authorization": pexels_key},
-        params={
-            "query": keyword,
-            "per_page": 15,
-            "orientation": "portrait",
-            "size": "large",
-        },
-        timeout=25,
-    )
-    resp.raise_for_status()
-    videos = resp.json().get("videos") or []
+    _pexels_headers = {"Authorization": pexels_key}
+    _pexels_base_params = {"per_page": 15, "orientation": "portrait", "size": "large"}
+
+    # Two-phase search: full keyword + short verb-focused query in parallel
+    # Pexels search is noun-based — a short verb query surfaces different clips
+    _kw_short_words = [w for w in keyword.lower().split() if len(w) > 3 and w not in {"with", "from", "into", "close", "looking", "fast"}][:5]
+    _kw_short = " ".join(_kw_short_words) if len(_kw_short_words) >= 3 else ""
+
+    def _search_pexels(query):
+        try:
+            _r = requests.get(
+                "https://api.pexels.com/videos/search",
+                headers=_pexels_headers,
+                params={**_pexels_base_params, "query": query},
+                timeout=25,
+            )
+            _r.raise_for_status()
+            return _r.json().get("videos") or []
+        except Exception:
+            return []
+
+    # Run both searches in parallel
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as _search_pool:
+        _fut_main = _search_pool.submit(_search_pexels, keyword)
+        _fut_short = _search_pool.submit(_search_pexels, _kw_short) if _kw_short else None
+        videos = _fut_main.result()
+        _short_videos = _fut_short.result() if _fut_short else []
+
+    # Merge results — deduplicate by video ID, main results first
+    _seen_ids = {v.get("id") for v in videos}
+    for _sv in _short_videos:
+        if _sv.get("id") not in _seen_ids:
+            videos.append(_sv)
+            _seen_ids.add(_sv.get("id"))
 
     if not videos:
         print(f"[broll] No Pexels results for '{keyword}'", flush=True)
         return None
 
-    print(f"[broll] Pexels returned {len(videos)} results for '{keyword}'", flush=True)
+    _search_note = f" (+{len(_short_videos)} from short query '{_kw_short}')" if _short_videos else ""
+    print(f"[broll] Pexels returned {len(videos)} results for '{keyword}'{_search_note}", flush=True)
 
     # Extract key words from the keyword for tag/URL matching
     _kw_words = set(keyword.lower().split())
@@ -3236,6 +3258,15 @@ def fetch_broll_clip(keyword, duration_needed, work_dir, dialogue_reason=""):
         _poster_url = str(video.get("image") or "")
         _slug = _vid_url.split("pexels.com/")[-1] if "pexels.com/" in _vid_url else ""
         _slug_desc = " ".join(w for w in re.split(r'[-/]', _slug) if w and not w.isdigit() and w != "video")
+        # Get video_pictures for multi-frame evaluation (start, middle, end)
+        _vid_pics = [str(p.get("picture") or "") for p in (video.get("video_pictures") or []) if p.get("picture")]
+        _frame_urls = []
+        if len(_vid_pics) >= 3:
+            _frame_urls = [_vid_pics[0], _vid_pics[len(_vid_pics)//2], _vid_pics[-1]]
+        elif _vid_pics:
+            _frame_urls = _vid_pics[:3]
+        if not _frame_urls and _poster_url:
+            _frame_urls = [_poster_url]
 
         _candidates.append({
             "video_id": vid_id,
@@ -3245,16 +3276,18 @@ def fetch_broll_clip(keyword, duration_needed, work_dir, dialogue_reason=""):
             "score": score,
             "poster_url": _poster_url,
             "slug_desc": _slug_desc,
+            "frame_urls": _frame_urls,
         })
 
-    # Gemini visual pick — fetch poster thumbnails for top candidates,
-    # let Gemini see them and pick the best match for the keyword.
+    # Gemini visual pick — fetch multiple frames per candidate (start/mid/end),
+    # let Gemini see the ACTION across time and pick the best match.
     if _candidates and _kw_match_words:
         _candidates.sort(key=lambda x: x["score"], reverse=True)
         _top_n = _candidates[:5]
-        _poster_images = {}
+        _candidate_frames = {}  # idx → list of image bytes
 
-        def _fetch_poster(idx_url):
+        # Fetch all frame URLs in parallel (~5KB each, <300ms total)
+        def _fetch_img(idx_url):
             _idx, _url = idx_url
             if not _url:
                 return _idx, None
@@ -3266,33 +3299,44 @@ def fetch_broll_clip(keyword, duration_needed, work_dir, dialogue_reason=""):
                 pass
             return _idx, None
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as _poster_pool:
-            _poster_futs = [_poster_pool.submit(_fetch_poster, (i, c["poster_url"])) for i, c in enumerate(_top_n)]
-            for _fut in concurrent.futures.as_completed(_poster_futs, timeout=5):
+        _fetch_tasks = []
+        for i, c in enumerate(_top_n):
+            for _furl in c.get("frame_urls", []):
+                _fetch_tasks.append((i, _furl))
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=15) as _frame_pool:
+            _frame_futs = [_frame_pool.submit(_fetch_img, t) for t in _fetch_tasks]
+            for _fut in concurrent.futures.as_completed(_frame_futs, timeout=5):
                 try:
-                    _pi, _pdata = _fut.result()
-                    if _pdata:
-                        _poster_images[_pi] = _pdata
+                    _fi, _fdata = _fut.result()
+                    if _fdata:
+                        _candidate_frames.setdefault(_fi, []).append(_fdata)
                 except Exception:
                     pass
 
-        if _poster_images and len(_poster_images) >= 2:
+        if _candidate_frames and len(_candidate_frames) >= 2:
             try:
                 _pick_client = _get_genai_client()
                 _dialogue_ctx = f' The speaker says: "{dialogue_reason}".' if dialogue_reason else ""
                 _content_parts = []
                 _poster_idx_map = {}
                 _num = 1
-                for _pi in sorted(_poster_images.keys()):
-                    _desc = _top_n[_pi].get("slug_desc", "")
-                    _content_parts.append(f"\nOption {_num} — \"{_desc}\":")
-                    _content_parts.append(genai_types.Part.from_bytes(
-                        data=_poster_images[_pi], mime_type="image/jpeg"
-                    ))
-                    _poster_idx_map[_num] = _pi
+                for _ci in sorted(_candidate_frames.keys()):
+                    _desc = _top_n[_ci].get("slug_desc", "")
+                    _n_frames = len(_candidate_frames[_ci])
+                    _frame_label = f"({_n_frames} frames showing the clip's action over time)" if _n_frames > 1 else ""
+                    _content_parts.append(f"\nOption {_num} — \"{_desc}\" {_frame_label}:")
+                    for _frame_bytes in _candidate_frames[_ci][:3]:
+                        _content_parts.append(genai_types.Part.from_bytes(
+                            data=_frame_bytes, mime_type="image/jpeg"
+                        ))
+                    _poster_idx_map[_num] = _ci
                     _num += 1
                 _content_parts.append(
-                    f'\nWhich option best depicts "{keyword}"?{_dialogue_ctx} Reply with ONLY the number.'
+                    f'\nEach option shows frames from a stock footage clip.{_dialogue_ctx} '
+                    f'Which option best depicts the ACTION of "{keyword}"? '
+                    f'Look at how the scene changes across frames to identify the action. '
+                    f'Reply with ONLY the number, or NONE if no option matches the action.'
                 )
 
                 _pick_t0 = time.time()
@@ -3302,22 +3346,26 @@ def fetch_broll_clip(keyword, duration_needed, work_dir, dialogue_reason=""):
                     config=genai_types.GenerateContentConfig(
                         temperature=0.2,
                         max_output_tokens=128,
-                        thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
+                        thinking_config=genai_types.ThinkingConfig(thinking_budget=256),
                     ),
                 )
                 _pick_elapsed = time.time() - _pick_t0
-                _pick_text = str(getattr(_pick_resp, "text", "") or "").strip()
-                _pick_num = None
-                for _ch in _pick_text:
-                    if _ch.isdigit():
-                        _pick_num = int(_ch)
-                        break
-                if _pick_num and _pick_num in _poster_idx_map:
-                    _winner_idx = _poster_idx_map[_pick_num]
-                    _top_n[_winner_idx]["score"] += 50
-                    print(f"[broll] Gemini visual pick: #{_pick_num} ('{_top_n[_winner_idx].get('slug_desc','')}') in {_pick_elapsed:.1f}s for '{keyword}'", flush=True)
+                _pick_text = str(getattr(_pick_resp, "text", "") or "").strip().upper()
+
+                if "NONE" in _pick_text:
+                    print(f"[broll] Gemini visual pick: NONE matched in {_pick_elapsed:.1f}s for '{keyword}'", flush=True)
                 else:
-                    print(f"[broll] Gemini visual pick: response='{_pick_text}' in {_pick_elapsed:.1f}s for '{keyword}'", flush=True)
+                    _pick_num = None
+                    for _ch in _pick_text:
+                        if _ch.isdigit():
+                            _pick_num = int(_ch)
+                            break
+                    if _pick_num and _pick_num in _poster_idx_map:
+                        _winner_idx = _poster_idx_map[_pick_num]
+                        _top_n[_winner_idx]["score"] += 50
+                        print(f"[broll] Gemini visual pick: #{_pick_num} ('{_top_n[_winner_idx].get('slug_desc','')}') in {_pick_elapsed:.1f}s for '{keyword}'", flush=True)
+                    else:
+                        print(f"[broll] Gemini visual pick: response='{_pick_text}' in {_pick_elapsed:.1f}s for '{keyword}'", flush=True)
             except Exception as _pick_err:
                 print(f"[broll] Gemini visual pick error: {_pick_err}", flush=True)
 
