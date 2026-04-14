@@ -2427,7 +2427,6 @@ RULES FOR USING THESE TIMESTAMPS:
     raw_sfx = edit_plan.get("sound_effects", [])
     sound_effects = []
     valid_sounds = set(_SFX_CATEGORIES.keys())
-    _sfx_removed = edit_plan.get("_removed_word_indices") or set()
     _sfx_dg_words = edit_plan.get("_deepgram_words") or []
     for sfx in raw_sfx:
         if isinstance(sfx, dict) and "t" in sfx and "sound" in sfx:
@@ -2439,14 +2438,14 @@ RULES FOR USING THESE TIMESTAMPS:
             sound = _SFX_ALIASES.get(sound, sound)
             if sound in valid_sounds and t >= 0 and (video_duration <= 0 or t <= video_duration):
                 word = str(sfx.get("word") or "").strip().lower()
-                # Resolve to a word index and snap to nearest KEPT word.
-                # Gemini may place SFX on a word that gets removed by the
-                # deterministic tightener (e.g., phrasal restart). Find the
-                # word index, and if removed, snap forward to the next kept
-                # instance of the same word or nearest kept word.
+                # Resolve to a word index by matching word text near the
+                # source timestamp. At render time, this index is looked up
+                # in projected words — the same system captions and b-roll
+                # use. If the word exists in the final output, the SFX plays
+                # at its exact output time. If it was removed, the SFX
+                # doesn't play because the viewer never hears that word.
                 _sfx_word_idx = None
                 if _sfx_dg_words and word:
-                    # Find the word closest to timestamp t with matching text
                     _best_dist = float("inf")
                     for _wi, _w in enumerate(_sfx_dg_words):
                         _wt = str(_w.get("word") or _w.get("punctuated_word") or "").strip().lower().rstrip(".,!?;:'\"")
@@ -2455,29 +2454,6 @@ RULES FOR USING THESE TIMESTAMPS:
                             if _d < _best_dist:
                                 _best_dist = _d
                                 _sfx_word_idx = _wi
-                    # If the matched word was removed, find the next kept word
-                    if _sfx_word_idx is not None and _sfx_word_idx in _sfx_removed:
-                        _orig_idx = _sfx_word_idx
-                        # Search forward for same word text (kept)
-                        _found = False
-                        for _si in range(_sfx_word_idx + 1, len(_sfx_dg_words)):
-                            if _si in _sfx_removed:
-                                continue
-                            _sw_text = str(_sfx_dg_words[_si].get("word") or "").strip().lower().rstrip(".,!?;:'\"")
-                            if _sw_text == word:
-                                _sfx_word_idx = _si
-                                t = float(_sfx_dg_words[_si].get("start") or 0)
-                                _found = True
-                                print(f"[sfx] Snapped '{word}' from removed [{_orig_idx}] to kept [{_si}] @ {t:.3f}s", flush=True)
-                                break
-                        if not _found:
-                            # No kept instance of same word — snap to nearest kept word
-                            for _si in range(_sfx_word_idx + 1, len(_sfx_dg_words)):
-                                if _si not in _sfx_removed:
-                                    _sfx_word_idx = _si
-                                    t = float(_sfx_dg_words[_si].get("start") or 0)
-                                    print(f"[sfx] Snapped '{word}' from removed [{_orig_idx}] to nearest kept [{_si}] @ {t:.3f}s", flush=True)
-                                    break
                 sound_effects.append({"t": t, "sound": sound, "word": word, "_word_idx": _sfx_word_idx})
 
     # Sound effects are taken EXACTLY as Gemini provided them. No caps,
@@ -5870,13 +5846,23 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _sound_path = get_sfx_path(_sound_style)
         if not _sound_path:
             continue
-        # Use projected words for exact timing (same source of truth as captions).
-        # Falls back to raw projection only if no word index was resolved.
+        # Use projected words for exact timing — same system as captions and
+        # b-roll. If the trigger word exists in the final output, the SFX
+        # plays at its exact output time. If the word was removed (phrasal
+        # restart, stutter, etc.), the viewer never hears it, so the SFX
+        # doesn't play.
         _sfx_wi = _sfx.get("_word_idx")
         _projected_t = None
-        if _sfx_wi is not None and _sfx_wi in _pw_by_idx:
-            _projected_t = float(_pw_by_idx[_sfx_wi]["start"])
+        if _sfx_wi is not None:
+            _pw = _pw_by_idx.get(_sfx_wi)
+            if _pw:
+                _projected_t = float(_pw["start"])
+            else:
+                _sfx_word = _sfx.get("word", "")
+                print(f"[sfx] Skipping {_sound_style} on '{_sfx_word}' — word was removed from final output", flush=True)
+                continue
         else:
+            # No word index resolved — fall back to raw projection
             _source_t = float(_sfx.get("t") or 0.0)
             _projected_t = project_source_time_to_output(_source_t, render_cuts, _full_ranges, speed_curve, clip_time_maps=_clip_time_maps)
         if _projected_t is None:
