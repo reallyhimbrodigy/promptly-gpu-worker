@@ -6236,46 +6236,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _max_workers = min(n, os.cpu_count() or 16)
     print(f"[render] Parallel: {n} segments, {_max_workers} workers, {os.cpu_count()} cores", flush=True)
     _seg_paths = [None] * n
-    with concurrent.futures.ThreadPoolExecutor(max_workers=_max_workers) as _seg_pool:
-        _seg_futures = {_seg_pool.submit(_run_one_segment, _si): _si for _si in range(n)}
-        for _fut in concurrent.futures.as_completed(_seg_futures):
-            _si = _seg_futures[_fut]
-            _seg_paths[_si] = _fut.result()
-    _par_elapsed = time.time() - _par_t0
-    print(f"[render] All {n} segments rendered in {_par_elapsed:.1f}s (parallel)", flush=True)
 
-    # ── Per-segment timing report ────────────────────────────────────────
-    # Diagnostic instrumentation: shows where each segment's time went so
-    # we can identify the actual bottleneck (Remotion wait? Remotion run?
-    # FFmpeg subprocess?). Sorted by total time descending so the slowest
-    # are at the top. Remove once perf is satisfactory.
-    if _seg_timings:
-        _seg_timings.sort(key=lambda r: -r[5])
-        _wait_total = sum(r[2] for r in _seg_timings)
-        _rem_total  = sum(r[3] for r in _seg_timings)
-        _ff_total   = sum(r[4] for r in _seg_timings)
-        _all_total  = sum(r[5] for r in _seg_timings)
-        print(f"[seg-timing] phases summed across all segments: rem_wait={_wait_total:.1f}s rem_run={_rem_total:.1f}s ffmpeg={_ff_total:.1f}s total={_all_total:.1f}s", flush=True)
-        print(f"[seg-timing] top 10 slowest segments (idx | start_offset | rem_wait | rem_run | ffmpeg | total):", flush=True)
-        for r in _seg_timings[:10]:
-            _idx, _so, _rw, _rr, _fr, _tot = r
-            print(f"[seg-timing]   seg {_idx:3d}  start@{_so:5.2f}s  wait={_rw:5.2f}s  rem={_rr:5.2f}s  ff={_fr:5.2f}s  total={_tot:5.2f}s", flush=True)
-
-    # ── Build concat list (consumed directly by audio_post via concat demuxer) ─
-    # Previously this was a separate ffmpeg invocation that wrote concat_raw.mkv
-    # then audio_post read it back — ~1.6s of pure overhead. The concat demuxer
-    # handles the same job inline as audio_post's input, eliminating the
-    # intermediate file and the second ffmpeg process. The segments are all
-    # encoded with identical codec/timebase (libx264 + PCM @ 48kHz) so concat
-    # demuxer compatibility is unchanged from the standalone concat call.
+    # Pre-build concat list path and audio filter chain WHILE segments render.
+    # The FFmpeg audio post command needs both, but the string computation is
+    # free to do now instead of after all segments finish.
     _concat_list_path = os.path.join(work_dir, "concat_list.txt")
-    with open(_concat_list_path, "w") as _clf:
-        for _sp in _seg_paths:
-            _clf.write(f"file '{_sp}'\n")
-
-    # ── Audio post-processing pass (video stream copy) ──────────────────
-    # SFX mixing, audio ducking, denoise, EQ, compress, loudnorm
-    _audio_t0 = time.time()
+    _audio_t0_prep = time.time()
 
     audio_denoise = bool(edit_plan.get("audio_denoise"))
     _src_loudness = edit_plan.get("_source_loudness") or {}
@@ -6295,9 +6261,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         f"fast_thresh={_fast_thresh:.0f}dB level_thresh={_level_thresh:.0f}dB makeup={_makeup}dB",
         flush=True,
     )
-    # No apad/atrim — let the audio be exactly the length the filters
-    # naturally produce. Forcing a target duration was cutting off the
-    # last word's natural decay.
     audio_chain = (
         f"{denoise_part}highpass=f=75,"
         f"equalizer=f=200:t=q:w=1.5:g=-1.5,"
@@ -6308,11 +6271,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         f"acompressor=threshold={_level_thresh}dB:ratio=1.8:attack=15:release=80:makeup={_makeup},"
         f"loudnorm=I=-14:TP=-1:LRA=11"
     )
-
     _audio_filter_parts = []
     _audio_out = "[audio_base]"
     _audio_filter_parts.append(f"[0:a]asetpts=PTS-STARTPTS{_audio_out}")
-
     if sfx_audio_labels and sfx_timestamps:
         _duck_parts = []
         for _dt in sorted(set(sfx_timestamps)):
@@ -6328,7 +6289,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _audio_filter_parts.append(f"{_audio_out}volume='{_duck_expr}':eval=frame[audio_ducked]")
             _audio_out = "[audio_ducked]"
             print(f"[sfx] Audio ducking: {len(_duck_parts)} dip point(s)", flush=True)
-
         _n_sfx = len(sfx_audio_labels) + 1
         _sfx_labels_str = _audio_out + "".join(sfx_audio_labels)
         _audio_filter_parts.append(
@@ -6336,10 +6296,38 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         )
         _audio_out = "[audio_sfx_mixed]"
         print(f"[sfx] Mixed {len(sfx_audio_labels)} SFX track(s) into audio", flush=True)
-
     _audio_filter_parts.append(f"{_audio_out}{audio_chain}[final_audio]")
     _audio_fc = ";".join(sfx_filter_strs + _audio_filter_parts)
+    # Audio filter chain ready — segments still rendering in parallel.
 
+    with concurrent.futures.ThreadPoolExecutor(max_workers=_max_workers) as _seg_pool:
+        _seg_futures = {_seg_pool.submit(_run_one_segment, _si): _si for _si in range(n)}
+        for _fut in concurrent.futures.as_completed(_seg_futures):
+            _si = _seg_futures[_fut]
+            _seg_paths[_si] = _fut.result()
+    _par_elapsed = time.time() - _par_t0
+    print(f"[render] All {n} segments rendered in {_par_elapsed:.1f}s (parallel)", flush=True)
+
+    if _seg_timings:
+        _seg_timings.sort(key=lambda r: -r[5])
+        _wait_total = sum(r[2] for r in _seg_timings)
+        _rem_total  = sum(r[3] for r in _seg_timings)
+        _ff_total   = sum(r[4] for r in _seg_timings)
+        _all_total  = sum(r[5] for r in _seg_timings)
+        print(f"[seg-timing] phases summed across all segments: rem_wait={_wait_total:.1f}s rem_run={_rem_total:.1f}s ffmpeg={_ff_total:.1f}s total={_all_total:.1f}s", flush=True)
+        print(f"[seg-timing] top 10 slowest segments (idx | start_offset | rem_wait | rem_run | ffmpeg | total):", flush=True)
+        for r in _seg_timings[:10]:
+            _idx, _so, _rw, _rr, _fr, _tot = r
+            print(f"[seg-timing]   seg {_idx:3d}  start@{_so:5.2f}s  wait={_rw:5.2f}s  rem={_rr:5.2f}s  ff={_fr:5.2f}s  total={_tot:5.2f}s", flush=True)
+
+    # Write concat list and launch audio post immediately — filter chain
+    # was pre-built during segment rendering so there's zero gap.
+    with open(_concat_list_path, "w") as _clf:
+        for _sp in _seg_paths:
+            _clf.write(f"file '{_sp}'\n")
+
+    _audio_t0 = time.time()
+    # Audio filter chain was pre-built during segment rendering — launch immediately.
     # No -shortest: let video and audio be their natural lengths so the
     # tail of the last word is not silently truncated when the audio
     # happens to be slightly longer than the video timeline.
