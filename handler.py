@@ -2246,6 +2246,8 @@ RULES FOR USING THESE TIMESTAMPS:
             "timestamp": _br_ts,
             "duration": _br_dur,
             "reason": str(_br.get("reason") or "").strip(),
+            "_start_word_kept": _sw_kept,
+            "_end_word_kept": _ew_kept,
         })
     edit_plan["broll_clips"] = validated_broll
     if validated_broll:
@@ -3932,6 +3934,7 @@ def project_words_to_output(transcript, cuts, effective_durations, speed_curve=N
                 "punctuated_word": w.get("punctuated_word") or w.get("word") or "",
                 "speaker": int(w.get("speaker", 0) or 0),
                 "_source_start": max(ws, c_start),
+                "_word_index": word_idx,
             })
         dur = effective_durations[i] if i < len(effective_durations) else (c_end - c_start)
         # Snap cursor to frame boundaries so word timestamps live on the
@@ -5042,9 +5045,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _all_caption_styles = {"volt", "clarity", "impact", "ember", "velocity",
                            "archive", "lumen", "rebel"}
 
-    # Project words to output timeline for captions
+    # Project words to output timeline — used by captions AND b-roll timing
     _projected_words = []
-    if caption_style != "none" and caption_style in _all_caption_styles and transcript.get("words"):
+    if transcript.get("words"):
         _projected_words = project_words_to_output(
             transcript, render_cuts, effective_durations,
             speed_curve=speed_curve,
@@ -5844,33 +5847,41 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             except Exception as _be_err:
                 print(f"[broll] Fetch error for clip {_idx}: {_be_err}", flush=True)
 
+        # Build word-index → projected output time lookup from the same
+        # projection used by captions. This is the FINAL output time after
+        # speed curve, content removal, hook reorder — everything.
+        _pw_by_idx = {}
+        for _pw in _projected_words:
+            _wi = _pw.get("_word_index")
+            if _wi is not None:
+                _pw_by_idx[_wi] = _pw
+
         if _broll_files and broll_clips:
             for _bi, _bc in enumerate(broll_clips):
                 if _bi not in _broll_files:
                     continue
                 _local_path = _broll_files[_bi]
-                _src_ts = float(_bc.get("timestamp") or 0)
-                _src_dur = float(_bc.get("duration") or 0)
-                if _src_dur <= 0:
-                    continue
-                _src_end = _src_ts + _src_dur
 
-                # Project BOTH start and end through the speed curve independently.
-                # Source duration ≠ output duration when speed ramping is active.
-                # A 1.76s source window at 1.25x becomes 1.41s in output.
-                _out_start = project_source_time_to_final_output(
-                    _src_ts, render_cuts, effective_durations, _broll_sc,
-                    clip_time_maps=_clip_time_maps,
-                )
-                _out_end = project_source_time_to_final_output(
-                    _src_end, render_cuts, effective_durations, _broll_sc,
-                    clip_time_maps=_clip_time_maps,
-                )
-                if _out_start is None or _out_start >= _seg_total_dur:
-                    print(f"[broll] '{_bc.get('keyword')}' projected output start invalid — skipping", flush=True)
+                # Look up b-roll timing from projected words — the same
+                # source of truth as captions. No separate projection needed.
+                _br_sw = _bc.get("_start_word_kept")
+                _br_ew = _bc.get("_end_word_kept")
+                if _br_sw is None or _br_ew is None:
+                    # Stored during validation from kept word indices
+                    print(f"[broll] '{_bc.get('keyword')}' missing kept word indices — skipping", flush=True)
                     continue
-                if _out_end is None or _out_end <= _out_start:
-                    print(f"[broll] '{_bc.get('keyword')}' projected output end invalid — skipping", flush=True)
+
+                _pw_start = _pw_by_idx.get(_br_sw)
+                _pw_end = _pw_by_idx.get(_br_ew)
+                if not _pw_start or not _pw_end:
+                    print(f"[broll] '{_bc.get('keyword')}' words [{_br_sw}]-[{_br_ew}] not in projected words — skipping", flush=True)
+                    continue
+
+                _out_start = float(_pw_start["start"])
+                _out_end = float(_pw_end["end"])
+
+                if _out_start >= _seg_total_dur or _out_end <= _out_start:
+                    print(f"[broll] '{_bc.get('keyword')}' output time invalid ({_out_start:.3f}-{_out_end:.3f}) — skipping", flush=True)
                     continue
 
                 effective_duration = _out_end - _out_start
