@@ -1532,24 +1532,7 @@ Text overlays:
   appear_at_clip — -1 for hook clip (if hook_clip is set), 0 for first content clip, or any clip number
   style — title (72px), callout (56px), cta (64px)
 
-Sound effects — audio accents that make the edit feel physical and professional. Every sound must be EARNED — placed at a moment that justifies it. The wrong sound at the wrong time makes the edit feel amateur. The right sound at the right time makes it feel like a Netflix trailer.
-
-  === THE #1 RULE: MATCH THE EMOTION, NOT THE WORDS ===
-
-  Every sound must match the speaker's ACTUAL EMOTION in that moment, not the literal words being said. The same word carries completely different emotions depending on context:
-  - "She's crying" when the speaker caught his wife cheating = VINDICATION, not sadness. No sad_trombone.
-  - "I killed it" = TRIUMPH, not death. Use boom, not something dark.
-  - "That's crazy" = AMAZEMENT. Not literal insanity.
-  - "I died" = slang for laughing hard. Not actual death.
-
-  Before placing ANY sound, identify the speaker's emotion: Are they triumphant? Disappointed? Shocked? Amused? Furious? Satisfied? Then pick a sound that AMPLIFIES that exact emotion. If the emotion is complex or ambiguous, use NO sound — silence is always safe and often more powerful than the wrong sound.
-
-  SILENCE is the most powerful sound effect. Use it when:
-  - The speaker's delivery already carries all the energy
-  - The moment is genuinely emotional or vulnerable
-  - You're not sure the sound matches the emotion (when in doubt, leave it out)
-
-  Available sounds and WHEN to use each. These descriptions are the definitive rule for every sound — follow them exactly.
+Sound effects amplify the speaker's energy at key moments. Match each sound to the speaker's emotion — read the descriptions below and place sounds where they fit.
 
   boom — deep bass-heavy impact with sub-bass rumble. The single most dramatic sound in the palette — reserve it for the 1-2 peak moments in the entire video where the story hits its absolute hardest. Place on the exact word that carries the most weight.
 
