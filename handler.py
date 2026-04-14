@@ -1549,35 +1549,33 @@ Sound effects — audio accents that make the edit feel physical and professiona
   - The moment is genuinely emotional or vulnerable
   - You're not sure the sound matches the emotion (when in doubt, leave it out)
 
-  Available sounds and WHEN to use each:
+  Available sounds and WHEN to use each. These descriptions are the definitive rule for every sound — follow them exactly.
 
-  boom — deep cinematic impact. Use for the biggest moments in the video — jaw-drop statements, shocking reveals, mic-drop lines. Place on the single word that carries the most weight in the moment.
+  boom — deep bass-heavy impact with sub-bass rumble. The single most dramatic sound in the palette — reserve it for the 1-2 peak moments in the entire video where the story hits its absolute hardest. Place on the exact word that carries the most weight.
 
-  hit — sharp dramatic impact. Use for strong statements that need punctuation but aren't THE biggest moment. A notch below boom in intensity.
+  hit — sharp percussive slap, punchy and bright. Use to punctuate strong statements that deserve emphasis but are not the peak moment of the video. 2-3 per video maximum.
 
-  drum_roll — snare drum roll building to a cymbal crash. The crash lands on your trigger word; the system starts the file early automatically. Use for genuine dramatic buildup before a big reveal, announcement, or life-changing number. Not for regular transitions or mild emphasis.
+  drum_roll — snare roll building to a cymbal crash over ~1.5 seconds. Use only when the speaker is verbally building suspense toward a specific reveal — the speaker must be escalating tension in their delivery, not just stating a surprising fact.
 
-  reverse — backward sweep sound. Use when the story literally reverses or rewinds, or for sudden stops where energy cuts dead.
+  reverse — reversed cymbal swell that creates a "rewind" feeling. Use when the speaker backtracks, corrects themselves, or the narrative literally reverses direction.
 
-  ching — cash register. Use ONLY when money, profit, sales, or financial success is literally mentioned. The trigger word must be the money-related word itself.
+  ching — cash register ring. Use only when the speaker mentions a specific financial gain, profit, or money earned. The trigger word must be the money word itself. Not for financial losses, costs, or spending.
 
-  ding — bright notification chime. Use ONLY when a DEVICE produces a notification — a phone ringing, a text arriving, an email pinging, a voicemail alert. The trigger word must be the device action word ("texted", "called", "voicemail", "notification"). A human delivering a message in person is NOT a device notification and should NEVER get a ding.
+  ding — short digital notification chime. Use only when the speaker describes receiving a phone call, text message, email, or app notification. The trigger word must be the action word — "called," "texted," "rang." A person delivering a message in person is not a notification.
 
-  pop — satisfying pop. Use ONLY when something visually pops up on screen — a text overlay appearing, a graphic appearing. Not for speech emphasis.
+  click — crisp mouse click. Use only when the speaker describes interacting with a device — clicking a button, tapping a screen, pressing a key. Not for abstract concepts like making a decision.
 
-  click — mouse/button click. Use when something is selected, decided, or confirmed.
+  camera_shutter — camera shutter snap. Use only when the speaker literally describes taking a photograph or being photographed. Not for metaphorical usage.
 
-  camera_shutter — camera shutter click. Use ONLY when someone is visibly taking a photo on screen or literally describes taking a photo. Not for metaphorical usage like "picture this."
+  sad_trombone — comedic "wah wah" failure jingle. Use only when the speaker is laughing at their own failure and their tone is playful. Never use when the speaker is genuinely hurt, angry, or upset — this sound trivializes whatever it is placed on.
 
-  sad_trombone — comedic failure sound. Use ONLY when the speaker is describing a lighthearted failure that THEY find funny. The speaker's tone must be playful or self-deprecating. NEVER use when the speaker is genuinely upset, angry, vindicated, or in pain. This sound trivializes the moment — only place it where trivializing is the intended comedic effect.
+  typing — continuous keyboard clacking. Use only when the speaker describes a sustained act of typing or writing — composing an email, writing a letter, filling out a form. Not for brief mentions of sending a text.
 
-  typing — keyboard typing sounds. Use when someone is visibly typing on screen or literally describes typing/texting something.
+  whoosh_slow — smooth atmospheric whoosh lasting ~0.5 seconds. Use only on clips that have a visual transition (whip, wipe, smooth, fade) — never on a hard cut. The whoosh sells the visual movement.
 
-  whoosh_slow — smooth atmospheric whoosh. Use on scene transitions or topic changes.
+  transition_smooth — soft tonal sweep, gentler and shorter than whoosh_slow. Use only on clips that have a subtle visual transition (dissolve, smooth, fade) — never on a hard cut or energetic whip.
 
-  transition_smooth — gentle transition sound. Use with smooth visual transitions.
-
-  thunder — deep rolling thunder. Use for ominous, foreboding, or threatening moments where something dark is happening or about to happen.
+  thunder — deep rolling thunder rumble building over ~0.7 seconds. Use for moments of genuine threat, menace, or foreboding — someone is about to do something dangerous or destructive. Not for sadness, grief, or general negativity.
 
   Transitions — the visual effect between two clips. Most cuts should be HARD CUTS (transition_out: "none") — they're fast, clean, and professional. Transitions are a tool, not decoration. Use them sparingly and with purpose.
 
@@ -1613,21 +1611,15 @@ Sound effects — audio accents that make the edit feel physical and professiona
   - transition_out goes on the clip BEFORE the transition (the outgoing clip).
 
   Rules:
-  - BEFORE placing any sound, ask: "Would a professional editor add a sound HERE?" If you can't articulate WHY this moment needs THIS specific sound, leave it out.
-  - Sound effects punctuate emphasis_moments. Place sounds where they amplify the moment.
+  - The sound descriptions above are the definitive rule for each sound. If the moment does not match the description, do not place that sound.
   - Every sound effect MUST have a "word" field — the EXACT trigger word that justifies this sound (lowercase, no punctuation).
-  - TIMING IS SAMPLE-ACCURATE. The "t" value MUST be the EXACT start time of the trigger word, in seconds with at least 3 decimal places (millisecond precision) — copy it directly from the Deepgram word timestamps provided. Do NOT round, do NOT estimate, do NOT pick a time "near" the word.
-  - The downstream system snaps your sound to the exact start of the spoken word using the "word" field, so getting the word right matters more than getting "t" right — but BOTH must point to the same word.
-  - Onset compensation is automatic: the system knows each SFX file's internal onset (where the actual hit/climax is) and schedules the file to start early so the perceived "moment" lands precisely on the word. You do NOT need to compensate — just place "t" on the word and the system handles the rest. This applies to build-up sounds too: drum_roll, reverse, sad_trombone, thunder, whoosh_slow all have their climax automatically aligned to the word.
-  - There is NO upper cap on sound effects and NO per-type limit. Place as many as the edit truly justifies. Quality over quantity — every sound must be earned, but if 8 moments earn a sound, place 8 sounds.
-  - Do not place 2 sounds on 1 moment. That will never work. If you want a layered impact, pick a single sound that already has the layers built in (drum_roll already builds to a crash; thunder already rumbles into a hit).
-  - ding should ONLY be used when someone literally receives a text/call/message/notification.
-  - whoosh_slow REQUIRES a wipe/fade/whip/smooth transition on the same clip. Never place it on a hard cut — there is no visual movement to sell the sound and it will play over silence.
-  - transition_smooth follows the same rule as whoosh_slow — REQUIRES a wipe/fade/whip/smooth transition on the same clip.
+  - The "t" value MUST be the EXACT start time of the trigger word from the Deepgram word list (3+ decimal places). Copy it directly — do not round or estimate.
+  - Onset compensation is automatic — the system aligns each sound's climax to the trigger word. Just place "t" on the word and the system handles the rest.
+  - Do not place 2 sounds on 1 moment.
   - When in doubt, leave the sound out. Silence is better than a wrong sound.
 
   sound_effects: [
-    {{"t": <seconds, 3+ decimal places, EXACT word start from Deepgram>, "sound": "<boom|hit|drum_roll|reverse|ching|ding|pop|click|camera_shutter|sad_trombone|typing|whoosh_slow|transition_smooth|thunder>", "word": "<exact trigger word, lowercase>"}}
+    {{"t": <seconds, 3+ decimal places, EXACT word start from Deepgram>, "sound": "<boom|hit|drum_roll|reverse|ching|ding|click|camera_shutter|sad_trombone|typing|whoosh_slow|transition_smooth|thunder>", "word": "<exact trigger word, lowercase>"}}
   ]
 
 B-roll — stock footage cutaways from Pexels.com. Your keyword gets typed into the Pexels search bar and the top result plays in the video OVER the speaker's dialogue. The viewer hears the speaker's words while watching your clip. Good b-roll makes the viewer FEEL the words — the clip reinforces and amplifies what the speaker is saying.
