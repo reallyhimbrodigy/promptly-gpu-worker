@@ -3306,23 +3306,29 @@ def fetch_broll_clip(keyword, duration_needed, work_dir, dialogue_reason=""):
             try:
                 _pick_client = _get_genai_client()
                 _dialogue_ctx = f' The speaker says: "{dialogue_reason}".' if dialogue_reason else ""
-                _parts = [f'This clip plays over a talking-head video while the viewer hears the dialogue.{_dialogue_ctx} Which image best matches what the viewer should see for "{keyword}"? Reply with ONLY the number (1-{len(_poster_images)}).']
+
+                # Build image labels for the prompt text
                 _poster_idx_map = {}
+                _image_parts = []
                 _num = 1
                 for _pi in sorted(_poster_images.keys()):
-                    _img_bytes = _poster_images[_pi]
-                    _parts.append(f"\nImage {_num}:")
-                    _parts.append(genai_types.Part.from_bytes(data=_img_bytes, mime_type="image/jpeg"))
+                    _image_parts.append(genai_types.Part.from_bytes(data=_poster_images[_pi], mime_type="image/jpeg"))
+                    _image_parts.append(genai_types.Part.from_text(data=f"(Image {_num})"))
                     _poster_idx_map[_num] = _pi
                     _num += 1
+
+                _prompt_text = genai_types.Part.from_text(
+                    data=f'Above are {_num - 1} stock footage thumbnails. This clip plays over a talking-head video.{_dialogue_ctx} Which image best depicts "{keyword}"? Reply with ONLY the image number.'
+                )
+                _all_parts = _image_parts + [_prompt_text]
 
                 _pick_t0 = time.time()
                 _pick_resp = _pick_client.models.generate_content(
                     model=GEMINI_MODEL,
-                    contents=[_parts],
+                    contents=_all_parts,
                     config=genai_types.GenerateContentConfig(
                         temperature=0.0,
-                        max_output_tokens=8,
+                        max_output_tokens=16,
                     ),
                 )
                 _pick_elapsed = time.time() - _pick_t0
@@ -3335,10 +3341,10 @@ def fetch_broll_clip(keyword, duration_needed, work_dir, dialogue_reason=""):
                         break
                 if _pick_num and _pick_num in _poster_idx_map:
                     _winner_idx = _poster_idx_map[_pick_num]
-                    _top_n[_winner_idx]["score"] += 50  # massive boost for visual match
+                    _top_n[_winner_idx]["score"] += 50
                     print(f"[broll] Gemini visual pick: #{_pick_num} (candidate {_winner_idx}) in {_pick_elapsed:.1f}s for '{keyword}'", flush=True)
                 else:
-                    print(f"[broll] Gemini visual pick: unclear response '{_pick_text}' in {_pick_elapsed:.1f}s", flush=True)
+                    print(f"[broll] Gemini visual pick: unclear response '{_pick_text}' in {_pick_elapsed:.1f}s for '{keyword}'", flush=True)
             except Exception as _pick_err:
                 print(f"[broll] Gemini visual pick failed: {_pick_err}", flush=True)
 
