@@ -3168,7 +3168,7 @@ def select_best_thumbnail_frame(video_path, seed_ts, work_dir):
     return _data, "image/jpeg"
 
 
-def fetch_broll_clip(keyword, duration_needed, work_dir):
+def fetch_broll_clip(keyword, duration_needed, work_dir, dialogue_reason=""):
     """Search Pexels for a portrait video clip. Returns local path or None."""
     pexels_key = os.environ.get("PEXELS_API_KEY")
     if not pexels_key:
@@ -3200,7 +3200,6 @@ def fetch_broll_clip(keyword, duration_needed, work_dir):
     _stop_words = {"a", "an", "the", "in", "on", "of", "with", "and", "to", "for", "up", "at", "by", "from", "into", "is", "it", "close"}
     _kw_match_words = _kw_words - _stop_words
 
-    # Score all candidates
     _candidates = []
     for vid_idx, video in enumerate(videos):
         vid_dur = float(video.get("duration") or 0)
@@ -3244,10 +3243,8 @@ def fetch_broll_clip(keyword, duration_needed, work_dir):
             score += 3
         score += max(0, 10 - vid_idx)
 
-        # URL slug relevance — Pexels encodes descriptive words in the page URL
         _vid_url = str(video.get("url") or "").lower()
         _vid_url_words = set(re.split(r'[-/]', _vid_url.split("pexels.com/")[-1] if "pexels.com/" in _vid_url else ""))
-        # Also check tags (usually empty on Pexels, but check anyway)
         _vid_tags = set()
         for _tag_obj in (video.get("tags") or []):
             if isinstance(_tag_obj, dict):
@@ -3257,19 +3254,106 @@ def fetch_broll_clip(keyword, duration_needed, work_dir):
         _all_vid_words = _vid_tags | _vid_url_words
         if _all_vid_words and _kw_match_words:
             _tag_matches = len(_kw_match_words & _all_vid_words)
-            score += _tag_matches * 10  # heavy weight — URL slug is the best relevance signal
+            score += _tag_matches * 10
         elif _kw_match_words:
-            score -= 15  # penalize videos with zero keyword overlap
+            score -= 15
 
-        if score > best_score:
-            best_match = {
-                "video_id": vid_id,
-                "video_idx": vid_idx,
-                "duration": vid_dur,
-                "file": best_file,
-                "score": score,
-            }
-            best_score = score
+        _poster_url = str(video.get("image") or "")
+        _slug = _vid_url.split("pexels.com/")[-1] if "pexels.com/" in _vid_url else ""
+        _slug_desc = " ".join(w for w in re.split(r'[-/]', _slug) if w and not w.isdigit() and w != "video")
+
+        _candidates.append({
+            "video_id": vid_id,
+            "video_idx": vid_idx,
+            "duration": vid_dur,
+            "file": best_file,
+            "score": score,
+            "poster_url": _poster_url,
+            "slug_desc": _slug_desc,
+        })
+
+    # Gemini visual pick — fetch poster thumbnails for top candidates,
+    # let Gemini see them and pick the best match for the keyword.
+    if _candidates and _kw_match_words:
+        _candidates.sort(key=lambda x: x["score"], reverse=True)
+        _top_n = _candidates[:5]
+        _poster_images = {}
+
+        def _fetch_poster(idx_url):
+            _idx, _url = idx_url
+            if not _url:
+                return _idx, None
+            try:
+                _r = requests.get(_url, timeout=5)
+                if _r.status_code == 200 and len(_r.content) > 500:
+                    return _idx, _r.content
+            except Exception:
+                pass
+            return _idx, None
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as _poster_pool:
+            _poster_futs = [_poster_pool.submit(_fetch_poster, (i, c["poster_url"])) for i, c in enumerate(_top_n)]
+            for _fut in concurrent.futures.as_completed(_poster_futs, timeout=5):
+                try:
+                    _pi, _pdata = _fut.result()
+                    if _pdata:
+                        _poster_images[_pi] = _pdata
+                except Exception:
+                    pass
+
+        if _poster_images and len(_poster_images) >= 2:
+            try:
+                _pick_client = _get_genai_client()
+                _dialogue_ctx = f' The speaker says: "{dialogue_reason}".' if dialogue_reason else ""
+                _content_parts = []
+                _poster_idx_map = {}
+                _num = 1
+                for _pi in sorted(_poster_images.keys()):
+                    _desc = _top_n[_pi].get("slug_desc", "")
+                    _content_parts.append(f"\nOption {_num} — \"{_desc}\":")
+                    _content_parts.append(genai_types.Part.from_bytes(
+                        data=_poster_images[_pi], mime_type="image/jpeg"
+                    ))
+                    _poster_idx_map[_num] = _pi
+                    _num += 1
+                _content_parts.append(
+                    f'\nWhich option best depicts "{keyword}"?{_dialogue_ctx} Reply with ONLY the number.'
+                )
+
+                _pick_t0 = time.time()
+                _pick_resp = _pick_client.models.generate_content(
+                    model=GEMINI_MODEL,
+                    contents=_content_parts,
+                    config=genai_types.GenerateContentConfig(
+                        temperature=0.2,
+                        max_output_tokens=128,
+                        thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
+                    ),
+                )
+                _pick_elapsed = time.time() - _pick_t0
+                _pick_text = str(getattr(_pick_resp, "text", "") or "").strip()
+                _pick_num = None
+                for _ch in _pick_text:
+                    if _ch.isdigit():
+                        _pick_num = int(_ch)
+                        break
+                if _pick_num and _pick_num in _poster_idx_map:
+                    _winner_idx = _poster_idx_map[_pick_num]
+                    _top_n[_winner_idx]["score"] += 50
+                    print(f"[broll] Gemini visual pick: #{_pick_num} ('{_top_n[_winner_idx].get('slug_desc','')}') in {_pick_elapsed:.1f}s for '{keyword}'", flush=True)
+                else:
+                    print(f"[broll] Gemini visual pick: response='{_pick_text}' in {_pick_elapsed:.1f}s for '{keyword}'", flush=True)
+            except Exception as _pick_err:
+                print(f"[broll] Gemini visual pick error: {_pick_err}", flush=True)
+
+        _candidates = _top_n + _candidates[5:]
+
+    best_match = None
+    best_score = -1
+    for _c in _candidates:
+        if _c["score"] > best_score:
+            best_match = _c
+            best_score = _c["score"]
 
     if not best_match:
         print(f"[broll] No portrait video files found across {len(videos)} results for '{keyword}' — SKIPPING", flush=True)
@@ -6501,6 +6585,7 @@ def handler(job):
                     _bc["keyword"],
                     float(_bc.get("duration") or 2.0),
                     work_dir,
+                    dialogue_reason=str(_bc.get("reason") or ""),
                 )
                 _broll_fetch_futures[_fut] = _bi
 
