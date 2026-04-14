@@ -3168,7 +3168,7 @@ def select_best_thumbnail_frame(video_path, seed_ts, work_dir):
     return _data, "image/jpeg"
 
 
-def fetch_broll_clip(keyword, duration_needed, work_dir, dialogue_reason=""):
+def fetch_broll_clip(keyword, duration_needed, work_dir):
     """Search Pexels for a portrait video clip. Returns local path or None."""
     pexels_key = os.environ.get("PEXELS_API_KEY")
     if not pexels_key:
@@ -3257,127 +3257,19 @@ def fetch_broll_clip(keyword, duration_needed, work_dir, dialogue_reason=""):
         _all_vid_words = _vid_tags | _vid_url_words
         if _all_vid_words and _kw_match_words:
             _tag_matches = len(_kw_match_words & _all_vid_words)
-            score += _tag_matches * 3
+            score += _tag_matches * 10  # heavy weight — URL slug is the best relevance signal
+        elif _kw_match_words:
+            score -= 15  # penalize videos with zero keyword overlap
 
-        # Get poster thumbnail URL and video_pictures for visual scoring
-        _poster_url = str(video.get("image") or "")
-        # Build human-readable description from URL slug
-        _slug = _vid_url.split("pexels.com/")[-1] if "pexels.com/" in _vid_url else ""
-        _slug_desc = " ".join(w for w in re.split(r'[-/]', _slug) if w and not w.isdigit() and w != "video")
-        # Get video_pictures (multiple preview frames)
-        _vid_pics = [str(p.get("picture") or "") for p in (video.get("video_pictures") or []) if p.get("picture")]
-
-        _candidates.append({
-            "video_id": vid_id,
-            "video_idx": vid_idx,
-            "duration": vid_dur,
-            "file": best_file,
-            "score": score,
-            "poster_url": _poster_url,
-            "url_words": _all_vid_words,
-            "slug_desc": _slug_desc,
-            "video_pictures": _vid_pics[:3],  # first 3 preview frames
-        })
-
-    # Visual scoring: fetch thumbnails for top candidates, send to Gemini
-    # with URL descriptions so it can pick the best match visually.
-    if _candidates and _kw_match_words:
-        _candidates.sort(key=lambda x: x["score"], reverse=True)
-        _top_n = _candidates[:5]
-        _poster_images = {}  # idx → list of image bytes
-
-        # Fetch thumbnails in parallel — poster + up to 2 video_pictures per candidate
-        def _fetch_img(idx_url):
-            _idx, _url = idx_url
-            if not _url:
-                return _idx, None
-            try:
-                _r = requests.get(_url, timeout=5)
-                if _r.status_code == 200 and len(_r.content) > 500:
-                    return _idx, _r.content
-            except Exception:
-                pass
-            return _idx, None
-
-        _fetch_tasks = []
-        for i, c in enumerate(_top_n):
-            # Poster image
-            if c["poster_url"]:
-                _fetch_tasks.append((i, c["poster_url"]))
-            # First 2 video_pictures for motion context
-            for _vp_url in c.get("video_pictures", [])[:2]:
-                if _vp_url:
-                    _fetch_tasks.append((i, _vp_url))
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as _poster_pool:
-            _poster_futs = [_poster_pool.submit(_fetch_img, t) for t in _fetch_tasks]
-            for _fut in concurrent.futures.as_completed(_poster_futs, timeout=5):
-                try:
-                    _pi, _pdata = _fut.result()
-                    if _pdata:
-                        _poster_images.setdefault(_pi, []).append(_pdata)
-                except Exception:
-                    pass
-
-        # Use Gemini to pick the best candidate — images + URL descriptions
-        if _poster_images and len(_poster_images) >= 2:
-            try:
-                _pick_client = _get_genai_client()
-                _dialogue_ctx = f' The speaker says: "{dialogue_reason}".' if dialogue_reason else ""
-
-                # Build content: for each candidate, show images + text description
-                _poster_idx_map = {}
-                _content_parts = []
-                _num = 1
-                for _pi in sorted(_poster_images.keys()):
-                    _desc = _top_n[_pi].get("slug_desc", "")
-                    _content_parts.append(f"\nOption {_num} — Pexels description: \"{_desc}\"")
-                    for _img_bytes in _poster_images[_pi][:3]:
-                        _content_parts.append(genai_types.Part.from_bytes(
-                            data=_img_bytes, mime_type="image/jpeg"
-                        ))
-                    _poster_idx_map[_num] = _pi
-                    _num += 1
-
-                _content_parts.append(
-                    f'\nThis stock footage clip plays over a talking-head video.{_dialogue_ctx} '
-                    f'Which option best depicts "{keyword}"? Reply with ONLY the option number.'
-                )
-
-                _pick_t0 = time.time()
-                _pick_resp = _pick_client.models.generate_content(
-                    model=GEMINI_MODEL,
-                    contents=_content_parts,
-                    config=genai_types.GenerateContentConfig(
-                        temperature=0.0,
-                        max_output_tokens=16,
-                    ),
-                )
-                _pick_elapsed = time.time() - _pick_t0
-                _pick_text = str(getattr(_pick_resp, "text", "") or "").strip()
-                _pick_num = None
-                for _ch in _pick_text:
-                    if _ch.isdigit():
-                        _pick_num = int(_ch)
-                        break
-                if _pick_num and _pick_num in _poster_idx_map:
-                    _winner_idx = _poster_idx_map[_pick_num]
-                    _top_n[_winner_idx]["score"] += 50
-                    print(f"[broll] Gemini visual pick: #{_pick_num} (candidate {_winner_idx}, desc='{_top_n[_winner_idx].get('slug_desc','')}') in {_pick_elapsed:.1f}s for '{keyword}'", flush=True)
-                else:
-                    print(f"[broll] Gemini visual pick: unclear response '{_pick_text}' in {_pick_elapsed:.1f}s for '{keyword}'", flush=True)
-            except Exception as _pick_err:
-                print(f"[broll] Gemini visual pick failed: {_pick_err}", flush=True)
-
-        _candidates = _top_n + _candidates[5:]
-
-    # Pick the best candidate
-    best_match = None
-    best_score = -1
-    for _c in _candidates:
-        if _c["score"] > best_score:
-            best_match = _c
-            best_score = _c["score"]
+        if score > best_score:
+            best_match = {
+                "video_id": vid_id,
+                "video_idx": vid_idx,
+                "duration": vid_dur,
+                "file": best_file,
+                "score": score,
+            }
+            best_score = score
 
     if not best_match:
         print(f"[broll] No portrait video files found across {len(videos)} results for '{keyword}' — SKIPPING", flush=True)
@@ -6609,7 +6501,6 @@ def handler(job):
                     _bc["keyword"],
                     float(_bc.get("duration") or 2.0),
                     work_dir,
-                    dialogue_reason=str(_bc.get("reason") or ""),
                 )
                 _broll_fetch_futures[_fut] = _bi
 
