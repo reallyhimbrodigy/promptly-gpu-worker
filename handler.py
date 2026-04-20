@@ -6141,14 +6141,24 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     if broll_fetch_futures:
         _broll_sc = edit_plan.get("_parsed_speed_curve")
         _broll_files = {}
-        for _fut in concurrent.futures.as_completed(broll_fetch_futures, timeout=30):
-            _idx = broll_fetch_futures[_fut]
-            try:
-                _path = _fut.result()
-                if _path:
-                    _broll_files[_idx] = _path
-            except Exception as _be_err:
-                print(f"[broll] Fetch error for clip {_idx}: {_be_err}", flush=True)
+        try:
+            for _fut in concurrent.futures.as_completed(broll_fetch_futures, timeout=10):
+                _idx = broll_fetch_futures[_fut]
+                try:
+                    _path = _fut.result(timeout=1)
+                    if _path:
+                        _broll_files[_idx] = _path
+                except Exception as _be_err:
+                    print(f"[broll] Fetch error for clip {_idx}: {_be_err}", flush=True)
+        except concurrent.futures.TimeoutError:
+            # Some B-roll clips timed out — continue without them
+            _done = set(_broll_files.keys())
+            _all = set(broll_fetch_futures.values())
+            _skipped = _all - _done
+            print(f"[broll] Timeout: skipped {len(_skipped)} clip(s), continuing with {len(_done)}", flush=True)
+            # Cancel remaining futures
+            for _fut in broll_fetch_futures:
+                _fut.cancel()
 
         if _broll_files and broll_clips:
             for _bi, _bc in enumerate(broll_clips):
