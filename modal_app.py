@@ -146,6 +146,7 @@ image = (
 # ── Secrets ────────────────────────────────────────────────────────────────────
 secrets = [
     modal.Secret.from_name("promptly-secrets"),
+    modal.Secret.from_name("promptly-cloudfront"),
 ]
 
 # ── App ────────────────────────────────────────────────────────────────────────
