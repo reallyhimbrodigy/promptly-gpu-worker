@@ -20,12 +20,17 @@ import certifi
 os.environ["SSL_CERT_FILE"] = certifi.where()
 os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
 
-HANDLER_VERSION = "3.0.0"
+HANDLER_VERSION = "3.1.0"
 GEMINI_MODEL = "gemini-3-flash-preview"
+# Bump when the edit_plan schema or render pipeline changes in a way that breaks
+# replay of older persisted plans. Returned in every job response so the server
+# can tag video_jobs.render_version and gate re-edit compatibility.
+RENDER_VERSION = 1
 
 print(f"[startup] Python {sys.version}", flush=True)
 print(f"[startup] handler version: {HANDLER_VERSION}", flush=True)
 print(f"[startup] Gemini model: {GEMINI_MODEL}", flush=True)
+print(f"[startup] render version: {RENDER_VERSION}", flush=True)
 
 try:
     from google import genai as genai_client_mod
@@ -1911,6 +1916,11 @@ RULES FOR USING THESE TIMESTAMPS:
             # over-allocation. Gemini will return finish_reason=MAX_TOKENS if exceeded
             # — handler logs that and we can bump back up if it ever triggers.
             max_output_tokens=4096,
+            # Force pure-JSON output so we never have to scrape a ```json block.
+            # response_mime_type is gentler than response_schema (which Gemini 3 Flash
+            # doesn't fully enforce on oneOf/anyOf nests); post-processing validators
+            # at handler.py:2187-2621 still shape the result.
+            response_mime_type="application/json",
             thinking_config=genai_types.ThinkingConfig(thinking_level="LOW"),
             media_resolution="MEDIA_RESOLUTION_LOW",
         ),
@@ -2621,6 +2631,154 @@ RULES FOR USING THESE TIMESTAMPS:
     return edit_plan
 
 
+# ─── PLAN-DIFF (RE-EDIT) ─────────────────────────────────────────────────────
+#
+# Given an old edit_plan + user change request, Gemini self-classifies the intent
+# (tweak | reinterpret | needs_clarification) and either emits a new_plan that
+# echoes every field byte-identical except the requested change, or a fused vibe
+# string for the reinterpret path. responseJsonSchema forces the echo — no field
+# drops — so the tweak path is surgically faithful.
+
+def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None):
+    """Call Gemini to produce a new plan from (old_plan, change_request).
+
+    Returns a dict with keys: classification, new_plan, fused_vibe,
+    changed_fields, human_summary, clarification_question.
+    Raises RuntimeError on unrecoverable failure (caller should fall back to
+    full reinterpret).
+    """
+    if not isinstance(old_plan, dict):
+        raise RuntimeError("generate_plan_diff: old_plan must be a dict")
+    if not change_request or not isinstance(change_request, str):
+        raise RuntimeError("generate_plan_diff: change_request is required")
+
+    client = _get_genai_client()
+
+    # Strip internal-only fields (underscored) — we only diff the sanitized plan.
+    sanitized_old_plan = {k: v for k, v in old_plan.items() if not (isinstance(k, str) and k.startswith("_"))}
+
+    # Compact transcript preview so the diff model can resolve word_index references
+    # without being overwhelmed. Cap at ~3K chars; plan-diff doesn't need the full
+    # transcript, just enough to ground timing-ish language in the change_request.
+    transcript_preview = ""
+    if isinstance(transcript, dict):
+        words = transcript.get("words") or []
+        if words:
+            preview_words = [str(w.get("punctuated_word") or w.get("word") or "") for w in words[:300]]
+            transcript_preview = " ".join(preview_words)[:3000]
+
+    prompt_parts = [
+        "You are editing a Promptly video-edit PLAN. The plan is a JSON document describing "
+        "every decision that produced a rendered video: cuts, speed ramps, captions, B-roll, "
+        "transitions, color grade, SFX. The user has requested a change. Your job:\n\n"
+        "1) CLASSIFY the request as one of:\n"
+        "   - 'tweak': surgical change to specific fields (e.g. 'smaller captions', 'remove clip 3', "
+        "'different caption style', 'remove the whoosh SFX on word X'). You MUST echo every other "
+        "field byte-identical. Do NOT edit anything the user didn't explicitly ask to change.\n"
+        "   - 'reinterpret': holistic re-direction (e.g. 'way more chaotic', 'darker vibe', "
+        "'completely different feel'). Emit a fused_vibe string that combines the prior vibe with "
+        "the new direction.\n"
+        "   - 'needs_clarification': request is too vague to map to fields (e.g. 'make it better'). "
+        "Emit a clear clarification_question — do NOT guess.\n\n"
+        "2) For 'tweak': produce new_plan with ONLY the explicitly-requested changes. Preserve "
+        "cuts, broll_clips (including pexels_video_id + pexels_file_url + clip_in/out), transitions, "
+        "color grade, SFX placements, text_overlays — everything else — unchanged.\n\n"
+        "3) Emit changed_fields: dotted paths of what you changed (e.g. ['caption_style', "
+        "'cuts[3].speed']). Empty array for reinterpret or clarification.\n\n"
+        "4) Emit human_summary: one sentence users can read (e.g. 'Changed caption style to "
+        "minimal. Preserved 11 cuts, B-roll, color grade, and 2 text overlays.').\n\n"
+        f"PRIOR VIBE: {old_vibe or '(unknown)'}\n\n"
+        f"USER CHANGE REQUEST: {change_request}\n\n"
+        f"OLD PLAN (JSON):\n{json.dumps(sanitized_old_plan, separators=(',', ':'))}\n\n",
+    ]
+    if transcript_preview:
+        prompt_parts.append(f"TRANSCRIPT PREVIEW (first 300 words for word_index grounding):\n{transcript_preview}\n\n")
+    prompt_parts.append(
+        "Respond with a single JSON object matching this shape:\n"
+        "{\n"
+        '  "classification": "tweak" | "reinterpret" | "needs_clarification",\n'
+        '  "clarification_question": string | null,\n'
+        '  "new_plan": <full edit plan object> | null,\n'
+        '  "fused_vibe": string | null,\n'
+        '  "changed_fields": [string],\n'
+        '  "human_summary": string\n'
+        "}\n"
+    )
+
+    prompt = "".join(prompt_parts)
+
+    print(f"[plan-diff] change_request: {change_request[:200]}", flush=True)
+    _t0 = time.time()
+    attempts = 2
+    last_err = None
+    for attempt in range(attempts):
+        try:
+            response = client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=[prompt],
+                config=genai_types.GenerateContentConfig(
+                    temperature=0.2,
+                    max_output_tokens=8192,
+                    response_mime_type="application/json",
+                    thinking_config=genai_types.ThinkingConfig(thinking_level="LOW"),
+                ),
+            )
+            text = str(getattr(response, "text", "") or "").strip()
+            if not text:
+                raise RuntimeError("Empty plan-diff response")
+            parsed = json.loads(text) if text.startswith("{") else extract_json(text)
+            if not isinstance(parsed, dict):
+                raise RuntimeError("Plan-diff response is not a JSON object")
+
+            classification = str(parsed.get("classification") or "").strip()
+            if classification not in ("tweak", "reinterpret", "needs_clarification"):
+                raise RuntimeError(f"Invalid classification: {classification!r}")
+
+            if classification == "tweak":
+                new_plan = parsed.get("new_plan")
+                if not isinstance(new_plan, dict):
+                    raise RuntimeError("tweak classification requires new_plan object")
+                # Enforce: new_plan must retain the required scaffold fields from old_plan.
+                for required in ("cuts", "caption_style", "aspect_ratio"):
+                    if required not in new_plan or new_plan[required] in (None, "", []):
+                        if required in sanitized_old_plan:
+                            new_plan[required] = sanitized_old_plan[required]
+                # Ensure broll persistence fields survive when Gemini echoes broll_clips
+                if isinstance(new_plan.get("broll_clips"), list) and isinstance(sanitized_old_plan.get("broll_clips"), list):
+                    for _i, _new_br in enumerate(new_plan["broll_clips"]):
+                        if _i < len(sanitized_old_plan["broll_clips"]) and isinstance(_new_br, dict):
+                            _old_br = sanitized_old_plan["broll_clips"][_i]
+                            for _persist_key in ("pexels_video_id", "pexels_file_url", "width", "height", "duration"):
+                                if _persist_key not in _new_br and _persist_key in _old_br:
+                                    _new_br[_persist_key] = _old_br[_persist_key]
+
+            print(f"[plan-diff] classification={classification} in {time.time()-_t0:.1f}s", flush=True)
+            return {
+                "classification": classification,
+                "clarification_question": parsed.get("clarification_question"),
+                "new_plan": parsed.get("new_plan"),
+                "fused_vibe": parsed.get("fused_vibe"),
+                "changed_fields": parsed.get("changed_fields") or [],
+                "human_summary": str(parsed.get("human_summary") or "Updated your video."),
+            }
+        except Exception as _e:
+            last_err = _e
+            print(f"[plan-diff] attempt {attempt+1}/{attempts} failed: {_e}", flush=True)
+            continue
+
+    # All attempts failed — surface as reinterpret fallback so the caller can run the
+    # full pipeline with a fused vibe rather than aborting.
+    print(f"[plan-diff] Falling back to reinterpret after {attempts} failures", flush=True)
+    return {
+        "classification": "reinterpret",
+        "clarification_question": None,
+        "new_plan": None,
+        "fused_vibe": f"{old_vibe or ''} — {change_request}".strip(" —"),
+        "changed_fields": [],
+        "human_summary": "Re-rendered with a combined creative direction.",
+    }
+
+
 # ─── SFX HELPERS ─────────────────────────────────────────────────────────────
 
 # LUFS-based SFX normalization — eliminates per-sound manual volume tuning.
@@ -3201,8 +3359,38 @@ def select_best_thumbnail_frame(video_path, seed_ts, work_dir):
     return _data, "image/jpeg"
 
 
-def fetch_broll_clip(keyword, duration_needed, work_dir, dialogue_reason=""):
-    """Search Pexels for a portrait video clip. Returns local path or None."""
+def fetch_broll_clip(broll_entry, duration_needed, work_dir, dialogue_reason=""):
+    """Resolve a B-roll clip entry to a local file path.
+
+    broll_entry is the dict from edit_plan.broll_clips[]. If it already carries
+    pexels_file_url + pexels_video_id from a prior render, this function skips
+    the Pexels search + Gemini visual pick and downloads that EXACT asset — the
+    "flawless preservation" path for re-edits.
+
+    On a fresh pick, the function mutates broll_entry in place with
+    pexels_video_id, pexels_file_url, width, height, and duration so the caller
+    can persist the resolved asset in video_jobs.resolved_broll.
+
+    Returns a local path on success, or None on skip / failure.
+    """
+    keyword = (broll_entry.get("keyword") or "").strip() if isinstance(broll_entry, dict) else ""
+    if not keyword:
+        print("[broll] Missing keyword on broll_entry — skipping", flush=True)
+        return None
+
+    # ── Pre-resolved path (re-edit): use the exact clip chosen last time.
+    pre_url = broll_entry.get("pexels_file_url")
+    pre_id = broll_entry.get("pexels_video_id")
+    if pre_url and pre_id:
+        print(f"[broll] Re-using pre-resolved clip for '{keyword}': pexels_id={pre_id}", flush=True)
+        return _download_and_validate_broll(
+            chosen_url=pre_url,
+            keyword=keyword,
+            work_dir=work_dir,
+            broll_entry=broll_entry,
+            chosen_video_id=pre_id,
+        )
+
     pexels_key = os.environ.get("PEXELS_API_KEY")
     if not pexels_key:
         print(f"[broll] PEXELS_API_KEY not set — skipping '{keyword}'", flush=True)
@@ -3458,11 +3646,28 @@ def fetch_broll_clip(keyword, duration_needed, work_dir, dialogue_reason=""):
         flush=True,
     )
 
-    safe_kw = re.sub(r"[^a-z0-9]", "_", keyword.lower())[:30]
+    return _download_and_validate_broll(
+        chosen_url=chosen_url,
+        keyword=keyword,
+        work_dir=work_dir,
+        broll_entry=broll_entry,
+        chosen_video_id=best_match["video_id"],
+    )
+
+
+def _download_and_validate_broll(chosen_url, keyword, work_dir, broll_entry=None, chosen_video_id=None):
+    """Download + validate a single B-roll file. Shared by fresh picks and
+    pre-resolved re-edit replays. Mutates broll_entry (if provided) with the
+    resolved asset metadata so callers can persist it."""
+    safe_kw = re.sub(r"[^a-z0-9]", "_", keyword.lower())[:30] if keyword else "broll"
     dest = os.path.join(work_dir, f"broll_{safe_kw}.mp4")
 
-    dl = requests.get(chosen_url, stream=True, timeout=30)
-    dl.raise_for_status()
+    try:
+        dl = requests.get(chosen_url, stream=True, timeout=30)
+        dl.raise_for_status()
+    except Exception as _e:
+        print(f"[broll] Download error for '{keyword}': {_e}", flush=True)
+        return None
 
     content_type = dl.headers.get("content-type", "")
     if "image" in content_type.lower():
@@ -3512,9 +3717,6 @@ def fetch_broll_clip(keyword, duration_needed, work_dir, dialogue_reason=""):
         os.remove(dest)
         return None
 
-    # Skip frame decode + motion check — Pexels videos are trusted, and these checks
-    # cost ~1s each (2 FFmpeg decodes per clip). Metadata validation is sufficient.
-
     if stream_h <= stream_w:
         print(f"[broll] REJECTED '{keyword}': landscape orientation ({stream_w}x{stream_h})", flush=True)
         os.remove(dest)
@@ -3525,6 +3727,16 @@ def fetch_broll_clip(keyword, duration_needed, work_dir, dialogue_reason=""):
         f"{fmt_duration:.1f}s",
         flush=True,
     )
+
+    # ── Persist chosen asset into broll_entry for re-edit replay ──────────
+    if isinstance(broll_entry, dict):
+        if chosen_video_id is not None:
+            broll_entry["pexels_video_id"] = chosen_video_id
+        broll_entry["pexels_file_url"] = chosen_url
+        broll_entry["width"] = stream_w
+        broll_entry["height"] = stream_h
+        broll_entry["duration"] = round(fmt_duration, 3)
+
     return dest
 
 
@@ -6737,6 +6949,29 @@ def handler(job):
         vibe      = input_data["vibe"]
         upload_url = input_data["upload_url"]
 
+        # ── Re-edit mode resolution ──────────────────────────────────────
+        # mode: "full" (default — fresh plan), "render_only" (render supplied plan
+        # deterministically), "tweak" (plan-diff + render new plan), "reinterpret"
+        # (fuse old vibe + change_request, full pipeline with cached intermediates).
+        mode = str(input_data.get("mode") or "full").strip().lower()
+        if mode not in ("full", "render_only", "tweak", "reinterpret"):
+            mode = "full"
+        provided_plan = input_data.get("edit_plan") if isinstance(input_data.get("edit_plan"), dict) else None
+        provided_transcript = input_data.get("transcript") if isinstance(input_data.get("transcript"), dict) else None
+        provided_analysis = input_data.get("analysis_data") if isinstance(input_data.get("analysis_data"), dict) else None
+        provided_broll = input_data.get("resolved_broll") if isinstance(input_data.get("resolved_broll"), list) else None
+        provided_trend = input_data.get("trend_snapshot") if isinstance(input_data.get("trend_snapshot"), dict) else None
+        change_request = str(input_data.get("change_request") or "").strip()
+        old_vibe = str(input_data.get("old_vibe") or "").strip()
+
+        # Validate re-edit mode inputs up front — fail fast with a clear message.
+        if mode == "render_only" and not provided_plan:
+            return {"error": "render_only mode requires edit_plan in input"}
+        if mode == "tweak" and (not provided_plan or not change_request):
+            return {"error": "tweak mode requires edit_plan + change_request in input"}
+        if mode == "reinterpret" and not change_request:
+            return {"error": "reinterpret mode requires change_request in input"}
+
         work_dir    = tempfile.mkdtemp(prefix=f"promptly-{job_id}-")
         source_path = os.path.join(work_dir, "source.mp4")
         output_path = os.path.join(work_dir, "output.mp4")
@@ -6762,6 +6997,67 @@ def handler(job):
         size_mb = os.path.getsize(source_path) / (1024*1024)
         _timings["download"] = time.time() - t
         print(f"[pipeline] download complete: {size_mb:.1f}MB in {_timings['download']:.1f}s ({_dl_method})", flush=True)
+
+        # ── Re-edit plan-diff (tweak mode) ───────────────────────────────
+        # For tweak mode, ask Gemini to produce a modified plan that preserves
+        # everything except the explicit change. Runs here (before mega-parallel)
+        # so the classification can downgrade to render_only / reinterpret before
+        # we decide which pipeline stages to spawn. needs_clarification short-
+        # circuits the job — the server surfaces the question to the user.
+        change_summary = None
+        if mode == "tweak":
+            send_progress(job_id, "plan_diff", 10, "Figuring out exactly what to change...", app_url)
+            try:
+                diff = generate_plan_diff(
+                    old_plan=provided_plan,
+                    change_request=change_request,
+                    old_vibe=old_vibe or vibe,
+                    transcript=provided_transcript,
+                )
+            except Exception as _diff_err:
+                print(f"[plan-diff] Unrecoverable failure ({_diff_err}) — falling back to reinterpret", flush=True)
+                diff = {
+                    "classification": "reinterpret",
+                    "new_plan": None,
+                    "fused_vibe": f"{old_vibe or vibe} — {change_request}".strip(" —"),
+                    "changed_fields": [],
+                    "human_summary": "Re-rendered with a combined creative direction.",
+                    "clarification_question": None,
+                }
+
+            classification = diff.get("classification")
+            if classification == "needs_clarification":
+                send_progress(job_id, "needs_clarification", 100, "Need a bit more info...", app_url)
+                return {
+                    "status": "needs_clarification",
+                    "job_id": job_id,
+                    "clarification_question": diff.get("clarification_question") or "Can you describe the change in more detail?",
+                }
+            elif classification == "tweak" and isinstance(diff.get("new_plan"), dict):
+                provided_plan = diff["new_plan"]
+                change_summary = diff.get("human_summary")
+                mode = "render_only"
+                print(f"[plan-diff] Tweak accepted — rendering with new plan. Summary: {change_summary}", flush=True)
+            else:
+                # reinterpret or fallback — fuse vibe and run full pipeline from source
+                vibe = diff.get("fused_vibe") or f"{old_vibe or vibe} — {change_request}".strip(" —")
+                change_summary = diff.get("human_summary")
+                mode = "reinterpret"
+                print(f"[plan-diff] Reinterpret — fused vibe: {vibe[:200]}", flush=True)
+
+        # Merge any provided resolved_broll entries back into provided_plan.broll_clips
+        # so the render can re-use exact Pexels assets. Keyed by index order.
+        if mode == "render_only" and isinstance(provided_plan, dict) and isinstance(provided_broll, list):
+            _plan_broll = provided_plan.get("broll_clips")
+            if isinstance(_plan_broll, list):
+                for _i, _resolved in enumerate(provided_broll):
+                    if _i >= len(_plan_broll):
+                        break
+                    if not isinstance(_plan_broll[_i], dict) or not isinstance(_resolved, dict):
+                        continue
+                    for _pk in ("pexels_video_id", "pexels_file_url", "width", "height", "duration", "clip_in", "clip_out"):
+                        if _pk in _resolved and _pk not in _plan_broll[_i]:
+                            _plan_broll[_i][_pk] = _resolved[_pk]
 
         # Step 2 — ALL initialization in ONE mega-parallel phase
         # Normalize, transcribe, Gemini upload, loudness, beats, edit recipe, face detect
@@ -6897,7 +7193,19 @@ def handler(job):
         # If cached_analysis is provided (pre-computed by content-studio), skip the
         # entire Gemini chain (proxy encode + upload + poll + API call = ~19s savings).
 
-        _cached_analysis = input_data.get("cached_analysis")
+        # Reinterpret mode reuses the prior Gemini visual analysis if we have one,
+        # saving another Gemini roundtrip. content-studio's cached_analysis (legacy)
+        # still wins if both are set.
+        _cached_analysis = input_data.get("cached_analysis") or (provided_analysis if mode == "reinterpret" else None)
+
+        # Mode-aware stage skipping — render_only is the fully-deterministic path
+        # that uses provided_plan and provided_transcript verbatim; reinterpret
+        # can reuse a provided transcript/analysis but still re-plans with a fused
+        # vibe; full is today's behavior.
+        _skip_edit_gen = (mode == "render_only")
+        _skip_transcribe = bool(provided_transcript)
+        _skip_trend = _skip_edit_gen or bool(provided_trend)
+        _skip_proxy = _skip_edit_gen  # proxy is only needed to feed Gemini edit generation
 
         # Shared futures — edit recipe and face detect wait on their deps internally
         future_normalize = None
@@ -6906,6 +7214,9 @@ def handler(job):
         future_trend = None  # trend context fetched in parallel
 
         def _do_trend_context():
+            # reinterpret with a provided trend snapshot still uses the CURRENT
+            # trend_profiles row (per design: reinterpret = freshest style guide);
+            # render_only skips this entirely.
             tc = get_trend_context()
             if not tc:
                 print("[trend] WARNING: Style guide not available — Gemini will edit without reference video patterns", flush=True)
@@ -6913,9 +7224,15 @@ def handler(job):
 
         def _do_edit_recipe_overlapped():
             """Start Gemini as soon as transcript + proxy + trend are ready."""
-            _transcript = future_transcribe.result()
-            _proxy_bytes = future_gemini_proxy.result()
-            _trend = future_trend.result()
+            if future_transcribe is not None:
+                _transcript = future_transcribe.result()
+            else:
+                _transcript = provided_transcript or {"words": []}
+            _proxy_bytes = future_gemini_proxy.result() if future_gemini_proxy is not None else None
+            if future_trend is not None:
+                _trend = future_trend.result()
+            else:
+                _trend = provided_trend  # reinterpret path can fall back to the snapshot
             _dg_words = _transcript.get("words", [])
             if len(_dg_words) == 0:
                 print("[pipeline] WARNING: Deepgram returned 0 words — proceeding without speech (no captions, time-based cuts only)", flush=True)
@@ -6934,19 +7251,22 @@ def handler(job):
 
         def _do_face_detect_overlapped():
             """Run face detection on 240p proxy (much faster than 1080p source).
-            Waits for proxy encode (~1.5s), then decodes 240p instead of 1080p (~20x fewer pixels)."""
+            Waits for proxy encode (~1.5s), then decodes 240p instead of 1080p (~20x fewer pixels).
+            Falls back to the raw source when no proxy was encoded (render_only mode)."""
             send_progress(job_id, "analysis", 20, "Watching your footage...", app_url)
-            # Wait for proxy to be encoded (runs in parallel, typically ~1.5s)
-            future_gemini_proxy.result()
-            _proxy_path = os.path.join(work_dir, "gemini_proxy.mp4")
-            if os.path.exists(_proxy_path):
+            _proxy_exists = False
+            if future_gemini_proxy is not None:
+                future_gemini_proxy.result()
+                _proxy_path = os.path.join(work_dir, "gemini_proxy.mp4")
+                _proxy_exists = os.path.exists(_proxy_path)
+            if _proxy_exists:
                 # Proxy is 10fps — every 7th frame ≈ 1.4fps detection (similar to every 20th @ 30fps)
                 dense = detect_face_positions_dense(
-                    _proxy_path, every_n_frames=7,
+                    os.path.join(work_dir, "gemini_proxy.mp4"), every_n_frames=7,
                     target_w=1080, target_h=1920,
                 )
             else:
-                # Fallback to source if proxy somehow doesn't exist
+                # No proxy (render_only) or proxy missing — use raw source
                 dense = detect_face_positions_dense(_raw_source, every_n_frames=20)
             if dense:
                 smoothed = smooth_face_trajectory(dense, total_duration=source_duration)
@@ -6959,20 +7279,27 @@ def handler(job):
         # the deferred face collection optimization (face detection should overlap with Remotion).
         mega_pool = concurrent.futures.ThreadPoolExecutor(max_workers=8)
         future_normalize = mega_pool.submit(_do_normalize)
-        future_transcribe = mega_pool.submit(_do_transcribe)
-        future_gemini_proxy = mega_pool.submit(_do_gemini_proxy)
-        future_trend = mega_pool.submit(_do_trend_context)
+        future_transcribe = None if _skip_transcribe else mega_pool.submit(_do_transcribe)
+        future_gemini_proxy = None if _skip_proxy else mega_pool.submit(_do_gemini_proxy)
+        future_trend = None if _skip_trend else mega_pool.submit(_do_trend_context)
         future_loudness = mega_pool.submit(_do_loudness)
         future_beats = mega_pool.submit(_do_beats)
         future_fps_normalize = mega_pool.submit(_do_fps_normalize)
-        # Edit recipe waits on transcript + upload internally
-        future_edit = mega_pool.submit(_do_edit_recipe_overlapped)
+        # Edit recipe waits on transcript + upload internally — skipped entirely in render_only
+        future_edit = None if _skip_edit_gen else mega_pool.submit(_do_edit_recipe_overlapped)
         # Face detection runs directly on raw source (no normalize dependency)
         future_faces = mega_pool.submit(_do_face_detect_overlapped)
 
         # Collect results — get edit_plan FIRST so we can start B-roll fetch early
         _mega_t0 = time.time()
-        edit_plan = future_edit.result()  # critical path — longest wait (Gemini)
+        if future_edit is not None:
+            edit_plan = future_edit.result()  # critical path — longest wait (Gemini)
+        else:
+            # render_only: use the provided plan. Deep-copy so downstream mutations
+            # (private _foo fields, thumbnail projection, etc.) don't pollute caller state.
+            import copy as _copy_mod
+            edit_plan = _copy_mod.deepcopy(provided_plan)
+            print("[pipeline] render_only mode — using provided edit_plan (skipped Gemini generate)", flush=True)
         print(f"[TIMING] edit_plan ready in {time.time() - _mega_t0:.1f}s (critical path)", flush=True)
 
         # Start B-roll fetch IMMEDIATELY while other futures may still be running
@@ -6985,7 +7312,7 @@ def handler(job):
             for _bi, _bc in enumerate(broll_clips):
                 _fut = _broll_fetch_pool.submit(
                     fetch_broll_clip,
-                    _bc["keyword"],
+                    _bc,  # pass whole entry — fetch_broll_clip mutates it with resolved Pexels metadata
                     float(_bc.get("duration") or 2.0),
                     work_dir,
                     dialogue_reason=str(_bc.get("reason") or ""),
@@ -6999,9 +7326,22 @@ def handler(job):
         source_info = future_normalize.result()
         source_path = source_info["source_path"]
         _normalize_vf = source_info.get("normalize_vf")
-        transcript = future_transcribe.result()
+        if future_transcribe is not None:
+            transcript = future_transcribe.result()
+        else:
+            # render_only / reinterpret with cached transcript — no Deepgram call this pass
+            transcript = provided_transcript or {"words": []}
+            print(f"[pipeline] Using provided transcript ({len(transcript.get('words') or [])} words) — skipped Deepgram", flush=True)
         source_loudness = future_loudness.result()
         source_beats = future_beats.result()
+        # Capture which trend context was used (fresh vs. snapshot) for persistence
+        if future_trend is not None:
+            try:
+                trend_used = future_trend.result(timeout=0)
+            except Exception:
+                trend_used = None
+        else:
+            trend_used = provided_trend
         # Swap in the 30fps-normalized source for render. fps_normalize ran in
         # parallel with Gemini so this is already done by the time we get here.
         # Downstream render detects source_fps=30.0 from the new file's r_frame_rate
@@ -7369,16 +7709,50 @@ def handler(job):
 
         send_progress(job_id, "complete", 100, "Your video is ready!", app_url)
 
+        # ── Build resolved_broll for persistence ──────────────────────────
+        # After a live B-roll pick, fetch_broll_clip mutates each broll_entry in-place
+        # with pexels_video_id/file_url/width/height/duration. Extract those into a
+        # parallel list keyed by index so the server can store video_jobs.resolved_broll.
+        resolved_broll_out = []
+        _final_broll = edit_plan.get("broll_clips") or []
+        for _i, _br in enumerate(_final_broll):
+            if not isinstance(_br, dict):
+                continue
+            _entry = {
+                "index": _i,
+                "keyword": _br.get("keyword"),
+                "start_word_index": _br.get("start_word_index"),
+                "end_word_index": _br.get("end_word_index"),
+            }
+            for _pk in ("pexels_video_id", "pexels_file_url", "width", "height", "duration", "clip_in", "clip_out"):
+                if _pk in _br:
+                    _entry[_pk] = _br[_pk]
+            # Only persist entries that were actually resolved to a Pexels asset.
+            if _entry.get("pexels_video_id") and _entry.get("pexels_file_url"):
+                resolved_broll_out.append(_entry)
+
+        # Sanitized recipe for persistence — drops internal _foo fields and analysis_data
+        # (which is persisted separately so we don't double-store it).
+        sanitized_recipe = {k: v for k, v in edit_plan.items() if k != "analysis_data" and not (isinstance(k, str) and k.startswith("_"))}
+
         result_payload = {
             "status": "success",
             "job_id": job_id,
             "render_time": round(render_elapsed, 1),
             "pipeline_time": round(_timings.get("total", 0), 1),
             "output_size_mb": round(output_size_mb, 1),
-            "edit_recipe": {k: v for k, v in edit_plan.items() if k != "analysis_data" and not k.startswith("_")},
+            "edit_recipe": sanitized_recipe,
             "cover_frame_timestamp": round(cover_frame_ts, 3),
             "thumbnail_timestamp": round(float(thumbnail_source_ts), 3),
+            # ── Re-edit persistence fields ────────────────────────────────
+            "transcript": transcript,
+            "analysis_data": edit_plan.get("analysis_data") or (_cached_analysis if isinstance(_cached_analysis, dict) else None),
+            "resolved_broll": resolved_broll_out,
+            "trend_snapshot": trend_used,
+            "render_version": RENDER_VERSION,
         }
+        if change_summary:
+            result_payload["change_summary"] = change_summary
         # Include CDN video URL if available (direct S3 upload path)
         if edit_plan.get("_rendered_video_url"):
             result_payload["video_url"] = edit_plan["_rendered_video_url"]
