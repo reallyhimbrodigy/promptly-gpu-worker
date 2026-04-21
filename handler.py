@@ -7063,7 +7063,9 @@ def handler(job):
         # Normalize, transcribe, Gemini upload, loudness, beats, edit recipe, face detect
         # all run concurrently. Edit recipe starts as soon as transcript + upload finish
         # (doesn't wait for normalize). Face detect starts when normalize finishes.
-        send_progress(job_id, "normalize", 12, "Getting everything set up...", app_url)
+        # Pre-parallel phase marker; individual stages inside the pool fire their own
+        # fine-grained tokens so the UI can narrate the work in real time.
+        send_progress(job_id, "analyze", 7, "Preparing your footage", app_url)
         t = time.time()
         print("[pipeline] step=mega-parallel (normalize + transcribe + upload + edit + faces)", flush=True)
 
@@ -7084,6 +7086,7 @@ def handler(job):
             return analyze_source_video(_raw_source)
 
         def _do_transcribe():
+            send_progress(job_id, "transcribe", 10, "Transcribing every word", app_url)
             audio_path = os.path.join(work_dir, "audio_for_words.ogg")
             _audio_ext = subprocess.run(
                 ["ffmpeg", "-threads", "0", "-y", "-i", _raw_source,
@@ -7130,6 +7133,7 @@ def handler(job):
             return measure_source_loudness(_raw_source)
 
         def _do_beats():
+            send_progress(job_id, "beats", 18, "Detecting beat and rhythm", app_url)
             return detect_beats(_raw_source)
 
         def _do_fps_normalize():
@@ -7217,6 +7221,7 @@ def handler(job):
             # reinterpret with a provided trend snapshot still uses the CURRENT
             # trend_profiles row (per design: reinterpret = freshest style guide);
             # render_only skips this entirely.
+            send_progress(job_id, "trend", 22, "Matching viral style patterns", app_url)
             tc = get_trend_context()
             if not tc:
                 print("[trend] WARNING: Style guide not available — Gemini will edit without reference video patterns", flush=True)
@@ -7236,7 +7241,7 @@ def handler(job):
             _dg_words = _transcript.get("words", [])
             if len(_dg_words) == 0:
                 print("[pipeline] WARNING: Deepgram returned 0 words — proceeding without speech (no captions, time-based cuts only)", flush=True)
-            send_progress(job_id, "edit_recipe", 52, "Putting your edit together...", app_url)
+            send_progress(job_id, "plan", 38, "Writing your edit recipe", app_url)
             print(f"[pipeline] Gemini edit starting (transcript ready: {len(_dg_words)} words)", flush=True)
             return generate_edit_gemini(
                 video_path=_raw_source,
@@ -7253,7 +7258,7 @@ def handler(job):
             """Run face detection on 240p proxy (much faster than 1080p source).
             Waits for proxy encode (~1.5s), then decodes 240p instead of 1080p (~20x fewer pixels).
             Falls back to the raw source when no proxy was encoded (render_only mode)."""
-            send_progress(job_id, "analysis", 20, "Watching your footage...", app_url)
+            send_progress(job_id, "face_detect", 14, "Tracking faces frame-by-frame", app_url)
             _proxy_exists = False
             if future_gemini_proxy is not None:
                 future_gemini_proxy.result()
@@ -7307,6 +7312,7 @@ def handler(job):
         _broll_fetch_futures = {}
         broll_clips = edit_plan.get("broll_clips") or []
         if broll_clips:
+            send_progress(job_id, "broll_search", 52, "Sourcing B-roll cutaways", app_url)
             print(f"[broll] Starting parallel fetch of {len(broll_clips)} B-roll clip(s) (overlapping with face detect)...", flush=True)
             _broll_fetch_pool = concurrent.futures.ThreadPoolExecutor(max_workers=min(5, len(broll_clips)))
             for _bi, _bc in enumerate(broll_clips):
@@ -7389,6 +7395,7 @@ def handler(job):
         print(f"[pipeline] Pipeline init phase complete", flush=True)
 
         # ── Auto-hook detection: validate/override Gemini's hook_clip ─────
+        send_progress(job_id, "hook", 58, "Finding the perfect hook", app_url)
         try:
             _ahook_emphasis = edit_plan.get("_emphasis_moments") or []
             _ahook_dg_words = edit_plan.get("_deepgram_words") or []
@@ -7447,7 +7454,7 @@ def handler(job):
         # B-roll fetch already started inside mega-parallel phase (right after edit_plan ready)
 
         print("[pipeline] step=parallel_render", flush=True)
-        send_progress(job_id, "render", 62, "Rendering — almost there...", app_url)
+        send_progress(job_id, "render", 65, "Rendering your edit", app_url)
         t = time.time()
         render_multi_clip(
             source_path, edit_plan["cuts"], edit_plan, output_path, transcript, work_dir,
@@ -7529,7 +7536,8 @@ def handler(job):
         if not validate_output(output_path, "final"):
             raise RuntimeError(f"Final output is invalid: {output_path}")
         output_size_mb = os.path.getsize(output_path) / (1024*1024)
-        send_progress(job_id, "upload", 90, "Just about done...", app_url)
+        send_progress(job_id, "thumbnail", 92, "Picking your cover frame", app_url)
+        send_progress(job_id, "upload", 96, "Publishing to your library", app_url)
         print(f"[pipeline] output: {output_size_mb:.1f}MB, {final_dur:.1f}s — parallel upload + cover frame", flush=True)
 
         def _upload_main():
