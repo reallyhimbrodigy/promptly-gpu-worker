@@ -1979,7 +1979,7 @@ A. zoom_effect — does this moment need a zoom?
    "FocusWindow"   — PiP of normal framing over zoomed bg. Use for: revealing context around a detail.
 
    Events are CLIP-relative (startMs from the clip's start). A single event tied to this moment's position within its clip is the common pattern.
-   scale 1.15 - 1.35 is professional. Higher is jarring.
+   For the `scale` value, use the SHOT SCALE block above as your single source of truth — it's tuned to the actual framing of THIS video. The scale ranges there supersede any general-purpose defaults. Too-tight zoom on an already-close face crops out eyes/chin.
    originY ≈ 0.4 for talking heads (faces sit in the upper half).
 
 B. color_pulse — should the global color effect fire a pulse at this moment?
@@ -2455,13 +2455,11 @@ RULES FOR USING THESE TIMESTAMPS:
     edit_plan["_shot_changes"] = list(_shots)
     edit_plan["_vocal_emphasis"] = list(_vocal)
     edit_plan["_source_loudness_signal"] = dict(_loudness)
-    # Face detections collected BEFORE Gemini call — store so validators can
-    # enforce "face-relative anchors require a visible face at that time" and
-    # so render_multi_clip doesn't need to re-collect from future_faces.
-    edit_plan["_face_positions"] = list(_face_positions)
-    edit_plan["_dense_face_trajectory"] = list(_smoothed_trajectory)
-    edit_plan["_face_visibility"] = list(_face_visibility)
-    edit_plan["_speaker_positions"] = dict(_speaker_positions)
+    # Face detections are consumed exactly once — to build the prompt signals
+    # above. Once build_gemini_edit_prompt has returned, the raw face data has
+    # no downstream reader (the Remotion composition renders motion_graphics
+    # against the canvas via resolveMGPosition; no face lookup happens at
+    # render time). Do NOT stash onto edit_plan — it would be dead weight.
     analysis = build_analysis_from_gemini_recipe(edit_plan, duration=duration)
     has_burned_captions = infer_has_burned_captions(edit_plan, analysis, log_prefix="[generate-edit]")
 
@@ -5958,7 +5956,7 @@ def compute_effective_durations(cuts, speed_curve=None, fps=30):
 
 
 def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, work_dir, speech_segments=None,
-                      broll_clips=None, broll_fetch_futures=None, face_future=None):
+                      broll_clips=None, broll_fetch_futures=None):
     """
     Remotion-primary render path.
 
@@ -6156,23 +6154,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     # Output clip ranges (start, end in output seconds) — used for SFX + b-roll + text overlay timing
     _clip_ranges = get_output_clip_ranges(render_cuts, effective_durations, transition_duration=None)
-
-    # Face detection is collected earlier in the pipeline (before Gemini) so
-    # the prompt can carry face-visibility + speaker-position signals. We
-    # prefer what's already on edit_plan; face_future is a fallback for
-    # render_only / reinterpret call paths that bypass generate_edit_gemini.
-    if not edit_plan.get("_face_positions") and not edit_plan.get("_dense_face_trajectory"):
-        face_positions = []
-        smoothed_trajectory = []
-        if face_future:
-            try:
-                _face_res = face_future.result(timeout=30)
-                if isinstance(_face_res, tuple) and len(_face_res) == 2:
-                    face_positions, smoothed_trajectory = _face_res
-            except Exception as _fe:
-                print(f"[face] WARNING: face future failed: {_fe}", flush=True)
-        edit_plan["_face_positions"] = face_positions or []
-        edit_plan["_dense_face_trajectory"] = smoothed_trajectory or []
 
     # Project Deepgram words onto output timeline (for captions + SFX + b-roll)
     _removed_word_indices = edit_plan.get("_removed_word_indices") or set()
@@ -6578,6 +6559,34 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 flush=True,
             )
 
+    # ── 7c. Z-order validator — captions must stay OUT of any bottom-anchored
+    # motion_graphic's window. Gemini is told this in Rule #5, but the rule
+    # requires the plan to synchronize output-time MG windows with source-time
+    # caption segments. By the time we reach here, both lists have been
+    # projected to output-frame space, so we can verify the contract directly.
+    # No silent fix — if Gemini got this wrong the plan is invalid.
+    _BOTTOM_MG_ANCHORS = {"bottom", "bottom-left", "bottom-right"}
+    for _mg_out in motion_graphics_out:
+        _mg_props_anchor = str((_mg_out.get("props") or {}).get("anchor") or "")
+        if _mg_props_anchor not in _BOTTOM_MG_ANCHORS:
+            continue
+        _mg_from = int(_mg_out["fromFrame"])
+        _mg_to = _mg_from + int(_mg_out["durationInFrames"])
+        for _cs_out in caption_position_segments_out:
+            if _cs_out["toFrame"] <= _mg_from or _cs_out["fromFrame"] >= _mg_to:
+                continue
+            if _cs_out["position"] != "top":
+                raise RuntimeError(
+                    f"Z-order violation: motion_graphic {_mg_out['type']!r} with "
+                    f"anchor={_mg_props_anchor!r} occupies the bottom half during output "
+                    f"frames [{_mg_from}-{_mg_to}] ({_mg_from/source_fps:.2f}s-"
+                    f"{_mg_to/source_fps:.2f}s), but caption_position_segment "
+                    f"[{_cs_out['fromFrame']}-{_cs_out['toFrame']}] has "
+                    f"position={_cs_out['position']!r} — it must be 'top' to avoid "
+                    f"caption/MG overlap. Gemini violated Rule #5: the plan should "
+                    f"have placed captions at 'top' across this window."
+                )
+
     # ── 8. Assemble Remotion input + write JSON ─────────────────────────────
     # Face trajectory no longer piped into Remotion — the motion-graphics pack
     # components position themselves via resolveMGPosition against the canvas,
@@ -6638,6 +6647,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         f"fast_thresh={_fast_thresh:.0f}dB level_thresh={_level_thresh:.0f}dB makeup={_makeup}dB",
         flush=True,
     )
+    # loudnorm targets the platform-standard integrated loudness used by TikTok
+    # / Instagram Reels / YouTube Shorts: I=-14 LUFS integrated, TP=-1.5 dBTP
+    # true peak ceiling, LRA=11 LU loudness-range target. Single-pass (dynamic
+    # normalization) — runs inline in one ffmpeg invocation, no measure-then-
+    # apply two-pass. Placed at the END of the chain so it normalizes the
+    # FINAL mix including SFX, ducking, EQ, and compression.
     audio_chain = (
         f"{denoise_part}highpass=f=75,"
         f"highshelf=f=6500:g=-3,"
@@ -6646,7 +6661,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         f":link=maximum:knee=3:mix=0.6,"
         f"equalizer=f=3000:t=q:w=1.2:g=1.5,"
         f"lowpass=f=14000,"
-        f"acompressor=threshold={_level_thresh}dB:ratio=1.8:attack=15:release=80:makeup={_makeup}"
+        f"acompressor=threshold={_level_thresh}dB:ratio=1.8:attack=15:release=80:makeup={_makeup},"
+        f"loudnorm=I=-14:TP=-1.5:LRA=11"
     )
 
     # Speed-curved audio — numpy-resampled pitch-scaling, mirrors video's
@@ -7461,14 +7477,19 @@ def handler(job):
         _collect_elapsed = time.time() - _collect_t0
         if _collect_elapsed > 0.5:
             print(f"[TIMING] Fast futures collected in {_collect_elapsed:.1f}s", flush=True)
-        # Shut down mega_pool WITHOUT waiting for future_faces (it's still running)
+        # Shut down mega_pool. Face detection, if still running, is only useful
+        # for generate_edit_gemini's prompt signals — by the time we're here,
+        # that call has already returned (and it awaited future_faces itself).
+        # For render_only / reinterpret paths that skip Gemini, the face data
+        # has no downstream consumer anyway.
         mega_pool.shutdown(wait=False)
 
         # Source res is what it is — normalize filter will handle conversion in render
         source_res = {"width": source_info["width"], "height": source_info["height"]}
         print(f"[DIAG] Source: {source_res['width']}x{source_res['height']} @ {source_info['fps']:.1f}fps, normalize_vf={'yes' if _normalize_vf else 'no'}", flush=True)
 
-        # Store face transform info for render_multi_clip to use when it collects face_future
+        # Record the face-transform used during source normalization so render
+        # can map the reframe math correctly.
         _ft = source_info.get("face_transform", {})
         edit_plan["_face_transform"] = _ft
 
@@ -7491,24 +7512,6 @@ def handler(job):
         edit_plan["_user_vibe"] = vibe
         edit_plan["_source_path"] = source_path
         edit_plan["_normalize_vf"] = _normalize_vf
-        # _face_positions / _dense_face_trajectory are populated by
-        # generate_edit_gemini (collected from future_faces before the Gemini
-        # call so the prompt carries face-visibility signals). render_only and
-        # reinterpret modes skip generate_edit_gemini — for those, collect from
-        # future_faces here so the renderer has a face timeline.
-        if "_face_positions" not in edit_plan or "_dense_face_trajectory" not in edit_plan:
-            try:
-                _pipe_face_res = future_faces.result(timeout=30)
-                if isinstance(_pipe_face_res, tuple) and len(_pipe_face_res) == 2:
-                    edit_plan["_face_positions"] = _pipe_face_res[0] or []
-                    edit_plan["_dense_face_trajectory"] = _pipe_face_res[1] or []
-                else:
-                    edit_plan["_face_positions"] = []
-                    edit_plan["_dense_face_trajectory"] = []
-            except Exception as _fe:
-                print(f"[face] WARNING: face future collection failed in pipeline: {_fe}", flush=True)
-                edit_plan["_face_positions"] = []
-                edit_plan["_dense_face_trajectory"] = []
         edit_plan["_source_loudness"] = source_loudness
         edit_plan["_shot_changes"] = source_shot_changes
         _timings["edit_recipe_faces"] = 0
@@ -7533,7 +7536,6 @@ def handler(job):
         render_multi_clip(
             source_path, edit_plan["cuts"], edit_plan, output_path, transcript, work_dir,
             broll_clips=broll_clips, broll_fetch_futures=_broll_fetch_futures,
-            face_future=future_faces,
         )
         if _broll_fetch_pool:
             _broll_fetch_pool.shutdown(wait=False)

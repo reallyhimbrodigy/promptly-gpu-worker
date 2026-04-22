@@ -1,6 +1,6 @@
 import modal
 
-# rebuild trigger v25 — MG anchor → MGAnchor mapping (no more 720x320 wrapper fiction), above_speaker/below_speaker retired, shot-scale + per-user style profile signals, zoom-collision ABSOLUTE RULE, dead validators & face timeline payload removed
+# rebuild trigger v26 — Z-order validator for bottom-anchored MGs + captions, LUFS-I -14 loudnorm at end of audio chain, zoom-scale harmonized to shot-scale, dead face-data writes on edit_plan removed
 
 # ── Image definition (replaces Dockerfile) ────────────────────────────────────
 image = (
