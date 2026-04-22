@@ -1,6 +1,6 @@
 import modal
 
-# rebuild trigger v20 — H100 + 64 CPU + 128GB (CPU-bound pipeline, NVENC irrelevant)
+# rebuild trigger v25 — MG anchor → MGAnchor mapping (no more 720x320 wrapper fiction), above_speaker/below_speaker retired, shot-scale + per-user style profile signals, zoom-collision ABSOLUTE RULE, dead validators & face timeline payload removed
 
 # ── Image definition (replaces Dockerfile) ────────────────────────────────────
 image = (
@@ -9,7 +9,7 @@ image = (
     # Without this, NVENC silently fails and pipeline falls back to CPU encoding (10-15x slower)
     .env({"NVIDIA_DRIVER_CAPABILITIES": "all"})
     .run_commands(
-        "echo 'build v23 - H100 + 64CPU + 128GB + Remotion + genai SDK'",
+        "echo 'build v24 - H100 + 64CPU + 128GB + Remotion 4.0.450 primary-render + genai SDK'",
         "apt-get update && apt-get install -y ca-certificates && update-ca-certificates",
         # Remove CUDA stubs AND compat libs that intercept dlopen before Modal's real driver libs
         "rm -rf /usr/local/cuda/lib64/stubs/libnvidia-encode* /usr/local/cuda/lib64/stubs/libcuda* /usr/local/cuda/compat/libcuda* /usr/local/cuda/lib64/libcuda.so* 2>/dev/null || true",
@@ -158,7 +158,7 @@ app = modal.App("promptly-gpu-worker", image=image, secrets=secrets)
     scaledown_window=120, # keep warm 2 min for back-to-back requests (avoid cold start)
     cpu=64,
     memory=131072,        # 128GB — headroom for parallel segment renders + Remotion Chrome tabs
-    gpu="H100",           # H100 has fastest CPUs — bottleneck is filter_complex, not encoding
+    gpu="H100",           # H100 has no NVENC — encode is libx264 on 64 CPUs. GPU handles NVDEC + Chromium compositing via angle-egl.
     region="us-west",     # colocate with Supabase (West US) for minimal network latency
 )
 class PromptlyWorker:

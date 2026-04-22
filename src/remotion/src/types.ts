@@ -1,163 +1,307 @@
-/** Word-level timing data from Deepgram (post-projection) */
-export interface ProjectedWord {
-  start: number;
-  end: number;
-  word: string;
-  punctuated_word: string;
-  speaker?: number;
-  _kw?: boolean;
-  _kw_color?: [number, number, number];
-}
+/**
+ * Production render input — the single shape Python emits and the
+ * <PromptlyRender> composition consumes.
+ *
+ * Times are FRAMES unless named *Ms* or *Seconds*. Everything is pre-resolved
+ * on the Python side from canonical time maps and the pre-computed face
+ * trajectory; Remotion does not compute timing or placement math — it only
+ * renders exactly what the spec says.
+ */
 
-/** A group of 2-4 words displayed together */
-export interface WordGroup {
-  words: ProjectedWord[];
-  start: number;
-  end: number;
-}
+// ── MG anchor vocabulary (matches the pack's MGAnchor type) ──────────────────
+// Python maps its safe-zone anchors (upper_third_safe, center, lower_third_safe,
+// left_safe, right_safe) into this vocabulary before emitting the spec, and
+// merges the mapped value into `props.anchor`. Face-relative anchoring is not
+// supported by the motion-graphics pack — each component uses its own
+// canvas-scale resolveMGPosition.
+export type MGAnchor =
+  | "center"
+  | "top"
+  | "bottom"
+  | "left"
+  | "right"
+  | "top-left"
+  | "top-right"
+  | "bottom-left"
+  | "bottom-right";
 
-/** Input data for the caption renderer */
-export interface CaptionInput {
-  words: ProjectedWord[];
-  style: string;
-  width: number;
-  height: number;
-  fps: number;
+// ── Clip and transition shapes ───────────────────────────────────────────────
+export interface ClipSpec {
+  id: string;
+  startFromFrames: number;
+  playbackRate: number;
   durationInFrames: number;
-  keywords: string[];
-  fontDir: string;
+  zoomEffect?: ZoomEffectSpec;
 }
 
-/** Style configuration for a caption style */
-export interface StyleConfig {
-  fontFamily: string;
-  fontWeight: number;
-  baseFontSize?: number;
-  keywordFontSize?: number;
-  lineHeight: number;
-  textTransform: "uppercase" | "lowercase" | "none" | "capitalize";
-  maxWordsPerGroup: number;
-  position: "lower-third" | "center" | "bottom";
-  yPercent: number;
-  pillEnabled: boolean;
-  pillColor: string;
-  pillRadius: number;
-  pillPadding: [number, number]; // [horizontal, vertical]
-  textColor: string;
-  activeColor: string;
-  dimColor: string;
-  keywordColors: string[];
-  shadowLayers: { x: number; y: number; blur: number; color: string }[];
-  glowEnabled: boolean;
-  glowColor: string;
-  glowRadius: number;
-  animation: "pop" | "spring" | "typewriter" | "slide" | "wave" | "none";
-  animationDuration: number; // ms
-  activeWordScale: number;
-  fadeInMs: number;
-  fadeOutMs: number;
-
-  // ─── Extended style properties (optional) ───────────────────────────────
-  // Text fill
-  textStroke?: { width: number; color: string };  // outline stroke
-  gradientColors?: string[];  // gradient text fill (2-3 colors)
-  gradientDirection?: string; // CSS gradient direction (e.g. "to right", "135deg")
-  outlineOnly?: boolean; // stroke only, transparent fill
-
-  // Background variations
-  backgroundShape?: "pill" | "underline" | "highlight" | "box" | "none";
-  highlightColor?: string; // for highlight background shape
-  underlineColor?: string; // for underline background shape
-  underlineThickness?: number;
-
-  // Layout
-  stackedLayout?: boolean; // one word per line, stacked vertically
-
-  // 3D/Depth
-  shadowExtrude?: { angle: number; distance: number; color: string }; // 3D extruded shadow
-
-  // Typography (override default fontFamily at word level is already fontFamily above)
-
-  // Multi-speaker
-  speakerColors?: string[];  // per-speaker active highlight colors
+export interface ZoomEffectSpec {
+  type: ZoomType;
+  events: ZoomEventSpec[];
+  firstStage?: number;
+  secondStage?: number;
+  windowScale?: number;
+  borderWidth?: number;
+  borderColor?: string;
+  bgScale?: number;
+  edgeBlur?: number;
+  frameLines?: boolean;
+  maxBarHeight?: number;
 }
 
-// ─── Visual Effects Types ────────────────────────────────────────────────────
-
-/** A cut/transition point in the output timeline */
-export interface CutPoint {
-  time: number; // seconds in output timeline where this cut happens
-  transition: string; // transition type from edit plan
-  duration: number; // clip duration after this cut
+export interface ZoomEventSpec {
+  startMs: number;
+  durationMs: number;
+  scale?: number;
+  originX?: number;
+  originY?: number;
 }
 
-/** An emphasis moment from Gemini's edit plan */
-export interface EmphasisMoment {
-  t: number; // seconds in output timeline
-  type: string; // punchline, revelation, statement, reaction, question, transition
-  intensity: string; // high, medium
-  word?: string; // the key word/phrase to display (for cascade echo / impact text)
-  duration?: number; // how long the emphasis lasts (seconds)
+export type ZoomType =
+  | "SmoothPush"
+  | "SnapReframe"
+  | "FocusWindow"
+  | "StepZoom"
+  | "LetterboxPush"
+  | "StageZoom"
+  | "DepthPull";
+
+export interface TransitionSpec {
+  afterClipIndex: number;
+  type: TransitionType;
+  durationInFrames: number;
+  clipAStartFromFrames: number;
+  clipBStartFromFrames: number;
+  clipAPlaybackRate: number;
+  clipBPlaybackRate: number;
+  direction?: "left" | "right" | "up" | "down";
+  palette?: "warm" | "gold" | "cool" | "magenta";
+  intensity?: number;
+  separatorShadow?: boolean;
+  title?: string;
+  label?: string;
+  variant?: "full" | "half-top" | "half-bottom";
+  theme?: "dark" | "light";
+  accentColor?: string;
+  titleColor?: string;
+  labelColor?: string;
+  showDivider?: boolean;
+  assetPath?: string;
+  frameBackground?: string;
+  caption?: string;
+  showBookmark?: boolean;
+  showGrid?: boolean;
+  advanceFrames?: number;
+  flashColor?: string;
 }
 
-/** A single visual effect instance */
-export interface VisualEffect {
-  type: EffectType;
-  start: number; // seconds
-  end: number; // seconds
-  params?: Record<string, unknown>;
+export type TransitionType =
+  | "CardSwipe"
+  | "ZoomThrough"
+  | "SlideOver"
+  | "Stack"
+  | "CrossfadeZoom"
+  | "ShutterFlash"
+  | "LightLeak"
+  | "StepPush"
+  | "NewspaperWipe"
+  | "FilmStrip"
+  | "SceneTitle";
+
+// ── B-roll cutaway ───────────────────────────────────────────────────────────
+export interface BrollSpec {
+  src: string;
+  fromFrame: number;
+  durationInFrames: number;
+  seekFromFrames: number;
+  playbackRate: number;
 }
 
-export type EffectType =
-  | "light_leak"
-  | "glitch"
-  | "impact_flash"
-  | "particle_burst"
-  | "particle_ambient"
-  | "emoji_pop"
-  | "vhs_grain"
-  | "zoom_blur_transition"
-  | "whip_pan"
-  | "whip_pan_blur"
-  | "vignette_pulse"
-  | "color_flash"
-  | "warm_flash"
-  | "letterbox_cinematic"
-  | "edge_glow"
-  | "cascade_echo"
-  | "impact_text"
-  | "blur_card";
-
-/** A text overlay (title, CTA, callout) rendered on screen for a time range */
-export interface TextOverlay {
+// ── Captions ─────────────────────────────────────────────────────────────────
+export interface TikTokTokenLike {
   text: string;
-  start: number; // seconds in output timeline
-  end: number;   // seconds in output timeline
-  position: string; // "top" | "center" | "bottom"
-  style: string; // "title" | "callout" | "cta"
+  fromMs: number;
+  toMs: number;
 }
 
-/** Full input for the combined overlay renderer */
-export interface OverlayInput {
-  // Captions
-  words: ProjectedWord[];
-  captionStyle: string;
+export interface TikTokPageLike {
+  text: string;
+  startMs: number;
+  durationMs: number;
+  tokens: TikTokTokenLike[];
+}
+
+export type CaptionStyle =
+  | "HormoziPopIn"
+  | "GlitchHighlight"
+  | "EmojiPop"
+  | "NegativeFlash"
+  | "PaperII"
+  | "Prime"
+  | "Prism"
+  | "TypewriterReveal"
+  | "CinematicLetterpress"
+  | "Cove"
+  | "Dimidium"
+  | "EditorialPop"
+  | "Gadzhi"
+  | "Illuminate"
+  | "Lumen"
+  | "MagazineCutout"
+  | "Passage"
+  | "Pulse"
+  | "Quintessence"
+  | "Serif"
+  | "StaggerWave";
+
+export interface CaptionPositionSegment {
+  fromFrame: number;
+  toFrame: number;
+  position: "top" | "center" | "bottom";
+}
+
+export interface CaptionSpec {
+  style: CaptionStyle;
+  pages: TikTokPageLike[];
   keywords: string[];
-  // Visual effects
-  effects: VisualEffect[];
-  // Cuts/transitions timeline
-  cuts: CutPoint[];
-  // Emphasis moments
-  emphasisMoments: EmphasisMoment[];
-  // Text overlays
-  textOverlays?: TextOverlay[];
-  // Video metadata
+  /** Per-segment position. Covers the full composition, no gaps. */
+  positionSegments: CaptionPositionSegment[];
+  extraProps?: Record<string, unknown>;
+}
+
+// ── Color effects ────────────────────────────────────────────────────────────
+export type ColorEffectType =
+  | "CinematicGrade"
+  | "BleachBypass"
+  | "VintageFilm"
+  | "DreamHaze"
+  | "ChromaSplit"
+  | "VignettePulse"
+  | "InvertStrike"
+  | "CineMono"
+  | "GoldenHour"
+  | "FilmGrain"
+  | "Portra"
+  | "NeoNoir";
+
+export interface ColorPulseSpec {
+  peakFrame: number;
+  attackFrames?: number;
+  holdFrames?: number;
+  releaseFrames?: number;
+  intensity?: number;
+}
+
+export type ColorTiming =
+  | { mode: "persistent"; fadeInFrames?: number }
+  | { mode: "pulsed"; pulses: ColorPulseSpec[] };
+
+export interface ColorEffectSpec {
+  type: ColorEffectType;
+  intensity: number;
+  timing: ColorTiming;
+  extraProps?: Record<string, unknown>;
+}
+
+// ── Motion graphics ──────────────────────────────────────────────────────────
+export type MotionGraphicType =
+  | "LowerThird"
+  | "AnnotationArrow"
+  | "BRollFrame"
+  | "ChartReveal"
+  | "ChatThread"
+  | "ComparisonSplit"
+  | "Notification"
+  | "ProgressBar"
+  | "QuoteCard"
+  | "RecordingFrame"
+  | "StatCard"
+  | "StickyNotes"
+  | "Toggle"
+  | "TornPaper"
+  | "TweetBubble"
+  | "InstagramComment"
+  | "IMessageBubble"
+  | "TikTokComment";
+
+export interface MotionGraphicSpec {
+  type: MotionGraphicType;
+  fromFrame: number;
+  durationInFrames: number;
+  /** Props forwarded to the MG component. `props.anchor` (MGAnchor) is set by
+   * Python; the component's resolveMGPosition places the content at that
+   * flex-aligned corner of the 1080×1920 canvas. */
+  props: Record<string, unknown>;
+}
+
+// ── Text overlays (discriminated by variant) ─────────────────────────────────
+export type TextOverlayVariant =
+  | "torn_paper"
+  | "sticky_note"
+  | "quote_card"
+  | "lower_third"
+  | "caption_match";
+
+interface TextOverlayBase {
+  fromFrame: number;
+  durationInFrames: number;
+}
+
+export interface TornPaperOverlay extends TextOverlayBase {
+  variant: "torn_paper";
+  topText: string;
+  bottomText: string;
+}
+
+export interface StickyNoteOverlay extends TextOverlayBase {
+  variant: "sticky_note";
+  notes: Array<{ text: string; color: string; rotation: number }>;
+}
+
+export interface QuoteCardOverlay extends TextOverlayBase {
+  variant: "quote_card";
+  quote: string;
+  attribution: string;
+}
+
+export interface LowerThirdOverlay extends TextOverlayBase {
+  variant: "lower_third";
+  name: string;
+  title: string;
+  accentColor?: string;
+  theme?: "dark" | "light";
+}
+
+export interface CaptionMatchOverlay extends TextOverlayBase {
+  variant: "caption_match";
+  text: string;
+  position: "top" | "center" | "bottom";
+}
+
+export type TextOverlaySpec =
+  | TornPaperOverlay
+  | StickyNoteOverlay
+  | QuoteCardOverlay
+  | LowerThirdOverlay
+  | CaptionMatchOverlay;
+
+// ── Top-level composition input ──────────────────────────────────────────────
+export interface PromptlyRenderInput {
+  sourceUrl: string;
+  fps: number;
   width: number;
   height: number;
-  fps: number;
-  duration: number;
-  durationInFrames: number;
-  fontDir: string;
-  // Vibe for effect selection
-  vibe: string;
+  totalDurationInFrames: number;
+
+  clips: ClipSpec[];
+  transitions: TransitionSpec[];
+  broll: BrollSpec[];
+  caption: CaptionSpec;
+  textOverlays: TextOverlaySpec[];
+  colorEffect?: ColorEffectSpec;
+  motionGraphics: MotionGraphicSpec[];
+  outro?: "none" | "fade_black" | "fade_white";
+}
+
+export interface PromptlyRenderProps {
+  input: PromptlyRenderInput;
 }

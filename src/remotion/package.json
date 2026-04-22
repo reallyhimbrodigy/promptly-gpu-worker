@@ -1,24 +1,25 @@
 {
-  "name": "promptly-captions",
-  "version": "1.0.0",
+  "name": "promptly-remotion",
+  "version": "2.0.0",
   "private": true,
   "scripts": {
-    "render": "node render-cli.mjs"
+    "render": "node render-full.mjs"
   },
   "dependencies": {
-    "@remotion/animation-utils": "^4.0.242",
-    "@remotion/bundler": "4.0.242",
-    "@remotion/captions": "^4.0.242",
-    "@remotion/cli": "4.0.242",
-    "@remotion/noise": "^4.0.242",
-    "@remotion/renderer": "4.0.242",
-    "@remotion/transitions": "^4.0.242",
+    "@remotion/bundler": "4.0.450",
+    "@remotion/captions": "4.0.450",
+    "@remotion/cli": "4.0.450",
+    "@remotion/google-fonts": "4.0.450",
+    "@remotion/lottie": "4.0.450",
+    "@remotion/media": "4.0.450",
+    "@remotion/renderer": "4.0.450",
+    "lottie-web": "5.13.0",
     "react": "18.3.1",
     "react-dom": "18.3.1",
-    "remotion": "4.0.242"
+    "remotion": "4.0.450"
   },
   "devDependencies": {
-    "@types/react": "^19.2.14",
-    "typescript": "^6.0.2"
+    "@types/react": "18.3.23",
+    "typescript": "5.7.3"
   }
 }

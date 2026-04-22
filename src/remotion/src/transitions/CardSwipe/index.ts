@@ -1,0 +1,1 @@
+export { CardSwipe } from "./CardSwipe";

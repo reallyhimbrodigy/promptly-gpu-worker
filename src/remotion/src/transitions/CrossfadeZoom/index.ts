@@ -1,0 +1,1 @@
+export { CrossfadeZoom } from "./CrossfadeZoom";
