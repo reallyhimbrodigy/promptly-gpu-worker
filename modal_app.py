@@ -1,6 +1,6 @@
 import modal
 
-# rebuild trigger v26 — Z-order validator for bottom-anchored MGs + captions, LUFS-I -14 loudnorm at end of audio chain, zoom-scale harmonized to shot-scale, dead face-data writes on edit_plan removed
+# rebuild trigger v27 — verbatim component descriptions + Best-for use cases for all 66 components (21 captions, 12 color effects, 11 transitions, 7 zooms, 18 motion graphics) straight from the delivery report
 
 # ── Image definition (replaces Dockerfile) ────────────────────────────────────
 image = (

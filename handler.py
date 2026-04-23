@@ -1847,32 +1847,48 @@ ONE style for the whole video. POSITION can change per segment.
 
 caption_style — pick EXACTLY ONE from 21 styles:
 
-Typography-driven:
-  "Serif"                — DM Serif Display, keywords 1.35x italic blue. Premium editorial, interview.
-  "Prime"                — Inter + italic Playfair for special words. Aspirational, premium branding.
-  "Passage"              — Cormorant Garamond, keyword letter-spacing expand + warm gold. Literary.
-  "Lumen"                — Montserrat + Playfair amber glow + gold underline sweep. Warm inspirational.
-  "Cove"                 — Bold Montserrat + italic Playfair glow on special words. Premium/luxury.
-  "Dimidium"             — Heavy Montserrat + thick black stroke, sine wave float. Street style, hip-hop.
-  "CinematicLetterpress" — Cormorant Garamond blur-into-focus. Documentary, film intros.
-
-Effect-driven:
-  "HormoziPopIn"    — Bold uppercase spring-pop, thick black stroke, keyword scale. Motivational, business.
-  "GlitchHighlight" — Montserrat + RGB chromatic aberration on keywords. Tech, gaming, cyberpunk.
-  "NegativeFlash"  — Playfair + color-invert flash on keywords. Bold statements, dramatic reveals.
-  "EmojiPop"       — Words with auto Lottie emojis. Fun/casual, storytelling.
-  "Gadzhi"         — Montserrat uppercase slide-up, keyword gold. Business/hustle/agency.
-  "EditorialPop"   — All Playfair, keyword 1.7x bold italic. Magazine-style, fashion.
-  "Prism"          — Playfair with keywords dramatically scaled. Quote highlights, single-word emphasis.
-  "StaggerWave"    — Montserrat uppercase spring + sine-wave float, yellow active. Workout/energetic.
-
-Specialty:
-  "TypewriterReveal" — Character-by-character Space Mono. Tech/coding, documentary narration.
-  "MagazineCutout"   — Cut-out paper pieces, rotation, cream bg. Creative/art, collage.
-  "PaperII"          — Lora serif, dim-to-bright reveal, strip stacking. Storytelling, narrative.
-  "Illuminate"       — Playfair + diagonal light sweep. Cinematic narration, atmospheric.
-  "Pulse"            — Two-slot paired display, cyan keywords. Music, lyric videos, rhythmic.
-  "Quintessence"     — Single word centered Playfair, vertical stretch. Single-word emphasis.
+ 1. "HormoziPopIn"         — Bold uppercase words spring-pop one at a time. Highlight words scale up with custom colors. Thick black stroke.
+                              Best for: Motivational clips, business advice, podcast highlights.
+ 2. "GlitchHighlight"      — Montserrat body with highlighted words that explode into RGB chromatic aberration. Scanlines, slice displacement, flicker, then glow.
+                              Best for: Tech, gaming, edgy reels, cyberpunk aesthetic.
+ 3. "EmojiPop"             — Words appear with automatic Lottie emoji animations. Active word gets color highlight. 48 built-in emoji mappings.
+                              Best for: Fun/casual content, storytelling, social media clips.
+ 4. "NegativeFlash"        — Playfair Display serif. Keywords trigger a negative/inverted color flash with warm tint and glow, then settle into a distinctive color.
+                              Best for: Bold statements, dramatic reveals, cinematic reels.
+ 5. "PaperII"              — Lora serif. Words transition from dim to bright as spoken. Strip-based stacking, heavy shadow.
+                              Best for: Storytelling, narrative, poetry, journal-style.
+ 6. "Prime"                — Two-tier system: Inter body, special words break out into oversized italic Playfair Display on their own line.
+                              Best for: Aspirational content, premium branding, lifestyle.
+ 7. "Prism"                — Playfair Display with keywords that dramatically scale up. Solo keywords on a line get 2.2x. Shares the NegativeFlash color system.
+                              Best for: Quote highlights, single-word emphasis, editorial.
+ 8. "TypewriterReveal"     — Character-by-character typewriter in Space Mono. Blinking cursor. Three schemes: classic, terminal, amber.
+                              Best for: Tech/coding, thoughtful narration, documentary.
+ 9. "CinematicLetterpress" — Words emerge from blur into focus — cinematic "focus pull." Cormorant Garamond, light weight, wide letter-spacing.
+                              Best for: Documentary, film-style intros, art house.
+10. "Cove"                 — Bold Montserrat base, special words switch to oversized italic Playfair Display with warm ethereal glow. ~2x scale contrast.
+                              Best for: Premium/luxury, brand storytelling, wellness.
+11. "Dimidium"             — Heavy Montserrat, thick black stroke (14px), staggered left-aligned lines. Subtle floating sine-wave animation.
+                              Best for: Street style, urban, bold statements, hip-hop.
+12. "EditorialPop"         — All Playfair Display — keywords scale to 1.7x bold italic, body stays light. Two-line staggered reveal.
+                              Best for: Magazine-style, fashion, interview quotes.
+13. "Gadzhi"               — Montserrat uppercase, words slide up with cubic ease-out. Gray to final color transition. Keywords land in gold.
+                              Best for: Business/hustle, agency reels, SMMA aesthetic.
+14. "Illuminate"           — Playfair Display with diagonal light sweep. Keywords keep a warm lingering glow. Cinematic spotlight.
+                              Best for: Cinematic narration, atmospheric storytelling.
+15. "Lumen"                — Montserrat body, keywords switch to Playfair with amber glow and gold underline sweep. Shine words get brightness flash.
+                              Best for: Warm inspirational, golden-hour aesthetics.
+16. "MagazineCutout"       — Individually cut-out paper pieces with cream background, random rotation, size variation. Collage aesthetic.
+                              Best for: Creative/art, collage, DIY/craft, zine-style.
+17. "Passage"              — Cormorant Garamond serif. Keywords expand letter-spacing on reveal and switch to italic warm gold.
+                              Best for: Literary content, book quotes, long-form storytelling.
+18. "Pulse"                — Two-slot paired display — words appear in pairs that fade in together. Keywords get cyan accent.
+                              Best for: Music, rhythmic narration, fast dialogue, lyric videos.
+19. "Quintessence"         — Single word at a time, centered, Playfair Display with dramatic vertical stretch (scaleY). Gold text, spring entrance.
+                              Best for: Single-word emphasis, dramatic pauses, poetry.
+20. "Serif"                — DM Serif Display body with keywords that scale up (1.35x) in italic with blue accent.
+                              Best for: Premium editorial, interview quotes, brand messaging.
+21. "StaggerWave"          — Montserrat uppercase, staggered spring entrance with sine-wave float. Active word lights up yellow.
+                              Best for: Dynamic content, workout/fitness, energetic reels.
 
 DECISION MATRIX — caption_style by content:
   business, hustle, agency, motivational         → HormoziPopIn or Gadzhi
@@ -1970,13 +1986,21 @@ Each entry:
 For each emphasis moment, deliberately choose each layer:
 
 A. zoom_effect — does this moment need a zoom?
-   "SnapReframe"   — Critically-damped spring, no bounce. Use for: vocal punches, reactions, punchlines. Lands on the word.
-   "SmoothPush"    — Slow deliberate push-in. Use for: quiet reveals, leaning-in moments, B-roll emphasis.
-   "StepZoom"      — Instant jump to tighter framing. Use for: beat-matched cuts in music-driven content.
-   "LetterboxPush" — Cinematic letterbox bars closing. Use for: dramatic wide-to-tight reveals.
-   "StageZoom"     — Two-stage push. Use for: two-beat emphasis, building tension.
-   "DepthPull"     — Multi-layer depth + bokeh + edge blur + haze. Use for: premium intros, title moments.
-   "FocusWindow"   — PiP of normal framing over zoomed bg. Use for: revealing context around a detail.
+
+   1. "SmoothPush"    — Slow, deliberate forward zoom with refined easing. Starts imperceptibly, accelerates, decelerates to stop.
+                         Best for: Drawing attention, emphasis moments, B-roll enhancement.
+   2. "SnapReframe"   — Fast, precise zoom with critically-damped spring. No bounce, no overshoot.
+                         Best for: Beat-synced reframes, reaction shots.
+   3. "FocusWindow"   — Background shows zoomed detail, smaller rectangle shows normal framing. Picture-in-picture context.
+                         Best for: Revealing context around a detail, before/after in same frame.
+   4. "StepZoom"      — Instant jump cuts between zoom levels. No easing. Clean editorial reframes on the beat.
+                         Best for: Music videos, fast-paced edits, beat-matched.
+   5. "LetterboxPush" — Zoomed-in view pushes from center with cinematic letterbox bars. Aspect ratio narrows with depth.
+                         Best for: Cinematic emphasis, dramatic reveals.
+   6. "StageZoom"     — Two-stage zoom: first push settles, holds, then second deeper push. Like finding focus then committing.
+                         Best for: Two-beat emphasis, building tension.
+   7. "DepthPull"     — Multi-layer cinematic depth. Background zooms slowly with floating bokeh, edge blur, haze, and frame lines.
+                         Best for: Premium intros, title sequences, high-production moments.
 
    Events are CLIP-relative (startMs from the clip's start). A single event tied to this moment's position within its clip is the common pattern.
    For the `scale` value, use the SHOT SCALE block above as your single source of truth — it's tuned to the actual framing of THIS video. The scale ranges there supersede any general-purpose defaults. Too-tight zoom on an already-close face crops out eyes/chin.
@@ -2005,18 +2029,31 @@ Structure:
   }}
 
 12 grades:
-  "CinematicGrade" — teal/orange. Cinematic footage, interviews.
-  "BleachBypass"   — silver retention. Thriller, prestige documentary.
-  "VintageFilm"    — warm+green+halation. Nostalgic, retro.
-  "DreamHaze"      — pastel diffusion. Music videos, lifestyle.
-  "ChromaSplit"    — RGB split. Glitch accents. Best with "pulsed".
-  "VignettePulse"  — pulsing vignette. Use with "pulsed".
-  "InvertStrike"   — color invert flash. REQUIRES "pulsed". Music drops, dramatic accents.
-  "CineMono"       — cinematic B&W. Documentary, dramatic portraits.
-  "GoldenHour"     — warm amber. Interviews, lifestyle.
-  "FilmGrain"      — grain + dust + scratches. Film authenticity.
-  "Portra"         — Kodak Portra 400. Editorial portrait feel.
-  "NeoNoir"        — desaturated + crushed blacks + cyan midtones. Thriller, moody.
+
+ 1. "CinematicGrade" — Teal-and-orange Hollywood grade. Cool shadows, warm highlights, subtle contrast boost.
+                        Best for: Cinematic footage, interviews, narrative B-roll.
+ 2. "BleachBypass"   — Silver retention look. Desaturated, contrasty, soft silver sheen via soft-light composite.
+                        Best for: Thriller, prestige documentary, cold editorial.
+ 3. "VintageFilm"    — Warm highlights, green-cast shadows, halation glow, optional procedural grain.
+                        Best for: Nostalgic montages, retro, wedding/lifestyle.
+ 4. "DreamHaze"      — Lifted blacks, soft highlight bloom, pastel desaturation. Nostalgic diffusion.
+                        Best for: Dreamy montages, music videos, lifestyle/travel.
+ 5. "ChromaSplit"    — RGB channel split via SVG filters. Optional slow angle drift.
+                        Best for: Glitch accents, analog aesthetics, beat-synced hits. Recommended with "pulsed" timing.
+ 6. "VignettePulse"  — Two-layer vignette: constant base + pulsed darker layer that "closes in" at peak.
+                        Best for: Beat-synced emphasis, dramatic framing. Use with "pulsed" timing.
+ 7. "InvertStrike"   — Color-inverts footage on beat via CSS invert(). Optional contrast punch.
+                        Best for: Beat drops, editorial punch, music video accents. REQUIRES "pulsed" timing.
+ 8. "CineMono"       — Cinematic B&W with channel-mixed grayscale. Custom R/G/B luma weights. Optional grain.
+                        Best for: Prestige documentary, dramatic B&W, portraits.
+ 9. "GoldenHour"     — Warm amber cast, cream highlights, magenta shadow hints. Everything glows.
+                        Best for: Interviews, lifestyle B-roll, golden-hour simulation.
+10. "FilmGrain"      — Authentic film grain with emulsion damage. Two grain layers, dust specks, hairline scratches. Deterministic per frame.
+                        Best for: Film print authenticity, documentary texture.
+11. "Portra"         — Kodak Portra 400 emulation. Low contrast, lifted shadows, creamy skin tones, muted greens.
+                        Best for: Portraits, editorial photography feel, subtle grading.
+12. "NeoNoir"        — Fincher-style neo-noir. Heavy desaturation, crushed blacks, cold greenish-cyan midtones.
+                        Best for: Thriller, moody narratives, dark editorial.
 
 Pulsed mode:
   Each pulse has `peak_at_seconds` — a SOURCE-time timestamp (pick from vocal_emphasis peaks or shot_changes). The renderer projects to output frames.
@@ -2042,35 +2079,75 @@ Each entry:
     "props": {{...}}             # component-specific
   }}
 
-Types + required props:
+Types, descriptions, use cases, and REQUIRED props (in the schema below, keys ending in `?` are optional):
 
-Data/stats:
-  "StatCard"     — count-up. {{"value": float, "suffix": str?, "prefix": str?, "label": str, "accentColor": "#hex"?}}
-  "ChartReveal"  — bar/line. {{"chartType": "bar"|"line", "data": [{{"label": str, "value": float}}, ...], "title": str?}}
-  "ProgressBar"  — progress bar. {{"percentage": 0-100, "label": str, "fillColor": "#hex"?}}
+ 1. "LowerThird"         — Broadcast name + title card with accent edge and optional avatar. Dark or light theme.
+                            Best for: Interviews, speaker identification, podcast clips.
+                            Props: {{"name": str, "title": str, "accentColor"?: "#hex", "theme"?: "dark"|"light"}}
 
-Social/testimonial:
-  "QuoteCard"     — floating quote. {{"quote": str, "attribution": str, "theme": "dark"|"light"}}
-  "TweetBubble"   — Twitter/X. {{"name": str, "handle": str, "text": str, "verified": bool}}
-  "IMessageBubble" — {{"text": str, "messageType": "incoming"|"outgoing"}}
-  "InstagramComment" — {{"username": str, "comment": str, "likes": int}}
-  "TikTokComment" — {{"username": str, "comment": str, "likes": int}}
-  "ChatThread"   — iMessage thread. {{"messages": [{{"text": str, "direction": "incoming"|"outgoing"}}, ...]}}
-  "Notification" — iOS/Android stack. {{"notifications": [{{"app": str, "title": str, "body": str}}, ...], "platform": "ios"|"android"}}
+ 2. "AnnotationArrow"    — Hand-drawn SVG arrow animated along bezier path. Straight, curved-arc, j-shape, or custom SVG.
+                            Best for: Callouts, UI annotations, "look here" moments.
+                            Props: {{"start": {{"x": 0-1, "y": 0-1}}, "end": {{"x": 0-1, "y": 0-1}}, "pathType"?: "straight"|"curved-arc"|"j-shape"|"custom", "color"?: "#hex"}}
 
-Attribution:
-  "LowerThird"  — name + title. {{"name": str, "title": str, "accentColor": "#hex"?, "theme": "dark"|"light"?}}
+ 3. "BRollFrame"         — Framed media insert. Clean, white-border, or polaroid variant. Multiple sources stack with rotation.
+                            Best for: B-roll inserts, photo reveals, product shots.
+                            Props: {{"src": URL or [URL,...], "mediaType"?: "image"|"video", "aspectRatio"?: "16:9"|"4:5"|"1:1"|"9:16", "variant"?: "clean"|"white-border"|"polaroid", "caption"?: str}}
 
-Callout:
-  "AnnotationArrow" — arrow. {{"start": {{"x": float 0-1, "y": float 0-1}}, "end": {{"x": float 0-1, "y": float 0-1}}, "color": "#hex"?}}
-  "BRollFrame"     — framed insert. {{"src": URL, "caption": str?, "variant": "clean"|"white-border"|"polaroid"}}
+ 4. "ChartReveal"        — Animated bar or line chart building from zero. Optional peak callout with spring physics.
+                            Best for: Revenue/growth stats, data storytelling.
+                            Props: {{"chartType": "bar"|"line", "data": [{{"label": str, "value": float}}, ...], "title"?: str, "prefix"?: str, "suffix"?: str, "accentColor"?: "#hex"}}
 
-Punchy:
-  "TornPaper"      — two torn strips. {{"topText": str<=5w, "bottomText": str<=5w}}
-  "StickyNotes"    — 1-3 notes. {{"notes": [{{"text": str, "color": "#hex", "rotation": float}}]}}
-  "Toggle"         — iOS toggle. {{"text": str, "activateAtMs": int}}
-  "RecordingFrame" — recording overlay. {{"accentColor": "#hex"?}}
-  "ComparisonSplit" — before/after. {{"sides": [{{"type": "text", "value": str}}, ...], "labels": [str, str]}}
+ 5. "ChatThread"         — iMessage-style conversation with typing indicators, sequential delivery, status bar.
+                            Best for: Text recreations, testimonials, DM screenshots.
+                            Props: {{"messages": [{{"sender": "me"|"them", "text": str, "typingMs"?: int, "holdMs"?: int}}, ...], "header"?: {{"name": str, "subtitle"?: str}}}}
+
+ 6. "ComparisonSplit"    — Full-screen split: image, video, color, text, or stat counter per side.
+                            Best for: Before/after, A/B comparisons, stat vs stat.
+                            Props: {{"sides": [ContentA, ContentB], "labels": [str, str], "orientation"?: "vertical"|"horizontal", "accentColor"?: "#hex", "theme"?: "dark"|"light"}}
+                            ContentX: {{"type": "text"|"stat"|"image"|"video"|"color", "value": str|number}}
+
+ 7. "Notification"       — iOS/Android notification stack. 1–3 banners drop in with platform styling. 7 built-in app icons.
+                            Best for: Income proof, social proof, notification montages.
+                            Props: {{"notifications": [{{"app": "apple-pay"|"venmo"|"stripe"|"imessage"|"instagram"|"email"|"bank", "appName": str, "title": str, "body": str, "timestamp"?: str}}, ...], "platform"?: "ios"|"android"}}
+
+ 8. "ProgressBar"        — Animated progress bar with count-up. Optional milestones.
+                            Best for: Goal tracking, fundraising, skill bars.
+                            Props: EITHER {{"value": number, "total": number, "label"?: str, "fillColor"?: "#hex", "accentColor"?: "#hex"}}  OR  {{"percentage": 0-100, "label"?: str, "fillColor"?: "#hex", "accentColor"?: "#hex"}}
+
+ 9. "QuoteCard"          — Floating card with decorative quotation mark, serif text, em-dash attribution. Spring entrance.
+                            Best for: Testimonials, pull quotes, book excerpts.
+                            Props: {{"quote": str, "attribution": str, "theme"?: "dark"|"light", "accentColor"?: "#hex"}}
+
+10. "RecordingFrame"     — Full-screen recording overlay with inset border, scan line, corner annotations (timestamp, WPM).
+                            Best for: Behind-the-scenes, raw/unfiltered, documentary.
+                            Props: {{"accentColor"?: "#hex", "showScanLine"?: bool}}
+
+    — SpeechBubble variants (4) — Platform-specific social bubbles. Best for: Social proof, testimonials, comment highlights.
+
+11. "TweetBubble"        — Twitter/X post with verified badge and engagement stats.
+                            Props: {{"name": str, "handle": str, "text": str, "verified"?: bool, "stats"?: {{"replies": int, "reposts": int, "likes": int, "views": int}}, "darkMode"?: bool}}
+12. "InstagramComment"   — Instagram comment with avatar and like count.
+                            Props: {{"username": str, "comment": str, "timestamp"?: str, "likes"?: int}}
+13. "IMessageBubble"     — iMessage bubble with typewriter mode.
+                            Props: {{"text": str, "messageType": "incoming"|"outgoing", "status"?: "Delivered"|"Read", "typewriter"?: bool}}
+14. "TikTokComment"      — TikTok comment with likes.
+                            Props: {{"username": str, "comment": str, "likes"?: int}}
+
+15. "StatCard"           — Animated count-up number with label and accent divider. Prefix/suffix formatting.
+                            Best for: Revenue stats, subscriber counts, KPIs.
+                            Props: {{"value": number, "label": str, "prefix"?: str, "suffix"?: str, "fromValue"?: number, "decimals"?: int, "accentColor"?: "#hex"}}
+
+16. "StickyNotes"        — 1–3 sticky notes slam on with spring physics. Color, rotation, handwritten text (Caveat Brush).
+                            Best for: Key takeaways, tip lists, educational content.
+                            Props: {{"notes": [{{"text": str, "color": "#hex", "rotation": float}}, ...]}} (1-3 notes)
+
+17. "Toggle"             — iOS-style toggle that flips on at configurable time. Label text.
+                            Best for: Feature toggles, on/off reveals, settings demos.
+                            Props: {{"text": str, "activateAtMs"?: int, "onColor"?: "#hex"}}
+
+18. "TornPaper"          — Two torn paper strips slam from opposite sides with stop-motion impact. Shadow blocks for depth.
+                            Best for: Bold statements, key points, "vs" comparisons.
+                            Props: {{"topText": str (<=5 words), "bottomText": str (<=5 words)}}
 
 GUIDELINES:
   Anchor semantically, not by pixels.
@@ -2133,11 +2210,41 @@ Rules: 3+ seconds of face between clips. Stay on the speaker during emotional be
 
 transitions — ARRAY. {{"after_word_index": int, "type": <name>, ...component props}}
 
-Types: "CardSwipe", "ZoomThrough", "SlideOver", "Stack", "CrossfadeZoom", "ShutterFlash", "LightLeak", "StepPush", "NewspaperWipe", "FilmStrip", "SceneTitle" (SceneTitle requires `title` prop).
+11 transitions — pick the one whose visual character fits the edit:
 
-  Never repeat the same transition more than twice.
-  Place ON or near a shot_changes entry.
-  SceneTitle: 0-2 per video maximum (genuine chapter breaks).
+ 1. "CardSwipe"      — Clip A swipes off with 3D tilt like dismissing a card. Clip B rises from behind.
+                        Best for: App-style UIs, mobile-first edits.
+                        Optional: `direction` ("left" | "right", default "left").
+ 2. "ZoomThrough"    — Clip A scales up past the camera, clip B emerges from behind and grows to fill.
+                        Best for: Energetic forward motion, "diving in" transitions.
+ 3. "SlideOver"      — Clip B slides over clip A with contact shadow. Clip A shifts and scales down.
+                        Best for: Clean editorial cuts, presentations.
+                        Optional: `direction` ("left" | "right", default "left").
+ 4. "Stack"          — iOS task-switcher. Dark wallpaper, stacked cards. Clip A shrinks to card and slides off.
+                        Best for: Phone UI, app showcases, tech content.
+ 5. "CrossfadeZoom"  — Clip A zooms in + fades, clip B fades in + zooms out. Premium cross-dissolve with motion.
+                        Best for: Cinematic dissolves, photo slideshows.
+ 6. "ShutterFlash"   — CRT power-off to power-on. Vertical collapse to bright dot, then reverse.
+                        Best for: Retro tech, channel-switching, dramatic hard cuts.
+                        Optional: `flashColor` (default "#ffffff").
+ 7. "LightLeak"      — Warm glow sweeps across frame. Three layered radial gradients with screen/soft-light blend. Hard cut hidden at peak.
+                        Best for: Warm cinematic, golden hour, dreamy bridges.
+                        Optional: `palette` ("warm"|"gold"|"cool"|"magenta", default "warm"); `direction` ("tl-br"|"tr-bl"|"left-right"|"top-down", default "tl-br"); `intensity` (default 1.0).
+ 8. "StepPush"       — Keynote-style slide push. Both panels travel together.
+                        Best for: Presentations, corporate, clean editorial.
+                        Optional: `direction` ("left"|"right"|"up"|"down", default "left"); `separatorShadow` (bool, default true).
+ 9. "NewspaperWipe"  — Torn newspaper slams up, covers frame, holds, rushes off. Staccato keyframes.
+                        Best for: News-style intros, editorial punch cuts.
+10. "FilmStrip"      — Device-frame film-reel. Clip A morphs into tile, strip scrolls, clip B expands back.
+                        Best for: Gallery reveals, portfolio showcases.
+                        Optional: `caption` (str); `showBookmark` (bool, default false); `showGrid` (bool, default true).
+11. "SceneTitle"     — Chapter-break. Typographic title panel wipes across, holds, wipes out. Inter + DM Serif Display.
+                        Best for: Chapter breaks, act titles, documentary headers.
+                        REQUIRED: `title` (str). Optional: `label` (str, small uppercase); `variant` ("full"|"half-top"|"half-bottom", default "full"); `theme` ("dark"|"light", default "dark"); `accentColor` (default "#C8551F").
+
+  Never repeat the same transition more than twice across the video.
+  Place ON or near a shot_changes entry — that's where the viewer's eye expects a visual boundary.
+  SceneTitle: 0-2 per video maximum (genuine chapter breaks only).
 
 === SPEED CURVE ===
 
