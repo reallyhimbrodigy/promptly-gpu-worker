@@ -1,6 +1,6 @@
 import modal
 
-# rebuild trigger v32 — remaining silent fallbacks deleted: _SFX_ALIASES gone (strict canonical-name check), SFX build-duration enforced at plan time, transition→'none' coercion + 3 defensive speed clamps replaced with fail-hard validators, speed_curve keypoints strictly typed-and-range-checked
+# rebuild trigger v33 — emphasis anchor consistency: t MUST equal word_indices[0].start, every word_indices entry MUST be a kept word. Schema-level constraint removes the entire class of "emphasis t lands in a removed segment" bugs. Prompt rule + validator + ABSOLUTE RULES #10.
 
 # ── Image definition (replaces Dockerfile) ────────────────────────────────────
 image = (

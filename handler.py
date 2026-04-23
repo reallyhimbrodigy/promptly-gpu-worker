@@ -1779,7 +1779,11 @@ These are enforced by a strict validator. Any violation fails the render.
    - High-intensity emphasis moments must be ≥2.5s apart.
 8. ONE ZOOM PER CLIP: at most ONE emphasis_moment may carry a zoom_effect within any single kept-source clip (the source range between your removed-words boundaries). Two emphasis moments landing in the same clip cannot BOTH have zoom_effect — the second one is ignored by the renderer. If you want multiple zoom beats close together in source time, put them all on ONE emphasis_moment's zoom_effect.events array instead of spreading across multiple emphasis moments.
 9. MOTION GRAPHIC ANCHORS are ABSOLUTE-ZONE ONLY: motion_graphics[i].anchor and emphasis_moments[i].motion_graphic.anchor must be one of `upper_third_safe | center | lower_third_safe | left_safe | right_safe`. The motion-graphics pack positions itself against the full canvas and does NOT follow the speaker's face — face-relative anchors are not available for motion_graphics.
-10. SILENCE IS A CHOICE: if you don't emit a zoom_effect on an emphasis moment, no zoom fires. `null` is explicit. There are no downstream defaults.
+10. EMPHASIS ANCHOR CONSISTENCY:
+   - For every emphasis_moments[i], `t` MUST equal the start timestamp of `word_indices[0]` — copy the exact value from the injected word-by-word transcript (rounded to 2 decimals). Do NOT synthesize a free-form timestamp between words.
+   - Every index in `emphasis_moments[i].word_indices` MUST target a word that SURVIVES your remove_words list. You cannot emphasize a word you've also chosen to remove.
+   - Same rule for `sound_effects[i]`: the `word` field must name a kept word (your trigger lands ON it), and the `t` field must be that word's start time.
+11. SILENCE IS A CHOICE: if you don't emit a zoom_effect on an emphasis moment, no zoom fires. `null` is explicit. There are no downstream defaults.
 
 {signals_block}
 {_usr_block}
@@ -1946,8 +1950,8 @@ emphasis_moments — ARRAY of 2-5 items. High-intensity moments must be ≥2.5s 
 
 Each entry:
   {{
-    "t": float,                          # source-time seconds of the peak moment (align to a vocal emphasis peak when possible)
-    "word_indices": [int, ...],          # 1-3 Deepgram word indices that ARE the emphasis
+    "t": float,                          # REQUIRED. Must equal the start timestamp of word_indices[0], copied verbatim from the word-by-word transcript (rounded to 2 decimals). Do NOT invent a free-form timestamp between words. Do NOT pick a time inside a removed gap — the renderer will reject it.
+    "word_indices": [int, ...],          # 1-3 Deepgram word indices. Every index MUST target a word that SURVIVES your remove_words list (i.e. not in any word_index removal entry and not inside any start/end range removal). Removed words can NEVER be emphasized — they aren't in the final edit.
     "type": "punchline" | "revelation" | "statement" | "reaction" | "question",
     "intensity": "high" | "medium",
     "duration": float,                   # output-seconds the visual hit lasts, 1.5 - 3.0
@@ -3274,21 +3278,61 @@ RULES FOR USING THESE TIMESTAMPS:
         raise ValueError("emphasis_moments must be an array")
     _valid_em_types = {"punchline", "statement", "question", "reaction", "transition", "revelation"}
     emphasis_moments = []
+    # Pre-compute the kept-word set so each emphasis can verify its word_indices
+    # survive remove_words. _removed_word_indices is populated upstream by
+    # build_clips_from_words and covers both word_index removals and words
+    # whose timestamps fell inside a start/end range removal.
+    _kept_word_indices = (
+        set(range(len(_dg_words))) - set(_removed_word_indices or set())
+    )
     for _ei, em in enumerate(raw_emphasis):
         if not isinstance(em, dict):
             raise ValueError(f"emphasis_moments[{_ei}] must be an object")
-        try:
-            t = float(em["t"])
-        except (KeyError, TypeError, ValueError):
-            raise ValueError(f"emphasis_moments[{_ei}].t must be a number")
-        if t < 0 or (video_duration > 0 and t > video_duration + 0.5):
-            raise ValueError(f"emphasis_moments[{_ei}].t ({t}) outside video [0, {video_duration}]")
         _wi_raw = em.get("word_indices")
         if not isinstance(_wi_raw, list) or not _wi_raw:
             raise ValueError(f"emphasis_moments[{_ei}].word_indices must be a non-empty array")
         _wis = [int(i) for i in _wi_raw if isinstance(i, (int, float))]
         if not _wis:
             raise ValueError(f"emphasis_moments[{_ei}].word_indices contained no integers")
+        # Every word_indices entry MUST be a word that survives remove_words.
+        for _k, _wi_val in enumerate(_wis):
+            if _wi_val < 0 or _wi_val >= len(_dg_words):
+                raise ValueError(
+                    f"emphasis_moments[{_ei}].word_indices[{_k}]={_wi_val} is out "
+                    f"of range [0, {len(_dg_words)-1}]."
+                )
+            if _wi_val not in _kept_word_indices:
+                _w = _dg_words[_wi_val]
+                _wt = str(_w.get("punctuated_word") or _w.get("word") or "").strip()
+                raise ValueError(
+                    f"emphasis_moments[{_ei}].word_indices[{_k}]={_wi_val} "
+                    f"({_wt!r}) targets a word that was REMOVED via remove_words. "
+                    f"Emphasize only words that survive your removal list."
+                )
+        # t MUST equal the start timestamp of word_indices[0] (rounded to 2
+        # decimals). This pins t to a real kept word so it can never land
+        # inside a cut/removed segment. Gemini gets the exact word timestamp
+        # in the injected transcript — it should copy it verbatim.
+        _anchor_word = _dg_words[_wis[0]]
+        _anchor_start = round(float(_anchor_word.get("start") or 0), 2)
+        try:
+            t = float(em["t"])
+        except (KeyError, TypeError, ValueError):
+            raise ValueError(f"emphasis_moments[{_ei}].t must be a number")
+        if abs(t - _anchor_start) > 0.05:
+            _wt = str(_anchor_word.get("punctuated_word") or _anchor_word.get("word") or "").strip()
+            raise ValueError(
+                f"emphasis_moments[{_ei}].t={t:.3f}s does not match the start "
+                f"timestamp of word_indices[0]={_wis[0]} ({_wt!r}) which starts "
+                f"at {_anchor_start:.2f}s. Set t exactly to that word's start "
+                f"time. The gap between t and the anchor word's start is "
+                f"{abs(t - _anchor_start):.3f}s (must be <=0.05s)."
+            )
+        # Normalize t to the anchor word's exact start — now guaranteed to land
+        # inside a kept clip since the anchor word survived remove_words.
+        t = _anchor_start
+        if t < 0 or (video_duration > 0 and t > video_duration + 0.5):
+            raise ValueError(f"emphasis_moments[{_ei}].t ({t}) outside video [0, {video_duration}]")
         intensity = str(em.get("intensity") or "").lower()
         if intensity not in ("high", "medium"):
             raise ValueError(f"emphasis_moments[{_ei}].intensity must be 'high'|'medium'")
