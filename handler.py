@@ -6749,8 +6749,30 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # and no other composition layer consumes face data at render time.
     _outro = edit_plan.get("outro") or "none"
 
+    # Remotion serves local files via its bundle server, which resolves every
+    # request against `publicDir` (set to `work_dir` by render-full.mjs). We
+    # emit BASENAMES for every local-file URL so the browser asks the server
+    # for e.g. `/source_30fps.mp4` and the server finds it in work_dir. If we
+    # kept absolute /tmp paths, the server would try `/remotion/bundle/tmp/...`
+    # and 404. Verify every referenced file is actually inside work_dir.
+    _source_src = os.path.basename(source_path)
+    if os.path.dirname(source_path) != work_dir:
+        raise RuntimeError(
+            f"source_path ({source_path}) is not inside work_dir ({work_dir}); "
+            f"Remotion's publicDir server cannot serve it. Move the source into "
+            f"work_dir before calling render_multi_clip."
+        )
+    for _br in broll_out:
+        _full = _br["src"]
+        if os.path.dirname(_full) != work_dir:
+            raise RuntimeError(
+                f"broll src ({_full}) is not inside work_dir ({work_dir}); "
+                f"Remotion's publicDir server cannot serve it."
+            )
+        _br["src"] = os.path.basename(_full)
+
     remotion_input = {
-        "sourceUrl": source_path,
+        "sourceUrl": _source_src,
         "fps": source_fps,
         "width": 1080,
         "height": 1920,
@@ -6850,6 +6872,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         "node", "/remotion/render-full.mjs",
         "--input", remotion_input_json,
         "--output", silent_video_path,
+        "--public-dir", work_dir,
         "--concurrency", str(_remotion_concurrency),
         "--gl", _gl_mode,
     ]

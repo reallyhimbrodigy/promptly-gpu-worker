@@ -3,10 +3,14 @@
  * Production render — single renderMedia call producing a silent mp4.
  *
  * Args:
- *   --input <path>    Path to PromptlyRenderInput JSON
- *   --output <path>   Absolute path to the output mp4 file
- *   --concurrency <N> Optional. Default = half of CPU threads.
- *   --gl <mode>       Optional Chromium GL backend (angle-egl | swiftshader).
+ *   --input <path>      Path to PromptlyRenderInput JSON
+ *   --output <path>     Absolute path to the output mp4 file
+ *   --public-dir <path> REQUIRED. Directory Remotion serves local assets from.
+ *                       All `src`/`sourceUrl` values in the input JSON are
+ *                       BASENAMES resolved against this directory by
+ *                       Remotion's bundle server. Usually the job's work_dir.
+ *   --concurrency <N>   Optional. Default = half of CPU threads.
+ *   --gl <mode>         Optional Chromium GL backend (angle-egl | swiftshader).
  *
  * The audio track is intentionally disabled (muted: true). Python builds the
  * full audio pipeline (speed-warped source, SFX mix, ducking, EQ, compressor)
@@ -33,23 +37,30 @@ const PREBUNDLE_DIR = "/remotion/bundle";
 const args = process.argv.slice(2);
 let inputPath = null;
 let outputPath = null;
+let publicDir = null;
 let concurrency = null;
 let glMode = "angle-egl";
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--input" && args[i + 1]) inputPath = args[++i];
   else if (args[i] === "--output" && args[i + 1]) outputPath = args[++i];
+  else if (args[i] === "--public-dir" && args[i + 1]) publicDir = args[++i];
   else if (args[i] === "--concurrency" && args[i + 1]) concurrency = parseInt(args[++i], 10);
   else if (args[i] === "--gl" && args[i + 1]) glMode = args[++i];
 }
 
-if (!inputPath || !outputPath) {
-  console.error("Usage: node render-full.mjs --input <json> --output <mp4> [--concurrency N] [--gl mode]");
+if (!inputPath || !outputPath || !publicDir) {
+  console.error("Usage: node render-full.mjs --input <json> --output <mp4> --public-dir <dir> [--concurrency N] [--gl mode]");
   process.exit(1);
 }
 
 if (!existsSync(inputPath)) {
   console.error(`[render-full] Input JSON not found: ${inputPath}`);
+  process.exit(1);
+}
+
+if (!existsSync(publicDir)) {
+  console.error(`[render-full] --public-dir does not exist: ${publicDir}`);
   process.exit(1);
 }
 
@@ -114,8 +125,9 @@ const composition = await selectComposition({
   id: "PromptlyRender",
   inputProps,
   puppeteerInstance: browser,
+  publicDir,
 });
-console.log(`[render-full] selectComposition: ${((Date.now() - tComp) / 1000).toFixed(2)}s`);
+console.log(`[render-full] selectComposition: ${((Date.now() - tComp) / 1000).toFixed(2)}s (publicDir=${publicDir})`);
 
 // ── Render ─────────────────────────────────────────────────────────────────
 const tRender = Date.now();
@@ -135,6 +147,7 @@ await renderMedia({
   enforceAudioTrack: false,
   overwrite: true,
   puppeteerInstance: browser,
+  publicDir,
   chromiumOptions: {
     ...(chromePath ? { executablePath: chromePath } : {}),
     gl: glMode,

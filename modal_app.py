@@ -1,6 +1,6 @@
 import modal
 
-# rebuild trigger v30 — fonts served locally: all 15 @remotion/google-fonts/* imports aliased to no-op shim at bundle time, 15 font families (.ttf) installed system-wide + fontconfig-verified at image build, zero font network fetches at render time, dead runtime-font-registration code removed
+# rebuild trigger v31 — local-file serving via Remotion publicDir: sourceUrl + broll.src now BASENAMES (not absolute /tmp paths) so the bundle server resolves them against publicDir=work_dir instead of /remotion/bundle. Fixes 404s that were masked by the font timeout pre-v30.
 
 # ── Image definition (replaces Dockerfile) ────────────────────────────────────
 image = (
