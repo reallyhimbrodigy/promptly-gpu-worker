@@ -1,6 +1,6 @@
 import modal
 
-# rebuild trigger v27 — verbatim component descriptions + Best-for use cases for all 66 components (21 captions, 12 color effects, 11 transitions, 7 zooms, 18 motion graphics) straight from the delivery report
+# rebuild trigger v28 — SFX section rewritten: 14 verbatim sound descriptions + tonal gates (ding=notifications only, camera_shutter=literal photos only, reverse=must pair with visual beat, sad_trombone=comedic vibe required), ambiguity callouts, build-up timing rule
 
 # ── Image definition (replaces Dockerfile) ────────────────────────────────────
 image = (

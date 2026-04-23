@@ -2185,16 +2185,88 @@ First thing before the rest. MUST be the climax/punchline/shock. Never the setup
 hook_clip — object or null. {{"source_start": float, "source_end": float}}.
   Duration 1.0 - 3.0s. First word lands within 0.3s. null is valid when the video opens with an already-compelling first 2s.
 
-=== SFX ===
+=== SFX — SOUND EFFECTS ===
 
-Each sound must literally BE what its trigger word names.
+Sound effects reinforce content beats. Use them liberally WHEN they genuinely add meaning to a moment, but silence > wrong sound. Emit as many as make sense — there's no hard cap. Each entry: {{"t": float, "sound": <name>, "word": str}} where `t` is source-time seconds and `word` is the lowercase trigger word Gemini matched.
 
-sound_effects — ARRAY. {{"t": float, "sound": <name>, "word": str}}
+Every sound must literally FIT the moment. The description and Best-for below tell you what each sound sounds like and when to reach for it. Tonal context beats vocabulary matching — if the surrounding content doesn't fit the sound's character, skip it even when a trigger word matches.
 
-Trigger rules (one word = one sound):
-  boom / hit / drum_roll / reverse / ching / ding / click / camera_shutter / sad_trombone / typing / whoosh_slow / transition_smooth / thunder
+14 sounds, grouped by acoustic behavior:
 
-Silence > wrong sound.
+IMPACT SOUNDS — instant transient. `t` is exactly the moment the hit should land.
+
+ 1. "hit"            — Short, punchy cinematic impact like a body hit or fist strike in a trailer. Mid-low-frequency thud, fast attack, very short tail. Not as deep as boom, not as hissy as pop.
+                        Best for: punchlines, emphasis moments, hard statements, "and that's when everything changed" beats.
+                        Triggers on: *hit, punch, bam, boom, snap, slam, crash, broke, dropped*.
+ 2. "ching"          — Bright metallic cash-register / slot-machine chime. The classic "cha-ching" money sound. High-frequency ring with a short metallic decay.
+                        Best for: money wins, revenue reveals, success-money crossover, "$$$" moments, jackpot beats.
+                        Triggers on: *money, cash, paid, earned, dollar, jackpot, profit, million, K, revenue*.
+ 3. "ding"           — Clean single-tone notification bell. iMessage-style — bright mid-high with a clean decay, NOT metallic like ching.
+                        Best for: notification events ONLY — on-screen notifications, incoming messages/alerts, phone notification reveals, "you've got mail" beats. Pair naturally with the Notification motion-graphic.
+                        Triggers on: *notification, alert, message, text, email, ping, notified*.
+                        Do NOT use for: correct answers, lightbulb ideas, general "yes" acknowledgments, level-ups, positive-check moments. Those muddy the signal with the Notification MG pairing.
+ 4. "pop"            — Quick cartoony bubble-burst. Bright, playful, mid-energy transient.
+                        Best for: item appearances, playful reveals, text-pops, sticker/emoji reveals, lighthearted visual punctuation.
+                        Triggers on: *pop, appeared, suddenly, out of nowhere, surprise*, any lighthearted reveal word.
+ 5. "camera_shutter" — Mechanical DSLR shutter snap. Short dual-click with a slight metallic ring.
+                        Best for: ONLY when an actual photo/picture is being taken on-screen, or the dialogue LITERALLY references taking a photo/screenshot. Rare — most videos should not use this at all.
+                        Triggers on (literal sense only): *took a picture, photo, snap a pic, selfie, screenshot, say cheese*.
+                        Do NOT use for: metaphorical "capture the moment", "freeze frame", still-moment visuals without a camera reference, or as generic punctuation.
+ 6. "click"          — Very soft, quiet UI button click. Low-energy tap, almost subliminal. Punctuates without intruding.
+                        Best for: UI interactions, toggle moments, checkbox confirmations, micro-beats where you want rhythm but can't have loudness.
+                        Triggers on: *click, tap, press, select, enable, tick, checked*.
+
+CINEMATIC IMPACT + BUILD — these sounds have a short build (0.4–0.7s) before the peak. The renderer automatically schedules the file to START before the trigger word so the climax lands ON the word. You just pick the trigger word.
+
+ 7. "boom"           — Deep cinematic sub-bass impact. Short build (~0.4s) into a massive low-end whoom, then a fading rumble. The sound used for beat drops and heavy reveals.
+                        Best for: heavy reveals, bass drops, dramatic punchlines, transition landings after an anticipation build.
+                        Triggers on: *boom, drop, reveal, changed everything, here's the thing, then this happened*.
+ 8. "thunder"        — Natural thunder crack with a rolling rumble tail. Crack lands ~0.73s in, 1.7s of rumble trailing off.
+                        Best for: dramatic proclamations, ominous statements, thriller/dark content, weather references, "storm is coming" moments.
+                        Triggers on: *thunder, storm, exploded, shook, rocked, hit me, catastrophic, disaster*.
+
+BUILD-UP SOUNDS — long builds (1.3–1.7s) climaxing at the end. The renderer schedules the file early so the climax lands on the trigger word, which means the build plays DURING the preceding audio. CRITICAL: the trigger word must have enough kept-clip time BEFORE it (at least the build duration) or the build gets truncated and the effect is lost.
+
+ 9. "drum_roll"      — Classic military/circus snare drum roll building for ~1.65s into a payoff crash at the end. Iconic tension-before-reveal sound. Traditional/comedic anticipation — works standalone in talking-head content.
+                        Best for: big announcements, anticipation before a reveal, "and the answer is...", award moments, payoff setups.
+                        Triggers on: *winner, revealed, the answer, finally, ta-da, drumroll, introducing*.
+                        Needs ≥1.65s of kept-clip time before the trigger word.
+10. "reverse"        — Reverse riser. Builds continuously in volume and pitch for ~1.37s, climaxing at the very end. Engineered as a cinematic "suck-toward-the-moment" effect — the entire sound IS anticipation.
+                        Best for: priming a MAJOR visual event. ALWAYS pair with something visually impactful landing on the trigger word — a hard cut to a new scene, a zoom effect landing (SnapReframe / StepZoom / LetterboxPush), a color pulse hit (InvertStrike / VignettePulse), a TornPaper or motion-graphic slam, or a transition peak. The 1.37s rise plays across the preceding clip audio and releases into the visual beat.
+                        Do NOT use for: generic "wait for it" conversation, punctuating sentences with no visual event attached, building up to a normal talking-head cut with nothing extra happening, or back-to-back triggers. Without a paired visual payoff, this sound feels anticlimactic.
+                        Needs ≥1.37s of kept-clip time before the trigger word.
+11. "sad_trombone"   — The iconic "wah wah waaah" four-note descending trombone. 1.3s descending phrase climaxing on the final low note. Unambiguously comedic — every listener recognizes this as the "you failed" joke sound. There is no way to use this sincerely; it IS the joke.
+                        Best for: ONLY when the content is EXPLICITLY comedic and the "failure" is being played for laughs. Trivial mishaps, obvious mock-failures, game-show-style setups, bloopers, intentional self-own jokes.
+                        Required tonal gate — verify BOTH before emitting:
+                          (a) User's vibe is comedic, playful, ironic, or self-deprecating (e.g. "funny", "comedy", "blooper", "joke", "fail compilation", "roast"). If the vibe is motivational, educational, interview, storytelling, lifestyle, business, or any serious register — DO NOT USE.
+                          (b) Dialogue at the trigger moment is clearly comedic — the speaker is making light of the moment intentionally, not processing something real.
+                        Do NOT use for: real failures, breakups, deaths, job losses, business collapses, mental-health struggles, motivational / overcoming-adversity content, interview / podcast / storytelling where a guest shares a vulnerable moment, or ANY reflective / emotional / vulnerable content. Any "sad" trigger word taken out of tonal context — the word "failed" does NOT auto-trigger this sound. Context trumps vocabulary. When in doubt, skip.
+                        Needs ≥1.29s of kept-clip time before the trigger word.
+
+ATMOSPHERIC SWEEPS — airy sweeps used BETWEEN beats rather than ON impact words. Near-instant onset, long trail.
+
+12. "whoosh_slow"        — Mid-energy cinematic airy sweep with presence and weight. More dramatic than transition_smooth.
+                            Best for: dramatic entrances, reveal sweeps, camera-move-simulation moments, "and then..." narrative pivots. The more cinematic of the two sweeps.
+                            Triggers on: *enter, arrived, appeared, suddenly, meanwhile, next, then, shift*.
+13. "transition_smooth"  — Softer, gentler airy wash. Lower-energy atmospheric sweep, less presence than whoosh_slow.
+                            Best for: scene-change transitions, soft pivots, topic shifts where whoosh_slow would be too punchy. The subtler sweep.
+                            Triggers on: *transition, shift, meanwhile, moving on, next, and then, speaking of, on that note*.
+
+CONTINUOUS TEXTURE
+
+14. "typing"             — Keyboard typing sequence. Rapid mechanical key clicks across ~1s, not a single transient.
+                            Best for: typing scenes, text-reveal moments, code/writing/email reveals, anything where typed text appears on screen. Pair naturally with a TypewriterReveal caption style.
+                            Triggers on: *typed, wrote, emailed, messaged, coded, typing*.
+
+AMBIGUITY CALLOUTS — the confusing pairs Gemini MUST distinguish:
+
+ - boom vs thunder vs hit:           boom = deep synthetic drop (music beats, reveals). thunder = natural rolling crack with trailing rumble (drama, weather, thriller). hit = short sharp punch with no build (punchlines, emphasis).
+ - ching vs ding:                    ching = metallic cash sound (money/wins only). ding = clean notification bell (phone/app notification events ONLY — never generic "yes/correct" moments).
+ - click vs pop vs camera_shutter:   click = soft UI tap, nearly subliminal (buttons, toggles). pop = bright cartoony burst (playful reveals, text pops). camera_shutter = DSLR snap reserved for LITERAL photo moments only.
+ - whoosh_slow vs transition_smooth: whoosh_slow has more presence and drama (dramatic entrances, cinematic moves). transition_smooth is softer and gentler (mundane topic pivots).
+ - reverse vs drum_roll:             both build up. drum_roll = traditional/comedic anticipation, works standalone. reverse = cinematic visual-impact prep — REQUIRES a paired visual beat at the climax, otherwise it sounds unfinished.
+
+RULE OF THUMB: pick a sound only when it adds meaning. A punchline without SFX is still a punchline; a punchline with the WRONG SFX becomes a problem. No generic punctuation. When unsure, skip.
 
 === B-ROLL ===
 
