@@ -1,6 +1,6 @@
 import modal
 
-# rebuild trigger v31 — local-file serving via Remotion publicDir: sourceUrl + broll.src now BASENAMES (not absolute /tmp paths) so the bundle server resolves them against publicDir=work_dir instead of /remotion/bundle. Fixes 404s that were masked by the font timeout pre-v30.
+# rebuild trigger v32 — remaining silent fallbacks deleted: _SFX_ALIASES gone (strict canonical-name check), SFX build-duration enforced at plan time, transition→'none' coercion + 3 defensive speed clamps replaced with fail-hard validators, speed_curve keypoints strictly typed-and-range-checked
 
 # ── Image definition (replaces Dockerfile) ────────────────────────────────────
 image = (

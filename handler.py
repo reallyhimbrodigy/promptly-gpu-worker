@@ -3142,20 +3142,48 @@ RULES FOR USING THESE TIMESTAMPS:
         print(f"[mg] Gemini requested {len(validated_mg)} motion graphic(s)", flush=True)
 
     raw_curve = edit_plan.get("speed_curve", "none")
-    if raw_curve == "none" or raw_curve is None or not isinstance(raw_curve, list):
+    if raw_curve == "none" or raw_curve is None:
         speed_curve = None
+    elif not isinstance(raw_curve, list):
+        raise ValueError(
+            f"speed_curve must be 'none' or an array of keypoints, got "
+            f"{type(raw_curve).__name__}"
+        )
     else:
+        # Strict: every keypoint must have numeric t + speed in [0.25, 2.0].
+        # No silent coercion; no dropping malformed entries.
         speed_curve = []
-        for kp in raw_curve:
-            if isinstance(kp, dict) and "t" in kp and ("speed" in kp or "s" in kp):
-                try:
-                    t = max(0.0, float(kp["t"]))
-                    s = max(0.25, min(2.0, float(kp.get("speed") or kp.get("s"))))
-                    speed_curve.append({"t": t, "speed": s})
-                except Exception:
-                    continue
-        if len(speed_curve) < 2:
+        for _kpi, kp in enumerate(raw_curve):
+            if not isinstance(kp, dict):
+                raise ValueError(f"speed_curve[{_kpi}] must be an object")
+            if "t" not in kp or ("speed" not in kp and "s" not in kp):
+                raise ValueError(
+                    f"speed_curve[{_kpi}] missing required keys 't' and 'speed'"
+                )
+            try:
+                t = float(kp["t"])
+                s = float(kp.get("speed") if "speed" in kp else kp.get("s"))
+            except (TypeError, ValueError):
+                raise ValueError(
+                    f"speed_curve[{_kpi}] t/speed must be numbers"
+                )
+            if t < 0:
+                raise ValueError(
+                    f"speed_curve[{_kpi}].t={t} must be >= 0"
+                )
+            if not (0.25 <= s <= 2.0):
+                raise ValueError(
+                    f"speed_curve[{_kpi}].speed={s} is outside the supported "
+                    f"range 0.25-2.0. Adjust the keypoint or drop it."
+                )
+            speed_curve.append({"t": t, "speed": s})
+        if len(speed_curve) == 0:
             speed_curve = None
+        elif len(speed_curve) == 1:
+            raise ValueError(
+                "speed_curve must have at least 2 keypoints to define a ramp "
+                "(got 1). Either add a second keypoint or use 'none'."
+            )
         else:
             speed_curve.sort(key=lambda x: x["t"])
 
@@ -3523,33 +3551,96 @@ RULES FOR USING THESE TIMESTAMPS:
     sound_effects = []
     valid_sounds = set(_SFX_CATEGORIES.keys())
     _sfx_dg_words = edit_plan.get("_deepgram_words") or []
-    for sfx in raw_sfx:
-        if isinstance(sfx, dict) and "t" in sfx and "sound" in sfx:
-            try:
-                t = float(sfx["t"])
-            except Exception:
-                continue
-            sound = str(sfx["sound"]).lower()
-            sound = _SFX_ALIASES.get(sound, sound)
-            if sound in valid_sounds and t >= 0 and (video_duration <= 0 or t <= video_duration):
-                word = str(sfx.get("word") or "").strip().lower()
-                # Resolve to a word index by matching word text near the
-                # source timestamp. At render time, this index is looked up
-                # in projected words — the same system captions and b-roll
-                # use. If the word exists in the final output, the SFX plays
-                # at its exact output time. If it was removed, the SFX
-                # doesn't play because the viewer never hears that word.
-                _sfx_word_idx = None
-                if _sfx_dg_words and word:
-                    _best_dist = float("inf")
-                    for _wi, _w in enumerate(_sfx_dg_words):
-                        _wt = str(_w.get("word") or _w.get("punctuated_word") or "").strip().lower().rstrip(".,!?;:'\"")
-                        if _wt == word:
-                            _d = abs(float(_w.get("start") or 0) - t)
-                            if _d < _best_dist:
-                                _best_dist = _d
-                                _sfx_word_idx = _wi
-                sound_effects.append({"t": t, "sound": sound, "word": word, "_word_idx": _sfx_word_idx})
+    # Build-up sounds require this much kept-clip time BEFORE the trigger
+    # word or the build gets truncated at render and the effect is lost.
+    # Values mirror _SFX_ONSET_OFFSETS for the 5 build-bearing sounds.
+    _SFX_MIN_PRE_TRIGGER = {
+        "boom":         0.440,
+        "thunder":      0.734,
+        "drum_roll":    1.657,
+        "reverse":      1.372,
+        "sad_trombone": 1.290,
+    }
+    for _si, sfx in enumerate(raw_sfx):
+        if not isinstance(sfx, dict):
+            raise ValueError(f"sound_effects[{_si}] must be an object")
+        if "t" not in sfx or "sound" not in sfx:
+            raise ValueError(
+                f"sound_effects[{_si}] missing required keys 't' and 'sound'"
+            )
+        try:
+            t = float(sfx["t"])
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"sound_effects[{_si}].t must be a number, got {sfx.get('t')!r}"
+            )
+        if t < 0 or (video_duration > 0 and t > video_duration):
+            raise ValueError(
+                f"sound_effects[{_si}].t={t:.3f}s is outside [0, {video_duration:.3f}s]"
+            )
+        sound = str(sfx["sound"]).strip().lower()
+        if sound not in valid_sounds:
+            raise ValueError(
+                f"sound_effects[{_si}].sound={sound!r} is not a canonical name. "
+                f"Must be one of {sorted(valid_sounds)}. No aliasing — pick the "
+                f"exact canonical name documented in the SFX section of the prompt."
+            )
+        word = str(sfx.get("word") or "").strip().lower()
+        if not word:
+            raise ValueError(
+                f"sound_effects[{_si}] ({sound}) missing trigger word — every SFX "
+                f"must name the exact lowercase trigger word from the transcript."
+            )
+        # Resolve to a word index by matching word text near the source timestamp.
+        # At render time, this index is looked up in projected words — the same
+        # system captions and b-roll use.
+        _sfx_word_idx = None
+        if _sfx_dg_words:
+            _best_dist = float("inf")
+            for _wi, _w in enumerate(_sfx_dg_words):
+                _wt = str(_w.get("word") or _w.get("punctuated_word") or "").strip().lower().rstrip(".,!?;:'\"")
+                if _wt == word:
+                    _d = abs(float(_w.get("start") or 0) - t)
+                    if _d < _best_dist:
+                        _best_dist = _d
+                        _sfx_word_idx = _wi
+        if _sfx_word_idx is None:
+            raise ValueError(
+                f"sound_effects[{_si}] ({sound} at t={t:.2f}s) trigger word "
+                f"{word!r} not found in transcript. Use the EXACT lowercase "
+                f"word from the word-by-word transcript injected into the prompt."
+            )
+        # Build-duration check: the trigger word must have enough kept-clip time
+        # BEFORE it to accommodate the sound's build. Fails hard if the build
+        # would get truncated at render.
+        if sound in _SFX_MIN_PRE_TRIGGER:
+            _needed = _SFX_MIN_PRE_TRIGGER[sound]
+            _trigger_w_start = float(_sfx_dg_words[_sfx_word_idx].get("start") or 0.0)
+            # Find the clip containing the trigger word.
+            _clip_start = None
+            for _cc in validated_cuts:
+                _cs = float(_cc["source_start"])
+                _ce = float(_cc["source_end"])
+                if _cs <= _trigger_w_start <= _ce:
+                    _clip_start = _cs
+                    break
+            if _clip_start is None:
+                raise ValueError(
+                    f"sound_effects[{_si}] ({sound}) trigger word {word!r} at "
+                    f"t={_trigger_w_start:.2f}s is not inside any kept clip."
+                )
+            _pre_trigger = _trigger_w_start - _clip_start
+            if _pre_trigger < _needed:
+                raise ValueError(
+                    f"sound_effects[{_si}] ({sound}) needs {_needed:.2f}s of "
+                    f"kept-clip time BEFORE the trigger word, but the trigger "
+                    f"word {word!r} has only {_pre_trigger:.2f}s of clip before "
+                    f"it (clip starts at {_clip_start:.2f}s, word starts at "
+                    f"{_trigger_w_start:.2f}s). Move this SFX to a trigger word "
+                    f"that's later in its clip, or pick an instant-onset sound "
+                    f"(hit/ching/ding/pop/click/camera_shutter/typing)."
+                )
+        sound_effects.append({"t": t, "sound": sound, "word": word, "_word_idx": _sfx_word_idx})
 
     # Sound effects are taken EXACTLY as Gemini provided them. No caps,
     # no spacing filter, no auto-placement, no dedup. The Gemini prompt is
@@ -3580,16 +3671,38 @@ RULES FOR USING THESE TIMESTAMPS:
     }
 
     final_cuts = []
-    for clip_entry in validated_cuts:
-        # Transitions are PascalCase (CardSwipe, ShutterFlash, …). "none" is
-        # lowercase. We only accept entries exactly matching the valid set.
-        transition = str(clip_entry.get("transition_out") or "").strip()
-        if transition and transition != "none" and transition not in valid_transitions:
-            print(f"[generate-edit] Unknown transition '{clip_entry.get('transition_out')}' -> 'none'", flush=True)
-            transition = "none"
-        if not transition:
-            transition = "none"
-        speed = max(0.25, min(4.0, float(clip_entry.get("speed") or 1.0)))
+    for _ci, clip_entry in enumerate(validated_cuts):
+        # transition_out is only set by the earlier validated-transition
+        # application block, which rejects unknown types. Any invalid value
+        # reaching here is a derivation bug — fail hard instead of silently
+        # coercing to "none".
+        transition = str(clip_entry.get("transition_out") or "none").strip()
+        if transition not in valid_transitions:
+            raise RuntimeError(
+                f"validated_cuts[{_ci}] has transition_out={transition!r} which "
+                f"is not in {sorted(valid_transitions)}. This is a derivation "
+                f"bug — transition_out should only ever be set by the upstream "
+                f"validated-transition block."
+            )
+        # Speed is Gemini's creative decision. Reject out-of-range instead of
+        # silently clamping; this forces Gemini to emit a value inside the
+        # documented range rather than sending something unrealistic.
+        _raw_speed = clip_entry.get("speed")
+        if _raw_speed is None:
+            speed = 1.0
+        else:
+            try:
+                speed = float(_raw_speed)
+            except (TypeError, ValueError):
+                raise ValueError(
+                    f"validated_cuts[{_ci}].speed={_raw_speed!r} is not a number."
+                )
+            if not (0.25 <= speed <= 4.0):
+                raise ValueError(
+                    f"validated_cuts[{_ci}].speed={speed} is outside the "
+                    f"documented range 0.25-4.0. Adjust the speed_curve keypoint "
+                    f"that produced this value or remove the keypoint."
+                )
         _new_cut = {
             "source_start": clip_entry["source_start"],
             "source_end": clip_entry["source_end"],
@@ -3886,64 +3999,18 @@ def _measure_sfx_rms(sfx_path):
     _SFX_RMS_CACHE[sfx_path] = rms_db
     return rms_db
 
-_SFX_ALIASES = {
-    "whoosh": "whoosh_slow",
-    "swoosh": "whoosh_slow",
-    "impact": "hit",
-    "drop": "boom",
-    "bass_drop": "boom",
-    "bass": "boom",
-    "slam": "hit",
-    "thud": "hit",
-    "stinger": "hit",
-    "cash": "ching",
-    "money": "ching",
-    "cash_register": "ching",
-    "ka_ching": "ching",
-    "coin": "ching",
-    "chime": "ding",
-    "alert": "ding",
-    "notification": "ding",
-    "bell": "ding",
-    "unlock": "ding",
-    "reveal": "ding",
-    "flash": "pop",
-    "snap": "click",
-    "button": "click",
-    "press": "click",
-    "bounce": "pop",
-    "boing": "pop",
-    "fail": "sad_trombone",
-    "wah": "sad_trombone",
-    "horn": "pop",
-    "scratch": "reverse",
-    "vinyl_scratch": "reverse",
-    "record_stop": "reverse",
-    "glitch": "reverse",
-    "riser": "drum_roll",
-    "riser_short": "drum_roll",
-    "buildup": "drum_roll",
-    "tension": "drum_roll",
-    "swipe": "transition_smooth",
-    "slide": "transition_smooth",
-    "whoosh_fast": "transition_smooth",
-    "wind": "whoosh_slow",
-    "breeze": "whoosh_slow",
-    "fire": "boom",
-    "static": "reverse",
-    "heartbeat": "boom",
-    "page_turn": "click",
-    "switch": "click",
-    "shutter": "camera_shutter",
-    "camera": "camera_shutter",
-}
-
-
 def normalize_sfx_style(style):
+    """Return the canonical SFX name (lowercased, stripped) or "none".
+
+    No aliasing — the Gemini prompt lists the exact 14 canonical names with
+    descriptions, and the validator rejects anything outside that set. If
+    Gemini emits "alert" or "heartbeat", the render fails with a clear
+    error instead of silently mapping to an approximation.
+    """
     key = str(style or "").strip().lower()
     if not key or key == "none":
         return "none"
-    return _SFX_ALIASES.get(key, key)
+    return key
 
 
 def get_sfx_path(sound_name):
@@ -5244,7 +5311,8 @@ def build_speed_curved_audio(source_path, cuts, speed_curve, effective_durations
         src_end = float(cut["source_end"])
         src_dur = src_end - src_start
         eff_dur = effective_durations[ci]
-        clip_speed = max(0.25, min(4.0, float(cut.get("speed") or 1.0)))
+        # Speed is pre-validated to [0.25, 4.0] at plan time — no defensive clamp.
+        clip_speed = float(cut.get("speed") or 1.0)
 
         if src_dur < 0.001:
             continue
@@ -5410,7 +5478,8 @@ def project_words_to_output(transcript, cuts, effective_durations, speed_curve=N
                 local_s = _time_map_lookup(tm, clamped_s - c_start)
                 local_e = _time_map_lookup(tm, clamped_e - c_start)
             else:
-                speed = max(0.25, min(4.0, float(cut.get("speed") or 1.0)))
+                # Speed pre-validated to [0.25, 4.0] upstream.
+                speed = float(cut.get("speed") or 1.0)
                 local_s = (clamped_s - c_start) / speed
                 local_e = (clamped_e - c_start) / speed
             projected.append({
@@ -6105,7 +6174,8 @@ def compute_effective_durations(cuts, speed_curve=None, fps=30):
     for cut in (cuts or []):
         src_start = float(cut["source_start"])
         src_end = float(cut["source_end"])
-        clip_speed = max(0.25, min(4.0, float(cut.get("speed") or 1.0)))
+        # Speed pre-validated to [0.25, 4.0] upstream.
+        clip_speed = float(cut.get("speed") or 1.0)
         tm = build_clip_time_map(src_start, src_end, clip_speed, speed_curve, fps=fps)
         durations.append(tm["effective_duration"])
     return durations
