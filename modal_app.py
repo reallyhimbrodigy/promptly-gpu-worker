@@ -1,6 +1,6 @@
 import modal
 
-# rebuild trigger v28 — SFX section rewritten: 14 verbatim sound descriptions + tonal gates (ding=notifications only, camera_shutter=literal photos only, reverse=must pair with visual beat, sad_trombone=comedic vibe required), ambiguity callouts, build-up timing rule
+# rebuild trigger v29 — zero retries/fallbacks/buffers: plan_diff single attempt, transition word-rewire removed, HormoziPopIn zero-word override removed, caption boundary snap removed (strict word-boundary match), micro-clip merge removed (fail hard), overlap fix → assertion, setdefault buffers → required fields, thumbnail AI scorer fallback removed
 
 # ── Image definition (replaces Dockerfile) ────────────────────────────────────
 image = (

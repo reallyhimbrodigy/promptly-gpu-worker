@@ -2647,14 +2647,12 @@ RULES FOR USING THESE TIMESTAMPS:
     raw_remove_words = edit_plan.get("remove_words")
 
     validated_cuts = []
-    if isinstance(raw_remove_words, list) and not _dg_words:
-        # No speech detected — skip word-based editing, create single full-video clip
-        print("[generate-edit] No words available — skipping word-based cuts, using full video as single clip", flush=True)
-        edit_plan["caption_style"] = "HormoziPopIn"
-        validated_cuts = [{"source_start": 0.0, "source_end": round(duration, 3)}]
-    elif isinstance(raw_remove_words, list):
-        if not _dg_words:
-            raise ValueError("Deepgram words missing — remove_words architecture requires word timestamps")
+    if not _dg_words:
+        raise ValueError(
+            "No speech detected in source (Deepgram returned 0 words). This pipeline "
+            "is a talking-head editor and requires spoken audio to produce an edit plan."
+        )
+    if isinstance(raw_remove_words, list):
         print(f"[DIAG] Full transcript ({len(_dg_words)} words):", flush=True)
         for i, w in enumerate(_dg_words):
             spk = w.get('speaker', '?')
@@ -2760,13 +2758,11 @@ RULES FOR USING THESE TIMESTAMPS:
         if not validated_cuts:
             raise ValueError("Gemini response removed all words — no clips remain")
     else:
-        if not _dg_words:
-            # No speech AND no remove_words — full source as a single clip.
-            print("[generate-edit] No words from Gemini — rendering full source as single clip", flush=True)
-            edit_plan["caption_style"] = "HormoziPopIn"
-            validated_cuts = [{"source_start": 0.0, "source_end": round(duration, 3)}]
-        else:
-            raise ValueError("Gemini response missing remove_words")
+        raise ValueError(
+            "Gemini response missing remove_words — the edit plan must include a "
+            "remove_words list (empty array is allowed to keep every word, but the "
+            "key itself is required)."
+        )
 
     # Verify no large gaps in output (monitoring only — not auto-removing)
     for _gi in range(1, len(validated_cuts)):
@@ -2778,7 +2774,8 @@ RULES FOR USING THESE TIMESTAMPS:
 
     # Apply transitions from Gemini's transitions array onto clips.
     # Each transition has after_word_index — find the clip whose source range
-    # contains that word's timestamp and set transition_out on it.
+    # contains that word's timestamp and set transition_out on it. Fail hard on
+    # any invalid reference: no silent skips, no rewires to nearby kept words.
     raw_transitions = edit_plan.get("transitions") or []
     if raw_transitions and _dg_words:
         # Transitions = pack PascalCase names (CardSwipe, ShutterFlash, …).
@@ -2787,42 +2784,47 @@ RULES FOR USING THESE TIMESTAMPS:
             "ShutterFlash", "LightLeak", "StepPush", "NewspaperWipe", "FilmStrip",
             "SceneTitle",
         }
-        # Build set of removed word indices to handle transitions on removed words
+        # Build set of removed word indices so we can reject transitions that
+        # target removed words (Gemini must pick kept words).
         _tr_removed = set()
         for rw in (edit_plan.get("remove_words") or []):
             if "word_index" in rw:
                 _tr_removed.add(int(rw["word_index"]))
-        for tr in raw_transitions:
+        for _ti, tr in enumerate(raw_transitions):
             if not isinstance(tr, dict):
-                continue
+                raise ValueError(f"transitions[{_ti}] must be an object")
             tr_type = str(tr.get("type") or "").strip()
             if tr_type not in _valid_tr_types:
-                continue
+                raise ValueError(
+                    f"transitions[{_ti}].type={tr_type!r} is not a valid transition "
+                    f"(must be one of {sorted(_valid_tr_types)})"
+                )
             awi = tr.get("after_word_index")
             if awi is None or not isinstance(awi, (int, float)):
-                continue
+                raise ValueError(
+                    f"transitions[{_ti}] ({tr_type}) missing numeric after_word_index"
+                )
             awi = int(awi)
             if awi < 0 or awi >= len(_dg_words):
-                print(f"[generate-edit] Transition '{tr_type}' skipped — word index {awi} out of bounds", flush=True)
-                continue
-            # If referenced word was removed, find the nearest kept word before it
+                raise ValueError(
+                    f"transitions[{_ti}] ({tr_type}) after_word_index={awi} is out of "
+                    f"bounds (transcript has {len(_dg_words)} words)"
+                )
             if awi in _tr_removed:
-                _found = False
-                for _wi in range(awi - 1, -1, -1):
-                    if _wi not in _tr_removed:
-                        awi = _wi
-                        _found = True
-                        break
-                if not _found:
-                    print(f"[generate-edit] Transition '{tr_type}' skipped — no kept word before index {tr.get('after_word_index')}", flush=True)
-                    continue
+                raise ValueError(
+                    f"transitions[{_ti}] ({tr_type}) after_word_index={awi} targets a "
+                    f"REMOVED word. Move this transition to a word index that was kept "
+                    f"(not listed in remove_words)."
+                )
             word_end = float(_dg_words[awi].get("end") or 0)
             # Build extras dict — copy through all component-specific props
             _extras = {
                 k: v for k, v in tr.items()
                 if k not in ("type", "after_word_index") and v is not None
             }
-            # Find the clip that contains this word (with 50ms tolerance)
+            # Find the clip that contains this word (with 50ms tolerance). Fail
+            # if no clip does — that means the transition target word ended up
+            # outside every kept clip (physically impossible if awi is kept).
             _applied = False
             for ci, clip in enumerate(validated_cuts):
                 cs = float(clip["source_start"])
@@ -2835,18 +2837,37 @@ RULES FOR USING THESE TIMESTAMPS:
                     _applied = True
                     break
             if not _applied:
-                print(f"[generate-edit] Transition '{tr_type}' at word {awi} ({word_end:.3f}s) — no matching clip found", flush=True)
+                raise ValueError(
+                    f"transitions[{_ti}] ({tr_type}) after_word_index={awi} "
+                    f"(t={word_end:.3f}s) does not land in any kept clip, or lands in "
+                    f"the LAST clip (there is no subsequent clip to transition to). "
+                    f"Pick a word that ends inside clips[0..N-2]."
+                )
 
     # Transition count/variety is Gemini's decision — the prompt teaches restraint.
 
     # caption_style, caption_keywords, caption_position_segments, text_overlays,
-    # emphasis_moments, motion_graphics — all REQUIRED by the strict validators
-    # below. audio_denoise, outro, aspect_ratio, sound_effects are optional and
-    # get sensible presence defaults only (not value defaults).
-    edit_plan.setdefault("audio_denoise", False)
-    edit_plan.setdefault("outro", "none")
-    edit_plan.setdefault("aspect_ratio", "9:16")
-    edit_plan.setdefault("sound_effects", [])
+    # emphasis_moments, motion_graphics, audio_denoise, outro, aspect_ratio,
+    # sound_effects — ALL required. No presence defaults. Gemini must emit every
+    # field explicitly or the plan is rejected.
+    for _req in ("audio_denoise", "outro", "aspect_ratio", "sound_effects"):
+        if _req not in edit_plan:
+            raise ValueError(
+                f"edit_plan missing required field {_req!r}. Every plan MUST emit "
+                f"audio_denoise (bool), outro ('none'|'fade_black'|'fade_white'), "
+                f"aspect_ratio ('9:16'), and sound_effects (array, empty if none)."
+            )
+    if not isinstance(edit_plan.get("sound_effects"), list):
+        raise ValueError("sound_effects must be an array (empty is fine)")
+    if str(edit_plan.get("outro")) not in ("none", "fade_black", "fade_white"):
+        raise ValueError(
+            f"outro must be 'none'|'fade_black'|'fade_white', got {edit_plan.get('outro')!r}"
+        )
+    if str(edit_plan.get("aspect_ratio")) != "9:16":
+        raise ValueError(
+            f"aspect_ratio must be '9:16' (only supported output format), got "
+            f"{edit_plan.get('aspect_ratio')!r}"
+        )
 
     # ── B-roll clips validation ───────────────────────────────────────────
     # Type/sanity checks only — no value clamps. Gemini owns every creative
@@ -3012,19 +3033,24 @@ RULES FOR USING THESE TIMESTAMPS:
                 f"caption_position_segments have a gap/overlap between segment {_i-1} "
                 f"(ends {_prev_end}) and segment {_i} (starts {_curr_start})"
             )
-    # Snap each interior boundary to its nearest word-boundary if within 0.3s.
-    # Boundaries MUST coincide with a word gap (mid-word flips cause visual
-    # glitches). If no word boundary is within tolerance, fail.
+    # Boundaries MUST coincide with a real word boundary — mid-word flips cause
+    # visual glitches. Gemini sees every word's start/end in the transcript and
+    # must pick one of those exact times (rounded to 2 decimals, same rounding
+    # as `_word_boundary_times`). No tolerance window, no silent snap — the
+    # boundary is either on a word or it isn't.
     for _i in range(1, len(_validated_cps)):
-        _b = _validated_cps[_i]["from_seconds"]
-        _nearest = min(_word_boundary_times, key=lambda w: abs(w - _b))
-        if abs(_nearest - _b) > 0.3:
+        _b = round(float(_validated_cps[_i]["from_seconds"]), 2)
+        if _b not in _word_boundary_times:
+            _nearest = min(_word_boundary_times, key=lambda w: abs(w - _b))
             raise ValueError(
-                f"caption_position_segments boundary at {_b}s does not fall on any word "
-                f"boundary (nearest is {_nearest}s, gap {abs(_nearest-_b):.3f}s)"
+                f"caption_position_segments[{_i}].from_seconds={_b}s is not a real "
+                f"word boundary (nearest valid boundary is {_nearest:.2f}s, gap "
+                f"{abs(_nearest-_b):.3f}s). Every segment boundary must match one of "
+                f"the start/end timestamps from the word list, rounded to 2 decimals."
             )
-        _validated_cps[_i]["from_seconds"] = _nearest
-        _validated_cps[_i - 1]["to_seconds"] = _nearest
+        # Ensure the adjacent segment's to_seconds matches exactly — no drift.
+        _validated_cps[_i]["from_seconds"] = _b
+        _validated_cps[_i - 1]["to_seconds"] = _b
     edit_plan["caption_position_segments"] = _validated_cps
     print(
         f"[caption-segments] {len(_validated_cps)} segment(s): "
@@ -3731,73 +3757,53 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None)
 
     print(f"[plan-diff] change_request: {change_request[:200]}", flush=True)
     _t0 = time.time()
-    attempts = 2
-    last_err = None
-    for attempt in range(attempts):
-        try:
-            response = client.models.generate_content(
-                model=GEMINI_MODEL,
-                contents=[prompt],
-                config=genai_types.GenerateContentConfig(
-                    temperature=0.2,
-                    max_output_tokens=8192,
-                    response_mime_type="application/json",
-                    thinking_config=genai_types.ThinkingConfig(thinking_level="LOW"),
-                ),
-            )
-            text = str(getattr(response, "text", "") or "").strip()
-            if not text:
-                raise RuntimeError("Empty plan-diff response")
-            parsed = json.loads(text) if text.startswith("{") else extract_json(text)
-            if not isinstance(parsed, dict):
-                raise RuntimeError("Plan-diff response is not a JSON object")
+    response = client.models.generate_content(
+        model=GEMINI_MODEL,
+        contents=[prompt],
+        config=genai_types.GenerateContentConfig(
+            temperature=0.2,
+            max_output_tokens=8192,
+            response_mime_type="application/json",
+            thinking_config=genai_types.ThinkingConfig(thinking_level="LOW"),
+        ),
+    )
+    text = str(getattr(response, "text", "") or "").strip()
+    if not text:
+        raise RuntimeError("Empty plan-diff response from Gemini")
+    parsed = json.loads(text) if text.startswith("{") else extract_json(text)
+    if not isinstance(parsed, dict):
+        raise RuntimeError("Plan-diff response is not a JSON object")
 
-            classification = str(parsed.get("classification") or "").strip()
-            if classification not in ("tweak", "reinterpret", "needs_clarification"):
-                raise RuntimeError(f"Invalid classification: {classification!r}")
+    classification = str(parsed.get("classification") or "").strip()
+    if classification not in ("tweak", "reinterpret", "needs_clarification"):
+        raise RuntimeError(f"Invalid plan-diff classification: {classification!r}")
 
-            if classification == "tweak":
-                new_plan = parsed.get("new_plan")
-                if not isinstance(new_plan, dict):
-                    raise RuntimeError("tweak classification requires new_plan object")
-                # Enforce: new_plan must retain the required scaffold fields from old_plan.
-                for required in ("cuts", "caption_style", "aspect_ratio"):
-                    if required not in new_plan or new_plan[required] in (None, "", []):
-                        if required in sanitized_old_plan:
-                            new_plan[required] = sanitized_old_plan[required]
-                # Ensure broll persistence fields survive when Gemini echoes broll_clips
-                if isinstance(new_plan.get("broll_clips"), list) and isinstance(sanitized_old_plan.get("broll_clips"), list):
-                    for _i, _new_br in enumerate(new_plan["broll_clips"]):
-                        if _i < len(sanitized_old_plan["broll_clips"]) and isinstance(_new_br, dict):
-                            _old_br = sanitized_old_plan["broll_clips"][_i]
-                            for _persist_key in ("pexels_video_id", "pexels_file_url", "width", "height", "duration"):
-                                if _persist_key not in _new_br and _persist_key in _old_br:
-                                    _new_br[_persist_key] = _old_br[_persist_key]
+    if classification == "tweak":
+        new_plan = parsed.get("new_plan")
+        if not isinstance(new_plan, dict):
+            raise RuntimeError("tweak classification requires new_plan object")
+        # Enforce: new_plan must retain the required scaffold fields from old_plan.
+        for required in ("cuts", "caption_style", "aspect_ratio"):
+            if required not in new_plan or new_plan[required] in (None, "", []):
+                if required in sanitized_old_plan:
+                    new_plan[required] = sanitized_old_plan[required]
+        # Ensure broll persistence fields survive when Gemini echoes broll_clips
+        if isinstance(new_plan.get("broll_clips"), list) and isinstance(sanitized_old_plan.get("broll_clips"), list):
+            for _i, _new_br in enumerate(new_plan["broll_clips"]):
+                if _i < len(sanitized_old_plan["broll_clips"]) and isinstance(_new_br, dict):
+                    _old_br = sanitized_old_plan["broll_clips"][_i]
+                    for _persist_key in ("pexels_video_id", "pexels_file_url", "width", "height", "duration"):
+                        if _persist_key not in _new_br and _persist_key in _old_br:
+                            _new_br[_persist_key] = _old_br[_persist_key]
 
-            print(f"[plan-diff] classification={classification} in {time.time()-_t0:.1f}s", flush=True)
-            return {
-                "classification": classification,
-                "clarification_question": parsed.get("clarification_question"),
-                "new_plan": parsed.get("new_plan"),
-                "fused_vibe": parsed.get("fused_vibe"),
-                "changed_fields": parsed.get("changed_fields") or [],
-                "human_summary": str(parsed.get("human_summary") or "Updated your video."),
-            }
-        except Exception as _e:
-            last_err = _e
-            print(f"[plan-diff] attempt {attempt+1}/{attempts} failed: {_e}", flush=True)
-            continue
-
-    # All attempts failed — surface as reinterpret fallback so the caller can run the
-    # full pipeline with a fused vibe rather than aborting.
-    print(f"[plan-diff] Falling back to reinterpret after {attempts} failures", flush=True)
+    print(f"[plan-diff] classification={classification} in {time.time()-_t0:.1f}s", flush=True)
     return {
-        "classification": "reinterpret",
-        "clarification_question": None,
-        "new_plan": None,
-        "fused_vibe": f"{old_vibe or ''} — {change_request}".strip(" —"),
-        "changed_fields": [],
-        "human_summary": "Re-rendered with a combined creative direction.",
+        "classification": classification,
+        "clarification_question": parsed.get("clarification_question"),
+        "new_plan": parsed.get("new_plan"),
+        "fused_vibe": parsed.get("fused_vibe"),
+        "changed_fields": parsed.get("changed_fields") or [],
+        "human_summary": str(parsed.get("human_summary") or "Updated your video."),
     }
 
 
@@ -5834,42 +5840,38 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15, v
             "word_count": len(word_group),
         })
 
-    # ── Step 6: Merge micro-clips into neighbors ──────────────────────────
-    # Any clip shorter than 120ms is too small to be a standalone segment.
-    # Merge it into the nearest neighbor — but ONLY if no removed words
-    # exist in the gap, otherwise we'd re-introduce audio bleed.
+    # ── Step 6: Reject micro-clips ────────────────────────────────────────
+    # Any clip shorter than 120ms is too small to be a standalone segment —
+    # it would be unplayable. This is a symptom of a removal pattern that
+    # orphans a tiny word island between two removal ranges. Fail hard so
+    # Gemini fixes the removal pattern at its root rather than us silently
+    # merging the orphan into a neighbor.
     MIN_CLIP_DURATION = 0.120
-    merged = []
-    for clip in raw_clips:
+    for _ci, clip in enumerate(raw_clips):
         dur = clip["padded_end"] - clip["padded_start"]
-        if dur < MIN_CLIP_DURATION and merged:
-            gap_start = merged[-1]["raw_end"]
-            gap_end = clip["raw_start"]
-            has_removed_in_gap = any(
-                w["_word_index"] in removed_indices
-                and w["_end"] > gap_start and w["_start"] < gap_end
-                for w in sorted_words
+        if dur < MIN_CLIP_DURATION:
+            raise ValueError(
+                f"build_clips_from_words produced a micro-clip ({dur*1000:.0f}ms, "
+                f"words[{clip['first_word']!r}..{clip['last_word']!r}], "
+                f"t={clip['padded_start']:.3f}s-{clip['padded_end']:.3f}s). Your "
+                f"remove_words pattern orphans a tiny kept segment between two "
+                f"removal ranges. Extend or consolidate the surrounding removals "
+                f"so the kept segment is at least {MIN_CLIP_DURATION*1000:.0f}ms."
             )
-            if has_removed_in_gap:
-                # Can't merge — removed word in the gap. Keep as separate clip.
-                merged.append(clip)
-            else:
-                merged[-1]["padded_end"] = clip["padded_end"]
-                merged[-1]["raw_end"] = clip["raw_end"]
-                merged[-1]["last_word"] = clip["last_word"]
-                merged[-1]["word_count"] += clip["word_count"]
-        else:
-            merged.append(clip)
-    raw_clips = merged
 
-    # ── Step 7: Fix overlaps — earlier clip wins ──────────────────────────
+    # ── Step 7: Non-overlap invariant ─────────────────────────────────────
+    # Clips are derived from sorted word groups with strictly non-overlapping
+    # source ranges. If two adjacent clips overlap, the derivation logic is
+    # broken. Fail loudly instead of silently splitting at the midpoint.
     for i in range(1, len(raw_clips)):
         if raw_clips[i]["padded_start"] < raw_clips[i - 1]["padded_end"]:
-            # Place the boundary at the midpoint of the gap between the
-            # last word of clip i-1 and the first word of clip i
-            mid = (raw_clips[i - 1]["raw_end"] + raw_clips[i]["raw_start"]) / 2
-            raw_clips[i - 1]["padded_end"] = round(mid * 1000) / 1000
-            raw_clips[i]["padded_start"] = round(mid * 1000) / 1000
+            raise RuntimeError(
+                f"build_clips_from_words invariant violated: clip {i-1} "
+                f"[{raw_clips[i-1]['padded_start']:.3f}-{raw_clips[i-1]['padded_end']:.3f}] "
+                f"overlaps clip {i} "
+                f"[{raw_clips[i]['padded_start']:.3f}-{raw_clips[i]['padded_end']:.3f}]. "
+                f"This is a derivation bug — clips should never overlap."
+            )
 
     # ── Build final clip dicts ────────────────────────────────────────────
     final_clips = []
@@ -7264,23 +7266,12 @@ def handler(job):
         change_summary = None
         if mode == "tweak":
             send_progress(job_id, "plan_diff", 10, "Figuring out exactly what to change...", app_url)
-            try:
-                diff = generate_plan_diff(
-                    old_plan=provided_plan,
-                    change_request=change_request,
-                    old_vibe=old_vibe or vibe,
-                    transcript=provided_transcript,
-                )
-            except Exception as _diff_err:
-                print(f"[plan-diff] Unrecoverable failure ({_diff_err}) — falling back to reinterpret", flush=True)
-                diff = {
-                    "classification": "reinterpret",
-                    "new_plan": None,
-                    "fused_vibe": f"{old_vibe or vibe} — {change_request}".strip(" —"),
-                    "changed_fields": [],
-                    "human_summary": "Re-rendered with a combined creative direction.",
-                    "clarification_question": None,
-                }
+            diff = generate_plan_diff(
+                old_plan=provided_plan,
+                change_request=change_request,
+                old_vibe=old_vibe or vibe,
+                transcript=provided_transcript,
+            )
 
             classification = diff.get("classification")
             if classification == "needs_clarification":
@@ -7674,12 +7665,16 @@ def handler(job):
 
         _timings["normalize_transcribe_upload"] = time.time() - t
         _dg_words = transcript.get("words", [])
-        if len(_dg_words) == 0:
-            # Force captions off — no words to display
-            edit_plan["caption_style"] = "none"
-            print(f"[pipeline] All init complete: 0 words (no speech detected), edit recipe ready ({_timings['normalize_transcribe_upload']:.1f}s)", flush=True)
-        else:
-            print(f"[pipeline] All init complete: {len(_dg_words)} words, edit recipe ready ({_timings['normalize_transcribe_upload']:.1f}s)", flush=True)
+        if len(_dg_words) == 0 and mode != "render_only":
+            # Talking-head editor requires spoken content. Silent/no-speech sources
+            # produce no captions and no word-based cuts, so there's nothing to edit.
+            # In render_only we trust the provided plan (previous render already
+            # handled this case) but a fresh pipeline run must have speech.
+            raise RuntimeError(
+                "No speech detected in source (Deepgram returned 0 words). This "
+                "pipeline requires spoken audio."
+            )
+        print(f"[pipeline] All init complete: {len(_dg_words)} words, edit recipe ready ({_timings['normalize_transcribe_upload']:.1f}s)", flush=True)
 
         print(f"[edit] User vibe: \"{vibe}\"", flush=True)
 
@@ -7846,31 +7841,11 @@ def handler(job):
                         flush=True,
                     )
                     break
-            try:
-                data, mime = select_best_thumbnail_frame(
-                    output_path, _thumb_seed, work_dir,
-                )
-            except Exception as _thumb_err:
-                # Last-resort fallback: extract a single frame at the seed timestamp
-                # without any scoring. Should be very rare (only triggers on cv2/ffprobe
-                # failures, not on bad-quality frames).
-                print(f"[thumbnail] WARNING: scorer failed ({_thumb_err}) — using seed frame", flush=True)
-                _fallback_path = os.path.join(work_dir, "thumbnail_fallback.jpg")
-                _r = subprocess.run(
-                    ["ffmpeg", "-y", "-v", "warning",
-                     "-ss", f"{_thumb_seed:.3f}", "-i", output_path,
-                     "-frames:v", "1", "-q:v", "2", _fallback_path],
-                    capture_output=True, text=True, timeout=10,
-                )
-                if _r.returncode != 0 or not os.path.exists(_fallback_path):
-                    raise RuntimeError(f"Thumbnail fallback failed: {(_r.stderr or '')[-300:]}")
-                with open(_fallback_path, "rb") as f:
-                    data = f.read()
-                try:
-                    os.unlink(_fallback_path)
-                except Exception:
-                    pass
-                mime = "image/jpeg"
+            # AI-scored thumbnail selection. No fallback — if the scorer fails,
+            # the whole job fails so the underlying bug gets fixed at root.
+            data, mime = select_best_thumbnail_frame(
+                output_path, _thumb_seed, work_dir,
+            )
             if data:
                 print(
                     f"[pipeline] cover frame at {cover_frame_ts:.2f}s "
