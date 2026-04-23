@@ -1,6 +1,6 @@
 import modal
 
-# rebuild trigger v29 — zero retries/fallbacks/buffers: plan_diff single attempt, transition word-rewire removed, HormoziPopIn zero-word override removed, caption boundary snap removed (strict word-boundary match), micro-clip merge removed (fail hard), overlap fix → assertion, setdefault buffers → required fields, thumbnail AI scorer fallback removed
+# rebuild trigger v30 — fonts served locally: all 15 @remotion/google-fonts/* imports aliased to no-op shim at bundle time, 15 font families (.ttf) installed system-wide + fontconfig-verified at image build, zero font network fetches at render time, dead runtime-font-registration code removed
 
 # ── Image definition (replaces Dockerfile) ────────────────────────────────────
 image = (
@@ -115,8 +115,23 @@ image = (
     )
     .add_local_dir("src/assets/fonts", "/assets/fonts", copy=True)
     .run_commands(
-        # Register fonts system-wide for both Remotion (Chromium) and FFmpeg libass
+        # Register fonts system-wide for both Remotion (Chromium) and FFmpeg libass.
+        # Every font the 66-component pack references via @remotion/google-fonts/*
+        # (those imports are aliased to our no-op shim in prebundle.mjs) MUST be
+        # resolvable by fontconfig here, or Chromium will render in a generic
+        # sans-serif fallback and the visual identity of each caption style / MG
+        # collapses. Fails the build if any required family is missing.
         "cp /assets/fonts/*.ttf /usr/share/fonts/truetype/ && fc-cache -f",
+        (
+            "for family in Anton 'Caveat Brush' 'Cormorant Garamond' 'DM Sans' "
+            "'DM Serif Display' Inter 'JetBrains Mono' Lora Montserrat Oswald "
+            "'Playfair Display' Poppins Roboto 'Space Mono' Teko; do "
+            "  if ! fc-list | grep -q \"$family\"; then "
+            "    echo \"[font-verify] MISSING: $family not registered with fontconfig\" >&2; "
+            "    exit 1; "
+            "  fi; "
+            "done && echo '[font-verify] all 15 required font families registered'"
+        ),
     )
     # Remotion: copy source, install deps, download Chromium, pre-bundle
     .add_local_dir("src/remotion", "/remotion", copy=True)

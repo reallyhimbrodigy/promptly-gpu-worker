@@ -697,37 +697,12 @@ def update_user_style_profile(user_id, edit_plan, vibe, duration):
 # Download arnndn noise-reduction model if not present (used by audio_denoise feature)
 _RNNOISE_MODEL_PATH = "/usr/share/rnnoise/bd.rnnn"
 SFX_SOUNDS_DIR    = os.path.join(os.path.dirname(__file__), "assets", "sounds")
-CAPTION_FONT_DIR = "/usr/local/share/fonts/montserrat"
 
-
-_fonts_registered = False
-def ensure_caption_fonts_registered():
-    """Register mounted caption fonts with fontconfig.
-    Fonts are pre-registered at container build time (modal_app.py), so this
-    is a fast no-op check in the common case. Only runs once per container.
-    """
-    global _fonts_registered
-    if _fonts_registered:
-        return
-    _fonts_registered = True
-    try:
-        # Check if fonts are already registered (build-time registration)
-        fc_check = subprocess.run(
-            ["fc-list", ":family=Montserrat"], capture_output=True, text=True, timeout=5)
-        if "Montserrat" in (fc_check.stdout or ""):
-            print("[fonts] Montserrat already registered (build-time)", flush=True)
-            return
-        # Fallback: register at runtime
-        os.makedirs(CAPTION_FONT_DIR, exist_ok=True)
-        copied = 0
-        for src in glob.glob("/assets/fonts/*.ttf"):
-            dst = os.path.join(CAPTION_FONT_DIR, os.path.basename(src))
-            shutil.copy2(src, dst)
-            copied += 1
-        subprocess.run(["fc-cache", "-f"], check=False, capture_output=True, text=True, timeout=20)
-        print(f"[fonts] Registered {copied} caption fonts into {CAPTION_FONT_DIR}", flush=True)
-    except Exception as e:
-        print(f"[fonts] WARNING: failed to register caption fonts: {e}", flush=True)
+# NOTE: caption / motion-graphic / transition fonts are registered system-wide
+# at Modal image build time (see modal_app.py — the image build fails hard if
+# any of the 15 required families aren't resolvable by fontconfig). The
+# runtime `ensure_caption_fonts_registered()` helper was removed because its
+# fallback path contradicted "fail hard at build time, no runtime recovery."
 if not os.path.exists(_RNNOISE_MODEL_PATH):
     try:
         os.makedirs(os.path.dirname(_RNNOISE_MODEL_PATH), exist_ok=True)
@@ -7240,7 +7215,6 @@ def handler(job):
         print(f"{'='*80}", flush=True)
         _pipeline_start = time.time()
         _timings = {}
-        ensure_caption_fonts_registered()
 
         # Step 1 — Download (S3 internal network if available, HTTP fallback)
         send_progress(job_id, "download", 5, "Got your video, loading it in...", app_url)
