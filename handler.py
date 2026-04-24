@@ -7540,9 +7540,21 @@ def _prewarm_cached_source_path(bucket, key):
     return os.path.join(PREWARM_CACHE_ROOT, _prewarm_cache_key(bucket, key), "source.mp4")
 
 
+def _prewarm_cached_transcript_path(bucket, key):
+    return os.path.join(PREWARM_CACHE_ROOT, _prewarm_cache_key(bucket, key), "transcript.json")
+
+
 def prewarm_handler(job):
-    """Download a source video into the Modal Volume cache. Idempotent — if the
-    file already exists, returns immediately. Fire-and-forget from iOS attach."""
+    """Aggressive pre-processing during iOS upload.
+
+    Runs S3 download AND URL-based Deepgram transcription in parallel, caching
+    both into the Modal Volume keyed by sha1(bucket/key). When the real render
+    job arrives and hits cache, it skips BOTH stages entirely — UI never shows
+    'Loading your footage' OR 'Transcribing every word'.
+
+    Idempotent: if artifacts already exist, returns immediately. Fire-and-forget
+    from iOS attach, so latency here doesn't affect UX.
+    """
     input_data = job.get("input") or {}
     try:
         video_url = str(input_data.get("video_url") or "").strip()
@@ -7557,29 +7569,66 @@ def prewarm_handler(job):
 
         cache_key = _prewarm_cache_key(dl_bucket, dl_key)
         cache_dir = os.path.join(PREWARM_CACHE_ROOT, cache_key)
-        cache_path = os.path.join(cache_dir, "source.mp4")
+        source_cache = os.path.join(cache_dir, "source.mp4")
+        transcript_cache = os.path.join(cache_dir, "transcript.json")
 
-        if os.path.exists(cache_path) and os.path.getsize(cache_path) > 1024:
-            size_mb = os.path.getsize(cache_path) / (1024 * 1024)
-            print(f"[prewarm] HIT {cache_key} ({size_mb:.1f}MB) — already cached", flush=True)
-            return {
-                "status": "cached",
-                "cache_key": cache_key,
-                "size_mb": round(size_mb, 1),
-            }
+        source_hit = os.path.exists(source_cache) and os.path.getsize(source_cache) > 1024
+        transcript_hit = os.path.exists(transcript_cache) and os.path.getsize(transcript_cache) > 2
+
+        if source_hit and transcript_hit:
+            size_mb = os.path.getsize(source_cache) / (1024 * 1024)
+            print(f"[prewarm] FULL HIT {cache_key} ({size_mb:.1f}MB source + transcript)", flush=True)
+            return {"status": "cached", "cache_key": cache_key, "size_mb": round(size_mb, 1)}
 
         os.makedirs(cache_dir, exist_ok=True)
         t0 = time.time()
-        print(f"[prewarm] MISS {cache_key} — downloading {dl_bucket}/{dl_key}", flush=True)
-        _aws_s3_client.download_file(dl_bucket, dl_key, cache_path, Config=_S3_TRANSFER_CONFIG)
+
+        # Presigned GET so Deepgram can fetch from S3 in parallel with our own download.
+        presigned_url = None
+        try:
+            presigned_url = _aws_s3_client.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": dl_bucket, "Key": dl_key},
+                ExpiresIn=600,
+            )
+        except Exception as _ps_err:
+            print(f"[prewarm] presigned URL gen failed: {_ps_err}", flush=True)
+
+        # Download + transcribe in parallel.
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+        fut_dl = None
+        fut_tx = None
+        if not source_hit:
+            print(f"[prewarm] start download → {cache_key}/source.mp4", flush=True)
+            fut_dl = pool.submit(
+                lambda: _aws_s3_client.download_file(dl_bucket, dl_key, source_cache, Config=_S3_TRANSFER_CONFIG)
+            )
+        if not transcript_hit and presigned_url and DeepgramClient is not None:
+            print(f"[prewarm] start URL-based transcribe → {cache_key}/transcript.json", flush=True)
+            fut_tx = pool.submit(transcribe_audio_url, presigned_url)
+
+        if fut_dl is not None:
+            fut_dl.result()
+        if fut_tx is not None:
+            _tx_result = fut_tx.result()
+            if _tx_result is not None:
+                with open(transcript_cache, "w") as f:
+                    json.dump(_tx_result, f)
+                print(f"[prewarm] transcript cached ({len(_tx_result.get('words') or [])} words)", flush=True)
+            else:
+                print("[prewarm] transcribe returned None (fallback will handle in main job)", flush=True)
+
+        pool.shutdown(wait=False)
+
         elapsed = time.time() - t0
-        size_mb = os.path.getsize(cache_path) / (1024 * 1024)
+        size_mb = os.path.getsize(source_cache) / (1024 * 1024) if os.path.exists(source_cache) else 0
         print(f"[prewarm] cached {cache_key} ({size_mb:.1f}MB in {elapsed:.1f}s)", flush=True)
         return {
             "status": "success",
             "cache_key": cache_key,
             "size_mb": round(size_mb, 1),
             "download_time": round(elapsed, 1),
+            "transcript_cached": os.path.exists(transcript_cache),
         }
     except Exception as e:
         import traceback
@@ -7646,14 +7695,35 @@ def handler(job):
         # for it. With a healthy download (~2-5s after boto3[crt]) the
         # transcript usually lands within a few seconds of the file — any
         # overlap is pure win.
-        send_progress(job_id, "download", 5, "Got your video, loading it in...", app_url)
         t = time.time()
-        print("[pipeline] step=download + parallel kickoff", flush=True)
         _dl_bucket, _dl_key = _parse_aws_s3_url(video_url)
         if not _dl_bucket or not _dl_key:
             raise RuntimeError(f"Not a valid AWS S3 URL: {video_url}")
         if not _aws_s3_client:
             raise RuntimeError("AWS S3 client not initialized — check AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_REGION in Modal secrets")
+
+        # ── Prewarm cache check — SKIP emitting `download` / `transcribe`
+        # tokens entirely when the prewarm lane pre-computed them. Anything
+        # we can satisfy from the Volume, we do — silently — so the client
+        # UI never shows "Loading your footage" or "Transcribing every word"
+        # for work that's already done. First user-visible stage in the
+        # hot path becomes face_detect, or on re-edit paths, plan.
+        _cached_source_path = _prewarm_cached_source_path(_dl_bucket, _dl_key)
+        _cached_transcript_path = _prewarm_cached_transcript_path(_dl_bucket, _dl_key)
+        _has_cached_source = os.path.exists(_cached_source_path) and os.path.getsize(_cached_source_path) > 1024
+        _has_cached_transcript = (
+            not provided_transcript
+            and os.path.exists(_cached_transcript_path)
+            and os.path.getsize(_cached_transcript_path) > 2
+        )
+
+        # Only emit the `download` token on a true cache miss — a cached copy
+        # resolves in <100ms and would flash the UI label for no reason.
+        if not _has_cached_source:
+            send_progress(job_id, "download", 5, "Got your video, loading it in...", app_url)
+            print("[pipeline] step=download + parallel kickoff", flush=True)
+        else:
+            print("[pipeline] prewarm cache hit — suppressing `download` SSE event", flush=True)
 
         # Presigned GET URL so Deepgram can fetch the source without AWS IAM.
         try:
@@ -7666,10 +7736,20 @@ def handler(job):
             print(f"[deepgram] presigned URL gen failed: {_ps_err} — will use local path after download", flush=True)
             _deepgram_presigned = None
 
+        # If prewarm cached the transcript, load it and pass it down the
+        # existing provided_transcript rail — skips all Deepgram work AND
+        # suppresses the `transcribe` SSE event.
+        if _has_cached_transcript:
+            try:
+                with open(_cached_transcript_path, "r") as _tf:
+                    provided_transcript = json.load(_tf)
+                print(f"[pipeline] prewarm transcript hit ({len(provided_transcript.get('words') or [])} words) — suppressing `transcribe` SSE event", flush=True)
+            except Exception as _tr_err:
+                print(f"[pipeline] failed to read cached transcript ({_tr_err}) — will re-transcribe", flush=True)
+
         _early_pool = concurrent.futures.ThreadPoolExecutor(max_workers=3)
-        # Only run URL-based Deepgram in modes where we actually transcribe
-        # (full + reinterpret-without-cached-transcript). render_only / tweak
-        # reuse the cached transcript from the parent job, skip entirely.
+        # Only run URL-based Deepgram when we actually need a transcript and
+        # don't already have one from prewarm cache or re-edit input.
         _can_url_transcribe = (
             mode not in ("render_only", "tweak")
             and not provided_transcript
@@ -7688,17 +7768,13 @@ def handler(job):
         if _can_parallel_trend:
             future_early_trend = _early_pool.submit(get_trend_context)
 
-        # Before hitting S3, check the prewarm volume cache. iOS fires a
-        # /prewarm on upload-complete, so by the time the user taps Send
-        # the source is usually already on the volume — copy is sub-second.
-        _cached_source_path = _prewarm_cached_source_path(_dl_bucket, _dl_key)
-        if os.path.exists(_cached_source_path) and os.path.getsize(_cached_source_path) > 1024:
+        # Move source bytes into the job's work_dir — cache hit = ~100ms copy,
+        # miss = real S3 download (still fast after boto3[crt] + same-region).
+        if _has_cached_source:
             import shutil as _sh
             _sh.copy(_cached_source_path, source_path)
             _dl_method = "prewarm-cache"
         else:
-            # Cache miss — actual download. Blocks the main thread while the
-            # early-pool stages (URL transcribe + trend fetch) continue in bg.
             _aws_s3_client.download_file(_dl_bucket, _dl_key, source_path, Config=_S3_TRANSFER_CONFIG)
             _dl_method = "s3-crt"
         size_mb = os.path.getsize(source_path) / (1024*1024)
