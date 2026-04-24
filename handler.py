@@ -2044,9 +2044,6 @@ The pipeline enforces these rules with strict validators. Output that violates a
 10. ANCHORS ARE KEPT WORDS. Every index in `emphasis_moments[i].word_indices` and every `sound_effects[i].word_index` references a word that SURVIVES your `remove_words` list. The pipeline derives timestamps from these word anchors — there's no free-form `t` for you to emit.
 11. EXPLICIT NULLS. If an emphasis moment has no zoom, emit `"zoom_effect": null` — no downstream defaults fill gaps.
 
-{signals_block}
-{_usr_block}
-
 === SAFE ZONES (1080x1920 canvas) ===
 
 Body zone (all visible elements live here):
@@ -2442,14 +2439,14 @@ IMPACT SOUNDS — instant transient. `t` is exactly the moment the hit should la
  3. "ding"           — Clean single-tone notification bell. iMessage-style — bright mid-high with a clean decay, NOT metallic like ching.
                         Best for: notification events ONLY — on-screen notifications, incoming messages/alerts, phone notification reveals, "you've got mail" beats. Pair naturally with the Notification motion-graphic.
                         Triggers on: *notification, alert, message, text, email, ping, notified*.
-                        Do NOT use for: correct answers, lightbulb ideas, general "yes" acknowledgments, level-ups, positive-check moments. Those muddy the signal with the Notification MG pairing.
+                        Skip for: correct answers, lightbulb ideas, general "yes" acknowledgments, level-ups, positive-check moments — the Notification MG pairing makes those contexts feel mismatched. Reach for `pop` or silence instead.
  4. "pop"            — Quick cartoony bubble-burst. Bright, playful, mid-energy transient.
                         Best for: item appearances, playful reveals, text-pops, sticker/emoji reveals, lighthearted visual punctuation.
                         Triggers on: *pop, appeared, suddenly, out of nowhere, surprise*, any lighthearted reveal word.
  5. "camera_shutter" — Mechanical DSLR shutter snap. Short dual-click with a slight metallic ring.
                         Best for: ONLY when an actual photo/picture is being taken on-screen, or the dialogue LITERALLY references taking a photo/screenshot. Rare — most videos should not use this at all.
                         Triggers on (literal sense only): *took a picture, photo, snap a pic, selfie, screenshot, say cheese*.
-                        Do NOT use for: metaphorical "capture the moment", "freeze frame", still-moment visuals without a camera reference, or as generic punctuation.
+                        Skip for: metaphorical "capture the moment", "freeze frame", still-moment visuals without an actual camera reference, or generic punctuation. When unsure, pick silence.
  6. "click"          — Very soft, quiet UI button click. Low-energy tap, almost subliminal. Punctuates without intruding.
                         Best for: UI interactions, toggle moments, checkbox confirmations, micro-beats where you want rhythm but can't have loudness.
                         Triggers on: *click, tap, press, select, enable, tick, checked*.
@@ -2471,14 +2468,14 @@ BUILD-UP SOUNDS — long builds (1.3–1.7s) climaxing at the end. The renderer 
                         Needs ≥1.65s of kept-clip time before the trigger word.
 10. "reverse"        — Reverse riser. Builds continuously in volume and pitch for ~1.37s, climaxing at the very end. Engineered as a cinematic "suck-toward-the-moment" effect — the entire sound IS anticipation.
                         Best for: priming a MAJOR visual event. ALWAYS pair with something visually impactful landing on the trigger word — a hard cut to a new scene, a zoom effect landing (SnapReframe / StepZoom / LetterboxPush), a color pulse hit (InvertStrike / VignettePulse), a TornPaper or motion-graphic slam, or a transition peak. The 1.37s rise plays across the preceding clip audio and releases into the visual beat.
-                        Do NOT use for: generic "wait for it" conversation, punctuating sentences with no visual event attached, building up to a normal talking-head cut with nothing extra happening, or back-to-back triggers. Without a paired visual payoff, this sound feels anticlimactic.
+                        Skip when there's no paired visual payoff — generic "wait for it" dialogue, punctuating sentences with no visual event attached, building up to a normal talking-head cut with nothing extra happening, or back-to-back triggers. Without a visual climax landing on the trigger word, this sound feels anticlimactic.
                         Needs ≥1.37s of kept-clip time before the trigger word.
 11. "sad_trombone"   — The iconic "wah wah waaah" four-note descending trombone. 1.3s descending phrase climaxing on the final low note. Unambiguously comedic — every listener recognizes this as the "you failed" joke sound. There is no way to use this sincerely; it IS the joke.
                         Best for: ONLY when the content is EXPLICITLY comedic and the "failure" is being played for laughs. Trivial mishaps, obvious mock-failures, game-show-style setups, bloopers, intentional self-own jokes.
                         Required tonal gate — verify BOTH before emitting:
                           (a) User's vibe is comedic, playful, ironic, or self-deprecating (e.g. "funny", "comedy", "blooper", "joke", "fail compilation", "roast"). If the vibe is motivational, educational, interview, storytelling, lifestyle, business, or any serious register — DO NOT USE.
                           (b) Dialogue at the trigger moment is clearly comedic — the speaker is making light of the moment intentionally, not processing something real.
-                        Do NOT use for: real failures, breakups, deaths, job losses, business collapses, mental-health struggles, motivational / overcoming-adversity content, interview / podcast / storytelling where a guest shares a vulnerable moment, or ANY reflective / emotional / vulnerable content. Any "sad" trigger word taken out of tonal context — the word "failed" does NOT auto-trigger this sound. Context trumps vocabulary. When in doubt, skip.
+                        Skip for: real failures, breakups, deaths, job losses, business collapses, mental-health struggles, motivational / overcoming-adversity content, interviews / podcasts / storytelling where a guest shares a vulnerable moment, and any reflective / emotional / vulnerable content. Trigger words alone never justify this sound — "failed" in a serious context calls for silence. Context trumps vocabulary. When in doubt, skip.
                         Needs ≥1.29s of kept-clip time before the trigger word.
 
 ATMOSPHERIC SWEEPS — airy sweeps used BETWEEN beats rather than ON impact words. Near-instant onset, long trail.
@@ -2571,8 +2568,6 @@ outro              — "none" | "fade_black" | "fade_white". "none" best for loo
 aspect_ratio       — always "9:16".
 pacing             — "fast" | "medium" | "slow".
 
-{trend_block}
-
 === RESPONSE FORMAT ===
 
 Output ONLY a JSON object — no commentary, no markdown fences, no prose.
@@ -2623,9 +2618,38 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
     {{"word_index": int, "reason": "stutter"|"false_start"|"filler"}} or
     {{"start": float, "end": float, "reason": "dead_air"|"section_skip"|"non_speech_gap"}}
   ]
-}}"""
+}}
 
-    return prompt
+=== BEFORE YOU EMIT — INTERNAL VERIFICATION ===
+
+Work through these checks against the plan you are about to emit. This is self-verification — do not externalize it in your output.
+
+1. Word anchors are kept. For every `emphasis_moments[i].word_indices`, every `sound_effects[i].word_index`, every `text_overlays[i].start_word_index`, and every `motion_graphics[i].start_word_index` / `end_word_index`: confirm the word is not inside any `remove_words` entry (neither a direct `word_index` match nor inside a `{{start, end}}` range covering the word's time). An anchor on a removed word means the viewer never sees the trigger — re-pick a kept neighbor word.
+2. Caption segments cover the full duration. `caption_position_segments[0].from_seconds == 0.0`. `caption_position_segments[-1].to_seconds` equals the source duration given in the user message. Every `to_seconds` equals the next segment's `from_seconds`. Every interior boundary matches a real word-boundary timestamp from the transcript you were given.
+3. Non-overlap in time. No two `text_overlays` windows (start_word.start, start_word.start + duration_seconds) overlap. No `text_overlays` window overlaps any `motion_graphics` window or any `emphasis_moments[i].motion_graphic` window. High-intensity emphasis moments are ≥2.5s apart.
+4. One zoom per kept-source clip. Within each contiguous source range between removed-word boundaries, at most one `emphasis_moments[i].zoom_effect` is non-null. Multiple beats close together stack their events onto a single emphasis_moment's `zoom_effect.events` array.
+5. Z-order yield. For every window a motion_graphic sits in the lower half (`lower_third_safe` or `center`-ish), `caption_position_segments` is `top` across that window.
+6. Color consistency. If any `emphasis_moments[i].color_pulse == true`, `color_effect` is non-null and `color_effect.timing.mode == "pulsed"`. `InvertStrike` requires `timing.mode == "pulsed"` with at least one pulse.
+7. MG anchors are absolute zones. Every `motion_graphics[i].anchor` and every `emphasis_moments[i].motion_graphic.anchor` is one of the 5 absolute zones (`upper_third_safe`, `center`, `lower_third_safe`, `left_safe`, `right_safe`).
+8. Explicit nulls. Every emphasis_moment has explicit `zoom_effect` (value or null), `color_pulse` (bool), and `motion_graphic` (value or null) fields — no omissions.
+9. Build-up SFX headroom. For every `drum_roll`, `reverse`, or `sad_trombone`, the trigger word has at least the required build duration of kept-clip time before it (drum_roll ≥1.65s, reverse ≥1.37s, sad_trombone ≥1.29s).
+10. sad_trombone tonal gate. If `sad_trombone` appears, the vibe is explicitly comedic/playful/ironic AND the surrounding dialogue is being played for laughs. Otherwise remove it.
+
+If any check fails, revise the plan before emitting JSON. The validators reject violations — fixing them here is cheaper than re-generating."""
+
+    user_content_parts = []
+    user_content_parts.append(f"The user wants: {vibe}")
+    user_content_parts.append(f"This video is {duration:.1f} seconds long ({duration:.3f}s source duration).")
+    user_content_parts.append(signals_block.strip())
+    if _usr_block:
+        user_content_parts.append(_usr_block.strip())
+    if trend_block:
+        user_content_parts.append(trend_block.strip())
+    user_content = "\n\n".join(user_content_parts)
+
+    return system_instruction, user_content
+
+
 def infer_has_burned_captions(edit_plan, analysis_data=None, log_prefix=None):
     has_burned_captions = bool(
         ((analysis_data or {}).get("frame_layout") or {})
@@ -2727,7 +2751,7 @@ def generate_edit_gemini(
     )
 
     client = _get_genai_client()
-    prompt = build_gemini_edit_prompt(
+    system_instruction, user_content = build_gemini_edit_prompt(
         vibe=vibe,
         duration=duration,
         trend_context=trend_context,
@@ -2741,7 +2765,9 @@ def generate_edit_gemini(
         user_style_profile=user_style_profile,
     )
 
-    # Inject Deepgram word timestamps so Gemini can place cuts precisely
+    # Append Deepgram word timestamps to the USER content. Transcript is
+    # per-video, so it stays out of system_instruction (which must remain
+    # byte-stable across calls for implicit caching).
     if deepgram_words:
         readable_words = []
         for w in deepgram_words:
@@ -2758,7 +2784,7 @@ def generate_edit_gemini(
 
         transcript_block = "\n".join(word_lines)
         first_word_start = float(deepgram_words[0].get("start", 0))
-        prompt += f"""
+        user_content += f"""
 
 === FULL TRANSCRIPT ===
 
@@ -2796,7 +2822,7 @@ RULES FOR USING THESE TIMESTAMPS:
         # from content-studio leak into Gemini's b-roll keyword generation,
         # overriding the stock-footage-title instructions.
         if _pa_parts:
-            prompt += "\n\n=== PRE-ANALYZED VIDEO DATA ===\n" + "\n".join(_pa_parts) + "\n"
+            user_content += "\n\n=== PRE-ANALYZED VIDEO DATA ===\n" + "\n".join(_pa_parts) + "\n"
             print(f"[generate-edit] Injected pre-analysis context ({len(_pa_parts)} sections)", flush=True)
 
     if trend_context:
@@ -2814,7 +2840,11 @@ RULES FOR USING THESE TIMESTAMPS:
     else:
         raise RuntimeError("No video data provided — need either inline_video_bytes or gemini_file")
 
-    print(f"[generate-edit] Calling Gemini model={GEMINI_MODEL} (thinking=MEDIUM, structured output, temp=1.0)...", flush=True)
+    print(
+        f"[generate-edit] Calling Gemini model={GEMINI_MODEL} (thinking=HIGH, structured output, temp=1.0, "
+        f"system_instruction={len(system_instruction)} chars, user_content={len(user_content)} chars)...",
+        flush=True,
+    )
     t = time.time()
     # response_json_schema enforces the EditPlan structure at token-generation
     # time — the model cannot emit missing fields, wrong types, or out-of-enum
@@ -2826,19 +2856,44 @@ RULES FOR USING THESE TIMESTAMPS:
     # temperature=1.0 is Google's explicit recommendation for Gemini 3 — values
     # below 1.0 "may lead to unexpected behavior, such as looping or degraded
     # performance." (per ai.google.dev/gemini-api/docs/text-generation)
+    #
+    # system_instruction + stable prefix enables implicit prompt caching — the
+    # system block is byte-identical across calls; per-video data lives in
+    # user_content, so Gemini re-reads only the deltas (video + transcript +
+    # signals).
+    #
+    # max_output_tokens=32768 so high thinking budget has room to produce a
+    # full, structurally-valid JSON response without truncation. Thinking
+    # tokens count against this limit.
     response = client.models.generate_content(
         model=GEMINI_MODEL,
-        contents=[_video_part, prompt],
+        contents=[_video_part, user_content],
         config=genai_types.GenerateContentConfig(
+            system_instruction=system_instruction,
             temperature=1.0,
-            max_output_tokens=8192,
+            max_output_tokens=32768,
             response_mime_type="application/json",
             response_json_schema=EditPlan.model_json_schema(),
-            thinking_config=genai_types.ThinkingConfig(thinking_level="MEDIUM"),
+            thinking_config=genai_types.ThinkingConfig(thinking_level="HIGH"),
             media_resolution="MEDIA_RESOLUTION_LOW",
         ),
     )
     print(f"[generate-edit] Gemini complete in {time.time()-t:.1f}s", flush=True)
+    try:
+        usage = getattr(response, "usage_metadata", None)
+        if usage is not None:
+            prompt_tokens = getattr(usage, "prompt_token_count", None)
+            cached_tokens = getattr(usage, "cached_content_token_count", None)
+            thoughts_tokens = getattr(usage, "thoughts_token_count", None)
+            output_tokens = getattr(usage, "candidates_token_count", None)
+            total_tokens = getattr(usage, "total_token_count", None)
+            print(
+                f"[generate-edit] Tokens — prompt={prompt_tokens} cached={cached_tokens} "
+                f"thoughts={thoughts_tokens} output={output_tokens} total={total_tokens}",
+                flush=True,
+            )
+    except Exception as _e:
+        print(f"[generate-edit] usage_metadata read failed: {_e}", flush=True)
 
     response_text = str(getattr(response, "text", "") or "").strip()
     try:

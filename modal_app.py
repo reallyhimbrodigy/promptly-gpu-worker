@@ -1,6 +1,6 @@
 import modal
 
-# rebuild trigger v34 — Gemini reliability: response_json_schema (Pydantic EditPlan) enforces structure at decode, temperature 1.0 (Google rec), emphasis drops `t` entirely (Python derives from word_indices[0].start), sound_effects schema is {word_index, sound} only, ABSOLUTE RULES rewritten positively with MG-anchor dedupe.
+# rebuild trigger v35 — Word-anchored overlays + system/user split + thinking=HIGH. text_overlays and motion_graphics use start_word_index (kept-word enforced); Python projects to output frames. build_gemini_edit_prompt returns (system, user) tuple: stable system prefix enables implicit Gemini caching. max_output_tokens=32768 gives HIGH thinking headroom without truncation. Internal-verification footer (split-step self-check). Positive-framed SFX scope boundaries.
 
 # ── Image definition (replaces Dockerfile) ────────────────────────────────────
 image = (
