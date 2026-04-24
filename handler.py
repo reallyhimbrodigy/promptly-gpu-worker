@@ -2263,7 +2263,7 @@ The pipeline enforces these rules with strict validators. Output that violates a
    - High-intensity emphasis moments are spaced ≥2.5s apart.
 8. ONE ZOOM PER KEPT-SOURCE CLIP. At most one emphasis_moment carries a zoom_effect within any single kept-source clip (the source range between your removed-words boundaries). When you want multiple zoom beats close together, stack their events onto a single emphasis_moment's `zoom_effect.events` array.
 9. MOTION GRAPHIC ANCHORS ARE ABSOLUTE ZONES. Every `motion_graphics[i].anchor` and `emphasis_moments[i].motion_graphic.anchor` is one of the 5 absolute zones — MGs don't follow the speaker's face.
-10. ANCHORS ARE KEPT WORDS. Every index in `emphasis_moments[i].word_indices` and every `sound_effects[i].word_index` references a word that SURVIVES your `remove_words` list. The pipeline derives timestamps from these word anchors — there's no free-form `t` for you to emit.
+10. ANCHORS ARE KEPT WORDS — STRUCTURALLY ENFORCED. Every index you emit in any anchor field (`emphasis_moments[i].word_indices`, `sound_effects[i].word_index`, `text_overlays[i].start_word_index`, `motion_graphics[i].start_word_index` / `end_word_index`, `broll_clips[i].start_word_index` / `end_word_index`, `transitions[i].after_word_index`) is schema-constrained to the kept-word enum. The pipeline derives timestamps from these word anchors — there's no free-form `t` for you to emit.
 11. EXPLICIT NULLS. If an emphasis moment has no zoom, emit `"zoom_effect": null` — no downstream defaults fill gaps.
 
 === SAFE ZONES (1080x1920 canvas) ===
@@ -2381,7 +2381,7 @@ text_overlays — REQUIRED ARRAY (can be empty).
 Each entry:
   {{
     "variant": "torn_paper" | "sticky_note" | "quote_card" | "lower_third" | "caption_match",
-    "start_word_index": int,       # Deepgram word whose START the overlay appears on. Must be a KEPT word.
+    "start_word_index": int,       # Deepgram word whose START the overlay appears on. Schema-constrained to kept words.
     "duration_seconds": float,     # on-screen lifespan, 1.5 - 4.0s typical
     ...variant-specific REQUIRED props
   }}
@@ -2529,8 +2529,8 @@ Each entry is WORD-ANCHORED — Gemini picks the kept words the MG stretches acr
 
   {{
     "type": <mg_type>,
-    "start_word_index": int,       # KEPT Deepgram word the MG appears on (word's start = MG's on-screen start)
-    "end_word_index": int,         # KEPT Deepgram word the MG disappears after. Must be >= start_word_index.
+    "start_word_index": int,       # Deepgram word the MG appears on (word's start = MG's on-screen start). Schema-constrained to kept words.
+    "end_word_index": int,         # Deepgram word the MG disappears after. Must be >= start_word_index. Schema-constrained to kept words.
     "duration_seconds": float?,    # OPTIONAL override. When present, MG stays on screen for this duration (from start_word.start) regardless of end_word. Use for fixed-length pins (e.g. a 3s StatCard on one punchline word — set start_word_index==end_word_index and duration_seconds=3.0). Null = natural word-span.
     "anchor": <semantic_zone>,
     "props": {{...}}                 # component-specific
@@ -2614,26 +2614,13 @@ GUIDELINES:
 
 === WORD EDITING ===
 
-remove_words — how you remove content. ARRAY.
+remove_words — ARRAY. All word-level cleanup (fillers, stutters, false starts, dead air, contextual filler, phrasal restarts, narrative redundancy) has ALREADY been applied by the upstream mechanical + content-analysis pre-pass. The transcript you see is the post-pre-pass transcript; pre-cut words appear with `[PRE-CUT:reason]` tags and cannot be anchored.
 
-Each item:
-  {{"word_index": int, "reason": "stutter" | "false_start" | "filler"}}    # remove a specific word
-  {{"start": float, "end": float, "reason": "dead_air" | "section_skip" | "non_speech_gap"}}  # remove a range
+Your `remove_words` field is almost always EMPTY. Only emit an entry if you decide an entire narrative section should be skipped (e.g. a tangent unrelated to the video's vibe). Range-based entries only:
 
-ALWAYS REMOVE:
-  fillers: um, uh, er, ah, hmm, uhh, umm, erm, mhm, hm, mm, mmm, huh
-  exact-word stutters: "I I", "the the"
-  false starts: "shou-" before "shouldn't"
-  phrasal restarts: "I said, who is — I said, who is he?" (remove first attempt)
-  trailing cutoffs at the END (incomplete thoughts that never resolve)
+  {{"start": float, "end": float, "reason": "section_skip"}}
 
-CONTEXT-DEPENDENT (evaluate per sentence):
-  like, right, so, basically, literally, actually, honestly, just, really, kind of, sort of
-
-Dead air:
-  under 0.08s → keep
-  0.08 - 0.3s → remove
-  over 0.3s → always remove
+Preferred alternative: use `speed_curve` to accelerate low-value sections instead of cutting them. Hard cuts of content inside a clause are jarring; a 1.3–1.5× speed ramp preserves continuity while pacing through filler content.
 
 === HOOK ===
 
@@ -2644,7 +2631,7 @@ hook_clip — object or null. {{"source_start": float, "source_end": float}}.
 
 === SFX — SOUND EFFECTS ===
 
-Sound effects reinforce content beats. Use them liberally WHEN they genuinely add meaning to a moment, but silence > wrong sound. Emit as many as make sense — there's no hard cap. Each entry: {{"word_index": int, "sound": <name>}} — you pick the Deepgram word that triggers the SFX and the pipeline derives the exact timing. The word_index MUST be a KEPT word (not in your remove_words list), otherwise the viewer never hears the trigger.
+Sound effects reinforce content beats. Use them liberally WHEN they genuinely add meaning to a moment, but silence > wrong sound. Emit as many as make sense — there's no hard cap. Each entry: {{"word_index": int, "sound": <name>}} — you pick the Deepgram word that triggers the SFX and the pipeline derives the exact timing. The schema enum constrains word_index to kept words only; you cannot pick a pre-cut word.
 
 Every sound must literally FIT the moment. The description and Best-for below tell you what each sound sounds like and when to reach for it. Tonal context beats vocabulary matching — if the surrounding content doesn't fit the sound's character, skip it even when a trigger word matches.
 
@@ -2837,8 +2824,7 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
     {{"type": "<name>", "start_word_index": int, "end_word_index": int, "duration_seconds": float|null, "anchor": "<zone>", "props": {{...}}}}
   ],
   "remove_words": [
-    {{"word_index": int, "reason": "stutter"|"false_start"|"filler"}} or
-    {{"start": float, "end": float, "reason": "dead_air"|"section_skip"|"non_speech_gap"}}
+    {{"start": float, "end": float, "reason": "section_skip"}}
   ]
 }}
 
@@ -2846,16 +2832,17 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
 
 Work through these checks against the plan you are about to emit. This is self-verification — do not externalize it in your output.
 
-1. Word anchors are kept. For every `emphasis_moments[i].word_indices`, every `sound_effects[i].word_index`, every `text_overlays[i].start_word_index`, and every `motion_graphics[i].start_word_index` / `end_word_index`: confirm the word is not inside any `remove_words` entry (neither a direct `word_index` match nor inside a `{{start, end}}` range covering the word's time). An anchor on a removed word means the viewer never sees the trigger — re-pick a kept neighbor word.
-2. Caption segments cover the full duration. `caption_position_segments[0].from_seconds == 0.0`. `caption_position_segments[-1].to_seconds` equals the source duration given in the user message. Every `to_seconds` equals the next segment's `from_seconds`. Every interior boundary matches a real word-boundary timestamp from the transcript you were given.
-3. Non-overlap in time. No two `text_overlays` windows (start_word.start, start_word.start + duration_seconds) overlap. No `text_overlays` window overlaps any `motion_graphics` window or any `emphasis_moments[i].motion_graphic` window. High-intensity emphasis moments are ≥2.5s apart.
-4. One zoom per kept-source clip. Within each contiguous source range between removed-word boundaries, at most one `emphasis_moments[i].zoom_effect` is non-null. Multiple beats close together stack their events onto a single emphasis_moment's `zoom_effect.events` array.
-5. Z-order yield. For every window a motion_graphic sits in the lower half (`lower_third_safe` or `center`-ish), `caption_position_segments` is `top` across that window.
-6. Color consistency. If any `emphasis_moments[i].color_pulse == true`, `color_effect` is non-null and `color_effect.timing.mode == "pulsed"`. `InvertStrike` requires `timing.mode == "pulsed"` with at least one pulse.
-7. MG anchors are absolute zones. Every `motion_graphics[i].anchor` and every `emphasis_moments[i].motion_graphic.anchor` is one of the 5 absolute zones (`upper_third_safe`, `center`, `lower_third_safe`, `left_safe`, `right_safe`).
-8. Explicit nulls. Every emphasis_moment has explicit `zoom_effect` (value or null), `color_pulse` (bool), and `motion_graphic` (value or null) fields — no omissions.
-9. Build-up SFX headroom. For every `drum_roll`, `reverse`, or `sad_trombone`, the trigger word has at least the required build duration of kept-clip time before it (drum_roll ≥1.65s, reverse ≥1.37s, sad_trombone ≥1.29s).
-10. sad_trombone tonal gate. If `sad_trombone` appears, the vibe is explicitly comedic/playful/ironic AND the surrounding dialogue is being played for laughs. Otherwise remove it.
+1. Caption segments cover the full duration. `caption_position_segments[0].from_seconds == 0.0`. `caption_position_segments[-1].to_seconds` equals the source duration given in the user message. Every `to_seconds` equals the next segment's `from_seconds`. Every interior boundary matches a real word-boundary timestamp from the transcript you were given.
+2. Non-overlap in time. No two `text_overlays` windows (start_word.start, start_word.start + duration_seconds) overlap. No `text_overlays` window overlaps any `motion_graphics` window or any `emphasis_moments[i].motion_graphic` window. High-intensity emphasis moments are ≥2.5s apart.
+3. One zoom per kept-source clip. Within each contiguous source range between removed-word boundaries, at most one `emphasis_moments[i].zoom_effect` is non-null. Multiple beats close together stack their events onto a single emphasis_moment's `zoom_effect.events` array.
+4. Z-order yield. For every window a motion_graphic sits in the lower half (`lower_third_safe` or `center`-ish), `caption_position_segments` is `top` across that window.
+5. Color consistency. If any `emphasis_moments[i].color_pulse == true`, `color_effect` is non-null and `color_effect.timing.mode == "pulsed"`. `InvertStrike` requires `timing.mode == "pulsed"` with at least one pulse.
+6. MG anchors are absolute zones. Every `motion_graphics[i].anchor` and every `emphasis_moments[i].motion_graphic.anchor` is one of the 5 absolute zones (`upper_third_safe`, `center`, `lower_third_safe`, `left_safe`, `right_safe`).
+7. Explicit nulls. Every emphasis_moment has explicit `zoom_effect` (value or null), `color_pulse` (bool), and `motion_graphic` (value or null) fields — no omissions.
+8. Build-up SFX headroom. For every `drum_roll`, `reverse`, or `sad_trombone`, the trigger word has at least the required build duration of kept-clip time before it (drum_roll ≥1.65s, reverse ≥1.37s, sad_trombone ≥1.29s).
+9. sad_trombone tonal gate. If `sad_trombone` appears, the tonal_register is "comedic" AND the surrounding dialogue is being played for laughs. Otherwise remove it.
+
+Note: word-anchor validity (anchors reference kept words) is structurally enforced by the schema enum — the decoder literally cannot emit an anchor that would target a cut word. You don't need to verify it.
 
 If any check fails, revise the plan before emitting JSON. The validators reject violations — fixing them here is cheaper than re-generating."""
 
