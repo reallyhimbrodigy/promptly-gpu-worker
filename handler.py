@@ -155,7 +155,12 @@ class _TextOverlayNote(BaseModel):
 
 class _TextOverlay(BaseModel):
     variant: _TEXT_OVERLAY_VARIANTS
-    appear_at_seconds: float
+    # Word-anchored timing: overlay appears when `start_word_index`'s word is
+    # spoken (projected to output frames by Python). Duration is caller-
+    # specified because text overlays are short title cards with chosen
+    # length, not phrase-spanning. Python rejects entries whose
+    # start_word_index targets a removed word.
+    start_word_index: int
     duration_seconds: float
     # Variant-specific — Python validator enforces per-variant required fields.
     topText: Optional[str] = None
@@ -172,8 +177,16 @@ class _TextOverlay(BaseModel):
 
 class _MotionGraphic(BaseModel):
     type: _MG_TYPES
-    from_seconds: float
-    to_seconds: float
+    # Word-anchored timing. MG appears when `start_word_index`'s word is
+    # spoken and disappears when `end_word_index`'s word ends. Python
+    # projects word start/end times to output frames. Both indices must
+    # reference kept words. For fixed-duration overlays pinned to a
+    # single word (e.g. a 3s StatCard on one punchline), set
+    # start_word_index == end_word_index and provide duration_seconds
+    # as an override.
+    start_word_index: int
+    end_word_index: int
+    duration_seconds: Optional[float] = None  # override; null = use word span
     anchor: _SEMANTIC_ANCHOR
     props: Dict[str, Any] = Field(default_factory=dict)
 
@@ -2002,10 +2015,11 @@ SPEAKER POSITIONS (where each speaker sits in frame, by diarization + face detec
   speaker at their first on-camera appearance — the diarization IDs are stable.
   {_off_center_line}{_shot_scale_block}"""
 
-    prompt = f"""You are a professional short-form video editor working on a 1080x1920 (9:16) vertical video for TikTok, Instagram Reels, and YouTube Shorts. You watch the full video at 5 frames per second — you see every shot, every face, every gesture, every on-screen element. You hear every word.
-
-The user wants: "{vibe}"
-This video is {duration:.1f} seconds long.
+    # SYSTEM INSTRUCTION — stable content. No per-video interpolation (vibe,
+    # duration, signals) lives here so the prefix stays byte-identical across
+    # calls and implicit prompt caching can take effect. Per-video data is
+    # injected via the USER message below.
+    system_instruction = f"""You are a professional short-form video editor working on a 1080x1920 (9:16) vertical video for TikTok, Instagram Reels, and YouTube Shorts. You watch the full video at 5 frames per second — you see every shot, every face, every gesture, every on-screen element. You hear every word.
 
 Your job: produce an edit plan that looks professionally crafted — every cut, every caption move, every zoom, every motion graphic has a narrative reason. Not random. Not accidental. Intentional.
 
@@ -2016,7 +2030,7 @@ The pipeline enforces these rules with strict validators. Output that violates a
 1. POSITIONS ARE SEMANTIC ZONES. Use the named zones from the vocabulary (`upper_third_safe`, `center`, `lower_third_safe`, `left_safe`, `right_safe`). Pixel coordinates are not accepted.
 2. TIMES ARE SOURCE SECONDS. Every timestamp you emit references the source video's timeline — match values directly from the injected transcript, shot_changes, and vocal_emphasis arrays. Frame numbers are not accepted.
 3. EVERY TEXT OVERLAY HAS A VARIANT + ITS REQUIRED PROPS. The `variant` field chooses which visual treatment; each variant has a specific set of required props documented in the TEXT OVERLAYS section.
-4. CAPTIONS COVER THE FULL DURATION. `caption_position_segments` spans [0, {duration:.3f}] with no gaps or overlaps. First segment starts at 0, last ends at {duration:.3f}. Every interior boundary lands on a real word boundary from the injected transcript (rounded to 2 decimals — copy the exact value).
+4. CAPTIONS COVER THE FULL DURATION. `caption_position_segments` spans the entire source duration (stated in the user message) with no gaps or overlaps. First segment starts at 0.0, last ends at the source duration. Every interior boundary lands on a real word boundary from the injected transcript (rounded to 2 decimals — copy the exact value).
 5. Z-ORDER YIELDS TO MOTION GRAPHICS. When a motion_graphic occupies the lower half of the frame across window [t1, t2], set `caption_position_segments` to `top` across that same window. Captions and MGs do not share vertical space.
 6. COLOR EFFECT MODE CONSISTENCY:
    - `InvertStrike` requires `timing.mode = "pulsed"` with at least one pulse.
@@ -2127,7 +2141,7 @@ DECISION MATRIX — caption_style by content:
 
 caption_keywords — REQUIRED. 2-6 short words that matter narratively (punchline nouns, reveal names, emotional verbs). Lowercase, no punctuation.
 
-caption_position_segments — REQUIRED. Array covering the full duration [0, {duration:.3f}] with no gaps or overlaps.
+caption_position_segments — REQUIRED. Array covering the full source duration (stated in the user message) with no gaps or overlaps.
   Format: [{{"from_seconds": float, "to_seconds": float, "position": "top" | "center" | "bottom"}}, ...]
 
   Baseline: one segment at "bottom" covering the whole duration.
@@ -2148,10 +2162,12 @@ text_overlays — REQUIRED ARRAY (can be empty).
 Each entry:
   {{
     "variant": "torn_paper" | "sticky_note" | "quote_card" | "lower_third" | "caption_match",
-    "appear_at_seconds": float,   # output-timeline start
-    "duration_seconds": float,    # on-screen lifespan, 1.5 - 4.0s typical
+    "start_word_index": int,       # Deepgram word whose START the overlay appears on. Must be a KEPT word.
+    "duration_seconds": float,     # on-screen lifespan, 1.5 - 4.0s typical
     ...variant-specific REQUIRED props
   }}
+
+The overlay appears precisely when `start_word_index`'s word begins speaking (the pipeline projects the word's start time through the output cuts) and stays visible for `duration_seconds`. No free-form timestamp to get wrong.
 
 Variants and their REQUIRED props:
 
@@ -2290,13 +2306,15 @@ GUIDELINES:
 
 motion_graphics — ARRAY.
 
-Each entry:
+Each entry is WORD-ANCHORED — Gemini picks the kept words the MG stretches across, and the pipeline derives the on-screen window from those word timestamps projected through the output cuts.
+
   {{
     "type": <mg_type>,
-    "from_seconds": float,     # output-time appear
-    "to_seconds": float,       # output-time disappear
+    "start_word_index": int,       # KEPT Deepgram word the MG appears on (word's start = MG's on-screen start)
+    "end_word_index": int,         # KEPT Deepgram word the MG disappears after. Must be >= start_word_index.
+    "duration_seconds": float?,    # OPTIONAL override. When present, MG stays on screen for this duration (from start_word.start) regardless of end_word. Use for fixed-length pins (e.g. a 3s StatCard on one punchline word — set start_word_index==end_word_index and duration_seconds=3.0). Null = natural word-span.
     "anchor": <semantic_zone>,
-    "props": {{...}}             # component-specific
+    "props": {{...}}                 # component-specific
   }}
 
 Types, descriptions, use cases, and REQUIRED props (in the schema below, keys ending in `?` are optional):
@@ -2587,7 +2605,7 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
     }}
   ],
   "text_overlays": [
-    {{"variant": "...", "appear_at_seconds": float, "duration_seconds": float, ...variant props}}
+    {{"variant": "...", "start_word_index": int, "duration_seconds": float, ...variant props}}
   ],
   "sound_effects": [
     {{"word_index": int, "sound": "<name>"}}
@@ -2599,7 +2617,7 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
     {{"after_word_index": int, "type": "<name>", ...transition props}}
   ],
   "motion_graphics": [
-    {{"type": "<name>", "from_seconds": float, "to_seconds": float, "anchor": "<zone>", "props": {{...}}}}
+    {{"type": "<name>", "start_word_index": int, "end_word_index": int, "duration_seconds": float|null, "anchor": "<zone>", "props": {{...}}}}
   ],
   "remove_words": [
     {{"word_index": int, "reason": "stutter"|"false_start"|"filler"}} or
@@ -3347,11 +3365,21 @@ RULES FOR USING THESE TIMESTAMPS:
         raise ValueError(f"color_effect must be an object or null, got {type(_ce_raw).__name__}")
 
     # motion_graphics — array. Each entry validated strictly.
+    # motion_graphics — word-anchored (start_word_index + end_word_index, with
+    # optional duration_seconds override for fixed-duration pins). Python
+    # derives the output-time window from the kept-word timestamps. Gemini
+    # CANNOT emit a time that doesn't map to a real spoken moment.
     raw_mg = edit_plan.get("motion_graphics")
     if raw_mg is None:
         raw_mg = []
     if not isinstance(raw_mg, list):
         raise ValueError("motion_graphics must be an array")
+    # Build kept-word set once if emphasis validator hasn't yet (MG validator
+    # runs before emphasis). This mirrors the same constraint: only kept words
+    # anchor overlays.
+    _mg_kept_set = (
+        set(range(len(_dg_words))) - set(_removed_word_indices or set())
+    )
     validated_mg = []
     for _i, _mg in enumerate(raw_mg):
         if not isinstance(_mg, dict):
@@ -3362,12 +3390,39 @@ RULES FOR USING THESE TIMESTAMPS:
                 f"motion_graphics[{_i}].type must be one of {sorted(_valid_mg_types)}, got {_mg_type!r}"
             )
         try:
-            _from_s = float(_mg["from_seconds"])
-            _to_s = float(_mg["to_seconds"])
+            _sw = int(_mg["start_word_index"])
+            _ew = int(_mg["end_word_index"])
         except (KeyError, TypeError, ValueError):
-            raise ValueError(f"motion_graphics[{_i}] needs numeric from_seconds and to_seconds")
-        if _to_s <= _from_s:
-            raise ValueError(f"motion_graphics[{_i}] to_seconds must be > from_seconds")
+            raise ValueError(
+                f"motion_graphics[{_i}] needs integer start_word_index and end_word_index"
+            )
+        if _sw < 0 or _sw >= len(_dg_words):
+            raise ValueError(
+                f"motion_graphics[{_i}].start_word_index={_sw} out of range "
+                f"[0, {len(_dg_words)-1}]"
+            )
+        if _ew < 0 or _ew >= len(_dg_words):
+            raise ValueError(
+                f"motion_graphics[{_i}].end_word_index={_ew} out of range "
+                f"[0, {len(_dg_words)-1}]"
+            )
+        if _ew < _sw:
+            raise ValueError(
+                f"motion_graphics[{_i}].end_word_index ({_ew}) must be >= "
+                f"start_word_index ({_sw})"
+            )
+        if _sw not in _mg_kept_set:
+            _wt = str(_dg_words[_sw].get("punctuated_word") or _dg_words[_sw].get("word") or "").strip()
+            raise ValueError(
+                f"motion_graphics[{_i}].start_word_index={_sw} ({_wt!r}) targets "
+                f"a REMOVED word. Anchor to a kept word."
+            )
+        if _ew not in _mg_kept_set:
+            _wt = str(_dg_words[_ew].get("punctuated_word") or _dg_words[_ew].get("word") or "").strip()
+            raise ValueError(
+                f"motion_graphics[{_i}].end_word_index={_ew} ({_wt!r}) targets "
+                f"a REMOVED word. Anchor to a kept word."
+            )
         _anchor = str(_mg.get("anchor") or "").strip()
         if _anchor not in _valid_semantic_anchors:
             raise ValueError(
@@ -3377,10 +3432,33 @@ RULES FOR USING THESE TIMESTAMPS:
         _props = _mg.get("props")
         if not isinstance(_props, dict):
             raise ValueError(f"motion_graphics[{_i}].props must be an object")
+        # Optional duration override; validator only enforces range.
+        _dur_override = _mg.get("duration_seconds")
+        if _dur_override is not None:
+            try:
+                _dur_override = float(_dur_override)
+            except (TypeError, ValueError):
+                raise ValueError(
+                    f"motion_graphics[{_i}].duration_seconds must be a number if present"
+                )
+            if _dur_override < 0.3 or _dur_override > 20.0:
+                raise ValueError(
+                    f"motion_graphics[{_i}].duration_seconds={_dur_override} "
+                    f"outside [0.3, 20.0]"
+                )
+        # Derive the source-time window from the anchor words.
+        _sw_start = round(float(_dg_words[_sw].get("start") or 0), 3)
+        _ew_end = round(float(_dg_words[_ew].get("end") or 0), 3)
         validated_mg.append({
             "type": _mg_type,
-            "from_seconds": _from_s,
-            "to_seconds": _to_s,
+            "start_word_index": _sw,
+            "end_word_index": _ew,
+            # Source-time timestamps carried forward for render_multi_clip to
+            # project through the output timeline (same pattern as everything
+            # else that's word-anchored).
+            "_source_start": _sw_start,
+            "_source_end": _ew_end,
+            "duration_seconds_override": _dur_override,
             "anchor": _anchor,
             "props": _props,
         })
@@ -3714,6 +3792,9 @@ RULES FOR USING THESE TIMESTAMPS:
     edit_plan["_emphasis_moments"] = emphasis_moments
 
     # text_overlays — variant-dispatched, required props per variant.
+    # Word-anchored: Gemini emits start_word_index (must be a kept word) and
+    # duration_seconds. Python derives the output-time window from the word's
+    # start timestamp projected through cuts.
     _to_raw = edit_plan.get("text_overlays")
     if _to_raw is None:
         _to_raw = []
@@ -3729,15 +3810,37 @@ RULES FOR USING THESE TIMESTAMPS:
                 f"text_overlays[{_i}].variant must be one of {sorted(_valid_text_overlay_variants)}, got {_var!r}"
             )
         try:
-            _ap = float(_ov["appear_at_seconds"])
+            _swi = int(_ov["start_word_index"])
+        except (KeyError, TypeError, ValueError):
+            raise ValueError(
+                f"text_overlays[{_i}] needs integer start_word_index"
+            )
+        if _swi < 0 or _swi >= len(_dg_words):
+            raise ValueError(
+                f"text_overlays[{_i}].start_word_index={_swi} out of range "
+                f"[0, {len(_dg_words)-1}]"
+            )
+        if _swi not in _kept_word_indices:
+            _wt = str(_dg_words[_swi].get("punctuated_word") or _dg_words[_swi].get("word") or "").strip()
+            raise ValueError(
+                f"text_overlays[{_i}].start_word_index={_swi} ({_wt!r}) targets "
+                f"a REMOVED word. Anchor to a kept word or drop this overlay."
+            )
+        try:
             _du = float(_ov["duration_seconds"])
         except (KeyError, TypeError, ValueError):
             raise ValueError(
-                f"text_overlays[{_i}] needs numeric appear_at_seconds and duration_seconds"
+                f"text_overlays[{_i}] needs numeric duration_seconds"
             )
         if _du < 0.3 or _du > 10.0:
             raise ValueError(f"text_overlays[{_i}].duration_seconds out of range 0.3..10.0")
-        _entry = {"variant": _var, "appear_at_seconds": _ap, "duration_seconds": _du}
+        _source_start = round(float(_dg_words[_swi].get("start") or 0), 3)
+        _entry = {
+            "variant": _var,
+            "start_word_index": _swi,
+            "_source_start": _source_start,
+            "duration_seconds": _du,
+        }
         if _var == "torn_paper":
             for _p in ("topText", "bottomText"):
                 if not isinstance(_ov.get(_p), str) or not _ov[_p].strip():
@@ -3779,24 +3882,28 @@ RULES FOR USING THESE TIMESTAMPS:
         _to_validated.append(_entry)
     edit_plan["text_overlays"] = _to_validated
 
-    # Non-overlap: no two text_overlays may overlap in output time.
+    # Non-overlap: no two text_overlays may overlap in source time (since both
+    # overlays are anchored to source-time word starts + duration_seconds).
     for _i in range(len(_to_validated)):
         _a = _to_validated[_i]
-        _a_end = _a["appear_at_seconds"] + _a["duration_seconds"]
+        _a_start = _a["_source_start"]
+        _a_end = _a_start + _a["duration_seconds"]
         for _j in range(_i + 1, len(_to_validated)):
             _b = _to_validated[_j]
-            _b_end = _b["appear_at_seconds"] + _b["duration_seconds"]
-            if _a["appear_at_seconds"] < _b_end and _b["appear_at_seconds"] < _a_end:
+            _b_start = _b["_source_start"]
+            _b_end = _b_start + _b["duration_seconds"]
+            if _a_start < _b_end and _b_start < _a_end:
                 raise ValueError(
-                    f"text_overlays overlap: #{_i} ({_a['variant']} {_a['appear_at_seconds']:.2f}-{_a_end:.2f}s) "
-                    f"collides with #{_j} ({_b['variant']} {_b['appear_at_seconds']:.2f}-{_b_end:.2f}s)"
+                    f"text_overlays overlap: #{_i} ({_a['variant']} "
+                    f"{_a_start:.2f}-{_a_end:.2f}s) collides with #{_j} "
+                    f"({_b['variant']} {_b_start:.2f}-{_b_end:.2f}s)"
                 )
 
     # Non-overlap: text_overlays must not overlap any emphasis motion_graphic
     # window. Emphasis MG windows are centered slightly before the moment's t
     # (mirrors the render-time placement: 25% pre-roll, 75% post-roll).
     for _to in _to_validated:
-        _to_start = _to["appear_at_seconds"]
+        _to_start = _to["_source_start"]
         _to_end = _to_start + _to["duration_seconds"]
         for _em in emphasis_moments:
             if not _em["motion_graphic"]:
@@ -3814,7 +3921,7 @@ RULES FOR USING THESE TIMESTAMPS:
     if _to_validated:
         print(
             f"[text-overlays] {len(_to_validated)} overlay(s): "
-            + ", ".join(f"{o['variant']}@{o['appear_at_seconds']:.1f}s" for o in _to_validated),
+            + ", ".join(f"{o['variant']}@{o['_source_start']:.1f}s" for o in _to_validated),
             flush=True,
         )
 
@@ -6861,23 +6968,38 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 print(f"[broll] '{_kw}' out=[{_out_start:.2f}..{_out_end:.2f}]s dur={_eff:.2f}s seek={_seek_seconds:.2f}s", flush=True)
 
     # ── 4b. Text overlays — variant dispatch ────────────────────────────────
-    # Gemini emits appear_at_seconds + duration_seconds on the output timeline
-    # directly. We pass them through unchanged (converted to frames).
+    # Word-anchored: Gemini emits start_word_index + duration_seconds. Python
+    # projects the anchor word's source-time start through cuts to get the
+    # output-time start, then converts to frames. Overlay disappears after
+    # duration_seconds of OUTPUT time (stable regardless of downstream speed
+    # ramping on the anchor clip).
     text_overlays_out = []
     for _ov in (edit_plan.get("text_overlays") or []):
-        _ap = float(_ov["appear_at_seconds"])
         _du = float(_ov["duration_seconds"])
+        _source_start = float(_ov["_source_start"])
+        _out_start = project_source_time_to_output(
+            _source_start, render_cuts, _clip_ranges, speed_curve,
+            clip_time_maps=_clip_time_maps,
+        )
+        if _out_start is None:
+            raise RuntimeError(
+                f"text_overlays[{_ov.get('variant')}] anchor word (source "
+                f"t={_source_start:.2f}s) projected to None — anchor word was "
+                f"removed after validation, which should be impossible."
+            )
         _entry = {
             "variant": _ov["variant"],
-            "fromFrame": int(round(_ap * source_fps)),
+            "fromFrame": int(round(_out_start * source_fps)),
             "durationInFrames": max(1, int(round(_du * source_fps))),
         }
         for _k, _v in _ov.items():
-            if _k not in ("variant", "appear_at_seconds", "duration_seconds"):
-                _entry[_k] = _v
+            if _k in ("variant", "start_word_index", "_source_start", "duration_seconds"):
+                continue
+            _entry[_k] = _v
         text_overlays_out.append(_entry)
         print(
-            f"[text-overlay] {_ov['variant']} @ {_ap:.2f}s for {_du:.2f}s",
+            f"[text-overlay] {_ov['variant']} @ src={_source_start:.2f}s "
+            f"→ out={_out_start:.2f}s for {_du:.2f}s",
             flush=True,
         )
 
@@ -6957,22 +7079,42 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         if _extras:
             color_out["extraProps"] = _extras
 
-    # ── 7. Motion graphics — output-seconds directly, semantic anchor translated ─
-    # Gemini emits safe-zone anchors (upper_third_safe, center, lower_third_safe,
-    # left_safe, right_safe). We translate each into the MG pack's MGAnchor
-    # vocabulary and merge it into `props.anchor` so the component's own
-    # resolveMGPosition honors it. The renderer no longer wraps MGs in a
-    # 720×320 fiction; each component renders against the full canvas.
+    # ── 7. Motion graphics — word-anchored, output-projected, semantic-anchor-translated ─
+    # Gemini emits start_word_index + end_word_index (plus optional
+    # duration_seconds_override). Python projects the anchor words' source-time
+    # boundaries through the cuts timeline to get output-frame start/end. The
+    # SEMANTIC_TO_MG_ANCHOR map translates the safe-zone anchor into the MG
+    # pack's own MGAnchor vocabulary; components render against the full canvas.
     motion_graphics_out = []
     for _mg in (edit_plan.get("motion_graphics") or []):
-        _from_s = float(_mg["from_seconds"])
-        _to_s = float(_mg["to_seconds"])
-        _from_frame = max(0, int(round(_from_s * source_fps)))
-        _to_frame = min(total_output_frames, int(round(_to_s * source_fps)))
+        _sw_source = float(_mg["_source_start"])
+        _ew_source = float(_mg["_source_end"])
+        _out_start = project_source_time_to_output(
+            _sw_source, render_cuts, _clip_ranges, speed_curve,
+            clip_time_maps=_clip_time_maps,
+        )
+        _out_end = project_source_time_to_output(
+            _ew_source, render_cuts, _clip_ranges, speed_curve,
+            clip_time_maps=_clip_time_maps,
+        )
+        if _out_start is None or _out_end is None:
+            raise RuntimeError(
+                f"motion_graphic {_mg['type']} anchor words projected to None "
+                f"(source {_sw_source:.2f}-{_ew_source:.2f}s) — anchor word "
+                f"was removed after validation."
+            )
+        # duration_seconds_override lets a fixed-length pin extend beyond the
+        # natural word span. Anchor start unchanged; end = start + override.
+        _dur_override = _mg.get("duration_seconds_override")
+        if _dur_override is not None:
+            _out_end = _out_start + float(_dur_override)
+        _from_frame = max(0, int(round(_out_start * source_fps)))
+        _to_frame = min(total_output_frames, int(round(_out_end * source_fps)))
         if _to_frame <= _from_frame:
             raise RuntimeError(
-                f"motion_graphic {_mg['type']} [{_from_s:.2f}-{_to_s:.2f}] resolves to 0 frames "
-                f"(total_output_frames={total_output_frames})"
+                f"motion_graphic {_mg['type']} window projects to 0 frames "
+                f"(out_start={_out_start:.2f}s, out_end={_out_end:.2f}s, "
+                f"total_output_frames={total_output_frames})"
             )
         _mg_anchor = SEMANTIC_TO_MG_ANCHOR[_mg["anchor"]]
         _mg_props = {**_mg["props"], "anchor": _mg_anchor}
@@ -6983,8 +7125,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             "props": _mg_props,
         })
         print(
-            f"[mg] {_mg['type']} @ {_from_s:.2f}-{_to_s:.2f}s "
-            f"anchor={_mg['anchor']}→{_mg_anchor}",
+            f"[mg] {_mg['type']} src=[{_sw_source:.2f}..{_ew_source:.2f}]s "
+            f"→ out=[{_out_start:.2f}..{_out_end:.2f}]s anchor={_mg['anchor']}→{_mg_anchor}",
             flush=True,
         )
 
@@ -7708,6 +7850,16 @@ def handler(job):
         # UI never shows "Loading your footage" or "Transcribing every word"
         # for work that's already done. First user-visible stage in the
         # hot path becomes face_detect, or on re-edit paths, plan.
+        #
+        # Server passes a `prewarm_status` hint when it has seen the prewarm
+        # call complete. We use the hint to detect the Modal Volume eventual-
+        # consistency race: if server says source_cached but the file isn't
+        # here yet, a cross-container sync hasn't landed — we emit a loud
+        # metric so hit rate is observable in prod.
+        _prewarm_hint = input_data.get("prewarm_status") or {}
+        _hint_source_cached = bool(_prewarm_hint.get("source_cached"))
+        _hint_transcript_cached = bool(_prewarm_hint.get("transcript_cached"))
+
         _cached_source_path = _prewarm_cached_source_path(_dl_bucket, _dl_key)
         _cached_transcript_path = _prewarm_cached_transcript_path(_dl_bucket, _dl_key)
         _has_cached_source = os.path.exists(_cached_source_path) and os.path.getsize(_cached_source_path) > 1024
@@ -7716,6 +7868,22 @@ def handler(job):
             and os.path.exists(_cached_transcript_path)
             and os.path.getsize(_cached_transcript_path) > 2
         )
+
+        # ── Race + hit-rate telemetry (greppable `[metric]` lines) ──────
+        _cache_key_str = _prewarm_cache_key(_dl_bucket, _dl_key)
+        if _hint_source_cached and not _has_cached_source:
+            print(f"[metric] cache_race_lost kind=source job={job_id} key={_cache_key_str}", flush=True)
+        elif _has_cached_source:
+            print(f"[metric] prewarm_hit kind=source job={job_id}", flush=True)
+        elif mode in ("full", "reinterpret"):
+            print(f"[metric] prewarm_miss kind=source job={job_id} hinted={_hint_source_cached}", flush=True)
+
+        if _hint_transcript_cached and not _has_cached_transcript:
+            print(f"[metric] cache_race_lost kind=transcript job={job_id} key={_cache_key_str}", flush=True)
+        elif _has_cached_transcript:
+            print(f"[metric] prewarm_hit kind=transcript job={job_id}", flush=True)
+        elif not provided_transcript and mode in ("full", "reinterpret"):
+            print(f"[metric] prewarm_miss kind=transcript job={job_id} hinted={_hint_transcript_cached}", flush=True)
 
         # Only emit the `download` token on a true cache miss — a cached copy
         # resolves in <100ms and would flash the UI label for no reason.

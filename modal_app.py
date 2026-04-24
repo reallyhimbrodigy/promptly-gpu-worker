@@ -178,7 +178,7 @@ prewarm_volume = modal.Volume.from_name("promptly-prewarm-cache", create_if_miss
 # ── Web endpoint ───────────────────────────────────────────────────────────────
 @app.cls(
     timeout=600,          # 10 min — target <60s with H100 + max cores
-    scaledown_window=120, # keep warm 2 min for back-to-back requests (avoid cold start)
+    scaledown_window=300, # keep warm 5 min — bursty traffic; 120s was killing containers between idle users (15-20s cold boot penalty)
     cpu=64,
     memory=131072,        # 128GB — headroom for parallel segment renders + Remotion Chrome tabs
     gpu="H100",           # H100 has no NVENC — encode is libx264 on 64 CPUs. GPU handles NVDEC + Chromium compositing via angle-egl.
@@ -223,3 +223,80 @@ class PromptlyWorker:
         except Exception as e:
             print(f"[prewarm] volume commit failed: {e}", flush=True)
         return result
+
+
+# ── Prewarm cache janitor ──────────────────────────────────────────────────────
+# Runs daily. Walks the volume, deletes any prewarm cache entry older than 48h.
+# Prevents the volume from growing unbounded → protects against Modal Volume
+# v1's 500k inode hard cap AND unbounded storage cost. CPU-only function so
+# running daily costs effectively nothing.
+@app.function(
+    schedule=modal.Period(days=1),
+    volumes={"/prewarm": prewarm_volume},
+    cpu=1,
+    memory=1024,
+    timeout=600,  # 10 min is plenty; a typical sweep is seconds
+)
+def prewarm_janitor():
+    """Delete prewarm cache entries older than 48 hours."""
+    import os
+    import time
+    import shutil
+
+    TTL_SECONDS = 48 * 3600  # 48 hours
+    PREWARM_ROOT = "/prewarm"
+
+    # Pull the latest view of the volume before deciding what to delete.
+    try:
+        prewarm_volume.reload()
+    except Exception as e:
+        print(f"[janitor] volume reload failed: {e}", flush=True)
+
+    if not os.path.isdir(PREWARM_ROOT):
+        print(f"[janitor] {PREWARM_ROOT} does not exist — nothing to clean", flush=True)
+        return {"deleted": 0, "bytes_freed": 0}
+
+    now = time.time()
+    deleted_count = 0
+    bytes_freed = 0
+    inspected = 0
+    errors = 0
+
+    for entry in os.listdir(PREWARM_ROOT):
+        entry_path = os.path.join(PREWARM_ROOT, entry)
+        inspected += 1
+        try:
+            if not os.path.isdir(entry_path):
+                continue
+            # Use directory mtime — bumped on file creation within, so new
+            # writes "refresh" the entry's freshness.
+            age = now - os.path.getmtime(entry_path)
+            if age < TTL_SECONDS:
+                continue
+            # Sum bytes before delete for reporting
+            entry_bytes = 0
+            for root, _dirs, files in os.walk(entry_path):
+                for f in files:
+                    try:
+                        entry_bytes += os.path.getsize(os.path.join(root, f))
+                    except OSError:
+                        pass
+            shutil.rmtree(entry_path)
+            deleted_count += 1
+            bytes_freed += entry_bytes
+        except Exception as e:
+            errors += 1
+            print(f"[janitor] error on {entry}: {e}", flush=True)
+
+    try:
+        prewarm_volume.commit()
+    except Exception as e:
+        print(f"[janitor] volume commit failed: {e}", flush=True)
+
+    freed_mb = bytes_freed / 1024 / 1024
+    print(
+        f"[janitor] sweep complete: inspected={inspected} deleted={deleted_count} "
+        f"freed={freed_mb:.1f}MB errors={errors} ttl={TTL_SECONDS}s",
+        flush=True,
+    )
+    return {"deleted": deleted_count, "bytes_freed": bytes_freed, "errors": errors}
