@@ -370,78 +370,6 @@ def mechanical_cut_pass(deepgram_words):
     }
 
 
-def build_constrained_edit_plan_schema(protected_indices, cuttable_indices):
-    """Build a JSON schema for the main edit call with disjoint index enums.
-
-    Starts from EditPlan.model_json_schema() and injects `enum` constraints
-    on every field that references a word index:
-      - `_RemoveWord.word_index` → enum = cuttable_indices
-      - `_EmphasisMoment.word_indices[*]` → enum = protected_indices
-      - `_TextOverlay.start_word_index` → enum = protected_indices
-      - `_MotionGraphic.{start,end}_word_index` → enum = protected_indices
-      - `_SoundEffect.word_index` → enum = protected_indices
-      - `_Transition.after_word_index` → enum = protected_indices
-      - `_BrollClip.{start,end}_word_index` → enum = protected_indices
-
-    By making PROTECTED ∩ CUTTABLE = ∅ in the classification pass, the
-    decoder is structurally incapable of emitting a JSON where an anchor
-    field and a remove_words entry reference the same word index.
-    """
-    import copy as _copy_mod
-    schema = _copy_mod.deepcopy(EditPlan.model_json_schema())
-    defs = schema.get("$defs") or schema.get("definitions") or {}
-
-    _prot = sorted(int(i) for i in (protected_indices or ()))
-    _cut = sorted(int(i) for i in (cuttable_indices or ()))
-
-    def _apply_enum(field_schema, indices):
-        if not indices:
-            # Empty enum — JSON Schema requires at least one value. Emit a
-            # sentinel -1 that Gemini will simply never choose (no valid
-            # index; field goes empty or omitted).
-            indices = [-1]
-        field_schema["type"] = "integer"
-        field_schema["enum"] = list(indices)
-        # Drop minimum/maximum/format that Pydantic may have emitted — enum
-        # is the complete constraint.
-        for k in ("minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "format"):
-            field_schema.pop(k, None)
-
-    def _constrain(def_name, field_name, indices, list_item=False):
-        if def_name not in defs:
-            return
-        props = defs[def_name].get("properties") or {}
-        if field_name not in props:
-            return
-        field = props[field_name]
-        if list_item:
-            items = field.get("items")
-            if isinstance(items, dict):
-                _apply_enum(items, indices)
-            return
-        # anyOf wrapping (Optional types) — find the int branch
-        if "anyOf" in field:
-            for branch in field["anyOf"]:
-                if isinstance(branch, dict) and branch.get("type") == "integer":
-                    _apply_enum(branch, indices)
-                    return
-        _apply_enum(field, indices)
-
-    # remove_words.word_index → CUTTABLE
-    _constrain("_RemoveWord", "word_index", _cut)
-
-    # All anchor fields → PROTECTED
-    _constrain("_EmphasisMoment", "word_indices", _prot, list_item=True)
-    _constrain("_TextOverlay", "start_word_index", _prot)
-    _constrain("_MotionGraphic", "start_word_index", _prot)
-    _constrain("_MotionGraphic", "end_word_index", _prot)
-    _constrain("_SoundEffect", "word_index", _prot)
-    _constrain("_Transition", "after_word_index", _prot)
-    _constrain("_BrollClip", "start_word_index", _prot)
-    _constrain("_BrollClip", "end_word_index", _prot)
-
-    return schema
-
 print(f"[startup] Python {sys.version}", flush=True)
 print(f"[startup] handler version: {HANDLER_VERSION}", flush=True)
 print(f"[startup] Gemini model: {GEMINI_MODEL}", flush=True)
@@ -3193,46 +3121,53 @@ def generate_edit_gemini(
         user_style_profile=user_style_profile,
     )
 
+    # Build a RE-INDEXED transcript view for Gemini. The main call sees only
+    # kept words, freshly numbered [0..M-1]. Anchors Gemini emits use these
+    # new indices, which by construction cannot reference a cut word because
+    # cut words don't exist in this index space. After the call returns,
+    # Python translates every anchor field from new indices → source indices.
+    #
+    # This is the cleanest structural guarantee for anchor-on-cut: we don't
+    # need response_json_schema enum constraints (which Gemini's structured-
+    # output subset rejects on size/shape) — the index space itself IS the
+    # enforcement.
+    _new_to_src = {}   # new_index (0..M-1) → original deepgram source_index
+    _src_to_new = {}   # original source_index → new_index
+    _kept_words = []   # the (src_index, word_dict) pairs Gemini will see
+    for _src_idx, _w in enumerate(deepgram_words or []):
+        if _src_idx in _all_cut_indices:
+            continue
+        _new_idx = len(_kept_words)
+        _new_to_src[_new_idx] = _src_idx
+        _src_to_new[_src_idx] = _new_idx
+        _kept_words.append((_src_idx, _w))
+
     # Append Deepgram word timestamps to the USER content. Transcript is
     # per-video, so it stays out of system_instruction (which must remain
     # byte-stable across calls for implicit caching).
-    if deepgram_words:
-        readable_words = []
-        for idx, w in enumerate(deepgram_words):
-            if idx in _all_cut_indices:
-                continue
-            readable_words.append(w.get("punctuated_word") or w.get("word") or "")
-        readable_transcript = " ".join(readable_words)
+    if deepgram_words and _kept_words:
+        readable_transcript = " ".join(
+            (_w.get("punctuated_word") or _w.get("word") or "")
+            for _src_idx, _w in _kept_words
+        )
 
         word_lines = []
         peaks_lines = []
-        for idx, w in enumerate(deepgram_words):
-            word_text = w.get("punctuated_word") or w.get("word") or ""
-            start = float(w.get("start") or 0)
-            end = float(w.get("end") or 0)
-            spk = int(w.get("speaker") or 0)
-            if idx in _all_cut_indices:
-                # Cut by mechanical or analysis pre-pass — not valid anchor target.
-                _reason = _mech_reasons.get(idx, "context" if idx in _anal_word_cuts else "mechanical")
-                word_lines.append(
-                    f"  [{idx}] {start:.2f}-{end:.2f} spk{spk}: {word_text}  "
-                    f"[PRE-CUT:{_reason} — NOT AVAILABLE for anchors]"
-                )
-                continue
+        for new_idx, (src_idx, _w) in enumerate(_kept_words):
+            word_text = _w.get("punctuated_word") or _w.get("word") or ""
+            start = float(_w.get("start") or 0)
+            end = float(_w.get("end") or 0)
+            spk = int(_w.get("speaker") or 0)
             tag = ""
-            if idx in _peaks:
+            if src_idx in _peaks:
                 tag = "  [NARRATIVE-PEAK]"
-                peaks_lines.append(f"    [{idx}] {start:.2f}s: {word_text}")
-            word_lines.append(f"  [{idx}] {start:.2f}-{end:.2f} spk{spk}: {word_text}{tag}")
+                peaks_lines.append(f"    [{new_idx}] {start:.2f}s: {word_text}")
+            word_lines.append(f"  [{new_idx}] {start:.2f}-{end:.2f} spk{spk}: {word_text}{tag}")
 
         transcript_block = "\n".join(word_lines)
         peaks_block = "\n".join(peaks_lines) if peaks_lines else "  (no narrative peaks identified)"
-        # First KEPT word's start timestamp (used to hint the first-clip cut)
-        _first_kept_start = 0.0
-        for idx, w in enumerate(deepgram_words):
-            if idx not in _all_cut_indices:
-                _first_kept_start = float(w.get("start") or 0)
-                break
+        _first_kept_start = float(_kept_words[0][1].get("start") or 0)
+        _kept_count = len(_kept_words)
         user_content += f"""
 
 === TONAL REGISTER (from pre-analysis) ===
@@ -3240,15 +3175,15 @@ def generate_edit_gemini(
 This video's overall tone: {_tonal_register}.
 Let this guide caption_style, color_effect, and SFX selection. Never pick an SFX that clashes with the tonal register (e.g., sad_trombone ONLY if comedic).
 
-=== FULL TRANSCRIPT (pre-cut words removed) ===
+=== FULL TRANSCRIPT ===
 
-Read this first to understand the full story before making any editing decisions. Identify the narrative structure — what is setup, what is the buildup, and where are the punchlines or reveals.
+Read this first to understand the full story before making any editing decisions. Identify the narrative structure — what is setup, what is the buildup, and where are the punchlines or reveals. (Mechanical fillers, stutters, false starts, and dead air have already been removed upstream; you're reading the post-pre-pass transcript.)
 
 {readable_transcript}
 
-=== WORD-BY-WORD TIMESTAMPS ===
+=== WORD-BY-WORD TIMESTAMPS ({_kept_count} kept words, re-indexed [0..{_kept_count - 1}]) ===
 
-The following is the complete word-by-word transcript with millisecond-accurate timestamps. Words tagged [PRE-CUT:*] have already been removed by the pre-pass (mechanical + context-aware analysis) — they are NOT valid anchor targets and you must not reference them in any anchor field (the schema enforces this). Words tagged [NARRATIVE-PEAK] are classified as emphasis candidates — these are your strongest anchor targets.
+The following is the word-by-word transcript with millisecond-accurate timestamps. All cut words (mechanical fillers, stutters, false starts, dead air, contextual filler/redundancy) have been REMOVED — you see ONLY the kept words, freshly numbered [0..{_kept_count - 1}]. Every word_index you emit in any anchor field references this index space. Words tagged [NARRATIVE-PEAK] are classified as emphasis candidates — these are your strongest anchor targets.
 
 {transcript_block}
 
@@ -3257,8 +3192,8 @@ The following is the complete word-by-word transcript with millisecond-accurate 
 {peaks_block}
 
 RULES FOR USING THESE TIMESTAMPS:
-- word_index refers to the numbered list above. Use those exact indices in anchor fields (start_word_index, end_word_index, word_indices, word_index, after_word_index).
-- The schema enforces that every anchor index is a kept (non-pre-cut) word — it is structurally impossible to anchor to a pre-cut word.
+- word_index is in the index space [0..{_kept_count - 1}] shown above. Use those exact indices in anchor fields (start_word_index, end_word_index, word_indices, word_index, after_word_index).
+- Every index is by construction a kept word — cut words don't exist in this index space.
 - Your source_start and source_end values MUST land in the gaps BETWEEN words, not inside a word.
 - A gap is the time between one word's end timestamp and the next word's start timestamp.
 - NEVER place a source_start or source_end between a word's start and end timestamps — that cuts the word in half.
@@ -3266,12 +3201,12 @@ RULES FOR USING THESE TIMESTAMPS:
 - If the video has intentional visual content before the first word (action, scenery, product shots), start source_start at 0.0 to preserve that content.
 
 REMOVE_WORDS GUIDANCE:
-- All mechanical fillers, stutters, false starts, dead air, and context-dependent filler/redundancy have already been cut by the pre-pass and analysis. Your remove_words field is almost always EMPTY.
+- All mechanical fillers, stutters, false starts, dead air, and context-dependent filler/redundancy have already been cut upstream. Your remove_words field is almost always EMPTY.
 - Only emit a remove_words entry if you identify a narrative section that needs to go (e.g., an unrelated tangent) — and prefer speed_curve acceleration for pacing instead.
 """
         print(
-            f"[generate-edit] Injected {len(deepgram_words)} Deepgram word timestamps "
-            f"({len(_all_cut_indices)} pre-cut, {len(_peaks)} peaks) into prompt",
+            f"[generate-edit] Re-indexed transcript: {_kept_count} kept words "
+            f"(from {len(deepgram_words)}; {len(_all_cut_indices)} pre-cut, {len(_peaks)} peaks)",
             flush=True,
         )
 
@@ -3306,29 +3241,22 @@ REMOVE_WORDS GUIDANCE:
     else:
         raise RuntimeError("No video data provided — need either inline_video_bytes or gemini_file")
 
-    # Build a schema with dynamic enums constraining word-index fields:
-    #   - `remove_words.word_index` → CUTTABLE (typically empty — all cuts are
-    #     upstream). If empty, the decoder never emits this variant; Gemini
-    #     uses the range variant for any residual narrative skips.
-    #   - Every anchor field → PROTECTED (content + narrative_peak only)
-    # This makes anchor-on-cut structurally impossible in the main call.
-    _cuttable_for_main_call = set()  # all word-level cuts happen upstream
-    _constrained_schema = build_constrained_edit_plan_schema(
-        protected_indices=_protected,
-        cuttable_indices=_cuttable_for_main_call,
-    )
-
+    # Use the base EditPlan schema (no dynamic enum injection). Structural
+    # safety against anchor-on-cut now comes from TRANSCRIPT RE-INDEXING:
+    # Gemini only sees kept words with new indices [0..M-1], so any anchor
+    # integer it emits is structurally in the kept set. Translation back to
+    # source indices happens below after the call returns.
     print(
         f"[generate-edit] Calling Gemini model={GEMINI_MODEL} (thinking=MEDIUM, structured output, temp=1.0, "
         f"system_instruction={len(system_instruction)} chars, user_content={len(user_content)} chars, "
-        f"protected_enum={len(_protected)} indices)...",
+        f"kept_words={len(_kept_words)})...",
         flush=True,
     )
     t = time.time()
-    # response_json_schema with dynamic enums constrains word indices at
-    # token-generation time — the model literally cannot emit an integer
-    # outside the PROTECTED set for anchor fields, and an anchor-on-cut
-    # failure is physically impossible in the output shape.
+    # Transcript re-indexing guarantees Gemini cannot emit an anchor
+    # referencing a cut word — cut words don't exist in the index space
+    # Gemini sees. We don't need response_json_schema enum constraints
+    # (which Gemini's structured-output subset rejects on size/shape).
     #
     # temperature=1.0 is Google's explicit recommendation for Gemini 3 — values
     # below 1.0 "may lead to unexpected behavior, such as looping or degraded
@@ -3350,7 +3278,7 @@ REMOVE_WORDS GUIDANCE:
             temperature=1.0,
             max_output_tokens=8192,
             response_mime_type="application/json",
-            response_json_schema=_constrained_schema,
+            response_json_schema=EditPlan.model_json_schema(),
             thinking_config=genai_types.ThinkingConfig(thinking_level="MEDIUM"),
             media_resolution="MEDIA_RESOLUTION_LOW",
         ),
@@ -3398,6 +3326,66 @@ REMOVE_WORDS GUIDANCE:
 
     edit_plan = extract_json(response_text)
 
+    # ── Translate new indices (Gemini's view) → source indices ────────────────
+    # Gemini was given a re-indexed transcript [0..M-1] of kept words only.
+    # Every word_index in its output is in that new space. Downstream code
+    # works on SOURCE indices (into the full deepgram_words list), so we
+    # translate every anchor field now. This is pure bookkeeping — every
+    # new_index is guaranteed to map to a kept source word because _new_to_src
+    # only contains kept entries.
+    def _translate_idx(v):
+        if v is None:
+            return None
+        try:
+            return _new_to_src[int(v)]
+        except (KeyError, ValueError, TypeError):
+            # Out-of-range — shouldn't happen (schema bounds on int would let
+            # any integer through; but in practice Gemini sticks to [0..M-1]
+            # because that's the only space described in the prompt). Return
+            # None so validators catch it loudly.
+            return None
+
+    # emphasis_moments.word_indices (list of ints)
+    for _em in (edit_plan.get("emphasis_moments") or []):
+        if isinstance(_em, dict) and isinstance(_em.get("word_indices"), list):
+            _em["word_indices"] = [_translate_idx(x) for x in _em["word_indices"] if x is not None]
+    # text_overlays.start_word_index
+    for _ov in (edit_plan.get("text_overlays") or []):
+        if isinstance(_ov, dict) and "start_word_index" in _ov:
+            _ov["start_word_index"] = _translate_idx(_ov["start_word_index"])
+    # motion_graphics.start_word_index + end_word_index
+    for _mg in (edit_plan.get("motion_graphics") or []):
+        if not isinstance(_mg, dict):
+            continue
+        if "start_word_index" in _mg:
+            _mg["start_word_index"] = _translate_idx(_mg["start_word_index"])
+        if "end_word_index" in _mg:
+            _mg["end_word_index"] = _translate_idx(_mg["end_word_index"])
+    # sound_effects.word_index
+    for _sfx in (edit_plan.get("sound_effects") or []):
+        if isinstance(_sfx, dict) and "word_index" in _sfx:
+            _sfx["word_index"] = _translate_idx(_sfx["word_index"])
+    # transitions.after_word_index
+    for _tr in (edit_plan.get("transitions") or []):
+        if isinstance(_tr, dict) and "after_word_index" in _tr:
+            _tr["after_word_index"] = _translate_idx(_tr["after_word_index"])
+    # broll_clips.start_word_index + end_word_index
+    for _bc in (edit_plan.get("broll_clips") or []):
+        if not isinstance(_bc, dict):
+            continue
+        if "start_word_index" in _bc:
+            _bc["start_word_index"] = _translate_idx(_bc["start_word_index"])
+        if "end_word_index" in _bc:
+            _bc["end_word_index"] = _translate_idx(_bc["end_word_index"])
+    # remove_words (Gemini's own, usually empty; range variant has no word_index)
+    for _rw in (edit_plan.get("remove_words") or []):
+        if isinstance(_rw, dict) and _rw.get("word_index") is not None:
+            _rw["word_index"] = _translate_idx(_rw["word_index"])
+    print(
+        f"[generate-edit] Translated {len(_new_to_src)} kept-word indices back to source space",
+        flush=True,
+    )
+
     # Post-processing
     edit_plan["_deepgram_words"] = list(deepgram_words or [])
     # Preserve signals for downstream (render_multi_clip projects peak_at_seconds
@@ -3418,17 +3406,45 @@ REMOVE_WORDS GUIDANCE:
     _dg_words = edit_plan.get("_deepgram_words", [])
     raw_remove_words = edit_plan.get("remove_words") or []
 
-    # ── Guard: drop Gemini range cuts covering PROTECTED words ───────────────
-    # The analysis-pass classification is authoritative. If Gemini tries to
-    # range-cut a word the analysis classified as PROTECTED (content or
-    # narrative peak), honor the classification and drop the range — anchors
-    # rely on PROTECTED words surviving to output.
-    if raw_remove_words and _protected and _dg_words:
-        _protected_times = []
-        for _pi in _protected:
+    # ── Guard: drop Gemini range cuts covering an ANCHORED word ──────────────
+    # Anchor integrity is the absolute invariant — if Gemini tried to
+    # range-cut a word it also anchored to (rare; ranges are reserved for
+    # narrative skips of unrelated tangents), the anchor wins and the range
+    # is dropped. Compute the anchor-referenced set by walking every field
+    # that carries a word index. Translation to source indices has already
+    # happened above, so everything is in source space here.
+    _anchored_src_indices = set()
+    for _em in (edit_plan.get("emphasis_moments") or []):
+        if isinstance(_em, dict):
+            for _wi in (_em.get("word_indices") or []):
+                if isinstance(_wi, int):
+                    _anchored_src_indices.add(_wi)
+    for _ov in (edit_plan.get("text_overlays") or []):
+        if isinstance(_ov, dict) and isinstance(_ov.get("start_word_index"), int):
+            _anchored_src_indices.add(_ov["start_word_index"])
+    for _mg in (edit_plan.get("motion_graphics") or []):
+        if isinstance(_mg, dict):
+            for _k in ("start_word_index", "end_word_index"):
+                if isinstance(_mg.get(_k), int):
+                    _anchored_src_indices.add(_mg[_k])
+    for _sfx in (edit_plan.get("sound_effects") or []):
+        if isinstance(_sfx, dict) and isinstance(_sfx.get("word_index"), int):
+            _anchored_src_indices.add(_sfx["word_index"])
+    for _tr in (edit_plan.get("transitions") or []):
+        if isinstance(_tr, dict) and isinstance(_tr.get("after_word_index"), int):
+            _anchored_src_indices.add(_tr["after_word_index"])
+    for _bc in (edit_plan.get("broll_clips") or []):
+        if isinstance(_bc, dict):
+            for _k in ("start_word_index", "end_word_index"):
+                if isinstance(_bc.get(_k), int):
+                    _anchored_src_indices.add(_bc[_k])
+
+    if raw_remove_words and _anchored_src_indices and _dg_words:
+        _anchored_times = []
+        for _pi in _anchored_src_indices:
             if 0 <= _pi < len(_dg_words):
                 _w = _dg_words[_pi]
-                _protected_times.append((
+                _anchored_times.append((
                     float(_w.get("start") or 0),
                     float(_w.get("end") or 0),
                     _pi,
@@ -3443,18 +3459,18 @@ REMOVE_WORDS GUIDANCE:
                     _re = float(_rw["end"])
                 except (TypeError, ValueError):
                     continue
-                _covers_protected = None
-                for (_pws, _pwe, _pi) in _protected_times:
+                _covers_anchor = None
+                for (_pws, _pwe, _pi) in _anchored_times:
                     if _rs < _pwe and _re > _pws:
-                        _covers_protected = _pi
+                        _covers_anchor = _pi
                         break
-                if _covers_protected is not None:
-                    _pword = _dg_words[_covers_protected]
+                if _covers_anchor is not None:
+                    _pword = _dg_words[_covers_anchor]
                     _pw_text = str(_pword.get("punctuated_word") or _pword.get("word") or "").strip()
                     print(
                         f"[generate-edit] Dropping Gemini range cut {_rs:.2f}-{_re:.2f}s "
-                        f"— covers PROTECTED word [{_covers_protected}] '{_pw_text}' "
-                        f"(classification-authoritative guard)",
+                        f"— covers ANCHORED word [{_covers_anchor}] '{_pw_text}' "
+                        f"(anchor-integrity guard)",
                         flush=True,
                     )
                     continue
