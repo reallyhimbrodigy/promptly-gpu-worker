@@ -193,9 +193,8 @@ class PromptlyWorker:
         that was being paid on EVERY request even on warm containers."""
         import sys
         sys.path.insert(0, "/")
-        from handler import handler as _h, prewarm_handler as _p
+        from handler import handler as _h
         self._handler = _h
-        self._prewarm = _p
         self._prewarm_volume = prewarm_volume
 
     @modal.fastapi_endpoint(method="POST")
@@ -210,6 +209,34 @@ class PromptlyWorker:
         result = self._handler({"input": body})
         return result
 
+
+# ── Prewarm CPU worker (split off from the GPU render worker) ─────────────────
+# Prewarm is pure I/O — S3 download + Deepgram URL call. It has zero use for
+# an H100; running it on the GPU class was costing us $3.95/hr while doing
+# nothing GPU-shaped. This dedicated CPU-only class:
+#   - Costs ~$35/mo always-warm (min_containers=1) vs $2844/mo for an H100
+#   - Eliminates cold-start latency for prewarm itself (the request that
+#     needs to be fastest to beat the user's send tap)
+#   - Frees the GPU class to scale from zero on render-only demand
+@app.cls(
+    timeout=300,          # 5 min is plenty for an S3 download + Deepgram call
+    scaledown_window=600, # stay warm a long time — cheap and helpful
+    cpu=8,                # enough to run boto3 CRT multipart + Deepgram in parallel
+    memory=4096,          # 4GB for in-flight download buffers + transcript JSON
+    region="us-west",     # same region as the S3 bucket + render class
+    volumes={"/prewarm": prewarm_volume},
+    min_containers=1,     # always-warm — prewarm must be faster than the user's fingers
+)
+class PromptlyPrewarmWorker:
+    @modal.enter()
+    def startup(self):
+        import sys
+        sys.path.insert(0, "/")
+        # Only need prewarm_handler — no reason to import the full pipeline here.
+        from handler import prewarm_handler as _p
+        self._prewarm = _p
+        self._prewarm_volume = prewarm_volume
+
     @modal.fastapi_endpoint(method="POST")
     def prewarm(self, body: dict):
         """Lightweight S3→Volume cache warm-up. Called by iOS the moment the
@@ -217,7 +244,6 @@ class PromptlyWorker:
         By the time the real render request arrives, the source is on the
         Modal Volume and the download step is a no-op."""
         result = self._prewarm({"input": body})
-        # Commit so subsequent run_job calls on other containers see the file.
         try:
             self._prewarm_volume.commit()
         except Exception as e:

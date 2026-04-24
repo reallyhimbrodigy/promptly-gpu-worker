@@ -1537,41 +1537,79 @@ def _parse_deepgram_response(resp):
     return {"text": alt.transcript or "", "words": words}
 
 
+def _deepgram_is_retriable_error(msg):
+    """Classify a Deepgram error message as retriable (rate limits, 5xx, network)."""
+    m = str(msg)
+    return (
+        "429" in m or "rate" in m.lower() or
+        "500" in m or "502" in m or "503" in m or "504" in m or
+        "timeout" in m.lower() or "connection" in m.lower() or
+        "temporarily" in m.lower()
+    )
+
+
 def transcribe_audio_url(video_url):
     """
     URL-based Deepgram transcription. Deepgram's servers fetch the media
     directly — runs in parallel with the Modal worker's own S3 download,
     so the transcript is ready (or close to it) the moment the file
     lands locally. Saves 3-6s of serial work vs transcribe_audio.
+
+    3-attempt exponential backoff (1s/2s/4s) on rate limits + 5xx + network.
+    Returns None on final failure; caller falls back to file-based Deepgram.
     """
     if DeepgramClient is None or PrerecordedOptions is None:
         print("[pipeline] transcription skipped: deepgram not available", flush=True)
         return {"text": "", "words": []}
-    try:
-        dg = DeepgramClient(api_key=os.environ["DEEPGRAM_API_KEY"])
-        print(f"[deepgram] URL-based transcribe against {video_url[:80]}...", flush=True)
-        resp = dg.listen.prerecorded.v("1").transcribe_url({"url": video_url}, _deepgram_options())
-        return _parse_deepgram_response(resp)
-    except Exception as e:
-        # Non-fatal — fall back to local file path in _do_transcribe
-        print(f"[deepgram] URL-based transcription failed: {e} — will fall back to local", flush=True)
-        return None
+    dg = DeepgramClient(api_key=os.environ["DEEPGRAM_API_KEY"])
+    print(f"[deepgram] URL-based transcribe against {video_url[:80]}...", flush=True)
+    _t0 = time.time()
+    for attempt in range(3):
+        try:
+            resp = dg.listen.prerecorded.v("1").transcribe_url({"url": video_url}, _deepgram_options())
+            result = _parse_deepgram_response(resp)
+            print(f"[metric] stage_duration stage=transcribe_url duration_ms={int((time.time()-_t0)*1000)} attempt={attempt+1}", flush=True)
+            return result
+        except Exception as e:
+            if attempt < 2 and _deepgram_is_retriable_error(e):
+                backoff = 2 ** attempt
+                print(f"[deepgram] URL attempt {attempt+1} retriable ({str(e)[:120]}) — retry in {backoff}s", flush=True)
+                time.sleep(backoff)
+                continue
+            print(f"[deepgram] URL transcription failed (attempt {attempt+1}): {str(e)[:200]} — falling back", flush=True)
+            return None
+    return None
 
 
 def transcribe_audio(source_path):
+    """File-based Deepgram. Fallback when URL-based path fails. Same 3-attempt
+    backoff (1s/2s/4s) on retriable errors so rate-limit spikes don't crash
+    the pipeline."""
     if DeepgramClient is None or PrerecordedOptions is None:
         print("[pipeline] transcription skipped: deepgram not available", flush=True)
         return {"text": "", "words": []}
-    try:
-        dg = DeepgramClient(api_key=os.environ["DEEPGRAM_API_KEY"])
-        with open(source_path, "rb") as f:
-            audio_bytes = f.read()
-        print(f"[deepgram] Sending {len(audio_bytes) / 1024:.0f}KB audio", flush=True)
-        options = _deepgram_options()
-        resp = dg.listen.prerecorded.v("1").transcribe_file({"buffer": audio_bytes}, options)
-        return _parse_deepgram_response(resp)
-    except Exception as e:
-        raise RuntimeError(f"Deepgram transcription failed: {e}") from e
+    dg = DeepgramClient(api_key=os.environ["DEEPGRAM_API_KEY"])
+    with open(source_path, "rb") as f:
+        audio_bytes = f.read()
+    print(f"[deepgram] Sending {len(audio_bytes) / 1024:.0f}KB audio", flush=True)
+    options = _deepgram_options()
+    _t0 = time.time()
+    last_err = None
+    for attempt in range(3):
+        try:
+            resp = dg.listen.prerecorded.v("1").transcribe_file({"buffer": audio_bytes}, options)
+            result = _parse_deepgram_response(resp)
+            print(f"[metric] stage_duration stage=transcribe_file duration_ms={int((time.time()-_t0)*1000)} attempt={attempt+1}", flush=True)
+            return result
+        except Exception as e:
+            last_err = e
+            if attempt < 2 and _deepgram_is_retriable_error(e):
+                backoff = 2 ** attempt
+                print(f"[deepgram] file attempt {attempt+1} retriable ({str(e)[:120]}) — retry in {backoff}s", flush=True)
+                time.sleep(backoff)
+                continue
+            break
+    raise RuntimeError(f"Deepgram transcription failed after 3 attempts: {last_err}") from last_err
 
 
 
@@ -7924,6 +7962,29 @@ def handler(job):
             and os.path.getsize(_cached_transcript_path) > 2
         )
 
+        # Volume eventual-consistency safety net: if the server-passed hint
+        # says a file IS cached but we don't see it, the cross-container sync
+        # may just not have propagated yet. Try ONE explicit reload + recheck
+        # with a short delay — most "races" resolve in under a second. If it
+        # still isn't there after retry, we fall through to the slow path.
+        if (_hint_source_cached and not _has_cached_source) or (_hint_transcript_cached and not _has_cached_transcript):
+            print("[pipeline] hint/reality mismatch — volume reload + retry", flush=True)
+            try:
+                # Import lazily since it's only needed on the retry path
+                from modal_app import prewarm_volume as _pv
+                _pv.reload()
+            except Exception as _rl_err:
+                print(f"[pipeline] volume reload failed: {_rl_err}", flush=True)
+            time.sleep(0.5)
+            _has_cached_source = os.path.exists(_cached_source_path) and os.path.getsize(_cached_source_path) > 1024
+            _has_cached_transcript = (
+                not provided_transcript
+                and os.path.exists(_cached_transcript_path)
+                and os.path.getsize(_cached_transcript_path) > 2
+            )
+            if _has_cached_source or _has_cached_transcript:
+                print("[metric] race_recovered kind=volume_reload job=" + job_id, flush=True)
+
         # ── Race + hit-rate telemetry (greppable `[metric]` lines) ──────
         _cache_key_str = _prewarm_cache_key(_dl_bucket, _dl_key)
         if _hint_source_cached and not _has_cached_source:
@@ -8733,6 +8794,31 @@ def handler(job):
         print(f"  broll:       {_timings.get('broll', 0):.1f}s", flush=True)
         print(f"  upload+exp:  {_timings.get('upload_export', 0):.1f}s", flush=True)
         print(f"{'='*80}\n", flush=True)
+
+        # ── Structured stage-duration metrics (greppable, stable schema) ──
+        # Emit one line per stage for post-hoc aggregation. Format is
+        # designed to be trivially parseable by `awk` / log aggregators:
+        #   [metric] stage_duration stage=X duration_ms=Y job=Z
+        # Plus a final summary line:
+        #   [metric] job_complete job=Z total_ms=... download_ms=... etc.
+        def _emit_stage_metric(stage_name, key):
+            dur_ms = int(_timings.get(key, 0) * 1000)
+            print(f"[metric] stage_duration stage={stage_name} duration_ms={dur_ms} job={job_id}", flush=True)
+
+        _emit_stage_metric("download", "download")
+        _emit_stage_metric("normalize_transcribe_upload", "normalize_transcribe_upload")
+        _emit_stage_metric("edit_recipe_faces", "edit_recipe_faces")
+        _emit_stage_metric("render", "render")
+        _emit_stage_metric("broll", "broll")
+        _emit_stage_metric("upload_export", "upload_export")
+        _total_ms = int(_timings["total"] * 1000)
+        _download_ms = int(_timings.get("download", 0) * 1000)
+        _render_ms = int(_timings.get("render", 0) * 1000)
+        print(
+            f"[metric] job_complete job={job_id} mode={mode} total_ms={_total_ms} "
+            f"download_ms={_download_ms} render_ms={_render_ms}",
+            flush=True,
+        )
 
         send_progress(job_id, "complete", 100, "Your video is ready!", app_url)
 
