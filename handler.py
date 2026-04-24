@@ -258,6 +258,190 @@ class EditPlan(BaseModel):
     motion_graphics: List[_MotionGraphic]
     remove_words: List[_RemoveWord]
 
+
+# ── Content Analysis schema (separate pre-pass Gemini call) ──────────────────
+# A dedicated analysis call classifies every word before the main edit call.
+# Its output drives dynamic Literal enums on the main EditPlan schema:
+#   - `remove_words.word_index` enum = CUTTABLE_INDICES (analysis-cuttable)
+#   - Every anchor field enum = PROTECTED_INDICES (analysis-safe)
+# PROTECTED ∩ CUTTABLE = ∅ by construction, so a main-call anchor physically
+# cannot reference a word Gemini later chose to cut.
+_ANALYSIS_CLASS = Literal[
+    "content",             # substantive content word. Protected (cannot be cut, can anchor).
+    "cuttable_filler",     # context-dependent filler (literally, basically, actually, just, like).
+    "cuttable_restart",    # part of a phrasal restart ("I said — I said who is he?").
+    "cuttable_redundant",  # narratively redundant (word repeats a concept already stated).
+    "narrative_peak",      # emphasis candidate / anchor peak. Protected.
+]
+
+class _WordAnalysis(BaseModel):
+    source_index: int
+    classification: _ANALYSIS_CLASS
+
+class ContentAnalysis(BaseModel):
+    """Per-word classification for the pre-edit analysis call.
+
+    Exactly one entry per kept Deepgram word (after mechanical pre-pass).
+    Narrative peaks and content words become anchor-eligible (PROTECTED);
+    cuttable_* entries become cut-eligible (CUTTABLE). The two sets are
+    disjoint, making anchor-on-cut collisions structurally impossible in
+    the main edit call's schema.
+    """
+    word_analyses: List[_WordAnalysis]
+    tonal_register: Literal[
+        "serious", "educational", "motivational",
+        "comedic", "dramatic", "casual",
+    ]
+
+
+# ── Mechanical pre-pass (deterministic, no Gemini) ───────────────────────────
+_MECHANICAL_FILLERS = {
+    "um", "uh", "er", "ah", "hmm", "uhh", "umm", "erm",
+    "mhm", "hm", "mm", "mmm", "huh",
+}
+_STUTTER_SKIP_WORDS = {"the", "a", "an", "that", "to"}
+_MECH_DEAD_AIR_THRESHOLD_S = 0.3
+
+
+def mechanical_cut_pass(deepgram_words):
+    """Deterministic cut detection — runs before any LLM call.
+
+    Returns a dict with:
+      - `word_cuts`: set of source word indices to cut (fillers, stutters, false starts)
+      - `range_cuts`: list of (start_s, end_s) ranges to cut (dead air, non-speech)
+      - `reasons`: parallel dict of word_index → reason string
+
+    Handles the 90% of cuts that don't need video context: filler tokens,
+    adjacent duplicate words, trailing-dash false starts, dead-air gaps > 0.3s.
+    """
+    _words = list(deepgram_words or [])
+    word_cuts = set()
+    reasons = {}
+    range_cuts = []
+
+    for idx, w in enumerate(_words):
+        word_text = str(w.get("punctuated_word") or w.get("word") or "").strip()
+        if not word_text:
+            continue
+        word_norm = re.sub(r"[^\w']", "", word_text).lower()
+
+        # Filler tokens (exact match)
+        if word_norm in _MECHANICAL_FILLERS:
+            word_cuts.add(idx)
+            reasons[idx] = "filler"
+            continue
+
+        # False start (trailing dash on punctuated_word)
+        if word_text.rstrip().endswith("-"):
+            word_cuts.add(idx)
+            reasons[idx] = "false_start"
+            continue
+
+        # Adjacent duplicate stutter ("I I", "the the") — remove the first.
+        # Skip very common short words where legitimate repetition happens
+        # (e.g., "I I think" vs "that that is why").
+        if idx + 1 < len(_words):
+            next_text = str(_words[idx + 1].get("punctuated_word") or _words[idx + 1].get("word") or "").strip()
+            next_norm = re.sub(r"[^\w']", "", next_text).lower()
+            if (
+                word_norm
+                and word_norm == next_norm
+                and word_norm not in _STUTTER_SKIP_WORDS
+                and len(word_norm) >= 2
+            ):
+                word_cuts.add(idx)
+                reasons[idx] = "stutter"
+                continue
+
+    # Dead-air detection (gaps between consecutive word boundaries)
+    for i in range(len(_words) - 1):
+        end_s = float(_words[i].get("end") or 0)
+        next_start_s = float(_words[i + 1].get("start") or 0)
+        gap = next_start_s - end_s
+        if gap >= _MECH_DEAD_AIR_THRESHOLD_S:
+            # Keep a small cushion either side so we don't clip speech
+            # (Deepgram rounds; leave 0.04s).
+            range_cuts.append((round(end_s + 0.04, 3), round(next_start_s - 0.04, 3)))
+
+    return {
+        "word_cuts": word_cuts,
+        "range_cuts": range_cuts,
+        "reasons": reasons,
+    }
+
+
+def build_constrained_edit_plan_schema(protected_indices, cuttable_indices):
+    """Build a JSON schema for the main edit call with disjoint index enums.
+
+    Starts from EditPlan.model_json_schema() and injects `enum` constraints
+    on every field that references a word index:
+      - `_RemoveWord.word_index` → enum = cuttable_indices
+      - `_EmphasisMoment.word_indices[*]` → enum = protected_indices
+      - `_TextOverlay.start_word_index` → enum = protected_indices
+      - `_MotionGraphic.{start,end}_word_index` → enum = protected_indices
+      - `_SoundEffect.word_index` → enum = protected_indices
+      - `_Transition.after_word_index` → enum = protected_indices
+      - `_BrollClip.{start,end}_word_index` → enum = protected_indices
+
+    By making PROTECTED ∩ CUTTABLE = ∅ in the classification pass, the
+    decoder is structurally incapable of emitting a JSON where an anchor
+    field and a remove_words entry reference the same word index.
+    """
+    import copy as _copy_mod
+    schema = _copy_mod.deepcopy(EditPlan.model_json_schema())
+    defs = schema.get("$defs") or schema.get("definitions") or {}
+
+    _prot = sorted(int(i) for i in (protected_indices or ()))
+    _cut = sorted(int(i) for i in (cuttable_indices or ()))
+
+    def _apply_enum(field_schema, indices):
+        if not indices:
+            # Empty enum — JSON Schema requires at least one value. Emit a
+            # sentinel -1 that Gemini will simply never choose (no valid
+            # index; field goes empty or omitted).
+            indices = [-1]
+        field_schema["type"] = "integer"
+        field_schema["enum"] = list(indices)
+        # Drop minimum/maximum/format that Pydantic may have emitted — enum
+        # is the complete constraint.
+        for k in ("minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "format"):
+            field_schema.pop(k, None)
+
+    def _constrain(def_name, field_name, indices, list_item=False):
+        if def_name not in defs:
+            return
+        props = defs[def_name].get("properties") or {}
+        if field_name not in props:
+            return
+        field = props[field_name]
+        if list_item:
+            items = field.get("items")
+            if isinstance(items, dict):
+                _apply_enum(items, indices)
+            return
+        # anyOf wrapping (Optional types) — find the int branch
+        if "anyOf" in field:
+            for branch in field["anyOf"]:
+                if isinstance(branch, dict) and branch.get("type") == "integer":
+                    _apply_enum(branch, indices)
+                    return
+        _apply_enum(field, indices)
+
+    # remove_words.word_index → CUTTABLE
+    _constrain("_RemoveWord", "word_index", _cut)
+
+    # All anchor fields → PROTECTED
+    _constrain("_EmphasisMoment", "word_indices", _prot, list_item=True)
+    _constrain("_TextOverlay", "start_word_index", _prot)
+    _constrain("_MotionGraphic", "start_word_index", _prot)
+    _constrain("_MotionGraphic", "end_word_index", _prot)
+    _constrain("_SoundEffect", "word_index", _prot)
+    _constrain("_Transition", "after_word_index", _prot)
+    _constrain("_BrollClip", "start_word_index", _prot)
+    _constrain("_BrollClip", "end_word_index", _prot)
+
+    return schema
+
 print(f"[startup] Python {sys.version}", flush=True)
 print(f"[startup] handler version: {HANDLER_VERSION}", flush=True)
 print(f"[startup] Gemini model: {GEMINI_MODEL}", flush=True)
@@ -2763,12 +2947,198 @@ def build_analysis_from_gemini_recipe(edit_plan, duration):
     return analysis
 
 
+def run_content_analysis(deepgram_words, inline_video_bytes, mechanical_cuts):
+    """Pre-pass Gemini call that classifies every word with full video context.
+
+    Runs in parallel with face detection + other signal computation. Its output
+    drives the main edit call's dynamic schema enums so that anchor fields and
+    remove_words.word_index reference disjoint index spaces.
+
+    Returns a dict:
+      {
+        "word_cuts": set[int]   # analysis-decided cuts (context-aware)
+        "cuttable": set[int]    # analysis-cuttable words not yet cut
+        "protected": set[int]   # anchor-eligible words (content + narrative peaks)
+        "peaks": set[int]       # narrative peak subset of protected
+        "tonal_register": str   # overall video tone (serious/comedic/...)
+      }
+
+    Gemini 3 Flash at LOW thinking is the right choice here: the task is narrow
+    (per-word classification with bounded output), video understanding is the
+    whole value, and there's no creative/composition reasoning to do.
+    """
+    _words = list(deepgram_words or [])
+    if not _words or not inline_video_bytes:
+        # No words → no classification possible. Default: everything the
+        # mechanical pass already caught is cut; nothing else is cuttable;
+        # everything else is protected.
+        _mech_cuts = set(mechanical_cuts.get("word_cuts", set()))
+        _protected = set(range(len(_words))) - _mech_cuts
+        return {
+            "word_cuts": set(),
+            "cuttable": set(),
+            "protected": _protected,
+            "peaks": set(),
+            "tonal_register": "casual",
+        }
+
+    client = _get_genai_client()
+    _video_part = genai_types.Part.from_bytes(
+        data=inline_video_bytes, mime_type="video/mp4",
+    )
+
+    # Build transcript representation for the analysis call. Include the
+    # mechanical-cut flag per word so Gemini sees the deterministic pre-pass
+    # decisions and doesn't re-classify those words.
+    _mech_cuts = set(mechanical_cuts.get("word_cuts", set()))
+    _mech_reasons = dict(mechanical_cuts.get("reasons", {}))
+    lines = []
+    for i, w in enumerate(_words):
+        word_text = str(w.get("punctuated_word") or w.get("word") or "").strip()
+        start = float(w.get("start") or 0)
+        end = float(w.get("end") or 0)
+        spk = int(w.get("speaker") or 0)
+        if i in _mech_cuts:
+            lines.append(
+                f"  [{i}] {start:.2f}-{end:.2f} spk{spk}: {word_text}  "
+                f"[MECHANICAL-CUT:{_mech_reasons.get(i, '?')}]"
+            )
+        else:
+            lines.append(f"  [{i}] {start:.2f}-{end:.2f} spk{spk}: {word_text}")
+    transcript_lines = "\n".join(lines)
+
+    system_instruction = """You are a classification system for a short-form video editor. Your ONLY job is to classify every word in the transcript into exactly one of five buckets based on the full video and dialogue context. You do not make creative decisions — you only judge what each word is.
+
+CLASSIFICATION VOCABULARY:
+
+1. "content" — a substantive word that should stay in the video and cannot be cut. Nouns, verbs with semantic weight, numbers, named entities, descriptive adjectives, words that carry the meaning of the sentence. This is the default for words you're not sure about. When in doubt, pick content.
+
+2. "cuttable_filler" — context-dependent filler. Words that look substantive in isolation but function as hedges, discourse markers, or filler in this specific context. Examples: "literally" in "I literally just walked in" (emphasis filler, no semantic value), "basically" as a hedge, "just" in "I just want to say", "like" as a discourse marker, "actually" as a hedge, "right?" at end of statement, "you know", "I mean" as restart. You must verify this word is NOT the emphasis target in its sentence (if it's where the speaker's voice peaks, it's a narrative_peak, not filler).
+
+3. "cuttable_restart" — part of a phrasal restart that the speaker corrected. Example: "I said — I said who is he?" the first "I said" is a restart. Or: "The thing is — well the thing about it is..." the first clause is a restart. Cut the incomplete version, keep the complete one.
+
+4. "cuttable_redundant" — narratively redundant. The word (or its phrase) repeats a concept the speaker just stated with no added value. Example: "bikini bottom is calling, calling again" — the second "calling" is redundant.
+
+5. "narrative_peak" — a genuine emphasis target. The word where the speaker's voice peaks, the punchline noun, the reveal, the reaction word, the emotional climax. Only a few words per video qualify. These are the anchor targets for MGs, emphasis moments, and SFX.
+
+RULES:
+
+- Every word in the transcript gets exactly one classification (via source_index).
+- Words already flagged [MECHANICAL-CUT] MUST be classified as "cuttable_filler" — they are already cut by the mechanical pre-pass; your classification is just bookkeeping.
+- Do NOT add new cuts liberally. When in doubt, default to "content". Over-cutting ruins the edit.
+- narrative_peak is RARE. Maybe 2–8 per video. It is the specific word the speaker hits hardest, where a visual effect belongs.
+- Your output is a flat list of {source_index, classification}, one per Deepgram word index. Missing indices default to content but emit all of them.
+
+TONAL REGISTER:
+
+Also output the overall tonal_register of the video — serious, educational, motivational, comedic, dramatic, or casual. This drives downstream SFX gating (e.g., sad_trombone requires comedic register).
+
+Your classification is authoritative — the downstream editor builds a schema where:
+  - words you classify as cuttable_* are the ONLY words it can cut
+  - words you classify as content + narrative_peak are the ONLY words it can anchor overlays to
+
+So be accurate: a true emphasis word misclassified as filler means the editor can't highlight it. A content word misclassified as cuttable means it may get removed. The whole point of this pass is to let the editor anchor precisely."""
+
+    user_content = f"""TRANSCRIPT (word-by-word with source indices; MECHANICAL-CUT tags indicate words already cut by the deterministic pre-pass):
+
+{transcript_lines}
+
+Classify each word. Return the word_analyses array with one entry per source_index (0..{len(_words) - 1}), plus the tonal_register."""
+
+    t0 = time.time()
+    print(
+        f"[content-analysis] Calling Gemini model={GEMINI_MODEL} (thinking=LOW, {len(_words)} words)...",
+        flush=True,
+    )
+    response = client.models.generate_content(
+        model=GEMINI_MODEL,
+        contents=[_video_part, user_content],
+        config=genai_types.GenerateContentConfig(
+            system_instruction=system_instruction,
+            temperature=1.0,
+            max_output_tokens=8192,
+            response_mime_type="application/json",
+            response_json_schema=ContentAnalysis.model_json_schema(),
+            thinking_config=genai_types.ThinkingConfig(thinking_level="LOW"),
+            media_resolution="MEDIA_RESOLUTION_LOW",
+        ),
+    )
+    elapsed = time.time() - t0
+    print(f"[content-analysis] Gemini complete in {elapsed:.1f}s", flush=True)
+
+    response_text = str(getattr(response, "text", "") or "").strip()
+    if not response_text:
+        raise RuntimeError("Empty content-analysis response")
+    parsed = extract_json(response_text)
+
+    # Parse word_analyses into the partitioned sets.
+    word_cuts = set()         # analysis-decided cuts (ADD to mechanical)
+    cuttable = set()          # analysis-cuttable, NOT yet cut (Gemini may choose)
+    protected = set()         # anchor-eligible
+    peaks = set()             # narrative peak subset of protected
+
+    _seen = set()
+    for entry in (parsed.get("word_analyses") or []):
+        try:
+            idx = int(entry.get("source_index"))
+            cls = str(entry.get("classification") or "content")
+        except (TypeError, ValueError):
+            continue
+        if idx < 0 or idx >= len(_words) or idx in _seen:
+            continue
+        _seen.add(idx)
+        if idx in _mech_cuts:
+            # Mechanical cuts stay cut regardless of what analysis says.
+            continue
+        if cls in ("cuttable_filler", "cuttable_restart", "cuttable_redundant"):
+            # Content-aware cuts: ADD to the hard-cut set (these words are
+            # cut before the main call even sees the transcript). Main call
+            # cannot anchor to them because they're not in its index space.
+            word_cuts.add(idx)
+        elif cls == "narrative_peak":
+            protected.add(idx)
+            peaks.add(idx)
+        else:
+            # "content" — default. Protected.
+            protected.add(idx)
+
+    # Default any unclassified surviving words to content/protected so the
+    # main call has full latitude over words the analysis didn't cover.
+    for idx in range(len(_words)):
+        if idx in _mech_cuts or idx in word_cuts:
+            continue
+        if idx not in protected:
+            protected.add(idx)
+
+    # No CUTTABLE set for the main edit call — all cuts are applied by
+    # mechanical+analysis BEFORE the main call sees the transcript. The main
+    # call's remove_words is used only for narrative range-level section
+    # skips (covered via speed_curve pacing instead per current prompt).
+    # This means the main-call `remove_words.word_index` enum is empty —
+    # collision is structurally impossible because there are no cuttable
+    # indices left to collide with.
+    tonal = str(parsed.get("tonal_register") or "casual")
+    print(
+        f"[content-analysis] classified: {len(word_cuts)} analysis-cuts, "
+        f"{len(protected)} protected ({len(peaks)} peaks), tone={tonal} ({elapsed:.1f}s)",
+        flush=True,
+    )
+    return {
+        "word_cuts": word_cuts,
+        "cuttable": cuttable,
+        "protected": protected,
+        "peaks": peaks,
+        "tonal_register": tonal,
+    }
+
+
 def generate_edit_gemini(
     video_path, vibe, duration, trend_context=None, deepgram_words=None,
     shot_changes=None, vocal_emphasis=None, source_loudness=None,
     face_positions=None, smoothed_face_trajectory=None,
     user_style_profile=None,
     gemini_file=None, cached_response=None, inline_video_bytes=None,
+    content_analysis=None, mechanical_cuts=None,
 ):
     _pre_analysis = cached_response
 
@@ -2777,6 +3147,38 @@ def generate_edit_gemini(
     _loudness = dict(source_loudness or {})
     _face_positions = list(face_positions or [])
     _smoothed_trajectory = list(smoothed_face_trajectory or [])
+
+    # ── Classification-driven disjoint index spaces ──────────────────────────
+    # `mechanical_cuts` = deterministic pre-pass (fillers, stutters, etc.)
+    # `content_analysis` = Gemini Flash LOW-thinking classification that runs
+    # before this call to identify context-dependent cuts and narrative peaks.
+    #
+    # ALL cuts (mechanical + analysis) are applied to the transcript BEFORE
+    # this call builds its prompt. Main-call `remove_words` is reserved for
+    # narrative decisions at the range level (still schema-enforced to the
+    # small set of surviving cuttable indices — typically empty since all
+    # word-level cuts are upstream).
+    _mech = dict(mechanical_cuts or {})
+    _anal = dict(content_analysis or {})
+    _mech_word_cuts = set(_mech.get("word_cuts") or set())
+    _mech_range_cuts = list(_mech.get("range_cuts") or [])
+    _mech_reasons = dict(_mech.get("reasons") or {})
+    _anal_word_cuts = set(_anal.get("word_cuts") or set())
+    # PROTECTED = words from analysis classified as content or narrative_peak.
+    # These are the ONLY indices valid in any anchor field of the main call.
+    _protected = set(_anal.get("protected") or set())
+    _peaks = set(_anal.get("peaks") or set())
+    _tonal_register = str(_anal.get("tonal_register") or "casual")
+    # Hard-cut word indices = mechanical ∪ analysis. These words are stripped
+    # from the transcript shown to the main call below.
+    _all_cut_indices = _mech_word_cuts | _anal_word_cuts
+    if _all_cut_indices:
+        print(
+            f"[generate-edit] Pre-cuts applied: {len(_mech_word_cuts)} mechanical + "
+            f"{len(_anal_word_cuts)} analysis = {len(_all_cut_indices)} total word cuts. "
+            f"{len(_protected)} protected ({len(_peaks)} peaks). tone={_tonal_register}",
+            flush=True,
+        )
 
     # Compute face-visibility timeline + per-speaker position signals + shot
     # scale from the dense face detections. These become ground-truth signals
@@ -2808,44 +3210,82 @@ def generate_edit_gemini(
     # byte-stable across calls for implicit caching).
     if deepgram_words:
         readable_words = []
-        for w in deepgram_words:
+        for idx, w in enumerate(deepgram_words):
+            if idx in _all_cut_indices:
+                continue
             readable_words.append(w.get("punctuated_word") or w.get("word") or "")
         readable_transcript = " ".join(readable_words)
 
         word_lines = []
+        peaks_lines = []
         for idx, w in enumerate(deepgram_words):
             word_text = w.get("punctuated_word") or w.get("word") or ""
             start = float(w.get("start") or 0)
             end = float(w.get("end") or 0)
             spk = int(w.get("speaker") or 0)
-            word_lines.append(f"  [{idx}] {start:.2f}-{end:.2f} spk{spk}: {word_text}")
+            if idx in _all_cut_indices:
+                # Cut by mechanical or analysis pre-pass — not valid anchor target.
+                _reason = _mech_reasons.get(idx, "context" if idx in _anal_word_cuts else "mechanical")
+                word_lines.append(
+                    f"  [{idx}] {start:.2f}-{end:.2f} spk{spk}: {word_text}  "
+                    f"[PRE-CUT:{_reason} — NOT AVAILABLE for anchors]"
+                )
+                continue
+            tag = ""
+            if idx in _peaks:
+                tag = "  [NARRATIVE-PEAK]"
+                peaks_lines.append(f"    [{idx}] {start:.2f}s: {word_text}")
+            word_lines.append(f"  [{idx}] {start:.2f}-{end:.2f} spk{spk}: {word_text}{tag}")
 
         transcript_block = "\n".join(word_lines)
-        first_word_start = float(deepgram_words[0].get("start", 0))
+        peaks_block = "\n".join(peaks_lines) if peaks_lines else "  (no narrative peaks identified)"
+        # First KEPT word's start timestamp (used to hint the first-clip cut)
+        _first_kept_start = 0.0
+        for idx, w in enumerate(deepgram_words):
+            if idx not in _all_cut_indices:
+                _first_kept_start = float(w.get("start") or 0)
+                break
         user_content += f"""
 
-=== FULL TRANSCRIPT ===
+=== TONAL REGISTER (from pre-analysis) ===
 
-Read this first to understand the full story before making any editing decisions. Identify the narrative structure — what is setup, what is filler, what is the buildup, and where are the punchlines or reveals. For speed ramping, use this understanding: the parts you'd skim if reading are filler (speed up), the parts that make you react are punchlines (slow down), and the parts that build tension should be fast — tension comes from momentum, not from slowing down.
+This video's overall tone: {_tonal_register}.
+Let this guide caption_style, color_effect, and SFX selection. Never pick an SFX that clashes with the tonal register (e.g., sad_trombone ONLY if comedic).
+
+=== FULL TRANSCRIPT (pre-cut words removed) ===
+
+Read this first to understand the full story before making any editing decisions. Identify the narrative structure — what is setup, what is the buildup, and where are the punchlines or reveals.
 
 {readable_transcript}
 
 === WORD-BY-WORD TIMESTAMPS ===
 
-The following is the complete word-by-word transcript with millisecond-accurate timestamps from speech recognition. Use these timestamps to place your cuts PRECISELY in the silence gaps between words.
+The following is the complete word-by-word transcript with millisecond-accurate timestamps. Words tagged [PRE-CUT:*] have already been removed by the pre-pass (mechanical + context-aware analysis) — they are NOT valid anchor targets and you must not reference them in any anchor field (the schema enforces this). Words tagged [NARRATIVE-PEAK] are classified as emphasis candidates — these are your strongest anchor targets.
 
 {transcript_block}
 
+=== NARRATIVE PEAKS (prioritize these for emphasis, MGs, SFX, transitions) ===
+
+{peaks_block}
+
 RULES FOR USING THESE TIMESTAMPS:
-- word_index refers to the numbered list above. Use those exact indices in remove_words when removing specific spoken words.
+- word_index refers to the numbered list above. Use those exact indices in anchor fields (start_word_index, end_word_index, word_indices, word_index, after_word_index).
+- The schema enforces that every anchor index is a kept (non-pre-cut) word — it is structurally impossible to anchor to a pre-cut word.
 - Your source_start and source_end values MUST land in the gaps BETWEEN words, not inside a word.
 - A gap is the time between one word's end timestamp and the next word's start timestamp.
-- For example, if "problem." ends at 5.62 and "With" starts at 5.76, the silence gap is 5.62-5.76. Place source_end at 5.62 and source_start at 5.76 (or anywhere in between).
 - NEVER place a source_start or source_end between a word's start and end timestamps — that cuts the word in half.
-- The first word starts at {first_word_start:.2f}s. If this is a talking head video, set your first clip's source_start to {first_word_start:.2f} so the video starts on the first word with zero dead air.
+- The first kept word starts at {_first_kept_start:.2f}s. For talking-head videos, set your first clip's source_start to {_first_kept_start:.2f} so the video starts on the first kept word with zero dead air.
 - If the video has intentional visual content before the first word (action, scenery, product shots), start source_start at 0.0 to preserve that content.
+
+REMOVE_WORDS GUIDANCE:
+- All mechanical fillers, stutters, false starts, dead air, and context-dependent filler/redundancy have already been cut by the pre-pass and analysis. Your remove_words field is almost always EMPTY.
+- Only emit a remove_words entry if you identify a narrative section that needs to go (e.g., an unrelated tangent) — and prefer speed_curve acceleration for pacing instead.
 """
-        print(f"[generate-edit] Injected {len(deepgram_words)} Deepgram word timestamps into Gemini prompt", flush=True)
+        print(
+            f"[generate-edit] Injected {len(deepgram_words)} Deepgram word timestamps "
+            f"({len(_all_cut_indices)} pre-cut, {len(_peaks)} peaks) into prompt",
+            flush=True,
+        )
 
     # Inject pre-analysis from content-studio if available (richer visual context)
     if _pre_analysis and isinstance(_pre_analysis, dict):
@@ -2878,18 +3318,29 @@ RULES FOR USING THESE TIMESTAMPS:
     else:
         raise RuntimeError("No video data provided — need either inline_video_bytes or gemini_file")
 
+    # Build a schema with dynamic enums constraining word-index fields:
+    #   - `remove_words.word_index` → CUTTABLE (typically empty — all cuts are
+    #     upstream). If empty, the decoder never emits this variant; Gemini
+    #     uses the range variant for any residual narrative skips.
+    #   - Every anchor field → PROTECTED (content + narrative_peak only)
+    # This makes anchor-on-cut structurally impossible in the main call.
+    _cuttable_for_main_call = set()  # all word-level cuts happen upstream
+    _constrained_schema = build_constrained_edit_plan_schema(
+        protected_indices=_protected,
+        cuttable_indices=_cuttable_for_main_call,
+    )
+
     print(
         f"[generate-edit] Calling Gemini model={GEMINI_MODEL} (thinking=MEDIUM, structured output, temp=1.0, "
-        f"system_instruction={len(system_instruction)} chars, user_content={len(user_content)} chars)...",
+        f"system_instruction={len(system_instruction)} chars, user_content={len(user_content)} chars, "
+        f"protected_enum={len(_protected)} indices)...",
         flush=True,
     )
     t = time.time()
-    # response_json_schema enforces the EditPlan structure at token-generation
-    # time — the model cannot emit missing fields, wrong types, or out-of-enum
-    # values. Python validators below still enforce cross-field semantic
-    # constraints (kept-word anchors, non-overlapping windows, etc.) but shape
-    # is guaranteed before any validator runs. Google docs (2026-02-26):
-    #   "Gemini … will produce outputs matching the provided schema."
+    # response_json_schema with dynamic enums constrains word indices at
+    # token-generation time — the model literally cannot emit an integer
+    # outside the PROTECTED set for anchor fields, and an anchor-on-cut
+    # failure is physically impossible in the output shape.
     #
     # temperature=1.0 is Google's explicit recommendation for Gemini 3 — values
     # below 1.0 "may lead to unexpected behavior, such as looping or degraded
@@ -2902,8 +3353,7 @@ RULES FOR USING THESE TIMESTAMPS:
     #
     # thinking_level=MEDIUM is the working baseline. The schema + validators
     # + word-anchored overlays make HIGH thinking unnecessary — structural
-    # correctness is enforced at decode time, not reasoned about. HIGH would
-    # push call latency past acceptable production bounds.
+    # correctness is enforced at decode time, not reasoned about.
     response = client.models.generate_content(
         model=GEMINI_MODEL,
         contents=[_video_part, user_content],
@@ -2912,7 +3362,7 @@ RULES FOR USING THESE TIMESTAMPS:
             temperature=1.0,
             max_output_tokens=8192,
             response_mime_type="application/json",
-            response_json_schema=EditPlan.model_json_schema(),
+            response_json_schema=_constrained_schema,
             thinking_config=genai_types.ThinkingConfig(thinking_level="MEDIUM"),
             media_resolution="MEDIA_RESOLUTION_LOW",
         ),
@@ -2978,7 +3428,77 @@ RULES FOR USING THESE TIMESTAMPS:
 
     video_duration = float(analysis.get("duration") or 0)
     _dg_words = edit_plan.get("_deepgram_words", [])
-    raw_remove_words = edit_plan.get("remove_words")
+    raw_remove_words = edit_plan.get("remove_words") or []
+
+    # ── Guard: drop Gemini range cuts covering PROTECTED words ───────────────
+    # The analysis-pass classification is authoritative. If Gemini tries to
+    # range-cut a word the analysis classified as PROTECTED (content or
+    # narrative peak), honor the classification and drop the range — anchors
+    # rely on PROTECTED words surviving to output.
+    if raw_remove_words and _protected and _dg_words:
+        _protected_times = []
+        for _pi in _protected:
+            if 0 <= _pi < len(_dg_words):
+                _w = _dg_words[_pi]
+                _protected_times.append((
+                    float(_w.get("start") or 0),
+                    float(_w.get("end") or 0),
+                    _pi,
+                ))
+        _filtered = []
+        for _rw in raw_remove_words:
+            if not isinstance(_rw, dict):
+                continue
+            if "start" in _rw and "end" in _rw and "word_index" not in _rw:
+                try:
+                    _rs = float(_rw["start"])
+                    _re = float(_rw["end"])
+                except (TypeError, ValueError):
+                    continue
+                _covers_protected = None
+                for (_pws, _pwe, _pi) in _protected_times:
+                    if _rs < _pwe and _re > _pws:
+                        _covers_protected = _pi
+                        break
+                if _covers_protected is not None:
+                    _pword = _dg_words[_covers_protected]
+                    _pw_text = str(_pword.get("punctuated_word") or _pword.get("word") or "").strip()
+                    print(
+                        f"[generate-edit] Dropping Gemini range cut {_rs:.2f}-{_re:.2f}s "
+                        f"— covers PROTECTED word [{_covers_protected}] '{_pw_text}' "
+                        f"(classification-authoritative guard)",
+                        flush=True,
+                    )
+                    continue
+            _filtered.append(_rw)
+        raw_remove_words = _filtered
+
+    # ── Merge mechanical + analysis cuts into remove_words ───────────────────
+    # Gemini's main call can't cut word-level (its CUTTABLE enum is empty by
+    # design). All word-level cuts came from the two upstream passes and need
+    # to be applied to the actual render via remove_words.
+    _pre_cut_injections = []
+    for idx in sorted(_mech_word_cuts):
+        _pre_cut_injections.append({
+            "word_index": idx,
+            "reason": _mech_reasons.get(idx) or "mechanical",
+        })
+    for idx in sorted(_anal_word_cuts):
+        _pre_cut_injections.append({
+            "word_index": idx,
+            "reason": "contextual",
+        })
+    for (rs, re_) in _mech_range_cuts:
+        _pre_cut_injections.append({"start": rs, "end": re_, "reason": "dead_air"})
+    if _pre_cut_injections:
+        raw_remove_words = list(raw_remove_words) + _pre_cut_injections
+        edit_plan["remove_words"] = raw_remove_words
+        print(
+            f"[generate-edit] Merged pre-pass cuts into remove_words: "
+            f"{len(_mech_word_cuts)} mechanical words, {len(_anal_word_cuts)} analysis words, "
+            f"{len(_mech_range_cuts)} dead-air ranges",
+            flush=True,
+        )
 
     validated_cuts = []
     if not _dg_words:
@@ -8297,6 +8817,36 @@ def handler(job):
                 print("[trend] WARNING: Style guide not available — Gemini will edit without reference video patterns", flush=True)
             return tc
 
+        def _do_content_analysis_overlapped():
+            """Run the pre-edit content-analysis Gemini call in parallel with face
+            detection and signal computation. Depends on transcript + proxy; its
+            output (word classifications + tonal register) drives the main edit
+            call's dynamic schema enums so that anchor-on-cut is structurally
+            impossible.
+            Returns (mechanical_cuts, content_analysis) tuple."""
+            # Wait for the same transcript the edit call will use.
+            if future_url_transcript is not None:
+                _transcript = future_url_transcript.result()
+                if _transcript is None:
+                    _transcript = future_transcribe.result() if future_transcribe is not None else {"words": []}
+            elif future_transcribe is not None:
+                _transcript = future_transcribe.result()
+            else:
+                _transcript = provided_transcript or {"words": []}
+            _dg_words = _transcript.get("words", []) or []
+            if not _dg_words:
+                return ({"word_cuts": set(), "range_cuts": [], "reasons": {}},
+                        {"word_cuts": set(), "cuttable": set(), "protected": set(),
+                         "peaks": set(), "tonal_register": "casual"})
+            # Mechanical pre-pass — deterministic, ~5ms.
+            _mech = mechanical_cut_pass(_dg_words)
+            # Need the proxy bytes for the context-aware analysis call.
+            _proxy_bytes = (
+                future_gemini_proxy.result() if future_gemini_proxy is not None else None
+            )
+            _analysis = run_content_analysis(_dg_words, _proxy_bytes, _mech)
+            return _mech, _analysis
+
         def _do_edit_recipe_overlapped():
             """Start Gemini as soon as transcript + proxy + trend + audio + face signals are ready.
             Transcript may come from the early_pool URL-based Deepgram call (ran in parallel
@@ -8357,6 +8907,20 @@ def handler(job):
                 except Exception as _upe:
                     print(f"[user-style] Profile fetch failed: {_upe}", flush=True)
                     _user_profile = None
+            # Wait for content-analysis (runs in parallel with face/signals).
+            # This is the mechanism that makes anchor-on-cut structurally
+            # impossible — analysis classifies every word into disjoint cut /
+            # protected sets; the main-call schema uses those as enum
+            # constraints.
+            _mech_cuts, _analysis_result = (
+                future_content_analysis.result()
+                if future_content_analysis is not None
+                else (
+                    {"word_cuts": set(), "range_cuts": [], "reasons": {}},
+                    {"word_cuts": set(), "cuttable": set(), "protected": set(),
+                     "peaks": set(), "tonal_register": "casual"},
+                )
+            )
             return generate_edit_gemini(
                 video_path=_raw_source,
                 vibe=vibe,
@@ -8371,6 +8935,8 @@ def handler(job):
                 user_style_profile=_user_profile,
                 inline_video_bytes=_proxy_bytes,
                 cached_response=_cached_analysis,
+                content_analysis=_analysis_result,
+                mechanical_cuts=_mech_cuts,
             )
 
         def _do_face_detect_overlapped():
@@ -8401,7 +8967,7 @@ def handler(job):
         # Manual pool management — do NOT use `with` block because it calls
         # shutdown(wait=True) on exit, which would block on future_faces and defeat
         # the deferred face collection optimization (face detection should overlap with Remotion).
-        mega_pool = concurrent.futures.ThreadPoolExecutor(max_workers=9)
+        mega_pool = concurrent.futures.ThreadPoolExecutor(max_workers=10)
         future_normalize = mega_pool.submit(_do_normalize)
         future_transcribe = None if _skip_transcribe else mega_pool.submit(_do_transcribe)
         future_gemini_proxy = None if _skip_proxy else mega_pool.submit(_do_gemini_proxy)
@@ -8416,7 +8982,13 @@ def handler(job):
         future_user_style = (
             None if _skip_edit_gen else mega_pool.submit(fetch_user_style_profile, user_id)
         )
-        # Edit recipe waits on transcript + upload internally — skipped entirely in render_only
+        # Content-analysis Gemini pre-pass — runs in parallel with face detection
+        # and signals. Waits internally on transcript + proxy. Its output drives
+        # the main edit call's disjoint schema enums. Skipped in render_only.
+        future_content_analysis = (
+            None if _skip_edit_gen else mega_pool.submit(_do_content_analysis_overlapped)
+        )
+        # Edit recipe waits on transcript + upload + content-analysis internally — skipped entirely in render_only
         future_edit = None if _skip_edit_gen else mega_pool.submit(_do_edit_recipe_overlapped)
         # Face detection runs directly on raw source (no normalize dependency)
         future_faces = mega_pool.submit(_do_face_detect_overlapped)

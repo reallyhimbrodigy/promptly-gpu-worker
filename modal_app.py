@@ -1,6 +1,6 @@
 import modal
 
-# rebuild trigger v36 — Revert thinking=MEDIUM + max_output_tokens=8192. HIGH thinking pushed call latency past acceptable production bounds; structural correctness is already enforced at decode time (response_json_schema + Pydantic + word-anchored overlays + kept-word validators) so HIGH reasoning was unnecessary padding. Keeps all v35 structural wins: word-anchored overlays, (system, user) tuple split, internal-verification footer, positive-framed SFX boundaries, usage_metadata logging.
+# rebuild trigger v37 — Zero-drift classification architecture. Python mechanical pre-pass (fillers, adjacent stutters, trailing-dash false starts, dead-air > 0.3s) + context-aware content-analysis Gemini call (Flash, LOW thinking, narrow schema) runs IN PARALLEL with face detection/signals; its output classifies every word as content/cuttable_filler/cuttable_restart/cuttable_redundant/narrative_peak. Main edit call schema has DYNAMIC enums: anchor fields constrained to PROTECTED (content+peaks), remove_words.word_index constrained to CUTTABLE (empty by design — all word-level cuts are upstream). PROTECTED∩CUTTABLE=∅ by construction → anchor-on-cut is structurally impossible. Classification-authority guard drops any Gemini range cut that would remove a PROTECTED word. No buffers, no neighbor snapping, no projection drift.
 
 # ── Image definition (replaces Dockerfile) ────────────────────────────────────
 image = (
