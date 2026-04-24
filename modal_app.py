@@ -1,6 +1,6 @@
 import modal
 
-# rebuild trigger v35 — Word-anchored overlays + system/user split + thinking=HIGH. text_overlays and motion_graphics use start_word_index (kept-word enforced); Python projects to output frames. build_gemini_edit_prompt returns (system, user) tuple: stable system prefix enables implicit Gemini caching. max_output_tokens=32768 gives HIGH thinking headroom without truncation. Internal-verification footer (split-step self-check). Positive-framed SFX scope boundaries.
+# rebuild trigger v36 — Revert thinking=MEDIUM + max_output_tokens=8192. HIGH thinking pushed call latency past acceptable production bounds; structural correctness is already enforced at decode time (response_json_schema + Pydantic + word-anchored overlays + kept-word validators) so HIGH reasoning was unnecessary padding. Keeps all v35 structural wins: word-anchored overlays, (system, user) tuple split, internal-verification footer, positive-framed SFX boundaries, usage_metadata logging.
 
 # ── Image definition (replaces Dockerfile) ────────────────────────────────────
 image = (

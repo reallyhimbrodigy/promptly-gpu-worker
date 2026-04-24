@@ -2879,7 +2879,7 @@ RULES FOR USING THESE TIMESTAMPS:
         raise RuntimeError("No video data provided — need either inline_video_bytes or gemini_file")
 
     print(
-        f"[generate-edit] Calling Gemini model={GEMINI_MODEL} (thinking=HIGH, structured output, temp=1.0, "
+        f"[generate-edit] Calling Gemini model={GEMINI_MODEL} (thinking=MEDIUM, structured output, temp=1.0, "
         f"system_instruction={len(system_instruction)} chars, user_content={len(user_content)} chars)...",
         flush=True,
     )
@@ -2900,19 +2900,20 @@ RULES FOR USING THESE TIMESTAMPS:
     # user_content, so Gemini re-reads only the deltas (video + transcript +
     # signals).
     #
-    # max_output_tokens=32768 so high thinking budget has room to produce a
-    # full, structurally-valid JSON response without truncation. Thinking
-    # tokens count against this limit.
+    # thinking_level=MEDIUM is the working baseline. The schema + validators
+    # + word-anchored overlays make HIGH thinking unnecessary — structural
+    # correctness is enforced at decode time, not reasoned about. HIGH would
+    # push call latency past acceptable production bounds.
     response = client.models.generate_content(
         model=GEMINI_MODEL,
         contents=[_video_part, user_content],
         config=genai_types.GenerateContentConfig(
             system_instruction=system_instruction,
             temperature=1.0,
-            max_output_tokens=32768,
+            max_output_tokens=8192,
             response_mime_type="application/json",
             response_json_schema=EditPlan.model_json_schema(),
-            thinking_config=genai_types.ThinkingConfig(thinking_level="HIGH"),
+            thinking_config=genai_types.ThinkingConfig(thinking_level="MEDIUM"),
             media_resolution="MEDIA_RESOLUTION_LOW",
         ),
     )
