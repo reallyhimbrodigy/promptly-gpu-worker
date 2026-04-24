@@ -2009,29 +2009,26 @@ This video is {duration:.1f} seconds long.
 
 Your job: produce an edit plan that looks professionally crafted — every cut, every caption move, every zoom, every motion graphic has a narrative reason. Not random. Not accidental. Intentional.
 
-=== ABSOLUTE RULES ===
+=== CONTRACT ===
 
-These are enforced by a strict validator. Any violation fails the render.
+The pipeline enforces these rules with strict validators. Output that violates any rule is rejected.
 
-1. Every position is a SEMANTIC ZONE from the defined vocabulary. NEVER output pixel coordinates.
-2. Every time reference is source seconds (from the transcript/shot-changes/vocal peaks arrays). NEVER frame numbers.
-3. Every text overlay has a `variant` field and every required prop for that variant is present.
-4. caption_position_segments covers [0, {duration:.3f}] exactly — no gaps, no overlaps. First from_seconds=0, last to_seconds={duration:.3f}. Every boundary falls on a word boundary from the transcript.
-5. Z-ORDER: if a motion_graphic occupies the lower half of the frame during window [t1, t2], your caption_position_segments MUST place captions at `top` throughout [t1, t2]. Overlap is an error, not a stylistic choice.
-6. CROSS-CONSISTENCY:
-   - color_effect type "InvertStrike" REQUIRES timing.mode = "pulsed" with at least one pulse. Otherwise: error.
-   - If ANY emphasis_moment.color_pulse = true, color_effect MUST be non-null and timing.mode MUST be "pulsed". Otherwise: error.
-7. NON-OVERLAP:
-   - No two text_overlays may overlap in time.
-   - No text_overlay may overlap an emphasis_moment.motion_graphic window.
-   - High-intensity emphasis moments must be ≥2.5s apart.
-8. ONE ZOOM PER CLIP: at most ONE emphasis_moment may carry a zoom_effect within any single kept-source clip (the source range between your removed-words boundaries). Two emphasis moments landing in the same clip cannot BOTH have zoom_effect — the second one is ignored by the renderer. If you want multiple zoom beats close together in source time, put them all on ONE emphasis_moment's zoom_effect.events array instead of spreading across multiple emphasis moments.
-9. MOTION GRAPHIC ANCHORS are ABSOLUTE-ZONE ONLY: motion_graphics[i].anchor and emphasis_moments[i].motion_graphic.anchor must be one of `upper_third_safe | center | lower_third_safe | left_safe | right_safe`. The motion-graphics pack positions itself against the full canvas and does NOT follow the speaker's face — face-relative anchors are not available for motion_graphics.
-10. EMPHASIS ANCHOR CONSISTENCY:
-   - For every emphasis_moments[i], `t` MUST equal the start timestamp of `word_indices[0]` — copy the exact value from the injected word-by-word transcript (rounded to 2 decimals). Do NOT synthesize a free-form timestamp between words.
-   - Every index in `emphasis_moments[i].word_indices` MUST target a word that SURVIVES your remove_words list. You cannot emphasize a word you've also chosen to remove.
-   - Same rule for `sound_effects[i]`: the `word` field must name a kept word (your trigger lands ON it), and the `t` field must be that word's start time.
-11. SILENCE IS A CHOICE: if you don't emit a zoom_effect on an emphasis moment, no zoom fires. `null` is explicit. There are no downstream defaults.
+1. POSITIONS ARE SEMANTIC ZONES. Use the named zones from the vocabulary (`upper_third_safe`, `center`, `lower_third_safe`, `left_safe`, `right_safe`). Pixel coordinates are not accepted.
+2. TIMES ARE SOURCE SECONDS. Every timestamp you emit references the source video's timeline — match values directly from the injected transcript, shot_changes, and vocal_emphasis arrays. Frame numbers are not accepted.
+3. EVERY TEXT OVERLAY HAS A VARIANT + ITS REQUIRED PROPS. The `variant` field chooses which visual treatment; each variant has a specific set of required props documented in the TEXT OVERLAYS section.
+4. CAPTIONS COVER THE FULL DURATION. `caption_position_segments` spans [0, {duration:.3f}] with no gaps or overlaps. First segment starts at 0, last ends at {duration:.3f}. Every interior boundary lands on a real word boundary from the injected transcript (rounded to 2 decimals — copy the exact value).
+5. Z-ORDER YIELDS TO MOTION GRAPHICS. When a motion_graphic occupies the lower half of the frame across window [t1, t2], set `caption_position_segments` to `top` across that same window. Captions and MGs do not share vertical space.
+6. COLOR EFFECT MODE CONSISTENCY:
+   - `InvertStrike` requires `timing.mode = "pulsed"` with at least one pulse.
+   - If any `emphasis_moment.color_pulse = true`, `color_effect` is non-null and `timing.mode = "pulsed"`.
+7. NON-OVERLAP WINDOWS:
+   - Text overlays do not overlap each other in time.
+   - Text overlays do not overlap any emphasis_moment's motion_graphic window.
+   - High-intensity emphasis moments are spaced ≥2.5s apart.
+8. ONE ZOOM PER KEPT-SOURCE CLIP. At most one emphasis_moment carries a zoom_effect within any single kept-source clip (the source range between your removed-words boundaries). When you want multiple zoom beats close together, stack their events onto a single emphasis_moment's `zoom_effect.events` array.
+9. MOTION GRAPHIC ANCHORS ARE ABSOLUTE ZONES. Every `motion_graphics[i].anchor` and `emphasis_moments[i].motion_graphic.anchor` is one of the 5 absolute zones — MGs don't follow the speaker's face.
+10. ANCHORS ARE KEPT WORDS. Every index in `emphasis_moments[i].word_indices` and every `sound_effects[i].word_index` references a word that SURVIVES your `remove_words` list. The pipeline derives timestamps from these word anchors — there's no free-form `t` for you to emit.
+11. EXPLICIT NULLS. If an emphasis moment has no zoom, emit `"zoom_effect": null` — no downstream defaults fill gaps.
 
 {signals_block}
 {_usr_block}
@@ -2050,10 +2047,7 @@ All semantic zones below pre-compute to inside the body zone. Use them and you a
 
 === SEMANTIC ZONE VOCABULARY (motion_graphics anchors) ===
 
-Every motion_graphics[i].anchor and emphasis_moments[i].motion_graphic.anchor
-MUST be one of these five absolute zones. The motion-graphics pack positions
-itself against the full 1080×1920 canvas; face-relative anchoring is not
-supported by the pack.
+The five absolute zones (per Rule #9). Pick based on what's already on screen and where the speaker sits.
 
   "upper_third_safe" — top band, above the speaker. Use for: title cards, hook text, stats appearing above the subject.
   "center"           — dead center. Use for: dramatic emphasis, full-screen moments, reveals.
@@ -3558,30 +3552,17 @@ RULES FOR USING THESE TIMESTAMPS:
                     f"({_wt!r}) targets a word that was REMOVED via remove_words. "
                     f"Emphasize only words that survive your removal list."
                 )
-        # t MUST equal the start timestamp of word_indices[0] (rounded to 2
-        # decimals). This pins t to a real kept word so it can never land
-        # inside a cut/removed segment. Gemini gets the exact word timestamp
-        # in the injected transcript — it should copy it verbatim.
+        # Derive t from word_indices[0].start — Gemini no longer emits `t`
+        # (schema-level constraint from v34: the two could disagree so we
+        # removed the degree of freedom). Because word_indices[0] is a kept
+        # word, the derived t is guaranteed to land inside a kept clip.
         _anchor_word = _dg_words[_wis[0]]
-        _anchor_start = round(float(_anchor_word.get("start") or 0), 2)
-        try:
-            t = float(em["t"])
-        except (KeyError, TypeError, ValueError):
-            raise ValueError(f"emphasis_moments[{_ei}].t must be a number")
-        if abs(t - _anchor_start) > 0.05:
-            _wt = str(_anchor_word.get("punctuated_word") or _anchor_word.get("word") or "").strip()
-            raise ValueError(
-                f"emphasis_moments[{_ei}].t={t:.3f}s does not match the start "
-                f"timestamp of word_indices[0]={_wis[0]} ({_wt!r}) which starts "
-                f"at {_anchor_start:.2f}s. Set t exactly to that word's start "
-                f"time. The gap between t and the anchor word's start is "
-                f"{abs(t - _anchor_start):.3f}s (must be <=0.05s)."
-            )
-        # Normalize t to the anchor word's exact start — now guaranteed to land
-        # inside a kept clip since the anchor word survived remove_words.
-        t = _anchor_start
+        t = round(float(_anchor_word.get("start") or 0), 2)
         if t < 0 or (video_duration > 0 and t > video_duration + 0.5):
-            raise ValueError(f"emphasis_moments[{_ei}].t ({t}) outside video [0, {video_duration}]")
+            raise ValueError(
+                f"emphasis_moments[{_ei}] derived t={t:.3f}s (from word_indices[0]="
+                f"{_wis[0]}) is outside video duration [0, {video_duration:.3f}]."
+            )
         intensity = str(em.get("intensity") or "").lower()
         if intensity not in ("high", "medium"):
             raise ValueError(f"emphasis_moments[{_ei}].intensity must be 'high'|'medium'")
@@ -3857,83 +3838,70 @@ RULES FOR USING THESE TIMESTAMPS:
     for _si, sfx in enumerate(raw_sfx):
         if not isinstance(sfx, dict):
             raise ValueError(f"sound_effects[{_si}] must be an object")
-        if "t" not in sfx or "sound" not in sfx:
+        if "word_index" not in sfx or "sound" not in sfx:
             raise ValueError(
-                f"sound_effects[{_si}] missing required keys 't' and 'sound'"
+                f"sound_effects[{_si}] missing required keys 'word_index' and 'sound'"
             )
         try:
-            t = float(sfx["t"])
+            _wi = int(sfx["word_index"])
         except (TypeError, ValueError):
             raise ValueError(
-                f"sound_effects[{_si}].t must be a number, got {sfx.get('t')!r}"
+                f"sound_effects[{_si}].word_index must be an integer, got "
+                f"{sfx.get('word_index')!r}"
             )
-        if t < 0 or (video_duration > 0 and t > video_duration):
+        if _wi < 0 or _wi >= len(_sfx_dg_words):
             raise ValueError(
-                f"sound_effects[{_si}].t={t:.3f}s is outside [0, {video_duration:.3f}s]"
+                f"sound_effects[{_si}].word_index={_wi} is out of range "
+                f"[0, {len(_sfx_dg_words)-1}]."
+            )
+        if _wi not in _kept_word_indices:
+            _wt = str(_sfx_dg_words[_wi].get("punctuated_word") or _sfx_dg_words[_wi].get("word") or "").strip()
+            raise ValueError(
+                f"sound_effects[{_si}].word_index={_wi} ({_wt!r}) targets a word "
+                f"that was REMOVED via remove_words. Pick a kept word or drop "
+                f"this SFX — the viewer never hears the trigger otherwise."
             )
         sound = str(sfx["sound"]).strip().lower()
         if sound not in valid_sounds:
             raise ValueError(
                 f"sound_effects[{_si}].sound={sound!r} is not a canonical name. "
-                f"Must be one of {sorted(valid_sounds)}. No aliasing — pick the "
-                f"exact canonical name documented in the SFX section of the prompt."
+                f"Must be one of {sorted(valid_sounds)} — pick the exact "
+                f"canonical name documented in the SFX section of the prompt."
             )
-        word = str(sfx.get("word") or "").strip().lower()
-        if not word:
-            raise ValueError(
-                f"sound_effects[{_si}] ({sound}) missing trigger word — every SFX "
-                f"must name the exact lowercase trigger word from the transcript."
-            )
-        # Resolve to a word index by matching word text near the source timestamp.
-        # At render time, this index is looked up in projected words — the same
-        # system captions and b-roll use.
-        _sfx_word_idx = None
-        if _sfx_dg_words:
-            _best_dist = float("inf")
-            for _wi, _w in enumerate(_sfx_dg_words):
-                _wt = str(_w.get("word") or _w.get("punctuated_word") or "").strip().lower().rstrip(".,!?;:'\"")
-                if _wt == word:
-                    _d = abs(float(_w.get("start") or 0) - t)
-                    if _d < _best_dist:
-                        _best_dist = _d
-                        _sfx_word_idx = _wi
-        if _sfx_word_idx is None:
-            raise ValueError(
-                f"sound_effects[{_si}] ({sound} at t={t:.2f}s) trigger word "
-                f"{word!r} not found in transcript. Use the EXACT lowercase "
-                f"word from the word-by-word transcript injected into the prompt."
-            )
+        # Derive t + word text from the word_index. Python is the single source
+        # of truth for timing — Gemini can't emit a mismatched timestamp.
+        _trigger_w = _sfx_dg_words[_wi]
+        t = float(_trigger_w.get("start") or 0.0)
+        word = str(_trigger_w.get("word") or _trigger_w.get("punctuated_word") or "").strip().lower().rstrip(".,!?;:'\"")
         # Build-duration check: the trigger word must have enough kept-clip time
         # BEFORE it to accommodate the sound's build. Fails hard if the build
         # would get truncated at render.
         if sound in _SFX_MIN_PRE_TRIGGER:
             _needed = _SFX_MIN_PRE_TRIGGER[sound]
-            _trigger_w_start = float(_sfx_dg_words[_sfx_word_idx].get("start") or 0.0)
-            # Find the clip containing the trigger word.
             _clip_start = None
             for _cc in validated_cuts:
                 _cs = float(_cc["source_start"])
                 _ce = float(_cc["source_end"])
-                if _cs <= _trigger_w_start <= _ce:
+                if _cs <= t <= _ce:
                     _clip_start = _cs
                     break
             if _clip_start is None:
                 raise ValueError(
                     f"sound_effects[{_si}] ({sound}) trigger word {word!r} at "
-                    f"t={_trigger_w_start:.2f}s is not inside any kept clip."
+                    f"t={t:.2f}s is not inside any kept clip."
                 )
-            _pre_trigger = _trigger_w_start - _clip_start
+            _pre_trigger = t - _clip_start
             if _pre_trigger < _needed:
                 raise ValueError(
                     f"sound_effects[{_si}] ({sound}) needs {_needed:.2f}s of "
-                    f"kept-clip time BEFORE the trigger word, but the trigger "
-                    f"word {word!r} has only {_pre_trigger:.2f}s of clip before "
-                    f"it (clip starts at {_clip_start:.2f}s, word starts at "
-                    f"{_trigger_w_start:.2f}s). Move this SFX to a trigger word "
-                    f"that's later in its clip, or pick an instant-onset sound "
+                    f"kept-clip time BEFORE the trigger word, but word_index="
+                    f"{_wi} ({word!r}) has only {_pre_trigger:.2f}s of clip "
+                    f"before it (clip starts at {_clip_start:.2f}s, word starts "
+                    f"at {t:.2f}s). Move this SFX to a trigger word that's "
+                    f"later in its clip, or pick an instant-onset sound "
                     f"(hit/ching/ding/pop/click/camera_shutter/typing)."
                 )
-        sound_effects.append({"t": t, "sound": sound, "word": word, "_word_idx": _sfx_word_idx})
+        sound_effects.append({"t": t, "sound": sound, "word": word, "_word_idx": _wi})
 
     # Sound effects are taken EXACTLY as Gemini provided them. No caps,
     # no spacing filter, no auto-placement, no dedup. The Gemini prompt is

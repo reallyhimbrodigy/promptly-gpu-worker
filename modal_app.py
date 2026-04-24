@@ -1,6 +1,6 @@
 import modal
 
-# rebuild trigger v33 — emphasis anchor consistency: t MUST equal word_indices[0].start, every word_indices entry MUST be a kept word. Schema-level constraint removes the entire class of "emphasis t lands in a removed segment" bugs. Prompt rule + validator + ABSOLUTE RULES #10.
+# rebuild trigger v34 — Gemini reliability: response_json_schema (Pydantic EditPlan) enforces structure at decode, temperature 1.0 (Google rec), emphasis drops `t` entirely (Python derives from word_indices[0].start), sound_effects schema is {word_index, sound} only, ABSOLUTE RULES rewritten positively with MG-anchor dedupe.
 
 # ── Image definition (replaces Dockerfile) ────────────────────────────────────
 image = (
