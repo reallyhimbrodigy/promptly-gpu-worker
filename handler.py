@@ -3010,11 +3010,12 @@ CLASSIFICATION VOCABULARY:
 
 RULES:
 
-- Every word in the transcript gets exactly one classification (via source_index).
-- Words already flagged [MECHANICAL-CUT] MUST be classified as "cuttable_filler" — they are already cut by the mechanical pre-pass; your classification is just bookkeeping.
-- Do NOT add new cuts liberally. When in doubt, default to "content". Over-cutting ruins the edit.
-- narrative_peak is RARE. Maybe 2–8 per video. It is the specific word the speaker hits hardest, where a visual effect belongs.
-- Your output is a flat list of {source_index, classification}, one per Deepgram word index. Missing indices default to content but emit all of them.
+- Emit classifications ONLY for words that are NOT content. The default is "content" — unemitted indices are automatically treated as content by the downstream pipeline.
+- For each word you do emit, pick exactly one of: cuttable_filler, cuttable_restart, cuttable_redundant, or narrative_peak.
+- Words already flagged [MECHANICAL-CUT] — do NOT re-emit them. They're already cut; your classification would be redundant.
+- Do NOT add new cuts liberally. When in doubt, leave a word unemitted (it stays as content).
+- narrative_peak is RARE. 2–8 per video. The specific word the speaker hits hardest, where a visual effect belongs.
+- Keep the word_analyses list SHORT — typically 5–30 entries total across all four non-content classifications.
 
 TONAL REGISTER:
 
@@ -3030,7 +3031,7 @@ So be accurate: a true emphasis word misclassified as filler means the editor ca
 
 {transcript_lines}
 
-Classify each word. Return the word_analyses array with one entry per source_index (0..{len(_words) - 1}), plus the tonal_register."""
+Return word_analyses with ONLY the non-content classifications (cuttable_filler, cuttable_restart, cuttable_redundant, narrative_peak). Unemitted indices (0..{len(_words) - 1}) default to content. Also emit the tonal_register. Keep the list short (5-30 entries typical)."""
 
     t0 = time.time()
     print(
@@ -8810,7 +8811,14 @@ def handler(job):
             output (word classifications + tonal register) drives the main edit
             call's dynamic schema enums so that anchor-on-cut is structurally
             impossible.
-            Returns (mechanical_cuts, content_analysis) tuple."""
+            Returns (mechanical_cuts, content_analysis) tuple.
+            If the analysis call fails (network/rate-limit/malformed), falls
+            back to mechanical-only cuts with every surviving word treated as
+            PROTECTED. The main edit call still runs successfully; the only
+            effect is that Gemini sees no additional contextual cuts and no
+            narrative-peak hints — the video renders, just without the
+            analysis-driven polish. This keeps a transient API failure from
+            taking down the whole job."""
             # Wait for the same transcript the edit call will use.
             if future_url_transcript is not None:
                 _transcript = future_url_transcript.result()
@@ -8831,7 +8839,25 @@ def handler(job):
             _proxy_bytes = (
                 future_gemini_proxy.result() if future_gemini_proxy is not None else None
             )
-            _analysis = run_content_analysis(_dg_words, _proxy_bytes, _mech)
+            try:
+                _analysis = run_content_analysis(_dg_words, _proxy_bytes, _mech)
+            except Exception as _ae:
+                # Graceful degradation: mechanical cuts still apply; every other
+                # word is PROTECTED; no narrative peaks identified.
+                print(
+                    f"[content-analysis] FAILED — falling back to mechanical-only "
+                    f"(reason: {type(_ae).__name__}: {str(_ae)[:200]})",
+                    flush=True,
+                )
+                _mech_cuts = set(_mech.get("word_cuts") or set())
+                _protected_fallback = set(range(len(_dg_words))) - _mech_cuts
+                _analysis = {
+                    "word_cuts": set(),
+                    "cuttable": set(),
+                    "protected": _protected_fallback,
+                    "peaks": set(),
+                    "tonal_register": "casual",
+                }
             return _mech, _analysis
 
         def _do_edit_recipe_overlapped():
