@@ -97,16 +97,23 @@ _SFX_SOUNDS = Literal[
 ]
 
 class _HookClip(BaseModel):
-    source_start: float
-    source_end: float
+    # Word-anchored — Python derives source_start from start_word.start and
+    # source_end from end_word.end after the main call returns. Gemini never
+    # emits float timestamps that need to match word boundaries exactly.
+    start_word_index: int
+    end_word_index: int
 
-class _CaptionPositionSegment(BaseModel):
-    from_seconds: float
-    to_seconds: float
+class _CaptionPositionChange(BaseModel):
+    # Position-change event at a specific kept word. Python synthesizes the
+    # actual caption_position_segments (with from_seconds/to_seconds/position)
+    # after the call returns. Every segment boundary is by construction a
+    # real word start timestamp — no mismatch possible.
+    word_index: int
     position: Literal["top", "center", "bottom"]
 
 class _ColorPulse(BaseModel):
-    peak_at_seconds: float
+    # Word-anchored — Python derives peak_at_seconds from word.start.
+    peak_word_index: int
     attackFrames: int = 3
     holdFrames: int = 4
     releaseFrames: int = 12
@@ -219,7 +226,9 @@ class _Transition(BaseModel):
     flashColor: Optional[str] = None
 
 class _SpeedCurveKeypoint(BaseModel):
-    t: float
+    # Word-anchored — Python derives `t` (source time in seconds) from
+    # deepgram_words[at_word_index].start after the main call returns.
+    at_word_index: int
     speed: float
 
 class _RemoveWord(BaseModel):
@@ -239,10 +248,10 @@ class EditPlan(BaseModel):
     """
     notes: str
     hook_clip: Optional[_HookClip] = None
-    thumbnail_timestamp: float
+    thumbnail_word_index: int
     caption_style: _CAPTION_STYLES
     caption_keywords: List[str]
-    caption_position_segments: List[_CaptionPositionSegment]
+    caption_position_changes: List[_CaptionPositionChange]
     color_effect: Optional[_ColorEffect] = None
     audio_denoise: bool
     outro: Literal["none", "fade_black", "fade_white"]
@@ -2178,10 +2187,10 @@ Your job: produce an edit plan that looks professionally crafted — every cut, 
 The pipeline enforces these rules with strict validators. Output that violates any rule is rejected.
 
 1. POSITIONS ARE SEMANTIC ZONES. Use the named zones from the vocabulary (`upper_third_safe`, `center`, `lower_third_safe`, `left_safe`, `right_safe`). Pixel coordinates are not accepted.
-2. TIMES ARE SOURCE SECONDS. Every timestamp you emit references the source video's timeline — match values directly from the injected transcript, shot_changes, and vocal_emphasis arrays. Frame numbers are not accepted.
+2. EVERY TIMING IS WORD-ANCHORED. You never emit raw float timestamps. Anchor every time-based decision to a specific kept word via its index (start_word_index, end_word_index, word_index, word_indices, after_word_index, peak_word_index, at_word_index, thumbnail_word_index). Python derives all float timestamps from word start/end times. The only float fields in your output are non-time values like `duration_seconds` (overlay lifespan), `intensity`, `scale`, and `speed`.
 3. EVERY TEXT OVERLAY HAS A VARIANT + ITS REQUIRED PROPS. The `variant` field chooses which visual treatment; each variant has a specific set of required props documented in the TEXT OVERLAYS section.
-4. CAPTIONS COVER THE FULL DURATION. `caption_position_segments` spans the entire source duration (stated in the user message) with no gaps or overlaps. First segment starts at 0.0, last ends at the source duration. Every interior boundary lands on a real word boundary from the injected transcript (rounded to 2 decimals — copy the exact value).
-5. Z-ORDER YIELDS TO MOTION GRAPHICS. When a motion_graphic occupies the lower half of the frame across window [t1, t2], set `caption_position_segments` to `top` across that same window. Captions and MGs do not share vertical space.
+4. CAPTIONS ARE WORD-ANCHORED. Emit `caption_position_changes` as an array of `{word_index, position}` events — each event says "at this kept word, captions move to this position." Python synthesizes the final segment list with exact word-start timestamps. No float boundaries to match, no duration arithmetic. If captions stay "bottom" the whole video, emit an empty array.
+5. Z-ORDER YIELDS TO MOTION GRAPHICS. When a motion_graphic occupies the lower half of the frame across a window, emit a `caption_position_changes` event at the MG's start_word moving captions to "top", and another at the MG's end_word moving them back. Captions and MGs do not share vertical space.
 6. COLOR EFFECT MODE CONSISTENCY:
    - `InvertStrike` requires `timing.mode = "pulsed"` with at least one pulse.
    - If any `emphasis_moment.color_pulse = true`, `color_effect` is non-null and `timing.mode = "pulsed"`.
@@ -2191,7 +2200,7 @@ The pipeline enforces these rules with strict validators. Output that violates a
    - High-intensity emphasis moments are spaced ≥2.5s apart.
 8. ONE ZOOM PER KEPT-SOURCE CLIP. At most one emphasis_moment carries a zoom_effect within any single kept-source clip (the source range between your removed-words boundaries). When you want multiple zoom beats close together, stack their events onto a single emphasis_moment's `zoom_effect.events` array.
 9. MOTION GRAPHIC ANCHORS ARE ABSOLUTE ZONES. Every `motion_graphics[i].anchor` and `emphasis_moments[i].motion_graphic.anchor` is one of the 5 absolute zones — MGs don't follow the speaker's face.
-10. ANCHORS ARE KEPT WORDS — STRUCTURALLY ENFORCED. Every index you emit in any anchor field (`emphasis_moments[i].word_indices`, `sound_effects[i].word_index`, `text_overlays[i].start_word_index`, `motion_graphics[i].start_word_index` / `end_word_index`, `broll_clips[i].start_word_index` / `end_word_index`, `transitions[i].after_word_index`) is schema-constrained to the kept-word enum. The pipeline derives timestamps from these word anchors — there's no free-form `t` for you to emit.
+10. ANCHORS ARE KEPT WORDS — BY CONSTRUCTION. The transcript you see contains only kept words, renumbered `[0..M-1]`. Every word_index you emit (in `emphasis_moments[i].word_indices`, `sound_effects[i].word_index`, `text_overlays[i].start_word_index`, `motion_graphics[i].{start,end}_word_index`, `broll_clips[i].{start,end}_word_index`, `transitions[i].after_word_index`, `caption_position_changes[i].word_index`, `color_effect.timing.pulses[i].peak_word_index`, `hook_clip.{start,end}_word_index`, `thumbnail_word_index`, `speed_curve[i].at_word_index`) references this index space. All anchors land on kept words. Python translates back to source indices and derives all timestamps.
 11. EXPLICIT NULLS. If an emphasis moment has no zoom, emit `"zoom_effect": null` — no downstream defaults fill gaps.
 
 === SAFE ZONES (1080x1920 canvas) ===
@@ -2288,17 +2297,21 @@ DECISION MATRIX — caption_style by content:
 
 caption_keywords — REQUIRED. 2-6 short words that matter narratively (punchline nouns, reveal names, emotional verbs). Lowercase, no punctuation.
 
-caption_position_segments — REQUIRED. Array covering the full source duration (stated in the user message) with no gaps or overlaps.
-  Format: [{{"from_seconds": float, "to_seconds": float, "position": "top" | "center" | "bottom"}}, ...]
+caption_position_changes — REQUIRED ARRAY (can be empty). Position-change events, each at a specific kept word.
+  Format: [{{"word_index": int, "position": "top" | "center" | "bottom"}}, ...]
 
-  Baseline: one segment at "bottom" covering the whole duration.
-  MOVE captions when:
-    - A motion_graphic occupies the bottom half for some window → captions go "top" for that window.
-    - The speaker is looking down / mouth is in the lower third of the frame → captions go "top".
-    - B-roll cutaway covers the bottom with busy imagery → captions go "top".
-    - Single-word dramatic moment (Quintessence-style) where caption needs center-stage → "center" briefly.
+  Semantics:
+    - Captions start at "bottom" by default.
+    - Each change says: "at this word, captions move to this position and stay there until the next change."
+    - Python synthesizes the actual timed segments from these events — you do not emit timestamps.
+    - Empty array = captions stay "bottom" for the entire video.
+
+  MOVE captions (emit a change) when:
+    - A motion_graphic occupies the bottom half across a window → emit a change to "top" at the MG's start_word_index, and another back to "bottom" at the word right after MG ends.
+    - The speaker is looking down / mouth is in the lower third of the frame → change to "top" at the word where the downward look starts.
+    - B-roll cutaway covers the bottom with busy imagery → change to "top" at the b-roll's start_word_index, back to "bottom" at its end_word_index + 1.
+    - Single-word dramatic moment (Quintessence-style) where caption needs center-stage → change to "center" at that word, back to "bottom" on the next word.
   Speaker changes alone don't require caption moves — face position does.
-  Segment boundaries must fall on word boundaries from the transcript.
 
 === TEXT OVERLAYS — BRIEF TITLE CARDS ===
 
@@ -2408,7 +2421,7 @@ Structure:
     "type": <grade>,
     "intensity": 0.4 - 1.0,
     "timing": {{"mode": "persistent", "fadeInFrames": 15}}
-      OR {{"mode": "pulsed", "pulses": [{{"peak_at_seconds": float, "attackFrames": 3, "holdFrames": 4, "releaseFrames": 12, "intensity": 1.0}}]}}
+      OR {{"mode": "pulsed", "pulses": [{{"peak_word_index": int, "attackFrames": 3, "holdFrames": 4, "releaseFrames": 12, "intensity": 1.0}}]}}
   }}
 
 12 grades:
@@ -2439,7 +2452,7 @@ Structure:
                         Best for: Thriller, moody narratives, dark editorial.
 
 Pulsed mode:
-  Each pulse has `peak_at_seconds` — a SOURCE-time timestamp (pick from vocal_emphasis peaks or shot_changes). The renderer projects to output frames.
+  Each pulse has `peak_word_index` — the kept word where the pulse peaks. Python derives the exact source timestamp from word.start, then projects it to output frames. Pick the word that corresponds to a vocal peak or a shot-change moment.
   If any emphasis_moment.color_pulse = true, you MUST ALSO set color_effect.timing.mode = "pulsed" (additional pulses fire automatically at those moments).
 
 GUIDELINES:
@@ -2554,8 +2567,10 @@ Preferred alternative: use `speed_curve` to accelerate low-value sections instea
 
 First thing before the rest. MUST be the climax/punchline/shock. Never the setup.
 
-hook_clip — object or null. {{"source_start": float, "source_end": float}}.
-  Duration 1.0 - 3.0s. First word lands within 0.3s. null is valid when the video opens with an already-compelling first 2s.
+hook_clip — object or null. {{"start_word_index": int, "end_word_index": int}}.
+  Word-anchored — Python derives source_start from start_word.start and source_end from end_word.end.
+  Duration (end_word.end − start_word.start) should be 1.0 - 3.0s.
+  null is valid when the video opens with an already-compelling first 2s.
 
 === SFX — SOUND EFFECTS ===
 
@@ -2692,14 +2707,15 @@ transitions — ARRAY. {{"after_word_index": int, "type": <name>, ...component p
 
 === SPEED CURVE ===
 
-Only when vibe mentions "speed ramp" or "CapCut style". Else: "none".
+Only when vibe mentions "speed ramp" or "CapCut style". Else: null.
 
-speed_curve — ARRAY of {{"t": float, "speed": float 0.67-1.4}} or "none".
+speed_curve — ARRAY of {{"at_word_index": int, "speed": float 0.67-1.4}} or null.
+  Each keypoint anchors to a kept word. Python derives `t` (source time) from word.start and densifies the curve for smooth transitions.
 
 === GLOBAL FIELDS ===
 
 notes              — string <=50 words. Brief rationale.
-thumbnail_timestamp — SOURCE-seconds. Pre-reveal anticipation or post-reveal reaction, NOT the punchline word (mid-syllable mouths are ugly).
+thumbnail_word_index — int. Kept word whose start timestamp will be used as the thumbnail frame. Pre-reveal anticipation or post-reveal reaction, NOT the punchline word (mid-syllable mouths are ugly).
 audio_denoise      — bool. true when noise_floor > -40 dB.
 outro              — "none" | "fade_black" | "fade_white". "none" best for looping.
 aspect_ratio       — always "9:16".
@@ -2711,12 +2727,12 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
 
 {{
   "notes": "<=50 words>",
-  "hook_clip": {{"source_start": float, "source_end": float}} | null,
-  "thumbnail_timestamp": float,
+  "hook_clip": {{"start_word_index": int, "end_word_index": int}} | null,
+  "thumbnail_word_index": int,
   "caption_style": "<one of 21>",
   "caption_keywords": ["<word>", "<word>", ...],
-  "caption_position_segments": [
-    {{"from_seconds": 0.0, "to_seconds": float, "position": "top" | "center" | "bottom"}},
+  "caption_position_changes": [
+    {{"word_index": int, "position": "top" | "center" | "bottom"}},
     ...
   ],
   "color_effect": {{"type": "<grade>", "intensity": float, "timing": {{...}}}} | null,
@@ -2760,17 +2776,16 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
 
 Work through these checks against the plan you are about to emit. This is self-verification — do not externalize it in your output.
 
-1. Caption segments cover the full duration. `caption_position_segments[0].from_seconds == 0.0`. `caption_position_segments[-1].to_seconds` equals the source duration given in the user message. Every `to_seconds` equals the next segment's `from_seconds`. Every interior boundary matches a real word-boundary timestamp from the transcript you were given.
-2. Non-overlap in time. No two `text_overlays` windows (start_word.start, start_word.start + duration_seconds) overlap. No `text_overlays` window overlaps any `motion_graphics` window or any `emphasis_moments[i].motion_graphic` window. High-intensity emphasis moments are ≥2.5s apart.
-3. One zoom per kept-source clip. Within each contiguous source range between removed-word boundaries, at most one `emphasis_moments[i].zoom_effect` is non-null. Multiple beats close together stack their events onto a single emphasis_moment's `zoom_effect.events` array.
-4. Z-order yield. For every window a motion_graphic sits in the lower half (`lower_third_safe` or `center`-ish), `caption_position_segments` is `top` across that window.
-5. Color consistency. If any `emphasis_moments[i].color_pulse == true`, `color_effect` is non-null and `color_effect.timing.mode == "pulsed"`. `InvertStrike` requires `timing.mode == "pulsed"` with at least one pulse.
-6. MG anchors are absolute zones. Every `motion_graphics[i].anchor` and every `emphasis_moments[i].motion_graphic.anchor` is one of the 5 absolute zones (`upper_third_safe`, `center`, `lower_third_safe`, `left_safe`, `right_safe`).
-7. Explicit nulls. Every emphasis_moment has explicit `zoom_effect` (value or null), `color_pulse` (bool), and `motion_graphic` (value or null) fields — no omissions.
-8. Build-up SFX headroom. For every `drum_roll`, `reverse`, or `sad_trombone`, the trigger word has at least the required build duration of kept-clip time before it (drum_roll ≥1.65s, reverse ≥1.37s, sad_trombone ≥1.29s).
-9. sad_trombone tonal gate. If `sad_trombone` appears, the tonal_register is "comedic" AND the surrounding dialogue is being played for laughs. Otherwise remove it.
+1. Non-overlap in time. No two `text_overlays` windows (start_word.start, start_word.start + duration_seconds) overlap. No `text_overlays` window overlaps any `motion_graphics` window or any `emphasis_moments[i].motion_graphic` window. High-intensity emphasis moments are ≥2.5s apart.
+2. One zoom per kept-source clip. Within each contiguous source range between removed-word boundaries, at most one `emphasis_moments[i].zoom_effect` is non-null. Multiple beats close together stack their events onto a single emphasis_moment's `zoom_effect.events` array.
+3. Z-order yield. For every window a motion_graphic sits in the lower half (`lower_third_safe` or `center`-ish), emit a `caption_position_changes` event at the MG's start_word moving captions to "top", and another at the MG's end_word moving them back to the previous position.
+4. Color consistency. If any `emphasis_moments[i].color_pulse == true`, `color_effect` is non-null and `color_effect.timing.mode == "pulsed"`. `InvertStrike` requires `timing.mode == "pulsed"` with at least one pulse.
+5. MG anchors are absolute zones. Every `motion_graphics[i].anchor` and every `emphasis_moments[i].motion_graphic.anchor` is one of the 5 absolute zones (`upper_third_safe`, `center`, `lower_third_safe`, `left_safe`, `right_safe`).
+6. Explicit nulls. Every emphasis_moment has explicit `zoom_effect` (value or null), `color_pulse` (bool), and `motion_graphic` (value or null) fields — no omissions.
+7. Build-up SFX headroom. For every `drum_roll`, `reverse`, or `sad_trombone`, the trigger word has at least the required build duration of kept-clip time before it (drum_roll ≥1.65s, reverse ≥1.37s, sad_trombone ≥1.29s).
+8. sad_trombone tonal gate. If `sad_trombone` appears, the tonal_register is "comedic" AND the surrounding dialogue is being played for laughs. Otherwise remove it.
 
-Note: word-anchor validity (anchors reference kept words) is structurally enforced by the schema enum — the decoder literally cannot emit an anchor that would target a cut word. You don't need to verify it.
+Note: every anchor field in this schema is word-index-based. You never emit float timestamps that must match word boundaries — Python derives all timestamps from word indices. Caption segments, hook boundaries, thumbnail time, speed-curve keypoints, and color pulses are all synthesized from the word indices you emit.
 
 If any check fails, revise the plan before emitting JSON. The validators reject violations — fixing them here is cheaper than re-generating."""
 
@@ -3381,8 +3396,131 @@ REMOVE_WORDS GUIDANCE:
     for _rw in (edit_plan.get("remove_words") or []):
         if isinstance(_rw, dict) and _rw.get("word_index") is not None:
             _rw["word_index"] = _translate_idx(_rw["word_index"])
+    # caption_position_changes (new word-index-based format)
+    for _cpc in (edit_plan.get("caption_position_changes") or []):
+        if isinstance(_cpc, dict) and "word_index" in _cpc:
+            _cpc["word_index"] = _translate_idx(_cpc["word_index"])
+    # color_effect.timing.pulses[*].peak_word_index
+    _ce = edit_plan.get("color_effect")
+    if isinstance(_ce, dict):
+        _timing = _ce.get("timing") or {}
+        for _p in (_timing.get("pulses") or []):
+            if isinstance(_p, dict) and "peak_word_index" in _p:
+                _p["peak_word_index"] = _translate_idx(_p["peak_word_index"])
+    # hook_clip.start_word_index / end_word_index
+    _hc = edit_plan.get("hook_clip")
+    if isinstance(_hc, dict):
+        for _k in ("start_word_index", "end_word_index"):
+            if _k in _hc:
+                _hc[_k] = _translate_idx(_hc[_k])
+    # thumbnail_word_index
+    if "thumbnail_word_index" in edit_plan:
+        edit_plan["thumbnail_word_index"] = _translate_idx(edit_plan["thumbnail_word_index"])
+    # speed_curve[*].at_word_index
+    for _sc in (edit_plan.get("speed_curve") or []):
+        if isinstance(_sc, dict) and "at_word_index" in _sc:
+            _sc["at_word_index"] = _translate_idx(_sc["at_word_index"])
     print(
         f"[generate-edit] Translated {len(_new_to_src)} kept-word indices back to source space",
+        flush=True,
+    )
+
+    # ── Derivation pass: word_index → float timestamps for downstream code ──
+    # Every downstream consumer (render_multi_clip, projection helpers,
+    # thumbnail selection, speed-curve densification) expects float-time fields
+    # (caption_position_segments, peak_at_seconds, source_start/source_end,
+    # thumbnail_timestamp, speed_curve[*].t). Gemini emits word-anchored
+    # inputs; Python synthesizes the float fields from word timings here.
+    _dg = deepgram_words or []
+
+    def _word_start(src_idx):
+        if src_idx is None or not (0 <= int(src_idx) < len(_dg)):
+            return None
+        return round(float(_dg[int(src_idx)].get("start") or 0), 3)
+
+    def _word_end(src_idx):
+        if src_idx is None or not (0 <= int(src_idx) < len(_dg)):
+            return None
+        return round(float(_dg[int(src_idx)].get("end") or 0), 3)
+
+    # caption_position_segments (synthesized from caption_position_changes)
+    _changes = edit_plan.get("caption_position_changes") or []
+    _changes_clean = [
+        c for c in _changes
+        if isinstance(c, dict) and c.get("word_index") is not None
+        and c.get("position") in ("top", "center", "bottom")
+    ]
+    _changes_clean.sort(key=lambda c: int(c["word_index"]))
+    _segments = []
+    _cur_pos = "bottom"  # default start position
+    _cur_t = 0.0
+    for _ch in _changes_clean:
+        _ch_t = _word_start(_ch["word_index"])
+        if _ch_t is None:
+            continue
+        if _ch_t > _cur_t:
+            _segments.append({
+                "from_seconds": round(_cur_t, 3),
+                "to_seconds": round(_ch_t, 3),
+                "position": _cur_pos,
+            })
+        _cur_pos = _ch["position"]
+        _cur_t = _ch_t
+    # Final segment to video duration
+    if duration > _cur_t:
+        _segments.append({
+            "from_seconds": round(_cur_t, 3),
+            "to_seconds": round(float(duration), 3),
+            "position": _cur_pos,
+        })
+    # Fallback: if no changes emitted, cover the whole video with default
+    if not _segments and duration > 0:
+        _segments = [{
+            "from_seconds": 0.0,
+            "to_seconds": round(float(duration), 3),
+            "position": "bottom",
+        }]
+    edit_plan["caption_position_segments"] = _segments
+
+    # color_effect.timing.pulses: derive peak_at_seconds from peak_word_index
+    if isinstance(_ce, dict):
+        _timing = _ce.get("timing") or {}
+        for _p in (_timing.get("pulses") or []):
+            if isinstance(_p, dict):
+                _pwi = _p.get("peak_word_index")
+                _pts = _word_start(_pwi)
+                if _pts is not None:
+                    _p["peak_at_seconds"] = _pts
+
+    # hook_clip: derive source_start/source_end from word indices
+    if isinstance(_hc, dict):
+        _s_wi = _hc.get("start_word_index")
+        _e_wi = _hc.get("end_word_index")
+        _ss = _word_start(_s_wi)
+        _se = _word_end(_e_wi)
+        if _ss is not None:
+            _hc["source_start"] = _ss
+        if _se is not None:
+            _hc["source_end"] = _se
+
+    # thumbnail_timestamp from thumbnail_word_index
+    _twi = edit_plan.get("thumbnail_word_index")
+    _tts = _word_start(_twi)
+    if _tts is not None:
+        edit_plan["thumbnail_timestamp"] = _tts
+
+    # speed_curve: derive t from at_word_index
+    for _sc in (edit_plan.get("speed_curve") or []):
+        if isinstance(_sc, dict) and "at_word_index" in _sc:
+            _sc_t = _word_start(_sc["at_word_index"])
+            if _sc_t is not None:
+                _sc["t"] = _sc_t
+
+    print(
+        f"[generate-edit] Derived float timestamps: "
+        f"caption_segments={len(_segments)}, "
+        f"hook={'yes' if isinstance(_hc, dict) else 'no'}, "
+        f"thumbnail={edit_plan.get('thumbnail_timestamp')}",
         flush=True,
     )
 
@@ -3844,77 +3982,17 @@ REMOVE_WORDS GUIDANCE:
         raise ValueError(f"caption_keywords must be an array, got {type(_ck_raw).__name__}")
     edit_plan["caption_keywords"] = [str(k).strip().lower() for k in _ck_raw if str(k).strip()]
 
-    # caption_position_segments — covers [0, duration], no gaps/overlaps,
-    # boundaries on word boundaries (±100ms tolerance for float rounding).
-    _cps_raw = edit_plan.get("caption_position_segments")
-    if not isinstance(_cps_raw, list) or not _cps_raw:
-        raise ValueError("caption_position_segments must be a non-empty array")
-    _word_boundary_times = set()
-    for _w in _dg_words:
-        _word_boundary_times.add(round(float(_w.get("start") or 0), 2))
-        _word_boundary_times.add(round(float(_w.get("end") or 0), 2))
-    _word_boundary_times.add(0.0)
-    _word_boundary_times.add(round(float(video_duration), 2))
-    _validated_cps = []
-    for _i, _seg in enumerate(_cps_raw):
-        if not isinstance(_seg, dict):
-            raise ValueError(f"caption_position_segments[{_i}] must be an object")
-        try:
-            _fs = float(_seg["from_seconds"])
-            _ts = float(_seg["to_seconds"])
-        except (KeyError, TypeError, ValueError):
-            raise ValueError(
-                f"caption_position_segments[{_i}] needs numeric from_seconds and to_seconds"
-            )
-        _pos = str(_seg.get("position") or "").strip()
-        if _pos not in ("top", "center", "bottom"):
-            raise ValueError(
-                f"caption_position_segments[{_i}].position must be 'top'|'center'|'bottom', got {_pos!r}"
-            )
-        if _ts <= _fs:
-            raise ValueError(f"caption_position_segments[{_i}] has to_seconds <= from_seconds")
-        _validated_cps.append({"from_seconds": _fs, "to_seconds": _ts, "position": _pos})
-    _validated_cps.sort(key=lambda x: x["from_seconds"])
-    if abs(_validated_cps[0]["from_seconds"] - 0.0) > 0.05:
-        raise ValueError(
-            f"caption_position_segments must start at 0.0, got {_validated_cps[0]['from_seconds']}"
+    # caption_position_segments — SYNTHESIZED by the derivation pass above
+    # from Gemini's caption_position_changes (word-index-based). Every
+    # boundary is by construction a real word start timestamp; no exact-match
+    # validation needed because mismatch is architecturally impossible.
+    _cps = edit_plan.get("caption_position_segments") or []
+    if _cps:
+        print(
+            f"[caption-segments] {len(_cps)} segment(s) synthesized from changes: "
+            + ", ".join(f"[{s['from_seconds']:.2f}-{s['to_seconds']:.2f}]={s['position']}" for s in _cps),
+            flush=True,
         )
-    if abs(_validated_cps[-1]["to_seconds"] - float(video_duration)) > 0.25:
-        raise ValueError(
-            f"caption_position_segments must end at {video_duration}, got {_validated_cps[-1]['to_seconds']}"
-        )
-    for _i in range(1, len(_validated_cps)):
-        _prev_end = _validated_cps[_i - 1]["to_seconds"]
-        _curr_start = _validated_cps[_i]["from_seconds"]
-        if abs(_curr_start - _prev_end) > 0.05:
-            raise ValueError(
-                f"caption_position_segments have a gap/overlap between segment {_i-1} "
-                f"(ends {_prev_end}) and segment {_i} (starts {_curr_start})"
-            )
-    # Boundaries MUST coincide with a real word boundary — mid-word flips cause
-    # visual glitches. Gemini sees every word's start/end in the transcript and
-    # must pick one of those exact times (rounded to 2 decimals, same rounding
-    # as `_word_boundary_times`). No tolerance window, no silent snap — the
-    # boundary is either on a word or it isn't.
-    for _i in range(1, len(_validated_cps)):
-        _b = round(float(_validated_cps[_i]["from_seconds"]), 2)
-        if _b not in _word_boundary_times:
-            _nearest = min(_word_boundary_times, key=lambda w: abs(w - _b))
-            raise ValueError(
-                f"caption_position_segments[{_i}].from_seconds={_b}s is not a real "
-                f"word boundary (nearest valid boundary is {_nearest:.2f}s, gap "
-                f"{abs(_nearest-_b):.3f}s). Every segment boundary must match one of "
-                f"the start/end timestamps from the word list, rounded to 2 decimals."
-            )
-        # Ensure the adjacent segment's to_seconds matches exactly — no drift.
-        _validated_cps[_i]["from_seconds"] = _b
-        _validated_cps[_i - 1]["to_seconds"] = _b
-    edit_plan["caption_position_segments"] = _validated_cps
-    print(
-        f"[caption-segments] {len(_validated_cps)} segment(s): "
-        + ", ".join(f"[{s['from_seconds']:.2f}-{s['to_seconds']:.2f}]={s['position']}" for s in _validated_cps),
-        flush=True,
-    )
 
     # color_effect — object or null. Pulses use source-time `peak_at_seconds`.
     _ce_raw = edit_plan.get("color_effect")
