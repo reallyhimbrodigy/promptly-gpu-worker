@@ -106,7 +106,7 @@ image = (
         "google-genai",
         "deepgram-sdk==3.4.0",
         "supabase",
-        "boto3",
+        "boto3[crt]",   # AWS Common Runtime — 2-6× S3 throughput vs stock boto3
         "httpx",
         "fastapi",
         "pydantic",
@@ -167,6 +167,14 @@ secrets = [
 # ── App ────────────────────────────────────────────────────────────────────────
 app = modal.App("promptly-gpu-worker", image=image, secrets=secrets)
 
+# ── Prewarm cache volume ───────────────────────────────────────────────────────
+# Stores source videos downloaded via the /prewarm endpoint, keyed by a hash
+# of the S3 bucket+key. When the real render job runs and finds its source in
+# this volume, it skips the S3 download entirely (saving ~5-15s depending on
+# file size and network). Volume is eventually consistent — commit/reload on
+# both ends keeps it coherent across containers.
+prewarm_volume = modal.Volume.from_name("promptly-prewarm-cache", create_if_missing=True)
+
 # ── Web endpoint ───────────────────────────────────────────────────────────────
 @app.cls(
     timeout=600,          # 10 min — target <60s with H100 + max cores
@@ -175,6 +183,7 @@ app = modal.App("promptly-gpu-worker", image=image, secrets=secrets)
     memory=131072,        # 128GB — headroom for parallel segment renders + Remotion Chrome tabs
     gpu="H100",           # H100 has no NVENC — encode is libx264 on 64 CPUs. GPU handles NVDEC + Chromium compositing via angle-egl.
     region="us-west",     # colocate with Supabase (West US) for minimal network latency
+    volumes={"/prewarm": prewarm_volume},
 )
 class PromptlyWorker:
     @modal.enter()
@@ -184,10 +193,33 @@ class PromptlyWorker:
         that was being paid on EVERY request even on warm containers."""
         import sys
         sys.path.insert(0, "/")
-        from handler import handler as _h
+        from handler import handler as _h, prewarm_handler as _p
         self._handler = _h
+        self._prewarm = _p
+        self._prewarm_volume = prewarm_volume
 
     @modal.fastapi_endpoint(method="POST")
     def run_job(self, body: dict):
+        # Refresh the prewarm volume view so recently-committed sources are
+        # visible even if another container did the prewarm. ~50ms when new
+        # data is available; free when nothing changed.
+        try:
+            self._prewarm_volume.reload()
+        except Exception:
+            pass
         result = self._handler({"input": body})
+        return result
+
+    @modal.fastapi_endpoint(method="POST")
+    def prewarm(self, body: dict):
+        """Lightweight S3→Volume cache warm-up. Called by iOS the moment the
+        client-side upload to S3 finishes (well before the user taps Send).
+        By the time the real render request arrives, the source is on the
+        Modal Volume and the download step is a no-op."""
+        result = self._prewarm({"input": body})
+        # Commit so subsequent run_job calls on other containers see the file.
+        try:
+            self._prewarm_volume.commit()
+        except Exception as e:
+            print(f"[prewarm] volume commit failed: {e}", flush=True)
         return result

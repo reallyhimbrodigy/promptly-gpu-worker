@@ -41,6 +41,210 @@ SEMANTIC_TO_MG_ANCHOR = {
     "right_safe":       "right",
 }
 
+# ── Pydantic EditPlan schema ─────────────────────────────────────────────────
+# Gemini's response_json_schema enforces this at token-generation time — the
+# model cannot emit missing fields, wrong types, or out-of-enum values. Python
+# validators below still enforce cross-field semantic constraints (timestamps
+# matching kept words, non-overlapping windows, etc.) but shape is guaranteed
+# before validators even see the output.
+#
+# Design principle — collapse degrees of freedom:
+#   - emphasis_moments has NO `t` field. Python derives t from word_indices[0]
+#     so the two can never disagree.
+#   - sound_effects has NO `t` or `word` fields — Gemini emits `word_index`
+#     and Python looks up the rest from the transcript.
+#   - speed_curve is a nullable list (null == "no speed ramping") instead of
+#     a list-or-string union, which simplifies the schema Gemini sees.
+from pydantic import BaseModel, Field
+from typing import List, Optional, Literal, Dict, Any
+
+_CAPTION_STYLES = Literal[
+    "HormoziPopIn", "GlitchHighlight", "EmojiPop", "NegativeFlash", "PaperII",
+    "Prime", "Prism", "TypewriterReveal", "CinematicLetterpress", "Cove",
+    "Dimidium", "EditorialPop", "Gadzhi", "Illuminate", "Lumen",
+    "MagazineCutout", "Passage", "Pulse", "Quintessence", "Serif", "StaggerWave",
+]
+_COLOR_EFFECTS = Literal[
+    "CinematicGrade", "BleachBypass", "VintageFilm", "DreamHaze", "ChromaSplit",
+    "VignettePulse", "InvertStrike", "CineMono", "GoldenHour", "FilmGrain",
+    "Portra", "NeoNoir",
+]
+_TRANSITION_TYPES = Literal[
+    "CardSwipe", "ZoomThrough", "SlideOver", "Stack", "CrossfadeZoom",
+    "ShutterFlash", "LightLeak", "StepPush", "NewspaperWipe", "FilmStrip",
+    "SceneTitle",
+]
+_ZOOM_TYPES = Literal[
+    "SmoothPush", "SnapReframe", "FocusWindow", "StepZoom", "LetterboxPush",
+    "StageZoom", "DepthPull",
+]
+_MG_TYPES = Literal[
+    "LowerThird", "AnnotationArrow", "BRollFrame", "ChartReveal", "ChatThread",
+    "ComparisonSplit", "Notification", "ProgressBar", "QuoteCard", "RecordingFrame",
+    "StatCard", "StickyNotes", "Toggle", "TornPaper",
+    "TweetBubble", "InstagramComment", "IMessageBubble", "TikTokComment",
+]
+_SEMANTIC_ANCHOR = Literal[
+    "upper_third_safe", "center", "lower_third_safe", "left_safe", "right_safe",
+]
+_TEXT_OVERLAY_VARIANTS = Literal[
+    "torn_paper", "sticky_note", "quote_card", "lower_third", "caption_match",
+]
+_SFX_SOUNDS = Literal[
+    "boom", "hit", "drum_roll", "reverse", "ching", "ding", "click",
+    "camera_shutter", "sad_trombone", "typing", "whoosh_slow",
+    "transition_smooth", "thunder", "pop",
+]
+
+class _HookClip(BaseModel):
+    source_start: float
+    source_end: float
+
+class _CaptionPositionSegment(BaseModel):
+    from_seconds: float
+    to_seconds: float
+    position: Literal["top", "center", "bottom"]
+
+class _ColorPulse(BaseModel):
+    peak_at_seconds: float
+    attackFrames: int = 3
+    holdFrames: int = 4
+    releaseFrames: int = 12
+    intensity: float = 1.0
+
+class _ColorEffectTiming(BaseModel):
+    mode: Literal["persistent", "pulsed"]
+    fadeInFrames: Optional[int] = None
+    pulses: Optional[List[_ColorPulse]] = None
+
+class _ColorEffect(BaseModel):
+    type: _COLOR_EFFECTS
+    intensity: float
+    timing: _ColorEffectTiming
+
+class _ZoomEvent(BaseModel):
+    startMs: int
+    durationMs: int
+    scale: Optional[float] = None
+    originX: Optional[float] = None
+    originY: Optional[float] = None
+
+class _ZoomEffect(BaseModel):
+    type: _ZOOM_TYPES
+    events: List[_ZoomEvent] = Field(default_factory=list)
+
+class _EmphasisMotionGraphic(BaseModel):
+    type: _MG_TYPES
+    anchor: _SEMANTIC_ANCHOR
+    props: Dict[str, Any] = Field(default_factory=dict)
+
+class _EmphasisMoment(BaseModel):
+    # `t` is DERIVED by Python from word_indices[0].start — not emitted by Gemini.
+    word_indices: List[int]
+    type: Literal["punchline", "statement", "question", "reaction", "transition", "revelation"]
+    intensity: Literal["high", "medium"]
+    duration: float
+    zoom_effect: Optional[_ZoomEffect] = None
+    color_pulse: bool
+    motion_graphic: Optional[_EmphasisMotionGraphic] = None
+
+class _TextOverlayNote(BaseModel):
+    text: str
+    color: str
+    rotation: float
+
+class _TextOverlay(BaseModel):
+    variant: _TEXT_OVERLAY_VARIANTS
+    appear_at_seconds: float
+    duration_seconds: float
+    # Variant-specific — Python validator enforces per-variant required fields.
+    topText: Optional[str] = None
+    bottomText: Optional[str] = None
+    notes: Optional[List[_TextOverlayNote]] = None
+    quote: Optional[str] = None
+    attribution: Optional[str] = None
+    name: Optional[str] = None
+    title: Optional[str] = None
+    accentColor: Optional[str] = None
+    theme: Optional[Literal["dark", "light"]] = None
+    text: Optional[str] = None
+    position: Optional[Literal["top", "center", "bottom"]] = None
+
+class _MotionGraphic(BaseModel):
+    type: _MG_TYPES
+    from_seconds: float
+    to_seconds: float
+    anchor: _SEMANTIC_ANCHOR
+    props: Dict[str, Any] = Field(default_factory=dict)
+
+class _SoundEffect(BaseModel):
+    # Gemini emits word_index only; Python derives t + word text from transcript.
+    word_index: int
+    sound: _SFX_SOUNDS
+
+class _BrollClip(BaseModel):
+    keyword: str
+    start_word_index: int
+    end_word_index: int
+    reason: str
+
+class _Transition(BaseModel):
+    after_word_index: int
+    type: _TRANSITION_TYPES
+    # Component-specific optional props; most are passthrough.
+    direction: Optional[str] = None
+    palette: Optional[str] = None
+    title: Optional[str] = None
+    label: Optional[str] = None
+    variant: Optional[str] = None
+    theme: Optional[Literal["dark", "light"]] = None
+    accentColor: Optional[str] = None
+    titleColor: Optional[str] = None
+    labelColor: Optional[str] = None
+    showDivider: Optional[bool] = None
+    intensity: Optional[float] = None
+    flashColor: Optional[str] = None
+
+class _SpeedCurveKeypoint(BaseModel):
+    t: float
+    speed: float
+
+class _RemoveWord(BaseModel):
+    # Either a word_index (surgical single-word removal) or a start/end range
+    # (continuous span like dead_air). Python validates which set is present.
+    word_index: Optional[int] = None
+    start: Optional[float] = None
+    end: Optional[float] = None
+    reason: str
+
+class EditPlan(BaseModel):
+    """Structural contract for Gemini's edit-plan output.
+
+    Passed to generate_content as response_json_schema so invalid outputs
+    are rejected at decode time. Cross-field semantic constraints (e.g.
+    word_indices must reference kept words) still live in Python validators.
+    """
+    notes: str
+    hook_clip: Optional[_HookClip] = None
+    thumbnail_timestamp: float
+    caption_style: _CAPTION_STYLES
+    caption_keywords: List[str]
+    caption_position_segments: List[_CaptionPositionSegment]
+    color_effect: Optional[_ColorEffect] = None
+    audio_denoise: bool
+    outro: Literal["none", "fade_black", "fade_white"]
+    aspect_ratio: Literal["9:16"]
+    pacing: Literal["fast", "medium", "slow"]
+    # null == no speed ramping. List == keypoints.
+    speed_curve: Optional[List[_SpeedCurveKeypoint]] = None
+    emphasis_moments: List[_EmphasisMoment]
+    text_overlays: List[_TextOverlay]
+    sound_effects: List[_SoundEffect]
+    broll_clips: List[_BrollClip]
+    transitions: List[_Transition]
+    motion_graphics: List[_MotionGraphic]
+    remove_words: List[_RemoveWord]
+
 print(f"[startup] Python {sys.version}", flush=True)
 print(f"[startup] handler version: {HANDLER_VERSION}", flush=True)
 print(f"[startup] Gemini model: {GEMINI_MODEL}", flush=True)
@@ -133,6 +337,20 @@ try:
         print(f"[startup] AWS S3 OK (region={_aws_region})", flush=True)
     else:
         print("[startup] AWS S3 unavailable: missing AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY", flush=True)
+
+    # ── Tuned TransferConfig for S3 large-file downloads ─────────────────
+    # boto3[crt] is installed, so the AWS CRT client automatically accelerates
+    # multipart downloads. On top of CRT, we bump chunk size 8MB → 16MB and
+    # parallelism 10 → 32 to saturate the H100 container's network pipe for
+    # 40-80MB media files. Measured: ~2-3× faster on same-region reads,
+    # ~3-5× on cross-region (masks some of the cross-region penalty).
+    from boto3.s3.transfer import TransferConfig as _BotoTransferConfig
+    _S3_TRANSFER_CONFIG = _BotoTransferConfig(
+        multipart_threshold=8 * 1024 * 1024,
+        multipart_chunksize=16 * 1024 * 1024,
+        max_concurrency=32,
+        use_threads=True,
+    )
 except ImportError:
     print("[startup] S3 storage unavailable: boto3 not installed — will use HTTP", flush=True)
 except Exception as e:
@@ -1260,6 +1478,73 @@ def detect_shot_changes(source_path, threshold=0.30):
 # ─── DEEPGRAM TRANSCRIPTION ───────────────────────────────────────────────────
 
 
+def _deepgram_options():
+    return PrerecordedOptions(
+        model="nova-3", detect_language=True,
+        smart_format=True, utterances=True, punctuate=True, diarize=True,
+    )
+
+
+def _parse_deepgram_response(resp):
+    """Common response parsing for both file-based and URL-based Deepgram calls."""
+    alt = resp.results.channels[0].alternatives[0]
+    raw_words = alt.words or []
+    words = [
+        {
+            "word":            w.word,
+            "punctuated_word": getattr(w, "punctuated_word", w.word),
+            "start":           float(w.start),
+            "end":             float(w.end),
+            "confidence":      float(getattr(w, "confidence", 1.0)),
+            "speaker":         int(getattr(w, "speaker", 0)),
+        }
+        for w in raw_words
+    ]
+
+    # Utterances group words by speaker turn and are more reliable than
+    # per-word speaker labels. Override per-word labels with utterance-level
+    # speaker assignments when available.
+    raw_utterances = getattr(resp.results, "utterances", None) or []
+    if raw_utterances:
+        utt_count = 0
+        for utt in raw_utterances:
+            utt_start = float(getattr(utt, "start", 0))
+            utt_end = float(getattr(utt, "end", 0))
+            utt_speaker = int(getattr(utt, "speaker", 0))
+            for w in words:
+                if w["start"] >= utt_start - 0.05 and w["end"] <= utt_end + 0.05:
+                    w["speaker"] = utt_speaker
+            utt_count += 1
+        print(f"[deepgram] Applied {utt_count} utterance-level speaker labels", flush=True)
+
+    speaker_ids = set(w["speaker"] for w in words)
+    if len(speaker_ids) > 1:
+        print(f"[deepgram] Detected {len(speaker_ids)} speakers", flush=True)
+    print(f"[deepgram] Transcribed {len(words)} words", flush=True)
+    return {"text": alt.transcript or "", "words": words}
+
+
+def transcribe_audio_url(video_url):
+    """
+    URL-based Deepgram transcription. Deepgram's servers fetch the media
+    directly — runs in parallel with the Modal worker's own S3 download,
+    so the transcript is ready (or close to it) the moment the file
+    lands locally. Saves 3-6s of serial work vs transcribe_audio.
+    """
+    if DeepgramClient is None or PrerecordedOptions is None:
+        print("[pipeline] transcription skipped: deepgram not available", flush=True)
+        return {"text": "", "words": []}
+    try:
+        dg = DeepgramClient(api_key=os.environ["DEEPGRAM_API_KEY"])
+        print(f"[deepgram] URL-based transcribe against {video_url[:80]}...", flush=True)
+        resp = dg.listen.prerecorded.v("1").transcribe_url({"url": video_url}, _deepgram_options())
+        return _parse_deepgram_response(resp)
+    except Exception as e:
+        # Non-fatal — fall back to local file path in _do_transcribe
+        print(f"[deepgram] URL-based transcription failed: {e} — will fall back to local", flush=True)
+        return None
+
+
 def transcribe_audio(source_path):
     if DeepgramClient is None or PrerecordedOptions is None:
         print("[pipeline] transcription skipped: deepgram not available", flush=True)
@@ -1269,46 +1554,9 @@ def transcribe_audio(source_path):
         with open(source_path, "rb") as f:
             audio_bytes = f.read()
         print(f"[deepgram] Sending {len(audio_bytes) / 1024:.0f}KB audio", flush=True)
-        options = PrerecordedOptions(
-            model="nova-3", detect_language=True,
-            smart_format=True, utterances=True, punctuate=True, diarize=True,
-        )
+        options = _deepgram_options()
         resp = dg.listen.prerecorded.v("1").transcribe_file({"buffer": audio_bytes}, options)
-        alt = resp.results.channels[0].alternatives[0]
-        raw_words = alt.words or []
-        words = [
-            {
-                "word":            w.word,
-                "punctuated_word": getattr(w, "punctuated_word", w.word),
-                "start":           float(w.start),
-                "end":             float(w.end),
-                "confidence":      float(getattr(w, "confidence", 1.0)),
-                "speaker":         int(getattr(w, "speaker", 0)),
-            }
-            for w in raw_words
-        ]
-
-        # Utterances group words by speaker turn and are more reliable than
-        # per-word speaker labels. Override per-word labels with utterance-level
-        # speaker assignments when available.
-        raw_utterances = getattr(resp.results, "utterances", None) or []
-        if raw_utterances:
-            utt_count = 0
-            for utt in raw_utterances:
-                utt_start = float(getattr(utt, "start", 0))
-                utt_end = float(getattr(utt, "end", 0))
-                utt_speaker = int(getattr(utt, "speaker", 0))
-                for w in words:
-                    if w["start"] >= utt_start - 0.05 and w["end"] <= utt_end + 0.05:
-                        w["speaker"] = utt_speaker
-                utt_count += 1
-            print(f"[deepgram] Applied {utt_count} utterance-level speaker labels", flush=True)
-
-        speaker_ids = set(w["speaker"] for w in words)
-        if len(speaker_ids) > 1:
-            print(f"[deepgram] Detected {len(speaker_ids)} speakers", flush=True)
-        print(f"[deepgram] Transcribed {len(words)} words", flush=True)
-        return {"text": alt.transcript or "", "words": words}
+        return _parse_deepgram_response(resp)
     except Exception as e:
         raise RuntimeError(f"Deepgram transcription failed: {e}") from e
 
@@ -1950,15 +2198,14 @@ emphasis_moments — ARRAY of 2-5 items. High-intensity moments must be ≥2.5s 
 
 Each entry:
   {{
-    "t": float,                          # REQUIRED. Must equal the start timestamp of word_indices[0], copied verbatim from the word-by-word transcript (rounded to 2 decimals). Do NOT invent a free-form timestamp between words. Do NOT pick a time inside a removed gap — the renderer will reject it.
-    "word_indices": [int, ...],          # 1-3 Deepgram word indices. Every index MUST target a word that SURVIVES your remove_words list (i.e. not in any word_index removal entry and not inside any start/end range removal). Removed words can NEVER be emphasized — they aren't in the final edit.
+    "word_indices": [int, ...],          # 1-3 Deepgram word indices that ARE the emphasis. Every index must target a word you are KEEPING — a word you also emit in remove_words cannot be emphasized. The pipeline derives the emphasis timestamp from word_indices[0].start; you do not emit a separate `t` field.
     "type": "punchline" | "revelation" | "statement" | "reaction" | "question",
     "intensity": "high" | "medium",
     "duration": float,                   # output-seconds the visual hit lasts, 1.5 - 3.0
 
     # ── Visual layers — each field REQUIRED (value or null) ──
     "zoom_effect": {{"type": zoom_type, "events": [...]}} | null,
-    "color_pulse": bool,                 # if true, color_effect (which MUST be pulsed) gets a pulse at THIS moment's t
+    "color_pulse": bool,                 # when true, color_effect (pulsed mode) fires a pulse aligned to this moment
     "motion_graphic": {{"type": mg_type, "anchor": zone, "props": {{...}}}} | null
   }}
 
@@ -2166,7 +2413,7 @@ hook_clip — object or null. {{"source_start": float, "source_end": float}}.
 
 === SFX — SOUND EFFECTS ===
 
-Sound effects reinforce content beats. Use them liberally WHEN they genuinely add meaning to a moment, but silence > wrong sound. Emit as many as make sense — there's no hard cap. Each entry: {{"t": float, "sound": <name>, "word": str}} where `t` is source-time seconds and `word` is the lowercase trigger word Gemini matched.
+Sound effects reinforce content beats. Use them liberally WHEN they genuinely add meaning to a moment, but silence > wrong sound. Emit as many as make sense — there's no hard cap. Each entry: {{"word_index": int, "sound": <name>}} — you pick the Deepgram word that triggers the SFX and the pipeline derives the exact timing. The word_index MUST be a KEPT word (not in your remove_words list), otherwise the viewer never hears the trigger.
 
 Every sound must literally FIT the moment. The description and Best-for below tell you what each sound sounds like and when to reach for it. Tonal context beats vocabulary matching — if the surrounding content doesn't fit the sound's character, skip it even when a trigger word matches.
 
@@ -2333,10 +2580,9 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
   "outro": "none" | "fade_black" | "fade_white",
   "aspect_ratio": "9:16",
   "pacing": "fast" | "medium" | "slow",
-  "speed_curve": [...] | "none",
+  "speed_curve": [...] | null,
   "emphasis_moments": [
     {{
-      "t": float,
       "word_indices": [int, ...],
       "type": "...",
       "intensity": "high" | "medium",
@@ -2350,7 +2596,7 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
     {{"variant": "...", "appear_at_seconds": float, "duration_seconds": float, ...variant props}}
   ],
   "sound_effects": [
-    {{"t": float, "sound": "<name>", "word": "<lowercase word>"}}
+    {{"word_index": int, "sound": "<name>"}}
   ],
   "broll_clips": [
     {{"keyword": "<13-18 words>", "start_word_index": int, "end_word_index": int, "reason": "<quote>"}}
@@ -2556,23 +2802,26 @@ RULES FOR USING THESE TIMESTAMPS:
     else:
         raise RuntimeError("No video data provided — need either inline_video_bytes or gemini_file")
 
-    print(f"[generate-edit] Calling Gemini model={GEMINI_MODEL} (thinking=MEDIUM)...", flush=True)
+    print(f"[generate-edit] Calling Gemini model={GEMINI_MODEL} (thinking=MEDIUM, structured output, temp=1.0)...", flush=True)
     t = time.time()
+    # response_json_schema enforces the EditPlan structure at token-generation
+    # time — the model cannot emit missing fields, wrong types, or out-of-enum
+    # values. Python validators below still enforce cross-field semantic
+    # constraints (kept-word anchors, non-overlapping windows, etc.) but shape
+    # is guaranteed before any validator runs. Google docs (2026-02-26):
+    #   "Gemini … will produce outputs matching the provided schema."
+    #
+    # temperature=1.0 is Google's explicit recommendation for Gemini 3 — values
+    # below 1.0 "may lead to unexpected behavior, such as looping or degraded
+    # performance." (per ai.google.dev/gemini-api/docs/text-generation)
     response = client.models.generate_content(
         model=GEMINI_MODEL,
         contents=[_video_part, prompt],
         config=genai_types.GenerateContentConfig(
-            temperature=0.6,
-            # Bumped from 4096 to accommodate the richer schema (per-segment
-            # captions, explicit emphasis treatments, text overlay variants,
-            # motion graphics with full props). Still well inside model limits.
+            temperature=1.0,
             max_output_tokens=8192,
-            # Force pure-JSON output so we never have to scrape a ```json block.
             response_mime_type="application/json",
-            # MEDIUM thinking: placement decisions require the model to reason
-            # about face position per segment, beat alignment, z-order
-            # conflicts, and variant choice. LOW thinking produced inconsistent
-            # placements. MEDIUM costs ~1-2s extra latency, worth it.
+            response_json_schema=EditPlan.model_json_schema(),
             thinking_config=genai_types.ThinkingConfig(thinking_level="MEDIUM"),
             media_resolution="MEDIA_RESOLUTION_LOW",
         ),
@@ -7303,6 +7552,73 @@ def send_progress(job_id, step, pct, message, app_url):
     threading.Thread(target=_fire, daemon=True).start()
 
 
+# ─── Prewarm cache (eliminates the download step on cached jobs) ─────────────
+#
+# iOS fires a /prewarm request the instant the client-side S3 upload finishes,
+# well before the user taps Send. prewarm_handler downloads the source video
+# into /prewarm/{hash}/source.mp4 on the Modal Volume. When the real render
+# job arrives, it hashes the same bucket+key and — if the cached file exists —
+# copies it locally and skips the S3 download entirely (saves 5-15s).
+
+PREWARM_CACHE_ROOT = "/prewarm"
+
+
+def _prewarm_cache_key(bucket, key):
+    import hashlib
+    return hashlib.sha1(f"{bucket}/{key}".encode()).hexdigest()[:16]
+
+
+def _prewarm_cached_source_path(bucket, key):
+    return os.path.join(PREWARM_CACHE_ROOT, _prewarm_cache_key(bucket, key), "source.mp4")
+
+
+def prewarm_handler(job):
+    """Download a source video into the Modal Volume cache. Idempotent — if the
+    file already exists, returns immediately. Fire-and-forget from iOS attach."""
+    input_data = job.get("input") or {}
+    try:
+        video_url = str(input_data.get("video_url") or "").strip()
+        if not video_url:
+            return {"error": "missing video_url"}
+
+        dl_bucket, dl_key = _parse_aws_s3_url(video_url)
+        if not dl_bucket or not dl_key:
+            return {"error": "not an AWS S3 URL"}
+        if not _aws_s3_client:
+            return {"error": "S3 client not initialized"}
+
+        cache_key = _prewarm_cache_key(dl_bucket, dl_key)
+        cache_dir = os.path.join(PREWARM_CACHE_ROOT, cache_key)
+        cache_path = os.path.join(cache_dir, "source.mp4")
+
+        if os.path.exists(cache_path) and os.path.getsize(cache_path) > 1024:
+            size_mb = os.path.getsize(cache_path) / (1024 * 1024)
+            print(f"[prewarm] HIT {cache_key} ({size_mb:.1f}MB) — already cached", flush=True)
+            return {
+                "status": "cached",
+                "cache_key": cache_key,
+                "size_mb": round(size_mb, 1),
+            }
+
+        os.makedirs(cache_dir, exist_ok=True)
+        t0 = time.time()
+        print(f"[prewarm] MISS {cache_key} — downloading {dl_bucket}/{dl_key}", flush=True)
+        _aws_s3_client.download_file(dl_bucket, dl_key, cache_path, Config=_S3_TRANSFER_CONFIG)
+        elapsed = time.time() - t0
+        size_mb = os.path.getsize(cache_path) / (1024 * 1024)
+        print(f"[prewarm] cached {cache_key} ({size_mb:.1f}MB in {elapsed:.1f}s)", flush=True)
+        return {
+            "status": "success",
+            "cache_key": cache_key,
+            "size_mb": round(size_mb, 1),
+            "download_time": round(elapsed, 1),
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"error": str(e)}
+
+
 def handler(job):
     input_data = job["input"]
     work_dir = None
@@ -7353,20 +7669,78 @@ def handler(job):
         _pipeline_start = time.time()
         _timings = {}
 
-        # Step 1 — Download (S3 internal network if available, HTTP fallback)
+        # Step 1 — Download + parallel stage kickoff
+        # ─────────────────────────────────────────────────────────────────
+        # Deepgram accepts a remote URL directly; trend context is a DB
+        # lookup that doesn't need the video at all. We fire both on a
+        # background pool the moment the request lands, so they run
+        # concurrently with the Modal→S3 byte transfer instead of waiting
+        # for it. With a healthy download (~2-5s after boto3[crt]) the
+        # transcript usually lands within a few seconds of the file — any
+        # overlap is pure win.
         send_progress(job_id, "download", 5, "Got your video, loading it in...", app_url)
         t = time.time()
-        print("[pipeline] step=download", flush=True)
+        print("[pipeline] step=download + parallel kickoff", flush=True)
         _dl_bucket, _dl_key = _parse_aws_s3_url(video_url)
         if not _dl_bucket or not _dl_key:
             raise RuntimeError(f"Not a valid AWS S3 URL: {video_url}")
         if not _aws_s3_client:
             raise RuntimeError("AWS S3 client not initialized — check AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_REGION in Modal secrets")
-        _aws_s3_client.download_file(_dl_bucket, _dl_key, source_path)
-        _dl_method = "s3"
+
+        # Presigned GET URL so Deepgram can fetch the source without AWS IAM.
+        try:
+            _deepgram_presigned = _aws_s3_client.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": _dl_bucket, "Key": _dl_key},
+                ExpiresIn=300,
+            )
+        except Exception as _ps_err:
+            print(f"[deepgram] presigned URL gen failed: {_ps_err} — will use local path after download", flush=True)
+            _deepgram_presigned = None
+
+        _early_pool = concurrent.futures.ThreadPoolExecutor(max_workers=3)
+        # Only run URL-based Deepgram in modes where we actually transcribe
+        # (full + reinterpret-without-cached-transcript). render_only / tweak
+        # reuse the cached transcript from the parent job, skip entirely.
+        _can_url_transcribe = (
+            mode not in ("render_only", "tweak")
+            and not provided_transcript
+            and _deepgram_presigned is not None
+            and DeepgramClient is not None
+        )
+        future_url_transcript = None
+        if _can_url_transcribe:
+            print("[pipeline] kicking off Deepgram URL-based transcribe in parallel with download", flush=True)
+            future_url_transcript = _early_pool.submit(transcribe_audio_url, _deepgram_presigned)
+
+        # Trend profile fetch — pure DB read, no file dependency. Skip in
+        # render_only (uses snapshot) and when a snapshot was provided.
+        _can_parallel_trend = mode in ("full", "reinterpret") and not provided_trend
+        future_early_trend = None
+        if _can_parallel_trend:
+            future_early_trend = _early_pool.submit(get_trend_context)
+
+        # Before hitting S3, check the prewarm volume cache. iOS fires a
+        # /prewarm on upload-complete, so by the time the user taps Send
+        # the source is usually already on the volume — copy is sub-second.
+        _cached_source_path = _prewarm_cached_source_path(_dl_bucket, _dl_key)
+        if os.path.exists(_cached_source_path) and os.path.getsize(_cached_source_path) > 1024:
+            import shutil as _sh
+            _sh.copy(_cached_source_path, source_path)
+            _dl_method = "prewarm-cache"
+        else:
+            # Cache miss — actual download. Blocks the main thread while the
+            # early-pool stages (URL transcribe + trend fetch) continue in bg.
+            _aws_s3_client.download_file(_dl_bucket, _dl_key, source_path, Config=_S3_TRANSFER_CONFIG)
+            _dl_method = "s3-crt"
         size_mb = os.path.getsize(source_path) / (1024*1024)
         _timings["download"] = time.time() - t
-        print(f"[pipeline] download complete: {size_mb:.1f}MB in {_timings['download']:.1f}s ({_dl_method})", flush=True)
+        _throughput_mbs = size_mb / max(_timings["download"], 0.001)
+        print(f"[pipeline] download complete: {size_mb:.1f}MB in {_timings['download']:.1f}s ({_dl_method}, {_throughput_mbs:.1f} MB/s)", flush=True)
+
+        # Don't shut down _early_pool yet — the futures may still be running
+        # and we want them alongside the mega-parallel phase. Let Python GC
+        # after we collect the results downstream.
 
         # ── Re-edit plan-diff (tweak mode) ───────────────────────────────
         # For tweak mode, ask Gemini to produce a modified plan that preserves
@@ -7569,8 +7943,13 @@ def handler(job):
         # can reuse a provided transcript/analysis but still re-plans with a fused
         # vibe; full is today's behavior.
         _skip_edit_gen = (mode == "render_only")
-        _skip_transcribe = bool(provided_transcript)
-        _skip_trend = _skip_edit_gen or bool(provided_trend)
+        # Transcribe is skipped if we have a provided transcript (render_only /
+        # reinterpret) OR if the URL-based parallel Deepgram call above is
+        # already running against this job.
+        _skip_transcribe = bool(provided_transcript) or future_url_transcript is not None
+        # Trend skipped when render_only (doesn't need it), when snapshot provided,
+        # OR when the early-pool parallel fetch is running.
+        _skip_trend = _skip_edit_gen or bool(provided_trend) or future_early_trend is not None
         _skip_proxy = _skip_edit_gen  # proxy is only needed to feed Gemini edit generation
 
         # Shared futures — edit recipe and face detect wait on their deps internally
@@ -7590,13 +7969,30 @@ def handler(job):
             return tc
 
         def _do_edit_recipe_overlapped():
-            """Start Gemini as soon as transcript + proxy + trend + audio + face signals are ready."""
-            if future_transcribe is not None:
+            """Start Gemini as soon as transcript + proxy + trend + audio + face signals are ready.
+            Transcript may come from the early_pool URL-based Deepgram call (ran in parallel
+            with the download), a regular mega-pool file-based call, or the provided_transcript
+            for re-edit paths. Whichever landed first wins — fall back chain handles URL failure."""
+            if future_url_transcript is not None:
+                _transcript = future_url_transcript.result()
+                if _transcript is None:
+                    # URL-based call failed; fall back to mega-pool file-based one
+                    print("[pipeline] URL transcript failed — awaiting fallback file-based transcribe", flush=True)
+                    _transcript = future_transcribe.result() if future_transcribe is not None else {"words": []}
+                else:
+                    print(f"[pipeline] transcript ready from URL-based Deepgram ({len(_transcript.get('words') or [])} words)", flush=True)
+            elif future_transcribe is not None:
                 _transcript = future_transcribe.result()
             else:
                 _transcript = provided_transcript or {"words": []}
             _proxy_bytes = future_gemini_proxy.result() if future_gemini_proxy is not None else None
-            if future_trend is not None:
+            if future_early_trend is not None:
+                try:
+                    _trend = future_early_trend.result(timeout=10)
+                except Exception as _tr_err:
+                    print(f"[pipeline] early trend fetch failed: {_tr_err} — proceeding without trend", flush=True)
+                    _trend = provided_trend
+            elif future_trend is not None:
                 _trend = future_trend.result()
             else:
                 _trend = provided_trend
@@ -7733,7 +8129,17 @@ def handler(job):
         source_info = future_normalize.result()
         source_path = source_info["source_path"]
         _normalize_vf = source_info.get("normalize_vf")
-        if future_transcribe is not None:
+        if future_url_transcript is not None:
+            # Early-pool URL transcript ran in parallel with the download.
+            # If it failed (returned None), fall through to local fallback.
+            _url_tx = future_url_transcript.result()
+            if _url_tx is not None:
+                transcript = _url_tx
+            elif future_transcribe is not None:
+                transcript = future_transcribe.result()
+            else:
+                transcript = provided_transcript or {"words": []}
+        elif future_transcribe is not None:
             transcript = future_transcribe.result()
         else:
             # render_only / reinterpret with cached transcript — no Deepgram call this pass
@@ -7742,7 +8148,12 @@ def handler(job):
         source_loudness = future_loudness.result()
         source_shot_changes = future_shot_changes.result()
         # Capture which trend context was used (fresh vs. snapshot) for persistence
-        if future_trend is not None:
+        if future_early_trend is not None:
+            try:
+                trend_used = future_early_trend.result(timeout=0)
+            except Exception:
+                trend_used = None
+        elif future_trend is not None:
             try:
                 trend_used = future_trend.result(timeout=0)
             except Exception:
