@@ -4,6 +4,7 @@ import {
   Sequence,
   Series,
   OffthreadVideo,
+  staticFile,
   useCurrentFrame,
   useVideoConfig,
   interpolate,
@@ -477,6 +478,17 @@ const OutroFade: React.FC<{ kind: "fade_black" | "fade_white" }> = ({ kind }) =>
   );
 };
 
+// Resolve a basename or absolute URL into a Remotion-servable URL.
+// Bare basenames (e.g. "source_30fps.mp4") are local files in publicDir
+// and MUST be wrapped in staticFile() — without it, Remotion's bundle
+// HTTP server tries to resolve against the bundle dir and 404s. Absolute
+// URLs (http(s)://, file://) and protocol-relative URLs pass through.
+const resolveSrc = (s: string): string => {
+  if (!s) return s;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(s) || s.startsWith("//")) return s;
+  return staticFile(s);
+};
+
 // ─── Top-level composition ─────────────────────────────────────────────────
 export const PromptlyRender: React.FC<PromptlyRenderProps> = ({ input }) => {
   const {
@@ -484,10 +496,18 @@ export const PromptlyRender: React.FC<PromptlyRenderProps> = ({ input }) => {
     colorEffect, motionGraphics, outro, textOverlays, fps,
   } = input;
 
+  // Resolve once at the boundary; every child component receives a URL
+  // already resolved against publicDir.
+  const resolvedSourceUrl = resolveSrc(sourceUrl);
+  const resolvedBroll = React.useMemo(
+    () => broll.map((b) => ({ ...b, src: resolveSrc(b.src) })),
+    [broll],
+  );
+
   const content = (
     <>
-      <ClipSeries clips={clips} transitions={transitions} sourceUrl={sourceUrl} />
-      <BrollOverlays broll={broll} />
+      <ClipSeries clips={clips} transitions={transitions} sourceUrl={resolvedSourceUrl} />
+      <BrollOverlays broll={resolvedBroll} />
     </>
   );
 
