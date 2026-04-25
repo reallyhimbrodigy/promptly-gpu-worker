@@ -39,7 +39,14 @@ let inputPath = null;
 let outputPath = null;
 let publicDir = null;
 let concurrency = null;
-let glMode = "angle-egl";
+// Vulkan is the only renderer mode in @remotion/renderer 4.0.450 that
+// passes `--enable-gpu` and `--ignore-gpu-blocklist` (see
+// node_modules/@remotion/renderer/dist/open-browser.js getOpenGlRenderer()).
+// Other modes (angle-egl, swiftshader, etc.) just set the GL backend
+// without explicitly enabling the GPU, so headless Chromium silently
+// falls through to SwiftShader. NVIDIA H100 has first-class Vulkan via
+// the NVIDIA driver; this is the most reliable hardware path on Modal.
+let glMode = "vulkan";
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--input" && args[i + 1]) inputPath = args[++i];
@@ -152,10 +159,13 @@ try {
     onBrowserLog: null,
     onLog: () => {},
   });
-  await _gpuPage.setContent(
-    '<canvas id="c" width="100" height="100"></canvas>',
-    { waitUntil: 'load' },
-  );
+  // Remotion's internal Page class has no .setContent() — only .goto() and
+  // .evaluate(). Navigate to a data: URL with the canvas inline, then run
+  // the WebGL probe via evaluate.
+  await _gpuPage.goto({
+    url: 'data:text/html,<canvas id="c" width="100" height="100"></canvas>',
+    timeout: 5000,
+  });
   const _glInfo = await _gpuPage.evaluate(() => {
     const c = document.getElementById('c');
     const gl = c.getContext('webgl2') || c.getContext('webgl');
@@ -242,6 +252,13 @@ await renderMedia({
     enableMultiProcessOnLinux: true,
     disableWebSecurity: true,
   },
+  // Force the H100 GPU pipeline. Default in headless mode silently falls
+  // back to SwiftShader (CPU pixel-pushing), which is what produced the
+  // 9 fps / 0% GPU util we measured. With "required", Remotion throws if
+  // hardware GL can't attach — turning a silent perf cliff into a clean
+  // error we can act on. Pairs with gl='vulkan' which adds the
+  // --enable-gpu / --ignore-gpu-blocklist Chromium flags.
+  hardwareAcceleration: "required",
   // Give the offthread cache generous headroom — we have 128 GB RAM.
   // The cache stores decoded source frames so repeated seeks across
   // transitions + captions don't re-decode from disk each time.

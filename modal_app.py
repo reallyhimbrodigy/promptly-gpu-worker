@@ -1,6 +1,6 @@
 import modal
 
-# rebuild trigger v51 — Render-speed Step 1: instrumentation only. Three small fixes that surface the data needed to pick the right Step-3 fix without burning render time on guesses. (1) WebGL probe in render-full.mjs: @remotion/renderer 4.0.450's internal browser.newPage() requires a destructured options arg with {context, logLevel, indent, pageIndex, onBrowserLog, onLog} — we were calling it with no args, blowing up the probe with "Cannot destructure property 'context' of 'undefined'". Now passes the stub fields so the probe actually runs and prints the WebGL renderer string (SwiftShader vs NVIDIA — the smoking gun for "is Chromium software-rendering?"). (2) Chromium executable path: the ChromiumOptions type in 4.0.450 has NO executablePath field — the correct option is the TOP-LEVEL `browserExecutable` on openBrowser/renderMedia. Our previous code put it inside chromiumOptions where it silently no-op'd, leaving Remotion to download Chromium on every cold start (~86 MB, log: "Downloading Chrome Headless Shell ... 86.6 Mb") despite the build-time-baked binary at /usr/local/bin/chrome-headless-shell. Lifted to the right place — eliminates the redundant download and the misleading "skipping ensureBrowser" log. (3) Keyframe verification in _do_fps_normalize: ffprobe the resulting source_30fps.mp4 and log keyframes=N, avg_gap=Xs, max_gap=Ys. v49 added -g 30 -keyint_min 30 -sc_threshold 0 to force 1 keyframe per second; without verification we have no proof the flags actually took effect (x264 sometimes ignores -keyint_min). Warns loudly if max_gap > 1.5s — would mean Remotion seeks remain expensive despite v49. No behavior changes — these are diagnostics that turn the next render's logs into actionable Step-3 input.
+# rebuild trigger v52 — Render-speed Step 3: force hardware GL on the H100. v51's diagnostics confirmed render is software-bound (GPU util ~0% for the entire 149s render, 9 fps avg @ 1080x1920), with v49's dense keyframes verified perfect (avg=1.00s max=1.00s) and Chromium re-download eliminated. Root cause: gl='angle-egl' silently falls back to SwiftShader because Remotion only passes --enable-gpu / --ignore-gpu-blocklist when gl='vulkan' (see open-browser.js:getOpenGlRenderer()), AND we never set hardwareAcceleration so headless Chromium silently routes through CPU pixel-pushing. Three changes: (1) gl default flipped from 'angle-egl' to 'vulkan' — the only Remotion mode that actually engages the GPU on H100 (NVIDIA driver has first-class Vulkan support, mounted at runtime via NVIDIA_DRIVER_CAPABILITIES='all'). (2) hardwareAcceleration='required' added to renderMedia — turns silent SwiftShader fallback into a clean error we can act on instead of another 9-fps render. (3) WebGL probe rewritten to use Remotion Page.goto({url:'data:text/html,...'}) — internal Page class has no .setContent(). Image now installs libvulkan1 + vulkan-tools (~5MB). Staying on chrome-headless-shell per user direction. Expected: render drops from ~150s to ~25-40s if hardware GL engages, or fails loud with a driver/EGL error we can diagnose if it doesn't.
 
 # ── Image definition (replaces Dockerfile) ────────────────────────────────────
 image = (
@@ -52,6 +52,14 @@ image = (
         "libcairo2",
         "libasound2",
         "libatspi2.0-0",
+        # Vulkan loader + tools — required for Chromium gl='vulkan' mode.
+        # The NVIDIA Vulkan ICD (libGLX_nvidia / libEGL_nvidia) is mounted at
+        # runtime by the nvidia-container-toolkit when NVIDIA_DRIVER_CAPABILITIES
+        # includes "graphics" or "all", so we only need the loader here.
+        # angle-egl silently falls back to SwiftShader (CPU) on H100 in headless
+        # mode — vulkan is the path that actually engages the GPU.
+        "libvulkan1",
+        "vulkan-tools",
     )
     .run_commands(
         "fc-cache -f",
