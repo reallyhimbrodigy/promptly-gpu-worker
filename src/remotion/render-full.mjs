@@ -100,9 +100,15 @@ const chromePath = existsSync("/usr/local/bin/chrome-headless-shell")
 
 // ensureBrowser() unconditionally downloads Chromium to Remotion's managed
 // location (~/.cache or node_modules/.remotion) — even when we have a
-// build-time-baked binary. Skip it entirely if our symlink exists. The
-// openBrowser() call below uses executablePath to point at the existing
-// binary, so no managed Chromium is ever needed.
+// build-time-baked binary. Skip it entirely if our symlink exists.
+//
+// CRITICAL: in @remotion/renderer 4.0.450, `executablePath` does NOT exist
+// on `chromiumOptions`. The correct field is the TOP-LEVEL `browserExecutable`
+// option on openBrowser/renderMedia. Passing executablePath inside
+// chromiumOptions silently no-ops, leaving browserExecutable=null, which
+// causes openBrowser → internalEnsureBrowser to download Chromium on every
+// render (~86 MB). This bug was masking the build-time-baked binary
+// completely. Fixed below by lifting it to the right place.
 if (!chromePath) {
   console.log("[render-full] No /usr/local/bin/chrome-headless-shell — calling ensureBrowser to download");
   await ensureBrowser({
@@ -117,9 +123,9 @@ if (!chromePath) {
 }
 
 const tBrowser = Date.now();
-const browser = await openBrowser("chrome-headless-shell", {
+const browser = await openBrowser("chrome", {
+  ...(chromePath ? { browserExecutable: chromePath } : {}),
   chromiumOptions: {
-    ...(chromePath ? { executablePath: chromePath } : {}),
     gl: glMode,
     enableMultiProcessOnLinux: true,
     disableWebSecurity: true,
@@ -134,7 +140,18 @@ console.log(`[render-full] Browser opened in ${((Date.now() - tBrowser) / 1000).
 // render — software renderer's pixel throughput on this composition is
 // roughly 9 fps × 32 tabs = ~288 fps total, exactly what we'd see.
 try {
-  const _gpuPage = await browser.newPage();
+  // @remotion/renderer 4.0.450 internal browser.newPage() destructures a
+  // mandatory options object — calling without args throws
+  // "Cannot destructure property 'context' of 'undefined'". Provide the
+  // minimum stub fields so the diagnostic actually runs.
+  const _gpuPage = await browser.newPage({
+    context: () => null,
+    logLevel: 'info',
+    indent: false,
+    pageIndex: 0,
+    onBrowserLog: null,
+    onLog: () => {},
+  });
   await _gpuPage.setContent(
     '<canvas id="c" width="100" height="100"></canvas>',
     { waitUntil: 'load' },
@@ -219,8 +236,8 @@ await renderMedia({
   overwrite: true,
   puppeteerInstance: browser,
   publicDir,
+  ...(chromePath ? { browserExecutable: chromePath } : {}),
   chromiumOptions: {
-    ...(chromePath ? { executablePath: chromePath } : {}),
     gl: glMode,
     enableMultiProcessOnLinux: true,
     disableWebSecurity: true,

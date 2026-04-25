@@ -9251,6 +9251,50 @@ def handler(job):
                 f"→ 30.0000fps CFR in {time.time() - _norm_t0:.1f}s ({_size_mb:.1f}MB)",
                 flush=True,
             )
+            # Verify dense keyframes actually landed in the encoded file.
+            # x264 sometimes ignores -keyint_min when scene-cuts trigger; the
+            # -sc_threshold 0 flag should disable that, but we have no proof
+            # without ffprobe. Each Remotion seek pays decode-from-prev-keyframe
+            # cost, so if GOPs are sparse we lose the v49 win silently. Counts
+            # I-frame packets and the max gap between consecutive keyframes.
+            try:
+                _kf_t0 = time.time()
+                _kf_probe = subprocess.run(
+                    ["ffprobe", "-v", "error", "-select_streams", "v:0",
+                     "-show_entries", "packet=pts_time,flags",
+                     "-of", "csv=print_section=0", _norm_path],
+                    capture_output=True, text=True, timeout=30,
+                )
+                _kf_times = []
+                for _line in (_kf_probe.stdout or "").splitlines():
+                    _parts = _line.strip().split(",")
+                    if len(_parts) >= 2 and "K" in _parts[1]:
+                        try:
+                            _kf_times.append(float(_parts[0]))
+                        except ValueError:
+                            continue
+                if _kf_times:
+                    _kf_count = len(_kf_times)
+                    _kf_gaps = [_kf_times[_i] - _kf_times[_i-1] for _i in range(1, len(_kf_times))]
+                    _max_gap = max(_kf_gaps) if _kf_gaps else 0.0
+                    _avg_gap = (sum(_kf_gaps) / len(_kf_gaps)) if _kf_gaps else 0.0
+                    print(
+                        f"[fps-normalize] keyframes={_kf_count} avg_gap={_avg_gap:.2f}s "
+                        f"max_gap={_max_gap:.2f}s (probe {time.time()-_kf_t0:.1f}s) "
+                        f"— v49 target: avg≈1.0s, max≤1.0s",
+                        flush=True,
+                    )
+                    if _max_gap > 1.5:
+                        print(
+                            f"[fps-normalize] *** WARNING: max keyframe gap "
+                            f"{_max_gap:.2f}s exceeds 1.5s — Remotion seeks "
+                            f"will be slow despite -g 30. v49 didn't take.",
+                            flush=True,
+                        )
+                else:
+                    print(f"[fps-normalize] keyframe probe returned no data", flush=True)
+            except Exception as _kf_err:
+                print(f"[fps-normalize] keyframe probe failed: {_kf_err}", flush=True)
             return _norm_path
 
         # ── ALL initialization + Gemini edit in ONE parallel phase ────────────
