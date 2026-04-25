@@ -8296,24 +8296,24 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             for _line in _render_r.stdout.split("\n"):
                 if _line.strip():
                     print(f"[remotion] {_line}", flush=True)
-        # DIAGNOSTIC: also echo stderr (Remotion's verbose logging goes there)
+        # DIAGNOSTIC: echo only high-signal stderr lines. We keep Remotion's
+        # actual error/warning output and any "Seeking to frame ... took Xms"
+        # latency reports (the smoking-gun signal for video-seek slowness),
+        # but drop the per-frame compositor stream that dwarfs everything.
         if _render_r.stderr:
-            _stderr_lines = _render_r.stderr.split("\n")
-            # Print first 30 + last 30 stderr lines to capture both startup
-            # diagnostics and any tail-end errors without flooding logs.
-            _max_each = 30
-            if len(_stderr_lines) <= 2 * _max_each:
-                for _line in _stderr_lines:
-                    if _line.strip():
-                        print(f"[remotion-err] {_line}", flush=True)
-            else:
-                for _line in _stderr_lines[:_max_each]:
-                    if _line.strip():
-                        print(f"[remotion-err] {_line}", flush=True)
-                print(f"[remotion-err] ... ({len(_stderr_lines) - 2 * _max_each} lines elided) ...", flush=True)
-                for _line in _stderr_lines[-_max_each:]:
-                    if _line.strip():
-                        print(f"[remotion-err] {_line}", flush=True)
+            _kept_err_prefixes = ("Error", "WARNING", "warn", "Seeking to frame")
+            _err_lines = []
+            for _line in _render_r.stderr.split("\n"):
+                _stripped = _line.strip()
+                if not _stripped:
+                    continue
+                if any(_stripped.startswith(_p) for _p in _kept_err_prefixes):
+                    _err_lines.append(_line)
+            # Cap at 60 lines to avoid runaway noise even on heavily-degraded runs.
+            for _line in _err_lines[:60]:
+                print(f"[remotion-err] {_line}", flush=True)
+            if len(_err_lines) > 60:
+                print(f"[remotion-err] ... ({len(_err_lines) - 60} more elided) ...", flush=True)
         if not os.path.exists(silent_video_path) or os.path.getsize(silent_video_path) < 10000:
             raise RuntimeError(f"Remotion produced invalid output: {silent_video_path}")
         print(f"[render] Remotion video done in {_render_elapsed:.1f}s ({os.path.getsize(silent_video_path)/1024/1024:.1f}MB silent mp4)", flush=True)
@@ -9148,14 +9148,13 @@ def handler(job):
                 return float(s)
 
             _avg = _parse_rate(_avg_rate_str)
-            if _r_rate_str == "30/1" and abs(_avg - 30.0) < 0.005:
-                print(
-                    f"[fps-normalize] Source already exactly 30fps "
-                    f"(r={_r_rate_str}, avg={_avg:.4f}) — no re-encode",
-                    flush=True,
-                )
-                return _raw_source
-
+            # We always re-encode now to guarantee dense keyframes (1 keyframe
+            # per second). Even if the source is exactly 30fps CFR, default
+            # x264 keyframe spacing is ~250 frames (8s) — too sparse for
+            # Remotion's per-frame seek pattern. Each Remotion seek into a
+            # sparse-GOP source costs ~2s as ffmpeg decodes from the previous
+            # keyframe forward to the target frame. Dense keyframes drop seek
+            # cost to <50ms (verified via Remotion's own per-seek timing).
             _norm_t0 = time.time()
             _norm_path = os.path.join(work_dir, "source_30fps.mp4")
             _r_out = subprocess.run(
@@ -9163,6 +9162,7 @@ def handler(job):
                  "-i", _raw_source,
                  "-vf", "fps=30",
                  "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
+                 "-g", "30", "-keyint_min", "30", "-sc_threshold", "0",
                  "-c:a", "copy",
                  "-video_track_timescale", "90000",
                  _norm_path],

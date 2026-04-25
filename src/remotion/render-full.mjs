@@ -229,8 +229,9 @@ await renderMedia({
   // The cache stores decoded source frames so repeated seeks across
   // transitions + captions don't re-decode from disk each time.
   offthreadVideoCacheSizeInBytes: 16 * 1024 * 1024 * 1024, // 16 GB
-  // DIAGNOSTIC: verbose logging gives per-frame timing breakdown in stderr.
-  logLevel: "verbose",
+  // info-level logging: keeps the [render-full] interval-fps lines visible
+  // without flooding stderr with thousands of per-frame compositor lines.
+  logLevel: "info",
   onProgress: (info) => {
     const { progress, encodedFrames, renderedFrames } = info || {};
     const now = Date.now();
