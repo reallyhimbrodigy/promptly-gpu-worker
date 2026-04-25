@@ -8284,7 +8284,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     # ── 10. Launch Remotion render (blocking; audio future runs in parallel) ─
     silent_video_path = os.path.join(work_dir, "silent_video.mp4")
-    _gl_mode = "angle-egl" if _HAS_HWACCEL else "swiftshader"
+    # Vulkan is the only Remotion gl mode that passes --enable-gpu /
+    # --ignore-gpu-blocklist (see @remotion/renderer/dist/open-browser.js
+    # getOpenGlRenderer()). With angle-egl, headless Chromium silently
+    # falls back to SwiftShader (CPU pixel-pushing, ~9 fps render speed
+    # measured in v51/v52). The H100's NVIDIA driver has full Vulkan
+    # support mounted via NVIDIA_DRIVER_CAPABILITIES='all', and the v52
+    # image installs libvulkan1 + vulkan-tools.
+    _gl_mode = "vulkan" if _HAS_HWACCEL else "swiftshader"
     _remotion_concurrency = max(4, min(int((os.cpu_count() or 32) // 2), 32))
     # Files are staged into /remotion/bundle/public/{stage_key}/ — the bundle
     # server serves them directly. --public-dir is a no-op for serving now
