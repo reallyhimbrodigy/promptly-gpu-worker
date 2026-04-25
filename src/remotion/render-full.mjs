@@ -98,14 +98,23 @@ const chromePath = existsSync("/usr/local/bin/chrome-headless-shell")
   ? "/usr/local/bin/chrome-headless-shell"
   : undefined;
 
-await ensureBrowser({
-  chromiumOptions: {
-    ...(chromePath ? { executablePath: chromePath } : {}),
-    gl: glMode,
-    enableMultiProcessOnLinux: true,
-    disableWebSecurity: true,
-  },
-});
+// ensureBrowser() unconditionally downloads Chromium to Remotion's managed
+// location (~/.cache or node_modules/.remotion) — even when we have a
+// build-time-baked binary. Skip it entirely if our symlink exists. The
+// openBrowser() call below uses executablePath to point at the existing
+// binary, so no managed Chromium is ever needed.
+if (!chromePath) {
+  console.log("[render-full] No /usr/local/bin/chrome-headless-shell — calling ensureBrowser to download");
+  await ensureBrowser({
+    chromiumOptions: {
+      gl: glMode,
+      enableMultiProcessOnLinux: true,
+      disableWebSecurity: true,
+    },
+  });
+} else {
+  console.log(`[render-full] Using build-time Chromium at ${chromePath} — skipping ensureBrowser`);
+}
 
 const tBrowser = Date.now();
 const browser = await openBrowser("chrome-headless-shell", {

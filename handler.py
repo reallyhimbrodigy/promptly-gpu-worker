@@ -4346,7 +4346,7 @@ REMOVE_WORDS GUIDANCE:
             # Gemini sends, making render time predictable. Steeper ramps
             # get more sub-steps where smoothness matters most.
             _gemini_kp_count = len(speed_curve)
-            speed_curve = densify_speed_curve(speed_curve, max_intermediates=150, min_step=0.08)
+            speed_curve = densify_speed_curve(speed_curve, max_intermediates=30, min_step=0.20)
             if len(speed_curve) > _gemini_kp_count:
                 print(
                     f"[speed-curve] Densified {_gemini_kp_count} Gemini keypoints → "
@@ -6364,12 +6364,17 @@ def densify_speed_curve(speed_curve, max_intermediates=50, min_step=0.10):
         for r in ramps:
             if r["is_hold"]:
                 continue
-            # Ramp's share of the budget, proportional to its speed delta
+            # Ramp's share of the budget, proportional to its speed delta.
+            # Floor of 6 sub-slices guarantees perceptual smoothness on
+            # short ramps without exploding sub-clip count on long ones.
+            # (At 30fps with min_step=0.20s, a 6-step ramp = 6 sub-slices
+            # at ≥6 frames each, and the per-sub-clip speed delta lands
+            # at ~delta/6 — well under the 5-10% human discrimination
+            # threshold for typical ramp deltas of 0.1-0.4.)
             share = (r["delta"] / total_delta) * max_intermediates
-            # n_steps = share + 1 (since we add (n_steps - 1) intermediates)
-            n_steps = max(12, round(share) + 1)
-            # Clamp by min_step so we don't create micro-clips smaller than min_step
-            n_steps_time = max(12, int(r["gap"] / min_step))
+            n_steps = max(6, round(share) + 1)
+            # Clamp by min_step so we don't create micro-clips smaller than min_step.
+            n_steps_time = max(6, int(r["gap"] / min_step))
             r["n_steps"] = min(n_steps, n_steps_time)
 
     # Third pass: emit the densified curve using smoothstep (ease-in-out)
