@@ -8007,43 +8007,54 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     # ── File staging for Remotion's bundle server ───────────────────────────
     # Remotion's bundle server only serves files that physically exist under
-    # the bundle directory. The `publicDir` parameter doesn't actually extend
-    # the server's serving roots in practice (verified via Remotion docs +
-    # the v40 404 logs). The documented pattern is to stage local files into
-    # the bundle's `public/` subfolder; the static server then serves them
-    # at `/public/<name>` URLs that the composition references via
-    # `staticFile()`.
+    # the bundle directory and won't follow symlinks pointing outside its
+    # served root (security default in Node static-file middleware). The
+    # documented pattern is to physically stage local files into the bundle's
+    # `public/` subfolder; the static server then serves them at /public/X
+    # URLs that the composition references via staticFile().
     #
-    # We stage per-job under `/remotion/bundle/public/<work_dir_basename>/`
-    # to avoid collisions if Modal reuses a warm container for concurrent
+    # We stage per-job under /remotion/bundle/public/<work_dir_basename>/ to
+    # avoid collisions if Modal reuses a warm container for concurrent
     # invocations. The directory is cleaned up after the render completes
-    # (via try/finally below). Symlinks are zero-copy.
+    # (via try/finally below). We try hardlink first (zero-copy when src and
+    # dst are on the same filesystem); on cross-device fall back to a real
+    # copy. Both produce a normal file inside bundle/public/ — no symlinks,
+    # no security middleware traps.
     _bundle_public_root = "/remotion/bundle/public"
     _stage_key = os.path.basename(work_dir.rstrip("/")) or f"job-{int(time.time()*1000)}"
     _stage_dir = os.path.join(_bundle_public_root, _stage_key)
     os.makedirs(_stage_dir, exist_ok=True)
 
     def _stage_file(src_abs_path):
-        """Symlink `src_abs_path` into the stage dir; return the path Remotion
-        sees (relative to bundle/public/, used by staticFile)."""
+        """Materialize `src_abs_path` into the stage dir (hardlink if same FS,
+        otherwise copy). Return the path Remotion sees (relative to
+        bundle/public/, used by staticFile)."""
         if not os.path.exists(src_abs_path):
             raise RuntimeError(
                 f"Cannot stage local file for Remotion: {src_abs_path} does not exist."
             )
         _name = os.path.basename(src_abs_path)
-        _link = os.path.join(_stage_dir, _name)
-        # If a previous failed run left a symlink, replace it (target may differ).
-        if os.path.lexists(_link):
+        _dst = os.path.join(_stage_dir, _name)
+        # Replace any existing entry left by a previous failed run.
+        if os.path.lexists(_dst):
             try:
-                os.unlink(_link)
+                os.unlink(_dst)
             except OSError:
                 pass
-        os.symlink(src_abs_path, _link)
+        try:
+            os.link(src_abs_path, _dst)  # hardlink — zero-copy when same FS
+        except OSError as _e:
+            # Cross-device link, permission, or unsupported FS → real copy.
+            shutil.copy2(src_abs_path, _dst)
         return f"{_stage_key}/{_name}"
 
     _source_src = _stage_file(source_path)
     for _br in broll_out:
         _br["src"] = _stage_file(_br["src"])
+    print(
+        f"[render] Staged {1 + len(broll_out)} file(s) into {_stage_dir}",
+        flush=True,
+    )
 
     remotion_input = {
         "sourceUrl": _source_src,
