@@ -178,4 +178,13 @@ try {
   console.log(`[render-full] DONE in ${renderElapsed.toFixed(1)}s → ${outputPath}`);
 }
 
-await browser.close();
+// browser.close() in newer @remotion/renderer destructures `silent` from
+// its options arg — calling without args throws TypeError. Pass `{}` (or
+// {silent: false}) to satisfy the API. The render output is already written
+// at this point, so we additionally swallow any cleanup error so a
+// post-render browser-cleanup hiccup doesn't fail the whole render.
+try {
+  await browser.close({silent: false});
+} catch (e) {
+  console.log(`[render-full] browser.close() warning (render output already written): ${e.message}`);
+}

@@ -1,6 +1,6 @@
 import modal
 
-# rebuild trigger v43 — Delete redundant emphasis_moments[i].color_pulse field. It was a shortcut flag that auto-appended a pulse to color_effect.timing.pulses at the emphasis moment, but the same effect is achievable directly by emitting the pulse with peak_word_index = the emphasis main word. The flag introduced a cross-field consistency bug (validator hard-failed when color_pulse=true but color_effect.timing.mode != "pulsed"). Eliminating the flag eliminates the bug structurally — there's only one place pulses live now. Removed: Pydantic field, render auto-append block, cross-consistency validator + per-field validator, prompt schema entries (Contract Rule #6, RESPONSE FORMAT, verification footer, emphasis_moments description, plan_diff prompt). 12 color-effect components in the pack are unaffected — they still grade and pulse exactly as before.
+# rebuild trigger v44 — Fix HeadlessBrowser.close() crash post-render. A recent @remotion/renderer update changed close() to destructure `{silent}` from its options arg; render-full.mjs was calling close() with no args, throwing TypeError after the render had already written the output mp4. The non-zero subprocess exit made handler.py treat the whole render as failed even though the output was good. Fixed by passing {silent: false} and wrapping in try/catch (cleanup errors don't fail the render). Also explains the CGroup memory reading noise (8.8 EXB) as Modal-side telemetry, not a real OOM.
 
 # ── Image definition (replaces Dockerfile) ────────────────────────────────────
 image = (
