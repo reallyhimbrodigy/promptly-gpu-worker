@@ -147,12 +147,15 @@ class _EmphasisMotionGraphic(BaseModel):
 
 class _EmphasisMoment(BaseModel):
     # `t` is DERIVED by Python from word_indices[0].start — not emitted by Gemini.
+    # Visual layers on an emphasis: zoom_effect (optional) and motion_graphic
+    # (optional). Color pulses are NOT a per-emphasis flag; they live in
+    # color_effect.timing.pulses with explicit peak_word_index so Gemini
+    # can pulse any moment without the redundant cross-field flag.
     word_indices: List[int]
     type: Literal["punchline", "statement", "question", "reaction", "transition", "revelation"]
     intensity: Literal["high", "medium"]
     duration: float
     zoom_effect: Optional[_ZoomEffect] = None
-    color_pulse: bool
     motion_graphic: Optional[_EmphasisMotionGraphic] = None
 
 class _TextOverlayNote(BaseModel):
@@ -2299,7 +2302,7 @@ The pipeline enforces these rules with strict validators. Output that violates a
 5. Z-ORDER YIELDS TO MOTION GRAPHICS. When a motion_graphic occupies the lower half of the frame across a window, emit a `caption_position_changes` event at the MG's start_word moving captions to "top", and another at the MG's end_word moving them back. Captions and MGs do not share vertical space.
 6. COLOR EFFECT MODE CONSISTENCY:
    - `InvertStrike` requires `timing.mode = "pulsed"` with at least one pulse.
-   - If any `emphasis_moment.color_pulse = true`, `color_effect` is non-null and `timing.mode = "pulsed"`.
+   - To pulse color at specific moments, emit `color_effect.timing.pulses` with a `peak_word_index` per pulse. There is no separate per-emphasis `color_pulse` flag — pulses are listed explicitly so there's one source of truth.
 7. ZONE DISCIPLINE FOR OVERLAYS. Overlays in DIFFERENT visual zones can freely share a time window (e.g., `torn_paper` at center + `lower_third` at the bottom is a standard pro layout). Overlays in the SAME zone at the SAME time are what collide — those are rejected. Per-variant canonical zones:
    - `torn_paper` → `center` (full-frame impact slam)
    - `sticky_note` → `upper_third_safe` (corner stickies)
@@ -2486,7 +2489,6 @@ Each entry:
 
     # ── Visual layers — each field REQUIRED (value or null) ──
     "zoom_effect": {{"type": zoom_type, "events": [...]}} | null,
-    "color_pulse": bool,                 # when true, color_effect (pulsed mode) fires a pulse aligned to this moment
     "motion_graphic": {{"type": mg_type, "anchor": zone, "props": {{...}}}} | null
   }}
 
@@ -2513,13 +2515,11 @@ A. zoom_effect — does this moment need a zoom?
    For the `scale` value, use the SHOT SCALE block above as your single source of truth — it's tuned to the actual framing of THIS video. The scale ranges there supersede any general-purpose defaults. Too-tight zoom on an already-close face crops out eyes/chin.
    originY ≈ 0.4 for talking heads (faces sit in the upper half).
 
-B. color_pulse — should the global color effect fire a pulse at this moment?
-   Only set true if color_effect is non-null AND its timing.mode is "pulsed". Otherwise false.
-   If true, the pulse's peakFrame automatically aligns to THIS moment's t.
-
-C. motion_graphic — should a text/graphic overlay land on this moment?
+B. motion_graphic — should a text/graphic overlay land on this moment?
    Pick from the motion graphic vocabulary below. Reserve for the 1-2 PAYOFF moments. Too many = clutter.
-   motion_graphic windows must NOT overlap with any text_overlay window.
+   motion_graphic windows must NOT overlap with any text_overlay in the same visual zone.
+
+   To pulse the color grade at this emphasis, don't use a per-emphasis flag — instead add a pulse to `color_effect.timing.pulses` with `peak_word_index` = this emphasis's main word (word_indices[0]). That's the single source of truth for pulse timing.
 
 === COLOR EFFECT — OPTIONAL GLOBAL GRADE ===
 
@@ -2563,8 +2563,7 @@ Structure:
                         Best for: Thriller, moody narratives, dark editorial.
 
 Pulsed mode:
-  Each pulse has `peak_word_index` — the kept word where the pulse peaks. Python derives the exact source timestamp from word.start, then projects it to output frames. Pick the word that corresponds to a vocal peak or a shot-change moment.
-  If any emphasis_moment.color_pulse = true, you MUST ALSO set color_effect.timing.mode = "pulsed" (additional pulses fire automatically at those moments).
+  Each pulse has `peak_word_index` — the kept word where the pulse peaks. Python derives the exact source timestamp from word.start, then projects it to output frames. Pick the word that corresponds to a vocal peak, a shot-change moment, or one of your emphasis_moments' main words (word_indices[0]). All pulses — including those at emphasis moments — live in this list as a single source of truth.
 
 GUIDELINES:
   Most videos → color_effect = null.
@@ -2856,7 +2855,6 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
       "intensity": "high" | "medium",
       "duration": float,
       "zoom_effect": {{...}} | null,
-      "color_pulse": bool,
       "motion_graphic": {{...}} | null
     }}
   ],
@@ -2887,9 +2885,9 @@ Work through these checks against the plan you are about to emit. This is self-v
 1. Zone discipline for overlays. Two overlays (text_overlay or motion_graphic) whose time windows overlap must sit in DIFFERENT visual zones. Per-variant text_overlay zones: torn_paper→center, sticky_note→upper_third_safe, quote_card→center, lower_third→lower_third_safe, caption_match→matches its `position`. motion_graphic zone = its `anchor` field. Same-zone + same-time is rejected. High-intensity emphasis moments are ≥2.5s apart regardless of zone.
 2. One zoom per kept-source clip. Within each contiguous source range between removed-word boundaries, at most one `emphasis_moments[i].zoom_effect` is non-null. Multiple beats close together stack their events onto a single emphasis_moment's `zoom_effect.events` array.
 3. Z-order yield. For every window a motion_graphic sits in the lower half (`lower_third_safe` or `center`-ish), emit a `caption_position_changes` event at the MG's start_word moving captions to "top", and another at the MG's end_word moving them back to the previous position.
-4. Color consistency. If any `emphasis_moments[i].color_pulse == true`, `color_effect` is non-null and `color_effect.timing.mode == "pulsed"`. `InvertStrike` requires `timing.mode == "pulsed"` with at least one pulse.
+4. Color-pulse consistency. `InvertStrike` requires `timing.mode == "pulsed"` with at least one pulse. All pulses live in `color_effect.timing.pulses` with explicit `peak_word_index`; there is no separate per-emphasis flag.
 5. MG anchors are absolute zones. Every `motion_graphics[i].anchor` and every `emphasis_moments[i].motion_graphic.anchor` is one of the 5 absolute zones (`upper_third_safe`, `center`, `lower_third_safe`, `left_safe`, `right_safe`).
-6. Explicit nulls. Every emphasis_moment has explicit `zoom_effect` (value or null), `color_pulse` (bool), and `motion_graphic` (value or null) fields — no omissions.
+6. Explicit nulls. Every emphasis_moment has explicit `zoom_effect` (value or null) and `motion_graphic` (value or null) fields — no omissions.
 7. sad_trombone tonal gate. If `sad_trombone` appears, the tonal_register is "comedic" AND the surrounding dialogue is being played for laughs. Otherwise remove it.
 
 Note: every anchor field in this schema is word-index-based. You never emit float timestamps that must match word boundaries — Python derives all timestamps from word indices. Caption segments, hook boundaries, thumbnail time, speed-curve keypoints, and color pulses are all synthesized from the word indices you emit.
@@ -4459,11 +4457,11 @@ REMOVE_WORDS GUIDANCE:
                 f"emphasis_moments[{_ei}].type must be one of {sorted(_valid_em_types)}"
             )
         _em_duration = float(em.get("duration") or 2.0)
-        # Visual layer bindings — ALL THREE fields are required (value or null).
+        # Visual layer bindings — both fields are required (value or null).
+        # Color pulses aren't a per-emphasis field anymore; they live in
+        # color_effect.timing.pulses via peak_word_index.
         if "zoom_effect" not in em:
             raise ValueError(f"emphasis_moments[{_ei}] missing zoom_effect (emit null if no zoom)")
-        if "color_pulse" not in em:
-            raise ValueError(f"emphasis_moments[{_ei}] missing color_pulse (emit false if none)")
         if "motion_graphic" not in em:
             raise ValueError(f"emphasis_moments[{_ei}] missing motion_graphic (emit null if none)")
         _ze_raw = em.get("zoom_effect")
@@ -4482,11 +4480,6 @@ REMOVE_WORDS GUIDANCE:
                         "borderColor", "bgScale", "edgeBlur", "frameLines", "maxBarHeight"):
                 if _ek in _ze_raw:
                     _ze_out[_ek] = _ze_raw[_ek]
-        _cp = em.get("color_pulse")
-        if not isinstance(_cp, bool):
-            raise ValueError(
-                f"emphasis_moments[{_ei}].color_pulse must be a boolean, got {_cp!r}"
-            )
         _mg_raw = em.get("motion_graphic")
         _mg_out = None
         if _mg_raw is not None:
@@ -4523,27 +4516,9 @@ REMOVE_WORDS GUIDANCE:
             "word": _em_word,
             "duration": _em_duration,
             "zoom_effect": _ze_out,
-            "color_pulse": _cp,
             "motion_graphic": _mg_out,
         })
     emphasis_moments.sort(key=lambda x: x["t"])
-
-    # Cross-consistency: if any emphasis has color_pulse=true, color_effect
-    # must be non-null AND pulsed. We check here after color_effect validation
-    # has already run.
-    _any_em_pulse = any(em["color_pulse"] for em in emphasis_moments)
-    _ce_final = edit_plan.get("color_effect")
-    if _any_em_pulse:
-        if not _ce_final:
-            raise ValueError(
-                "One or more emphasis_moments.color_pulse=true but color_effect is null. "
-                "Either set all color_pulse to false, or emit a pulsed color_effect."
-            )
-        if _ce_final.get("timing", {}).get("mode") != "pulsed":
-            raise ValueError(
-                "One or more emphasis_moments.color_pulse=true but color_effect.timing.mode "
-                "is not 'pulsed'. Change timing.mode to 'pulsed' or set all color_pulse to false."
-            )
 
     # High-intensity emphasis pacing: no two within 2.5s of each other.
     _high = [em for em in emphasis_moments if em["intensity"] == "high"]
@@ -4591,7 +4566,6 @@ REMOVE_WORDS GUIDANCE:
     for em in emphasis_moments:
         _layers = []
         if em["zoom_effect"]: _layers.append(f"zoom={em['zoom_effect']['type']}")
-        if em["color_pulse"]: _layers.append("pulse")
         if em["motion_graphic"]: _layers.append(f"mg={em['motion_graphic']['type']}@{em['motion_graphic']['anchor']}")
         print(
             f"[emphasis] {em['t']:.1f}s {em['type']}({em['intensity']}) "
@@ -4904,11 +4878,12 @@ REMOVE_WORDS GUIDANCE:
             _new_cut["_zoom_effect"] = clip_entry["_zoom_effect"]
         final_cuts.append(_new_cut)
 
-    # Zoom and color pulses are attached to each emphasis_moment explicitly by
-    # Gemini (emphasis_moments[i].zoom_effect / color_pulse / motion_graphic).
-    # No auto-SnapReframe, no auto-SmoothPush on hook. If Gemini didn't emit a
-    # zoom_effect on a moment, no zoom fires — that's an intentional decision,
-    # not an omission to repair.
+    # Zoom and motion graphics are attached to each emphasis_moment explicitly
+    # by Gemini (emphasis_moments[i].zoom_effect / motion_graphic). Color
+    # pulses live in color_effect.timing.pulses with explicit peak_word_index,
+    # not on emphasis. No auto-SnapReframe, no auto-SmoothPush on hook. If
+    # Gemini didn't emit a zoom_effect on a moment, no zoom fires — that's an
+    # intentional decision, not an omission to repair.
 
     # Strip legacy fields that older Gemini outputs (or re-edit plans) may
     # carry. The Remotion-primary pipeline doesn't consume them.
@@ -4987,7 +4962,7 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None)
         "peak_at_seconds is derived — do not edit), text_overlays (each has a variant "
         "discriminator: torn_paper|sticky_note|quote_card|lower_third|caption_match), "
         "motion_graphics (with semantic anchor), emphasis_moments (each binds explicit "
-        "zoom_effect / color_pulse / motion_graphic), sfx_placements, hook_clip "
+        "zoom_effect / motion_graphic), sfx_placements, hook_clip "
         "(start_word_index + end_word_index; source_start/end derived), thumbnail_word_index "
         "(thumbnail_timestamp derived), speed_curve (at_word_index + speed; t derived), outro. "
         "The user has requested a change. Your job:\n\n"
@@ -5009,7 +4984,7 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None)
         "invent or shift a raw timestamp. The pipeline derives timestamps from word_index fields.\n\n"
         "3) Emit changed_fields: dotted paths of what you changed (e.g. ['caption_style', "
         "'cuts[3].speed', 'caption_position_changes[1].position', 'text_overlays[2].variant', "
-        "'emphasis_moments[0].color_pulse']). Empty array for reinterpret or clarification.\n\n"
+        "'color_effect.timing.pulses[0].peak_word_index']). Empty array for reinterpret or clarification.\n\n"
         "4) Emit human_summary: one sentence users can read (e.g. 'Changed caption style to "
         "minimal. Preserved 11 cuts, B-roll, color grade, and 2 text overlays.').\n\n"
         f"PRIOR VIBE: {old_vibe or '(unknown)'}\n\n"
@@ -7952,10 +7927,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         )
 
     # ── 7b. Emphasis moments → output-timeline effect specs ─────────────────
-    # Each emphasis moment's explicit visual layers (zoom / color_pulse / MG)
-    # get projected and merged into the Remotion input here. No mutation of
-    # color_effect.timing — if emphasis has color_pulse=true, the validator
-    # already enforced that color_effect.timing.mode is "pulsed".
+    # Each emphasis moment's visual layers (zoom / MG) get projected and
+    # merged into the Remotion input here. Color pulses are NOT handled here
+    # anymore — they live exclusively in color_effect.timing.pulses with
+    # explicit peak_word_index (processed in the color_effect section above).
     for em in edit_plan.get("_emphasis_moments", []):
         _em_t_out = project_source_time_to_output(
             float(em["t"]), render_cuts, _clip_ranges, speed_curve,
@@ -7974,19 +7949,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 if float(_rc["source_start"]) <= em["t"] <= float(_rc["source_end"]):
                     _rc["_zoom_effect"] = em["zoom_effect"]
                     break
-
-        # Color pulse: append at the emphasis moment's own t. Validator has
-        # already guaranteed color_effect.timing.mode == "pulsed" when any
-        # emphasis has color_pulse=true.
-        if em["color_pulse"]:
-            _pulse_entry = {
-                "peakFrame": _em_t_frame,
-                "attackFrames": 3,
-                "holdFrames": 4,
-                "releaseFrames": 12,
-                "intensity": 1.0,
-            }
-            color_out["timing"]["pulses"].append(_pulse_entry)
 
         # Motion graphic: append to motion_graphics_out, anchored at the moment.
         # Translate semantic anchor → MGAnchor just like the top-level loop.
