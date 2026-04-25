@@ -746,14 +746,23 @@ try:
         os.environ["LD_LIBRARY_PATH"] = ":".join(_nvidia_lib_dirs) + (":" + _existing_ldpath if _existing_ldpath else "")
         print(f"[startup] LD_LIBRARY_PATH: {os.environ['LD_LIBRARY_PATH'][:200]}", flush=True)
 
-    # Create soname symlinks for NVIDIA libs (Modal mounts versioned .so but not symlinks)
+    # Create soname symlinks for NVIDIA libs (Modal mounts versioned .so but not symlinks).
+    # NOTE: must include libGLX_*/libEGL_* — NVIDIA's Vulkan ICD references
+    # `libGLX_nvidia.so.0` by soname, and Modal only mounts the full versioned
+    # filename (libGLX_nvidia.so.580.95.05), so the soname dlopen fails without
+    # this symlink. Was the missing piece in v56's ICD registration attempt.
     for _lib_dir in _nvidia_lib_dirs:
         try:
             for _f in os.listdir(_lib_dir):
-                if _f.startswith("libnvidia-") and ".so." in _f and not _f.endswith(".so.1"):
+                _matches_nvidia = (
+                    _f.startswith("libnvidia-")
+                    or _f.startswith("libGLX_")
+                    or _f.startswith("libEGL_")
+                ) and ".so." in _f and not _f.endswith(".so.1") and not _f.endswith(".so.0")
+                if _matches_nvidia:
                     _base = _f.split(".so.")[0]
                     _target = os.path.join(_lib_dir, _f)
-                    for _suf in [".so.1", ".so"]:
+                    for _suf in [".so.0", ".so.1", ".so"]:
                         _sym = os.path.join(_lib_dir, f"{_base}{_suf}")
                         if not os.path.exists(_sym):
                             try:
@@ -879,7 +888,11 @@ try:
         )
 
     # Step 3: if we found a libGLX_nvidia.so.X, write nvidia_icd.json so the
-    # Vulkan loader picks it up. JSON format per Vulkan spec.
+    # Vulkan loader picks it up. Use the soname (libGLX_nvidia.so.0) — that's
+    # how NVIDIA's standard ICD JSON references the driver, and the soname
+    # symlink is created by the symlink loop earlier in startup. Letting the
+    # loader resolve via ld.so.cache is more reliable than absolute paths
+    # because the driver internally dlopens sub-libs by soname too.
     _glx_nvidia = next(
         (p for p in _nvidia_lib_candidates if os.path.basename(p).startswith("libGLX_nvidia.so")),
         None,
@@ -890,18 +903,27 @@ try:
         _icd_doc = {
             "file_format_version": "1.0.0",
             "ICD": {
-                "library_path": _glx_nvidia,
+                "library_path": "libGLX_nvidia.so.0",
                 "api_version": "1.3.255",
             },
         }
         try:
             with open(_icd_target, "w") as _f:
                 _json_mod.dump(_icd_doc, _f)
-            print(f"[startup] Synthesized {_icd_target} → {_glx_nvidia}", flush=True)
-            # VK_DRIVER_FILES makes the Vulkan loader prefer this ICD over
-            # any bundled SwiftShader/llvmpipe ICDs.
+            print(f"[startup] Synthesized {_icd_target} → libGLX_nvidia.so.0", flush=True)
+            # Set both env vars: VK_ICD_FILENAMES (Vulkan loader < 1.3.207,
+            # which is what Ubuntu 22.04 ships) and VK_DRIVER_FILES (modern).
+            # In v56 we set only VK_DRIVER_FILES and the loader silently
+            # ignored it — vulkaninfo still showed llvmpipe instead of 0
+            # devices, which would have happened if the var were honored and
+            # NVIDIA's ICD failed to load. Setting both covers any version.
+            os.environ["VK_ICD_FILENAMES"] = _icd_target
             os.environ["VK_DRIVER_FILES"] = _icd_target
-            print(f"[startup] VK_DRIVER_FILES={_icd_target}", flush=True)
+            print(
+                f"[startup] VK_ICD_FILENAMES={_icd_target} (legacy) "
+                f"VK_DRIVER_FILES={_icd_target} (modern)",
+                flush=True,
+            )
         except Exception as _e:
             print(f"[startup] Failed to write nvidia_icd.json: {_e}", flush=True)
 
