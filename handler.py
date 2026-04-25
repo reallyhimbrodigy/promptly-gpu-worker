@@ -304,72 +304,178 @@ class ContentAnalysis(BaseModel):
 
 
 # ── Mechanical pre-pass (deterministic, no Gemini) ───────────────────────────
-_MECHANICAL_FILLERS = {
-    "um", "uh", "er", "ah", "hmm", "uhh", "umm", "erm",
-    "mhm", "hm", "mm", "mmm", "huh",
-}
-_STUTTER_SKIP_WORDS = {"the", "a", "an", "that", "to"}
+# Mirrors EXACTLY the deterministic-tightening pass in build_clips_from_words.
+# Running these cuts upstream (before Gemini sees the transcript) ensures that
+# nothing gets removed AFTER Gemini anchors to it. ALWAYS_FILLER, _is_stutter,
+# and the phrasal-restart constants below are shared with build_clips_from_words
+# so the two passes produce identical results.
 _MECH_DEAD_AIR_THRESHOLD_S = 0.3
+
+
+def _phrasal_restart_cuts(deepgram_words, already_cut):
+    """Detect 2-4 word phrasal restarts and orphan fillers in their gaps.
+
+    Mirrors the Step-3b logic in build_clips_from_words. Operates on words
+    NOT yet in `already_cut`. Returns (new_cuts: set[int], reasons: dict).
+
+    Constraints (kept tight to avoid false positives):
+      - phrase length 2/3/4 words (try longest first)
+      - lookahead window: next 3 word positions only
+      - time gap between phrases: ≤ 1.5s
+      - same speaker
+      - no sentence-ending punctuation in the gap words
+    """
+    _words = list(deepgram_words or [])
+    _SENTENCE_END_RE = re.compile(r"[.!?]\s*$")
+
+    # Build remaining list of (idx, clean_text, start, end, speaker, punctuated_word)
+    remaining = []
+    for idx, w in enumerate(_words):
+        if idx in already_cut:
+            continue
+        word_text = str(w.get("punctuated_word") or w.get("word") or "").strip()
+        clean = word_text.lower().rstrip(".,!?;:'\"")
+        remaining.append({
+            "idx": idx,
+            "clean": clean,
+            "start": float(w.get("start") or 0),
+            "end": float(w.get("end") or 0),
+            "speaker": w.get("speaker"),
+            "punctuated": word_text,
+        })
+
+    new_cuts = set()
+    reasons = {}
+
+    for i, w in enumerate(remaining):
+        if w["idx"] in new_cuts:
+            continue
+        for phrase_len in (4, 3, 2):  # longest first; avoid orphan words
+            if i + phrase_len > len(remaining):
+                continue
+            phrase_words = remaining[i : i + phrase_len]
+            if any(pw["idx"] in new_cuts for pw in phrase_words):
+                continue
+            phrase_text = tuple(pw["clean"] for pw in phrase_words)
+            if not all(phrase_text):
+                continue
+            # Skip if last word of candidate phrase ends a sentence — it's a
+            # complete thought, not an abandoned restart.
+            if _SENTENCE_END_RE.search(phrase_words[-1]["punctuated"]):
+                continue
+            phrase_speaker = phrase_words[0]["speaker"]
+            _matched = False
+            # Tight lookahead: next 3 positions only
+            for scan_idx in range(i + phrase_len, min(i + phrase_len + 3, len(remaining))):
+                if scan_idx + phrase_len > len(remaining):
+                    break
+                cand_words = remaining[scan_idx : scan_idx + phrase_len]
+                if any(cw["idx"] in new_cuts for cw in cand_words):
+                    continue
+                cand_text = tuple(cw["clean"] for cw in cand_words)
+                if cand_text != phrase_text:
+                    continue
+                cand_speaker = cand_words[0]["speaker"]
+                if (phrase_speaker is not None and cand_speaker is not None
+                        and phrase_speaker != cand_speaker):
+                    continue
+                _time_gap = cand_words[0]["start"] - phrase_words[-1]["end"]
+                if _time_gap > 1.5 or _time_gap < 0:
+                    continue
+                # Reject if a gap word ends a sentence — that's parallel
+                # structure, not a restart.
+                _gap_words = remaining[i + phrase_len : scan_idx]
+                if any(_SENTENCE_END_RE.search(gw["punctuated"]) for gw in _gap_words):
+                    continue
+                # Validated restart — remove the FIRST occurrence
+                for pw in phrase_words:
+                    new_cuts.add(pw["idx"])
+                    reasons[pw["idx"]] = "phrasal_restart"
+                # Remove orphan fillers in the gap (e.g., "calling, like, calling")
+                for gw in _gap_words:
+                    if gw["clean"] in ALWAYS_FILLER or gw["clean"] in CONTEXT_FILLER:
+                        new_cuts.add(gw["idx"])
+                        reasons[gw["idx"]] = "orphan_filler"
+                _matched = True
+                break
+            if _matched:
+                break  # don't also try shorter phrase length at this position
+    return new_cuts, reasons
 
 
 def mechanical_cut_pass(deepgram_words):
     """Deterministic cut detection — runs before any LLM call.
 
     Returns a dict with:
-      - `word_cuts`: set of source word indices to cut (fillers, stutters, false starts)
-      - `range_cuts`: list of (start_s, end_s) ranges to cut (dead air, non-speech)
+      - `word_cuts`: set of source word indices to cut
+      - `range_cuts`: list of (start_s, end_s) ranges to cut (dead air)
       - `reasons`: parallel dict of word_index → reason string
 
-    Handles the 90% of cuts that don't need video context: filler tokens,
-    adjacent duplicate words, trailing-dash false starts, dead-air gaps > 0.3s.
+    Mirrors the deterministic tightening logic in build_clips_from_words so
+    every word that downstream tightening would remove is removed UPSTREAM,
+    before Gemini sees the transcript. This is what guarantees Gemini cannot
+    anchor to a word that later gets cut.
+
+    Detects:
+      - ALWAYS_FILLER tokens (um, uh, hmm, ...)
+      - 1-word stutters via _is_stutter (exact repeat, prefix false-start,
+        contraction false-start, hyphenated truncation)
+      - Trailing-dash false starts
+      - 2-4 word phrasal restarts + orphan fillers in their gaps
+      - Dead-air gaps > 0.3s between consecutive words
     """
     _words = list(deepgram_words or [])
     word_cuts = set()
     reasons = {}
     range_cuts = []
 
+    # ── Pass 1: per-word filler detection (ALWAYS_FILLER) ──
     for idx, w in enumerate(_words):
         word_text = str(w.get("punctuated_word") or w.get("word") or "").strip()
         if not word_text:
             continue
-        word_norm = re.sub(r"[^\w']", "", word_text).lower()
-
-        # Filler tokens (exact match)
-        if word_norm in _MECHANICAL_FILLERS:
+        word_clean = word_text.lower().rstrip(".,!?;:'\"")
+        if word_clean in ALWAYS_FILLER:
             word_cuts.add(idx)
             reasons[idx] = "filler"
             continue
-
-        # False start (trailing dash on punctuated_word)
+        # Trailing-dash false start
         if word_text.rstrip().endswith("-"):
             word_cuts.add(idx)
             reasons[idx] = "false_start"
             continue
 
-        # Adjacent duplicate stutter ("I I", "the the") — remove the first.
-        # Skip very common short words where legitimate repetition happens
-        # (e.g., "I I think" vs "that that is why").
-        if idx + 1 < len(_words):
-            next_text = str(_words[idx + 1].get("punctuated_word") or _words[idx + 1].get("word") or "").strip()
-            next_norm = re.sub(r"[^\w']", "", next_text).lower()
-            if (
-                word_norm
-                and word_norm == next_norm
-                and word_norm not in _STUTTER_SKIP_WORDS
-                and len(word_norm) >= 2
-            ):
-                word_cuts.add(idx)
-                reasons[idx] = "stutter"
+    # ── Pass 2: 1-word stutter detection (using shared _is_stutter helper) ──
+    # Iterate over words not yet cut; check each against its next-not-cut peer.
+    _remaining_indices = [i for i in range(len(_words)) if i not in word_cuts]
+    for pos, idx in enumerate(_remaining_indices):
+        if pos + 1 >= len(_remaining_indices):
+            break
+        next_idx = _remaining_indices[pos + 1]
+        curr_text = _words[idx].get("punctuated_word") or _words[idx].get("word") or ""
+        next_text = _words[next_idx].get("punctuated_word") or _words[next_idx].get("word") or ""
+        if _is_stutter(curr_text, next_text):
+            curr_speaker = _words[idx].get("speaker")
+            next_speaker = _words[next_idx].get("speaker")
+            # Cross-speaker repetition is conversation, not stutter
+            if (curr_speaker is not None and next_speaker is not None
+                    and curr_speaker != next_speaker):
                 continue
+            word_cuts.add(idx)
+            reasons[idx] = "stutter"
 
-    # Dead-air detection (gaps between consecutive word boundaries)
+    # ── Pass 3: phrasal restart + orphan filler detection ──
+    restart_cuts, restart_reasons = _phrasal_restart_cuts(_words, word_cuts)
+    word_cuts.update(restart_cuts)
+    reasons.update(restart_reasons)
+
+    # ── Pass 4: dead-air ranges (gaps between consecutive word boundaries) ──
     for i in range(len(_words) - 1):
         end_s = float(_words[i].get("end") or 0)
         next_start_s = float(_words[i + 1].get("start") or 0)
         gap = next_start_s - end_s
         if gap >= _MECH_DEAD_AIR_THRESHOLD_S:
-            # Keep a small cushion either side so we don't clip speech
-            # (Deepgram rounds; leave 0.04s).
+            # Cushion either side so we don't clip speech (Deepgram rounds).
             range_cuts.append((round(end_s + 0.04, 3), round(next_start_s - 0.04, 3)))
 
     return {
