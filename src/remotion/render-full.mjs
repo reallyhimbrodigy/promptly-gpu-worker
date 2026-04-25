@@ -252,13 +252,16 @@ await renderMedia({
     enableMultiProcessOnLinux: true,
     disableWebSecurity: true,
   },
-  // Force the H100 GPU pipeline. Default in headless mode silently falls
-  // back to SwiftShader (CPU pixel-pushing), which is what produced the
-  // 9 fps / 0% GPU util we measured. With "required", Remotion throws if
-  // hardware GL can't attach — turning a silent perf cliff into a clean
-  // error we can act on. Pairs with gl='vulkan' which adds the
-  // --enable-gpu / --ignore-gpu-blocklist Chromium flags.
-  hardwareAcceleration: "required",
+  // NOTE: hardwareAcceleration in Remotion controls the ENCODER (NVENC vs
+  // libx264), NOT Chromium's GL backend. H100 has no NVENC ASIC (the
+  // Modal startup log says so explicitly), so 'required' would always fail
+  // on this hardware. The actual GPU paint path is fully controlled by
+  // chromiumOptions.gl='vulkan', which adds --enable-gpu /
+  // --ignore-gpu-blocklist / --use-angle=vulkan / --use-vulkan=native at
+  // browser launch. That's what engages the H100 for the per-frame paint.
+  // The encode stays on libx264 ultrafast — which is fine because in v51
+  // we measured the encoder catching up at 65 fps; the bottleneck was
+  // never the encode, it was Chromium painting in software.
   // Give the offthread cache generous headroom — we have 128 GB RAM.
   // The cache stores decoded source frames so repeated seeks across
   // transitions + captions don't re-decode from disk each time.
