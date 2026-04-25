@@ -815,15 +815,21 @@ except Exception as _e:
     print(f"[startup] GPU check failed: {_e} — using CPU", flush=True)
 
 
-# ── Vulkan diagnostic probe ──────────────────────────────────────────────
+# ── Vulkan diagnostic probe + NVIDIA ICD auto-registration ──────────────
 # Confirms whether Chromium's gl='vulkan' path can possibly engage the H100.
-# Three-step check: (1) is the GPU visible to the container at all,
-# (2) is a Vulkan ICD registered, (3) does Vulkan see the GPU when probed
-# directly. Together with render-full.mjs's WebGL renderer probe, these
-# pinpoint exactly where (if anywhere) Vulkan breaks: OS layer, ICD
-# registration, or Chromium's binding to it.
+# The v55 diagnostic showed: NVIDIA libs not at /usr/local/nvidia/lib*,
+# vulkaninfo only sees llvmpipe, no nvidia_icd.json registered. That means
+# either (a) Modal mounts NVIDIA graphics libs at a non-standard path that
+# we can find and register, or (b) Modal strips the graphics capability
+# entirely. This block does an aggressive filesystem-wide search for
+# libGLX_nvidia / libEGL_nvidia / libnvidia-vulkan; if found anywhere, it
+# synthesizes an nvidia_icd.json pointing at the library and re-runs
+# vulkaninfo to verify the H100 is now enumerable.
 try:
     import glob as _glob_mod
+    import json as _json_mod
+
+    # Step 1: list pre-existing ICDs
     _icd_paths = []
     for _icd_dir in ("/etc/vulkan/icd.d", "/usr/share/vulkan/icd.d",
                      "/usr/local/share/vulkan/icd.d", "/etc/glvnd/egl_vendor.d",
@@ -834,29 +840,78 @@ try:
     if _icd_paths:
         print(f"[startup] Vulkan ICDs found: {_icd_paths}", flush=True)
     else:
+        print("[startup] Vulkan ICDs: NONE registered", flush=True)
+
+    # Step 2: filesystem-wide search for NVIDIA graphics libs.
+    # We use a hand-rolled walk (faster + more controllable than `find`).
+    _nvidia_lib_candidates = []
+    _search_roots = ["/usr/local/nvidia", "/usr/lib", "/usr/lib64",
+                     "/usr/local/lib", "/lib", "/lib64", "/opt"]
+    _wanted_prefixes = ("libGLX_nvidia.so", "libEGL_nvidia.so",
+                        "libnvidia-vulkan", "libnvidia-glcore",
+                        "libnvidia-egl-wayland", "libnvidia-glsi",
+                        "libnvidia-tls.so", "libnvidia-rtcore.so")
+    for _root in _search_roots:
+        if not os.path.isdir(_root):
+            continue
+        try:
+            for _dirpath, _dirnames, _filenames in os.walk(_root, followlinks=False):
+                # skip docs / man / share dirs to keep the walk bounded
+                _dirnames[:] = [d for d in _dirnames if d not in ("doc", "man", "info", "locale", "i18n")]
+                for _fn in _filenames:
+                    if _fn.startswith(_wanted_prefixes):
+                        _nvidia_lib_candidates.append(os.path.join(_dirpath, _fn))
+        except Exception:
+            pass
+
+    if _nvidia_lib_candidates:
+        print(f"[startup] NVIDIA graphics libs found ({len(_nvidia_lib_candidates)}):", flush=True)
+        for _p in _nvidia_lib_candidates[:15]:
+            print(f"[startup]   {_p}", flush=True)
+    else:
         print(
-            "[startup] Vulkan ICDs: NONE registered — Chromium gl='vulkan' "
-            "will fall back to SwiftShader. Need NVIDIA ICD JSON in "
-            "/etc/vulkan/icd.d/ or /usr/share/vulkan/icd.d/.",
+            "[startup] NVIDIA graphics libs: NONE found anywhere on the "
+            "filesystem (libGLX_nvidia / libEGL_nvidia / libnvidia-vulkan). "
+            "Modal isn't mounting graphics-capability drivers despite "
+            "NVIDIA_DRIVER_CAPABILITIES='all'. Chromium gl='vulkan' will "
+            "always fall back to SwiftShader on this platform.",
             flush=True,
         )
 
-    _vk_libs = _glob_mod.glob("/usr/local/nvidia/lib/libGLX_nvidia*") + \
-               _glob_mod.glob("/usr/local/nvidia/lib64/libGLX_nvidia*") + \
-               _glob_mod.glob("/usr/local/nvidia/lib*/libnvidia-egl*") + \
-               _glob_mod.glob("/usr/local/nvidia/lib*/libnvidia-vulkan*")
-    print(f"[startup] NVIDIA GL/Vulkan libs visible: {len(_vk_libs)} files", flush=True)
-    if _vk_libs:
-        # Just show one example to confirm the mount worked.
-        print(f"[startup]   sample: {_vk_libs[0]}", flush=True)
+    # Step 3: if we found a libGLX_nvidia.so.X, write nvidia_icd.json so the
+    # Vulkan loader picks it up. JSON format per Vulkan spec.
+    _glx_nvidia = next(
+        (p for p in _nvidia_lib_candidates if os.path.basename(p).startswith("libGLX_nvidia.so")),
+        None,
+    )
+    if _glx_nvidia:
+        _icd_target = "/etc/vulkan/icd.d/nvidia_icd.json"
+        os.makedirs(os.path.dirname(_icd_target), exist_ok=True)
+        _icd_doc = {
+            "file_format_version": "1.0.0",
+            "ICD": {
+                "library_path": _glx_nvidia,
+                "api_version": "1.3.255",
+            },
+        }
+        try:
+            with open(_icd_target, "w") as _f:
+                _json_mod.dump(_icd_doc, _f)
+            print(f"[startup] Synthesized {_icd_target} → {_glx_nvidia}", flush=True)
+            # VK_DRIVER_FILES makes the Vulkan loader prefer this ICD over
+            # any bundled SwiftShader/llvmpipe ICDs.
+            os.environ["VK_DRIVER_FILES"] = _icd_target
+            print(f"[startup] VK_DRIVER_FILES={_icd_target}", flush=True)
+        except Exception as _e:
+            print(f"[startup] Failed to write nvidia_icd.json: {_e}", flush=True)
 
+    # Step 4: re-run vulkaninfo to see if the H100 is now visible
     _vkinfo = subprocess.run(
         ["vulkaninfo", "--summary"],
         capture_output=True, text=True, timeout=5,
+        env={**os.environ},
     )
     if _vkinfo.returncode == 0:
-        # vulkaninfo --summary lists physical devices. Filter for the
-        # interesting lines so we don't dump 200 lines of API extensions.
         _summary_lines = []
         for _line in (_vkinfo.stdout or "").splitlines():
             _stripped = _line.strip()
@@ -865,9 +920,15 @@ try:
                 "Devices:", "GPU id", "vendorID", "deviceID")):
                 _summary_lines.append(_stripped)
         if _summary_lines:
-            print(f"[startup] vulkaninfo --summary:", flush=True)
-            for _ln in _summary_lines[:25]:
+            print("[startup] vulkaninfo --summary (post-ICD-registration):", flush=True)
+            for _ln in _summary_lines[:30]:
                 print(f"[startup]   {_ln}", flush=True)
+            # Heuristic: did NVIDIA appear?
+            _vk_text = " ".join(_summary_lines).lower()
+            if "nvidia" in _vk_text or "h100" in _vk_text:
+                print("[startup] *** Vulkan now sees an NVIDIA device — gl='vulkan' should engage the H100.", flush=True)
+            else:
+                print("[startup] Vulkan still only sees software (llvmpipe). NVIDIA Vulkan path unavailable on this Modal H100 container.", flush=True)
         else:
             print(f"[startup] vulkaninfo --summary returned 0 devices", flush=True)
     else:
