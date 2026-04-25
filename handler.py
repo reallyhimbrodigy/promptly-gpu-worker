@@ -8137,11 +8137,15 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _gl_mode = "angle-egl" if _HAS_HWACCEL else "swiftshader"
     _remotion_concurrency = max(4, min(int((os.cpu_count() or 32) // 2), 32))
     # Files are staged into /remotion/bundle/public/{stage_key}/ — the bundle
-    # server serves them directly. No --public-dir needed.
+    # server serves them directly. --public-dir is a no-op for serving now
+    # (publicDir doesn't actually extend the bundle server's serving roots),
+    # but render-full.mjs's CLI parser still requires the flag, so we pass
+    # work_dir to satisfy it.
     _render_cmd = [
         "node", "/remotion/render-full.mjs",
         "--input", remotion_input_json,
         "--output", silent_video_path,
+        "--public-dir", work_dir,
         "--concurrency", str(_remotion_concurrency),
         "--gl", _gl_mode,
     ]
@@ -8529,6 +8533,39 @@ def prewarm_handler(job):
             return {"status": "cached", "cache_key": cache_key, "size_mb": round(size_mb, 1)}
 
         os.makedirs(cache_dir, exist_ok=True)
+
+        # iOS fires prewarm as soon as the eventual S3 URL is known
+        # (right after multipart-init), which can be well before the
+        # upload has completed. Poll HEAD for the object to appear
+        # before trying to download. This lets Deepgram + source
+        # download start within milliseconds of upload-complete instead
+        # of waiting for a separate client-side "now fire prewarm"
+        # roundtrip — usually saves 10-15s of post-send latency.
+        poll_start = time.time()
+        poll_deadline = poll_start + 180
+        poll_attempt = 0
+        while True:
+            poll_attempt += 1
+            try:
+                _aws_s3_client.head_object(Bucket=dl_bucket, Key=dl_key)
+                if poll_attempt > 1:
+                    print(f"[prewarm] S3 object available after {time.time() - poll_start:.1f}s "
+                          f"({poll_attempt} polls)", flush=True)
+                break
+            except Exception as head_err:
+                now = time.time()
+                if now >= poll_deadline:
+                    code = getattr(head_err, 'response', {}).get('Error', {}).get('Code', 'unknown')
+                    print(f"[prewarm] timed out waiting for S3 object after "
+                          f"{now - poll_start:.1f}s (last={code})", flush=True)
+                    return {"error": "s3 object never materialized", "cache_key": cache_key}
+                # Adaptive backoff: poll fast while upload is plausibly
+                # almost done, back off as time passes so we don't hammer
+                # HEAD requests on huge slow uploads.
+                elapsed = now - poll_start
+                wait = 1.0 if elapsed < 10 else (2.0 if elapsed < 60 else 4.0)
+                time.sleep(wait)
+
         t0 = time.time()
 
         # Presigned GET so Deepgram can fetch from S3 in parallel with our own download.
