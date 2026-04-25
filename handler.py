@@ -2612,23 +2612,20 @@ CINEMATIC IMPACT + BUILD — these sounds have a short build (0.4–0.7s) before
                         Best for: dramatic proclamations, ominous statements, thriller/dark content, weather references, "storm is coming" moments.
                         Triggers on: *thunder, storm, exploded, shook, rocked, hit me, catastrophic, disaster*.
 
-BUILD-UP SOUNDS — long builds (1.3–1.7s) climaxing at the end. The renderer schedules the file early so the climax lands on the trigger word, which means the build plays DURING the preceding audio. CRITICAL: the trigger word must have enough kept-clip time BEFORE it (at least the build duration) or the build gets truncated and the effect is lost.
+BUILD-UP SOUNDS — long builds (1.3–1.7s) climaxing at the end. The renderer schedules the file early so the climax lands on the trigger word; the build plays DURING the preceding output audio (it mixes globally on the output timeline, not the source clip, so it freely spans cut boundaries).
 
  9. "drum_roll"      — Classic military/circus snare drum roll building for ~1.65s into a payoff crash at the end. Iconic tension-before-reveal sound. Traditional/comedic anticipation — works standalone in talking-head content.
                         Best for: big announcements, anticipation before a reveal, "and the answer is...", award moments, payoff setups.
                         Triggers on: *winner, revealed, the answer, finally, ta-da, drumroll, introducing*.
-                        Needs ≥1.65s of kept-clip time before the trigger word.
 10. "reverse"        — Reverse riser. Builds continuously in volume and pitch for ~1.37s, climaxing at the very end. Engineered as a cinematic "suck-toward-the-moment" effect — the entire sound IS anticipation.
-                        Best for: priming a MAJOR visual event. ALWAYS pair with something visually impactful landing on the trigger word — a hard cut to a new scene, a zoom effect landing (SnapReframe / StepZoom / LetterboxPush), a color pulse hit (InvertStrike / VignettePulse), a TornPaper or motion-graphic slam, or a transition peak. The 1.37s rise plays across the preceding clip audio and releases into the visual beat.
+                        Best for: priming a MAJOR visual event. ALWAYS pair with something visually impactful landing on the trigger word — a hard cut to a new scene, a zoom effect landing (SnapReframe / StepZoom / LetterboxPush), a color pulse hit (InvertStrike / VignettePulse), a TornPaper or motion-graphic slam, or a transition peak. The 1.37s rise plays across the preceding output audio and releases into the visual beat.
                         Skip when there's no paired visual payoff — generic "wait for it" dialogue, punctuating sentences with no visual event attached, building up to a normal talking-head cut with nothing extra happening, or back-to-back triggers. Without a visual climax landing on the trigger word, this sound feels anticlimactic.
-                        Needs ≥1.37s of kept-clip time before the trigger word.
 11. "sad_trombone"   — The iconic "wah wah waaah" four-note descending trombone. 1.3s descending phrase climaxing on the final low note. Unambiguously comedic — every listener recognizes this as the "you failed" joke sound. There is no way to use this sincerely; it IS the joke.
                         Best for: ONLY when the content is EXPLICITLY comedic and the "failure" is being played for laughs. Trivial mishaps, obvious mock-failures, game-show-style setups, bloopers, intentional self-own jokes.
                         Required tonal gate — verify BOTH before emitting:
                           (a) User's vibe is comedic, playful, ironic, or self-deprecating (e.g. "funny", "comedy", "blooper", "joke", "fail compilation", "roast"). If the vibe is motivational, educational, interview, storytelling, lifestyle, business, or any serious register — DO NOT USE.
                           (b) Dialogue at the trigger moment is clearly comedic — the speaker is making light of the moment intentionally, not processing something real.
                         Skip for: real failures, breakups, deaths, job losses, business collapses, mental-health struggles, motivational / overcoming-adversity content, interviews / podcasts / storytelling where a guest shares a vulnerable moment, and any reflective / emotional / vulnerable content. Trigger words alone never justify this sound — "failed" in a serious context calls for silence. Context trumps vocabulary. When in doubt, skip.
-                        Needs ≥1.29s of kept-clip time before the trigger word.
 
 ATMOSPHERIC SWEEPS — airy sweeps used BETWEEN beats rather than ON impact words. Near-instant onset, long trail.
 
@@ -2782,8 +2779,7 @@ Work through these checks against the plan you are about to emit. This is self-v
 4. Color consistency. If any `emphasis_moments[i].color_pulse == true`, `color_effect` is non-null and `color_effect.timing.mode == "pulsed"`. `InvertStrike` requires `timing.mode == "pulsed"` with at least one pulse.
 5. MG anchors are absolute zones. Every `motion_graphics[i].anchor` and every `emphasis_moments[i].motion_graphic.anchor` is one of the 5 absolute zones (`upper_third_safe`, `center`, `lower_third_safe`, `left_safe`, `right_safe`).
 6. Explicit nulls. Every emphasis_moment has explicit `zoom_effect` (value or null), `color_pulse` (bool), and `motion_graphic` (value or null) fields — no omissions.
-7. Build-up SFX headroom. For every `drum_roll`, `reverse`, or `sad_trombone`, the trigger word has at least the required build duration of kept-clip time before it (drum_roll ≥1.65s, reverse ≥1.37s, sad_trombone ≥1.29s).
-8. sad_trombone tonal gate. If `sad_trombone` appears, the tonal_register is "comedic" AND the surrounding dialogue is being played for laughs. Otherwise remove it.
+7. sad_trombone tonal gate. If `sad_trombone` appears, the tonal_register is "comedic" AND the surrounding dialogue is being played for laughs. Otherwise remove it.
 
 Note: every anchor field in this schema is word-index-based. You never emit float timestamps that must match word boundaries — Python derives all timestamps from word indices. Caption segments, hook boundaries, thumbnail time, speed-curve keypoints, and color pulses are all synthesized from the word indices you emit.
 
@@ -4634,16 +4630,6 @@ REMOVE_WORDS GUIDANCE:
     sound_effects = []
     valid_sounds = set(_SFX_CATEGORIES.keys())
     _sfx_dg_words = edit_plan.get("_deepgram_words") or []
-    # Build-up sounds require this much kept-clip time BEFORE the trigger
-    # word or the build gets truncated at render and the effect is lost.
-    # Values mirror _SFX_ONSET_OFFSETS for the 5 build-bearing sounds.
-    _SFX_MIN_PRE_TRIGGER = {
-        "boom":         0.440,
-        "thunder":      0.734,
-        "drum_roll":    1.657,
-        "reverse":      1.372,
-        "sad_trombone": 1.290,
-    }
     for _si, sfx in enumerate(raw_sfx):
         if not isinstance(sfx, dict):
             raise ValueError(f"sound_effects[{_si}] must be an object")
@@ -4682,34 +4668,14 @@ REMOVE_WORDS GUIDANCE:
         _trigger_w = _sfx_dg_words[_wi]
         t = float(_trigger_w.get("start") or 0.0)
         word = str(_trigger_w.get("word") or _trigger_w.get("punctuated_word") or "").strip().lower().rstrip(".,!?;:'\"")
-        # Build-duration check: the trigger word must have enough kept-clip time
-        # BEFORE it to accommodate the sound's build. Fails hard if the build
-        # would get truncated at render.
-        if sound in _SFX_MIN_PRE_TRIGGER:
-            _needed = _SFX_MIN_PRE_TRIGGER[sound]
-            _clip_start = None
-            for _cc in validated_cuts:
-                _cs = float(_cc["source_start"])
-                _ce = float(_cc["source_end"])
-                if _cs <= t <= _ce:
-                    _clip_start = _cs
-                    break
-            if _clip_start is None:
-                raise ValueError(
-                    f"sound_effects[{_si}] ({sound}) trigger word {word!r} at "
-                    f"t={t:.2f}s is not inside any kept clip."
-                )
-            _pre_trigger = t - _clip_start
-            if _pre_trigger < _needed:
-                raise ValueError(
-                    f"sound_effects[{_si}] ({sound}) needs {_needed:.2f}s of "
-                    f"kept-clip time BEFORE the trigger word, but word_index="
-                    f"{_wi} ({word!r}) has only {_pre_trigger:.2f}s of clip "
-                    f"before it (clip starts at {_clip_start:.2f}s, word starts "
-                    f"at {t:.2f}s). Move this SFX to a trigger word that's "
-                    f"later in its clip, or pick an instant-onset sound "
-                    f"(hit/ching/ding/pop/click/camera_shutter/typing)."
-                )
+        # No in-clip pre-roll check — SFX audio plays on the GLOBAL output
+        # timeline via FFmpeg's adelay + amix (see render_multi_clip). The
+        # build-up phase plays over whatever precedes the trigger word in the
+        # output, with no respect for source clip boundaries. The only physical
+        # limit is the output-timeline start (t=0); if the projected trigger
+        # time is within the onset duration of that, adelay clamps to 0 and
+        # the crack lands a couple hundred ms late on the first few words of
+        # the video. No audio is truncated.
         sound_effects.append({"t": t, "sound": sound, "word": word, "_word_idx": _wi})
 
     # Sound effects are taken EXACTLY as Gemini provided them. No caps,
