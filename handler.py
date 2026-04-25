@@ -2299,7 +2299,7 @@ The pipeline enforces these rules with strict validators. Output that violates a
 2. EVERY TIMING IS WORD-ANCHORED. You never emit raw float timestamps. Anchor every time-based decision to a specific kept word via its index (start_word_index, end_word_index, word_index, word_indices, after_word_index, peak_word_index, at_word_index, thumbnail_word_index). Python derives all float timestamps from word start/end times. The only float fields in your output are non-time values like `duration_seconds` (overlay lifespan), `intensity`, `scale`, and `speed`.
 3. EVERY TEXT OVERLAY HAS A VARIANT + ITS REQUIRED PROPS. The `variant` field chooses which visual treatment; each variant has a specific set of required props documented in the TEXT OVERLAYS section.
 4. CAPTIONS ARE WORD-ANCHORED. Emit `caption_position_changes` as an array of `{{word_index, position}}` events — each event says "at this kept word, captions move to this position." Python synthesizes the final segment list with exact word-start timestamps. No float boundaries to match, no duration arithmetic. If captions stay "bottom" the whole video, emit an empty array.
-5. Z-ORDER YIELDS TO MOTION GRAPHICS. When a motion_graphic occupies the lower half of the frame across a window, emit a `caption_position_changes` event at the MG's start_word moving captions to "top", and another at the MG's end_word moving them back. Captions and MGs do not share vertical space.
+5. Z-ORDER YIELDS TO MOTION GRAPHICS — AUTOMATIC. Python automatically forces caption_position_segments to "top" inside any bottom-anchored MG window after derivation, so you don't need to coordinate this. Emit caption_position_changes for creative reasons (e.g., a "center" beat for a Quintessence-style dramatic single word) and Python takes care of the MG-overlap geometry.
 6. COLOR EFFECT MODE CONSISTENCY:
    - `InvertStrike` requires `timing.mode = "pulsed"` with at least one pulse.
    - To pulse color at specific moments, emit `color_effect.timing.pulses` with a `peak_word_index` per pulse. There is no separate per-emphasis `color_pulse` flag — pulses are listed explicitly so there's one source of truth.
@@ -2884,7 +2884,7 @@ Work through these checks against the plan you are about to emit. This is self-v
 
 1. Zone discipline for overlays. Two overlays (text_overlay or motion_graphic) whose time windows overlap must sit in DIFFERENT visual zones. Per-variant text_overlay zones: torn_paper→center, sticky_note→upper_third_safe, quote_card→center, lower_third→lower_third_safe, caption_match→matches its `position`. motion_graphic zone = its `anchor` field. Same-zone + same-time is rejected. High-intensity emphasis moments are ≥2.5s apart regardless of zone.
 2. One zoom per kept-source clip. Within each contiguous source range between removed-word boundaries, at most one `emphasis_moments[i].zoom_effect` is non-null. Multiple beats close together stack their events onto a single emphasis_moment's `zoom_effect.events` array.
-3. Z-order yield. For every window a motion_graphic sits in the lower half (`lower_third_safe` or `center`-ish), emit a `caption_position_changes` event at the MG's start_word moving captions to "top", and another at the MG's end_word moving them back to the previous position.
+3. Z-order — automatic. Python forces caption_position_segments to "top" inside bottom-anchored MG windows. You don't need to coordinate this; emit caption_position_changes for creative reasons only.
 4. Color-pulse consistency. `InvertStrike` requires `timing.mode == "pulsed"` with at least one pulse. All pulses live in `color_effect.timing.pulses` with explicit `peak_word_index`; there is no separate per-emphasis flag.
 5. MG anchors are absolute zones. Every `motion_graphics[i].anchor` and every `emphasis_moments[i].motion_graphic.anchor` is one of the 5 absolute zones (`upper_third_safe`, `center`, `lower_third_safe`, `left_safe`, `right_safe`).
 6. Explicit nulls. Every emphasis_moment has explicit `zoom_effect` (value or null) and `motion_graphic` (value or null) fields — no omissions.
@@ -7971,33 +7971,72 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 flush=True,
             )
 
-    # ── 7c. Z-order validator — captions must stay OUT of any bottom-anchored
-    # motion_graphic's window. Gemini is told this in Rule #5, but the rule
-    # requires the plan to synchronize output-time MG windows with source-time
-    # caption segments. By the time we reach here, both lists have been
-    # projected to output-frame space, so we can verify the contract directly.
-    # No silent fix — if Gemini got this wrong the plan is invalid.
+    # ── 7c. Z-order auto-fix — Python OWNS "captions don't visually overlap
+    # bottom-anchored MGs". Both lists are in output-frame space here, so we
+    # split any caption segment that overlaps a bottom-MG window and flip the
+    # inside-MG portion to "top". Same structural pattern as deriving
+    # timestamps from word indices: Python computes the dependent field from
+    # the creative inputs Gemini emits. No cross-field validator, no
+    # hard-fail, no buffer — just deterministic derivation.
     _BOTTOM_MG_ANCHORS = {"bottom", "bottom-left", "bottom-right"}
+    _bottom_mg_windows = []
     for _mg_out in motion_graphics_out:
         _mg_props_anchor = str((_mg_out.get("props") or {}).get("anchor") or "")
         if _mg_props_anchor not in _BOTTOM_MG_ANCHORS:
             continue
         _mg_from = int(_mg_out["fromFrame"])
         _mg_to = _mg_from + int(_mg_out["durationInFrames"])
-        for _cs_out in caption_position_segments_out:
-            if _cs_out["toFrame"] <= _mg_from or _cs_out["fromFrame"] >= _mg_to:
+        if _mg_to > _mg_from:
+            _bottom_mg_windows.append((_mg_from, _mg_to))
+
+    def _flip_segments_to_top_in_window(segments, win_from, win_to):
+        """Split any segment overlapping [win_from, win_to) and flip the
+        inside-window portion to 'top'. Segments already 'top' pass through."""
+        out = []
+        for _cs in segments:
+            _cf, _ct, _pos = _cs["fromFrame"], _cs["toFrame"], _cs["position"]
+            if _ct <= win_from or _cf >= win_to or _pos == "top":
+                out.append(_cs)
                 continue
-            if _cs_out["position"] != "top":
-                raise RuntimeError(
-                    f"Z-order violation: motion_graphic {_mg_out['type']!r} with "
-                    f"anchor={_mg_props_anchor!r} occupies the bottom half during output "
-                    f"frames [{_mg_from}-{_mg_to}] ({_mg_from/source_fps:.2f}s-"
-                    f"{_mg_to/source_fps:.2f}s), but caption_position_segment "
-                    f"[{_cs_out['fromFrame']}-{_cs_out['toFrame']}] has "
-                    f"position={_cs_out['position']!r} — it must be 'top' to avoid "
-                    f"caption/MG overlap. Gemini violated Rule #5: the plan should "
-                    f"have placed captions at 'top' across this window."
-                )
+            # Segment overlaps the window AND is bottom/center — split.
+            if _cf < win_from:
+                out.append({"fromFrame": _cf, "toFrame": win_from, "position": _pos})
+            out.append({
+                "fromFrame": max(_cf, win_from),
+                "toFrame": min(_ct, win_to),
+                "position": "top",
+            })
+            if _ct > win_to:
+                out.append({"fromFrame": win_to, "toFrame": _ct, "position": _pos})
+        return out
+
+    if _bottom_mg_windows:
+        _flips_made = 0
+        for _wf, _wt in _bottom_mg_windows:
+            _before = sum(1 for _cs in caption_position_segments_out
+                          if _cs["position"] != "top"
+                          and _cs["toFrame"] > _wf and _cs["fromFrame"] < _wt)
+            caption_position_segments_out = _flip_segments_to_top_in_window(
+                caption_position_segments_out, _wf, _wt,
+            )
+            _flips_made += _before
+
+        # Coalesce adjacent segments with the same position.
+        _coalesced = []
+        for _cs in caption_position_segments_out:
+            if (_coalesced and _coalesced[-1]["position"] == _cs["position"]
+                    and _coalesced[-1]["toFrame"] == _cs["fromFrame"]):
+                _coalesced[-1]["toFrame"] = _cs["toFrame"]
+            else:
+                _coalesced.append(dict(_cs))
+        caption_position_segments_out = _coalesced
+
+        if _flips_made:
+            print(
+                f"[render] Auto-flipped {_flips_made} caption segment portion(s) to "
+                f"'top' to clear bottom-anchored MG window(s)",
+                flush=True,
+            )
 
     # ── 8. Assemble Remotion input + write JSON ─────────────────────────────
     # Face trajectory no longer piped into Remotion — the motion-graphics pack

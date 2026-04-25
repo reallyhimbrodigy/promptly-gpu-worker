@@ -1,6 +1,6 @@
 import modal
 
-# rebuild trigger v44 — Fix HeadlessBrowser.close() crash post-render. A recent @remotion/renderer update changed close() to destructure `{silent}` from its options arg; render-full.mjs was calling close() with no args, throwing TypeError after the render had already written the output mp4. The non-zero subprocess exit made handler.py treat the whole render as failed even though the output was good. Fixed by passing {silent: false} and wrapping in try/catch (cleanup errors don't fail the render). Also explains the CGroup memory reading noise (8.8 EXB) as Modal-side telemetry, not a real OOM.
+# rebuild trigger v45 — Replace z-order validator with auto-fix. Old validator hard-failed when caption_position_segments had position!='top' inside a bottom-anchored MG window — this required Gemini to coordinate two parallel decisions perfectly, which it didn't always do. Replaced with a Python derivation step: walks every bottom-MG window, splits any caption segment that overlaps and isn't already 'top', flips the inside-window portion to 'top', coalesces adjacent same-position segments. Same structural pattern as deriving timestamps from word indices: Python OWNS the cross-field consistency contract, Gemini just emits the creative inputs. Updated Contract Rule #5 + verification footer Rule #3 to say z-order is automatic, Gemini emits caption_position_changes only for creative reasons (e.g. Quintessence-style center beats).
 
 # ── Image definition (replaces Dockerfile) ────────────────────────────────────
 image = (
