@@ -7999,27 +7999,45 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # and no other composition layer consumes face data at render time.
     _outro = edit_plan.get("outro") or "none"
 
-    # Remotion serves local files via its bundle server, which resolves every
-    # request against `publicDir` (set to `work_dir` by render-full.mjs). We
-    # emit BASENAMES for every local-file URL so the browser asks the server
-    # for e.g. `/source_30fps.mp4` and the server finds it in work_dir. If we
-    # kept absolute /tmp paths, the server would try `/remotion/bundle/tmp/...`
-    # and 404. Verify every referenced file is actually inside work_dir.
-    _source_src = os.path.basename(source_path)
-    if os.path.dirname(source_path) != work_dir:
-        raise RuntimeError(
-            f"source_path ({source_path}) is not inside work_dir ({work_dir}); "
-            f"Remotion's publicDir server cannot serve it. Move the source into "
-            f"work_dir before calling render_multi_clip."
-        )
-    for _br in broll_out:
-        _full = _br["src"]
-        if os.path.dirname(_full) != work_dir:
+    # ── File staging for Remotion's bundle server ───────────────────────────
+    # Remotion's bundle server only serves files that physically exist under
+    # the bundle directory. The `publicDir` parameter doesn't actually extend
+    # the server's serving roots in practice (verified via Remotion docs +
+    # the v40 404 logs). The documented pattern is to stage local files into
+    # the bundle's `public/` subfolder; the static server then serves them
+    # at `/public/<name>` URLs that the composition references via
+    # `staticFile()`.
+    #
+    # We stage per-job under `/remotion/bundle/public/<work_dir_basename>/`
+    # to avoid collisions if Modal reuses a warm container for concurrent
+    # invocations. The directory is cleaned up after the render completes
+    # (via try/finally below). Symlinks are zero-copy.
+    _bundle_public_root = "/remotion/bundle/public"
+    _stage_key = os.path.basename(work_dir.rstrip("/")) or f"job-{int(time.time()*1000)}"
+    _stage_dir = os.path.join(_bundle_public_root, _stage_key)
+    os.makedirs(_stage_dir, exist_ok=True)
+
+    def _stage_file(src_abs_path):
+        """Symlink `src_abs_path` into the stage dir; return the path Remotion
+        sees (relative to bundle/public/, used by staticFile)."""
+        if not os.path.exists(src_abs_path):
             raise RuntimeError(
-                f"broll src ({_full}) is not inside work_dir ({work_dir}); "
-                f"Remotion's publicDir server cannot serve it."
+                f"Cannot stage local file for Remotion: {src_abs_path} does not exist."
             )
-        _br["src"] = os.path.basename(_full)
+        _name = os.path.basename(src_abs_path)
+        _link = os.path.join(_stage_dir, _name)
+        # If a previous failed run left a symlink, replace it (target may differ).
+        if os.path.lexists(_link):
+            try:
+                os.unlink(_link)
+            except OSError:
+                pass
+        os.symlink(src_abs_path, _link)
+        return f"{_stage_key}/{_name}"
+
+    _source_src = _stage_file(source_path)
+    for _br in broll_out:
+        _br["src"] = _stage_file(_br["src"])
 
     remotion_input = {
         "sourceUrl": _source_src,
@@ -8118,31 +8136,42 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     silent_video_path = os.path.join(work_dir, "silent_video.mp4")
     _gl_mode = "angle-egl" if _HAS_HWACCEL else "swiftshader"
     _remotion_concurrency = max(4, min(int((os.cpu_count() or 32) // 2), 32))
+    # Files are staged into /remotion/bundle/public/{stage_key}/ — the bundle
+    # server serves them directly. No --public-dir needed.
     _render_cmd = [
         "node", "/remotion/render-full.mjs",
         "--input", remotion_input_json,
         "--output", silent_video_path,
-        "--public-dir", work_dir,
         "--concurrency", str(_remotion_concurrency),
         "--gl", _gl_mode,
     ]
     _render_t0 = time.time()
-    print(f"[render] Launching Remotion render ({_remotion_concurrency} concurrent, gl={_gl_mode})...", flush=True)
-    _render_r = subprocess.run(_render_cmd, capture_output=True, text=True, timeout=900)
-    _render_elapsed = time.time() - _render_t0
-    if _render_r.returncode != 0:
-        raise RuntimeError(
-            f"Remotion render failed (rc={_render_r.returncode}): "
-            f"{(_render_r.stderr or '')[-2000:]}"
-        )
-    # Echo Remotion's stdout for observability
-    if _render_r.stdout:
-        for _line in _render_r.stdout.split("\n")[-40:]:
-            if _line.strip():
-                print(f"[remotion] {_line}", flush=True)
-    if not os.path.exists(silent_video_path) or os.path.getsize(silent_video_path) < 10000:
-        raise RuntimeError(f"Remotion produced invalid output: {silent_video_path}")
-    print(f"[render] Remotion video done in {_render_elapsed:.1f}s ({os.path.getsize(silent_video_path)/1024/1024:.1f}MB silent mp4)", flush=True)
+    print(f"[render] Launching Remotion render ({_remotion_concurrency} concurrent, gl={_gl_mode}, stage={_stage_key})...", flush=True)
+    try:
+        _render_r = subprocess.run(_render_cmd, capture_output=True, text=True, timeout=900)
+        _render_elapsed = time.time() - _render_t0
+        if _render_r.returncode != 0:
+            raise RuntimeError(
+                f"Remotion render failed (rc={_render_r.returncode}): "
+                f"{(_render_r.stderr or '')[-2000:]}"
+            )
+        # Echo Remotion's stdout for observability
+        if _render_r.stdout:
+            for _line in _render_r.stdout.split("\n")[-40:]:
+                if _line.strip():
+                    print(f"[remotion] {_line}", flush=True)
+        if not os.path.exists(silent_video_path) or os.path.getsize(silent_video_path) < 10000:
+            raise RuntimeError(f"Remotion produced invalid output: {silent_video_path}")
+        print(f"[render] Remotion video done in {_render_elapsed:.1f}s ({os.path.getsize(silent_video_path)/1024/1024:.1f}MB silent mp4)", flush=True)
+    finally:
+        # Clean up staged symlinks (per-job dir under bundle/public/) so the
+        # bundle filesystem doesn't accumulate dead links across warm-container
+        # invocations. shutil.rmtree on a dir of symlinks removes only the
+        # links; their targets in work_dir are unaffected.
+        try:
+            shutil.rmtree(_stage_dir, ignore_errors=True)
+        except Exception as _rm_err:
+            print(f"[render] WARNING: stage cleanup failed: {_rm_err}", flush=True)
 
     # Collect speed-curved audio (fails fast — no fallback to plain audio
     # because speed ramps would desync).
