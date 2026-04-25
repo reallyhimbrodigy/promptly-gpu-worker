@@ -4139,12 +4139,19 @@ REMOVE_WORDS GUIDANCE:
         _mode = str(_timing.get("mode") or "").strip()
         if _mode not in ("persistent", "pulsed"):
             raise ValueError(f"color_effect.timing.mode must be 'persistent'|'pulsed', got {_mode!r}")
-        # InvertStrike can only render as pulsed.
-        if _ct == "InvertStrike" and _mode != "pulsed":
-            raise ValueError(
-                "color_effect.type 'InvertStrike' REQUIRES timing.mode='pulsed' with at least one pulse"
+        # InvertStrike can only render as pulsed. If Gemini emits the wrong
+        # mode, drop the color_effect entirely and continue — render proceeds
+        # without color grading rather than hard-failing the whole plan.
+        _drop_color_effect = (_ct == "InvertStrike" and _mode != "pulsed")
+        if _drop_color_effect:
+            print(
+                f"[generate-edit] DROP color_effect 'InvertStrike': "
+                f"timing.mode={_mode!r} but InvertStrike only renders as "
+                f"'pulsed'. Render continues without this color_effect.",
+                flush=True,
             )
-        if _mode == "persistent":
+            edit_plan["color_effect"] = None
+        elif _mode == "persistent":
             _ce_out["timing"] = {"mode": "persistent"}
             if "fadeInFrames" in _timing:
                 _ce_out["timing"]["fadeInFrames"] = int(_timing["fadeInFrames"])
@@ -4175,14 +4182,16 @@ REMOVE_WORDS GUIDANCE:
                     "intensity": float(_p.get("intensity", 1.0)),
                 })
             _ce_out["timing"] = {"mode": "pulsed", "pulses": _out_pulses}
-        # Pass through component-specific extras verbatim.
-        for _ek in ("grain", "grainStrength", "sunWash", "palette", "offset", "angle", "drift",
-                    "baseDarkness", "baseInnerPct", "color", "punch", "redWeight", "greenWeight",
-                    "blueWeight", "contrastBoost", "grainScale", "grainOctaves", "flicker",
-                    "monochrome", "grainStep", "dustDensity", "scratchDensity"):
-            if _ek in _ce_raw:
-                _ce_out[_ek] = _ce_raw[_ek]
-        edit_plan["color_effect"] = _ce_out
+        # Pass through component-specific extras verbatim. Skip when the
+        # InvertStrike drop fired above — _ce_out is incomplete in that case.
+        if not _drop_color_effect:
+            for _ek in ("grain", "grainStrength", "sunWash", "palette", "offset", "angle", "drift",
+                        "baseDarkness", "baseInnerPct", "color", "punch", "redWeight", "greenWeight",
+                        "blueWeight", "contrastBoost", "grainScale", "grainOctaves", "flicker",
+                        "monochrome", "grainStep", "dustDensity", "scratchDensity"):
+                if _ek in _ce_raw:
+                    _ce_out[_ek] = _ce_raw[_ek]
+            edit_plan["color_effect"] = _ce_out
     else:
         raise ValueError(f"color_effect must be an object or null, got {type(_ce_raw).__name__}")
 
@@ -4237,16 +4246,22 @@ REMOVE_WORDS GUIDANCE:
             )
         if _sw not in _mg_kept_set:
             _wt = str(_dg_words[_sw].get("punctuated_word") or _dg_words[_sw].get("word") or "").strip()
-            raise ValueError(
-                f"motion_graphics[{_i}].start_word_index={_sw} ({_wt!r}) targets "
-                f"a REMOVED word. Anchor to a kept word."
+            print(
+                f"[generate-edit] DROP motion_graphics '{_mg_type}' [{_i}]: "
+                f"start_word_index={_sw} ({_wt!r}) targets a REMOVED word. "
+                f"Render continues without this motion graphic.",
+                flush=True,
             )
+            continue
         if _ew not in _mg_kept_set:
             _wt = str(_dg_words[_ew].get("punctuated_word") or _dg_words[_ew].get("word") or "").strip()
-            raise ValueError(
-                f"motion_graphics[{_i}].end_word_index={_ew} ({_wt!r}) targets "
-                f"a REMOVED word. Anchor to a kept word."
+            print(
+                f"[generate-edit] DROP motion_graphics '{_mg_type}' [{_i}]: "
+                f"end_word_index={_ew} ({_wt!r}) targets a REMOVED word. "
+                f"Render continues without this motion graphic.",
+                flush=True,
             )
+            continue
         _anchor = str(_mg.get("anchor") or "").strip()
         if _anchor not in _valid_semantic_anchors:
             raise ValueError(
@@ -4441,6 +4456,10 @@ REMOVE_WORDS GUIDANCE:
         if not _wis:
             raise ValueError(f"emphasis_moments[{_ei}].word_indices contained no integers")
         # Every word_indices entry MUST be a word that survives remove_words.
+        # If any anchor word was removed, drop the entire emphasis_moment and
+        # continue — render proceeds without this single beat rather than
+        # hard-failing the whole plan.
+        _drop_em = False
         for _k, _wi_val in enumerate(_wis):
             if _wi_val < 0 or _wi_val >= len(_dg_words):
                 raise ValueError(
@@ -4450,11 +4469,16 @@ REMOVE_WORDS GUIDANCE:
             if _wi_val not in _kept_word_indices:
                 _w = _dg_words[_wi_val]
                 _wt = str(_w.get("punctuated_word") or _w.get("word") or "").strip()
-                raise ValueError(
-                    f"emphasis_moments[{_ei}].word_indices[{_k}]={_wi_val} "
-                    f"({_wt!r}) targets a word that was REMOVED via remove_words. "
-                    f"Emphasize only words that survive your removal list."
+                print(
+                    f"[generate-edit] DROP emphasis_moment [{_ei}]: "
+                    f"word_indices[{_k}]={_wi_val} ({_wt!r}) targets a "
+                    f"REMOVED word. Render continues without this emphasis.",
+                    flush=True,
                 )
+                _drop_em = True
+                break
+        if _drop_em:
+            continue
         # Derive t from word_indices[0].start — Gemini no longer emits `t`
         # (schema-level constraint from v34: the two could disagree so we
         # removed the degree of freedom). Because word_indices[0] is a kept
@@ -4538,15 +4562,27 @@ REMOVE_WORDS GUIDANCE:
         })
     emphasis_moments.sort(key=lambda x: x["t"])
 
-    # High-intensity emphasis pacing: no two within 2.5s of each other.
-    _high = [em for em in emphasis_moments if em["intensity"] == "high"]
-    for _i in range(1, len(_high)):
-        _gap = _high[_i]["t"] - _high[_i - 1]["t"]
-        if _gap < 2.5:
-            raise ValueError(
-                f"High-intensity emphasis moments at {_high[_i-1]['t']:.2f}s and "
-                f"{_high[_i]['t']:.2f}s are {_gap:.2f}s apart (minimum 2.5s)."
+    # High-intensity emphasis pacing: no two within 2.5s of each other. Drop
+    # any second-or-later high-intensity emphasis that crowds the previous one
+    # — render continues without the dropped emphasis.
+    _drop_idx = set()
+    _prev_high_t = None
+    for _i, em in enumerate(emphasis_moments):
+        if em["intensity"] != "high":
+            continue
+        if _prev_high_t is not None and (em["t"] - _prev_high_t) < 2.5:
+            print(
+                f"[generate-edit] DROP emphasis_moment [{_i}] high-intensity: "
+                f"t={em['t']:.2f}s is {em['t'] - _prev_high_t:.2f}s after "
+                f"previous high-intensity at {_prev_high_t:.2f}s (minimum 2.5s). "
+                f"Render continues without this emphasis.",
+                flush=True,
             )
+            _drop_idx.add(_i)
+            continue
+        _prev_high_t = em["t"]
+    if _drop_idx:
+        emphasis_moments = [em for _i, em in enumerate(emphasis_moments) if _i not in _drop_idx]
 
     # Zoom collision: each clip (source_start..source_end) can host at most ONE
     # emphasis_moment with a zoom_effect. Two emphasis moments in the same clip
@@ -4565,20 +4601,29 @@ REMOVE_WORDS GUIDANCE:
                 _owning_clip = _ci
                 break
         if _owning_clip is None:
-            raise ValueError(
-                f"emphasis_moments[{_ei}].t={em['t']:.2f}s with zoom_effect falls "
-                f"OUTSIDE every validated clip — t lands in a cut/removed segment. "
-                f"Move t inside a clip's source range or drop this emphasis."
+            # Zoom emphasis lands in a cut/removed segment — clear just the
+            # zoom and keep the rest of the emphasis (text, MG) intact.
+            print(
+                f"[generate-edit] CLEAR emphasis_moments[{_ei}].zoom_effect: "
+                f"t={em['t']:.2f}s falls outside every validated clip. "
+                f"Render continues with the emphasis but no zoom.",
+                flush=True,
             )
+            em["zoom_effect"] = None
+            continue
         if _owning_clip in _clip_zoom_owner:
             _prev = _clip_zoom_owner[_owning_clip]
-            raise ValueError(
-                f"emphasis_moments[{_ei}] and [{_prev}] both place zoom_effect on clip "
-                f"{_owning_clip} ({validated_cuts[_owning_clip]['source_start']:.2f}-"
-                f"{validated_cuts[_owning_clip]['source_end']:.2f}s). Only one zoom can "
-                f"run per clip — merge their events into a single zoom_effect on the "
-                f"first emphasis, or drop one of the zooms."
+            print(
+                f"[generate-edit] CLEAR emphasis_moments[{_ei}].zoom_effect: "
+                f"clip {_owning_clip} already owned by emphasis [{_prev}] "
+                f"({validated_cuts[_owning_clip]['source_start']:.2f}-"
+                f"{validated_cuts[_owning_clip]['source_end']:.2f}s). Only one "
+                f"zoom can run per clip. Render continues with this emphasis "
+                f"but no zoom.",
+                flush=True,
             )
+            em["zoom_effect"] = None
+            continue
         _clip_zoom_owner[_owning_clip] = _ei
 
     for em in emphasis_moments:
@@ -4623,10 +4668,13 @@ REMOVE_WORDS GUIDANCE:
             )
         if _swi not in _kept_word_indices:
             _wt = str(_dg_words[_swi].get("punctuated_word") or _dg_words[_swi].get("word") or "").strip()
-            raise ValueError(
-                f"text_overlays[{_i}].start_word_index={_swi} ({_wt!r}) targets "
-                f"a REMOVED word. Anchor to a kept word or drop this overlay."
+            print(
+                f"[generate-edit] DROP text_overlay '{_var}' [{_i}]: "
+                f"start_word_index={_swi} ({_wt!r}) targets a REMOVED word. "
+                f"Render continues without this overlay.",
+                flush=True,
             )
+            continue
         try:
             _du = float(_ov["duration_seconds"])
         except (KeyError, TypeError, ValueError):
@@ -4711,12 +4759,18 @@ REMOVE_WORDS GUIDANCE:
         return _TEXT_OVERLAY_ZONE.get(ov.get("variant"), "center")
 
     # text_overlay vs text_overlay: same-zone + time-overlap = collision.
+    # Drop the second (later) overlay; the first wins. Render continues.
+    _to_drop_indices = set()
     for _i in range(len(_to_validated)):
+        if _i in _to_drop_indices:
+            continue
         _a = _to_validated[_i]
         _a_start = _a["_source_start"]
         _a_end = _a_start + _a["duration_seconds"]
         _a_zone = _text_overlay_zone(_a)
         for _j in range(_i + 1, len(_to_validated)):
+            if _j in _to_drop_indices:
+                continue
             _b = _to_validated[_j]
             _b_start = _b["_source_start"]
             _b_end = _b_start + _b["duration_seconds"]
@@ -4724,19 +4778,23 @@ REMOVE_WORDS GUIDANCE:
             if _a_zone != _b_zone:
                 continue  # different zones — coexistence is fine
             if _a_start < _b_end and _b_start < _a_end:
-                raise ValueError(
-                    f"text_overlays collide in zone '{_a_zone}': "
-                    f"#{_i} ({_a['variant']} {_a_start:.2f}-{_a_end:.2f}s) vs "
-                    f"#{_j} ({_b['variant']} {_b_start:.2f}-{_b_end:.2f}s). "
-                    f"Overlays in the same visual zone at the same time render "
-                    f"on top of each other. Move one to a different time or "
-                    f"pick variants in different zones."
+                print(
+                    f"[generate-edit] DROP text_overlay '{_b['variant']}' "
+                    f"[{_j}]: collides with [{_i}] ('{_a['variant']}') in zone "
+                    f"'{_a_zone}' ({_a_start:.2f}-{_a_end:.2f}s vs "
+                    f"{_b_start:.2f}-{_b_end:.2f}s). Render continues without "
+                    f"the colliding overlay.",
+                    flush=True,
                 )
+                _to_drop_indices.add(_j)
 
     # text_overlay vs emphasis motion_graphic: same-zone + time-overlap = collision.
     # Emphasis MG windows center slightly before the moment's t (25% pre-roll).
-    # MG zone = its explicit `anchor` field.
-    for _to in _to_validated:
+    # MG zone = its explicit `anchor` field. Drop the text_overlay (the
+    # emphasis MG carries narrative weight); render continues.
+    for _to_idx, _to in enumerate(_to_validated):
+        if _to_idx in _to_drop_indices:
+            continue
         _to_start = _to["_source_start"]
         _to_end = _to_start + _to["duration_seconds"]
         _to_zone = _text_overlay_zone(_to)
@@ -4750,13 +4808,23 @@ REMOVE_WORDS GUIDANCE:
             _em_mg_start = max(0.0, _em["t"] - _em_dur * 0.25)
             _em_mg_end = _em_mg_start + _em_dur
             if _to_start < _em_mg_end and _em_mg_start < _to_end:
-                raise ValueError(
-                    f"text_overlay collides with emphasis motion_graphic in zone '{_to_zone}': "
-                    f"text_overlay ({_to['variant']} {_to_start:.2f}-{_to_end:.2f}s) overlaps "
-                    f"emphasis MG ({_em['motion_graphic']['type']} "
-                    f"{_em_mg_start:.2f}-{_em_mg_end:.2f}s at emphasis t={_em['t']:.2f}s). "
-                    f"Both occupy the same zone at the same time — move one."
+                print(
+                    f"[generate-edit] DROP text_overlay '{_to['variant']}' "
+                    f"[{_to_idx}]: collides with emphasis motion_graphic "
+                    f"'{_em['motion_graphic']['type']}' in zone '{_to_zone}' "
+                    f"({_to_start:.2f}-{_to_end:.2f}s vs "
+                    f"{_em_mg_start:.2f}-{_em_mg_end:.2f}s at emphasis t="
+                    f"{_em['t']:.2f}s). Render continues without the overlay.",
+                    flush=True,
                 )
+                _to_drop_indices.add(_to_idx)
+                break
+
+    # Apply the accumulated overlay drops in one pass (preserves index
+    # references inside the loops above).
+    if _to_drop_indices:
+        _to_validated = [t for _i, t in enumerate(_to_validated) if _i not in _to_drop_indices]
+        edit_plan["text_overlays"] = _to_validated
 
     if _to_validated:
         print(
@@ -4793,11 +4861,14 @@ REMOVE_WORDS GUIDANCE:
             )
         if _wi not in _kept_word_indices:
             _wt = str(_sfx_dg_words[_wi].get("punctuated_word") or _sfx_dg_words[_wi].get("word") or "").strip()
-            raise ValueError(
-                f"sound_effects[{_si}].word_index={_wi} ({_wt!r}) targets a word "
-                f"that was REMOVED via remove_words. Pick a kept word or drop "
-                f"this SFX — the viewer never hears the trigger otherwise."
+            print(
+                f"[generate-edit] DROP sound_effect '{sfx.get('sound')}' [{_si}]: "
+                f"word_index={_wi} ({_wt!r}) targets a REMOVED word — viewer "
+                f"would never hear the trigger. Render continues without this "
+                f"SFX.",
+                flush=True,
             )
+            continue
         sound = str(sfx["sound"]).strip().lower()
         if sound not in valid_sounds:
             raise ValueError(
