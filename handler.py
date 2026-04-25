@@ -9650,25 +9650,52 @@ def handler(job):
             # CloudFront serves the content via CDN.
             _s3_bucket = os.environ.get("S3_BUCKET_NAME", "")
             _cf_domain = os.environ.get("CLOUDFRONT_DOMAIN", "")
-            if _aws_s3_client and _s3_bucket:
-                _ul_key = f"rendered/{job_id}/output.mp4"
+            # The Node.js dispatcher pre-generated a presigned PUT URL that
+            # targets the bucket's `renders/{jobId}/{ts}-edited.mp4` key.
+            # Use it. This is the same upload path source uploads use, and
+            # the bucket policy is configured to let CloudFront serve
+            # objects there. Earlier code did a direct boto3 upload to
+            # `rendered/{job_id}/output.mp4` (note the spelling mismatch:
+            # `rendered/` vs `renders/`), which CloudFront 403'd because
+            # that prefix isn't covered by the bucket's CloudFront origin
+            # access policy. Result: rendered videos showed AVPlayer's
+            # "unplayable" icon while thumbnails (which fall back to
+            # Supabase) loaded fine.
+            if upload_url:
+                with open(output_path, "rb") as f:
+                    resp = requests.put(
+                        upload_url,
+                        data=f,
+                        headers={"Content-Type": "video/mp4"},
+                        timeout=600,
+                    )
+                    resp.raise_for_status()
+                if input_data.get("public_url"):
+                    _video_url = input_data["public_url"]
+                else:
+                    _video_url = upload_url.split("?")[0]
+                print(f"[pipeline] upload complete (presigned-put → {_video_url})", flush=True)
+                edit_plan["_rendered_video_url"] = _video_url
+            elif _aws_s3_client and _s3_bucket:
+                # Last-resort fallback: direct SDK upload to the prefix the
+                # bucket policy allows. Should never hit this path in
+                # practice — Node always provides upload_url.
+                _ul_key = f"renders/{job_id}/output.mp4"
                 _aws_s3_client.upload_file(
                     output_path, _s3_bucket, _ul_key,
-                    ExtraArgs={"ContentType": "video/mp4"},
+                    ExtraArgs={
+                        "ContentType": "video/mp4",
+                        "ACL": "bucket-owner-full-control",
+                    },
                 )
                 if _cf_domain:
                     _video_url = f"https://{_cf_domain.rstrip('/')}/{_ul_key}"
                 else:
                     _video_url = f"https://{_s3_bucket}.s3.{os.environ.get('AWS_REGION', 'us-west-1')}.amazonaws.com/{_ul_key}"
                 print(f"[pipeline] upload complete (s3-direct → {_video_url})", flush=True)
-                # Store for webhook/SSE to return to client
                 edit_plan["_rendered_video_url"] = _video_url
             else:
-                # Legacy: presigned URL upload
-                with open(output_path, "rb") as f:
-                    resp = requests.put(upload_url, data=f, headers={"Content-Type": "video/mp4"}, timeout=120)
-                    resp.raise_for_status()
-                print("[pipeline] upload complete (presigned-put)", flush=True)
+                raise RuntimeError("No upload_url provided and no S3 client configured — cannot upload render")
 
         def _extract_and_upload_cover():
             # Pick the visually best frame from the FINAL RENDERED OUTPUT around
