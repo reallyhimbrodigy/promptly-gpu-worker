@@ -3878,8 +3878,11 @@ REMOVE_WORDS GUIDANCE:
 
     # Apply transitions from Gemini's transitions array onto clips.
     # Each transition has after_word_index — find the clip whose source range
-    # contains that word's timestamp and set transition_out on it. Fail hard on
-    # any invalid reference: no silent skips, no rewires to nearby kept words.
+    # contains that word's timestamp and set transition_out on it. If the
+    # transition can't land (word fell in a cut, or it's in the last clip
+    # with no subsequent clip), DROP that single transition and continue —
+    # same auto-handle pattern as caption z-order: Python OWNS the cross-
+    # field consistency, the rest of the plan still renders.
     raw_transitions = edit_plan.get("transitions") or []
     if raw_transitions and _dg_words:
         # Transitions = pack PascalCase names (CardSwipe, ShutterFlash, …).
@@ -3910,25 +3913,36 @@ REMOVE_WORDS GUIDANCE:
                 )
             awi = int(awi)
             if awi < 0 or awi >= len(_dg_words):
-                raise ValueError(
-                    f"transitions[{_ti}] ({tr_type}) after_word_index={awi} is out of "
-                    f"bounds (transcript has {len(_dg_words)} words)"
+                # Out-of-bounds index — drop this transition; render proceeds
+                # without it. Logged loudly so the operator notices.
+                print(
+                    f"[generate-edit] DROP transition '{tr_type}' [{_ti}]: "
+                    f"after_word_index={awi} out of bounds (transcript has "
+                    f"{len(_dg_words)} words). Render continues without this "
+                    f"transition.",
+                    flush=True,
                 )
+                continue
             if awi in _tr_removed:
-                raise ValueError(
-                    f"transitions[{_ti}] ({tr_type}) after_word_index={awi} targets a "
-                    f"REMOVED word. Move this transition to a word index that was kept "
-                    f"(not listed in remove_words)."
+                # The transition word got cut by a downstream pass. Drop the
+                # transition; the rest of the plan still renders.
+                print(
+                    f"[generate-edit] DROP transition '{tr_type}' [{_ti}]: "
+                    f"after_word_index={awi} targets a removed word. Render "
+                    f"continues without this transition.",
+                    flush=True,
                 )
+                continue
             word_end = float(_dg_words[awi].get("end") or 0)
             # Build extras dict — copy through all component-specific props
             _extras = {
                 k: v for k, v in tr.items()
                 if k not in ("type", "after_word_index") and v is not None
             }
-            # Find the clip that contains this word (with 50ms tolerance). Fail
-            # if no clip does — that means the transition target word ended up
-            # outside every kept clip (physically impossible if awi is kept).
+            # Find the clip that contains this word (with 50ms tolerance) and
+            # has a successor to transition INTO. If the word lands in the last
+            # clip (or isn't found), no clip-pair exists for this transition;
+            # drop it and continue.
             _applied = False
             for ci, clip in enumerate(validated_cuts):
                 cs = float(clip["source_start"])
@@ -3941,11 +3955,15 @@ REMOVE_WORDS GUIDANCE:
                     _applied = True
                     break
             if not _applied:
-                raise ValueError(
-                    f"transitions[{_ti}] ({tr_type}) after_word_index={awi} "
-                    f"(t={word_end:.3f}s) does not land in any kept clip, or lands in "
-                    f"the LAST clip (there is no subsequent clip to transition to). "
-                    f"Pick a word that ends inside clips[0..N-2]."
+                # Lands in the last clip OR doesn't fall in any clip range
+                # (rare edge case: dead-air gap exactly straddling word_end).
+                # Drop the transition; render proceeds with the rest of the plan.
+                print(
+                    f"[generate-edit] DROP transition '{tr_type}' [{_ti}]: "
+                    f"after_word_index={awi} (t={word_end:.2f}s) lands in the "
+                    f"last clip or no clip-pair exists. Render continues "
+                    f"without this transition.",
+                    flush=True,
                 )
 
     # Transition count/variety is Gemini's decision — the prompt teaches restraint.

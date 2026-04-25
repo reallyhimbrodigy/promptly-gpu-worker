@@ -1,6 +1,6 @@
 import modal
 
-# rebuild trigger v47-diag — Diagnostic instrumentation for the slow render. Adds three layers of telemetry: (1) Chromium WebGL renderer probe at startup logs renderer/vendor/version + flags software-fallback explicitly (SwiftShader, llvmpipe, mesa). (2) Remotion render now uses verbose log level + per-progress-update interval render-fps + encode-fps so we can see if degradation is uniform or curves. (3) Background metrics-sampler thread polls nvidia-smi (GPU util %, VRAM), /proc/loadavg, /proc/meminfo every 1s during the render subprocess. Prints summary at the end: GPU util ~0% confirms software-rendering hypothesis; high CPU loadavg with low GPU points to compositing being the bottleneck. Runs on next invocation; no behavioral change to the render itself.
+# rebuild trigger v48 — Replace transition hard-fail validator with drop-and-continue. Same pattern as the z-order fix: if a transition's after_word_index lands in a cut word, lands in the last clip (no successor), or otherwise can't map to a valid clip-pair, we drop just that one transition and continue with the rest of the plan. Loudly logged ([generate-edit] DROP transition '...' [N]: reason). Same diagnostic instrumentation (v47-diag) is still active so the next render's GPU/CPU/render-fps telemetry will land in the logs.
 
 # ── Image definition (replaces Dockerfile) ────────────────────────────────────
 image = (
