@@ -2300,10 +2300,13 @@ The pipeline enforces these rules with strict validators. Output that violates a
 6. COLOR EFFECT MODE CONSISTENCY:
    - `InvertStrike` requires `timing.mode = "pulsed"` with at least one pulse.
    - If any `emphasis_moment.color_pulse = true`, `color_effect` is non-null and `timing.mode = "pulsed"`.
-7. NON-OVERLAP WINDOWS:
-   - Text overlays do not overlap each other in time.
-   - Text overlays do not overlap any emphasis_moment's motion_graphic window.
-   - High-intensity emphasis moments are spaced ≥2.5s apart.
+7. ZONE DISCIPLINE FOR OVERLAYS. Overlays in DIFFERENT visual zones can freely share a time window (e.g., `torn_paper` at center + `lower_third` at the bottom is a standard pro layout). Overlays in the SAME zone at the SAME time are what collide — those are rejected. Per-variant canonical zones:
+   - `torn_paper` → `center` (full-frame impact slam)
+   - `sticky_note` → `upper_third_safe` (corner stickies)
+   - `quote_card` → `center` (floating card)
+   - `lower_third` → `lower_third_safe` (bottom broadcast card)
+   - `caption_match` → zone matches its `position` (top→`upper_third_safe`, center→`center`, bottom→`lower_third_safe`)
+   A motion_graphic's zone is its explicit `anchor` field. Two items collide only when their zones AND time windows both overlap. High-intensity emphasis moments are spaced ≥2.5s apart regardless of zone.
 8. ONE ZOOM PER KEPT-SOURCE CLIP. At most one emphasis_moment carries a zoom_effect within any single kept-source clip (the source range between your removed-words boundaries). When you want multiple zoom beats close together, stack their events onto a single emphasis_moment's `zoom_effect.events` array.
 9. MOTION GRAPHIC ANCHORS ARE ABSOLUTE ZONES. Every `motion_graphics[i].anchor` and `emphasis_moments[i].motion_graphic.anchor` is one of the 5 absolute zones — MGs don't follow the speaker's face.
 10. ANCHORS ARE KEPT WORDS — BY CONSTRUCTION. The transcript you see contains only kept words, renumbered `[0..M-1]`. Every word_index you emit (in `emphasis_moments[i].word_indices`, `sound_effects[i].word_index`, `text_overlays[i].start_word_index`, `motion_graphics[i].{{start,end}}_word_index`, `broll_clips[i].{{start,end}}_word_index`, `transitions[i].after_word_index`, `caption_position_changes[i].word_index`, `color_effect.timing.pulses[i].peak_word_index`, `hook_clip.{{start,end}}_word_index`, `thumbnail_word_index`, `speed_curve[i].at_word_index`) references this index space. All anchors land on kept words. Python translates back to source indices and derives all timestamps.
@@ -2435,25 +2438,27 @@ Each entry:
 
 The overlay appears precisely when `start_word_index`'s word begins speaking (the pipeline projects the word's start time through the output cuts) and stays visible for `duration_seconds`. No free-form timestamp to get wrong.
 
-Variants and their REQUIRED props:
+Each variant has a canonical visual zone. The pipeline allows overlays in DIFFERENT zones to coexist at the same time (e.g. a `torn_paper` slam at `center` while a `lower_third` card sits at `lower_third_safe` is a classic pro layout). Same-zone at same-time is rejected.
 
-1. "torn_paper"  — Two torn paper strips slam from opposite sides. Confession/framing/hook aesthetic.
+Variants, their canonical zones, and REQUIRED props:
+
+1. "torn_paper"  — zone: `center`. Two torn paper strips slam from opposite sides. Confession/framing/hook aesthetic.
    REQUIRED: "topText" (str <=5 words UPPERCASE), "bottomText" (str <=5 words UPPERCASE)
    Use for: POV hooks ("MY 6YO" / "EXPOSED MY WIFE"), "BEFORE" / "AFTER".
 
-2. "sticky_note" — 1-3 animated sticky notes with handwritten-style text.
+2. "sticky_note" — zone: `upper_third_safe`. 1-3 animated sticky notes with handwritten-style text.
    REQUIRED: "notes" (array of {{"text": str, "color": "#hex", "rotation": float}} — 1 to 3 items)
    Use for: key takeaways, tip bullets, educational moments.
 
-3. "quote_card" — Floating card with quote + em-dash attribution. Serif, premium.
+3. "quote_card" — zone: `center`. Floating card with quote + em-dash attribution. Serif, premium.
    REQUIRED: "quote" (str <=20 words), "attribution" (str)
    Use for: testimonials, pull-quotes, book references.
 
-4. "lower_third" — Broadcast name + title card. Anchored at the lower third.
+4. "lower_third" — zone: `lower_third_safe`. Broadcast name + title card. Anchored at the lower third.
    REQUIRED: "name" (str), "title" (str — role/location)
-   Use for: speaker attribution, podcast guests, location tags. EMIT ONE whenever a new speaker appears.
+   Use for: speaker attribution, podcast guests, location tags. EMIT ONE whenever a new speaker appears. Pairs naturally with a `torn_paper` at `center` — they share the same moment without collision.
 
-5. "caption_match" — Renders in the same style as the main captions. Mono-brand aesthetic.
+5. "caption_match" — zone: matches `position` prop (top→`upper_third_safe`, center→`center`, bottom→`lower_third_safe`). Renders in the same style as the main captions. Mono-brand aesthetic.
    REQUIRED: "text" (str <=6 words), "position" ("top" | "center" | "bottom")
    Use ONLY for Hormozi/hustle/mono-brand vibes where matching the caption IS the brand. Otherwise pick torn_paper / sticky_note / quote_card / lower_third.
 
@@ -2879,7 +2884,7 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
 
 Work through these checks against the plan you are about to emit. This is self-verification — do not externalize it in your output.
 
-1. Non-overlap in time. No two `text_overlays` windows (start_word.start, start_word.start + duration_seconds) overlap. No `text_overlays` window overlaps any `motion_graphics` window or any `emphasis_moments[i].motion_graphic` window. High-intensity emphasis moments are ≥2.5s apart.
+1. Zone discipline for overlays. Two overlays (text_overlay or motion_graphic) whose time windows overlap must sit in DIFFERENT visual zones. Per-variant text_overlay zones: torn_paper→center, sticky_note→upper_third_safe, quote_card→center, lower_third→lower_third_safe, caption_match→matches its `position`. motion_graphic zone = its `anchor` field. Same-zone + same-time is rejected. High-intensity emphasis moments are ≥2.5s apart regardless of zone.
 2. One zoom per kept-source clip. Within each contiguous source range between removed-word boundaries, at most one `emphasis_moments[i].zoom_effect` is non-null. Multiple beats close together stack their events onto a single emphasis_moment's `zoom_effect.events` array.
 3. Z-order yield. For every window a motion_graphic sits in the lower half (`lower_third_safe` or `center`-ish), emit a `caption_position_changes` event at the MG's start_word moving captions to "top", and another at the MG's end_word moving them back to the previous position.
 4. Color consistency. If any `emphasis_moments[i].color_pulse == true`, `color_effect` is non-null and `color_effect.timing.mode == "pulsed"`. `InvertStrike` requires `timing.mode == "pulsed"` with at least one pulse.
@@ -4686,40 +4691,79 @@ REMOVE_WORDS GUIDANCE:
         _to_validated.append(_entry)
     edit_plan["text_overlays"] = _to_validated
 
-    # Non-overlap: no two text_overlays may overlap in source time (since both
-    # overlays are anchored to source-time word starts + duration_seconds).
+    # ── Zone-aware overlap validation ────────────────────────────────────────
+    # Two overlays may share a time window IF they live in different visual
+    # zones. Only same-zone + overlapping-time is a real collision (torn_paper
+    # + lower_third at the same time is a valid professional layout: impact
+    # text in the center, speaker name card at the bottom).
+    #
+    # Per-variant canonical zone for text_overlays. Motion graphics carry
+    # their zone explicitly via the `anchor` field. `caption_match` is
+    # dynamic and resolved from its `position` prop.
+    _TEXT_OVERLAY_ZONE = {
+        "torn_paper":    "center",
+        "sticky_note":   "upper_third_safe",
+        "quote_card":    "center",
+        "lower_third":   "lower_third_safe",
+        # "caption_match" resolved below
+    }
+    _CAPTION_POS_TO_ZONE = {
+        "top":    "upper_third_safe",
+        "center": "center",
+        "bottom": "lower_third_safe",
+    }
+
+    def _text_overlay_zone(ov):
+        if ov.get("variant") == "caption_match":
+            return _CAPTION_POS_TO_ZONE.get(ov.get("position") or "bottom", "lower_third_safe")
+        return _TEXT_OVERLAY_ZONE.get(ov.get("variant"), "center")
+
+    # text_overlay vs text_overlay: same-zone + time-overlap = collision.
     for _i in range(len(_to_validated)):
         _a = _to_validated[_i]
         _a_start = _a["_source_start"]
         _a_end = _a_start + _a["duration_seconds"]
+        _a_zone = _text_overlay_zone(_a)
         for _j in range(_i + 1, len(_to_validated)):
             _b = _to_validated[_j]
             _b_start = _b["_source_start"]
             _b_end = _b_start + _b["duration_seconds"]
+            _b_zone = _text_overlay_zone(_b)
+            if _a_zone != _b_zone:
+                continue  # different zones — coexistence is fine
             if _a_start < _b_end and _b_start < _a_end:
                 raise ValueError(
-                    f"text_overlays overlap: #{_i} ({_a['variant']} "
-                    f"{_a_start:.2f}-{_a_end:.2f}s) collides with #{_j} "
-                    f"({_b['variant']} {_b_start:.2f}-{_b_end:.2f}s)"
+                    f"text_overlays collide in zone '{_a_zone}': "
+                    f"#{_i} ({_a['variant']} {_a_start:.2f}-{_a_end:.2f}s) vs "
+                    f"#{_j} ({_b['variant']} {_b_start:.2f}-{_b_end:.2f}s). "
+                    f"Overlays in the same visual zone at the same time render "
+                    f"on top of each other. Move one to a different time or "
+                    f"pick variants in different zones."
                 )
 
-    # Non-overlap: text_overlays must not overlap any emphasis motion_graphic
-    # window. Emphasis MG windows are centered slightly before the moment's t
-    # (mirrors the render-time placement: 25% pre-roll, 75% post-roll).
+    # text_overlay vs emphasis motion_graphic: same-zone + time-overlap = collision.
+    # Emphasis MG windows center slightly before the moment's t (25% pre-roll).
+    # MG zone = its explicit `anchor` field.
     for _to in _to_validated:
         _to_start = _to["_source_start"]
         _to_end = _to_start + _to["duration_seconds"]
+        _to_zone = _text_overlay_zone(_to)
         for _em in emphasis_moments:
             if not _em["motion_graphic"]:
                 continue
+            _em_zone = str(_em["motion_graphic"].get("anchor") or "center")
+            if _to_zone != _em_zone:
+                continue  # different zones — fine
             _em_dur = float(_em["duration"])
             _em_mg_start = max(0.0, _em["t"] - _em_dur * 0.25)
             _em_mg_end = _em_mg_start + _em_dur
             if _to_start < _em_mg_end and _em_mg_start < _to_end:
                 raise ValueError(
+                    f"text_overlay collides with emphasis motion_graphic in zone '{_to_zone}': "
                     f"text_overlay ({_to['variant']} {_to_start:.2f}-{_to_end:.2f}s) overlaps "
-                    f"emphasis motion_graphic ({_em['motion_graphic']['type']} "
-                    f"{_em_mg_start:.2f}-{_em_mg_end:.2f}s at emphasis t={_em['t']:.2f}s)"
+                    f"emphasis MG ({_em['motion_graphic']['type']} "
+                    f"{_em_mg_start:.2f}-{_em_mg_end:.2f}s at emphasis t={_em['t']:.2f}s). "
+                    f"Both occupy the same zone at the same time — move one."
                 )
 
     if _to_validated:
