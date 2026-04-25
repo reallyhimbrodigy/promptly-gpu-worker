@@ -127,6 +127,58 @@ const browser = await openBrowser("chrome-headless-shell", {
 });
 console.log(`[render-full] Browser opened in ${((Date.now() - tBrowser) / 1000).toFixed(2)}s`);
 
+// ── DIAGNOSTIC: Probe Chromium's actual WebGL renderer ─────────────────────
+// We need to know whether Chromium is hardware-accelerated (NVIDIA H100) or
+// software-rendering (SwiftShader). 32 parallel software-rendered tabs at
+// 1080×1920 with SVG filter chains is the most likely cause of the 152s
+// render — software renderer's pixel throughput on this composition is
+// roughly 9 fps × 32 tabs = ~288 fps total, exactly what we'd see.
+try {
+  const _gpuPage = await browser.newPage();
+  await _gpuPage.setContent(
+    '<canvas id="c" width="100" height="100"></canvas>',
+    { waitUntil: 'load' },
+  );
+  const _glInfo = await _gpuPage.evaluate(() => {
+    const c = document.getElementById('c');
+    const gl = c.getContext('webgl2') || c.getContext('webgl');
+    if (!gl) return { error: 'no WebGL context available' };
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    const renderer = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+    const vendor   = ext ? gl.getParameter(ext.UNMASKED_VENDOR_WEBGL)   : gl.getParameter(gl.VENDOR);
+    return {
+      renderer: String(renderer),
+      vendor: String(vendor),
+      version: String(gl.getParameter(gl.VERSION)),
+      shadingLanguage: String(gl.getParameter(gl.SHADING_LANGUAGE_VERSION)),
+      maxTextureSize: gl.getParameter(gl.MAX_TEXTURE_SIZE),
+    };
+  });
+  await _gpuPage.close();
+  console.log(`[gpu-info] WebGL renderer: ${_glInfo.renderer || _glInfo.error}`);
+  console.log(`[gpu-info] WebGL vendor:   ${_glInfo.vendor || ''}`);
+  console.log(`[gpu-info] WebGL version:  ${_glInfo.version || ''}`);
+  console.log(`[gpu-info] Max texture:    ${_glInfo.maxTextureSize || ''}`);
+  // Heuristic flag — if the renderer string contains "SwiftShader", "llvmpipe",
+  // or "Software", we're in software fallback regardless of what the
+  // gl=angle-egl flag suggested.
+  const _rs = (_glInfo.renderer || '').toLowerCase();
+  const _isSoftware =
+    _rs.includes('swiftshader') ||
+    _rs.includes('llvmpipe') ||
+    _rs.includes('software') ||
+    _rs.includes('mesa');
+  if (_isSoftware) {
+    console.log(`[gpu-info] *** SOFTWARE RENDERER DETECTED *** — Chromium is NOT using the H100. This is almost certainly the bottleneck.`);
+  } else if (_rs.includes('nvidia') || _rs.includes('h100') || _rs.includes('cuda')) {
+    console.log(`[gpu-info] Hardware GPU rendering active.`);
+  } else {
+    console.log(`[gpu-info] Renderer not recognized as software or NVIDIA — inspect manually.`);
+  }
+} catch (e) {
+  console.log(`[gpu-info] WebGL probe failed: ${e.message}`);
+}
+
 // ── Composition ────────────────────────────────────────────────────────────
 const tComp = Date.now();
 const composition = await selectComposition({
@@ -141,6 +193,16 @@ console.log(`[render-full] selectComposition: ${((Date.now() - tComp) / 1000).to
 // ── Render ─────────────────────────────────────────────────────────────────
 const tRender = Date.now();
 let lastPctLogged = -10;
+
+// DIAGNOSTIC: per-progress-update timing samples. Tells us if render speed
+// degrades over time (memory pressure, cache eviction) or is uniformly slow
+// (composition cost). Captures rendered/encoded split — if rendered is
+// keeping up but encoded is lagging, encoder is the bottleneck; if rendered
+// is slow, composition/decode is the bottleneck.
+let _lastProgressTime = Date.now();
+let _lastRenderedFrames = 0;
+let _lastEncodedFrames = 0;
+const _intervalSamples = [];
 
 await renderMedia({
   serveUrl: bundleLocation,
@@ -167,17 +229,43 @@ await renderMedia({
   // The cache stores decoded source frames so repeated seeks across
   // transitions + captions don't re-decode from disk each time.
   offthreadVideoCacheSizeInBytes: 16 * 1024 * 1024 * 1024, // 16 GB
-  logLevel: "info",
-  onProgress: ({ progress }) => {
-    const pct = Math.round(progress * 100);
+  // DIAGNOSTIC: verbose logging gives per-frame timing breakdown in stderr.
+  logLevel: "verbose",
+  onProgress: (info) => {
+    const { progress, encodedFrames, renderedFrames } = info || {};
+    const now = Date.now();
+    const pct = Math.round((progress || 0) * 100);
+    // Emit a sample roughly every 10% AND record rate-over-interval.
     if (pct >= lastPctLogged + 10) {
-      console.log(`[render-full] progress ${pct}%`);
+      const elapsedSec = (now - _lastProgressTime) / 1000;
+      const rendDelta = (renderedFrames || 0) - _lastRenderedFrames;
+      const encDelta = (encodedFrames || 0) - _lastEncodedFrames;
+      const renderFps = elapsedSec > 0 ? rendDelta / elapsedSec : 0;
+      const encodeFps = elapsedSec > 0 ? encDelta / elapsedSec : 0;
+      console.log(
+        `[render-full] progress ${pct}% rendered=${renderedFrames || 0} encoded=${encodedFrames || 0} ` +
+        `interval_render_fps=${renderFps.toFixed(1)} interval_encode_fps=${encodeFps.toFixed(1)}`,
+      );
+      _intervalSamples.push({ pct, renderFps, encodeFps });
       lastPctLogged = pct;
+      _lastProgressTime = now;
+      _lastRenderedFrames = renderedFrames || 0;
+      _lastEncodedFrames = encodedFrames || 0;
     }
   },
 });
 
 const renderElapsed = (Date.now() - tRender) / 1000;
+// DIAGNOSTIC: summarise interval samples — degrading vs uniform slowness.
+if (_intervalSamples.length) {
+  const fpsList = _intervalSamples.map((s) => s.renderFps);
+  const avg = fpsList.reduce((a, b) => a + b, 0) / fpsList.length;
+  const min = Math.min(...fpsList);
+  const max = Math.max(...fpsList);
+  console.log(
+    `[render-full] render-fps over time: avg=${avg.toFixed(1)} min=${min.toFixed(1)} max=${max.toFixed(1)} (${_intervalSamples.length} samples)`,
+  );
+}
 try {
   const size = statSync(outputPath).size;
   console.log(

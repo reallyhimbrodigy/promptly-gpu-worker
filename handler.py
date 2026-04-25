@@ -8212,6 +8212,58 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     ]
     _render_t0 = time.time()
     print(f"[render] Launching Remotion render ({_remotion_concurrency} concurrent, gl={_gl_mode}, stage={_stage_key})...", flush=True)
+
+    # ── DIAGNOSTIC: sample CPU/GPU/RAM during the render ─────────────────────
+    # If render is software-rendering (Chromium fallback to SwiftShader), GPU
+    # util will be ~0% and CPU will be saturated. If GPU is doing the work,
+    # we'll see GPU util > 30% during render. This is the smoking-gun probe
+    # for the most likely root cause of the slow render.
+    _metrics_stop = threading.Event()
+    _metrics_samples = []
+
+    def _sample_metrics():
+        import time as _t
+        while not _metrics_stop.is_set():
+            _sample = {"ts": _t.time()}
+            # GPU
+            try:
+                _gpu_r = subprocess.run(
+                    ["nvidia-smi",
+                     "--query-gpu=utilization.gpu,utilization.memory,memory.used,memory.total",
+                     "--format=csv,noheader,nounits"],
+                    capture_output=True, text=True, timeout=2,
+                )
+                if _gpu_r.returncode == 0:
+                    _parts = [p.strip() for p in _gpu_r.stdout.strip().split(",")]
+                    if len(_parts) >= 4:
+                        _sample["gpu_util_pct"] = int(_parts[0])
+                        _sample["gpu_mem_pct"] = int(_parts[1])
+                        _sample["gpu_mem_used_mb"] = int(_parts[2])
+                        _sample["gpu_mem_total_mb"] = int(_parts[3])
+            except Exception:
+                pass
+            # CPU + RAM
+            try:
+                with open("/proc/loadavg") as _lf:
+                    _sample["loadavg"] = _lf.read().strip().split()[0]
+                with open("/proc/meminfo") as _mf:
+                    _meminfo = {}
+                    for _line in _mf:
+                        _k, _, _v = _line.partition(":")
+                        _meminfo[_k.strip()] = _v.strip()
+                    _mem_total_kb = int(_meminfo.get("MemTotal", "0 kB").split()[0])
+                    _mem_avail_kb = int(_meminfo.get("MemAvailable", "0 kB").split()[0])
+                    _sample["mem_used_mb"] = (_mem_total_kb - _mem_avail_kb) // 1024
+                    _sample["mem_total_mb"] = _mem_total_kb // 1024
+            except Exception:
+                pass
+            _metrics_samples.append(_sample)
+            _metrics_stop.wait(1.0)
+
+    _metrics_thread = threading.Thread(target=_sample_metrics, daemon=True)
+    _metrics_thread.start()
+
+    _render_elapsed = 0.0
     try:
         _render_r = subprocess.run(_render_cmd, capture_output=True, text=True, timeout=900)
         _render_elapsed = time.time() - _render_t0
@@ -8220,15 +8272,61 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 f"Remotion render failed (rc={_render_r.returncode}): "
                 f"{(_render_r.stderr or '')[-2000:]}"
             )
-        # Echo Remotion's stdout for observability
+        # DIAGNOSTIC: echo ALL Remotion stdout (not just last 40) so we see
+        # gpu-info + per-progress timing samples.
         if _render_r.stdout:
-            for _line in _render_r.stdout.split("\n")[-40:]:
+            for _line in _render_r.stdout.split("\n"):
                 if _line.strip():
                     print(f"[remotion] {_line}", flush=True)
+        # DIAGNOSTIC: also echo stderr (Remotion's verbose logging goes there)
+        if _render_r.stderr:
+            _stderr_lines = _render_r.stderr.split("\n")
+            # Print first 30 + last 30 stderr lines to capture both startup
+            # diagnostics and any tail-end errors without flooding logs.
+            _max_each = 30
+            if len(_stderr_lines) <= 2 * _max_each:
+                for _line in _stderr_lines:
+                    if _line.strip():
+                        print(f"[remotion-err] {_line}", flush=True)
+            else:
+                for _line in _stderr_lines[:_max_each]:
+                    if _line.strip():
+                        print(f"[remotion-err] {_line}", flush=True)
+                print(f"[remotion-err] ... ({len(_stderr_lines) - 2 * _max_each} lines elided) ...", flush=True)
+                for _line in _stderr_lines[-_max_each:]:
+                    if _line.strip():
+                        print(f"[remotion-err] {_line}", flush=True)
         if not os.path.exists(silent_video_path) or os.path.getsize(silent_video_path) < 10000:
             raise RuntimeError(f"Remotion produced invalid output: {silent_video_path}")
         print(f"[render] Remotion video done in {_render_elapsed:.1f}s ({os.path.getsize(silent_video_path)/1024/1024:.1f}MB silent mp4)", flush=True)
     finally:
+        _metrics_stop.set()
+        _metrics_thread.join(timeout=2)
+        # DIAGNOSTIC: summarize the metrics samples.
+        if _metrics_samples:
+            _gpu_utils = [s.get("gpu_util_pct") for s in _metrics_samples if "gpu_util_pct" in s]
+            _gpu_mems = [s.get("gpu_mem_used_mb") for s in _metrics_samples if "gpu_mem_used_mb" in s]
+            _mem_useds = [s.get("mem_used_mb") for s in _metrics_samples if "mem_used_mb" in s]
+            _loads = [float(s.get("loadavg", 0)) for s in _metrics_samples if "loadavg" in s]
+            _summarize = lambda lst: (
+                f"avg={sum(lst)/len(lst):.0f} min={min(lst)} max={max(lst)} n={len(lst)}"
+                if lst else "(no samples)"
+            )
+            if _gpu_utils:
+                print(f"[metrics] GPU util %:   {_summarize(_gpu_utils)}", flush=True)
+                if max(_gpu_utils) < 5:
+                    print(
+                        f"[metrics] *** GPU UTIL ~0% — Chromium is NOT using the H100 for rendering. "
+                        f"Render is software-bound on CPU. This is the bottleneck. ***",
+                        flush=True,
+                    )
+            if _gpu_mems:
+                print(f"[metrics] GPU mem MB:   {_summarize(_gpu_mems)}", flush=True)
+            if _mem_useds:
+                print(f"[metrics] System RAM MB used: {_summarize(_mem_useds)}", flush=True)
+            if _loads:
+                print(f"[metrics] CPU loadavg(1m):    avg={sum(_loads)/len(_loads):.1f} min={min(_loads):.1f} max={max(_loads):.1f}", flush=True)
+            print(f"[metrics] Sampled {len(_metrics_samples)} times over {_render_elapsed:.1f}s render", flush=True)
         # Clean up staged symlinks (per-job dir under bundle/public/) so the
         # bundle filesystem doesn't accumulate dead links across warm-container
         # invocations. shutil.rmtree on a dir of symlinks removes only the
