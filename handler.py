@@ -815,6 +815,70 @@ except Exception as _e:
     print(f"[startup] GPU check failed: {_e} — using CPU", flush=True)
 
 
+# ── Vulkan diagnostic probe ──────────────────────────────────────────────
+# Confirms whether Chromium's gl='vulkan' path can possibly engage the H100.
+# Three-step check: (1) is the GPU visible to the container at all,
+# (2) is a Vulkan ICD registered, (3) does Vulkan see the GPU when probed
+# directly. Together with render-full.mjs's WebGL renderer probe, these
+# pinpoint exactly where (if anywhere) Vulkan breaks: OS layer, ICD
+# registration, or Chromium's binding to it.
+try:
+    import glob as _glob_mod
+    _icd_paths = []
+    for _icd_dir in ("/etc/vulkan/icd.d", "/usr/share/vulkan/icd.d",
+                     "/usr/local/share/vulkan/icd.d", "/etc/glvnd/egl_vendor.d",
+                     "/usr/share/glvnd/egl_vendor.d"):
+        if os.path.isdir(_icd_dir):
+            for _f in os.listdir(_icd_dir):
+                _icd_paths.append(os.path.join(_icd_dir, _f))
+    if _icd_paths:
+        print(f"[startup] Vulkan ICDs found: {_icd_paths}", flush=True)
+    else:
+        print(
+            "[startup] Vulkan ICDs: NONE registered — Chromium gl='vulkan' "
+            "will fall back to SwiftShader. Need NVIDIA ICD JSON in "
+            "/etc/vulkan/icd.d/ or /usr/share/vulkan/icd.d/.",
+            flush=True,
+        )
+
+    _vk_libs = _glob_mod.glob("/usr/local/nvidia/lib/libGLX_nvidia*") + \
+               _glob_mod.glob("/usr/local/nvidia/lib64/libGLX_nvidia*") + \
+               _glob_mod.glob("/usr/local/nvidia/lib*/libnvidia-egl*") + \
+               _glob_mod.glob("/usr/local/nvidia/lib*/libnvidia-vulkan*")
+    print(f"[startup] NVIDIA GL/Vulkan libs visible: {len(_vk_libs)} files", flush=True)
+    if _vk_libs:
+        # Just show one example to confirm the mount worked.
+        print(f"[startup]   sample: {_vk_libs[0]}", flush=True)
+
+    _vkinfo = subprocess.run(
+        ["vulkaninfo", "--summary"],
+        capture_output=True, text=True, timeout=5,
+    )
+    if _vkinfo.returncode == 0:
+        # vulkaninfo --summary lists physical devices. Filter for the
+        # interesting lines so we don't dump 200 lines of API extensions.
+        _summary_lines = []
+        for _line in (_vkinfo.stdout or "").splitlines():
+            _stripped = _line.strip()
+            if any(_kw in _stripped for _kw in (
+                "deviceName", "driverName", "driverInfo", "apiVersion",
+                "Devices:", "GPU id", "vendorID", "deviceID")):
+                _summary_lines.append(_stripped)
+        if _summary_lines:
+            print(f"[startup] vulkaninfo --summary:", flush=True)
+            for _ln in _summary_lines[:25]:
+                print(f"[startup]   {_ln}", flush=True)
+        else:
+            print(f"[startup] vulkaninfo --summary returned 0 devices", flush=True)
+    else:
+        _err = (_vkinfo.stderr or _vkinfo.stdout or "").strip()[:300]
+        print(f"[startup] vulkaninfo failed (rc={_vkinfo.returncode}): {_err}", flush=True)
+except FileNotFoundError:
+    print("[startup] vulkaninfo not in PATH — vulkan-tools may not be installed", flush=True)
+except Exception as _e:
+    print(f"[startup] Vulkan probe failed: {_e}", flush=True)
+
+
 def get_encode_args(quality="high", threads=0):
     """Return encoder args for FFmpeg. Uses NVENC when GPU is available.
 
