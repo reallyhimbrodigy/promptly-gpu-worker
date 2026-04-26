@@ -253,9 +253,19 @@ await renderMedia({
   //   PromptlyBase     → h264 yuv420p (no alpha, fast encode, small file)
   //   PromptlyOverlay  → ProRes 4444 yuva444p10le (alpha, fast encode, larger
   //                      but acceptable since file is short-lived intermediate)
+  // imageFormat="png" is REQUIRED for alpha output. Remotion validates that
+  // alpha-bearing pixel formats (yuva*) only work with PNG intermediates
+  // (JPEG can't carry alpha). Throws "Pixel format was set to 'yuva444p10le'
+  // but the image format is not PNG" otherwise. PNG is slower per frame in
+  // theory, but the overlay canvas is mostly transparent so PNG compression
+  // is near-instant — net cost is negligible.
   codec: isOverlay ? "prores" : "h264",
   ...(isOverlay
-    ? { proResProfile: "4444", pixelFormat: "yuva444p10le" }
+    ? {
+        proResProfile: "4444",
+        pixelFormat: "yuva444p10le",
+        imageFormat: "png",
+      }
     : { x264Preset: "ultrafast", crf: 18, pixelFormat: "yuv420p" }),
   outputLocation: outputPath,
   inputProps,
