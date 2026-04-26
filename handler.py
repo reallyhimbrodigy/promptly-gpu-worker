@@ -4166,12 +4166,10 @@ REMOVE_WORDS GUIDANCE:
             flush=True,
         )
 
-    # color_effect was removed from the pipeline. The two-renderer split
-    # (PromptlyBase + PromptlyOverlay) renders source video in one Remotion
-    # composition and overlays in another, with FFmpeg compositing — there's
-    # no place a global color grade fits without re-introducing the
-    # full-canvas mixBlendMode paint cost that drove the 140s renders. Keep
-    # the field forced-null so any stale callers don't break.
+    # color_effect was removed from the pipeline. There's no place a global
+    # color grade fits without reintroducing the full-canvas mixBlendMode paint
+    # cost that drove the 140s renders. Keep the field forced-null so any stale
+    # callers don't break.
     edit_plan["color_effect"] = None
 
     # motion_graphics — array. Each entry validated strictly.
@@ -8065,64 +8063,77 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 flush=True,
             )
 
-    # ── 8. Assemble Remotion input + write JSON ─────────────────────────────
-    # Face trajectory no longer piped into Remotion — the motion-graphics pack
-    # components position themselves via resolveMGPosition against the canvas,
-    # and no other composition layer consumes face data at render time.
+    # ── 8. Build Remotion inputs + stage source for the bundle server ──────
+    # Visually-identical fast-path architecture (replaces v61 chunked render):
+    #   • PromptlyOverlay        — captions + MG + text overlays on transparent
+    #                              canvas. Rendered once, ProRes 4444 alpha.
+    #   • PromptlyMicroSegments  — every transition (11 types) + composite-
+    #                              effect zoom clips (FocusWindow / LetterboxPush
+    #                              / DepthPull). Rendered once if any segment
+    #                              needs it; segments are concatenated end-to-
+    #                              end so a single Remotion process amortizes
+    #                              the ~10s startup tax across all of them.
+    #   • Base video             — clip cuts, simple zoom (SmoothPush /
+    #                              SnapReframe / StepZoom / StageZoom) ported
+    #                              to per-frame `crop` expressions, B-roll
+    #                              cutaways, outro fade. Built directly by
+    #                              FFmpeg in the final composite pass.
+    # Net: Remotion only paints the visual layers it has to (overlay +
+    # complex-segment windows). FFmpeg handles every video-paint frame at
+    # native speed (libx264 ultrafast + lanczos resample on 64 cores).
     _outro = edit_plan.get("outro") or "none"
 
-    # ── File staging for Remotion's bundle server ───────────────────────────
-    # Chunked-render staging: files go into the shared render_volume (mounted
-    # at /remotion/bundle/public/jobs on every container — orchestrator AND
-    # workers). Mount point matches Remotion's static-served root, so files
-    # are directly servable as /public/jobs/<job_id>/<filename> via
-    # staticFile() with no hardlink/copy gymnastics inside workers.
-    #
-    # Per-job dir: /remotion/bundle/public/jobs/<job_id>/ — orchestrator
-    # writes source + broll + remotion_input.json + chunks (output by
-    # workers); orchestrator reads chunks back after workers commit;
-    # render_staging_janitor cleans entries older than 24h.
+    from ffmpeg_base import (
+        build_micro_segments_input, build_final_filtergraph, categorize_clip,
+        slice_timeline_for_chunk, split_timeline_into_chunks,
+    )
+
+    # Stage source video directly into Remotion's bundle public root with a
+    # job-prefixed basename. Subdirectory layouts have caused 404s in past
+    # bundle configs (staticFile + offthreadVideo proxy can drop directory
+    # components in some Remotion versions), so we keep a flat layout here
+    # and rely on the job_id-prefixed filename for uniqueness across
+    # concurrent renders. Cleaned up at end-of-render.
     _bundle_public_root = "/remotion/bundle/public"
     _stage_key = os.path.basename(work_dir.rstrip("/")) or f"job-{int(time.time()*1000)}"
-    _stage_dir = os.path.join(_bundle_public_root, "jobs", _stage_key)
-    # path Remotion sees in the JSON: "jobs/<job_id>/<filename>" (resolveSrc
-    # in PromptlyRender.tsx wraps this with staticFile() → /public/jobs/...)
-    _stage_url_prefix = f"jobs/{_stage_key}"
-    os.makedirs(_stage_dir, exist_ok=True)
+    # Side-channel directory for files we *don't* want Remotion to serve
+    # (input JSONs etc.) — kept under work_dir so Remotion never sees them.
+    _stage_dir = work_dir
+    _staged_for_cleanup: list = []
 
     def _stage_file(src_abs_path):
-        """Materialize `src_abs_path` into the stage dir (hardlink if same FS,
-        otherwise copy). Return the path Remotion sees (relative to
-        bundle/public/, used by staticFile)."""
+        """Materialize `src_abs_path` into the bundle public root with a
+        stage-key-prefixed basename. Returns the URL Remotion sees relative to
+        publicDir (just the prefixed basename — staticFile resolves it to
+        /<basename> served from /remotion/bundle/public/<basename>)."""
         if not os.path.exists(src_abs_path):
             raise RuntimeError(
                 f"Cannot stage local file for Remotion: {src_abs_path} does not exist."
             )
-        _name = os.path.basename(src_abs_path)
-        _dst = os.path.join(_stage_dir, _name)
-        # Replace any existing entry left by a previous failed run.
+        _orig = os.path.basename(src_abs_path)
+        _name = f"{_stage_key}__{_orig}"
+        _dst = os.path.join(_bundle_public_root, _name)
         if os.path.lexists(_dst):
             try:
                 os.unlink(_dst)
             except OSError:
                 pass
         try:
-            os.link(src_abs_path, _dst)  # hardlink — zero-copy when same FS
-        except OSError as _e:
-            # Cross-device (always true for Modal volumes vs /tmp) → real copy.
+            os.link(src_abs_path, _dst)
+        except OSError:
             shutil.copy2(src_abs_path, _dst)
-        return f"{_stage_url_prefix}/{_name}"
+        _staged_for_cleanup.append(_dst)
+        return _name
 
-    _source_src = _stage_file(source_path)
-    for _br in broll_out:
-        _br["src"] = _stage_file(_br["src"])
-    print(
-        f"[render] Staged {1 + len(broll_out)} file(s) into {_stage_dir}",
-        flush=True,
-    )
+    _source_url = _stage_file(source_path)
+    print(f"[render] Staged source as {_source_url} (under {_bundle_public_root})", flush=True)
 
-    remotion_input = {
-        "sourceUrl": _source_src,
+    # PromptlyOverlay input — full edit_plan, but the composition only renders
+    # captions/MG/text on transparent canvas (it ignores clips/transitions/
+    # broll). sourceUrl is included for completeness; OverlayLayer never reads
+    # video.
+    overlay_input = {
+        "sourceUrl": _source_url,
         "fps": source_fps,
         "width": 1080,
         "height": 1920,
@@ -8141,19 +8152,41 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         "motionGraphics": motion_graphics_out,
         "outro": _outro,
     }
+    overlay_input_path = os.path.join(_stage_dir, "overlay_input.json")
+    with open(overlay_input_path, "w") as _f:
+        json.dump(overlay_input, _f)
 
-    # Write remotion_input.json INTO the staging dir on the shared volume —
-    # workers read it from there. (Was previously written to work_dir, but
-    # workers can't see work_dir.)
-    remotion_input_json = os.path.join(_stage_dir, "remotion_input.json")
-    with open(remotion_input_json, "w") as _f:
-        json.dump(remotion_input, _f)
+    # PromptlyMicroSegments input — only the windows Remotion must render.
+    # Each segment carries its own clip/transition spec; Python tracks a
+    # parallel list of metadata (with _clipIndex / _afterClipIndex tags) so
+    # the FFmpeg final-mux filtergraph can find each segment by source.
+    micro_input, micro_segments_meta = build_micro_segments_input(
+        clips_out, transitions_out, _source_url, source_fps,
+    )
+    micro_input_path = None
+    if micro_input is not None:
+        micro_input_path = os.path.join(_stage_dir, "micro_input.json")
+        with open(micro_input_path, "w") as _f:
+            json.dump(micro_input, _f)
+
+    _ffmpeg_clip_count = sum(1 for c in clips_out if categorize_clip(c) == "ffmpeg")
+    _remotion_clip_count = len(clips_out) - _ffmpeg_clip_count
     print(
-        f"[render] Remotion input: {len(clips_out)} clips, {len(transitions_out)} transitions, "
-        f"{len(broll_out)} broll, {len(caption_pages)} pages, {len(text_overlays_out)} text_overlays, "
-        f"{len(motion_graphics_out)} MG, {total_output_frames} frames @ {source_fps:.2f}fps",
+        f"[render] {len(clips_out)} clips ({_ffmpeg_clip_count} ffmpeg, "
+        f"{_remotion_clip_count} remotion), {len(transitions_out)} transitions, "
+        f"{len(broll_out)} broll, {len(caption_pages)} pages, "
+        f"{len(text_overlays_out)} text overlays, {len(motion_graphics_out)} MG, "
+        f"{total_output_frames} frames @ {source_fps:.2f}fps",
         flush=True,
     )
+    if micro_input is not None:
+        print(
+            f"[render] PromptlyMicroSegments: {len(micro_input['segments'])} segments, "
+            f"{micro_input['totalDurationInFrames']} frames",
+            flush=True,
+        )
+    else:
+        print("[render] PromptlyMicroSegments: empty (no transitions, no complex zooms)", flush=True)
 
     # ── 9. Audio pipeline (parallel with Remotion render) ───────────────────
     # Build the same audio filter chain that previously ran post-segment.
@@ -8215,193 +8248,140 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             work_dir, sample_rate=sample_rate,
         )
 
-    # ── 10. Chunked render: spawn N parallel Modal containers, each rendering
-    #        a frame range of one composition, then ffmpeg-concat the chunks.
+    # ── 10. Spawn Remotion renders in parallel (overlay chunks + micro) ────
+    # The orchestrator (64 vCPU, 128 GB) runs N parallel Remotion overlay
+    # subprocesses + 1 micro-segments subprocess on the same container.
+    # Subprocess parallelism is OS-level (Python ThreadPoolExecutor →
+    # subprocess.Popen → kernel scheduler distributes across vCPUs); there's
+    # no Modal Function.map() involved, so the v61 inter-container scheduling
+    # bottleneck (only 4-of-12 chunks running simultaneously) doesn't apply.
     #
-    # Per Remotion issue #4664 + our v60 measurements, single-instance
-    # rendering hits a hard ceiling around 16-22 fps regardless of CPU count.
-    # The documented workaround is distributed rendering: split the timeline
-    # into N frame-range chunks, run each as an independent Remotion process,
-    # combine after. We implement that pattern via Modal's Function.map().
+    # Why chunked overlay specifically: a single Remotion process hits a
+    # documented ~16-22 fps ceiling regardless of CPU count (issue #4664) —
+    # main-thread + encoder serialization, not paint cost. 4 separate
+    # processes each get their own ceiling, so aggregate fps scales nearly
+    # linearly with chunk count up to ~6-8 chunks on this container.
     #
-    # Worker mix (8 base + 4 overlay = 12 total) chosen so wall time of base
-    # chunks (slower at ~9 fps with mixBlendMode-free PromptlyBase) matches
-    # wall time of overlay chunks (~17 fps). Both lanes finish in ~20s for
-    # a 47s output; combined wall time of all 12 workers in parallel is
-    # ~21s, vs. 137s for the previous monolithic render.
-
-    # Commit the staging dir so chunk workers can see source/broll/input
-    # after their .reload() at function entry.
-    try:
-        from modal_app import render_volume as _render_volume
-        _render_volume.commit()
-    except Exception as _e:
-        print(f"[render] WARNING: render_volume commit before spawn failed: {_e}", flush=True)
-
-    # Lazy import — avoids module-init circular reference; modal_app has
-    # already loaded by the time we get here (PromptlyWorker class started us).
-    from modal_app import render_chunk
-
-    _gl_mode = "vulkan" if _HAS_HWACCEL else "swiftshader"
-    _per_chunk_concurrency = 8
-
-    # Build chunk specs. Frames are [start, end] inclusive.
-    def _split_frames(total: int, n_chunks: int) -> list:
-        """Partition [0, total-1] into n_chunks contiguous inclusive ranges."""
-        if total <= 0 or n_chunks <= 0:
-            return []
-        per = total // n_chunks
-        remainder = total % n_chunks
-        ranges = []
-        cursor = 0
-        for i in range(n_chunks):
-            chunk_size = per + (1 if i < remainder else 0)
-            if chunk_size == 0:
-                continue
-            start = cursor
-            end = cursor + chunk_size - 1
-            ranges.append((start, end))
-            cursor = end + 1
-        return ranges
-
-    # 8 base chunks: PromptlyBase is ~9 fps (heavier composition).
-    # 4 overlay chunks: PromptlyOverlay is ~17 fps (lighter, transparent).
-    # Asymmetric split → both lanes finish in ~matched wall time.
-    _base_ranges = _split_frames(int(total_output_frames), 8)
-    _overlay_ranges = _split_frames(int(total_output_frames), 4)
-
-    chunk_specs = []
-    for _i, (_s, _e) in enumerate(_base_ranges):
-        chunk_specs.append({
-            "job_id": _stage_key,
-            "composition_id": "PromptlyBase",
-            "frame_range_start": _s,
-            "frame_range_end": _e,
-            "output_filename": f"base_chunk_{_i:02d}.mp4",
-            "gl_mode": _gl_mode,
-            "concurrency": _per_chunk_concurrency,
-        })
-    for _i, (_s, _e) in enumerate(_overlay_ranges):
-        chunk_specs.append({
-            "job_id": _stage_key,
-            "composition_id": "PromptlyOverlay",
-            "frame_range_start": _s,
-            "frame_range_end": _e,
-            "output_filename": f"overlay_chunk_{_i:02d}.mov",
-            "gl_mode": _gl_mode,
-            "concurrency": _per_chunk_concurrency,
-        })
-
-    _render_t0 = time.time()
-    print(
-        f"[render] Spawning {len(chunk_specs)} parallel chunk workers "
-        f"({len(_base_ranges)} PromptlyBase + {len(_overlay_ranges)} PromptlyOverlay, "
-        f"each at concurrency={_per_chunk_concurrency}, gl={_gl_mode}, stage={_stage_key})",
-        flush=True,
-    )
-
-    # Fan out: Modal spawns one container per spec. .map() returns an iterator
-    # in input order; we list() to block until all complete (or one raises).
-    try:
-        chunk_results = list(render_chunk.map(chunk_specs))
-    except Exception as _spawn_err:
-        raise RuntimeError(f"Chunk render fan-out failed: {_spawn_err}")
-
-    _render_elapsed = time.time() - _render_t0
-
-    # Reload to see the chunks workers committed.
-    try:
-        _render_volume.reload()
-    except Exception as _e:
-        print(f"[render] WARNING: render_volume reload after chunks failed: {_e}", flush=True)
-
-    # Echo per-chunk timing from worker stdout for visibility.
-    for _result in chunk_results:
-        _comp = _result.get("composition_id", "?")
-        _fr = f"{_result.get('frame_range_start','?')}-{_result.get('frame_range_end','?')}"
-        _rt = _result.get("render_time_seconds", 0)
-        _sz = _result.get("size_mb", 0)
-        print(f"[chunk-result] {_comp} frames {_fr}: {_rt:.1f}s, {_sz:.1f}MB", flush=True)
-
-    # Verify every expected chunk landed on the volume.
-    for _spec in chunk_specs:
-        _path = os.path.join(_stage_dir, _spec["output_filename"])
-        if not os.path.exists(_path) or os.path.getsize(_path) < 1000:
-            raise RuntimeError(
-                f"Chunk output missing/invalid after fan-out: {_path} "
-                f"(spec={_spec['composition_id']} {_spec['frame_range_start']}-{_spec['frame_range_end']})"
-            )
-
-    # Concatenate chunks → base_video.mp4 + overlay.mov in work_dir. Both
-    # codecs (h264, ProRes 4444) are frame-based / no inter-chunk dependencies,
-    # so `ffmpeg -f concat -c copy` is lossless and fast.
-    base_video_path = os.path.join(work_dir, "base_video.mp4")
+    # Chunk sizing: 4 chunks at concurrency=8 each → ~16 vCPUs per process,
+    # fits cleanly in 64 vCPUs. Skip chunking for very short overlays
+    # (<300 frames) where the per-process startup tax doesn't amortize.
     overlay_video_path = os.path.join(work_dir, "overlay.mov")
+    micro_video_path = os.path.join(work_dir, "micro_segments.mp4")
+    _gl_mode = "vulkan" if _HAS_HWACCEL else "swiftshader"
 
-    def _ffmpeg_concat(chunk_paths: list, output_path: str, label: str):
-        """Concatenate a list of same-codec chunk files via ffmpeg concat
-        demuxer. Stream-copy (no re-encode), so output is bit-identical to
-        the chunk inputs."""
-        if not chunk_paths:
-            raise RuntimeError(f"[concat:{label}] no chunks to combine")
-        _list_path = os.path.join(work_dir, f"_concat_{label}.txt")
-        with open(_list_path, "w") as _lf:
-            for _p in chunk_paths:
-                # ffmpeg concat demuxer needs `file '<path>'` with absolute paths
-                _lf.write(f"file '{_p}'\n")
+    def _run_remotion(label, cmd):
         _t0 = time.time()
-        _r = subprocess.run(
-            ["ffmpeg", "-y", "-v", "error",
-             "-f", "concat", "-safe", "0",
-             "-i", _list_path,
-             "-c", "copy",
-             output_path],
-            capture_output=True, text=True, timeout=120,
-        )
+        _r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        _elapsed = time.time() - _t0
         if _r.returncode != 0:
             raise RuntimeError(
-                f"[concat:{label}] ffmpeg failed (rc={_r.returncode}): "
-                f"{(_r.stderr or '')[-1000:]}"
+                f"[{label}] Remotion render failed (rc={_r.returncode}) in "
+                f"{_elapsed:.1f}s: {(_r.stderr or '')[-1500:]}"
             )
-        if not os.path.exists(output_path) or os.path.getsize(output_path) < 10000:
-            raise RuntimeError(f"[concat:{label}] output invalid: {output_path}")
+        # Surface render-fps lines for diagnostics.
+        if _r.stdout:
+            for _line in _r.stdout.split("\n"):
+                _ls = _line.strip()
+                if _ls.startswith("[render-full]") or _ls.startswith("[gpu-info]"):
+                    print(f"[{label}] {_ls}", flush=True)
+        return _elapsed
+
+    def _split_frames(total_frames: int, n_chunks: int) -> list:
+        """Partition [0, total_frames) into n_chunks contiguous inclusive
+        ranges (start, end). Used to slice the overlay timeline across
+        parallel Remotion processes."""
+        if total_frames <= 0 or n_chunks <= 0:
+            return []
+        per = total_frames // n_chunks
+        remainder = total_frames % n_chunks
+        ranges = []
+        cursor = 0
+        for _i in range(n_chunks):
+            chunk_size = per + (1 if _i < remainder else 0)
+            if chunk_size == 0:
+                continue
+            ranges.append((cursor, cursor + chunk_size - 1))
+            cursor += chunk_size
+        return ranges
+
+    # Decide chunk count based on total frames. Below 300 frames the
+    # per-process startup tax (~3.5s) dominates — single process is faster.
+    _OVERLAY_CHUNK_COUNT = 4 if total_output_frames >= 300 else 1
+    _PER_CHUNK_CONCURRENCY = 8  # 4 chunks × 8 tabs = 32 tabs across 64 vCPUs
+    _overlay_ranges = _split_frames(int(total_output_frames), _OVERLAY_CHUNK_COUNT)
+    _overlay_chunked = len(_overlay_ranges) > 1
+    _overlay_chunk_paths: list = []
+    overlay_cmds: list = []
+    if _overlay_chunked:
+        for _i, (_fs, _fe) in enumerate(_overlay_ranges):
+            _chunk_path = os.path.join(work_dir, f"overlay_chunk_{_i:02d}.mov")
+            _overlay_chunk_paths.append(_chunk_path)
+            overlay_cmds.append((
+                f"overlay-{_i:02d}",
+                [
+                    "node", "/remotion/render-full.mjs",
+                    "--input", overlay_input_path,
+                    "--output", _chunk_path,
+                    "--public-dir", _bundle_public_root,
+                    "--composition", "PromptlyOverlay",
+                    "--gl", _gl_mode,
+                    "--frame-range", f"{_fs},{_fe}",
+                    "--composition-start", str(_fs),
+                    "--concurrency", str(_PER_CHUNK_CONCURRENCY),
+                ],
+            ))
+    else:
+        overlay_cmds.append((
+            "overlay",
+            [
+                "node", "/remotion/render-full.mjs",
+                "--input", overlay_input_path,
+                "--output", overlay_video_path,
+                "--public-dir", _bundle_public_root,
+                "--composition", "PromptlyOverlay",
+                "--gl", _gl_mode,
+            ],
+        ))
+
+    micro_cmd = None
+    if micro_input is not None:
+        micro_cmd = [
+            "node", "/remotion/render-full.mjs",
+            "--input", micro_input_path,
+            "--output", micro_video_path,
+            "--public-dir", _bundle_public_root,
+            "--composition", "PromptlyMicroSegments",
+            "--gl", _gl_mode,
+        ]
+
+    _render_t0 = time.time()
+    if _overlay_chunked:
         print(
-            f"[concat:{label}] {len(chunk_paths)} chunks → "
-            f"{os.path.getsize(output_path)/1024/1024:.1f}MB in {time.time()-_t0:.1f}s",
+            f"[render] Spawning {len(overlay_cmds)} overlay chunk subprocesses "
+            f"({total_output_frames} frames split {len(_overlay_ranges)}-ways, "
+            f"concurrency={_PER_CHUNK_CONCURRENCY} each)"
+            f"{' + 1 micro subprocess' if micro_cmd else ''} (gl={_gl_mode})",
             flush=True,
         )
-
-    _concat_t0 = time.time()
-    _base_chunk_paths = [
-        os.path.join(_stage_dir, f"base_chunk_{_i:02d}.mp4")
-        for _i in range(len(_base_ranges))
-    ]
-    _overlay_chunk_paths = [
-        os.path.join(_stage_dir, f"overlay_chunk_{_i:02d}.mov")
-        for _i in range(len(_overlay_ranges))
-    ]
-    _ffmpeg_concat(_base_chunk_paths, base_video_path, "base")
-    _ffmpeg_concat(_overlay_chunk_paths, overlay_video_path, "overlay")
-    _concat_elapsed = time.time() - _concat_t0
-
-    print(
-        f"[render] Chunk fan-out + concat done in {_render_elapsed:.1f}s + {_concat_elapsed:.1f}s "
-        f"(base={os.path.getsize(base_video_path)/1024/1024:.1f}MB, "
-        f"overlay={os.path.getsize(overlay_video_path)/1024/1024:.1f}MB)",
-        flush=True,
+    else:
+        print(
+            f"[render] Spawning Remotion renders: PromptlyOverlay (single, "
+            f"{total_output_frames}f)"
+            f"{' + PromptlyMicroSegments' if micro_cmd else ''} (gl={_gl_mode})",
+            flush=True,
+        )
+    _render_pool = concurrent.futures.ThreadPoolExecutor(
+        max_workers=len(overlay_cmds) + (1 if micro_cmd else 0),
     )
+    overlay_futures = [
+        _render_pool.submit(_run_remotion, _lbl, _cmd)
+        for _lbl, _cmd in overlay_cmds
+    ]
+    micro_future = _render_pool.submit(_run_remotion, "micro", micro_cmd) if micro_cmd else None
 
-    # Cleanup the per-job stage dir on the volume so it doesn't pile up
-    # before the daily janitor runs. Don't fail the render if cleanup fails;
-    # janitor catches strays anyway.
-    try:
-        shutil.rmtree(_stage_dir, ignore_errors=True)
-        _render_volume.commit()
-    except Exception as _rm_err:
-        print(f"[render] WARNING: stage cleanup failed: {_rm_err}", flush=True)
-
-    # Collect speed-curved audio (fails fast — no fallback to plain audio
-    # because speed ramps would desync).
+    # ── Audio pipeline (still running on a separate thread since line ~8211) —
+    # Collect its output now so the final-audio build can start while the
+    # Remotion renders are still in flight.
     if _speed_audio_future:
         _speed_audio_path = _speed_audio_future.result(timeout=60)
         if _audio_pool:
@@ -8469,36 +8449,319 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _audio_elapsed = time.time() - _audio_t0
     print(f"[render] Final audio built in {_audio_elapsed:.1f}s → {_final_audio_path}", flush=True)
 
-    # ── 12. Final composite — overlay alpha onto base + add audio (one pass) ─
-    # FFmpeg's `overlay` filter alpha-blends overlay.mov (ProRes 4444) onto
-    # base_video.mp4 (h264). Single re-encode pass at libx264 ultrafast CRF 18
-    # — visually indistinguishable from the source-quality base, ~3-5s on
-    # 64 cores. Audio is stream-copied from the m4a we built in parallel.
+    # ── 12. Wait for Remotion renders, then single-pass final composite ────
+    # All the heavy work is in this one ffmpeg invocation:
+    #   1. Build each ffmpeg-renderable clip from source via trim+setpts+(zoom?)
+    #   2. Trim each Remotion-rendered clip/transition out of micro_segments.mp4
+    #      by frame range
+    #   3. Concat all timeline segments in order → [base]
+    #   4. Overlay each B-roll cutaway at its output-time window
+    #   5. Apply outro fade (if configured)
+    #   6. Alpha-composite the PromptlyOverlay layer
+    #   7. libx264 ultrafast crf 18 final encode + AAC audio mux
+    # Wait for all overlay chunk subprocesses (in input order — for chunked
+    # mode each chunk lands in its own .mov; we concat them in order below).
+    _overlay_chunk_elapsed = []
+    for _i, _f in enumerate(overlay_futures):
+        _e = _f.result(timeout=320)
+        _overlay_chunk_elapsed.append(_e)
+        _label = overlay_cmds[_i][0]
+        _path = _overlay_chunk_paths[_i] if _overlay_chunked else overlay_video_path
+        print(
+            f"[render] {_label} done in {_e:.1f}s → "
+            f"{os.path.getsize(_path)/1024/1024:.1f}MB",
+            flush=True,
+        )
+    if micro_future:
+        micro_elapsed = micro_future.result(timeout=320)
+        print(f"[render] PromptlyMicroSegments done in {micro_elapsed:.1f}s → "
+              f"{os.path.getsize(micro_video_path)/1024/1024:.1f}MB", flush=True)
+    _render_pool.shutdown(wait=False)
+    _render_elapsed = time.time() - _render_t0
+
+    # ── Concat overlay chunks (-c copy, lossless) ─────────────────────────
+    # ProRes 4444 chunks share identical codec parameters (resolution, fps,
+    # profile, pixel format, color space) since they all came from the same
+    # composition spec — concat demuxer can stream-copy them with zero
+    # quality loss in <1s.
+    if _overlay_chunked:
+        for _p in _overlay_chunk_paths:
+            if not os.path.exists(_p) or os.path.getsize(_p) < 1000:
+                raise RuntimeError(f"Overlay chunk missing/invalid: {_p}")
+        _concat_t0 = time.time()
+        _concat_list = os.path.join(work_dir, "_overlay_concat_list.txt")
+        with open(_concat_list, "w") as _lf:
+            for _p in _overlay_chunk_paths:
+                _lf.write(f"file '{_p}'\n")
+        _concat_r = subprocess.run(
+            ["ffmpeg", "-y", "-v", "error",
+             "-f", "concat", "-safe", "0",
+             "-i", _concat_list,
+             "-c", "copy",
+             overlay_video_path],
+            capture_output=True, text=True, timeout=120,
+        )
+        if _concat_r.returncode != 0:
+            raise RuntimeError(
+                f"Overlay chunk concat failed (rc={_concat_r.returncode}): "
+                f"{(_concat_r.stderr or '')[-1000:]}"
+            )
+        _concat_elapsed = time.time() - _concat_t0
+        _max_chunk = max(_overlay_chunk_elapsed)
+        print(
+            f"[render] Overlay chunks: max={_max_chunk:.1f}s, "
+            f"concat={_concat_elapsed:.1f}s → "
+            f"{os.path.getsize(overlay_video_path)/1024/1024:.1f}MB",
+            flush=True,
+        )
+
+    print(f"[render] All Remotion renders done in {_render_elapsed:.1f}s", flush=True)
+
+    # Validate Remotion outputs.
+    if not os.path.exists(overlay_video_path) or os.path.getsize(overlay_video_path) < 1000:
+        raise RuntimeError(f"PromptlyOverlay output missing/invalid: {overlay_video_path}")
+    if micro_input is not None and (
+        not os.path.exists(micro_video_path) or os.path.getsize(micro_video_path) < 1000
+    ):
+        raise RuntimeError(f"PromptlyMicroSegments output missing/invalid: {micro_video_path}")
+
+    # ── Chunked composite (4-way parallel ffmpeg) ─────────────────────────
+    # The single-pass final-mux step was a libx264-encode-bound bottleneck
+    # (22.9s for 1363 frames on 64 vCPUs). Splitting the work into 4 parallel
+    # ffmpeg invocations on the same container — each producing one mp4
+    # piece for 1/4 of the timeline — gives each piece its own encoder
+    # thread pool. Lossless concat (`-c copy`) stitches the pieces and a
+    # final stream-copy pass muxes the audio.
+    #
+    # Quality identical: same libx264 ultrafast crf 18 settings per piece;
+    # concat is bit-exact, audio mux is stream-copy. The slicer
+    # (slice_timeline_for_chunk) shifts zoom events with their full
+    # original duration preserved, so easing curves stay smooth across
+    # chunk boundaries (verified pixel-exact at boundary frames).
+    #
+    # For very short outputs (<400 frames) the per-process startup tax
+    # dominates — fall back to single-pass.
+    _N_COMPOSITE_CHUNKS = 4 if total_output_frames >= 400 else 1
+    _composite_ranges = split_timeline_into_chunks(int(total_output_frames), _N_COMPOSITE_CHUNKS)
+    _composite_chunked = len(_composite_ranges) > 1
+
+    def _build_composite_cmd(
+        chunk_idx: int,
+        chunk_start: int,
+        chunk_end: int,
+        output_path_for_chunk: str,
+        include_audio: bool,
+    ) -> list:
+        """Construct a single ffmpeg command for one composite chunk.
+        When include_audio=True, the audio track is muxed in the same pass
+        (used by the single-chunk fallback path)."""
+        if _composite_chunked:
+            _c_clips, _c_trans, _c_broll, _c_micro = slice_timeline_for_chunk(
+                chunk_start, chunk_end, clips_out, transitions_out,
+                broll_out, micro_segments_meta, source_fps,
+            )
+        else:
+            _c_clips = clips_out
+            _c_trans = transitions_out
+            _c_broll = broll_out
+            _c_micro = micro_segments_meta
+
+        # Build inputs for THIS chunk. Source + overlay are always present;
+        # micro is only present if any sliced segment is remotion-rendered
+        # OR there's a transition in this chunk (transitions always live in
+        # micro_segments). broll inputs only include the broll files
+        # visible in this chunk.
+        chunk_inputs = [source_path]
+        c_source_idx = 0
+        c_micro_idx = None
+        c_micro_needed = (
+            micro_input is not None and len(_c_micro) > 0
+        )
+        if c_micro_needed:
+            chunk_inputs.append(micro_video_path)
+            c_micro_idx = len(chunk_inputs) - 1
+        # Overlay is included for every chunk — captions span the full
+        # video and the filtergraph trims to this chunk's frame range.
+        chunk_inputs.append(overlay_video_path)
+        c_overlay_idx = len(chunk_inputs) - 1
+        c_broll_start_idx = None
+        if _c_broll:
+            c_broll_start_idx = len(chunk_inputs)
+            for _br in _c_broll:
+                chunk_inputs.append(_br["src"])
+        c_audio_idx = None
+        if include_audio:
+            c_audio_idx = len(chunk_inputs)
+            chunk_inputs.append(_final_audio_path)
+
+        chunk_size = chunk_end - chunk_start
+        _fg, _final_labels = build_final_filtergraph(
+            clips=_c_clips,
+            transitions=_c_trans,
+            broll=_c_broll,
+            micro_segments=_c_micro,
+            outro=_outro,
+            total_output_frames=chunk_size,
+            source_fps=source_fps,
+            source_input_idx=c_source_idx,
+            micro_input_idx=c_micro_idx,
+            overlay_input_idx=c_overlay_idx,
+            broll_input_start_idx=c_broll_start_idx,
+            chunk_global_start_frame=(chunk_start if _composite_chunked else None),
+            global_total_frames=int(total_output_frames),
+        )
+
+        cmd = ["ffmpeg", "-y", "-v", "warning", "-threads", "0"]
+        for _inp in chunk_inputs:
+            cmd += ["-i", _inp]
+        cmd += [
+            "-filter_complex", _fg,
+            "-map", f"[{_final_labels[0]}]",
+        ]
+        if include_audio and c_audio_idx is not None:
+            cmd += ["-map", f"{c_audio_idx}:a:0", "-c:a", "copy"]
+        cmd += [
+            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
+            "-pix_fmt", "yuv420p",
+            # Force dense keyframes on every chunk so concat -c copy joins
+            # cleanly without GOP-boundary glitches.
+            "-g", str(int(round(source_fps))),
+            "-keyint_min", str(int(round(source_fps))),
+            "-sc_threshold", "0",
+            "-shortest",
+            "-movflags", "+faststart",
+            output_path_for_chunk,
+        ]
+        return cmd
+
     _mux_t0 = time.time()
-    _mux_cmd = [
-        "ffmpeg", "-y", "-v", "warning", "-threads", "0",
-        "-i", base_video_path,
-        "-i", overlay_video_path,
-        "-i", _final_audio_path,
-        "-filter_complex", "[0:v][1:v]overlay=format=auto[v]",
-        "-map", "[v]",
-        "-map", "2:a:0", "-c:a", "copy",
-        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
-        "-pix_fmt", "yuv420p",
-        "-shortest",
-        "-movflags", "+faststart",
-        output_path,
-    ]
-    _mux_r = subprocess.run(_mux_cmd, capture_output=True, text=True, timeout=180)
-    if _mux_r.returncode != 0:
-        raise RuntimeError(f"Final composite failed: {(_mux_r.stderr or '')[-800:]}")
+
+    if _composite_chunked:
+        # ── Spawn N parallel ffmpeg processes for the silent video pieces ──
+        _composite_chunk_paths = [
+            os.path.join(work_dir, f"composite_chunk_{_i:02d}.mp4")
+            for _i in range(len(_composite_ranges))
+        ]
+        _composite_cmds = [
+            (
+                f"composite-{_i:02d}",
+                _build_composite_cmd(
+                    _i, _cs, _ce, _composite_chunk_paths[_i], include_audio=False,
+                ),
+            )
+            for _i, (_cs, _ce) in enumerate(_composite_ranges)
+        ]
+
+        def _run_ffmpeg_chunk(label, cmd):
+            _t0 = time.time()
+            _r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            _e = time.time() - _t0
+            if _r.returncode != 0:
+                raise RuntimeError(
+                    f"[{label}] composite ffmpeg failed (rc={_r.returncode}) in "
+                    f"{_e:.1f}s: {(_r.stderr or '')[-1500:]}"
+                )
+            return _e
+
+        print(
+            f"[render] Spawning {len(_composite_cmds)} parallel composite ffmpegs "
+            f"({total_output_frames} frames split {len(_composite_ranges)}-ways)",
+            flush=True,
+        )
+        _composite_pool = concurrent.futures.ThreadPoolExecutor(max_workers=len(_composite_cmds))
+        _composite_futures = [
+            _composite_pool.submit(_run_ffmpeg_chunk, _lbl, _cmd)
+            for _lbl, _cmd in _composite_cmds
+        ]
+        _composite_chunk_elapsed = []
+        for _ci, _f in enumerate(_composite_futures):
+            _e = _f.result(timeout=320)
+            _composite_chunk_elapsed.append(_e)
+            _path = _composite_chunk_paths[_ci]
+            print(
+                f"[render] composite-{_ci:02d} done in {_e:.1f}s → "
+                f"{os.path.getsize(_path)/1024/1024:.1f}MB",
+                flush=True,
+            )
+        _composite_pool.shutdown(wait=False)
+
+        # Concat the silent pieces (lossless `-c copy`).
+        _silent_full = os.path.join(work_dir, "silent_full.mp4")
+        _cc_list = os.path.join(work_dir, "_composite_concat_list.txt")
+        with open(_cc_list, "w") as _lf:
+            for _p in _composite_chunk_paths:
+                _lf.write(f"file '{_p}'\n")
+        _cc_t0 = time.time()
+        _cc_r = subprocess.run(
+            ["ffmpeg", "-y", "-v", "error",
+             "-f", "concat", "-safe", "0",
+             "-i", _cc_list,
+             "-c", "copy",
+             _silent_full],
+            capture_output=True, text=True, timeout=120,
+        )
+        if _cc_r.returncode != 0:
+            raise RuntimeError(
+                f"Composite chunk concat failed (rc={_cc_r.returncode}): "
+                f"{(_cc_r.stderr or '')[-1500:]}"
+            )
+        _cc_elapsed = time.time() - _cc_t0
+
+        # Final stream-copy mux: silent video + processed audio → output.
+        _am_t0 = time.time()
+        _am_r = subprocess.run(
+            ["ffmpeg", "-y", "-v", "warning",
+             "-i", _silent_full,
+             "-i", _final_audio_path,
+             "-c:v", "copy",
+             "-c:a", "copy",
+             "-shortest",
+             "-movflags", "+faststart",
+             output_path],
+            capture_output=True, text=True, timeout=120,
+        )
+        if _am_r.returncode != 0:
+            raise RuntimeError(
+                f"Audio mux failed (rc={_am_r.returncode}): "
+                f"{(_am_r.stderr or '')[-1500:]}"
+            )
+        _am_elapsed = time.time() - _am_t0
+
+        _max_chunk = max(_composite_chunk_elapsed)
+        print(
+            f"[render] Composite: max chunk={_max_chunk:.1f}s, "
+            f"concat={_cc_elapsed:.1f}s, audio mux={_am_elapsed:.1f}s",
+            flush=True,
+        )
+    else:
+        # Single-pass fallback for short outputs — same shape as v62.
+        _single_cmd = _build_composite_cmd(
+            0, 0, int(total_output_frames), output_path, include_audio=True,
+        )
+        _r = subprocess.run(_single_cmd, capture_output=True, text=True, timeout=300)
+        if _r.returncode != 0:
+            raise RuntimeError(f"Final composite failed: {(_r.stderr or '')[-1500:]}")
+
     _mux_elapsed = time.time() - _mux_t0
-    print(f"[render] Final composite (overlay+audio mux) done in {_mux_elapsed:.1f}s", flush=True)
+    print(
+        f"[render] Final composite (clips+broll+overlay+encode+audio) done in {_mux_elapsed:.1f}s",
+        flush=True,
+    )
     print(
         f"[render] Total render: remotion={_render_elapsed:.1f}s audio={_audio_elapsed:.1f}s "
         f"composite={_mux_elapsed:.1f}s → {os.path.getsize(output_path)/1024/1024:.1f}MB",
         flush=True,
     )
+
+    # Cleanup staged files in the bundle public root so it doesn't pile up.
+    # work_dir itself is cleaned up by the caller (handler() in the finally
+    # block), so input JSONs there get freed automatically.
+    for _staged_path in _staged_for_cleanup:
+        try:
+            if os.path.lexists(_staged_path):
+                os.unlink(_staged_path)
+        except Exception as _rm_err:
+            print(f"[render] WARNING: stage cleanup failed for {_staged_path}: {_rm_err}", flush=True)
 
 
 # ─── CAPTION / COMPONENT VOCABULARIES (enforced at validation + render time) ───
@@ -9742,52 +10005,28 @@ def handler(job):
             # CloudFront serves the content via CDN.
             _s3_bucket = os.environ.get("S3_BUCKET_NAME", "")
             _cf_domain = os.environ.get("CLOUDFRONT_DOMAIN", "")
-            # The Node.js dispatcher pre-generated a presigned PUT URL that
-            # targets the bucket's `renders/{jobId}/{ts}-edited.mp4` key.
-            # Use it. This is the same upload path source uploads use, and
-            # the bucket policy is configured to let CloudFront serve
-            # objects there. Earlier code did a direct boto3 upload to
-            # `rendered/{job_id}/output.mp4` (note the spelling mismatch:
-            # `rendered/` vs `renders/`), which CloudFront 403'd because
-            # that prefix isn't covered by the bucket's CloudFront origin
-            # access policy. Result: rendered videos showed AVPlayer's
-            # "unplayable" icon while thumbnails (which fall back to
-            # Supabase) loaded fine.
-            if upload_url:
-                with open(output_path, "rb") as f:
-                    resp = requests.put(
-                        upload_url,
-                        data=f,
-                        headers={"Content-Type": "video/mp4"},
-                        timeout=600,
-                    )
-                    resp.raise_for_status()
-                if input_data.get("public_url"):
-                    _video_url = input_data["public_url"]
-                else:
-                    _video_url = upload_url.split("?")[0]
-                print(f"[pipeline] upload complete (presigned-put → {_video_url})", flush=True)
-                edit_plan["_rendered_video_url"] = _video_url
-            elif _aws_s3_client and _s3_bucket:
-                # Last-resort fallback: direct SDK upload to the prefix the
-                # bucket policy allows. Should never hit this path in
-                # practice — Node always provides upload_url.
-                _ul_key = f"renders/{job_id}/output.mp4"
-                _aws_s3_client.upload_file(
-                    output_path, _s3_bucket, _ul_key,
-                    ExtraArgs={
-                        "ContentType": "video/mp4",
-                        "ACL": "bucket-owner-full-control",
-                    },
+            # Single deterministic upload path. The Node.js dispatcher
+            # always pre-generates a presigned PUT URL targeting the
+            # bucket's `renders/{jobId}/{ts}-edited.mp4` key. If it
+            # didn't, fail loudly — no direct-SDK fallback to a
+            # different prefix that may not be covered by CloudFront
+            # origin access.
+            if not upload_url:
+                raise RuntimeError("No upload_url provided — Node dispatcher must pre-generate the presigned PUT URL")
+            with open(output_path, "rb") as f:
+                resp = requests.put(
+                    upload_url,
+                    data=f,
+                    headers={"Content-Type": "video/mp4"},
+                    timeout=600,
                 )
-                if _cf_domain:
-                    _video_url = f"https://{_cf_domain.rstrip('/')}/{_ul_key}"
-                else:
-                    _video_url = f"https://{_s3_bucket}.s3.{os.environ.get('AWS_REGION', 'us-west-1')}.amazonaws.com/{_ul_key}"
-                print(f"[pipeline] upload complete (s3-direct → {_video_url})", flush=True)
-                edit_plan["_rendered_video_url"] = _video_url
+                resp.raise_for_status()
+            if input_data.get("public_url"):
+                _video_url = input_data["public_url"]
             else:
-                raise RuntimeError("No upload_url provided and no S3 client configured — cannot upload render")
+                _video_url = upload_url.split("?")[0]
+            print(f"[pipeline] upload complete (presigned-put → {_video_url})", flush=True)
+            edit_plan["_rendered_video_url"] = _video_url
 
         def _extract_and_upload_cover():
             # Pick the visually best frame from the FINAL RENDERED OUTPUT around
