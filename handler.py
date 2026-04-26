@@ -8072,23 +8072,22 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _outro = edit_plan.get("outro") or "none"
 
     # ── File staging for Remotion's bundle server ───────────────────────────
-    # Remotion's bundle server only serves files that physically exist under
-    # the bundle directory and won't follow symlinks pointing outside its
-    # served root (security default in Node static-file middleware). The
-    # documented pattern is to physically stage local files into the bundle's
-    # `public/` subfolder; the static server then serves them at /public/X
-    # URLs that the composition references via staticFile().
+    # Chunked-render staging: files go into the shared render_volume (mounted
+    # at /remotion/bundle/public/jobs on every container — orchestrator AND
+    # workers). Mount point matches Remotion's static-served root, so files
+    # are directly servable as /public/jobs/<job_id>/<filename> via
+    # staticFile() with no hardlink/copy gymnastics inside workers.
     #
-    # We stage per-job under /remotion/bundle/public/<work_dir_basename>/ to
-    # avoid collisions if Modal reuses a warm container for concurrent
-    # invocations. The directory is cleaned up after the render completes
-    # (via try/finally below). We try hardlink first (zero-copy when src and
-    # dst are on the same filesystem); on cross-device fall back to a real
-    # copy. Both produce a normal file inside bundle/public/ — no symlinks,
-    # no security middleware traps.
+    # Per-job dir: /remotion/bundle/public/jobs/<job_id>/ — orchestrator
+    # writes source + broll + remotion_input.json + chunks (output by
+    # workers); orchestrator reads chunks back after workers commit;
+    # render_staging_janitor cleans entries older than 24h.
     _bundle_public_root = "/remotion/bundle/public"
     _stage_key = os.path.basename(work_dir.rstrip("/")) or f"job-{int(time.time()*1000)}"
-    _stage_dir = os.path.join(_bundle_public_root, _stage_key)
+    _stage_dir = os.path.join(_bundle_public_root, "jobs", _stage_key)
+    # path Remotion sees in the JSON: "jobs/<job_id>/<filename>" (resolveSrc
+    # in PromptlyRender.tsx wraps this with staticFile() → /public/jobs/...)
+    _stage_url_prefix = f"jobs/{_stage_key}"
     os.makedirs(_stage_dir, exist_ok=True)
 
     def _stage_file(src_abs_path):
@@ -8110,9 +8109,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         try:
             os.link(src_abs_path, _dst)  # hardlink — zero-copy when same FS
         except OSError as _e:
-            # Cross-device link, permission, or unsupported FS → real copy.
+            # Cross-device (always true for Modal volumes vs /tmp) → real copy.
             shutil.copy2(src_abs_path, _dst)
-        return f"{_stage_key}/{_name}"
+        return f"{_stage_url_prefix}/{_name}"
 
     _source_src = _stage_file(source_path)
     for _br in broll_out:
@@ -8143,7 +8142,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         "outro": _outro,
     }
 
-    remotion_input_json = os.path.join(work_dir, "promptly_render_input.json")
+    # Write remotion_input.json INTO the staging dir on the shared volume —
+    # workers read it from there. (Was previously written to work_dir, but
+    # workers can't see work_dir.)
+    remotion_input_json = os.path.join(_stage_dir, "remotion_input.json")
     with open(remotion_input_json, "w") as _f:
         json.dump(remotion_input, _f)
     print(
@@ -8213,156 +8215,190 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             work_dir, sample_rate=sample_rate,
         )
 
-    # ── 10. Launch TWO Remotion renders in parallel + final ffmpeg composite ─
-    # Two-renderer split (the architecture from the pre-66-pack era):
-    #   PromptlyBase    → base_video.mp4   (h264, video + transitions + zoom + broll)
-    #   PromptlyOverlay → overlay.mov      (ProRes 4444 with alpha, captions + MGs + text)
-    # Run both subprocesses in parallel — they're independent. FFmpeg then
-    # composites the alpha overlay onto the base in a single pass and adds
-    # the audio track. Per-frame paint cost in each composition is a small
-    # fraction of the old monolithic render, so combined wall-clock time
-    # drops from ~150s to ~12-25s on H100 (encoder-bound on libx264 ultrafast).
-    base_video_path = os.path.join(work_dir, "base_video.mp4")
-    overlay_video_path = os.path.join(work_dir, "overlay.mov")
-    # gl=vulkan adds --enable-gpu / --ignore-gpu-blocklist to Chromium, the
-    # only Remotion mode that does so. NVIDIA's Vulkan ICD is registered at
-    # startup (handler.py top-of-file) so the H100 is the rendering target
-    # when available; falls back to SwiftShader if not.
-    _gl_mode = "vulkan" if _HAS_HWACCEL else "swiftshader"
-    # 16 tabs per renderer × 2 renderers = 32 total Chromium tabs. Same total
-    # as before, just split across two processes instead of one. Each
-    # composition has a much lighter per-frame paint, so 16 tabs each is
-    # plenty.
-    _per_renderer_concurrency = max(4, min(int((os.cpu_count() or 32) // 4), 16))
+    # ── 10. Chunked render: spawn N parallel Modal containers, each rendering
+    #        a frame range of one composition, then ffmpeg-concat the chunks.
+    #
+    # Per Remotion issue #4664 + our v60 measurements, single-instance
+    # rendering hits a hard ceiling around 16-22 fps regardless of CPU count.
+    # The documented workaround is distributed rendering: split the timeline
+    # into N frame-range chunks, run each as an independent Remotion process,
+    # combine after. We implement that pattern via Modal's Function.map().
+    #
+    # Worker mix (8 base + 4 overlay = 12 total) chosen so wall time of base
+    # chunks (slower at ~9 fps with mixBlendMode-free PromptlyBase) matches
+    # wall time of overlay chunks (~17 fps). Both lanes finish in ~20s for
+    # a 47s output; combined wall time of all 12 workers in parallel is
+    # ~21s, vs. 137s for the previous monolithic render.
 
-    def _build_render_cmd(_composition_id, _output_path):
-        return [
-            "node", "/remotion/render-full.mjs",
-            "--input", remotion_input_json,
-            "--output", _output_path,
-            "--public-dir", work_dir,
-            "--concurrency", str(_per_renderer_concurrency),
-            "--gl", _gl_mode,
-            "--composition", _composition_id,
-        ]
+    # Commit the staging dir so chunk workers can see source/broll/input
+    # after their .reload() at function entry.
+    try:
+        from modal_app import render_volume as _render_volume
+        _render_volume.commit()
+    except Exception as _e:
+        print(f"[render] WARNING: render_volume commit before spawn failed: {_e}", flush=True)
+
+    # Lazy import — avoids module-init circular reference; modal_app has
+    # already loaded by the time we get here (PromptlyWorker class started us).
+    from modal_app import render_chunk
+
+    _gl_mode = "vulkan" if _HAS_HWACCEL else "swiftshader"
+    _per_chunk_concurrency = 8
+
+    # Build chunk specs. Frames are [start, end] inclusive.
+    def _split_frames(total: int, n_chunks: int) -> list:
+        """Partition [0, total-1] into n_chunks contiguous inclusive ranges."""
+        if total <= 0 or n_chunks <= 0:
+            return []
+        per = total // n_chunks
+        remainder = total % n_chunks
+        ranges = []
+        cursor = 0
+        for i in range(n_chunks):
+            chunk_size = per + (1 if i < remainder else 0)
+            if chunk_size == 0:
+                continue
+            start = cursor
+            end = cursor + chunk_size - 1
+            ranges.append((start, end))
+            cursor = end + 1
+        return ranges
+
+    # 8 base chunks: PromptlyBase is ~9 fps (heavier composition).
+    # 4 overlay chunks: PromptlyOverlay is ~17 fps (lighter, transparent).
+    # Asymmetric split → both lanes finish in ~matched wall time.
+    _base_ranges = _split_frames(int(total_output_frames), 8)
+    _overlay_ranges = _split_frames(int(total_output_frames), 4)
+
+    chunk_specs = []
+    for _i, (_s, _e) in enumerate(_base_ranges):
+        chunk_specs.append({
+            "job_id": _stage_key,
+            "composition_id": "PromptlyBase",
+            "frame_range_start": _s,
+            "frame_range_end": _e,
+            "output_filename": f"base_chunk_{_i:02d}.mp4",
+            "gl_mode": _gl_mode,
+            "concurrency": _per_chunk_concurrency,
+        })
+    for _i, (_s, _e) in enumerate(_overlay_ranges):
+        chunk_specs.append({
+            "job_id": _stage_key,
+            "composition_id": "PromptlyOverlay",
+            "frame_range_start": _s,
+            "frame_range_end": _e,
+            "output_filename": f"overlay_chunk_{_i:02d}.mov",
+            "gl_mode": _gl_mode,
+            "concurrency": _per_chunk_concurrency,
+        })
 
     _render_t0 = time.time()
     print(
-        f"[render] Launching parallel Remotion renders "
-        f"(2x{_per_renderer_concurrency} concurrent tabs, gl={_gl_mode}, stage={_stage_key}): "
-        f"PromptlyBase → base_video.mp4, PromptlyOverlay → overlay.mov",
+        f"[render] Spawning {len(chunk_specs)} parallel chunk workers "
+        f"({len(_base_ranges)} PromptlyBase + {len(_overlay_ranges)} PromptlyOverlay, "
+        f"each at concurrency={_per_chunk_concurrency}, gl={_gl_mode}, stage={_stage_key})",
         flush=True,
     )
 
-    # Spawn both render subprocesses; wait for both to complete.
-    _base_proc = subprocess.Popen(
-        _build_render_cmd("PromptlyBase", base_video_path),
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-    )
-    _overlay_proc = subprocess.Popen(
-        _build_render_cmd("PromptlyOverlay", overlay_video_path),
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-    )
-
-    # ── DIAGNOSTIC: sample CPU/GPU/RAM during the parallel renders ───────────
-    _metrics_stop = threading.Event()
-    _metrics_samples = []
-
-    def _sample_metrics():
-        import time as _t
-        while not _metrics_stop.is_set():
-            _sample = {"ts": _t.time()}
-            try:
-                _gpu_r = subprocess.run(
-                    ["nvidia-smi",
-                     "--query-gpu=utilization.gpu,utilization.memory,memory.used,memory.total",
-                     "--format=csv,noheader,nounits"],
-                    capture_output=True, text=True, timeout=2,
-                )
-                if _gpu_r.returncode == 0:
-                    _parts = [p.strip() for p in _gpu_r.stdout.strip().split(",")]
-                    if len(_parts) >= 4:
-                        _sample["gpu_util_pct"] = int(_parts[0])
-                        _sample["gpu_mem_pct"] = int(_parts[1])
-                        _sample["gpu_mem_used_mb"] = int(_parts[2])
-                        _sample["gpu_mem_total_mb"] = int(_parts[3])
-            except Exception:
-                pass
-            try:
-                with open("/proc/meminfo") as _mf:
-                    _meminfo = {}
-                    for _line in _mf:
-                        _k, _, _v = _line.partition(":")
-                        _meminfo[_k.strip()] = _v.strip()
-                    _mem_total_kb = int(_meminfo.get("MemTotal", "0 kB").split()[0])
-                    _mem_avail_kb = int(_meminfo.get("MemAvailable", "0 kB").split()[0])
-                    _sample["mem_used_mb"] = (_mem_total_kb - _mem_avail_kb) // 1024
-            except Exception:
-                pass
-            _metrics_samples.append(_sample)
-            _metrics_stop.wait(1.0)
-
-    _metrics_thread = threading.Thread(target=_sample_metrics, daemon=True)
-    _metrics_thread.start()
-
-    _render_elapsed = 0.0
+    # Fan out: Modal spawns one container per spec. .map() returns an iterator
+    # in input order; we list() to block until all complete (or one raises).
     try:
-        _base_stdout, _base_stderr = _base_proc.communicate(timeout=900)
-        _overlay_stdout, _overlay_stderr = _overlay_proc.communicate(timeout=900)
-        _render_elapsed = time.time() - _render_t0
+        chunk_results = list(render_chunk.map(chunk_specs))
+    except Exception as _spawn_err:
+        raise RuntimeError(f"Chunk render fan-out failed: {_spawn_err}")
 
-        for _label, _proc, _out, _err, _path in (
-            ("PromptlyBase", _base_proc, _base_stdout, _base_stderr, base_video_path),
-            ("PromptlyOverlay", _overlay_proc, _overlay_stdout, _overlay_stderr, overlay_video_path),
-        ):
-            if _proc.returncode != 0:
-                raise RuntimeError(
-                    f"Remotion {_label} render failed (rc={_proc.returncode}): "
-                    f"{(_err or '')[-2000:]}"
-                )
-            for _line in (_out or "").split("\n"):
-                if _line.strip():
-                    print(f"[remotion:{_label}] {_line}", flush=True)
-            if _err:
-                _kept_err_prefixes = ("Error", "WARNING", "warn", "Seeking to frame")
-                _err_lines = [
-                    _l for _l in _err.split("\n")
-                    if _l.strip() and any(_l.strip().startswith(_p) for _p in _kept_err_prefixes)
-                ]
-                for _l in _err_lines[:30]:
-                    print(f"[remotion-err:{_label}] {_l}", flush=True)
-                if len(_err_lines) > 30:
-                    print(f"[remotion-err:{_label}] ... ({len(_err_lines) - 30} more elided) ...", flush=True)
-            if not os.path.exists(_path) or os.path.getsize(_path) < 10000:
-                raise RuntimeError(f"Remotion {_label} produced invalid output: {_path}")
+    _render_elapsed = time.time() - _render_t0
+
+    # Reload to see the chunks workers committed.
+    try:
+        _render_volume.reload()
+    except Exception as _e:
+        print(f"[render] WARNING: render_volume reload after chunks failed: {_e}", flush=True)
+
+    # Echo per-chunk timing from worker stdout for visibility.
+    for _result in chunk_results:
+        _comp = _result.get("composition_id", "?")
+        _fr = f"{_result.get('frame_range_start','?')}-{_result.get('frame_range_end','?')}"
+        _rt = _result.get("render_time_seconds", 0)
+        _sz = _result.get("size_mb", 0)
+        print(f"[chunk-result] {_comp} frames {_fr}: {_rt:.1f}s, {_sz:.1f}MB", flush=True)
+
+    # Verify every expected chunk landed on the volume.
+    for _spec in chunk_specs:
+        _path = os.path.join(_stage_dir, _spec["output_filename"])
+        if not os.path.exists(_path) or os.path.getsize(_path) < 1000:
+            raise RuntimeError(
+                f"Chunk output missing/invalid after fan-out: {_path} "
+                f"(spec={_spec['composition_id']} {_spec['frame_range_start']}-{_spec['frame_range_end']})"
+            )
+
+    # Concatenate chunks → base_video.mp4 + overlay.mov in work_dir. Both
+    # codecs (h264, ProRes 4444) are frame-based / no inter-chunk dependencies,
+    # so `ffmpeg -f concat -c copy` is lossless and fast.
+    base_video_path = os.path.join(work_dir, "base_video.mp4")
+    overlay_video_path = os.path.join(work_dir, "overlay.mov")
+
+    def _ffmpeg_concat(chunk_paths: list, output_path: str, label: str):
+        """Concatenate a list of same-codec chunk files via ffmpeg concat
+        demuxer. Stream-copy (no re-encode), so output is bit-identical to
+        the chunk inputs."""
+        if not chunk_paths:
+            raise RuntimeError(f"[concat:{label}] no chunks to combine")
+        _list_path = os.path.join(work_dir, f"_concat_{label}.txt")
+        with open(_list_path, "w") as _lf:
+            for _p in chunk_paths:
+                # ffmpeg concat demuxer needs `file '<path>'` with absolute paths
+                _lf.write(f"file '{_p}'\n")
+        _t0 = time.time()
+        _r = subprocess.run(
+            ["ffmpeg", "-y", "-v", "error",
+             "-f", "concat", "-safe", "0",
+             "-i", _list_path,
+             "-c", "copy",
+             output_path],
+            capture_output=True, text=True, timeout=120,
+        )
+        if _r.returncode != 0:
+            raise RuntimeError(
+                f"[concat:{label}] ffmpeg failed (rc={_r.returncode}): "
+                f"{(_r.stderr or '')[-1000:]}"
+            )
+        if not os.path.exists(output_path) or os.path.getsize(output_path) < 10000:
+            raise RuntimeError(f"[concat:{label}] output invalid: {output_path}")
         print(
-            f"[render] Both Remotion renders done in {_render_elapsed:.1f}s "
-            f"(base={os.path.getsize(base_video_path)/1024/1024:.1f}MB, "
-            f"overlay={os.path.getsize(overlay_video_path)/1024/1024:.1f}MB)",
+            f"[concat:{label}] {len(chunk_paths)} chunks → "
+            f"{os.path.getsize(output_path)/1024/1024:.1f}MB in {time.time()-_t0:.1f}s",
             flush=True,
         )
-    finally:
-        _metrics_stop.set()
-        _metrics_thread.join(timeout=2)
-        if _metrics_samples:
-            _gpu_utils = [s.get("gpu_util_pct") for s in _metrics_samples if "gpu_util_pct" in s]
-            _gpu_mems = [s.get("gpu_mem_used_mb") for s in _metrics_samples if "gpu_mem_used_mb" in s]
-            _mem_useds = [s.get("mem_used_mb") for s in _metrics_samples if "mem_used_mb" in s]
-            _summarize = lambda lst: (
-                f"avg={sum(lst)/len(lst):.0f} min={min(lst)} max={max(lst)} n={len(lst)}"
-                if lst else "(no samples)"
-            )
-            if _gpu_utils:
-                print(f"[metrics] GPU util %:   {_summarize(_gpu_utils)}", flush=True)
-            if _gpu_mems:
-                print(f"[metrics] GPU mem MB:   {_summarize(_gpu_mems)}", flush=True)
-            if _mem_useds:
-                print(f"[metrics] System RAM MB used: {_summarize(_mem_useds)}", flush=True)
-            print(f"[metrics] Sampled {len(_metrics_samples)} times over {_render_elapsed:.1f}s render", flush=True)
-        try:
-            shutil.rmtree(_stage_dir, ignore_errors=True)
-        except Exception as _rm_err:
-            print(f"[render] WARNING: stage cleanup failed: {_rm_err}", flush=True)
+
+    _concat_t0 = time.time()
+    _base_chunk_paths = [
+        os.path.join(_stage_dir, f"base_chunk_{_i:02d}.mp4")
+        for _i in range(len(_base_ranges))
+    ]
+    _overlay_chunk_paths = [
+        os.path.join(_stage_dir, f"overlay_chunk_{_i:02d}.mov")
+        for _i in range(len(_overlay_ranges))
+    ]
+    _ffmpeg_concat(_base_chunk_paths, base_video_path, "base")
+    _ffmpeg_concat(_overlay_chunk_paths, overlay_video_path, "overlay")
+    _concat_elapsed = time.time() - _concat_t0
+
+    print(
+        f"[render] Chunk fan-out + concat done in {_render_elapsed:.1f}s + {_concat_elapsed:.1f}s "
+        f"(base={os.path.getsize(base_video_path)/1024/1024:.1f}MB, "
+        f"overlay={os.path.getsize(overlay_video_path)/1024/1024:.1f}MB)",
+        flush=True,
+    )
+
+    # Cleanup the per-job stage dir on the volume so it doesn't pile up
+    # before the daily janitor runs. Don't fail the render if cleanup fails;
+    # janitor catches strays anyway.
+    try:
+        shutil.rmtree(_stage_dir, ignore_errors=True)
+        _render_volume.commit()
+    except Exception as _rm_err:
+        print(f"[render] WARNING: stage cleanup failed: {_rm_err}", flush=True)
 
     # Collect speed-curved audio (fails fast — no fallback to plain audio
     # because speed ramps would desync).

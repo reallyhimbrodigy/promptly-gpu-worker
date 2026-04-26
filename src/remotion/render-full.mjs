@@ -53,6 +53,15 @@ let glMode = "vulkan";
 // in parallel and FFmpeg composites the alpha overlay onto the base in
 // the final mux step.
 let compositionId = "PromptlyBase";
+// Chunked rendering (Remotion's documented distributed-rendering pattern):
+// each chunk worker renders a subrange of the timeline. frameRange = [start, end]
+// inclusive bounds; compositionStart tells Remotion that frame 0 of THIS chunk
+// is actually frame N of the overall composition, so animations using
+// useCurrentFrame() return the correct global frame number. Without
+// compositionStart, animations would restart per chunk → broken output.
+let frameRangeStart = null;
+let frameRangeEnd = null;
+let compositionStart = 0;
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--input" && args[i + 1]) inputPath = args[++i];
@@ -61,10 +70,26 @@ for (let i = 0; i < args.length; i++) {
   else if (args[i] === "--concurrency" && args[i + 1]) concurrency = parseInt(args[++i], 10);
   else if (args[i] === "--gl" && args[i + 1]) glMode = args[++i];
   else if (args[i] === "--composition" && args[i + 1]) compositionId = args[++i];
+  else if (args[i] === "--frame-range" && args[i + 1]) {
+    const parts = args[++i].split(",").map((s) => parseInt(s.trim(), 10));
+    if (parts.length !== 2 || parts.some((n) => Number.isNaN(n))) {
+      console.error(`[render-full] --frame-range must be "start,end" with two integers, got "${args[i]}"`);
+      process.exit(1);
+    }
+    frameRangeStart = parts[0];
+    frameRangeEnd = parts[1];
+  }
+  else if (args[i] === "--composition-start" && args[i + 1]) {
+    compositionStart = parseInt(args[++i], 10);
+    if (Number.isNaN(compositionStart)) {
+      console.error(`[render-full] --composition-start must be an integer, got "${args[i]}"`);
+      process.exit(1);
+    }
+  }
 }
 
 if (!inputPath || !outputPath || !publicDir) {
-  console.error("Usage: node render-full.mjs --input <json> --output <mp4|mov> --public-dir <dir> [--concurrency N] [--gl mode] [--composition PromptlyBase|PromptlyOverlay]");
+  console.error("Usage: node render-full.mjs --input <json> --output <mp4|mov> --public-dir <dir> [--concurrency N] [--gl mode] [--composition PromptlyBase|PromptlyOverlay] [--frame-range start,end] [--composition-start N]");
   process.exit(1);
 }
 
@@ -93,11 +118,15 @@ const inputProps = { input: inputJson };
 const cpuCount = os.cpus().length;
 const resolvedConcurrency = concurrency && concurrency > 0 ? concurrency : Math.max(1, Math.floor(cpuCount / 2));
 
+const isChunked = frameRangeStart !== null && frameRangeEnd !== null;
+const frameRangeLabel = isChunked ? `frames ${frameRangeStart}..${frameRangeEnd}` : `frames 0..${inputJson.totalDurationInFrames - 1}`;
+
 console.log(
   `[render-full] composition=${compositionId} (${isOverlay ? "ProRes 4444 alpha" : "h264"}) ` +
+  `${frameRangeLabel}, compositionStart=${compositionStart}, ` +
   `${inputJson.clips?.length ?? 0} clips, ${inputJson.transitions?.length ?? 0} transitions, ` +
   `${inputJson.broll?.length ?? 0} broll, ${inputJson.motionGraphics?.length ?? 0} MG, ` +
-  `${inputJson.totalDurationInFrames} frames, concurrency=${resolvedConcurrency}`,
+  `${inputJson.totalDurationInFrames} frames total, concurrency=${resolvedConcurrency}`,
 );
 
 // ── Bundle (use prebundle if present) ──────────────────────────────────────
@@ -275,6 +304,12 @@ await renderMedia({
   overwrite: true,
   puppeteerInstance: browser,
   publicDir,
+  // Chunked rendering: limit work to a frame range, with compositionStart
+  // telling Remotion the global frame offset so animations using
+  // useCurrentFrame() return the correct frame numbers across chunk
+  // boundaries. Both fields are required together for distributed renders.
+  ...(isChunked ? { frameRange: [frameRangeStart, frameRangeEnd] } : {}),
+  compositionStart,
   ...(chromePath ? { browserExecutable: chromePath } : {}),
   chromiumOptions: {
     gl: glMode,
@@ -291,10 +326,13 @@ await renderMedia({
   // The encode stays on libx264 ultrafast — which is fine because in v51
   // we measured the encoder catching up at 65 fps; the bottleneck was
   // never the encode, it was Chromium painting in software.
-  // Give the offthread cache generous headroom — we have 128 GB RAM.
-  // The cache stores decoded source frames so repeated seeks across
-  // transitions + captions don't re-decode from disk each time.
-  offthreadVideoCacheSizeInBytes: 16 * 1024 * 1024 * 1024, // 16 GB
+  // OffthreadVideo cache. Sized for chunked workers (16 GB RAM each).
+  // 1 GB is plenty per chunk: each chunk renders a subrange (~177 frames
+  // per base chunk), seek footprint is bounded by the chunk's frame range,
+  // and the overlay composition reads no video at all. A 16 GB cache here
+  // would OOM the worker (16 GB tab cache + 8 Chromium tabs × 1 GB each
+  // + Node + bundle ≈ 30 GB).
+  offthreadVideoCacheSizeInBytes: 1 * 1024 * 1024 * 1024, // 1 GB
   // info-level logging: keeps the [render-full] interval-fps lines visible
   // without flooding stderr with thousands of per-frame compositor lines.
   logLevel: "info",
