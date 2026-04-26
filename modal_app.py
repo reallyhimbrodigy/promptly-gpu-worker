@@ -1,5 +1,7 @@
 import modal
 
+# rebuild trigger v60 — Cut always-on prewarm cost. PromptlyPrewarmWorker had min_containers=1 (always-warm CPU container) costing ~$35/mo regardless of usage. Removed it so the class scales to zero when idle. First prewarm after a quiet period takes 3-5s cold start, but the user is mid-upload to S3 when prewarm fires so it's invisible. GPU class already scales to zero. Net: ~$35/mo saved on idle infrastructure.
+
 # rebuild trigger v59 — Fix Remotion alpha-render validation: imageFormat="png" required for yuva pixel formats. v58's PromptlyOverlay render failed instantly with TypeError "Pixel format was set to 'yuva444p10le' but the image format is not PNG" because Remotion enforces PNG intermediates for any alpha-bearing pixel format (JPEG can't carry alpha). One-line fix in render-full.mjs: add imageFormat="png" to the overlay branch alongside proResProfile="4444" + pixelFormat="yuva444p10le". PNG is theoretically slower per-frame screenshot than JPEG, but the overlay canvas is mostly transparent so PNG compression is near-instant on empty alpha — negligible cost. PromptlyBase keeps default JPEG (faster, no alpha needed). Same v58 architecture otherwise.
 
 # rebuild trigger v58 — Phase A + Phase B: two-renderer split + drop color effects. The user diagnosed correctly that the slowdown was architectural, not a GPU/Vulkan issue: pre-66-pack Remotion was overlay-only (~10-15s renders), while 8a777e1 made Remotion render the full 1080x1920 canvas including video underneath, which made each frame's mixBlendMode/filter passes catastrophically expensive in software. Restored the original architecture: PromptlyBase (h264, video + transitions + zoom + broll, black background) and PromptlyOverlay (ProRes 4444 alpha, captions + MGs + text overlays, transparent background) render as TWO parallel Remotion compositions, then FFmpeg composites the alpha overlay onto the base in a single pass + audio mux. Color effects (12 components) are removed entirely — they were the heaviest mixBlendMode stack, irrelevant for talking-head content, and impossible to translate cleanly between Remotion's CSS blend modes and FFmpeg without quality drift. Zero quality risk: all 21 captions + 18 MGs + 4 text overlays + 11 transitions + 7 zooms + B-roll render through the same React tree they always have, just split into two independent compositions. Per-frame paint cost drops ~10x on each composition (no video paint in overlay, no overlay paint in base). Expected end-to-end render time: ~30-40s on H100 (encoder-bound on libx264 ultrafast), down from 140-180s. Full deletion of color-effects directory + Pydantic schema + Gemini prompt section + validator + render_multi_clip color path.
@@ -222,20 +224,21 @@ class PromptlyWorker:
 
 # ── Prewarm CPU worker (split off from the GPU render worker) ─────────────────
 # Prewarm is pure I/O — S3 download + Deepgram URL call. It has zero use for
-# an H100; running it on the GPU class was costing us $3.95/hr while doing
-# nothing GPU-shaped. This dedicated CPU-only class:
-#   - Costs ~$35/mo always-warm (min_containers=1) vs $2844/mo for an H100
-#   - Eliminates cold-start latency for prewarm itself (the request that
-#     needs to be fastest to beat the user's send tap)
-#   - Frees the GPU class to scale from zero on render-only demand
+# an H100; running it on the GPU class was costing $3.95/hr while doing
+# nothing GPU-shaped. This dedicated CPU-only class scales to zero when idle
+# (no min_containers) — first prewarm after a quiet period eats a 3-5s cold
+# start, but subsequent prewarms within scaledown_window reuse the warm
+# container. The user is still mid-upload to S3 when prewarm fires, so a
+# few seconds of cold start is invisible.
 @app.cls(
     timeout=300,          # 5 min is plenty for an S3 download + Deepgram call
-    scaledown_window=600, # stay warm a long time — cheap and helpful
+    scaledown_window=600, # stay warm 10 min after last request; idles to zero after
     cpu=8,                # enough to run boto3 CRT multipart + Deepgram in parallel
     memory=4096,          # 4GB for in-flight download buffers + transcript JSON
     region="us-west",     # same region as the S3 bucket + render class
     volumes={"/prewarm": prewarm_volume},
-    min_containers=1,     # always-warm — prewarm must be faster than the user's fingers
+    # NOTE: no min_containers — class scales to zero when idle. This is the
+    # primary always-on cost killer (~$35/mo saved vs min_containers=1).
 )
 class PromptlyPrewarmWorker:
     @modal.enter()
