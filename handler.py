@@ -64,11 +64,6 @@ _CAPTION_STYLES = Literal[
     "Dimidium", "EditorialPop", "Gadzhi", "Illuminate", "Lumen",
     "MagazineCutout", "Passage", "Pulse", "Quintessence", "Serif", "StaggerWave",
 ]
-_COLOR_EFFECTS = Literal[
-    "CinematicGrade", "BleachBypass", "VintageFilm", "DreamHaze", "ChromaSplit",
-    "VignettePulse", "InvertStrike", "CineMono", "GoldenHour", "FilmGrain",
-    "Portra", "NeoNoir",
-]
 _TRANSITION_TYPES = Literal[
     "CardSwipe", "ZoomThrough", "SlideOver", "Stack", "CrossfadeZoom",
     "ShutterFlash", "LightLeak", "StepPush", "NewspaperWipe", "FilmStrip",
@@ -111,24 +106,6 @@ class _CaptionPositionChange(BaseModel):
     word_index: int
     position: Literal["top", "center", "bottom"]
 
-class _ColorPulse(BaseModel):
-    # Word-anchored — Python derives peak_at_seconds from word.start.
-    peak_word_index: int
-    attackFrames: int = 3
-    holdFrames: int = 4
-    releaseFrames: int = 12
-    intensity: float = 1.0
-
-class _ColorEffectTiming(BaseModel):
-    mode: Literal["persistent", "pulsed"]
-    fadeInFrames: Optional[int] = None
-    pulses: Optional[List[_ColorPulse]] = None
-
-class _ColorEffect(BaseModel):
-    type: _COLOR_EFFECTS
-    intensity: float
-    timing: _ColorEffectTiming
-
 class _ZoomEvent(BaseModel):
     startMs: int
     durationMs: int
@@ -148,9 +125,9 @@ class _EmphasisMotionGraphic(BaseModel):
 class _EmphasisMoment(BaseModel):
     # `t` is DERIVED by Python from word_indices[0].start — not emitted by Gemini.
     # Visual layers on an emphasis: zoom_effect (optional) and motion_graphic
-    # (optional). Color pulses are NOT a per-emphasis flag; they live in
-    # color_effect.timing.pulses with explicit peak_word_index so Gemini
-    # can pulse any moment without the redundant cross-field flag.
+    # (optional). Color effects were removed from the pipeline (talking-head
+    # videos don't need cinematic grades) — emphasis is now purely a
+    # zoom/MG/SFX combo.
     word_indices: List[int]
     type: Literal["punchline", "statement", "question", "reaction", "transition", "revelation"]
     intensity: Literal["high", "medium"]
@@ -255,7 +232,6 @@ class EditPlan(BaseModel):
     caption_style: _CAPTION_STYLES
     caption_keywords: List[str]
     caption_position_changes: List[_CaptionPositionChange]
-    color_effect: Optional[_ColorEffect] = None
     audio_denoise: bool
     outro: Literal["none", "fade_black", "fade_white"]
     aspect_ratio: Literal["9:16"]
@@ -1227,9 +1203,10 @@ def update_user_style_profile(user_id, edit_plan, vibe, duration):
         _pacings = _decayed("pacings")
         _bump(_pacings, edit_plan.get("pacing"))
 
+        # color_effects: feature removed (talking-head pipeline doesn't need
+        # cinematic grades). Preserve the existing column for any historical
+        # rows but stop bumping; the field decays to zero over time.
         _color_effects = _decayed("color_effects")
-        _ce = edit_plan.get("color_effect")
-        _bump(_color_effects, (_ce.get("type") if isinstance(_ce, dict) else "null"))
 
         _tov_freq = _decayed("text_overlay_variants")
         for _tov in (edit_plan.get("text_overlays") or []):
@@ -2409,7 +2386,7 @@ VOCAL EMPHASIS PEAKS (source seconds, score 0-1)
   words, pitch peaks, punches. Use as PRIMARY anchors for:
     - zoom_effect events (SnapReframe lands ON a vocal peak)
     - emphasis_moments.t (pick the peak, then map word_indices to it)
-    - color pulse peak_at_seconds (hit at the vocal prominence)
+    - sound_effects (drum_roll buildup ending at a peak, hit on the peak)
 
 FACE VISIBILITY (source-seconds ranges; yes = face detected in 0.5s bucket)
   {_fv_display}
@@ -2443,24 +2420,21 @@ Your job: produce an edit plan that looks professionally crafted — every cut, 
 The pipeline enforces these rules with strict validators. Output that violates any rule is rejected.
 
 1. POSITIONS ARE SEMANTIC ZONES. Use the named zones from the vocabulary (`upper_third_safe`, `center`, `lower_third_safe`, `left_safe`, `right_safe`). Pixel coordinates are not accepted.
-2. EVERY TIMING IS WORD-ANCHORED. You never emit raw float timestamps. Anchor every time-based decision to a specific kept word via its index (start_word_index, end_word_index, word_index, word_indices, after_word_index, peak_word_index, at_word_index, thumbnail_word_index). Python derives all float timestamps from word start/end times. The only float fields in your output are non-time values like `duration_seconds` (overlay lifespan), `intensity`, `scale`, and `speed`.
+2. EVERY TIMING IS WORD-ANCHORED. You never emit raw float timestamps. Anchor every time-based decision to a specific kept word via its index (start_word_index, end_word_index, word_index, word_indices, after_word_index, at_word_index, thumbnail_word_index). Python derives all float timestamps from word start/end times. The only float fields in your output are non-time values like `duration_seconds` (overlay lifespan), `intensity`, `scale`, and `speed`.
 3. EVERY TEXT OVERLAY HAS A VARIANT + ITS REQUIRED PROPS. The `variant` field chooses which visual treatment; each variant has a specific set of required props documented in the TEXT OVERLAYS section.
 4. CAPTIONS ARE WORD-ANCHORED. Emit `caption_position_changes` as an array of `{{word_index, position}}` events — each event says "at this kept word, captions move to this position." Python synthesizes the final segment list with exact word-start timestamps. No float boundaries to match, no duration arithmetic. If captions stay "bottom" the whole video, emit an empty array.
 5. Z-ORDER YIELDS TO MOTION GRAPHICS — AUTOMATIC. Python automatically forces caption_position_segments to "top" inside any bottom-anchored MG window after derivation, so you don't need to coordinate this. Emit caption_position_changes for creative reasons (e.g., a "center" beat for a Quintessence-style dramatic single word) and Python takes care of the MG-overlap geometry.
-6. COLOR EFFECT MODE CONSISTENCY:
-   - `InvertStrike` requires `timing.mode = "pulsed"` with at least one pulse.
-   - To pulse color at specific moments, emit `color_effect.timing.pulses` with a `peak_word_index` per pulse. There is no separate per-emphasis `color_pulse` flag — pulses are listed explicitly so there's one source of truth.
-7. ZONE DISCIPLINE FOR OVERLAYS. Overlays in DIFFERENT visual zones can freely share a time window (e.g., `torn_paper` at center + `lower_third` at the bottom is a standard pro layout). Overlays in the SAME zone at the SAME time are what collide — those are rejected. Per-variant canonical zones:
+6. ZONE DISCIPLINE FOR OVERLAYS. Overlays in DIFFERENT visual zones can freely share a time window (e.g., `torn_paper` at center + `lower_third` at the bottom is a standard pro layout). Overlays in the SAME zone at the SAME time are what collide — those are rejected. Per-variant canonical zones:
    - `torn_paper` → `center` (full-frame impact slam)
    - `sticky_note` → `upper_third_safe` (corner stickies)
    - `quote_card` → `center` (floating card)
    - `lower_third` → `lower_third_safe` (bottom broadcast card)
    - `caption_match` → zone matches its `position` (top→`upper_third_safe`, center→`center`, bottom→`lower_third_safe`)
    A motion_graphic's zone is its explicit `anchor` field. Two items collide only when their zones AND time windows both overlap. High-intensity emphasis moments are spaced ≥2.5s apart regardless of zone.
-8. ONE ZOOM PER KEPT-SOURCE CLIP. At most one emphasis_moment carries a zoom_effect within any single kept-source clip (the source range between your removed-words boundaries). When you want multiple zoom beats close together, stack their events onto a single emphasis_moment's `zoom_effect.events` array.
-9. MOTION GRAPHIC ANCHORS ARE ABSOLUTE ZONES. Every `motion_graphics[i].anchor` and `emphasis_moments[i].motion_graphic.anchor` is one of the 5 absolute zones — MGs don't follow the speaker's face.
-10. ANCHORS ARE KEPT WORDS — BY CONSTRUCTION. The transcript you see contains only kept words, renumbered `[0..M-1]`. Every word_index you emit (in `emphasis_moments[i].word_indices`, `sound_effects[i].word_index`, `text_overlays[i].start_word_index`, `motion_graphics[i].{{start,end}}_word_index`, `broll_clips[i].{{start,end}}_word_index`, `transitions[i].after_word_index`, `caption_position_changes[i].word_index`, `color_effect.timing.pulses[i].peak_word_index`, `hook_clip.{{start,end}}_word_index`, `thumbnail_word_index`, `speed_curve[i].at_word_index`) references this index space. All anchors land on kept words. Python translates back to source indices and derives all timestamps.
-11. EXPLICIT NULLS. If an emphasis moment has no zoom, emit `"zoom_effect": null` — no downstream defaults fill gaps.
+7. ONE ZOOM PER KEPT-SOURCE CLIP. At most one emphasis_moment carries a zoom_effect within any single kept-source clip (the source range between your removed-words boundaries). When you want multiple zoom beats close together, stack their events onto a single emphasis_moment's `zoom_effect.events` array.
+8. MOTION GRAPHIC ANCHORS ARE ABSOLUTE ZONES. Every `motion_graphics[i].anchor` and `emphasis_moments[i].motion_graphic.anchor` is one of the 5 absolute zones — MGs don't follow the speaker's face.
+9. ANCHORS ARE KEPT WORDS — BY CONSTRUCTION. The transcript you see contains only kept words, renumbered `[0..M-1]`. Every word_index you emit (in `emphasis_moments[i].word_indices`, `sound_effects[i].word_index`, `text_overlays[i].start_word_index`, `motion_graphics[i].{{start,end}}_word_index`, `broll_clips[i].{{start,end}}_word_index`, `transitions[i].after_word_index`, `caption_position_changes[i].word_index`, `hook_clip.{{start,end}}_word_index`, `thumbnail_word_index`, `speed_curve[i].at_word_index`) references this index space. All anchors land on kept words. Python translates back to source indices and derives all timestamps.
+10. EXPLICIT NULLS. If an emphasis moment has no zoom, emit `"zoom_effect": null` — no downstream defaults fill gaps.
 
 === SAFE ZONES (1080x1920 canvas) ===
 
@@ -2666,57 +2640,6 @@ B. motion_graphic — should a text/graphic overlay land on this moment?
    Pick from the motion graphic vocabulary below. Reserve for the 1-2 PAYOFF moments. Too many = clutter.
    motion_graphic windows must NOT overlap with any text_overlay in the same visual zone.
 
-   To pulse the color grade at this emphasis, don't use a per-emphasis flag — instead add a pulse to `color_effect.timing.pulses` with `peak_word_index` = this emphasis's main word (word_indices[0]). That's the single source of truth for pulse timing.
-
-=== COLOR EFFECT — OPTIONAL GLOBAL GRADE ===
-
-Wraps the entire video. Set null for most videos (phone footage grades poorly).
-
-color_effect — object or null.
-
-Structure:
-  {{
-    "type": <grade>,
-    "intensity": 0.4 - 1.0,
-    "timing": {{"mode": "persistent", "fadeInFrames": 15}}
-      OR {{"mode": "pulsed", "pulses": [{{"peak_word_index": int, "attackFrames": 3, "holdFrames": 4, "releaseFrames": 12, "intensity": 1.0}}]}}
-  }}
-
-12 grades:
-
- 1. "CinematicGrade" — Teal-and-orange Hollywood grade. Cool shadows, warm highlights, subtle contrast boost.
-                        Best for: Cinematic footage, interviews, narrative B-roll.
- 2. "BleachBypass"   — Silver retention look. Desaturated, contrasty, soft silver sheen via soft-light composite.
-                        Best for: Thriller, prestige documentary, cold editorial.
- 3. "VintageFilm"    — Warm highlights, green-cast shadows, halation glow, optional procedural grain.
-                        Best for: Nostalgic montages, retro, wedding/lifestyle.
- 4. "DreamHaze"      — Lifted blacks, soft highlight bloom, pastel desaturation. Nostalgic diffusion.
-                        Best for: Dreamy montages, music videos, lifestyle/travel.
- 5. "ChromaSplit"    — RGB channel split via SVG filters. Optional slow angle drift.
-                        Best for: Glitch accents, analog aesthetics, beat-synced hits. Recommended with "pulsed" timing.
- 6. "VignettePulse"  — Two-layer vignette: constant base + pulsed darker layer that "closes in" at peak.
-                        Best for: Beat-synced emphasis, dramatic framing. Use with "pulsed" timing.
- 7. "InvertStrike"   — Color-inverts footage on beat via CSS invert(). Optional contrast punch.
-                        Best for: Beat drops, editorial punch, music video accents. REQUIRES "pulsed" timing.
- 8. "CineMono"       — Cinematic B&W with channel-mixed grayscale. Custom R/G/B luma weights. Optional grain.
-                        Best for: Prestige documentary, dramatic B&W, portraits.
- 9. "GoldenHour"     — Warm amber cast, cream highlights, magenta shadow hints. Everything glows.
-                        Best for: Interviews, lifestyle B-roll, golden-hour simulation.
-10. "FilmGrain"      — Authentic film grain with emulsion damage. Two grain layers, dust specks, hairline scratches. Deterministic per frame.
-                        Best for: Film print authenticity, documentary texture.
-11. "Portra"         — Kodak Portra 400 emulation. Low contrast, lifted shadows, creamy skin tones, muted greens.
-                        Best for: Portraits, editorial photography feel, subtle grading.
-12. "NeoNoir"        — Fincher-style neo-noir. Heavy desaturation, crushed blacks, cold greenish-cyan midtones.
-                        Best for: Thriller, moody narratives, dark editorial.
-
-Pulsed mode:
-  Each pulse has `peak_word_index` — the kept word where the pulse peaks. Python derives the exact source timestamp from word.start, then projects it to output frames. Pick the word that corresponds to a vocal peak, a shot-change moment, or one of your emphasis_moments' main words (word_indices[0]). All pulses — including those at emphasis moments — live in this list as a single source of truth.
-
-GUIDELINES:
-  Most videos → color_effect = null.
-  Only pick a grade if it genuinely fits the vibe AND the footage is flattering enough to carry it.
-  InvertStrike / ChromaSplit / VignettePulse use "pulsed".
-
 === MOTION GRAPHICS — REINFORCE CONTENT ===
 
 0-5 per video. Each REINFORCES a moment, doesn't replace it.
@@ -2875,7 +2798,7 @@ BUILD-UP SOUNDS — long builds (1.3–1.7s) climaxing at the end. The renderer 
                         Best for: big announcements, anticipation before a reveal, "and the answer is...", award moments, payoff setups.
                         Triggers on: *winner, revealed, the answer, finally, ta-da, drumroll, introducing*.
 10. "reverse"        — Reverse riser. Builds continuously in volume and pitch for ~1.37s, climaxing at the very end. Engineered as a cinematic "suck-toward-the-moment" effect — the entire sound IS anticipation.
-                        Best for: priming a MAJOR visual event. ALWAYS pair with something visually impactful landing on the trigger word — a hard cut to a new scene, a zoom effect landing (SnapReframe / StepZoom / LetterboxPush), a color pulse hit (InvertStrike / VignettePulse), a TornPaper or motion-graphic slam, or a transition peak. The 1.37s rise plays across the preceding output audio and releases into the visual beat.
+                        Best for: priming a MAJOR visual event. ALWAYS pair with something visually impactful landing on the trigger word — a hard cut to a new scene, a zoom effect landing (SnapReframe / StepZoom / LetterboxPush), a TornPaper or motion-graphic slam, or a transition peak. The 1.37s rise plays across the preceding output audio and releases into the visual beat.
                         Skip when there's no paired visual payoff — generic "wait for it" dialogue, punctuating sentences with no visual event attached, building up to a normal talking-head cut with nothing extra happening, or back-to-back triggers. Without a visual climax landing on the trigger word, this sound feels anticlimactic.
 11. "sad_trombone"   — The iconic "wah wah waaah" four-note descending trombone. 1.3s descending phrase climaxing on the final low note. Unambiguously comedic — every listener recognizes this as the "you failed" joke sound. There is no way to use this sincerely; it IS the joke.
                         Best for: ONLY when the content is EXPLICITLY comedic and the "failure" is being played for laughs. Trivial mishaps, obvious mock-failures, game-show-style setups, bloopers, intentional self-own jokes.
@@ -2989,7 +2912,6 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
     {{"word_index": int, "position": "top" | "center" | "bottom"}},
     ...
   ],
-  "color_effect": {{"type": "<grade>", "intensity": float, "timing": {{...}}}} | null,
   "audio_denoise": bool,
   "outro": "none" | "fade_black" | "fade_white",
   "aspect_ratio": "9:16",
@@ -3032,12 +2954,11 @@ Work through these checks against the plan you are about to emit. This is self-v
 1. Zone discipline for overlays. Two overlays (text_overlay or motion_graphic) whose time windows overlap must sit in DIFFERENT visual zones. Per-variant text_overlay zones: torn_paper→center, sticky_note→upper_third_safe, quote_card→center, lower_third→lower_third_safe, caption_match→matches its `position`. motion_graphic zone = its `anchor` field. Same-zone + same-time is rejected. High-intensity emphasis moments are ≥2.5s apart regardless of zone.
 2. One zoom per kept-source clip. Within each contiguous source range between removed-word boundaries, at most one `emphasis_moments[i].zoom_effect` is non-null. Multiple beats close together stack their events onto a single emphasis_moment's `zoom_effect.events` array.
 3. Z-order — automatic. Python forces caption_position_segments to "top" inside bottom-anchored MG windows. You don't need to coordinate this; emit caption_position_changes for creative reasons only.
-4. Color-pulse consistency. `InvertStrike` requires `timing.mode == "pulsed"` with at least one pulse. All pulses live in `color_effect.timing.pulses` with explicit `peak_word_index`; there is no separate per-emphasis flag.
-5. MG anchors are absolute zones. Every `motion_graphics[i].anchor` and every `emphasis_moments[i].motion_graphic.anchor` is one of the 5 absolute zones (`upper_third_safe`, `center`, `lower_third_safe`, `left_safe`, `right_safe`).
-6. Explicit nulls. Every emphasis_moment has explicit `zoom_effect` (value or null) and `motion_graphic` (value or null) fields — no omissions.
-7. sad_trombone tonal gate. If `sad_trombone` appears, the tonal_register is "comedic" AND the surrounding dialogue is being played for laughs. Otherwise remove it.
+4. MG anchors are absolute zones. Every `motion_graphics[i].anchor` and every `emphasis_moments[i].motion_graphic.anchor` is one of the 5 absolute zones (`upper_third_safe`, `center`, `lower_third_safe`, `left_safe`, `right_safe`).
+5. Explicit nulls. Every emphasis_moment has explicit `zoom_effect` (value or null) and `motion_graphic` (value or null) fields — no omissions.
+6. sad_trombone tonal gate. If `sad_trombone` appears, the tonal_register is "comedic" AND the surrounding dialogue is being played for laughs. Otherwise remove it.
 
-Note: every anchor field in this schema is word-index-based. You never emit float timestamps that must match word boundaries — Python derives all timestamps from word indices. Caption segments, hook boundaries, thumbnail time, speed-curve keypoints, and color pulses are all synthesized from the word indices you emit.
+Note: every anchor field in this schema is word-index-based. You never emit float timestamps that must match word boundaries — Python derives all timestamps from word indices. Caption segments, hook boundaries, thumbnail time, and speed-curve keypoints are all synthesized from the word indices you emit.
 
 If any check fails, revise the plan before emitting JSON. The validators reject violations — fixing them here is cheaper than re-generating."""
 
@@ -3439,7 +3360,7 @@ def generate_edit_gemini(
 === TONAL REGISTER (from pre-analysis) ===
 
 This video's overall tone: {_tonal_register}.
-Let this guide caption_style, color_effect, and SFX selection. Never pick an SFX that clashes with the tonal register (e.g., sad_trombone ONLY if comedic).
+Let this guide caption_style and SFX selection. Never pick an SFX that clashes with the tonal register (e.g., sad_trombone ONLY if comedic).
 
 === FULL TRANSCRIPT ===
 
@@ -3651,13 +3572,6 @@ REMOVE_WORDS GUIDANCE:
     for _cpc in (edit_plan.get("caption_position_changes") or []):
         if isinstance(_cpc, dict) and "word_index" in _cpc:
             _cpc["word_index"] = _translate_idx(_cpc["word_index"])
-    # color_effect.timing.pulses[*].peak_word_index
-    _ce = edit_plan.get("color_effect")
-    if isinstance(_ce, dict):
-        _timing = _ce.get("timing") or {}
-        for _p in (_timing.get("pulses") or []):
-            if isinstance(_p, dict) and "peak_word_index" in _p:
-                _p["peak_word_index"] = _translate_idx(_p["peak_word_index"])
     # hook_clip.start_word_index / end_word_index
     _hc = edit_plan.get("hook_clip")
     if isinstance(_hc, dict):
@@ -3732,16 +3646,6 @@ REMOVE_WORDS GUIDANCE:
             "position": "bottom",
         }]
     edit_plan["caption_position_segments"] = _segments
-
-    # color_effect.timing.pulses: derive peak_at_seconds from peak_word_index
-    if isinstance(_ce, dict):
-        _timing = _ce.get("timing") or {}
-        for _p in (_timing.get("pulses") or []):
-            if isinstance(_p, dict):
-                _pwi = _p.get("peak_word_index")
-                _pts = _word_start(_pwi)
-                if _pts is not None:
-                    _p["peak_at_seconds"] = _pts
 
     # hook_clip: derive source_start/source_end from word indices
     if isinstance(_hc, dict):
@@ -4213,11 +4117,6 @@ REMOVE_WORDS GUIDANCE:
         "Dimidium", "EditorialPop", "Gadzhi", "Illuminate", "Lumen",
         "MagazineCutout", "Passage", "Pulse", "Quintessence", "Serif", "StaggerWave",
     }
-    _valid_color_types = {
-        "CinematicGrade", "BleachBypass", "VintageFilm", "DreamHaze", "ChromaSplit",
-        "VignettePulse", "InvertStrike", "CineMono", "GoldenHour", "FilmGrain",
-        "Portra", "NeoNoir",
-    }
     _valid_zoom_types = {
         "SmoothPush", "SnapReframe", "FocusWindow", "StepZoom", "LetterboxPush",
         "StageZoom", "DepthPull",
@@ -4267,80 +4166,13 @@ REMOVE_WORDS GUIDANCE:
             flush=True,
         )
 
-    # color_effect — object or null. Pulses use source-time `peak_at_seconds`.
-    _ce_raw = edit_plan.get("color_effect")
-    if _ce_raw is None:
-        edit_plan["color_effect"] = None
-    elif isinstance(_ce_raw, dict):
-        _ct = str(_ce_raw.get("type") or "").strip()
-        if _ct not in _valid_color_types:
-            raise ValueError(f"color_effect.type must be one of {sorted(_valid_color_types)}, got {_ct!r}")
-        _ce_out = {"type": _ct}
-        try:
-            _ce_out["intensity"] = max(0.0, min(1.5, float(_ce_raw.get("intensity"))))
-        except (TypeError, ValueError):
-            raise ValueError("color_effect.intensity must be a number in [0.0, 1.5]")
-        _timing = _ce_raw.get("timing")
-        if not isinstance(_timing, dict):
-            raise ValueError("color_effect.timing must be an object")
-        _mode = str(_timing.get("mode") or "").strip()
-        if _mode not in ("persistent", "pulsed"):
-            raise ValueError(f"color_effect.timing.mode must be 'persistent'|'pulsed', got {_mode!r}")
-        # InvertStrike can only render as pulsed. If Gemini emits the wrong
-        # mode, drop the color_effect entirely and continue — render proceeds
-        # without color grading rather than hard-failing the whole plan.
-        _drop_color_effect = (_ct == "InvertStrike" and _mode != "pulsed")
-        if _drop_color_effect:
-            print(
-                f"[generate-edit] DROP color_effect 'InvertStrike': "
-                f"timing.mode={_mode!r} but InvertStrike only renders as "
-                f"'pulsed'. Render continues without this color_effect.",
-                flush=True,
-            )
-            edit_plan["color_effect"] = None
-        elif _mode == "persistent":
-            _ce_out["timing"] = {"mode": "persistent"}
-            if "fadeInFrames" in _timing:
-                _ce_out["timing"]["fadeInFrames"] = int(_timing["fadeInFrames"])
-        else:
-            _pulses = _timing.get("pulses")
-            if not isinstance(_pulses, list) or not _pulses:
-                raise ValueError("color_effect.timing.pulses must be a non-empty array for pulsed mode")
-            _out_pulses = []
-            for _pi, _p in enumerate(_pulses):
-                if not isinstance(_p, dict):
-                    raise ValueError(f"color_effect.timing.pulses[{_pi}] must be an object")
-                try:
-                    _peak_s = float(_p["peak_at_seconds"])
-                except (KeyError, TypeError, ValueError):
-                    raise ValueError(
-                        f"color_effect.timing.pulses[{_pi}].peak_at_seconds must be a float (source seconds)"
-                    )
-                if _peak_s < 0 or (video_duration > 0 and _peak_s > video_duration):
-                    raise ValueError(
-                        f"color_effect.timing.pulses[{_pi}].peak_at_seconds ({_peak_s}) "
-                        f"outside source [0, {video_duration}]"
-                    )
-                _out_pulses.append({
-                    "peak_at_seconds": _peak_s,
-                    "attackFrames": int(_p.get("attackFrames") or 3),
-                    "holdFrames": int(_p.get("holdFrames") or 4),
-                    "releaseFrames": int(_p.get("releaseFrames") or 12),
-                    "intensity": float(_p.get("intensity", 1.0)),
-                })
-            _ce_out["timing"] = {"mode": "pulsed", "pulses": _out_pulses}
-        # Pass through component-specific extras verbatim. Skip when the
-        # InvertStrike drop fired above — _ce_out is incomplete in that case.
-        if not _drop_color_effect:
-            for _ek in ("grain", "grainStrength", "sunWash", "palette", "offset", "angle", "drift",
-                        "baseDarkness", "baseInnerPct", "color", "punch", "redWeight", "greenWeight",
-                        "blueWeight", "contrastBoost", "grainScale", "grainOctaves", "flicker",
-                        "monochrome", "grainStep", "dustDensity", "scratchDensity"):
-                if _ek in _ce_raw:
-                    _ce_out[_ek] = _ce_raw[_ek]
-            edit_plan["color_effect"] = _ce_out
-    else:
-        raise ValueError(f"color_effect must be an object or null, got {type(_ce_raw).__name__}")
+    # color_effect was removed from the pipeline. The two-renderer split
+    # (PromptlyBase + PromptlyOverlay) renders source video in one Remotion
+    # composition and overlays in another, with FFmpeg compositing — there's
+    # no place a global color grade fits without re-introducing the
+    # full-canvas mixBlendMode paint cost that drove the 140s renders. Keep
+    # the field forced-null so any stale callers don't break.
+    edit_plan["color_effect"] = None
 
     # motion_graphics — array. Each entry validated strictly.
     # motion_graphics — word-anchored (start_word_index + end_word_index, with
@@ -4647,8 +4479,6 @@ REMOVE_WORDS GUIDANCE:
             )
         _em_duration = float(em.get("duration") or 2.0)
         # Visual layer bindings — both fields are required (value or null).
-        # Color pulses aren't a per-emphasis field anymore; they live in
-        # color_effect.timing.pulses via peak_word_index.
         if "zoom_effect" not in em:
             raise ValueError(f"emphasis_moments[{_ei}] missing zoom_effect (emit null if no zoom)")
         if "motion_graphic" not in em:
@@ -5115,11 +4945,10 @@ REMOVE_WORDS GUIDANCE:
         final_cuts.append(_new_cut)
 
     # Zoom and motion graphics are attached to each emphasis_moment explicitly
-    # by Gemini (emphasis_moments[i].zoom_effect / motion_graphic). Color
-    # pulses live in color_effect.timing.pulses with explicit peak_word_index,
-    # not on emphasis. No auto-SnapReframe, no auto-SmoothPush on hook. If
-    # Gemini didn't emit a zoom_effect on a moment, no zoom fires — that's an
-    # intentional decision, not an omission to repair.
+    # by Gemini (emphasis_moments[i].zoom_effect / motion_graphic). No
+    # auto-SnapReframe, no auto-SmoothPush on hook. If Gemini didn't emit a
+    # zoom_effect on a moment, no zoom fires — that's an intentional decision,
+    # not an omission to repair.
 
     # Strip legacy fields that older Gemini outputs (or re-edit plans) may
     # carry. The Remotion-primary pipeline doesn't consume them.
@@ -5194,8 +5023,7 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None)
         "every decision that produced a rendered video. Top-level fields include: cuts, "
         "transitions, caption_style, caption_position_changes (list of {word_index, position}), "
         "caption_position_segments (DERIVED from caption_position_changes — do not edit directly), "
-        "keywords, broll_clips, color_effect (with timing.pulses[].peak_word_index; "
-        "peak_at_seconds is derived — do not edit), text_overlays (each has a variant "
+        "keywords, broll_clips, text_overlays (each has a variant "
         "discriminator: torn_paper|sticky_note|quote_card|lower_third|caption_match), "
         "motion_graphics (with semantic anchor), emphasis_moments (each binds explicit "
         "zoom_effect / motion_graphic), sfx_placements, hook_clip "
@@ -5214,15 +5042,15 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None)
         "Emit a clear clarification_question — do NOT guess.\n\n"
         "2) For 'tweak': produce new_plan with ONLY the explicitly-requested changes. Preserve "
         "cuts, transitions, broll_clips (including pexels_video_id + pexels_file_url + "
-        "clip_in/out), color_effect, sfx_placements, text_overlays, motion_graphics, "
+        "clip_in/out), sfx_placements, text_overlays, motion_graphics, "
         "emphasis_moments, caption_position_changes (and the derived caption_position_segments) "
         "— everything else — unchanged. Every timing decision references a word by index; never "
         "invent or shift a raw timestamp. The pipeline derives timestamps from word_index fields.\n\n"
         "3) Emit changed_fields: dotted paths of what you changed (e.g. ['caption_style', "
-        "'cuts[3].speed', 'caption_position_changes[1].position', 'text_overlays[2].variant', "
-        "'color_effect.timing.pulses[0].peak_word_index']). Empty array for reinterpret or clarification.\n\n"
+        "'cuts[3].speed', 'caption_position_changes[1].position', 'text_overlays[2].variant']). "
+        "Empty array for reinterpret or clarification.\n\n"
         "4) Emit human_summary: one sentence users can read (e.g. 'Changed caption style to "
-        "minimal. Preserved 11 cuts, B-roll, color grade, and 2 text overlays.').\n\n"
+        "minimal. Preserved 11 cuts, B-roll, and 2 text overlays.').\n\n"
         f"PRIOR VIBE: {old_vibe or '(unknown)'}\n\n"
         f"USER CHANGE REQUEST: {change_request}\n\n"
         f"OLD PLAN (JSON):\n{json.dumps(sanitized_old_plan, separators=(',', ':'))}\n\n",
@@ -8076,46 +7904,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # If projection produced nothing, it means total_output_frames is 0.
         raise RuntimeError("caption_position_segments projection produced no output frames")
 
-    # ── 6. Color effect (global) — resolve peak_at_seconds → peakFrame ──────
-    _color_raw = edit_plan.get("color_effect")
-    color_out = None
-    if isinstance(_color_raw, dict):
-        color_out = {
-            "type": _color_raw["type"],
-            "intensity": float(_color_raw["intensity"]),
-        }
-        _timing = _color_raw["timing"]
-        if _timing["mode"] == "persistent":
-            color_out["timing"] = {"mode": "persistent"}
-            if "fadeInFrames" in _timing:
-                color_out["timing"]["fadeInFrames"] = int(_timing["fadeInFrames"])
-        else:
-            # pulsed — resolve each peak_at_seconds (source time) to an output frame.
-            _resolved_pulses = []
-            for _p in _timing["pulses"]:
-                _peak_s = float(_p["peak_at_seconds"])
-                _out_t = project_source_time_to_output(
-                    _peak_s, render_cuts, _clip_ranges, speed_curve,
-                    clip_time_maps=_clip_time_maps,
-                )
-                if _out_t is None:
-                    raise RuntimeError(
-                        f"color_effect pulse peak_at_seconds={_peak_s}s was removed from "
-                        f"the output timeline — Gemini referenced a time in a cut segment."
-                    )
-                _resolved_pulses.append({
-                    "peakFrame": int(round(_out_t * source_fps)),
-                    "attackFrames": _p["attackFrames"],
-                    "holdFrames": _p["holdFrames"],
-                    "releaseFrames": _p["releaseFrames"],
-                    "intensity": _p["intensity"],
-                })
-            color_out["timing"] = {"mode": "pulsed", "pulses": _resolved_pulses}
-        # Component extras pass through.
-        _extras = {k: v for k, v in _color_raw.items() if k not in ("type", "intensity", "timing")}
-        if _extras:
-            color_out["extraProps"] = _extras
-
     # ── 7. Motion graphics — word-anchored, output-projected, semantic-anchor-translated ─
     # Gemini emits start_word_index + end_word_index (plus optional
     # duration_seconds_override). Python projects the anchor words' source-time
@@ -8169,9 +7957,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     # ── 7b. Emphasis moments → output-timeline effect specs ─────────────────
     # Each emphasis moment's visual layers (zoom / MG) get projected and
-    # merged into the Remotion input here. Color pulses are NOT handled here
-    # anymore — they live exclusively in color_effect.timing.pulses with
-    # explicit peak_word_index (processed in the color_effect section above).
+    # merged into the Remotion input here.
     for em in edit_plan.get("_emphasis_moments", []):
         _em_t_out = project_source_time_to_output(
             float(em["t"]), render_cuts, _clip_ranges, speed_curve,
@@ -8356,8 +8142,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         "motionGraphics": motion_graphics_out,
         "outro": _outro,
     }
-    if color_out:
-        remotion_input["colorEffect"] = color_out
 
     remotion_input_json = os.path.join(work_dir, "promptly_render_input.json")
     with open(remotion_input_json, "w") as _f:
@@ -8429,38 +8213,58 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             work_dir, sample_rate=sample_rate,
         )
 
-    # ── 10. Launch Remotion render (blocking; audio future runs in parallel) ─
-    silent_video_path = os.path.join(work_dir, "silent_video.mp4")
-    # Vulkan is the only Remotion gl mode that passes --enable-gpu /
-    # --ignore-gpu-blocklist (see @remotion/renderer/dist/open-browser.js
-    # getOpenGlRenderer()). With angle-egl, headless Chromium silently
-    # falls back to SwiftShader (CPU pixel-pushing, ~9 fps render speed
-    # measured in v51/v52). The H100's NVIDIA driver has full Vulkan
-    # support mounted via NVIDIA_DRIVER_CAPABILITIES='all', and the v52
-    # image installs libvulkan1 + vulkan-tools.
+    # ── 10. Launch TWO Remotion renders in parallel + final ffmpeg composite ─
+    # Two-renderer split (the architecture from the pre-66-pack era):
+    #   PromptlyBase    → base_video.mp4   (h264, video + transitions + zoom + broll)
+    #   PromptlyOverlay → overlay.mov      (ProRes 4444 with alpha, captions + MGs + text)
+    # Run both subprocesses in parallel — they're independent. FFmpeg then
+    # composites the alpha overlay onto the base in a single pass and adds
+    # the audio track. Per-frame paint cost in each composition is a small
+    # fraction of the old monolithic render, so combined wall-clock time
+    # drops from ~150s to ~12-25s on H100 (encoder-bound on libx264 ultrafast).
+    base_video_path = os.path.join(work_dir, "base_video.mp4")
+    overlay_video_path = os.path.join(work_dir, "overlay.mov")
+    # gl=vulkan adds --enable-gpu / --ignore-gpu-blocklist to Chromium, the
+    # only Remotion mode that does so. NVIDIA's Vulkan ICD is registered at
+    # startup (handler.py top-of-file) so the H100 is the rendering target
+    # when available; falls back to SwiftShader if not.
     _gl_mode = "vulkan" if _HAS_HWACCEL else "swiftshader"
-    _remotion_concurrency = max(4, min(int((os.cpu_count() or 32) // 2), 32))
-    # Files are staged into /remotion/bundle/public/{stage_key}/ — the bundle
-    # server serves them directly. --public-dir is a no-op for serving now
-    # (publicDir doesn't actually extend the bundle server's serving roots),
-    # but render-full.mjs's CLI parser still requires the flag, so we pass
-    # work_dir to satisfy it.
-    _render_cmd = [
-        "node", "/remotion/render-full.mjs",
-        "--input", remotion_input_json,
-        "--output", silent_video_path,
-        "--public-dir", work_dir,
-        "--concurrency", str(_remotion_concurrency),
-        "--gl", _gl_mode,
-    ]
-    _render_t0 = time.time()
-    print(f"[render] Launching Remotion render ({_remotion_concurrency} concurrent, gl={_gl_mode}, stage={_stage_key})...", flush=True)
+    # 16 tabs per renderer × 2 renderers = 32 total Chromium tabs. Same total
+    # as before, just split across two processes instead of one. Each
+    # composition has a much lighter per-frame paint, so 16 tabs each is
+    # plenty.
+    _per_renderer_concurrency = max(4, min(int((os.cpu_count() or 32) // 4), 16))
 
-    # ── DIAGNOSTIC: sample CPU/GPU/RAM during the render ─────────────────────
-    # If render is software-rendering (Chromium fallback to SwiftShader), GPU
-    # util will be ~0% and CPU will be saturated. If GPU is doing the work,
-    # we'll see GPU util > 30% during render. This is the smoking-gun probe
-    # for the most likely root cause of the slow render.
+    def _build_render_cmd(_composition_id, _output_path):
+        return [
+            "node", "/remotion/render-full.mjs",
+            "--input", remotion_input_json,
+            "--output", _output_path,
+            "--public-dir", work_dir,
+            "--concurrency", str(_per_renderer_concurrency),
+            "--gl", _gl_mode,
+            "--composition", _composition_id,
+        ]
+
+    _render_t0 = time.time()
+    print(
+        f"[render] Launching parallel Remotion renders "
+        f"(2x{_per_renderer_concurrency} concurrent tabs, gl={_gl_mode}, stage={_stage_key}): "
+        f"PromptlyBase → base_video.mp4, PromptlyOverlay → overlay.mov",
+        flush=True,
+    )
+
+    # Spawn both render subprocesses; wait for both to complete.
+    _base_proc = subprocess.Popen(
+        _build_render_cmd("PromptlyBase", base_video_path),
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    _overlay_proc = subprocess.Popen(
+        _build_render_cmd("PromptlyOverlay", overlay_video_path),
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+
+    # ── DIAGNOSTIC: sample CPU/GPU/RAM during the parallel renders ───────────
     _metrics_stop = threading.Event()
     _metrics_samples = []
 
@@ -8468,7 +8272,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         import time as _t
         while not _metrics_stop.is_set():
             _sample = {"ts": _t.time()}
-            # GPU
             try:
                 _gpu_r = subprocess.run(
                     ["nvidia-smi",
@@ -8485,10 +8288,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                         _sample["gpu_mem_total_mb"] = int(_parts[3])
             except Exception:
                 pass
-            # CPU + RAM
             try:
-                with open("/proc/loadavg") as _lf:
-                    _sample["loadavg"] = _lf.read().strip().split()[0]
                 with open("/proc/meminfo") as _mf:
                     _meminfo = {}
                     for _line in _mf:
@@ -8497,7 +8297,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                     _mem_total_kb = int(_meminfo.get("MemTotal", "0 kB").split()[0])
                     _mem_avail_kb = int(_meminfo.get("MemAvailable", "0 kB").split()[0])
                     _sample["mem_used_mb"] = (_mem_total_kb - _mem_avail_kb) // 1024
-                    _sample["mem_total_mb"] = _mem_total_kb // 1024
             except Exception:
                 pass
             _metrics_samples.append(_sample)
@@ -8508,72 +8307,58 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     _render_elapsed = 0.0
     try:
-        _render_r = subprocess.run(_render_cmd, capture_output=True, text=True, timeout=900)
+        _base_stdout, _base_stderr = _base_proc.communicate(timeout=900)
+        _overlay_stdout, _overlay_stderr = _overlay_proc.communicate(timeout=900)
         _render_elapsed = time.time() - _render_t0
-        if _render_r.returncode != 0:
-            raise RuntimeError(
-                f"Remotion render failed (rc={_render_r.returncode}): "
-                f"{(_render_r.stderr or '')[-2000:]}"
-            )
-        # DIAGNOSTIC: echo ALL Remotion stdout (not just last 40) so we see
-        # gpu-info + per-progress timing samples.
-        if _render_r.stdout:
-            for _line in _render_r.stdout.split("\n"):
+
+        for _label, _proc, _out, _err, _path in (
+            ("PromptlyBase", _base_proc, _base_stdout, _base_stderr, base_video_path),
+            ("PromptlyOverlay", _overlay_proc, _overlay_stdout, _overlay_stderr, overlay_video_path),
+        ):
+            if _proc.returncode != 0:
+                raise RuntimeError(
+                    f"Remotion {_label} render failed (rc={_proc.returncode}): "
+                    f"{(_err or '')[-2000:]}"
+                )
+            for _line in (_out or "").split("\n"):
                 if _line.strip():
-                    print(f"[remotion] {_line}", flush=True)
-        # DIAGNOSTIC: echo only high-signal stderr lines. We keep Remotion's
-        # actual error/warning output and any "Seeking to frame ... took Xms"
-        # latency reports (the smoking-gun signal for video-seek slowness),
-        # but drop the per-frame compositor stream that dwarfs everything.
-        if _render_r.stderr:
-            _kept_err_prefixes = ("Error", "WARNING", "warn", "Seeking to frame")
-            _err_lines = []
-            for _line in _render_r.stderr.split("\n"):
-                _stripped = _line.strip()
-                if not _stripped:
-                    continue
-                if any(_stripped.startswith(_p) for _p in _kept_err_prefixes):
-                    _err_lines.append(_line)
-            # Cap at 60 lines to avoid runaway noise even on heavily-degraded runs.
-            for _line in _err_lines[:60]:
-                print(f"[remotion-err] {_line}", flush=True)
-            if len(_err_lines) > 60:
-                print(f"[remotion-err] ... ({len(_err_lines) - 60} more elided) ...", flush=True)
-        if not os.path.exists(silent_video_path) or os.path.getsize(silent_video_path) < 10000:
-            raise RuntimeError(f"Remotion produced invalid output: {silent_video_path}")
-        print(f"[render] Remotion video done in {_render_elapsed:.1f}s ({os.path.getsize(silent_video_path)/1024/1024:.1f}MB silent mp4)", flush=True)
+                    print(f"[remotion:{_label}] {_line}", flush=True)
+            if _err:
+                _kept_err_prefixes = ("Error", "WARNING", "warn", "Seeking to frame")
+                _err_lines = [
+                    _l for _l in _err.split("\n")
+                    if _l.strip() and any(_l.strip().startswith(_p) for _p in _kept_err_prefixes)
+                ]
+                for _l in _err_lines[:30]:
+                    print(f"[remotion-err:{_label}] {_l}", flush=True)
+                if len(_err_lines) > 30:
+                    print(f"[remotion-err:{_label}] ... ({len(_err_lines) - 30} more elided) ...", flush=True)
+            if not os.path.exists(_path) or os.path.getsize(_path) < 10000:
+                raise RuntimeError(f"Remotion {_label} produced invalid output: {_path}")
+        print(
+            f"[render] Both Remotion renders done in {_render_elapsed:.1f}s "
+            f"(base={os.path.getsize(base_video_path)/1024/1024:.1f}MB, "
+            f"overlay={os.path.getsize(overlay_video_path)/1024/1024:.1f}MB)",
+            flush=True,
+        )
     finally:
         _metrics_stop.set()
         _metrics_thread.join(timeout=2)
-        # DIAGNOSTIC: summarize the metrics samples.
         if _metrics_samples:
             _gpu_utils = [s.get("gpu_util_pct") for s in _metrics_samples if "gpu_util_pct" in s]
             _gpu_mems = [s.get("gpu_mem_used_mb") for s in _metrics_samples if "gpu_mem_used_mb" in s]
             _mem_useds = [s.get("mem_used_mb") for s in _metrics_samples if "mem_used_mb" in s]
-            _loads = [float(s.get("loadavg", 0)) for s in _metrics_samples if "loadavg" in s]
             _summarize = lambda lst: (
                 f"avg={sum(lst)/len(lst):.0f} min={min(lst)} max={max(lst)} n={len(lst)}"
                 if lst else "(no samples)"
             )
             if _gpu_utils:
                 print(f"[metrics] GPU util %:   {_summarize(_gpu_utils)}", flush=True)
-                if max(_gpu_utils) < 5:
-                    print(
-                        f"[metrics] *** GPU UTIL ~0% — Chromium is NOT using the H100 for rendering. "
-                        f"Render is software-bound on CPU. This is the bottleneck. ***",
-                        flush=True,
-                    )
             if _gpu_mems:
                 print(f"[metrics] GPU mem MB:   {_summarize(_gpu_mems)}", flush=True)
             if _mem_useds:
                 print(f"[metrics] System RAM MB used: {_summarize(_mem_useds)}", flush=True)
-            if _loads:
-                print(f"[metrics] CPU loadavg(1m):    avg={sum(_loads)/len(_loads):.1f} min={min(_loads):.1f} max={max(_loads):.1f}", flush=True)
             print(f"[metrics] Sampled {len(_metrics_samples)} times over {_render_elapsed:.1f}s render", flush=True)
-        # Clean up staged symlinks (per-job dir under bundle/public/) so the
-        # bundle filesystem doesn't accumulate dead links across warm-container
-        # invocations. shutil.rmtree on a dir of symlinks removes only the
-        # links; their targets in work_dir are unaffected.
         try:
             shutil.rmtree(_stage_dir, ignore_errors=True)
         except Exception as _rm_err:
@@ -8648,26 +8433,34 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _audio_elapsed = time.time() - _audio_t0
     print(f"[render] Final audio built in {_audio_elapsed:.1f}s → {_final_audio_path}", flush=True)
 
-    # ── 12. Mux silent video + final audio → output.mp4 (no video re-encode) ─
+    # ── 12. Final composite — overlay alpha onto base + add audio (one pass) ─
+    # FFmpeg's `overlay` filter alpha-blends overlay.mov (ProRes 4444) onto
+    # base_video.mp4 (h264). Single re-encode pass at libx264 ultrafast CRF 18
+    # — visually indistinguishable from the source-quality base, ~3-5s on
+    # 64 cores. Audio is stream-copied from the m4a we built in parallel.
     _mux_t0 = time.time()
     _mux_cmd = [
-        "ffmpeg", "-y", "-v", "warning",
-        "-i", silent_video_path,
+        "ffmpeg", "-y", "-v", "warning", "-threads", "0",
+        "-i", base_video_path,
+        "-i", overlay_video_path,
         "-i", _final_audio_path,
-        "-map", "0:v:0", "-c:v", "copy",
-        "-map", "1:a:0", "-c:a", "copy",
+        "-filter_complex", "[0:v][1:v]overlay=format=auto[v]",
+        "-map", "[v]",
+        "-map", "2:a:0", "-c:a", "copy",
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
+        "-pix_fmt", "yuv420p",
         "-shortest",
         "-movflags", "+faststart",
         output_path,
     ]
-    _mux_r = subprocess.run(_mux_cmd, capture_output=True, text=True, timeout=120)
+    _mux_r = subprocess.run(_mux_cmd, capture_output=True, text=True, timeout=180)
     if _mux_r.returncode != 0:
-        raise RuntimeError(f"Final mux failed: {(_mux_r.stderr or '')[-500:]}")
+        raise RuntimeError(f"Final composite failed: {(_mux_r.stderr or '')[-800:]}")
     _mux_elapsed = time.time() - _mux_t0
-    print(f"[render] Mux done in {_mux_elapsed:.1f}s", flush=True)
+    print(f"[render] Final composite (overlay+audio mux) done in {_mux_elapsed:.1f}s", flush=True)
     print(
         f"[render] Total render: remotion={_render_elapsed:.1f}s audio={_audio_elapsed:.1f}s "
-        f"mux={_mux_elapsed:.1f}s → {os.path.getsize(output_path)/1024/1024:.1f}MB",
+        f"composite={_mux_elapsed:.1f}s → {os.path.getsize(output_path)/1024/1024:.1f}MB",
         flush=True,
     )
 
@@ -8679,12 +8472,6 @@ VALID_CAPTION_STYLES = {
     "Prime", "Prism", "TypewriterReveal", "CinematicLetterpress", "Cove",
     "Dimidium", "EditorialPop", "Gadzhi", "Illuminate", "Lumen",
     "MagazineCutout", "Passage", "Pulse", "Quintessence", "Serif", "StaggerWave",
-}
-
-VALID_COLOR_TYPES = {
-    "CinematicGrade", "BleachBypass", "VintageFilm", "DreamHaze", "ChromaSplit",
-    "VignettePulse", "InvertStrike", "CineMono", "GoldenHour", "FilmGrain",
-    "Portra", "NeoNoir",
 }
 
 VALID_TRANSITION_TYPES = {

@@ -47,6 +47,12 @@ let concurrency = null;
 // falls through to SwiftShader. NVIDIA H100 has first-class Vulkan via
 // the NVIDIA driver; this is the most reliable hardware path on Modal.
 let glMode = "vulkan";
+// Two-renderer split: "PromptlyBase" (h264, video + transitions + zoom +
+// broll) or "PromptlyOverlay" (ProRes 4444 with alpha — captions + MGs +
+// text overlays on transparent canvas). handler.py launches one of each
+// in parallel and FFmpeg composites the alpha overlay onto the base in
+// the final mux step.
+let compositionId = "PromptlyBase";
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--input" && args[i + 1]) inputPath = args[++i];
@@ -54,12 +60,20 @@ for (let i = 0; i < args.length; i++) {
   else if (args[i] === "--public-dir" && args[i + 1]) publicDir = args[++i];
   else if (args[i] === "--concurrency" && args[i + 1]) concurrency = parseInt(args[++i], 10);
   else if (args[i] === "--gl" && args[i + 1]) glMode = args[++i];
+  else if (args[i] === "--composition" && args[i + 1]) compositionId = args[++i];
 }
 
 if (!inputPath || !outputPath || !publicDir) {
-  console.error("Usage: node render-full.mjs --input <json> --output <mp4> --public-dir <dir> [--concurrency N] [--gl mode]");
+  console.error("Usage: node render-full.mjs --input <json> --output <mp4|mov> --public-dir <dir> [--concurrency N] [--gl mode] [--composition PromptlyBase|PromptlyOverlay]");
   process.exit(1);
 }
+
+if (compositionId !== "PromptlyBase" && compositionId !== "PromptlyOverlay") {
+  console.error(`[render-full] --composition must be "PromptlyBase" or "PromptlyOverlay", got "${compositionId}"`);
+  process.exit(1);
+}
+
+const isOverlay = compositionId === "PromptlyOverlay";
 
 if (!existsSync(inputPath)) {
   console.error(`[render-full] Input JSON not found: ${inputPath}`);
@@ -80,7 +94,8 @@ const cpuCount = os.cpus().length;
 const resolvedConcurrency = concurrency && concurrency > 0 ? concurrency : Math.max(1, Math.floor(cpuCount / 2));
 
 console.log(
-  `[render-full] ${inputJson.clips?.length ?? 0} clips, ${inputJson.transitions?.length ?? 0} transitions, ` +
+  `[render-full] composition=${compositionId} (${isOverlay ? "ProRes 4444 alpha" : "h264"}) ` +
+  `${inputJson.clips?.length ?? 0} clips, ${inputJson.transitions?.length ?? 0} transitions, ` +
   `${inputJson.broll?.length ?? 0} broll, ${inputJson.motionGraphics?.length ?? 0} MG, ` +
   `${inputJson.totalDurationInFrames} frames, concurrency=${resolvedConcurrency}`,
 );
@@ -210,7 +225,7 @@ try {
 const tComp = Date.now();
 const composition = await selectComposition({
   serveUrl: bundleLocation,
-  id: "PromptlyRender",
+  id: compositionId,
   inputProps,
   puppeteerInstance: browser,
   publicDir,
@@ -234,14 +249,18 @@ const _intervalSamples = [];
 await renderMedia({
   serveUrl: bundleLocation,
   composition,
-  codec: "h264",
+  // Two-renderer split codec selection:
+  //   PromptlyBase     → h264 yuv420p (no alpha, fast encode, small file)
+  //   PromptlyOverlay  → ProRes 4444 yuva444p10le (alpha, fast encode, larger
+  //                      but acceptable since file is short-lived intermediate)
+  codec: isOverlay ? "prores" : "h264",
+  ...(isOverlay
+    ? { proResProfile: "4444", pixelFormat: "yuva444p10le" }
+    : { x264Preset: "ultrafast", crf: 18, pixelFormat: "yuv420p" }),
   outputLocation: outputPath,
   inputProps,
   concurrency: resolvedConcurrency,
   muted: true,
-  x264Preset: "ultrafast",
-  crf: 18,
-  pixelFormat: "yuv420p",
   enforceAudioTrack: false,
   overwrite: true,
   puppeteerInstance: browser,

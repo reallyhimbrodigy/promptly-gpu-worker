@@ -168,40 +168,6 @@ export interface CaptionSpec {
   extraProps?: Record<string, unknown>;
 }
 
-// ── Color effects ────────────────────────────────────────────────────────────
-export type ColorEffectType =
-  | "CinematicGrade"
-  | "BleachBypass"
-  | "VintageFilm"
-  | "DreamHaze"
-  | "ChromaSplit"
-  | "VignettePulse"
-  | "InvertStrike"
-  | "CineMono"
-  | "GoldenHour"
-  | "FilmGrain"
-  | "Portra"
-  | "NeoNoir";
-
-export interface ColorPulseSpec {
-  peakFrame: number;
-  attackFrames?: number;
-  holdFrames?: number;
-  releaseFrames?: number;
-  intensity?: number;
-}
-
-export type ColorTiming =
-  | { mode: "persistent"; fadeInFrames?: number }
-  | { mode: "pulsed"; pulses: ColorPulseSpec[] };
-
-export interface ColorEffectSpec {
-  type: ColorEffectType;
-  intensity: number;
-  timing: ColorTiming;
-  extraProps?: Record<string, unknown>;
-}
-
 // ── Motion graphics ──────────────────────────────────────────────────────────
 export type MotionGraphicType =
   | "LowerThird"
@@ -297,7 +263,6 @@ export interface PromptlyRenderInput {
   broll: BrollSpec[];
   caption: CaptionSpec;
   textOverlays: TextOverlaySpec[];
-  colorEffect?: ColorEffectSpec;
   motionGraphics: MotionGraphicSpec[];
   outro?: "none" | "fade_black" | "fade_white";
 }

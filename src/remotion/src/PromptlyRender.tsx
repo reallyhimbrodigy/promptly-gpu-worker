@@ -16,11 +16,9 @@ import type {
   TransitionSpec,
   BrollSpec,
   CaptionSpec,
-  ColorEffectSpec,
   MotionGraphicSpec,
   TextOverlaySpec,
   TikTokPageLike,
-  CaptionPositionSegment,
 } from "./types";
 
 // Caption styles — all 21
@@ -30,13 +28,6 @@ import {
   Dimidium, EditorialPop, Gadzhi, Illuminate, Lumen,
   MagazineCutout, Passage, Pulse, Quintessence, Serif, StaggerWave,
 } from "./captions";
-
-// Color effects — all 12
-import {
-  CinematicGrade, BleachBypass, VintageFilm, DreamHaze, ChromaSplit,
-  VignettePulse, InvertStrike, CineMono, GoldenHour, FilmGrain,
-  Portra, NeoNoir,
-} from "./color-effects";
 
 // Transitions — all 11
 import {
@@ -66,12 +57,6 @@ const CAPTION_MAP: Record<string, React.FC<any>> = {
   MagazineCutout, Passage, Pulse, Quintessence, Serif, StaggerWave,
 };
 
-const COLOR_MAP: Record<string, React.FC<any>> = {
-  CinematicGrade, BleachBypass, VintageFilm, DreamHaze, ChromaSplit,
-  VignettePulse, InvertStrike, CineMono, GoldenHour, FilmGrain,
-  Portra, NeoNoir,
-};
-
 const TRANSITION_MAP: Record<string, React.FC<any>> = {
   CardSwipe, ZoomThrough, SlideOver, Stack, CrossfadeZoom,
   ShutterFlash, LightLeak, StepPush, NewspaperWipe, FilmStrip, SceneTitle,
@@ -88,14 +73,6 @@ const MG_MAP: Record<string, React.FC<any>> = {
   TornPaper, StickyNotes, Toggle, RecordingFrame,
   TweetBubble, InstagramComment, IMessageBubble, TikTokComment,
 };
-
-// ─── Canvas + safe zone constants (1080×1920) ──────────────────────────────
-const CANVAS_W = 1080;
-const CANVAS_H = 1920;
-const SAFE_X_MIN = 60;
-const SAFE_X_MAX = 1020;
-const SAFE_Y_MIN = 108;
-const SAFE_Y_MAX = 1812;
 
 // ─── Per-clip renderer ─────────────────────────────────────────────────────
 const ClipRenderer: React.FC<{ clip: ClipSpec; sourceUrl: string }> = ({
@@ -236,9 +213,6 @@ const CaptionSegmentRenderer: React.FC<{
 }) => {
   const Comp = CAPTION_MAP[style];
   if (!Comp) return null;
-  // Select only the pages whose [startMs, startMs+durationMs) intersects
-  // the segment window, and rebase their startMs to segment-local time so
-  // the inner caption component's useCurrentFrame aligns correctly.
   const segStartMs = Math.round((segmentStartFrame / fps) * 1000);
   const segEndMs = Math.round(((segmentStartFrame + segmentDurationInFrames) / fps) * 1000);
   const clippedPages: TikTokPageLike[] = [];
@@ -247,7 +221,6 @@ const CaptionSegmentRenderer: React.FC<{
     const pEnd = page.startMs + page.durationMs;
     if (pEnd <= segStartMs) continue;
     if (pStart >= segEndMs) continue;
-    // Rebase so startMs is relative to segment start.
     const localStart = pStart - segStartMs;
     clippedPages.push({
       ...page,
@@ -300,7 +273,6 @@ const CaptionsLayer: React.FC<{ caption: CaptionSpec; fps: number }> = ({
 };
 
 // ─── Text overlay variants ─────────────────────────────────────────────────
-// Build a caption-style page for caption_match variant.
 const buildOverlayPage = (
   text: string,
   durationInFrames: number,
@@ -425,11 +397,6 @@ const TextOverlaysLayer: React.FC<{
 );
 
 // ─── Motion graphics ───────────────────────────────────────────────────────
-// Each MG component was built to render against the full 1080×1920 canvas
-// using its own `resolveMGPosition(props.anchor, offsetX, offsetY, scale)`
-// against an AbsoluteFill. Python has already translated the safe-zone anchor
-// into an MGAnchor and merged it into `props.anchor`. We render the component
-// directly — no wrapper, no size assumptions, no face lookup.
 const MotionGraphicRenderer: React.FC<{
   spec: MotionGraphicSpec;
   fps: number;
@@ -478,59 +445,50 @@ const OutroFade: React.FC<{ kind: "fade_black" | "fade_white" }> = ({ kind }) =>
   );
 };
 
-// Resolve a basename or absolute URL into a Remotion-servable URL.
-// Bare basenames (e.g. "source_30fps.mp4") are local files in publicDir
-// and MUST be wrapped in staticFile() — without it, Remotion's bundle
-// HTTP server tries to resolve against the bundle dir and 404s. Absolute
-// URLs (http(s)://, file://) and protocol-relative URLs pass through.
 const resolveSrc = (s: string): string => {
   if (!s) return s;
   if (/^[a-z][a-z0-9+.-]*:/i.test(s) || s.startsWith("//")) return s;
   return staticFile(s);
 };
 
-// ─── Top-level composition ─────────────────────────────────────────────────
-export const PromptlyRender: React.FC<PromptlyRenderProps> = ({ input }) => {
-  const {
-    sourceUrl, clips, transitions, broll, caption,
-    colorEffect, motionGraphics, outro, textOverlays, fps,
-  } = input;
-
-  // Resolve once at the boundary; every child component receives a URL
-  // already resolved against publicDir.
+// ─── PromptlyBase composition ──────────────────────────────────────────────
+// Renders ONLY the underlying video timeline: clips, transitions, zoom, B-roll.
+// Black background, no overlays. This is what FFmpeg used to do in the
+// pre-66-pack era — it's intentionally minimal so per-frame paint cost stays
+// at "video frame copy" levels.
+//
+// The Outro fade is included here because it's a full-canvas color overlay
+// that operates on the underlying video, not on text/MG overlays.
+export const PromptlyBase: React.FC<PromptlyRenderProps> = ({ input }) => {
+  const { sourceUrl, clips, transitions, broll, outro } = input;
   const resolvedSourceUrl = resolveSrc(sourceUrl);
   const resolvedBroll = React.useMemo(
     () => broll.map((b) => ({ ...b, src: resolveSrc(b.src) })),
     [broll],
   );
 
-  const content = (
-    <>
-      <ClipSeries clips={clips} transitions={transitions} sourceUrl={resolvedSourceUrl} />
-      <BrollOverlays broll={resolvedBroll} />
-    </>
-  );
-
-  let graded: React.ReactNode;
-  if (colorEffect) {
-    const ColorComp = COLOR_MAP[colorEffect.type];
-    if (ColorComp) {
-      const { type: _t, intensity, timing, extraProps } = colorEffect;
-      graded = (
-        <ColorComp intensity={intensity} timing={timing} {...(extraProps ?? {})}>
-          {content}
-        </ColorComp>
-      );
-    } else {
-      graded = content;
-    }
-  } else {
-    graded = content;
-  }
-
   return (
     <AbsoluteFill style={{ background: "#000" }}>
-      {graded}
+      <ClipSeries clips={clips} transitions={transitions} sourceUrl={resolvedSourceUrl} />
+      <BrollOverlays broll={resolvedBroll} />
+      {outro && outro !== "none" ? <OutroFade kind={outro} /> : null}
+    </AbsoluteFill>
+  );
+};
+
+// ─── PromptlyOverlay composition ───────────────────────────────────────────
+// Renders ONLY the text/graphic overlay layer on a TRANSPARENT canvas:
+// captions, motion graphics, text overlays. No video, no transitions, no
+// zoom, no B-roll. Per-frame paint cost is tiny (small painted regions on
+// transparent background).
+//
+// Output is encoded with alpha (ProRes 4444) so FFmpeg can composite it
+// over the base in the final mux step.
+export const PromptlyOverlay: React.FC<PromptlyRenderProps> = ({ input }) => {
+  const { caption, motionGraphics, textOverlays, fps } = input;
+
+  return (
+    <AbsoluteFill style={{ background: "transparent" }}>
       <CaptionsLayer caption={caption} fps={fps} />
       <TextOverlaysLayer
         overlays={textOverlays ?? []}
@@ -540,7 +498,20 @@ export const PromptlyRender: React.FC<PromptlyRenderProps> = ({ input }) => {
         fps={fps}
       />
       <MotionGraphicsLayer items={motionGraphics} fps={fps} />
-      {outro && outro !== "none" ? <OutroFade kind={outro} /> : null}
     </AbsoluteFill>
+  );
+};
+
+// ─── Backward-compat alias ─────────────────────────────────────────────────
+// Kept so older code paths or external callers that import `PromptlyRender`
+// don't break — it now renders the union of base + overlay (the pre-split
+// behavior, minus color effects which are deleted from the schema). New
+// production renders use the split path via Root.tsx's two compositions.
+export const PromptlyRender: React.FC<PromptlyRenderProps> = ({ input }) => {
+  return (
+    <>
+      <PromptlyBase input={input} />
+      <PromptlyOverlay input={input} />
+    </>
   );
 };
