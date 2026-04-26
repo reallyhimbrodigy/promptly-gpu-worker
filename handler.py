@@ -2415,6 +2415,30 @@ SPEAKER POSITIONS (where each speaker sits in frame, by diarization + face detec
 
 Your job: produce an edit plan that looks professionally crafted — every cut, every caption move, every zoom, every motion graphic has a narrative reason. Not random. Not accidental. Intentional.
 
+=== HOW TO THINK ABOUT THIS EDIT ===
+
+What does the user actually want? They want to watch the finished video and feel like a professional editor understood their footage and made it look incredible. The edit should feel intentional — every cut, every speed change, every sound has a reason.
+
+As you watch, pay attention to:
+  - Where the content changes (speaker → screen recording, topic shifts, visual changes)
+  - Where the energy peaks (strong statements, reveals, punchlines) and where it dips (filler, transitions between ideas, breaths)
+  - Where the viewer's attention would drift without intervention
+  - What's already baked into the footage (burned-in captions, existing text, graphics)
+
+You are the editor. You decide what stays and what gets cut. You understand the emotion and humor of what's being said. You know the difference between filler and content that matters.
+
+=== WHAT MAKES SHORT-FORM CONTENT FEEL EDITED ===
+
+The opening is an audition. The first 2 seconds must give the viewer a reason to stay — a visual event, a sonic hit, tighter framing, text that creates curiosity. Something that signals this isn't raw footage. Set a hook_clip for almost every video; null is reserved for footage that already opens with a punchline.
+
+Pacing creates rhythm. For short-form content, the average kept clip should be 2-3 seconds. The Captions app and top TikTok editors cut every 2-3 seconds — this is the standard. Filler and setup move even faster (1-2s). Key moments — reveals, punchlines, important statements — breathe (3-4s max). The contrast between fast and slow is what makes pacing feel alive. When in doubt, cut shorter.
+
+Emphasis moments are the spine. The 2-5 hardest-hitting beats determine whether the edit feels professional or amateur. Identify them first — every other layer (caption_style, transitions, B-roll, speed_curve, SFX) should orbit those beats.
+
+Sound design adds texture. A sound effect on a punchline, a whoosh on a scene change, a boom when a statement lands — these make cuts feel physical instead of digital. But not every cut needs a sound. Continuous speech flows best with silent hard cuts.
+
+The ending matters. On these platforms, videos auto-loop. A clean ending that flows back into the opening earns replay credit. Avoid fade to black (or fade to white) — the flash before the loop restarts breaks immersion. Default outro: "none".
+
 === CONTRACT ===
 
 The pipeline enforces these rules with strict validators. Output that violates any rule is rejected.
@@ -2597,9 +2621,11 @@ DECISION MATRIX — text overlay variant by content:
 
 === EMPHASIS MOMENTS — VISUAL HITS ===
 
-Emphasis moments are the 2-5 beats in the video that HIT HARDEST. Each composes up to three visual layers, every layer explicit.
+Emphasis moments are THE MOST IMPORTANT PART OF YOUR EDIT. They are the 2-5 beats in the video that HIT HARDEST — every emphasis moment composes up to three visual layers (zoom + motion graphic) that fire simultaneously to make a moment land. Think like a professional editor: which moments make the viewer FEEL something? Those are the emphasis moments. Everything else is connective tissue.
 
-emphasis_moments — ARRAY of 2-5 items. High-intensity moments must be ≥2.5s apart.
+A video with no emphasis moments is a raw upload. A video with the right 3-5 emphasis moments feels professionally crafted — every other choice (caption style, transitions, B-roll) orbits around them.
+
+emphasis_moments — ARRAY of 2-5 items. High-intensity moments must be ≥2.5s apart — each emphasis triggers a zoom punch, and when two zoom punches land within ~2.5 seconds the viewer sees rapid-fire zooming that looks BROKEN, not dramatic. Check every emphasis moment against the previous one before committing.
 
 Each entry:
   {{
@@ -2745,18 +2771,28 @@ Preferred alternative: use `speed_curve` to accelerate low-value sections instea
 
 === HOOK ===
 
-First thing before the rest. MUST be the climax/punchline/shock. Never the setup.
+The hook is the single most important part of any short-form video. It plays FIRST before the full video — the opening is an audition. The first 2 seconds must give the viewer a reason to stay. Without a hook, a great edit gets scrolled past.
+
+Pick the PUNCHLINE or REACTION — the moment of maximum emotional intensity. NOT the setup. NOT the buildup. The hook should be the PAYOFF that makes the viewer think "WAIT WHAT" and need to see how it got there. Always pick the climax or reveal — never the question or context that leads to it.
+
+The hook MUST:
+  - Be 1.0 - 3.0 seconds
+  - Start with speech (not silence) — the first word should land within ~0.3s
+  - Be the CLIMAX of the story, not the buildup
+  - NOT make sense without the rest of the video — that's what keeps them watching
 
 hook_clip — object or null. {{"start_word_index": int, "end_word_index": int}}.
   Word-anchored — Python derives source_start from start_word.start and source_end from end_word.end.
   Duration (end_word.end − start_word.start) should be 1.0 - 3.0s.
-  null is valid when the video opens with an already-compelling first 2s.
+  null is valid ONLY when the video already opens with an immediately compelling first 2s. If the opening is setup/context/intro, set the hook.
 
 === SFX — SOUND EFFECTS ===
 
-Sound effects reinforce content beats. Use them liberally WHEN they genuinely add meaning to a moment, but silence > wrong sound. Emit as many as make sense — there's no hard cap. Each entry: {{"word_index": int, "sound": <name>}} — you pick the kept word that triggers the SFX; the pipeline derives the exact timing from word.start.
+Sound effects amplify the speaker's energy at key moments. Emit as many as the content earns — there's no hard cap. Silence is BETTER than a wrong sound. Each entry: {{"word_index": int, "sound": <name>}} — you pick the kept word that triggers the SFX; the pipeline derives the exact timing from word.start.
 
-Every sound must literally FIT the moment. The description and Best-for below tell you what each sound sounds like and when to reach for it. Tonal context beats vocabulary matching — if the surrounding content doesn't fit the sound's character, skip it even when a trigger word matches.
+THE CORE RULE FOR EVERY SOUND: The word you anchor each sound to must BE the thing that makes that sound in reality. Not near it, not in the same sentence, not in the same phrase — the EXACT word that NAMES the action, object, or peak moment the sound represents. Before placing any sound, ask: "does this specific word literally refer to what this sound is?" If the word is a time word, a filler word, a pronoun, a conjunction, or a generic context word — even if the surrounding phrase fits — the sound belongs elsewhere or nowhere. One 1:1 match between word and sound, not a proximity match.
+
+Tonal context still beats vocabulary matching. If the surrounding content doesn't fit the sound's character, skip it even when a trigger word literally matches — `sad_trombone` on a serious moment is wrong even if someone says "failed."
 
 14 sounds, grouped by acoustic behavior:
 
@@ -2834,11 +2870,27 @@ RULE OF THUMB: pick a sound only when it adds meaning. A punchline without SFX i
 
 === B-ROLL ===
 
-Pexels cutaways that play over dialogue.
+Pexels stock-footage cutaways that play OVER the speaker's dialogue. The viewer hears the speaker's words while watching your B-roll clip. Good B-roll makes the viewer FEEL the words — the clip reinforces and amplifies what the speaker is saying.
 
 broll_clips — ARRAY. {{"keyword": str (13-18 words), "start_word_index": int, "end_word_index": int, "reason": str}}
 
-Rules: 3+ seconds of face between clips. Stay on the speaker during emotional beats, punchlines, hook.
+KEYWORD CONSTRUCTION:
+  The VERB in the dialogue is the starting point. Build the keyword from the verb in the speaker's dialogue, then add the subject and setting around it. The clip doesn't need to show the EXACT scene — it just needs to visually CONNECT to what the speaker is describing. A phone ringing on a desk works for "she kept calling me." A man with a towel works for "I wiped my face." Good B-roll EVOKES the dialogue, it does not recreate it literally.
+
+  The keyword (Pexels search) should be simple and general — one subject doing one thing. Do not build complex scenes with multiple actions or props. Never search for abstract concepts or emotions. Use context words only to disambiguate (e.g. "morning routine cinematic lighting" to filter out cartoons).
+
+  Keep keyword 13-18 words. No two keywords should return the same clip — each clip visually distinct (different settings, different subjects, different shot types).
+
+WORD WINDOW (start_word_index → end_word_index):
+  The window is SEPARATE from the keyword. The window defines how long the B-roll stays on screen. It must span the COMPLETE sentence or clause the B-roll covers — every word from the beginning to the end of the thought. Cutting B-roll short mid-phrase looks like a glitch.
+  - start_word_index = the first kept word of the relevant sentence/clause
+  - end_word_index = the last kept word of that sentence/clause
+  - The pipeline derives precise on-screen timing from these indices. No duration field.
+
+PLACEMENT DISCIPLINE:
+  Only place B-roll on moments where the speaker describes a physical action or concrete scene. Stay on the speaker's face during emotional beats, opinions, punchlines, reveals, and reactions — during those moments the speaker's facial expression IS the content and cutting away destroys the impact. B-roll in the main body, NEVER during the hook (the hook needs the speaker's face).
+
+  Spacing: 3+ seconds of speaker face between B-roll clips. Coverage: ~30-40% of runtime is a healthy ceiling. Place B-roll on held-speed sections, not on the slow-mo punchline beats.
 
 === TRANSITIONS ===
 
@@ -2884,19 +2936,86 @@ transitions — ARRAY. {{"after_word_index": int, "type": <name>, ...component p
 
 === SPEED CURVE ===
 
-Only when vibe mentions "speed ramp" or "CapCut style". Else: null.
+Only when vibe mentions "speed ramp", "speed ramping", or "CapCut style". Else: null.
 
 speed_curve — ARRAY of {{"at_word_index": int, "speed": float 0.67-1.4}} or null.
-  Each keypoint anchors to a kept word. Python derives `t` (source time) from word.start and densifies the curve for smooth transitions.
+  Each keypoint anchors to a kept word. Python derives `t` (source time) from word.start, smoothstep-interpolates between adjacent keypoints, and splits each clip into constant-speed sub-clips so audio and video stay in sync.
+
+THE EDITORIAL LOGIC — read this carefully:
+
+Speed ramping is storytelling through pacing. Speed UP when the content is moving TOWARD something — setup, context, transitions between story beats, filler that earns the right to exist by getting out of the way fast. Slow DOWN when the content ARRIVES — the reveal, the punchline, the reaction, the emotional weight. The CONTRAST between fast and slow is what makes each moment land. Every speed change must be motivated by the narrative.
+
+Pre-roll the slow-mo. The slow section must begin 0.3–0.5 seconds BEFORE the key word so the viewer feels the deceleration building INTO the moment. By the time the punchline word lands, the video is already in slow-mo and the moment has weight. Starting the slow-mo exactly on the word is too late — the viewer misses the buildup.
+
+Fast sections: 1.2x – 1.4x. Slow sections: 0.67x – 0.8x.
+Every section is either fast or slow. THE VIDEO NEVER PLAYS AT NORMAL SPEED. Never emit a keypoint with speed=1.0. A 1.0 keypoint cancels the ramp on either side and produces an unintentional flat section that reads as "nothing happening."
+
+THE THREE BUILDING BLOCKS — every curve is constructed from these:
+
+  1. HELD SECTION: two keypoints at the SAME speed value, one at the start and one at the end of the section you want held constant. Inside the held section the speed is flat — fast (1.2-1.4) or slow (0.67-0.8), never 1.0.
+
+  2. RAMP: two keypoints at DIFFERENT speed values, placed close together (0.4 – 1.2 seconds apart). The pipeline interpolates smoothly between them with ease-in-out, so the speed glides from one held value to the next over that short gap. The gap MUST be at least 0.4s — gaps shorter than 0.4s produce audible audio artifacts instead of a smooth ramp. If the nearest word boundary is too close, move the target keypoint farther out.
+
+  3. ARRIVAL: a held-fast section ramps DOWN into a held-slow section right before the punchline word, then ramps BACK UP after the moment passes. The slow held section is short (often just 1-2 words, ~0.5-1.5s) — it's a moment of weight, not a section.
+
+THE FULL CURVE ALTERNATES:
+  hold-fast → ramp-down → hold-slow → ramp-up → hold-fast → ramp-down → hold-slow → ramp-up → hold-fast …
+
+Every speed CHANGE needs a ramp pair (two keypoints, ~0.4-1.2s apart, at different speeds). Every HELD section needs matching start and end keypoints (two keypoints, far apart, at the same speed). The first keypoint sets the opening hold; the last keypoint sets the closing hold.
+
+DENSITY:
+  Aim for 10-16 keypoints per 60 seconds of output (3-5 ramp pairs with held sections between them). Fewer keypoints = drift, no real ramping. More keypoints = jittery oscillation. Stay in this band.
+
+WORD ANCHORING:
+  Every keypoint anchors to a specific kept word via `at_word_index`. Slow sections must land ON spoken words — choose the kept word whose start time you want the ramp to hit, and the pipeline derives the timestamp from `word.start`. Use the punchline / reveal / reaction word as the anchor for slow holds, and the start of the following sentence/clause as the anchor for the ramp back up.
 
 === GLOBAL FIELDS ===
 
 notes              — string <=50 words. Brief rationale.
-thumbnail_word_index — int. Kept word whose start timestamp will be used as the thumbnail frame. Pre-reveal anticipation or post-reveal reaction, NOT the punchline word (mid-syllable mouths are ugly).
 audio_denoise      — bool. true when noise_floor > -40 dB.
 outro              — "none" | "fade_black" | "fade_white". "none" best for looping.
 aspect_ratio       — always "9:16".
-pacing             — "fast" | "medium" | "slow".
+pacing             — "fast" | "medium" | "slow". Default "fast" for short-form under 60s — TikTok/Reels live at 2-3s per cut. Use "medium" for interview/podcast/educational. Reserve "slow" for genuinely contemplative content.
+
+=== THUMBNAIL ===
+
+thumbnail_word_index — int. The single most important visual decision in the entire edit. The thumbnail is what makes someone scrolling stop and click. A bad thumbnail tanks the video no matter how good the edit is.
+
+CRITICAL — DO NOT PICK THE PUNCHLINE WORD ITSELF.
+A common mistake is to pick the word whose timestamp lands ON the most dramatic moment. This is almost always WRONG because:
+  - Mid-syllable mouths are in awkward shapes (open mid-vowel, contorted mid-consonant)
+  - Speaking causes head movement and motion blur
+  - Eyes squint from vocal effort
+  - The narratively-peak word is usually the visually-WORST moment
+
+INSTEAD, scan for the VISUAL peak. It almost always falls in one of these three zones:
+
+  1. PRE-REVEAL ANTICIPATION (a kept word 0.3-1.5s BEFORE the dramatic word):
+     The speaker is leaning into the camera, eyes WIDE, mouth set/closed, building tension. Just before they say the shocking thing — their face shows the EMOTION without the speaking distortion. Best for reveals, punchlines, and shocking statements.
+
+  2. POST-REVEAL REACTION (a kept word 0.3-1.5s AFTER the dramatic word):
+     The speaker is REACTING to what they just said. Often the most extreme expression of the entire video — eyes huge, jaw set, head tilted in disbelief, scowl, smirk, raised eyebrows. The aftermath of the statement, not the statement itself.
+
+  3. MID-EMOTION SILENT PAUSE:
+     A kept word between sentences when the speaker shows pure emotion (anger, disgust, shock, joy, contempt) with mouth closed or in a non-speaking expressive shape. These are gold.
+
+A GREAT thumbnail frame has ALL of these:
+  ✓ Face is BIG in the frame (close-up framing)
+  ✓ Eyes WIDE OPEN, looking at or near the camera lens
+  ✓ Extreme facial expression — shock, anger, disgust, surprise, contempt, joy. NOT neutral, NOT "talking face"
+  ✓ Mouth in an EXPRESSIVE shape: gritted teeth, jaw dropped (silent), smirk, scowl, lips pressed — NOT mid-syllable
+  ✓ Head STILL (no motion blur from gesturing or moving)
+  ✓ Face well-LIT (not in shadow)
+
+A BAD thumbnail frame:
+  ✗ Mid-word with mouth in awkward syllable shape (vowel-O, consonant-clicks, etc.)
+  ✗ Eyes half-closed mid-blink, or looking down/away
+  ✗ Wide shot where the face is small
+  ✗ Neutral "speaking" expression (not extreme)
+  ✗ Mid-gesture motion blur from moving hands or head
+  ✗ Face partially obscured (hand in front, glare, etc.)
+
+Pick the kept word whose start timestamp lands EXACTLY on the visual peak. The pipeline fine-tunes within ±0.6s, so get within ~0.5s of the actual best frame and let Python pick the best face from that window.
 
 === RESPONSE FORMAT ===
 
@@ -8622,6 +8741,18 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             cmd += ["-map", f"{c_audio_idx}:a:0", "-c:a", "copy"]
         cmd += [
             "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
+            # Cap the bitrate. CRF-18 ultrafast on its own produced
+            # ~36 Mbps streams (200MB for ~44s of 1080x1920) — way
+            # above iPhone-camera (12-15 Mbps) and YouTube-1080p
+            # (5-8 Mbps) reference rates. AVPlayer can't sustain that
+            # download rate over typical wifi, manifesting as constant
+            # freezes mid-playback. -maxrate 8M -bufsize 16M caps the
+            # output at YouTube-1080p quality without a perceptual
+            # quality loss for typical iPhone-style content.
+            "-maxrate", "8M", "-bufsize", "16M",
+            # Constrained Baseline + Level 4.1 = max compatibility for
+            # iOS AVPlayer / web HLS without limiting quality.
+            "-profile:v", "high", "-level:v", "4.1",
             "-pix_fmt", "yuv420p",
             # Force dense keyframes on every chunk so concat -c copy joins
             # cleanly without GOP-boundary glitches.
@@ -8868,6 +8999,11 @@ def _resolve_caption_extra_props(style, keywords, edit_plan):
     kw_list = list(keywords or [])
 
     # Style-specific default prop names for a simple string[] of keywords.
+    # NegativeFlash and Prism used to ship hardcoded fitness/hype vocabularies
+    # baked into their bundle (negativeKeywords.ts / prismKeywords.ts) — those
+    # files are gone now and both components accept a `keywords` prop like
+    # the rest. Plumb Gemini's caption_keywords through to them so the flash
+    # / scale-up effects fire on the actual narrative emphasis words.
     simple_keyword_prop = {
         "EditorialPop": "keywords",
         "Gadzhi": "keywords",
@@ -8876,6 +9012,8 @@ def _resolve_caption_extra_props(style, keywords, edit_plan):
         "Passage": "keywords",
         "Pulse": "keywords",
         "Serif": "keywords",
+        "NegativeFlash": "keywords",
+        "Prism": "keywords",
         "Dimidium": "highlightWords",
         "Prime": "specialWords",
         "Cove": "boxedWords",
