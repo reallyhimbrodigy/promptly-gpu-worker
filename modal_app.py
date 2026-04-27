@@ -1,6 +1,6 @@
 import modal
 
-# rebuild trigger v63 — RIFE on H100 GPU for true motion-compensated source-level frame interpolation. Replaces FFmpeg's `minterpolate` filter at the fps-normalize step (which timed out on 1080p 30→60fps because mci+aobmc+epzs runs at ~3 input fps even with 64 vCPUs; FFmpeg minterpolate has internal serial sections and doesn't scale). RIFE 4.6 (Practical-RIFE) runs on the H100 at ~real-time for 1080p — ~60s for 60s of source content vs 10+ minutes for FFmpeg. Adds PyTorch with CUDA 12.4 wheel (~3GB image bloat), clones hzwer/Practical-RIFE at /opt/rife, downloads RIFE_v4.6/flownet.pkl from imaginairy/rife-models on HuggingFace (stable URL, no Google Drive). Custom Python wrapper rife_normalize.py pipes raw rgb24 frames through RIFE inference on CUDA, encodes via ffmpeg with audio mux from original source. Per-slow-mo-sub-clip and per-B-roll FFmpeg minterpolate are kept as-is (bounded cost on smaller content windows).
+# rebuild trigger v64 — Reverted v63's source-level RIFE. Local code inspection confirmed the v63 deploy would have failed three independent ways: (1) ImportError because `from train_log.RIFE_HDv3 import Model` references a file that ships only with Google Drive model archives, not the Practical-RIFE git repo; (2) wrong architecture in the bundled flownet.pkl (3M params, custom convblock0/1/2 pattern not matching any IFNet variant in any of the three RIFE repos); (3) all real RIFE weights are Google-Drive-only — no stable HuggingFace mirror with matching code exists. Reverted to plain `fps=60` source-level normalization. Slow-mo smoothness is preserved via per-slow-mo-sub-clip FFmpeg minterpolate in the composite step (bounded cost on small content windows). B-roll smoothness preserved via per-B-roll FFmpeg minterpolate. Trade-off: regular-speed content from sub-60fps source has duplicate frames at 60fps output. Proper RIFE integration requires sourcing both the model code (.py file) and matching weights (.pkl) from the same archive — deferred to a follow-up that uses gdown + a known-good Drive URL.
 
 # rebuild trigger v62 — FFmpeg base + Remotion micro-segments architecture. Replaces v61's chunked Remotion fan-out (which delivered 140s, not the projected 60s, because Modal's Function.map only ran ~4 workers in parallel without warm pool, and the per-chunk Remotion startup tax of ~10s didn't amortize on small chunks). Visually-identical fast path:
 # (1) PromptlyOverlay (transparent canvas — captions/MG/text overlays) renders once on the orchestrator. ProRes 4444 alpha, unchanged.
@@ -134,30 +134,11 @@ image = (
         "tqdm",
         "Pillow",
     )
-    # PyTorch with CUDA 12.4 — for RIFE motion-compensated frame
-    # interpolation on the H100 GPU at the fps-normalize step.
-    # FFmpeg's `minterpolate` filter is too slow on 1080p (~3 input fps
-    # with mci+aobmc+epzs, doesn't scale with vCPU count); RIFE on H100
-    # runs at real-time. ~3GB wheel + ~46MB model.
-    .pip_install(
-        "torch==2.5.1",
-        "torchvision==0.20.1",
-        extra_options="--index-url https://download.pytorch.org/whl/cu124",
-    )
-    .run_commands(
-        # Clone Practical-RIFE (stable inference reference implementation)
-        "git clone --depth 1 https://github.com/hzwer/Practical-RIFE.git /opt/rife",
-        "mkdir -p /opt/rife/train_log",
-        # Verify torch import (CUDA tensor ops not tested at build time —
-        # H100 isn't attached during image build).
-        "python -c 'import torch; print(\"[rife-build] torch:\", torch.__version__)'",
-    )
-    # Bundle pre-downloaded RIFE flownet.pkl directly into the image.
-    # Why: HuggingFace mirror URLs we tried at build time were either
-    # 404/401 or returned the wrong model size. The model file is
-    # gitignored locally (12MB) and committed via add_local_file so
-    # the image build is fully reproducible without runtime downloads.
-    .add_local_file("models/flownet.pkl", "/opt/rife/train_log/flownet.pkl", copy=True)
+    # NOTE: PyTorch + CUDA + RIFE removed in v64. See rebuild trigger
+    # comment at the top of this file for full rationale. Plain `fps=60`
+    # ffmpeg filter handles source-level fps normalization; per-slow-mo-
+    # sub-clip and per-B-roll FFmpeg minterpolate handle the smoothness
+    # cases that matter most.
     .add_local_dir("src/assets/fonts", "/assets/fonts", copy=True)
     .run_commands(
         # Register fonts system-wide for both Remotion (Chromium) and FFmpeg libass.
@@ -202,7 +183,6 @@ image = (
     .add_local_dir("src/assets/sounds", "/assets/sounds")
     .add_local_file("handler.py", "/handler.py")
     .add_local_file("ffmpeg_base.py", "/ffmpeg_base.py")
-    .add_local_file("rife_normalize.py", "/rife_normalize.py")
 )
 
 # ── Secrets ────────────────────────────────────────────────────────────────────
