@@ -144,18 +144,29 @@ image = (
         "torchvision==0.20.1",
         extra_options="--index-url https://download.pytorch.org/whl/cu124",
     )
+    .pip_install("huggingface-hub")
     .run_commands(
         # Clone Practical-RIFE (stable inference reference implementation)
         "git clone --depth 1 https://github.com/hzwer/Practical-RIFE.git /opt/rife",
         "mkdir -p /opt/rife/train_log",
-        # Download RIFE 4.6 weights from HuggingFace (stable URL — Practical-RIFE's
-        # README links to Google Drive which doesn't work for automated builds).
-        "wget -q -O /opt/rife/train_log/flownet.pkl "
-        "https://huggingface.co/imaginairy/rife-models/resolve/main/RIFE_v4.6/flownet.pkl",
-        # Verify torch + RIFE import without crashing (CUDA tensor ops not
-        # tested at build time — H100 isn't attached during image build).
+        # Download RIFE 4.6 weights via huggingface_hub (handles LFS
+        # redirects + retries cleanly; raw wget fails with exit 6 on
+        # HF LFS URLs because of redirect chain to S3-backed storage).
+        "python -c 'from huggingface_hub import hf_hub_download; "
+        "p = hf_hub_download(repo_id=\"imaginairy/rife-models\", "
+        "filename=\"RIFE_v4.6/flownet.pkl\", "
+        "local_dir=\"/tmp/rife-dl\"); "
+        "import shutil; shutil.copy(p, \"/opt/rife/train_log/flownet.pkl\"); "
+        "print(\"[rife-build] model downloaded:\", p)'",
+        # Sanity check: file exists and is reasonable size (~46MB expected).
+        "ls -la /opt/rife/train_log/flownet.pkl",
+        "python -c 'import os; "
+        "size = os.path.getsize(\"/opt/rife/train_log/flownet.pkl\"); "
+        "assert size > 1024 * 1024, f\"flownet.pkl too small: {size} bytes\"; "
+        "print(f\"[rife-build] flownet.pkl: {size/1024/1024:.1f}MB\")'",
+        # Verify torch import (CUDA tensor ops not tested at build time —
+        # H100 isn't attached during image build).
         "python -c 'import torch; print(\"[rife-build] torch:\", torch.__version__)'",
-        "ls -la /opt/rife/train_log/",
     )
     .add_local_dir("src/assets/fonts", "/assets/fonts", copy=True)
     .run_commands(
