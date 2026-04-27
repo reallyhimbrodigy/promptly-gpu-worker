@@ -1,6 +1,36 @@
 import modal
 
-# rebuild trigger v64 — Reverted v63's source-level RIFE. Local code inspection confirmed the v63 deploy would have failed three independent ways: (1) ImportError because `from train_log.RIFE_HDv3 import Model` references a file that ships only with Google Drive model archives, not the Practical-RIFE git repo; (2) wrong architecture in the bundled flownet.pkl (3M params, custom convblock0/1/2 pattern not matching any IFNet variant in any of the three RIFE repos); (3) all real RIFE weights are Google-Drive-only — no stable HuggingFace mirror with matching code exists. Reverted to plain `fps=60` source-level normalization. Slow-mo smoothness is preserved via per-slow-mo-sub-clip FFmpeg minterpolate in the composite step (bounded cost on small content windows). B-roll smoothness preserved via per-B-roll FFmpeg minterpolate. Trade-off: regular-speed content from sub-60fps source has duplicate frames at 60fps output. Proper RIFE integration requires sourcing both the model code (.py file) and matching weights (.pkl) from the same archive — deferred to a follow-up that uses gdown + a known-good Drive URL.
+# rebuild trigger v65 — RIFE 4.18 on H100 GPU for source-level frame interpolation, properly verified this time.
+#
+# What v63 got wrong: assumed RIFE_HDv3.py was in the Practical-RIFE git
+# repo (it isn't — it ships with the model archive on Google Drive) AND
+# bundled a 12MB flownet.pkl from AlexWortega/RIFE that turned out to
+# have a custom `convblock0/1/2` architecture not matching any IFNet
+# variant in any official RIFE repo. Both errors caught via local code
+# inspection in v64.
+#
+# What v65 does differently:
+#   1. Downloaded the OFFICIAL RIFE 4.18 archive locally via gdown
+#      from the Practical-RIFE README's known-good Drive URL.
+#   2. Verified the archive contains BOTH the model code (.py files)
+#      and matching weights (flownet.pkl, 22MB, ~10M params).
+#   3. Loaded the model on CPU locally and ran an end-to-end test
+#      pipeline (320x256 30fps -> 60fps via ffmpeg decode + RIFE
+#      inference + ffmpeg encode + audio mux). Verified output shape,
+#      frame counts, audio passthrough.
+#   4. Bundled the verified files into the repo at models/rife-v4.18/
+#      (gitignored), shipped via add_local_file — no Drive downloads
+#      at build time, no flaky URLs, fully reproducible.
+#   5. Added a BUILD-TIME validation step that imports the Model class,
+#      loads the weights, and runs a dummy 256x256 CPU inference. Build
+#      fails loud if anything is wrong instead of crashing on the first
+#      production render.
+#
+# RIFE 4.18 on H100 should run ~50-100 fps for 1088x1920 (vs 1 fps on
+# my local CPU benchmark). Estimated normalize step cost: ~25-50s for
+# typical 60s source. Total render time estimate: ~120-180s end-to-end.
+
+# rebuild trigger v64 — Reverted v63's source-level RIFE.
 
 # rebuild trigger v62 — FFmpeg base + Remotion micro-segments architecture. Replaces v61's chunked Remotion fan-out (which delivered 140s, not the projected 60s, because Modal's Function.map only ran ~4 workers in parallel without warm pool, and the per-chunk Remotion startup tax of ~10s didn't amortize on small chunks). Visually-identical fast path:
 # (1) PromptlyOverlay (transparent canvas — captions/MG/text overlays) renders once on the orchestrator. ProRes 4444 alpha, unchanged.
@@ -134,11 +164,71 @@ image = (
         "tqdm",
         "Pillow",
     )
-    # NOTE: PyTorch + CUDA + RIFE removed in v64. See rebuild trigger
-    # comment at the top of this file for full rationale. Plain `fps=60`
-    # ffmpeg filter handles source-level fps normalization; per-slow-mo-
-    # sub-clip and per-B-roll FFmpeg minterpolate handle the smoothness
-    # cases that matter most.
+    # PyTorch with CUDA 12.4 — for RIFE 4.18 motion-compensated frame
+    # interpolation on the H100 GPU at the fps-normalize step. Verified
+    # locally: model loads cleanly, inference returns expected shape,
+    # full pipeline (ffmpeg decode -> RIFE -> ffmpeg encode + audio mux)
+    # produces correct output. ~3GB wheel.
+    .pip_install(
+        "torch==2.5.1",
+        "torchvision==0.20.1",
+        extra_options="--index-url https://download.pytorch.org/whl/cu124",
+    )
+    .run_commands(
+        # Clone Practical-RIFE — provides the support modules
+        # (model/warplayer.py, model/loss.py) that RIFE_HDv3.py and
+        # IFNet_HDv3.py import via `from model.warplayer import warp`
+        # and `from model.loss import *`.
+        "git clone --depth 1 https://github.com/hzwer/Practical-RIFE.git /opt/rife",
+        "mkdir -p /opt/rife/train_log",
+    )
+    # Bundle pre-verified RIFE 4.18 files (downloaded locally via gdown
+    # from Practical-RIFE README's official Drive URL, then unpacked).
+    # gitignored locally — bundled into the image via add_local_file so
+    # the build is reproducible without runtime downloads.
+    .add_local_file(
+        "models/rife-v4.18/RIFE_HDv3.py",
+        "/opt/rife/train_log/RIFE_HDv3.py",
+        copy=True,
+    )
+    .add_local_file(
+        "models/rife-v4.18/IFNet_HDv3.py",
+        "/opt/rife/train_log/IFNet_HDv3.py",
+        copy=True,
+    )
+    .add_local_file(
+        "models/rife-v4.18/refine.py",
+        "/opt/rife/train_log/refine.py",
+        copy=True,
+    )
+    .add_local_file(
+        "models/rife-v4.18/flownet.pkl",
+        "/opt/rife/train_log/flownet.pkl",
+        copy=True,
+    )
+    .run_commands(
+        # Build-time validation: import Model, load weights, run a dummy
+        # 256x256 inference on CPU. Catches missing files / wrong arch /
+        # API changes at build time instead of crashing on the first
+        # production render. The build container has no GPU so this
+        # exercises the CPU code path; CUDA path is structurally identical
+        # (same Model class, same load_model, same inference) and only
+        # differs in `.to(device)` placement.
+        "cd /opt/rife && python -c \""
+        "import sys; sys.path.insert(0, '/opt/rife');"
+        "import torch;"
+        "from train_log.RIFE_HDv3 import Model;"
+        "m = Model();"
+        "m.load_model('/opt/rife/train_log', -1);"
+        "m.eval();"
+        "img0 = torch.randn(1, 3, 256, 256);"
+        "img1 = torch.randn(1, 3, 256, 256);"
+        "out = m.inference(img0, img1, 0.5);"
+        "assert tuple(out.shape) == (1, 3, 256, 256), f'wrong shape: {out.shape}';"
+        "print('[rife-build] model loaded + inference verified');"
+        "print('[rife-build] flownet.pkl size:', __import__('os').path.getsize('/opt/rife/train_log/flownet.pkl'));"
+        "\"",
+    )
     .add_local_dir("src/assets/fonts", "/assets/fonts", copy=True)
     .run_commands(
         # Register fonts system-wide for both Remotion (Chromium) and FFmpeg libass.
@@ -183,6 +273,7 @@ image = (
     .add_local_dir("src/assets/sounds", "/assets/sounds")
     .add_local_file("handler.py", "/handler.py")
     .add_local_file("ffmpeg_base.py", "/ffmpeg_base.py")
+    .add_local_file("rife_normalize.py", "/rife_normalize.py")
 )
 
 # ── Secrets ────────────────────────────────────────────────────────────────────
