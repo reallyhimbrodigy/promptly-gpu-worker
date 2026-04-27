@@ -8888,7 +8888,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
         def _run_ffmpeg_chunk(label, cmd):
             _t0 = time.time()
-            _r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            # Composite chunks may include minterpolate on slow-mo sub-clips
+            # and on B-roll inputs (when broll fps < output fps). On a
+            # chunk with several slow-mo windows + 1-2 B-rolls, minterpolate
+            # cost can reach ~60-90s; 600s gives ample headroom while still
+            # failing loud on a stuck chunk.
+            _r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
             _e = time.time() - _t0
             if _r.returncode != 0:
                 raise RuntimeError(
@@ -9672,26 +9677,32 @@ def handler(job):
             return detect_vocal_emphasis(_raw_source)
 
         def _do_fps_normalize():
-            """Ensure source is exactly 60fps CFR with motion-compensated
-            interpolation when upscaling from a lower fps source.
+            """Ensure source is exactly 60fps CFR. Plain fps=60 filter (no
+            motion-compensated interpolation at the source level).
 
-            Output target: 60fps CFR with 1 keyframe per second. Why 60fps:
-            modern social platforms target 60fps for buttery-smooth playback
-            on high-refresh displays (60/90/120Hz phones). Why
-            motion-compensated minterpolate: for sources below 60fps, the
-            FFmpeg fps filter would duplicate frames (every other output
-            frame = duplicate of previous), producing visible stutter.
-            minterpolate with mci+aobmc synthesizes intermediate frames using
-            optical flow — actual smooth motion, not duplication.
+            Target: 60fps CFR with 1 keyframe per second. Why 60fps: modern
+            social platforms target 60fps for smoother playback on
+            high-refresh displays (60/90/120Hz phones).
 
-            Cost: minterpolate is CPU-only and the dominant cost of init.
-            Runs in parallel with transcribe + Gemini edit so wall-clock
-            impact is bounded by max(normalize, transcribe + edit). Worth
-            it for the visual quality jump.
+            Why NO source-level minterpolate: FFmpeg's `minterpolate` filter
+            at quality settings (mci+aobmc+epzs) processes 1080p at ~3
+            input fps even with 64 vCPUs available — internal serial
+            sections don't parallelize. For 60s of source content this
+            exceeds the 10-minute container timeout. Per-slow-mo-sub-clip
+            and per-B-roll minterpolate (which see much smaller content
+            windows) remain in place — those costs are bounded.
 
-            Dense keyframes (every 60 frames at 60fps = 1s) keep Remotion
-            seek costs bounded — sparse-GOP sources cost ~2s per Remotion
-            seek as ffmpeg decodes forward to the target frame.
+            Trade-off: regular-speed content from 30fps source has
+            duplicate frames at 60fps output (every other output frame is
+            a duplicate). This produces slight judder on fast camera
+            motion at 60Hz playback. For talking-head content with mostly
+            static framing this is barely visible. The proper fix for
+            buttery-smooth source-level uprating is RIFE on the H100 GPU,
+            which requires a separate integration.
+
+            Dense keyframes (every 60 frames = 1s) keep Remotion seek
+            costs bounded — sparse-GOP sources cost ~2s per Remotion seek
+            as ffmpeg decodes forward to the target frame.
             """
             _cached = _probe_full(_raw_source)
             _vs = next((s for s in (_cached.get("streams") or []) if s.get("codec_type") == "video"), {})
@@ -9710,42 +9721,28 @@ def handler(job):
             _avg = _parse_rate(_avg_rate_str)
             _r_val = _parse_rate(_r_rate_str)
 
-            # Only minterpolate when upscaling. If source is already at or
-            # above 60fps, plain fps filter is sufficient (drops or maintains
-            # frame rate without synthesis cost).
-            _src_fps_estimate = _avg or _r_val or 30.0
-            if _src_fps_estimate >= 59.5:
-                _vf_arg = "fps=60"
-                _interp_mode = "fps-only"
-            else:
-                _vf_arg = (
-                    "minterpolate=fps=60:mi_mode=mci:mc_mode=aobmc:"
-                    "me=epzs:scd=fdiff"
-                )
-                _interp_mode = "minterpolate-mci"
-
             _norm_t0 = time.time()
             _norm_path = os.path.join(work_dir, "source_60fps.mp4")
             _r_out = subprocess.run(
                 ["ffmpeg", "-y", "-v", "error", "-threads", "0",
                  "-i", _raw_source,
-                 "-vf", _vf_arg,
+                 "-vf", "fps=60",
                  "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
                  "-g", "60", "-keyint_min", "60", "-sc_threshold", "0",
                  "-c:a", "copy",
                  "-video_track_timescale", "90000",
                  _norm_path],
-                capture_output=True, text=True, timeout=600,
+                capture_output=True, text=True, timeout=180,
             )
             if _r_out.returncode != 0 or not os.path.exists(_norm_path):
                 raise RuntimeError(
-                    f"FPS normalization to 60fps CFR failed ({_interp_mode}): "
+                    f"FPS normalization to 60fps CFR failed: "
                     f"{(_r_out.stderr or '')[-500:]}"
                 )
             _size_mb = os.path.getsize(_norm_path) / (1024 * 1024)
             print(
                 f"[fps-normalize] Converted r={_r_val:.4f}fps avg={_avg:.4f}fps "
-                f"→ 60.0000fps CFR ({_interp_mode}) in {time.time() - _norm_t0:.1f}s ({_size_mb:.1f}MB)",
+                f"→ 60.0000fps CFR in {time.time() - _norm_t0:.1f}s ({_size_mb:.1f}MB)",
                 flush=True,
             )
             # Verify dense keyframes actually landed in the encoded file.
