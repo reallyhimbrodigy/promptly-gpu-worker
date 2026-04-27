@@ -4715,6 +4715,13 @@ REMOVE_WORDS GUIDANCE:
             em["zoom_effect"] = None
             continue
         _clip_zoom_owner[_owning_clip] = _ei
+        # Attach the emphasis zoom_effect to its owning validated_cut.
+        # Mirrors how transitions attach (~line 4117): single source of
+        # truth carried forward by validated_cuts → final_cuts → speed-curve
+        # sub-clips → render_cuts → clips_out. Without this, the zoom only
+        # gets written to render_cuts AFTER clips_out is already built, so
+        # every emphasis zoom is silently lost.
+        validated_cuts[_owning_clip]["_zoom_effect"] = em["zoom_effect"]
 
     for em in emphasis_moments:
         _layers = []
@@ -8096,12 +8103,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             )
         _em_t_frame = int(round(_em_t_out * source_fps))
 
-        # Zoom on the clip containing this moment (moment is in source time).
-        if em["zoom_effect"]:
-            for _rc in render_cuts:
-                if float(_rc["source_start"]) <= em["t"] <= float(_rc["source_end"]):
-                    _rc["_zoom_effect"] = em["zoom_effect"]
-                    break
+        # Zoom is already attached to validated_cuts during the validation
+        # phase (collision check at line ~4717), so it propagates to clips_out
+        # naturally via final_cuts → speed-curve sub-clips → render_cuts. No
+        # late attachment here — that pattern silently lost every emphasis
+        # zoom because clips_out was built before the mutation happened.
 
         # Motion graphic: append to motion_graphics_out, anchored at the moment.
         # Translate semantic anchor → MGAnchor just like the top-level loop.
@@ -8214,6 +8220,68 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     from ffmpeg_base import (
         build_micro_segments_input, build_final_filtergraph, categorize_clip,
         slice_timeline_for_chunk, split_timeline_into_chunks,
+    )
+
+    # ── Structural integrity audit ──────────────────────────────────────────
+    # Every Gemini-emitted layer that survived validation must reach the
+    # output spec. These postconditions raise on phase-ordering bugs
+    # immediately instead of letting the pipeline silently produce flat-
+    # looking videos. No fallbacks, no buffers, no retries — fail loud on
+    # internal mismatch so the next regression is impossible to miss.
+    _expected_zooms = sum(
+        1 for em in (edit_plan.get("_emphasis_moments") or [])
+        if em.get("zoom_effect")
+    )
+    _actual_zooms = sum(1 for c in clips_out if c.get("zoomEffect"))
+    if _actual_zooms != _expected_zooms:
+        raise RuntimeError(
+            f"Pipeline integrity violation: clips_out has {_actual_zooms} "
+            f"zoomEffect(s) but {_expected_zooms} validated emphasis_moment(s) "
+            f"carry a zoom_effect. Every validated zoom must reach the output "
+            f"spec — phase-ordering bug, not a Gemini issue."
+        )
+
+    _expected_transitions = sum(
+        1 for c in cuts
+        if c.get("transition_out") and c.get("transition_out") != "none"
+    )
+    if len(transitions_out) != _expected_transitions:
+        raise RuntimeError(
+            f"Pipeline integrity violation: transitions_out has "
+            f"{len(transitions_out)} entries but validated_cuts carries "
+            f"{_expected_transitions} non-none transition_out fields. "
+            f"Every validated transition must reach the output spec."
+        )
+
+    _expected_emphasis_mgs = sum(
+        1 for em in (edit_plan.get("_emphasis_moments") or [])
+        if em.get("motion_graphic")
+    )
+    _expected_top_mgs = len(edit_plan.get("motion_graphics") or [])
+    _expected_total_mgs = _expected_top_mgs + _expected_emphasis_mgs
+    if len(motion_graphics_out) != _expected_total_mgs:
+        raise RuntimeError(
+            f"Pipeline integrity violation: motion_graphics_out has "
+            f"{len(motion_graphics_out)} entries but validation produced "
+            f"{_expected_top_mgs} top-level + {_expected_emphasis_mgs} emphasis "
+            f"MGs ({_expected_total_mgs} total). Every validated MG must reach "
+            f"the output spec."
+        )
+
+    _expected_text_overlays = len(edit_plan.get("text_overlays") or [])
+    if len(text_overlays_out) != _expected_text_overlays:
+        raise RuntimeError(
+            f"Pipeline integrity violation: text_overlays_out has "
+            f"{len(text_overlays_out)} entries but validation produced "
+            f"{_expected_text_overlays}. Every validated text overlay must "
+            f"reach the output spec."
+        )
+
+    print(
+        f"[integrity] All layers reached output spec: "
+        f"{_actual_zooms} zoom(s), {len(transitions_out)} transition(s), "
+        f"{len(motion_graphics_out)} MG(s), {len(text_overlays_out)} text overlay(s).",
+        flush=True,
     )
 
     # Stage source video directly into Remotion's bundle public root with a
