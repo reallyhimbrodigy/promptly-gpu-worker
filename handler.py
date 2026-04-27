@@ -8258,13 +8258,33 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         1 for em in (edit_plan.get("_emphasis_moments") or [])
         if em.get("zoom_effect")
     )
-    _actual_zooms = sum(1 for c in clips_out if c.get("zoomEffect"))
-    if _actual_zooms != _expected_zooms:
+    # The zoom_effect is intentionally propagated to every sub-clip of a
+    # parent for continuous animation across speed-curve splits (see
+    # comment ~line 7754). One emphasis fans out to N entries in
+    # clips_out where N = #sub-clips for that parent. Count UNIQUE
+    # parents with zoom (strip the "-s{i}" sub-clip suffix from the
+    # spec id, e.g. "clip-3-s17" -> "clip-3", "hook--1-s2" -> "hook--1").
+    # Hook clips ALSO inherit zoom from the narrative clip they overlap,
+    # so an emphasis that lands in a hook-overlapping narrative clip
+    # produces TWO unique parent keys (one for the hook, one for the
+    # narrative replay). Use `<` instead of `!=` so the check catches
+    # the drop bug (the original v62 issue: zoom silently lost) without
+    # firing on legitimate fan-out (hook replay + sub-clip propagation).
+    _zoom_parent_keys = set()
+    for _c in clips_out:
+        if not _c.get("zoomEffect"):
+            continue
+        _cid = str(_c.get("id", ""))
+        _parent_key = _cid.rsplit("-s", 1)[0] if "-s" in _cid else _cid
+        _zoom_parent_keys.add(_parent_key)
+    _actual_zoom_parents = len(_zoom_parent_keys)
+    if _actual_zoom_parents < _expected_zooms:
         raise RuntimeError(
-            f"Pipeline integrity violation: clips_out has {_actual_zooms} "
-            f"zoomEffect(s) but {_expected_zooms} validated emphasis_moment(s) "
-            f"carry a zoom_effect. Every validated zoom must reach the output "
-            f"spec — phase-ordering bug, not a Gemini issue."
+            f"Pipeline integrity violation: only {_actual_zoom_parents} "
+            f"unique parent clip(s) carry a zoomEffect in clips_out but "
+            f"{_expected_zooms} validated emphasis_moment(s) had a "
+            f"zoom_effect after collision check. At least one validated "
+            f"zoom was dropped between validation and output spec."
         )
 
     _expected_transitions = sum(
