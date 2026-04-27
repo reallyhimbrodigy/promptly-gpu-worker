@@ -144,30 +144,20 @@ image = (
         "torchvision==0.20.1",
         extra_options="--index-url https://download.pytorch.org/whl/cu124",
     )
-    .pip_install("huggingface-hub")
     .run_commands(
         # Clone Practical-RIFE (stable inference reference implementation)
         "git clone --depth 1 https://github.com/hzwer/Practical-RIFE.git /opt/rife",
         "mkdir -p /opt/rife/train_log",
-        # Download RIFE 4.6 weights via huggingface_hub (handles LFS
-        # redirects + retries cleanly; raw wget fails with exit 6 on
-        # HF LFS URLs because of redirect chain to S3-backed storage).
-        "python -c 'from huggingface_hub import hf_hub_download; "
-        "p = hf_hub_download(repo_id=\"imaginairy/rife-models\", "
-        "filename=\"RIFE_v4.6/flownet.pkl\", "
-        "local_dir=\"/tmp/rife-dl\"); "
-        "import shutil; shutil.copy(p, \"/opt/rife/train_log/flownet.pkl\"); "
-        "print(\"[rife-build] model downloaded:\", p)'",
-        # Sanity check: file exists and is reasonable size (~46MB expected).
-        "ls -la /opt/rife/train_log/flownet.pkl",
-        "python -c 'import os; "
-        "size = os.path.getsize(\"/opt/rife/train_log/flownet.pkl\"); "
-        "assert size > 1024 * 1024, f\"flownet.pkl too small: {size} bytes\"; "
-        "print(f\"[rife-build] flownet.pkl: {size/1024/1024:.1f}MB\")'",
         # Verify torch import (CUDA tensor ops not tested at build time —
         # H100 isn't attached during image build).
         "python -c 'import torch; print(\"[rife-build] torch:\", torch.__version__)'",
     )
+    # Bundle pre-downloaded RIFE flownet.pkl directly into the image.
+    # Why: HuggingFace mirror URLs we tried at build time were either
+    # 404/401 or returned the wrong model size. The model file is
+    # gitignored locally (12MB) and committed via add_local_file so
+    # the image build is fully reproducible without runtime downloads.
+    .add_local_file("models/flownet.pkl", "/opt/rife/train_log/flownet.pkl", copy=True)
     .add_local_dir("src/assets/fonts", "/assets/fonts", copy=True)
     .run_commands(
         # Register fonts system-wide for both Remotion (Chromium) and FFmpeg libass.
