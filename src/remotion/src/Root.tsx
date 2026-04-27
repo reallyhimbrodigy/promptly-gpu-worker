@@ -27,10 +27,10 @@ import type {
 
 const DEFAULT_RENDER_INPUT: PromptlyRenderInput = {
   sourceUrl: "",
-  fps: 30,
+  fps: 60,
   width: 1080,
   height: 1920,
-  totalDurationInFrames: 300,
+  totalDurationInFrames: 600,
   clips: [],
   transitions: [],
   broll: [],
@@ -38,7 +38,7 @@ const DEFAULT_RENDER_INPUT: PromptlyRenderInput = {
     style: "HormoziPopIn",
     pages: [],
     keywords: [],
-    positionSegments: [{ fromFrame: 0, toFrame: 300, position: "bottom" }],
+    positionSegments: [{ fromFrame: 0, toFrame: 600, position: "bottom" }],
   },
   textOverlays: [],
   motionGraphics: [],
@@ -47,7 +47,7 @@ const DEFAULT_RENDER_INPUT: PromptlyRenderInput = {
 
 const DEFAULT_MICRO_INPUT: PromptlyMicroSegmentsInput = {
   sourceUrl: "",
-  fps: 30,
+  fps: 60,
   width: 1080,
   height: 1920,
   totalDurationInFrames: 1,

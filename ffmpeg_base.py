@@ -347,33 +347,67 @@ def build_broll_input_filter(
 ) -> Tuple[str, str]:
     """Build the per-B-roll input filter chain. Returns (filter_string, label).
 
-    The filter chain:
-      1. Trims the B-roll source to [seekFromFrames, seekFromFrames + durationInFrames * playbackRate)
-         in the broll's own frame coordinates (its source fps may differ from output).
+    The filter chain (mirrors _build_clip_segment_with_pad's exact-math
+    + post-fps trim approach so the B-roll's output frame count is
+    deterministic regardless of B-roll fps or playback rate):
+
+      1. Trims the B-roll source by SECONDS (no fps coordinate round-trip).
+         seekFromSeconds is the canonical seek field — the legacy
+         seekFromFrames field interpreted in broll's fps but used in
+         output_fps caused silent content corruption on non-output-fps
+         brolls (Pexels frequently serves 25/24fps).
       2. Rebases timestamps to 0 and applies playbackRate via setpts.
       3. Scales/crops to canvas dimensions (objectFit:cover semantics).
-      4. Shifts presentation time forward to output start so the overlay aligns.
-      5. Resamples to output fps for clean overlay alignment.
+      4. Resamples to output fps via motion-compensated minterpolate (when
+         broll's effective rate is below output) or plain fps (when at or
+         above). This synthesizes intermediate frames instead of duplicating
+         them — buttery-smooth playback regardless of source fps mismatch.
+      5. Clamps to exactly dur_frames so concat sees the precise frame
+         count it expects.
+      6. Rebases PTS to 0 and shifts to the output-time window.
     """
     label = f"br{broll_idx}"
-    seek_from_frames = int(broll.get("seekFromFrames", 0))
+    seek_seconds = float(broll.get("seekFromSeconds", 0.0))
     dur_frames = int(broll["durationInFrames"])
     pbr = float(broll.get("playbackRate", 1.0)) or 1.0
+    br_fps = float(broll.get("brollFps") or source_fps) or source_fps
     from_frame = int(broll["fromFrame"])
     out_start_seconds = from_frame / source_fps
-    # Read enough source frames to fill the duration at the desired playback
-    # rate. trim takes seconds (more reliable than frame indices when the
-    # broll fps differs from source_fps).
-    source_in_seconds = (dur_frames * pbr) / source_fps
-    trim_start_s = seek_from_frames / max(1.0, source_fps)
-    trim_end_s = trim_start_s + source_in_seconds + 0.05  # small padding for safety
+
+    # Geometric minimum source frames at broll's native rate to produce
+    # exactly dur_frames output frames after setpts/pbr + fps=source_fps.
+    # Mirrors _build_clip_segment_with_pad's math, generalized for the
+    # broll's own fps:
+    #   dur_frames output frames span (dur_frames-1) intervals of 1/source_fps
+    #   Each output interval requires pbr source intervals at source_fps,
+    #   which equals pbr * br_fps / source_fps broll intervals.
+    #   Plus 1 frame for the fencepost.
+    src_frames_needed = max(
+        1, int(math.ceil((dur_frames - 1) * pbr * br_fps / source_fps)) + 1
+    )
+    src_seconds_needed = src_frames_needed / br_fps
+
+    # When the broll's effective output frame rate (br_fps / pbr) is below
+    # source_fps, motion-compensated minterpolate synthesizes intermediate
+    # frames. This eliminates duplicate-frame stutter on slow brolls or
+    # non-output-fps brolls (Pexels 24/25fps brolls into 60fps output).
+    effective_out_fps = br_fps / pbr if pbr > 0 else br_fps
+    if effective_out_fps < source_fps - 0.5:
+        rate_filter = (
+            f"minterpolate=fps={source_fps:g}:mi_mode=mci:"
+            f"mc_mode=aobmc:me=epzs:scd=fdiff"
+        )
+    else:
+        rate_filter = f"fps={source_fps:g}"
+
     filters = [
-        f"trim=start={trim_start_s:.6f}:end={trim_end_s:.6f}",
+        f"trim=start={seek_seconds:.6f}:end={seek_seconds + src_seconds_needed:.6f}",
         f"setpts=(PTS-STARTPTS)/{pbr:.6f}",
         f"scale={canvas_w}:{canvas_h}:force_original_aspect_ratio=increase:flags=lanczos",
         f"crop={canvas_w}:{canvas_h}",
-        f"fps={source_fps:g}",
-        f"setpts=PTS+{out_start_seconds:.6f}/TB",
+        rate_filter,
+        f"trim=end_frame={dur_frames}",
+        f"setpts=PTS-STARTPTS+{out_start_seconds:.6f}/TB",
     ]
     chain = f"[{output_input_idx}:v]" + ",".join(filters) + f"[{label}]"
     return chain, label
@@ -400,7 +434,12 @@ def _build_clip_segment_with_pad(
       1. Trims source to the exact minimum frames that produce dur_frames
          output frames after the rate change (see "Why" below).
       2. Rebases PTS and applies playbackRate via setpts.
-      3. Resamples to source_fps (drops/duplicates as needed for the rate).
+      3. Resamples to source_fps via motion-compensated minterpolate when
+         the sub-clip is in slow-motion (pbr<1.0); otherwise plain fps
+         filter (which drops frames cleanly when speeding up). For slow-
+         motion, this synthesizes intermediate frames using optical flow
+         instead of duplicating source frames — buttery-smooth playback
+         at any speed instead of slideshow stutter.
       4. Applies zoom math (if simple zoom) via crop+scale-lanczos.
       5. Clamps output to exactly `dur_frames` and rebases PTS for clean
          concat downstream.
@@ -432,10 +471,24 @@ def _build_clip_segment_with_pad(
     source_frames_needed = max(1, int(math.ceil((dur_frames - 1) * pbr)) + 1)
     end_frame = start_from + source_frames_needed
 
+    # Slow-motion sub-clips use motion-compensated frame synthesis. The fps
+    # filter alone duplicates source frames at pbr<1, producing visible
+    # slideshow stutter on slow-mo. minterpolate with mci+aobmc generates
+    # intermediate frames using optical flow — actual smooth motion. For
+    # pbr>=1.0 (normal/fast playback) the fps filter drops frames cleanly,
+    # so minterpolate adds cost without benefit.
+    if pbr < 1.0:
+        rate_filter = (
+            f"minterpolate=fps={source_fps:g}:mi_mode=mci:"
+            f"mc_mode=aobmc:me=epzs:scd=fdiff"
+        )
+    else:
+        rate_filter = f"fps={source_fps:g}"
+
     filters = [
         f"trim=start_frame={start_from}:end_frame={end_frame}",
         f"setpts=(PTS-STARTPTS)/{pbr:.6f}",
-        f"fps={source_fps:g}",
+        rate_filter,
     ]
 
     zoom = clip.get("zoomEffect")

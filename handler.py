@@ -2631,6 +2631,11 @@ Each entry:
     "duration": float,                   # output-seconds the visual hit lasts, 1.5 - 3.0
 
     # ── Visual layers — each field REQUIRED (value or null) ──
+    # zoom_effect.events: each event has {{"startMs": int, "durationMs": int, "scale": float, "originX": float, "originY": float}}
+    # IMPORTANT: startMs and durationMs are in SOURCE TIME relative to the parent clip's source_start.
+    # The zoom is anchored to source content — when the underlying clip plays in slow-motion, the zoom
+    # takes proportionally longer; when it speeds up, the zoom finishes faster. This keeps the zoom
+    # climax synced with the spoken content regardless of speed ramping. Typical durationMs: 500-1500ms.
     "zoom_effect": {{"type": zoom_type, "events": [...]}} | null,
     "motion_graphic": {{"type": mg_type, "anchor": zone, "props": {{...}}}} | null
   }}
@@ -6216,16 +6221,23 @@ def _kb_crop_exprs(direction, kb_smooth, extra_px_w, extra_px_h):
         cy = f"'max(0\\,min({_half_h}*{kb_smooth}\\,ih-1920))'"
     return cx, cy
 
-TRANSITION_DURATION_DEFAULT = 0.3
+TRANSITION_DURATION_DEFAULT = 0.55
 
 def get_transition_duration(pacing=None):
     """Adaptive transition duration based on video pacing.
-    Fast pacing = snappy transitions (0.2s), slow = smoother (0.4s)."""
+
+    The ABE pack components are designed for ~3s (90 frames at 30fps);
+    cutting to 6 frames at the previous fast=0.20s left them as a
+    single-frame flash with no animation arc — visible as a glitch
+    rather than a transition. New durations target 16-30 frames at
+    60fps, which lets the components hit their ramp-in / hold /
+    ramp-out cycle while still feeling snappy on fast-paced content.
+    """
     if pacing == "fast":
-        return 0.2
+        return 0.4   # 24 frames at 60fps — readable but snappy
     elif pacing == "slow":
-        return 0.4
-    return TRANSITION_DURATION_DEFAULT
+        return 0.75  # 45 frames at 60fps — smooth and cinematic
+    return TRANSITION_DURATION_DEFAULT  # 33 frames at 60fps — default
 
 
 # ── Probe cache — eliminates redundant ffprobe calls on the same file ─────────
@@ -6390,9 +6402,9 @@ def analyze_source_video(source_path):
     needs_scale_crop = (w != 1080 or h != 1920)
 
     if not needs_scale_crop:
-        # fps/VFR conversion is handled by fps=30 filter in render v_chain — no normalize_vf needed
+        # fps/VFR conversion is handled by fps-normalize step (60fps + minterpolate) — no normalize_vf needed
         if abs(fps - 30) > 1 or is_vfr:
-            print(f"[analyze] Source {w}x{h} @ {fps:.2f}fps (VFR={is_vfr}) — fps=30 filter handles it", flush=True)
+            print(f"[analyze] Source {w}x{h} @ {fps:.2f}fps (VFR={is_vfr}) — fps-normalize step handles it", flush=True)
         else:
             print(f"[analyze] Source is already {w}x{h} @ {fps:.2f}fps — no normalize needed", flush=True)
         return {"source_path": source_path, "width": w, "height": h, "fps": fps, "normalize_vf": None,
@@ -6773,15 +6785,11 @@ def build_speed_curved_audio(source_path, cuts, speed_curve, effective_durations
             wf.writeframes(b"\x00" * sample_rate * 2)
         return output_wav
 
-    # Apply 5ms fade at narrative clip boundaries (12 boundaries total — content cuts)
-    _fade_samples = int(0.005 * sample_rate)  # 240 samples at 48kHz
-    for clip_audio in all_clips:
-        n = len(clip_audio)
-        if n > _fade_samples * 2:
-            fade_in = np.linspace(0.0, 1.0, _fade_samples)
-            fade_out = np.linspace(1.0, 0.0, _fade_samples)
-            clip_audio[:_fade_samples] *= fade_in
-            clip_audio[-_fade_samples:] *= fade_out
+    # No fade at clip boundaries — sharp cuts. Speech audio rarely has a
+    # zero-crossing at boundaries, so removing the 5ms fade can produce
+    # audible clicks. Trade-off accepted: clean cuts win over masked
+    # boundaries. If clicks become an issue, the fix is to land cuts on
+    # quieter source moments via Gemini's prompt, not to re-add a fade.
 
     # Concatenate all clips
     full_audio = np.concatenate(all_clips)
@@ -6800,7 +6808,7 @@ def build_speed_curved_audio(source_path, cuts, speed_curve, effective_durations
     return output_wav
 
 
-def project_words_to_output(transcript, cuts, effective_durations, speed_curve=None, transition_duration=None, clip_time_maps=None, removed_word_indices=None, fps=30.0):
+def project_words_to_output(transcript, cuts, effective_durations, speed_curve=None, transition_duration=None, clip_time_maps=None, removed_word_indices=None, fps=60.0):
     """Project word timestamps from source to output timeline using canonical time maps.
 
     If removed_word_indices is provided, words at those indices are excluded.
@@ -7330,7 +7338,7 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15, v
     return final_clips, set(removed_indices)
 
 
-def build_clip_time_map(clip_start, clip_end, clip_speed, speed_curve, fps=30):
+def build_clip_time_map(clip_start, clip_end, clip_speed, speed_curve, fps=60):
     """Build a canonical per-frame time map for one clip.
 
     This is the SINGLE SOURCE OF TRUTH for the time mapping. All systems
@@ -7527,14 +7535,14 @@ def project_source_time_to_final_output(source_t, cuts, effective_durations, spe
     return project_source_time_to_output(source_t, cuts, clip_ranges, speed_curve, clip_time_maps=clip_time_maps)
 
 
-def build_variable_speed_setpts(clip_start, clip_end, clip_speed, speed_curve, log=False, fps=30):
+def build_variable_speed_setpts(clip_start, clip_end, clip_speed, speed_curve, log=False, fps=60):
     """Build speed expression from canonical time map. Wrapper for backward compatibility."""
     tm = build_clip_time_map(clip_start, clip_end, clip_speed, speed_curve, fps=fps)
     setpts_val, eff_dur, avg_speed = build_setpts_from_time_map(tm, log=log)
     return setpts_val, eff_dur, avg_speed
 
 
-def compute_effective_durations(cuts, speed_curve=None, fps=30):
+def compute_effective_durations(cuts, speed_curve=None, fps=60):
     """Compute output duration for each clip using canonical time maps."""
     durations = []
     for cut in (cuts or []):
@@ -7758,14 +7766,18 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _pw_by_idx = {pw["_word_index"]: pw for pw in _projected_words if pw.get("_word_index") is not None}
 
     # ── 2. Build Remotion input JSON ────────────────────────────────────────
-    # Clips — one ClipSpec per sub-clip. Zoom effects are attached to EVERY
-    # sub-clip of a parent, with event `startMs` offset by how far into the
-    # parent the sub-clip sits. This keeps the zoom animation continuous
-    # across speed-curve splits (sub-clip 1 picks up the animation partway
-    # through, matching where sub-clip 0 left off).
+    # Clips — one ClipSpec per sub-clip. Zoom events are SOURCE-anchored:
+    # Gemini emits startMs / durationMs in SOURCE TIME relative to the
+    # parent clip's source_start. Each sub-clip projects the event's source
+    # range to its own OUTPUT frames using the sub-clip's avg_speed. This
+    # keeps the zoom climax synced with the spoken content regardless of
+    # speed ramping — slow-mo stretches the zoom, fast playback shortens
+    # it, and progress is continuous across sub-clip boundaries because
+    # the same source moment maps to the same progress value in any
+    # sub-clip that contains it.
     clips_out = []
     prev_original_idx = None
-    _parent_output_offset_ms = 0.0
+    _parent_source_start = None  # source_start of the FIRST sub-clip per parent
     for i, (rc, tm, eff_dur) in enumerate(zip(render_cuts, _clip_time_maps, effective_durations)):
         _source_start_frames = int(round(float(rc["source_start"]) * source_fps))
         _pbr = float(tm.get("avg_speed") or 1.0)
@@ -7773,7 +7785,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _orig_idx = rc.get("_original_idx")
         _is_first_subclip = _orig_idx != prev_original_idx
         if _is_first_subclip:
-            _parent_output_offset_ms = 0.0
+            _parent_source_start = float(rc["source_start"])
         _clip_id_parts = [
             "hook" if rc.get("_is_hook") else "clip",
             str(_orig_idx if _orig_idx is not None else i),
@@ -7787,18 +7799,26 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         }
         _zoom = rc.get("_zoom_effect") or rc.get("zoom_effect")
         if isinstance(_zoom, dict) and _zoom.get("type") in VALID_ZOOM_TYPES:
-            # Offset each event's startMs by the sub-clip's position inside
-            # the parent clip. Zoom component sees time relative to parent,
-            # so the animation flows seamlessly across sub-clip boundaries.
-            _offset_ms = int(round(_parent_output_offset_ms))
+            # Sub-clip's source position within its parent (in ms)
+            _subclip_src_offset_ms = (
+                (float(rc["source_start"]) - _parent_source_start) * 1000.0
+            )
             _raw_events = _zoom.get("events") or []
             _adjusted_events = []
             for _ev in _raw_events:
                 if not isinstance(_ev, dict):
                     continue
                 try:
-                    _new_start_ms = int(round(float(_ev.get("startMs", 0)))) - _offset_ms
-                    _new_dur_ms = int(round(float(_ev.get("durationMs", 0))))
+                    # Gemini's event timing is in SOURCE MS relative to the
+                    # parent clip. Convert to sub-clip-local OUTPUT MS by
+                    # offsetting by sub-clip's source position within parent
+                    # and scaling by 1/avg_speed (output ms per source ms).
+                    _src_start_ms = float(_ev.get("startMs", 0))
+                    _src_dur_ms = float(_ev.get("durationMs", 0))
+                    _new_start_ms = int(round(
+                        (_src_start_ms - _subclip_src_offset_ms) / _pbr
+                    ))
+                    _new_dur_ms = int(round(_src_dur_ms / _pbr))
                 except Exception:
                     continue
                 _new_ev = {**_ev, "startMs": _new_start_ms, "durationMs": _new_dur_ms}
@@ -7809,7 +7829,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 **{k: v for k, v in _zoom.items() if k not in ("type", "events") and v is not None},
             }
         clips_out.append(_clip_spec)
-        _parent_output_offset_ms += eff_dur * 1000.0
         prev_original_idx = _orig_idx
 
     # Transitions on ORIGINAL clip boundaries (not between sub-clips of same parent)
@@ -7953,12 +7972,19 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                     _br_fps = 30.0
                 if _br_fps <= 0 or _br_fps > 240:
                     _br_fps = 30.0
-                _seek_from_frames = int(round(_seek_seconds * _br_fps))
+                # Canonical seek field: seconds (not frames). Frame-based
+                # seek required round-tripping through fps coordinates and
+                # the consumer side used the WRONG fps (output_fps instead
+                # of broll's actual fps), corrupting seek time on any
+                # non-output-fps broll. brollFps is plumbed through so the
+                # FFmpeg side can compute exact source-frame counts for
+                # the rate-shift + minterpolate filter chain.
                 broll_out.append({
                     "src": _local_path,
                     "fromFrame": _from_frame,
                     "durationInFrames": _dur_frames,
-                    "seekFromFrames": _seek_from_frames,
+                    "seekFromSeconds": float(_seek_seconds),
+                    "brollFps": float(_br_fps),
                     "playbackRate": 1.0,
                 })
                 edit_plan.setdefault("_broll_output_ranges", []).append((_out_start, _out_end))
@@ -9646,11 +9672,27 @@ def handler(job):
             return detect_vocal_emphasis(_raw_source)
 
         def _do_fps_normalize():
-            """Ensure source is exactly 30fps CFR. Skips re-encode when source
-            is already 30/1 declared AND ~30.0 measured; otherwise re-encodes
-            via fps=30 filter. Runs in parallel with Gemini edit (~14s
-            critical path), so the ~3-5s re-encode adds zero wall-clock time.
-            Returns the path to the 30fps source (raw path if no re-encode)."""
+            """Ensure source is exactly 60fps CFR with motion-compensated
+            interpolation when upscaling from a lower fps source.
+
+            Output target: 60fps CFR with 1 keyframe per second. Why 60fps:
+            modern social platforms target 60fps for buttery-smooth playback
+            on high-refresh displays (60/90/120Hz phones). Why
+            motion-compensated minterpolate: for sources below 60fps, the
+            FFmpeg fps filter would duplicate frames (every other output
+            frame = duplicate of previous), producing visible stutter.
+            minterpolate with mci+aobmc synthesizes intermediate frames using
+            optical flow — actual smooth motion, not duplication.
+
+            Cost: minterpolate is CPU-only and the dominant cost of init.
+            Runs in parallel with transcribe + Gemini edit so wall-clock
+            impact is bounded by max(normalize, transcribe + edit). Worth
+            it for the visual quality jump.
+
+            Dense keyframes (every 60 frames at 60fps = 1s) keep Remotion
+            seek costs bounded — sparse-GOP sources cost ~2s per Remotion
+            seek as ffmpeg decodes forward to the target frame.
+            """
             _cached = _probe_full(_raw_source)
             _vs = next((s for s in (_cached.get("streams") or []) if s.get("codec_type") == "video"), {})
             _r_rate_str = _vs.get("r_frame_rate", "")
@@ -9666,36 +9708,44 @@ def handler(job):
                 return float(s)
 
             _avg = _parse_rate(_avg_rate_str)
-            # We always re-encode now to guarantee dense keyframes (1 keyframe
-            # per second). Even if the source is exactly 30fps CFR, default
-            # x264 keyframe spacing is ~250 frames (8s) — too sparse for
-            # Remotion's per-frame seek pattern. Each Remotion seek into a
-            # sparse-GOP source costs ~2s as ffmpeg decodes from the previous
-            # keyframe forward to the target frame. Dense keyframes drop seek
-            # cost to <50ms (verified via Remotion's own per-seek timing).
+            _r_val = _parse_rate(_r_rate_str)
+
+            # Only minterpolate when upscaling. If source is already at or
+            # above 60fps, plain fps filter is sufficient (drops or maintains
+            # frame rate without synthesis cost).
+            _src_fps_estimate = _avg or _r_val or 30.0
+            if _src_fps_estimate >= 59.5:
+                _vf_arg = "fps=60"
+                _interp_mode = "fps-only"
+            else:
+                _vf_arg = (
+                    "minterpolate=fps=60:mi_mode=mci:mc_mode=aobmc:"
+                    "me=epzs:scd=fdiff"
+                )
+                _interp_mode = "minterpolate-mci"
+
             _norm_t0 = time.time()
-            _norm_path = os.path.join(work_dir, "source_30fps.mp4")
+            _norm_path = os.path.join(work_dir, "source_60fps.mp4")
             _r_out = subprocess.run(
                 ["ffmpeg", "-y", "-v", "error", "-threads", "0",
                  "-i", _raw_source,
-                 "-vf", "fps=30",
+                 "-vf", _vf_arg,
                  "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
-                 "-g", "30", "-keyint_min", "30", "-sc_threshold", "0",
+                 "-g", "60", "-keyint_min", "60", "-sc_threshold", "0",
                  "-c:a", "copy",
                  "-video_track_timescale", "90000",
                  _norm_path],
-                capture_output=True, text=True, timeout=180,
+                capture_output=True, text=True, timeout=600,
             )
             if _r_out.returncode != 0 or not os.path.exists(_norm_path):
                 raise RuntimeError(
-                    f"FPS normalization to 30fps CFR failed: "
+                    f"FPS normalization to 60fps CFR failed ({_interp_mode}): "
                     f"{(_r_out.stderr or '')[-500:]}"
                 )
             _size_mb = os.path.getsize(_norm_path) / (1024 * 1024)
-            _r_val = _parse_rate(_r_rate_str)
             print(
                 f"[fps-normalize] Converted r={_r_val:.4f}fps avg={_avg:.4f}fps "
-                f"→ 30.0000fps CFR in {time.time() - _norm_t0:.1f}s ({_size_mb:.1f}MB)",
+                f"→ 60.0000fps CFR ({_interp_mode}) in {time.time() - _norm_t0:.1f}s ({_size_mb:.1f}MB)",
                 flush=True,
             )
             # Verify dense keyframes actually landed in the encoded file.
@@ -10054,9 +10104,9 @@ def handler(job):
                 trend_used = None
         else:
             trend_used = provided_trend
-        # Swap in the 30fps-normalized source for render. fps_normalize ran in
+        # Swap in the 60fps-normalized source for render. fps_normalize ran in
         # parallel with Gemini so this is already done by the time we get here.
-        # Downstream render detects source_fps=30.0 from the new file's r_frame_rate
+        # Downstream render detects source_fps=60.0 from the new file's r_frame_rate
         # and all frame-count math becomes exact.
         source_path = future_fps_normalize.result()
         # NOTE: future_faces NOT collected here — passed to render_multi_clip for parallel collection
