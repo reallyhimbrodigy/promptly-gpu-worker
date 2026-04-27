@@ -958,7 +958,7 @@ def slice_timeline_for_chunk(
             continue
         v_start = max(br_global_start, chunk_start)
         v_end = min(br_global_end, chunk_end)
-        local_start = v_start - br_global_start  # offset into broll's own timeline
+        local_start = v_start - br_global_start  # offset into broll's own timeline (output frames)
         local_duration = v_end - v_start
         playback_rate = float(br.get("playbackRate", 1.0)) or 1.0
 
@@ -967,8 +967,16 @@ def slice_timeline_for_chunk(
         # frame of this chunk).
         sliced_br["fromFrame"] = v_start - chunk_start
         sliced_br["durationInFrames"] = local_duration
-        sliced_br["seekFromFrames"] = int(
-            br["seekFromFrames"] + round(local_start * playback_rate)
+        # Advance the canonical seek-seconds field by the B-roll content
+        # already consumed by the chunk start. local_start is in output
+        # frames; convert to broll seconds via:
+        #   output_time = local_start / source_fps      (chunk-cut output time)
+        #   broll_time  = output_time * playback_rate    (broll content at that point)
+        # source_fps here is the output canvas fps (60 in v65); brollFps
+        # is preserved via dict(br) copy and used by build_broll_input_filter.
+        sliced_br["seekFromSeconds"] = (
+            float(br["seekFromSeconds"])
+            + (local_start * playback_rate) / float(source_fps)
         )
         chunk_broll.append(sliced_br)
 

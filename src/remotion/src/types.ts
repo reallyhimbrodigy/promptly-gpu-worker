@@ -108,11 +108,20 @@ export type TransitionType =
   | "SceneTitle";
 
 // ── B-roll cutaway ───────────────────────────────────────────────────────────
+// Note: in v62+ the B-roll layer is rendered by FFmpeg, not Remotion.
+// This type stays in sync with the dict shape Python emits so the JSON
+// validates if anything ever does consume it. seekFromSeconds is the
+// canonical seek field (the legacy seekFromFrames was interpreted in
+// broll's own fps but consumed in output_fps coordinates — silent
+// content corruption on non-output-fps Pexels videos). brollFps is
+// the broll's actual fps, plumbed through for the FFmpeg side's
+// exact-frame-count math.
 export interface BrollSpec {
   src: string;
   fromFrame: number;
   durationInFrames: number;
-  seekFromFrames: number;
+  seekFromSeconds: number;
+  brollFps: number;
   playbackRate: number;
 }
 
