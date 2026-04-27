@@ -9677,32 +9677,25 @@ def handler(job):
             return detect_vocal_emphasis(_raw_source)
 
         def _do_fps_normalize():
-            """Ensure source is exactly 60fps CFR. Plain fps=60 filter (no
-            motion-compensated interpolation at the source level).
+            """Normalize source to exactly 60fps CFR.
 
-            Target: 60fps CFR with 1 keyframe per second. Why 60fps: modern
-            social platforms target 60fps for smoother playback on
-            high-refresh displays (60/90/120Hz phones).
+            Routes:
+              * Source already ≥60fps → plain `fps=60` ffmpeg filter (CFR-
+                only, drops/maintains rate). Fast path, no interpolation
+                needed.
+              * Source < 60fps → RIFE 4.6 on H100 GPU via rife_normalize.py.
+                Motion-compensated optical-flow frame synthesis on CUDA at
+                ~real-time. Replaced FFmpeg's `minterpolate` filter which
+                ran at ~3 input fps and timed out on 60s content.
 
-            Why NO source-level minterpolate: FFmpeg's `minterpolate` filter
-            at quality settings (mci+aobmc+epzs) processes 1080p at ~3
-            input fps even with 64 vCPUs available — internal serial
-            sections don't parallelize. For 60s of source content this
-            exceeds the 10-minute container timeout. Per-slow-mo-sub-clip
-            and per-B-roll minterpolate (which see much smaller content
-            windows) remain in place — those costs are bounded.
+            Why RIFE: FFmpeg's minterpolate is decades-old CPU code with
+            internal serial sections that don't scale beyond ~3 fps on
+            1080p regardless of vCPU count. RIFE 4.6 on the H100 runs at
+            ~30-60 input fps. Quality is also better — true neural
+            optical flow vs FFmpeg's block-based motion estimation.
 
-            Trade-off: regular-speed content from 30fps source has
-            duplicate frames at 60fps output (every other output frame is
-            a duplicate). This produces slight judder on fast camera
-            motion at 60Hz playback. For talking-head content with mostly
-            static framing this is barely visible. The proper fix for
-            buttery-smooth source-level uprating is RIFE on the H100 GPU,
-            which requires a separate integration.
-
-            Dense keyframes (every 60 frames = 1s) keep Remotion seek
-            costs bounded — sparse-GOP sources cost ~2s per Remotion seek
-            as ffmpeg decodes forward to the target frame.
+            Both paths produce h264 ultrafast crf 18 with 1 keyframe per
+            second (dense GOP for fast Remotion seeks).
             """
             _cached = _probe_full(_raw_source)
             _vs = next((s for s in (_cached.get("streams") or []) if s.get("codec_type") == "video"), {})
@@ -9720,29 +9713,57 @@ def handler(job):
 
             _avg = _parse_rate(_avg_rate_str)
             _r_val = _parse_rate(_r_rate_str)
+            _src_fps_estimate = _avg or _r_val or 30.0
 
             _norm_t0 = time.time()
             _norm_path = os.path.join(work_dir, "source_60fps.mp4")
-            _r_out = subprocess.run(
-                ["ffmpeg", "-y", "-v", "error", "-threads", "0",
-                 "-i", _raw_source,
-                 "-vf", "fps=60",
-                 "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
-                 "-g", "60", "-keyint_min", "60", "-sc_threshold", "0",
-                 "-c:a", "copy",
-                 "-video_track_timescale", "90000",
-                 _norm_path],
-                capture_output=True, text=True, timeout=180,
-            )
-            if _r_out.returncode != 0 or not os.path.exists(_norm_path):
-                raise RuntimeError(
-                    f"FPS normalization to 60fps CFR failed: "
-                    f"{(_r_out.stderr or '')[-500:]}"
+
+            if _src_fps_estimate >= 59.5:
+                # Source already at or above target — plain fps filter.
+                _interp_mode = "fps-only"
+                _r_out = subprocess.run(
+                    ["ffmpeg", "-y", "-v", "error", "-threads", "0",
+                     "-i", _raw_source,
+                     "-vf", "fps=60",
+                     "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
+                     "-g", "60", "-keyint_min", "60", "-sc_threshold", "0",
+                     "-c:a", "copy",
+                     "-video_track_timescale", "90000",
+                     _norm_path],
+                    capture_output=True, text=True, timeout=180,
                 )
+                if _r_out.returncode != 0 or not os.path.exists(_norm_path):
+                    raise RuntimeError(
+                        f"FPS normalization (fps-only) failed: "
+                        f"{(_r_out.stderr or '')[-500:]}"
+                    )
+            else:
+                # Source below target — RIFE motion-compensated upscale on CUDA.
+                _interp_mode = "rife-4.6"
+                _r_out = subprocess.run(
+                    ["python", "/rife_normalize.py",
+                     "--input", _raw_source,
+                     "--output", _norm_path,
+                     "--target-fps", "60",
+                     "--rife-dir", "/opt/rife"],
+                    capture_output=True, text=True, timeout=480,
+                )
+                if _r_out.returncode != 0 or not os.path.exists(_norm_path):
+                    raise RuntimeError(
+                        f"FPS normalization (RIFE) failed: "
+                        f"stderr={(_r_out.stderr or '')[-1000:]} "
+                        f"stdout={(_r_out.stdout or '')[-500:]}"
+                    )
+                # Forward RIFE's progress lines so they appear in job logs.
+                for _line in (_r_out.stdout or "").splitlines():
+                    if _line.startswith("[rife]"):
+                        print(_line, flush=True)
+
             _size_mb = os.path.getsize(_norm_path) / (1024 * 1024)
             print(
                 f"[fps-normalize] Converted r={_r_val:.4f}fps avg={_avg:.4f}fps "
-                f"→ 60.0000fps CFR in {time.time() - _norm_t0:.1f}s ({_size_mb:.1f}MB)",
+                f"→ 60.0000fps CFR ({_interp_mode}) in {time.time() - _norm_t0:.1f}s "
+                f"({_size_mb:.1f}MB)",
                 flush=True,
             )
             # Verify dense keyframes actually landed in the encoded file.

@@ -1,5 +1,7 @@
 import modal
 
+# rebuild trigger v63 — RIFE on H100 GPU for true motion-compensated source-level frame interpolation. Replaces FFmpeg's `minterpolate` filter at the fps-normalize step (which timed out on 1080p 30→60fps because mci+aobmc+epzs runs at ~3 input fps even with 64 vCPUs; FFmpeg minterpolate has internal serial sections and doesn't scale). RIFE 4.6 (Practical-RIFE) runs on the H100 at ~real-time for 1080p — ~60s for 60s of source content vs 10+ minutes for FFmpeg. Adds PyTorch with CUDA 12.4 wheel (~3GB image bloat), clones hzwer/Practical-RIFE at /opt/rife, downloads RIFE_v4.6/flownet.pkl from imaginairy/rife-models on HuggingFace (stable URL, no Google Drive). Custom Python wrapper rife_normalize.py pipes raw rgb24 frames through RIFE inference on CUDA, encodes via ffmpeg with audio mux from original source. Per-slow-mo-sub-clip and per-B-roll FFmpeg minterpolate are kept as-is (bounded cost on smaller content windows).
+
 # rebuild trigger v62 — FFmpeg base + Remotion micro-segments architecture. Replaces v61's chunked Remotion fan-out (which delivered 140s, not the projected 60s, because Modal's Function.map only ran ~4 workers in parallel without warm pool, and the per-chunk Remotion startup tax of ~10s didn't amortize on small chunks). Visually-identical fast path:
 # (1) PromptlyOverlay (transparent canvas — captions/MG/text overlays) renders once on the orchestrator. ProRes 4444 alpha, unchanged.
 # (2) PromptlyMicroSegments (NEW composition) renders ALL transitions (11 types: CardSwipe / FilmStrip / SceneTitle / NewspaperWipe / LightLeak / SlideOver / Stack / CrossfadeZoom / ShutterFlash / StepPush / ZoomThrough) AND composite-effect zoom clips (FocusWindow / LetterboxPush / DepthPull) in ONE Remotion process — segments concatenated end-to-end so ~10s startup tax amortizes across all of them. h264 (no alpha).
@@ -132,6 +134,29 @@ image = (
         "tqdm",
         "Pillow",
     )
+    # PyTorch with CUDA 12.4 — for RIFE motion-compensated frame
+    # interpolation on the H100 GPU at the fps-normalize step.
+    # FFmpeg's `minterpolate` filter is too slow on 1080p (~3 input fps
+    # with mci+aobmc+epzs, doesn't scale with vCPU count); RIFE on H100
+    # runs at real-time. ~3GB wheel + ~46MB model.
+    .pip_install(
+        "torch==2.5.1",
+        "torchvision==0.20.1",
+        extra_options="--index-url https://download.pytorch.org/whl/cu124",
+    )
+    .run_commands(
+        # Clone Practical-RIFE (stable inference reference implementation)
+        "git clone --depth 1 https://github.com/hzwer/Practical-RIFE.git /opt/rife",
+        "mkdir -p /opt/rife/train_log",
+        # Download RIFE 4.6 weights from HuggingFace (stable URL — Practical-RIFE's
+        # README links to Google Drive which doesn't work for automated builds).
+        "wget -q -O /opt/rife/train_log/flownet.pkl "
+        "https://huggingface.co/imaginairy/rife-models/resolve/main/RIFE_v4.6/flownet.pkl",
+        # Verify torch + RIFE import without crashing (CUDA tensor ops not
+        # tested at build time — H100 isn't attached during image build).
+        "python -c 'import torch; print(\"[rife-build] torch:\", torch.__version__)'",
+        "ls -la /opt/rife/train_log/",
+    )
     .add_local_dir("src/assets/fonts", "/assets/fonts", copy=True)
     .run_commands(
         # Register fonts system-wide for both Remotion (Chromium) and FFmpeg libass.
@@ -176,6 +201,7 @@ image = (
     .add_local_dir("src/assets/sounds", "/assets/sounds")
     .add_local_file("handler.py", "/handler.py")
     .add_local_file("ffmpeg_base.py", "/ffmpeg_base.py")
+    .add_local_file("rife_normalize.py", "/rife_normalize.py")
 )
 
 # ── Secrets ────────────────────────────────────────────────────────────────────
