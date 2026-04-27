@@ -1,6 +1,11 @@
 import modal
 
-# rebuild trigger v61 — Chunked render fan-out (Modal Function.map across 12 parallel containers). Implements Remotion's documented distributed-rendering pattern to break past the single-instance ~16-22 fps ceiling (Remotion issue #4664: 14× more cores = 70% more fps on a single instance, hard architectural ceiling). Splits each composition into frame-range chunks rendered by independent Modal containers: 8 PromptlyBase chunks + 4 PromptlyOverlay chunks. Each chunk worker is a CPU-only 16-vCPU/16GB container running one Remotion process at concurrency=8 over its frame range. After all 12 workers complete, ffmpeg concat (-c copy, no re-encode) combines chunks into base_video.mp4 + overlay.mov for the existing final composite step. Workers and orchestrator share render_volume mounted at /remotion/bundle/public/jobs (matches Remotion's static-served root, so files are directly servable without hardlink/copy gymnastics in workers). render-full.mjs gains --frame-range and --composition-start CLI args; offthreadVideoCacheSizeInBytes shrunk from 16 GB to 1 GB (matches worker RAM budget). Daily render_staging_janitor cleans entries >24h. Expected end-to-end (warm): ~52-58s; cost per render: ~$0.06 (CPU-only workers ~5-10× cheaper than H100 per second; H100 stays on orchestrator only for fps-normalize CUDA decode + final composite). Quality preserved 100% — same React tree, same components, just sharded timeline. Backward compat: render-full.mjs still supports the unchunked path (legacy), but handler.py always uses chunked fan-out now.
+# rebuild trigger v62 — FFmpeg base + Remotion micro-segments architecture. Replaces v61's chunked Remotion fan-out (which delivered 140s, not the projected 60s, because Modal's Function.map only ran ~4 workers in parallel without warm pool, and the per-chunk Remotion startup tax of ~10s didn't amortize on small chunks). Visually-identical fast path:
+# (1) PromptlyOverlay (transparent canvas — captions/MG/text overlays) renders once on the orchestrator. ProRes 4444 alpha, unchanged.
+# (2) PromptlyMicroSegments (NEW composition) renders ALL transitions (11 types: CardSwipe / FilmStrip / SceneTitle / NewspaperWipe / LightLeak / SlideOver / Stack / CrossfadeZoom / ShutterFlash / StepPush / ZoomThrough) AND composite-effect zoom clips (FocusWindow / LetterboxPush / DepthPull) in ONE Remotion process — segments concatenated end-to-end so ~10s startup tax amortizes across all of them. h264 (no alpha).
+# (3) Base video — clip cuts, simple-zoom clips (SmoothPush / SnapReframe / StepZoom / StageZoom) ported to per-frame `crop` expressions, B-roll cutaways, outro fade — built directly by FFmpeg in one big filter_complex. SnapReframe spring (damping=28 mass=0.6 stiffness=260) uses closed-form over-damped step response (1 + (-33.87*exp(-12.79*t) + 12.79*exp(-33.87*t))/21.08); SmoothPush/StageZoom use cubic ease pieces matching the Remotion components exactly.
+# (4) Single-pass final ffmpeg invocation: builds each clip segment via filter chains, trims Remotion-rendered segments out of micro_segments.mp4 by frame range, concats in timeline order, overlays B-roll at output windows, applies outro fade, alpha-composites the overlay layer, libx264 ultrafast crf 18 final encode + AAC audio mux.
+# Net: Remotion only paints the visual layers it has to (overlay layer + complex-segment windows). Every video-paint frame goes through FFmpeg at native libx264 ultrafast + lanczos resample on 64 cores. Removes render_chunk function, render_volume, render_staging_janitor — all chunked-render infra is dead. handler.py and orchestrator container unchanged in resource shape (H100 + 64 vCPU + 128 GB). Expected end-to-end (warm): ~30-50s for typical talking-head videos (no complex zoom), ~50-70s if a clip uses FocusWindow/LetterboxPush/DepthPull. Quality preserved: every Remotion component renders exactly the frames it always did; FFmpeg-rendered clips use the same scale/origin math the components compute, just with FFmpeg's lanczos resampler instead of Chromium's compositor — visually indistinguishable.
 
 # rebuild trigger v60 — Cut always-on prewarm cost. PromptlyPrewarmWorker had min_containers=1 (always-warm CPU container) costing ~$35/mo regardless of usage. Removed it so the class scales to zero when idle. First prewarm after a quiet period takes 3-5s cold start, but the user is mid-upload to S3 when prewarm fires so it's invisible. GPU class already scales to zero. Net: ~$35/mo saved on idle infrastructure.
 
@@ -170,6 +175,7 @@ image = (
     )
     .add_local_dir("src/assets/sounds", "/assets/sounds")
     .add_local_file("handler.py", "/handler.py")
+    .add_local_file("ffmpeg_base.py", "/ffmpeg_base.py")
 )
 
 # ── Secrets ────────────────────────────────────────────────────────────────────
@@ -189,33 +195,15 @@ app = modal.App("promptly-gpu-worker", image=image, secrets=secrets)
 # both ends keeps it coherent across containers.
 prewarm_volume = modal.Volume.from_name("promptly-prewarm-cache", create_if_missing=True)
 
-# ── Render-chunk staging volume ────────────────────────────────────────────────
-# Shared between the orchestrator (PromptlyWorker) and chunk workers
-# (render_chunk function). Mounted at /remotion/bundle/public/jobs so that
-# files staged here are directly servable by Remotion's bundle HTTP server
-# without hardlink/copy gymnastics — Remotion only serves files physically
-# under /remotion/bundle/public/, which is why we mount the volume there.
-#
-# Per-job layout: /remotion/bundle/public/jobs/<job_id>/{source_30fps.mp4,
-# broll_*.mp4, remotion_input.json, base_chunk_<n>.mp4, overlay_chunk_<n>.mov}.
-# Orchestrator writes inputs + commits; workers reload + render their chunk
-# back to the same dir + commit; orchestrator reloads + concats chunks.
-# Janitor runs daily to delete entries older than 24h (jobs complete in
-# ~60s — anything that old is orphaned).
-render_volume = modal.Volume.from_name("promptly-render-staging", create_if_missing=True)
-
 # ── Web endpoint ───────────────────────────────────────────────────────────────
 @app.cls(
-    timeout=600,          # 10 min — orchestrator runs init + audio + composite + upload while workers handle render
+    timeout=600,          # 10 min — orchestrator runs init + audio + remotion + composite + upload
     scaledown_window=300, # keep warm 5 min — bursty traffic; 120s was killing containers between idle users (15-20s cold boot penalty)
     cpu=64,
-    memory=131072,        # 128GB — headroom for parallel segment renders + Remotion Chrome tabs
-    gpu="H100",           # H100 still useful here for fps-normalize CUDA decode + final composite. Render itself is offloaded to chunk workers.
+    memory=131072,        # 128GB — Remotion overlay + Remotion micro-segments run in parallel here, plus speed-curved audio resampler, plus the big single-pass ffmpeg composite
+    gpu="H100",           # H100 useful for fps-normalize CUDA decode + parallel-friendly libx264 ultrafast on 64 cores. Remotion's Chromium paint stays software-bound (per v55-v58 Vulkan investigation).
     region="us-west",     # colocate with Supabase (West US) for minimal network latency
-    volumes={
-        "/prewarm": prewarm_volume,
-        "/remotion/bundle/public/jobs": render_volume,
-    },
+    volumes={"/prewarm": prewarm_volume},
 )
 class PromptlyWorker:
     @modal.enter()
@@ -236,12 +224,6 @@ class PromptlyWorker:
         # data is available; free when nothing changed.
         try:
             self._prewarm_volume.reload()
-        except Exception:
-            pass
-        # Same for the render staging volume — pre-render reload is cheap and
-        # ensures we don't see stale chunk artifacts from a prior aborted run.
-        try:
-            render_volume.reload()
         except Exception:
             pass
         result = self._handler({"input": body})
@@ -288,155 +270,6 @@ class PromptlyPrewarmWorker:
         except Exception as e:
             print(f"[prewarm] volume commit failed: {e}", flush=True)
         return result
-
-
-# ── Chunk renderer (CPU-only fan-out worker) ──────────────────────────────────
-# Implements the documented Remotion distributed-rendering pattern: the
-# orchestrator (PromptlyWorker) splits the timeline into N frame-range chunks,
-# spawns this function in parallel via Function.map(), and concatenates the
-# chunk outputs after all return. Each worker renders ONE composition for ONE
-# frame range — independent of every other worker.
-#
-# CPU-only: Remotion's Chromium render is software-bound regardless of GPU
-# (we proved this conclusively with v55-v58 Vulkan investigation; H100 stays
-# at 0% util through the entire render). No reason to pay for a GPU here.
-# Cost per worker-second is ~5-10× cheaper than H100.
-#
-# Volume design: render_volume mounts at /remotion/bundle/public/jobs which
-# is exactly where Remotion's bundle HTTP server looks for static files.
-# Orchestrator stages source/broll/remotion_input.json there + commits;
-# workers reload + render their chunk back to the same dir + commit;
-# orchestrator reloads + concats.
-#
-# Concurrency: 8 Chromium tabs per worker. Per Remotion issue #4664 + our
-# v60 measurements, single-instance ceiling is ~16-22 fps regardless of CPU
-# count, and a 16-vCPU machine at concurrency 8 hits ~9 fps for base, ~17 fps
-# for overlay. Splitting timeline into N parallel workers gives us total
-# throughput of N × per-instance-fps, breaking past Remotion's single-
-# instance ceiling.
-@app.function(
-    image=image,
-    cpu=16,
-    memory=16384,        # 16 GB — 8 tabs × ~700 MB + Node + Remotion bundle + 1 GB cache
-    timeout=300,         # 5 min hard cap; per-chunk target is 20-30s
-    scaledown_window=600, # stay warm 10 min for burst — first chunk may cold-start, subsequent are warm
-    retries=1,           # one auto-retry on transient failure
-    region="us-west",
-    volumes={
-        "/prewarm": prewarm_volume,
-        "/remotion/bundle/public/jobs": render_volume,
-    },
-)
-def render_chunk(spec: dict) -> dict:
-    """Render one composition × one frame range to the shared render_volume.
-
-    Spec keys (all required):
-      job_id (str)             — orchestrator's per-job dir name
-      composition_id (str)     — "PromptlyBase" | "PromptlyOverlay"
-      frame_range_start (int)  — inclusive global frame index
-      frame_range_end (int)    — inclusive global frame index
-      output_filename (str)    — basename relative to job dir
-      gl_mode (str)            — "vulkan" | "swiftshader" | etc.
-      concurrency (int)        — Chromium tabs per worker (default 8)
-
-    Returns metadata dict; raises on render failure (Modal will retry once).
-    """
-    import os
-    import subprocess
-    import time
-
-    # Volume reload to see latest writes from orchestrator.
-    try:
-        render_volume.reload()
-    except Exception as _e:
-        print(f"[chunk] volume reload failed (non-fatal): {_e}", flush=True)
-
-    job_id = spec["job_id"]
-    job_dir = f"/remotion/bundle/public/jobs/{job_id}"
-    if not os.path.isdir(job_dir):
-        raise RuntimeError(
-            f"[chunk] job dir {job_dir} not present on render_volume — "
-            f"orchestrator may not have committed before spawning workers."
-        )
-
-    remotion_input_path = os.path.join(job_dir, "remotion_input.json")
-    if not os.path.exists(remotion_input_path):
-        raise RuntimeError(f"[chunk] remotion_input.json missing at {remotion_input_path}")
-
-    output_filename = spec["output_filename"]
-    output_path = os.path.join(job_dir, output_filename)
-
-    composition_id = spec["composition_id"]
-    fr_start = int(spec["frame_range_start"])
-    fr_end = int(spec["frame_range_end"])
-    chunk_label = f"{composition_id}:{fr_start}-{fr_end}"
-
-    cmd = [
-        "node", "/remotion/render-full.mjs",
-        "--input", remotion_input_path,
-        "--output", output_path,
-        "--public-dir", job_dir,
-        "--composition", composition_id,
-        "--frame-range", f"{fr_start},{fr_end}",
-        "--composition-start", str(fr_start),
-        "--concurrency", str(int(spec.get("concurrency", 8))),
-        "--gl", str(spec.get("gl_mode", "swiftshader")),
-    ]
-
-    print(f"[chunk:{chunk_label}] starting render", flush=True)
-    t0 = time.time()
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=290)
-    except subprocess.TimeoutExpired:
-        raise RuntimeError(f"[chunk:{chunk_label}] timed out after 290s")
-    elapsed = time.time() - t0
-
-    if r.returncode != 0:
-        # Echo a tail of stderr for diagnosis.
-        _err = (r.stderr or "")[-2000:]
-        raise RuntimeError(
-            f"[chunk:{chunk_label}] render failed (rc={r.returncode}) in {elapsed:.1f}s: {_err}"
-        )
-
-    if not os.path.exists(output_path) or os.path.getsize(output_path) < 1000:
-        raise RuntimeError(
-            f"[chunk:{chunk_label}] produced invalid output at {output_path} "
-            f"(size={os.path.getsize(output_path) if os.path.exists(output_path) else 0})"
-        )
-
-    size_mb = os.path.getsize(output_path) / 1024 / 1024
-
-    # Commit so orchestrator can read the chunk after .reload().
-    try:
-        render_volume.commit()
-    except Exception as _e:
-        # Don't fail the chunk on commit error — orchestrator will surface it
-        # via missing-file detection if the commit truly didn't propagate.
-        print(f"[chunk:{chunk_label}] volume commit warning: {_e}", flush=True)
-
-    print(
-        f"[chunk:{chunk_label}] done in {elapsed:.1f}s ({size_mb:.1f} MB)",
-        flush=True,
-    )
-
-    # Surface a tail of stdout (interval fps lines) for diagnostics.
-    _stdout_tail_lines = []
-    if r.stdout:
-        _kept_prefixes = ("[render-full]", "[gpu-info]")
-        for _line in r.stdout.split("\n"):
-            _ls = _line.strip()
-            if _ls and any(_ls.startswith(_p) for _p in _kept_prefixes):
-                _stdout_tail_lines.append(_ls)
-
-    return {
-        "composition_id": composition_id,
-        "frame_range_start": fr_start,
-        "frame_range_end": fr_end,
-        "output_filename": output_filename,
-        "render_time_seconds": round(elapsed, 2),
-        "size_mb": round(size_mb, 1),
-        "stdout_tail": _stdout_tail_lines[-25:],
-    }
 
 
 # ── Prewarm cache janitor ──────────────────────────────────────────────────────
@@ -516,75 +349,3 @@ def prewarm_janitor():
     return {"deleted": deleted_count, "bytes_freed": bytes_freed, "errors": errors}
 
 
-# ── Render-staging volume janitor ──────────────────────────────────────────────
-# Render jobs complete in ~60s and the orchestrator should clean up its job
-# dir at end-of-render. This janitor catches orphaned dirs (jobs that crashed
-# before cleanup, deploy-time aborts, etc.). 24h TTL is plenty — anything
-# older than that is unambiguously stale. Tighter than prewarm's 48h because
-# render artifacts are larger (300 MB source + 12 chunks ≈ 600-900 MB per job).
-@app.function(
-    schedule=modal.Period(days=1),
-    volumes={"/remotion/bundle/public/jobs": render_volume},
-    cpu=1,
-    memory=1024,
-    timeout=600,
-)
-def render_staging_janitor():
-    """Delete render-staging entries older than 24 hours."""
-    import os
-    import time
-    import shutil
-
-    TTL_SECONDS = 24 * 3600
-    ROOT = "/remotion/bundle/public/jobs"
-
-    try:
-        render_volume.reload()
-    except Exception as e:
-        print(f"[render-janitor] volume reload failed: {e}", flush=True)
-
-    if not os.path.isdir(ROOT):
-        print(f"[render-janitor] {ROOT} does not exist — nothing to clean", flush=True)
-        return {"deleted": 0, "bytes_freed": 0}
-
-    now = time.time()
-    deleted_count = 0
-    bytes_freed = 0
-    inspected = 0
-    errors = 0
-
-    for entry in os.listdir(ROOT):
-        entry_path = os.path.join(ROOT, entry)
-        inspected += 1
-        try:
-            if not os.path.isdir(entry_path):
-                continue
-            age = now - os.path.getmtime(entry_path)
-            if age < TTL_SECONDS:
-                continue
-            entry_bytes = 0
-            for root, _dirs, files in os.walk(entry_path):
-                for f in files:
-                    try:
-                        entry_bytes += os.path.getsize(os.path.join(root, f))
-                    except OSError:
-                        pass
-            shutil.rmtree(entry_path)
-            deleted_count += 1
-            bytes_freed += entry_bytes
-        except Exception as e:
-            errors += 1
-            print(f"[render-janitor] error on {entry}: {e}", flush=True)
-
-    try:
-        render_volume.commit()
-    except Exception as e:
-        print(f"[render-janitor] volume commit failed: {e}", flush=True)
-
-    freed_mb = bytes_freed / 1024 / 1024
-    print(
-        f"[render-janitor] sweep complete: inspected={inspected} deleted={deleted_count} "
-        f"freed={freed_mb:.1f}MB errors={errors} ttl={TTL_SECONDS}s",
-        flush=True,
-    )
-    return {"deleted": deleted_count, "bytes_freed": bytes_freed, "errors": errors}

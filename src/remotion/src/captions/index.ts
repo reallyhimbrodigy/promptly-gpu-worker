@@ -5,15 +5,8 @@ export { normalizeWord, buildKeywordSet, isKeyword } from "./shared/keywords";
 export { HormoziPopIn } from "./HormoziPopIn";
 export type { HormoziPopInProps, HormoziHighlightWord } from "./HormoziPopIn";
 
-export { GlitchHighlight } from "./GlitchHighlight";
-export type { GlitchHighlightProps, GlitchHighlightWord } from "./GlitchHighlight";
-
 export { EmojiPop } from "./EmojiPop";
 export type { EmojiPopProps, EmojiEntry } from "./EmojiPop";
-
-export { NegativeFlash } from "./NegativeFlash";
-export type { NegativeFlashProps, NegativeFlashPresetName, NegativeFlashColorPreset } from "./NegativeFlash";
-export { NEGATIVE_FLASH_PRESETS } from "./NegativeFlash";
 
 export { Prime } from "./Prime";
 export type { PrimeProps } from "./Prime";
@@ -26,9 +19,6 @@ export type { CoveProps } from "./Cove";
 
 export { Dimidium } from "./Dimidium";
 export type { DimidiumProps } from "./Dimidium";
-
-export { Prism } from "./Prism";
-export type { PrismProps } from "./Prism";
 
 export { CinematicLetterpress } from "./CinematicLetterpress";
 export type { CinematicLetterpressProps } from "./CinematicLetterpress";

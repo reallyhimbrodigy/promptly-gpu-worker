@@ -1,6 +1,6 @@
 # Caption Components — Style Catalog
 
-21 caption styles for Remotion. Each is a self-contained React component — feed it timed caption data, drop it over your video, render.
+18 caption styles for Remotion. Each is a self-contained React component — feed it timed caption data, drop it over your video, render.
 
 ---
 
@@ -72,22 +72,7 @@ Bold uppercase words that spring-pop onto screen one at a time. Highlight words 
 
 ---
 
-### 2. GlitchHighlight
-
-Clean Montserrat body text with highlighted words that explode into a full RGB chromatic aberration glitch — scanlines, slice displacement, flicker, the works. After the glitch settles, the word stays lit with a pulsing glow. Uses Teko for glitch words to create a jarring font contrast.
-
-**Best for:** Tech content, gaming, edgy reels, cyberpunk aesthetic, anything that needs controlled chaos.
-
-| Prop | Type | Default | Description |
-|------|------|---------|-------------|
-| `highlightWords` | `GlitchHighlightWord[]` | `[]` | Words that trigger the glitch. Each entry: `{ text, preset? }`. |
-| `colorPreset` | `string` | `"blue"` | Default color. Options: `cyan`, `blue`, `red`, `green`, `yellow`, `pink`. |
-| `staggerDelayFrames` | `number` | `1` | Stagger between word entrances. |
-| `glitchDurationFrames` | `number` | `14` | How long the glitch effect lasts per word. |
-
----
-
-### 3. EmojiPop
+### 2. EmojiPop
 
 Words appear with automatic Lottie emoji animations that pop in alongside the captions. Active word gets a color highlight. 48 built-in emoji animations mapped to common words.
 
@@ -102,22 +87,7 @@ Words appear with automatic Lottie emoji animations that pop in alongside the ca
 
 ---
 
-### 4. NegativeFlash
-
-Words appear in elegant Playfair Display serif. Keywords trigger a dramatic negative/inverted color flash with warm tint and glow, then settle into a distinctive color. Has built-in keyword detection for common emphasis words.
-
-**Best for:** Bold statements, dramatic reveals, quote overlays, cinematic reels with a punch.
-
-| Prop | Type | Default | Description |
-|------|------|---------|-------------|
-| `colorPreset` | `NegativeFlashPresetName` | `"red"` | Color preset: `red`, `blue`, `green`, `purple`, `gold`, `cyan`. |
-| `maxWordsPerLine` | `number` | — | Words per line. |
-| `keywordScale` | `number` | — | Scale multiplier for keywords. |
-| `maxWidthPercent` | `number` | `0.85` | Max width as fraction of frame. |
-
----
-
-### 5. PaperII
+### 3. PaperII
 
 Clean Lora serif text where words smoothly transition from dim to bright as they're spoken. Minimal, no background by default — just text over footage with heavy shadow for readability. The strip-based layout stacks naturally.
 
@@ -139,7 +109,7 @@ Clean Lora serif text where words smoothly transition from dim to bright as they
 
 ---
 
-### 6. Prime
+### 4. Prime
 
 Two-tier text system: regular words in Inter, special words break out into oversized italic Playfair Display on their own line. Words spring in one at a time with a subtle slide. The font contrast between sans-serif body and serif specials creates a premium editorial feel.
 
@@ -160,22 +130,7 @@ Two-tier text system: regular words in Inter, special words break out into overs
 
 ---
 
-### 7. Prism
-
-Playfair Display serif with keywords that dramatically scale up — solo keywords on a line get even larger (2.2x). Shares the negative flash color system for keyword emphasis. Clean, elegant, high-impact.
-
-**Best for:** Quote highlights, dramatic single-word emphasis, editorial content, luxury branding.
-
-| Prop | Type | Default | Description |
-|------|------|---------|-------------|
-| `keywordScale` | `number` | — | Scale for keywords in a multi-word line. |
-| `soloKeywordScale` | `number` | `2.2` | Scale for keywords alone on a line. |
-| `maxWordsPerLine` | `number` | — | Words per line. |
-| `maxWidthPercent` | `number` | `0.85` | Max width as fraction of frame. |
-
----
-
-### 8. TypewriterReveal
+### 5. TypewriterReveal
 
 Character-by-character typewriter reveal with a blinking cursor in Space Mono. Each character appears precisely timed to the word's audio duration. Three built-in color schemes (classic white, green terminal, amber) plus full custom colors.
 
@@ -194,7 +149,7 @@ Character-by-character typewriter reveal with a blinking cursor in Space Mono. E
 
 ---
 
-### 9. CinematicLetterpress
+### 6. CinematicLetterpress
 
 Words emerge from blur into sharp focus — a cinematic "focus pull" effect. Cormorant Garamond serif at light weight with wide letter-spacing creates a film title card feel. Pages exit with a reverse blur dissolve.
 
@@ -214,7 +169,7 @@ Words emerge from blur into sharp focus — a cinematic "focus pull" effect. Cor
 
 ---
 
-### 10. Cove
+### 7. Cove
 
 Bold Montserrat base with special words that switch to oversized italic Playfair Display with a warm ethereal glow above them. Special words are nearly 2x the size of body text, creating a dramatic scale contrast. Non-special words have a dark blurred shadow above for depth.
 
@@ -231,7 +186,7 @@ Bold Montserrat base with special words that switch to oversized italic Playfair
 
 ---
 
-### 11. Dimidium
+### 8. Dimidium
 
 Heavy Montserrat with thick black stroke (14px), staggered left-aligned lines that drift with organic offsets. Highlight words alternate between 1.55x and 1x scale. A subtle floating sine-wave animation gives the text a breathing quality. Bold, urban, in-your-face.
 
@@ -247,7 +202,7 @@ Heavy Montserrat with thick black stroke (14px), staggered left-aligned lines th
 
 ---
 
-### 12. EditorialPop
+### 9. EditorialPop
 
 All Playfair Display — keywords scale up to 1.7x with bold italic treatment while body text stays light weight. Two-line staggered reveal where the second line appears timed to the audio. Pure typographic hierarchy, no color tricks.
 
@@ -262,7 +217,7 @@ All Playfair Display — keywords scale up to 1.7x with bold italic treatment wh
 
 ---
 
-### 13. Gadzhi
+### 10. Gadzhi
 
 Montserrat uppercase with words that slide up from below with a smooth cubic ease-out. Words transition from gray to their final color as they settle. Keywords land in gold. Left-aligned with tight 2-word lines for punchy delivery.
 
@@ -278,7 +233,7 @@ Montserrat uppercase with words that slide up from below with a smooth cubic eas
 
 ---
 
-### 14. Illuminate
+### 11. Illuminate
 
 Playfair Display with a diagonal light sweep that reveals each word from dark to fully lit. Keywords keep a warm lingering glow after the sweep passes. Cinematic spotlight feel — like a beam of light crossing the text.
 
@@ -293,7 +248,7 @@ Playfair Display with a diagonal light sweep that reveals each word from dark to
 
 ---
 
-### 15. Lumen
+### 12. Lumen
 
 Montserrat body with keywords that switch to Playfair Display serif with an amber glow and gold underline sweep. Shine words get an additional brightness flash that sweeps across them. Warm, golden, editorial.
 
@@ -312,7 +267,7 @@ Montserrat body with keywords that switch to Playfair Display serif with an ambe
 
 ---
 
-### 16. MagazineCutout
+### 13. MagazineCutout
 
 Words appear as individually cut-out paper pieces — each with a cream background, slight random rotation, and size variation. Like a ransom note or magazine collage but clean. Words snap into place timed to audio.
 
@@ -331,7 +286,7 @@ Words appear as individually cut-out paper pieces — each with a cream backgrou
 
 ---
 
-### 17. Passage
+### 14. Passage
 
 Cormorant Garamond serif with keywords that expand their letter-spacing (tracking) as they're revealed — a subtle typographic emphasis. Keywords also switch to italic with a warm gold color. The tracking shift is the signature move: letters physically spread apart to draw the eye.
 
@@ -351,7 +306,7 @@ Cormorant Garamond serif with keywords that expand their letter-spacing (trackin
 
 ---
 
-### 18. Pulse
+### 15. Pulse
 
 Two-slot paired display — words appear in pairs (one on top, one below) that fade in together. Keywords get a cyan accent color. Simple, clean, rhythmic. No spring physics, just crisp opacity transitions.
 
@@ -366,7 +321,7 @@ Two-slot paired display — words appear in pairs (one on top, one below) that f
 
 ---
 
-### 19. Quintessence
+### 16. Quintessence
 
 Single word at a time, centered, in Playfair Display with dramatic vertical stretch (scaleY). Gold text on a spring entrance. Pure one-word-at-a-time impact — nothing else on screen.
 
@@ -379,7 +334,7 @@ Single word at a time, centered, in Playfair Display with dramatic vertical stre
 
 ---
 
-### 20. Serif
+### 17. Serif
 
 DM Serif Display body with keywords that scale up (1.35x) in italic with a distinct blue accent and tighter letter-spacing. Words enter with a subtle spring scale-up from 0.96. Clean editorial hierarchy.
 
@@ -399,7 +354,7 @@ DM Serif Display body with keywords that scale up (1.35x) in italic with a disti
 
 ---
 
-### 21. StaggerWave
+### 18. StaggerWave
 
 Montserrat uppercase with words that spring in with a staggered delay and float on a gentle sine wave. The currently spoken word lights up in yellow (accent color) while upcoming words sit at low opacity. Energetic but controlled.
 

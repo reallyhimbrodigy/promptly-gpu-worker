@@ -59,8 +59,8 @@ from pydantic import BaseModel, Field
 from typing import List, Optional, Literal, Dict, Any
 
 _CAPTION_STYLES = Literal[
-    "HormoziPopIn", "GlitchHighlight", "EmojiPop", "NegativeFlash", "PaperII",
-    "Prime", "Prism", "TypewriterReveal", "CinematicLetterpress", "Cove",
+    "HormoziPopIn", "EmojiPop", "PaperII",
+    "Prime", "TypewriterReveal", "CinematicLetterpress", "Cove",
     "Dimidium", "EditorialPop", "Gadzhi", "Illuminate", "Lumen",
     "MagazineCutout", "Passage", "Pulse", "Quintessence", "Serif", "StaggerWave",
 ]
@@ -950,12 +950,14 @@ def get_encode_args(quality="high", threads=0):
         else:
             # p4 = high quality NVENC preset. H100 NVENC is so fast that p4 adds
             # negligible time vs p1 but produces significantly better quality.
-            # CQ 18 = visually lossless on mobile. Higher bitrate ceiling (15M)
-            # ensures complex scenes (fast motion, particle effects) don't starve.
-            # H100 NVENC encodes 1080p @ 500+ fps — encoding is never the bottleneck.
+            # CQ 18 = visually lossless on mobile. -maxrate 8M -bufsize 16M
+            # caps streaming bandwidth so AVPlayer doesn't freeze mid-playback
+            # on typical wifi/LTE — 15M was over the sustained-throughput
+            # ceiling for many real connections, producing constant rebuffers.
+            # 8M @ CQ18 is still within YouTube-1080p territory.
             return ["-c:v", "h264_nvenc", "-preset", "p4", "-tune", "hq",
                     "-rc", "vbr", "-cq", "18", "-b:v", "0",
-                    "-maxrate", "15M", "-bufsize", "30M",
+                    "-maxrate", "8M", "-bufsize", "16M",
                     "-spatial-aq", "1", "-temporal-aq", "1",
                     "-b_ref_mode", "middle"]
     else:
@@ -976,7 +978,7 @@ def get_encode_args(quality="high", threads=0):
                     "-x264-params", _x264_threads]
         else:
             return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
-                    "-maxrate", "15M", "-bufsize", "30M",
+                    "-maxrate", "8M", "-bufsize", "16M",
                     "-fps_mode", "passthrough",
                     "-x264-params", _x264_threads]
 
@@ -2493,63 +2495,57 @@ DECISION — which anchor:
 
 ONE style for the whole video. POSITION can change per segment.
 
-caption_style — pick EXACTLY ONE from 21 styles:
+caption_style — pick EXACTLY ONE from 18 styles:
 
  1. "HormoziPopIn"         — Bold uppercase words spring-pop one at a time. Highlight words scale up with custom colors. Thick black stroke.
                               Best for: Motivational clips, business advice, podcast highlights.
- 2. "GlitchHighlight"      — Montserrat body with highlighted words that explode into RGB chromatic aberration. Scanlines, slice displacement, flicker, then glow.
-                              Best for: Tech, gaming, edgy reels, cyberpunk aesthetic.
- 3. "EmojiPop"             — Words appear with automatic Lottie emoji animations. Active word gets color highlight. 48 built-in emoji mappings.
+ 2. "EmojiPop"             — Words appear with automatic Lottie emoji animations. Active word gets color highlight. 48 built-in emoji mappings.
                               Best for: Fun/casual content, storytelling, social media clips.
- 4. "NegativeFlash"        — Playfair Display serif. Keywords trigger a negative/inverted color flash with warm tint and glow, then settle into a distinctive color.
-                              Best for: Bold statements, dramatic reveals, cinematic reels.
- 5. "PaperII"              — Lora serif. Words transition from dim to bright as spoken. Strip-based stacking, heavy shadow.
+ 3. "PaperII"              — Lora serif. Words transition from dim to bright as spoken. Strip-based stacking, heavy shadow.
                               Best for: Storytelling, narrative, poetry, journal-style.
- 6. "Prime"                — Two-tier system: Inter body, special words break out into oversized italic Playfair Display on their own line.
+ 4. "Prime"                — Two-tier system: Inter body, special words break out into oversized italic Playfair Display on their own line.
                               Best for: Aspirational content, premium branding, lifestyle.
- 7. "Prism"                — Playfair Display with keywords that dramatically scale up. Solo keywords on a line get 2.2x. Shares the NegativeFlash color system.
-                              Best for: Quote highlights, single-word emphasis, editorial.
- 8. "TypewriterReveal"     — Character-by-character typewriter in Space Mono. Blinking cursor. Three schemes: classic, terminal, amber.
+ 5. "TypewriterReveal"     — Character-by-character typewriter in Space Mono. Blinking cursor. Three schemes: classic, terminal, amber.
                               Best for: Tech/coding, thoughtful narration, documentary.
- 9. "CinematicLetterpress" — Words emerge from blur into focus — cinematic "focus pull." Cormorant Garamond, light weight, wide letter-spacing.
+ 6. "CinematicLetterpress" — Words emerge from blur into focus — cinematic "focus pull." Cormorant Garamond, light weight, wide letter-spacing.
                               Best for: Documentary, film-style intros, art house.
-10. "Cove"                 — Bold Montserrat base, special words switch to oversized italic Playfair Display with warm ethereal glow. ~2x scale contrast.
+ 7. "Cove"                 — Bold Montserrat base, special words switch to oversized italic Playfair Display with warm ethereal glow. ~2x scale contrast.
                               Best for: Premium/luxury, brand storytelling, wellness.
-11. "Dimidium"             — Heavy Montserrat, thick black stroke (14px), staggered left-aligned lines. Subtle floating sine-wave animation.
+ 8. "Dimidium"             — Heavy Montserrat, thick black stroke (14px), staggered left-aligned lines. Subtle floating sine-wave animation.
                               Best for: Street style, urban, bold statements, hip-hop.
-12. "EditorialPop"         — All Playfair Display — keywords scale to 1.7x bold italic, body stays light. Two-line staggered reveal.
+ 9. "EditorialPop"         — All Playfair Display — keywords scale to 1.7x bold italic, body stays light. Two-line staggered reveal.
                               Best for: Magazine-style, fashion, interview quotes.
-13. "Gadzhi"               — Montserrat uppercase, words slide up with cubic ease-out. Gray to final color transition. Keywords land in gold.
+10. "Gadzhi"               — Montserrat uppercase, words slide up with cubic ease-out. Gray to final color transition. Keywords land in gold.
                               Best for: Business/hustle, agency reels, SMMA aesthetic.
-14. "Illuminate"           — Playfair Display with diagonal light sweep. Keywords keep a warm lingering glow. Cinematic spotlight.
+11. "Illuminate"           — Playfair Display with diagonal light sweep. Keywords keep a warm lingering glow. Cinematic spotlight.
                               Best for: Cinematic narration, atmospheric storytelling.
-15. "Lumen"                — Montserrat body, keywords switch to Playfair with amber glow and gold underline sweep. Shine words get brightness flash.
+12. "Lumen"                — Montserrat body, keywords switch to Playfair with amber glow and gold underline sweep. Shine words get brightness flash.
                               Best for: Warm inspirational, golden-hour aesthetics.
-16. "MagazineCutout"       — Individually cut-out paper pieces with cream background, random rotation, size variation. Collage aesthetic.
+13. "MagazineCutout"       — Individually cut-out paper pieces with cream background, random rotation, size variation. Collage aesthetic.
                               Best for: Creative/art, collage, DIY/craft, zine-style.
-17. "Passage"              — Cormorant Garamond serif. Keywords expand letter-spacing on reveal and switch to italic warm gold.
+14. "Passage"              — Cormorant Garamond serif. Keywords expand letter-spacing on reveal and switch to italic warm gold.
                               Best for: Literary content, book quotes, long-form storytelling.
-18. "Pulse"                — Two-slot paired display — words appear in pairs that fade in together. Keywords get cyan accent.
+15. "Pulse"                — Two-slot paired display — words appear in pairs that fade in together. Keywords get cyan accent.
                               Best for: Music, rhythmic narration, fast dialogue, lyric videos.
-19. "Quintessence"         — Single word at a time, centered, Playfair Display with dramatic vertical stretch (scaleY). Gold text, spring entrance.
+16. "Quintessence"         — Single word at a time, centered, Playfair Display with dramatic vertical stretch (scaleY). Gold text, spring entrance.
                               Best for: Single-word emphasis, dramatic pauses, poetry.
-20. "Serif"                — DM Serif Display body with keywords that scale up (1.35x) in italic with blue accent.
+17. "Serif"                — DM Serif Display body with keywords that scale up (1.35x) in italic with blue accent.
                               Best for: Premium editorial, interview quotes, brand messaging.
-21. "StaggerWave"          — Montserrat uppercase, staggered spring entrance with sine-wave float. Active word lights up yellow.
+18. "StaggerWave"          — Montserrat uppercase, staggered spring entrance with sine-wave float. Active word lights up yellow.
                               Best for: Dynamic content, workout/fitness, energetic reels.
 
 DECISION MATRIX — caption_style by content:
   business, hustle, agency, motivational         → HormoziPopIn or Gadzhi
   interview, podcast, thoughtful, calm           → Serif or Cove
-  gaming, tech, cyberpunk, glitch                → GlitchHighlight or TypewriterReveal
-  cinematic, documentary, dramatic               → CinematicLetterpress or NegativeFlash
+  gaming, tech, cyberpunk                        → TypewriterReveal or Dimidium
+  cinematic, documentary, dramatic               → CinematicLetterpress or Illuminate
   aesthetic, lifestyle, travel, minimal          → Cove or Passage
   creative, artistic, collage, music             → MagazineCutout or EmojiPop
   luxury, fashion, premium                       → Prime or Passage
-  editorial, magazine, interview quote           → EditorialPop or Prism
+  editorial, magazine, interview quote           → EditorialPop or Quintessence
   storytelling, narrative, POV                   → PaperII or Cove
   workout, fitness, energetic                    → StaggerWave or HormoziPopIn
-  music, rhythmic, lyric-driven                  → Pulse or Prism
+  music, rhythmic, lyric-driven                  → Pulse or Lumen
   unsure                                          → HormoziPopIn
 
 caption_keywords — REQUIRED. 2-6 short words that matter narratively (punchline nouns, reveal names, emotional verbs). Lowercase, no punctuation.
@@ -4231,8 +4227,8 @@ REMOVE_WORDS GUIDANCE:
     # raises on error — we do not substitute defaults or silently drop entries.
 
     _valid_caption_styles = {
-        "HormoziPopIn", "GlitchHighlight", "EmojiPop", "NegativeFlash", "PaperII",
-        "Prime", "Prism", "TypewriterReveal", "CinematicLetterpress", "Cove",
+        "HormoziPopIn", "EmojiPop", "PaperII",
+        "Prime", "TypewriterReveal", "CinematicLetterpress", "Cove",
         "Dimidium", "EditorialPop", "Gadzhi", "Illuminate", "Lumen",
         "MagazineCutout", "Passage", "Pulse", "Quintessence", "Serif", "StaggerWave",
     }
@@ -6820,7 +6816,20 @@ def project_words_to_output(transcript, cuts, effective_durations, speed_curve=N
                 continue
             ws = float(w.get("start") or 0)
             we = float(w.get("end") or 0)
-            if we <= c_start or ws >= c_end:
+            # A word belongs to whichever cut contains its MIDPOINT in source
+            # time. Half-open interval [c_start, c_end) ensures exactly-one
+            # assignment when adjacent sub-clips share a boundary point —
+            # which they do by construction in split_clips_at_speed_keypoints
+            # (sub-clip N+1's start equals sub-clip N's end). Without this,
+            # a word straddling the boundary passed both predicates of the
+            # old overlap check (we<=c_start, ws>=c_end) and got projected
+            # twice, surfacing as duplicate captions back-to-back. Hook
+            # clips (subset of a narrative clip) are unaffected: a word
+            # inside the hook range has its midpoint inside both the hook
+            # AND the narrative cut, so it's projected once per cut —
+            # preserving the hook's intentional replay behavior.
+            w_mid = (ws + we) / 2.0
+            if not (c_start <= w_mid < c_end):
                 continue
             clamped_s = max(ws, c_start)
             clamped_e = min(we, c_end)
@@ -8898,8 +8907,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 # ─── CAPTION / COMPONENT VOCABULARIES (enforced at validation + render time) ───
 
 VALID_CAPTION_STYLES = {
-    "HormoziPopIn", "GlitchHighlight", "EmojiPop", "NegativeFlash", "PaperII",
-    "Prime", "Prism", "TypewriterReveal", "CinematicLetterpress", "Cove",
+    "HormoziPopIn", "EmojiPop", "PaperII",
+    "Prime", "TypewriterReveal", "CinematicLetterpress", "Cove",
     "Dimidium", "EditorialPop", "Gadzhi", "Illuminate", "Lumen",
     "MagazineCutout", "Passage", "Pulse", "Quintessence", "Serif", "StaggerWave",
 }
@@ -8999,11 +9008,6 @@ def _resolve_caption_extra_props(style, keywords, edit_plan):
     kw_list = list(keywords or [])
 
     # Style-specific default prop names for a simple string[] of keywords.
-    # NegativeFlash and Prism used to ship hardcoded fitness/hype vocabularies
-    # baked into their bundle (negativeKeywords.ts / prismKeywords.ts) — those
-    # files are gone now and both components accept a `keywords` prop like
-    # the rest. Plumb Gemini's caption_keywords through to them so the flash
-    # / scale-up effects fire on the actual narrative emphasis words.
     simple_keyword_prop = {
         "EditorialPop": "keywords",
         "Gadzhi": "keywords",
@@ -9012,8 +9016,6 @@ def _resolve_caption_extra_props(style, keywords, edit_plan):
         "Passage": "keywords",
         "Pulse": "keywords",
         "Serif": "keywords",
-        "NegativeFlash": "keywords",
-        "Prism": "keywords",
         "Dimidium": "highlightWords",
         "Prime": "specialWords",
         "Cove": "boxedWords",
@@ -9021,7 +9023,6 @@ def _resolve_caption_extra_props(style, keywords, edit_plan):
     # Styles that expect {text, color?} entries — we emit default color per style
     rich_keyword_styles = {
         "HormoziPopIn": ("highlightWords", "#F5C518"),
-        "GlitchHighlight": ("highlightWords", None),
     }
 
     if style in simple_keyword_prop:

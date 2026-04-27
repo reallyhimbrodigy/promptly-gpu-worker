@@ -1,21 +1,25 @@
 #!/usr/bin/env node
 /**
- * Production render — single renderMedia call producing a silent mp4.
+ * Production render — single renderMedia call producing a silent video file.
  *
  * Args:
- *   --input <path>      Path to PromptlyRenderInput JSON
- *   --output <path>     Absolute path to the output mp4 file
- *   --public-dir <path> REQUIRED. Directory Remotion serves local assets from.
- *                       All `src`/`sourceUrl` values in the input JSON are
- *                       BASENAMES resolved against this directory by
- *                       Remotion's bundle server. Usually the job's work_dir.
- *   --concurrency <N>   Optional. Default = half of CPU threads.
- *   --gl <mode>         Optional Chromium GL backend (angle-egl | swiftshader).
+ *   --input <path>       Path to input JSON (PromptlyRenderInput for overlay,
+ *                        PromptlyMicroSegmentsInput for micro-segments).
+ *   --output <path>      Absolute path to the output video file.
+ *   --public-dir <path>  REQUIRED. Directory Remotion serves local assets from.
+ *                        All `src`/`sourceUrl` values in the input JSON are
+ *                        BASENAMES resolved against this directory by
+ *                        Remotion's bundle server.
+ *   --composition <id>   "PromptlyOverlay"      → ProRes 4444 alpha (overlay).
+ *                        "PromptlyMicroSegments" → h264 (transitions + complex
+ *                                                  zoom clips, no alpha).
+ *   --concurrency <N>    Optional. Default = half of CPU threads.
+ *   --gl <mode>          Optional Chromium GL backend. Default: vulkan.
  *
  * The audio track is intentionally disabled (muted: true). Python builds the
  * full audio pipeline (speed-warped source, SFX mix, ducking, EQ, compressor)
- * in parallel and mux-concats it onto this silent mp4 in a final ffmpeg pass
- * that stream-copies the video.
+ * in parallel and mux-concats it onto the final video in the composite pass
+ * that runs after this render exits.
  */
 
 import { bundle } from "@remotion/bundler";
@@ -33,6 +37,11 @@ import os from "os";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PREBUNDLE_DIR = "/remotion/bundle";
 
+const VALID_COMPOSITIONS = new Set([
+  "PromptlyOverlay",
+  "PromptlyMicroSegments",
+]);
+
 // ── CLI ────────────────────────────────────────────────────────────────────
 const args = process.argv.slice(2);
 let inputPath = null;
@@ -47,18 +56,13 @@ let concurrency = null;
 // falls through to SwiftShader. NVIDIA H100 has first-class Vulkan via
 // the NVIDIA driver; this is the most reliable hardware path on Modal.
 let glMode = "vulkan";
-// Two-renderer split: "PromptlyBase" (h264, video + transitions + zoom +
-// broll) or "PromptlyOverlay" (ProRes 4444 with alpha — captions + MGs +
-// text overlays on transparent canvas). handler.py launches one of each
-// in parallel and FFmpeg composites the alpha overlay onto the base in
-// the final mux step.
-let compositionId = "PromptlyBase";
-// Chunked rendering (Remotion's documented distributed-rendering pattern):
-// each chunk worker renders a subrange of the timeline. frameRange = [start, end]
-// inclusive bounds; compositionStart tells Remotion that frame 0 of THIS chunk
-// is actually frame N of the overall composition, so animations using
-// useCurrentFrame() return the correct global frame number. Without
-// compositionStart, animations would restart per chunk → broken output.
+let compositionId = "PromptlyOverlay";
+// Chunked rendering: split a composition timeline into N frame ranges
+// rendered by independent processes. Required to break past Remotion's
+// documented single-instance ~16-22 fps ceiling (issue #4664). Each chunk
+// renders frames [start, end] inclusive; compositionStart tells Remotion
+// the global frame offset so animations using useCurrentFrame() return
+// correct numbers across chunk boundaries.
 let frameRangeStart = null;
 let frameRangeEnd = null;
 let compositionStart = 0;
@@ -73,7 +77,7 @@ for (let i = 0; i < args.length; i++) {
   else if (args[i] === "--frame-range" && args[i + 1]) {
     const parts = args[++i].split(",").map((s) => parseInt(s.trim(), 10));
     if (parts.length !== 2 || parts.some((n) => Number.isNaN(n))) {
-      console.error(`[render-full] --frame-range must be "start,end" with two integers, got "${args[i]}"`);
+      console.error(`[render-full] --frame-range must be "start,end" with two integers`);
       process.exit(1);
     }
     frameRangeStart = parts[0];
@@ -82,19 +86,25 @@ for (let i = 0; i < args.length; i++) {
   else if (args[i] === "--composition-start" && args[i + 1]) {
     compositionStart = parseInt(args[++i], 10);
     if (Number.isNaN(compositionStart)) {
-      console.error(`[render-full] --composition-start must be an integer, got "${args[i]}"`);
+      console.error(`[render-full] --composition-start must be an integer`);
       process.exit(1);
     }
   }
 }
 
 if (!inputPath || !outputPath || !publicDir) {
-  console.error("Usage: node render-full.mjs --input <json> --output <mp4|mov> --public-dir <dir> [--concurrency N] [--gl mode] [--composition PromptlyBase|PromptlyOverlay] [--frame-range start,end] [--composition-start N]");
+  console.error(
+    "Usage: node render-full.mjs --input <json> --output <file> --public-dir <dir> " +
+    "[--composition PromptlyOverlay|PromptlyMicroSegments] [--concurrency N] [--gl mode] " +
+    "[--frame-range start,end --composition-start N]",
+  );
   process.exit(1);
 }
 
-if (compositionId !== "PromptlyBase" && compositionId !== "PromptlyOverlay") {
-  console.error(`[render-full] --composition must be "PromptlyBase" or "PromptlyOverlay", got "${compositionId}"`);
+if (!VALID_COMPOSITIONS.has(compositionId)) {
+  console.error(
+    `[render-full] --composition must be one of ${[...VALID_COMPOSITIONS].join(" | ")}, got "${compositionId}"`,
+  );
   process.exit(1);
 }
 
@@ -119,14 +129,15 @@ const cpuCount = os.cpus().length;
 const resolvedConcurrency = concurrency && concurrency > 0 ? concurrency : Math.max(1, Math.floor(cpuCount / 2));
 
 const isChunked = frameRangeStart !== null && frameRangeEnd !== null;
-const frameRangeLabel = isChunked ? `frames ${frameRangeStart}..${frameRangeEnd}` : `frames 0..${inputJson.totalDurationInFrames - 1}`;
-
+const frameRangeLabel = isChunked
+  ? `chunk frames ${frameRangeStart}-${frameRangeEnd} (compositionStart=${compositionStart})`
+  : `frames 0-${inputJson.totalDurationInFrames - 1}`;
+const _summary = isOverlay
+  ? `${inputJson.caption?.pages?.length ?? 0} caption pages, ${inputJson.motionGraphics?.length ?? 0} MG, ${inputJson.textOverlays?.length ?? 0} text overlays`
+  : `${inputJson.segments?.length ?? 0} segments`;
 console.log(
   `[render-full] composition=${compositionId} (${isOverlay ? "ProRes 4444 alpha" : "h264"}) ` +
-  `${frameRangeLabel}, compositionStart=${compositionStart}, ` +
-  `${inputJson.clips?.length ?? 0} clips, ${inputJson.transitions?.length ?? 0} transitions, ` +
-  `${inputJson.broll?.length ?? 0} broll, ${inputJson.motionGraphics?.length ?? 0} MG, ` +
-  `${inputJson.totalDurationInFrames} frames total, concurrency=${resolvedConcurrency}`,
+  `${frameRangeLabel}, ${_summary}, concurrency=${resolvedConcurrency}`,
 );
 
 // ── Bundle (use prebundle if present) ──────────────────────────────────────
@@ -158,8 +169,7 @@ const chromePath = existsSync("/usr/local/bin/chrome-headless-shell")
 // option on openBrowser/renderMedia. Passing executablePath inside
 // chromiumOptions silently no-ops, leaving browserExecutable=null, which
 // causes openBrowser → internalEnsureBrowser to download Chromium on every
-// render (~86 MB). This bug was masking the build-time-baked binary
-// completely. Fixed below by lifting it to the right place.
+// render (~86 MB).
 if (!chromePath) {
   console.log("[render-full] No /usr/local/bin/chrome-headless-shell — calling ensureBrowser to download");
   await ensureBrowser({
@@ -184,72 +194,6 @@ const browser = await openBrowser("chrome", {
 });
 console.log(`[render-full] Browser opened in ${((Date.now() - tBrowser) / 1000).toFixed(2)}s`);
 
-// ── DIAGNOSTIC: Probe Chromium's actual WebGL renderer ─────────────────────
-// We need to know whether Chromium is hardware-accelerated (NVIDIA H100) or
-// software-rendering (SwiftShader). 32 parallel software-rendered tabs at
-// 1080×1920 with SVG filter chains is the most likely cause of the 152s
-// render — software renderer's pixel throughput on this composition is
-// roughly 9 fps × 32 tabs = ~288 fps total, exactly what we'd see.
-try {
-  // @remotion/renderer 4.0.450 internal browser.newPage() destructures a
-  // mandatory options object — calling without args throws
-  // "Cannot destructure property 'context' of 'undefined'". Provide the
-  // minimum stub fields so the diagnostic actually runs.
-  const _gpuPage = await browser.newPage({
-    context: () => null,
-    logLevel: 'info',
-    indent: false,
-    pageIndex: 0,
-    onBrowserLog: null,
-    onLog: () => {},
-  });
-  // Remotion's internal Page class has no .setContent() — only .goto() and
-  // .evaluate(). Navigate to a data: URL with the canvas inline, then run
-  // the WebGL probe via evaluate.
-  await _gpuPage.goto({
-    url: 'data:text/html,<canvas id="c" width="100" height="100"></canvas>',
-    timeout: 5000,
-  });
-  const _glInfo = await _gpuPage.evaluate(() => {
-    const c = document.getElementById('c');
-    const gl = c.getContext('webgl2') || c.getContext('webgl');
-    if (!gl) return { error: 'no WebGL context available' };
-    const ext = gl.getExtension('WEBGL_debug_renderer_info');
-    const renderer = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
-    const vendor   = ext ? gl.getParameter(ext.UNMASKED_VENDOR_WEBGL)   : gl.getParameter(gl.VENDOR);
-    return {
-      renderer: String(renderer),
-      vendor: String(vendor),
-      version: String(gl.getParameter(gl.VERSION)),
-      shadingLanguage: String(gl.getParameter(gl.SHADING_LANGUAGE_VERSION)),
-      maxTextureSize: gl.getParameter(gl.MAX_TEXTURE_SIZE),
-    };
-  });
-  await _gpuPage.close();
-  console.log(`[gpu-info] WebGL renderer: ${_glInfo.renderer || _glInfo.error}`);
-  console.log(`[gpu-info] WebGL vendor:   ${_glInfo.vendor || ''}`);
-  console.log(`[gpu-info] WebGL version:  ${_glInfo.version || ''}`);
-  console.log(`[gpu-info] Max texture:    ${_glInfo.maxTextureSize || ''}`);
-  // Heuristic flag — if the renderer string contains "SwiftShader", "llvmpipe",
-  // or "Software", we're in software fallback regardless of what the
-  // gl=angle-egl flag suggested.
-  const _rs = (_glInfo.renderer || '').toLowerCase();
-  const _isSoftware =
-    _rs.includes('swiftshader') ||
-    _rs.includes('llvmpipe') ||
-    _rs.includes('software') ||
-    _rs.includes('mesa');
-  if (_isSoftware) {
-    console.log(`[gpu-info] *** SOFTWARE RENDERER DETECTED *** — Chromium is NOT using the H100. This is almost certainly the bottleneck.`);
-  } else if (_rs.includes('nvidia') || _rs.includes('h100') || _rs.includes('cuda')) {
-    console.log(`[gpu-info] Hardware GPU rendering active.`);
-  } else {
-    console.log(`[gpu-info] Renderer not recognized as software or NVIDIA — inspect manually.`);
-  }
-} catch (e) {
-  console.log(`[gpu-info] WebGL probe failed: ${e.message}`);
-}
-
 // ── Composition ────────────────────────────────────────────────────────────
 const tComp = Date.now();
 const composition = await selectComposition({
@@ -265,11 +209,6 @@ console.log(`[render-full] selectComposition: ${((Date.now() - tComp) / 1000).to
 const tRender = Date.now();
 let lastPctLogged = -10;
 
-// DIAGNOSTIC: per-progress-update timing samples. Tells us if render speed
-// degrades over time (memory pressure, cache eviction) or is uniformly slow
-// (composition cost). Captures rendered/encoded split — if rendered is
-// keeping up but encoded is lagging, encoder is the bottleneck; if rendered
-// is slow, composition/decode is the bottleneck.
 let _lastProgressTime = Date.now();
 let _lastRenderedFrames = 0;
 let _lastEncodedFrames = 0;
@@ -278,16 +217,13 @@ const _intervalSamples = [];
 await renderMedia({
   serveUrl: bundleLocation,
   composition,
-  // Two-renderer split codec selection:
-  //   PromptlyBase     → h264 yuv420p (no alpha, fast encode, small file)
-  //   PromptlyOverlay  → ProRes 4444 yuva444p10le (alpha, fast encode, larger
-  //                      but acceptable since file is short-lived intermediate)
-  // imageFormat="png" is REQUIRED for alpha output. Remotion validates that
-  // alpha-bearing pixel formats (yuva*) only work with PNG intermediates
-  // (JPEG can't carry alpha). Throws "Pixel format was set to 'yuva444p10le'
-  // but the image format is not PNG" otherwise. PNG is slower per frame in
-  // theory, but the overlay canvas is mostly transparent so PNG compression
-  // is near-instant — net cost is negligible.
+  // Codec selection by composition:
+  //   PromptlyOverlay       → ProRes 4444 yuva444p10le (alpha required for
+  //                           the alpha-composite step). PNG intermediates
+  //                           are required by Remotion for any yuva pixel
+  //                           format (JPEG can't carry alpha).
+  //   PromptlyMicroSegments → h264 yuv420p (no alpha, fast encode, decoded
+  //                           by FFmpeg in the final composite pass).
   codec: isOverlay ? "prores" : "h264",
   ...(isOverlay
     ? {
@@ -304,43 +240,31 @@ await renderMedia({
   overwrite: true,
   puppeteerInstance: browser,
   publicDir,
-  // Chunked rendering: limit work to a frame range, with compositionStart
-  // telling Remotion the global frame offset so animations using
-  // useCurrentFrame() return the correct frame numbers across chunk
-  // boundaries. Both fields are required together for distributed renders.
-  ...(isChunked ? { frameRange: [frameRangeStart, frameRangeEnd] } : {}),
-  compositionStart,
   ...(chromePath ? { browserExecutable: chromePath } : {}),
   chromiumOptions: {
     gl: glMode,
     enableMultiProcessOnLinux: true,
     disableWebSecurity: true,
   },
-  // NOTE: hardwareAcceleration in Remotion controls the ENCODER (NVENC vs
-  // libx264), NOT Chromium's GL backend. H100 has no NVENC ASIC (the
-  // Modal startup log says so explicitly), so 'required' would always fail
-  // on this hardware. The actual GPU paint path is fully controlled by
-  // chromiumOptions.gl='vulkan', which adds --enable-gpu /
-  // --ignore-gpu-blocklist / --use-angle=vulkan / --use-vulkan=native at
-  // browser launch. That's what engages the H100 for the per-frame paint.
-  // The encode stays on libx264 ultrafast — which is fine because in v51
-  // we measured the encoder catching up at 65 fps; the bottleneck was
-  // never the encode, it was Chromium painting in software.
-  // OffthreadVideo cache. Sized for chunked workers (16 GB RAM each).
-  // 1 GB is plenty per chunk: each chunk renders a subrange (~177 frames
-  // per base chunk), seek footprint is bounded by the chunk's frame range,
-  // and the overlay composition reads no video at all. A 16 GB cache here
-  // would OOM the worker (16 GB tab cache + 8 Chromium tabs × 1 GB each
-  // + Node + bundle ≈ 30 GB).
-  offthreadVideoCacheSizeInBytes: 1 * 1024 * 1024 * 1024, // 1 GB
-  // info-level logging: keeps the [render-full] interval-fps lines visible
-  // without flooding stderr with thousands of per-frame compositor lines.
+  // Chunked rendering: limit work to a frame range, with compositionStart
+  // telling Remotion the global frame offset so animations using
+  // useCurrentFrame() return correct frame numbers across chunk boundaries.
+  // Both fields are required together for distributed renders.
+  ...(isChunked ? { frameRange: [frameRangeStart, frameRangeEnd] } : {}),
+  compositionStart,
+  // OffthreadVideo cache, sized per composition. Overlay is a transparent
+  // canvas — no source video reads — so a small cache suffices. Micro
+  // segments seek heavily into source video for transitions + complex-zoom
+  // clips, so it gets a larger cache. With 4-6 chunked overlay processes
+  // running in parallel, an 8 GB cache PER process would OOM the container.
+  offthreadVideoCacheSizeInBytes: isOverlay
+    ? 256 * 1024 * 1024     // 256 MB (overlay never reads video)
+    : 4 * 1024 * 1024 * 1024, // 4 GB (micro reads source video)
   logLevel: "info",
   onProgress: (info) => {
     const { progress, encodedFrames, renderedFrames } = info || {};
     const now = Date.now();
     const pct = Math.round((progress || 0) * 100);
-    // Emit a sample roughly every 10% AND record rate-over-interval.
     if (pct >= lastPctLogged + 10) {
       const elapsedSec = (now - _lastProgressTime) / 1000;
       const rendDelta = (renderedFrames || 0) - _lastRenderedFrames;
@@ -361,7 +285,6 @@ await renderMedia({
 });
 
 const renderElapsed = (Date.now() - tRender) / 1000;
-// DIAGNOSTIC: summarise interval samples — degrading vs uniform slowness.
 if (_intervalSamples.length) {
   const fpsList = _intervalSamples.map((s) => s.renderFps);
   const avg = fpsList.reduce((a, b) => a + b, 0) / fpsList.length;
@@ -383,10 +306,9 @@ try {
 // browser.close() in newer @remotion/renderer destructures `silent` from
 // its options arg — calling without args throws TypeError. Pass `{}` (or
 // {silent: false}) to satisfy the API. The render output is already written
-// at this point, so we additionally swallow any cleanup error so a
-// post-render browser-cleanup hiccup doesn't fail the whole render.
+// at this point, so we additionally swallow any cleanup error.
 try {
-  await browser.close({silent: false});
+  await browser.close({ silent: false });
 } catch (e) {
   console.log(`[render-full] browser.close() warning (render output already written): ${e.message}`);
 }

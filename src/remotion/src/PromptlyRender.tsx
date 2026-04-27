@@ -2,29 +2,28 @@ import React from "react";
 import {
   AbsoluteFill,
   Sequence,
-  Series,
   OffthreadVideo,
   staticFile,
   useCurrentFrame,
-  useVideoConfig,
   interpolate,
 } from "remotion";
 import type {
-  PromptlyRenderInput,
   PromptlyRenderProps,
+  PromptlyMicroSegmentsProps,
   ClipSpec,
   TransitionSpec,
-  BrollSpec,
   CaptionSpec,
   MotionGraphicSpec,
   TextOverlaySpec,
   TikTokPageLike,
 } from "./types";
 
-// Caption styles — all 21
+// Caption styles — 18 (NegativeFlash, Prism, GlitchHighlight removed:
+// they require mixBlendMode against video pixels, which the transparent
+// overlay architecture can't provide without dropping the FFmpeg base path).
 import {
-  HormoziPopIn, GlitchHighlight, EmojiPop, NegativeFlash, PaperII,
-  Prime, Prism, TypewriterReveal, CinematicLetterpress, Cove,
+  HormoziPopIn, EmojiPop, PaperII,
+  Prime, TypewriterReveal, CinematicLetterpress, Cove,
   Dimidium, EditorialPop, Gadzhi, Illuminate, Lumen,
   MagazineCutout, Passage, Pulse, Quintessence, Serif, StaggerWave,
 } from "./captions";
@@ -51,8 +50,8 @@ import {
 
 // ─── Component maps ────────────────────────────────────────────────────────
 const CAPTION_MAP: Record<string, React.FC<any>> = {
-  HormoziPopIn, GlitchHighlight, EmojiPop, NegativeFlash, PaperII,
-  Prime, Prism, TypewriterReveal, CinematicLetterpress, Cove,
+  HormoziPopIn, EmojiPop, PaperII,
+  Prime, TypewriterReveal, CinematicLetterpress, Cove,
   Dimidium, EditorialPop, Gadzhi, Illuminate, Lumen,
   MagazineCutout, Passage, Pulse, Quintessence, Serif, StaggerWave,
 };
@@ -146,56 +145,6 @@ const TransitionRenderer: React.FC<{
     />
   );
 };
-
-// ─── Clip series ───────────────────────────────────────────────────────────
-const ClipSeries: React.FC<{
-  clips: ClipSpec[]; transitions: TransitionSpec[]; sourceUrl: string;
-}> = ({ clips, transitions, sourceUrl }) => {
-  const byIdx = new Map<number, TransitionSpec>();
-  for (const t of transitions) byIdx.set(t.afterClipIndex, t);
-
-  return (
-    <Series>
-      {clips.map((clip, i) => {
-        const trans = byIdx.get(i);
-        return (
-          <React.Fragment key={`clip-${clip.id}`}>
-            <Series.Sequence durationInFrames={clip.durationInFrames}>
-              <ClipRenderer clip={clip} sourceUrl={sourceUrl} />
-            </Series.Sequence>
-            {trans && i < clips.length - 1 ? (
-              <Series.Sequence durationInFrames={trans.durationInFrames}>
-                <TransitionRenderer transition={trans} sourceUrl={sourceUrl} />
-              </Series.Sequence>
-            ) : null}
-          </React.Fragment>
-        );
-      })}
-    </Series>
-  );
-};
-
-// ─── B-roll cutaways ───────────────────────────────────────────────────────
-const BrollOverlays: React.FC<{ broll: BrollSpec[] }> = ({ broll }) => (
-  <>
-    {broll.map((b, i) => (
-      <Sequence
-        key={`broll-${i}`}
-        from={b.fromFrame}
-        durationInFrames={b.durationInFrames}
-      >
-        <AbsoluteFill style={{ background: "#000" }}>
-          <OffthreadVideo
-            src={b.src}
-            startFrom={b.seekFromFrames}
-            playbackRate={b.playbackRate}
-            style={{ width: "100%", height: "100%", objectFit: "cover" }}
-          />
-        </AbsoluteFill>
-      </Sequence>
-    ))}
-  </>
-);
 
 // ─── Captions: one Series segment per position window ──────────────────────
 const CaptionSegmentRenderer: React.FC<{
@@ -429,51 +378,10 @@ const MotionGraphicsLayer: React.FC<{
   </>
 );
 
-// ─── Outro fade ────────────────────────────────────────────────────────────
-const OutroFade: React.FC<{ kind: "fade_black" | "fade_white" }> = ({ kind }) => {
-  const frame = useCurrentFrame();
-  const { durationInFrames, fps } = useVideoConfig();
-  const fadeFrames = Math.round(fps * 1.0);
-  const start = Math.max(0, durationInFrames - fadeFrames);
-  const alpha = interpolate(
-    frame, [start, durationInFrames], [0, 1],
-    { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
-  );
-  const bg = kind === "fade_white" ? "#ffffff" : "#000000";
-  return (
-    <AbsoluteFill style={{ backgroundColor: bg, opacity: alpha, pointerEvents: "none" }} />
-  );
-};
-
 const resolveSrc = (s: string): string => {
   if (!s) return s;
   if (/^[a-z][a-z0-9+.-]*:/i.test(s) || s.startsWith("//")) return s;
   return staticFile(s);
-};
-
-// ─── PromptlyBase composition ──────────────────────────────────────────────
-// Renders ONLY the underlying video timeline: clips, transitions, zoom, B-roll.
-// Black background, no overlays. This is what FFmpeg used to do in the
-// pre-66-pack era — it's intentionally minimal so per-frame paint cost stays
-// at "video frame copy" levels.
-//
-// The Outro fade is included here because it's a full-canvas color overlay
-// that operates on the underlying video, not on text/MG overlays.
-export const PromptlyBase: React.FC<PromptlyRenderProps> = ({ input }) => {
-  const { sourceUrl, clips, transitions, broll, outro } = input;
-  const resolvedSourceUrl = resolveSrc(sourceUrl);
-  const resolvedBroll = React.useMemo(
-    () => broll.map((b) => ({ ...b, src: resolveSrc(b.src) })),
-    [broll],
-  );
-
-  return (
-    <AbsoluteFill style={{ background: "#000" }}>
-      <ClipSeries clips={clips} transitions={transitions} sourceUrl={resolvedSourceUrl} />
-      <BrollOverlays broll={resolvedBroll} />
-      {outro && outro !== "none" ? <OutroFade kind={outro} /> : null}
-    </AbsoluteFill>
-  );
 };
 
 // ─── PromptlyOverlay composition ───────────────────────────────────────────
@@ -502,16 +410,45 @@ export const PromptlyOverlay: React.FC<PromptlyRenderProps> = ({ input }) => {
   );
 };
 
-// ─── Backward-compat alias ─────────────────────────────────────────────────
-// Kept so older code paths or external callers that import `PromptlyRender`
-// don't break — it now renders the union of base + overlay (the pre-split
-// behavior, minus color effects which are deleted from the schema). New
-// production renders use the split path via Root.tsx's two compositions.
-export const PromptlyRender: React.FC<PromptlyRenderProps> = ({ input }) => {
+// ─── PromptlyMicroSegments composition ─────────────────────────────────────
+// Renders ONLY the windows that FFmpeg can't replicate without visual drift:
+//   - Every transition (CardSwipe, FilmStrip, SceneTitle, NewspaperWipe,
+//     LightLeak, etc. — all 11 use bespoke React/CSS that has no faithful
+//     FFmpeg analog).
+//   - Composite-effect zoom clips (FocusWindow, LetterboxPush, DepthPull —
+//     multi-layer overlays, blur masks, bokeh orbs, etc.).
+// Pure scale-only zooms (SmoothPush, SnapReframe, StepZoom, StageZoom) and
+// no-zoom clips are produced directly by FFmpeg in handler.py.
+//
+// Segments are concatenated end-to-end in the composition timeline so Python
+// can render them all in ONE Remotion process (no per-segment subprocess
+// startup tax) and then trim each segment back out by frame range using
+// FFmpeg `trim` in the final composite step.
+export const PromptlyMicroSegments: React.FC<PromptlyMicroSegmentsProps> = ({
+  input,
+}) => {
+  const { sourceUrl, segments } = input;
+  const resolvedSourceUrl = resolveSrc(sourceUrl);
+
   return (
-    <>
-      <PromptlyBase input={input} />
-      <PromptlyOverlay input={input} />
-    </>
+    <AbsoluteFill style={{ background: "#000" }}>
+      {segments.map((seg, i) => (
+        <Sequence
+          key={`micro-${i}`}
+          from={seg.outputStartFrame}
+          durationInFrames={seg.durationInFrames}
+        >
+          {seg.type === "transition" && seg.transition ? (
+            <TransitionRenderer
+              transition={seg.transition}
+              sourceUrl={resolvedSourceUrl}
+            />
+          ) : null}
+          {seg.type === "zoom_clip" && seg.clip ? (
+            <ClipRenderer clip={seg.clip} sourceUrl={resolvedSourceUrl} />
+          ) : null}
+        </Sequence>
+      ))}
+    </AbsoluteFill>
   );
 };

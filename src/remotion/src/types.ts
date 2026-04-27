@@ -132,12 +132,9 @@ export interface TikTokPageLike {
 
 export type CaptionStyle =
   | "HormoziPopIn"
-  | "GlitchHighlight"
   | "EmojiPop"
-  | "NegativeFlash"
   | "PaperII"
   | "Prime"
-  | "Prism"
   | "TypewriterReveal"
   | "CinematicLetterpress"
   | "Cove"
@@ -269,4 +266,38 @@ export interface PromptlyRenderInput {
 
 export interface PromptlyRenderProps {
   input: PromptlyRenderInput;
+}
+
+// ── PromptlyMicroSegments — batched Remotion-only video segments ─────────────
+// Renders only the windows that can't be replicated faithfully in FFmpeg
+// (transitions + composite zoom effects). Each segment is placed back-to-back
+// in the composition timeline; Python knows the boundaries from outputStartFrame
+// + durationInFrames and trims the segments back out in the final ffmpeg
+// composite step. Black background, h264 (no alpha).
+export interface MicroSegmentSpec {
+  /** "transition" → render TransitionRenderer with the given transition spec.
+   *  "zoom_clip"  → render ClipRenderer with the given clip spec (clip.zoomEffect
+   *                 is what triggered Remotion-rendering this clip — typically
+   *                 FocusWindow/LetterboxPush/DepthPull). */
+  type: "transition" | "zoom_clip";
+  outputStartFrame: number;
+  durationInFrames: number;
+  /** Set when type === "transition". */
+  transition?: TransitionSpec;
+  /** Set when type === "zoom_clip". */
+  clip?: ClipSpec;
+}
+
+export interface PromptlyMicroSegmentsInput {
+  sourceUrl: string;
+  fps: number;
+  width: number;
+  height: number;
+  /** Sum of all segment durations. */
+  totalDurationInFrames: number;
+  segments: MicroSegmentSpec[];
+}
+
+export interface PromptlyMicroSegmentsProps {
+  input: PromptlyMicroSegmentsInput;
 }
