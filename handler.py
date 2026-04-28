@@ -6583,7 +6583,7 @@ def get_pitch_preserving_speed_filter(speed: float) -> str:
     return get_atempo_filter(speed)
 
 
-def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample_rate=48000):
+def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample_rate=48000, trans_dur_after=None):
     """Build the per-cut audio track in one numpy pass.
 
     Source audio is extracted ONCE (one ffmpeg invocation) and held in
@@ -6593,10 +6593,15 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
     constant speed per cut, guaranteeing audio + video durations are
     sample-identical.
 
+    `trans_dur_after[i]` (when provided) is the seconds of silence to
+    append after cut i's audio, accounting for the transition segment
+    that follows cut i in the video timeline. Without this, audio is
+    shorter than video by sum(transition_durs) and `-shortest` mux
+    truncates the tail — leaving the audio drifting ahead of the video
+    by a growing amount as transitions accumulate.
+
     Memory cost: one mono 16-bit PCM buffer at sample_rate covering the
     full source audio. At 48 kHz × 60 s × 2 bytes = 5.5 MB — negligible.
-    Wallclock save vs the old per-cut subprocess pattern: ~50 ms × N cuts
-    of ffmpeg startup + N disk roundtrips.
 
     No boundary fades — sharp cuts. Speech rarely has a zero-crossing at
     boundaries, but the trade-off is accepted: clean cuts beat masked ones.
@@ -6672,6 +6677,18 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
             src_positions = np.linspace(0, n_src - 1, n_out)
             all_clips.append(np.interp(src_positions, np.arange(n_src), samples))
 
+        # If a transition follows this cut in the timeline, append silence
+        # of trans_dur seconds. This keeps audio length aligned with the
+        # video timeline (which has the transition as a separate concat
+        # segment). Without this, audio would be sum(trans_durs) shorter
+        # than video and `-shortest` mux would truncate or — worse —
+        # let audio drift ahead of video by trans_dur per transition.
+        if trans_dur_after is not None and ci < len(trans_dur_after):
+            _t_after = float(trans_dur_after[ci] or 0.0)
+            if _t_after > 0:
+                _silence_n = max(1, round(_t_after * sample_rate))
+                all_clips.append(np.zeros(_silence_n, dtype=np.float32))
+
     if not all_clips:
         with wave.open(output_wav, "wb") as wf:
             wf.setnchannels(1)
@@ -6697,19 +6714,23 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
     return output_wav
 
 
-def project_words_to_output(transcript, cuts, effective_durations, transition_duration=None, clip_time_maps=None, removed_word_indices=None, fps=60.0):
+def project_words_to_output(transcript, cuts, effective_durations, transition_duration=None, clip_time_maps=None, removed_word_indices=None, fps=60.0, trans_dur_after=None):
     """Project word timestamps from source to output timeline using canonical time maps.
 
     If removed_word_indices is provided, words at those indices are excluded.
     This is the SAME source of truth used by build_clips_from_words, so the
     caption projection cannot emit fragments of removed words.
+
+    `trans_dur_after[i]` (when provided) is the seconds to advance the
+    output cursor AFTER cut i's clip duration, accounting for the
+    transition segment that follows cut i in the timeline.
     """
     words = transcript.get("words") or []
     projected = []
     if not words or not cuts:
         return projected
     _removed = removed_word_indices if isinstance(removed_word_indices, (set, frozenset)) else set(removed_word_indices or [])
-    clip_ranges = get_output_clip_ranges(cuts, effective_durations, transition_duration=transition_duration)
+    clip_ranges = get_output_clip_ranges(cuts, effective_durations, transition_duration=transition_duration, trans_dur_after=trans_dur_after)
     output_cursor = 0.0
     for i, cut in enumerate(cuts):
         c_start = float(cut["source_start"])
@@ -6751,31 +6772,43 @@ def project_words_to_output(transcript, cuts, effective_durations, transition_du
                 "_word_index": word_idx,
             })
         dur = effective_durations[i] if i < len(effective_durations) else (c_end - c_start)
-        # Raw float accumulation — matches _seg_starts (line 6049) which also
-        # uses raw addition. Frame-snapping was removed because it accumulated
-        # ~200ms drift over 80+ segments, causing b-roll overlays to appear early.
+        # Raw float accumulation. Frame-snapping was removed because it
+        # accumulated ~200ms drift over 80+ segments. The transition
+        # extension after this clip is added so word output positions
+        # match the actual rendered timeline (which has transition
+        # segments concatenated between clips).
         output_cursor += dur
+        if trans_dur_after is not None and i < len(trans_dur_after):
+            output_cursor += float(trans_dur_after[i] or 0.0)
 
     projected = [w for w in projected if w["end"] > w["start"]]
     return projected
 
-def get_output_clip_ranges(cuts, effective_durations, transition_duration=None):
+def get_output_clip_ranges(cuts, effective_durations, transition_duration=None, trans_dur_after=None):
     """
     Return list of {"start": float, "end": float} for each clip's position
     in the output timeline.
 
-    The actual ffmpeg pipeline concatenates segments with `-f concat -c copy`
-    (stream copy), which does NOT cross-fade. Transitions are decomposed into
-    per-segment fade-in/fade-out *within* each segment — they consume time
-    inside the segment but the segment's total playback duration is unchanged.
-    Therefore the cursor must advance by the FULL effective duration with no
-    overlap subtraction. Subtracting overlap was the bug that caused captions
-    and SFX to drift earlier by (n_transitions × transition_duration).
+    The actual ffmpeg pipeline (build_final_filtergraph in ffmpeg_base.py)
+    concatenates segments AS:
+        clip_0 [+ trans_0] + clip_1 [+ trans_1] + ... + clip_{N-1}
+    where trans_i is a SEPARATE timeline segment of `transition_duration`
+    seconds when cut[i].transition_out is a real transition. Transitions
+    therefore EXTEND the timeline; they do not overlap with adjacent clips.
 
-    The transition_duration parameter is kept for API compatibility but is
-    intentionally unused.
+    Args:
+      cuts: list of cut dicts with source_start/source_end/transition_out.
+      effective_durations: per-cut output duration in seconds (clip-only).
+      transition_duration: kept for API compatibility (not used here — the
+        per-cut extension is passed via trans_dur_after instead).
+      trans_dur_after: optional list of seconds to advance the cursor AFTER
+        cut i's clip duration, representing the transition that follows cut
+        i in the timeline. Pass [t_0, t_1, ..., t_{N-1}] where t_i = 0 if
+        cut i has no transition_out, else transition_duration. The last
+        cut's value is always 0 (no transition after the last cut).
+        When None, defaults to all-zero (back-compat: no transition gaps).
     """
-    _ = transition_duration  # intentionally unused — see docstring
+    _ = transition_duration  # API compat — actual extensions come from trans_dur_after
     ranges = []
     cursor = 0.0
     for i, cut in enumerate(cuts):
@@ -6784,6 +6817,8 @@ def get_output_clip_ranges(cuts, effective_durations, transition_duration=None):
         end   = cursor + dur
         ranges.append({"start": start, "end": end})
         cursor = end
+        if trans_dur_after is not None and i < len(trans_dur_after):
+            cursor += float(trans_dur_after[i] or 0.0)
     return ranges
 
 
@@ -7470,12 +7505,37 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     edit_plan["_render_effective_durations"] = effective_durations
     edit_plan["_render_clip_time_maps"] = _clip_time_maps
 
+    # ── Per-cut transition extension (timeline alignment) ───────────────────
+    # The FFmpeg composite renders the timeline as
+    #     clip_0 [+ trans_0] + clip_1 [+ trans_1] + ... + clip_{N-1}
+    # where trans_i exists when cut[i].transition_out is a real transition
+    # AND i < N-1 (no transition after the last clip). Each trans_i is its
+    # own concatenated segment of TRANSITION_DURATION seconds. So the true
+    # output timeline length is
+    #     sum(clip_eff_dur_i) + sum(trans_dur_i)
+    # not just sum(clip_eff_dur_i). Audio MUST pad with silence at each
+    # transition window or it falls behind by trans_dur per transition.
+    # All output-position projections (clip_ranges, project_words_to_output,
+    # SFX/B-roll/MG output positions) take this same array so they land on
+    # the actually-rendered frames.
+    _T_trans = TRANSITION_DURATION
+    _T_trans_frames = max(1, int(round(_T_trans * source_fps)))
+    _trans_dur_after = []
+    _trans_frames_after = 0
+    for _i, _rc in enumerate(render_cuts):
+        _t_raw = str(_rc.get("transition_out") or "none")
+        if _t_raw in VALID_TRANSITION_TYPES and _i < len(render_cuts) - 1:
+            _trans_dur_after.append(_T_trans)
+            _trans_frames_after += _T_trans_frames
+        else:
+            _trans_dur_after.append(0.0)
+
     n = len(render_cuts)
-    total_output_frames = max(1, sum(_per_cut_dur_frames))
+    total_output_frames = max(1, sum(_per_cut_dur_frames) + _trans_frames_after)
     total_output_duration = total_output_frames / float(source_fps)
 
     # Output clip ranges (start, end in output seconds) — used for SFX + b-roll + text overlay timing
-    _clip_ranges = get_output_clip_ranges(render_cuts, effective_durations, transition_duration=None)
+    _clip_ranges = get_output_clip_ranges(render_cuts, effective_durations, transition_duration=None, trans_dur_after=_trans_dur_after)
 
     # Project Deepgram words onto output timeline (for captions + SFX + b-roll)
     _removed_word_indices = edit_plan.get("_removed_word_indices") or set()
@@ -7483,6 +7543,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         transcript, render_cuts, effective_durations,
         transition_duration=None, clip_time_maps=_clip_time_maps,
         removed_word_indices=_removed_word_indices, fps=source_fps,
+        trans_dur_after=_trans_dur_after,
     )
     edit_plan["_projected_words"] = _projected_words
     _pw_by_idx = {pw["_word_index"]: pw for pw in _projected_words if pw.get("_word_index") is not None}
@@ -8183,10 +8244,15 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     # Per-cut audio — numpy-resampled pitch-scaling, one segment per cut at
     # that cut's constant speed (asetrate-equivalent: pitch tracks tempo).
+    # `trans_dur_after` is forwarded so the audio inserts silence for each
+    # transition segment in the video timeline, keeping audio length
+    # aligned with video (which has transitions as separate concat
+    # segments adding to total duration).
     _audio_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     _speed_audio_future = _audio_pool.submit(
         build_per_cut_audio, source_path, render_cuts,
-        effective_durations, work_dir, sample_rate=sample_rate,
+        effective_durations, work_dir,
+        sample_rate=sample_rate, trans_dur_after=_trans_dur_after,
     )
 
     # ── 10. Spawn Remotion renders in parallel (overlay chunks + micro) ────
@@ -8855,6 +8921,9 @@ def _resolve_caption_extra_props(style, keywords, edit_plan):
     # Styles that expect {text, color?} entries — we emit default color per style
     rich_keyword_styles = {
         "HormoziPopIn": ("highlightWords", "#F5C518"),
+        # PaperII expects PaperIIHighlightWord[] = [{text, color}]; default to
+        # the same warm-yellow accent as Hormozi for consistency.
+        "PaperII": ("highlightWords", "#F5C518"),
     }
 
     if style in simple_keyword_prop:
