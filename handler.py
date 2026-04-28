@@ -374,9 +374,18 @@ def _phrasal_restart_cuts(deepgram_words, already_cut):
                 if _time_gap > 1.5 or _time_gap < 0:
                     continue
                 # Reject if a gap word ends a sentence — that's parallel
-                # structure, not a restart.
+                # structure ("I went, I saw, I conquered"), not a restart.
                 _gap_words = remaining[i + phrase_len : scan_idx]
                 if any(_SENTENCE_END_RE.search(gw["punctuated"]) for gw in _gap_words):
+                    continue
+                # Reject if the gap is empty — no filler/restart-marker
+                # between the two phrases. An empty gap with the same words
+                # twice is intentional repetition for emphasis ("I want, I
+                # want this"), not a restart. Real restarts have a discourse
+                # marker, hesitation, or filler in the gap. Without this
+                # guard, "very, very" would slip through (length-2 phrases
+                # would never trigger, but length-1+ patterns could).
+                if len(_gap_words) == 0:
                     continue
                 # Validated restart — remove the FIRST occurrence
                 for pw in phrase_words:
@@ -438,6 +447,8 @@ def mechanical_cut_pass(deepgram_words):
 
     # ── Pass 2: 1-word stutter detection (using shared _is_stutter helper) ──
     # Iterate over words not yet cut; check each against its next-not-cut peer.
+    # Pass duration + gap so _is_stutter can discriminate mechanical stutters
+    # from intentional emphatic repetition ("very, very good").
     _remaining_indices = [i for i in range(len(_words)) if i not in word_cuts]
     for pos, idx in enumerate(_remaining_indices):
         if pos + 1 >= len(_remaining_indices):
@@ -445,7 +456,9 @@ def mechanical_cut_pass(deepgram_words):
         next_idx = _remaining_indices[pos + 1]
         curr_text = _words[idx].get("punctuated_word") or _words[idx].get("word") or ""
         next_text = _words[next_idx].get("punctuated_word") or _words[next_idx].get("word") or ""
-        if _is_stutter(curr_text, next_text):
+        _curr_dur = float(_words[idx].get("end") or 0) - float(_words[idx].get("start") or 0)
+        _gap = float(_words[next_idx].get("start") or 0) - float(_words[idx].get("end") or 0)
+        if _is_stutter(curr_text, next_text, curr_duration=_curr_dur, gap_to_next=_gap):
             curr_speaker = _words[idx].get("speaker")
             next_speaker = _words[next_idx].get("speaker")
             # Cross-speaker repetition is conversation, not stutter
@@ -2567,7 +2580,11 @@ DECISION MATRIX — caption_style by content:
   music, rhythmic, lyric-driven                  → Pulse or Lumen
   unsure                                          → HormoziPopIn
 
-caption_keywords — REQUIRED. 2-6 short words that matter narratively (punchline nouns, reveal names, emotional verbs). Lowercase, no punctuation.
+caption_keywords — REQUIRED. The words that should be visually highlighted in captions for engagement. Aim for 1 keyword per ~5–10 spoken words across the kept transcript — that's roughly **8–15 keywords for a 30s video, 15–30 for a 60s video, 25–50 for a 90s video**. NOT every word, but FREQUENT — every emphasis target, every punchline noun, every reaction word, every reveal, every emotional verb, every vivid adjective. Sparse keywords (only 2–6) leave the captions feeling flat. Lowercase, no punctuation.
+
+Pick keywords from across the ENTIRE transcript — don't cluster them all in the first 10 seconds. Spread coverage so highlights appear throughout the video, including the back half (which retains less attention without visual interest).
+
+When in doubt: include the word. Cost of missing a beat-landing word > cost of one extra highlight.
 
 caption_position_changes — REQUIRED ARRAY (can be empty). Position-change events, each at a specific kept word.
   Format: [{{"word_index": int, "position": "top" | "center" | "bottom"}}, ...]
@@ -4531,6 +4548,49 @@ REMOVE_WORDS GUIDANCE:
     edit_plan["motion_graphics"] = validated_mg
     if validated_mg:
         print(f"[mg] Gemini requested {len(validated_mg)} motion graphic(s)", flush=True)
+
+    # ── B-roll vs motion-graphic temporal overlap validator ─────────────────
+    # B-roll renders full-frame (covers the entire canvas). MGs render in
+    # anchored zones. If a MG and B-roll overlap in time, the MG visually
+    # appears ON TOP of the B-roll — a stack the user didn't ask for and
+    # most viewers read as a layout glitch. Drop any MG whose word-window
+    # overlaps a B-roll word-window, prioritizing the B-roll (it's larger
+    # and conveys narrative content; MGs are accents).
+    if validated_mg and validated_broll:
+        _broll_windows = []
+        for _bc in validated_broll:
+            _bs = int(_bc.get("start_word_index", -1))
+            _be = int(_bc.get("end_word_index", -1))
+            if _bs >= 0 and _be >= _bs:
+                _broll_windows.append((_bs, _be))
+        if _broll_windows:
+            _kept_mgs = []
+            for _mg in validated_mg:
+                _ms = int(_mg.get("start_word_index", -1))
+                _me = int(_mg.get("end_word_index", -1))
+                if _ms < 0 or _me < _ms:
+                    _kept_mgs.append(_mg)
+                    continue
+                _conflicts = False
+                for (_bs2, _be2) in _broll_windows:
+                    # Word-index overlap: max(start_a, start_b) <= min(end_a, end_b)
+                    if max(_ms, _bs2) <= min(_me, _be2):
+                        _conflicts = True
+                        break
+                if _conflicts:
+                    print(
+                        f"[mg] Dropping {_mg.get('type')!r} at words "
+                        f"[{_ms}-{_me}] — overlaps B-roll window. "
+                        f"B-roll is full-frame; MG would stack on top.",
+                        flush=True,
+                    )
+                    continue
+                _kept_mgs.append(_mg)
+            if len(_kept_mgs) != len(validated_mg):
+                _dropped_count = len(validated_mg) - len(_kept_mgs)
+                print(f"[mg] Dropped {_dropped_count} MG(s) for B-roll overlap", flush=True)
+                validated_mg = _kept_mgs
+                edit_plan["motion_graphics"] = validated_mg
 
     # Defensive: in case any legacy upstream caller still hands us a
     # `speed_curve` field on the plan (it's no longer in the schema), drop
@@ -6709,9 +6769,13 @@ def project_words_to_output(transcript, cuts, effective_durations, transition_du
     This is the SAME source of truth used by build_clips_from_words, so the
     caption projection cannot emit fragments of removed words.
 
-    `trans_dur_after[i]` (when provided) is the seconds to advance the
-    output cursor AFTER cut i's clip duration, accounting for the
-    transition segment that follows cut i in the timeline.
+    `trans_dur_after[i]` (when provided) is the seconds the next cut's full
+    window overlaps the END of cut i's full window in the pro-NLE overlap
+    model. Words in the OUTGOING cut's tail (last trans_dur seconds of
+    output) are SUPPRESSED to avoid two captions rendering simultaneously
+    during the transition window — the incoming cut's head words own the
+    transition's caption real estate. Both sides are still audible (the
+    cross-fade plays both clips), but only one caption shows at a time.
     """
     words = transcript.get("words") or []
     projected = []
@@ -6724,6 +6788,12 @@ def project_words_to_output(transcript, cuts, effective_durations, transition_du
         c_start = float(cut["source_start"])
         c_end   = float(cut["source_end"])
         tm = clip_time_maps[i] if clip_time_maps and i < len(clip_time_maps) else None
+        # Cut's eff_dur (full output window length) and trans_tail
+        # (output seconds at the END of this cut's window that overlap
+        # with the incoming next cut's head — those are the "transition"
+        # window where the next cut's captions take precedence).
+        _eff_i = effective_durations[i] if i < len(effective_durations) else (c_end - c_start)
+        _trans_tail_i = float(trans_dur_after[i] or 0.0) if (trans_dur_after is not None and i < len(trans_dur_after)) else 0.0
         for word_idx, w in enumerate(words):
             if word_idx in _removed:
                 continue
@@ -6746,6 +6816,13 @@ def project_words_to_output(transcript, cuts, effective_durations, transition_du
                 speed = float(cut.get("speed") or 1.0)
                 local_s = (clamped_s - c_start) / speed
                 local_e = (clamped_e - c_start) / speed
+            # Suppress words that fall inside this cut's trans_tail handle
+            # (the overlap region with the next cut's head). The next cut's
+            # head words own that output time range; rendering this cut's
+            # tail words there would produce simultaneous overlapping
+            # caption pages during every transition.
+            if _trans_tail_i > 0 and local_s >= (_eff_i - _trans_tail_i):
+                continue
             projected.append({
                 "start": round((output_cursor + local_s)*1000)/1000,
                 "end":   round((output_cursor + local_e)*1000)/1000,
@@ -6814,8 +6891,22 @@ def get_output_clip_ranges(cuts, effective_durations, transition_duration=None, 
 FILLER_WORDS = {"uh", "um", "uh,", "um,", "hmm", "hmm,", "uhh", "umm", "er", "ah"}
 
 
-def _is_stutter(current_word, next_word):
-    """Detect clear false-start patterns that should be removed."""
+def _is_stutter(current_word, next_word, curr_duration=None, gap_to_next=None):
+    """Detect clear false-start patterns that should be removed.
+
+    `curr_duration` and `gap_to_next` (both optional, in seconds) are used to
+    discriminate mechanical stutters from intentional emphatic repetition.
+
+    The exact-repetition pattern ("very, very" / "now, now") is mechanical
+    ONLY when the timing looks rushed — the first word was truncated (short
+    duration) OR there's almost no gap to the second instance (rapid-fire
+    stutter). Otherwise the speaker is using rhetorical emphasis and the
+    word should be kept. Without this gating, "very, very good" loses the
+    first "very" — destroying the emphasis the speaker intended.
+
+    Prefix / contraction / hyphenated patterns are unambiguous false starts
+    and always fire.
+    """
     if not next_word:
         return False
 
@@ -6825,21 +6916,34 @@ def _is_stutter(current_word, next_word):
     if not curr or not nxt:
         return False
 
-    # Exact repetition: "I I", "the the"
-    if curr == nxt:
+    # Hyphenated/truncated word (Deepgram returns "wh-", "th-") — always a
+    # false start regardless of context.
+    if curr.endswith("-") and len(curr) >= 2:
         return True
 
-    # Prefix/false start: "shou" before "shouldn't", "wh" before "what"
+    # Prefix/false start: "shou" before "shouldn't", "wh" before "what".
+    # The current word is a strict prefix of the next, with the next being
+    # a longer real word — the speaker started, restarted with the full word.
     if len(curr) >= 2 and nxt.startswith(curr) and len(nxt) > len(curr):
         return True
 
-    # Contraction false start: "do" before "don't"
+    # Contraction false start: "do" before "don't" / "dont".
     if curr + "n't" == nxt or curr + "nt" == nxt:
         return True
 
-    # Hyphenated/truncated word (Deepgram sometimes returns "wh-" or "th-")
-    if curr.endswith("-") and len(curr) >= 2:
-        return True
+    # Exact repetition: "I I", "the the". Could be a mechanical stutter OR
+    # intentional emphasis ("very, very good"). Discriminate by timing:
+    #   - curr_duration < 0.20s → first instance was truncated (real stutter)
+    #   - gap_to_next < 0.08s → fired off rapid-fire (real stutter)
+    # Otherwise treat as emphasis and keep both words.
+    if curr == nxt:
+        if curr_duration is not None and curr_duration < 0.20:
+            return True
+        if gap_to_next is not None and gap_to_next < 0.08:
+            return True
+        # No timing info or timing looks intentional — leave for Gemini to
+        # decide via content-analysis.
+        return False
 
     return False
 
@@ -6982,7 +7086,13 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15, v
         if w["_word_index"] in removed_indices:
             continue
         next_w = remaining[idx_in_remaining + 1] if idx_in_remaining + 1 < len(remaining) else None
-        if next_w and _is_stutter(w["_clean"], next_w["_clean"]):
+        if next_w:
+            _curr_dur_b = float(w.get("_end") or 0) - float(w.get("_start") or 0)
+            _gap_b = float(next_w.get("_start") or 0) - float(w.get("_end") or 0)
+        else:
+            _curr_dur_b = None
+            _gap_b = None
+        if next_w and _is_stutter(w["_clean"], next_w["_clean"], curr_duration=_curr_dur_b, gap_to_next=_gap_b):
             # Different speakers repeating the same word is conversation, not a stutter.
             w_speaker = w.get("speaker", w.get("_speaker"))
             next_speaker = next_w.get("speaker", next_w.get("_speaker"))
@@ -7069,6 +7179,11 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15, v
                         _sentence_completed = True
                         break
                 if _sentence_completed:
+                    continue
+                # Empty gap = intentional repetition for emphasis ("I want, I
+                # want this"). Real restarts have a discourse marker /
+                # hesitation / filler in the gap. Don't eat emphasis.
+                if len(_gap_words) == 0:
                     continue
                 # Validated restart — remove the FIRST occurrence (false start)
                 for pw in phrase_words:
