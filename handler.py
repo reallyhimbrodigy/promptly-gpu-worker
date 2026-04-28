@@ -93,13 +93,6 @@ _SFX_SOUNDS = Literal[
     "transition_smooth", "thunder", "pop",
 ]
 
-class _HookClip(BaseModel):
-    # Word-anchored — Python derives source_start from start_word.start and
-    # source_end from end_word.end after the main call returns. Gemini never
-    # emits float timestamps that need to match word boundaries exactly.
-    start_word_index: int
-    end_word_index: int
-
 class _CaptionPositionChange(BaseModel):
     # Position-change event at a specific kept word. Python synthesizes the
     # actual caption_position_segments (with from_seconds/to_seconds/position)
@@ -223,7 +216,6 @@ class EditPlan(BaseModel):
     word_indices must reference kept words) still live in Python validators.
     """
     notes: str
-    hook_clip: Optional[_HookClip] = None
     thumbnail_word_index: int
     caption_style: _CAPTION_STYLES
     caption_keywords: List[str]
@@ -2458,7 +2450,7 @@ You are the editor. You decide what stays and what gets cut. You understand the 
 
 === WHAT MAKES SHORT-FORM CONTENT FEEL EDITED ===
 
-The opening is an audition. The first 2 seconds must give the viewer a reason to stay — a visual event, a sonic hit, tighter framing, text that creates curiosity. Something that signals this isn't raw footage. Set a hook_clip for almost every video; null is reserved for footage that already opens with a punchline.
+The opening is an audition. The first 2 seconds must give the viewer a reason to stay — a visual event, a sonic hit, tight framing, text that creates curiosity. Something that signals this isn't raw footage. cut[0] must be the strongest attention-grabbing moment — see the OPENING section below for placement rules. Don't bury the lede.
 
 Pacing creates rhythm. For short-form content, the average kept clip should be 2-3 seconds. The Captions app and top TikTok editors cut every 2-3 seconds — this is the standard. Filler and setup move even faster (1-2s). Key moments — reveals, punchlines, important statements — breathe (3-4s max). The contrast between fast and slow is what makes pacing feel alive. When in doubt, cut shorter.
 
@@ -2486,7 +2478,7 @@ The pipeline enforces these rules with strict validators. Output that violates a
    A motion_graphic's zone is its explicit `anchor` field. Two items collide only when their zones AND time windows both overlap. High-intensity emphasis moments are spaced ≥2.5s apart regardless of zone.
 7. ONE ZOOM PER KEPT-SOURCE CLIP. At most one emphasis_moment carries a zoom_effect within any single kept-source clip (the source range between your removed-words boundaries). When you want multiple zoom beats close together, stack their events onto a single emphasis_moment's `zoom_effect.events` array.
 8. MOTION GRAPHIC ANCHORS ARE ABSOLUTE ZONES. Every `motion_graphics[i].anchor` and `emphasis_moments[i].motion_graphic.anchor` is one of the 5 absolute zones — MGs don't follow the speaker's face.
-9. ANCHORS ARE KEPT WORDS — BY CONSTRUCTION. The transcript you see contains only kept words, renumbered `[0..M-1]`. Every word_index you emit (in `emphasis_moments[i].word_indices`, `sound_effects[i].word_index`, `text_overlays[i].start_word_index`, `motion_graphics[i].{{start,end}}_word_index`, `broll_clips[i].{{start,end}}_word_index`, `transitions[i].after_word_index`, `caption_position_changes[i].word_index`, `hook_clip.{{start,end}}_word_index`, `thumbnail_word_index`) references this index space. All anchors land on kept words. Python translates back to source indices and derives all timestamps.
+9. ANCHORS ARE KEPT WORDS — BY CONSTRUCTION. The transcript you see contains only kept words, renumbered `[0..M-1]`. Every word_index you emit (in `emphasis_moments[i].word_indices`, `sound_effects[i].word_index`, `text_overlays[i].start_word_index`, `motion_graphics[i].{{start,end}}_word_index`, `broll_clips[i].{{start,end}}_word_index`, `transitions[i].after_word_index`, `caption_position_changes[i].word_index`, `thumbnail_word_index`) references this index space. All anchors land on kept words. Python translates back to source indices and derives all timestamps.
 10. EXPLICIT NULLS. If an emphasis moment has no zoom, emit `"zoom_effect": null` — no downstream defaults fill gaps.
 
 === SAFE ZONES (1080x1920 canvas) ===
@@ -2801,22 +2793,21 @@ Your `remove_words` field is almost always EMPTY. Only emit an entry if you deci
 
 Preferred alternative: keep the low-value section as a clip but set its `speed` to 1.30–1.40 so it pace-flies through the content. Hard cuts mid-clause are jarring; a fast clip preserves continuity while still removing weight.
 
-=== HOOK ===
+=== OPENING (cut[0]) ===
 
-The hook is the single most important part of any short-form video. It plays FIRST before the full video — the opening is an audition. The first 2 seconds must give the viewer a reason to stay. Without a hook, a great edit gets scrolled past.
+The first 2 seconds of any short-form video are an audition — the viewer decides whether to keep watching or scroll. There is no auto-hook, no preview-then-replay structure (that pattern duplicates content and reads as amateurish; no professional editor or production tool does it).
 
-Pick the PUNCHLINE or REACTION — the moment of maximum emotional intensity. NOT the setup. NOT the buildup. The hook should be the PAYOFF that makes the viewer think "WAIT WHAT" and need to see how it got there. Always pick the climax or reveal — never the question or context that leads to it.
+Instead: **cut[0] must be the strongest attention-grabbing moment in the video** — the punchline, the reveal, the most extreme reaction, the emotional peak. Don't bury the lede behind setup. The viewer should be hooked by what they see and hear in cut[0] alone.
 
-The hook MUST:
-  - Be 1.0 - 3.0 seconds
-  - Start with speech (not silence) — the first word should land within ~0.3s
-  - Be the CLIMAX of the story, not the buildup
-  - NOT make sense without the rest of the video — that's what keeps them watching
+Concretely:
+  - cut[0]'s source range should contain a high-energy moment, not setup
+  - cut[0]'s `speed` should be 0.75–0.85x (the buildup-arrival pattern's "arrival" speed) so the moment lands with weight
+  - cut[0] should start with speech (not silence) — pick a source range whose first word lands within ~0.3s of source_start
+  - cut[0] should NOT need the rest of the video to make sense — that ambiguity is what keeps the viewer watching
 
-hook_clip — object or null. {{"start_word_index": int, "end_word_index": int}}.
-  Word-anchored — Python derives source_start from start_word.start and source_end from end_word.end.
-  Duration (end_word.end − start_word.start) should be 1.0 - 3.0s.
-  null is valid ONLY when the video already opens with an immediately compelling first 2s. If the opening is setup/context/intro, set the hook.
+If the speaker's strongest moment is at source second 35, your cuts list does NOT have to start at 0. Start cut[0] at ~34.5 with the punchline; let cut[1] onward fill in the chronological narrative leading up to it (or skip back to the beginning, depending on the story shape). This is a "cold open" — the climax leads, the lead-up follows.
+
+If the source genuinely opens with a strong moment (e.g., the speaker walks in mid-rant), then cut[0] = source from 0 is fine. But this is rare; for most talking-head footage the strongest moment lives somewhere in the middle.
 
 === SFX — SOUND EFFECTS ===
 
@@ -2920,7 +2911,7 @@ WORD WINDOW (start_word_index → end_word_index):
   - The pipeline derives precise on-screen timing from these indices. No duration field.
 
 PLACEMENT DISCIPLINE:
-  Only place B-roll on moments where the speaker describes a physical action or concrete scene. Stay on the speaker's face during emotional beats, opinions, punchlines, reveals, and reactions — during those moments the speaker's facial expression IS the content and cutting away destroys the impact. B-roll in the main body, NEVER during the hook (the hook needs the speaker's face).
+  Only place B-roll on moments where the speaker describes a physical action or concrete scene. Stay on the speaker's face during emotional beats, opinions, punchlines, reveals, and reactions — during those moments the speaker's facial expression IS the content and cutting away destroys the impact. B-roll in the main body, NEVER during cut[0] (the opening needs the speaker's face for the first 2 seconds — viewers form snap judgments from human faces).
 
   Spacing: 3+ seconds of speaker face between B-roll clips. Coverage: ~30-40% of runtime is a healthy ceiling. Place B-roll on 1.0x or 1.2–1.3x clips, not on the 0.7–0.85x slow-speed clips that contain a punchline beat.
 
@@ -3068,7 +3059,6 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
 
 {{
   "notes": "<=50 words>",
-  "hook_clip": {{"start_word_index": int, "end_word_index": int}} | null,
   "thumbnail_word_index": int,
   "caption_style": "<one of 21>",
   "caption_keywords": ["<word>", "<word>", ...],
@@ -3794,12 +3784,6 @@ REMOVE_WORDS GUIDANCE:
     for _cpc in (edit_plan.get("caption_position_changes") or []):
         if isinstance(_cpc, dict) and "word_index" in _cpc:
             _cpc["word_index"] = _translate_idx(_cpc["word_index"])
-    # hook_clip.start_word_index / end_word_index
-    _hc = edit_plan.get("hook_clip")
-    if isinstance(_hc, dict):
-        for _k in ("start_word_index", "end_word_index"):
-            if _k in _hc:
-                _hc[_k] = _translate_idx(_hc[_k])
     # thumbnail_word_index
     if "thumbnail_word_index" in edit_plan:
         edit_plan["thumbnail_word_index"] = _translate_idx(edit_plan["thumbnail_word_index"])
@@ -3865,17 +3849,6 @@ REMOVE_WORDS GUIDANCE:
         }]
     edit_plan["caption_position_segments"] = _segments
 
-    # hook_clip: derive source_start/source_end from word indices
-    if isinstance(_hc, dict):
-        _s_wi = _hc.get("start_word_index")
-        _e_wi = _hc.get("end_word_index")
-        _ss = _word_start(_s_wi)
-        _se = _word_end(_e_wi)
-        if _ss is not None:
-            _hc["source_start"] = _ss
-        if _se is not None:
-            _hc["source_end"] = _se
-
     # thumbnail_timestamp from thumbnail_word_index
     _twi = edit_plan.get("thumbnail_word_index")
     _tts = _word_start(_twi)
@@ -3885,7 +3858,6 @@ REMOVE_WORDS GUIDANCE:
     print(
         f"[generate-edit] Derived float timestamps: "
         f"caption_segments={len(_segments)}, "
-        f"hook={'yes' if isinstance(_hc, dict) else 'no'}, "
         f"thumbnail={edit_plan.get('thumbnail_timestamp')}",
         flush=True,
     )
@@ -4576,29 +4548,12 @@ REMOVE_WORDS GUIDANCE:
         thumbnail_timestamp = None
     edit_plan["thumbnail_timestamp"] = thumbnail_timestamp
 
-    hook_clip = None
-    raw_hook = edit_plan.get("hook_clip")
-    if isinstance(raw_hook, dict):
-        try:
-            hook_start = max(0.0, float(raw_hook.get("source_start")))
-            hook_end = max(0.0, float(raw_hook.get("source_end")))
-            if video_duration > 0:
-                hook_end = min(hook_end, video_duration)
-            hook_dur = hook_end - hook_start
-            if 0.5 <= hook_dur <= 5.0:
-                hook_clip = {
-                    "source_start": round(hook_start, 3),
-                    "source_end": round(hook_end, 3),
-                }
-            else:
-                print(f"[generate-edit] Hook clip duration {hook_dur:.2f}s out of range — skipping", flush=True)
-        except Exception:
-            hook_clip = None
-    if hook_clip:
-        _hs = float(hook_clip["source_start"])
-        _he = float(hook_clip["source_end"])
-        print(f"[hook] Hook timestamps: {_hs:.2f}-{_he:.2f} ({_he - _hs:.2f}s)", flush=True)
-    edit_plan["hook_clip"] = hook_clip
+    # Defensive: drop any legacy hook_clip field a stale caller might pass.
+    # Auto-hook (climax replay at start) was removed because it duplicates
+    # source content in the timeline — no production NLE does this. The
+    # opening punch comes from cut[0] being the strongest moment, picked
+    # by Gemini per the prompt.
+    edit_plan.pop("hook_clip", None)
     edit_plan["cuts"] = list(validated_cuts)
 
     # ── Parse emphasis moments — strict, with explicit visual-layer bindings ─
@@ -5147,7 +5102,7 @@ REMOVE_WORDS GUIDANCE:
 
     # Zoom and motion graphics are attached to each emphasis_moment explicitly
     # by Gemini (emphasis_moments[i].zoom_effect / motion_graphic). No
-    # auto-SnapReframe, no auto-SmoothPush on hook. If Gemini didn't emit a
+    # auto-SnapReframe, no auto-SmoothPush. If Gemini didn't emit a
     # zoom_effect on a moment, no zoom fires — that's an intentional decision,
     # not an omission to repair.
 
@@ -5227,8 +5182,7 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None)
         "keywords, broll_clips, text_overlays (each has a variant "
         "discriminator: torn_paper|sticky_note|quote_card|lower_third|caption_match), "
         "motion_graphics (with semantic anchor), emphasis_moments (each binds explicit "
-        "zoom_effect / motion_graphic), sfx_placements, hook_clip "
-        "(start_word_index + end_word_index; source_start/end derived), thumbnail_word_index "
+        "zoom_effect / motion_graphic), sfx_placements, thumbnail_word_index "
         "(thumbnail_timestamp derived), per-clip `speed` (constant 0.7–1.4 per cut), outro. "
         "The user has requested a change. Your job:\n\n"
         "1) CLASSIFY the request as one of:\n"
@@ -6779,11 +6733,7 @@ def project_words_to_output(transcript, cuts, effective_durations, transition_du
             # time. Half-open interval [c_start, c_end) ensures exactly-one
             # assignment for words that straddle a cut boundary — without
             # this, a straddling word would be projected by both adjacent
-            # cuts and surface as duplicate back-to-back captions. Hook
-            # clips (a subset of a narrative clip) are unaffected: a word
-            # inside the hook range has its midpoint inside both the hook
-            # AND the narrative cut, so it's projected once per cut —
-            # preserving the hook's intentional replay behavior.
+            # cuts and surface as duplicate back-to-back captions.
             w_mid = (ws + we) / 2.0
             if not (c_start <= w_mid < c_end):
                 continue
@@ -7353,10 +7303,10 @@ def project_source_time_to_output(source_t, cuts, clip_ranges, clip_time_maps=No
     clip_time_maps is REQUIRED — each cut's avg_speed comes from there,
     matching FFmpeg's setpts exactly.
 
-    When a hook clip duplicates a source range at the start of the timeline,
-    multiple cuts can contain the same source timestamp. We prefer the LAST
-    (narrative) match so that b-roll, SFX, and emphasis moments land at the
-    correct narrative position rather than the hook preview position."""
+    Cuts are non-overlapping in source time, so each source timestamp falls
+    into at most one cut's source range. The loop assigns to the LAST
+    matching cut (no overlap means there's only one), and returns its
+    output position via the cut's time map."""
     if not clip_time_maps:
         raise ValueError("project_source_time_to_output requires clip_time_maps")
     best_output_t = None
@@ -7463,44 +7413,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     render_cuts = list(cuts)
 
-    # Hook clip — prefix the timeline with the Gemini-selected hook source
-    # range, subset from the narrative clips it overlaps. No auto-zoom is
-    # applied here; if Gemini wants a zoom on the hook it emits one via
-    # emphasis_moments (whose source timestamps fall in the hook window).
-    hook_clip = edit_plan.get("hook_clip")
-    if isinstance(hook_clip, dict):
-        _hook_start = float(hook_clip.get("source_start") or 0.0)
-        _hook_end = float(hook_clip.get("source_end") or 0.0)
-        _hook_clips = []
-        for _nc in render_cuts:
-            _nc_start = float(_nc["source_start"])
-            _nc_end = float(_nc["source_end"])
-            _overlap_start = max(_nc_start, _hook_start)
-            _overlap_end = min(_nc_end, _hook_end)
-            if _overlap_end - _overlap_start > 0.05:
-                _hc = dict(_nc)
-                _hc["source_start"] = _overlap_start
-                _hc["source_end"] = _overlap_end
-                _hc["transition_out"] = "none"
-                _hc["_is_hook"] = True
-                _hook_clips.append(_hc)
-        if not _hook_clips:
-            raise RuntimeError(
-                f"Hook clip {_hook_start:.3f}-{_hook_end:.3f} does not overlap any "
-                f"narrative clip. Gemini must pick a hook inside kept content."
-            )
-        _hook_dur = sum(float(h["source_end"]) - float(h["source_start"]) for h in _hook_clips)
-        print(f"[hook] Built hook from {len(_hook_clips)} narrative clip(s) covering {_hook_dur:.2f}s", flush=True)
-        render_cuts = _hook_clips + render_cuts
-
-    # Tag clips with _original_idx (hook = -1, content = 0..N)
-    _content_idx = 0
-    for _rc in render_cuts:
-        if _rc.get("_is_hook"):
-            _rc["_original_idx"] = -1
-        else:
-            _rc["_original_idx"] = _content_idx
-            _content_idx += 1
+    # Tag clips with _original_idx for downstream lookups.
+    for _idx, _rc in enumerate(render_cuts):
+        _rc["_original_idx"] = _idx
 
     # Source fps detection (unified timeline)
     render_source = source_path
@@ -7688,7 +7603,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _dur_frames = _per_cut_render_dur_frames[i]
         _orig_idx = rc.get("_original_idx")
         _clip_id_parts = [
-            "hook" if rc.get("_is_hook") else "clip",
+            "clip",
             str(_orig_idx if _orig_idx is not None else i),
         ]
         _clip_spec = {
@@ -8164,11 +8079,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         1 for em in (edit_plan.get("_emphasis_moments") or [])
         if em.get("zoom_effect")
     )
-    # One emphasis_moment with zoom_effect = one cut with zoomEffect. The
-    # only fan-out source is hook clips: an emphasis whose source range
-    # falls inside a hook duplicate produces zoomEffect on BOTH the hook
-    # cut and the narrative cut. So expected ≤ actual is the correct
-    # invariant — strictly less means we silently dropped a zoom.
+    # One emphasis_moment with zoom_effect = exactly one cut with
+    # zoomEffect (no fan-out — cuts are non-overlapping in source time
+    # since auto-hook duplication was deleted). Strictly less actual
+    # than expected means we silently dropped a zoom — bail loud.
     _actual_zooms = sum(1 for _c in clips_out if _c.get("zoomEffect"))
     if _actual_zooms < _expected_zooms:
         raise RuntimeError(
@@ -10144,15 +10058,6 @@ def handler(job):
         _timings["edit_recipe_faces"] = 0
         print(f"[pipeline] Pipeline init phase complete", flush=True)
 
-        # Hook is Gemini's decision. If it picked one, we render it. If it
-        # said null, the video starts with the first content clip. No fallback
-        # hook detection — Gemini has the signals (video, transcript, shot
-        # changes, vocal emphasis, loudness) to make this call.
-        _gh = edit_plan.get("hook_clip") if isinstance(edit_plan.get("hook_clip"), dict) else None
-        if _gh:
-            print(f"[hook] Gemini picked {_gh['source_start']:.2f}-{_gh['source_end']:.2f}", flush=True)
-        else:
-            print("[hook] Gemini picked None (no hook)", flush=True)
         analysis = edit_plan.get("analysis_data") or {}
 
         # B-roll fetch already started inside mega-parallel phase (right after edit_plan ready)
