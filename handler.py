@@ -7860,17 +7860,42 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _sfx_extra_idx += 1
 
     # ── 4. B-roll cutaways on output timeline ───────────────────────────────
-    # B-roll fetches run in parallel with the main pipeline. Each fetch must
-    # either return a local file path OR return None (no Pexels match). A
-    # raised exception fails the whole render — we do not silently skip.
+    # B-roll fetches run in parallel with the main pipeline. Fail-soft: if a
+    # single fetch times out or errors (Gemini API slowness, Pexels 5xx,
+    # download timeout), we SKIP that B-roll and continue with the rest.
+    # B-roll is enhancement, not core content — one slow API call shouldn't
+    # kill an otherwise-valid edit. The 120s overall budget covers Gemini
+    # visual-pick latency (~5–70s observed) plus Pexels download (~1–10s)
+    # for the slowest of N parallel fetches.
     broll_out = []
     if broll_fetch_futures:
         _broll_files = {}
-        for _fut in concurrent.futures.as_completed(broll_fetch_futures, timeout=30):
-            _idx = broll_fetch_futures[_fut]
-            _path = _fut.result(timeout=1)
-            if _path:
-                _broll_files[_idx] = _path
+        _BROLL_FETCH_TIMEOUT = 120.0
+        _t_broll = time.time()
+        try:
+            for _fut in concurrent.futures.as_completed(broll_fetch_futures, timeout=_BROLL_FETCH_TIMEOUT):
+                _idx = broll_fetch_futures[_fut]
+                try:
+                    _path = _fut.result(timeout=1)
+                    if _path:
+                        _broll_files[_idx] = _path
+                except Exception as _bre:
+                    print(
+                        f"[broll] fetch #{_idx} failed ({type(_bre).__name__}: "
+                        f"{str(_bre)[:120]}) — skipping that B-roll",
+                        flush=True,
+                    )
+        except concurrent.futures.TimeoutError:
+            _pending = [i for f, i in broll_fetch_futures.items() if not f.done()]
+            print(
+                f"[broll] WARNING: {len(_pending)} B-roll fetch(es) didn't complete "
+                f"within {_BROLL_FETCH_TIMEOUT:.0f}s (indices {_pending}) — "
+                f"skipping those, continuing with {len(_broll_files)} that finished",
+                flush=True,
+            )
+            # Don't cancel — already-running threads can finish in the background;
+            # the pool's shutdown(wait=False) at function exit handles cleanup.
+        print(f"[broll] fetch wait: {time.time() - _t_broll:.1f}s, {len(_broll_files)}/{len(broll_fetch_futures)} ready", flush=True)
 
         if _broll_files and broll_clips:
             for _bi, _bc in enumerate(broll_clips):
