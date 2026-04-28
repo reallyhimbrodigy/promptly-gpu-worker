@@ -53,8 +53,10 @@ SEMANTIC_TO_MG_ANCHOR = {
 #     so the two can never disagree.
 #   - sound_effects has NO `t` or `word` fields — Gemini emits `word_index`
 #     and Python looks up the rest from the transcript.
-#   - speed_curve is a nullable list (null == "no speed ramping") instead of
-#     a list-or-string union, which simplifies the schema Gemini sees.
+#   - There is no continuous speed curve. Pacing is expressed via the per-cut
+#     `speed` field (constant 0.7–1.4× per cut). "Speed ramping" aesthetics
+#     come from adjacent cuts at contrasting speeds (the buildup-arrival
+#     pattern), not from interpolating speed within a single clip.
 from pydantic import BaseModel, Field
 from typing import List, Optional, Literal, Dict, Any
 
@@ -205,12 +207,6 @@ class _Transition(BaseModel):
     intensity: Optional[float] = None
     flashColor: Optional[str] = None
 
-class _SpeedCurveKeypoint(BaseModel):
-    # Word-anchored — Python derives `t` (source time in seconds) from
-    # deepgram_words[at_word_index].start after the main call returns.
-    at_word_index: int
-    speed: float
-
 class _RemoveWord(BaseModel):
     # Either a word_index (surgical single-word removal) or a start/end range
     # (continuous span like dead_air). Python validates which set is present.
@@ -236,8 +232,6 @@ class EditPlan(BaseModel):
     outro: Literal["none", "fade_black", "fade_white"]
     aspect_ratio: Literal["9:16"]
     pacing: Literal["fast", "medium", "slow"]
-    # null == no speed ramping. List == keypoints.
-    speed_curve: Optional[List[_SpeedCurveKeypoint]] = None
     emphasis_moments: List[_EmphasisMoment]
     text_overlays: List[_TextOverlay]
     sound_effects: List[_SoundEffect]
@@ -267,15 +261,31 @@ class _WordAnalysis(BaseModel):
     source_index: int
     classification: _ANALYSIS_CLASS
 
+class _SilenceCut(BaseModel):
+    """A short pause/breath/thinking gap Gemini wants cut on top of the
+    mechanical dead-air pass. Times are absolute source seconds. The
+    mechanical pre-pass already cuts gaps above _MECH_DEAD_AIR_THRESHOLD_S
+    deterministically — Gemini's job here is to flag any *additional*
+    sub-threshold pauses that still feel slack in context (mid-thought
+    breaths, short hesitations between clauses, etc.)."""
+    start: float
+    end: float
+    reason: Literal["breath", "thinking_pause", "mid_clause_drag", "other"]
+
 class ContentAnalysis(BaseModel):
-    """Per-word classification for the pre-edit analysis call.
+    """Per-word classification + range-level silence flags for the pre-edit
+    analysis call.
 
     Only non-content classifications are emitted (cuttable_* + narrative_peak);
     content is the implicit default for unemitted indices. `cuttable_*` words
     are stripped from the transcript before the main call; `narrative_peak`
     words become anchor hints surfaced in the main-call prompt.
+    `silence_cuts` are folded into the same range-cut machinery the mechanical
+    dead-air pass uses, so Gemini-flagged pauses are removed alongside the
+    deterministic ones.
     """
     word_analyses: List[_WordAnalysis]
+    silence_cuts: List[_SilenceCut] = Field(default_factory=list)
     tonal_register: Literal[
         "serious", "educational", "motivational",
         "comedic", "dramatic", "casual",
@@ -288,7 +298,17 @@ class ContentAnalysis(BaseModel):
 # nothing gets removed AFTER Gemini anchors to it. ALWAYS_FILLER, _is_stutter,
 # and the phrasal-restart constants below are shared with build_clips_from_words
 # so the two passes produce identical results.
-_MECH_DEAD_AIR_THRESHOLD_S = 0.3
+# Zero-silence target: any gap longer than _MECH_DEAD_AIR_THRESHOLD_S between
+# consecutive word boundaries is cut. The threshold is kept just above the
+# `_MECH_DEAD_AIR_CUSHION_S` floor so the resulting range-cut never inverts —
+# any gap above (2 × cushion + small epsilon) gets squeezed down to ~2× cushion
+# of residual silence at the cut boundary. 30 ms threshold + 10 ms cushion
+# leaves at most ~20 ms of residual silence anywhere in the output, well below
+# perceptible levels for short-form viral content. Cushion exists only because
+# Deepgram word boundaries are approximate (~30 ms typical) — at zero cushion
+# we'd occasionally clip the trailing consonant of a word.
+_MECH_DEAD_AIR_THRESHOLD_S = 0.03
+_MECH_DEAD_AIR_CUSHION_S = 0.01
 
 
 def _phrasal_restart_cuts(deepgram_words, already_cut):
@@ -401,7 +421,7 @@ def mechanical_cut_pass(deepgram_words):
         contraction false-start, hyphenated truncation)
       - Trailing-dash false starts
       - 2-4 word phrasal restarts + orphan fillers in their gaps
-      - Dead-air gaps > 0.3s between consecutive words
+      - Dead-air gaps > _MECH_DEAD_AIR_THRESHOLD_S between consecutive words
     """
     _words = list(deepgram_words or [])
     word_cuts = set()
@@ -449,13 +469,19 @@ def mechanical_cut_pass(deepgram_words):
     reasons.update(restart_reasons)
 
     # ── Pass 4: dead-air ranges (gaps between consecutive word boundaries) ──
+    # Cut every gap above _MECH_DEAD_AIR_THRESHOLD_S (≈30 ms) — the user's
+    # quality bar is zero perceptible silence in the output. Cushion is the
+    # minimum needed to avoid clipping the trailing consonant of a word
+    # given Deepgram boundary inaccuracy.
     for i in range(len(_words) - 1):
         end_s = float(_words[i].get("end") or 0)
         next_start_s = float(_words[i + 1].get("start") or 0)
         gap = next_start_s - end_s
         if gap >= _MECH_DEAD_AIR_THRESHOLD_S:
-            # Cushion either side so we don't clip speech (Deepgram rounds).
-            range_cuts.append((round(end_s + 0.04, 3), round(next_start_s - 0.04, 3)))
+            _cut_start = end_s + _MECH_DEAD_AIR_CUSHION_S
+            _cut_end = next_start_s - _MECH_DEAD_AIR_CUSHION_S
+            if _cut_end > _cut_start:
+                range_cuts.append((round(_cut_start, 3), round(_cut_end, 3)))
 
     return {
         "word_cuts": word_cuts,
@@ -677,6 +703,7 @@ print("[startup] all import checks done", flush=True)
 # ── GPU / NVENC detection ─────────────────────────────────────────────────────
 _HAS_NVENC = False
 _HAS_HWACCEL = False  # NVDEC hardware decoding
+_VULKAN_NVIDIA_OK = False  # set True only if vulkaninfo enumerates an NVIDIA device
 try:
     # Print GPU info for diagnostics
     _smi = subprocess.run(
@@ -924,6 +951,7 @@ try:
             # Heuristic: did NVIDIA appear?
             _vk_text = " ".join(_summary_lines).lower()
             if "nvidia" in _vk_text or "h100" in _vk_text:
+                _VULKAN_NVIDIA_OK = True
                 print("[startup] *** Vulkan now sees an NVIDIA device — gl='vulkan' should engage the H100.", flush=True)
             else:
                 print("[startup] Vulkan still only sees software (llvmpipe). NVIDIA Vulkan path unavailable on this Modal H100 container.", flush=True)
@@ -952,32 +980,31 @@ def get_encode_args(quality="high", threads=0):
             # negligible time vs p1 but produces significantly better quality.
             # CQ 18 = visually lossless on mobile. -maxrate 8M -bufsize 16M
             # caps streaming bandwidth so AVPlayer doesn't freeze mid-playback
-            # on typical wifi/LTE — 15M was over the sustained-throughput
-            # ceiling for many real connections, producing constant rebuffers.
-            # 8M @ CQ18 is still within YouTube-1080p territory.
+            # on typical wifi/LTE.
             return ["-c:v", "h264_nvenc", "-preset", "p4", "-tune", "hq",
                     "-rc", "vbr", "-cq", "18", "-b:v", "0",
                     "-maxrate", "8M", "-bufsize", "16M",
                     "-spatial-aq", "1", "-temporal-aq", "1",
                     "-b_ref_mode", "middle"]
     else:
-        # H100 has no NVENC hardware — CPU encoding is the only option.
+        # CPU encoding (H100 has no NVENC). `veryfast` is the right floor
+        # for any encode the user actually watches: enables CABAC, B-frames,
+        # and the deblocking filter that ultrafast disables. ultrafast was
+        # producing visible compression artifacts at the 8M bitrate cap.
         # threads=0 lets x264 auto-detect (use all cores). Pass an explicit
         # value when running many ffmpeg processes in parallel — otherwise
         # each process tries to claim every core, producing massive
-        # context-switch contention (60 processes × 80 threads each =
-        # 4800 threads competing for 80 cores, render time blows up).
-        # -fps_mode passthrough: honor filter graph PTS exactly. Without
-        # this, libx264 forces CFR by duplicating/dropping frames to fit
-        # the output frame rate, which re-introduces the quantization
-        # drift the speed-warped setpts was supposed to eliminate.
+        # context-switch contention.
+        # `lossless` intermediates stay on `ultrafast` since the quality
+        # ceiling is already perfect (no loss) and the speed matters for
+        # parallel render time.
         _x264_threads = f"threads={threads}"
         if quality == "lossless":
             return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
                     "-fps_mode", "passthrough",
                     "-x264-params", _x264_threads]
         else:
-            return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
+            return ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
                     "-maxrate", "8M", "-bufsize", "16M",
                     "-fps_mode", "passthrough",
                     "-x264-params", _x264_threads]
@@ -1042,7 +1069,7 @@ def format_trend_section(trend_context):
 
 The following editing style guide was generated by watching {sample_size} of the highest-performing TikTok videos from this week — videos with 500K+ views that the algorithm is actively distributing. These are real patterns from real viral content, not theory.
 
-Follow these patterns for speed ramping, pacing, and cuts only.
+Follow these patterns for pacing and cuts only.
 
 {style_guide}"""
 
@@ -2435,7 +2462,7 @@ The opening is an audition. The first 2 seconds must give the viewer a reason to
 
 Pacing creates rhythm. For short-form content, the average kept clip should be 2-3 seconds. The Captions app and top TikTok editors cut every 2-3 seconds — this is the standard. Filler and setup move even faster (1-2s). Key moments — reveals, punchlines, important statements — breathe (3-4s max). The contrast between fast and slow is what makes pacing feel alive. When in doubt, cut shorter.
 
-Emphasis moments are the spine. The 2-5 hardest-hitting beats determine whether the edit feels professional or amateur. Identify them first — every other layer (caption_style, transitions, B-roll, speed_curve, SFX) should orbit those beats.
+Emphasis moments are the spine. The 2-5 hardest-hitting beats determine whether the edit feels professional or amateur. Identify them first — every other layer (caption_style, transitions, B-roll, per-clip speed, SFX) should orbit those beats.
 
 Sound design adds texture. A sound effect on a punchline, a whoosh on a scene change, a boom when a statement lands — these make cuts feel physical instead of digital. But not every cut needs a sound. Continuous speech flows best with silent hard cuts.
 
@@ -2446,7 +2473,7 @@ The ending matters. On these platforms, videos auto-loop. A clean ending that fl
 The pipeline enforces these rules with strict validators. Output that violates any rule is rejected.
 
 1. POSITIONS ARE SEMANTIC ZONES. Use the named zones from the vocabulary (`upper_third_safe`, `center`, `lower_third_safe`, `left_safe`, `right_safe`). Pixel coordinates are not accepted.
-2. EVERY TIMING IS WORD-ANCHORED. You never emit raw float timestamps. Anchor every time-based decision to a specific kept word via its index (start_word_index, end_word_index, word_index, word_indices, after_word_index, at_word_index, thumbnail_word_index). Python derives all float timestamps from word start/end times. The only float fields in your output are non-time values like `duration_seconds` (overlay lifespan), `intensity`, `scale`, and `speed`.
+2. EVERY TIMING IS WORD-ANCHORED. You never emit raw float timestamps. Anchor every time-based decision to a specific kept word via its index (start_word_index, end_word_index, word_index, word_indices, after_word_index, thumbnail_word_index). Python derives all float timestamps from word start/end times. The only float fields in your output are non-time values like `duration_seconds` (overlay lifespan), `intensity`, `scale`, and `speed`.
 3. EVERY TEXT OVERLAY HAS A VARIANT + ITS REQUIRED PROPS. The `variant` field chooses which visual treatment; each variant has a specific set of required props documented in the TEXT OVERLAYS section.
 4. CAPTIONS ARE WORD-ANCHORED. Emit `caption_position_changes` as an array of `{{word_index, position}}` events — each event says "at this kept word, captions move to this position." Python synthesizes the final segment list with exact word-start timestamps. No float boundaries to match, no duration arithmetic. If captions stay "bottom" the whole video, emit an empty array.
 5. Z-ORDER YIELDS TO MOTION GRAPHICS — AUTOMATIC. Python automatically forces caption_position_segments to "top" inside any bottom-anchored MG window after derivation, so you don't need to coordinate this. Emit caption_position_changes for creative reasons (e.g., a "center" beat for a Quintessence-style dramatic single word) and Python takes care of the MG-overlap geometry.
@@ -2459,7 +2486,7 @@ The pipeline enforces these rules with strict validators. Output that violates a
    A motion_graphic's zone is its explicit `anchor` field. Two items collide only when their zones AND time windows both overlap. High-intensity emphasis moments are spaced ≥2.5s apart regardless of zone.
 7. ONE ZOOM PER KEPT-SOURCE CLIP. At most one emphasis_moment carries a zoom_effect within any single kept-source clip (the source range between your removed-words boundaries). When you want multiple zoom beats close together, stack their events onto a single emphasis_moment's `zoom_effect.events` array.
 8. MOTION GRAPHIC ANCHORS ARE ABSOLUTE ZONES. Every `motion_graphics[i].anchor` and `emphasis_moments[i].motion_graphic.anchor` is one of the 5 absolute zones — MGs don't follow the speaker's face.
-9. ANCHORS ARE KEPT WORDS — BY CONSTRUCTION. The transcript you see contains only kept words, renumbered `[0..M-1]`. Every word_index you emit (in `emphasis_moments[i].word_indices`, `sound_effects[i].word_index`, `text_overlays[i].start_word_index`, `motion_graphics[i].{{start,end}}_word_index`, `broll_clips[i].{{start,end}}_word_index`, `transitions[i].after_word_index`, `caption_position_changes[i].word_index`, `hook_clip.{{start,end}}_word_index`, `thumbnail_word_index`, `speed_curve[i].at_word_index`) references this index space. All anchors land on kept words. Python translates back to source indices and derives all timestamps.
+9. ANCHORS ARE KEPT WORDS — BY CONSTRUCTION. The transcript you see contains only kept words, renumbered `[0..M-1]`. Every word_index you emit (in `emphasis_moments[i].word_indices`, `sound_effects[i].word_index`, `text_overlays[i].start_word_index`, `motion_graphics[i].{{start,end}}_word_index`, `broll_clips[i].{{start,end}}_word_index`, `transitions[i].after_word_index`, `caption_position_changes[i].word_index`, `hook_clip.{{start,end}}_word_index`, `thumbnail_word_index`) references this index space. All anchors land on kept words. Python translates back to source indices and derives all timestamps.
 10. EXPLICIT NULLS. If an emphasis moment has no zoom, emit `"zoom_effect": null` — no downstream defaults fill gaps.
 
 === SAFE ZONES (1080x1920 canvas) ===
@@ -2772,7 +2799,7 @@ Your `remove_words` field is almost always EMPTY. Only emit an entry if you deci
 
   {{"start": float, "end": float, "reason": "section_skip"}}
 
-Preferred alternative: use `speed_curve` to accelerate low-value sections instead of cutting them. Hard cuts of content inside a clause are jarring; a 1.3–1.5× speed ramp preserves continuity while pacing through filler content.
+Preferred alternative: keep the low-value section as a clip but set its `speed` to 1.30–1.40 so it pace-flies through the content. Hard cuts mid-clause are jarring; a fast clip preserves continuity while still removing weight.
 
 === HOOK ===
 
@@ -2895,7 +2922,7 @@ WORD WINDOW (start_word_index → end_word_index):
 PLACEMENT DISCIPLINE:
   Only place B-roll on moments where the speaker describes a physical action or concrete scene. Stay on the speaker's face during emotional beats, opinions, punchlines, reveals, and reactions — during those moments the speaker's facial expression IS the content and cutting away destroys the impact. B-roll in the main body, NEVER during the hook (the hook needs the speaker's face).
 
-  Spacing: 3+ seconds of speaker face between B-roll clips. Coverage: ~30-40% of runtime is a healthy ceiling. Place B-roll on held-speed sections, not on the slow-mo punchline beats.
+  Spacing: 3+ seconds of speaker face between B-roll clips. Coverage: ~30-40% of runtime is a healthy ceiling. Place B-roll on 1.0x or 1.2–1.3x clips, not on the 0.7–0.85x slow-speed clips that contain a punchline beat.
 
 === TRANSITIONS ===
 
@@ -2939,40 +2966,53 @@ transitions — ARRAY. {{"after_word_index": int, "type": <name>, ...component p
   Place ON or near a shot_changes entry — that's where the viewer's eye expects a visual boundary.
   SceneTitle: 0-2 per video maximum (genuine chapter breaks only).
 
-=== SPEED CURVE ===
+=== PER-CLIP PACING (cut.speed) ===
 
-Only when vibe mentions "speed ramp", "speed ramping", or "CapCut style". Else: null.
-
-speed_curve — ARRAY of {{"at_word_index": int, "speed": float 0.67-1.4}} or null.
-  Each keypoint anchors to a kept word. Python derives `t` (source time) from word.start, smoothstep-interpolates between adjacent keypoints, and splits each clip into constant-speed sub-clips so audio and video stay in sync.
+Each clip you emit has a `speed` field — a single constant playback rate that holds for the entire clip. Range: 0.7 to 1.4. This is your one and only pacing tool. There is no continuous speed curve, no ramp, no glide — every clip plays at one constant speed and the rhythm comes from the contrast between adjacent clips.
 
 THE EDITORIAL LOGIC — read this carefully:
 
-Speed ramping is storytelling through pacing. Speed UP when the content is moving TOWARD something — setup, context, transitions between story beats, filler that earns the right to exist by getting out of the way fast. Slow DOWN when the content ARRIVES — the reveal, the punchline, the reaction, the emotional weight. The CONTRAST between fast and slow is what makes each moment land. Every speed change must be motivated by the narrative.
+Pacing is storytelling. Speed UP a clip (1.2–1.4) when the content is moving TOWARD something — setup, context, transitions between beats, filler that earns its keep by getting out of the way fast. Slow DOWN a clip (0.7–0.85) when the content ARRIVES — the reveal, the punchline, the reaction, the emotional weight. Stay at 1.0 for narrative cruise — when neither building nor arriving.
 
-Pre-roll the slow-mo. The slow section must begin 0.3–0.5 seconds BEFORE the key word so the viewer feels the deceleration building INTO the moment. By the time the punchline word lands, the video is already in slow-mo and the moment has weight. Starting the slow-mo exactly on the word is too late — the viewer misses the buildup.
+The CONTRAST between adjacent clips is what makes a moment land. A 1.25x clip cutting straight into a 0.75x clip on the punchline word is the entire effect. The viewer feels the deceleration as a hard transition, not a glide — that's the modern viral aesthetic, sharper than any smooth ramp.
 
-Fast sections: 1.2x – 1.4x. Slow sections: 0.67x – 0.8x.
-Every section is either fast or slow. THE VIDEO NEVER PLAYS AT NORMAL SPEED. Never emit a keypoint with speed=1.0. A 1.0 keypoint cancels the ramp on either side and produces an unintentional flat section that reads as "nothing happening."
+THE BUILDUP-ARRIVAL PATTERN (most important):
 
-THE THREE BUILDING BLOCKS — every curve is constructed from these:
+A great emphasis isn't a single slow clip. It's a 2- or 3-cut sequence built from your `cuts` list:
 
-  1. HELD SECTION: two keypoints at the SAME speed value, one at the start and one at the end of the section you want held constant. Inside the held section the speed is flat — fast (1.2-1.4) or slow (0.67-0.8), never 1.0.
+  Clip A — buildup at 1.20–1.30x
+           Ends just BEFORE the punchline word's start timestamp.
+           Carries the setup/context.
 
-  2. RAMP: two keypoints at DIFFERENT speed values, placed close together (0.4 – 1.2 seconds apart). The pipeline interpolates smoothly between them with ease-in-out, so the speed glides from one held value to the next over that short gap. The gap MUST be at least 0.4s — gaps shorter than 0.4s produce audible audio artifacts instead of a smooth ramp. If the nearest word boundary is too close, move the target keypoint farther out.
+  Clip B — arrival at 0.70–0.85x
+           Starts at the punchline word and runs 0.8–1.5 seconds.
+           Contains exactly the moment that matters.
 
-  3. ARRIVAL: a held-fast section ramps DOWN into a held-slow section right before the punchline word, then ramps BACK UP after the moment passes. The slow held section is short (often just 1-2 words, ~0.5-1.5s) — it's a moment of weight, not a section.
+  Clip C — resume at 1.00x (or back to 1.20x if continuing momentum)
+           Picks up after the moment lands.
 
-THE FULL CURVE ALTERNATES:
-  hold-fast → ramp-down → hold-slow → ramp-up → hold-fast → ramp-down → hold-slow → ramp-up → hold-fast …
+Place Clips A→B→C as three adjacent entries in your `cuts` list. Use a hard cut or a SnapReframe / SmoothPush transition between A and B to drive the speed change visually.
 
-Every speed CHANGE needs a ramp pair (two keypoints, ~0.4-1.2s apart, at different speeds). Every HELD section needs matching start and end keypoints (two keypoints, far apart, at the same speed). The first keypoint sets the opening hold; the last keypoint sets the closing hold.
+For every emphasis_moment you place, isolate the punchline word as its own clip at 0.7–0.85x. Don't bury an emphasis word inside a normal-speed clip — that flattens it. The emphasis_moment's `word_indices[0]` should land at or near the start of a slow-speed clip.
 
-DENSITY:
-  Aim for 10-16 keypoints per 60 seconds of output (3-5 ramp pairs with held sections between them). Fewer keypoints = drift, no real ramping. More keypoints = jittery oscillation. Stay in this band.
+DON'T:
+  - Use 1.0x for a clip containing an emphasis word — make it slow (0.7–0.85x).
+  - Use the same speed for every clip — pacing is created by contrast.
+  - Go below 0.7 (audio artifacts) or above 1.4 (looks like fast-forward, not pacing).
+  - Set every clip to fast or every clip to slow — without contrast, the effect dies.
 
-WORD ANCHORING:
-  Every keypoint anchors to a specific kept word via `at_word_index`. Slow sections must land ON spoken words — choose the kept word whose start time you want the ramp to hit, and the pipeline derives the timestamp from `word.start`. Use the punchline / reveal / reaction word as the anchor for slow holds, and the start of the following sentence/clause as the anchor for the ramp back up.
+DO:
+  - Use 1.0x for the majority of clips (narrative cruise).
+  - Use 1.2–1.3x for setup/buildup clips that lead into a slow moment.
+  - Use 0.75x for the 1–2 clips per video that contain the hardest-hitting moment.
+  - Build 1–3 buildup-arrival sequences per 60 seconds of output.
+
+A typical 60-second video has: most clips at 1.0x, two or three clips at 1.20–1.30x (setup), and one or two clips at 0.75–0.85x (the moment lands). That's it.
+
+VIBE TUNING:
+  - If the vibe mentions "speed ramp", "speed ramping", "CapCut style", or "fast-paced edit", lean into MORE buildup-arrival sequences — every emphasis moment gets its own A→B→C trio, and the resume clip itself often runs at 1.20–1.30x to keep momentum. Aim for 3–5 buildup-arrival sequences per 60s instead of 1–3.
+  - If the vibe is contemplative, cinematic, interview, or documentary, dial pacing down: most clips at 1.0x, the occasional 0.85x for emphasis, and 1.10–1.20x only for clearly low-value setup. No 1.4x sprinting.
+  - If the vibe is purely informational/educational with no emotional peaks, you can leave every clip at 1.0x — pacing through speed contrast is optional, not mandatory.
 
 === GLOBAL FIELDS ===
 
@@ -3040,7 +3080,6 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
   "outro": "none" | "fade_black" | "fade_white",
   "aspect_ratio": "9:16",
   "pacing": "fast" | "medium" | "slow",
-  "speed_curve": [...] | null,
   "emphasis_moments": [
     {{
       "word_indices": [int, ...],
@@ -3082,7 +3121,7 @@ Work through these checks against the plan you are about to emit. This is self-v
 5. Explicit nulls. Every emphasis_moment has explicit `zoom_effect` (value or null) and `motion_graphic` (value or null) fields — no omissions.
 6. sad_trombone tonal gate. If `sad_trombone` appears, the tonal_register is "comedic" AND the surrounding dialogue is being played for laughs. Otherwise remove it.
 
-Note: every anchor field in this schema is word-index-based. You never emit float timestamps that must match word boundaries — Python derives all timestamps from word indices. Caption segments, hook boundaries, thumbnail time, and speed-curve keypoints are all synthesized from the word indices you emit.
+Note: every anchor field in this schema is word-index-based. You never emit float timestamps that must match word boundaries — Python derives all timestamps from word indices. Caption segments, hook boundaries, and thumbnail time are all synthesized from the word indices you emit.
 
 If any check fails, revise the plan before emitting JSON. The validators reject violations — fixing them here is cheaper than re-generating."""
 
@@ -3184,16 +3223,17 @@ def run_content_analysis(deepgram_words, inline_video_bytes, mechanical_cuts):
 
     Returns a dict:
       {
-        "word_cuts": set[int]   # analysis-decided cuts (context-aware)
-        "cuttable": set[int]    # (reserved; currently always empty)
-        "protected": set[int]   # kept-word source indices (content + peaks)
-        "peaks": set[int]       # narrative peak subset of protected
-        "tonal_register": str   # overall video tone (serious/comedic/...)
+        "word_cuts": set[int]            # analysis-decided cuts (context-aware)
+        "cuttable": set[int]             # (reserved; currently always empty)
+        "protected": set[int]            # kept-word source indices (content + peaks)
+        "peaks": set[int]                # narrative peak subset of protected
+        "silence_range_cuts": list[(s,e)]  # sub-threshold pauses Gemini flagged
+        "tonal_register": str            # overall video tone (serious/comedic/...)
       }
 
-    Gemini 3 Flash at LOW thinking is the right choice here: the task is narrow
-    (per-word classification with bounded output), video understanding is the
-    whole value, and there's no creative/composition reasoning to do.
+    Gemini 3 Flash at MEDIUM thinking — the task spans aggressive filler
+    detection across multiple categories plus range-level silence judgment,
+    so LOW under-cuts. MEDIUM is the right balance of cut quality and latency.
     """
     _words = list(deepgram_words or [])
     if not _words or not inline_video_bytes:
@@ -3207,6 +3247,7 @@ def run_content_analysis(deepgram_words, inline_video_bytes, mechanical_cuts):
             "cuttable": set(),
             "protected": _protected,
             "peaks": set(),
+            "silence_range_cuts": [],
             "tonal_register": "casual",
         }
 
@@ -3235,48 +3276,71 @@ def run_content_analysis(deepgram_words, inline_video_bytes, mechanical_cuts):
             lines.append(f"  [{i}] {start:.2f}-{end:.2f} spk{spk}: {word_text}")
     transcript_lines = "\n".join(lines)
 
-    system_instruction = """You are a classification system for a short-form video editor. Your ONLY job is to classify every word in the transcript into exactly one of five buckets based on the full video and dialogue context. You do not make creative decisions — you only judge what each word is.
+    system_instruction = """You are the cut-decision system for a short-form video editor. Your job is to identify every word and pause that should be cut from the video so the final edit is tight, professional, and viral-ready — the standard set by top short-form creators (Captions app, Opus Clip, etc.). You see the full video and full transcript. Be decisive.
+
+THE QUALITY BAR: zero perceptible silence, zero filler. A typical 60-second talking-head video should yield 30–80 cuttable_* word entries plus a handful of silence_cuts. Under-cutting reads as amateur. The bias is AGGRESSIVE — when you're 50/50 on whether a word is filler or content, classify it as cuttable. The cost of leaving filler in is far higher than the cost of cutting one borderline word.
 
 CLASSIFICATION VOCABULARY:
 
-1. "content" — a substantive word that should stay in the video and cannot be cut. Nouns, verbs with semantic weight, numbers, named entities, descriptive adjectives, words that carry the meaning of the sentence. This is the default for words you're not sure about. When in doubt, pick content.
+1. "content" — a substantive word that genuinely carries the meaning of the sentence. Nouns, verbs with semantic weight, numbers, named entities, descriptive adjectives, the actual subject/predicate of the thought. The reader should be able to remove this word and have the sentence stop making sense.
 
-2. "cuttable_filler" — context-dependent filler. Words that look substantive in isolation but function as hedges, discourse markers, or filler in this specific context. Examples: "literally" in "I literally just walked in" (emphasis filler, no semantic value), "basically" as a hedge, "just" in "I just want to say", "like" as a discourse marker, "actually" as a hedge, "right?" at end of statement, "you know", "I mean" as restart. You must verify this word is NOT the emphasis target in its sentence (if it's where the speaker's voice peaks, it's a narrative_peak, not filler).
+2. "cuttable_filler" — any word functioning as filler, hedge, discourse marker, intensifier, or verbal tic in this specific context. CUT THESE AGGRESSIVELY. Categories:
+   • Hedges: "kind of", "sort of", "I guess", "I think", "I mean", "you know", "honestly", "basically"
+   • Intensifiers without semantic value: "literally", "really", "actually", "totally", "definitely", "absolutely", "obviously", "clearly", "essentially"
+   • Discourse markers: "like" (when not a comparison), "so" (sentence-initial), "well" (sentence-initial), "right?" (terminal), "you know?" (terminal), "OK so", "alright"
+   • Softeners: "just", "maybe", "probably", "perhaps", "kind of"
+   • Restart-leadins: "And then", "And so", "But like", "But then", "And basically"
+   The litmus test: if the sentence reads cleaner without the word, it's cuttable_filler. The ONLY exception: if this word is the prosodic peak of the sentence (the reader hits it hard for emphasis), it's narrative_peak instead — but that's rare; most "literally"s and "actually"s are filler.
 
-3. "cuttable_restart" — part of a phrasal restart that the speaker corrected. Example: "I said — I said who is he?" the first "I said" is a restart. Or: "The thing is — well the thing about it is..." the first clause is a restart. Cut the incomplete version, keep the complete one.
+3. "cuttable_restart" — every word in any abandoned thought, partial sentence, mid-sentence reset, or self-correction. Tag ALL the abandoned words, not just the last one. Examples:
+   • "So I was — but actually let me back up." → tag "So", "I", "was", "but" as cuttable_restart (the speaker abandoned the first thought).
+   • "I said — I said who is he?" → tag the first "I", "said" as cuttable_restart.
+   • "Twenty… twenty-five thousand." → tag the first "Twenty" as cuttable_restart (self-correction).
+   • Any clause the speaker bailed on without finishing — every word in it is cuttable_restart.
 
-4. "cuttable_redundant" — narratively redundant. The word (or its phrase) repeats a concept the speaker just stated with no added value. Example: "bikini bottom is calling, calling again" — the second "calling" is redundant.
+4. "cuttable_redundant" — a word or phrase that repeats a concept the speaker just stated with no added value. Example: "calling, calling again" — the second "calling" is redundant. "this is huge, it's huge" — the second "huge" is redundant. Be aggressive about repetition.
 
-5. "narrative_peak" — a genuine emphasis target. The word where the speaker's voice peaks, the punchline noun, the reveal, the reaction word, the emotional climax. Only a few words per video qualify. These are the anchor targets for MGs, emphasis moments, and SFX.
+5. "narrative_peak" — a genuine prosodic emphasis target where the speaker's voice peaks and a visual effect (zoom, MG, SFX) belongs. Listen and watch carefully — these are the punchline nouns, the reveal words, the reaction words. They're not rare; on a typical talking-head video there are several per minute. Tag them when you hear/see them clearly.
+
+ADDITIONAL OUTPUT — silence_cuts:
+
+The mechanical pre-pass already cut all gaps above {dead_air_thresh:.2f}s between word boundaries. Your job here is to flag any *additional* sub-threshold pauses that still read as drag in context — short hesitations between clauses, audible breaths, mid-thought thinking pauses. Emit a silence_cut entry for each:
+  • start: absolute source-time second where the silence begins (= preceding word's end timestamp).
+  • end: absolute source-time second where the silence ends (= following word's start timestamp).
+  • reason: "breath" | "thinking_pause" | "mid_clause_drag" | "other"
+Look for any pause that the eye/ear notices on first watch, even if it's only 100–250 ms. The user's quality bar is zero perceptible silence anywhere in the output.
 
 RULES:
 
-- Emit classifications ONLY for words that are NOT content. The default is "content" — unemitted indices are automatically treated as content by the downstream pipeline.
-- For each word you do emit, pick exactly one of: cuttable_filler, cuttable_restart, cuttable_redundant, or narrative_peak.
-- Words already flagged [MECHANICAL-CUT] — do NOT re-emit them. They're already cut; your classification would be redundant.
-- Do NOT add new cuts liberally. When in doubt, leave a word unemitted (it stays as content).
-- narrative_peak is RARE. 2–8 per video. The specific word the speaker hits hardest, where a visual effect belongs.
-- Keep the word_analyses list SHORT — typically 5–30 entries total across all four non-content classifications.
+- Emit classifications ONLY for words that are NOT content. Unemitted indices default to content.
+- Words tagged [MECHANICAL-CUT] are already cut by the deterministic pre-pass — do not re-emit them.
+- BIAS AGGRESSIVELY toward cutting. Top-tier short-form edits remove ~25–40% of the spoken words in a typical talking-head clip. If your output is short (<20 entries on a 60-second video), you're under-cutting.
+- A word can be filler in one sentence and content in the next. Judge each instance in context.
 
 TONAL REGISTER:
 
 Also output the overall tonal_register of the video — serious, educational, motivational, comedic, dramatic, or casual. This drives downstream SFX gating (e.g., sad_trombone requires comedic register).
 
 Your classification is authoritative — the downstream editor builds a schema where:
-  - words you classify as cuttable_* are the ONLY words it can cut
-  - words you classify as content + narrative_peak are the ONLY words it can anchor overlays to
+  - words you classify as cuttable_* AND ranges in silence_cuts are removed before the main edit call
+  - words you classify as content + narrative_peak are the ONLY words the main editor can anchor overlays to
 
-So be accurate: a true emphasis word misclassified as filler means the editor can't highlight it. A content word misclassified as cuttable means it may get removed. The whole point of this pass is to let the editor anchor precisely."""
+So be accurate AND aggressive: a true emphasis word misclassified as filler means the editor can't highlight it (rare cost). A filler word misclassified as content means the audience watches dead weight (frequent cost — the bigger problem). When in doubt, cut.""".replace(
+        "{dead_air_thresh:.2f}", f"{_MECH_DEAD_AIR_THRESHOLD_S:.2f}"
+    )
 
     user_content = f"""TRANSCRIPT (word-by-word with source indices; MECHANICAL-CUT tags indicate words already cut by the deterministic pre-pass):
 
 {transcript_lines}
 
-Return word_analyses with ONLY the non-content classifications (cuttable_filler, cuttable_restart, cuttable_redundant, narrative_peak). Unemitted indices (0..{len(_words) - 1}) default to content. Also emit the tonal_register. Keep the list short (5-30 entries typical)."""
+Return:
+  • word_analyses — every cuttable_filler / cuttable_restart / cuttable_redundant / narrative_peak you see. Unemitted indices (0..{len(_words) - 1}) default to content. Be aggressive — target 30–80 cuttable_* entries for a typical 60-second video.
+  • silence_cuts — any sub-{_MECH_DEAD_AIR_THRESHOLD_S:.2f}s pause that still reads as drag (breaths, thinking pauses, mid-clause hesitations).
+  • tonal_register — the overall tone of the video."""
 
     t0 = time.time()
     print(
-        f"[content-analysis] Calling Gemini model={GEMINI_MODEL} (thinking=LOW, {len(_words)} words)...",
+        f"[content-analysis] Calling Gemini model={GEMINI_MODEL} (thinking=MEDIUM, {len(_words)} words)...",
         flush=True,
     )
     response = client.models.generate_content(
@@ -3285,10 +3349,14 @@ Return word_analyses with ONLY the non-content classifications (cuttable_filler,
         config=genai_types.GenerateContentConfig(
             system_instruction=system_instruction,
             temperature=1.0,
-            max_output_tokens=8192,
+            max_output_tokens=16384,
             response_mime_type="application/json",
             response_json_schema=ContentAnalysis.model_json_schema(),
-            thinking_config=genai_types.ThinkingConfig(thinking_level="LOW"),
+            # MEDIUM thinking — the task expanded from narrow per-word
+            # classification to multi-category aggressive filler detection
+            # plus range-level silence judgment. LOW under-cuts; HIGH spends
+            # latency we don't need. MEDIUM is the sweet spot.
+            thinking_config=genai_types.ThinkingConfig(thinking_level="MEDIUM"),
             media_resolution="MEDIA_RESOLUTION_LOW",
         ),
     )
@@ -3339,21 +3407,50 @@ Return word_analyses with ONLY the non-content classifications (cuttable_filler,
         if idx not in protected:
             protected.add(idx)
 
+    # Parse silence_cuts → range cuts that get folded into the same
+    # range-cut machinery the mechanical dead-air pass uses.
+    silence_range_cuts = []
+    for entry in (parsed.get("silence_cuts") or []):
+        try:
+            _s = float(entry.get("start"))
+            _e = float(entry.get("end"))
+        except (TypeError, ValueError):
+            continue
+        if not (math.isfinite(_s) and math.isfinite(_e)):
+            continue
+        if _e - _s < 0.04:
+            continue  # too short to remove cleanly
+        if _s < 0 or _e <= _s:
+            continue
+        silence_range_cuts.append((round(_s, 3), round(_e, 3)))
+
     # All word-level cuts are applied to the transcript BEFORE the main call
     # sees it — Gemini is shown re-indexed kept words only. `cuttable` stays
     # empty; remove_words in Gemini's output is reserved for narrative range
-    # cuts (though speed_curve pacing is the preferred alternative per prompt).
+    # cuts (the prompt prefers per-clip `speed` 1.3-1.4x for low-value pacing).
     tonal = str(parsed.get("tonal_register") or "casual")
+    # Calibration check: if cut count is very low for a long video, log a
+    # warning so under-cutting is visible in the render output.
+    _cut_rate_per_min = (len(word_cuts) / max(len(_words), 1)) * 100.0
     print(
-        f"[content-analysis] classified: {len(word_cuts)} analysis-cuts, "
+        f"[content-analysis] classified: {len(word_cuts)} analysis-cuts "
+        f"({_cut_rate_per_min:.1f}% of words), {len(silence_range_cuts)} silence ranges, "
         f"{len(protected)} protected ({len(peaks)} peaks), tone={tonal} ({elapsed:.1f}s)",
         flush=True,
     )
+    if len(_words) >= 100 and len(word_cuts) < max(10, int(len(_words) * 0.10)):
+        print(
+            f"[content-analysis] WARNING: low cut rate "
+            f"({len(word_cuts)} cuts / {len(_words)} words) — likely under-cutting. "
+            f"Quality bar is 25–40% of words removed for filler/restart/redundancy.",
+            flush=True,
+        )
     return {
         "word_cuts": word_cuts,
         "cuttable": cuttable,
         "protected": protected,
         "peaks": peaks,
+        "silence_range_cuts": silence_range_cuts,
         "tonal_register": tonal,
     }
 
@@ -3383,13 +3480,14 @@ def generate_edit_gemini(
     # this call builds its prompt. Cut words are removed from the index
     # space Gemini sees — the main call cannot reference them because they
     # don't exist. Main-call `remove_words` is reserved for narrative range
-    # cuts (prompt prefers speed_curve pacing instead).
+    # cuts (the prompt prefers per-clip `speed` 1.3-1.4x for low-value pacing).
     _mech = dict(mechanical_cuts or {})
     _anal = dict(content_analysis or {})
     _mech_word_cuts = set(_mech.get("word_cuts") or set())
     _mech_range_cuts = list(_mech.get("range_cuts") or [])
     _mech_reasons = dict(_mech.get("reasons") or {})
     _anal_word_cuts = set(_anal.get("word_cuts") or set())
+    _anal_silence_cuts = list(_anal.get("silence_range_cuts") or [])
     # Kept source word indices (content + narrative peaks). Peaks are tagged
     # in the prompt as anchor hints. Translation from new-index to source-
     # index in post-processing guarantees every anchor lands on a kept word.
@@ -3513,7 +3611,7 @@ RULES FOR USING THESE TIMESTAMPS:
 
 REMOVE_WORDS GUIDANCE:
 - All mechanical fillers, stutters, false starts, dead air, and context-dependent filler/redundancy have already been cut upstream. Your remove_words field is almost always EMPTY.
-- Only emit a remove_words entry if you identify a narrative section that needs to go (e.g., an unrelated tangent) — and prefer speed_curve acceleration for pacing instead.
+- Only emit a remove_words entry if you identify a narrative section that needs to go (e.g., an unrelated tangent) — and prefer setting the corresponding clip's `speed` to 1.30–1.40 to pace through low-value content instead of cutting it.
 """
         print(
             f"[generate-edit] Re-indexed transcript: {_kept_count} kept words "
@@ -3705,10 +3803,6 @@ REMOVE_WORDS GUIDANCE:
     # thumbnail_word_index
     if "thumbnail_word_index" in edit_plan:
         edit_plan["thumbnail_word_index"] = _translate_idx(edit_plan["thumbnail_word_index"])
-    # speed_curve[*].at_word_index
-    for _sc in (edit_plan.get("speed_curve") or []):
-        if isinstance(_sc, dict) and "at_word_index" in _sc:
-            _sc["at_word_index"] = _translate_idx(_sc["at_word_index"])
     print(
         f"[generate-edit] Translated {len(_new_to_src)} kept-word indices back to source space",
         flush=True,
@@ -3716,9 +3810,9 @@ REMOVE_WORDS GUIDANCE:
 
     # ── Derivation pass: word_index → float timestamps for downstream code ──
     # Every downstream consumer (render_multi_clip, projection helpers,
-    # thumbnail selection, speed-curve densification) expects float-time fields
+    # thumbnail selection) expects float-time fields
     # (caption_position_segments, peak_at_seconds, source_start/source_end,
-    # thumbnail_timestamp, speed_curve[*].t). Gemini emits word-anchored
+    # thumbnail_timestamp). Gemini emits word-anchored
     # inputs; Python synthesizes the float fields from word timings here.
     _dg = deepgram_words or []
 
@@ -3787,13 +3881,6 @@ REMOVE_WORDS GUIDANCE:
     _tts = _word_start(_twi)
     if _tts is not None:
         edit_plan["thumbnail_timestamp"] = _tts
-
-    # speed_curve: derive t from at_word_index
-    for _sc in (edit_plan.get("speed_curve") or []):
-        if isinstance(_sc, dict) and "at_word_index" in _sc:
-            _sc_t = _word_start(_sc["at_word_index"])
-            if _sc_t is not None:
-                _sc["t"] = _sc_t
 
     print(
         f"[generate-edit] Derived float timestamps: "
@@ -3912,13 +3999,16 @@ REMOVE_WORDS GUIDANCE:
         })
     for (rs, re_) in _mech_range_cuts:
         _pre_cut_injections.append({"start": rs, "end": re_, "reason": "dead_air"})
+    for (rs, re_) in _anal_silence_cuts:
+        _pre_cut_injections.append({"start": rs, "end": re_, "reason": "analysis_silence"})
     if _pre_cut_injections:
         raw_remove_words = list(raw_remove_words) + _pre_cut_injections
         edit_plan["remove_words"] = raw_remove_words
         print(
             f"[generate-edit] Merged pre-pass cuts into remove_words: "
             f"{len(_mech_word_cuts)} mechanical words, {len(_anal_word_cuts)} analysis words, "
-            f"{len(_mech_range_cuts)} dead-air ranges",
+            f"{len(_mech_range_cuts)} dead-air ranges, "
+            f"{len(_anal_silence_cuts)} analysis silence ranges",
             flush=True,
         )
 
@@ -4470,95 +4560,11 @@ REMOVE_WORDS GUIDANCE:
     if validated_mg:
         print(f"[mg] Gemini requested {len(validated_mg)} motion graphic(s)", flush=True)
 
-    raw_curve = edit_plan.get("speed_curve", "none")
-    if raw_curve == "none" or raw_curve is None:
-        speed_curve = None
-    elif not isinstance(raw_curve, list):
-        raise ValueError(
-            f"speed_curve must be 'none' or an array of keypoints, got "
-            f"{type(raw_curve).__name__}"
-        )
-    else:
-        # Strict: every keypoint must have numeric t + speed in [0.25, 2.0].
-        # No silent coercion; no dropping malformed entries.
-        speed_curve = []
-        for _kpi, kp in enumerate(raw_curve):
-            if not isinstance(kp, dict):
-                raise ValueError(f"speed_curve[{_kpi}] must be an object")
-            if "t" not in kp or ("speed" not in kp and "s" not in kp):
-                raise ValueError(
-                    f"speed_curve[{_kpi}] missing required keys 't' and 'speed'"
-                )
-            try:
-                t = float(kp["t"])
-                s = float(kp.get("speed") if "speed" in kp else kp.get("s"))
-            except (TypeError, ValueError):
-                raise ValueError(
-                    f"speed_curve[{_kpi}] t/speed must be numbers"
-                )
-            if t < 0:
-                raise ValueError(
-                    f"speed_curve[{_kpi}].t={t} must be >= 0"
-                )
-            if not (0.25 <= s <= 2.0):
-                raise ValueError(
-                    f"speed_curve[{_kpi}].speed={s} is outside the supported "
-                    f"range 0.25-2.0. Adjust the keypoint or drop it."
-                )
-            speed_curve.append({"t": t, "speed": s})
-        if len(speed_curve) == 0:
-            speed_curve = None
-        elif len(speed_curve) == 1:
-            raise ValueError(
-                "speed_curve must have at least 2 keypoints to define a ramp "
-                "(got 1). Either add a second keypoint or use 'none'."
-            )
-        else:
-            speed_curve.sort(key=lambda x: x["t"])
-
-            # Gemini already has word-level timestamps at 3-decimal
-            # precision and places keypoints directly on them. Any
-            # rounding error is ≤1 frame (33ms) — imperceptible in a
-            # speed ramp. The old snapping code corrected this tiny
-            # error but caused a catastrophic bug: when a snap-back
-            # keypoint fell in a dead-air gap (removed silence between
-            # clips), it got pulled onto its partner's timestamp and
-            # the ramp pair collapsed into a single keypoint. The
-            # densifier then saw a long gap and filled it with a
-            # gradual 10-second drift instead of a sharp snap. Gemini
-            # is the expert — trust its timestamps exactly.
-
-        if speed_curve and len(speed_curve) >= 2:
-            # MIN_RAMP_SECS spreading was removed. It existed to prevent
-            # jarring abrupt speed changes under hold-and-snap semantics
-            # (where a 0.7→1.3 jump over 0.3s was an instant snap). With
-            # linear interpolation, the same keypoints become a smooth
-            # 0.3s glide which sounds fine. The spreading was also moving
-            # keypoints away from word boundaries, defeating the snap-to-
-            # word fix.
-
-            # Densify with linear interpolation. BUDGETED allocation: a
-            # global cap of 50 intermediate keypoints distributed across
-            # ramps proportional to each ramp's speed delta. This bounds
-            # total sub-clip count regardless of how many keypoints
-            # Gemini sends, making render time predictable. Steeper ramps
-            # get more sub-steps where smoothness matters most.
-            _gemini_kp_count = len(speed_curve)
-            speed_curve = densify_speed_curve(speed_curve, max_intermediates=30, min_step=0.20)
-            if len(speed_curve) > _gemini_kp_count:
-                print(
-                    f"[speed-curve] Densified {_gemini_kp_count} Gemini keypoints → "
-                    f"{len(speed_curve)} interpolated keypoints (smooth ramping)",
-                    flush=True,
-                )
-
-            speeds = [kp["speed"] for kp in speed_curve]
-            print(
-                f"[generate-edit] Speed curve: {len(speed_curve)} keypoints, range "
-                f"{min(speeds):.2f}x - {max(speeds):.2f}x",
-                flush=True,
-            )
-    edit_plan["_parsed_speed_curve"] = speed_curve
+    # Defensive: in case any legacy upstream caller still hands us a
+    # `speed_curve` field on the plan (it's no longer in the schema), drop
+    # it silently. Pacing is now expressed exclusively via per-clip `speed`.
+    edit_plan.pop("speed_curve", None)
+    edit_plan.pop("_parsed_speed_curve", None)
 
     thumbnail_timestamp = None
     try:
@@ -4790,10 +4796,10 @@ REMOVE_WORDS GUIDANCE:
         _clip_zoom_owner[_owning_clip] = _ei
         # Attach the emphasis zoom_effect to its owning validated_cut.
         # Mirrors how transitions attach (~line 4117): single source of
-        # truth carried forward by validated_cuts → final_cuts → speed-curve
-        # sub-clips → render_cuts → clips_out. Without this, the zoom only
-        # gets written to render_cuts AFTER clips_out is already built, so
-        # every emphasis zoom is silently lost.
+        # truth carried forward by validated_cuts → final_cuts →
+        # render_cuts → clips_out. Without this, the zoom only gets written
+        # to render_cuts AFTER clips_out is already built, so every
+        # emphasis zoom is silently lost.
         validated_cuts[_owning_clip]["_zoom_effect"] = em["zoom_effect"]
 
     for em in emphasis_moments:
@@ -5103,9 +5109,11 @@ REMOVE_WORDS GUIDANCE:
                 f"bug — transition_out should only ever be set by the upstream "
                 f"validated-transition block."
             )
-        # Speed is Gemini's creative decision. Reject out-of-range instead of
-        # silently clamping; this forces Gemini to emit a value inside the
-        # documented range rather than sending something unrealistic.
+        # Speed is Gemini's creative decision — a constant playback rate per
+        # clip. Range 0.7–1.4 covers the entire viral-pacing band. Anything
+        # below 0.7 produces audible audio artifacts; anything above 1.4
+        # reads as fast-forward, not pacing. Reject out-of-range instead of
+        # silently clamping so the prompt's stated range is enforced.
         _raw_speed = clip_entry.get("speed")
         if _raw_speed is None:
             speed = 1.0
@@ -5116,11 +5124,11 @@ REMOVE_WORDS GUIDANCE:
                 raise ValueError(
                     f"validated_cuts[{_ci}].speed={_raw_speed!r} is not a number."
                 )
-            if not (0.25 <= speed <= 4.0):
+            if not (0.7 <= speed <= 1.4):
                 raise ValueError(
                     f"validated_cuts[{_ci}].speed={speed} is outside the "
-                    f"documented range 0.25-4.0. Adjust the speed_curve keypoint "
-                    f"that produced this value or remove the keypoint."
+                    f"documented range 0.7–1.4. Set the clip's speed inside "
+                    f"this band or omit the field for default 1.0."
                 )
         _new_cut = {
             "source_start": clip_entry["source_start"],
@@ -5221,7 +5229,7 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None)
         "motion_graphics (with semantic anchor), emphasis_moments (each binds explicit "
         "zoom_effect / motion_graphic), sfx_placements, hook_clip "
         "(start_word_index + end_word_index; source_start/end derived), thumbnail_word_index "
-        "(thumbnail_timestamp derived), speed_curve (at_word_index + speed; t derived), outro. "
+        "(thumbnail_timestamp derived), per-clip `speed` (constant 0.7–1.4 per cut), outro. "
         "The user has requested a change. Your job:\n\n"
         "1) CLASSIFY the request as one of:\n"
         "   - 'tweak': surgical change to specific fields (e.g. 'smaller captions', 'remove clip 3', "
@@ -6575,277 +6583,96 @@ def get_pitch_preserving_speed_filter(speed: float) -> str:
     return get_atempo_filter(speed)
 
 
-def densify_speed_curve(speed_curve, max_intermediates=50, min_step=0.10):
-    """Insert linearly-interpolated intermediate keypoints between Gemini's
-    keypoints so the speed curve becomes a perceptually smooth ramp instead
-    of discrete jumps.
+def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample_rate=48000):
+    """Build the per-cut audio track in one numpy pass.
 
-    BUDGETED proportional allocation: a global cap of max_intermediates
-    intermediate keypoints is distributed across all the ramps in
-    proportion to each ramp's speed delta. Steeper ramps get more sub-steps
-    (where smoothness matters most), gentler ramps get fewer. Hold sections
-    get zero. This guarantees the total sub-clip count is bounded
-    independently of how many keypoints Gemini sends, so render time is
-    predictable.
+    Source audio is extracted ONCE (one ffmpeg invocation) and held in
+    memory; each cut's range is then numpy-sliced and resampled at its
+    constant `cut.speed` via np.interp — the asetrate-equivalent (pitch
+    tracks tempo). Both video setpts and this resampler use the SAME
+    constant speed per cut, guaranteeing audio + video durations are
+    sample-identical.
 
-    With a budget of 50 across typical 6-9 keypoint Gemini curves, the
-    max per-step speed delta lands around 0.05 — at or just under the
-    human tempo discrimination threshold. Steep ramps where smoothness
-    matters most get the densest allocation; gentle ramps barely need any.
+    Memory cost: one mono 16-bit PCM buffer at sample_rate covering the
+    full source audio. At 48 kHz × 60 s × 2 bytes = 5.5 MB — negligible.
+    Wallclock save vs the old per-cut subprocess pattern: ~50 ms × N cuts
+    of ffmpeg startup + N disk roundtrips.
 
-    min_step (100ms) clamps the minimum sub-clip duration so the splitter's
-    micro-clip merger doesn't drop sub-clips smaller than 3 frames.
-
-    Returns a new list with the original keypoints plus inserted intermediates.
-    """
-    if not speed_curve or len(speed_curve) < 2:
-        return list(speed_curve or [])
-
-    # First pass: compute each ramp's speed_delta and gap so we can
-    # allocate the intermediate budget proportionally.
-    ramps = []
-    total_delta = 0.0
-    for i in range(len(speed_curve) - 1):
-        t_a = float(speed_curve[i]["t"])
-        s_a = float(speed_curve[i]["speed"])
-        t_b = float(speed_curve[i + 1]["t"])
-        s_b = float(speed_curve[i + 1]["speed"])
-        gap = t_b - t_a
-        speed_delta = abs(s_b - s_a)
-        is_hold = speed_delta < 0.01
-        ramps.append({
-            "i": i, "t_a": t_a, "s_a": s_a, "t_b": t_b, "s_b": s_b,
-            "gap": gap, "delta": speed_delta, "is_hold": is_hold,
-            "n_steps": 1,  # default: no intermediates (just the endpoint)
-        })
-        if not is_hold:
-            total_delta += speed_delta
-
-    # Second pass: allocate budget proportional to each ramp's delta.
-    # Each ramp's n_steps is the number of equal sub-slices it gets
-    # divided into (so n_steps - 1 intermediate keypoints inserted).
-    if total_delta > 0:
-        for r in ramps:
-            if r["is_hold"]:
-                continue
-            # Ramp's share of the budget, proportional to its speed delta.
-            # Floor of 6 sub-slices guarantees perceptual smoothness on
-            # short ramps without exploding sub-clip count on long ones.
-            # (At 30fps with min_step=0.20s, a 6-step ramp = 6 sub-slices
-            # at ≥6 frames each, and the per-sub-clip speed delta lands
-            # at ~delta/6 — well under the 5-10% human discrimination
-            # threshold for typical ramp deltas of 0.1-0.4.)
-            share = (r["delta"] / total_delta) * max_intermediates
-            n_steps = max(6, round(share) + 1)
-            # Clamp by min_step so we don't create micro-clips smaller than min_step.
-            n_steps_time = max(6, int(r["gap"] / min_step))
-            r["n_steps"] = min(n_steps, n_steps_time)
-
-    # Third pass: emit the densified curve using smoothstep (ease-in-out)
-    # interpolation. Linear interpolation has instant acceleration at ramp
-    # boundaries which sounds/looks abrupt. Smoothstep (3t²-2t³) eases in
-    # and out so the speed change is gentle at both ends of every ramp.
-    densified = [dict(speed_curve[0])]
-    for r in ramps:
-        n_steps = r["n_steps"]
-        if n_steps >= 2:
-            for k in range(1, n_steps):
-                frac = k / n_steps
-                # Smoothstep: 3t² - 2t³ (ease-in-out)
-                smooth_frac = frac * frac * (3.0 - 2.0 * frac)
-                t_new = r["t_a"] + frac * r["gap"]  # time stays linear
-                s_new = r["s_a"] + (r["s_b"] - r["s_a"]) * smooth_frac
-                densified.append({"t": round(t_new, 3), "speed": round(s_new, 4)})
-        densified.append(dict(speed_curve[r["i"] + 1]))
-
-    return densified
-
-
-def get_speed_for_timestamp(t, speed_curve):
-    """Return the speed in effect at time t.
-
-    Speed keypoints are HOLD-and-snap: a keypoint at time T with speed S
-    means "from T onward, play at speed S, until the next keypoint takes
-    effect." This matches the Gemini prompt's stated intent ("place each
-    keypoint at the MOMENT the speed should change") and the user's
-    mental model of speed ramping.
-
-    Previously this function smoothstep-interpolated between adjacent
-    keypoints, which produced speed values in the MIDDLE of a ramp that
-    averaged toward 1.0 — meaning a clip whose start time fell between
-    two keypoints would play at near-normal speed regardless of what
-    Gemini set on either side.
-    """
-    if not speed_curve or speed_curve == "none":
-        return 1.0
-    if not isinstance(speed_curve, list) or len(speed_curve) == 0:
-        return 1.0
-    if t < float(speed_curve[0]["t"]):
-        return float(speed_curve[0]["speed"])
-    # Walk forward and return the speed of the most recent keypoint at or
-    # before t. Keypoints are sorted by time at parse time.
-    current = float(speed_curve[0]["speed"])
-    for kp in speed_curve:
-        if float(kp["t"]) <= t:
-            current = float(kp["speed"])
-        else:
-            break
-    return current
-
-
-def get_speed_linear_interp(t, speed_curve):
-    """Linearly interpolated speed at time t.
-
-    Matches np.interp semantics used by the audio path: speed glides
-    continuously between keypoints instead of holding-and-snapping. Used
-    in time-map construction so video's avg_speed (log-mean of endpoints)
-    and audio's per-sample speed agree on the speed profile across every
-    sub-clip — including first/last sub-clips whose boundaries fall
-    between densified keypoints rather than on them.
-    """
-    if not speed_curve or speed_curve == "none":
-        return 1.0
-    if not isinstance(speed_curve, list) or len(speed_curve) == 0:
-        return 1.0
-    t0 = float(speed_curve[0]["t"])
-    if t <= t0:
-        return float(speed_curve[0]["speed"])
-    for i in range(1, len(speed_curve)):
-        ti = float(speed_curve[i]["t"])
-        if t <= ti:
-            ti_prev = float(speed_curve[i - 1]["t"])
-            span = ti - ti_prev
-            if span < 1e-12:
-                return float(speed_curve[i]["speed"])
-            si_prev = float(speed_curve[i - 1]["speed"])
-            si = float(speed_curve[i]["speed"])
-            frac = (t - ti_prev) / span
-            return si_prev + frac * (si - si_prev)
-    return float(speed_curve[-1]["speed"])
-
-
-def build_speed_curved_audio(source_path, cuts, speed_curve, effective_durations, work_dir, sample_rate=48000):
-    """Build speed-curved audio for the entire output as one continuous operation.
-
-    Instead of per-segment asetrate (80+ independent resamplers with boundary
-    clicks), this processes each narrative clip's audio through numpy interpolation.
-    Pitch shifts proportionally to speed (same effect as asetrate) but with zero
-    boundary artifacts within speed ramps.
-
-    Returns path to the processed WAV file.
+    No boundary fades — sharp cuts. Speech rarely has a zero-crossing at
+    boundaries, but the trade-off is accepted: clean cuts beat masked ones.
+    Returns the path to the concatenated WAV.
     """
     import numpy as np
+    import wave
 
-    output_wav = os.path.join(work_dir, "speed_curved_audio.wav")
+    output_wav = os.path.join(work_dir, "per_cut_audio.wav")
+
+    # ── Single source extraction ────────────────────────────────────────
+    # Decode the entire source audio once at our target rate + mono.
+    # Any per-cut slicing happens in numpy from this buffer.
+    full_src_wav = os.path.join(work_dir, "source_audio_full.wav")
+    _ext = subprocess.run(
+        ["ffmpeg", "-y", "-v", "error",
+         "-i", source_path, "-vn",
+         "-acodec", "pcm_s16le", "-ar", str(sample_rate), "-ac", "1",
+         full_src_wav],
+        capture_output=True, text=True, timeout=120,
+    )
+    if _ext.returncode != 0 or not os.path.exists(full_src_wav):
+        raise RuntimeError(
+            f"Source audio extraction failed: {(_ext.stderr or '')[-500:]}"
+        )
+
+    with wave.open(full_src_wav, "rb") as wf:
+        n_channels = wf.getnchannels()
+        n_src_samples = wf.getnframes()
+        raw = wf.readframes(n_src_samples)
+    src_samples = np.frombuffer(raw, dtype=np.int16).astype(np.float32)
+    if n_channels > 1:
+        src_samples = src_samples[::n_channels]  # first channel only
+    src_total = len(src_samples)
+    try:
+        os.remove(full_src_wav)
+    except OSError:
+        pass
+
+    # ── Per-cut numpy slice + resample ──────────────────────────────────
     all_clips = []
-
     for ci, cut in enumerate(cuts):
         src_start = float(cut["source_start"])
         src_end = float(cut["source_end"])
         src_dur = src_end - src_start
         eff_dur = effective_durations[ci]
-        # Speed is pre-validated to [0.25, 4.0] at plan time — no defensive clamp.
         clip_speed = float(cut.get("speed") or 1.0)
+        n_out = max(1, round(eff_dur * sample_rate))
 
         if src_dur < 0.001:
             continue
 
-        # Extract this clip's raw audio from source
-        clip_wav = os.path.join(work_dir, f"clip_audio_{ci:03d}.wav")
-        _ext = subprocess.run(
-            ["ffmpeg", "-y", "-v", "error",
-             "-ss", f"{src_start:.3f}", "-t", f"{src_dur:.3f}",
-             "-i", source_path, "-vn",
-             "-acodec", "pcm_s16le", "-ar", str(sample_rate), "-ac", "1",
-             clip_wav],
-            capture_output=True, text=True, timeout=15,
-        )
-        if _ext.returncode != 0 or not os.path.exists(clip_wav):
-            # Fallback: silence for this clip
-            n_out = max(1, round(eff_dur * sample_rate))
-            all_clips.append(np.zeros(n_out, dtype=np.float32))
-            continue
-
-        # Read PCM samples
-        import wave
-        with wave.open(clip_wav, "rb") as wf:
-            n_channels = wf.getnchannels()
-            n_src_samples = wf.getnframes()
-            raw = wf.readframes(n_src_samples)
-        samples = np.frombuffer(raw, dtype=np.int16).astype(np.float32)
-        if n_channels > 1:
-            samples = samples[::n_channels]  # take first channel
+        # Slice the cut's range out of the in-memory source buffer.
+        s_start = max(0, int(round(src_start * sample_rate)))
+        s_end = min(src_total, int(round(src_end * sample_rate)))
+        samples = src_samples[s_start:s_end]
         n_src = len(samples)
 
         if n_src < 2:
-            n_out = max(1, round(eff_dur * sample_rate))
             all_clips.append(np.zeros(n_out, dtype=np.float32))
             continue
 
-        # Get speed at each source sample position using the speed curve.
-        # Speed is hold-and-snap from the densified curve (matching video behavior).
-        has_curve = (speed_curve and speed_curve != "none" and isinstance(speed_curve, list))
-        n_out = max(1, round(eff_dur * sample_rate))
-
-        if not has_curve:
-            # No speed curve — simple uniform resampling at clip_speed
-            if abs(clip_speed - 1.0) < 0.001:
-                # 1.0x speed — just truncate/pad to exact length
-                if n_src >= n_out:
-                    all_clips.append(samples[:n_out])
-                else:
-                    padded = np.zeros(n_out, dtype=np.float32)
-                    padded[:n_src] = samples
-                    all_clips.append(padded)
+        # Constant-speed resample. At 1.0× we can truncate/pad without
+        # interpolation; otherwise np.interp evenly spans the source.
+        if abs(clip_speed - 1.0) < 0.001:
+            if n_src >= n_out:
+                all_clips.append(samples[:n_out])
             else:
-                src_positions = np.linspace(0, n_src - 1, n_out)
-                all_clips.append(np.interp(src_positions, np.arange(n_src), samples))
+                padded = np.zeros(n_out, dtype=np.float32)
+                padded[:n_src] = samples
+                all_clips.append(padded)
         else:
-            # Variable speed — compute source position for each output sample
-            # by integrating 1/speed(t) across the source timeline.
-            src_sample_times = np.arange(n_src) / sample_rate
-            abs_times = src_sample_times + src_start
-
-            # Linearly interpolate speed between keypoints so pitch glides
-            # smoothly instead of stepping at every keypoint boundary. Video's
-            # avg_speed uses the log-mean of the same endpoint speeds, so
-            # per-sub-clip audio/video durations match exactly (∫1/speed dt
-            # equals source_dur / log_mean by construction). Clamp product
-            # to [0.25, 4.0] to match video's speed range.
-            kp_times = np.array([float(kp["t"]) for kp in speed_curve], dtype=np.float64)
-            kp_speeds = np.array(
-                [max(0.25, min(2.0, float(kp["speed"]))) for kp in speed_curve],
-                dtype=np.float64,
-            )
-            curve_speeds = np.interp(abs_times, kp_times, kp_speeds)
-            speeds = np.clip(clip_speed * curve_speeds, 0.25, 4.0)
-
-            # Compute cumulative output time for each source sample
-            dt = 1.0 / sample_rate
-            cum_output = np.cumsum(dt / speeds)
-            cum_output = np.insert(cum_output, 0, 0.0)  # prepend 0 for sample 0
-
-            # Output sample grid at uniform spacing
-            output_grid = np.linspace(0, eff_dur, n_out)
-
-            # Map output time → source sample position (inverse lookup).
-            # Use n_src+1 to include the final cumulative value (avoids
-            # extrapolation clamping on the last few output samples).
-            src_positions = np.interp(output_grid, cum_output[:n_src + 1], np.arange(n_src + 1, dtype=np.float64))
-            src_positions = np.clip(src_positions, 0, n_src - 1)
-
-            # Interpolate source audio at computed positions
+            src_positions = np.linspace(0, n_src - 1, n_out)
             all_clips.append(np.interp(src_positions, np.arange(n_src), samples))
 
-        # Clean up clip wav
-        try:
-            os.remove(clip_wav)
-        except OSError:
-            pass
-
     if not all_clips:
-        # No clips — produce silence
-        import wave
         with wave.open(output_wav, "wb") as wf:
             wf.setnchannels(1)
             wf.setsampwidth(2)
@@ -6853,18 +6680,8 @@ def build_speed_curved_audio(source_path, cuts, speed_curve, effective_durations
             wf.writeframes(b"\x00" * sample_rate * 2)
         return output_wav
 
-    # No fade at clip boundaries — sharp cuts. Speech audio rarely has a
-    # zero-crossing at boundaries, so removing the 5ms fade can produce
-    # audible clicks. Trade-off accepted: clean cuts win over masked
-    # boundaries. If clicks become an issue, the fix is to land cuts on
-    # quieter source moments via Gemini's prompt, not to re-add a fade.
-
-    # Concatenate all clips
     full_audio = np.concatenate(all_clips)
-
-    # Write as 16-bit PCM WAV
     full_audio = np.clip(full_audio, -32768, 32767).astype(np.int16)
-    import wave
     with wave.open(output_wav, "wb") as wf:
         wf.setnchannels(1)
         wf.setsampwidth(2)
@@ -6872,11 +6689,15 @@ def build_speed_curved_audio(source_path, cuts, speed_curve, effective_durations
         wf.writeframes(full_audio.tobytes())
 
     _total_dur = len(full_audio) / sample_rate
-    print(f"[audio-speed] Built speed-curved audio: {len(cuts)} clips, {_total_dur:.2f}s, {len(full_audio)} samples", flush=True)
+    print(
+        f"[audio] Built per-cut audio: {len(cuts)} cuts, "
+        f"{_total_dur:.2f}s, {len(full_audio)} samples (single-extract)",
+        flush=True,
+    )
     return output_wav
 
 
-def project_words_to_output(transcript, cuts, effective_durations, speed_curve=None, transition_duration=None, clip_time_maps=None, removed_word_indices=None, fps=60.0):
+def project_words_to_output(transcript, cuts, effective_durations, transition_duration=None, clip_time_maps=None, removed_word_indices=None, fps=60.0):
     """Project word timestamps from source to output timeline using canonical time maps.
 
     If removed_word_indices is provided, words at those indices are excluded.
@@ -6901,13 +6722,10 @@ def project_words_to_output(transcript, cuts, effective_durations, speed_curve=N
             we = float(w.get("end") or 0)
             # A word belongs to whichever cut contains its MIDPOINT in source
             # time. Half-open interval [c_start, c_end) ensures exactly-one
-            # assignment when adjacent sub-clips share a boundary point —
-            # which they do by construction in split_clips_at_speed_keypoints
-            # (sub-clip N+1's start equals sub-clip N's end). Without this,
-            # a word straddling the boundary passed both predicates of the
-            # old overlap check (we<=c_start, ws>=c_end) and got projected
-            # twice, surfacing as duplicate captions back-to-back. Hook
-            # clips (subset of a narrative clip) are unaffected: a word
+            # assignment for words that straddle a cut boundary — without
+            # this, a straddling word would be projected by both adjacent
+            # cuts and surface as duplicate back-to-back captions. Hook
+            # clips (a subset of a narrative clip) are unaffected: a word
             # inside the hook range has its midpoint inside both the hook
             # AND the narrative cut, so it's projected once per cut —
             # preserving the hook's intentional replay behavior.
@@ -6920,7 +6738,6 @@ def project_words_to_output(transcript, cuts, effective_durations, speed_curve=N
                 local_s = _time_map_lookup(tm, clamped_s - c_start)
                 local_e = _time_map_lookup(tm, clamped_e - c_start)
             else:
-                # Speed pre-validated to [0.25, 4.0] upstream.
                 speed = float(cut.get("speed") or 1.0)
                 local_s = (clamped_s - c_start) / speed
                 local_e = (clamped_e - c_start) / speed
@@ -7406,60 +7223,37 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15, v
     return final_clips, set(removed_indices)
 
 
-def build_clip_time_map(clip_start, clip_end, clip_speed, speed_curve, fps=60):
+def build_clip_time_map(clip_start, clip_end, clip_speed, fps=60):
     """Build a canonical per-frame time map for one clip.
 
-    This is the SINGLE SOURCE OF TRUTH for the time mapping. All systems
-    (FFmpeg setpts, caption projection, SFX/B-roll projection) derive their
-    timing from this same table, eliminating drift between systems.
+    Single source of truth for time mapping. All systems (FFmpeg setpts,
+    caption projection, SFX/B-roll projection, audio resampling) derive
+    their timing from this same table.
 
-    Uses trapezoidal integration at 1 sample per frame for sub-frame accuracy.
+    Each clip plays at one constant speed (`clip_speed`). The map is
+    therefore trivial:
+        eff_dur = source_dur / clip_speed
+        avg_speed = clip_speed
+        n_frames = round(source_dur * fps)
+        output_times[k] = k * eff_dur / n_frames     for k in [0..n_frames]
 
-    Returns dict with:
-        output_times: list of output times (seconds) at each source frame boundary [0..n_frames]
-        effective_duration: total output duration (= output_times[-1])
-        avg_speed: average speed (for audio, which must be constant)
-        n_frames: number of source frames
-        source_dur: source duration in seconds
+    Returns dict with: output_times, effective_duration, avg_speed,
+    n_frames, source_dur.
     """
     source_dur = clip_end - clip_start
     if source_dur <= 0.001:
-        return {"output_times": [0.0, max(source_dur, 0.001)], "effective_duration": max(source_dur, 0.001),
-                "avg_speed": clip_speed, "n_frames": 1, "source_dur": source_dur}
+        return {
+            "output_times": [0.0, max(source_dur, 0.001)],
+            "effective_duration": max(source_dur, 0.001),
+            "avg_speed": clip_speed,
+            "n_frames": 1,
+            "source_dur": source_dur,
+        }
 
-    has_curve = (speed_curve and speed_curve != "none" and isinstance(speed_curve, list))
+    speed = max(0.25, min(4.0, clip_speed))
     n_frames = max(1, round(source_dur * fps))
-
-    # Logarithmic mean of the sub-clip's start and end speeds (linearly
-    # interpolated from the densified curve). This is the unique constant
-    # speed whose reciprocal integrates to the same output duration as the
-    # audio's linearly-sliding speed — i.e. video setpts=(1/log_mean)*PTS
-    # and audio ∫1/speed(t) dt produce identical per-sub-clip durations.
-    # Degenerate case (s_start == s_end) collapses to that shared value.
-    if has_curve:
-        s_start = max(0.25, min(2.0, get_speed_linear_interp(clip_start, speed_curve)))
-        s_end = max(0.25, min(2.0, get_speed_linear_interp(clip_end, speed_curve)))
-        if abs(s_end - s_start) < 1e-9:
-            curve_speed = s_start
-        else:
-            curve_speed = (s_end - s_start) / math.log(s_end / s_start)
-    else:
-        curve_speed = 1.0
-    speed = max(0.25, min(4.0, clip_speed * curve_speed))
-
-    # Effective duration equals source_dur / speed — this matches exactly what
-    # FFmpeg emits for a segment rendered with `-ss X -t source_dur -i source`
-    # plus `setpts=(1/speed)*PTS`. FFmpeg reads source_dur seconds of source
-    # (a continuous time window, not frame-quantized) and setpts scales the
-    # output timeline by 1/speed. Stream duration = source_dur / speed.
-    # Using n_frames / (fps * speed) instead introduced up to ±16ms per
-    # segment of drift between our prediction and FFmpeg's actual output,
-    # because round(source_dur * fps) is unstable at half-frame boundaries.
     eff_dur = source_dur / speed
-
-    # output_times span [0, eff_dur] uniformly across n_frames+1 boundaries.
     output_times = [k * eff_dur / n_frames for k in range(n_frames + 1)]
-
     return {
         "output_times": output_times,
         "effective_duration": eff_dur,
@@ -7467,62 +7261,6 @@ def build_clip_time_map(clip_start, clip_end, clip_speed, speed_curve, fps=60):
         "n_frames": n_frames,
         "source_dur": source_dur,
     }
-
-
-def split_clips_at_speed_keypoints(cuts, speed_curve):
-    """Split clips at speed curve keypoints so each sub-clip has near-constant speed.
-
-    This is the root fix for audio/video sync: when each sub-clip has <5% speed variation,
-    constant-average audio matches the video perfectly. The parallel architecture is preserved.
-
-    Returns expanded list of cuts with sub-clips replacing originals.
-    """
-    if not speed_curve or speed_curve == "none" or not isinstance(speed_curve, list):
-        return list(cuts)
-
-    # Split at every keypoint in the speed curve. The speed curve has
-    # already been densified at parse time (densify_speed_curve) — Gemini's
-    # original keypoints + linearly-interpolated intermediates at ~250ms
-    # intervals — so this loop produces enough sub-clips for smooth ramping.
-    all_split_times = sorted(set(float(kp["t"]) for kp in speed_curve))
-    expanded = []
-
-    for cut in cuts:
-        src_start = float(cut["source_start"])
-        src_end = float(cut["source_end"])
-
-        # Find split points that fall strictly inside this clip
-        interior = [t for t in all_split_times if src_start + 0.05 < t < src_end - 0.05]
-
-        if not interior:
-            expanded.append(dict(cut))
-            continue
-
-        boundaries = [src_start] + interior + [src_end]
-
-        for si in range(len(boundaries) - 1):
-            sub_start = boundaries[si]
-            sub_end = boundaries[si + 1]
-
-            if sub_end - sub_start < 0.001:
-                continue  # skip zero-length clips (floating point edge case)
-
-            sub_cut = dict(cut)
-            sub_cut["source_start"] = round(sub_start, 3)
-            sub_cut["source_end"] = round(sub_end, 3)
-
-            # Only last sub-clip keeps transition_out
-            if si < len(boundaries) - 2:
-                sub_cut["transition_out"] = "none"
-
-            expanded.append(sub_cut)
-
-    if expanded:
-        n_split = len(expanded) - len(cuts)
-        if n_split > 0:
-            print(f"[speed-split] Split {len(cuts)} clips into {len(expanded)} sub-clips ({len(all_split_times)} split points)", flush=True)
-
-    return expanded
 
 
 def _time_map_lookup(tm, source_offset):
@@ -7534,46 +7272,12 @@ def _time_map_lookup(tm, source_offset):
     return source_offset / avg_speed if avg_speed > 0 else source_offset
 
 
-def build_setpts_from_time_map(tm, log=False):
-    """Generate constant-speed FFmpeg setpts expression from a canonical time map.
-
-    Uses the integrated average speed from the time map. After splitting clips at
-    speed keypoints, each sub-clip has near-constant speed, so the constant average
-    is accurate. Audio uses the same avg_speed, guaranteeing perfect sync.
-
-    Returns (setpts_value, effective_dur, avg_speed).
-    """
-    eff_dur = tm["effective_duration"]
-    avg_speed = tm["avg_speed"]
-    n_frames = tm["n_frames"]
-
-    if n_frames <= 1:
-        return None, eff_dur, avg_speed
-
-    # Skip setpts if speed is ~1.0
-    if abs(avg_speed - 1.0) < 0.005:
-        return None, eff_dur, avg_speed
-
-    # Full float precision (10 decimals) so the audio asetrate and the
-    # video setpts agree on the playback rate to sub-microsecond accuracy.
-    # Previously :.4f rounded both values independently in opposite
-    # directions, producing different effective playback rates that drifted
-    # by ~1-10ms per minute of segment.
-    setpts_val = f"{1.0/avg_speed:.10f}*PTS"
-    if log:
-        print(f"[speed] Setpts: avg={avg_speed:.3f}x, eff={eff_dur:.3f}s", flush=True)
-
-    return setpts_val, eff_dur, avg_speed
-
-
-def project_source_time_to_output(source_t, cuts, clip_ranges, speed_curve=None, clip_time_maps=None):
+def project_source_time_to_output(source_t, cuts, clip_ranges, clip_time_maps=None):
     """Map a source-timeline timestamp to the output-timeline timestamp.
     Uses canonical time maps for exact alignment with FFmpeg.
 
-    clip_time_maps is REQUIRED — it contains the combined clip_speed *
-    curve_speed used by FFmpeg's setpts. Without it, the projection
-    would use cut["speed"] (always 1.0 when speed_curve is active),
-    ignoring the speed curve entirely and placing b-roll/SFX late.
+    clip_time_maps is REQUIRED — each cut's avg_speed comes from there,
+    matching FFmpeg's setpts exactly.
 
     When a hook clip duplicates a source range at the start of the timeline,
     multiple cuts can contain the same source timestamp. We prefer the LAST
@@ -7597,28 +7301,20 @@ def project_source_time_to_output(source_t, cuts, clip_ranges, speed_curve=None,
     return None
 
 
-def project_source_time_to_final_output(source_t, cuts, effective_durations, speed_curve=None, clip_time_maps=None):
+def project_source_time_to_final_output(source_t, cuts, effective_durations, clip_time_maps=None):
     """Map a source timestamp to the final output timeline after cut compression."""
     clip_ranges = get_output_clip_ranges(cuts, effective_durations)
-    return project_source_time_to_output(source_t, cuts, clip_ranges, speed_curve, clip_time_maps=clip_time_maps)
+    return project_source_time_to_output(source_t, cuts, clip_ranges, clip_time_maps=clip_time_maps)
 
 
-def build_variable_speed_setpts(clip_start, clip_end, clip_speed, speed_curve, log=False, fps=60):
-    """Build speed expression from canonical time map. Wrapper for backward compatibility."""
-    tm = build_clip_time_map(clip_start, clip_end, clip_speed, speed_curve, fps=fps)
-    setpts_val, eff_dur, avg_speed = build_setpts_from_time_map(tm, log=log)
-    return setpts_val, eff_dur, avg_speed
-
-
-def compute_effective_durations(cuts, speed_curve=None, fps=60):
+def compute_effective_durations(cuts, fps=60):
     """Compute output duration for each clip using canonical time maps."""
     durations = []
     for cut in (cuts or []):
         src_start = float(cut["source_start"])
         src_end = float(cut["source_end"])
-        # Speed pre-validated to [0.25, 4.0] upstream.
         clip_speed = float(cut.get("speed") or 1.0)
-        tm = build_clip_time_map(src_start, src_end, clip_speed, speed_curve, fps=fps)
+        tm = build_clip_time_map(src_start, src_end, clip_speed, fps=fps)
         durations.append(tm["effective_duration"])
     return durations
 
@@ -7638,8 +7334,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
       - motion graphics overlays (pack motion-graphics components)
 
     Audio pipeline (ffmpeg) runs in parallel and produces a final AAC track:
-      - numpy speed-curve-resampled source audio (pitch-scaling exactly matching
-        video playbackRate)
+      - numpy per-cut resampled source audio (pitch-scaling exactly matching
+        each cut's playbackRate)
       - SFX mix with onset compensation + output-timeline projection
       - voice ducking at SFX onsets
       - adaptive EQ + double-compressor voice chain
@@ -7688,7 +7384,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         print("[source-norm] Source is already 1080x1920 — no normalization needed", flush=True)
 
     # ── 1. Pre-render clip setup ────────────────────────────────────────────
-    speed_curve = edit_plan.get("_parsed_speed_curve")
     TRANSITION_DURATION = get_transition_duration(edit_plan.get("pacing"))
     print(f"[render] transition_duration={TRANSITION_DURATION:.2f}s (pacing={edit_plan.get('pacing')})", flush=True)
 
@@ -7753,72 +7448,31 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     sample_rate = probe_audio_sample_rate(source_path) or 48000
 
-    # Shift speed ramps that span removed-content gaps into preceding clip tails
-    if speed_curve and isinstance(speed_curve, list) and len(speed_curve) >= 2 and len(render_cuts) >= 2:
-        _ramps_shifted = 0
-        for _bi in range(1, len(render_cuts)):
-            _prev_start = float(render_cuts[_bi - 1]["source_start"])
-            _prev_end = float(render_cuts[_bi - 1]["source_end"])
-            _curr_start = float(render_cuts[_bi]["source_start"])
-            _gap = _curr_start - _prev_end
-            if _gap < 0.05:
-                continue
-            _speed_at_prev_end = get_speed_for_timestamp(_prev_end, speed_curve)
-            _speed_at_curr_start = get_speed_for_timestamp(_curr_start, speed_curve)
-            _delta = _speed_at_curr_start - _speed_at_prev_end
-            if _delta >= -0.03:
-                continue
-            _prev_dur = _prev_end - _prev_start
-            _ramp_dur = min(0.4, _prev_dur * 0.3)
-            if _ramp_dur < 0.08:
-                continue
-            _ramp_start = round(_prev_end - _ramp_dur, 3)
-            _target_speed = _speed_at_curr_start
-            speed_curve = [kp for kp in speed_curve
-                           if not (_ramp_start < float(kp["t"]) <= _prev_end)]
-            _n_steps = 8
-            for _si in range(_n_steps + 1):
-                _frac = _si / _n_steps
-                _smooth = _frac * _frac * (3.0 - 2.0 * _frac)
-                _t = _ramp_start + _frac * _ramp_dur
-                _s = _speed_at_prev_end + (_target_speed - _speed_at_prev_end) * _smooth
-                speed_curve.append({"t": round(_t, 3), "speed": round(_s, 4)})
-            _ramps_shifted += 1
-        if _ramps_shifted > 0:
-            speed_curve.sort(key=lambda x: float(x["t"]))
-            print(f"[speed-curve] Shifted {_ramps_shifted} ramp(s) into preceding clip tails ({len(speed_curve)} keypoints)", flush=True)
-    edit_plan["_parsed_speed_curve"] = speed_curve
-
-    # Snapshot pre-split cuts (audio pipeline uses these for full clip resampling)
-    _presplit_cuts = list(render_cuts)
-    _presplit_effective_durations = compute_effective_durations(_presplit_cuts, speed_curve, fps=source_fps)
-    edit_plan["_presplit_cuts"] = _presplit_cuts
-    edit_plan["_presplit_eff_durs"] = _presplit_effective_durations
-
-    # Split at speed curve keypoints → constant-speed sub-clips
-    render_cuts = split_clips_at_speed_keypoints(render_cuts, speed_curve)
-
-    # Build canonical time maps per sub-clip (SSOT for video + audio)
+    # ── Build canonical time maps per cut (SSOT for video + audio) ──────────
+    # No sub-clip splitting, no speed-curve interpolation. Each cut has a
+    # single constant speed; its time map is trivial (source_dur / speed).
+    # Audio uses the same map. There is exactly one render segment per cut.
     _clip_time_maps = []
     effective_durations = []
+    _per_cut_dur_frames: List[int] = []
     for _rc in render_cuts:
         _tm = build_clip_time_map(
             float(_rc["source_start"]),
             float(_rc["source_end"]),
             float(_rc.get("speed") or 1.0),
-            speed_curve,
             fps=source_fps,
         )
         _clip_time_maps.append(_tm)
         effective_durations.append(_tm["effective_duration"])
+        _per_cut_dur_frames.append(max(1, int(round(_tm["effective_duration"] * source_fps))))
 
     edit_plan["_render_cuts"] = render_cuts
     edit_plan["_render_effective_durations"] = effective_durations
     edit_plan["_render_clip_time_maps"] = _clip_time_maps
 
     n = len(render_cuts)
-    total_output_duration = sum(effective_durations)
-    total_output_frames = max(1, int(round(total_output_duration * source_fps)))
+    total_output_frames = max(1, sum(_per_cut_dur_frames))
+    total_output_duration = total_output_frames / float(source_fps)
 
     # Output clip ranges (start, end in output seconds) — used for SFX + b-roll + text overlay timing
     _clip_ranges = get_output_clip_ranges(render_cuts, effective_durations, transition_duration=None)
@@ -7826,7 +7480,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # Project Deepgram words onto output timeline (for captions + SFX + b-roll)
     _removed_word_indices = edit_plan.get("_removed_word_indices") or set()
     _projected_words = project_words_to_output(
-        transcript, render_cuts, effective_durations, speed_curve,
+        transcript, render_cuts, effective_durations,
         transition_duration=None, clip_time_maps=_clip_time_maps,
         removed_word_indices=_removed_word_indices, fps=source_fps,
     )
@@ -7834,34 +7488,27 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _pw_by_idx = {pw["_word_index"]: pw for pw in _projected_words if pw.get("_word_index") is not None}
 
     # ── 2. Build Remotion input JSON ────────────────────────────────────────
-    # Clips — one ClipSpec per sub-clip. Zoom events are ABSOLUTE-source-
-    # anchored: Gemini emits startMs / durationMs in absolute source-time
-    # milliseconds (verified empirically from production renders — Gemini
-    # consistently emits values like "13500ms" for an emphasis at source
-    # 12.32s, "24800ms" for emphasis at 24.155s, etc.). Each sub-clip
-    # projects events that overlap its source range into sub-clip-local
-    # OUTPUT frames using the sub-clip's avg_speed:
+    # Clips — one ClipSpec per cut (no sub-clip splitting). Zoom events are
+    # ABSOLUTE-source-anchored: Gemini emits startMs / durationMs in absolute
+    # source-time milliseconds (verified empirically from production renders).
+    # Each cut projects events that overlap its source range into cut-local
+    # OUTPUT frames using the cut's constant speed:
     #
-    #   subclip_local_output_ms = (event_abs_source_ms - subclip_source_start_ms) / pbr
+    #   clip_local_output_ms = (event_abs_source_ms - clip_source_start_ms) / pbr
     #
-    # AND we only attach zoomEffect to a sub-clip if at least one event's
-    # output range overlaps the sub-clip's output window. Sub-clips that
-    # share a parent with a zoomed sub-clip but don't actually contain the
-    # event window stay on the FFmpeg path — no wasteful Remotion routing.
-    # This was a bug in v65: the LetterboxPush emphasis attached to a
-    # parent clip, then propagated to all 12 sub-clips of that parent,
-    # forcing 12 Remotion renders for ZERO visible zoom output.
+    # AND we only attach zoomEffect to a cut if at least one event's output
+    # range overlaps the cut's output window. Cuts that don't actually
+    # contain the event window stay on the FFmpeg path — no wasteful
+    # Remotion routing.
     clips_out = []
-    prev_original_idx = None
     for i, (rc, tm, eff_dur) in enumerate(zip(render_cuts, _clip_time_maps, effective_durations)):
         _source_start_frames = int(round(float(rc["source_start"]) * source_fps))
         _pbr = float(tm.get("avg_speed") or 1.0)
-        _dur_frames = max(1, int(round(eff_dur * source_fps)))
+        _dur_frames = _per_cut_dur_frames[i]
         _orig_idx = rc.get("_original_idx")
         _clip_id_parts = [
             "hook" if rc.get("_is_hook") else "clip",
             str(_orig_idx if _orig_idx is not None else i),
-            f"s{i}",
         ]
         _clip_spec = {
             "id": "-".join(_clip_id_parts),
@@ -7871,8 +7518,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         }
         _zoom = rc.get("_zoom_effect") or rc.get("zoom_effect")
         if isinstance(_zoom, dict) and _zoom.get("type") in VALID_ZOOM_TYPES:
-            _subclip_source_start_ms = float(rc["source_start"]) * 1000.0
-            _subclip_output_ms = (_dur_frames / float(source_fps)) * 1000.0
+            _clip_source_start_ms = float(rc["source_start"]) * 1000.0
+            _clip_output_ms = (_dur_frames / float(source_fps)) * 1000.0
             _raw_events = _zoom.get("events") or []
             _overlapping_events = []
             for _ev in _raw_events:
@@ -7881,25 +7528,22 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 try:
                     _src_start_ms = float(_ev.get("startMs", 0))
                     _src_dur_ms = float(_ev.get("durationMs", 0))
-                    # Event timing in sub-clip-local OUTPUT ms.
-                    # Negative startMs means the event began before this
-                    # sub-clip — components handle negative correctly
-                    # (continuing animation across boundaries).
+                    # Event timing in clip-local OUTPUT ms. Negative startMs
+                    # means the event began before this clip — components
+                    # handle that correctly (continuing animation across
+                    # boundaries).
                     _new_start_ms = int(round(
-                        (_src_start_ms - _subclip_source_start_ms) / _pbr
+                        (_src_start_ms - _clip_source_start_ms) / _pbr
                     ))
                     _new_dur_ms = int(round(_src_dur_ms / _pbr))
                 except Exception:
                     continue
-                # Skip events that don't overlap this sub-clip's output
-                # window. This is what stops zoomEffect from propagating
-                # to every sub-clip of a parent and forcing wasteful
-                # Remotion renders.
+                # Skip events that don't overlap this clip's output window.
                 _ev_end_ms = _new_start_ms + _new_dur_ms
                 if _ev_end_ms <= 0:
-                    continue  # event already ended before sub-clip starts
-                if _new_start_ms >= _subclip_output_ms:
-                    continue  # event starts after sub-clip ends
+                    continue  # event already ended before clip starts
+                if _new_start_ms >= _clip_output_ms:
+                    continue  # event starts after clip ends
                 _overlapping_events.append({
                     **_ev,
                     "startMs": _new_start_ms,
@@ -7912,15 +7556,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                     **{k: v for k, v in _zoom.items() if k not in ("type", "events") and v is not None},
                 }
         clips_out.append(_clip_spec)
-        prev_original_idx = _orig_idx
 
-    # Transitions on ORIGINAL clip boundaries (not between sub-clips of same parent)
+    # Transitions live between cut[i] and cut[i+1] when the leading cut emits
+    # transition_out. One transition per cut boundary (cuts are atomic now —
+    # no more sub-clip skip-logic).
     transitions_out = []
     _T_trans = TRANSITION_DURATION
     _T_trans_frames = max(1, int(round(_T_trans * source_fps)))
     for i in range(len(render_cuts) - 1):
-        if render_cuts[i].get("_original_idx") == render_cuts[i + 1].get("_original_idx"):
-            continue
         _t_raw = str(render_cuts[i].get("transition_out") or "none")
         if _t_raw not in VALID_TRANSITION_TYPES:
             continue
@@ -7942,7 +7585,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             "clipBPlaybackRate": round(_clipB_pbr, 6),
             **_trans_extras,
         })
-        print(f"[transition] {_t_raw} after clip {i} (orig {render_cuts[i].get('_original_idx')}) — {_T_trans_frames}f", flush=True)
+        print(f"[transition] {_t_raw} after clip {i} — {_T_trans_frames}f", flush=True)
 
     # ── 3. SFX collection (projected onto output timeline) ──────────────────
     # Each SFX entry produces a ffmpeg input + filter that delays + scales it
@@ -7977,7 +7620,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         else:
             _source_t = float(_sfx.get("t") or 0.0)
             _projected_t = project_source_time_to_output(
-                _source_t, render_cuts, _clip_ranges, speed_curve,
+                _source_t, render_cuts, _clip_ranges,
                 clip_time_maps=_clip_time_maps,
             )
         if _projected_t is None:
@@ -8085,7 +7728,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _du = float(_ov["duration_seconds"])
         _source_start = float(_ov["_source_start"])
         _out_start = project_source_time_to_output(
-            _source_start, render_cuts, _clip_ranges, speed_curve,
+            _source_start, render_cuts, _clip_ranges,
             clip_time_maps=_clip_time_maps,
         )
         if _out_start is None:
@@ -8122,11 +7765,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     caption_position_segments_out = []
     for _cs in _cps_raw:
         _f_out = project_source_time_to_output(
-            float(_cs["from_seconds"]), render_cuts, _clip_ranges, speed_curve,
+            float(_cs["from_seconds"]), render_cuts, _clip_ranges,
             clip_time_maps=_clip_time_maps,
         )
         _t_out = project_source_time_to_output(
-            float(_cs["to_seconds"]), render_cuts, _clip_ranges, speed_curve,
+            float(_cs["to_seconds"]), render_cuts, _clip_ranges,
             clip_time_maps=_clip_time_maps,
         )
         if _f_out is None:
@@ -8157,11 +7800,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _sw_source = float(_mg["_source_start"])
         _ew_source = float(_mg["_source_end"])
         _out_start = project_source_time_to_output(
-            _sw_source, render_cuts, _clip_ranges, speed_curve,
+            _sw_source, render_cuts, _clip_ranges,
             clip_time_maps=_clip_time_maps,
         )
         _out_end = project_source_time_to_output(
-            _ew_source, render_cuts, _clip_ranges, speed_curve,
+            _ew_source, render_cuts, _clip_ranges,
             clip_time_maps=_clip_time_maps,
         )
         if _out_start is None or _out_end is None:
@@ -8202,7 +7845,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # merged into the Remotion input here.
     for em in edit_plan.get("_emphasis_moments", []):
         _em_t_out = project_source_time_to_output(
-            float(em["t"]), render_cuts, _clip_ranges, speed_curve,
+            float(em["t"]), render_cuts, _clip_ranges,
             clip_time_maps=_clip_time_maps,
         )
         if _em_t_out is None:
@@ -8214,9 +7857,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
         # Zoom is already attached to validated_cuts during the validation
         # phase (collision check at line ~4717), so it propagates to clips_out
-        # naturally via final_cuts → speed-curve sub-clips → render_cuts. No
-        # late attachment here — that pattern silently lost every emphasis
-        # zoom because clips_out was built before the mutation happened.
+        # naturally via final_cuts → render_cuts. No late attachment here —
+        # that pattern silently lost every emphasis zoom because clips_out
+        # was built before the mutation happened.
 
         # Motion graphic: append to motion_graphics_out, anchored at the moment.
         # Translate semantic anchor → MGAnchor just like the top-level loop.
@@ -8341,30 +7984,16 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         1 for em in (edit_plan.get("_emphasis_moments") or [])
         if em.get("zoom_effect")
     )
-    # The zoom_effect is intentionally propagated to every sub-clip of a
-    # parent for continuous animation across speed-curve splits (see
-    # comment ~line 7754). One emphasis fans out to N entries in
-    # clips_out where N = #sub-clips for that parent. Count UNIQUE
-    # parents with zoom (strip the "-s{i}" sub-clip suffix from the
-    # spec id, e.g. "clip-3-s17" -> "clip-3", "hook--1-s2" -> "hook--1").
-    # Hook clips ALSO inherit zoom from the narrative clip they overlap,
-    # so an emphasis that lands in a hook-overlapping narrative clip
-    # produces TWO unique parent keys (one for the hook, one for the
-    # narrative replay). Use `<` instead of `!=` so the check catches
-    # the drop bug (the original v62 issue: zoom silently lost) without
-    # firing on legitimate fan-out (hook replay + sub-clip propagation).
-    _zoom_parent_keys = set()
-    for _c in clips_out:
-        if not _c.get("zoomEffect"):
-            continue
-        _cid = str(_c.get("id", ""))
-        _parent_key = _cid.rsplit("-s", 1)[0] if "-s" in _cid else _cid
-        _zoom_parent_keys.add(_parent_key)
-    _actual_zoom_parents = len(_zoom_parent_keys)
-    if _actual_zoom_parents < _expected_zooms:
+    # One emphasis_moment with zoom_effect = one cut with zoomEffect. The
+    # only fan-out source is hook clips: an emphasis whose source range
+    # falls inside a hook duplicate produces zoomEffect on BOTH the hook
+    # cut and the narrative cut. So expected ≤ actual is the correct
+    # invariant — strictly less means we silently dropped a zoom.
+    _actual_zooms = sum(1 for _c in clips_out if _c.get("zoomEffect"))
+    if _actual_zooms < _expected_zooms:
         raise RuntimeError(
-            f"Pipeline integrity violation: only {_actual_zoom_parents} "
-            f"unique parent clip(s) carry a zoomEffect in clips_out but "
+            f"Pipeline integrity violation: only {_actual_zooms} "
+            f"clip(s) carry a zoomEffect in clips_out but "
             f"{_expected_zooms} validated emphasis_moment(s) had a "
             f"zoom_effect after collision check. At least one validated "
             f"zoom was dropped between validation and output spec."
@@ -8552,26 +8181,13 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         f"loudnorm=I=-14:TP=-1.5:LRA=11"
     )
 
-    # Speed-curved audio — numpy-resampled pitch-scaling, mirrors video's
-    # playbackRate on a per-sub-clip basis.
-    _speed_audio_future = None
-    _audio_pool = None
-    _has_speed_curve = (speed_curve and speed_curve != "none" and isinstance(speed_curve, list))
-    if _has_speed_curve:
-        _audio_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-        _subclip_bounds_src = sorted(set(
-            [round(float(rc["source_start"]), 3) for rc in render_cuts] +
-            [round(float(rc["source_end"]), 3) for rc in render_cuts]
-        ))
-        _aware_speed_curve = [
-            {"t": _t, "speed": get_speed_linear_interp(_t, speed_curve)}
-            for _t in _subclip_bounds_src
-        ]
-        _speed_audio_future = _audio_pool.submit(
-            build_speed_curved_audio, source_path, _presplit_cuts,
-            _aware_speed_curve, _presplit_effective_durations,
-            work_dir, sample_rate=sample_rate,
-        )
+    # Per-cut audio — numpy-resampled pitch-scaling, one segment per cut at
+    # that cut's constant speed (asetrate-equivalent: pitch tracks tempo).
+    _audio_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    _speed_audio_future = _audio_pool.submit(
+        build_per_cut_audio, source_path, render_cuts,
+        effective_durations, work_dir, sample_rate=sample_rate,
+    )
 
     # ── 10. Spawn Remotion renders in parallel (overlay chunks + micro) ────
     # The orchestrator (64 vCPU, 128 GB) runs N parallel Remotion overlay
@@ -8592,7 +8208,22 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # (<300 frames) where the per-process startup tax doesn't amortize.
     overlay_video_path = os.path.join(work_dir, "overlay.mov")
     micro_video_path = os.path.join(work_dir, "micro_segments.mp4")
-    _gl_mode = "vulkan" if _HAS_HWACCEL else "swiftshader"
+    # Pick the best Chromium rasterizer this container can actually drive:
+    #   - "vulkan"      : engages the NVIDIA H100 via libGLX_nvidia. Only works
+    #                     if startup confirmed _VULKAN_NVIDIA_OK (vulkaninfo saw
+    #                     an NVIDIA device).
+    #   - "swangle"     : Skia-backed software rasterizer. Sharper text +
+    #                     subpixel anti-aliasing than SwiftShader. Right
+    #                     fallback when Vulkan isn't real on this container.
+    #   - "swiftshader" : last-resort CPU rasterizer. Visibly fuzzier text,
+    #                     poor `color-mix()` and shadow rendering — what was
+    #                     producing the "captions render weird" look.
+    # NOTE: gating Vulkan on _HAS_HWACCEL was the bug — NVDEC availability
+    # says nothing about whether Chromium has an NVIDIA Vulkan ICD to load.
+    if _VULKAN_NVIDIA_OK:
+        _gl_mode = "vulkan"
+    else:
+        _gl_mode = "swangle"
 
     def _run_remotion(label, cmd):
         _t0 = time.time()
@@ -8704,27 +8335,13 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     ]
     micro_future = _render_pool.submit(_run_remotion, "micro", micro_cmd) if micro_cmd else None
 
-    # ── Audio pipeline (still running on a separate thread since line ~8211) —
+    # ── Audio pipeline (running on a separate thread) —
     # Collect its output now so the final-audio build can start while the
     # Remotion renders are still in flight.
-    if _speed_audio_future:
-        _speed_audio_path = _speed_audio_future.result(timeout=60)
-        if _audio_pool:
-            _audio_pool.shutdown(wait=False)
-        if not _speed_audio_path or not os.path.exists(_speed_audio_path):
-            raise RuntimeError(f"Speed-curved audio pipeline produced no output at {_speed_audio_path}")
-    else:
-        # No speed curve — extract plain source audio once.
-        _speed_audio_path = os.path.join(work_dir, "plain_audio.wav")
-        _plain = subprocess.run(
-            ["ffmpeg", "-y", "-v", "error",
-             "-i", source_path, "-vn",
-             "-acodec", "pcm_s16le", "-ar", str(sample_rate), "-ac", "1",
-             _speed_audio_path],
-            capture_output=True, text=True, timeout=60,
-        )
-        if _plain.returncode != 0:
-            raise RuntimeError(f"Plain audio extraction failed: {(_plain.stderr or '')[-500:]}")
+    _speed_audio_path = _speed_audio_future.result(timeout=60)
+    _audio_pool.shutdown(wait=False)
+    if not _speed_audio_path or not os.path.exists(_speed_audio_path):
+        raise RuntimeError(f"Per-cut audio pipeline produced no output at {_speed_audio_path}")
 
     # ── 11. Build final audio (SFX mix + ducking + EQ chain) → .m4a ─────────
     _audio_filter_parts = []
@@ -8946,18 +8563,32 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         if include_audio and c_audio_idx is not None:
             cmd += ["-map", f"{c_audio_idx}:a:0", "-c:a", "copy"]
         cmd += [
-            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
-            # Cap the bitrate. CRF-18 ultrafast on its own produced
-            # ~36 Mbps streams (200MB for ~44s of 1080x1920) — way
-            # above iPhone-camera (12-15 Mbps) and YouTube-1080p
-            # (5-8 Mbps) reference rates. AVPlayer can't sustain that
-            # download rate over typical wifi, manifesting as constant
-            # freezes mid-playback. -maxrate 8M -bufsize 16M caps the
-            # output at YouTube-1080p quality without a perceptual
-            # quality loss for typical iPhone-style content.
-            "-maxrate", "8M", "-bufsize", "16M",
-            # Constrained Baseline + Level 4.1 = max compatibility for
-            # iOS AVPlayer / web HLS without limiting quality.
+            # `veryfast` preset replaces `ultrafast`. ultrafast disables
+            # CABAC entropy coding, B-frames, deblocking filter, and
+            # advanced motion estimation — at a capped 8M bitrate that
+            # produces visible blocking, banding, and motion noise (the
+            # "static" + "10fps look" users were reporting). veryfast
+            # enables all of those at ~2-3× the encode time, which the
+            # H100 absorbs trivially since chunks run in parallel.
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+            # Force constant frame rate at the output stage. Filter
+            # graphs with speed-ramps produce non-uniform PTS — VFR
+            # output then makes AVPlayer's display loop look juddery
+            # on some devices. Targeting source_fps duplicates frames
+            # during slow-mo (fine) and the source is often 60fps so
+            # fast-mo segments don't lose detail.
+            "-fps_mode", "cfr", "-r", str(int(round(source_fps))),
+            # 14M / 28M cap for 1080p60. The previous 8M ceiling was below
+            # the floor for this resolution+framerate — VBV-clamped libx264
+            # could not hold detail through speed ramps, hard cuts, zoom
+            # regions, or B-roll overlays, producing the visible blocking +
+            # banding ("static") that users reported. 14M sits comfortably
+            # under iOS Level 4.1's 50M ceiling and is in line with TikTok's
+            # 1080p60 upload spec. CRF 18 is still the rate driver; the cap
+            # is just a safety lid.
+            "-maxrate", "14M", "-bufsize", "28M",
+            # High Profile + Level 4.1 = max compatibility for iOS
+            # AVPlayer / web HLS without limiting quality.
             "-profile:v", "high", "-level:v", "4.1",
             "-pix_fmt", "yuv420p",
             # Force dense keyframes on every chunk so concat -c copy joins
@@ -8991,11 +8622,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
         def _run_ffmpeg_chunk(label, cmd):
             _t0 = time.time()
-            # Composite chunks may include minterpolate on slow-mo sub-clips
-            # and on B-roll inputs (when broll fps < output fps). On a
-            # chunk with several slow-mo windows + 1-2 B-rolls, minterpolate
-            # cost can reach ~60-90s; 600s gives ample headroom while still
-            # failing loud on a stuck chunk.
+            # Composite chunks may include minterpolate on B-roll inputs
+            # when broll fps < output fps. With several B-rolls in a
+            # chunk, minterpolate cost can reach ~60-90s; 600s gives
+            # ample headroom while still failing loud on a stuck chunk.
             _r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
             _e = time.time() - _t0
             if _r.returncode != 0:
@@ -10115,15 +9745,24 @@ def handler(job):
                 future_gemini_proxy.result()
                 _proxy_path = os.path.join(work_dir, "gemini_proxy.mp4")
                 _proxy_exists = os.path.exists(_proxy_path)
+            # Sparse sampling target: ~1 detection per 3s of source — roughly
+            # one sample per cut at typical short-form pacing (~20 cuts per
+            # 60s video → 20 detections). The EMA smoothing in
+            # smooth_face_trajectory interpolates between samples and coasts
+            # through gaps, so coarse samples still produce a continuous
+            # trajectory. Trade-off accepted: fast head movement (~1s spans)
+            # will be missed and the source-reframe crop will be less
+            # precise on high-motion content.
             if _proxy_exists:
-                # Proxy is 10fps — every 7th frame ≈ 1.4fps detection (similar to every 20th @ 30fps)
+                # Proxy is 10fps — every 30 frames ≈ 1 detection per 3s.
                 dense = detect_face_positions_dense(
-                    os.path.join(work_dir, "gemini_proxy.mp4"), every_n_frames=7,
+                    os.path.join(work_dir, "gemini_proxy.mp4"), every_n_frames=30,
                     target_w=1080, target_h=1920,
                 )
             else:
-                # No proxy (render_only) or proxy missing — use raw source
-                dense = detect_face_positions_dense(_raw_source, every_n_frames=20)
+                # No proxy (render_only) or proxy missing — use raw source.
+                # Source is up to 60fps; every 180 frames ≈ 1 detection per 3s.
+                dense = detect_face_positions_dense(_raw_source, every_n_frames=180)
             if dense:
                 smoothed = smooth_face_trajectory(dense, total_duration=source_duration)
                 print(f"[dense-face] Smoothed trajectory: {len(smoothed)} keyframes", flush=True)
@@ -10309,7 +9948,6 @@ def handler(job):
         print(f"[pipeline] parallel_render complete in {render_elapsed:.1f}s", flush=True)
         _enc_label = "NVENC" if _HAS_NVENC else "libx264/ultrafast threads=auto"
         print(f"[render] Encoding: {_enc_label}", flush=True)
-        speed_curve = edit_plan.get("_parsed_speed_curve")
         # Validate render output — single ffprobe for file check + duration extraction
         if not os.path.exists(output_path) or os.path.getsize(output_path) < 100000:
             raise RuntimeError(f"Main render produced invalid output: {output_path}")
@@ -10348,7 +9986,7 @@ def handler(job):
         )
 
         cuts = edit_plan.get("_render_cuts") or edit_plan.get("cuts") or []
-        effective_durations = edit_plan.get("_render_effective_durations") or compute_effective_durations(cuts, speed_curve)
+        effective_durations = edit_plan.get("_render_effective_durations") or compute_effective_durations(cuts)
         final_dur = _rv
 
         # B-roll is now integrated into the first FFmpeg pass (no second encode needed)
@@ -10359,12 +9997,10 @@ def handler(job):
         thumbnail_source_ts = edit_plan.get("thumbnail_timestamp")
         if thumbnail_source_ts is None:
             thumbnail_source_ts = (source_duration / 3.0) if source_duration > 0 else 1.0
-        speed_curve = edit_plan.get("_parsed_speed_curve")
         cover_frame_ts = project_source_time_to_final_output(
             float(thumbnail_source_ts),
             cuts,
             effective_durations,
-            speed_curve,
             clip_time_maps=edit_plan.get("_render_clip_time_maps"),
         )
         if cover_frame_ts is None:
