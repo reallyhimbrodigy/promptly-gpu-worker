@@ -6583,7 +6583,7 @@ def get_pitch_preserving_speed_filter(speed: float) -> str:
     return get_atempo_filter(speed)
 
 
-def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample_rate=48000, trans_dur_after=None):
+def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample_rate=48000, trans_dur_after=None, per_cut_dur_frames=None, source_fps=60.0):
     """Build the per-cut audio track in one numpy pass.
 
     Source audio is extracted ONCE (one ffmpeg invocation) and held in
@@ -6593,18 +6593,29 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
     constant speed per cut, guaranteeing audio + video durations are
     sample-identical.
 
-    `trans_dur_after[i]` (when provided) is the seconds of silence to
-    append after cut i's audio, accounting for the transition segment
-    that follows cut i in the video timeline. Without this, audio is
-    shorter than video by sum(transition_durs) and `-shortest` mux
-    truncates the tail — leaving the audio drifting ahead of the video
-    by a growing amount as transitions accumulate.
+    SAMPLE-COUNT ALIGNMENT (sub-20ms drift target):
+      Audio sample count per cut is derived from the *exact* video frame
+      count (per_cut_dur_frames[i]) instead of the analytic eff_dur. This
+      keeps each cut's audio length within ±1 sample (~21 µs) of the
+      corresponding video segment — vs ±8 ms when each side rounds the
+      same eff_dur to a different grid.
+
+    TRANSITION CROSS-FADE (no silence target):
+      `trans_dur_after[i] > 0` indicates a transition follows cut i in
+      the video timeline. Instead of inserting silence (which sounded
+      broken — 0.4s of dead audio at every transition), we generate an
+      EQUAL-POWER CROSS-FADE between cut i's tail and cut (i+1)'s head:
+        cross[k] = A_tail[k]·cos(πk/2N) + B_head[k]·sin(πk/2N)
+      where N = trans_samples = round(trans_dur * sample_rate). This
+      keeps the audio flowing through the transition. The user hears
+      cut i's last words fading naturally into cut (i+1)'s first words
+      over the 0.4s transition window. A_tail and B_head are sourced
+      from the already-resampled cut audios — no double-extraction,
+      no source content past clip boundaries.
 
     Memory cost: one mono 16-bit PCM buffer at sample_rate covering the
     full source audio. At 48 kHz × 60 s × 2 bytes = 5.5 MB — negligible.
 
-    No boundary fades — sharp cuts. Speech rarely has a zero-crossing at
-    boundaries, but the trade-off is accepted: clean cuts beat masked ones.
     Returns the path to the concatenated WAV.
     """
     import numpy as np
@@ -6641,17 +6652,23 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
     except OSError:
         pass
 
-    # ── Per-cut numpy slice + resample ──────────────────────────────────
-    all_clips = []
+    # ── Per-cut numpy slice + resample (audio sample count locked to
+    #    video frame count for sample-accurate A/V alignment). ───────────
+    cut_audios: List[np.ndarray] = []
     for ci, cut in enumerate(cuts):
         src_start = float(cut["source_start"])
         src_end = float(cut["source_end"])
         src_dur = src_end - src_start
         eff_dur = effective_durations[ci]
         clip_speed = float(cut.get("speed") or 1.0)
-        n_out = max(1, round(eff_dur * sample_rate))
+        # Lock audio sample count to video frame count exactly.
+        if per_cut_dur_frames is not None and ci < len(per_cut_dur_frames):
+            n_out = max(1, int(round(per_cut_dur_frames[ci] * sample_rate / source_fps)))
+        else:
+            n_out = max(1, round(eff_dur * sample_rate))
 
         if src_dur < 0.001:
+            cut_audios.append(np.zeros(n_out, dtype=np.float32))
             continue
 
         # Slice the cut's range out of the in-memory source buffer.
@@ -6661,33 +6678,56 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
         n_src = len(samples)
 
         if n_src < 2:
-            all_clips.append(np.zeros(n_out, dtype=np.float32))
+            cut_audios.append(np.zeros(n_out, dtype=np.float32))
             continue
 
         # Constant-speed resample. At 1.0× we can truncate/pad without
         # interpolation; otherwise np.interp evenly spans the source.
         if abs(clip_speed - 1.0) < 0.001:
             if n_src >= n_out:
-                all_clips.append(samples[:n_out])
+                cut_audios.append(samples[:n_out].astype(np.float32))
             else:
                 padded = np.zeros(n_out, dtype=np.float32)
                 padded[:n_src] = samples
-                all_clips.append(padded)
+                cut_audios.append(padded)
         else:
             src_positions = np.linspace(0, n_src - 1, n_out)
-            all_clips.append(np.interp(src_positions, np.arange(n_src), samples))
+            cut_audios.append(np.interp(src_positions, np.arange(n_src), samples).astype(np.float32))
 
-        # If a transition follows this cut in the timeline, append silence
-        # of trans_dur seconds. This keeps audio length aligned with the
-        # video timeline (which has the transition as a separate concat
-        # segment). Without this, audio would be sum(trans_durs) shorter
-        # than video and `-shortest` mux would truncate or — worse —
-        # let audio drift ahead of video by trans_dur per transition.
+    # ── Assemble final stream with cross-faded transitions ──────────────
+    all_clips: List[np.ndarray] = []
+    _n_crossfades = 0
+    for ci, cut_audio in enumerate(cut_audios):
+        all_clips.append(cut_audio)
+        # Transition follows this cut?
+        _t_after = 0.0
         if trans_dur_after is not None and ci < len(trans_dur_after):
             _t_after = float(trans_dur_after[ci] or 0.0)
-            if _t_after > 0:
-                _silence_n = max(1, round(_t_after * sample_rate))
-                all_clips.append(np.zeros(_silence_n, dtype=np.float32))
+        if _t_after <= 0 or ci + 1 >= len(cut_audios):
+            continue
+        # Equal-power cross-fade of cut i's tail and cut (i+1)'s head.
+        n_trans = max(1, round(_t_after * sample_rate))
+        a_full = cut_audio
+        b_full = cut_audios[ci + 1]
+        # Take up to n_trans samples from A's tail and B's head; pad with
+        # zero on the side that's too short (tiny clips edge case only).
+        a_take = min(n_trans, len(a_full))
+        b_take = min(n_trans, len(b_full))
+        a_tail = np.zeros(n_trans, dtype=np.float32)
+        b_head = np.zeros(n_trans, dtype=np.float32)
+        if a_take > 0:
+            a_tail[-a_take:] = a_full[-a_take:]
+        if b_take > 0:
+            b_head[:b_take] = b_full[:b_take]
+        # Equal-power crossfade envelopes (cos²/sin² = 1, so combined
+        # power stays roughly constant across the transition — no
+        # perceived volume dip).
+        t = np.linspace(0, np.pi / 2, n_trans, dtype=np.float32)
+        fade_out = np.cos(t)
+        fade_in = np.sin(t)
+        cross = a_tail * fade_out + b_head * fade_in
+        all_clips.append(cross)
+        _n_crossfades += 1
 
     if not all_clips:
         with wave.open(output_wav, "wb") as wf:
@@ -6708,7 +6748,8 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
     _total_dur = len(full_audio) / sample_rate
     print(
         f"[audio] Built per-cut audio: {len(cuts)} cuts, "
-        f"{_total_dur:.2f}s, {len(full_audio)} samples (single-extract)",
+        f"{_n_crossfades} cross-fade(s), "
+        f"{_total_dur:.3f}s, {len(full_audio)} samples (single-extract)",
         flush=True,
     )
     return output_wav
@@ -8244,15 +8285,18 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     # Per-cut audio — numpy-resampled pitch-scaling, one segment per cut at
     # that cut's constant speed (asetrate-equivalent: pitch tracks tempo).
-    # `trans_dur_after` is forwarded so the audio inserts silence for each
-    # transition segment in the video timeline, keeping audio length
-    # aligned with video (which has transitions as separate concat
-    # segments adding to total duration).
+    # `trans_dur_after` triggers an equal-power cross-fade between cut i's
+    # tail and cut (i+1)'s head for each transition window, replacing
+    # silence with audibly-continuous audio. `per_cut_dur_frames` locks
+    # per-cut audio sample count to the exact video frame count for
+    # sample-accurate A/V alignment (sub-20ms drift target across the
+    # entire timeline).
     _audio_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     _speed_audio_future = _audio_pool.submit(
         build_per_cut_audio, source_path, render_cuts,
         effective_durations, work_dir,
         sample_rate=sample_rate, trans_dur_after=_trans_dur_after,
+        per_cut_dur_frames=_per_cut_dur_frames, source_fps=source_fps,
     )
 
     # ── 10. Spawn Remotion renders in parallel (overlay chunks + micro) ────
@@ -8790,6 +8834,41 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         f"composite={_mux_elapsed:.1f}s → {os.path.getsize(output_path)/1024/1024:.1f}MB",
         flush=True,
     )
+
+    # ── A/V sync verification — fail loud on drift > 20 ms ─────────────
+    # The pipeline is engineered for sample-accurate A/V alignment:
+    # video frame count and audio sample count both derive from the same
+    # per-cut effective durations, with transitions accounted for in
+    # both pipelines. After mux, the rendered file's video and audio
+    # stream durations should match within ~1 frame (16.7 ms at 60fps).
+    # Anything beyond 20 ms indicates a structural drift bug — log it
+    # loudly so it shows up in production logs immediately, not three
+    # bug reports later.
+    try:
+        _final_probe = _probe_full(output_path)
+        _final_streams = _final_probe.get("streams") or []
+        _final_v = next((s for s in _final_streams if s.get("codec_type") == "video"), {})
+        _final_a = next((s for s in _final_streams if s.get("codec_type") == "audio"), {})
+        _v_dur = float(_final_v.get("duration") or 0.0)
+        _a_dur = float(_final_a.get("duration") or 0.0)
+        _av_drift_ms = (_v_dur - _a_dur) * 1000.0
+        _expected_dur = total_output_frames / float(source_fps)
+        _v_drift_vs_expected_ms = (_v_dur - _expected_dur) * 1000.0
+        print(
+            f"[av-sync] video={_v_dur:.4f}s audio={_a_dur:.4f}s "
+            f"v−a={_av_drift_ms:+.2f}ms  v−expected={_v_drift_vs_expected_ms:+.2f}ms "
+            f"(expected={_expected_dur:.4f}s, target ≤±20ms)",
+            flush=True,
+        )
+        if abs(_av_drift_ms) > 20.0:
+            print(
+                f"[av-sync] WARNING: A/V drift {_av_drift_ms:+.2f}ms exceeds 20ms target. "
+                f"Audio and video stream durations don't match — investigate cuts, "
+                f"transitions, audio extraction, or composite filtergraph.",
+                flush=True,
+            )
+    except Exception as _av_e:
+        print(f"[av-sync] sync probe skipped: {_av_e}", flush=True)
 
     # Cleanup staged files in the bundle public root so it doesn't pile up.
     # work_dir itself is cleaned up by the caller (handler() in the finally
