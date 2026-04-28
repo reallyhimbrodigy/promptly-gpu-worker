@@ -205,7 +205,6 @@ export type TextOverlayVariant =
   | "torn_paper"
   | "sticky_note"
   | "quote_card"
-  | "lower_third"
   | "caption_match";
 
 interface TextOverlayBase {
@@ -230,14 +229,6 @@ export interface QuoteCardOverlay extends TextOverlayBase {
   attribution: string;
 }
 
-export interface LowerThirdOverlay extends TextOverlayBase {
-  variant: "lower_third";
-  name: string;
-  title: string;
-  accentColor?: string;
-  theme?: "dark" | "light";
-}
-
 export interface CaptionMatchOverlay extends TextOverlayBase {
   variant: "caption_match";
   text: string;
@@ -248,7 +239,6 @@ export type TextOverlaySpec =
   | TornPaperOverlay
   | StickyNoteOverlay
   | QuoteCardOverlay
-  | LowerThirdOverlay
   | CaptionMatchOverlay;
 
 // ── Top-level composition input ──────────────────────────────────────────────

@@ -1,10 +1,6 @@
 export { useMGPhase, resolveMGPosition } from "./shared";
 export type { MGTimingProps, MGPhaseState, MGPhase, MGPositionProps, MGAnchor } from "./shared";
 
-// LowerThird kept here ONLY for the `lower_third` text_overlay variant
-// to import; it is no longer a usable motion_graphic.
-export { LowerThird } from "./LowerThird";
-export type { LowerThirdProps } from "./LowerThird";
 export { AnnotationArrow } from "./AnnotationArrow";
 export type { AnnotationArrowProps } from "./AnnotationArrow";
 export { QuoteCard } from "./QuoteCard";

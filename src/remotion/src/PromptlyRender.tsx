@@ -41,10 +41,8 @@ import {
 } from "./zoom";
 
 // Motion graphics — 14 components total (10 standalone + 4 SpeechBubble variants).
-// LowerThird is imported here ONLY for the `lower_third` text_overlay variant
-// rendering below — it is no longer a usable motion_graphic type.
 import {
-  LowerThird, AnnotationArrow, QuoteCard, StatCard,
+  AnnotationArrow, QuoteCard, StatCard,
   Notification, ProgressBar, ChatThread,
   TornPaper, StickyNotes, Toggle, RecordingFrame,
   TweetBubble, InstagramComment, IMessageBubble, TikTokComment,
@@ -297,20 +295,6 @@ const TextOverlayRenderer: React.FC<{
           durationMs={Math.round((overlay.durationInFrames / fps) * 1000)}
           quote={overlay.quote}
           attribution={overlay.attribution}
-        />
-      </AbsoluteFill>
-    );
-  }
-  if (overlay.variant === "lower_third") {
-    return (
-      <AbsoluteFill style={{ pointerEvents: "none" }}>
-        <LowerThird
-          startMs={0}
-          durationMs={Math.round((overlay.durationInFrames / fps) * 1000)}
-          name={overlay.name}
-          title={overlay.title}
-          accentColor={overlay.accentColor}
-          theme={overlay.theme}
         />
       </AbsoluteFill>
     );

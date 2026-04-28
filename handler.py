@@ -85,7 +85,7 @@ _SEMANTIC_ANCHOR = Literal[
     "upper_third_safe", "center", "lower_third_safe", "left_safe", "right_safe",
 ]
 _TEXT_OVERLAY_VARIANTS = Literal[
-    "torn_paper", "sticky_note", "quote_card", "lower_third", "caption_match",
+    "torn_paper", "sticky_note", "quote_card", "caption_match",
 ]
 _SFX_SOUNDS = Literal[
     "boom", "hit", "drum_roll", "reverse", "ching", "ding", "click",
@@ -150,10 +150,6 @@ class _TextOverlay(BaseModel):
     notes: Optional[List[_TextOverlayNote]] = None
     quote: Optional[str] = None
     attribution: Optional[str] = None
-    name: Optional[str] = None
-    title: Optional[str] = None
-    accentColor: Optional[str] = None
-    theme: Optional[Literal["dark", "light"]] = None
     text: Optional[str] = None
     position: Optional[Literal["top", "center", "bottom"]] = None
 
@@ -2437,8 +2433,6 @@ SPEAKER POSITIONS (where each speaker sits in frame, by diarization + face detec
     - spk on `left`   → `right_safe` for overlays during their words
     - spk on `right`  → `left_safe` for overlays during their words
     - spk on `center` → `upper_third_safe` / `lower_third_safe`
-  For `lower_third` text overlays (speaker-attribution), emit ONE per distinct
-  speaker at their first on-camera appearance — the diarization IDs are stable.
   {_off_center_line}{_shot_scale_block}"""
 
     # SYSTEM INSTRUCTION — stable content. No per-video interpolation (vibe,
@@ -2482,11 +2476,10 @@ The pipeline enforces these rules with strict validators. Output that violates a
 3. EVERY TEXT OVERLAY HAS A VARIANT + ITS REQUIRED PROPS. The `variant` field chooses which visual treatment; each variant has a specific set of required props documented in the TEXT OVERLAYS section.
 4. CAPTIONS ARE WORD-ANCHORED. Emit `caption_position_changes` as an array of `{{word_index, position}}` events — each event says "at this kept word, captions move to this position." Python synthesizes the final segment list with exact word-start timestamps. No float boundaries to match, no duration arithmetic. If captions stay "bottom" the whole video, emit an empty array.
 5. Z-ORDER YIELDS TO MOTION GRAPHICS — AUTOMATIC. Python automatically forces caption_position_segments to "top" inside any bottom-anchored MG window after derivation, so you don't need to coordinate this. Emit caption_position_changes for creative reasons (e.g., a "center" beat for a Quintessence-style dramatic single word) and Python takes care of the MG-overlap geometry.
-6. ZONE DISCIPLINE FOR OVERLAYS. Overlays in DIFFERENT visual zones can freely share a time window (e.g., `torn_paper` at center + `lower_third` at the bottom is a standard pro layout). Overlays in the SAME zone at the SAME time are what collide — those are rejected. Per-variant canonical zones:
+6. ZONE DISCIPLINE FOR OVERLAYS. Overlays in DIFFERENT visual zones can freely share a time window. Overlays in the SAME zone at the SAME time are what collide — those are rejected. Per-variant canonical zones:
    - `torn_paper` → `center` (full-frame impact slam)
    - `sticky_note` → `upper_third_safe` (corner stickies)
    - `quote_card` → `center` (floating card)
-   - `lower_third` → `lower_third_safe` (bottom broadcast card)
    - `caption_match` → zone matches its `position` (top→`upper_third_safe`, center→`center`, bottom→`lower_third_safe`)
    A motion_graphic's zone is its explicit `anchor` field. Two items collide only when their zones AND time windows both overlap. High-intensity emphasis moments are spaced ≥2.5s apart regardless of zone.
 7. ONE ZOOM PER KEPT-SOURCE CLIP. At most one emphasis_moment carries a zoom_effect within any single kept-source clip (the source range between your removed-words boundaries). When you want multiple zoom beats close together, stack their events onto a single emphasis_moment's `zoom_effect.events` array.
@@ -2512,7 +2505,7 @@ The five absolute zones (per Rule #9). Pick based on what's already on screen an
 
   "upper_third_safe" — top band, above the speaker. Use for: title cards, hook text, stats appearing above the subject.
   "center"           — dead center. Use for: dramatic emphasis, full-screen moments, reveals.
-  "lower_third_safe" — lower-third band, just above the TikTok/IG UI rail. Use for: lower_third name/title cards, tweet bubbles that frame at the bottom.
+  "lower_third_safe" — lower-third band, just above the TikTok/IG UI rail. Use for: tweet bubbles that frame at the bottom, IMessageBubble at bottom.
   "left_safe"        — left edge, vertically centered. Use when the speaker is on the RIGHT half of the frame (put the overlay OPPOSITE the speaker).
   "right_safe"       — right edge, vertically centered. Use when the speaker is on the LEFT half of the frame.
 
@@ -2520,7 +2513,6 @@ DECISION — which anchor:
 - Speaker on camera-left → `right_safe` for overlays (see SPEAKER POSITIONS signal).
 - Speaker on camera-right → `left_safe` for overlays.
 - Speaker centered or off-camera → `upper_third_safe` / `lower_third_safe` / `center`.
-- lower_third text_overlay (speaker-attribution) → always `lower_third_safe`.
 - Notification stacks / top title cards → `upper_third_safe`.
 
 === CAPTIONS — WORD-BY-WORD RUNNING SUBTITLES ===
@@ -2590,11 +2582,32 @@ DECISION MATRIX — caption_style by content. Each row gives 4–5 valid choices
 
 DON'T REPEAT YOURSELF. Top short-form creators use a VARIETY of caption styles across their videos — never the same one every time. If the user's profile shows they recently used a particular style, deliberately choose a different option from the appropriate row this time. Different content deserves different visual identity.
 
-caption_keywords — REQUIRED. The words that should be visually highlighted in captions for engagement. Aim for 1 keyword per ~5–10 spoken words across the kept transcript — that's roughly **8–15 keywords for a 30s video, 15–30 for a 60s video, 25–50 for a 90s video**. NOT every word, but FREQUENT — every emphasis target, every punchline noun, every reaction word, every reveal, every emotional verb, every vivid adjective. Sparse keywords (only 2–6) leave the captions feeling flat. Lowercase, no punctuation.
+caption_keywords — REQUIRED. The words that get visually highlighted by the caption style. THIS IS THE VISUAL IDENTITY OF THE STYLE — keyword highlighting is what makes PaperII feel like PaperII, Cove feel like Cove, Lumen feel like Lumen. With 11 keywords on a 60-second video, the highlight color barely fires and the captions look flat and generic. With 30+ keywords, the style sings.
 
-Pick keywords from across the ENTIRE transcript — don't cluster them all in the first 10 seconds. Spread coverage so highlights appear throughout the video, including the back half (which retains less attention without visual interest).
+DENSITY TARGET: aim for ~1 keyword every 3–4 spoken words across the kept transcript. That's roughly:
+  • 30s video (≈75 kept words)  → 18–25 keywords
+  • 60s video (≈150 kept words) → 35–50 keywords
+  • 90s video (≈225 kept words) → 55–75 keywords
 
-When in doubt: include the word. Cost of missing a beat-landing word > cost of one extra highlight.
+Pick liberally. WHAT TO INCLUDE:
+  • every concrete noun that paints a picture (shaving, mirror, bedroom, secretary, voicemail)
+  • every emotional verb (told, kicked, electrocuted, crying, said, screamed)
+  • every vivid adjective (dark, dramatic, scared, exhausted, brutal)
+  • every punchline beat, reaction word, reveal moment
+  • every name, place, brand, or specific noun a viewer would search for
+  • numbers, ages, dates, prices ("six", "2023", "fifty bucks")
+  • any word a top creator would visually punctuate in a caption track
+
+WHAT TO SKIP:
+  • articles (a, the, an), prepositions (to, of, in, on, at), conjunctions (and, but, so)
+  • generic auxiliaries (is, was, were, had, would, could)
+  • pronouns unless they're the punchline ("HE didn't")
+
+Lowercase, no punctuation. Use the dictionary form ("crying" not "Crying,").
+
+Pick keywords from across the ENTIRE transcript. If the back half has fewer keywords than the front half, you've under-keyworded — every section of the video should feel equally punctuated.
+
+WHEN IN DOUBT: INCLUDE THE WORD. A keyword that doesn't fire visually is invisible; a missing keyword on a beat-landing word leaves the captions feeling flat. Sparse caption_keywords (under 1 per 10 words) is the most common failure mode — it makes every caption style look the same. Bias hard toward inclusion.
 
 caption_position_changes — REQUIRED ARRAY (can be empty). Position-change events, each at a specific kept word.
   Format: [{{"word_index": int, "position": "top" | "center" | "bottom"}}, ...]
@@ -2609,8 +2622,9 @@ caption_position_changes — REQUIRED ARRAY (can be empty). Position-change even
     - A motion_graphic occupies the bottom half across a window → emit a change to "top" at the MG's start_word_index, and another back to "bottom" at the word right after MG ends.
     - The speaker is looking down / mouth is in the lower third of the frame → change to "top" at the word where the downward look starts.
     - B-roll cutaway covers the bottom with busy imagery → change to "top" at the b-roll's start_word_index, back to "bottom" at its end_word_index + 1.
-    - Single-word dramatic moment (Quintessence-style) where caption needs center-stage → change to "center" at that word, back to "bottom" on the next word.
   Speaker changes alone don't require caption moves — face position does.
+
+  MINIMUM SUSTAINED DURATION — every position must hold for AT LEAST 1.5 SECONDS of OUTPUT time (≈4-6 spoken words at typical pacing). The renderer drops any segment shorter than that as flicker — the captions visibly snap up, then back down inside half a second, which reads as broken instead of intentional. Don't emit a change to "center" for a single word and another back to "bottom" on the very next word — that's a flicker and the renderer will collapse it back to "bottom" anyway. If you want a single dramatic word to stand out, use a Quintessence emphasis_moment or a torn_paper text_overlay, NOT a 1-word caption position flip.
 
 === TEXT OVERLAYS — BRIEF TITLE CARDS ===
 
@@ -2620,7 +2634,7 @@ text_overlays — REQUIRED ARRAY (can be empty).
 
 Each entry:
   {{
-    "variant": "torn_paper" | "sticky_note" | "quote_card" | "lower_third" | "caption_match",
+    "variant": "torn_paper" | "sticky_note" | "quote_card" | "caption_match",
     "start_word_index": int,       # Deepgram word whose START the overlay appears on. Schema-constrained to kept words.
     "duration_seconds": float,     # on-screen lifespan, 1.5 - 4.0s typical
     ...variant-specific REQUIRED props
@@ -2628,7 +2642,7 @@ Each entry:
 
 The overlay appears precisely when `start_word_index`'s word begins speaking (the pipeline projects the word's start time through the output cuts) and stays visible for `duration_seconds`. No free-form timestamp to get wrong.
 
-Each variant has a canonical visual zone. The pipeline allows overlays in DIFFERENT zones to coexist at the same time (e.g. a `torn_paper` slam at `center` while a `lower_third` card sits at `lower_third_safe` is a classic pro layout). Same-zone at same-time is rejected.
+Each variant has a canonical visual zone. The pipeline allows overlays in DIFFERENT zones to coexist at the same time. Same-zone at same-time is rejected.
 
 Variants, their canonical zones, and REQUIRED props:
 
@@ -2644,22 +2658,17 @@ Variants, their canonical zones, and REQUIRED props:
    REQUIRED: "quote" (str <=20 words), "attribution" (str)
    Use for: testimonials, pull-quotes, book references.
 
-4. "lower_third" — zone: `lower_third_safe`. Broadcast name + title card. Anchored at the lower third.
-   REQUIRED: "name" (str), "title" (str — role/location)
-   Use for: speaker attribution, podcast guests, location tags. EMIT ONE whenever a new speaker appears. Pairs naturally with a `torn_paper` at `center` — they share the same moment without collision.
-
-5. "caption_match" — zone: matches `position` prop (top→`upper_third_safe`, center→`center`, bottom→`lower_third_safe`). Renders in the same style as the main captions. Mono-brand aesthetic.
+4. "caption_match" — zone: matches `position` prop (top→`upper_third_safe`, center→`center`, bottom→`lower_third_safe`). Renders in the same style as the main captions. Mono-brand aesthetic.
    REQUIRED: "text" (str <=6 words), "position" ("top" | "center" | "bottom")
-   Use ONLY for Hormozi/hustle/mono-brand vibes where matching the caption IS the brand. Otherwise pick torn_paper / sticky_note / quote_card / lower_third.
+   Use ONLY for Hormozi/hustle/mono-brand vibes where matching the caption IS the brand. Otherwise pick torn_paper / sticky_note / quote_card.
 
 DECISION MATRIX — text overlay variant by content:
   POV, confession, narrative, story hook        → "torn_paper"
   educational, tip, how-to, tutorial            → "sticky_note"
-  interview guest intro, name + role            → "lower_third" (emit ONE per distinct speaker)
   testimonial, pull-quote, book/article quote   → "quote_card"
   motivational/hustle/Hormozi mono-brand        → "caption_match"
 
-0-2 overlays per video. More is noise (except lower_thirds for multi-speaker intros — one per speaker is fine).
+0-2 overlays per video. More is noise.
 
 === EMPHASIS MOMENTS — VISUAL HITS ===
 
@@ -3114,7 +3123,7 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
 
 Work through these checks against the plan you are about to emit. This is self-verification — do not externalize it in your output.
 
-1. Zone discipline for overlays. Two overlays (text_overlay or motion_graphic) whose time windows overlap must sit in DIFFERENT visual zones. Per-variant text_overlay zones: torn_paper→center, sticky_note→upper_third_safe, quote_card→center, lower_third→lower_third_safe, caption_match→matches its `position`. motion_graphic zone = its `anchor` field. Same-zone + same-time is rejected. High-intensity emphasis moments are ≥2.5s apart regardless of zone.
+1. Zone discipline for overlays. Two overlays (text_overlay or motion_graphic) whose time windows overlap must sit in DIFFERENT visual zones. Per-variant text_overlay zones: torn_paper→center, sticky_note→upper_third_safe, quote_card→center, caption_match→matches its `position`. motion_graphic zone = its `anchor` field. Same-zone + same-time is rejected. High-intensity emphasis moments are ≥2.5s apart regardless of zone.
 2. One zoom per kept-source clip. Within each contiguous source range between removed-word boundaries, at most one `emphasis_moments[i].zoom_effect` is non-null. Multiple beats close together stack their events onto a single emphasis_moment's `zoom_effect.events` array.
 3. Z-order — automatic. Python forces caption_position_segments to "top" inside bottom-anchored MG windows. You don't need to coordinate this; emit caption_position_changes for creative reasons only.
 4. MG anchors are absolute zones. Every `motion_graphics[i].anchor` and every `emphasis_moments[i].motion_graphic.anchor` is one of the 5 absolute zones (`upper_third_safe`, `center`, `lower_third_safe`, `left_safe`, `right_safe`).
@@ -3472,6 +3481,62 @@ Apply the READING TEST to every candidate cut: read the sentence aloud with and 
         "silence_range_cuts": silence_range_cuts,
         "tonal_register": tonal,
     }
+
+
+def _coalesce_caption_position_segments(segments, min_dur=1.5):
+    """Drop sub-min_dur caption position segments and merge same-position
+    neighbors. Gemini sometimes emits adjacent caption_position_changes that
+    produce a sub-second segment in the middle (e.g. center for one word,
+    then back to bottom). Visually that's a flash up and back — every
+    caption component fades each page in/out for ~150ms, so a 0.5s segment
+    with 1-2 caption pages reads as captions stacking, drifting, or
+    jumping position. Anything shorter than min_dur is absorbed into the
+    previous segment's position; if it's the FIRST segment, it inherits
+    the next segment's position. Then adjacent same-position segments
+    merge."""
+    if not segments or len(segments) < 2:
+        return segments
+    out: List[dict] = []
+    for seg in segments:
+        seg_dur = seg["to_seconds"] - seg["from_seconds"]
+        if seg_dur < min_dur and out:
+            # Absorb into previous segment.
+            print(
+                f"[caption-segments] dropped flicker {seg_dur:.2f}s "
+                f"@ {seg['from_seconds']:.2f}s ({seg['position']}) — "
+                f"absorbed into previous '{out[-1]['position']}'",
+                flush=True,
+            )
+            out[-1]["to_seconds"] = seg["to_seconds"]
+        elif seg_dur < min_dur and not out:
+            # First segment is short — keep it as a placeholder; the next
+            # iteration will overwrite its position.
+            out.append(dict(seg))
+        else:
+            if (
+                out
+                and (out[-1]["to_seconds"] - out[-1]["from_seconds"]) < min_dur
+            ):
+                # Previous (kept) was an opening flicker — overwrite its
+                # position with the current long segment's position.
+                print(
+                    f"[caption-segments] dropped opening flicker "
+                    f"({out[-1]['position']}) — replaced with "
+                    f"following '{seg['position']}'",
+                    flush=True,
+                )
+                out[-1]["position"] = seg["position"]
+                out[-1]["to_seconds"] = seg["to_seconds"]
+            else:
+                out.append(dict(seg))
+    # Merge adjacent same-position segments.
+    merged: List[dict] = []
+    for seg in out:
+        if merged and merged[-1]["position"] == seg["position"]:
+            merged[-1]["to_seconds"] = seg["to_seconds"]
+        else:
+            merged.append(seg)
+    return merged
 
 
 def generate_edit_gemini(
@@ -3876,6 +3941,7 @@ REMOVE_WORDS GUIDANCE:
             "to_seconds": round(float(duration), 3),
             "position": "bottom",
         }]
+    _segments = _coalesce_caption_position_segments(_segments)
     edit_plan["caption_position_segments"] = _segments
 
     # thumbnail_timestamp from thumbnail_word_index
@@ -4165,6 +4231,7 @@ REMOVE_WORDS GUIDANCE:
                         "to_seconds": round(float(video_duration), 3),
                         "position": "bottom",
                     }]
+                _resynth_segments = _coalesce_caption_position_segments(_resynth_segments)
                 edit_plan["caption_position_segments"] = _resynth_segments
                 print(
                     f"[generate-edit] Dropped {_dropped} caption_position_change(s) "
@@ -4416,7 +4483,7 @@ REMOVE_WORDS GUIDANCE:
         "upper_third_safe", "center", "lower_third_safe", "left_safe", "right_safe",
     }
     _valid_text_overlay_variants = {
-        "torn_paper", "sticky_note", "quote_card", "lower_third", "caption_match",
+        "torn_paper", "sticky_note", "quote_card", "caption_match",
     }
 
     # caption_style — must be exactly one of the 21 valid styles
@@ -4916,11 +4983,6 @@ REMOVE_WORDS GUIDANCE:
                 if not isinstance(_ov.get(_p), str) or not _ov[_p].strip():
                     raise ValueError(f"text_overlays[{_i}](quote_card) missing required prop {_p!r}")
                 _entry[_p] = _EMOJI_RE.sub("", str(_ov[_p])).strip()
-        elif _var == "lower_third":
-            for _p in ("name", "title"):
-                if not isinstance(_ov.get(_p), str) or not _ov[_p].strip():
-                    raise ValueError(f"text_overlays[{_i}](lower_third) missing required prop {_p!r}")
-                _entry[_p] = _EMOJI_RE.sub("", str(_ov[_p])).strip()
         elif _var == "caption_match":
             if not isinstance(_ov.get("text"), str) or not _ov["text"].strip():
                 raise ValueError(f"text_overlays[{_i}](caption_match) missing required prop 'text'")
@@ -4936,9 +4998,7 @@ REMOVE_WORDS GUIDANCE:
 
     # ── Zone-aware overlap validation ────────────────────────────────────────
     # Two overlays may share a time window IF they live in different visual
-    # zones. Only same-zone + overlapping-time is a real collision (torn_paper
-    # + lower_third at the same time is a valid professional layout: impact
-    # text in the center, speaker name card at the bottom).
+    # zones. Only same-zone + overlapping-time is a real collision.
     #
     # Per-variant canonical zone for text_overlays. Motion graphics carry
     # their zone explicitly via the `anchor` field. `caption_match` is
@@ -4947,7 +5007,6 @@ REMOVE_WORDS GUIDANCE:
         "torn_paper":    "center",
         "sticky_note":   "upper_third_safe",
         "quote_card":    "center",
-        "lower_third":   "lower_third_safe",
         # "caption_match" resolved below
     }
     _CAPTION_POS_TO_ZONE = {
@@ -5252,7 +5311,7 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None)
         "transitions, caption_style, caption_position_changes (list of {word_index, position}), "
         "caption_position_segments (DERIVED from caption_position_changes — do not edit directly), "
         "keywords, broll_clips, text_overlays (each has a variant "
-        "discriminator: torn_paper|sticky_note|quote_card|lower_third|caption_match), "
+        "discriminator: torn_paper|sticky_note|quote_card|caption_match), "
         "motion_graphics (with semantic anchor), emphasis_moments (each binds explicit "
         "zoom_effect / motion_graphic), sfx_placements, thumbnail_word_index "
         "(thumbnail_timestamp derived), per-clip `speed` (constant 0.7–1.4 per cut), outro. "
