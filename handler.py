@@ -6583,38 +6583,33 @@ def get_pitch_preserving_speed_filter(speed: float) -> str:
     return get_atempo_filter(speed)
 
 
-def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample_rate=48000, trans_dur_after=None, per_cut_dur_frames=None, source_fps=60.0):
-    """Build the per-cut audio track in one numpy pass.
+def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample_rate=48000, trans_dur_after=None, per_cut_render_dur_frames=None, source_fps=60.0, trim_head_dur=None, trim_tail_dur=None):
+    """Build the per-cut audio track in one numpy pass — pro NLE overlap model.
 
     Source audio is extracted ONCE (one ffmpeg invocation) and held in
-    memory; each cut's range is then numpy-sliced and resampled at its
-    constant `cut.speed` via np.interp — the asetrate-equivalent (pitch
-    tracks tempo). Both video setpts and this resampler use the SAME
-    constant speed per cut, guaranteeing audio + video durations are
-    sample-identical.
+    memory. Each cut's RENDER range (source[start + trim_head*speed,
+    end − trim_tail*speed]) is sliced and resampled at the cut's
+    constant speed. Each transition's audio is the cross-fade of the
+    HANDLE source ranges that were trimmed from clips A and B —
+    SAME source content the transition video is rendering, so audio
+    and video stay in lockstep, and no source content is heard twice.
 
-    SAMPLE-COUNT ALIGNMENT (sub-20ms drift target):
+    SAMPLE-LOCKED ALIGNMENT (sub-20ms drift target):
       Audio sample count per cut is derived from the *exact* video frame
-      count (per_cut_dur_frames[i]) instead of the analytic eff_dur. This
-      keeps each cut's audio length within ±1 sample (~21 µs) of the
-      corresponding video segment — vs ±8 ms when each side rounds the
-      same eff_dur to a different grid.
+      count (per_cut_render_dur_frames[i]) so audio and video lengths
+      match within ±1 sample (~21 µs) per cut.
 
-    TRANSITION CROSS-FADE (no silence target):
-      `trans_dur_after[i] > 0` indicates a transition follows cut i in
-      the video timeline. Instead of inserting silence (which sounded
-      broken — 0.4s of dead audio at every transition), we generate an
-      EQUAL-POWER CROSS-FADE between cut i's tail and cut (i+1)'s head:
-        cross[k] = A_tail[k]·cos(πk/2N) + B_head[k]·sin(πk/2N)
-      where N = trans_samples = round(trans_dur * sample_rate). This
-      keeps the audio flowing through the transition. The user hears
-      cut i's last words fading naturally into cut (i+1)'s first words
-      over the 0.4s transition window. A_tail and B_head are sourced
-      from the already-resampled cut audios — no double-extraction,
-      no source content past clip boundaries.
-
-    Memory cost: one mono 16-bit PCM buffer at sample_rate covering the
-    full source audio. At 48 kHz × 60 s × 2 bytes = 5.5 MB — negligible.
+    PRO NLE OVERLAP — NO PADDING:
+      Old model: clip A renders full eff_dur, transition adds trans_dur,
+      clip B renders full eff_dur. Audio had to pad with silence or
+      cross-fade buffer to match the longer video, AND clip A's tail
+      was shown twice (in clip A's render and again as part of the
+      transition). The "fix" was a buffer.
+      New model: clip A renders for (eff_dur_A − trim_tail_A), clip B
+      renders for (eff_dur_B − trim_head_B), transition fills the
+      trans_dur gap using the trimmed-off handles from A and B. Audio
+      and video durations match by construction. Each piece of source
+      content shown ONCE.
 
     Returns the path to the concatenated WAV.
     """
@@ -6624,8 +6619,6 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
     output_wav = os.path.join(work_dir, "per_cut_audio.wav")
 
     # ── Single source extraction ────────────────────────────────────────
-    # Decode the entire source audio once at our target rate + mono.
-    # Any per-cut slicing happens in numpy from this buffer.
     full_src_wav = os.path.join(work_dir, "source_audio_full.wav")
     _ext = subprocess.run(
         ["ffmpeg", "-y", "-v", "error",
@@ -6652,80 +6645,80 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
     except OSError:
         pass
 
-    # ── Per-cut numpy slice + resample (audio sample count locked to
-    #    video frame count for sample-accurate A/V alignment). ───────────
+    # Helper: extract source[s_sec, e_sec] then resample to n_out samples.
+    def _resample_range(s_sec: float, e_sec: float, n_out: int) -> np.ndarray:
+        if n_out <= 0:
+            return np.zeros(0, dtype=np.float32)
+        s_idx = max(0, int(round(s_sec * sample_rate)))
+        e_idx = min(src_total, int(round(e_sec * sample_rate)))
+        if e_idx <= s_idx + 1:
+            return np.zeros(n_out, dtype=np.float32)
+        slc = src_samples[s_idx:e_idx]
+        if len(slc) == n_out:
+            return slc.astype(np.float32)
+        pos = np.linspace(0, len(slc) - 1, n_out)
+        return np.interp(pos, np.arange(len(slc)), slc).astype(np.float32)
+
+    # ── Per-cut audio — render-only range, sample-locked to video frames ─
     cut_audios: List[np.ndarray] = []
     for ci, cut in enumerate(cuts):
         src_start = float(cut["source_start"])
         src_end = float(cut["source_end"])
-        src_dur = src_end - src_start
-        eff_dur = effective_durations[ci]
         clip_speed = float(cut.get("speed") or 1.0)
-        # Lock audio sample count to video frame count exactly.
-        if per_cut_dur_frames is not None and ci < len(per_cut_dur_frames):
-            n_out = max(1, int(round(per_cut_dur_frames[ci] * sample_rate / source_fps)))
+        trim_h = float(trim_head_dur[ci]) if trim_head_dur is not None and ci < len(trim_head_dur) else 0.0
+        trim_t = float(trim_tail_dur[ci]) if trim_tail_dur is not None and ci < len(trim_tail_dur) else 0.0
+        # Render source range = [src_start + trim_h*speed, src_end − trim_t*speed]
+        render_src_start = src_start + trim_h * clip_speed
+        render_src_end = src_end - trim_t * clip_speed
+        if render_src_end - render_src_start < 0.001:
+            cut_audios.append(np.zeros(1, dtype=np.float32))
+            continue
+        # Lock audio sample count to video frame count when provided.
+        if per_cut_render_dur_frames is not None and ci < len(per_cut_render_dur_frames):
+            n_out = max(1, int(round(per_cut_render_dur_frames[ci] * sample_rate / source_fps)))
         else:
-            n_out = max(1, round(eff_dur * sample_rate))
-
-        if src_dur < 0.001:
-            cut_audios.append(np.zeros(n_out, dtype=np.float32))
-            continue
-
-        # Slice the cut's range out of the in-memory source buffer.
-        s_start = max(0, int(round(src_start * sample_rate)))
-        s_end = min(src_total, int(round(src_end * sample_rate)))
-        samples = src_samples[s_start:s_end]
-        n_src = len(samples)
-
-        if n_src < 2:
-            cut_audios.append(np.zeros(n_out, dtype=np.float32))
-            continue
-
-        # Constant-speed resample. At 1.0× we can truncate/pad without
-        # interpolation; otherwise np.interp evenly spans the source.
+            n_out = max(1, int(round((effective_durations[ci] - trim_h - trim_t) * sample_rate)))
         if abs(clip_speed - 1.0) < 0.001:
-            if n_src >= n_out:
-                cut_audios.append(samples[:n_out].astype(np.float32))
+            # 1.0× — direct slice (truncate/pad to exact n_out).
+            s_idx = max(0, int(round(render_src_start * sample_rate)))
+            e_idx = min(src_total, s_idx + n_out)
+            slc = src_samples[s_idx:e_idx]
+            if len(slc) >= n_out:
+                cut_audios.append(slc[:n_out].astype(np.float32))
             else:
                 padded = np.zeros(n_out, dtype=np.float32)
-                padded[:n_src] = samples
+                padded[:len(slc)] = slc
                 cut_audios.append(padded)
         else:
-            src_positions = np.linspace(0, n_src - 1, n_out)
-            cut_audios.append(np.interp(src_positions, np.arange(n_src), samples).astype(np.float32))
+            cut_audios.append(_resample_range(render_src_start, render_src_end, n_out))
 
-    # ── Assemble final stream with cross-faded transitions ──────────────
+    # ── Transition audio — equal-power cross-fade of the handle ranges ──
+    # For each transition, the trimmed-off source content from clip A's
+    # tail and clip B's head IS the audio for the transition. No
+    # duplication: that source content is NOT played anywhere else.
     all_clips: List[np.ndarray] = []
     _n_crossfades = 0
     for ci, cut_audio in enumerate(cut_audios):
         all_clips.append(cut_audio)
-        # Transition follows this cut?
         _t_after = 0.0
         if trans_dur_after is not None and ci < len(trans_dur_after):
             _t_after = float(trans_dur_after[ci] or 0.0)
-        if _t_after <= 0 or ci + 1 >= len(cut_audios):
+        if _t_after <= 0 or ci + 1 >= len(cuts):
             continue
-        # Equal-power cross-fade of cut i's tail and cut (i+1)'s head.
-        n_trans = max(1, round(_t_after * sample_rate))
-        a_full = cut_audio
-        b_full = cut_audios[ci + 1]
-        # Take up to n_trans samples from A's tail and B's head; pad with
-        # zero on the side that's too short (tiny clips edge case only).
-        a_take = min(n_trans, len(a_full))
-        b_take = min(n_trans, len(b_full))
-        a_tail = np.zeros(n_trans, dtype=np.float32)
-        b_head = np.zeros(n_trans, dtype=np.float32)
-        if a_take > 0:
-            a_tail[-a_take:] = a_full[-a_take:]
-        if b_take > 0:
-            b_head[:b_take] = b_full[:b_take]
-        # Equal-power crossfade envelopes (cos²/sin² = 1, so combined
-        # power stays roughly constant across the transition — no
-        # perceived volume dip).
+        cut_a = cuts[ci]
+        cut_b = cuts[ci + 1]
+        speed_a = float(cut_a.get("speed") or 1.0)
+        speed_b = float(cut_b.get("speed") or 1.0)
+        n_trans = max(1, int(round(_t_after * sample_rate)))
+        # A's tail HANDLE: source[c_a_end − t_after*speed_a, c_a_end] resampled to n_trans
+        c_a_end = float(cut_a["source_end"])
+        a_handle = _resample_range(c_a_end - _t_after * speed_a, c_a_end, n_trans)
+        # B's head HANDLE: source[c_b_start, c_b_start + t_after*speed_b] resampled to n_trans
+        c_b_start = float(cut_b["source_start"])
+        b_handle = _resample_range(c_b_start, c_b_start + _t_after * speed_b, n_trans)
+        # Equal-power cross-fade (cos²/sin² = 1 → constant perceived loudness).
         t = np.linspace(0, np.pi / 2, n_trans, dtype=np.float32)
-        fade_out = np.cos(t)
-        fade_in = np.sin(t)
-        cross = a_tail * fade_out + b_head * fade_in
+        cross = a_handle * np.cos(t) + b_handle * np.sin(t)
         all_clips.append(cross)
         _n_crossfades += 1
 
@@ -6813,43 +6806,45 @@ def project_words_to_output(transcript, cuts, effective_durations, transition_du
                 "_word_index": word_idx,
             })
         dur = effective_durations[i] if i < len(effective_durations) else (c_end - c_start)
-        # Raw float accumulation. Frame-snapping was removed because it
-        # accumulated ~200ms drift over 80+ segments. The transition
-        # extension after this clip is added so word output positions
-        # match the actual rendered timeline (which has transition
-        # segments concatenated between clips).
+        # Pro NLE overlap model: cursor advances by full eff_dur, then
+        # SUBTRACT trans_dur_after (the transition overlaps with this
+        # cut's tail and the next cut's head). Without subtracting,
+        # caption/SFX positions land trans_dur per transition LATER
+        # than the actual rendered timeline.
         output_cursor += dur
         if trans_dur_after is not None and i < len(trans_dur_after):
-            output_cursor += float(trans_dur_after[i] or 0.0)
+            output_cursor -= float(trans_dur_after[i] or 0.0)
 
     projected = [w for w in projected if w["end"] > w["start"]]
     return projected
 
 def get_output_clip_ranges(cuts, effective_durations, transition_duration=None, trans_dur_after=None):
     """
-    Return list of {"start": float, "end": float} for each clip's position
-    in the output timeline.
+    Return list of {"start": float, "end": float} for each clip's FULL
+    output window (covering the cut's entire source range from c_start to
+    c_end), used by all source-time → output-time projections (captions,
+    SFX, B-roll, MGs).
 
-    The actual ffmpeg pipeline (build_final_filtergraph in ffmpeg_base.py)
-    concatenates segments AS:
-        clip_0 [+ trans_0] + clip_1 [+ trans_1] + ... + clip_{N-1}
-    where trans_i is a SEPARATE timeline segment of `transition_duration`
-    seconds when cut[i].transition_out is a real transition. Transitions
-    therefore EXTEND the timeline; they do not overlap with adjacent clips.
+    Pro NLE OVERLAP MODEL:
+      Adjacent clips overlap by `trans_dur` seconds when there's a
+      transition between them. Clip A's tail (last trans_dur of output)
+      and Clip B's head (first trans_dur of output) occupy the SAME
+      output time range — that's the transition window. Total timeline
+      shortens by trans_dur per transition, not extends by it.
+
+      Cursor advance per cut = eff_dur − trans_dur_after (the trans_dur
+      is "absorbed" by the next cut's overlap with this cut's tail).
 
     Args:
       cuts: list of cut dicts with source_start/source_end/transition_out.
-      effective_durations: per-cut output duration in seconds (clip-only).
-      transition_duration: kept for API compatibility (not used here — the
-        per-cut extension is passed via trans_dur_after instead).
-      trans_dur_after: optional list of seconds to advance the cursor AFTER
-        cut i's clip duration, representing the transition that follows cut
-        i in the timeline. Pass [t_0, t_1, ..., t_{N-1}] where t_i = 0 if
-        cut i has no transition_out, else transition_duration. The last
-        cut's value is always 0 (no transition after the last cut).
-        When None, defaults to all-zero (back-compat: no transition gaps).
+      effective_durations: per-cut output duration in seconds (full eff_dur,
+        covering source_start..source_end at the cut's speed).
+      transition_duration: kept for API compatibility (unused here).
+      trans_dur_after: optional list. trans_dur_after[i] = transition
+        duration in seconds between cut i and cut i+1 (0 if no transition).
+        When None, defaults to all-zero (no transitions).
     """
-    _ = transition_duration  # API compat — actual extensions come from trans_dur_after
+    _ = transition_duration  # API compat
     ranges = []
     cursor = 0.0
     for i, cut in enumerate(cuts):
@@ -6857,9 +6852,12 @@ def get_output_clip_ranges(cuts, effective_durations, transition_duration=None, 
         start = cursor
         end   = cursor + dur
         ranges.append({"start": start, "end": end})
-        cursor = end
+        # Advance cursor by full eff_dur, then SUBTRACT trans_dur_after
+        # (transitions OVERLAP — the next cut starts trans_dur seconds
+        # before this cut's full window ends).
+        cursor += dur
         if trans_dur_after is not None and i < len(trans_dur_after):
-            cursor += float(trans_dur_after[i] or 0.0)
+            cursor -= float(trans_dur_after[i] or 0.0)
     return ranges
 
 
@@ -7528,9 +7526,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # No sub-clip splitting, no speed-curve interpolation. Each cut has a
     # single constant speed; its time map is trivial (source_dur / speed).
     # Audio uses the same map. There is exactly one render segment per cut.
+    # Render frame counts (after handle trim for transitions) are computed
+    # below in the overlap-model block.
     _clip_time_maps = []
     effective_durations = []
-    _per_cut_dur_frames: List[int] = []
     for _rc in render_cuts:
         _tm = build_clip_time_map(
             float(_rc["source_start"]),
@@ -7540,43 +7539,115 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         )
         _clip_time_maps.append(_tm)
         effective_durations.append(_tm["effective_duration"])
-        _per_cut_dur_frames.append(max(1, int(round(_tm["effective_duration"] * source_fps))))
 
     edit_plan["_render_cuts"] = render_cuts
     edit_plan["_render_effective_durations"] = effective_durations
     edit_plan["_render_clip_time_maps"] = _clip_time_maps
 
-    # ── Per-cut transition extension (timeline alignment) ───────────────────
-    # The FFmpeg composite renders the timeline as
-    #     clip_0 [+ trans_0] + clip_1 [+ trans_1] + ... + clip_{N-1}
-    # where trans_i exists when cut[i].transition_out is a real transition
-    # AND i < N-1 (no transition after the last clip). Each trans_i is its
-    # own concatenated segment of TRANSITION_DURATION seconds. So the true
-    # output timeline length is
-    #     sum(clip_eff_dur_i) + sum(trans_dur_i)
-    # not just sum(clip_eff_dur_i). Audio MUST pad with silence at each
-    # transition window or it falls behind by trans_dur per transition.
-    # All output-position projections (clip_ranges, project_words_to_output,
-    # SFX/B-roll/MG output positions) take this same array so they land on
-    # the actually-rendered frames.
+    # ── Pro-NLE overlap model for transitions ───────────────────────────────
+    # Professional editors (Premiere, Resolve, Final Cut, CapCut) handle
+    # transitions as OVERLAPS: clips A and B overlap by trans_dur on the
+    # timeline, and the transition decides what's visible during the
+    # overlap region. Total timeline = sum(eff_dur) − sum(trans_dur) per
+    # pair — NOT sum(eff_dur) + sum(trans_dur). Each piece of source
+    # content is shown EXACTLY ONCE (no duplication of clip A's tail or
+    # clip B's head, which the previous concat-with-padding model produced).
+    #
+    # Implementation: for each cut, compute trim_head_dur (output seconds
+    # consumed by the incoming transition) and trim_tail_dur (output
+    # seconds consumed by the outgoing transition). The cut's RENDER
+    # duration is `eff_dur − trim_head − trim_tail`; its render source
+    # range is `[c_start + trim_head*speed, c_end − trim_tail*speed]`.
+    # The "handles" — `[c_start, c_start + trim_head*speed]` and
+    # `[c_end − trim_tail*speed, c_end]` — are reserved for the
+    # adjacent transitions (which already pull from those exact ranges
+    # via clipAStartFromFrames / clipBStartFromFrames).
+    #
+    # If a cut is too short to accommodate its transition handles
+    # (eff_dur < trim_head + trim_tail + min_render), drop the
+    # outgoing transition (preferred: affects only this pair) or the
+    # incoming transition. This matches NLE behavior — "insufficient
+    # handles" produces a warning, not a render failure.
     _T_trans = TRANSITION_DURATION
     _T_trans_frames = max(1, int(round(_T_trans * source_fps)))
+    _MIN_RENDER_DUR = 0.05  # min seconds a clip must render after handles
+
+    def _has_real_transition(_rc):
+        return str(_rc.get("transition_out") or "none") in VALID_TRANSITION_TYPES
+
+    _trim_head_dur = [0.0] * len(render_cuts)
+    _trim_tail_dur = [0.0] * len(render_cuts)
+    for _i in range(len(render_cuts)):
+        _has_in = _i > 0 and _has_real_transition(render_cuts[_i - 1])
+        _has_out = _i < len(render_cuts) - 1 and _has_real_transition(render_cuts[_i])
+        _trim_head_dur[_i] = _T_trans if _has_in else 0.0
+        _trim_tail_dur[_i] = _T_trans if _has_out else 0.0
+
+    # Drop transitions on clips that can't afford the handles. Iterate
+    # left-to-right; if a cut's render dur would go below _MIN_RENDER_DUR,
+    # drop its outgoing transition first (cascades cleanly), then incoming.
+    _dropped = 0
+    for _i in range(len(render_cuts)):
+        _eff = effective_durations[_i]
+        while _eff - _trim_head_dur[_i] - _trim_tail_dur[_i] < _MIN_RENDER_DUR:
+            if _trim_tail_dur[_i] > 0 and _i < len(render_cuts) - 1:
+                print(
+                    f"[transitions] Cut {_i} eff_dur={_eff:.3f}s lacks handles; "
+                    f"dropping outgoing {render_cuts[_i].get('transition_out')!r}.",
+                    flush=True,
+                )
+                render_cuts[_i]["transition_out"] = "none"
+                _trim_tail_dur[_i] = 0.0
+                _trim_head_dur[_i + 1] = 0.0
+                _dropped += 1
+            elif _trim_head_dur[_i] > 0 and _i > 0:
+                print(
+                    f"[transitions] Cut {_i} eff_dur={_eff:.3f}s lacks handles; "
+                    f"dropping incoming "
+                    f"{render_cuts[_i - 1].get('transition_out')!r}.",
+                    flush=True,
+                )
+                render_cuts[_i - 1]["transition_out"] = "none"
+                _trim_tail_dur[_i - 1] = 0.0
+                _trim_head_dur[_i] = 0.0
+                _dropped += 1
+            else:
+                break  # nothing left to drop; clip is just short
+    if _dropped > 0:
+        print(f"[transitions] Dropped {_dropped} transition(s) for insufficient handles.", flush=True)
+
+    # Final transition durations after drops (used by audio + projection)
     _trans_dur_after = []
     _trans_frames_after = 0
     for _i, _rc in enumerate(render_cuts):
-        _t_raw = str(_rc.get("transition_out") or "none")
-        if _t_raw in VALID_TRANSITION_TYPES and _i < len(render_cuts) - 1:
+        _has_out = _i < len(render_cuts) - 1 and _has_real_transition(_rc)
+        if _has_out:
             _trans_dur_after.append(_T_trans)
             _trans_frames_after += _T_trans_frames
         else:
             _trans_dur_after.append(0.0)
 
+    # Per-cut RENDER frame count (after handle trim).
+    _per_cut_render_dur_frames: List[int] = []
+    for _i in range(len(render_cuts)):
+        _render_dur = effective_durations[_i] - _trim_head_dur[_i] - _trim_tail_dur[_i]
+        _per_cut_render_dur_frames.append(max(1, int(round(_render_dur * source_fps))))
+
+    # Total output = sum(render frames) + sum(trans frames)
     n = len(render_cuts)
-    total_output_frames = max(1, sum(_per_cut_dur_frames) + _trans_frames_after)
+    total_output_frames = max(1, sum(_per_cut_render_dur_frames) + _trans_frames_after)
     total_output_duration = total_output_frames / float(source_fps)
 
-    # Output clip ranges (start, end in output seconds) — used for SFX + b-roll + text overlay timing
-    _clip_ranges = get_output_clip_ranges(render_cuts, effective_durations, transition_duration=None, trans_dur_after=_trans_dur_after)
+    # Output clip ranges — each cut's full output window (eff_dur span,
+    # including handle portions consumed by adjacent transitions). Cursor
+    # advances by (eff_dur − trans_dur_after) per cut: the transition
+    # OVERLAPS with this cut's tail and the next cut's head, so we
+    # SUBTRACT trans_dur instead of adding. This is the pro NLE model.
+    _clip_ranges = get_output_clip_ranges(
+        render_cuts, effective_durations,
+        transition_duration=None,
+        trans_dur_after=_trans_dur_after,
+    )
 
     # Project Deepgram words onto output timeline (for captions + SFX + b-roll)
     _removed_word_indices = edit_plan.get("_removed_word_indices") or set()
@@ -7604,9 +7675,17 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # Remotion routing.
     clips_out = []
     for i, (rc, tm, eff_dur) in enumerate(zip(render_cuts, _clip_time_maps, effective_durations)):
-        _source_start_frames = int(round(float(rc["source_start"]) * source_fps))
         _pbr = float(tm.get("avg_speed") or 1.0)
-        _dur_frames = _per_cut_dur_frames[i]
+        _trim_h = _trim_head_dur[i]
+        _trim_t = _trim_tail_dur[i]
+        # The clip's RENDER source range is shifted forward by trim_head*speed
+        # (handles for the incoming transition) and shortened by trim_tail*speed
+        # (handles for the outgoing transition). Clip A's tail handle and
+        # clip B's head handle are reserved for the adjacent transitions —
+        # rendered there, not here, eliminating duplication.
+        _source_start_seconds = float(rc["source_start"]) + _trim_h * _pbr
+        _source_start_frames = int(round(_source_start_seconds * source_fps))
+        _dur_frames = _per_cut_render_dur_frames[i]
         _orig_idx = rc.get("_original_idx")
         _clip_id_parts = [
             "hook" if rc.get("_is_hook") else "clip",
@@ -7620,8 +7699,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         }
         _zoom = rc.get("_zoom_effect") or rc.get("zoom_effect")
         if isinstance(_zoom, dict) and _zoom.get("type") in VALID_ZOOM_TYPES:
-            _clip_source_start_ms = float(rc["source_start"]) * 1000.0
-            _clip_output_ms = (_dur_frames / float(source_fps)) * 1000.0
+            # Zoom events project against the clip's RENDER window, not its
+            # full source window. Events whose source time falls inside the
+            # trim_head or trim_tail handle ranges belong to the adjacent
+            # transition (which is a separate Remotion render), not this clip.
+            _clip_render_source_start_ms = _source_start_seconds * 1000.0
+            _clip_render_output_ms = (_dur_frames / float(source_fps)) * 1000.0
             _raw_events = _zoom.get("events") or []
             _overlapping_events = []
             for _ev in _raw_events:
@@ -7630,22 +7713,17 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 try:
                     _src_start_ms = float(_ev.get("startMs", 0))
                     _src_dur_ms = float(_ev.get("durationMs", 0))
-                    # Event timing in clip-local OUTPUT ms. Negative startMs
-                    # means the event began before this clip — components
-                    # handle that correctly (continuing animation across
-                    # boundaries).
                     _new_start_ms = int(round(
-                        (_src_start_ms - _clip_source_start_ms) / _pbr
+                        (_src_start_ms - _clip_render_source_start_ms) / _pbr
                     ))
                     _new_dur_ms = int(round(_src_dur_ms / _pbr))
                 except Exception:
                     continue
-                # Skip events that don't overlap this clip's output window.
                 _ev_end_ms = _new_start_ms + _new_dur_ms
                 if _ev_end_ms <= 0:
-                    continue  # event already ended before clip starts
-                if _new_start_ms >= _clip_output_ms:
-                    continue  # event starts after clip ends
+                    continue
+                if _new_start_ms >= _clip_render_output_ms:
+                    continue
                 _overlapping_events.append({
                     **_ev,
                     "startMs": _new_start_ms,
@@ -8283,20 +8361,19 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         f"loudnorm=I=-14:TP=-1.5:LRA=11"
     )
 
-    # Per-cut audio — numpy-resampled pitch-scaling, one segment per cut at
-    # that cut's constant speed (asetrate-equivalent: pitch tracks tempo).
-    # `trans_dur_after` triggers an equal-power cross-fade between cut i's
-    # tail and cut (i+1)'s head for each transition window, replacing
-    # silence with audibly-continuous audio. `per_cut_dur_frames` locks
-    # per-cut audio sample count to the exact video frame count for
-    # sample-accurate A/V alignment (sub-20ms drift target across the
-    # entire timeline).
+    # Per-cut audio — pro NLE overlap model. Each cut's audio uses its
+    # RENDER range (source[start + trim_head*speed, end − trim_tail*speed]);
+    # transition audio is a real cross-fade of the trimmed-off handles
+    # (same source the transition video is rendering). Audio + video
+    # durations match by construction — no padding, no buffer.
     _audio_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     _speed_audio_future = _audio_pool.submit(
         build_per_cut_audio, source_path, render_cuts,
         effective_durations, work_dir,
         sample_rate=sample_rate, trans_dur_after=_trans_dur_after,
-        per_cut_dur_frames=_per_cut_dur_frames, source_fps=source_fps,
+        per_cut_render_dur_frames=_per_cut_render_dur_frames,
+        source_fps=source_fps,
+        trim_head_dur=_trim_head_dur, trim_tail_dur=_trim_tail_dur,
     )
 
     # ── 10. Spawn Remotion renders in parallel (overlay chunks + micro) ────
