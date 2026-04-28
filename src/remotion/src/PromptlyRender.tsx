@@ -165,12 +165,22 @@ const CaptionSegmentRenderer: React.FC<{
   const segStartMs = Math.round((segmentStartFrame / fps) * 1000);
   const segEndMs = Math.round(((segmentStartFrame + segmentDurationInFrames) / fps) * 1000);
   const clippedPages: TikTokPageLike[] = [];
+  // Each caption page belongs to exactly one position segment — the one
+  // whose time window contains the page's MIDPOINT. Half-open interval
+  // [segStartMs, segEndMs) ensures exactly-one assignment when adjacent
+  // segments share a boundary (which they do by construction in the
+  // synthesize-from-changes derivation in handler.py).
+  //
+  // Without this midpoint check, pages whose time window OVERLAPS a
+  // segment boundary were being rendered in BOTH segments at different
+  // positions — causing visible duplicate captions, animation restarts
+  // mid-page, and the same word appearing at bottom AND center
+  // simultaneously during the overlap. Same bug class as the word-
+  // duplication fix in project_words_to_output (handler.py).
   for (const page of pages) {
-    const pStart = page.startMs;
-    const pEnd = page.startMs + page.durationMs;
-    if (pEnd <= segStartMs) continue;
-    if (pStart >= segEndMs) continue;
-    const localStart = pStart - segStartMs;
+    const pMid = page.startMs + page.durationMs / 2;
+    if (pMid < segStartMs || pMid >= segEndMs) continue;
+    const localStart = page.startMs - segStartMs;
     clippedPages.push({
       ...page,
       startMs: Math.max(0, localStart),

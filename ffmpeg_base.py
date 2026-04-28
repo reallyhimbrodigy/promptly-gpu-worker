@@ -358,10 +358,16 @@ def build_broll_input_filter(
          brolls (Pexels frequently serves 25/24fps).
       2. Rebases timestamps to 0 and applies playbackRate via setpts.
       3. Scales/crops to canvas dimensions (objectFit:cover semantics).
-      4. Resamples to output fps via motion-compensated minterpolate (when
-         broll's effective rate is below output) or plain fps (when at or
-         above). This synthesizes intermediate frames instead of duplicating
-         them — buttery-smooth playback regardless of source fps mismatch.
+      4. Resamples to output fps via plain fps filter (deterministic
+         frame count). Earlier versions used motion-compensated
+         minterpolate when broll fps was below output, but the CPU cost
+         (~10s per broll) compounded with per-clip minterpolate to a
+         200+ second composite step, and minterpolate's variable output
+         frame count caused B-roll frame underflow that the overlay
+         filter held as a frozen last frame. Plain fps duplicates 1-in-2
+         frames on 30→60fps brolls; with the rest of the timeline at
+         RIFE-interpolated 60fps the slight broll judder is bounded and
+         barely noticeable for talking-head content.
       5. Clamps to exactly dur_frames so concat sees the precise frame
          count it expects.
       6. Rebases PTS to 0 and shifts to the output-time window.
@@ -387,25 +393,12 @@ def build_broll_input_filter(
     )
     src_seconds_needed = src_frames_needed / br_fps
 
-    # When the broll's effective output frame rate (br_fps / pbr) is below
-    # source_fps, motion-compensated minterpolate synthesizes intermediate
-    # frames. This eliminates duplicate-frame stutter on slow brolls or
-    # non-output-fps brolls (Pexels 24/25fps brolls into 60fps output).
-    effective_out_fps = br_fps / pbr if pbr > 0 else br_fps
-    if effective_out_fps < source_fps - 0.5:
-        rate_filter = (
-            f"minterpolate=fps={source_fps:g}:mi_mode=mci:"
-            f"mc_mode=aobmc:me=epzs:scd=fdiff"
-        )
-    else:
-        rate_filter = f"fps={source_fps:g}"
-
     filters = [
         f"trim=start={seek_seconds:.6f}:end={seek_seconds + src_seconds_needed:.6f}",
         f"setpts=(PTS-STARTPTS)/{pbr:.6f}",
         f"scale={canvas_w}:{canvas_h}:force_original_aspect_ratio=increase:flags=lanczos",
         f"crop={canvas_w}:{canvas_h}",
-        rate_filter,
+        f"fps={source_fps:g}",
         f"trim=end_frame={dur_frames}",
         f"setpts=PTS-STARTPTS+{out_start_seconds:.6f}/TB",
     ]
@@ -434,16 +427,20 @@ def _build_clip_segment_with_pad(
       1. Trims source to the exact minimum frames that produce dur_frames
          output frames after the rate change (see "Why" below).
       2. Rebases PTS and applies playbackRate via setpts.
-      3. Resamples to source_fps via motion-compensated minterpolate when
-         the sub-clip is in slow-motion (pbr<1.0); otherwise plain fps
-         filter (which drops frames cleanly when speeding up). For slow-
-         motion, this synthesizes intermediate frames using optical flow
-         instead of duplicating source frames — buttery-smooth playback
-         at any speed instead of slideshow stutter.
+      3. Resamples to source_fps via plain fps filter (drops/duplicates
+         frames cleanly with deterministic frame count).
       4. Applies zoom math (if simple zoom) via crop+scale-lanczos.
       5. Clamps output to exactly `dur_frames` and rebases PTS for clean
          concat downstream.
       6. Sets sar=1 and pix_fmt=yuv420p.
+
+    NOTE: source-level frame interpolation is handled by RIFE on the H100
+    GPU at the fps-normalize step (see _do_fps_normalize in handler.py).
+    The 60fps RIFE-interpolated source already provides smooth motion at
+    every output speed; per-sub-clip CPU minterpolate (which we tried in
+    earlier versions) added 200+ seconds of CPU cost to the composite
+    step AND introduced per-sub-clip frame-count underflow (~22 missing
+    frames per video). Plain fps filter is deterministic and exact.
 
     Why `ceil((dur_frames - 1) * pbr) + 1`:
     Replacing the original `round(dur_frames * pbr)` formula. The previous
@@ -471,24 +468,10 @@ def _build_clip_segment_with_pad(
     source_frames_needed = max(1, int(math.ceil((dur_frames - 1) * pbr)) + 1)
     end_frame = start_from + source_frames_needed
 
-    # Slow-motion sub-clips use motion-compensated frame synthesis. The fps
-    # filter alone duplicates source frames at pbr<1, producing visible
-    # slideshow stutter on slow-mo. minterpolate with mci+aobmc generates
-    # intermediate frames using optical flow — actual smooth motion. For
-    # pbr>=1.0 (normal/fast playback) the fps filter drops frames cleanly,
-    # so minterpolate adds cost without benefit.
-    if pbr < 1.0:
-        rate_filter = (
-            f"minterpolate=fps={source_fps:g}:mi_mode=mci:"
-            f"mc_mode=aobmc:me=epzs:scd=fdiff"
-        )
-    else:
-        rate_filter = f"fps={source_fps:g}"
-
     filters = [
         f"trim=start_frame={start_from}:end_frame={end_frame}",
         f"setpts=(PTS-STARTPTS)/{pbr:.6f}",
-        rate_filter,
+        f"fps={source_fps:g}",
     ]
 
     zoom = clip.get("zoomEffect")

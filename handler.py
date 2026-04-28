@@ -2632,10 +2632,14 @@ Each entry:
 
     # ── Visual layers — each field REQUIRED (value or null) ──
     # zoom_effect.events: each event has {{"startMs": int, "durationMs": int, "scale": float, "originX": float, "originY": float}}
-    # IMPORTANT: startMs and durationMs are in SOURCE TIME relative to the parent clip's source_start.
-    # The zoom is anchored to source content — when the underlying clip plays in slow-motion, the zoom
-    # takes proportionally longer; when it speeds up, the zoom finishes faster. This keeps the zoom
-    # climax synced with the spoken content regardless of speed ramping. Typical durationMs: 500-1500ms.
+    # IMPORTANT: startMs is the ABSOLUTE source-time in milliseconds where the zoom event begins
+    # (relative to the start of the source video — same coordinate system as the word timestamps
+    # you see in the transcript). durationMs is the event's duration in source ms. The zoom is
+    # anchored to source content — when the underlying clip plays in slow-motion, the rendered
+    # zoom takes proportionally longer wall-clock time; when it speeds up, the zoom finishes
+    # faster. This keeps the zoom climax synced with the spoken content regardless of speed
+    # ramping. Typical durationMs: 500-1500ms. Place startMs slightly after the emphasis word's
+    # start (e.g., emphasis word at 12.32s, startMs around 13500 for a 1.2s lead-in).
     "zoom_effect": {{"type": zoom_type, "events": [...]}} | null,
     "motion_graphic": {{"type": mg_type, "anchor": zone, "props": {{...}}}} | null
   }}
@@ -4013,6 +4017,70 @@ REMOVE_WORDS GUIDANCE:
         )
         validated_cuts, _removed_word_indices = build_clips_from_words(_dg_words, normalized_remove_words, max_silence_gap=_speech_gap, video_duration=video_duration)
         edit_plan["_removed_word_indices"] = _removed_word_indices
+
+        # Drop caption_position_changes anchored to removed words and
+        # re-derive caption_position_segments. The earlier derivation
+        # (around line 3735) ran before deterministic tightening
+        # (stutter/restart detection inside build_clips_from_words), so
+        # changes pointing at removed words like a stutter would survive
+        # and produce phantom 0.5s position segments at removed-word
+        # time positions — visible as caption flicker between bottom
+        # and center for half a second around a word that doesn't
+        # actually appear on screen.
+        _removed_set = set(_removed_word_indices) if _removed_word_indices else set()
+        if _removed_set:
+            _raw_changes = edit_plan.get("caption_position_changes") or []
+            _filtered_changes = [
+                _ch for _ch in _raw_changes
+                if isinstance(_ch, dict) and _ch.get("word_index") is not None
+                and int(_ch["word_index"]) not in _removed_set
+            ]
+            if len(_filtered_changes) != len(_raw_changes):
+                _dropped = len(_raw_changes) - len(_filtered_changes)
+                edit_plan["caption_position_changes"] = _filtered_changes
+                # Re-synthesize caption_position_segments from filtered changes.
+                # Same logic as the derivation block above (~line 3735).
+                _filtered_changes_clean = [
+                    c for c in _filtered_changes
+                    if isinstance(c, dict) and c.get("word_index") is not None
+                    and c.get("position") in ("top", "center", "bottom")
+                ]
+                _filtered_changes_clean.sort(key=lambda c: int(c["word_index"]))
+                _resynth_segments = []
+                _cur_pos = "bottom"
+                _cur_t = 0.0
+                for _ch in _filtered_changes_clean:
+                    _wi = int(_ch["word_index"])
+                    if _wi < 0 or _wi >= len(_dg_words):
+                        continue
+                    _ch_t = round(float(_dg_words[_wi].get("start") or 0), 3)
+                    if _ch_t > _cur_t:
+                        _resynth_segments.append({
+                            "from_seconds": round(_cur_t, 3),
+                            "to_seconds": round(_ch_t, 3),
+                            "position": _cur_pos,
+                        })
+                    _cur_pos = _ch["position"]
+                    _cur_t = _ch_t
+                if video_duration > _cur_t:
+                    _resynth_segments.append({
+                        "from_seconds": round(_cur_t, 3),
+                        "to_seconds": round(float(video_duration), 3),
+                        "position": _cur_pos,
+                    })
+                if not _resynth_segments and video_duration > 0:
+                    _resynth_segments = [{
+                        "from_seconds": 0.0,
+                        "to_seconds": round(float(video_duration), 3),
+                        "position": "bottom",
+                    }]
+                edit_plan["caption_position_segments"] = _resynth_segments
+                print(
+                    f"[generate-edit] Dropped {_dropped} caption_position_change(s) "
+                    f"anchored to removed words; re-synthesized "
+                    f"{len(_resynth_segments)} segment(s)",
+                    flush=True,
+                )
         for i, clip in enumerate(validated_cuts):
             clip_start = float(clip["source_start"])
             clip_end = float(clip["source_end"])
@@ -7766,26 +7834,30 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _pw_by_idx = {pw["_word_index"]: pw for pw in _projected_words if pw.get("_word_index") is not None}
 
     # ── 2. Build Remotion input JSON ────────────────────────────────────────
-    # Clips — one ClipSpec per sub-clip. Zoom events are SOURCE-anchored:
-    # Gemini emits startMs / durationMs in SOURCE TIME relative to the
-    # parent clip's source_start. Each sub-clip projects the event's source
-    # range to its own OUTPUT frames using the sub-clip's avg_speed. This
-    # keeps the zoom climax synced with the spoken content regardless of
-    # speed ramping — slow-mo stretches the zoom, fast playback shortens
-    # it, and progress is continuous across sub-clip boundaries because
-    # the same source moment maps to the same progress value in any
-    # sub-clip that contains it.
+    # Clips — one ClipSpec per sub-clip. Zoom events are ABSOLUTE-source-
+    # anchored: Gemini emits startMs / durationMs in absolute source-time
+    # milliseconds (verified empirically from production renders — Gemini
+    # consistently emits values like "13500ms" for an emphasis at source
+    # 12.32s, "24800ms" for emphasis at 24.155s, etc.). Each sub-clip
+    # projects events that overlap its source range into sub-clip-local
+    # OUTPUT frames using the sub-clip's avg_speed:
+    #
+    #   subclip_local_output_ms = (event_abs_source_ms - subclip_source_start_ms) / pbr
+    #
+    # AND we only attach zoomEffect to a sub-clip if at least one event's
+    # output range overlaps the sub-clip's output window. Sub-clips that
+    # share a parent with a zoomed sub-clip but don't actually contain the
+    # event window stay on the FFmpeg path — no wasteful Remotion routing.
+    # This was a bug in v65: the LetterboxPush emphasis attached to a
+    # parent clip, then propagated to all 12 sub-clips of that parent,
+    # forcing 12 Remotion renders for ZERO visible zoom output.
     clips_out = []
     prev_original_idx = None
-    _parent_source_start = None  # source_start of the FIRST sub-clip per parent
     for i, (rc, tm, eff_dur) in enumerate(zip(render_cuts, _clip_time_maps, effective_durations)):
         _source_start_frames = int(round(float(rc["source_start"]) * source_fps))
         _pbr = float(tm.get("avg_speed") or 1.0)
         _dur_frames = max(1, int(round(eff_dur * source_fps)))
         _orig_idx = rc.get("_original_idx")
-        _is_first_subclip = _orig_idx != prev_original_idx
-        if _is_first_subclip:
-            _parent_source_start = float(rc["source_start"])
         _clip_id_parts = [
             "hook" if rc.get("_is_hook") else "clip",
             str(_orig_idx if _orig_idx is not None else i),
@@ -7799,35 +7871,46 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         }
         _zoom = rc.get("_zoom_effect") or rc.get("zoom_effect")
         if isinstance(_zoom, dict) and _zoom.get("type") in VALID_ZOOM_TYPES:
-            # Sub-clip's source position within its parent (in ms)
-            _subclip_src_offset_ms = (
-                (float(rc["source_start"]) - _parent_source_start) * 1000.0
-            )
+            _subclip_source_start_ms = float(rc["source_start"]) * 1000.0
+            _subclip_output_ms = (_dur_frames / float(source_fps)) * 1000.0
             _raw_events = _zoom.get("events") or []
-            _adjusted_events = []
+            _overlapping_events = []
             for _ev in _raw_events:
                 if not isinstance(_ev, dict):
                     continue
                 try:
-                    # Gemini's event timing is in SOURCE MS relative to the
-                    # parent clip. Convert to sub-clip-local OUTPUT MS by
-                    # offsetting by sub-clip's source position within parent
-                    # and scaling by 1/avg_speed (output ms per source ms).
                     _src_start_ms = float(_ev.get("startMs", 0))
                     _src_dur_ms = float(_ev.get("durationMs", 0))
+                    # Event timing in sub-clip-local OUTPUT ms.
+                    # Negative startMs means the event began before this
+                    # sub-clip — components handle negative correctly
+                    # (continuing animation across boundaries).
                     _new_start_ms = int(round(
-                        (_src_start_ms - _subclip_src_offset_ms) / _pbr
+                        (_src_start_ms - _subclip_source_start_ms) / _pbr
                     ))
                     _new_dur_ms = int(round(_src_dur_ms / _pbr))
                 except Exception:
                     continue
-                _new_ev = {**_ev, "startMs": _new_start_ms, "durationMs": _new_dur_ms}
-                _adjusted_events.append(_new_ev)
-            _clip_spec["zoomEffect"] = {
-                "type": _zoom["type"],
-                "events": _adjusted_events,
-                **{k: v for k, v in _zoom.items() if k not in ("type", "events") and v is not None},
-            }
+                # Skip events that don't overlap this sub-clip's output
+                # window. This is what stops zoomEffect from propagating
+                # to every sub-clip of a parent and forcing wasteful
+                # Remotion renders.
+                _ev_end_ms = _new_start_ms + _new_dur_ms
+                if _ev_end_ms <= 0:
+                    continue  # event already ended before sub-clip starts
+                if _new_start_ms >= _subclip_output_ms:
+                    continue  # event starts after sub-clip ends
+                _overlapping_events.append({
+                    **_ev,
+                    "startMs": _new_start_ms,
+                    "durationMs": _new_dur_ms,
+                })
+            if _overlapping_events:
+                _clip_spec["zoomEffect"] = {
+                    "type": _zoom["type"],
+                    "events": _overlapping_events,
+                    **{k: v for k, v in _zoom.items() if k not in ("type", "events") and v is not None},
+                }
         clips_out.append(_clip_spec)
         prev_original_idx = _orig_idx
 
