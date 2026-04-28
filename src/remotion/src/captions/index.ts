@@ -2,9 +2,6 @@ export { CaptionContainer } from "./shared/CaptionContainer";
 export type { CaptionStyleProps, TikTokToken, TikTokPage } from "./shared/types";
 export { normalizeWord, buildKeywordSet, isKeyword } from "./shared/keywords";
 
-export { HormoziPopIn } from "./HormoziPopIn";
-export type { HormoziPopInProps, HormoziHighlightWord } from "./HormoziPopIn";
-
 export { EmojiPop } from "./EmojiPop";
 export type { EmojiPopProps, EmojiEntry } from "./EmojiPop";
 

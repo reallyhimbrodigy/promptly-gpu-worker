@@ -35,7 +35,7 @@ const DEFAULT_RENDER_INPUT: PromptlyRenderInput = {
   transitions: [],
   broll: [],
   caption: {
-    style: "HormoziPopIn",
+    style: "Dimidium",
     pages: [],
     keywords: [],
     positionSegments: [{ fromFrame: 0, toFrame: 600, position: "bottom" }],

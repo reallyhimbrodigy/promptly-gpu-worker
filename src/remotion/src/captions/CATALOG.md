@@ -53,25 +53,6 @@ All components accept `position?: "top" | "center" | "bottom"` to control vertic
 
 ## Components
 
-### 1. HormoziPopIn
-
-Bold uppercase words that spring-pop onto screen one at a time. Highlight words scale up with a custom color. Thick black stroke for maximum readability over any footage. The go-to for high-energy talking-head content.
-
-**Best for:** Motivational clips, business advice, podcast highlights, talking-head content.
-
-| Prop | Type | Default | Description |
-|------|------|---------|-------------|
-| `highlightWords` | `HormoziHighlightWord[]` | `[]` | Words to highlight with specific colors. Each entry: `{ text, color }`. |
-| `highlightScale` | `number` | `1.45` | Scale multiplier for highlighted words. |
-| `allCaps` | `boolean` | `true` | Force uppercase text. |
-| `maxWordsPerLine` | `number` | `4` | Words per line before wrapping. |
-| `springConfig` | `SpringConfig` | Hormozi-tuned | Spring physics for the pop-in animation. |
-| `staggerDelayFrames` | `number` | `1` | Delay between each word's entrance. |
-| `letterSpacing` | `number` | `0.05` | Letter spacing in em. |
-| `enableSoftShadow` | `boolean` | `true` | Soft drop shadow behind stroke. |
-
----
-
 ### 2. EmojiPop
 
 Words appear with automatic Lottie emoji animations that pop in alongside the captions. Active word gets a color highlight. 48 built-in emoji animations mapped to common words.

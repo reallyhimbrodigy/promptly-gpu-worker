@@ -61,7 +61,7 @@ from pydantic import BaseModel, Field
 from typing import List, Optional, Literal, Dict, Any
 
 _CAPTION_STYLES = Literal[
-    "HormoziPopIn", "EmojiPop", "PaperII",
+    "EmojiPop", "PaperII",
     "Prime", "TypewriterReveal", "CinematicLetterpress", "Cove",
     "Dimidium", "EditorialPop", "Gadzhi", "Illuminate", "Lumen",
     "MagazineCutout", "Passage", "Pulse", "Quintessence", "Serif", "StaggerWave",
@@ -2527,70 +2527,68 @@ DECISION — which anchor:
 
 ONE style for the whole video. POSITION can change per segment.
 
-caption_style — pick EXACTLY ONE from 18 styles. Read each description carefully — these are real components with distinct visual identities. Pick the one whose AESTHETIC matches the video's content register, not the one you used last time.
+caption_style — pick EXACTLY ONE from 17 styles. Read each description carefully — these are real components with distinct visual identities. Pick the one whose AESTHETIC matches the video's content register, not the one you used last time.
 
- 1. "HormoziPopIn"         — Bold uppercase words spring-pop one at a time. Highlight words scale up with custom colors. Thick black stroke. **Hormozi/MoneyTwitter aesthetic.** Keywords highlighted in gold by default.
-                              Best for: Motivational clips, business advice, podcast highlights.
- 2. "EmojiPop"             — Words appear with automatic Lottie emoji animations next to relevant nouns. Active word gets color highlight. 48 built-in emoji mappings — emoji selection is automatic, you can't override which words get which emoji.
+ 1. "EmojiPop"             — Words appear with automatic Lottie emoji animations next to relevant nouns. Active word gets color highlight. 48 built-in emoji mappings — emoji selection is automatic, you can't override which words get which emoji.
                               Best for: Fun/casual content, storytelling, social media clips, comedy.
- 3. "PaperII"              — Lora serif. Words transition from dim to bright as spoken. Strip-based stacking, heavy shadow. Editorial paper-strip feel. Keywords highlighted in warm yellow.
+ 2. "PaperII"              — Lora serif. Words transition from dim to bright as spoken. Strip-based stacking, heavy shadow. Editorial paper-strip feel. Keywords highlighted in warm yellow.
                               Best for: Storytelling, narrative, poetry, journal-style, long-form.
- 4. "Prime"                — Two-tier system: Inter body, special words break out onto a new line in oversized italic Playfair Display. The keyword break-line is the entire visual identity.
+ 3. "Prime"                — Two-tier system: Inter body, special words break out onto a new line in oversized italic Playfair Display. The keyword break-line is the entire visual identity.
                               Best for: Aspirational content, premium branding, lifestyle.
- 5. "TypewriterReveal"     — Character-by-character typewriter in Space Mono. Blinking cursor. NO keyword highlighting (animation IS the effect — every word looks the same).
+ 4. "TypewriterReveal"     — Character-by-character typewriter in Space Mono. Blinking cursor. NO keyword highlighting (animation IS the effect — every word looks the same).
                               Optional extraProps: {{"scheme": "classic"|"terminal"|"amber"}} — classic = white on black, terminal = green-on-black hacker, amber = orange phosphor monitor.
                               Best for: Tech/coding, thoughtful narration, documentary, retro.
- 6. "CinematicLetterpress" — Words emerge from blur into focus — cinematic "focus pull" effect. Cormorant Garamond serif, light weight, wide letter-spacing. NO keyword highlighting (the blur-to-focus animation IS the effect).
+ 5. "CinematicLetterpress" — Words emerge from blur into focus — cinematic "focus pull" effect. Cormorant Garamond serif, light weight, wide letter-spacing. NO keyword highlighting (the blur-to-focus animation IS the effect).
                               Best for: Documentary, film-style intros, art house, slow contemplative.
- 7. "Cove"                 — Bold Montserrat base, special words switch to oversized italic Playfair Display with warm ethereal glow. ~2x scale contrast. Keywords get the glow treatment.
+ 6. "Cove"                 — Bold Montserrat base, special words switch to oversized italic Playfair Display with warm ethereal glow. ~2x scale contrast. Keywords get the glow treatment.
                               Best for: Premium/luxury, brand storytelling, wellness, aspirational.
- 8. "Dimidium"             — Heavy Montserrat, thick black stroke (14px), staggered left-aligned lines. Subtle floating sine-wave animation. Keywords highlighted with a different color.
+ 7. "Dimidium"             — Heavy Montserrat, thick black stroke (14px), staggered left-aligned lines. Subtle floating sine-wave animation. Keywords highlighted with a different color.
                               Best for: Street style, urban, bold statements, hip-hop, high-energy.
- 9. "EditorialPop"         — All Playfair Display — keywords scale to 1.7x bold italic, body stays light. Two-line staggered reveal. Magazine-headline feel.
+ 8. "EditorialPop"         — All Playfair Display — keywords scale to 1.7x bold italic, body stays light. Two-line staggered reveal. Magazine-headline feel.
                               Best for: Magazine-style, fashion, interview quotes, premium editorial.
-10. "Gadzhi"               — Montserrat uppercase, words slide up with cubic ease-out. Gray-to-final color transition. Keywords land in gold. Smooth/professional.
+ 9. "Gadzhi"               — Montserrat uppercase, words slide up with cubic ease-out. Gray-to-final color transition. Keywords land in gold. Smooth/professional.
                               Best for: Business/hustle, agency reels, SMMA aesthetic, professional.
-11. "Illuminate"           — Playfair Display with a diagonal light sweep across each word as it appears. Keywords keep a warm lingering glow. Cinematic spotlight feel.
+10. "Illuminate"           — Playfair Display with a diagonal light sweep across each word as it appears. Keywords keep a warm lingering glow. Cinematic spotlight feel.
                               Best for: Cinematic narration, atmospheric storytelling, premium docs.
-12. "Lumen"                — Montserrat body, keywords switch to Playfair with amber glow and gold underline sweep. Shine words get a brightness flash.
+11. "Lumen"                — Montserrat body, keywords switch to Playfair with amber glow and gold underline sweep. Shine words get a brightness flash.
                               Best for: Warm inspirational, golden-hour aesthetics, brand campaigns.
-13. "MagazineCutout"       — Individually cut-out paper pieces with cream background, random rotation, size variation. Collage / zine aesthetic. NO keyword highlighting (every word is its own cutout — the chaos IS the effect).
+12. "MagazineCutout"       — Individually cut-out paper pieces with cream background, random rotation, size variation. Collage / zine aesthetic. NO keyword highlighting (every word is its own cutout — the chaos IS the effect).
                               Optional extraProps: {{"maxRotation": 3}} for tight controlled craft, {{"maxRotation": 10}} for wild DIY chaos. Default 6.
                               Best for: Creative/art, collage, DIY/craft, zine-style, indie.
-14. "Passage"              — Cormorant Garamond serif. Keywords expand letter-spacing on reveal and switch to italic warm gold. Literary, book-page feel.
+13. "Passage"              — Cormorant Garamond serif. Keywords expand letter-spacing on reveal and switch to italic warm gold. Literary, book-page feel.
                               Best for: Literary content, book quotes, long-form storytelling.
-15. "Pulse"                — Two-slot paired display — words appear in pairs that fade in together. Keywords get cyan accent. Rhythmic, lyric-video feel.
+14. "Pulse"                — Two-slot paired display — words appear in pairs that fade in together. Keywords get cyan accent. Rhythmic, lyric-video feel.
                               Best for: Music, rhythmic narration, fast dialogue, lyric videos.
-16. "Quintessence"         — Single word at a time, centered, Playfair Display with dramatic vertical stretch (scaleY). Gold text, spring entrance. NO keyword highlighting (every word is the focus — that's the whole point).
+15. "Quintessence"         — Single word at a time, centered, Playfair Display with dramatic vertical stretch (scaleY). Gold text, spring entrance. NO keyword highlighting (every word is the focus — that's the whole point).
                               Optional extraProps: {{"stretchY": 1.6}} default, increase to 2.0 for more dramatic stretch, decrease to 1.3 for subtle.
                               Use for: Single-word emphasis moments, dramatic pauses, poetry, art-house.
-17. "Serif"                — DM Serif Display body with keywords that scale up (1.35x) in italic with blue accent. Premium editorial / brand-message feel.
+16. "Serif"                — DM Serif Display body with keywords that scale up (1.35x) in italic with blue accent. Premium editorial / brand-message feel.
                               Best for: Premium editorial, interview quotes, brand messaging, calm.
-18. "StaggerWave"          — Montserrat uppercase, staggered spring entrance with sine-wave float. Active word lights up yellow. NO keyword highlighting (the active-word color IS the highlight; it follows the audio, not your keywords).
+17. "StaggerWave"          — Montserrat uppercase, staggered spring entrance with sine-wave float. Active word lights up yellow. NO keyword highlighting (the active-word color IS the highlight; it follows the audio, not your keywords).
                               Best for: Dynamic content, workout/fitness, energetic reels.
 
 NOTES ON KEYWORDS PER STYLE:
-  Styles that USE caption_keywords for highlighting: HormoziPopIn, PaperII, Prime, Cove, Dimidium, EditorialPop, Gadzhi, Illuminate, Lumen, Passage, Pulse, Serif (12 styles).
+  Styles that USE caption_keywords for highlighting: PaperII, Prime, Cove, Dimidium, EditorialPop, Gadzhi, Illuminate, Lumen, Passage, Pulse, Serif (11 styles).
   Styles that IGNORE caption_keywords by design: TypewriterReveal, CinematicLetterpress, MagazineCutout, Quintessence, StaggerWave, EmojiPop (6 styles — animation/aesthetic IS the effect, no per-word highlighting). When you pick one of these, the caption_keywords list still has narrative value (for emphasis_moments etc.) but won't visually highlight in captions.
 
 DECISION MATRIX — caption_style by content. Each row gives 4–5 valid choices in order of typical fit; rotate among them rather than always defaulting to the first. The user's past videos are visible to you in their style profile — if your top candidate matches the style they used in their LAST video, pick a different option from the same row.
 
-  business, hustle, agency, motivational    → HormoziPopIn / Gadzhi / Dimidium / Lumen / Pulse
+  business, hustle, agency, motivational    → Gadzhi / Dimidium / Lumen / Pulse / Cove
   interview, podcast, thoughtful, calm      → Serif / Cove / Passage / Illuminate / EditorialPop
-  gaming, tech, cyberpunk                   → TypewriterReveal / Dimidium / Pulse / StaggerWave / HormoziPopIn
+  gaming, tech, cyberpunk                   → TypewriterReveal / Dimidium / Pulse / StaggerWave
   cinematic, documentary, dramatic          → CinematicLetterpress / Illuminate / Quintessence / Passage / PaperII
   aesthetic, lifestyle, travel, minimal     → Cove / Passage / Lumen / EditorialPop / Serif
   creative, artistic, collage, music        → MagazineCutout / EmojiPop / Pulse / StaggerWave / Quintessence
   luxury, fashion, premium                  → Prime / Passage / EditorialPop / Quintessence / Cove
   editorial, magazine, interview quote      → EditorialPop / Quintessence / Serif / Passage / PaperII
   storytelling, narrative, POV              → PaperII / Cove / Illuminate / Passage / CinematicLetterpress
-  workout, fitness, energetic               → StaggerWave / HormoziPopIn / Pulse / Dimidium / Gadzhi
+  workout, fitness, energetic               → StaggerWave / Pulse / Dimidium / Gadzhi
   music, rhythmic, lyric-driven             → Pulse / Lumen / EmojiPop / StaggerWave / Quintessence
-  comedy, casual, fun                       → EmojiPop / StaggerWave / MagazineCutout / Pulse / HormoziPopIn
+  comedy, casual, fun                       → EmojiPop / StaggerWave / MagazineCutout / Pulse
   art house, poetic, contemplative          → Quintessence / CinematicLetterpress / Passage / Illuminate / EditorialPop
-  unsure                                    → pick from any vibe row above that matches the dominant register; AVOID picking HormoziPopIn unless the content is genuinely hustle/business
+  unsure                                    → pick from any vibe row above that matches the dominant register
 
-DON'T REPEAT YOURSELF. Top short-form creators use a VARIETY of caption styles across their videos — never the same one every time. If the user's profile shows they recently used HormoziPopIn, deliberately choose a different option from the appropriate row this time. Different content deserves different visual identity.
+DON'T REPEAT YOURSELF. Top short-form creators use a VARIETY of caption styles across their videos — never the same one every time. If the user's profile shows they recently used a particular style, deliberately choose a different option from the appropriate row this time. Different content deserves different visual identity.
 
 caption_keywords — REQUIRED. The words that should be visually highlighted in captions for engagement. Aim for 1 keyword per ~5–10 spoken words across the kept transcript — that's roughly **8–15 keywords for a 30s video, 15–30 for a 60s video, 25–50 for a 90s video**. NOT every word, but FREQUENT — every emphasis target, every punchline noun, every reaction word, every reveal, every emotional verb, every vivid adjective. Sparse keywords (only 2–6) leave the captions feeling flat. Lowercase, no punctuation.
 
@@ -4393,7 +4391,7 @@ REMOVE_WORDS GUIDANCE:
     # raises on error — we do not substitute defaults or silently drop entries.
 
     _valid_caption_styles = {
-        "HormoziPopIn", "EmojiPop", "PaperII",
+        "EmojiPop", "PaperII",
         "Prime", "TypewriterReveal", "CinematicLetterpress", "Cove",
         "Dimidium", "EditorialPop", "Gadzhi", "Illuminate", "Lumen",
         "MagazineCutout", "Passage", "Pulse", "Quintessence", "Serif", "StaggerWave",
@@ -7978,15 +7976,23 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         )
 
     # ── 5. Caption segments projection (source → output timeline) ───────────
-    caption_pages = _build_tiktok_pages_from_projected(_projected_words, max_words_per_page=3)
+    # Build position segments FIRST so we can pass their output-time
+    # boundaries into the page builder and force a page flush at every
+    # position change. Without this, a page that spans a position
+    # boundary gets assigned to whichever segment contains its midpoint
+    # — but the page's start/end times don't move, so the page either
+    # appears late, lingers past where it should end, or jumps from one
+    # position to another mid-display. ("floating around / drift" the
+    # user reported.)
     _caption_style = edit_plan["caption_style"]
     _caption_keywords = edit_plan["caption_keywords"]
     _caption_extra_props = _resolve_caption_extra_props(_caption_style, _caption_keywords, edit_plan)
     # Each segment's from/to is in SOURCE seconds (pre-remove_words timeline).
-    # Project each endpoint to OUTPUT frames using the same canonical time maps
-    # that drive captions / SFX / b-roll.
+    # Project each endpoint to OUTPUT seconds using the same canonical time
+    # maps that drive captions / SFX / b-roll.
     _cps_raw = edit_plan["caption_position_segments"]
     caption_position_segments_out = []
+    _position_boundaries_out_sec: List[float] = []  # output-time seconds where position changes
     for _cs in _cps_raw:
         _f_out = project_source_time_to_output(
             float(_cs["from_seconds"]), render_cuts, _clip_ranges,
@@ -8008,6 +8014,16 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 "toFrame": _to_frame,
                 "position": _cs["position"],
             })
+            # Capture inner boundaries (skip 0 and total_duration; those
+            # don't split anything).
+            if _f_out > 0.001 and _f_out < total_output_duration - 0.001:
+                _position_boundaries_out_sec.append(_f_out)
+
+    caption_pages = _build_tiktok_pages_from_projected(
+        _projected_words,
+        max_words_per_page=3,
+        position_boundaries_sec=sorted(set(_position_boundaries_out_sec)),
+    )
     if not caption_position_segments_out:
         # The validator guarantees at least one segment covering [0, duration].
         # If projection produced nothing, it means total_output_frames is 0.
@@ -9004,7 +9020,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 # ─── CAPTION / COMPONENT VOCABULARIES (enforced at validation + render time) ───
 
 VALID_CAPTION_STYLES = {
-    "HormoziPopIn", "EmojiPop", "PaperII",
+    "EmojiPop", "PaperII",
     "Prime", "TypewriterReveal", "CinematicLetterpress", "Cove",
     "Dimidium", "EditorialPop", "Gadzhi", "Illuminate", "Lumen",
     "MagazineCutout", "Passage", "Pulse", "Quintessence", "Serif", "StaggerWave",
@@ -9029,12 +9045,21 @@ VALID_MG_TYPES = {
 }
 
 
-def _build_tiktok_pages_from_projected(projected_words, max_words_per_page=3):
+def _build_tiktok_pages_from_projected(projected_words, max_words_per_page=3, position_boundaries_sec=None):
     """Convert projected Deepgram words into TikTokPage[] structured for the
     @remotion/captions types consumed by the pack caption components.
 
     Each page covers up to `max_words_per_page` consecutive words. Page
-    boundaries also break on large gaps (>0.6s) or sentence-end punctuation.
+    boundaries break on:
+      - large gaps (>0.6s)
+      - sentence-end punctuation
+      - position-change boundaries (so a page never spans top→bottom etc.;
+        if it did, the page would be assigned by midpoint to one position
+        and visually drift relative to its actual time range)
+
+    `position_boundaries_sec` is an optional sorted list of output-time
+    seconds where the caption position changes. Pages are flushed when
+    crossing one.
     """
     if not projected_words:
         return []
@@ -9044,6 +9069,7 @@ def _build_tiktok_pages_from_projected(projected_words, max_words_per_page=3):
     current_text_parts = []
     last_word_end = None
     SENTENCE_END = {".", "!", "?"}
+    _bounds = list(position_boundaries_sec or [])
 
     def _flush():
         nonlocal current_tokens, current_start_ms, current_text_parts, last_word_end
@@ -9059,15 +9085,26 @@ def _build_tiktok_pages_from_projected(projected_words, max_words_per_page=3):
         current_start_ms = None
         current_text_parts = []
 
+    def _crosses_boundary(prev_end_sec, next_start_sec):
+        # True iff any position boundary falls in [prev_end, next_start].
+        if not _bounds:
+            return False
+        for b in _bounds:
+            if prev_end_sec <= b <= next_start_sec:
+                return True
+        return False
+
     for w in projected_words:
         w_start = float(w.get("start") or 0)
         w_end = float(w.get("end") or w_start)
         w_text = w.get("punctuated_word") or w.get("word") or ""
         if not w_text.strip():
             continue
-        # Break on big gap
+        # Break on big gap OR position-change boundary
         if current_tokens and last_word_end is not None:
             if w_start - last_word_end > 0.6:
+                _flush()
+            elif _crosses_boundary(last_word_end, w_start):
                 _flush()
         if current_start_ms is None:
             current_start_ms = int(round(w_start * 1000))
@@ -9119,9 +9156,8 @@ def _resolve_caption_extra_props(style, keywords, edit_plan):
     }
     # Styles that expect {text, color?} entries — we emit default color per style
     rich_keyword_styles = {
-        "HormoziPopIn": ("highlightWords", "#F5C518"),
-        # PaperII expects PaperIIHighlightWord[] = [{text, color}]; default to
-        # the same warm-yellow accent as Hormozi for consistency.
+        # PaperII expects PaperIIHighlightWord[] = [{text, color}]; default
+        # to a warm yellow accent.
         "PaperII": ("highlightWords", "#F5C518"),
     }
 

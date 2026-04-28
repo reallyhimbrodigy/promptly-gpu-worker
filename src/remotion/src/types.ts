@@ -140,7 +140,6 @@ export interface TikTokPageLike {
 }
 
 export type CaptionStyle =
-  | "HormoziPopIn"
   | "EmojiPop"
   | "PaperII"
   | "Prime"

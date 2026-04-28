@@ -22,7 +22,7 @@ import type {
 // they require mixBlendMode against video pixels, which the transparent
 // overlay architecture can't provide without dropping the FFmpeg base path).
 import {
-  HormoziPopIn, EmojiPop, PaperII,
+  EmojiPop, PaperII,
   Prime, TypewriterReveal, CinematicLetterpress, Cove,
   Dimidium, EditorialPop, Gadzhi, Illuminate, Lumen,
   MagazineCutout, Passage, Pulse, Quintessence, Serif, StaggerWave,
@@ -52,7 +52,7 @@ import {
 
 // ─── Component maps ────────────────────────────────────────────────────────
 const CAPTION_MAP: Record<string, React.FC<any>> = {
-  HormoziPopIn, EmojiPop, PaperII,
+  EmojiPop, PaperII,
   Prime, TypewriterReveal, CinematicLetterpress, Cove,
   Dimidium, EditorialPop, Gadzhi, Illuminate, Lumen,
   MagazineCutout, Passage, Pulse, Quintessence, Serif, StaggerWave,
