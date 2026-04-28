@@ -57,24 +57,6 @@ Components automatically handle entrance and exit animations. You just set `star
 
 ## Components
 
-### 1. LowerThird
-
-Broadcast-style name + title card with an accent-colored leading edge and optional circular avatar. Dark or light theme with smooth spring entrance from the side. The standard lower-third for any talking-head or interview setup.
-
-**Best for:** Interviews, talking-head intros, speaker identification, podcast clips.
-
-**Supports:** MGTimingProps + MGPositionProps
-
-| Prop | Type | Default | Description |
-|------|------|---------|-------------|
-| `name` | `string` | — | **Required.** Speaker name (max ~26 chars). |
-| `title` | `string` | — | **Required.** Role / affiliation (max ~40 chars). |
-| `accentColor` | `string` | `"#C8551F"` | Accent bar color on the card's leading edge. |
-| `avatarSrc` | `string` | — | Optional circular avatar image. |
-| `theme` | `"dark" \| "light"` | `"dark"` | Card color theme. |
-
----
-
 ### 2. AnnotationArrow
 
 Hand-drawn SVG arrow with arrowhead, animated along a bezier path. Supports straight, curved-arc, j-shape, and fully custom SVG paths. Deterministic jitter via seed gives each arrow a unique hand-sketched feel. The arrow draws on during entrance and retracts on exit.
@@ -93,49 +75,6 @@ Hand-drawn SVG arrow with arrowhead, animated along a bezier path. Supports stra
 | `strokeWidth` | `number` | `8` | Stroke width in px. |
 | `seed` | `number` | `1` | Deterministic seed for hand-drawn jitter. |
 | `arrowheadSize` | `number` | `32` | Arrowhead chevron size in px. |
-
----
-
-### 3. BRollFrame
-
-Framed media insert — drop in 1-3 images or videos with scrapbook-style stacking. Three visual variants: clean (no border), white-border (classic photo frame), and polaroid (with caption below). Multiple sources stack with slight rotation offsets.
-
-**Best for:** B-roll inserts, photo reveals, product shots, scrapbook-style montages, before/after photos.
-
-**Supports:** MGTimingProps + MGPositionProps
-
-| Prop | Type | Default | Description |
-|------|------|---------|-------------|
-| `src` | `string \| string[]` | — | **Required.** 1-3 media URLs. Multiple sources stack with rotation offsets. |
-| `mediaType` | `"image" \| "video"` | `"image"` | Media type for all sources. |
-| `aspectRatio` | `"16:9" \| "4:5" \| "1:1" \| "9:16"` | `"16:9"` | Frame aspect ratio. |
-| `width` | `number` | `540` | Frame width in px. |
-| `variant` | `"clean" \| "white-border" \| "polaroid"` | `"clean"` | Visual style. |
-| `caption` | `string \| string[]` | — | Caption text below each photo. |
-
----
-
-### 4. ChartReveal
-
-Animated bar or line chart that builds up from zero. Bars grow sequentially, line draws itself. Optional peak callout scales in at a highlighted data point. Values, category labels, and title all animate in with spring physics.
-
-**Best for:** Revenue/growth stats, data storytelling, performance metrics, trend visualization.
-
-**Supports:** MGTimingProps + MGPositionProps
-
-| Prop | Type | Default | Description |
-|------|------|---------|-------------|
-| `chartType` | `"line" \| "bar"` | `"bar"` | Chart style. |
-| `data` | `DataPoint[]` | — | **Required.** Data series. Each: `{ label?, value }`. Min 2 points. |
-| `title` | `string` | — | Headline above the chart. |
-| `prefix` | `string` | — | Value prefix (e.g. `"$"`). |
-| `suffix` | `string` | — | Value suffix (e.g. `"K"`, `"%"`). |
-| `decimals` | `number` | `0` | Decimal places in value labels. |
-| `width` | `number` | — | Chart width in px. |
-| `height` | `number` | — | Chart height in px. |
-| `accentColor` | `string` | `"#C8551F"` | Bar/line color. |
-| `highlight` | `ChartHighlight` | — | Peak callout: `{ index, label? }`. |
-| `textShadow` | `string` | heavy shadow | Override drop shadow on title/values/labels. Pass `""` to disable. |
 
 ---
 
@@ -162,26 +101,6 @@ Full iMessage-style phone conversation with typing indicators, sequential messag
 | `incomingTextColor` | `string` | `"#FFFFFF"` | Incoming bubble text color. |
 | `outgoingColor` | `string` | `"#0A84FF"` | Outgoing bubble color. |
 | `outgoingTextColor` | `string` | `"#FFFFFF"` | Outgoing bubble text color. |
-
----
-
-### 6. ComparisonSplit
-
-Full-screen split comparison — vertical (left vs right) or horizontal (top vs bottom). Each side can be an image, video, solid color, text, or animated stat counter. A divider line with labels separates the two halves. The split animates in with the divider wiping across.
-
-**Best for:** Before/after, A/B comparisons, stat vs stat, product comparisons, transformation reveals.
-
-**Supports:** MGTimingProps
-
-| Prop | Type | Default | Description |
-|------|------|---------|-------------|
-| `sides` | `[ComparisonContent, ComparisonContent]` | — | **Required.** Content for each side. Each can be `image`, `video`, `color`, `text`, or `stat`. |
-| `labels` | `[string, string]` | — | **Required.** Labels for each side (e.g. `["BEFORE", "AFTER"]`). |
-| `orientation` | `"vertical" \| "horizontal"` | `"vertical"` | Split direction. |
-| `accentColor` | `string` | `"#C8551F"` | Divider + label color. |
-| `theme` | `"dark" \| "light"` | `"dark"` | Backdrop for text/stat/color sides. |
-| `dividerColor` | `string` | accentColor | Divider line color override. |
-| `statFontSize` | `number` | `148` | Hero number size for stat sides. |
 
 ---
 
@@ -445,7 +364,6 @@ These are exported from the barrel and available for advanced use:
 **Peer dependencies (npm install):**
 
 - `remotion` — core framework (all components)
-- `@remotion/media` — video playback (BRollFrame, ComparisonSplit)
 - `@remotion/google-fonts` — the following 8 font packages are loaded automatically:
   - `@remotion/google-fonts/Inter`
   - `@remotion/google-fonts/Anton`

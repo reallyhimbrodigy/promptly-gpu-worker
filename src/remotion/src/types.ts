@@ -176,12 +176,8 @@ export interface CaptionSpec {
 
 // ── Motion graphics ──────────────────────────────────────────────────────────
 export type MotionGraphicType =
-  | "LowerThird"
   | "AnnotationArrow"
-  | "BRollFrame"
-  | "ChartReveal"
   | "ChatThread"
-  | "ComparisonSplit"
   | "Notification"
   | "ProgressBar"
   | "QuoteCard"

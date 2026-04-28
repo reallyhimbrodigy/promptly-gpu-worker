@@ -76,8 +76,8 @@ _ZOOM_TYPES = Literal[
     "StageZoom", "DepthPull",
 ]
 _MG_TYPES = Literal[
-    "LowerThird", "AnnotationArrow", "BRollFrame", "ChartReveal", "ChatThread",
-    "ComparisonSplit", "Notification", "ProgressBar", "QuoteCard", "RecordingFrame",
+    "AnnotationArrow", "ChatThread",
+    "Notification", "ProgressBar", "QuoteCard", "RecordingFrame",
     "StatCard", "StickyNotes", "Toggle", "TornPaper",
     "TweetBubble", "InstagramComment", "IMessageBubble", "TikTokComment",
 ]
@@ -2428,7 +2428,7 @@ FACE VISIBILITY (source-seconds ranges; yes = face detected in 0.5s bucket)
   Use this to choose overlays that make sense with what's on screen. When
   `visible=NO` for a window, the viewer is looking at b-roll, a product
   shot, text, or scenery — lean into that (e.g., use TornPaper/QuoteCard
-  over scenery, ChartReveal/StatCard over a product shot).
+  over scenery, StatCard over a product shot).
 
 SPEAKER POSITIONS (where each speaker sits in frame, by diarization + face detect)
   {_sp_display}
@@ -2512,7 +2512,7 @@ The five absolute zones (per Rule #9). Pick based on what's already on screen an
 
   "upper_third_safe" — top band, above the speaker. Use for: title cards, hook text, stats appearing above the subject.
   "center"           — dead center. Use for: dramatic emphasis, full-screen moments, reveals.
-  "lower_third_safe" — lower-third band, just above the TikTok/IG UI rail. Use for: LowerThird name/title cards, tweet bubbles that frame at the bottom.
+  "lower_third_safe" — lower-third band, just above the TikTok/IG UI rail. Use for: lower_third name/title cards, tweet bubbles that frame at the bottom.
   "left_safe"        — left edge, vertically centered. Use when the speaker is on the RIGHT half of the frame (put the overlay OPPOSITE the speaker).
   "right_safe"       — right edge, vertically centered. Use when the speaker is on the LEFT half of the frame.
 
@@ -2520,7 +2520,7 @@ DECISION — which anchor:
 - Speaker on camera-left → `right_safe` for overlays (see SPEAKER POSITIONS signal).
 - Speaker on camera-right → `left_safe` for overlays.
 - Speaker centered or off-camera → `upper_third_safe` / `lower_third_safe` / `center`.
-- LowerThird (speaker-attribution MG or text_overlay) → always `lower_third_safe`.
+- lower_third text_overlay (speaker-attribution) → always `lower_third_safe`.
 - Notification stacks / top title cards → `upper_third_safe`.
 
 === CAPTIONS — WORD-BY-WORD RUNNING SUBTITLES ===
@@ -2738,71 +2738,54 @@ Each entry is WORD-ANCHORED — Gemini picks the kept words the MG stretches acr
 
 Types, descriptions, use cases, and REQUIRED props (in the schema below, keys ending in `?` are optional):
 
- 1. "LowerThird"         — Broadcast name + title card with accent edge and optional avatar. Dark or light theme.
-                            Best for: Interviews, speaker identification, podcast clips.
-                            Props: {{"name": str, "title": str, "accentColor"?: "#hex", "theme"?: "dark"|"light"}}
-
- 2. "AnnotationArrow"    — Hand-drawn SVG arrow animated along bezier path. Straight, curved-arc, j-shape, or custom SVG.
+ 1. "AnnotationArrow"    — Hand-drawn SVG arrow animated along bezier path. Straight, curved-arc, j-shape, or custom SVG.
                             Best for: Callouts, UI annotations, "look here" moments.
                             Props: {{"start": {{"x": 0-1, "y": 0-1}}, "end": {{"x": 0-1, "y": 0-1}}, "pathType"?: "straight"|"curved-arc"|"j-shape"|"custom", "color"?: "#hex"}}
 
- 3. "BRollFrame"         — Framed media insert. Clean, white-border, or polaroid variant. Multiple sources stack with rotation.
-                            Best for: B-roll inserts, photo reveals, product shots.
-                            Props: {{"src": URL or [URL,...], "mediaType"?: "image"|"video", "aspectRatio"?: "16:9"|"4:5"|"1:1"|"9:16", "variant"?: "clean"|"white-border"|"polaroid", "caption"?: str}}
-
- 4. "ChartReveal"        — Animated bar or line chart building from zero. Optional peak callout with spring physics.
-                            Best for: Revenue/growth stats, data storytelling.
-                            Props: {{"chartType": "bar"|"line", "data": [{{"label": str, "value": float}}, ...], "title"?: str, "prefix"?: str, "suffix"?: str, "accentColor"?: "#hex"}}
-
- 5. "ChatThread"         — iMessage-style conversation with typing indicators, sequential delivery, status bar.
+ 2. "ChatThread"         — iMessage-style conversation with typing indicators, sequential delivery, status bar.
                             Best for: Text recreations, testimonials, DM screenshots.
                             Props: {{"messages": [{{"sender": "me"|"them", "text": str, "typingMs"?: int, "holdMs"?: int}}, ...], "header"?: {{"name": str, "subtitle"?: str}}}}
 
- 6. "ComparisonSplit"    — Full-screen split: image, video, color, text, or stat counter per side.
-                            Best for: Before/after, A/B comparisons, stat vs stat.
-                            Props: {{"sides": [ContentA, ContentB], "labels": [str, str], "orientation"?: "vertical"|"horizontal", "accentColor"?: "#hex", "theme"?: "dark"|"light"}}
-                            ContentX: {{"type": "text"|"stat"|"image"|"video"|"color", "value": str|number}}
-
- 7. "Notification"       — iOS/Android notification stack. 1–3 banners drop in with platform styling. 7 built-in app icons.
+ 3. "Notification"       — iOS/Android notification stack. 1–3 banners drop in with platform styling. 7 built-in app icons.
                             Best for: Income proof, social proof, notification montages.
                             Props: {{"notifications": [{{"app": "apple-pay"|"venmo"|"stripe"|"imessage"|"instagram"|"email"|"bank", "appName": str, "title": str, "body": str, "timestamp"?: str}}, ...], "platform"?: "ios"|"android"}}
 
- 8. "ProgressBar"        — Animated progress bar with count-up. Optional milestones.
+ 4. "ProgressBar"        — Animated progress bar with count-up. Optional milestones.
                             Best for: Goal tracking, fundraising, skill bars.
                             Props: EITHER {{"value": number, "total": number, "label"?: str, "fillColor"?: "#hex", "accentColor"?: "#hex"}}  OR  {{"percentage": 0-100, "label"?: str, "fillColor"?: "#hex", "accentColor"?: "#hex"}}
 
- 9. "QuoteCard"          — Floating card with decorative quotation mark, serif text, em-dash attribution. Spring entrance.
+ 5. "QuoteCard"          — Floating card with decorative quotation mark, serif text, em-dash attribution. Spring entrance.
                             Best for: Testimonials, pull quotes, book excerpts.
                             Props: {{"quote": str, "attribution": str, "theme"?: "dark"|"light", "accentColor"?: "#hex"}}
 
-10. "RecordingFrame"     — Full-screen recording overlay with inset border, scan line, corner annotations (timestamp, WPM).
+ 6. "RecordingFrame"     — Full-screen recording overlay with inset border, scan line, corner annotations (timestamp, WPM).
                             Best for: Behind-the-scenes, raw/unfiltered, documentary.
                             Props: {{"accentColor"?: "#hex", "showScanLine"?: bool}}
 
     — SpeechBubble variants (4) — Platform-specific social bubbles. Best for: Social proof, testimonials, comment highlights.
 
-11. "TweetBubble"        — Twitter/X post with verified badge and engagement stats.
+ 7. "TweetBubble"        — Twitter/X post with verified badge and engagement stats.
                             Props: {{"name": str, "handle": str, "text": str, "verified"?: bool, "stats"?: {{"replies": int, "reposts": int, "likes": int, "views": int}}, "darkMode"?: bool}}
-12. "InstagramComment"   — Instagram comment with avatar and like count.
+ 8. "InstagramComment"   — Instagram comment with avatar and like count.
                             Props: {{"username": str, "comment": str, "timestamp"?: str, "likes"?: int}}
-13. "IMessageBubble"     — iMessage bubble with typewriter mode.
+ 9. "IMessageBubble"     — iMessage bubble with typewriter mode.
                             Props: {{"text": str, "messageType": "incoming"|"outgoing", "status"?: "Delivered"|"Read", "typewriter"?: bool}}
-14. "TikTokComment"      — TikTok comment with likes.
+10. "TikTokComment"      — TikTok comment with likes.
                             Props: {{"username": str, "comment": str, "likes"?: int}}
 
-15. "StatCard"           — Animated count-up number with label and accent divider. Prefix/suffix formatting.
+11. "StatCard"           — Animated count-up number with label and accent divider. Prefix/suffix formatting.
                             Best for: Revenue stats, subscriber counts, KPIs.
                             Props: {{"value": number, "label": str, "prefix"?: str, "suffix"?: str, "fromValue"?: number, "decimals"?: int, "accentColor"?: "#hex"}}
 
-16. "StickyNotes"        — 1–3 sticky notes slam on with spring physics. Color, rotation, handwritten text (Caveat Brush).
+12. "StickyNotes"        — 1–3 sticky notes slam on with spring physics. Color, rotation, handwritten text (Caveat Brush).
                             Best for: Key takeaways, tip lists, educational content.
                             Props: {{"notes": [{{"text": str, "color": "#hex", "rotation": float}}, ...]}} (1-3 notes)
 
-17. "Toggle"             — iOS-style toggle that flips on at configurable time. Label text.
+13. "Toggle"             — iOS-style toggle that flips on at configurable time. Label text.
                             Best for: Feature toggles, on/off reveals, settings demos.
                             Props: {{"text": str, "activateAtMs"?: int, "onColor"?: "#hex"}}
 
-18. "TornPaper"          — Two torn paper strips slam from opposite sides with stop-motion impact. Shadow blocks for depth.
+14. "TornPaper"          — Two torn paper strips slam from opposite sides with stop-motion impact. Shadow blocks for depth.
                             Best for: Bold statements, key points, "vs" comparisons.
                             Props: {{"topText": str (<=5 words), "bottomText": str (<=5 words)}}
 
@@ -4401,8 +4384,8 @@ REMOVE_WORDS GUIDANCE:
         "StageZoom", "DepthPull",
     }
     _valid_mg_types = {
-        "LowerThird", "AnnotationArrow", "BRollFrame", "ChartReveal", "ChatThread",
-        "ComparisonSplit", "Notification", "ProgressBar", "QuoteCard", "RecordingFrame",
+        "AnnotationArrow", "ChatThread",
+        "Notification", "ProgressBar", "QuoteCard", "RecordingFrame",
         "StatCard", "StickyNotes", "Toggle", "TornPaper",
         "TweetBubble", "InstagramComment", "IMessageBubble", "TikTokComment",
     }
@@ -9020,8 +9003,8 @@ VALID_ZOOM_TYPES = {
 }
 
 VALID_MG_TYPES = {
-    "LowerThird", "AnnotationArrow", "BRollFrame", "ChartReveal", "ChatThread",
-    "ComparisonSplit", "Notification", "ProgressBar", "QuoteCard", "RecordingFrame",
+    "AnnotationArrow", "ChatThread",
+    "Notification", "ProgressBar", "QuoteCard", "RecordingFrame",
     "StatCard", "StickyNotes", "Toggle", "TornPaper",
     "TweetBubble", "InstagramComment", "IMessageBubble", "TikTokComment",
 }

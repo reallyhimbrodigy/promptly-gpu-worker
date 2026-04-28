@@ -40,10 +40,12 @@ import {
   StageZoom, DepthPull,
 } from "./zoom";
 
-// Motion graphics — all 15 + 4 SpeechBubble variants
+// Motion graphics — 14 components total (10 standalone + 4 SpeechBubble variants).
+// LowerThird is imported here ONLY for the `lower_third` text_overlay variant
+// rendering below — it is no longer a usable motion_graphic type.
 import {
-  LowerThird, AnnotationArrow, BRollFrame, QuoteCard, StatCard,
-  Notification, ComparisonSplit, ChartReveal, ProgressBar, ChatThread,
+  LowerThird, AnnotationArrow, QuoteCard, StatCard,
+  Notification, ProgressBar, ChatThread,
   TornPaper, StickyNotes, Toggle, RecordingFrame,
   TweetBubble, InstagramComment, IMessageBubble, TikTokComment,
 } from "./motion-graphics";
@@ -67,8 +69,8 @@ const ZOOM_MAP: Record<string, React.FC<any>> = {
 };
 
 const MG_MAP: Record<string, React.FC<any>> = {
-  LowerThird, AnnotationArrow, BRollFrame, QuoteCard, StatCard,
-  Notification, ComparisonSplit, ChartReveal, ProgressBar, ChatThread,
+  AnnotationArrow, QuoteCard, StatCard,
+  Notification, ProgressBar, ChatThread,
   TornPaper, StickyNotes, Toggle, RecordingFrame,
   TweetBubble, InstagramComment, IMessageBubble, TikTokComment,
 };

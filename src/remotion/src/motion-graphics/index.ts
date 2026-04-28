@@ -1,22 +1,18 @@
 export { useMGPhase, resolveMGPosition } from "./shared";
 export type { MGTimingProps, MGPhaseState, MGPhase, MGPositionProps, MGAnchor } from "./shared";
 
+// LowerThird kept here ONLY for the `lower_third` text_overlay variant
+// to import; it is no longer a usable motion_graphic.
 export { LowerThird } from "./LowerThird";
 export type { LowerThirdProps } from "./LowerThird";
 export { AnnotationArrow } from "./AnnotationArrow";
 export type { AnnotationArrowProps } from "./AnnotationArrow";
-export { BRollFrame } from "./BRollFrame";
-export type { BRollFrameProps } from "./BRollFrame";
 export { QuoteCard } from "./QuoteCard";
 export type { QuoteCardProps } from "./QuoteCard";
 export { StatCard } from "./StatCard";
 export type { StatCardProps } from "./StatCard";
 export { Notification } from "./Notification";
 export type { NotificationProps, NotificationApp, NotificationItem } from "./Notification";
-export { ComparisonSplit } from "./ComparisonSplit";
-export type { ComparisonSplitProps, ComparisonContent } from "./ComparisonSplit";
-export { ChartReveal } from "./ChartReveal";
-export type { ChartRevealProps, DataPoint, ChartHighlight } from "./ChartReveal";
 export {
   SpeechBubble,
   TweetBubble,
