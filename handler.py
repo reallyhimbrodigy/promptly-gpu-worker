@@ -1193,12 +1193,12 @@ weighted counts — higher numbers = more frequent / more recent picks.
   Avg MGs per video:      {_avg_mg:.1f}
   Recent vibe prompts:    {_rv_tail}
 
-GUIDANCE:
-- Lean toward the user's top picks when the current vibe is compatible.
-- If the current vibe EXPLICITLY contradicts (e.g. "completely different look"),
-  ignore history and follow the vibe.
-- When two choices are equally defensible, pick the one the user has picked
-  before — it's the signal that their aesthetic has converged.
+GUIDANCE — important:
+- Use this profile as a LIGHT signal about general taste, NOT a "pick the same thing again" instruction.
+- For caption_style specifically: AVOID picking whichever style ranks #1 in their history if it appeared in either of their last 2 videos. Variety is itself a quality signal — top creators rotate caption styles across videos to keep their feed visually fresh. Pick something else from the appropriate vibe row in the DECISION MATRIX below.
+- For transitions, color effects, pacing: gentle bias toward their top picks is fine; people develop a consistent overall feel.
+- If the current vibe EXPLICITLY contradicts (e.g. "completely different look"), ignore history entirely.
+- The profile shows top 3 with recency-weighted counts. A score above ~3.0 means very recent + repeated; treat that as "the user already saw this; serve them something new this time."
 """
 
 
@@ -2527,58 +2527,70 @@ DECISION — which anchor:
 
 ONE style for the whole video. POSITION can change per segment.
 
-caption_style — pick EXACTLY ONE from 18 styles:
+caption_style — pick EXACTLY ONE from 18 styles. Read each description carefully — these are real components with distinct visual identities. Pick the one whose AESTHETIC matches the video's content register, not the one you used last time.
 
- 1. "HormoziPopIn"         — Bold uppercase words spring-pop one at a time. Highlight words scale up with custom colors. Thick black stroke.
+ 1. "HormoziPopIn"         — Bold uppercase words spring-pop one at a time. Highlight words scale up with custom colors. Thick black stroke. **Hormozi/MoneyTwitter aesthetic.** Keywords highlighted in gold by default.
                               Best for: Motivational clips, business advice, podcast highlights.
- 2. "EmojiPop"             — Words appear with automatic Lottie emoji animations. Active word gets color highlight. 48 built-in emoji mappings.
-                              Best for: Fun/casual content, storytelling, social media clips.
- 3. "PaperII"              — Lora serif. Words transition from dim to bright as spoken. Strip-based stacking, heavy shadow.
-                              Best for: Storytelling, narrative, poetry, journal-style.
- 4. "Prime"                — Two-tier system: Inter body, special words break out into oversized italic Playfair Display on their own line.
+ 2. "EmojiPop"             — Words appear with automatic Lottie emoji animations next to relevant nouns. Active word gets color highlight. 48 built-in emoji mappings — emoji selection is automatic, you can't override which words get which emoji.
+                              Best for: Fun/casual content, storytelling, social media clips, comedy.
+ 3. "PaperII"              — Lora serif. Words transition from dim to bright as spoken. Strip-based stacking, heavy shadow. Editorial paper-strip feel. Keywords highlighted in warm yellow.
+                              Best for: Storytelling, narrative, poetry, journal-style, long-form.
+ 4. "Prime"                — Two-tier system: Inter body, special words break out onto a new line in oversized italic Playfair Display. The keyword break-line is the entire visual identity.
                               Best for: Aspirational content, premium branding, lifestyle.
- 5. "TypewriterReveal"     — Character-by-character typewriter in Space Mono. Blinking cursor. Three schemes: classic, terminal, amber.
-                              Best for: Tech/coding, thoughtful narration, documentary.
- 6. "CinematicLetterpress" — Words emerge from blur into focus — cinematic "focus pull." Cormorant Garamond, light weight, wide letter-spacing.
-                              Best for: Documentary, film-style intros, art house.
- 7. "Cove"                 — Bold Montserrat base, special words switch to oversized italic Playfair Display with warm ethereal glow. ~2x scale contrast.
-                              Best for: Premium/luxury, brand storytelling, wellness.
- 8. "Dimidium"             — Heavy Montserrat, thick black stroke (14px), staggered left-aligned lines. Subtle floating sine-wave animation.
-                              Best for: Street style, urban, bold statements, hip-hop.
- 9. "EditorialPop"         — All Playfair Display — keywords scale to 1.7x bold italic, body stays light. Two-line staggered reveal.
-                              Best for: Magazine-style, fashion, interview quotes.
-10. "Gadzhi"               — Montserrat uppercase, words slide up with cubic ease-out. Gray to final color transition. Keywords land in gold.
-                              Best for: Business/hustle, agency reels, SMMA aesthetic.
-11. "Illuminate"           — Playfair Display with diagonal light sweep. Keywords keep a warm lingering glow. Cinematic spotlight.
-                              Best for: Cinematic narration, atmospheric storytelling.
-12. "Lumen"                — Montserrat body, keywords switch to Playfair with amber glow and gold underline sweep. Shine words get brightness flash.
-                              Best for: Warm inspirational, golden-hour aesthetics.
-13. "MagazineCutout"       — Individually cut-out paper pieces with cream background, random rotation, size variation. Collage aesthetic.
-                              Best for: Creative/art, collage, DIY/craft, zine-style.
-14. "Passage"              — Cormorant Garamond serif. Keywords expand letter-spacing on reveal and switch to italic warm gold.
+ 5. "TypewriterReveal"     — Character-by-character typewriter in Space Mono. Blinking cursor. NO keyword highlighting (animation IS the effect — every word looks the same).
+                              Optional extraProps: {{"scheme": "classic"|"terminal"|"amber"}} — classic = white on black, terminal = green-on-black hacker, amber = orange phosphor monitor.
+                              Best for: Tech/coding, thoughtful narration, documentary, retro.
+ 6. "CinematicLetterpress" — Words emerge from blur into focus — cinematic "focus pull" effect. Cormorant Garamond serif, light weight, wide letter-spacing. NO keyword highlighting (the blur-to-focus animation IS the effect).
+                              Best for: Documentary, film-style intros, art house, slow contemplative.
+ 7. "Cove"                 — Bold Montserrat base, special words switch to oversized italic Playfair Display with warm ethereal glow. ~2x scale contrast. Keywords get the glow treatment.
+                              Best for: Premium/luxury, brand storytelling, wellness, aspirational.
+ 8. "Dimidium"             — Heavy Montserrat, thick black stroke (14px), staggered left-aligned lines. Subtle floating sine-wave animation. Keywords highlighted with a different color.
+                              Best for: Street style, urban, bold statements, hip-hop, high-energy.
+ 9. "EditorialPop"         — All Playfair Display — keywords scale to 1.7x bold italic, body stays light. Two-line staggered reveal. Magazine-headline feel.
+                              Best for: Magazine-style, fashion, interview quotes, premium editorial.
+10. "Gadzhi"               — Montserrat uppercase, words slide up with cubic ease-out. Gray-to-final color transition. Keywords land in gold. Smooth/professional.
+                              Best for: Business/hustle, agency reels, SMMA aesthetic, professional.
+11. "Illuminate"           — Playfair Display with a diagonal light sweep across each word as it appears. Keywords keep a warm lingering glow. Cinematic spotlight feel.
+                              Best for: Cinematic narration, atmospheric storytelling, premium docs.
+12. "Lumen"                — Montserrat body, keywords switch to Playfair with amber glow and gold underline sweep. Shine words get a brightness flash.
+                              Best for: Warm inspirational, golden-hour aesthetics, brand campaigns.
+13. "MagazineCutout"       — Individually cut-out paper pieces with cream background, random rotation, size variation. Collage / zine aesthetic. NO keyword highlighting (every word is its own cutout — the chaos IS the effect).
+                              Optional extraProps: {{"maxRotation": 3}} for tight controlled craft, {{"maxRotation": 10}} for wild DIY chaos. Default 6.
+                              Best for: Creative/art, collage, DIY/craft, zine-style, indie.
+14. "Passage"              — Cormorant Garamond serif. Keywords expand letter-spacing on reveal and switch to italic warm gold. Literary, book-page feel.
                               Best for: Literary content, book quotes, long-form storytelling.
-15. "Pulse"                — Two-slot paired display — words appear in pairs that fade in together. Keywords get cyan accent.
+15. "Pulse"                — Two-slot paired display — words appear in pairs that fade in together. Keywords get cyan accent. Rhythmic, lyric-video feel.
                               Best for: Music, rhythmic narration, fast dialogue, lyric videos.
-16. "Quintessence"         — Single word at a time, centered, Playfair Display with dramatic vertical stretch (scaleY). Gold text, spring entrance.
-                              Best for: Single-word emphasis, dramatic pauses, poetry.
-17. "Serif"                — DM Serif Display body with keywords that scale up (1.35x) in italic with blue accent.
-                              Best for: Premium editorial, interview quotes, brand messaging.
-18. "StaggerWave"          — Montserrat uppercase, staggered spring entrance with sine-wave float. Active word lights up yellow.
+16. "Quintessence"         — Single word at a time, centered, Playfair Display with dramatic vertical stretch (scaleY). Gold text, spring entrance. NO keyword highlighting (every word is the focus — that's the whole point).
+                              Optional extraProps: {{"stretchY": 1.6}} default, increase to 2.0 for more dramatic stretch, decrease to 1.3 for subtle.
+                              Use for: Single-word emphasis moments, dramatic pauses, poetry, art-house.
+17. "Serif"                — DM Serif Display body with keywords that scale up (1.35x) in italic with blue accent. Premium editorial / brand-message feel.
+                              Best for: Premium editorial, interview quotes, brand messaging, calm.
+18. "StaggerWave"          — Montserrat uppercase, staggered spring entrance with sine-wave float. Active word lights up yellow. NO keyword highlighting (the active-word color IS the highlight; it follows the audio, not your keywords).
                               Best for: Dynamic content, workout/fitness, energetic reels.
 
-DECISION MATRIX — caption_style by content:
-  business, hustle, agency, motivational         → HormoziPopIn or Gadzhi
-  interview, podcast, thoughtful, calm           → Serif or Cove
-  gaming, tech, cyberpunk                        → TypewriterReveal or Dimidium
-  cinematic, documentary, dramatic               → CinematicLetterpress or Illuminate
-  aesthetic, lifestyle, travel, minimal          → Cove or Passage
-  creative, artistic, collage, music             → MagazineCutout or EmojiPop
-  luxury, fashion, premium                       → Prime or Passage
-  editorial, magazine, interview quote           → EditorialPop or Quintessence
-  storytelling, narrative, POV                   → PaperII or Cove
-  workout, fitness, energetic                    → StaggerWave or HormoziPopIn
-  music, rhythmic, lyric-driven                  → Pulse or Lumen
-  unsure                                          → HormoziPopIn
+NOTES ON KEYWORDS PER STYLE:
+  Styles that USE caption_keywords for highlighting: HormoziPopIn, PaperII, Prime, Cove, Dimidium, EditorialPop, Gadzhi, Illuminate, Lumen, Passage, Pulse, Serif (12 styles).
+  Styles that IGNORE caption_keywords by design: TypewriterReveal, CinematicLetterpress, MagazineCutout, Quintessence, StaggerWave, EmojiPop (6 styles — animation/aesthetic IS the effect, no per-word highlighting). When you pick one of these, the caption_keywords list still has narrative value (for emphasis_moments etc.) but won't visually highlight in captions.
+
+DECISION MATRIX — caption_style by content. Each row gives 4–5 valid choices in order of typical fit; rotate among them rather than always defaulting to the first. The user's past videos are visible to you in their style profile — if your top candidate matches the style they used in their LAST video, pick a different option from the same row.
+
+  business, hustle, agency, motivational    → HormoziPopIn / Gadzhi / Dimidium / Lumen / Pulse
+  interview, podcast, thoughtful, calm      → Serif / Cove / Passage / Illuminate / EditorialPop
+  gaming, tech, cyberpunk                   → TypewriterReveal / Dimidium / Pulse / StaggerWave / HormoziPopIn
+  cinematic, documentary, dramatic          → CinematicLetterpress / Illuminate / Quintessence / Passage / PaperII
+  aesthetic, lifestyle, travel, minimal     → Cove / Passage / Lumen / EditorialPop / Serif
+  creative, artistic, collage, music        → MagazineCutout / EmojiPop / Pulse / StaggerWave / Quintessence
+  luxury, fashion, premium                  → Prime / Passage / EditorialPop / Quintessence / Cove
+  editorial, magazine, interview quote      → EditorialPop / Quintessence / Serif / Passage / PaperII
+  storytelling, narrative, POV              → PaperII / Cove / Illuminate / Passage / CinematicLetterpress
+  workout, fitness, energetic               → StaggerWave / HormoziPopIn / Pulse / Dimidium / Gadzhi
+  music, rhythmic, lyric-driven             → Pulse / Lumen / EmojiPop / StaggerWave / Quintessence
+  comedy, casual, fun                       → EmojiPop / StaggerWave / MagazineCutout / Pulse / HormoziPopIn
+  art house, poetic, contemplative          → Quintessence / CinematicLetterpress / Passage / Illuminate / EditorialPop
+  unsure                                    → pick from any vibe row above that matches the dominant register; AVOID picking HormoziPopIn unless the content is genuinely hustle/business
+
+DON'T REPEAT YOURSELF. Top short-form creators use a VARIETY of caption styles across their videos — never the same one every time. If the user's profile shows they recently used HormoziPopIn, deliberately choose a different option from the appropriate row this time. Different content deserves different visual identity.
 
 caption_keywords — REQUIRED. The words that should be visually highlighted in captions for engagement. Aim for 1 keyword per ~5–10 spoken words across the kept transcript — that's roughly **8–15 keywords for a 30s video, 15–30 for a 60s video, 25–50 for a 90s video**. NOT every word, but FREQUENT — every emphasis target, every punchline noun, every reaction word, every reveal, every emotional verb, every vivid adjective. Sparse keywords (only 2–6) leave the captions feeling flat. Lowercase, no punctuation.
 
