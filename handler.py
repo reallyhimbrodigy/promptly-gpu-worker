@@ -8037,7 +8037,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     print(
         f"[integrity] All layers reached output spec: "
-        f"{_actual_zoom_parents} zoom parent(s), {len(transitions_out)} transition(s), "
+        f"{_actual_zooms} zoom(s), {len(transitions_out)} transition(s), "
         f"{len(motion_graphics_out)} MG(s), {len(text_overlays_out)} text overlay(s).",
         flush=True,
     )
