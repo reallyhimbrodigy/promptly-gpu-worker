@@ -3291,40 +3291,52 @@ WHAT FILLER IS
 
 Filler is any vocalization the speaker did not intend as part of their message — hesitation tokens, throat-clearing, social lubrication, abandoned thoughts the speaker themselves replaced. Content is everything the speaker chose to say: information, narrative structure, emotional weight, rhythm, voice, scene transitions, attribution, framing.
 
-The distinction is SPEAKER INTENT, not surface form. The same word ("so", "like", "actually", "I think", "well", "right") can be either — content when the speaker meant it as part of their message, filler when it slipped out as connective tissue while they organized their thoughts. There is no list of words that are always filler beyond the pure vocalizations ("um", "uh", "er", "erm", "hm"), and even those are content when used as deliberate beats. Apply the test below to every candidate, regardless of which word it is.
+The distinction is SPEAKER INTENT, not surface form. The same word can be either — content when the speaker meant it as part of their message, filler when it slipped out as connective tissue while they organized their thoughts. Speaker intent isn't directly observable. The four checks below are how you read it — observable signals replace the unobservable mental state. Apply them to every candidate.
 
-THE TEST (apply to every word you consider cutting)
+THE FOUR CHECKS
 
-Imagine the word is removed and the surrounding speech is played back. Would a fluent listener notice the seam? A seam means: broken grammar, dropped prosody, weakened meaning, lost rhythm, or speech that no longer sounds like the speaker delivering an intentional message.
+A candidate word or span is filler if and only if all four are affirmed:
 
-  • Seam audible → the word was load-bearing → KEEP. It is content even if it looks like filler.
-  • No seam → the word was filler → CUT. It is filler regardless of what category it fits.
+  1. AUDIO — the surrounding speech sounds like uninterrupted natural delivery without the candidate.
+  2. GRAMMAR — the remaining clause is well-formed.
+  3. INFORMATION — the candidate carries no information, structure, or weight the listener relies on for understanding the speaker's message.
+  4. DELIVERY — the speaker delivered the candidate without any observable deliberate emphasis.
 
-This test applies uniformly to every word in every video. You have the audio and video — use the speaker's actual delivery (stress, prosody, eye contact, pacing) as evidence of intent.
+If you cannot confidently affirm a check, it does not pass. Each check is a positive assertion you must affirm. Any one failure → keep.
 
-THE DEFAULT
+The conjunction is the only conservatism. There is no separate "default to keep" rule, no count target, no quota — the four checks are the gate. Apply them honestly.
 
-When the answer is unclear, keep. Real filler is unambiguous to a careful listener. If you have to argue for cutting a word, it is content.
+SPAN PRECEDENCE
+
+The four checks apply to spans of any length, not just single words. When both a span and its individual words would pass the checks, prefer the longest span — tag every word in it with the same classification. This catches multi-word fluff a per-word pass would miss.
+
+RESTART STRUCTURE (overrides the four checks)
+
+When you observe an abandoned-and-replaced sentence pattern — the speaker breaks off and starts over with a verbatim repeat, paraphrase, or correction within the same idea — tag every word in the abandoned attempt as cuttable_restart, even if those words would individually pass or fail the four checks. The replacement always wins. Never tag words from both instances of a repeated phrase.
+
+VIDEO OVERRIDES TRANSCRIPT
+
+When the transcript and the audio disagree — for example, the transcriber wrote a real word but the speaker actually vocalized "um" — classify based on what the speaker actually vocalized. The video is ground truth.
 
 CLASSIFICATION VOCABULARY (the labels to emit)
 
-  • "content" — the default. The seam test says keep, or you have any doubt at all.
-  • "cuttable_filler" — the seam test says cut, and the word is a hesitation/throat-clearing/social-lubrication token.
-  • "cuttable_restart" — the speaker abandoned a sentence and replaced it. Tag every word in the FIRST (abandoned) attempt. The SECOND (intended) version always stays whole. Never tag words from both instances of a repeated phrase.
-  • "cuttable_redundant" — a pure restatement that adds zero new information and zero emphasis value. Be extremely sparing; intentional repetition is almost always emphasis.
+  • "content" — the four checks did not all pass.
+  • "cuttable_filler" — the four checks all passed.
+  • "cuttable_restart" — abandoned attempt of a restart structure (the override above).
+  • "cuttable_redundant" — pure restatement with no new information and no emphasis value. The four checks govern; redundant restatement passes the information check (no new info) and typically the others.
   • "narrative_peak" — a genuine prosodic emphasis target where a visual effect belongs. The moment the speaker's voice peaks. 2–8 per video. Not a cut.
 
 Words tagged [MECHANICAL-CUT] in the input are already cut — do not re-emit them.
 
 SILENCE
 
-The mechanical pre-pass already cuts every silence gap above {dead_air_thresh:.2f}s. Per directive, ALL dead silence is cut — silence is never content. If you notice any sub-threshold pauses (breaths, between-clause gaps) the mechanical pass missed, flag them in silence_cuts. Be liberal: silences are not speech.
+The mechanical pre-pass already cuts every silence gap above {dead_air_thresh:.2f}s. Per directive, ALL dead silence is cut — silence is never content. If you notice any sub-threshold pauses (breaths, between-clause gaps) the mechanical pass missed, flag them in silence_cuts.
 
 TONAL REGISTER
 
 Output the overall tonal_register of the video — serious, educational, motivational, comedic, dramatic, or casual.
 
-Your classification is authoritative. Words you classify as cuttable_* are permanently removed before the editor sees the transcript. The seam test is the only test.""".replace(
+Your classification is authoritative. Words you classify as cuttable_* are permanently removed before the editor sees the transcript.""".replace(
         "{dead_air_thresh:.2f}", f"{_MECH_DEAD_AIR_THRESHOLD_S:.2f}"
     )
 
@@ -3337,7 +3349,7 @@ Return:
   • silence_cuts — sub-{_MECH_DEAD_AIR_THRESHOLD_S:.2f}s pauses anywhere in the audio. ALL dead silence is cut.
   • tonal_register — the overall tone of the video.
 
-Apply the seam test to every candidate cut: would a fluent listener notice the seam if the word were removed? Seam audible → keep. No seam → cut. When unclear, keep."""
+Apply the four checks to every candidate. All four must be affirmed for cuttable_filler. Apply the restart override when you see abandoned-and-replaced patterns. Prefer the longest passing span over individual words."""
 
     t0 = time.time()
     print(
