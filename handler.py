@@ -3285,68 +3285,81 @@ def run_content_analysis(deepgram_words, inline_video_bytes, mechanical_cuts):
             lines.append(f"  [{i}] {start:.2f}-{end:.2f} spk{spk}: {word_text}")
     transcript_lines = "\n".join(lines)
 
-    system_instruction = """You are the cut-decision system for a short-form video editor. Your job is to identify words and pauses that should be cut from the video so the final edit is tight and professional. You see the full video and full transcript. Cut quality matters more than cut quantity — one mistakenly-cut narrative word does more damage than five missed filler words. PRECISION over volume.
+    system_instruction = """You are the cut-decision system for a short-form video editor. Your job is to identify the FEW words that are clearly filler and should be cut from the video. You see the full video and full transcript.
 
-THE QUALITY BAR: every cut must improve the edit. The READING TEST is the only test that matters: read the sentence aloud both with and without the word — does the version without it still convey the same meaning, story beat, and emotional weight? If yes, the word is cuttable. If the version without it loses anything (information, setup, grammar, emphasis, rhythm), KEEP THE WORD. When in doubt, KEEP. Under-cutting is recoverable; cutting narrative content is not — viewers get a broken story and you've destroyed the speaker's actual words.
+THE PRIME DIRECTIVE: keep all valuable content. The user's exact rule is: dead silence and verbal tics like "um/uh/erm" should always be cut, but anything that has semantic, narrative, prosodic, or rhythmic value MUST stay. There is no recovery if you misclassify a content word as filler — the speaker's actual words get destroyed and the viewer sees a broken story. ZERO valuable cuts is the correct answer for almost every clean video. Output an empty word_analyses list when in doubt — that is the SAFE default.
+
+THE READING TEST (apply to every candidate cut, no exceptions):
+  Read the sentence aloud both WITH and WITHOUT the word.
+  - If the version without it changes the meaning, breaks grammar, removes setup, weakens emphasis, alters rhythm, or makes the speaker sound less like themselves → KEEP THE WORD.
+  - Only cut when removing the word leaves a sentence that is grammatically natural AND semantically identical AND emotionally identical.
 
 CLASSIFICATION VOCABULARY:
 
-1. "content" — DEFAULT for every word unless you can specifically justify cutting it. Includes: nouns, verbs, articles ("a", "an", "the"), pronouns ("I", "she", "he", "they"), conjunctions ("and", "but", "so"), prepositions, numbers, named entities, adjectives, adverbs that modify meaning. Most "common" words are content because they CARRY the grammar of the sentence even when they don't carry the topic.
+1. "content" — DEFAULT for every word. Almost every word is content. A word is content if removing it would be noticed by a careful listener — even subtly. Most "small" words are content because they carry grammar, rhythm, voice, or scene structure even when they don't carry the topic.
 
-2. "cuttable_filler" — ONLY classify a word as filler if ALL of these are true:
-   (a) Removing it leaves a fully grammatical, natural-sounding sentence.
-   (b) The word's removal does NOT eliminate a setup, simile, metaphor, intensifier, or transition that the next sentence depends on.
-   (c) The speaker isn't using it for prosodic emphasis (voice peak, slowed delivery).
-   (d) It fits one of the narrow categories below.
+2. "cuttable_filler" — VERY NARROW. ONLY four categories qualify, and ONLY when ALL preconditions hold (grammatical without it, no narrative role, no prosodic weight, no rhythmic purpose):
 
-   Narrow filler categories:
-   • Pure verbal tics (out of any sentence, you'd never say it): "uh", "um", "er", "hm" (these are usually caught mechanically already)
-   • Sentence-INITIAL discourse markers when followed by a complete sentence: "So,", "Well,", "OK so,", "I mean,"
-     (NOT mid-sentence "so" — "I went so I could see" has a real "so")
-   • Terminal hedges: "right?", "you know?", "okay?" at the END of a statement
-   • Repeated standalone "like" used as a discourse particle: "we were, like, leaving" — not "I felt like X" or "this is like Y"
-   • One-word intensifiers ONLY when they don't carry prosodic weight AND removing them doesn't change the meaning: "literally", "actually", "really", "honestly", "basically"
-     CAUTION: "I literally died" with prosodic weight on "literally" is content. Cut only when "literally" sounds like a verbal tic.
+   (a) Pure verbal tics with no semantic content: "uh", "um", "er", "erm", "hm", "uhh". (These are usually already caught mechanically — only emit if mechanical missed one or visual context shows the speaker said "um" but Deepgram transcribed it as a real word.)
 
-   THINGS THAT ARE NEVER FILLER (do not classify these as cuttable):
-   • Articles ("the", "a", "an") — "who fuck is Stelius" is grammatically broken; "the" is required.
-   • Pronouns and subject words: "I", "she", "he", "they", "it" — even when sentence-starting.
-   • "I felt", "I saw", "I had", "I went", "I was" — these are NARRATIVE FRAMES that set up what follows.
-   • Simile/metaphor setups: "I felt like I had been [X]" — every word matters; the metaphor is the point.
-   • "I'm going to [verb]", "I want to [verb]", "I have to [verb]" — these are intent constructions; cutting them removes the speaker's stated intention.
-   • Time/temporal markers: "and then", "after that", "before", "later" — these are story structure.
-   • Quantifiers when factual: "five", "two thousand", "every five seconds" — these are data.
+   (b) Sentence-INITIAL pure discourse particles, ONLY at the very opening of the video or at the start of a NEW thought after a hard reset, AND only when the sentence is fully complete without them: "So,", "Well,", "OK so,", "I mean,".
+       - Cut "So" only when it's a throat-clearing opener with no narrative function.
+       - DO NOT cut "And", "But", "So" when they bridge clauses, scenes, or beats — see NEVER-FILLER below.
 
-3. "cuttable_restart" — entire abandoned sentences. Tag every word in the FIRST instance only, NEVER both instances of a phrase that repeats. Examples:
-   • "So I was — but actually let me back up." → tag "So", "I", "was", "but" as cuttable_restart (first abandoned thought).
-   • "I said — I said who is he?" → tag ONLY the first "I", "said" (3-word version) — leave "I said who is he?" intact (the complete second instance).
+   (c) Terminal hedges at the END of a complete statement: "right?", "you know?", "okay?", "or whatever".
+       - The hedge must be at the actual end of the utterance, not embedded mid-sentence.
+
+   (d) Repeated standalone "like" used as a discourse particle ONLY: "we were, like, leaving" — and only when surrounded by commas/pauses showing it's a tic, not the verb/preposition/conjunction "like".
+       - NEVER cut "like" in: "I felt like I had been...", "this is like a movie", "I like it", "things like that".
+
+THINGS THAT ARE NEVER FILLER (do not classify any of these as cuttable, ever):
+
+   • Articles: "the", "a", "an" — required for grammar.
+   • Pronouns: "I", "you", "he", "she", "it", "we", "they", "me", "him", "her", "us", "them" — required for grammar even sentence-initial.
+   • Auxiliaries / be-verbs: "is", "was", "were", "had", "has", "have", "do", "does", "did", "will", "would", "could", "should", "can", "may" — these are verbs.
+   • Possessives: "my", "your", "his", "her", "our", "their", "its".
+   • Sentence-bridging connectives: "And", "But", "So", "Then", "Now", "Also", "Yet" at the start of a clause/sentence/scene that adds NEW content. Examples that MUST be kept:
+       - "I went to work. **And** that afternoon, she started calling me." — "And" bridges scenes.
+       - "She told me to mind my own business. **But** I felt like I'd been electrocuted." — "But" sets up the contrast.
+       - "I said, who is he? **So** she said, don't believe everything..." — "So" is the consequence.
+     A sentence-starting "And/But/So" is filler ONLY when it leads to nothing (an abandoned thought) or it's a tic with zero clausal function. If it precedes a complete clause that adds meaning → it's content.
+   • Narrative frames: "I felt", "I saw", "I had", "I went", "I was", "I told", "I said", "I thought", "I knew", "I heard", "I started", "she said", "he said", "they said" — these set up what follows; cutting them flattens narration.
+   • Simile/metaphor setups: "I felt like X", "it was like Y", "this is like Z" — every word in the simile is the metaphor.
+   • Intent constructions: "I'm going to", "I want to", "I have to", "I had to", "I need to", "I tried to" — cutting these removes the speaker's stated action.
+   • Time/scene markers: "and then", "after that", "before", "later", "that afternoon", "the next day", "that morning", "finally", "suddenly", "eventually", "meanwhile", "first", "then", "next" — story structure.
+   • Quantifiers when factual: "five", "two thousand", "every five seconds", "six years old", "twice", "first" — data.
+   • One-word intensifiers — these are VOICE: "literally", "actually", "really", "honestly", "basically", "definitely", "totally", "absolutely", "completely", "obviously", "exactly", "seriously", "genuinely", "frankly". Cutting them removes the speaker's personality. KEEP them.
+   • Speaker-attribution beats inside dialogue: "I'm John", "she said", "he goes", "they were like" — these introduce or attribute speech and are content.
+   • Anything with prosodic weight (voice peak, drawn-out delivery, emphasis stress).
+   • Anything you can't immediately and confidently name a narrow filler category for.
+
+3. "cuttable_restart" — entire abandoned sentences caught by the speaker themselves. Tag every word in the FIRST (abandoned) instance only, NEVER both instances of a phrase that repeats:
+   • "So I was — but actually let me back up." → tag "So", "I", "was", "but" — abandoned thought.
+   • "I said — I said who is he?" → tag ONLY the first "I said" — leave "I said who is he?" whole.
    • "Twenty… twenty-five thousand." → tag the first "Twenty" only.
    ABSOLUTE RULE: if a phrase repeats, the SECOND (intended) version stays whole. Never tag words from both instances.
 
-4. "cuttable_redundant" — pure restatement that adds zero new information. Be sparing; intentional repetition is often emphasis ("very, very good"; "no, no, no"). Examples:
-   • "calling me, like, calling me again" → middle "like" is filler, not redundant; the two "calling me"s might be intentional.
-   • "this is huge, it's huge" → the second "it's huge" might be redundant ONLY if the speaker isn't doubling down for emphasis.
-   When in doubt, leave it as content.
+4. "cuttable_redundant" — pure restatement that adds zero new information AND zero emphasis value. Be EXTREMELY sparing — intentional repetition is almost always emphasis ("very, very good"; "no, no, no"; "calling me, calling me, calling me"). Default to keeping repetition unless it's clearly an unintentional restart.
 
 5. "narrative_peak" — a genuine prosodic emphasis target where a visual effect belongs. Listen for the moment the speaker's voice peaks. 2-8 per video.
 
 ADDITIONAL OUTPUT — silence_cuts:
 
-The mechanical pre-pass already cut all gaps above {dead_air_thresh:.2f}s. Flag ADDITIONAL sub-threshold pauses (breaths, thinking pauses) only when they read as drag. Be conservative — natural sentence-rhythm pauses are part of speech.
+The mechanical pre-pass already cuts all gaps above {dead_air_thresh:.2f}s. Per the user's directive, ALL dead silence is cut — silence is never content. If you notice ANY sub-threshold pauses (breaths, between-clause gaps, micro-pauses) that the mechanical pass would have missed, flag them. Be liberal here: silences are not speech, viewers don't miss them.
 
 RULES:
 
-- DEFAULT every word to content. Only emit a classification if you can articulate which narrow category it fits.
+- DEFAULT every word to content. Only emit a classification if you can articulate which exact narrow category it fits AND the reading test passes.
 - Words tagged [MECHANICAL-CUT] are already cut — do not re-emit.
-- A typical 60-second talking-head clip yields 5–20 cuttable_* entries (mostly clear discourse markers and abandoned phrases). Aggressive editors cut 20–35 in filler-heavy footage. Going above ~15% of total words means you're cutting narrative content — STOP.
+- TYPICAL COUNT: 0-5 cuttable_* entries on most videos. Zero is a perfectly valid answer and is often the CORRECT answer. Do not feel pressure to find filler that isn't there — the mechanical pass already caught the obvious tics. Going above 8% of total words means you're almost certainly cutting narrative content — STOP and re-read the candidates.
 - For repeated phrases: the SECOND instance is the intended one. Never cut both.
-- If you're considering cutting a word and you can't immediately name which narrow category it fits, it's content.
+- If you can argue both ways about a word, it's content. Genuine filler is OBVIOUS — you don't need to debate it.
 
 TONAL REGISTER:
 
 Also output the overall tonal_register of the video — serious, educational, motivational, comedic, dramatic, or casual.
 
-Your classification is authoritative — words you classify as cuttable_* are PERMANENTLY removed before the editor sees the transcript. There is no recovery if you misclassify a narrative word as filler. Be precise, not prolific.""".replace(
+Your classification is authoritative — words you classify as cuttable_* are PERMANENTLY removed before the editor sees the transcript. Bias HARD toward keeping. The cost of one missed filler word is invisible; the cost of one cut content word is a broken sentence the viewer notices.""".replace(
         "{dead_air_thresh:.2f}", f"{_MECH_DEAD_AIR_THRESHOLD_S:.2f}"
     )
 
@@ -3355,11 +3368,11 @@ Your classification is authoritative — words you classify as cuttable_* are PE
 {transcript_lines}
 
 Return:
-  • word_analyses — only cuttable_filler / cuttable_restart / cuttable_redundant / narrative_peak entries you can JUSTIFY. Unemitted indices (0..{len(_words) - 1}) default to content. Typical count: 5–15 entries on a clean talking-head video, 15–25 on filler-heavy interview footage.
-  • silence_cuts — sub-{_MECH_DEAD_AIR_THRESHOLD_S:.2f}s pauses that read as drag in context (be conservative — natural rhythm pauses are speech).
+  • word_analyses — emit ONLY cuttable_filler / cuttable_restart / cuttable_redundant / narrative_peak entries you can JUSTIFY against the narrow categories. Unemitted indices (0..{len(_words) - 1}) default to content. ZERO cuttable_* entries is a valid and often CORRECT answer when the speech is clean. Typical count: 0–5 entries. If you find yourself emitting more than 8% of words as cuttable, you are over-cutting — re-audit each one against the reading test and the NEVER-FILLER list before emitting.
+  • silence_cuts — sub-{_MECH_DEAD_AIR_THRESHOLD_S:.2f}s pauses anywhere in the audio. Per user directive, ALL dead silence is cut.
   • tonal_register — the overall tone of the video.
 
-Apply the READING TEST to every candidate cut: read the sentence aloud with and without the word. If the meaning, setup, grammar, or emphasis changes, KEEP IT."""
+Apply the READING TEST to every candidate cut: read the sentence aloud with and without the word. If the meaning, setup, grammar, emphasis, rhythm, or speaker's voice changes in any way, KEEP IT. When in doubt: KEEP IT. Bias hard toward zero cuts."""
 
     t0 = time.time()
     print(
@@ -3452,12 +3465,15 @@ Apply the READING TEST to every candidate cut: read the sentence aloud with and 
     # empty; remove_words in Gemini's output is reserved for narrative range
     # cuts (the prompt prefers per-clip `speed` 1.3-1.4x for low-value pacing).
     tonal = str(parsed.get("tonal_register") or "casual")
-    # Calibration check: warn on OVER-cutting (the failure mode we just
-    # spent a render fixing — content-analysis was destroying narrative
-    # connectives and metaphor setups). If cuts exceed 15% of total
-    # words, content-analysis is likely classifying narrative content as
-    # filler. Under-cutting is recoverable; over-cutting destroys the
-    # speaker's actual sentences.
+    # Calibration check: warn on OVER-cutting (the failure mode this prompt
+    # is calibrated against — content-analysis destroying narrative
+    # connectives, intent constructions, simile setups, scene bridges).
+    # Per the user's directive, valuable content must NEVER be cut — the
+    # only safe cuts are obvious tics ("um/uh/erm") that mechanical missed,
+    # narrow-category fillers (initial "So,", terminal "you know?", etc.),
+    # phrasal restarts, and pure restatement. ZERO cuts is the safe answer.
+    # Anything above ~5% on a clean talking-head video means narrative
+    # content is being misclassified as filler.
     _cut_rate = (len(word_cuts) / max(len(_words), 1)) * 100.0
     print(
         f"[content-analysis] classified: {len(word_cuts)} analysis-cuts "
@@ -3465,12 +3481,13 @@ Apply the READING TEST to every candidate cut: read the sentence aloud with and 
         f"{len(protected)} protected ({len(peaks)} peaks), tone={tonal} ({elapsed:.1f}s)",
         flush=True,
     )
-    if _cut_rate > 15.0:
+    if _cut_rate > 8.0:
         print(
             f"[content-analysis] WARNING: high cut rate ({_cut_rate:.1f}%) — "
-            f"likely OVER-cutting narrative content. Target is 5–15% on "
-            f"talking-head footage; >15% usually means narrative connectives "
-            f"or simile setups got classified as filler.",
+            f"likely OVER-cutting narrative content. Target is 0–5% on clean "
+            f"talking-head footage; >8% usually means narrative connectives, "
+            f"intent constructions, simile setups, or scene bridges got "
+            f"classified as filler.",
             flush=True,
         )
     return {
