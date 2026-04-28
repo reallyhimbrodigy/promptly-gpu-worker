@@ -3278,56 +3278,68 @@ def run_content_analysis(deepgram_words, inline_video_bytes, mechanical_cuts):
             lines.append(f"  [{i}] {start:.2f}-{end:.2f} spk{spk}: {word_text}")
     transcript_lines = "\n".join(lines)
 
-    system_instruction = """You are the cut-decision system for a short-form video editor. Your job is to identify every word and pause that should be cut from the video so the final edit is tight, professional, and viral-ready — the standard set by top short-form creators (Captions app, Opus Clip, etc.). You see the full video and full transcript. Be decisive.
+    system_instruction = """You are the cut-decision system for a short-form video editor. Your job is to identify words and pauses that should be cut from the video so the final edit is tight and professional. You see the full video and full transcript. Cut quality matters more than cut quantity — one mistakenly-cut narrative word does more damage than five missed filler words. PRECISION over volume.
 
-THE QUALITY BAR: zero perceptible silence, zero filler. A typical 60-second talking-head video should yield 30–80 cuttable_* word entries plus a handful of silence_cuts. Under-cutting reads as amateur. The bias is AGGRESSIVE — when you're 50/50 on whether a word is filler or content, classify it as cuttable. The cost of leaving filler in is far higher than the cost of cutting one borderline word.
+THE QUALITY BAR: every cut must improve the edit. The READING TEST is the only test that matters: read the sentence aloud both with and without the word — does the version without it still convey the same meaning, story beat, and emotional weight? If yes, the word is cuttable. If the version without it loses anything (information, setup, grammar, emphasis, rhythm), KEEP THE WORD. When in doubt, KEEP. Under-cutting is recoverable; cutting narrative content is not — viewers get a broken story and you've destroyed the speaker's actual words.
 
 CLASSIFICATION VOCABULARY:
 
-1. "content" — a substantive word that genuinely carries the meaning of the sentence. Nouns, verbs with semantic weight, numbers, named entities, descriptive adjectives, the actual subject/predicate of the thought. The reader should be able to remove this word and have the sentence stop making sense.
+1. "content" — DEFAULT for every word unless you can specifically justify cutting it. Includes: nouns, verbs, articles ("a", "an", "the"), pronouns ("I", "she", "he", "they"), conjunctions ("and", "but", "so"), prepositions, numbers, named entities, adjectives, adverbs that modify meaning. Most "common" words are content because they CARRY the grammar of the sentence even when they don't carry the topic.
 
-2. "cuttable_filler" — any word functioning as filler, hedge, discourse marker, intensifier, or verbal tic in this specific context. CUT THESE AGGRESSIVELY. Categories:
-   • Hedges: "kind of", "sort of", "I guess", "I think", "I mean", "you know", "honestly", "basically"
-   • Intensifiers without semantic value: "literally", "really", "actually", "totally", "definitely", "absolutely", "obviously", "clearly", "essentially"
-   • Discourse markers: "like" (when not a comparison), "so" (sentence-initial), "well" (sentence-initial), "right?" (terminal), "you know?" (terminal), "OK so", "alright"
-   • Softeners: "just", "maybe", "probably", "perhaps", "kind of"
-   • Restart-leadins: "And then", "And so", "But like", "But then", "And basically"
-   The litmus test: if the sentence reads cleaner without the word, it's cuttable_filler. The ONLY exception: if this word is the prosodic peak of the sentence (the reader hits it hard for emphasis), it's narrative_peak instead — but that's rare; most "literally"s and "actually"s are filler.
+2. "cuttable_filler" — ONLY classify a word as filler if ALL of these are true:
+   (a) Removing it leaves a fully grammatical, natural-sounding sentence.
+   (b) The word's removal does NOT eliminate a setup, simile, metaphor, intensifier, or transition that the next sentence depends on.
+   (c) The speaker isn't using it for prosodic emphasis (voice peak, slowed delivery).
+   (d) It fits one of the narrow categories below.
 
-3. "cuttable_restart" — every word in any abandoned thought, partial sentence, mid-sentence reset, or self-correction. Tag ALL the abandoned words, not just the last one. Examples:
-   • "So I was — but actually let me back up." → tag "So", "I", "was", "but" as cuttable_restart (the speaker abandoned the first thought).
-   • "I said — I said who is he?" → tag the first "I", "said" as cuttable_restart.
-   • "Twenty… twenty-five thousand." → tag the first "Twenty" as cuttable_restart (self-correction).
-   • Any clause the speaker bailed on without finishing — every word in it is cuttable_restart.
+   Narrow filler categories:
+   • Pure verbal tics (out of any sentence, you'd never say it): "uh", "um", "er", "hm" (these are usually caught mechanically already)
+   • Sentence-INITIAL discourse markers when followed by a complete sentence: "So,", "Well,", "OK so,", "I mean,"
+     (NOT mid-sentence "so" — "I went so I could see" has a real "so")
+   • Terminal hedges: "right?", "you know?", "okay?" at the END of a statement
+   • Repeated standalone "like" used as a discourse particle: "we were, like, leaving" — not "I felt like X" or "this is like Y"
+   • One-word intensifiers ONLY when they don't carry prosodic weight AND removing them doesn't change the meaning: "literally", "actually", "really", "honestly", "basically"
+     CAUTION: "I literally died" with prosodic weight on "literally" is content. Cut only when "literally" sounds like a verbal tic.
 
-4. "cuttable_redundant" — a word or phrase that repeats a concept the speaker just stated with no added value. Example: "calling, calling again" — the second "calling" is redundant. "this is huge, it's huge" — the second "huge" is redundant. Be aggressive about repetition.
+   THINGS THAT ARE NEVER FILLER (do not classify these as cuttable):
+   • Articles ("the", "a", "an") — "who fuck is Stelius" is grammatically broken; "the" is required.
+   • Pronouns and subject words: "I", "she", "he", "they", "it" — even when sentence-starting.
+   • "I felt", "I saw", "I had", "I went", "I was" — these are NARRATIVE FRAMES that set up what follows.
+   • Simile/metaphor setups: "I felt like I had been [X]" — every word matters; the metaphor is the point.
+   • "I'm going to [verb]", "I want to [verb]", "I have to [verb]" — these are intent constructions; cutting them removes the speaker's stated intention.
+   • Time/temporal markers: "and then", "after that", "before", "later" — these are story structure.
+   • Quantifiers when factual: "five", "two thousand", "every five seconds" — these are data.
 
-5. "narrative_peak" — a genuine prosodic emphasis target where the speaker's voice peaks and a visual effect (zoom, MG, SFX) belongs. Listen and watch carefully — these are the punchline nouns, the reveal words, the reaction words. They're not rare; on a typical talking-head video there are several per minute. Tag them when you hear/see them clearly.
+3. "cuttable_restart" — entire abandoned sentences. Tag every word in the FIRST instance only, NEVER both instances of a phrase that repeats. Examples:
+   • "So I was — but actually let me back up." → tag "So", "I", "was", "but" as cuttable_restart (first abandoned thought).
+   • "I said — I said who is he?" → tag ONLY the first "I", "said" (3-word version) — leave "I said who is he?" intact (the complete second instance).
+   • "Twenty… twenty-five thousand." → tag the first "Twenty" only.
+   ABSOLUTE RULE: if a phrase repeats, the SECOND (intended) version stays whole. Never tag words from both instances.
+
+4. "cuttable_redundant" — pure restatement that adds zero new information. Be sparing; intentional repetition is often emphasis ("very, very good"; "no, no, no"). Examples:
+   • "calling me, like, calling me again" → middle "like" is filler, not redundant; the two "calling me"s might be intentional.
+   • "this is huge, it's huge" → the second "it's huge" might be redundant ONLY if the speaker isn't doubling down for emphasis.
+   When in doubt, leave it as content.
+
+5. "narrative_peak" — a genuine prosodic emphasis target where a visual effect belongs. Listen for the moment the speaker's voice peaks. 2-8 per video.
 
 ADDITIONAL OUTPUT — silence_cuts:
 
-The mechanical pre-pass already cut all gaps above {dead_air_thresh:.2f}s between word boundaries. Your job here is to flag any *additional* sub-threshold pauses that still read as drag in context — short hesitations between clauses, audible breaths, mid-thought thinking pauses. Emit a silence_cut entry for each:
-  • start: absolute source-time second where the silence begins (= preceding word's end timestamp).
-  • end: absolute source-time second where the silence ends (= following word's start timestamp).
-  • reason: "breath" | "thinking_pause" | "mid_clause_drag" | "other"
-Look for any pause that the eye/ear notices on first watch, even if it's only 100–250 ms. The user's quality bar is zero perceptible silence anywhere in the output.
+The mechanical pre-pass already cut all gaps above {dead_air_thresh:.2f}s. Flag ADDITIONAL sub-threshold pauses (breaths, thinking pauses) only when they read as drag. Be conservative — natural sentence-rhythm pauses are part of speech.
 
 RULES:
 
-- Emit classifications ONLY for words that are NOT content. Unemitted indices default to content.
-- Words tagged [MECHANICAL-CUT] are already cut by the deterministic pre-pass — do not re-emit them.
-- BIAS AGGRESSIVELY toward cutting. Top-tier short-form edits remove ~25–40% of the spoken words in a typical talking-head clip. If your output is short (<20 entries on a 60-second video), you're under-cutting.
-- A word can be filler in one sentence and content in the next. Judge each instance in context.
+- DEFAULT every word to content. Only emit a classification if you can articulate which narrow category it fits.
+- Words tagged [MECHANICAL-CUT] are already cut — do not re-emit.
+- A typical 60-second talking-head clip yields 5–20 cuttable_* entries (mostly clear discourse markers and abandoned phrases). Aggressive editors cut 20–35 in filler-heavy footage. Going above ~15% of total words means you're cutting narrative content — STOP.
+- For repeated phrases: the SECOND instance is the intended one. Never cut both.
+- If you're considering cutting a word and you can't immediately name which narrow category it fits, it's content.
 
 TONAL REGISTER:
 
-Also output the overall tonal_register of the video — serious, educational, motivational, comedic, dramatic, or casual. This drives downstream SFX gating (e.g., sad_trombone requires comedic register).
+Also output the overall tonal_register of the video — serious, educational, motivational, comedic, dramatic, or casual.
 
-Your classification is authoritative — the downstream editor builds a schema where:
-  - words you classify as cuttable_* AND ranges in silence_cuts are removed before the main edit call
-  - words you classify as content + narrative_peak are the ONLY words the main editor can anchor overlays to
-
-So be accurate AND aggressive: a true emphasis word misclassified as filler means the editor can't highlight it (rare cost). A filler word misclassified as content means the audience watches dead weight (frequent cost — the bigger problem). When in doubt, cut.""".replace(
+Your classification is authoritative — words you classify as cuttable_* are PERMANENTLY removed before the editor sees the transcript. There is no recovery if you misclassify a narrative word as filler. Be precise, not prolific.""".replace(
         "{dead_air_thresh:.2f}", f"{_MECH_DEAD_AIR_THRESHOLD_S:.2f}"
     )
 
@@ -3336,9 +3348,11 @@ So be accurate AND aggressive: a true emphasis word misclassified as filler mean
 {transcript_lines}
 
 Return:
-  • word_analyses — every cuttable_filler / cuttable_restart / cuttable_redundant / narrative_peak you see. Unemitted indices (0..{len(_words) - 1}) default to content. Be aggressive — target 30–80 cuttable_* entries for a typical 60-second video.
-  • silence_cuts — any sub-{_MECH_DEAD_AIR_THRESHOLD_S:.2f}s pause that still reads as drag (breaths, thinking pauses, mid-clause hesitations).
-  • tonal_register — the overall tone of the video."""
+  • word_analyses — only cuttable_filler / cuttable_restart / cuttable_redundant / narrative_peak entries you can JUSTIFY. Unemitted indices (0..{len(_words) - 1}) default to content. Typical count: 5–15 entries on a clean talking-head video, 15–25 on filler-heavy interview footage.
+  • silence_cuts — sub-{_MECH_DEAD_AIR_THRESHOLD_S:.2f}s pauses that read as drag in context (be conservative — natural rhythm pauses are speech).
+  • tonal_register — the overall tone of the video.
+
+Apply the READING TEST to every candidate cut: read the sentence aloud with and without the word. If the meaning, setup, grammar, or emphasis changes, KEEP IT."""
 
     t0 = time.time()
     print(
@@ -3431,20 +3445,25 @@ Return:
     # empty; remove_words in Gemini's output is reserved for narrative range
     # cuts (the prompt prefers per-clip `speed` 1.3-1.4x for low-value pacing).
     tonal = str(parsed.get("tonal_register") or "casual")
-    # Calibration check: if cut count is very low for a long video, log a
-    # warning so under-cutting is visible in the render output.
-    _cut_rate_per_min = (len(word_cuts) / max(len(_words), 1)) * 100.0
+    # Calibration check: warn on OVER-cutting (the failure mode we just
+    # spent a render fixing — content-analysis was destroying narrative
+    # connectives and metaphor setups). If cuts exceed 15% of total
+    # words, content-analysis is likely classifying narrative content as
+    # filler. Under-cutting is recoverable; over-cutting destroys the
+    # speaker's actual sentences.
+    _cut_rate = (len(word_cuts) / max(len(_words), 1)) * 100.0
     print(
         f"[content-analysis] classified: {len(word_cuts)} analysis-cuts "
-        f"({_cut_rate_per_min:.1f}% of words), {len(silence_range_cuts)} silence ranges, "
+        f"({_cut_rate:.1f}% of words), {len(silence_range_cuts)} silence ranges, "
         f"{len(protected)} protected ({len(peaks)} peaks), tone={tonal} ({elapsed:.1f}s)",
         flush=True,
     )
-    if len(_words) >= 100 and len(word_cuts) < max(10, int(len(_words) * 0.10)):
+    if _cut_rate > 15.0:
         print(
-            f"[content-analysis] WARNING: low cut rate "
-            f"({len(word_cuts)} cuts / {len(_words)} words) — likely under-cutting. "
-            f"Quality bar is 25–40% of words removed for filler/restart/redundancy.",
+            f"[content-analysis] WARNING: high cut rate ({_cut_rate:.1f}%) — "
+            f"likely OVER-cutting narrative content. Target is 5–15% on "
+            f"talking-head footage; >15% usually means narrative connectives "
+            f"or simile setups got classified as filler.",
             flush=True,
         )
     return {
