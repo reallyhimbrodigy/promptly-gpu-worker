@@ -140,13 +140,11 @@ export interface TikTokPageLike {
 }
 
 export type CaptionStyle =
-  | "EmojiPop"
   | "PaperII"
   | "Prime"
   | "TypewriterReveal"
   | "CinematicLetterpress"
   | "Cove"
-  | "Dimidium"
   | "EditorialPop"
   | "Illuminate"
   | "Lumen"

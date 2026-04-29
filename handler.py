@@ -61,9 +61,9 @@ from pydantic import BaseModel, Field
 from typing import List, Optional, Literal, Dict, Any
 
 _CAPTION_STYLES = Literal[
-    "EmojiPop", "PaperII",
+    "PaperII",
     "Prime", "TypewriterReveal", "CinematicLetterpress", "Cove",
-    "Dimidium", "EditorialPop", "Illuminate", "Lumen",
+    "EditorialPop", "Illuminate", "Lumen",
     "MagazineCutout", "Passage", "Pulse", "Quintessence", "Serif",
 ]
 _TRANSITION_TYPES = Literal[
@@ -2632,60 +2632,56 @@ DECISION — which anchor:
 
 ONE style for the whole video. POSITION can change per segment.
 
-caption_style — pick EXACTLY ONE from 15 styles. Read each description carefully — these are real components with distinct visual identities. Pick the one whose AESTHETIC matches the video's content register, not the one you used last time.
+caption_style — pick EXACTLY ONE from 13 styles. Read each description carefully — these are real components with distinct visual identities. Pick the one whose AESTHETIC matches the video's content register, not the one you used last time.
 
- 1. "EmojiPop"             — Words appear with automatic Lottie emoji animations next to relevant nouns. Active word gets color highlight. 48 built-in emoji mappings — emoji selection is automatic, you can't override which words get which emoji.
-                              Best for: Fun/casual content, storytelling, social media clips, comedy.
- 2. "PaperII"              — Lora serif. Words transition from dim to bright as spoken. Strip-based stacking, heavy shadow. Editorial paper-strip feel. Keywords highlighted in warm yellow.
+ 1. "PaperII"              — Lora serif. Words transition from dim to bright as spoken. Strip-based stacking, heavy shadow. Editorial paper-strip feel. Keywords highlighted in warm yellow.
                               Best for: Storytelling, narrative, poetry, journal-style, long-form.
- 3. "Prime"                — Two-tier system: Inter body, special words break out onto a new line in oversized italic Playfair Display. The keyword break-line is the entire visual identity.
+ 2. "Prime"                — Two-tier system: Inter body, special words break out onto a new line in oversized italic Playfair Display. The keyword break-line is the entire visual identity.
                               Best for: Aspirational content, premium branding, lifestyle.
- 4. "TypewriterReveal"     — Character-by-character typewriter in Space Mono. Blinking cursor. NO keyword highlighting (animation IS the effect — every word looks the same).
+ 3. "TypewriterReveal"     — Character-by-character typewriter in Space Mono. Blinking cursor. NO keyword highlighting (animation IS the effect — every word looks the same).
                               Optional extraProps: {{"scheme": "classic"|"terminal"|"amber"}} — classic = white on black, terminal = green-on-black hacker, amber = orange phosphor monitor.
                               Best for: Tech/coding, thoughtful narration, documentary, retro.
- 5. "CinematicLetterpress" — Words emerge from blur into focus — cinematic "focus pull" effect. Cormorant Garamond serif, light weight, wide letter-spacing. NO keyword highlighting (the blur-to-focus animation IS the effect).
+ 4. "CinematicLetterpress" — Words emerge from blur into focus — cinematic "focus pull" effect. Cormorant Garamond serif, light weight, wide letter-spacing. NO keyword highlighting (the blur-to-focus animation IS the effect).
                               Best for: Documentary, film-style intros, art house, slow contemplative.
- 6. "Cove"                 — Bold Montserrat base, special words switch to oversized italic Playfair Display with warm ethereal glow. ~2x scale contrast. Keywords get the glow treatment.
+ 5. "Cove"                 — Bold Montserrat base, special words switch to oversized italic Playfair Display with warm ethereal glow. ~2x scale contrast. Keywords get the glow treatment.
                               Best for: Premium/luxury, brand storytelling, wellness, aspirational.
- 7. "Dimidium"             — Heavy Montserrat, thick black stroke (14px), staggered left-aligned lines. Subtle floating sine-wave animation. Keywords highlighted with a different color.
-                              Best for: Street style, urban, bold statements, hip-hop, high-energy.
- 8. "EditorialPop"         — All Playfair Display — keywords scale to 1.7x bold italic, body stays light. Two-line staggered reveal. Magazine-headline feel.
+ 6. "EditorialPop"         — All Playfair Display — keywords scale to 1.7x bold italic, body stays light. Two-line staggered reveal. Magazine-headline feel.
                               Best for: Magazine-style, fashion, interview quotes, premium editorial.
- 9. "Illuminate"           — Playfair Display with a diagonal light sweep across each word as it appears. Keywords keep a warm lingering glow. Cinematic spotlight feel.
+ 7. "Illuminate"           — Playfair Display with a diagonal light sweep across each word as it appears. Keywords keep a warm lingering glow. Cinematic spotlight feel.
                               Best for: Cinematic narration, atmospheric storytelling, premium docs.
-10. "Lumen"                — Montserrat body, keywords switch to Playfair with amber glow and gold underline sweep. Shine words get a brightness flash.
+ 8. "Lumen"                — Montserrat body, keywords switch to Playfair with amber glow and gold underline sweep. Shine words get a brightness flash.
                               Best for: Warm inspirational, golden-hour aesthetics, brand campaigns.
-11. "MagazineCutout"       — Individually cut-out paper pieces with cream background, random rotation, size variation. Collage / zine aesthetic. NO keyword highlighting (every word is its own cutout — the chaos IS the effect).
+ 9. "MagazineCutout"       — Individually cut-out paper pieces with cream background, random rotation, size variation. Collage / zine aesthetic. NO keyword highlighting (every word is its own cutout — the chaos IS the effect).
                               Optional extraProps: {{"maxRotation": 3}} for tight controlled craft, {{"maxRotation": 10}} for wild DIY chaos. Default 6.
                               Best for: Creative/art, collage, DIY/craft, zine-style, indie.
-12. "Passage"              — Cormorant Garamond serif. Keywords expand letter-spacing on reveal and switch to italic warm gold. Literary, book-page feel.
+10. "Passage"              — Cormorant Garamond serif. Keywords expand letter-spacing on reveal and switch to italic warm gold. Literary, book-page feel.
                               Best for: Literary content, book quotes, long-form storytelling.
-13. "Pulse"                — Two-slot paired display — words appear in pairs that fade in together. Keywords get cyan accent. Rhythmic, lyric-video feel.
+11. "Pulse"                — Two-slot paired display — words appear in pairs that fade in together. Keywords get cyan accent. Rhythmic, lyric-video feel.
                               Best for: Music, rhythmic narration, fast dialogue, lyric videos.
-14. "Quintessence"         — Single word at a time, centered, Playfair Display with dramatic vertical stretch (scaleY). Gold text, spring entrance. NO keyword highlighting (every word is the focus — that's the whole point).
+12. "Quintessence"         — Single word at a time, centered, Playfair Display with dramatic vertical stretch (scaleY). Gold text, spring entrance. NO keyword highlighting (every word is the focus — that's the whole point).
                               Optional extraProps: {{"stretchY": 1.6}} default, increase to 2.0 for more dramatic stretch, decrease to 1.3 for subtle.
                               Use for: Single-word emphasis moments, dramatic pauses, poetry, art-house.
-15. "Serif"                — DM Serif Display body with keywords that scale up (1.35x) in italic with blue accent. Premium editorial / brand-message feel.
+13. "Serif"                — DM Serif Display body with keywords that scale up (1.35x) in italic with blue accent. Premium editorial / brand-message feel.
                               Best for: Premium editorial, interview quotes, brand messaging, calm.
 
 NOTES ON KEYWORDS PER STYLE:
-  Styles that USE caption_keywords for highlighting: PaperII, Prime, Cove, Dimidium, EditorialPop, Illuminate, Lumen, Passage, Pulse, Serif (10 styles).
-  Styles that IGNORE caption_keywords by design: TypewriterReveal, CinematicLetterpress, MagazineCutout, Quintessence, EmojiPop (5 styles — animation/aesthetic IS the effect, no per-word highlighting). When you pick one of these, the caption_keywords list still has narrative value (for emphasis_moments etc.) but won't visually highlight in captions.
+  Styles that USE caption_keywords for highlighting: PaperII, Prime, Cove, EditorialPop, Illuminate, Lumen, Passage, Pulse, Serif (9 styles).
+  Styles that IGNORE caption_keywords by design: TypewriterReveal, CinematicLetterpress, MagazineCutout, Quintessence (4 styles — animation/aesthetic IS the effect, no per-word highlighting). When you pick one of these, the caption_keywords list still has narrative value (for emphasis_moments etc.) but won't visually highlight in captions.
 
 DECISION MATRIX — caption_style by content. Each row gives 4–5 valid choices in order of typical fit; rotate among them rather than always defaulting to the first. The user's past videos are visible to you in their style profile — if your top candidate matches the style they used in their LAST video, pick a different option from the same row.
 
-  business, hustle, agency, motivational    → Dimidium / Lumen / Pulse / Cove / EditorialPop
+  business, hustle, agency, motivational    → Lumen / Pulse / Cove / EditorialPop
   interview, podcast, thoughtful, calm      → Serif / Cove / Passage / Illuminate / EditorialPop
-  gaming, tech, cyberpunk                   → TypewriterReveal / Dimidium / Pulse
+  gaming, tech, cyberpunk                   → TypewriterReveal / Pulse
   cinematic, documentary, dramatic          → CinematicLetterpress / Illuminate / Quintessence / Passage / PaperII
   aesthetic, lifestyle, travel, minimal     → Cove / Passage / Lumen / EditorialPop / Serif
-  creative, artistic, collage, music        → MagazineCutout / EmojiPop / Pulse / Quintessence
+  creative, artistic, collage, music        → MagazineCutout / Pulse / Quintessence
   luxury, fashion, premium                  → Prime / Passage / EditorialPop / Quintessence / Cove
   editorial, magazine, interview quote      → EditorialPop / Quintessence / Serif / Passage / PaperII
   storytelling, narrative, POV              → PaperII / Cove / Illuminate / Passage / CinematicLetterpress
-  workout, fitness, energetic               → Pulse / Dimidium
-  music, rhythmic, lyric-driven             → Pulse / Lumen / EmojiPop / Quintessence
-  comedy, casual, fun                       → EmojiPop / MagazineCutout / Pulse
+  workout, fitness, energetic               → Pulse
+  music, rhythmic, lyric-driven             → Pulse / Lumen / Quintessence
+  comedy, casual, fun                       → MagazineCutout / Pulse
   art house, poetic, contemplative          → Quintessence / CinematicLetterpress / Passage / Illuminate / EditorialPop
   unsure                                    → pick from any vibe row above that matches the dominant register
 
@@ -4548,9 +4544,9 @@ REMOVE_WORDS GUIDANCE:
     # raises on error — we do not substitute defaults or silently drop entries.
 
     _valid_caption_styles = {
-        "EmojiPop", "PaperII",
+        "PaperII",
         "Prime", "TypewriterReveal", "CinematicLetterpress", "Cove",
-        "Dimidium", "EditorialPop", "Illuminate", "Lumen",
+        "EditorialPop", "Illuminate", "Lumen",
         "MagazineCutout", "Passage", "Pulse", "Quintessence", "Serif",
     }
     _valid_zoom_types = {
@@ -9211,9 +9207,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 # ─── CAPTION / COMPONENT VOCABULARIES (enforced at validation + render time) ───
 
 VALID_CAPTION_STYLES = {
-    "EmojiPop", "PaperII",
+    "PaperII",
     "Prime", "TypewriterReveal", "CinematicLetterpress", "Cove",
-    "Dimidium", "EditorialPop", "Illuminate", "Lumen",
+    "EditorialPop", "Illuminate", "Lumen",
     "MagazineCutout", "Passage", "Pulse", "Quintessence", "Serif",
 }
 
@@ -9346,7 +9342,6 @@ def _resolve_caption_extra_props(style, keywords, edit_plan):
         "Passage": "keywords",
         "Pulse": "keywords",
         "Serif": "keywords",
-        "Dimidium": "highlightWords",
         "Prime": "specialWords",
         "Cove": "boxedWords",
     }

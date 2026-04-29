@@ -2,9 +2,6 @@ export { CaptionContainer } from "./shared/CaptionContainer";
 export type { CaptionStyleProps, TikTokToken, TikTokPage } from "./shared/types";
 export { normalizeWord, buildKeywordSet, isKeyword } from "./shared/keywords";
 
-export { EmojiPop } from "./EmojiPop";
-export type { EmojiPopProps, EmojiEntry } from "./EmojiPop";
-
 export { Prime } from "./Prime";
 export type { PrimeProps } from "./Prime";
 
@@ -13,9 +10,6 @@ export type { PaperIIProps, PaperIIHighlightWord } from "./PaperII";
 
 export { Cove } from "./Cove";
 export type { CoveProps } from "./Cove";
-
-export { Dimidium } from "./Dimidium";
-export type { DimidiumProps } from "./Dimidium";
 
 export { CinematicLetterpress } from "./CinematicLetterpress";
 export type { CinematicLetterpressProps } from "./CinematicLetterpress";
