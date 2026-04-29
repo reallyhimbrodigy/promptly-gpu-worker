@@ -223,7 +223,8 @@ let _lastRenderedFrames = 0;
 let _lastEncodedFrames = 0;
 const _intervalSamples = [];
 
-await renderMedia({
+try {
+  await renderMedia({
   serveUrl: bundleLocation,
   composition,
   // Codec selection by composition:
@@ -296,6 +297,28 @@ await renderMedia({
     }
   },
 });
+} catch (e) {
+  // Print every available error field — Remotion's ErrorWithStackFrame
+  // attaches symbolicated frames + frame number + delayRender callsite that
+  // the stock `throw` formatter in Node hides. These details are essential
+  // for diagnosing which component / line threw the actual exception.
+  console.error("[render-full] ─── RENDER ERROR ───");
+  console.error(`[render-full] error.name: ${e?.name}`);
+  console.error(`[render-full] error.message: ${e?.message}`);
+  if (e?.frame !== undefined) console.error(`[render-full] error.frame: ${e.frame}`);
+  if (e?.chunk !== undefined) console.error(`[render-full] error.chunk: ${e.chunk}`);
+  if (e?.delayRenderCall) console.error(`[render-full] delayRenderCall: ${e.delayRenderCall}`);
+  if (Array.isArray(e?.symbolicatedStackFrames)) {
+    console.error("[render-full] symbolicatedStackFrames:");
+    for (const f of e.symbolicatedStackFrames) {
+      console.error(`    at ${f.functionName} (${f.fileName}:${f.lineNumber}:${f.columnNumber})`);
+    }
+  }
+  if (e?.cause) console.error(`[render-full] error.cause: ${e.cause?.stack ?? e.cause}`);
+  if (e?.stack) console.error(`[render-full] stack:\n${e.stack}`);
+  // Re-throw so Node exits non-zero and Python sees rc=1.
+  throw e;
+}
 
 const renderElapsed = (Date.now() - tRender) / 1000;
 if (_intervalSamples.length) {

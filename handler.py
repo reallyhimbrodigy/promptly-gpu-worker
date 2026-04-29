@@ -8794,9 +8794,16 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         _elapsed = time.time() - _t0
         if _r.returncode != 0:
+            # Print the full stdout + stderr so the failure mode is debuggable
+            # (truncated tail-only logs hid the actual JS exception class and
+            # symbolicated stack frames in prior runs).
+            _stderr_full = _r.stderr or ""
+            _stdout_full = _r.stdout or ""
+            print(f"[{label}] ─── FULL STDOUT ───\n{_stdout_full}", flush=True)
+            print(f"[{label}] ─── FULL STDERR ───\n{_stderr_full}", flush=True)
             raise RuntimeError(
                 f"[{label}] Remotion render failed (rc={_r.returncode}) in "
-                f"{_elapsed:.1f}s: {(_r.stderr or '')[-1500:]}"
+                f"{_elapsed:.1f}s: {_stderr_full[-3000:]}"
             )
         # Surface render-fps lines for diagnostics.
         if _r.stdout:

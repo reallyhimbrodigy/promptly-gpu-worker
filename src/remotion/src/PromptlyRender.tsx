@@ -493,25 +493,33 @@ const ClipSeries: React.FC<{
   const byIdx = new Map<number, TransitionSpec>();
   for (const t of transitions) byIdx.set(t.afterClipIndex, t);
 
-  return (
-    <Series>
-      {clips.map((clip, i) => {
-        const trans = byIdx.get(i);
-        return (
-          <React.Fragment key={`clip-${clip.id}`}>
-            <Series.Sequence durationInFrames={clip.durationInFrames}>
-              <ClipRenderer clip={clip} sourceUrl={sourceUrl} />
-            </Series.Sequence>
-            {trans && i < clips.length - 1 ? (
-              <Series.Sequence durationInFrames={trans.durationInFrames}>
-                <TransitionRenderer transition={trans} sourceUrl={sourceUrl} />
-              </Series.Sequence>
-            ) : null}
-          </React.Fragment>
-        );
-      })}
-    </Series>
-  );
+  // Build a flat array of Series.Sequence children. Remotion's Series does
+  // flatten Fragments, but a direct array reads more clearly and avoids any
+  // ambiguity about per-child key collisions.
+  const children: React.ReactNode[] = [];
+  clips.forEach((clip, i) => {
+    children.push(
+      <Series.Sequence
+        key={`clip-${clip.id}`}
+        durationInFrames={Math.max(1, clip.durationInFrames)}
+      >
+        <ClipRenderer clip={clip} sourceUrl={sourceUrl} />
+      </Series.Sequence>
+    );
+    const trans = byIdx.get(i);
+    if (trans && i < clips.length - 1) {
+      children.push(
+        <Series.Sequence
+          key={`trans-${i}`}
+          durationInFrames={Math.max(1, trans.durationInFrames)}
+        >
+          <TransitionRenderer transition={trans} sourceUrl={sourceUrl} />
+        </Series.Sequence>
+      );
+    }
+  });
+
+  return <Series>{children}</Series>;
 };
 
 const BrollOverlays: React.FC<{ broll: BrollSpec[]; fps: number }> = ({ broll, fps }) => (
