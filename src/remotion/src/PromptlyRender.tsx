@@ -189,13 +189,24 @@ const CaptionSegmentRenderer: React.FC<{
     const pMid = page.startMs + page.durationMs / 2;
     if (pMid < segStartMs || pMid >= segEndMs) continue;
     const localStart = page.startMs - segStartMs;
-    // Shift page AND tokens by the same delta so they remain in the same
-    // coordinate system. The components subtract pageStartMs from
-    // token.fromMs to derive page-local time — that math only works when
-    // both are shifted together. Without this, mutating page.startMs alone
-    // breaks the per-token activation animations (words appear all at
-    // once instead of progressively as spoken).
-    const tokenDelta = page.startMs - Math.max(0, localStart);
+    // Shift page AND tokens by segStartMs so both end up in segment-local
+    // coordinates. The components compute (token.fromMs - pageStartMs) to
+    // derive page-local time for word activation animations — this works
+    // when:
+    //   • page.startMs - segStartMs (positive case): pageStartMs is
+    //     segment-relative; tokens shifted by segStartMs are also
+    //     segment-relative; difference is page-relative.
+    //   • localStart < 0 (page straddles segment boundary, midpoint puts
+    //     it in this segment): pageStartMs clamps to 0; tokens shifted
+    //     by segStartMs are segment-relative; difference equals the
+    //     segment-relative token time, which IS the correct activation
+    //     point inside the rendered page Sequence (since the page now
+    //     starts at segment frame 0).
+    // Using `segStartMs` as the delta — NOT `page.startMs - max(0,
+    // localStart)` — keeps both branches consistent. The earlier formula
+    // delayed tokens by up to (segStartMs − page.startMs) ms in the
+    // straddling case, producing visible caption stacking and lag.
+    const tokenDelta = segStartMs;
     clippedPages.push({
       ...page,
       startMs: Math.max(0, localStart),

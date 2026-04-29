@@ -2002,25 +2002,36 @@ def transcribe_audio(source_path):
     raise RuntimeError(f"Deepgram transcription failed after 3 attempts: {last_err}") from last_err
 
 
-def refine_word_boundaries_with_audio(words, source_path, sample_rate=16000):
-    """Snap each word's start/end to actual vocal-energy boundaries in the audio.
+def refine_word_boundaries_with_audio(words, source_path, sample_rate=48000):
+    """Snap each word's start/end to actual vocal-energy boundaries with
+    sample-level precision.
 
-    Deepgram returns approximate word boundaries (~30 ms drift typical) based on
-    its acoustic model. This pass uses the audio waveform itself as ground truth:
-    at each Deepgram-reported boundary, scan a ±60 ms window for the actual
-    vocal-energy crossing and snap to it. Cuts at refined boundaries land
-    cleanly between words — no padding or cushion required.
+    Deepgram returns word boundaries quantized to milliseconds and based on
+    its acoustic model — typical drift ±10–30 ms relative to where vocal
+    energy actually starts/ends. Audio cuts at Deepgram boundaries pull in
+    fragments of the previous/next word as audible residue (e.g., the "s-"
+    of a removed "so" leaking past a kept word's end).
+
+    This pass uses the audio waveform itself as ground truth and refines to
+    SAMPLE precision (1/48000 s ≈ 20.83 µs at 48 kHz). The audio cut path
+    downstream uses round(time * sample_rate) for indexing, so sample-precise
+    times become sample-precise cuts — no padding, no cushion, no rounding.
 
     Process:
-      1. Decode the full audio to mono PCM at `sample_rate`.
-      2. Compute RMS in 10 ms windows.
-      3. Threshold against (noise_floor × 2) to mark each window vocal/silent.
-      4. Detect rising edges (silence → vocal) and falling edges (vocal → silence).
-      5. For each word, snap start to the nearest rising edge within ±60 ms,
-         and end to the nearest falling edge within ±60 ms.
-      6. If no edge falls in the search window (back-to-back words with no
-         silence between them), keep Deepgram's value — there is no acoustic
-         boundary to snap to.
+      1. Decode the full audio to mono PCM at sample_rate (matches the
+         render audio rate so cut indices land on real samples).
+      2. Compute short-window RMS (1 ms = sample_rate/1000 samples) for
+         coarse boundary localization.
+      3. Threshold against (noise_floor × 2) to classify each window
+         vocal/silent.
+      4. Detect rising edges (silence → vocal) and falling edges (vocal →
+         silence) at 1 ms resolution.
+      5. For each Deepgram boundary, find the nearest 1 ms edge within
+         ±60 ms, then refine to sample precision: scan the surrounding
+         ±2 ms of audio sample-by-sample for the exact threshold crossing.
+      6. If no edge exists in the search window (back-to-back words with no
+         silence between them), keep Deepgram's value — there is no
+         acoustic boundary to snap to.
 
     Returns a NEW list of word dicts (does not mutate the input).
     """
@@ -2040,10 +2051,13 @@ def refine_word_boundaries_with_audio(words, source_path, sample_rate=16000):
         if len(samples) < sample_rate // 10:  # less than 100ms
             return list(words)
 
-        WINDOW_MS = 10
-        window_size = (sample_rate * WINDOW_MS) // 1000  # 160 samples for 16kHz
+        # 1 ms RMS windows for coarse boundary localization. At 48 kHz that's
+        # 48 samples per window. Smaller than the previous 10 ms grid, but
+        # the sub-millisecond refinement below is the real precision driver.
+        WINDOW_MS = 1
+        window_size = max(1, (sample_rate * WINDOW_MS) // 1000)
         n_windows = len(samples) // window_size
-        if n_windows < 10:
+        if n_windows < 100:
             return list(words)
         rms = np.sqrt(
             np.mean(samples[:n_windows * window_size].reshape(n_windows, window_size) ** 2, axis=1)
@@ -2059,14 +2073,64 @@ def refine_word_boundaries_with_audio(words, source_path, sample_rate=16000):
         # Detect rising/falling edges with virtual silence at both ends.
         padded = np.concatenate([[False], is_vocal, [False]])
         diff = np.diff(padded.astype(np.int8))
-        rising_idx = np.where(diff == 1)[0]    # window where vocal STARTS
-        falling_idx = np.where(diff == -1)[0]  # window where vocal ENDS (first silent window after vocal)
-        # Convert window indices to seconds at the boundary of each window
+        # rising_idx / falling_idx are window indices (0-based, 1 ms each).
+        rising_idx = np.where(diff == 1)[0]    # first VOCAL window after silence
+        falling_idx = np.where(diff == -1)[0]  # first SILENT window after vocal
+
+        # ── Sample-level refinement ────────────────────────────────────
+        # Within ±REFINE_RADIUS samples of the 1 ms-quantized edge, scan
+        # sample-by-sample using a short instantaneous magnitude window
+        # for the exact threshold crossing. This pushes boundaries below
+        # the 1 ms grid down to a single audio sample (≈21 µs @ 48 kHz).
+        REFINE_RADIUS_MS = 2
+        REFINE_RADIUS = (sample_rate * REFINE_RADIUS_MS) // 1000
+        # Instantaneous magnitude is too noisy for thresholding; use a short
+        # sliding window (256 µs at 48 kHz = ~12 samples) to smooth.
+        INSTANT_WIN = max(2, sample_rate // 4000)  # ~250 µs window
+        # A sample is "vocal" if the local mean-abs over [s-INSTANT_WIN/2, s+INSTANT_WIN/2]
+        # exceeds threshold. Precompute the smoothed envelope once (cheap).
+        kernel = np.ones(INSTANT_WIN, dtype=np.float32) / INSTANT_WIN
+        smoothed_env = np.convolve(np.abs(samples), kernel, mode="same")
+
+        def _refine_rising(window_idx):
+            """Edge: silence → vocal at window_idx. Return the first sample
+            (within the 1 ms window or a small radius around it) where the
+            smoothed envelope crosses threshold going UP."""
+            base = window_idx * window_size
+            lo = max(0, base - REFINE_RADIUS)
+            hi = min(len(smoothed_env), base + window_size + REFINE_RADIUS)
+            if hi <= lo:
+                return base
+            seg = smoothed_env[lo:hi]
+            above = seg > threshold
+            if not above.any():
+                return base
+            # First True index in this segment.
+            return lo + int(np.argmax(above))
+
+        def _refine_falling(window_idx):
+            """Edge: vocal → silence at window_idx (first silent window).
+            Return the LAST sample where smoothed envelope was above
+            threshold (= first sample of the gap)."""
+            base = window_idx * window_size
+            lo = max(0, base - window_size - REFINE_RADIUS)
+            hi = min(len(smoothed_env), base + REFINE_RADIUS)
+            if hi <= lo:
+                return base
+            seg = smoothed_env[lo:hi]
+            above = seg > threshold
+            if not above.any():
+                return base
+            # Last True index in this segment, +1 for exclusive end.
+            last_above = lo + int(len(seg) - 1 - np.argmax(above[::-1]))
+            return last_above + 1
+
+        # Convert 1 ms window indices to seconds for fast nearest-edge lookup.
         rising_t = rising_idx.astype(np.float64) * (WINDOW_MS / 1000.0)
         falling_t = falling_idx.astype(np.float64) * (WINDOW_MS / 1000.0)
 
-        SEARCH = 0.06  # ±60 ms search window
-        SNAP_MIN = 0.005  # 5 ms minimum delta to count as a refinement
+        SEARCH = 0.06  # ±60 ms search window for nearest edge
+        SNAP_MIN = 0.001  # 1 ms minimum delta to count as a meaningful refinement
 
         n_start_snapped = 0
         n_end_snapped = 0
@@ -2078,22 +2142,30 @@ def refine_word_boundaries_with_audio(words, source_path, sample_rate=16000):
             old_start = float(w.get("start") or 0.0)
             old_end = float(w.get("end") or 0.0)
 
-            # Snap start to nearest rising edge within ±SEARCH
-            if len(rising_t) > 0:
-                cand = rising_t[(rising_t >= old_start - SEARCH) & (rising_t <= old_start + SEARCH)]
-                if len(cand) > 0:
-                    new_start = float(cand[np.argmin(np.abs(cand - old_start))])
+            # Snap start: nearest rising edge within ±SEARCH, then refine to sample.
+            if len(rising_idx) > 0:
+                mask = (rising_t >= old_start - SEARCH) & (rising_t <= old_start + SEARCH)
+                cand_widx = rising_idx[mask]
+                if len(cand_widx) > 0:
+                    cand_t = cand_widx.astype(np.float64) * (WINDOW_MS / 1000.0)
+                    chosen = int(cand_widx[int(np.argmin(np.abs(cand_t - old_start)))])
+                    sample_idx = _refine_rising(chosen)
+                    new_start = sample_idx / float(sample_rate)
                     delta = new_start - old_start
                     if abs(delta) >= SNAP_MIN:
                         n_start_snapped += 1
                         max_start_delta = max(max_start_delta, abs(delta))
                     new_w["start"] = new_start
 
-            # Snap end to nearest falling edge within ±SEARCH
-            if len(falling_t) > 0:
-                cand = falling_t[(falling_t >= old_end - SEARCH) & (falling_t <= old_end + SEARCH)]
-                if len(cand) > 0:
-                    new_end = float(cand[np.argmin(np.abs(cand - old_end))])
+            # Snap end: nearest falling edge within ±SEARCH, then refine to sample.
+            if len(falling_idx) > 0:
+                mask = (falling_t >= old_end - SEARCH) & (falling_t <= old_end + SEARCH)
+                cand_widx = falling_idx[mask]
+                if len(cand_widx) > 0:
+                    cand_t = cand_widx.astype(np.float64) * (WINDOW_MS / 1000.0)
+                    chosen = int(cand_widx[int(np.argmin(np.abs(cand_t - old_end)))])
+                    sample_idx = _refine_falling(chosen)
+                    new_end = sample_idx / float(sample_rate)
                     delta = new_end - old_end
                     if abs(delta) >= SNAP_MIN:
                         n_end_snapped += 1
@@ -2108,9 +2180,10 @@ def refine_word_boundaries_with_audio(words, source_path, sample_rate=16000):
             refined.append(new_w)
 
         print(
-            f"[align] Refined word boundaries: {n_start_snapped} starts, {n_end_snapped} ends "
-            f"(max Δstart={max_start_delta * 1000:.0f}ms, max Δend={max_end_delta * 1000:.0f}ms, "
-            f"noise_floor={noise_floor:.4f})",
+            f"[align] Refined word boundaries (sample-precision @ {sample_rate}Hz): "
+            f"{n_start_snapped} starts, {n_end_snapped} ends "
+            f"(max Δstart={max_start_delta * 1000:.2f}ms, max Δend={max_end_delta * 1000:.2f}ms, "
+            f"noise_floor={noise_floor:.4f}, refine±{REFINE_RADIUS_MS}ms@sample-level)",
             flush=True,
         )
         return refined
@@ -7001,9 +7074,14 @@ def project_words_to_output(transcript, cuts, effective_durations, transition_du
             # caption pages during every transition.
             if _trans_tail_i > 0 and local_s >= (_eff_i - _trans_tail_i):
                 continue
+            # Preserve sub-millisecond precision for caption tokens.
+            # Captions and audio share the same source-of-truth timestamps;
+            # rounding to ms here would put captions on a 1 ms grid while
+            # audio is sample-precise, introducing visible drift between
+            # caption highlight and spoken word over a long clip.
             projected.append({
-                "start": round((output_cursor + local_s)*1000)/1000,
-                "end":   round((output_cursor + local_e)*1000)/1000,
+                "start": float(output_cursor + local_s),
+                "end":   float(output_cursor + local_e),
                 "word":  w.get("punctuated_word") or w.get("word") or "",
                 "punctuated_word": w.get("punctuated_word") or w.get("word") or "",
                 "speaker": int(w.get("speaker", 0) or 0),
@@ -7494,13 +7572,17 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15, v
             )
 
     # ── Build final clip dicts ────────────────────────────────────────────
+    # Preserve sub-millisecond precision from audio-derived boundary
+    # refinement. The downstream audio cut path uses round(time *
+    # sample_rate) for indexing, so a sub-ms `time` gives a sample-precise
+    # cut. Rounding to ms here would re-introduce a ~10ms quantization
+    # buffer and re-create the "word residue at cut boundaries" problem.
     final_clips = []
     for rc in raw_clips:
-        s = round(rc["padded_start"] * 1000) / 1000
-        e = round(rc["padded_end"] * 1000) / 1000
-        # Final clamp: padding may have pushed end past video_duration
+        s = float(rc["padded_start"])
+        e = float(rc["padded_end"])
         if _vd > 0 and e > _vd:
-            e = round(_vd * 1000) / 1000
+            e = float(_vd)
         if e - s < 0.05:
             continue
         final_clips.append({
