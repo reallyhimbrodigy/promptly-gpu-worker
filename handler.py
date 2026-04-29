@@ -11094,18 +11094,22 @@ def handler(job):
             if _entry.get("pexels_video_id") and _entry.get("pexels_file_url"):
                 resolved_broll_out.append(_entry)
 
-        # Sanitized recipe for persistence — drops internal _foo fields and
-        # analysis_data (which is persisted separately so we don't double-store
-        # it). Also strips any underscore-prefixed nested keys on broll_clips
-        # entries (e.g. _local_path, which points at a container-local path
-        # that's meaningless after the render).
+        # Sanitized recipe for persistence — drops internal _foo fields at the
+        # top level and analysis_data (which is persisted separately so we
+        # don't double-store it). Inside broll_clips entries we strip ONLY
+        # _local_path: it points at a container-local /tmp file that's
+        # meaningless after the render. Other internal fields like
+        # _start_word_kept / _end_word_kept MUST persist — render_only
+        # re-renders rely on them and the validator that recomputes them
+        # only runs in full/tweak/reinterpret modes.
+        _BROLL_NONPERSISTABLE = {"_local_path"}
         sanitized_recipe = {
             k: v for k, v in edit_plan.items()
             if k != "analysis_data" and not (isinstance(k, str) and k.startswith("_"))
         }
         if isinstance(sanitized_recipe.get("broll_clips"), list):
             sanitized_recipe["broll_clips"] = [
-                {kk: vv for kk, vv in _br.items() if not (isinstance(kk, str) and kk.startswith("_"))}
+                {kk: vv for kk, vv in _br.items() if kk not in _BROLL_NONPERSISTABLE}
                 for _br in sanitized_recipe["broll_clips"] if isinstance(_br, dict)
             ]
 
