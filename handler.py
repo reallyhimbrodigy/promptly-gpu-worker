@@ -7894,44 +7894,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     """
     import math
 
-    # ── 0. Source normalization — guarantee 1080x1920 9:16 input to Remotion ─
-    # `normalize_vf` comes from analyze_source_video. It encodes a scale+crop
-    # that reframes landscape/mismatched sources to 1080x1920 with an optional
-    # face-centered crop (computed from sparse face detection). Remotion
-    # cannot do this correction (CSS transforms can crop but not with the
-    # same ffmpeg-quality lanczos scale), so we apply it in one pre-pass
-    # before handing the source to Remotion. When the source is already
-    # 1080x1920 this is a no-op and we skip the pass.
-    _normalize_vf = edit_plan.get("_normalize_vf")
-    if _normalize_vf:
-        _norm_t0 = time.time()
-        _normalized_path = os.path.join(work_dir, "source_ready.mp4")
-        _norm_cmd = [
-            "ffmpeg", "-y", "-v", "error", "-threads", "0",
-            "-i", source_path,
-            "-vf", _normalize_vf,
-            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "15",
-            "-pix_fmt", "yuv420p",
-            "-c:a", "copy",
-            "-video_track_timescale", "90000",
-            _normalized_path,
-        ]
-        _norm_r = subprocess.run(_norm_cmd, capture_output=True, text=True, timeout=300)
-        if _norm_r.returncode != 0:
-            raise RuntimeError(
-                f"Source normalization to 1080x1920 failed: {(_norm_r.stderr or '')[-500:]}"
-            )
-        if not os.path.exists(_normalized_path) or os.path.getsize(_normalized_path) < 10000:
-            raise RuntimeError(f"Source normalization produced invalid output: {_normalized_path}")
-        print(
-            f"[source-norm] Applied {_normalize_vf[:60]}{'...' if len(_normalize_vf) > 60 else ''} "
-            f"in {time.time() - _norm_t0:.1f}s → source_ready.mp4 "
-            f"({os.path.getsize(_normalized_path)/1024/1024:.1f}MB)",
-            flush=True,
-        )
-        source_path = _normalized_path
-    else:
-        print("[source-norm] Source is already 1080x1920 — no normalization needed", flush=True)
+    # ── 0. Source is already canonical ──────────────────────────────────────
+    # The ingest pass (_do_fps_normalize in mega_pool) folded fps + scale +
+    # crop + pix_fmt into a single transcode and produced source_canonical.mp4.
+    # By the time we get here, source_path is a 1080x1920 60fps yuv420p h264
+    # file. Nothing in this function needs to re-normalize the source.
 
     # ── 1. Pre-render clip setup ────────────────────────────────────────────
     TRANSITION_DURATION = get_transition_duration(edit_plan.get("pacing"))
@@ -10265,26 +10232,34 @@ def handler(job):
             return detect_vocal_emphasis(_raw_source)
 
         def _do_fps_normalize():
-            """Normalize source to exactly 60fps CFR.
+            """Canonicalize source to 1080×1920 60fps CFR yuv420p.
+
+            Single ingest pass that produces the ONE canonical shape every
+            downstream module operates against. Replaces the prior dual-pass
+            arrangement (a separate fps-only step, then a second scale/crop
+            pass at the start of render_multi_clip).
 
             Routes:
-              * Source already >=60fps -> plain `fps=60` ffmpeg filter
-                (CFR-only, no synthesis cost).
+              * Source already >=60fps -> plain ffmpeg pass with fps=60
+                plus the analyze-derived normalize_vf (face-aware crop or
+                center-crop) folded into a single filter chain. No frame
+                synthesis cost.
               * Source <60fps -> RIFE 4.18 on H100 GPU via
-                /rife_normalize.py. Motion-compensated optical-flow frame
-                synthesis on CUDA. Verified end-to-end at build time
-                with a dummy CPU inference; production runs on GPU.
+                /rife_normalize.py for motion-compensated frame synthesis,
+                then a second ffmpeg pass that applies normalize_vf and
+                pix_fmt = yuv420p. Two passes is unavoidable: RIFE outputs
+                its own mp4 and we don't want RIFE to know about cropping.
 
-            Why RIFE: FFmpeg's `minterpolate` filter at quality settings
-            (mci+aobmc+epzs) is decades-old CPU code with internal
-            serial sections that don't scale with vCPU count — it caps
-            at ~3 input fps on 1080p and timed out at 600s on 60s
-            source content (production attempt v62 -> v9bf753c hotfix).
-            RIFE on H100 should land 50-100 input fps at 1088x1920.
+            Awaits future_normalize so it can read the analyze-derived
+            normalize_vf. analyze typically finishes in 2-5s; the await is
+            negligible against the ~30s normalize cost.
 
-            Both routes produce h264 ultrafast crf 18 with 1 keyframe
-            per second (dense GOP for fast Remotion seeks).
+            Output: source_canonical.mp4 (1080x1920 60fps yuv420p h264
+            ultrafast crf 18, 1-keyframe-per-second GOP for fast seeks).
             """
+            _shape = future_normalize.result()
+            _normalize_vf = _shape.get("normalize_vf")
+
             _cached = _probe_full(_raw_source)
             _vs = next((s for s in (_cached.get("streams") or []) if s.get("codec_type") == "video"), {})
             _r_rate_str = _vs.get("r_frame_rate", "")
@@ -10304,16 +10279,27 @@ def handler(job):
             _src_fps_estimate = _avg or _r_val or 30.0
 
             _norm_t0 = time.time()
-            _norm_path = os.path.join(work_dir, "source_60fps.mp4")
+            _norm_path = os.path.join(work_dir, "source_canonical.mp4")
+
+            # Compose the filter chain. fps=60 + (optional) scale/crop
+            # + setsar=1 + final pix_fmt-yuv420p output. When normalize_vf
+            # is None the source is already 1080x1920 so we just do fps
+            # conversion and a yuv420p re-encode for downstream uniformity.
+            _vf_parts = ["fps=60"]
+            if _normalize_vf:
+                _vf_parts.append(_normalize_vf)
+            _vf_combined = ",".join(_vf_parts)
 
             if _src_fps_estimate >= 59.5:
-                # Source already at or above target — plain fps filter.
+                # Source already at or above target — plain fps filter +
+                # normalize_vf in a single pass.
                 _interp_mode = "fps-only"
                 _r_out = subprocess.run(
                     ["ffmpeg", "-y", "-v", "error", "-threads", "0",
                      "-i", _raw_source,
-                     "-vf", "fps=60",
+                     "-vf", _vf_combined,
                      "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
+                     "-pix_fmt", "yuv420p",
                      "-g", "60", "-keyint_min", "60", "-sc_threshold", "0",
                      "-c:a", "copy",
                      "-video_track_timescale", "90000",
@@ -10322,25 +10308,26 @@ def handler(job):
                 )
                 if _r_out.returncode != 0 or not os.path.exists(_norm_path):
                     raise RuntimeError(
-                        f"FPS normalization (fps-only) failed: "
+                        f"Source canonicalize (fps-only) failed: "
                         f"{(_r_out.stderr or '')[-500:]}"
                     )
             else:
-                # Source below target — RIFE 4.18 motion-compensated
-                # upscale on CUDA. 8-min timeout headroom for 60-90s
-                # of expected work on H100.
+                # Source below target — RIFE 4.18 first to bring fps to 60
+                # at original resolution, then ffmpeg pass to scale/crop
+                # to 1080x1920 yuv420p.
                 _interp_mode = "rife-4.18"
+                _rife_out = os.path.join(work_dir, "_rife_60fps.mp4")
                 _r_out = subprocess.run(
                     ["python", "/rife_normalize.py",
                      "--input", _raw_source,
-                     "--output", _norm_path,
+                     "--output", _rife_out,
                      "--target-fps", "60",
                      "--rife-dir", "/opt/rife"],
                     capture_output=True, text=True, timeout=480,
                 )
-                if _r_out.returncode != 0 or not os.path.exists(_norm_path):
+                if _r_out.returncode != 0 or not os.path.exists(_rife_out):
                     raise RuntimeError(
-                        f"FPS normalization (RIFE) failed: "
+                        f"Source canonicalize (RIFE) failed: "
                         f"stderr={(_r_out.stderr or '')[-1000:]} "
                         f"stdout={(_r_out.stdout or '')[-500:]}"
                     )
@@ -10348,6 +10335,32 @@ def handler(job):
                 for _line in (_r_out.stdout or "").splitlines():
                     if _line.startswith("[rife]"):
                         print(_line, flush=True)
+                # Second pass: scale/crop the RIFE output to 1080x1920 +
+                # yuv420p. RIFE output is already 60fps so no fps filter
+                # here; if normalize_vf is None the source was already
+                # 1080x1920 and we just re-encode for pix_fmt uniformity.
+                _vf_post = _normalize_vf or "null"
+                _scale_r = subprocess.run(
+                    ["ffmpeg", "-y", "-v", "error", "-threads", "0",
+                     "-i", _rife_out,
+                     "-vf", _vf_post,
+                     "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
+                     "-pix_fmt", "yuv420p",
+                     "-g", "60", "-keyint_min", "60", "-sc_threshold", "0",
+                     "-c:a", "copy",
+                     "-video_track_timescale", "90000",
+                     _norm_path],
+                    capture_output=True, text=True, timeout=180,
+                )
+                if _scale_r.returncode != 0 or not os.path.exists(_norm_path):
+                    raise RuntimeError(
+                        f"Source canonicalize (post-RIFE scale) failed: "
+                        f"{(_scale_r.stderr or '')[-500:]}"
+                    )
+                try:
+                    os.remove(_rife_out)
+                except OSError:
+                    pass
 
             _size_mb = os.path.getsize(_norm_path) / (1024 * 1024)
             print(
@@ -10764,12 +10777,15 @@ def handler(job):
         print(f"[edit] User vibe: \"{vibe}\"", flush=True)
 
         if _normalize_vf:
-            print(f"[reframe] Smart reframe active via normalize_vf (folded into render pass)", flush=True)
+            print(f"[reframe] Smart reframe applied at ingest (source_canonical.mp4 is 1080x1920)", flush=True)
         else:
-            print("[reframe] Source is native 9:16 — no reframe needed", flush=True)
+            print("[reframe] Source is native 9:16 — ingest only did fps + pix_fmt", flush=True)
 
         edit_plan["_user_vibe"] = vibe
         edit_plan["_source_path"] = source_path
+        # Record what reframe filter was applied at ingest for downstream
+        # face-coordinate mapping. The render pipeline no longer reads this
+        # to APPLY the filter — it's already baked into source_canonical.mp4.
         edit_plan["_normalize_vf"] = _normalize_vf
         edit_plan["_source_loudness"] = source_loudness
         edit_plan["_shot_changes"] = source_shot_changes
