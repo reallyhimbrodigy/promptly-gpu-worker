@@ -1,4 +1,28 @@
+import os
+import subprocess
+import time
+
 import modal
+
+# ── Build identification ──────────────────────────────────────────────────────
+# Computed at deploy time (when `modal deploy` reads this file) and baked into
+# the image as env vars. The handler logs these on the first line of every job
+# so we can always answer "which build ran this render?" — no guessing about
+# warm-container code drift after a deploy. _BUILD_DIRTY is "1" if there are
+# uncommitted changes in the working tree at deploy time, "0" otherwise.
+def _git(*args):
+    try:
+        return subprocess.check_output(
+            ["git", *args],
+            cwd=os.path.dirname(os.path.abspath(__file__)) or ".",
+            stderr=subprocess.DEVNULL,
+        ).decode().strip()
+    except Exception:
+        return ""
+
+_BUILD_SHA = _git("rev-parse", "HEAD") or "unknown"
+_BUILD_DIRTY = "1" if _git("status", "--porcelain") else "0"
+_BUILD_TS = str(int(time.time()))
 
 # rebuild trigger v65 — RIFE 4.18 on H100 GPU for source-level frame interpolation, properly verified this time.
 #
@@ -274,6 +298,15 @@ image = (
     .add_local_file("handler.py", "/handler.py")
     .add_local_file("ffmpeg_base.py", "/ffmpeg_base.py")
     .add_local_file("rife_normalize.py", "/rife_normalize.py")
+    # Build identification — placed AFTER the heavy install layers so a SHA
+    # change only invalidates the final layers (which already rebuild on
+    # every source change). The handler reads these at job start and logs
+    # them as line 1 of every render's output.
+    .env({
+        "PROMPTLY_BUILD_SHA": _BUILD_SHA,
+        "PROMPTLY_BUILD_DIRTY": _BUILD_DIRTY,
+        "PROMPTLY_BUILD_TS": _BUILD_TS,
+    })
 )
 
 # ── Secrets ────────────────────────────────────────────────────────────────────

@@ -9688,6 +9688,12 @@ def prewarm_handler(job):
     Idempotent: if artifacts already exist, returns immediately. Fire-and-forget
     from iOS attach, so latency here doesn't affect UX.
     """
+    print(
+        f"[prewarm] BUILD sha={os.environ.get('PROMPTLY_BUILD_SHA', 'unknown')[:12]} "
+        f"dirty={os.environ.get('PROMPTLY_BUILD_DIRTY', '?')} "
+        f"ts={os.environ.get('PROMPTLY_BUILD_TS', '?')}",
+        flush=True,
+    )
     input_data = job.get("input") or {}
     try:
         video_url = str(input_data.get("video_url") or "").strip()
@@ -9848,6 +9854,19 @@ def handler(job):
 
         print(f"\n{'='*80}", flush=True)
         print(f"JOB {job_id}: \"{vibe}\"", flush=True)
+        # Build identification — answers "which build ran this render?" with
+        # zero ambiguity. After a deploy, warm containers may keep serving
+        # the OLD code for up to scaledown_window seconds; this line lets
+        # you cross-reference any failure to the exact git SHA the container
+        # was built from. _BUILD_DIRTY=1 means the deploy was made with
+        # uncommitted local changes (dev iteration, not a clean build).
+        _build_sha = os.environ.get("PROMPTLY_BUILD_SHA", "unknown")
+        _build_dirty = os.environ.get("PROMPTLY_BUILD_DIRTY", "?")
+        _build_ts = os.environ.get("PROMPTLY_BUILD_TS", "?")
+        print(
+            f"BUILD sha={_build_sha[:12]} dirty={_build_dirty} ts={_build_ts}",
+            flush=True,
+        )
         print(f"{'='*80}", flush=True)
         _pipeline_start = time.time()
         _timings = {}
