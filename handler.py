@@ -8614,8 +8614,16 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 _br_fps = 30.0
             if _br_fps <= 0 or _br_fps > 240:
                 _br_fps = 30.0
+            # In blend mode the B-roll src is read by Remotion's
+            # `resolveSrc` → `staticFile()`, which rejects absolute paths and
+            # only accepts basenames relative to publicDir. Stage the file
+            # into the bundle public root (hardlinked, so v62's FFmpeg path
+            # via _local_path also still works for any concurrent rendering).
+            # In v62 (FFmpeg-base + alpha overlay), B-roll is composited by
+            # FFmpeg from the absolute /tmp path — no staging required.
+            _broll_src = _stage_file(_local_path) if _is_blend_render else _local_path
             broll_out.append({
-                "src": _local_path,
+                "src": _broll_src,
                 "fromFrame": _from_frame,
                 "durationInFrames": _dur_frames,
                 "seekFromSeconds": float(_seek_seconds),
