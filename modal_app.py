@@ -308,6 +308,7 @@ image = (
     .add_local_file("handler.py", "/handler.py")
     .add_local_file("ffmpeg_base.py", "/ffmpeg_base.py")
     .add_local_file("rife_normalize.py", "/rife_normalize.py")
+    .add_local_file("render_schemas.py", "/render_schemas.py")
 )
 
 # ── Secrets ────────────────────────────────────────────────────────────────────

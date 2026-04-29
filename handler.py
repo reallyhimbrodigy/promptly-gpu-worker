@@ -57,8 +57,46 @@ SEMANTIC_TO_MG_ANCHOR = {
 #     `speed` field (constant 0.7–1.4× per cut). "Speed ramping" aesthetics
 #     come from adjacent cuts at contrasting speeds (the buildup-arrival
 #     pattern), not from interpolating speed within a single clip.
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from typing import List, Optional, Literal, Dict, Any
+
+# Pydantic schemas mirroring src/remotion/src/types.ts. Validating the
+# render input dicts against these models BEFORE writing JSON turns every
+# Python-vs-Remotion shape mismatch into an immediate, named Python error
+# at the boundary instead of an opaque renderer crash 90 seconds into
+# headless Chromium. See render_schemas.py for the full mirror; the smoke
+# test (scripts/smoke.sh) catches drift between this file and types.ts.
+from render_schemas import (
+    PromptlyRenderInput as _SchemaOverlayInput,
+    PromptlyMicroSegmentsInput as _SchemaMicroInput,
+    PromptlyBlendCaptionsOnlyInput as _SchemaBlendCaptionsInput,
+)
+
+
+def _validate_and_write_render_input(
+    label: str,
+    payload: dict,
+    schema_cls,
+    output_path: str,
+) -> None:
+    """Validate `payload` against `schema_cls` and write it to `output_path`.
+
+    Validation runs on the dict as-is; the dict itself is what gets written
+    (no Pydantic-induced normalization of field order, None-stripping, etc).
+    A ValidationError surfaces with the bad field path, expected type, and
+    actual value — fail-fast at the boundary instead of inside React.
+    """
+    try:
+        schema_cls.model_validate(payload)
+    except ValidationError as ve:
+        # Pydantic v2's str(ve) gives one error per line with field path,
+        # input value, and expected type — all you need to fix it.
+        raise RuntimeError(
+            f"[{label}] render input failed schema validation against "
+            f"{schema_cls.__name__}:\n{ve}"
+        ) from ve
+    with open(output_path, "w") as _f:
+        json.dump(payload, _f)
 
 _CAPTION_STYLES = Literal[
     "PaperII",
@@ -8672,8 +8710,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         "outro": _outro,
     }
     overlay_input_path = os.path.join(_stage_dir, "overlay_input.json")
-    with open(overlay_input_path, "w") as _f:
-        json.dump(overlay_input, _f)
+    _validate_and_write_render_input(
+        "overlay", overlay_input, _SchemaOverlayInput, overlay_input_path,
+    )
 
     # PromptlyMicroSegments input — only the windows Remotion must render.
     # Each segment carries its own clip/transition spec; Python tracks a
@@ -8687,8 +8726,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     micro_input_path = None
     if micro_input is not None:
         micro_input_path = os.path.join(_stage_dir, "micro_input.json")
-        with open(micro_input_path, "w") as _f:
-            json.dump(micro_input, _f)
+        _validate_and_write_render_input(
+            "micro", micro_input, _SchemaMicroInput, micro_input_path,
+        )
 
     # PromptlyBlendCaptionsOnly input — built only when caption style needs
     # video pixels for blend modes. videoUrl is set later, after the v62
@@ -9335,8 +9375,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _blend_video_basename = _stage_file(_silent_full)
         blend_captions_input["videoUrl"] = _blend_video_basename
         blend_captions_input_path = os.path.join(_stage_dir, "blend_captions_input.json")
-        with open(blend_captions_input_path, "w") as _f:
-            json.dump(blend_captions_input, _f)
+        _validate_and_write_render_input(
+            "blend-captions",
+            blend_captions_input,
+            _SchemaBlendCaptionsInput,
+            blend_captions_input_path,
+        )
         _blend_captions_video = os.path.join(work_dir, "blend_captions.mp4")
         _blend_cmd = [
             "node", "/remotion/render-full.mjs",

@@ -228,7 +228,28 @@ cat > "$SMOKE_DIR/blend.json" <<EOF
 }
 EOF
 
-# ── 6. Render each composition ─────────────────────────────────────────────
+# ── 6. Validate inputs against Pydantic schemas ────────────────────────────
+# render_schemas.py mirrors src/remotion/src/types.ts. If the schemas drift
+# from what the React tree actually accepts, the synthetic JSONs would
+# render successfully (TS side doesn't enforce them) but Python's runtime
+# validation in handler.py would reject real render inputs in production.
+# Cheaper to catch the drift here.
+echo "smoke: python schema validation"
+python3 -c "
+import json, sys
+sys.path.insert(0, '$REPO_ROOT')
+from render_schemas import (
+    PromptlyRenderInput,
+    PromptlyMicroSegmentsInput,
+    PromptlyBlendCaptionsOnlyInput,
+)
+PromptlyRenderInput.model_validate(json.load(open('$SMOKE_DIR/overlay.json')))
+PromptlyMicroSegmentsInput.model_validate(json.load(open('$SMOKE_DIR/micro.json')))
+PromptlyBlendCaptionsOnlyInput.model_validate(json.load(open('$SMOKE_DIR/blend.json')))
+print('smoke: schemas OK')
+"
+
+# ── 7. Render each composition ─────────────────────────────────────────────
 run_render() {
   local label="$1"
   local composition="$2"
