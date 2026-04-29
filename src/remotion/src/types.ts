@@ -154,8 +154,7 @@ export type CaptionStyle =
   | "Passage"
   | "Pulse"
   | "Quintessence"
-  | "Serif"
-  | "StaggerWave";
+  | "Serif";
 
 export interface CaptionPositionSegment {
   fromFrame: number;

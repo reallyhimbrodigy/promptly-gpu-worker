@@ -25,7 +25,7 @@ import {
   EmojiPop, PaperII,
   Prime, TypewriterReveal, CinematicLetterpress, Cove,
   Dimidium, EditorialPop, Illuminate, Lumen,
-  MagazineCutout, Passage, Pulse, Quintessence, Serif, StaggerWave,
+  MagazineCutout, Passage, Pulse, Quintessence, Serif,
 } from "./captions";
 
 // Transitions — all 11
@@ -53,7 +53,7 @@ const CAPTION_MAP: Record<string, React.FC<any>> = {
   EmojiPop, PaperII,
   Prime, TypewriterReveal, CinematicLetterpress, Cove,
   Dimidium, EditorialPop, Illuminate, Lumen,
-  MagazineCutout, Passage, Pulse, Quintessence, Serif, StaggerWave,
+  MagazineCutout, Passage, Pulse, Quintessence, Serif,
 };
 
 const TRANSITION_MAP: Record<string, React.FC<any>> = {

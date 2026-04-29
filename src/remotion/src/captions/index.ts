@@ -38,9 +38,6 @@ export type { QuintessenceProps } from "./Quintessence";
 export { Serif } from "./Serif";
 export type { SerifProps } from "./Serif";
 
-export { StaggerWave } from "./StaggerWave";
-export type { StaggerWaveProps } from "./StaggerWave";
-
 export { TypewriterReveal } from "./TypewriterReveal";
 export type { TypewriterRevealProps, TypewriterColorScheme } from "./TypewriterReveal";
 

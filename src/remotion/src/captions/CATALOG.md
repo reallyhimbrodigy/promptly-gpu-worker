@@ -319,25 +319,6 @@ DM Serif Display body with keywords that scale up (1.35x) in italic with a disti
 
 ---
 
-### 17. StaggerWave
-
-Montserrat uppercase with words that spring in with a staggered delay and float on a gentle sine wave. The currently spoken word lights up in yellow (accent color) while upcoming words sit at low opacity. Energetic but controlled.
-
-**Best for:** Dynamic content, workout/fitness, fast narration, energetic reels, any content with rhythm and momentum.
-
-| Prop | Type | Default | Description |
-|------|------|---------|-------------|
-| `accentColor` | `string` | `"#FFED00"` | Active word color. |
-| `upcomingOpacity` | `number` | `0.38` | Opacity for unspoken words. |
-| `staggerFrames` | `number` | `3` | Delay between word entrances. |
-| `waveAmplitude` | `number` | `3` | Floating wave height in px. |
-| `waveHz` | `number` | `0.7` | Wave frequency. |
-| `allCaps` | `boolean` | `true` | Uppercase text. |
-| `maxWordsPerLine` | `number` | `3` | Words per line. |
-| `letterSpacing` | `number` | `0.02` | Letter spacing in em. |
-
----
-
 ## Shared Dependencies
 
 These components depend on the following utilities (included in delivery):

@@ -64,7 +64,7 @@ _CAPTION_STYLES = Literal[
     "EmojiPop", "PaperII",
     "Prime", "TypewriterReveal", "CinematicLetterpress", "Cove",
     "Dimidium", "EditorialPop", "Illuminate", "Lumen",
-    "MagazineCutout", "Passage", "Pulse", "Quintessence", "Serif", "StaggerWave",
+    "MagazineCutout", "Passage", "Pulse", "Quintessence", "Serif",
 ]
 _TRANSITION_TYPES = Literal[
     "CardSwipe", "ZoomThrough", "SlideOver", "Stack", "CrossfadeZoom",
@@ -2632,7 +2632,7 @@ DECISION — which anchor:
 
 ONE style for the whole video. POSITION can change per segment.
 
-caption_style — pick EXACTLY ONE from 16 styles. Read each description carefully — these are real components with distinct visual identities. Pick the one whose AESTHETIC matches the video's content register, not the one you used last time.
+caption_style — pick EXACTLY ONE from 15 styles. Read each description carefully — these are real components with distinct visual identities. Pick the one whose AESTHETIC matches the video's content register, not the one you used last time.
 
  1. "EmojiPop"             — Words appear with automatic Lottie emoji animations next to relevant nouns. Active word gets color highlight. 48 built-in emoji mappings — emoji selection is automatic, you can't override which words get which emoji.
                               Best for: Fun/casual content, storytelling, social media clips, comedy.
@@ -2667,27 +2667,25 @@ caption_style — pick EXACTLY ONE from 16 styles. Read each description careful
                               Use for: Single-word emphasis moments, dramatic pauses, poetry, art-house.
 15. "Serif"                — DM Serif Display body with keywords that scale up (1.35x) in italic with blue accent. Premium editorial / brand-message feel.
                               Best for: Premium editorial, interview quotes, brand messaging, calm.
-16. "StaggerWave"          — Montserrat uppercase, staggered spring entrance with sine-wave float. Active word lights up yellow. NO keyword highlighting (the active-word color IS the highlight; it follows the audio, not your keywords).
-                              Best for: Dynamic content, workout/fitness, energetic reels.
 
 NOTES ON KEYWORDS PER STYLE:
   Styles that USE caption_keywords for highlighting: PaperII, Prime, Cove, Dimidium, EditorialPop, Illuminate, Lumen, Passage, Pulse, Serif (10 styles).
-  Styles that IGNORE caption_keywords by design: TypewriterReveal, CinematicLetterpress, MagazineCutout, Quintessence, StaggerWave, EmojiPop (6 styles — animation/aesthetic IS the effect, no per-word highlighting). When you pick one of these, the caption_keywords list still has narrative value (for emphasis_moments etc.) but won't visually highlight in captions.
+  Styles that IGNORE caption_keywords by design: TypewriterReveal, CinematicLetterpress, MagazineCutout, Quintessence, EmojiPop (5 styles — animation/aesthetic IS the effect, no per-word highlighting). When you pick one of these, the caption_keywords list still has narrative value (for emphasis_moments etc.) but won't visually highlight in captions.
 
 DECISION MATRIX — caption_style by content. Each row gives 4–5 valid choices in order of typical fit; rotate among them rather than always defaulting to the first. The user's past videos are visible to you in their style profile — if your top candidate matches the style they used in their LAST video, pick a different option from the same row.
 
   business, hustle, agency, motivational    → Dimidium / Lumen / Pulse / Cove / EditorialPop
   interview, podcast, thoughtful, calm      → Serif / Cove / Passage / Illuminate / EditorialPop
-  gaming, tech, cyberpunk                   → TypewriterReveal / Dimidium / Pulse / StaggerWave
+  gaming, tech, cyberpunk                   → TypewriterReveal / Dimidium / Pulse
   cinematic, documentary, dramatic          → CinematicLetterpress / Illuminate / Quintessence / Passage / PaperII
   aesthetic, lifestyle, travel, minimal     → Cove / Passage / Lumen / EditorialPop / Serif
-  creative, artistic, collage, music        → MagazineCutout / EmojiPop / Pulse / StaggerWave / Quintessence
+  creative, artistic, collage, music        → MagazineCutout / EmojiPop / Pulse / Quintessence
   luxury, fashion, premium                  → Prime / Passage / EditorialPop / Quintessence / Cove
   editorial, magazine, interview quote      → EditorialPop / Quintessence / Serif / Passage / PaperII
   storytelling, narrative, POV              → PaperII / Cove / Illuminate / Passage / CinematicLetterpress
-  workout, fitness, energetic               → StaggerWave / Pulse / Dimidium
-  music, rhythmic, lyric-driven             → Pulse / Lumen / EmojiPop / StaggerWave / Quintessence
-  comedy, casual, fun                       → EmojiPop / StaggerWave / MagazineCutout / Pulse
+  workout, fitness, energetic               → Pulse / Dimidium
+  music, rhythmic, lyric-driven             → Pulse / Lumen / EmojiPop / Quintessence
+  comedy, casual, fun                       → EmojiPop / MagazineCutout / Pulse
   art house, poetic, contemplative          → Quintessence / CinematicLetterpress / Passage / Illuminate / EditorialPop
   unsure                                    → pick from any vibe row above that matches the dominant register
 
@@ -4553,7 +4551,7 @@ REMOVE_WORDS GUIDANCE:
         "EmojiPop", "PaperII",
         "Prime", "TypewriterReveal", "CinematicLetterpress", "Cove",
         "Dimidium", "EditorialPop", "Illuminate", "Lumen",
-        "MagazineCutout", "Passage", "Pulse", "Quintessence", "Serif", "StaggerWave",
+        "MagazineCutout", "Passage", "Pulse", "Quintessence", "Serif",
     }
     _valid_zoom_types = {
         "SmoothPush", "SnapReframe", "FocusWindow", "StepZoom", "LetterboxPush",
@@ -9216,7 +9214,7 @@ VALID_CAPTION_STYLES = {
     "EmojiPop", "PaperII",
     "Prime", "TypewriterReveal", "CinematicLetterpress", "Cove",
     "Dimidium", "EditorialPop", "Illuminate", "Lumen",
-    "MagazineCutout", "Passage", "Pulse", "Quintessence", "Serif", "StaggerWave",
+    "MagazineCutout", "Passage", "Pulse", "Quintessence", "Serif",
 }
 
 VALID_TRANSITION_TYPES = {
