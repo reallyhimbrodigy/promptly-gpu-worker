@@ -2,6 +2,22 @@ export { CaptionContainer } from "./shared/CaptionContainer";
 export type { CaptionStyleProps, TikTokToken, TikTokPage } from "./shared/types";
 export { normalizeWord, buildKeywordSet, isKeyword } from "./shared/keywords";
 
+export { GlitchHighlight } from "./GlitchHighlight";
+export type {
+  GlitchHighlightProps,
+  GlitchHighlightWord,
+} from "./GlitchHighlight";
+
+export { NegativeFlash, NEGATIVE_FLASH_PRESETS } from "./NegativeFlash";
+export type {
+  NegativeFlashProps,
+  NegativeFlashColorPreset,
+  NegativeFlashPresetName,
+} from "./NegativeFlash";
+
+export { Prism } from "./Prism";
+export type { PrismProps } from "./Prism";
+
 export { Prime } from "./Prime";
 export type { PrimeProps } from "./Prime";
 

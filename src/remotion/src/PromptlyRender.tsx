@@ -2,9 +2,11 @@ import React from "react";
 import {
   AbsoluteFill,
   Sequence,
+  Series,
   OffthreadVideo,
   staticFile,
   useCurrentFrame,
+  useVideoConfig,
   interpolate,
 } from "remotion";
 import type {
@@ -12,20 +14,25 @@ import type {
   PromptlyMicroSegmentsProps,
   ClipSpec,
   TransitionSpec,
+  BrollSpec,
   CaptionSpec,
   MotionGraphicSpec,
   TextOverlaySpec,
   TikTokPageLike,
 } from "./types";
 
-// Caption styles — 18 (NegativeFlash, Prism, GlitchHighlight removed:
-// they require mixBlendMode against video pixels, which the transparent
-// overlay architecture can't provide without dropping the FFmpeg base path).
+// Caption styles. NegativeFlash, Prism, GlitchHighlight use CSS mixBlendMode
+// against video pixels — they only render correctly inside PromptlyBlendRender
+// (the full Remotion composition that includes the source video as a
+// background layer). The other styles render in the transparent PromptlyOverlay
+// composition that the v62 FFmpeg-base architecture composites on top of the
+// FFmpeg-built base video.
 import {
   PaperII,
   Prime, TypewriterReveal, CinematicLetterpress, Cove,
   EditorialPop, Illuminate, Lumen,
   MagazineCutout, Passage, Pulse, Quintessence, Serif,
+  GlitchHighlight, NegativeFlash, Prism,
 } from "./captions";
 
 // Transitions — all 11
@@ -54,6 +61,7 @@ const CAPTION_MAP: Record<string, React.FC<any>> = {
   Prime, TypewriterReveal, CinematicLetterpress, Cove,
   EditorialPop, Illuminate, Lumen,
   MagazineCutout, Passage, Pulse, Quintessence, Serif,
+  GlitchHighlight, NegativeFlash, Prism,
 };
 
 const TRANSITION_MAP: Record<string, React.FC<any>> = {
@@ -457,6 +465,120 @@ export const PromptlyMicroSegments: React.FC<PromptlyMicroSegmentsProps> = ({
           ) : null}
         </Sequence>
       ))}
+    </AbsoluteFill>
+  );
+};
+
+// ─── Helpers for PromptlyBlendRender (full Remotion-primary composition) ────
+// These mirror the pre-v62 architecture so blend-mode caption styles
+// (GlitchHighlight, NegativeFlash, Prism) have actual video pixels underneath
+// to blend against. The v62 FFmpeg-base architecture is bypassed entirely for
+// blend-mode renders; PromptlyBlendRender produces the final h264 video and
+// audio is muxed in a single FFmpeg pass.
+
+const ClipSeries: React.FC<{
+  clips: ClipSpec[]; transitions: TransitionSpec[]; sourceUrl: string;
+}> = ({ clips, transitions, sourceUrl }) => {
+  const byIdx = new Map<number, TransitionSpec>();
+  for (const t of transitions) byIdx.set(t.afterClipIndex, t);
+
+  return (
+    <Series>
+      {clips.map((clip, i) => {
+        const trans = byIdx.get(i);
+        return (
+          <React.Fragment key={`clip-${clip.id}`}>
+            <Series.Sequence durationInFrames={clip.durationInFrames}>
+              <ClipRenderer clip={clip} sourceUrl={sourceUrl} />
+            </Series.Sequence>
+            {trans && i < clips.length - 1 ? (
+              <Series.Sequence durationInFrames={trans.durationInFrames}>
+                <TransitionRenderer transition={trans} sourceUrl={sourceUrl} />
+              </Series.Sequence>
+            ) : null}
+          </React.Fragment>
+        );
+      })}
+    </Series>
+  );
+};
+
+const BrollOverlays: React.FC<{ broll: BrollSpec[]; fps: number }> = ({ broll, fps }) => (
+  <>
+    {broll.map((b, i) => (
+      <Sequence
+        key={`broll-${i}`}
+        from={b.fromFrame}
+        durationInFrames={b.durationInFrames}
+      >
+        <AbsoluteFill style={{ background: "#000" }}>
+          <OffthreadVideo
+            src={b.src}
+            startFrom={Math.round((b.seekFromSeconds ?? 0) * fps)}
+            playbackRate={b.playbackRate}
+            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+          />
+        </AbsoluteFill>
+      </Sequence>
+    ))}
+  </>
+);
+
+const OutroFade: React.FC<{ kind: "fade_black" | "fade_white" }> = ({ kind }) => {
+  const frame = useCurrentFrame();
+  const { durationInFrames, fps } = useVideoConfig();
+  const fadeFrames = Math.round(fps * 1.0);
+  const start = Math.max(0, durationInFrames - fadeFrames);
+  const alpha = interpolate(
+    frame, [start, durationInFrames], [0, 1],
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
+  );
+  const bg = kind === "fade_white" ? "#ffffff" : "#000000";
+  return (
+    <AbsoluteFill style={{ backgroundColor: bg, opacity: alpha, pointerEvents: "none" }} />
+  );
+};
+
+// ─── PromptlyBlendRender composition ───────────────────────────────────────
+// Used ONLY when caption_style is one of {GlitchHighlight, NegativeFlash, Prism}.
+// These caption components use CSS mixBlendMode (screen/difference/multiply/
+// color-burn) against video pixels to produce their chromatic-aberration,
+// inversion, and color-flash effects. They cannot render correctly on a
+// transparent canvas.
+//
+// PromptlyBlendRender is the pre-v62 single-render architecture: source video
+// + clips + transitions + zoom + B-roll + outro fade as the BASE, with
+// captions + text overlays + motion graphics composited on top in the same
+// Remotion process. Captions blend against the actual video pixels.
+//
+// Output: h264 (no alpha needed — captions are baked in). handler.py muxes
+// audio onto this output as the only post-Remotion step.
+//
+// Trade-off: render time goes up vs. v62 (FFmpeg-base + alpha overlay run in
+// parallel in v62; PromptlyBlendRender is single-threaded Remotion). Accepted
+// trade-off for correct blend-mode caption rendering.
+export const PromptlyBlendRender: React.FC<PromptlyRenderProps> = ({ input }) => {
+  const { sourceUrl, clips, transitions, broll, caption, motionGraphics, textOverlays, outro, fps } = input;
+  const resolvedSourceUrl = resolveSrc(sourceUrl);
+  const resolvedBroll = React.useMemo(
+    () => broll.map((b) => ({ ...b, src: resolveSrc(b.src) })),
+    [broll],
+  );
+
+  return (
+    <AbsoluteFill style={{ background: "#000" }}>
+      <ClipSeries clips={clips} transitions={transitions} sourceUrl={resolvedSourceUrl} />
+      <BrollOverlays broll={resolvedBroll} fps={fps} />
+      <CaptionsLayer caption={caption} fps={fps} />
+      <TextOverlaysLayer
+        overlays={textOverlays ?? []}
+        captionStyle={caption.style}
+        captionExtraProps={caption.extraProps}
+        captionKeywords={caption.keywords}
+        fps={fps}
+      />
+      <MotionGraphicsLayer items={motionGraphics} fps={fps} />
+      {outro && outro !== "none" ? <OutroFade kind={outro} /> : null}
     </AbsoluteFill>
   );
 };

@@ -65,7 +65,16 @@ _CAPTION_STYLES = Literal[
     "Prime", "TypewriterReveal", "CinematicLetterpress", "Cove",
     "EditorialPop", "Illuminate", "Lumen",
     "MagazineCutout", "Passage", "Pulse", "Quintessence", "Serif",
+    "GlitchHighlight", "NegativeFlash", "Prism",
 ]
+# Caption styles that use CSS mixBlendMode against video pixels. These render
+# correctly only inside PromptlyBlendRender (full Remotion composition with
+# source video underneath) — NOT in the v62 transparent-overlay architecture.
+# When the chosen caption_style is in this set, render_multi_clip routes
+# through the blend-render path: a single Remotion composition that produces
+# the final h264 video, then audio mux. The FFmpeg-base + alpha-overlay split
+# is bypassed for these renders.
+_BLEND_MODE_CAPTION_STYLES = frozenset({"GlitchHighlight", "NegativeFlash", "Prism"})
 _TRANSITION_TYPES = Literal[
     "CardSwipe", "ZoomThrough", "SlideOver", "Stack", "CrossfadeZoom",
     "ShutterFlash", "LightLeak", "StepPush", "NewspaperWipe", "FilmStrip",
@@ -2632,9 +2641,9 @@ DECISION — which anchor:
 
 ONE style for the whole video. POSITION can change per segment.
 
-caption_style — pick EXACTLY ONE from 13 styles. Read each description carefully — these are real components with distinct visual identities. Pick the one whose AESTHETIC matches the video's content register, not the one you used last time.
+caption_style — pick EXACTLY ONE from 16 styles. Read each description carefully — these are real components with distinct visual identities. Pick the one whose AESTHETIC matches the video's content register, not the one you used last time.
 
- 1. "PaperII"              — Lora serif. Words transition from dim to bright as spoken. Strip-based stacking, heavy shadow. Editorial paper-strip feel. Keywords highlighted in warm yellow.
+ 1. "PaperII"              — Lora serif. Words transition from dim to bright as spoken. Strip-based stacking, heavy shadow. Editorial paper-strip feel.
                               Best for: Storytelling, narrative, poetry, journal-style, long-form.
  2. "Prime"                — Two-tier system: Inter body, special words break out onto a new line in oversized italic Playfair Display. The keyword break-line is the entire visual identity.
                               Best for: Aspirational content, premium branding, lifestyle.
@@ -2663,26 +2672,37 @@ caption_style — pick EXACTLY ONE from 13 styles. Read each description careful
                               Use for: Single-word emphasis moments, dramatic pauses, poetry, art-house.
 13. "Serif"                — DM Serif Display body with keywords that scale up (1.35x) in italic with blue accent. Premium editorial / brand-message feel.
                               Best for: Premium editorial, interview quotes, brand messaging, calm.
+14. "GlitchHighlight"      — Montserrat body with highlighted words that explode into RGB chromatic aberration. Scanlines, slice displacement, flicker, then settle into a glow color. Uses video-pixel blend modes.
+                              Optional extraProps: {{"colorPreset": "cyan"|"blue"|"red"|"green"|"yellow"|"pink"}} (default "blue") — color the keyword settles into after the glitch.
+                              Best for: Tech, gaming, edgy reels, cyberpunk aesthetic.
+15. "NegativeFlash"        — Playfair Display serif. Keywords trigger a negative/inverted color flash with warm tint and glow, then settle into a distinctive color. Uses video-pixel blend modes for the inversion effect.
+                              Optional extraProps: {{"colorPreset": "red"|"blue"|"green"|"purple"|"gold"|"cyan"}} (default "red") — color the keyword settles into after the flash.
+                              Best for: Bold statements, dramatic reveals, cinematic reels.
+16. "Prism"                — Playfair Display with keywords that dramatically scale up. Solo keywords on a line get 2.2x. Shares NegativeFlash's color system. Uses video-pixel blend modes.
+                              Best for: Quote highlights, single-word emphasis, editorial.
 
 NOTES ON KEYWORDS PER STYLE:
-  Styles that USE caption_keywords for highlighting: PaperII, Prime, Cove, EditorialPop, Illuminate, Lumen, Passage, Pulse, Serif (9 styles).
-  Styles that IGNORE caption_keywords by design: TypewriterReveal, CinematicLetterpress, MagazineCutout, Quintessence (4 styles — animation/aesthetic IS the effect, no per-word highlighting). When you pick one of these, the caption_keywords list still has narrative value (for emphasis_moments etc.) but won't visually highlight in captions.
+  Styles that USE caption_keywords for highlighting: Prime, Cove, EditorialPop, Illuminate, Lumen, Passage, Pulse, Serif, GlitchHighlight (9 styles).
+  Styles that IGNORE caption_keywords by design: PaperII, TypewriterReveal, CinematicLetterpress, MagazineCutout, Quintessence, NegativeFlash, Prism (7 styles — animation/aesthetic IS the effect, no per-word highlighting). When you pick one of these, the caption_keywords list still has narrative value (for emphasis_moments etc.) but won't visually highlight in captions.
+
+NOTE on render time: GlitchHighlight, NegativeFlash, and Prism use CSS blend modes against video pixels — they require a different render path that's slightly slower (single-pass Remotion instead of parallel FFmpeg+Remotion). Pick them when their visual identity is right for the content; the render-time tax is small per video.
 
 DECISION MATRIX — caption_style by content. Each row gives 4–5 valid choices in order of typical fit; rotate among them rather than always defaulting to the first. The user's past videos are visible to you in their style profile — if your top candidate matches the style they used in their LAST video, pick a different option from the same row.
 
   business, hustle, agency, motivational    → Lumen / Pulse / Cove / EditorialPop
   interview, podcast, thoughtful, calm      → Serif / Cove / Passage / Illuminate / EditorialPop
-  gaming, tech, cyberpunk                   → TypewriterReveal / Pulse
-  cinematic, documentary, dramatic          → CinematicLetterpress / Illuminate / Quintessence / Passage / PaperII
+  gaming, tech, cyberpunk                   → TypewriterReveal / GlitchHighlight / Pulse
+  cinematic, documentary, dramatic          → CinematicLetterpress / Illuminate / Quintessence / Passage / NegativeFlash / PaperII
   aesthetic, lifestyle, travel, minimal     → Cove / Passage / Lumen / EditorialPop / Serif
-  creative, artistic, collage, music        → MagazineCutout / Pulse / Quintessence
+  creative, artistic, collage, music        → MagazineCutout / Pulse / Quintessence / GlitchHighlight
   luxury, fashion, premium                  → Prime / Passage / EditorialPop / Quintessence / Cove
-  editorial, magazine, interview quote      → EditorialPop / Quintessence / Serif / Passage / PaperII
+  editorial, magazine, interview quote      → EditorialPop / Quintessence / Prism / Serif / Passage / PaperII
   storytelling, narrative, POV              → PaperII / Cove / Illuminate / Passage / CinematicLetterpress
-  workout, fitness, energetic               → Pulse
-  music, rhythmic, lyric-driven             → Pulse / Lumen / Quintessence
+  workout, fitness, energetic               → Pulse / GlitchHighlight
+  music, rhythmic, lyric-driven             → Pulse / Lumen / Quintessence / GlitchHighlight
   comedy, casual, fun                       → MagazineCutout / Pulse
-  art house, poetic, contemplative          → Quintessence / CinematicLetterpress / Passage / Illuminate / EditorialPop
+  art house, poetic, contemplative          → Quintessence / CinematicLetterpress / Passage / Illuminate / EditorialPop / Prism
+  bold reveals, single-word emphasis         → Prism / Quintessence / NegativeFlash / EditorialPop
   unsure                                    → pick from any vibe row above that matches the dominant register
 
 DON'T REPEAT YOURSELF. Top short-form creators use a VARIETY of caption styles across their videos — never the same one every time. If the user's profile shows they recently used a particular style, deliberately choose a different option from the appropriate row this time. Different content deserves different visual identity.
@@ -4548,6 +4568,7 @@ REMOVE_WORDS GUIDANCE:
         "Prime", "TypewriterReveal", "CinematicLetterpress", "Cove",
         "EditorialPop", "Illuminate", "Lumen",
         "MagazineCutout", "Passage", "Pulse", "Quintessence", "Serif",
+        "GlitchHighlight", "NegativeFlash", "Prism",
     }
     _valid_zoom_types = {
         "SmoothPush", "SnapReframe", "FocusWindow", "StepZoom", "LetterboxPush",
@@ -8426,18 +8447,42 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     with open(overlay_input_path, "w") as _f:
         json.dump(overlay_input, _f)
 
+    # ── Blend-mode caption render path ─────────────────────────────────────
+    # When the chosen caption_style uses CSS mixBlendMode against video pixels
+    # (GlitchHighlight / NegativeFlash / Prism), the v62 transparent-overlay
+    # architecture cannot give the components what they need — blend modes
+    # have nothing to blend against on a transparent canvas. We bypass the
+    # FFmpeg-base + alpha-overlay split entirely for these renders and use a
+    # single Remotion composition (PromptlyBlendRender) that produces the
+    # final h264 video with everything (clips, transitions, zoom, B-roll,
+    # captions w/ blend, MG, text overlays, outro) baked in. Audio is muxed
+    # onto the Remotion output as the only post-render step.
+    _is_blend_render = _caption_style in _BLEND_MODE_CAPTION_STYLES
+    if _is_blend_render:
+        print(
+            f"[render] Caption style '{_caption_style}' uses CSS blend modes — "
+            f"routing through PromptlyBlendRender (full Remotion composition).",
+            flush=True,
+        )
+
     # PromptlyMicroSegments input — only the windows Remotion must render.
     # Each segment carries its own clip/transition spec; Python tracks a
     # parallel list of metadata (with _clipIndex / _afterClipIndex tags) so
     # the FFmpeg final-mux filtergraph can find each segment by source.
-    micro_input, micro_segments_meta = build_micro_segments_input(
-        clips_out, transitions_out, _source_url, source_fps,
-    )
-    micro_input_path = None
-    if micro_input is not None:
-        micro_input_path = os.path.join(_stage_dir, "micro_input.json")
-        with open(micro_input_path, "w") as _f:
-            json.dump(micro_input, _f)
+    # Skipped in blend-render mode: PromptlyBlendRender handles transitions
+    # and complex zooms inline.
+    if _is_blend_render:
+        micro_input, micro_segments_meta = None, []
+        micro_input_path = None
+    else:
+        micro_input, micro_segments_meta = build_micro_segments_input(
+            clips_out, transitions_out, _source_url, source_fps,
+        )
+        micro_input_path = None
+        if micro_input is not None:
+            micro_input_path = os.path.join(_stage_dir, "micro_input.json")
+            with open(micro_input_path, "w") as _f:
+                json.dump(micro_input, _f)
 
     _ffmpeg_clip_count = sum(1 for c in clips_out if categorize_clip(c) == "ffmpeg")
     _remotion_clip_count = len(clips_out) - _ffmpeg_clip_count
@@ -8531,6 +8576,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # (<300 frames) where the per-process startup tax doesn't amortize.
     overlay_video_path = os.path.join(work_dir, "overlay.mov")
     micro_video_path = os.path.join(work_dir, "micro_segments.mp4")
+    blend_video_path = os.path.join(work_dir, "blend_render.mp4")
     # Pick the best Chromium rasterizer this container can actually drive:
     #   - "vulkan"      : engages the NVIDIA H100 via libGLX_nvidia. Only works
     #                     if startup confirmed _VULKAN_NVIDIA_OK (vulkaninfo saw
@@ -8591,7 +8637,24 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _overlay_chunked = len(_overlay_ranges) > 1
     _overlay_chunk_paths: list = []
     overlay_cmds: list = []
-    if _overlay_chunked:
+    blend_cmd = None
+    micro_cmd = None
+    if _is_blend_render:
+        # Blend-mode caption render: a single Remotion process renders the
+        # full final video (clips + transitions + zoom + B-roll + captions
+        # with mixBlendMode + MG + text overlays + outro). No chunking yet —
+        # the full composition needs continuous frame-to-frame state for
+        # transitions and B-roll cutaways. Output: h264.
+        _overlay_chunked = False
+        blend_cmd = [
+            "node", "/remotion/render-full.mjs",
+            "--input", overlay_input_path,
+            "--output", blend_video_path,
+            "--public-dir", _bundle_public_root,
+            "--composition", "PromptlyBlendRender",
+            "--gl", _gl_mode,
+        ]
+    elif _overlay_chunked:
         for _i, (_fs, _fe) in enumerate(_overlay_ranges):
             _chunk_path = os.path.join(work_dir, f"overlay_chunk_{_i:02d}.mov")
             _overlay_chunk_paths.append(_chunk_path)
@@ -8622,8 +8685,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             ],
         ))
 
-    micro_cmd = None
-    if micro_input is not None:
+    if not _is_blend_render and micro_input is not None:
         micro_cmd = [
             "node", "/remotion/render-full.mjs",
             "--input", micro_input_path,
@@ -8634,7 +8696,13 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         ]
 
     _render_t0 = time.time()
-    if _overlay_chunked:
+    if _is_blend_render:
+        print(
+            f"[render] Spawning Remotion render: PromptlyBlendRender (single, "
+            f"{total_output_frames}f) (gl={_gl_mode})",
+            flush=True,
+        )
+    elif _overlay_chunked:
         print(
             f"[render] Spawning {len(overlay_cmds)} overlay chunk subprocesses "
             f"({total_output_frames} frames split {len(_overlay_ranges)}-ways, "
@@ -8650,13 +8718,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             flush=True,
         )
     _render_pool = concurrent.futures.ThreadPoolExecutor(
-        max_workers=len(overlay_cmds) + (1 if micro_cmd else 0),
+        max_workers=max(1, len(overlay_cmds) + (1 if micro_cmd else 0) + (1 if blend_cmd else 0)),
     )
     overlay_futures = [
         _render_pool.submit(_run_remotion, _lbl, _cmd)
         for _lbl, _cmd in overlay_cmds
     ]
     micro_future = _render_pool.submit(_run_remotion, "micro", micro_cmd) if micro_cmd else None
+    blend_future = _render_pool.submit(_run_remotion, "blend", blend_cmd) if blend_cmd else None
 
     # ── Audio pipeline (running on a separate thread) —
     # Collect its output now so the final-audio build can start while the
@@ -8834,6 +8903,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     #   5. Apply outro fade (if configured)
     #   6. Alpha-composite the PromptlyOverlay layer
     #   7. libx264 ultrafast crf 18 final encode + AAC audio mux
+    # In blend-render mode, the Remotion composition produced the entire
+    # final video in a single pass — no FFmpeg composite filtergraph runs.
     # Wait for all overlay chunk subprocesses (in input order — for chunked
     # mode each chunk lands in its own .mov; we concat them in order below).
     _overlay_chunk_elapsed = []
@@ -8851,6 +8922,15 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         micro_elapsed = micro_future.result(timeout=320)
         print(f"[render] PromptlyMicroSegments done in {micro_elapsed:.1f}s → "
               f"{os.path.getsize(micro_video_path)/1024/1024:.1f}MB", flush=True)
+    if blend_future:
+        blend_elapsed = blend_future.result(timeout=600)
+        if not os.path.exists(blend_video_path) or os.path.getsize(blend_video_path) < 1000:
+            raise RuntimeError(f"PromptlyBlendRender output missing/invalid: {blend_video_path}")
+        print(
+            f"[render] PromptlyBlendRender done in {blend_elapsed:.1f}s → "
+            f"{os.path.getsize(blend_video_path)/1024/1024:.1f}MB",
+            flush=True,
+        )
     _render_pool.shutdown(wait=False)
     _render_elapsed = time.time() - _render_t0
 
@@ -8893,12 +8973,50 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     print(f"[render] All Remotion renders done in {_render_elapsed:.1f}s", flush=True)
 
     # Validate Remotion outputs.
-    if not os.path.exists(overlay_video_path) or os.path.getsize(overlay_video_path) < 1000:
-        raise RuntimeError(f"PromptlyOverlay output missing/invalid: {overlay_video_path}")
-    if micro_input is not None and (
-        not os.path.exists(micro_video_path) or os.path.getsize(micro_video_path) < 1000
-    ):
-        raise RuntimeError(f"PromptlyMicroSegments output missing/invalid: {micro_video_path}")
+    # In blend-render mode, only the blend output exists; the overlay/micro
+    # paths were skipped entirely.
+    if not _is_blend_render:
+        if not os.path.exists(overlay_video_path) or os.path.getsize(overlay_video_path) < 1000:
+            raise RuntimeError(f"PromptlyOverlay output missing/invalid: {overlay_video_path}")
+        if micro_input is not None and (
+            not os.path.exists(micro_video_path) or os.path.getsize(micro_video_path) < 1000
+        ):
+            raise RuntimeError(f"PromptlyMicroSegments output missing/invalid: {micro_video_path}")
+
+    # ── Blend-mode final mux: audio onto Remotion video, then exit ────────
+    # In blend-render mode, the Remotion composition produced the entire
+    # final video — clips, transitions, B-roll, captions w/ blend modes,
+    # MG, text overlays, outro fade. The only post-Remotion step is muxing
+    # the audio track onto it. No FFmpeg composite filtergraph runs.
+    if _is_blend_render:
+        _mux_t0 = time.time()
+        _mux_cmd = [
+            "ffmpeg", "-y", "-v", "warning", "-threads", "0",
+            "-i", blend_video_path,
+            "-i", _final_audio_path,
+            "-c:v", "copy",
+            "-c:a", "copy",
+            "-map", "0:v:0",
+            "-map", "1:a:0",
+            "-shortest",
+            "-movflags", "+faststart",
+            output_path,
+        ]
+        _mux_r = subprocess.run(_mux_cmd, capture_output=True, text=True, timeout=180)
+        if _mux_r.returncode != 0:
+            raise RuntimeError(
+                f"Blend-render audio mux failed (rc={_mux_r.returncode}): "
+                f"{(_mux_r.stderr or '')[-1000:]}"
+            )
+        _mux_elapsed = time.time() - _mux_t0
+        print(
+            f"[render] Blend mux done in {_mux_elapsed:.1f}s. "
+            f"Total render: blend={_render_elapsed:.1f}s audio={_audio_elapsed:.1f}s "
+            f"mux={_mux_elapsed:.1f}s → "
+            f"{os.path.getsize(output_path)/1024/1024:.1f}MB",
+            flush=True,
+        )
+        return output_path
 
     # ── Chunked composite (4-way parallel ffmpeg) ─────────────────────────
     # The single-pass final-mux step was a libx264-encode-bound bottleneck
@@ -9211,6 +9329,7 @@ VALID_CAPTION_STYLES = {
     "Prime", "TypewriterReveal", "CinematicLetterpress", "Cove",
     "EditorialPop", "Illuminate", "Lumen",
     "MagazineCutout", "Passage", "Pulse", "Quintessence", "Serif",
+    "GlitchHighlight", "NegativeFlash", "Prism",
 }
 
 VALID_TRANSITION_TYPES = {
@@ -9335,6 +9454,11 @@ def _resolve_caption_extra_props(style, keywords, edit_plan):
     kw_list = list(keywords or [])
 
     # Style-specific default prop names for a simple string[] of keywords.
+    # Per the component-pack report, PaperII / TypewriterReveal /
+    # CinematicLetterpress / MagazineCutout / Quintessence / NegativeFlash /
+    # Prism do NOT take a keyword list (their effect is style-driven, not
+    # keyword-driven) — they're omitted from this map and the caption_keywords
+    # list goes unused for those styles.
     simple_keyword_prop = {
         "EditorialPop": "keywords",
         "Illuminate": "keywords",
@@ -9345,24 +9469,15 @@ def _resolve_caption_extra_props(style, keywords, edit_plan):
         "Prime": "specialWords",
         "Cove": "boxedWords",
     }
-    # Styles that expect {text, color?} entries — we emit default color per style
-    rich_keyword_styles = {
-        # PaperII expects PaperIIHighlightWord[] = [{text, color}]; default
-        # to a warm yellow accent.
-        "PaperII": ("highlightWords", "#F5C518"),
-    }
+    # Styles that expect [{text, preset?}] entries (GlitchHighlight). The
+    # color preset is global; per-word preset is rare so we emit just text.
+    if style == "GlitchHighlight" and kw_list and "highlightWords" not in out:
+        out["highlightWords"] = [{"text": w} for w in kw_list]
 
     if style in simple_keyword_prop:
         prop_name = simple_keyword_prop[style]
         if kw_list and prop_name not in out:
             out[prop_name] = kw_list
-    elif style in rich_keyword_styles:
-        prop_name, default_color = rich_keyword_styles[style]
-        if kw_list and prop_name not in out:
-            if default_color:
-                out[prop_name] = [{"text": w, "color": default_color} for w in kw_list]
-            else:
-                out[prop_name] = [{"text": w} for w in kw_list]
     return out
 
 

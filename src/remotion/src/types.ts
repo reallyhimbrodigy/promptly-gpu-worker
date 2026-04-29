@@ -152,7 +152,10 @@ export type CaptionStyle =
   | "Passage"
   | "Pulse"
   | "Quintessence"
-  | "Serif";
+  | "Serif"
+  | "GlitchHighlight"
+  | "NegativeFlash"
+  | "Prism";
 
 export interface CaptionPositionSegment {
   fromFrame: number;
