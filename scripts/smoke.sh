@@ -18,17 +18,23 @@
 #   - real assets from S3 / Pexels / Gemini / Deepgram (no network)
 #   - audio pipeline (handler.py-side; orthogonal)
 #   - long-form timing edge cases (smoke uses a 1-second timeline)
-#   - visual correctness (no pixel comparison; that's Phase 7's regression
-#     suite)
+#
+# Visual regression: each rendered output is decoded to raw RGBA/YUV pixels
+# and md5-hashed. Hashes are pinned in scripts/smoke-baselines.json. A
+# mismatch is a regression — either an unintended visual change in
+# Remotion components, or an intentional one that wasn't checked in. Run
+# with BASELINE=update to overwrite the baselines after intentional
+# changes (review the diff before committing).
 #
 # Output: /tmp/promptly-smoke-<unix>/  (deleted on success unless KEEP=1).
 # A pre-bundle cache is reused at .smoke-bundle/ — first run pays ~30-60s
 # for the bundle, subsequent runs reuse it.
 #
 # Usage:
-#   bash scripts/smoke.sh           # run smoke
-#   KEEP=1 bash scripts/smoke.sh    # keep temp dir for inspection
-#   FRESH=1 bash scripts/smoke.sh   # rebuild the prebundle cache
+#   bash scripts/smoke.sh                # run smoke + regression check
+#   KEEP=1 bash scripts/smoke.sh         # keep temp dir for inspection
+#   FRESH=1 bash scripts/smoke.sh        # rebuild the prebundle cache
+#   BASELINE=update bash scripts/smoke.sh  # overwrite scripts/smoke-baselines.json
 
 set -euo pipefail
 
@@ -39,6 +45,8 @@ BUNDLE_CACHE="$REMOTION_DIR/.smoke-bundle"
 SMOKE_DIR="$(mktemp -d "/tmp/promptly-smoke-XXXXXX")"
 KEEP="${KEEP:-0}"
 FRESH="${FRESH:-0}"
+BASELINE="${BASELINE:-0}"
+BASELINES_FILE="$REPO_ROOT/scripts/smoke-baselines.json"
 
 cleanup() {
   # Always remove the staged fixture from the bundle cache — leaving it
@@ -250,11 +258,19 @@ print('smoke: schemas OK')
 "
 
 # ── 7. Render each composition ─────────────────────────────────────────────
+# Track each render's visual hash (computed by decoding to raw pixels and
+# md5'ing the stream — encoder thread counts and container muxing don't
+# affect the hash, only frame content does). Compared to baselines after
+# all renders complete.
+declare -a OBSERVED_LABELS=()
+declare -a OBSERVED_HASHES=()
+
 run_render() {
   local label="$1"
   local composition="$2"
   local input="$3"
   local output="$4"
+  local pix_fmt="$5"
   local t0
   t0=$(date +%s)
   echo "smoke: rendering $label ($composition)"
@@ -272,11 +288,68 @@ run_render() {
   fi
   local size
   size=$(wc -c <"$output" | tr -d ' ')
-  echo "smoke: $label OK in ${elapsed}s ($size bytes)"
+  # Decode to raw pixels and md5 — invariant to container/encoder choices.
+  local hash
+  hash=$(ffmpeg -loglevel error -i "$output" -an -pix_fmt "$pix_fmt" -f md5 - 2>&1 | sed 's/^MD5=//')
+  if [[ -z "$hash" ]]; then
+    echo "smoke: ERROR — could not hash $label output at $output" >&2
+    exit 1
+  fi
+  OBSERVED_LABELS+=("$label")
+  OBSERVED_HASHES+=("$hash")
+  echo "smoke: $label OK in ${elapsed}s ($size bytes, hash=$hash)"
 }
 
-run_render "overlay"          "PromptlyOverlay"          "$SMOKE_DIR/overlay.json" "$SMOKE_DIR/overlay.mov"
-run_render "micro-segments"   "PromptlyMicroSegments"    "$SMOKE_DIR/micro.json"   "$SMOKE_DIR/micro.mp4"
-run_render "blend-captions"   "PromptlyBlendCaptionsOnly" "$SMOKE_DIR/blend.json"   "$SMOKE_DIR/blend.mp4"
+run_render "overlay"          "PromptlyOverlay"          "$SMOKE_DIR/overlay.json" "$SMOKE_DIR/overlay.mov" "rgba"
+run_render "micro-segments"   "PromptlyMicroSegments"    "$SMOKE_DIR/micro.json"   "$SMOKE_DIR/micro.mp4"   "yuv420p"
+run_render "blend-captions"   "PromptlyBlendCaptionsOnly" "$SMOKE_DIR/blend.json"   "$SMOKE_DIR/blend.mp4"   "yuv420p"
+
+# ── 8. Visual regression check ─────────────────────────────────────────────
+# Compare observed hashes to baselines. A mismatch fails smoke unless
+# BASELINE=update, in which case we overwrite the baselines file (review
+# the resulting diff before committing).
+if [[ "$BASELINE" == "update" ]]; then
+  python3 - <<PY
+import json
+labels = "${OBSERVED_LABELS[@]}".split()
+hashes = "${OBSERVED_HASHES[@]}".split()
+baselines = dict(zip(labels, hashes))
+with open("$BASELINES_FILE", "w") as f:
+    json.dump(baselines, f, indent=2)
+    f.write("\n")
+print(f"smoke: baselines updated at $BASELINES_FILE")
+for k, v in baselines.items():
+    print(f"smoke:   {k} = {v}")
+PY
+else
+  python3 - <<PY
+import json, sys
+labels = "${OBSERVED_LABELS[@]}".split()
+hashes = "${OBSERVED_HASHES[@]}".split()
+observed = dict(zip(labels, hashes))
+try:
+    with open("$BASELINES_FILE") as f:
+        baselines = json.load(f)
+except FileNotFoundError:
+    print("smoke: ERROR — no baselines file at $BASELINES_FILE")
+    print("smoke: run 'BASELINE=update bash scripts/smoke.sh' to create one")
+    sys.exit(1)
+mismatches = []
+for k, v in observed.items():
+    expected = baselines.get(k)
+    if expected is None:
+        mismatches.append((k, "<missing baseline>", v))
+    elif expected != v:
+        mismatches.append((k, expected, v))
+if mismatches:
+    print("smoke: ERROR — visual regression(s) detected:")
+    for label, expected, actual in mismatches:
+        print(f"smoke:   {label}: expected={expected} actual={actual}")
+    print("smoke: if these changes are intentional, update with:")
+    print("smoke:   BASELINE=update bash scripts/smoke.sh")
+    sys.exit(1)
+print(f"smoke: visual regression check OK ({len(observed)} hashes match)")
+PY
+fi
 
 echo "smoke: all compositions rendered successfully"
