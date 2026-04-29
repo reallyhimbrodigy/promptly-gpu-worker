@@ -407,7 +407,18 @@ const MotionGraphicsLayer: React.FC<{
 
 const resolveSrc = (s: string): string => {
   if (!s) return s;
+  // URL with scheme (https://, http://, file://) → pass through.
   if (/^[a-z][a-z0-9+.-]*:/i.test(s) || s.startsWith("//")) return s;
+  // Absolute filesystem path → Python should have staged this into the bundle
+  // public dir, but if anything slips through we don't want React's render to
+  // throw and kill the whole composition. Strip the directory and let
+  // staticFile resolve by basename (the staging step uses a job_id-prefixed
+  // name so collisions are unlikely). OffthreadVideo will fail fast with a
+  // clearer "404 from server" if the file isn't actually present.
+  if (s.startsWith("/")) {
+    const idx = s.lastIndexOf("/");
+    return staticFile(s.slice(idx + 1));
+  }
   return staticFile(s);
 };
 

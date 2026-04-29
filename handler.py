@@ -8621,7 +8621,22 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             # via _local_path also still works for any concurrent rendering).
             # In v62 (FFmpeg-base + alpha overlay), B-roll is composited by
             # FFmpeg from the absolute /tmp path — no staging required.
-            _broll_src = _stage_file(_local_path) if _is_blend_render else _local_path
+            if _is_blend_render:
+                _broll_src = _stage_file(_local_path)
+                # Hard assertion: a basename, never an absolute path. If this
+                # ever fires it means _stage_file silently returned an absolute
+                # path; we want to fail fast on the Python side so we never
+                # ship an invalid src to Remotion's staticFile().
+                if _broll_src.startswith("/") or "://" in _broll_src:
+                    raise RuntimeError(
+                        f"[broll] Staged src must be a basename, got: {_broll_src!r}"
+                    )
+                print(
+                    f"[broll] blend-mode staged: {_local_path} → {_broll_src}",
+                    flush=True,
+                )
+            else:
+                _broll_src = _local_path
             broll_out.append({
                 "src": _broll_src,
                 "fromFrame": _from_frame,
@@ -8638,6 +8653,30 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # because PromptlyBlendRender bakes B-roll into the final video.
     if _is_blend_render:
         _resolve_broll_fetches()
+        # Sanity-check every src that's about to be handed to Remotion. This
+        # catches the case where ANY src field still carries an absolute path
+        # (Remotion's staticFile would crash on the first frame). Failing
+        # here turns a 73s opaque Remotion crash into an immediate, precise
+        # Python error.
+        _bad_srcs = []
+        if _source_url.startswith("/") or "://" in _source_url:
+            _bad_srcs.append(("sourceUrl", _source_url))
+        for _i, _b in enumerate(broll_out):
+            _s = _b.get("src", "")
+            if isinstance(_s, str) and (_s.startswith("/") or "://" in _s):
+                _bad_srcs.append((f"broll[{_i}].src", _s))
+        if _bad_srcs:
+            raise RuntimeError(
+                "[blend] Refusing to render: "
+                f"{len(_bad_srcs)} src(s) carry absolute paths/URLs that "
+                f"Remotion's staticFile() will reject: {_bad_srcs[:5]}"
+            )
+        print(
+            f"[blend] All srcs validated ({len(broll_out)} broll). "
+            f"sourceUrl={_source_url!r}; "
+            f"broll srcs={[b['src'] for b in broll_out]}",
+            flush=True,
+        )
 
     # PromptlyOverlay input — full edit_plan, but the composition only renders
     # captions/MG/text on transparent canvas (it ignores clips/transitions/
