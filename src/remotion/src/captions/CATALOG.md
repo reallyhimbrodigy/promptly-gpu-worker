@@ -198,23 +198,7 @@ All Playfair Display — keywords scale up to 1.7x with bold italic treatment wh
 
 ---
 
-### 10. Gadzhi
-
-Montserrat uppercase with words that slide up from below with a smooth cubic ease-out. Words transition from gray to their final color as they settle. Keywords land in gold. Left-aligned with tight 2-word lines for punchy delivery.
-
-**Best for:** Business/hustle content, agency-style reels, Gadzhi/SMMA aesthetic, confident delivery.
-
-| Prop | Type | Default | Description |
-|------|------|---------|-------------|
-| `textColor` | `string` | `"#FFFFFF"` | Body text color. |
-| `highlightColor` | `string` | `"#F5C518"` | Keyword color (gold). |
-| `keywords` | `string[]` | `[]` | Words to highlight. |
-| `maxWordsPerLine` | `number` | `2` | Words per line. |
-| `wordGap` | `number` | `14` | Gap between words. |
-
----
-
-### 11. Illuminate
+### 10. Illuminate
 
 Playfair Display with a diagonal light sweep that reveals each word from dark to fully lit. Keywords keep a warm lingering glow after the sweep passes. Cinematic spotlight feel — like a beam of light crossing the text.
 
@@ -229,7 +213,7 @@ Playfair Display with a diagonal light sweep that reveals each word from dark to
 
 ---
 
-### 12. Lumen
+### 11. Lumen
 
 Montserrat body with keywords that switch to Playfair Display serif with an amber glow and gold underline sweep. Shine words get an additional brightness flash that sweeps across them. Warm, golden, editorial.
 
@@ -248,7 +232,7 @@ Montserrat body with keywords that switch to Playfair Display serif with an ambe
 
 ---
 
-### 13. MagazineCutout
+### 12. MagazineCutout
 
 Words appear as individually cut-out paper pieces — each with a cream background, slight random rotation, and size variation. Like a ransom note or magazine collage but clean. Words snap into place timed to audio.
 
@@ -267,7 +251,7 @@ Words appear as individually cut-out paper pieces — each with a cream backgrou
 
 ---
 
-### 14. Passage
+### 13. Passage
 
 Cormorant Garamond serif with keywords that expand their letter-spacing (tracking) as they're revealed — a subtle typographic emphasis. Keywords also switch to italic with a warm gold color. The tracking shift is the signature move: letters physically spread apart to draw the eye.
 
@@ -287,7 +271,7 @@ Cormorant Garamond serif with keywords that expand their letter-spacing (trackin
 
 ---
 
-### 15. Pulse
+### 14. Pulse
 
 Two-slot paired display — words appear in pairs (one on top, one below) that fade in together. Keywords get a cyan accent color. Simple, clean, rhythmic. No spring physics, just crisp opacity transitions.
 
@@ -302,7 +286,7 @@ Two-slot paired display — words appear in pairs (one on top, one below) that f
 
 ---
 
-### 16. Quintessence
+### 15. Quintessence
 
 Single word at a time, centered, in Playfair Display with dramatic vertical stretch (scaleY). Gold text on a spring entrance. Pure one-word-at-a-time impact — nothing else on screen.
 
@@ -315,7 +299,7 @@ Single word at a time, centered, in Playfair Display with dramatic vertical stre
 
 ---
 
-### 17. Serif
+### 16. Serif
 
 DM Serif Display body with keywords that scale up (1.35x) in italic with a distinct blue accent and tighter letter-spacing. Words enter with a subtle spring scale-up from 0.96. Clean editorial hierarchy.
 
@@ -335,7 +319,7 @@ DM Serif Display body with keywords that scale up (1.35x) in italic with a disti
 
 ---
 
-### 18. StaggerWave
+### 17. StaggerWave
 
 Montserrat uppercase with words that spring in with a staggered delay and float on a gentle sine wave. The currently spoken word lights up in yellow (accent color) while upcoming words sit at low opacity. Energetic but controlled.
 

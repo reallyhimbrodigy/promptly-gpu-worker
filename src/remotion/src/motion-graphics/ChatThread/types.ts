@@ -31,7 +31,7 @@ export interface ChatThreadProps extends MGTimingProps, MGPositionProps {
   // plays on the correct side between messages.
   messages: ChatMessage[];
   // Card width in pixels. Default 820 (≈76% of 1080 frame — matches how
-  // screenshot cards sit in real Hormozi/Gadzhi-style creator content).
+  // screenshot cards sit in real Hormozi-style creator content).
   width?: number;
   // Card minimum height. Default 1320 (~phone-screen aspect ratio).
   minHeight?: number;

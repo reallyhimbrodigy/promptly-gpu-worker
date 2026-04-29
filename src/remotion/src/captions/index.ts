@@ -44,9 +44,6 @@ export type { StaggerWaveProps } from "./StaggerWave";
 export { TypewriterReveal } from "./TypewriterReveal";
 export type { TypewriterRevealProps, TypewriterColorScheme } from "./TypewriterReveal";
 
-export { Gadzhi } from "./Gadzhi";
-export type { GadzhiProps } from "./Gadzhi";
-
 export { Illuminate } from "./Illuminate";
 export type { IlluminateProps } from "./Illuminate";
 

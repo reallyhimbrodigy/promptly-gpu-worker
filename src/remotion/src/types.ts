@@ -148,7 +148,6 @@ export type CaptionStyle =
   | "Cove"
   | "Dimidium"
   | "EditorialPop"
-  | "Gadzhi"
   | "Illuminate"
   | "Lumen"
   | "MagazineCutout"

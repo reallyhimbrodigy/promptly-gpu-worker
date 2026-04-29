@@ -24,7 +24,7 @@ import type {
 import {
   EmojiPop, PaperII,
   Prime, TypewriterReveal, CinematicLetterpress, Cove,
-  Dimidium, EditorialPop, Gadzhi, Illuminate, Lumen,
+  Dimidium, EditorialPop, Illuminate, Lumen,
   MagazineCutout, Passage, Pulse, Quintessence, Serif, StaggerWave,
 } from "./captions";
 
@@ -52,7 +52,7 @@ import {
 const CAPTION_MAP: Record<string, React.FC<any>> = {
   EmojiPop, PaperII,
   Prime, TypewriterReveal, CinematicLetterpress, Cove,
-  Dimidium, EditorialPop, Gadzhi, Illuminate, Lumen,
+  Dimidium, EditorialPop, Illuminate, Lumen,
   MagazineCutout, Passage, Pulse, Quintessence, Serif, StaggerWave,
 };
 
