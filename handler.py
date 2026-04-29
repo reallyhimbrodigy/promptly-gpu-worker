@@ -9303,12 +9303,18 @@ def _build_tiktok_pages_from_projected(projected_words, max_words_per_page=3, po
                 _flush()
         if current_start_ms is None:
             current_start_ms = int(round(w_start * 1000))
-        # Token times are page-relative (fromMs is relative to page start)
-        token_from_ms = int(round(w_start * 1000)) - current_start_ms
-        token_to_ms = int(round(w_end * 1000)) - current_start_ms
+        # Token times are ABSOLUTE (output-time milliseconds), matching the
+        # coordinate system of page.startMs. Caption components subtract
+        # pageStartMs from token.fromMs to derive page-local time for word
+        # activation animations — this only works when both are in the same
+        # absolute coordinate system. Page-relative tokens broke every
+        # component that does (token.fromMs - pageStartMs) because the
+        # subtraction yielded a huge negative number.
+        token_from_ms = int(round(w_start * 1000))
+        token_to_ms = int(round(w_end * 1000))
         current_tokens.append({
             "text": w_text,
-            "fromMs": max(0, token_from_ms),
+            "fromMs": token_from_ms,
             "toMs": max(token_from_ms + 1, token_to_ms),
         })
         current_text_parts.append(w_text)

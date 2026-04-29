@@ -181,9 +181,21 @@ const CaptionSegmentRenderer: React.FC<{
     const pMid = page.startMs + page.durationMs / 2;
     if (pMid < segStartMs || pMid >= segEndMs) continue;
     const localStart = page.startMs - segStartMs;
+    // Shift page AND tokens by the same delta so they remain in the same
+    // coordinate system. The components subtract pageStartMs from
+    // token.fromMs to derive page-local time — that math only works when
+    // both are shifted together. Without this, mutating page.startMs alone
+    // breaks the per-token activation animations (words appear all at
+    // once instead of progressively as spoken).
+    const tokenDelta = page.startMs - Math.max(0, localStart);
     clippedPages.push({
       ...page,
       startMs: Math.max(0, localStart),
+      tokens: page.tokens.map((t) => ({
+        ...t,
+        fromMs: t.fromMs - tokenDelta,
+        toMs: t.toMs - tokenDelta,
+      })),
     });
   }
   if (!clippedPages.length) return null;
