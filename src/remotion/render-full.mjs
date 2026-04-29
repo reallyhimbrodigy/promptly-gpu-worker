@@ -35,7 +35,10 @@ import { fileURLToPath } from "url";
 import os from "os";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const PREBUNDLE_DIR = "/remotion/bundle";
+// Default to the Modal-image path used in production. Overridable via env
+// var so local smoke tests can point at a project-local prebundle cache
+// without re-bundling on every iteration.
+const PREBUNDLE_DIR = process.env.PROMPTLY_BUNDLE_DIR || "/remotion/bundle";
 
 const VALID_COMPOSITIONS = new Set([
   "PromptlyOverlay",

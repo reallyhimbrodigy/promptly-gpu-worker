@@ -21,7 +21,11 @@ import { fileURLToPath } from "url";
 import { mkdirSync } from "fs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const BUNDLE_DIR = "/remotion/bundle";
+// Default to the Modal-image path used at production build time. Overridable
+// via env var so local smoke tests can prebundle into a project-local cache
+// without colliding with /remotion/bundle (which doesn't exist on dev
+// machines anyway).
+const BUNDLE_DIR = process.env.PROMPTLY_BUNDLE_DIR || "/remotion/bundle";
 
 // Every @remotion/google-fonts/FONTNAME subpath the pack imports → local shim.
 // Keep this list in lock-step with src/shims/google-fonts/. If a new component

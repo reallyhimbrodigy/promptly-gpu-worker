@@ -5,3 +5,10 @@ node_modules/
 .claude/
 models/
 models/
+# Local Remotion smoke-bundle cache (built by scripts/smoke.sh; production
+# uses /remotion/bundle inside the Modal image instead).
+src/remotion/.smoke-bundle/
+# Remotion's auto-downloaded headless Chromium when run on a dev machine
+# without /usr/local/bin/chrome-headless-shell (production has it baked
+# into the Modal image).
+.remotion/
