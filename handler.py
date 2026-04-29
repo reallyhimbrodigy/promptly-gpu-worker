@@ -287,16 +287,13 @@ class ContentAnalysis(BaseModel):
 # and the phrasal-restart constants below are shared with build_clips_from_words
 # so the two passes produce identical results.
 # Zero-silence target: any gap longer than _MECH_DEAD_AIR_THRESHOLD_S between
-# consecutive word boundaries is cut. The threshold is kept just above the
-# `_MECH_DEAD_AIR_CUSHION_S` floor so the resulting range-cut never inverts —
-# any gap above (2 × cushion + small epsilon) gets squeezed down to ~2× cushion
-# of residual silence at the cut boundary. 30 ms threshold + 10 ms cushion
-# leaves at most ~20 ms of residual silence anywhere in the output, well below
-# perceptible levels for short-form viral content. Cushion exists only because
-# Deepgram word boundaries are approximate (~30 ms typical) — at zero cushion
-# we'd occasionally clip the trailing consonant of a word.
+# consecutive word boundaries is cut. Cushion is 0 because Deepgram boundaries
+# are now refined against the actual audio waveform (refine_word_boundaries_with_audio)
+# before this pass runs. The refined boundaries land on real vocal-energy
+# transitions, so cuts at those timestamps are AT word boundaries — no padding
+# or cushion needed.
 _MECH_DEAD_AIR_THRESHOLD_S = 0.03
-_MECH_DEAD_AIR_CUSHION_S = 0.01
+_MECH_DEAD_AIR_CUSHION_S = 0.0
 
 
 def _phrasal_restart_cuts(deepgram_words, already_cut):
@@ -1996,6 +1993,122 @@ def transcribe_audio(source_path):
     raise RuntimeError(f"Deepgram transcription failed after 3 attempts: {last_err}") from last_err
 
 
+def refine_word_boundaries_with_audio(words, source_path, sample_rate=16000):
+    """Snap each word's start/end to actual vocal-energy boundaries in the audio.
+
+    Deepgram returns approximate word boundaries (~30 ms drift typical) based on
+    its acoustic model. This pass uses the audio waveform itself as ground truth:
+    at each Deepgram-reported boundary, scan a ±60 ms window for the actual
+    vocal-energy crossing and snap to it. Cuts at refined boundaries land
+    cleanly between words — no padding or cushion required.
+
+    Process:
+      1. Decode the full audio to mono PCM at `sample_rate`.
+      2. Compute RMS in 10 ms windows.
+      3. Threshold against (noise_floor × 2) to mark each window vocal/silent.
+      4. Detect rising edges (silence → vocal) and falling edges (vocal → silence).
+      5. For each word, snap start to the nearest rising edge within ±60 ms,
+         and end to the nearest falling edge within ±60 ms.
+      6. If no edge falls in the search window (back-to-back words with no
+         silence between them), keep Deepgram's value — there is no acoustic
+         boundary to snap to.
+
+    Returns a NEW list of word dicts (does not mutate the input).
+    """
+    if not words:
+        return words
+    try:
+        import numpy as np
+        proc = subprocess.run(
+            ["ffmpeg", "-v", "error", "-threads", "0", "-i", source_path,
+             "-vn", "-ar", str(sample_rate), "-ac", "1", "-f", "s16le", "-"],
+            capture_output=True, timeout=60,
+        )
+        if proc.returncode != 0:
+            print(f"[align] audio decode failed; skipping refinement", flush=True)
+            return list(words)
+        samples = np.frombuffer(proc.stdout, dtype=np.int16).astype(np.float32) / 32768.0
+        if len(samples) < sample_rate // 10:  # less than 100ms
+            return list(words)
+
+        WINDOW_MS = 10
+        window_size = (sample_rate * WINDOW_MS) // 1000  # 160 samples for 16kHz
+        n_windows = len(samples) // window_size
+        if n_windows < 10:
+            return list(words)
+        rms = np.sqrt(
+            np.mean(samples[:n_windows * window_size].reshape(n_windows, window_size) ** 2, axis=1)
+        )
+
+        # Noise floor = 10th percentile of RMS over the whole audio.
+        # Threshold = noise_floor × 2 (≈ +6 dB) to discriminate vocal from silence.
+        # Floor at 1e-4 to avoid degenerate behavior on perfectly silent audio.
+        noise_floor = max(float(np.percentile(rms, 10)), 1e-4)
+        threshold = noise_floor * 2.0
+        is_vocal = rms > threshold
+
+        # Detect rising/falling edges with virtual silence at both ends.
+        padded = np.concatenate([[False], is_vocal, [False]])
+        diff = np.diff(padded.astype(np.int8))
+        rising_idx = np.where(diff == 1)[0]    # window where vocal STARTS
+        falling_idx = np.where(diff == -1)[0]  # window where vocal ENDS (first silent window after vocal)
+        # Convert window indices to seconds at the boundary of each window
+        rising_t = rising_idx.astype(np.float64) * (WINDOW_MS / 1000.0)
+        falling_t = falling_idx.astype(np.float64) * (WINDOW_MS / 1000.0)
+
+        SEARCH = 0.06  # ±60 ms search window
+        SNAP_MIN = 0.005  # 5 ms minimum delta to count as a refinement
+
+        n_start_snapped = 0
+        n_end_snapped = 0
+        max_start_delta = 0.0
+        max_end_delta = 0.0
+        refined: List[dict] = []
+        for w in words:
+            new_w = dict(w)
+            old_start = float(w.get("start") or 0.0)
+            old_end = float(w.get("end") or 0.0)
+
+            # Snap start to nearest rising edge within ±SEARCH
+            if len(rising_t) > 0:
+                cand = rising_t[(rising_t >= old_start - SEARCH) & (rising_t <= old_start + SEARCH)]
+                if len(cand) > 0:
+                    new_start = float(cand[np.argmin(np.abs(cand - old_start))])
+                    delta = new_start - old_start
+                    if abs(delta) >= SNAP_MIN:
+                        n_start_snapped += 1
+                        max_start_delta = max(max_start_delta, abs(delta))
+                    new_w["start"] = new_start
+
+            # Snap end to nearest falling edge within ±SEARCH
+            if len(falling_t) > 0:
+                cand = falling_t[(falling_t >= old_end - SEARCH) & (falling_t <= old_end + SEARCH)]
+                if len(cand) > 0:
+                    new_end = float(cand[np.argmin(np.abs(cand - old_end))])
+                    delta = new_end - old_end
+                    if abs(delta) >= SNAP_MIN:
+                        n_end_snapped += 1
+                        max_end_delta = max(max_end_delta, abs(delta))
+                    new_w["end"] = new_end
+
+            # Sanity: end must remain greater than start (otherwise revert).
+            if new_w["end"] <= new_w["start"]:
+                new_w["start"] = old_start
+                new_w["end"] = old_end
+
+            refined.append(new_w)
+
+        print(
+            f"[align] Refined word boundaries: {n_start_snapped} starts, {n_end_snapped} ends "
+            f"(max Δstart={max_start_delta * 1000:.0f}ms, max Δend={max_end_delta * 1000:.0f}ms, "
+            f"noise_floor={noise_floor:.4f})",
+            flush=True,
+        )
+        return refined
+    except Exception as e:
+        print(f"[align] refinement failed ({type(e).__name__}: {str(e)[:200]}); using Deepgram boundaries", flush=True)
+        return list(words)
+
 
 
 # ─── TIGHTEN ──────────────────────────────────────────────────────────────────
@@ -3299,7 +3412,7 @@ A candidate word or span is filler if and only if all four are affirmed:
 
   1. AUDIO — the surrounding speech sounds like uninterrupted natural delivery without the candidate.
   2. GRAMMAR — the remaining clause is well-formed.
-  3. INFORMATION — the candidate carries no information, structure, or weight the listener relies on for understanding the speaker's message.
+  3. INFORMATION — removing the candidate does not change the meaning the listener takes from the surrounding speech. If removing it would alter what the listener understands, or how parts of the message connect to each other, the check fails.
   4. DELIVERY — the speaker delivered the candidate without any observable deliberate emphasis.
 
 If you cannot confidently affirm a check, it does not pass. Each check is a positive assertion you must affirm. Any one failure → keep.
@@ -9974,6 +10087,34 @@ def handler(job):
                 print("[trend] WARNING: Style guide not available — Gemini will edit without reference video patterns", flush=True)
             return tc
 
+        # Shared transcript resolver + audio-derived boundary refinement.
+        # Both consumers (_do_content_analysis_overlapped, _do_edit_recipe_overlapped)
+        # and the main pipeline thread call this. A lock + cache ensures the
+        # resolution and audio-energy refinement run exactly once, regardless
+        # of which thread arrives first.
+        _refined_tx_cache: Dict[str, Any] = {"value": None}
+        _refined_tx_lock = threading.Lock()
+
+        def _get_resolved_transcript():
+            with _refined_tx_lock:
+                if _refined_tx_cache["value"] is not None:
+                    return _refined_tx_cache["value"]
+                # Resolve from whichever source is available (URL, file, prewarm).
+                _t = None
+                if future_url_transcript is not None:
+                    _t = future_url_transcript.result()
+                if _t is None and future_transcribe is not None:
+                    _t = future_transcribe.result()
+                if _t is None:
+                    _t = provided_transcript or {"words": []}
+                # Refine word boundaries against the actual audio waveform so
+                # cuts land at real word edges, not Deepgram's ~30 ms drift.
+                if _t and _t.get("words"):
+                    _t = dict(_t)
+                    _t["words"] = refine_word_boundaries_with_audio(_t["words"], _raw_source)
+                _refined_tx_cache["value"] = _t
+                return _t
+
         def _do_content_analysis_overlapped():
             """Run the pre-edit content-analysis Gemini call in parallel with face
             detection and signal computation. Depends on transcript + proxy; its
@@ -9988,15 +10129,8 @@ def handler(job):
             peak hints — the video renders, just without the analysis-driven
             polish. This keeps a transient API failure from taking down the
             whole job."""
-            # Wait for the same transcript the edit call will use.
-            if future_url_transcript is not None:
-                _transcript = future_url_transcript.result()
-                if _transcript is None:
-                    _transcript = future_transcribe.result() if future_transcribe is not None else {"words": []}
-            elif future_transcribe is not None:
-                _transcript = future_transcribe.result()
-            else:
-                _transcript = provided_transcript or {"words": []}
+            # Resolve transcript once, with audio-derived boundary refinement.
+            _transcript = _get_resolved_transcript()
             _dg_words = _transcript.get("words", []) or []
             if not _dg_words:
                 return ({"word_cuts": set(), "range_cuts": [], "reasons": {}},
@@ -10033,19 +10167,9 @@ def handler(job):
             """Start Gemini as soon as transcript + proxy + trend + audio + face signals are ready.
             Transcript may come from the early_pool URL-based Deepgram call (ran in parallel
             with the download), a regular mega-pool file-based call, or the provided_transcript
-            for re-edit paths. Whichever landed first wins — fall back chain handles URL failure."""
-            if future_url_transcript is not None:
-                _transcript = future_url_transcript.result()
-                if _transcript is None:
-                    # URL-based call failed; fall back to mega-pool file-based one
-                    print("[pipeline] URL transcript failed — awaiting fallback file-based transcribe", flush=True)
-                    _transcript = future_transcribe.result() if future_transcribe is not None else {"words": []}
-                else:
-                    print(f"[pipeline] transcript ready from URL-based Deepgram ({len(_transcript.get('words') or [])} words)", flush=True)
-            elif future_transcribe is not None:
-                _transcript = future_transcribe.result()
-            else:
-                _transcript = provided_transcript or {"words": []}
+            for re-edit paths. Whichever landed first wins — shared resolver applies audio-
+            derived boundary refinement once and caches the result for both consumers."""
+            _transcript = _get_resolved_transcript()
             _proxy_bytes = future_gemini_proxy.result() if future_gemini_proxy is not None else None
             if future_early_trend is not None:
                 try:
@@ -10221,21 +10345,12 @@ def handler(job):
         source_info = future_normalize.result()
         source_path = source_info["source_path"]
         _normalize_vf = source_info.get("normalize_vf")
-        if future_url_transcript is not None:
-            # Early-pool URL transcript ran in parallel with the download.
-            # If it failed (returned None), fall through to local fallback.
-            _url_tx = future_url_transcript.result()
-            if _url_tx is not None:
-                transcript = _url_tx
-            elif future_transcribe is not None:
-                transcript = future_transcribe.result()
-            else:
-                transcript = provided_transcript or {"words": []}
-        elif future_transcribe is not None:
-            transcript = future_transcribe.result()
-        else:
-            # render_only / reinterpret with cached transcript — no Deepgram call this pass
-            transcript = provided_transcript or {"words": []}
+        # Resolve transcript through the shared resolver — applies audio-derived
+        # boundary refinement once and caches the result. The overlapped
+        # consumers above already triggered this; here we just retrieve the
+        # cached refined transcript.
+        transcript = _get_resolved_transcript()
+        if not (future_url_transcript is not None or future_transcribe is not None):
             print(f"[pipeline] Using provided transcript ({len(transcript.get('words') or [])} words) — skipped Deepgram", flush=True)
         source_loudness = future_loudness.result()
         source_shot_changes = future_shot_changes.result()
