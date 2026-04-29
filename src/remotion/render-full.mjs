@@ -40,7 +40,7 @@ const PREBUNDLE_DIR = "/remotion/bundle";
 const VALID_COMPOSITIONS = new Set([
   "PromptlyOverlay",
   "PromptlyMicroSegments",
-  "PromptlyBlendRender",
+  "PromptlyBlendCaptionsOnly",
 ]);
 
 // ── CLI ────────────────────────────────────────────────────────────────────
@@ -96,7 +96,7 @@ for (let i = 0; i < args.length; i++) {
 if (!inputPath || !outputPath || !publicDir) {
   console.error(
     "Usage: node render-full.mjs --input <json> --output <file> --public-dir <dir> " +
-    "[--composition PromptlyOverlay|PromptlyMicroSegments|PromptlyBlendRender] " +
+    "[--composition PromptlyOverlay|PromptlyMicroSegments|PromptlyBlendCaptionsOnly] " +
     "[--concurrency N] [--gl mode] [--frame-range start,end --composition-start N]",
   );
   process.exit(1);
@@ -110,13 +110,13 @@ if (!VALID_COMPOSITIONS.has(compositionId)) {
 }
 
 const isOverlay = compositionId === "PromptlyOverlay";
-// PromptlyBlendRender renders the full final video (clips + transitions +
-// zoom + B-roll + captions w/ blend modes + MG + text overlays + outro)
-// in one Remotion pass. Used only when caption_style is one of the blend-
-// mode styles (GlitchHighlight, NegativeFlash, Prism). Codec/cache settings
-// match PromptlyMicroSegments (h264, large OffthreadVideo cache because the
-// source video is read heavily).
-const isBlend = compositionId === "PromptlyBlendRender";
+// PromptlyBlendCaptionsOnly is the second-pass composition for blend-mode
+// caption styles (GlitchHighlight, NegativeFlash, Prism). It reads the v62
+// silent intermediate as <OffthreadVideo> source and lays the blend-mode
+// captions + caption_match overlays on top so the existing mixBlendMode CSS
+// has real frame content underneath. h264, plus a generous OffthreadVideo
+// cache because the source video is read end-to-end.
+const isBlendCaptions = compositionId === "PromptlyBlendCaptionsOnly";
 
 if (!existsSync(inputPath)) {
   console.error(`[render-full] Input JSON not found: ${inputPath}`);
@@ -140,9 +140,10 @@ const isChunked = frameRangeStart !== null && frameRangeEnd !== null;
 const frameRangeLabel = isChunked
   ? `chunk frames ${frameRangeStart}-${frameRangeEnd} (compositionStart=${compositionStart})`
   : `frames 0-${inputJson.totalDurationInFrames - 1}`;
-const _summary = isOverlay || isBlend
-  ? `${inputJson.caption?.pages?.length ?? 0} caption pages, ${inputJson.motionGraphics?.length ?? 0} MG, ${inputJson.textOverlays?.length ?? 0} text overlays` +
-    (isBlend ? `, ${inputJson.clips?.length ?? 0} clips, ${inputJson.broll?.length ?? 0} broll` : "")
+const _summary = isOverlay
+  ? `${inputJson.caption?.pages?.length ?? 0} caption pages, ${inputJson.motionGraphics?.length ?? 0} MG, ${inputJson.textOverlays?.length ?? 0} text overlays`
+  : isBlendCaptions
+  ? `${inputJson.caption?.pages?.length ?? 0} caption pages, ${inputJson.captionMatchOverlays?.length ?? 0} caption-match overlays`
   : `${inputJson.segments?.length ?? 0} segments`;
 console.log(
   `[render-full] composition=${compositionId} (${isOverlay ? "ProRes 4444 alpha" : "h264"}) ` +
@@ -228,16 +229,15 @@ try {
   serveUrl: bundleLocation,
   composition,
   // Codec selection by composition:
-  //   PromptlyOverlay       → ProRes 4444 yuva444p10le (alpha required for
-  //                           the alpha-composite step). PNG intermediates
-  //                           are required by Remotion for any yuva pixel
-  //                           format (JPEG can't carry alpha).
-  //   PromptlyMicroSegments → h264 yuv420p (no alpha, fast encode, decoded
-  //                           by FFmpeg in the final composite pass).
-  //   PromptlyBlendRender   → h264 yuv420p (final video — no alpha needed
-  //                           because the composition includes source video
-  //                           and B-roll baked in. Audio is muxed onto this
-  //                           output as the only post-Remotion step.)
+  //   PromptlyOverlay           → ProRes 4444 yuva444p10le (alpha required
+  //                               for the alpha-composite step). PNG
+  //                               intermediates required for yuva pixel
+  //                               formats (JPEG can't carry alpha).
+  //   PromptlyMicroSegments     → h264 yuv420p (no alpha, fast encode,
+  //                               decoded by FFmpeg in the final composite).
+  //   PromptlyBlendCaptionsOnly → h264 yuv420p (output of the second pass:
+  //                               v62 silent video + blend captions baked
+  //                               in. Audio mux is the only step after.)
   codec: isOverlay ? "prores" : "h264",
   ...(isOverlay
     ? {
@@ -268,12 +268,12 @@ try {
   compositionStart,
   // OffthreadVideo cache, sized per composition. Overlay is a transparent
   // canvas — no source video reads — so a small cache suffices. Micro
-  // segments seek heavily into source video for transitions + complex-zoom
-  // clips. PromptlyBlendRender reads source video for every clip (full
-  // timeline) plus B-roll cutaways, so it needs the largest cache.
+  // segments seek heavily into source for transitions + complex-zoom clips.
+  // PromptlyBlendCaptionsOnly reads the v62 silent intermediate end-to-end,
+  // so it needs the largest cache.
   offthreadVideoCacheSizeInBytes: isOverlay
     ? 256 * 1024 * 1024     // 256 MB (overlay never reads video)
-    : 4 * 1024 * 1024 * 1024, // 4 GB (micro & blend read source heavily)
+    : 4 * 1024 * 1024 * 1024, // 4 GB (micro + blend-captions read source heavily)
   logLevel: "info",
   onProgress: (info) => {
     const { progress, encodedFrames, renderedFrames } = info || {};

@@ -294,3 +294,34 @@ export interface PromptlyMicroSegmentsInput {
 export interface PromptlyMicroSegmentsProps {
   input: PromptlyMicroSegmentsInput;
 }
+
+// ── PromptlyBlendCaptionsOnly — captions on top of finished video ────────────
+// Used ONLY for caption styles that rely on CSS mixBlendMode (GlitchHighlight,
+// NegativeFlash, Prism). The first pass (v62) renders the entire video with
+// every other layer (clips, transitions, zoom, B-roll, MGs, non-caption_match
+// text overlays, outro). This second pass takes that intermediate as the
+// source video, draws the blend-mode captions and any caption_match text
+// overlays on top so they have real video pixels to blend against, and emits
+// a new video. Audio is muxed afterward.
+//
+// This composition only knows about the captions/caption_match overlays — it
+// has no clip, transition, B-roll or MG state. That makes it a much smaller
+// surface than the previous PromptlyBlendRender composition (which inlined
+// every layer the v62 path already covers).
+export interface PromptlyBlendCaptionsOnlyInput {
+  videoUrl: string;
+  fps: number;
+  width: number;
+  height: number;
+  totalDurationInFrames: number;
+  caption: CaptionSpec;
+  /** caption_match-variant text overlays only — these render through the
+   *  caption component and therefore also need video pixels underneath. Other
+   *  variants (torn_paper / sticky_note / quote_card) are baked in by the
+   *  v62 pass and must NOT be repeated here. */
+  captionMatchOverlays: CaptionMatchOverlay[];
+}
+
+export interface PromptlyBlendCaptionsOnlyProps {
+  input: PromptlyBlendCaptionsOnlyInput;
+}

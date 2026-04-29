@@ -1,36 +1,41 @@
 import React from "react";
 import { Composition } from "remotion";
-import { PromptlyOverlay, PromptlyMicroSegments, PromptlyBlendRender } from "./PromptlyRender";
+import {
+  PromptlyOverlay,
+  PromptlyMicroSegments,
+  PromptlyBlendCaptionsOnly,
+} from "./PromptlyRender";
 import type {
   PromptlyRenderInput,
   PromptlyMicroSegmentsInput,
+  PromptlyBlendCaptionsOnlyInput,
 } from "./types";
 
 /**
- * Remotion root — THREE production compositions:
+ * Remotion root — three production compositions:
  *
- *   PromptlyOverlay      — captions + motion graphics + text overlays on a
- *                          TRANSPARENT canvas. ProRes 4444 (alpha) so FFmpeg
- *                          can composite it onto the base. Used for the v62
- *                          FFmpeg-base architecture (default path).
- *   PromptlyMicroSegments — segmented Remotion-only render covering the
- *                          windows that can't be reproduced faithfully in
- *                          FFmpeg: every transition (11 types) and the
- *                          composite-effect zoom clips (FocusWindow,
- *                          LetterboxPush, DepthPull). h264 (no alpha).
- *   PromptlyBlendRender  — full Remotion composition (clips + transitions +
- *                          zoom + B-roll + captions + MG + text overlays +
- *                          outro). h264. Used ONLY when the chosen
- *                          caption_style is one of the blend-mode styles
- *                          (GlitchHighlight, NegativeFlash, Prism) which
- *                          require video pixels underneath the captions to
- *                          blend against. Bypasses the FFmpeg-base + alpha-
- *                          overlay split for those renders.
+ *   PromptlyOverlay           — captions + motion graphics + text overlays on
+ *                               a TRANSPARENT canvas. ProRes 4444 (alpha) so
+ *                               FFmpeg can composite it onto the base.
+ *                               In blend-mode renders, handler.py zeroes out
+ *                               caption.pages and filters caption_match text
+ *                               overlays from this input — those are drawn
+ *                               by PromptlyBlendCaptionsOnly in the second
+ *                               pass instead.
+ *   PromptlyMicroSegments     — segmented Remotion render covering windows
+ *                               that can't be reproduced faithfully in
+ *                               FFmpeg: every transition (11 types) and
+ *                               composite-effect zoom clips. h264.
+ *   PromptlyBlendCaptionsOnly — second pass for blend-mode caption styles
+ *                               (GlitchHighlight, NegativeFlash, Prism).
+ *                               Reads the v62 silent intermediate as
+ *                               OffthreadVideo source and lays the blend-
+ *                               mode captions + caption_match overlays on
+ *                               top so the existing mixBlendMode CSS has
+ *                               real frame content underneath. h264.
  *
- * Default path: FFmpeg builds the base video (clip cuts, simple zoom, B-roll,
- * outro fade), Remotion renders PromptlyOverlay (alpha) + PromptlyMicroSegments
- * (transitions, complex zooms) in parallel, then a single ffmpeg pass
- * composites everything.
+ * v62 path always runs end-to-end first. Blend renders pay for one extra
+ * Remotion pass on top; non-blend renders go straight from v62 to audio mux.
  */
 
 const DEFAULT_RENDER_INPUT: PromptlyRenderInput = {
@@ -62,6 +67,21 @@ const DEFAULT_MICRO_INPUT: PromptlyMicroSegmentsInput = {
   segments: [],
 };
 
+const DEFAULT_BLEND_CAPTIONS_INPUT: PromptlyBlendCaptionsOnlyInput = {
+  videoUrl: "",
+  fps: 60,
+  width: 1080,
+  height: 1920,
+  totalDurationInFrames: 1,
+  caption: {
+    style: "GlitchHighlight",
+    pages: [],
+    keywords: [],
+    positionSegments: [{ fromFrame: 0, toFrame: 1, position: "bottom" }],
+  },
+  captionMatchOverlays: [],
+};
+
 const calculateOverlayMetadata = ({ props }: { props: unknown }) => {
   const i = (props as { input: PromptlyRenderInput }).input;
   return {
@@ -74,6 +94,16 @@ const calculateOverlayMetadata = ({ props }: { props: unknown }) => {
 
 const calculateMicroMetadata = ({ props }: { props: unknown }) => {
   const i = (props as { input: PromptlyMicroSegmentsInput }).input;
+  return {
+    width: i.width,
+    height: i.height,
+    fps: i.fps,
+    durationInFrames: Math.max(1, i.totalDurationInFrames),
+  };
+};
+
+const calculateBlendCaptionsMetadata = ({ props }: { props: unknown }) => {
+  const i = (props as { input: PromptlyBlendCaptionsOnlyInput }).input;
   return {
     width: i.width,
     height: i.height,
@@ -106,14 +136,14 @@ export const RemotionRoot: React.FC = () => {
         calculateMetadata={calculateMicroMetadata}
       />
       <Composition
-        id="PromptlyBlendRender"
-        component={PromptlyBlendRender as unknown as React.FC<Record<string, unknown>>}
-        width={DEFAULT_RENDER_INPUT.width}
-        height={DEFAULT_RENDER_INPUT.height}
-        fps={DEFAULT_RENDER_INPUT.fps}
-        durationInFrames={DEFAULT_RENDER_INPUT.totalDurationInFrames}
-        defaultProps={{ input: DEFAULT_RENDER_INPUT } as unknown as Record<string, unknown>}
-        calculateMetadata={calculateOverlayMetadata}
+        id="PromptlyBlendCaptionsOnly"
+        component={PromptlyBlendCaptionsOnly as unknown as React.FC<Record<string, unknown>>}
+        width={DEFAULT_BLEND_CAPTIONS_INPUT.width}
+        height={DEFAULT_BLEND_CAPTIONS_INPUT.height}
+        fps={DEFAULT_BLEND_CAPTIONS_INPUT.fps}
+        durationInFrames={DEFAULT_BLEND_CAPTIONS_INPUT.totalDurationInFrames}
+        defaultProps={{ input: DEFAULT_BLEND_CAPTIONS_INPUT } as unknown as Record<string, unknown>}
+        calculateMetadata={calculateBlendCaptionsMetadata}
       />
     </>
   );

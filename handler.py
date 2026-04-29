@@ -67,13 +67,14 @@ _CAPTION_STYLES = Literal[
     "MagazineCutout", "Passage", "Pulse", "Quintessence", "Serif",
     "GlitchHighlight", "NegativeFlash", "Prism",
 ]
-# Caption styles that use CSS mixBlendMode against video pixels. These render
-# correctly only inside PromptlyBlendRender (full Remotion composition with
-# source video underneath) — NOT in the v62 transparent-overlay architecture.
-# When the chosen caption_style is in this set, render_multi_clip routes
-# through the blend-render path: a single Remotion composition that produces
-# the final h264 video, then audio mux. The FFmpeg-base + alpha-overlay split
-# is bypassed for these renders.
+# Caption styles that use CSS mixBlendMode against video pixels. They CANNOT
+# render correctly on the transparent overlay alone (no pixels to blend
+# against). The pipeline handles this in two passes: v62 produces the full
+# video without these captions (handler zeroes out caption.pages and filters
+# caption_match overlays for PromptlyOverlay's input), then a small second
+# Remotion pass — PromptlyBlendCaptionsOnly — takes the v62 silent
+# intermediate as <OffthreadVideo> source and lays the blend captions on top.
+# Audio mux is the only further step.
 _BLEND_MODE_CAPTION_STYLES = frozenset({"GlitchHighlight", "NegativeFlash", "Prism"})
 _TRANSITION_TYPES = Literal[
     "CardSwipe", "ZoomThrough", "SlideOver", "Stack", "CrossfadeZoom",
@@ -8501,30 +8502,28 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _source_url = _stage_file(source_path)
     print(f"[render] Staged source as {_source_url} (under {_bundle_public_root})", flush=True)
 
-    # ── Blend-mode caption render path ─────────────────────────────────────
-    # When the chosen caption_style uses CSS mixBlendMode against video pixels
-    # (GlitchHighlight / NegativeFlash / Prism), the v62 transparent-overlay
-    # architecture cannot give the components what they need — blend modes
-    # have nothing to blend against on a transparent canvas. We bypass the
-    # FFmpeg-base + alpha-overlay split entirely for these renders and use a
-    # single Remotion composition (PromptlyBlendRender) that produces the
-    # final h264 video with everything (clips, transitions, zoom, B-roll,
-    # captions w/ blend, MG, text overlays, outro) baked in. Audio is muxed
-    # onto the Remotion output as the only post-render step.
+    # ── Blend-mode caption flag ────────────────────────────────────────────
+    # When the chosen caption_style uses CSS mixBlendMode (GlitchHighlight /
+    # NegativeFlash / Prism), v62 still runs end-to-end — it just produces the
+    # video WITHOUT those captions (handler zeroes their pages out and filters
+    # any caption_match-variant text overlays from PromptlyOverlay's input).
+    # After v62 is done, a small second Remotion pass (PromptlyBlendCaptionsOnly)
+    # reads the silent intermediate as <OffthreadVideo> source and draws the
+    # blend captions + caption_match overlays on top so the existing mixBlendMode
+    # CSS has real frame content underneath. Audio mux happens last.
     _is_blend_render = _caption_style in _BLEND_MODE_CAPTION_STYLES
     if _is_blend_render:
         print(
             f"[render] Caption style '{_caption_style}' uses CSS blend modes — "
-            f"routing through PromptlyBlendRender (full Remotion composition).",
+            f"will run v62 + PromptlyBlendCaptionsOnly second pass.",
             flush=True,
         )
 
     # ── B-roll fetch resolution closure ─────────────────────────────────────
-    # Wraps the wait+populate logic so it can be called early (before the
-    # blend render input JSON is written, since PromptlyBlendRender bakes
-    # B-roll inline) or late (after the v62 alpha overlay/micro renders are
-    # spawned, where the deferred timing overlaps with the Remotion render).
-    # The flag prevents double-resolution when both paths are walked.
+    # Wraps the wait+populate logic so it can be called late (after the v62
+    # alpha overlay/micro renders are spawned, where the deferred timing
+    # overlaps with the Remotion renders). The flag is preserved to prevent
+    # accidental double-resolution if anyone re-introduces an early-resolve.
     _broll_resolved = False
 
     def _resolve_broll_fetches():
@@ -8614,14 +8613,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 _br_fps = 30.0
             if _br_fps <= 0 or _br_fps > 240:
                 _br_fps = 30.0
-            # Blend mode: Remotion reads broll src through staticFile, which
-            # only accepts basenames relative to publicDir. Stage the fetched
-            # /tmp file into the bundle public root and emit the basename.
-            # v62 path: B-roll is composited by FFmpeg from the absolute path,
-            # no staging.
-            _broll_src = _stage_file(_local_path) if _is_blend_render else _local_path
+            # B-roll is always composited by FFmpeg in v62. The src is the
+            # absolute on-disk /tmp path; FFmpeg reads it directly. The
+            # Remotion blend-captions pass never sees B-roll (captions only),
+            # so no public-dir staging is needed.
             broll_out.append({
-                "src": _broll_src,
+                "src": _local_path,
                 "fromFrame": _from_frame,
                 "durationInFrames": _dur_frames,
                 "seekFromSeconds": float(_seek_seconds),
@@ -8632,16 +8629,34 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _kw = _bc.get("keyword", "")
             print(f"[broll] '{_kw}' out=[{_out_start:.2f}..{_out_end:.2f}]s dur={_eff:.2f}s seek={_seek_seconds:.2f}s", flush=True)
 
-    # Blend mode: B-roll must be resolved BEFORE the input JSON is written
-    # because PromptlyBlendRender bakes B-roll into the final video.
+    # PromptlyOverlay input — captions/MG/text on a transparent canvas. In
+    # blend-mode renders, captions and caption_match-variant text overlays
+    # are dropped here because they need real video pixels underneath; they
+    # render in the second-pass PromptlyBlendCaptionsOnly composition
+    # instead. Other text-overlay variants (torn_paper / sticky_note /
+    # quote_card) and MGs render here in both modes — they don't depend on
+    # video pixels.
     if _is_blend_render:
-        _resolve_broll_fetches()
-
-    # PromptlyOverlay input — full edit_plan, but the composition only renders
-    # captions/MG/text on transparent canvas (it ignores clips/transitions/
-    # broll). sourceUrl is included for completeness; OverlayLayer never reads
-    # video. PromptlyBlendRender consumes the SAME shape but renders all
-    # fields (it's a full composition).
+        _v62_caption = {
+            "style": _caption_style,
+            "pages": [],
+            "keywords": _caption_keywords,
+            "positionSegments": caption_position_segments_out,
+            "extraProps": _caption_extra_props,
+        }
+        _v62_text_overlays = [
+            ov for ov in text_overlays_out
+            if ov.get("variant") != "caption_match"
+        ]
+    else:
+        _v62_caption = {
+            "style": _caption_style,
+            "pages": caption_pages,
+            "keywords": _caption_keywords,
+            "positionSegments": caption_position_segments_out,
+            "extraProps": _caption_extra_props,
+        }
+        _v62_text_overlays = text_overlays_out
     overlay_input = {
         "sourceUrl": _source_url,
         "fps": source_fps,
@@ -8651,14 +8666,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         "clips": clips_out,
         "transitions": transitions_out,
         "broll": broll_out,
-        "caption": {
-            "style": _caption_style,
-            "pages": caption_pages,
-            "keywords": _caption_keywords,
-            "positionSegments": caption_position_segments_out,
-            "extraProps": _caption_extra_props,
-        },
-        "textOverlays": text_overlays_out,
+        "caption": _v62_caption,
+        "textOverlays": _v62_text_overlays,
         "motionGraphics": motion_graphics_out,
         "outro": _outro,
     }
@@ -8670,20 +8679,44 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # Each segment carries its own clip/transition spec; Python tracks a
     # parallel list of metadata (with _clipIndex / _afterClipIndex tags) so
     # the FFmpeg final-mux filtergraph can find each segment by source.
-    # Skipped in blend-render mode: PromptlyBlendRender handles transitions
-    # and complex zooms inline.
+    # Always runs — blend mode goes through v62 too, just with a captions
+    # second pass on top afterwards.
+    micro_input, micro_segments_meta = build_micro_segments_input(
+        clips_out, transitions_out, _source_url, source_fps,
+    )
+    micro_input_path = None
+    if micro_input is not None:
+        micro_input_path = os.path.join(_stage_dir, "micro_input.json")
+        with open(micro_input_path, "w") as _f:
+            json.dump(micro_input, _f)
+
+    # PromptlyBlendCaptionsOnly input — built only when caption style needs
+    # video pixels for blend modes. videoUrl is set later, after the v62
+    # silent intermediate is staged into the bundle public root. captionMatch
+    # overlays are the subset of text_overlays that render through the
+    # caption component, so they also need to be drawn on top of the video.
+    blend_captions_input = None
+    blend_captions_input_path = None
     if _is_blend_render:
-        micro_input, micro_segments_meta = None, []
-        micro_input_path = None
-    else:
-        micro_input, micro_segments_meta = build_micro_segments_input(
-            clips_out, transitions_out, _source_url, source_fps,
-        )
-        micro_input_path = None
-        if micro_input is not None:
-            micro_input_path = os.path.join(_stage_dir, "micro_input.json")
-            with open(micro_input_path, "w") as _f:
-                json.dump(micro_input, _f)
+        _blend_caption_match_overlays = [
+            ov for ov in text_overlays_out
+            if ov.get("variant") == "caption_match"
+        ]
+        blend_captions_input = {
+            "videoUrl": "",  # filled in after v62 silent intermediate is staged
+            "fps": source_fps,
+            "width": 1080,
+            "height": 1920,
+            "totalDurationInFrames": total_output_frames,
+            "caption": {
+                "style": _caption_style,
+                "pages": caption_pages,
+                "keywords": _caption_keywords,
+                "positionSegments": caption_position_segments_out,
+                "extraProps": _caption_extra_props,
+            },
+            "captionMatchOverlays": _blend_caption_match_overlays,
+        }
 
     _ffmpeg_clip_count = sum(1 for c in clips_out if categorize_clip(c) == "ffmpeg")
     _remotion_clip_count = len(clips_out) - _ffmpeg_clip_count
@@ -8777,7 +8810,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # (<300 frames) where the per-process startup tax doesn't amortize.
     overlay_video_path = os.path.join(work_dir, "overlay.mov")
     micro_video_path = os.path.join(work_dir, "micro_segments.mp4")
-    blend_video_path = os.path.join(work_dir, "blend_render.mp4")
     # Pick the best Chromium rasterizer this container can actually drive:
     #   - "vulkan"      : engages the NVIDIA H100 via libGLX_nvidia. Only works
     #                     if startup confirmed _VULKAN_NVIDIA_OK (vulkaninfo saw
@@ -8845,24 +8877,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _overlay_chunked = len(_overlay_ranges) > 1
     _overlay_chunk_paths: list = []
     overlay_cmds: list = []
-    blend_cmd = None
     micro_cmd = None
-    if _is_blend_render:
-        # Blend-mode caption render: a single Remotion process renders the
-        # full final video (clips + transitions + zoom + B-roll + captions
-        # with mixBlendMode + MG + text overlays + outro). No chunking yet —
-        # the full composition needs continuous frame-to-frame state for
-        # transitions and B-roll cutaways. Output: h264.
-        _overlay_chunked = False
-        blend_cmd = [
-            "node", "/remotion/render-full.mjs",
-            "--input", overlay_input_path,
-            "--output", blend_video_path,
-            "--public-dir", _bundle_public_root,
-            "--composition", "PromptlyBlendRender",
-            "--gl", _gl_mode,
-        ]
-    elif _overlay_chunked:
+    if _overlay_chunked:
         for _i, (_fs, _fe) in enumerate(_overlay_ranges):
             _chunk_path = os.path.join(work_dir, f"overlay_chunk_{_i:02d}.mov")
             _overlay_chunk_paths.append(_chunk_path)
@@ -8893,7 +8909,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             ],
         ))
 
-    if not _is_blend_render and micro_input is not None:
+    if micro_input is not None:
         micro_cmd = [
             "node", "/remotion/render-full.mjs",
             "--input", micro_input_path,
@@ -8904,13 +8920,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         ]
 
     _render_t0 = time.time()
-    if _is_blend_render:
-        print(
-            f"[render] Spawning Remotion render: PromptlyBlendRender (single, "
-            f"{total_output_frames}f) (gl={_gl_mode})",
-            flush=True,
-        )
-    elif _overlay_chunked:
+    if _overlay_chunked:
         print(
             f"[render] Spawning {len(overlay_cmds)} overlay chunk subprocesses "
             f"({total_output_frames} frames split {len(_overlay_ranges)}-ways, "
@@ -8926,14 +8936,13 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             flush=True,
         )
     _render_pool = concurrent.futures.ThreadPoolExecutor(
-        max_workers=max(1, len(overlay_cmds) + (1 if micro_cmd else 0) + (1 if blend_cmd else 0)),
+        max_workers=max(1, len(overlay_cmds) + (1 if micro_cmd else 0)),
     )
     overlay_futures = [
         _render_pool.submit(_run_remotion, _lbl, _cmd)
         for _lbl, _cmd in overlay_cmds
     ]
     micro_future = _render_pool.submit(_run_remotion, "micro", micro_cmd) if micro_cmd else None
-    blend_future = _render_pool.submit(_run_remotion, "blend", blend_cmd) if blend_cmd else None
 
     # ── Audio pipeline (running on a separate thread) —
     # Collect its output now so the final-audio build can start while the
@@ -8998,25 +9007,23 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # broll_out populated. Deferring the wait here overlaps the fetch
     # budget with the entire Remotion render (~80s typical) instead of
     # blocking the critical path.
-    #
-    # Blend-mode path: B-roll resolution happens EARLIER (before the
-    # PromptlyBlendRender input JSON is written) because that composition
-    # bakes B-roll into the final video. The early resolve sets _broll_resolved.
     if not _broll_resolved:
         _resolve_broll_fetches()
 
-    # ── 12. Wait for Remotion renders, then single-pass final composite ────
-    # All the heavy work is in this one ffmpeg invocation:
+    # ── 12. Wait for Remotion renders, then ffmpeg composite ────────────
+    # All the heavy v62 work happens in this one ffmpeg invocation:
     #   1. Build each ffmpeg-renderable clip from source via trim+setpts+(zoom?)
     #   2. Trim each Remotion-rendered clip/transition out of micro_segments.mp4
     #      by frame range
     #   3. Concat all timeline segments in order → [base]
     #   4. Overlay each B-roll cutaway at its output-time window
     #   5. Apply outro fade (if configured)
-    #   6. Alpha-composite the PromptlyOverlay layer
-    #   7. libx264 ultrafast crf 18 final encode + AAC audio mux
-    # In blend-render mode, the Remotion composition produced the entire
-    # final video in a single pass — no FFmpeg composite filtergraph runs.
+    #   6. Alpha-composite the PromptlyOverlay layer (captions + MGs + non-
+    #      caption_match text overlays — blend captions are handled by the
+    #      second-pass PromptlyBlendCaptionsOnly composition that runs after
+    #      this composite finishes, when caption_style is a blend style).
+    #   7. libx264 ultrafast crf 18 silent intermediate (audio mux is a
+    #      separate stream-copy step at the very end).
     # Wait for all overlay chunk subprocesses (in input order — for chunked
     # mode each chunk lands in its own .mov; we concat them in order below).
     _overlay_chunk_elapsed = []
@@ -9034,15 +9041,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         micro_elapsed = micro_future.result(timeout=320)
         print(f"[render] PromptlyMicroSegments done in {micro_elapsed:.1f}s → "
               f"{os.path.getsize(micro_video_path)/1024/1024:.1f}MB", flush=True)
-    if blend_future:
-        blend_elapsed = blend_future.result(timeout=600)
-        if not os.path.exists(blend_video_path) or os.path.getsize(blend_video_path) < 1000:
-            raise RuntimeError(f"PromptlyBlendRender output missing/invalid: {blend_video_path}")
-        print(
-            f"[render] PromptlyBlendRender done in {blend_elapsed:.1f}s → "
-            f"{os.path.getsize(blend_video_path)/1024/1024:.1f}MB",
-            flush=True,
-        )
     _render_pool.shutdown(wait=False)
     _render_elapsed = time.time() - _render_t0
 
@@ -9084,51 +9082,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     print(f"[render] All Remotion renders done in {_render_elapsed:.1f}s", flush=True)
 
-    # Validate Remotion outputs.
-    # In blend-render mode, only the blend output exists; the overlay/micro
-    # paths were skipped entirely.
-    if not _is_blend_render:
-        if not os.path.exists(overlay_video_path) or os.path.getsize(overlay_video_path) < 1000:
-            raise RuntimeError(f"PromptlyOverlay output missing/invalid: {overlay_video_path}")
-        if micro_input is not None and (
-            not os.path.exists(micro_video_path) or os.path.getsize(micro_video_path) < 1000
-        ):
-            raise RuntimeError(f"PromptlyMicroSegments output missing/invalid: {micro_video_path}")
-
-    # ── Blend-mode final mux: audio onto Remotion video, then exit ────────
-    # In blend-render mode, the Remotion composition produced the entire
-    # final video — clips, transitions, B-roll, captions w/ blend modes,
-    # MG, text overlays, outro fade. The only post-Remotion step is muxing
-    # the audio track onto it. No FFmpeg composite filtergraph runs.
-    if _is_blend_render:
-        _mux_t0 = time.time()
-        _mux_cmd = [
-            "ffmpeg", "-y", "-v", "warning", "-threads", "0",
-            "-i", blend_video_path,
-            "-i", _final_audio_path,
-            "-c:v", "copy",
-            "-c:a", "copy",
-            "-map", "0:v:0",
-            "-map", "1:a:0",
-            "-shortest",
-            "-movflags", "+faststart",
-            output_path,
-        ]
-        _mux_r = subprocess.run(_mux_cmd, capture_output=True, text=True, timeout=180)
-        if _mux_r.returncode != 0:
-            raise RuntimeError(
-                f"Blend-render audio mux failed (rc={_mux_r.returncode}): "
-                f"{(_mux_r.stderr or '')[-1000:]}"
-            )
-        _mux_elapsed = time.time() - _mux_t0
-        print(
-            f"[render] Blend mux done in {_mux_elapsed:.1f}s. "
-            f"Total render: blend={_render_elapsed:.1f}s audio={_audio_elapsed:.1f}s "
-            f"mux={_mux_elapsed:.1f}s → "
-            f"{os.path.getsize(output_path)/1024/1024:.1f}MB",
-            flush=True,
-        )
-        return output_path
+    # Validate v62 Remotion outputs (always produced — blend mode no longer
+    # bypasses these; it adds a second pass on top of the v62 result).
+    if not os.path.exists(overlay_video_path) or os.path.getsize(overlay_video_path) < 1000:
+        raise RuntimeError(f"PromptlyOverlay output missing/invalid: {overlay_video_path}")
+    if micro_input is not None and (
+        not os.path.exists(micro_video_path) or os.path.getsize(micro_video_path) < 1000
+    ):
+        raise RuntimeError(f"PromptlyMicroSegments output missing/invalid: {micro_video_path}")
 
     # ── Chunked composite (4-way parallel ffmpeg) ─────────────────────────
     # The single-pass final-mux step was a libx264-encode-bound bottleneck
@@ -9266,6 +9227,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         return cmd
 
     _mux_t0 = time.time()
+    _silent_full = os.path.join(work_dir, "silent_full.mp4")
 
     if _composite_chunked:
         # ── Spawn N parallel ffmpeg processes for the silent video pieces ──
@@ -9321,7 +9283,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _composite_pool.shutdown(wait=False)
 
         # Concat the silent pieces (lossless `-c copy`).
-        _silent_full = os.path.join(work_dir, "silent_full.mp4")
         _cc_list = os.path.join(work_dir, "_composite_concat_list.txt")
         with open(_cc_list, "w") as _lf:
             for _p in _composite_chunk_paths:
@@ -9341,45 +9302,91 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 f"{(_cc_r.stderr or '')[-1500:]}"
             )
         _cc_elapsed = time.time() - _cc_t0
-
-        # Final stream-copy mux: silent video + processed audio → output.
-        _am_t0 = time.time()
-        _am_r = subprocess.run(
-            ["ffmpeg", "-y", "-v", "warning",
-             "-i", _silent_full,
-             "-i", _final_audio_path,
-             "-c:v", "copy",
-             "-c:a", "copy",
-             "-shortest",
-             "-movflags", "+faststart",
-             output_path],
-            capture_output=True, text=True, timeout=120,
-        )
-        if _am_r.returncode != 0:
-            raise RuntimeError(
-                f"Audio mux failed (rc={_am_r.returncode}): "
-                f"{(_am_r.stderr or '')[-1500:]}"
-            )
-        _am_elapsed = time.time() - _am_t0
-
         _max_chunk = max(_composite_chunk_elapsed)
         print(
-            f"[render] Composite: max chunk={_max_chunk:.1f}s, "
-            f"concat={_cc_elapsed:.1f}s, audio mux={_am_elapsed:.1f}s",
+            f"[render] Composite: max chunk={_max_chunk:.1f}s, concat={_cc_elapsed:.1f}s",
             flush=True,
         )
     else:
-        # Single-pass fallback for short outputs — same shape as v62.
+        # Single-pass for short outputs (<400 frames). Always produces a
+        # silent intermediate so the downstream blend-captions / audio-mux
+        # steps share the same shape as the chunked path.
         _single_cmd = _build_composite_cmd(
-            0, 0, int(total_output_frames), output_path, include_audio=True,
+            0, 0, int(total_output_frames), _silent_full, include_audio=False,
         )
         _r = subprocess.run(_single_cmd, capture_output=True, text=True, timeout=300)
         if _r.returncode != 0:
             raise RuntimeError(f"Final composite failed: {(_r.stderr or '')[-1500:]}")
 
+    if not os.path.exists(_silent_full) or os.path.getsize(_silent_full) < 1000:
+        raise RuntimeError(f"Silent intermediate missing/invalid: {_silent_full}")
+
+    # ── Blend-mode second pass ────────────────────────────────────────────
+    # For blend captions (GlitchHighlight / NegativeFlash / Prism), v62 has
+    # produced the full video without those captions. Stage the silent
+    # intermediate into the bundle public root, run PromptlyBlendCaptionsOnly
+    # to draw blend captions + caption_match overlays on top with the
+    # existing mixBlendMode CSS against real frame content, and use the
+    # output of THAT pass as the source for the final audio mux.
+    _audio_source_video = _silent_full
+    _blend_pass_elapsed = 0.0
+    if _is_blend_render:
+        _blend_t0 = time.time()
+        _blend_video_basename = _stage_file(_silent_full)
+        blend_captions_input["videoUrl"] = _blend_video_basename
+        blend_captions_input_path = os.path.join(_stage_dir, "blend_captions_input.json")
+        with open(blend_captions_input_path, "w") as _f:
+            json.dump(blend_captions_input, _f)
+        _blend_captions_video = os.path.join(work_dir, "blend_captions.mp4")
+        _blend_cmd = [
+            "node", "/remotion/render-full.mjs",
+            "--input", blend_captions_input_path,
+            "--output", _blend_captions_video,
+            "--public-dir", _bundle_public_root,
+            "--composition", "PromptlyBlendCaptionsOnly",
+            "--gl", _gl_mode,
+        ]
+        _run_remotion("blend-captions", _blend_cmd)
+        if (
+            not os.path.exists(_blend_captions_video)
+            or os.path.getsize(_blend_captions_video) < 1000
+        ):
+            raise RuntimeError(
+                f"PromptlyBlendCaptionsOnly output missing/invalid: {_blend_captions_video}"
+            )
+        _audio_source_video = _blend_captions_video
+        _blend_pass_elapsed = time.time() - _blend_t0
+        print(
+            f"[render] PromptlyBlendCaptionsOnly done in {_blend_pass_elapsed:.1f}s → "
+            f"{os.path.getsize(_blend_captions_video)/1024/1024:.1f}MB",
+            flush=True,
+        )
+
+    # ── Final audio mux: stream-copy silent video + AAC audio → output ────
+    _am_t0 = time.time()
+    _am_r = subprocess.run(
+        ["ffmpeg", "-y", "-v", "warning",
+         "-i", _audio_source_video,
+         "-i", _final_audio_path,
+         "-c:v", "copy",
+         "-c:a", "copy",
+         "-shortest",
+         "-movflags", "+faststart",
+         output_path],
+        capture_output=True, text=True, timeout=120,
+    )
+    if _am_r.returncode != 0:
+        raise RuntimeError(
+            f"Audio mux failed (rc={_am_r.returncode}): "
+            f"{(_am_r.stderr or '')[-1500:]}"
+        )
+    _am_elapsed = time.time() - _am_t0
+
     _mux_elapsed = time.time() - _mux_t0
     print(
-        f"[render] Final composite (clips+broll+overlay+encode+audio) done in {_mux_elapsed:.1f}s",
+        f"[render] Final composite (clips+broll+overlay+encode"
+        f"{'+blend-captions' if _is_blend_render else ''}+audio) done in {_mux_elapsed:.1f}s "
+        f"(audio mux={_am_elapsed:.1f}s)",
         flush=True,
     )
     print(
