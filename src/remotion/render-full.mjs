@@ -40,6 +40,7 @@ const PREBUNDLE_DIR = "/remotion/bundle";
 const VALID_COMPOSITIONS = new Set([
   "PromptlyOverlay",
   "PromptlyMicroSegments",
+  "PromptlyBlendRender",
 ]);
 
 // ── CLI ────────────────────────────────────────────────────────────────────
@@ -95,8 +96,8 @@ for (let i = 0; i < args.length; i++) {
 if (!inputPath || !outputPath || !publicDir) {
   console.error(
     "Usage: node render-full.mjs --input <json> --output <file> --public-dir <dir> " +
-    "[--composition PromptlyOverlay|PromptlyMicroSegments] [--concurrency N] [--gl mode] " +
-    "[--frame-range start,end --composition-start N]",
+    "[--composition PromptlyOverlay|PromptlyMicroSegments|PromptlyBlendRender] " +
+    "[--concurrency N] [--gl mode] [--frame-range start,end --composition-start N]",
   );
   process.exit(1);
 }
@@ -109,6 +110,13 @@ if (!VALID_COMPOSITIONS.has(compositionId)) {
 }
 
 const isOverlay = compositionId === "PromptlyOverlay";
+// PromptlyBlendRender renders the full final video (clips + transitions +
+// zoom + B-roll + captions w/ blend modes + MG + text overlays + outro)
+// in one Remotion pass. Used only when caption_style is one of the blend-
+// mode styles (GlitchHighlight, NegativeFlash, Prism). Codec/cache settings
+// match PromptlyMicroSegments (h264, large OffthreadVideo cache because the
+// source video is read heavily).
+const isBlend = compositionId === "PromptlyBlendRender";
 
 if (!existsSync(inputPath)) {
   console.error(`[render-full] Input JSON not found: ${inputPath}`);
@@ -132,8 +140,9 @@ const isChunked = frameRangeStart !== null && frameRangeEnd !== null;
 const frameRangeLabel = isChunked
   ? `chunk frames ${frameRangeStart}-${frameRangeEnd} (compositionStart=${compositionStart})`
   : `frames 0-${inputJson.totalDurationInFrames - 1}`;
-const _summary = isOverlay
-  ? `${inputJson.caption?.pages?.length ?? 0} caption pages, ${inputJson.motionGraphics?.length ?? 0} MG, ${inputJson.textOverlays?.length ?? 0} text overlays`
+const _summary = isOverlay || isBlend
+  ? `${inputJson.caption?.pages?.length ?? 0} caption pages, ${inputJson.motionGraphics?.length ?? 0} MG, ${inputJson.textOverlays?.length ?? 0} text overlays` +
+    (isBlend ? `, ${inputJson.clips?.length ?? 0} clips, ${inputJson.broll?.length ?? 0} broll` : "")
   : `${inputJson.segments?.length ?? 0} segments`;
 console.log(
   `[render-full] composition=${compositionId} (${isOverlay ? "ProRes 4444 alpha" : "h264"}) ` +
@@ -224,6 +233,10 @@ await renderMedia({
   //                           format (JPEG can't carry alpha).
   //   PromptlyMicroSegments → h264 yuv420p (no alpha, fast encode, decoded
   //                           by FFmpeg in the final composite pass).
+  //   PromptlyBlendRender   → h264 yuv420p (final video — no alpha needed
+  //                           because the composition includes source video
+  //                           and B-roll baked in. Audio is muxed onto this
+  //                           output as the only post-Remotion step.)
   codec: isOverlay ? "prores" : "h264",
   ...(isOverlay
     ? {
@@ -255,11 +268,11 @@ await renderMedia({
   // OffthreadVideo cache, sized per composition. Overlay is a transparent
   // canvas — no source video reads — so a small cache suffices. Micro
   // segments seek heavily into source video for transitions + complex-zoom
-  // clips, so it gets a larger cache. With 4-6 chunked overlay processes
-  // running in parallel, an 8 GB cache PER process would OOM the container.
+  // clips. PromptlyBlendRender reads source video for every clip (full
+  // timeline) plus B-roll cutaways, so it needs the largest cache.
   offthreadVideoCacheSizeInBytes: isOverlay
     ? 256 * 1024 * 1024     // 256 MB (overlay never reads video)
-    : 4 * 1024 * 1024 * 1024, // 4 GB (micro reads source video)
+    : 4 * 1024 * 1024 * 1024, // 4 GB (micro & blend read source heavily)
   logLevel: "info",
   onProgress: (info) => {
     const { progress, encodedFrames, renderedFrames } = info || {};

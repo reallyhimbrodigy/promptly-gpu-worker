@@ -8419,10 +8419,141 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _source_url = _stage_file(source_path)
     print(f"[render] Staged source as {_source_url} (under {_bundle_public_root})", flush=True)
 
+    # ── Blend-mode caption render path ─────────────────────────────────────
+    # When the chosen caption_style uses CSS mixBlendMode against video pixels
+    # (GlitchHighlight / NegativeFlash / Prism), the v62 transparent-overlay
+    # architecture cannot give the components what they need — blend modes
+    # have nothing to blend against on a transparent canvas. We bypass the
+    # FFmpeg-base + alpha-overlay split entirely for these renders and use a
+    # single Remotion composition (PromptlyBlendRender) that produces the
+    # final h264 video with everything (clips, transitions, zoom, B-roll,
+    # captions w/ blend, MG, text overlays, outro) baked in. Audio is muxed
+    # onto the Remotion output as the only post-render step.
+    _is_blend_render = _caption_style in _BLEND_MODE_CAPTION_STYLES
+    if _is_blend_render:
+        print(
+            f"[render] Caption style '{_caption_style}' uses CSS blend modes — "
+            f"routing through PromptlyBlendRender (full Remotion composition).",
+            flush=True,
+        )
+
+    # ── B-roll fetch resolution closure ─────────────────────────────────────
+    # Wraps the wait+populate logic so it can be called early (before the
+    # blend render input JSON is written, since PromptlyBlendRender bakes
+    # B-roll inline) or late (after the v62 alpha overlay/micro renders are
+    # spawned, where the deferred timing overlaps with the Remotion render).
+    # The flag prevents double-resolution when both paths are walked.
+    _broll_resolved = False
+
+    def _resolve_broll_fetches():
+        nonlocal _broll_resolved
+        if _broll_resolved:
+            return
+        _broll_resolved = True
+        if not broll_fetch_futures:
+            return
+        # Fail-soft: if a single fetch times out or errors (Gemini API slowness,
+        # Pexels 5xx, download timeout), we SKIP that B-roll and continue with
+        # the rest. B-roll is enhancement, not core content — one slow API call
+        # shouldn't kill an otherwise-valid edit. The 120s overall budget covers
+        # Gemini visual-pick latency (~5–70s observed) plus Pexels download
+        # (~1–10s) for the slowest of N parallel fetches.
+        _broll_files: dict = {}
+        _BROLL_FETCH_TIMEOUT = 120.0
+        _t_broll = time.time()
+        try:
+            for _fut in concurrent.futures.as_completed(broll_fetch_futures, timeout=_BROLL_FETCH_TIMEOUT):
+                _idx = broll_fetch_futures[_fut]
+                try:
+                    _path = _fut.result(timeout=1)
+                    if _path:
+                        _broll_files[_idx] = _path
+                except Exception as _bre:
+                    print(
+                        f"[broll] fetch #{_idx} failed ({type(_bre).__name__}: "
+                        f"{str(_bre)[:120]}) — skipping that B-roll",
+                        flush=True,
+                    )
+        except concurrent.futures.TimeoutError:
+            _pending = [i for f, i in broll_fetch_futures.items() if not f.done()]
+            print(
+                f"[broll] WARNING: {len(_pending)} B-roll fetch(es) didn't complete "
+                f"within {_BROLL_FETCH_TIMEOUT:.0f}s (indices {_pending}) — "
+                f"skipping those, continuing with {len(_broll_files)} that finished",
+                flush=True,
+            )
+        print(f"[broll] fetch wait: {time.time() - _t_broll:.1f}s, {len(_broll_files)}/{len(broll_fetch_futures)} ready", flush=True)
+
+        if not (_broll_files and broll_clips):
+            return
+        for _bi, _bc in enumerate(broll_clips):
+            if _bi not in _broll_files:
+                continue
+            _local_path = _broll_files[_bi]
+            _br_sw = _bc.get("_start_word_kept")
+            _br_ew = _bc.get("_end_word_kept")
+            if _br_sw is None or _br_ew is None:
+                print(f"[broll] '{_bc.get('keyword')}' missing kept word indices — skipping", flush=True)
+                continue
+            _pw_start = _pw_by_idx.get(_br_sw)
+            _pw_end = _pw_by_idx.get(_br_ew)
+            if not _pw_start or not _pw_end:
+                print(f"[broll] '{_bc.get('keyword')}' projected words missing — skipping", flush=True)
+                continue
+            _out_start = float(_pw_start["start"])
+            _out_end = float(_pw_end["end"])
+            if _out_start >= total_output_duration or _out_end <= _out_start:
+                continue
+            _eff = _out_end - _out_start
+            _br_dur = get_video_duration(_local_path)
+            if _br_dur > 0 and _eff > _br_dur:
+                _eff = _br_dur
+                _out_end = _out_start + _eff
+            if _out_start + _eff > total_output_duration:
+                _eff = total_output_duration - _out_start
+                _out_end = _out_start + _eff
+            if _eff <= 0.05:
+                continue
+            _seek_seconds = 0.0
+            if _br_dur > _eff + 1.0:
+                _seek_seconds = min(_br_dur * 0.25, max(0.0, _br_dur - _eff - 0.5))
+            _from_frame = int(round(_out_start * source_fps))
+            _dur_frames = max(1, int(round(_eff * source_fps)))
+            _br_probe = _probe_full(_local_path)
+            _br_vs = next((s for s in (_br_probe.get("streams") or []) if s.get("codec_type") == "video"), {})
+            _br_fps_str = _br_vs.get("r_frame_rate") or "30/1"
+            try:
+                if "/" in _br_fps_str:
+                    _bn, _bd = _br_fps_str.split("/")
+                    _br_fps = float(_bn) / float(_bd) if float(_bd) > 0 else 30.0
+                else:
+                    _br_fps = float(_br_fps_str)
+            except Exception:
+                _br_fps = 30.0
+            if _br_fps <= 0 or _br_fps > 240:
+                _br_fps = 30.0
+            broll_out.append({
+                "src": _local_path,
+                "fromFrame": _from_frame,
+                "durationInFrames": _dur_frames,
+                "seekFromSeconds": float(_seek_seconds),
+                "brollFps": float(_br_fps),
+                "playbackRate": 1.0,
+            })
+            edit_plan.setdefault("_broll_output_ranges", []).append((_out_start, _out_end))
+            _kw = _bc.get("keyword", "")
+            print(f"[broll] '{_kw}' out=[{_out_start:.2f}..{_out_end:.2f}]s dur={_eff:.2f}s seek={_seek_seconds:.2f}s", flush=True)
+
+    # Blend mode: B-roll must be resolved BEFORE the input JSON is written
+    # because PromptlyBlendRender bakes B-roll into the final video.
+    if _is_blend_render:
+        _resolve_broll_fetches()
+
     # PromptlyOverlay input — full edit_plan, but the composition only renders
     # captions/MG/text on transparent canvas (it ignores clips/transitions/
     # broll). sourceUrl is included for completeness; OverlayLayer never reads
-    # video.
+    # video. PromptlyBlendRender consumes the SAME shape but renders all
+    # fields (it's a full composition).
     overlay_input = {
         "sourceUrl": _source_url,
         "fps": source_fps,
@@ -8446,24 +8577,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     overlay_input_path = os.path.join(_stage_dir, "overlay_input.json")
     with open(overlay_input_path, "w") as _f:
         json.dump(overlay_input, _f)
-
-    # ── Blend-mode caption render path ─────────────────────────────────────
-    # When the chosen caption_style uses CSS mixBlendMode against video pixels
-    # (GlitchHighlight / NegativeFlash / Prism), the v62 transparent-overlay
-    # architecture cannot give the components what they need — blend modes
-    # have nothing to blend against on a transparent canvas. We bypass the
-    # FFmpeg-base + alpha-overlay split entirely for these renders and use a
-    # single Remotion composition (PromptlyBlendRender) that produces the
-    # final h264 video with everything (clips, transitions, zoom, B-roll,
-    # captions w/ blend, MG, text overlays, outro) baked in. Audio is muxed
-    # onto the Remotion output as the only post-render step.
-    _is_blend_render = _caption_style in _BLEND_MODE_CAPTION_STYLES
-    if _is_blend_render:
-        print(
-            f"[render] Caption style '{_caption_style}' uses CSS blend modes — "
-            f"routing through PromptlyBlendRender (full Remotion composition).",
-            flush=True,
-        )
 
     # PromptlyMicroSegments input — only the windows Remotion must render.
     # Each segment carries its own clip/transition spec; Python tracks a
@@ -8783,115 +8896,19 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _audio_elapsed = time.time() - _audio_t0
     print(f"[render] Final audio built in {_audio_elapsed:.1f}s → {_final_audio_path}", flush=True)
 
-    # ── 11b. Resolve deferred B-roll fetches ────────────────────────────────
-    # B-roll fetches were launched at function entry and have been running in
-    # parallel with everything since. This is the latest point where we can
-    # block on them — the FFmpeg composite filtergraph below needs broll_out
-    # populated. By deferring the wait until here, the fetch budget overlaps
-    # with the entire Remotion render (~80s on a typical video) instead of
-    # being on the critical path before Remotion was even spawned.
+    # ── 11b. Resolve deferred B-roll fetches (non-blend path only) ──────────
+    # Default v62 path: B-roll fetches were launched at function entry and
+    # have been running in parallel since. This is the latest point we can
+    # block on them — the FFmpeg composite filtergraph below needs
+    # broll_out populated. Deferring the wait here overlaps the fetch
+    # budget with the entire Remotion render (~80s typical) instead of
+    # blocking the critical path.
     #
-    # Fail-soft: if a single fetch times out or errors (Gemini API slowness,
-    # Pexels 5xx, download timeout), we SKIP that B-roll and continue with
-    # the rest. B-roll is enhancement, not core content — one slow API call
-    # shouldn't kill an otherwise-valid edit. The 120s overall budget covers
-    # Gemini visual-pick latency (~5–70s observed) plus Pexels download
-    # (~1–10s) for the slowest of N parallel fetches.
-    if broll_fetch_futures:
-        _broll_files = {}
-        _BROLL_FETCH_TIMEOUT = 120.0
-        _t_broll = time.time()
-        try:
-            for _fut in concurrent.futures.as_completed(broll_fetch_futures, timeout=_BROLL_FETCH_TIMEOUT):
-                _idx = broll_fetch_futures[_fut]
-                try:
-                    _path = _fut.result(timeout=1)
-                    if _path:
-                        _broll_files[_idx] = _path
-                except Exception as _bre:
-                    print(
-                        f"[broll] fetch #{_idx} failed ({type(_bre).__name__}: "
-                        f"{str(_bre)[:120]}) — skipping that B-roll",
-                        flush=True,
-                    )
-        except concurrent.futures.TimeoutError:
-            _pending = [i for f, i in broll_fetch_futures.items() if not f.done()]
-            print(
-                f"[broll] WARNING: {len(_pending)} B-roll fetch(es) didn't complete "
-                f"within {_BROLL_FETCH_TIMEOUT:.0f}s (indices {_pending}) — "
-                f"skipping those, continuing with {len(_broll_files)} that finished",
-                flush=True,
-            )
-            # Don't cancel — already-running threads can finish in the background;
-            # the pool's shutdown(wait=False) at function exit handles cleanup.
-        print(f"[broll] fetch wait: {time.time() - _t_broll:.1f}s, {len(_broll_files)}/{len(broll_fetch_futures)} ready", flush=True)
-
-        if _broll_files and broll_clips:
-            for _bi, _bc in enumerate(broll_clips):
-                if _bi not in _broll_files:
-                    continue
-                _local_path = _broll_files[_bi]
-                _br_sw = _bc.get("_start_word_kept")
-                _br_ew = _bc.get("_end_word_kept")
-                if _br_sw is None or _br_ew is None:
-                    print(f"[broll] '{_bc.get('keyword')}' missing kept word indices — skipping", flush=True)
-                    continue
-                _pw_start = _pw_by_idx.get(_br_sw)
-                _pw_end = _pw_by_idx.get(_br_ew)
-                if not _pw_start or not _pw_end:
-                    print(f"[broll] '{_bc.get('keyword')}' projected words missing — skipping", flush=True)
-                    continue
-                _out_start = float(_pw_start["start"])
-                _out_end = float(_pw_end["end"])
-                if _out_start >= total_output_duration or _out_end <= _out_start:
-                    continue
-                _eff = _out_end - _out_start
-                _br_dur = get_video_duration(_local_path)
-                if _br_dur > 0 and _eff > _br_dur:
-                    _eff = _br_dur
-                    _out_end = _out_start + _eff
-                if _out_start + _eff > total_output_duration:
-                    _eff = total_output_duration - _out_start
-                    _out_end = _out_start + _eff
-                if _eff <= 0.05:
-                    continue
-                _seek_seconds = 0.0
-                if _br_dur > _eff + 1.0:
-                    _seek_seconds = min(_br_dur * 0.25, max(0.0, _br_dur - _eff - 0.5))
-                _from_frame = int(round(_out_start * source_fps))
-                _dur_frames = max(1, int(round(_eff * source_fps)))
-                # Probe the B-roll's actual fps for frame-accurate seek→frame.
-                _br_probe = _probe_full(_local_path)
-                _br_vs = next((s for s in (_br_probe.get("streams") or []) if s.get("codec_type") == "video"), {})
-                _br_fps_str = _br_vs.get("r_frame_rate") or "30/1"
-                try:
-                    if "/" in _br_fps_str:
-                        _bn, _bd = _br_fps_str.split("/")
-                        _br_fps = float(_bn) / float(_bd) if float(_bd) > 0 else 30.0
-                    else:
-                        _br_fps = float(_br_fps_str)
-                except Exception:
-                    _br_fps = 30.0
-                if _br_fps <= 0 or _br_fps > 240:
-                    _br_fps = 30.0
-                # Canonical seek field: seconds (not frames). Frame-based
-                # seek required round-tripping through fps coordinates and
-                # the consumer side used the WRONG fps (output_fps instead
-                # of broll's actual fps), corrupting seek time on any
-                # non-output-fps broll. brollFps is plumbed through so the
-                # FFmpeg side can compute exact source-frame counts for
-                # the rate-shift + minterpolate filter chain.
-                broll_out.append({
-                    "src": _local_path,
-                    "fromFrame": _from_frame,
-                    "durationInFrames": _dur_frames,
-                    "seekFromSeconds": float(_seek_seconds),
-                    "brollFps": float(_br_fps),
-                    "playbackRate": 1.0,
-                })
-                edit_plan.setdefault("_broll_output_ranges", []).append((_out_start, _out_end))
-                _kw = _bc.get("keyword", "")
-                print(f"[broll] '{_kw}' out=[{_out_start:.2f}..{_out_end:.2f}]s dur={_eff:.2f}s seek={_seek_seconds:.2f}s", flush=True)
+    # Blend-mode path: B-roll resolution happens EARLIER (before the
+    # PromptlyBlendRender input JSON is written) because that composition
+    # bakes B-roll into the final video. The early resolve sets _broll_resolved.
+    if not _broll_resolved:
+        _resolve_broll_fetches()
 
     # ── 12. Wait for Remotion renders, then single-pass final composite ────
     # All the heavy work is in this one ffmpeg invocation:
