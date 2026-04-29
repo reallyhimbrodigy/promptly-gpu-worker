@@ -294,19 +294,20 @@ image = (
         'cd /remotion && node -e "require(\'@remotion/renderer\'); console.log(\'[remotion] renderer OK\')"',
         "cd /remotion && node prebundle.mjs",
     )
-    .add_local_dir("src/assets/sounds", "/assets/sounds")
-    .add_local_file("handler.py", "/handler.py")
-    .add_local_file("ffmpeg_base.py", "/ffmpeg_base.py")
-    .add_local_file("rife_normalize.py", "/rife_normalize.py")
-    # Build identification — placed AFTER the heavy install layers so a SHA
-    # change only invalidates the final layers (which already rebuild on
-    # every source change). The handler reads these at job start and logs
-    # them as line 1 of every render's output.
+    # Build identification — placed AFTER the heavy install/run_commands
+    # layers but BEFORE the add_local_* layers (Modal forbids any build
+    # step after add_local_*). A SHA bump invalidates only the final layers,
+    # which already rebuild on every source change. Handler reads these at
+    # job start and logs them as line 1 of every render's output.
     .env({
         "PROMPTLY_BUILD_SHA": _BUILD_SHA,
         "PROMPTLY_BUILD_DIRTY": _BUILD_DIRTY,
         "PROMPTLY_BUILD_TS": _BUILD_TS,
     })
+    .add_local_dir("src/assets/sounds", "/assets/sounds")
+    .add_local_file("handler.py", "/handler.py")
+    .add_local_file("ffmpeg_base.py", "/ffmpeg_base.py")
+    .add_local_file("rife_normalize.py", "/rife_normalize.py")
 )
 
 # ── Secrets ────────────────────────────────────────────────────────────────────
