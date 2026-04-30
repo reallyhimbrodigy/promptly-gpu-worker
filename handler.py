@@ -4674,11 +4674,14 @@ REMOVE_WORDS GUIDANCE:
         raise ValueError(
             f"outro must be 'none'|'fade_black'|'fade_white', got {edit_plan.get('outro')!r}"
         )
+    # aspect_ratio is informational — the pipeline always outputs 1080x1920
+    # regardless of this field. Pydantic's Literal["9:16"] in EditPlan
+    # constrains Gemini's structured-output normally, but Gemini occasionally
+    # bypasses its own schema and emits e.g. "1080x1920" or "vertical".
+    # Both convey the same intent (portrait 9:16). Normalize to "9:16" so
+    # the persisted plan is canonical; don't hard-fail on a dead field.
     if str(edit_plan.get("aspect_ratio")) != "9:16":
-        raise ValueError(
-            f"aspect_ratio must be '9:16' (only supported output format), got "
-            f"{edit_plan.get('aspect_ratio')!r}"
-        )
+        edit_plan["aspect_ratio"] = "9:16"
 
     # ── B-roll clips validation ───────────────────────────────────────────
     # Type/sanity checks only — no value clamps. Gemini owns every creative
