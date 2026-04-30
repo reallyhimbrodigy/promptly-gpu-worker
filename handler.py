@@ -10959,7 +10959,13 @@ def handler(job):
         # Downstream render detects source_fps=60.0 from the new file's r_frame_rate
         # and all frame-count math becomes exact.
         source_path = future_fps_normalize.result()
-        # NOTE: future_faces NOT collected here — passed to render_multi_clip for parallel collection
+        # Collect face trajectory: render_multi_clip uses it for face-aware
+        # MG placement (re-routing center anchors when the speaker's face
+        # would be covered). Detection finished long before we got here
+        # (~2-3s on the proxy) so the .result() call is essentially free.
+        # Mirrors the same .result() the edit-recipe closure does — if both
+        # await it, Future caches the result and second call is free.
+        _face_positions, _smoothed_trajectory = future_faces.result()
         _collect_elapsed = time.time() - _collect_t0
         if _collect_elapsed > 0.5:
             print(f"[TIMING] Fast futures collected in {_collect_elapsed:.1f}s", flush=True)
