@@ -246,7 +246,10 @@ class _Transition(BaseModel):
 
 class _RemoveWord(BaseModel):
     # Either a word_index (surgical single-word removal) or a start/end range
-    # (continuous span like dead_air). Python validates which set is present.
+    # (continuous span — dead air, abandoned tangent, breath, etc.). Gemini
+    # owns every cut decision; Python applies them verbatim. `reason` is a
+    # free-form short label (filler / stutter / restart / dead_air / breath /
+    # tangent / redundant / ...) — informational only.
     word_index: Optional[int] = None
     start: Optional[float] = None
     end: Optional[float] = None
@@ -277,263 +280,19 @@ class EditPlan(BaseModel):
     remove_words: List[_RemoveWord]
 
 
-# ── Content Analysis schema (separate pre-pass Gemini call) ──────────────────
-# A dedicated analysis call classifies every word before the main edit call.
-# Its `cuttable_*` classifications are applied as cuts BEFORE the main call,
-# so Gemini sees a transcript containing only kept words (re-indexed
-# [0..M-1]). Anchor-on-cut is structurally impossible because cut words
-# don't exist in Gemini's index space — Python re-indexes before the call
-# and translates back after (see `_new_to_src` in generate_edit_gemini).
-# `narrative_peak` classifications are surfaced to Gemini as anchor hints.
-_ANALYSIS_CLASS = Literal[
-    "content",             # substantive content word. Stays in transcript; anchorable.
-    "cuttable_filler",     # context-dependent filler (literally, basically, actually, just, like).
-    "cuttable_restart",    # part of a phrasal restart ("I said — I said who is he?").
-    "cuttable_redundant",  # narratively redundant (word repeats a concept already stated).
-    "narrative_peak",      # emphasis candidate / anchor hint. Stays in transcript.
-]
-
-class _WordAnalysis(BaseModel):
-    source_index: int
-    classification: _ANALYSIS_CLASS
-
-class _SilenceCut(BaseModel):
-    """A short pause/breath/thinking gap Gemini wants cut on top of the
-    mechanical dead-air pass. Times are absolute source seconds. The
-    mechanical pre-pass already cuts gaps above _MECH_DEAD_AIR_THRESHOLD_S
-    deterministically — Gemini's job here is to flag any *additional*
-    sub-threshold pauses that still feel slack in context (mid-thought
-    breaths, short hesitations between clauses, etc.)."""
-    start: float
-    end: float
-    reason: Literal["breath", "thinking_pause", "mid_clause_drag", "other"]
-
-class ContentAnalysis(BaseModel):
-    """Per-word classification + range-level silence flags for the pre-edit
-    analysis call.
-
-    Only non-content classifications are emitted (cuttable_* + narrative_peak);
-    content is the implicit default for unemitted indices. `cuttable_*` words
-    are stripped from the transcript before the main call; `narrative_peak`
-    words become anchor hints surfaced in the main-call prompt.
-    `silence_cuts` are folded into the same range-cut machinery the mechanical
-    dead-air pass uses, so Gemini-flagged pauses are removed alongside the
-    deterministic ones.
-    """
-    word_analyses: List[_WordAnalysis]
-    silence_cuts: List[_SilenceCut] = Field(default_factory=list)
-    tonal_register: Literal[
-        "serious", "educational", "motivational",
-        "comedic", "dramatic", "casual",
-    ]
-
-
-# ── Mechanical pre-pass (deterministic, no Gemini) ───────────────────────────
-# Mirrors EXACTLY the deterministic-tightening pass in build_clips_from_words.
-# Running these cuts upstream (before Gemini sees the transcript) ensures that
-# nothing gets removed AFTER Gemini anchors to it. ALWAYS_FILLER, _is_stutter,
-# and the phrasal-restart constants below are shared with build_clips_from_words
-# so the two passes produce identical results.
-# Zero-silence target: any gap longer than _MECH_DEAD_AIR_THRESHOLD_S between
-# consecutive word boundaries is cut. Cushion is 0 because Deepgram boundaries
-# are now refined against the actual audio waveform (refine_word_boundaries_with_audio)
-# before this pass runs. The refined boundaries land on real vocal-energy
-# transitions, so cuts at those timestamps are AT word boundaries — no padding
-# or cushion needed.
-_MECH_DEAD_AIR_THRESHOLD_S = 0.03
-_MECH_DEAD_AIR_CUSHION_S = 0.0
-
-
-def _phrasal_restart_cuts(deepgram_words, already_cut):
-    """Detect 2-4 word phrasal restarts and orphan fillers in their gaps.
-
-    Mirrors the Step-3b logic in build_clips_from_words. Operates on words
-    NOT yet in `already_cut`. Returns (new_cuts: set[int], reasons: dict).
-
-    Constraints (kept tight to avoid false positives):
-      - phrase length 2/3/4 words (try longest first)
-      - lookahead window: next 3 word positions only
-      - time gap between phrases: ≤ 1.5s
-      - same speaker
-      - no sentence-ending punctuation in the gap words
-    """
-    _words = list(deepgram_words or [])
-    _SENTENCE_END_RE = re.compile(r"[.!?]\s*$")
-
-    # Build remaining list of (idx, clean_text, start, end, speaker, punctuated_word)
-    remaining = []
-    for idx, w in enumerate(_words):
-        if idx in already_cut:
-            continue
-        word_text = str(w.get("punctuated_word") or w.get("word") or "").strip()
-        clean = word_text.lower().rstrip(".,!?;:'\"")
-        remaining.append({
-            "idx": idx,
-            "clean": clean,
-            "start": float(w.get("start") or 0),
-            "end": float(w.get("end") or 0),
-            "speaker": w.get("speaker"),
-            "punctuated": word_text,
-        })
-
-    new_cuts = set()
-    reasons = {}
-
-    for i, w in enumerate(remaining):
-        if w["idx"] in new_cuts:
-            continue
-        for phrase_len in (4, 3, 2):  # longest first; avoid orphan words
-            if i + phrase_len > len(remaining):
-                continue
-            phrase_words = remaining[i : i + phrase_len]
-            if any(pw["idx"] in new_cuts for pw in phrase_words):
-                continue
-            phrase_text = tuple(pw["clean"] for pw in phrase_words)
-            if not all(phrase_text):
-                continue
-            # Skip if last word of candidate phrase ends a sentence — it's a
-            # complete thought, not an abandoned restart.
-            if _SENTENCE_END_RE.search(phrase_words[-1]["punctuated"]):
-                continue
-            phrase_speaker = phrase_words[0]["speaker"]
-            _matched = False
-            # Tight lookahead: next 3 positions only
-            for scan_idx in range(i + phrase_len, min(i + phrase_len + 3, len(remaining))):
-                if scan_idx + phrase_len > len(remaining):
-                    break
-                cand_words = remaining[scan_idx : scan_idx + phrase_len]
-                if any(cw["idx"] in new_cuts for cw in cand_words):
-                    continue
-                cand_text = tuple(cw["clean"] for cw in cand_words)
-                if cand_text != phrase_text:
-                    continue
-                cand_speaker = cand_words[0]["speaker"]
-                if (phrase_speaker is not None and cand_speaker is not None
-                        and phrase_speaker != cand_speaker):
-                    continue
-                _time_gap = cand_words[0]["start"] - phrase_words[-1]["end"]
-                if _time_gap > 1.5 or _time_gap < 0:
-                    continue
-                # Reject if a gap word ends a sentence — that's parallel
-                # structure ("I went, I saw, I conquered"), not a restart.
-                _gap_words = remaining[i + phrase_len : scan_idx]
-                if any(_SENTENCE_END_RE.search(gw["punctuated"]) for gw in _gap_words):
-                    continue
-                # Reject if the gap is empty — no filler/restart-marker
-                # between the two phrases. An empty gap with the same words
-                # twice is intentional repetition for emphasis ("I want, I
-                # want this"), not a restart. Real restarts have a discourse
-                # marker, hesitation, or filler in the gap. Without this
-                # guard, "very, very" would slip through (length-2 phrases
-                # would never trigger, but length-1+ patterns could).
-                if len(_gap_words) == 0:
-                    continue
-                # Validated restart — remove the FIRST occurrence
-                for pw in phrase_words:
-                    new_cuts.add(pw["idx"])
-                    reasons[pw["idx"]] = "phrasal_restart"
-                # Remove orphan fillers in the gap (e.g., "calling, like, calling")
-                for gw in _gap_words:
-                    if gw["clean"] in ALWAYS_FILLER or gw["clean"] in CONTEXT_FILLER:
-                        new_cuts.add(gw["idx"])
-                        reasons[gw["idx"]] = "orphan_filler"
-                _matched = True
-                break
-            if _matched:
-                break  # don't also try shorter phrase length at this position
-    return new_cuts, reasons
-
-
-def mechanical_cut_pass(deepgram_words):
-    """Deterministic cut detection — runs before any LLM call.
-
-    Returns a dict with:
-      - `word_cuts`: set of source word indices to cut
-      - `range_cuts`: list of (start_s, end_s) ranges to cut (dead air)
-      - `reasons`: parallel dict of word_index → reason string
-
-    Mirrors the deterministic tightening logic in build_clips_from_words so
-    every word that downstream tightening would remove is removed UPSTREAM,
-    before Gemini sees the transcript. This is what guarantees Gemini cannot
-    anchor to a word that later gets cut.
-
-    Detects:
-      - ALWAYS_FILLER tokens (um, uh, hmm, ...)
-      - 1-word stutters via _is_stutter (exact repeat, prefix false-start,
-        contraction false-start, hyphenated truncation)
-      - Trailing-dash false starts
-      - 2-4 word phrasal restarts + orphan fillers in their gaps
-      - Dead-air gaps > _MECH_DEAD_AIR_THRESHOLD_S between consecutive words
-    """
-    _words = list(deepgram_words or [])
-    word_cuts = set()
-    reasons = {}
-    range_cuts = []
-
-    # ── Pass 1: per-word filler detection (ALWAYS_FILLER) ──
-    for idx, w in enumerate(_words):
-        word_text = str(w.get("punctuated_word") or w.get("word") or "").strip()
-        if not word_text:
-            continue
-        word_clean = word_text.lower().rstrip(".,!?;:'\"")
-        if word_clean in ALWAYS_FILLER:
-            word_cuts.add(idx)
-            reasons[idx] = "filler"
-            continue
-        # Trailing-dash false start
-        if word_text.rstrip().endswith("-"):
-            word_cuts.add(idx)
-            reasons[idx] = "false_start"
-            continue
-
-    # ── Pass 2: 1-word stutter detection (using shared _is_stutter helper) ──
-    # Iterate over words not yet cut; check each against its next-not-cut peer.
-    # Pass duration + gap so _is_stutter can discriminate mechanical stutters
-    # from intentional emphatic repetition ("very, very good").
-    _remaining_indices = [i for i in range(len(_words)) if i not in word_cuts]
-    for pos, idx in enumerate(_remaining_indices):
-        if pos + 1 >= len(_remaining_indices):
-            break
-        next_idx = _remaining_indices[pos + 1]
-        curr_text = _words[idx].get("punctuated_word") or _words[idx].get("word") or ""
-        next_text = _words[next_idx].get("punctuated_word") or _words[next_idx].get("word") or ""
-        _curr_dur = float(_words[idx].get("end") or 0) - float(_words[idx].get("start") or 0)
-        _gap = float(_words[next_idx].get("start") or 0) - float(_words[idx].get("end") or 0)
-        if _is_stutter(curr_text, next_text, curr_duration=_curr_dur, gap_to_next=_gap):
-            curr_speaker = _words[idx].get("speaker")
-            next_speaker = _words[next_idx].get("speaker")
-            # Cross-speaker repetition is conversation, not stutter
-            if (curr_speaker is not None and next_speaker is not None
-                    and curr_speaker != next_speaker):
-                continue
-            word_cuts.add(idx)
-            reasons[idx] = "stutter"
-
-    # ── Pass 3: phrasal restart + orphan filler detection ──
-    restart_cuts, restart_reasons = _phrasal_restart_cuts(_words, word_cuts)
-    word_cuts.update(restart_cuts)
-    reasons.update(restart_reasons)
-
-    # ── Pass 4: dead-air ranges (gaps between consecutive word boundaries) ──
-    # Cut every gap above _MECH_DEAD_AIR_THRESHOLD_S (≈30 ms) — the user's
-    # quality bar is zero perceptible silence in the output. Cushion is the
-    # minimum needed to avoid clipping the trailing consonant of a word
-    # given Deepgram boundary inaccuracy.
-    for i in range(len(_words) - 1):
-        end_s = float(_words[i].get("end") or 0)
-        next_start_s = float(_words[i + 1].get("start") or 0)
-        gap = next_start_s - end_s
-        if gap >= _MECH_DEAD_AIR_THRESHOLD_S:
-            _cut_start = end_s + _MECH_DEAD_AIR_CUSHION_S
-            _cut_end = next_start_s - _MECH_DEAD_AIR_CUSHION_S
-            if _cut_end > _cut_start:
-                range_cuts.append((round(_cut_start, 3), round(_cut_end, 3)))
-
-    return {
-        "word_cuts": word_cuts,
-        "range_cuts": range_cuts,
-        "reasons": reasons,
-    }
+# ── Cutting architecture ────────────────────────────────────────────────────
+# Gemini owns every cut decision. There is no Python-side filler / stutter /
+# phrasal-restart / dead-air pre-pass — pattern matchers cannot tell the
+# difference between an abandoned restart and a rhetorical repetition, so any
+# pre-pass risks killing valuable content the main edit Gemini would have
+# kept (see "I said who is, I said who is, he?" — pre-passes cut both
+# occurrences leaving "he?" floating).
+#
+# The main edit call sees the full Deepgram transcript. Its `remove_words`
+# field carries every cut: filler tokens, stutters, abandoned restarts,
+# silence ranges, tangents — single source of truth. Python applies them
+# verbatim at sample-precise Deepgram timestamps; no refinement, no buffer,
+# no crossfade.
 
 
 print(f"[startup] Python {sys.version}", flush=True)
@@ -1795,10 +1554,53 @@ def detect_shot_changes(source_path, threshold=0.30):
 # ─── DEEPGRAM TRANSCRIPTION ───────────────────────────────────────────────────
 
 
+def prepare_audio_for_deepgram(source_path: str) -> bytes:
+    """Extract loudness-normalized mono FLAC for transcription.
+
+    Sending raw video bytes (or pointing Deepgram at a URL) means Deepgram
+    receives the source's compressed audio at whatever level the source was
+    recorded at. Talking-head footage is often quiet (-27 dB RMS is typical)
+    which sits at the edge of Deepgram's acoustic-model confidence on soft
+    consonants — that's how words like "Stelius/Stelios" get inconsistent.
+
+    This preprocessor produces:
+      • mono channel — Deepgram's models are tuned for mono speech
+      • 48 kHz sample rate — preserves all source detail
+      • loudness normalized to -16 LUFS / -1.5 dBTP (broadcast standard) so
+        every word arrives at a consistent, audible level
+      • lossless FLAC encode — no second-generation lossy compression on top
+        of whatever the source already lost in its AAC encode
+
+    Returns FLAC bytes ready for Deepgram's transcribe_file. Typical size on
+    a 60s clip: ~5-8 MB (vs 80 MB for the full video), so the upload is
+    actually faster than sending the raw file too.
+    """
+    cmd = [
+        "ffmpeg", "-v", "error", "-threads", "0",
+        "-i", source_path,
+        "-vn", "-ac", "1", "-ar", "48000",
+        "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
+        "-c:a", "flac", "-compression_level", "5",
+        "-f", "flac", "-",
+    ]
+    proc = subprocess.run(cmd, capture_output=True, timeout=120)
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"Deepgram audio prep failed: {(proc.stderr or b'').decode('utf-8', errors='replace')[-300:]}"
+        )
+    print(
+        f"[deepgram-prep] Extracted {len(proc.stdout) / 1024:.0f}KB FLAC "
+        f"(mono 48kHz, loudnorm -16 LUFS)",
+        flush=True,
+    )
+    return proc.stdout
+
+
 def _deepgram_options():
     return PrerecordedOptions(
         model="nova-3", detect_language=True,
         smart_format=True, utterances=True, punctuate=True, diarize=True,
+        numerals=True,
     )
 
 
@@ -1852,56 +1654,29 @@ def _deepgram_is_retriable_error(msg):
     )
 
 
-def transcribe_audio_url(video_url):
-    """
-    URL-based Deepgram transcription. Deepgram's servers fetch the media
-    directly — runs in parallel with the Modal worker's own S3 download,
-    so the transcript is ready (or close to it) the moment the file
-    lands locally. Saves 3-6s of serial work vs transcribe_audio.
-
-    3-attempt exponential backoff (1s/2s/4s) on rate limits + 5xx + network.
-    Returns None on final failure; caller falls back to file-based Deepgram.
-    """
-    if DeepgramClient is None or PrerecordedOptions is None:
-        print("[pipeline] transcription skipped: deepgram not available", flush=True)
-        return {"text": "", "words": []}
-    dg = DeepgramClient(api_key=os.environ["DEEPGRAM_API_KEY"])
-    print(f"[deepgram] URL-based transcribe against {video_url[:80]}...", flush=True)
-    _t0 = time.time()
-    for attempt in range(3):
-        try:
-            resp = dg.listen.prerecorded.v("1").transcribe_url({"url": video_url}, _deepgram_options())
-            result = _parse_deepgram_response(resp)
-            print(f"[metric] stage_duration stage=transcribe_url duration_ms={int((time.time()-_t0)*1000)} attempt={attempt+1}", flush=True)
-            return result
-        except Exception as e:
-            if attempt < 2 and _deepgram_is_retriable_error(e):
-                backoff = 2 ** attempt
-                print(f"[deepgram] URL attempt {attempt+1} retriable ({str(e)[:120]}) — retry in {backoff}s", flush=True)
-                time.sleep(backoff)
-                continue
-            print(f"[deepgram] URL transcription failed (attempt {attempt+1}): {str(e)[:200]} — falling back", flush=True)
-            return None
-    return None
-
-
 def transcribe_audio(source_path):
-    """File-based Deepgram. Fallback when URL-based path fails. Same 3-attempt
-    backoff (1s/2s/4s) on retriable errors so rate-limit spikes don't crash
-    the pipeline."""
+    """File-based Deepgram with loudness-normalized FLAC audio prep.
+
+    Sends the cleaned mono 48 kHz FLAC produced by prepare_audio_for_deepgram
+    rather than the raw video bytes — gives the model uniform-level audio
+    and saves bandwidth (FLAC of just the audio stream is much smaller than
+    the full video). 3-attempt exponential backoff on retriable errors.
+    """
     if DeepgramClient is None or PrerecordedOptions is None:
         print("[pipeline] transcription skipped: deepgram not available", flush=True)
         return {"text": "", "words": []}
     dg = DeepgramClient(api_key=os.environ["DEEPGRAM_API_KEY"])
-    with open(source_path, "rb") as f:
-        audio_bytes = f.read()
-    print(f"[deepgram] Sending {len(audio_bytes) / 1024:.0f}KB audio", flush=True)
+    audio_bytes = prepare_audio_for_deepgram(source_path)
+    print(f"[deepgram] Sending {len(audio_bytes) / 1024:.0f}KB FLAC audio", flush=True)
     options = _deepgram_options()
     _t0 = time.time()
     last_err = None
     for attempt in range(3):
         try:
-            resp = dg.listen.prerecorded.v("1").transcribe_file({"buffer": audio_bytes}, options)
+            resp = dg.listen.prerecorded.v("1").transcribe_file(
+                {"buffer": audio_bytes, "mimetype": "audio/flac"},
+                options,
+            )
             result = _parse_deepgram_response(resp)
             print(f"[metric] stage_duration stage=transcribe_file duration_ms={int((time.time()-_t0)*1000)} attempt={attempt+1}", flush=True)
             return result
@@ -1916,234 +1691,8 @@ def transcribe_audio(source_path):
     raise RuntimeError(f"Deepgram transcription failed after 3 attempts: {last_err}") from last_err
 
 
-def refine_word_boundaries_with_audio(words, source_path, sample_rate=48000):
-    """Snap each word's start/end to actual vocal-energy boundaries with
-    sample-level precision.
-
-    Deepgram returns word boundaries quantized to milliseconds and based on
-    its acoustic model — typical drift ±10–30 ms relative to where vocal
-    energy actually starts/ends. Audio cuts at Deepgram boundaries pull in
-    fragments of the previous/next word as audible residue (e.g., the "s-"
-    of a removed "so" leaking past a kept word's end).
-
-    This pass uses the audio waveform itself as ground truth and refines to
-    SAMPLE precision (1/48000 s ≈ 20.83 µs at 48 kHz). The audio cut path
-    downstream uses round(time * sample_rate) for indexing, so sample-precise
-    times become sample-precise cuts — no padding, no cushion, no rounding.
-
-    Process:
-      1. Decode the full audio to mono PCM at sample_rate (matches the
-         render audio rate so cut indices land on real samples).
-      2. Compute short-window RMS (1 ms = sample_rate/1000 samples) for
-         coarse boundary localization.
-      3. Threshold against (noise_floor × 2) to classify each window
-         vocal/silent.
-      4. Detect rising edges (silence → vocal) and falling edges (vocal →
-         silence) at 1 ms resolution.
-      5. For each Deepgram boundary, find the nearest 1 ms edge within
-         ±60 ms, then refine to sample precision: scan the surrounding
-         ±2 ms of audio sample-by-sample for the exact threshold crossing.
-      6. If no edge exists in the search window (back-to-back words with no
-         silence between them), keep Deepgram's value — there is no
-         acoustic boundary to snap to.
-
-    Returns a NEW list of word dicts (does not mutate the input).
-    """
-    if not words:
-        return words
-    try:
-        import numpy as np
-        proc = subprocess.run(
-            ["ffmpeg", "-v", "error", "-threads", "0", "-i", source_path,
-             "-vn", "-ar", str(sample_rate), "-ac", "1", "-f", "s16le", "-"],
-            capture_output=True, timeout=60,
-        )
-        if proc.returncode != 0:
-            print(f"[align] audio decode failed; skipping refinement", flush=True)
-            return list(words)
-        samples = np.frombuffer(proc.stdout, dtype=np.int16).astype(np.float32) / 32768.0
-        if len(samples) < sample_rate // 10:  # less than 100ms
-            return list(words)
-
-        # 1 ms RMS windows for coarse boundary localization. At 48 kHz that's
-        # 48 samples per window. Smaller than the previous 10 ms grid, but
-        # the sub-millisecond refinement below is the real precision driver.
-        WINDOW_MS = 1
-        window_size = max(1, (sample_rate * WINDOW_MS) // 1000)
-        n_windows = len(samples) // window_size
-        if n_windows < 100:
-            return list(words)
-        rms = np.sqrt(
-            np.mean(samples[:n_windows * window_size].reshape(n_windows, window_size) ** 2, axis=1)
-        )
-
-        # Noise floor = 10th percentile of RMS over the whole audio.
-        # Threshold = noise_floor × 2 (≈ +6 dB) to discriminate vocal from silence.
-        # Floor at 1e-4 to avoid degenerate behavior on perfectly silent audio.
-        noise_floor = max(float(np.percentile(rms, 10)), 1e-4)
-        threshold = noise_floor * 2.0
-        is_vocal = rms > threshold
-
-        # Detect rising/falling edges with virtual silence at both ends.
-        padded = np.concatenate([[False], is_vocal, [False]])
-        diff = np.diff(padded.astype(np.int8))
-        # rising_idx / falling_idx are window indices (0-based, 1 ms each).
-        rising_idx = np.where(diff == 1)[0]    # first VOCAL window after silence
-        falling_idx = np.where(diff == -1)[0]  # first SILENT window after vocal
-
-        # ── Sample-level refinement ────────────────────────────────────
-        # Within ±REFINE_RADIUS samples of the 1 ms-quantized edge, scan
-        # sample-by-sample using a short instantaneous magnitude window
-        # for the exact threshold crossing. This pushes boundaries below
-        # the 1 ms grid down to a single audio sample (≈21 µs @ 48 kHz).
-        REFINE_RADIUS_MS = 2
-        REFINE_RADIUS = (sample_rate * REFINE_RADIUS_MS) // 1000
-        # Instantaneous magnitude is too noisy for thresholding; use a short
-        # sliding window (256 µs at 48 kHz = ~12 samples) to smooth.
-        INSTANT_WIN = max(2, sample_rate // 4000)  # ~250 µs window
-        # A sample is "vocal" if the local mean-abs over [s-INSTANT_WIN/2, s+INSTANT_WIN/2]
-        # exceeds threshold. Precompute the smoothed envelope once (cheap).
-        kernel = np.ones(INSTANT_WIN, dtype=np.float32) / INSTANT_WIN
-        smoothed_env = np.convolve(np.abs(samples), kernel, mode="same")
-
-        def _refine_rising(window_idx):
-            """Edge: silence → vocal at window_idx. Return the first sample
-            (within the 1 ms window or a small radius around it) where the
-            smoothed envelope crosses threshold going UP."""
-            base = window_idx * window_size
-            lo = max(0, base - REFINE_RADIUS)
-            hi = min(len(smoothed_env), base + window_size + REFINE_RADIUS)
-            if hi <= lo:
-                return base
-            seg = smoothed_env[lo:hi]
-            above = seg > threshold
-            if not above.any():
-                return base
-            # First True index in this segment.
-            return lo + int(np.argmax(above))
-
-        def _refine_falling(window_idx):
-            """Edge: vocal → silence at window_idx (first silent window).
-            Return the LAST sample where smoothed envelope was above
-            threshold (= first sample of the gap)."""
-            base = window_idx * window_size
-            lo = max(0, base - window_size - REFINE_RADIUS)
-            hi = min(len(smoothed_env), base + REFINE_RADIUS)
-            if hi <= lo:
-                return base
-            seg = smoothed_env[lo:hi]
-            above = seg > threshold
-            if not above.any():
-                return base
-            # Last True index in this segment, +1 for exclusive end.
-            last_above = lo + int(len(seg) - 1 - np.argmax(above[::-1]))
-            return last_above + 1
-
-        # Convert 1 ms window indices to seconds for fast nearest-edge lookup.
-        rising_t = rising_idx.astype(np.float64) * (WINDOW_MS / 1000.0)
-        falling_t = falling_idx.astype(np.float64) * (WINDOW_MS / 1000.0)
-
-        SEARCH = 0.06  # ±60 ms search window for nearest edge
-        SNAP_MIN = 0.001  # 1 ms minimum delta to count as a meaningful refinement
-
-        n_start_snapped = 0
-        n_end_snapped = 0
-        max_start_delta = 0.0
-        max_end_delta = 0.0
-
-        # Pre-compute neighbour boundaries so the search window for each word
-        # can be CLAMPED inside [prev_word.end, next_word.start]. Without this
-        # clamp, a word with no silence to its right (back-to-back speech)
-        # would have its falling-edge search extend up to +60 ms — past the
-        # NEXT word's start — and snap to the falling edge of THAT word
-        # instead of its own. Result: the next word's audio leaks into the
-        # current clip when this word is the last kept word before a cut.
-        # This is the "10 ms residue / jagged cut" the user reported.
-        old_starts = [float(w.get("start") or 0.0) for w in words]
-        old_ends = [float(w.get("end") or 0.0) for w in words]
-
-        refined: List[dict] = []
-        for i, w in enumerate(words):
-            new_w = dict(w)
-            old_start = old_starts[i]
-            old_end = old_ends[i]
-            # Lower bound on the start search: half-way back to the previous
-            # word's end, but never further than -SEARCH. The "half-way"
-            # ensures that if previous_word.end and this_word.start are
-            # closer than 2×SEARCH, neither word's refinement can cross the
-            # midpoint between them.
-            if i > 0:
-                gap_back = max(0.0, old_start - old_ends[i - 1])
-                start_lo = old_start - min(SEARCH, gap_back / 2.0)
-            else:
-                start_lo = old_start - SEARCH
-            start_hi = old_start + SEARCH
-            # Upper bound on the end search: mirror logic with the next word.
-            if i + 1 < len(words):
-                gap_fwd = max(0.0, old_starts[i + 1] - old_end)
-                end_hi = old_end + min(SEARCH, gap_fwd / 2.0)
-            else:
-                end_hi = old_end + SEARCH
-            end_lo = old_end - SEARCH
-
-            # Snap start: nearest rising edge within the clamped window,
-            # then refine to sample.
-            if len(rising_idx) > 0:
-                mask = (rising_t >= start_lo) & (rising_t <= start_hi)
-                cand_widx = rising_idx[mask]
-                if len(cand_widx) > 0:
-                    cand_t = cand_widx.astype(np.float64) * (WINDOW_MS / 1000.0)
-                    chosen = int(cand_widx[int(np.argmin(np.abs(cand_t - old_start)))])
-                    sample_idx = _refine_rising(chosen)
-                    new_start = sample_idx / float(sample_rate)
-                    delta = new_start - old_start
-                    if abs(delta) >= SNAP_MIN:
-                        n_start_snapped += 1
-                        max_start_delta = max(max_start_delta, abs(delta))
-                    new_w["start"] = new_start
-
-            # Snap end: nearest falling edge within the clamped window,
-            # then refine to sample.
-            if len(falling_idx) > 0:
-                mask = (falling_t >= end_lo) & (falling_t <= end_hi)
-                cand_widx = falling_idx[mask]
-                if len(cand_widx) > 0:
-                    cand_t = cand_widx.astype(np.float64) * (WINDOW_MS / 1000.0)
-                    chosen = int(cand_widx[int(np.argmin(np.abs(cand_t - old_end)))])
-                    sample_idx = _refine_falling(chosen)
-                    new_end = sample_idx / float(sample_rate)
-                    delta = new_end - old_end
-                    if abs(delta) >= SNAP_MIN:
-                        n_end_snapped += 1
-                        max_end_delta = max(max_end_delta, abs(delta))
-                    new_w["end"] = new_end
-
-            # Sanity: end must remain greater than start (otherwise revert).
-            if new_w["end"] <= new_w["start"]:
-                new_w["start"] = old_start
-                new_w["end"] = old_end
-
-            refined.append(new_w)
-
-        print(
-            f"[align] Refined word boundaries (sample-precision @ {sample_rate}Hz): "
-            f"{n_start_snapped} starts, {n_end_snapped} ends "
-            f"(max Δstart={max_start_delta * 1000:.2f}ms, max Δend={max_end_delta * 1000:.2f}ms, "
-            f"noise_floor={noise_floor:.4f}, refine±{REFINE_RADIUS_MS}ms@sample-level)",
-            flush=True,
-        )
-        return refined
-    except Exception as e:
-        print(f"[align] refinement failed ({type(e).__name__}: {str(e)[:200]}); using Deepgram boundaries", flush=True)
-        return list(words)
-
-
-
 # ─── TIGHTEN ──────────────────────────────────────────────────────────────────
 
-ALWAYS_FILLER = {"um","uh","uhh","uhm","umm","erm","er","hmm","hm","mm","mmm","mhm","ah","ahh","huh"}
-CONTEXT_FILLER = {"like","right","so","basically","literally","actually","honestly","obviously","just","really"}
-MULTI_WORD_FILLER = [["you","know"],["i","mean"],["kind","of"],["sort","of"]]
 
 
 def measure_source_loudness(source_path):
@@ -2307,17 +1856,23 @@ def _build_face_signals(face_positions, deepgram_words, duration):
     """Turn raw face detections + speaker-tagged words into signals Gemini consumes.
 
     Returns (face_visibility, speaker_positions, off_center, shot_scale):
-      face_visibility  — list of {"from_s": float, "to_s": float, "visible": bool}
-                         contiguous non-overlapping segments over [0, duration]
-                         bucketed at 0.5s granularity.
+      face_visibility   — list of {"from_s": float, "to_s": float, "visible": bool}
+                          contiguous non-overlapping segments over [0, duration]
+                          bucketed at 0.5s granularity. Lets Gemini choose
+                          overlay variants that fit "is anyone on camera".
       speaker_positions — dict[int spk_id] → {"avg_cx": float (px),
-                         "side": "left"|"center"|"right", "samples": int}
-      off_center       — bool: median face cx deviates from canvas-center 540
-                         by more than 100px (flag Gemini to avoid aggressive zoom)
-      shot_scale       — dict: {"median_w": float, "median_h": float,
-                         "label": "close_up"|"medium"|"wide"|"unknown"} —
-                         tells Gemini how tight the framing is, which gates
-                         appropriate zoom types and intensities.
+                          "side": "left"|"center"|"right", "samples": int}
+      off_center        — bool: median face cx deviates from canvas-center 540
+                          by more than 100px (flag Gemini to avoid aggressive zoom)
+      shot_scale        — dict: {"median_w": float, "median_h": float,
+                          "label": "close_up"|"medium"|"wide"|"unknown"} —
+                          tells Gemini how tight the framing is, which gates
+                          appropriate zoom types and intensities.
+
+    Face position over time is NOT fed as data. Gemini watches the video at
+    5 fps and can see where the face sits at every moment — placement of
+    captions and motion graphics around the face is its job, made on the
+    video pixels themselves, not on a precomputed timeline.
     """
     if duration <= 0:
         return (
@@ -2567,6 +2122,25 @@ FACE VISIBILITY (source-seconds ranges; yes = face detected in 0.5s bucket)
   shot, text, or scenery — lean into that (e.g., use TornPaper/QuoteCard
   over scenery, StatCard over a product shot).
 
+  PLACEMENT AROUND THE FACE — YOU SEE THE VIDEO.
+  You watch the source at 5 fps. You can see exactly where the speaker's
+  face sits in every frame — the eyes, the mouth, the chin, the shoulders.
+  Place every caption_position_change, every motion_graphic anchor, every
+  text_overlay variant so it does NOT cover the face. This is a visual
+  decision made on the actual pixels, not from data:
+
+    - If the face fills the lower half at a moment, captions belong on top
+      for that moment.
+    - If the face fills the center, captions stay at the bottom (the only
+      safe zone) and motion_graphic anchors go to upper_third_safe or
+      lower_third_safe — never "center" — for that window.
+    - If the face fills the upper half, captions stay at the default bottom.
+    - If no face is on screen, place freely for creative effect.
+
+  Anchors and position changes are word-anchored — emit them on the kept
+  word where the face's screen position transitions. The renderer applies
+  your choice verbatim; there is no Python re-routing layer.
+
 SPEAKER POSITIONS (where each speaker sits in frame, by diarization + face detect)
   {_sp_display}
 
@@ -2615,8 +2189,8 @@ The pipeline enforces these rules with strict validators. Output that violates a
 1. POSITIONS ARE SEMANTIC ZONES. Use the named zones from the vocabulary (`upper_third_safe`, `center`, `lower_third_safe`, `left_safe`, `right_safe`). Pixel coordinates are not accepted.
 2. EVERY TIMING IS WORD-ANCHORED. You never emit raw float timestamps. Anchor every time-based decision to a specific kept word via its index (start_word_index, end_word_index, word_index, word_indices, after_word_index, thumbnail_word_index). Python derives all float timestamps from word start/end times. The only float fields in your output are non-time values like `duration_seconds` (overlay lifespan), `intensity`, `scale`, and `speed`.
 3. EVERY TEXT OVERLAY HAS A VARIANT + ITS REQUIRED PROPS. The `variant` field chooses which visual treatment; each variant has a specific set of required props documented in the TEXT OVERLAYS section.
-4. CAPTIONS ARE WORD-ANCHORED. Emit `caption_position_changes` as an array of `{{word_index, position}}` events — each event says "at this kept word, captions move to this position." Python synthesizes the final segment list with exact word-start timestamps. No float boundaries to match, no duration arithmetic. If captions stay "bottom" the whole video, emit an empty array.
-5. Z-ORDER YIELDS TO MOTION GRAPHICS — AUTOMATIC. Python automatically forces caption_position_segments to "top" inside any bottom-anchored MG window after derivation, so you don't need to coordinate this. Emit caption_position_changes for creative reasons (e.g., a "center" beat for a Quintessence-style dramatic single word) and Python takes care of the MG-overlap geometry.
+4. CAPTIONS ARE WORD-ANCHORED + FACE-AWARE. Emit `caption_position_changes` as an array of `{{word_index, position}}` events — each event says "at this kept word, captions move to this position." Python synthesizes the final segment list with exact word-start timestamps. You watch the video — when the speaker's face moves into the bottom of the frame (looking down, leaning forward, low framing), emit a change to "top" at the first kept word in that window and back to "bottom" when the face returns up. Captions over the speaker's mouth are unreadable; place them so they never cover the face.
+5. Z-ORDER YIELDS TO MOTION GRAPHICS — YOU OWN IT. Python does NOT auto-flip caption position for MG overlap. If a motion_graphic sits at "lower_third_safe" or any bottom-anchored zone across a window, you must emit a caption_position_change to "top" at the MG's start_word_index and back to "bottom" at the word immediately after end_word_index. Same rule for "center" MGs that visually cover the speaker.
 6. ZONE DISCIPLINE FOR OVERLAYS. Overlays in DIFFERENT visual zones can freely share a time window. Overlays in the SAME zone at the SAME time are what collide — those are rejected. Per-variant canonical zones:
    - `torn_paper` → `center` (full-frame impact slam)
    - `sticky_note` → `upper_third_safe` (corner stickies)
@@ -2624,8 +2198,8 @@ The pipeline enforces these rules with strict validators. Output that violates a
    - `caption_match` → zone matches its `position` (top→`upper_third_safe`, center→`center`, bottom→`lower_third_safe`)
    A motion_graphic's zone is its explicit `anchor` field. Two items collide only when their zones AND time windows both overlap. High-intensity emphasis moments are spaced ≥2.5s apart regardless of zone.
 7. ONE ZOOM PER KEPT-SOURCE CLIP. At most one emphasis_moment carries a zoom_effect within any single kept-source clip (the source range between your removed-words boundaries). When you want multiple zoom beats close together, stack their events onto a single emphasis_moment's `zoom_effect.events` array.
-8. MOTION GRAPHIC ANCHORS ARE ABSOLUTE ZONES. Every `motion_graphics[i].anchor` and `emphasis_moments[i].motion_graphic.anchor` is one of the 5 absolute zones — MGs don't follow the speaker's face.
-9. ANCHORS ARE KEPT WORDS — BY CONSTRUCTION. The transcript you see contains only kept words, renumbered `[0..M-1]`. Every word_index you emit (in `emphasis_moments[i].word_indices`, `sound_effects[i].word_index`, `text_overlays[i].start_word_index`, `motion_graphics[i].{{start,end}}_word_index`, `broll_clips[i].{{start,end}}_word_index`, `transitions[i].after_word_index`, `caption_position_changes[i].word_index`, `thumbnail_word_index`) references this index space. All anchors land on kept words. Python translates back to source indices and derives all timestamps.
+8. MOTION GRAPHIC ANCHORS ARE ABSOLUTE ZONES — FACE-AWARE. Every `motion_graphics[i].anchor` and `emphasis_moments[i].motion_graphic.anchor` is one of the 5 absolute zones. You watch the source video — look at where the speaker's face sits in the frame across the MG's word window and pick an anchor that does NOT cover the face. If the face is in the middle of the frame, do not anchor to "center". If the face is in the lower third, avoid "lower_third_safe". The MG renders exactly where you place it; there is no fallback.
+9. ANCHORS ARE KEPT WORDS. The transcript you see is the FULL Deepgram output, indexed [0..N-1]. Every word_index you emit (in `emphasis_moments[i].word_indices`, `sound_effects[i].word_index`, `text_overlays[i].start_word_index`, `motion_graphics[i].{{start,end}}_word_index`, `broll_clips[i].{{start,end}}_word_index`, `transitions[i].after_word_index`, `caption_position_changes[i].word_index`, `thumbnail_word_index`) references this same source index space. Any word you also list in remove_words is NOT a kept word and CANNOT be anchored. The renderer fails validation if you cross-reference a removed word.
 10. EXPLICIT NULLS. If an emphasis moment has no zoom, emit `"zoom_effect": null` — no downstream defaults fill gaps.
 
 === SAFE ZONES (1080x1920 canvas) ===
@@ -2953,18 +2527,44 @@ Types, descriptions, use cases, and REQUIRED props (in the schema below, keys en
 GUIDELINES:
   Anchor semantically, not by pixels.
   Duration 2.0 - 4.0s.
-  Conflict check: if a motion_graphic sits at "lower_third_safe" during a window, your caption_position_segments MUST set captions to "top" across that window. This is your responsibility; the renderer will NOT auto-flip.
+  Conflict check: if a motion_graphic sits at "lower_third_safe" (or any bottom-overlapping anchor) during a window, you MUST emit a caption_position_change to "top" at the MG's start_word_index and back to "bottom" at the word right after end_word_index. The renderer does NOT auto-flip — Z-order is your responsibility.
+  Face check: look at the video across the MG's word window — pick an anchor that does NOT cover the speaker's face wherever it sits in those frames.
   Non-overlap: no motion_graphic window may overlap any text_overlay window.
 
-=== WORD EDITING ===
+=== WORD EDITING — YOU OWN EVERY CUT ===
 
-remove_words — ARRAY. All word-level cleanup (fillers, stutters, false starts, dead air, contextual filler, phrasal restarts, narrative redundancy) has ALREADY been applied by the upstream mechanical + content-analysis pre-pass. The transcript you see is the post-pre-pass transcript; pre-cut words appear with `[PRE-CUT:reason]` tags and cannot be anchored.
+remove_words — REQUIRED ARRAY. THIS IS THE ONLY CUT AUTHORITY. There is no upstream filler/stutter/dead-air pre-pass. The transcript you see is the FULL Deepgram output, every word indexed [0..N-1]. Every cut — fillers, stutters, abandoned restarts, breaths, dead-air gaps, redundant restatements, tangents — comes from your `remove_words`. Python applies them verbatim at sample-precise Deepgram timestamps; no padding, no buffer, no second-guessing.
 
-Your `remove_words` field is almost always EMPTY. Only emit an entry if you decide an entire narrative section should be skipped (e.g. a tangent unrelated to the video's vibe). Range-based entries only:
+WHAT TO CUT — apply the four checks to every candidate word or span:
 
-  {{"start": float, "end": float, "reason": "section_skip"}}
+  1. AUDIO   — does the surrounding speech sound natural without the candidate?
+  2. GRAMMAR — is the remaining clause well-formed?
+  3. INFORMATION — does removing it preserve the meaning the listener takes from the surrounding speech?
+  4. DELIVERY — was the candidate delivered without deliberate emphasis?
 
-Preferred alternative: keep the low-value section as a clip but set its `speed` to 1.30–1.40 so it pace-flies through the content. Hard cuts mid-clause are jarring; a fast clip preserves continuity while still removing weight.
+If all four are affirmed, cut. If any one fails, keep. The conjunction is the only conservatism.
+
+Apply this to:
+  - Hesitation tokens: um, uh, hmm, er, ah — almost always cut.
+  - Throat clears, lip smacks, mouth noise — cut.
+  - Trailing-dash false starts ("wh-", "shou-") — cut.
+  - 1-word stutters ("I I", "the the") when the timing looks rushed (short duration or tight gap). Keep when the speaker used rhetorical emphasis ("very, very good") — that's intent, not a stutter.
+  - Phrasal restarts: the speaker abandons a phrase and starts over with a verbatim repeat, paraphrase, or correction. Cut the abandoned attempt; KEEP the replacement. CRITICAL: a parallel structure ("I went, I saw, I conquered" / "what are you gonna do? what are you gonna learn?") is NOT a restart — sentence-ending punctuation between the two phrases means the first thought completed. Don't cut parallel structure.
+  - Context-dependent filler ("like", "so", "basically", "you know") — cut when the four checks pass; keep when it carries meaning.
+  - Narratively redundant restatement — pure repetition with no new information and no emphasis value.
+
+Emit two kinds of entries:
+
+  • Single-word cut:    {{"word_index": int, "reason": "filler"|"stutter"|"restart"|"redundant"|"breath"|"other"}}
+  • Time-range cut:     {{"start": float, "end": float, "reason": "dead_air"|"breath"|"tangent"|"section_skip"|"other"}}
+
+DEAD AIR / SILENCE / BREATHS — emit a time-range cut for every silence gap longer than ~50 ms between words. Aim for ZERO perceptible silence in the output. Silence is never content; breaths are never content. Use the gap between consecutive word.end → next word.start to find them.
+
+ANCHOR INTEGRITY — any word_index you list in remove_words CANNOT be anchored elsewhere. The renderer fails validation if you anchor an emphasis_moment, motion_graphic, sound_effect, transition, broll_clip, text_overlay, or caption_position_change to a word you also removed.
+
+Range cuts and word cuts can coexist — a range cut removes every word fully contained in [start, end]; partial overlaps keep the word.
+
+If a low-value section is too long to cut entirely but isn't punchline material, prefer setting that clip's `speed` to 1.30–1.40 so it pace-flies through the content. Hard cuts mid-clause are jarring; a fast clip preserves continuity while still removing weight.
 
 === OPENING (cut[0]) ===
 
@@ -3279,10 +2879,10 @@ Work through these checks against the plan you are about to emit. This is self-v
 
 1. Zone discipline for overlays. Two overlays (text_overlay or motion_graphic) whose time windows overlap must sit in DIFFERENT visual zones. Per-variant text_overlay zones: torn_paper→center, sticky_note→upper_third_safe, quote_card→center, caption_match→matches its `position`. motion_graphic zone = its `anchor` field. Same-zone + same-time is rejected. High-intensity emphasis moments are ≥2.5s apart regardless of zone.
 2. One zoom per kept-source clip. Within each contiguous source range between removed-word boundaries, at most one `emphasis_moments[i].zoom_effect` is non-null. Multiple beats close together stack their events onto a single emphasis_moment's `zoom_effect.events` array.
-3. Z-order — automatic. Python forces caption_position_segments to "top" inside bottom-anchored MG windows. You don't need to coordinate this; emit caption_position_changes for creative reasons only.
-4. MG anchors are absolute zones. Every `motion_graphics[i].anchor` and every `emphasis_moments[i].motion_graphic.anchor` is one of the 5 absolute zones (`upper_third_safe`, `center`, `lower_third_safe`, `left_safe`, `right_safe`).
+3. Z-order — your responsibility. When any motion_graphic occupies a bottom-anchored zone (`lower_third_safe`) across a window, you MUST emit a caption_position_change to "top" at the MG's start_word_index and back to "bottom" at the word right after end_word_index. Python does not auto-flip.
+4. MG anchors are absolute zones AND face-aware. Every `motion_graphics[i].anchor` and every `emphasis_moments[i].motion_graphic.anchor` is one of the 5 absolute zones (`upper_third_safe`, `center`, `lower_third_safe`, `left_safe`, `right_safe`). Look at the video across the MG window — pick an anchor that does NOT cover the speaker's face wherever it sits in those frames.
 5. Explicit nulls. Every emphasis_moment has explicit `zoom_effect` (value or null) and `motion_graphic` (value or null) fields — no omissions.
-6. sad_trombone tonal gate. If `sad_trombone` appears, the tonal_register is "comedic" AND the surrounding dialogue is being played for laughs. Otherwise remove it.
+6. sad_trombone tonal gate. If `sad_trombone` appears, the surrounding dialogue must be being played for laughs. Otherwise remove it.
 
 Note: every anchor field in this schema is word-index-based. You never emit float timestamps that must match word boundaries — Python derives all timestamps from word indices. Caption segments, hook boundaries, and thumbnail time are all synthesized from the word indices you emit.
 
@@ -3376,248 +2976,6 @@ def build_analysis_from_gemini_recipe(edit_plan, duration):
     return analysis
 
 
-def run_content_analysis(deepgram_words, inline_video_bytes, mechanical_cuts):
-    """Pre-pass Gemini call that classifies every word with full video context.
-
-    Runs in parallel with face detection + other signal computation. Its
-    cuttable classifications are applied as cuts BEFORE the main call, so
-    Gemini sees a transcript containing only kept words (re-indexed
-    [0..M-1]) with narrative peaks tagged for emphasis priors.
-
-    Returns a dict:
-      {
-        "word_cuts": set[int]            # analysis-decided cuts (context-aware)
-        "cuttable": set[int]             # (reserved; currently always empty)
-        "protected": set[int]            # kept-word source indices (content + peaks)
-        "peaks": set[int]                # narrative peak subset of protected
-        "silence_range_cuts": list[(s,e)]  # sub-threshold pauses Gemini flagged
-        "tonal_register": str            # overall video tone (serious/comedic/...)
-      }
-
-    Gemini 3 Flash at MEDIUM thinking — the task spans aggressive filler
-    detection across multiple categories plus range-level silence judgment,
-    so LOW under-cuts. MEDIUM is the right balance of cut quality and latency.
-    """
-    _words = list(deepgram_words or [])
-    if not _words or not inline_video_bytes:
-        # No words → no classification possible. Default: everything the
-        # mechanical pass already caught is cut; nothing else is cuttable;
-        # everything else is protected.
-        _mech_cuts = set(mechanical_cuts.get("word_cuts", set()))
-        _protected = set(range(len(_words))) - _mech_cuts
-        return {
-            "word_cuts": set(),
-            "cuttable": set(),
-            "protected": _protected,
-            "peaks": set(),
-            "silence_range_cuts": [],
-            "tonal_register": "casual",
-        }
-
-    client = _get_genai_client()
-    _video_part = genai_types.Part.from_bytes(
-        data=inline_video_bytes, mime_type="video/mp4",
-    )
-
-    # Build transcript representation for the analysis call. Include the
-    # mechanical-cut flag per word so Gemini sees the deterministic pre-pass
-    # decisions and doesn't re-classify those words.
-    _mech_cuts = set(mechanical_cuts.get("word_cuts", set()))
-    _mech_reasons = dict(mechanical_cuts.get("reasons", {}))
-    lines = []
-    for i, w in enumerate(_words):
-        word_text = str(w.get("punctuated_word") or w.get("word") or "").strip()
-        start = float(w.get("start") or 0)
-        end = float(w.get("end") or 0)
-        spk = int(w.get("speaker") or 0)
-        if i in _mech_cuts:
-            lines.append(
-                f"  [{i}] {start:.2f}-{end:.2f} spk{spk}: {word_text}  "
-                f"[MECHANICAL-CUT:{_mech_reasons.get(i, '?')}]"
-            )
-        else:
-            lines.append(f"  [{i}] {start:.2f}-{end:.2f} spk{spk}: {word_text}")
-    transcript_lines = "\n".join(lines)
-
-    system_instruction = """You are the cut-decision system for a short-form video editor. You see the full video and full transcript. Your job: classify each word as content (keep) or filler (cut), and identify the speaker's narrative peaks.
-
-WHAT FILLER IS
-
-Filler is any vocalization the speaker did not intend as part of their message — hesitation tokens, throat-clearing, social lubrication, abandoned thoughts the speaker themselves replaced. Content is everything the speaker chose to say: information, narrative structure, emotional weight, rhythm, voice, scene transitions, attribution, framing.
-
-The distinction is SPEAKER INTENT, not surface form. The same word can be either — content when the speaker meant it as part of their message, filler when it slipped out as connective tissue while they organized their thoughts. Speaker intent isn't directly observable. The four checks below are how you read it — observable signals replace the unobservable mental state. Apply them to every candidate.
-
-THE FOUR CHECKS
-
-A candidate word or span is filler if and only if all four are affirmed:
-
-  1. AUDIO — the surrounding speech sounds like uninterrupted natural delivery without the candidate.
-  2. GRAMMAR — the remaining clause is well-formed.
-  3. INFORMATION — removing the candidate does not change the meaning the listener takes from the surrounding speech. If removing it would alter what the listener understands, or how parts of the message connect to each other, the check fails.
-  4. DELIVERY — the speaker delivered the candidate without any observable deliberate emphasis.
-
-If you cannot confidently affirm a check, it does not pass. Each check is a positive assertion you must affirm. Any one failure → keep.
-
-The conjunction is the only conservatism. There is no separate "default to keep" rule, no count target, no quota — the four checks are the gate. Apply them honestly.
-
-SPAN PRECEDENCE
-
-The four checks apply to spans of any length, not just single words. When both a span and its individual words would pass the checks, prefer the longest span — tag every word in it with the same classification. This catches multi-word fluff a per-word pass would miss.
-
-RESTART STRUCTURE (overrides the four checks)
-
-When you observe an abandoned-and-replaced sentence pattern — the speaker breaks off and starts over with a verbatim repeat, paraphrase, or correction within the same idea — tag every word in the abandoned attempt as cuttable_restart, even if those words would individually pass or fail the four checks. The replacement always wins. Never tag words from both instances of a repeated phrase.
-
-VIDEO OVERRIDES TRANSCRIPT
-
-When the transcript and the audio disagree — for example, the transcriber wrote a real word but the speaker actually vocalized "um" — classify based on what the speaker actually vocalized. The video is ground truth.
-
-CLASSIFICATION VOCABULARY (the labels to emit)
-
-  • "content" — the four checks did not all pass.
-  • "cuttable_filler" — the four checks all passed.
-  • "cuttable_restart" — abandoned attempt of a restart structure (the override above).
-  • "cuttable_redundant" — pure restatement with no new information and no emphasis value. The four checks govern; redundant restatement passes the information check (no new info) and typically the others.
-  • "narrative_peak" — a genuine prosodic emphasis target where a visual effect belongs. The moment the speaker's voice peaks. 2–8 per video. Not a cut.
-
-Words tagged [MECHANICAL-CUT] in the input are already cut — do not re-emit them.
-
-SILENCE
-
-The mechanical pre-pass already cuts every silence gap above {dead_air_thresh:.2f}s. Per directive, ALL dead silence is cut — silence is never content. If you notice any sub-threshold pauses (breaths, between-clause gaps) the mechanical pass missed, flag them in silence_cuts.
-
-TONAL REGISTER
-
-Output the overall tonal_register of the video — serious, educational, motivational, comedic, dramatic, or casual.
-
-Your classification is authoritative. Words you classify as cuttable_* are permanently removed before the editor sees the transcript.""".replace(
-        "{dead_air_thresh:.2f}", f"{_MECH_DEAD_AIR_THRESHOLD_S:.2f}"
-    )
-
-    user_content = f"""TRANSCRIPT (word-by-word with source indices; MECHANICAL-CUT tags indicate words already cut by the deterministic pre-pass):
-
-{transcript_lines}
-
-Return:
-  • word_analyses — emit cuttable_filler / cuttable_restart / cuttable_redundant / narrative_peak entries. Unemitted indices (0..{len(_words) - 1}) default to content.
-  • silence_cuts — sub-{_MECH_DEAD_AIR_THRESHOLD_S:.2f}s pauses anywhere in the audio. ALL dead silence is cut.
-  • tonal_register — the overall tone of the video.
-
-Apply the four checks to every candidate. All four must be affirmed for cuttable_filler. Apply the restart override when you see abandoned-and-replaced patterns. Prefer the longest passing span over individual words."""
-
-    t0 = time.time()
-    print(
-        f"[content-analysis] Calling Gemini model={GEMINI_MODEL} (thinking=MEDIUM, {len(_words)} words)...",
-        flush=True,
-    )
-    response = client.models.generate_content(
-        model=GEMINI_MODEL,
-        contents=[_video_part, user_content],
-        config=genai_types.GenerateContentConfig(
-            system_instruction=system_instruction,
-            temperature=1.0,
-            max_output_tokens=16384,
-            response_mime_type="application/json",
-            response_json_schema=ContentAnalysis.model_json_schema(),
-            # MEDIUM thinking — the task expanded from narrow per-word
-            # classification to multi-category aggressive filler detection
-            # plus range-level silence judgment. LOW under-cuts; HIGH spends
-            # latency we don't need. MEDIUM is the sweet spot.
-            thinking_config=genai_types.ThinkingConfig(thinking_level="MEDIUM"),
-            media_resolution="MEDIA_RESOLUTION_LOW",
-        ),
-    )
-    elapsed = time.time() - t0
-    print(f"[content-analysis] Gemini complete in {elapsed:.1f}s", flush=True)
-
-    response_text = str(getattr(response, "text", "") or "").strip()
-    if not response_text:
-        raise RuntimeError("Empty content-analysis response")
-    parsed = extract_json(response_text)
-
-    # Parse word_analyses into the partitioned sets.
-    word_cuts = set()         # analysis-decided cuts (ADD to mechanical)
-    cuttable = set()          # analysis-cuttable, NOT yet cut (Gemini may choose)
-    protected = set()         # anchor-eligible
-    peaks = set()             # narrative peak subset of protected
-
-    _seen = set()
-    for entry in (parsed.get("word_analyses") or []):
-        try:
-            idx = int(entry.get("source_index"))
-            cls = str(entry.get("classification") or "content")
-        except (TypeError, ValueError):
-            continue
-        if idx < 0 or idx >= len(_words) or idx in _seen:
-            continue
-        _seen.add(idx)
-        if idx in _mech_cuts:
-            # Mechanical cuts stay cut regardless of what analysis says.
-            continue
-        if cls in ("cuttable_filler", "cuttable_restart", "cuttable_redundant"):
-            # Content-aware cuts: ADD to the hard-cut set (these words are
-            # cut before the main call even sees the transcript). Main call
-            # cannot anchor to them because they're not in its index space.
-            word_cuts.add(idx)
-        elif cls == "narrative_peak":
-            protected.add(idx)
-            peaks.add(idx)
-        else:
-            # "content" — default. Protected.
-            protected.add(idx)
-
-    # Default any unclassified surviving words to content/protected so the
-    # main call has full latitude over words the analysis didn't cover.
-    for idx in range(len(_words)):
-        if idx in _mech_cuts or idx in word_cuts:
-            continue
-        if idx not in protected:
-            protected.add(idx)
-
-    # Parse silence_cuts → range cuts that get folded into the same
-    # range-cut machinery the mechanical dead-air pass uses.
-    silence_range_cuts = []
-    for entry in (parsed.get("silence_cuts") or []):
-        try:
-            _s = float(entry.get("start"))
-            _e = float(entry.get("end"))
-        except (TypeError, ValueError):
-            continue
-        if not (math.isfinite(_s) and math.isfinite(_e)):
-            continue
-        if _e - _s < 0.04:
-            continue  # too short to remove cleanly
-        if _s < 0 or _e <= _s:
-            continue
-        silence_range_cuts.append((round(_s, 3), round(_e, 3)))
-
-    # All word-level cuts are applied to the transcript BEFORE the main call
-    # sees it — Gemini is shown re-indexed kept words only. `cuttable` stays
-    # empty; remove_words in Gemini's output is reserved for narrative range
-    # cuts (the prompt prefers per-clip `speed` 1.3-1.4x for low-value pacing).
-    tonal = str(parsed.get("tonal_register") or "casual")
-    # The prompt's seam test is the gate. No percentage warning — there is
-    # no universal right number of cuts (clean talking-head can be 0; filler-
-    # heavy interview can be 30%+). The taxonomy and seam test drive cuts;
-    # categorical bias drift is what we'd detect if we logged it, but a flat
-    # percentage threshold reliably misclassifies legitimate cut rates.
-    _cut_rate = (len(word_cuts) / max(len(_words), 1)) * 100.0
-    print(
-        f"[content-analysis] classified: {len(word_cuts)} analysis-cuts "
-        f"({_cut_rate:.1f}% of words), {len(silence_range_cuts)} silence ranges, "
-        f"{len(protected)} protected ({len(peaks)} peaks), tone={tonal} ({elapsed:.1f}s)",
-        flush=True,
-    )
-    return {
-        "word_cuts": word_cuts,
-        "cuttable": cuttable,
-        "protected": protected,
-        "peaks": peaks,
-        "silence_range_cuts": silence_range_cuts,
-        "tonal_register": tonal,
-    }
-
-
 def _coalesce_caption_position_segments(segments, min_dur=1.5):
     """Drop sub-min_dur caption position segments and merge same-position
     neighbors. Gemini sometimes emits adjacent caption_position_changes that
@@ -3680,7 +3038,6 @@ def generate_edit_gemini(
     face_positions=None, smoothed_face_trajectory=None,
     user_style_profile=None,
     gemini_file=None, cached_response=None, inline_video_bytes=None,
-    content_analysis=None, mechanical_cuts=None,
 ):
     _pre_analysis = cached_response
 
@@ -3690,49 +3047,17 @@ def generate_edit_gemini(
     _face_positions = list(face_positions or [])
     _smoothed_trajectory = list(smoothed_face_trajectory or [])
 
-    # ── Classification-driven disjoint index spaces ──────────────────────────
-    # `mechanical_cuts` = deterministic pre-pass (fillers, stutters, etc.)
-    # `content_analysis` = Gemini Flash LOW-thinking classification that runs
-    # before this call to identify context-dependent cuts and narrative peaks.
-    #
-    # All cuts (mechanical + analysis) are applied to the transcript BEFORE
-    # this call builds its prompt. Cut words are removed from the index
-    # space Gemini sees — the main call cannot reference them because they
-    # don't exist. Main-call `remove_words` is reserved for narrative range
-    # cuts (the prompt prefers per-clip `speed` 1.3-1.4x for low-value pacing).
-    _mech = dict(mechanical_cuts or {})
-    _anal = dict(content_analysis or {})
-    _mech_word_cuts = set(_mech.get("word_cuts") or set())
-    _mech_range_cuts = list(_mech.get("range_cuts") or [])
-    _mech_reasons = dict(_mech.get("reasons") or {})
-    _anal_word_cuts = set(_anal.get("word_cuts") or set())
-    _anal_silence_cuts = list(_anal.get("silence_range_cuts") or [])
-    # Kept source word indices (content + narrative peaks). Peaks are tagged
-    # in the prompt as anchor hints. Translation from new-index to source-
-    # index in post-processing guarantees every anchor lands on a kept word.
-    _protected = set(_anal.get("protected") or set())
-    _peaks = set(_anal.get("peaks") or set())
-    _tonal_register = str(_anal.get("tonal_register") or "casual")
-    # Hard-cut word indices = mechanical ∪ analysis. These words are stripped
-    # from the transcript shown to the main call below.
-    _all_cut_indices = _mech_word_cuts | _anal_word_cuts
-    if _all_cut_indices:
-        print(
-            f"[generate-edit] Pre-cuts applied: {len(_mech_word_cuts)} mechanical + "
-            f"{len(_anal_word_cuts)} analysis = {len(_all_cut_indices)} total word cuts. "
-            f"{len(_protected)} protected ({len(_peaks)} peaks). tone={_tonal_register}",
-            flush=True,
-        )
-
-    # Compute face-visibility timeline + per-speaker position signals + shot
-    # scale from the dense face detections. These become ground-truth signals
-    # in the prompt: Gemini uses `face_visibility` to decide overlay placement
-    # during face-absent moments, `speaker_positions` to choose overlay sides
-    # opposite the speaker, `off_center` to avoid aggressive zoom, and
-    # `shot_scale` to pick zoom type (SnapReframe only works on tight faces).
-    _face_visibility, _speaker_positions, _off_center, _shot_scale = _build_face_signals(
-        _face_positions, deepgram_words or [], duration,
-    )
+    # Compute face signals from dense face detections. Speaker positions,
+    # off-center flag, and shot scale gate zoom and side-overlay choices.
+    # Face POSITION over time is intentionally NOT computed — Gemini sees
+    # the video at 5 fps and decides where to place captions / MGs around
+    # the speaker by looking at the actual frames.
+    (
+        _face_visibility,
+        _speaker_positions,
+        _off_center,
+        _shot_scale,
+    ) = _build_face_signals(_face_positions, deepgram_words or [], duration)
 
     client = _get_genai_client()
     system_instruction, user_content = build_gemini_edit_prompt(
@@ -3749,92 +3074,52 @@ def generate_edit_gemini(
         user_style_profile=user_style_profile,
     )
 
-    # Build a RE-INDEXED transcript view for Gemini. The main call sees only
-    # kept words, freshly numbered [0..M-1]. Anchors Gemini emits use these
-    # new indices, which by construction cannot reference a cut word because
-    # cut words don't exist in this index space. After the call returns,
-    # Python translates every anchor field from new indices → source indices.
-    #
-    # This is the cleanest structural guarantee for anchor-on-cut: we don't
-    # need response_json_schema enum constraints (which Gemini's structured-
-    # output subset rejects on size/shape) — the index space itself IS the
-    # enforcement.
-    _new_to_src = {}   # new_index (0..M-1) → original deepgram source_index
-    _src_to_new = {}   # original source_index → new_index
-    _kept_words = []   # the (src_index, word_dict) pairs Gemini will see
-    for _src_idx, _w in enumerate(deepgram_words or []):
-        if _src_idx in _all_cut_indices:
-            continue
-        _new_idx = len(_kept_words)
-        _new_to_src[_new_idx] = _src_idx
-        _src_to_new[_src_idx] = _new_idx
-        _kept_words.append((_src_idx, _w))
-
-    # Append Deepgram word timestamps to the USER content. Transcript is
-    # per-video, so it stays out of system_instruction (which must remain
-    # byte-stable across calls for implicit caching).
-    if deepgram_words and _kept_words:
+    # Append the full Deepgram transcript to USER content. Gemini owns every
+    # cut decision via remove_words — there is no Python-side pre-pass, no
+    # re-indexing. Word indices in the prompt match Deepgram source indices
+    # 1:1, and any anchor Gemini emits is in the same source-index space.
+    if deepgram_words:
         readable_transcript = " ".join(
             (_w.get("punctuated_word") or _w.get("word") or "")
-            for _src_idx, _w in _kept_words
+            for _w in deepgram_words
         )
 
         word_lines = []
-        peaks_lines = []
-        for new_idx, (src_idx, _w) in enumerate(_kept_words):
+        for src_idx, _w in enumerate(deepgram_words):
             word_text = _w.get("punctuated_word") or _w.get("word") or ""
             start = float(_w.get("start") or 0)
             end = float(_w.get("end") or 0)
             spk = int(_w.get("speaker") or 0)
-            tag = ""
-            if src_idx in _peaks:
-                tag = "  [NARRATIVE-PEAK]"
-                peaks_lines.append(f"    [{new_idx}] {start:.2f}s: {word_text}")
-            word_lines.append(f"  [{new_idx}] {start:.2f}-{end:.2f} spk{spk}: {word_text}{tag}")
+            word_lines.append(f"  [{src_idx}] {start:.2f}-{end:.2f} spk{spk}: {word_text}")
 
         transcript_block = "\n".join(word_lines)
-        peaks_block = "\n".join(peaks_lines) if peaks_lines else "  (no narrative peaks identified)"
-        _first_kept_start = float(_kept_words[0][1].get("start") or 0)
-        _kept_count = len(_kept_words)
+        _first_word_start = float(deepgram_words[0].get("start") or 0)
+        _word_count = len(deepgram_words)
         user_content += f"""
-
-=== TONAL REGISTER (from pre-analysis) ===
-
-This video's overall tone: {_tonal_register}.
-Let this guide caption_style and SFX selection. Never pick an SFX that clashes with the tonal register (e.g., sad_trombone ONLY if comedic).
 
 === FULL TRANSCRIPT ===
 
-Read this first to understand the full story before making any editing decisions. Identify the narrative structure — what is setup, what is the buildup, and where are the punchlines or reveals. (Mechanical fillers, stutters, false starts, and dead air have already been removed upstream; you're reading the post-pre-pass transcript.)
+Read this first to understand the full story before making any editing decisions. Identify the narrative structure — what is setup, what is the buildup, and where are the punchlines or reveals. Identify every filler word, stutter, abandoned restart, breath, dead-air pause, and tangent. You will cut all of them via remove_words.
 
 {readable_transcript}
 
-=== WORD-BY-WORD TIMESTAMPS ({_kept_count} kept words, re-indexed [0..{_kept_count - 1}]) ===
+=== WORD-BY-WORD TIMESTAMPS ({_word_count} words, indexed [0..{_word_count - 1}]) ===
 
-The following is the word-by-word transcript with millisecond-accurate timestamps. All cut words (mechanical fillers, stutters, false starts, dead air, contextual filler/redundancy) have been REMOVED — you see ONLY the kept words, freshly numbered [0..{_kept_count - 1}]. Every word_index you emit in any anchor field references this index space. Words tagged [NARRATIVE-PEAK] are classified as emphasis candidates — these are your strongest anchor targets.
+The following is the FULL Deepgram word-by-word transcript with millisecond-accurate timestamps. NO words have been pre-cut. Every word_index you emit in any anchor field references this index space directly.
 
 {transcript_block}
 
-=== NARRATIVE PEAKS (prioritize these for emphasis, MGs, SFX, transitions) ===
-
-{peaks_block}
-
 RULES FOR USING THESE TIMESTAMPS:
-- word_index is in the index space [0..{_kept_count - 1}] shown above. Use those exact indices in anchor fields (start_word_index, end_word_index, word_indices, word_index, after_word_index).
-- Every index is by construction a kept word — cut words don't exist in this index space.
+- word_index is in the index space [0..{_word_count - 1}] shown above. Use those exact indices in anchor fields (start_word_index, end_word_index, word_indices, word_index, after_word_index, thumbnail_word_index, caption_position_changes[*].word_index).
+- Anchor only to words you are KEEPING. Any word you also list in remove_words cannot be anchored to — the renderer will fail validation if you do.
 - Your source_start and source_end values MUST land in the gaps BETWEEN words, not inside a word.
 - A gap is the time between one word's end timestamp and the next word's start timestamp.
 - NEVER place a source_start or source_end between a word's start and end timestamps — that cuts the word in half.
-- The first kept word starts at {_first_kept_start:.2f}s. For talking-head videos, set your first clip's source_start to {_first_kept_start:.2f} so the video starts on the first kept word with zero dead air.
+- The first word starts at {_first_word_start:.2f}s. For talking-head videos, set your first clip's source_start to the first KEPT word's start so the video starts on speech with zero dead air.
 - If the video has intentional visual content before the first word (action, scenery, product shots), start source_start at 0.0 to preserve that content.
-
-REMOVE_WORDS GUIDANCE:
-- All mechanical fillers, stutters, false starts, dead air, and context-dependent filler/redundancy have already been cut upstream. Your remove_words field is almost always EMPTY.
-- Only emit a remove_words entry if you identify a narrative section that needs to go (e.g., an unrelated tangent) — and prefer setting the corresponding clip's `speed` to 1.30–1.40 to pace through low-value content instead of cutting it.
 """
         print(
-            f"[generate-edit] Re-indexed transcript: {_kept_count} kept words "
-            f"(from {len(deepgram_words)}; {len(_all_cut_indices)} pre-cut, {len(_peaks)} peaks)",
+            f"[generate-edit] Transcript prepared: {_word_count} words (raw Deepgram, no pre-cuts)",
             flush=True,
         )
 
@@ -3869,23 +3154,17 @@ REMOVE_WORDS GUIDANCE:
     else:
         raise RuntimeError("No video data provided — need either inline_video_bytes or gemini_file")
 
-    # Use the base EditPlan schema (no dynamic enum injection). Structural
-    # safety against anchor-on-cut now comes from TRANSCRIPT RE-INDEXING:
-    # Gemini only sees kept words with new indices [0..M-1], so any anchor
-    # integer it emits is structurally in the kept set. Translation back to
-    # source indices happens below after the call returns.
+    # Use the base EditPlan schema. Anchor integrity (no anchor on a removed
+    # word) is enforced post-decode via the validator that scans every
+    # word-index field against the remove_words set. Range cuts that cover
+    # an anchored word are dropped by the anchor-integrity guard below.
     print(
         f"[generate-edit] Calling Gemini model={GEMINI_MODEL} (thinking=MEDIUM, structured output, temp=1.0, "
         f"system_instruction={len(system_instruction)} chars, user_content={len(user_content)} chars, "
-        f"kept_words={len(_kept_words)})...",
+        f"words={len(deepgram_words or [])})...",
         flush=True,
     )
     t = time.time()
-    # Transcript re-indexing guarantees Gemini cannot emit an anchor
-    # referencing a cut word — cut words don't exist in the index space
-    # Gemini sees. We don't need response_json_schema enum constraints
-    # (which Gemini's structured-output subset rejects on size/shape).
-    #
     # temperature=1.0 is Google's explicit recommendation for Gemini 3 — values
     # below 1.0 "may lead to unexpected behavior, such as looping or degraded
     # performance." (per ai.google.dev/gemini-api/docs/text-generation)
@@ -3954,72 +3233,9 @@ REMOVE_WORDS GUIDANCE:
 
     edit_plan = extract_json(response_text)
 
-    # ── Translate new indices (Gemini's view) → source indices ────────────────
-    # Gemini was given a re-indexed transcript [0..M-1] of kept words only.
-    # Every word_index in its output is in that new space. Downstream code
-    # works on SOURCE indices (into the full deepgram_words list), so we
-    # translate every anchor field now. This is pure bookkeeping — every
-    # new_index is guaranteed to map to a kept source word because _new_to_src
-    # only contains kept entries.
-    def _translate_idx(v):
-        if v is None:
-            return None
-        try:
-            return _new_to_src[int(v)]
-        except (KeyError, ValueError, TypeError):
-            # Out-of-range — shouldn't happen (schema bounds on int would let
-            # any integer through; but in practice Gemini sticks to [0..M-1]
-            # because that's the only space described in the prompt). Return
-            # None so validators catch it loudly.
-            return None
-
-    # emphasis_moments.word_indices (list of ints)
-    for _em in (edit_plan.get("emphasis_moments") or []):
-        if isinstance(_em, dict) and isinstance(_em.get("word_indices"), list):
-            _em["word_indices"] = [_translate_idx(x) for x in _em["word_indices"] if x is not None]
-    # text_overlays.start_word_index
-    for _ov in (edit_plan.get("text_overlays") or []):
-        if isinstance(_ov, dict) and "start_word_index" in _ov:
-            _ov["start_word_index"] = _translate_idx(_ov["start_word_index"])
-    # motion_graphics.start_word_index + end_word_index
-    for _mg in (edit_plan.get("motion_graphics") or []):
-        if not isinstance(_mg, dict):
-            continue
-        if "start_word_index" in _mg:
-            _mg["start_word_index"] = _translate_idx(_mg["start_word_index"])
-        if "end_word_index" in _mg:
-            _mg["end_word_index"] = _translate_idx(_mg["end_word_index"])
-    # sound_effects.word_index
-    for _sfx in (edit_plan.get("sound_effects") or []):
-        if isinstance(_sfx, dict) and "word_index" in _sfx:
-            _sfx["word_index"] = _translate_idx(_sfx["word_index"])
-    # transitions.after_word_index
-    for _tr in (edit_plan.get("transitions") or []):
-        if isinstance(_tr, dict) and "after_word_index" in _tr:
-            _tr["after_word_index"] = _translate_idx(_tr["after_word_index"])
-    # broll_clips.start_word_index + end_word_index
-    for _bc in (edit_plan.get("broll_clips") or []):
-        if not isinstance(_bc, dict):
-            continue
-        if "start_word_index" in _bc:
-            _bc["start_word_index"] = _translate_idx(_bc["start_word_index"])
-        if "end_word_index" in _bc:
-            _bc["end_word_index"] = _translate_idx(_bc["end_word_index"])
-    # remove_words (Gemini's own, usually empty; range variant has no word_index)
-    for _rw in (edit_plan.get("remove_words") or []):
-        if isinstance(_rw, dict) and _rw.get("word_index") is not None:
-            _rw["word_index"] = _translate_idx(_rw["word_index"])
-    # caption_position_changes (new word-index-based format)
-    for _cpc in (edit_plan.get("caption_position_changes") or []):
-        if isinstance(_cpc, dict) and "word_index" in _cpc:
-            _cpc["word_index"] = _translate_idx(_cpc["word_index"])
-    # thumbnail_word_index
-    if "thumbnail_word_index" in edit_plan:
-        edit_plan["thumbnail_word_index"] = _translate_idx(edit_plan["thumbnail_word_index"])
-    print(
-        f"[generate-edit] Translated {len(_new_to_src)} kept-word indices back to source space",
-        flush=True,
-    )
+    # Gemini emitted indices directly into the Deepgram source-index space —
+    # no translation step needed. Downstream code below derives float
+    # timestamps from word.start / word.end.
 
     # ── Derivation pass: word_index → float timestamps for downstream code ──
     # Every downstream consumer (render_multi_clip, projection helpers,
@@ -4189,36 +3405,10 @@ REMOVE_WORDS GUIDANCE:
             _filtered.append(_rw)
         raw_remove_words = _filtered
 
-    # ── Merge mechanical + analysis cuts into remove_words ───────────────────
-    # All word-level cuts came from the two upstream passes (mechanical pre-
-    # pass + content-analysis Gemini call). Gemini's main call sees those
-    # words stripped from the transcript, so it doesn't re-emit them; we
-    # inject them here as the authoritative remove_words list for the render.
-    _pre_cut_injections = []
-    for idx in sorted(_mech_word_cuts):
-        _pre_cut_injections.append({
-            "word_index": idx,
-            "reason": _mech_reasons.get(idx) or "mechanical",
-        })
-    for idx in sorted(_anal_word_cuts):
-        _pre_cut_injections.append({
-            "word_index": idx,
-            "reason": "contextual",
-        })
-    for (rs, re_) in _mech_range_cuts:
-        _pre_cut_injections.append({"start": rs, "end": re_, "reason": "dead_air"})
-    for (rs, re_) in _anal_silence_cuts:
-        _pre_cut_injections.append({"start": rs, "end": re_, "reason": "analysis_silence"})
-    if _pre_cut_injections:
-        raw_remove_words = list(raw_remove_words) + _pre_cut_injections
-        edit_plan["remove_words"] = raw_remove_words
-        print(
-            f"[generate-edit] Merged pre-pass cuts into remove_words: "
-            f"{len(_mech_word_cuts)} mechanical words, {len(_anal_word_cuts)} analysis words, "
-            f"{len(_mech_range_cuts)} dead-air ranges, "
-            f"{len(_anal_silence_cuts)} analysis silence ranges",
-            flush=True,
-        )
+    # Gemini's remove_words is the authoritative cut list — every filler,
+    # stutter, restart, dead-air range, breath, and tangent. No injection,
+    # no merging from upstream passes (those have been removed from the
+    # pipeline entirely).
 
     validated_cuts = []
     if not _dg_words:
@@ -4239,9 +3429,6 @@ REMOVE_WORDS GUIDANCE:
         for item in raw_remove_words:
             if not isinstance(item, dict):
                 continue
-            # The word_index branch handles Python-injected pre-pass/analysis
-            # cuts only — Gemini's main call doesn't emit word_index variants
-            # (it sees the transcript with those words already stripped).
             if "word_index" in item:
                 try:
                     idx = int(item["word_index"])
@@ -4310,21 +3497,18 @@ REMOVE_WORDS GUIDANCE:
                 print(f"[tighten] Speech rate: {_wpm:.0f} wpm, pacing={_pacing} → gap threshold: {_speech_gap*1000:.0f}ms", flush=True)
         print(
             f"[generate-edit] Building clips: {len(_dg_words)} words, "
-            f"{len(normalized_remove_words)} Gemini removals + deterministic tightening",
+            f"{len(normalized_remove_words)} Gemini removals",
             flush=True,
         )
         validated_cuts, _removed_word_indices = build_clips_from_words(_dg_words, normalized_remove_words, max_silence_gap=_speech_gap, video_duration=video_duration)
         edit_plan["_removed_word_indices"] = _removed_word_indices
 
         # Drop caption_position_changes anchored to removed words and
-        # re-derive caption_position_segments. The earlier derivation
-        # (around line 3735) ran before deterministic tightening
-        # (stutter/restart detection inside build_clips_from_words), so
-        # changes pointing at removed words like a stutter would survive
-        # and produce phantom 0.5s position segments at removed-word
-        # time positions — visible as caption flicker between bottom
-        # and center for half a second around a word that doesn't
-        # actually appear on screen.
+        # re-derive caption_position_segments. If Gemini happens to anchor
+        # a position change to the same word it also lists in remove_words,
+        # the change references a word that doesn't appear on screen —
+        # would render as a 0.5s caption flicker at the removed-word
+        # position. Re-synthesize from the filtered list.
         _removed_set = set(_removed_word_indices) if _removed_word_indices else set()
         if _removed_set:
             _raw_changes = edit_plan.get("caption_position_changes") or []
@@ -7240,85 +6424,28 @@ def get_output_clip_ranges(cuts, effective_durations, transition_duration=None, 
     return ranges
 
 
-FILLER_WORDS = {"uh", "um", "uh,", "um,", "hmm", "hmm,", "uhh", "umm", "er", "ah"}
-
-
-def _is_stutter(current_word, next_word, curr_duration=None, gap_to_next=None):
-    """Detect clear false-start patterns that should be removed.
-
-    `curr_duration` and `gap_to_next` (both optional, in seconds) are used to
-    discriminate mechanical stutters from intentional emphatic repetition.
-
-    The exact-repetition pattern ("very, very" / "now, now") is mechanical
-    ONLY when the timing looks rushed — the first word was truncated (short
-    duration) OR there's almost no gap to the second instance (rapid-fire
-    stutter). Otherwise the speaker is using rhetorical emphasis and the
-    word should be kept. Without this gating, "very, very good" loses the
-    first "very" — destroying the emphasis the speaker intended.
-
-    Prefix / contraction / hyphenated patterns are unambiguous false starts
-    and always fire.
-    """
-    if not next_word:
-        return False
-
-    curr = str(current_word or "").strip().lower().rstrip(".,!?;:'\"")
-    nxt = str(next_word or "").strip().lower().rstrip(".,!?;:'\"")
-
-    if not curr or not nxt:
-        return False
-
-    # Hyphenated/truncated word (Deepgram returns "wh-", "th-") — always a
-    # false start regardless of context.
-    if curr.endswith("-") and len(curr) >= 2:
-        return True
-
-    # Prefix/false start: "shou" before "shouldn't", "wh" before "what".
-    # The current word is a strict prefix of the next, with the next being
-    # a longer real word — the speaker started, restarted with the full word.
-    if len(curr) >= 2 and nxt.startswith(curr) and len(nxt) > len(curr):
-        return True
-
-    # Contraction false start: "do" before "don't" / "dont".
-    if curr + "n't" == nxt or curr + "nt" == nxt:
-        return True
-
-    # Exact repetition: "I I", "the the". Could be a mechanical stutter OR
-    # intentional emphasis ("very, very good"). Discriminate by timing:
-    #   - curr_duration < 0.20s → first instance was truncated (real stutter)
-    #   - gap_to_next < 0.08s → fired off rapid-fire (real stutter)
-    # Otherwise treat as emphasis and keep both words.
-    if curr == nxt:
-        if curr_duration is not None and curr_duration < 0.20:
-            return True
-        if gap_to_next is not None and gap_to_next < 0.08:
-            return True
-        # No timing info or timing looks intentional — leave for Gemini to
-        # decide via content-analysis.
-        return False
-
-    return False
-
-
 def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15, video_duration=0.0):
-    """
-    Deterministic, CapCut-quality clip builder.
+    """Apply Gemini's remove_words decisions and split kept words into clips.
+
+    Single cut authority: Gemini's `remove_words` (word_index + range entries)
+    is the only source of cuts. Python applies them verbatim — no filler /
+    stutter / phrasal-restart / dead-air detection. Pattern matchers cannot
+    discriminate abandoned restarts from rhetorical repetition; Gemini reads
+    the full transcript with video context and decides.
 
     Pipeline:
       1. Apply Gemini's remove_words (word indices + time ranges)
-      2. Deterministic filler removal (ALWAYS_FILLER, CONTEXT_FILLER, MULTI_WORD_FILLER)
-      3. Stutter/repeat detection and removal
-      4. Build clips from kept words, collapsing dead air
-      5. Add audio padding so cuts never clip consonants
-      6. Merge micro-clips (< 120ms) into neighbors
-      7. Fix overlaps between adjacent clips
-      8. Final safety: expand any boundary that lands mid-word
+      2. Build clips from kept words, splitting on silence > max_silence_gap
+      3. Reject sub-120ms micro-clips (orphan-island removals — Gemini's job
+         to consolidate)
+      4. Verify non-overlap invariant
+
+    Cut times are sample-precise raw Deepgram timestamps — no padding,
+    no cushion, no rounding. The audio cut path uses round(t * sample_rate)
+    for indexing, so the rendered splice lands at the exact sample.
 
     video_duration (when > 0) clamps every word's end timestamp so that
     no clip ever requests source frames past the actual end of the video.
-    Without this, ffmpeg silently produces a shorter segment than predicted
-    when the last word's Deepgram-reported end exceeds the actual video
-    length, causing a downstream timeline mismatch.
     """
     if not deepgram_words:
         return []
@@ -7408,174 +6535,7 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15, v
     if _range_removed_count:
         print(f"[tighten] Range removals removed {_range_removed_count} word(s)", flush=True)
 
-    gemini_removed = set(removed_indices)
-
-    # ── Step 2: Deterministic filler word removal ─────────────────────────
-    # Build a list of non-Gemini-removed words for context-aware filler detection
-    remaining = [w for w in sorted_words if w["_word_index"] not in removed_indices]
-
-    for idx_in_remaining, w in enumerate(remaining):
-        clean = w["_clean"]
-
-        # Always-filler: remove unconditionally — these are never content words
-        # ("um", "uh", "er", "ah", "hmm", etc.)
-        # Context-dependent fillers ("like", "so", "basically", "you know") are
-        # left to Gemini which understands sentence meaning and can decide whether
-        # the word is filler or actual content.
-        if clean in ALWAYS_FILLER:
-            removed_indices.add(w["_word_index"])
-            print(
-                f"[tighten] Filler '{w['_text']}' at {w['_start']:.3f}s removed (always-filler)",
-                flush=True,
-            )
-            continue
-
-    # ── Step 3: Stutter/repeat detection ──────────────────────────────────
-    # Re-build remaining list after filler removal
-    remaining = [w for w in sorted_words if w["_word_index"] not in removed_indices]
-
-    for idx_in_remaining, w in enumerate(remaining):
-        if w["_word_index"] in removed_indices:
-            continue
-        next_w = remaining[idx_in_remaining + 1] if idx_in_remaining + 1 < len(remaining) else None
-        if next_w:
-            _curr_dur_b = float(w.get("_end") or 0) - float(w.get("_start") or 0)
-            _gap_b = float(next_w.get("_start") or 0) - float(w.get("_end") or 0)
-        else:
-            _curr_dur_b = None
-            _gap_b = None
-        if next_w and _is_stutter(w["_clean"], next_w["_clean"], curr_duration=_curr_dur_b, gap_to_next=_gap_b):
-            # Different speakers repeating the same word is conversation, not a stutter.
-            w_speaker = w.get("speaker", w.get("_speaker"))
-            next_speaker = next_w.get("speaker", next_w.get("_speaker"))
-            if w_speaker is not None and next_speaker is not None and w_speaker != next_speaker:
-                print(
-                    f"[tighten] Skipping cross-speaker repeat '{w['_text']}' (speaker {w_speaker}) → "
-                    f"'{next_w['_text']}' (speaker {next_speaker})",
-                    flush=True,
-                )
-                continue
-            removed_indices.add(w["_word_index"])
-            print(
-                f"[tighten] Stutter '{w['_text']}' before '{next_w['_text']}' at {w['_start']:.3f}s removed",
-                flush=True,
-            )
-
-    # ── Step 3b: Phrasal restart detection (N-gram lookahead) ─────────────
-    # Catches 2- and 3-word phrasal restarts where the speaker abandons a
-    # phrase mid-thought and restarts it. Example:
-    #   [141] who  [142] is  [143] I  [144] said  [145] who  [146] is  [147] he?
-    # "who is" at 141-142 was abandoned and restarted at 145-146.
-    #
-    # CRITICAL DISCRIMINATOR: a true restart abandons the first phrase mid-
-    # thought. A parallel structure ("what are you gonna do? what are you
-    # gonna learn?") COMPLETES the first sentence with sentence-ending
-    # punctuation (?, ., !) before the next begins. We reject any match
-    # where any word in the gap between the first and second occurrence has
-    # sentence-ending punctuation — that signals the first sentence finished.
-    #
-    # Constraints (tight to avoid false positives):
-    #   - phrase length 2 or 3 words
-    #   - lookahead window: next 3 word positions only
-    #   - time gap between phrases: ≤1.5s
-    #   - same speaker
-    #   - NO sentence-ending punctuation in the gap words
-    _SENTENCE_END_RE = re.compile(r"[.!?]\s*$")
-    remaining = [w for w in sorted_words if w["_word_index"] not in removed_indices]
-    _restart_removed = set()
-    for idx_in_remaining, w in enumerate(remaining):
-        if w["_word_index"] in _restart_removed:
-            continue
-        for phrase_len in (4, 3, 2):  # try longest first to avoid orphan words
-            if idx_in_remaining + phrase_len > len(remaining):
-                continue
-            phrase_words = remaining[idx_in_remaining : idx_in_remaining + phrase_len]
-            if any(pw["_word_index"] in _restart_removed for pw in phrase_words):
-                continue
-            phrase_text = tuple(pw["_clean"] for pw in phrase_words)
-            if not all(phrase_text):
-                continue
-            # If the LAST word of the candidate phrase already has sentence-
-            # ending punctuation, the phrase is a complete thought — not an
-            # abandoned restart. Skip.
-            _last_phrase_punct = str(phrase_words[-1].get("punctuated_word") or phrase_words[-1].get("_text") or "")
-            if _SENTENCE_END_RE.search(_last_phrase_punct):
-                continue
-            phrase_speaker = phrase_words[0].get("speaker", phrase_words[0].get("_speaker"))
-            _matched = False
-            # TIGHT lookahead: only check the next 3 positions, not 5
-            for scan_idx in range(idx_in_remaining + phrase_len, min(idx_in_remaining + phrase_len + 3, len(remaining))):
-                if scan_idx + phrase_len > len(remaining):
-                    break
-                cand_words = remaining[scan_idx : scan_idx + phrase_len]
-                if any(cw["_word_index"] in _restart_removed for cw in cand_words):
-                    continue
-                cand_text = tuple(cw["_clean"] for cw in cand_words)
-                if cand_text != phrase_text:
-                    continue
-                cand_speaker = cand_words[0].get("speaker", cand_words[0].get("_speaker"))
-                if phrase_speaker is not None and cand_speaker is not None and phrase_speaker != cand_speaker:
-                    continue
-                # TIGHT time gap: ≤1.5s (true restarts are quick)
-                _time_gap = cand_words[0]["_start"] - phrase_words[-1]["_end"]
-                if _time_gap > 1.5 or _time_gap < 0:
-                    continue
-                # CRITICAL: reject if any word in the gap has sentence-ending
-                # punctuation. That means the first sentence completed and
-                # this is parallel structure, not a restart.
-                _gap_words = remaining[idx_in_remaining + phrase_len : scan_idx]
-                _sentence_completed = False
-                for _gw in _gap_words:
-                    _gw_punct = str(_gw.get("punctuated_word") or _gw.get("_text") or "")
-                    if _SENTENCE_END_RE.search(_gw_punct):
-                        _sentence_completed = True
-                        break
-                if _sentence_completed:
-                    continue
-                # Empty gap = intentional repetition for emphasis ("I want, I
-                # want this"). Real restarts have a discourse marker /
-                # hesitation / filler in the gap. Don't eat emphasis.
-                if len(_gap_words) == 0:
-                    continue
-                # Validated restart — remove the FIRST occurrence (false start)
-                for pw in phrase_words:
-                    _restart_removed.add(pw["_word_index"])
-                # Also remove orphan fillers in the gap between false start and
-                # restart. Example: "calling me, like, calling me" — once the
-                # first "calling me" is removed, "like" becomes an orphan
-                # discourse marker dangling between "started" and "calling me".
-                # Its grammatical role was to bridge the false start to its
-                # restart; with the false start gone, it serves no purpose.
-                # We do NOT apply the pause-bracket validator here because the
-                # word is provably orphaned by structural evidence (between a
-                # confirmed false start and its restart). Meaningful conjunctions
-                # like "but", "and", "however" are not in either filler set,
-                # so they're kept.
-                for _gw in _gap_words:
-                    _gw_clean = _gw["_clean"]
-                    if _gw_clean in ALWAYS_FILLER or _gw_clean in CONTEXT_FILLER:
-                        _restart_removed.add(_gw["_word_index"])
-                        print(
-                            f"[tighten] Orphan filler '{_gw['_text']}' at "
-                            f"{_gw['_start']:.3f}s removed "
-                            f"(gap between false start and restart)",
-                            flush=True,
-                        )
-                print(
-                    f"[tighten] Phrasal restart '{' '.join(phrase_text)}' at "
-                    f"{phrase_words[0]['_start']:.3f}s removed "
-                    f"(repeats at {cand_words[0]['_start']:.3f}s, gap={_time_gap*1000:.0f}ms)",
-                    flush=True,
-                )
-                _matched = True
-                break
-            if _matched:
-                break  # don't also try shorter phrase length at this position
-    removed_indices |= _restart_removed
-
-    deterministic_removed = removed_indices - gemini_removed
-
-    # ── Step 4: Build clips from kept words ───────────────────────────────
+    # ── Step 2: Build clips from kept words ───────────────────────────────
     kept_words = [w for w in sorted_words if w["_word_index"] not in removed_indices]
 
     if not kept_words:
@@ -7611,14 +6571,11 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15, v
     if current_words:
         clips.append(current_words)
 
-    # ── Step 5: Build raw clips at exact word boundaries ──────────────────
+    # ── Step 3: Build raw clips at exact word boundaries ──────────────────
     # No padding. Cuts land at Deepgram's word.start and word.end exactly.
     # The render pipeline (PCM-audio segments + AAC-once final encode) is
     # sample-accurate, so the boundary in the rendered video matches the
-    # boundary we ask for here. Previously we added 15ms / 60ms padding to
-    # mask AAC priming-delay artifacts (~21ms per segment) that bled into
-    # boundaries when AAC segments were stream-copy concatenated. With PCM
-    # intermediates that mechanism no longer exists, so the padding is gone.
+    # boundary we ask for here.
     raw_clips = []
     for word_group in clips:
         first_start = word_group[0]["_start"]
@@ -7634,7 +6591,7 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15, v
             "word_count": len(word_group),
         })
 
-    # ── Step 6: Reject micro-clips ────────────────────────────────────────
+    # ── Step 4: Reject micro-clips ────────────────────────────────────────
     # Any clip shorter than 120ms is too small to be a standalone segment —
     # it would be unplayable. This is a symptom of a removal pattern that
     # orphans a tiny word island between two removal ranges. Fail hard so
@@ -7653,7 +6610,7 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15, v
                 f"so the kept segment is at least {MIN_CLIP_DURATION*1000:.0f}ms."
             )
 
-    # ── Step 7: Non-overlap invariant ─────────────────────────────────────
+    # ── Step 5: Non-overlap invariant ─────────────────────────────────────
     # Clips are derived from sorted word groups with strictly non-overlapping
     # source ranges. If two adjacent clips overlap, the derivation logic is
     # broken. Fail loudly instead of silently splitting at the midpoint.
@@ -7668,11 +6625,9 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15, v
             )
 
     # ── Build final clip dicts ────────────────────────────────────────────
-    # Preserve sub-millisecond precision from audio-derived boundary
-    # refinement. The downstream audio cut path uses round(time *
-    # sample_rate) for indexing, so a sub-ms `time` gives a sample-precise
-    # cut. Rounding to ms here would re-introduce a ~10ms quantization
-    # buffer and re-create the "word residue at cut boundaries" problem.
+    # Raw Deepgram timestamps. The downstream audio cut path uses
+    # round(time * sample_rate) for indexing, so an unrounded float here
+    # produces a sample-precise splice.
     final_clips = []
     for rc in raw_clips:
         s = float(rc["padded_start"])
@@ -7691,30 +6646,24 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15, v
     # ── Summary ───────────────────────────────────────────────────────────
     total_kept = len(kept_words)
     total_words = len(sorted_words)
-    total_gemini = len(gemini_removed)
-    total_det = len(deterministic_removed)
     total_source = sum(c["source_end"] - c["source_start"] for c in final_clips)
 
-    # Log every removed word so we can audit exactly what was cut
     all_removed = sorted(removed_indices)
     if all_removed:
         print(f"[tighten] REMOVED WORDS ({len(all_removed)}):", flush=True)
         for idx in all_removed:
             w = sorted_words[idx]
-            source = "gemini" if idx in gemini_removed else "deterministic"
-            print(f"[tighten]   [{idx}] '{w['_text']}' @ {w['_start']:.3f}s ({source})", flush=True)
+            print(f"[tighten]   [{idx}] '{w['_text']}' @ {w['_start']:.3f}s", flush=True)
 
     print(
-        f"[tighten] {total_words} words → {total_kept} kept, "
-        f"{total_gemini} Gemini removals + {total_det} deterministic removals, "
+        f"[tighten] {total_words} words → {total_kept} kept "
+        f"({len(all_removed)} Gemini removals), "
         f"{len(final_clips)} clips, {total_source:.2f}s output",
         flush=True,
     )
 
-    # Return clips AND the set of removed word indices so downstream consumers
-    # (caption projection, SFX word-snapping) can use the SAME source of truth
-    # as the cut builder. Without this, the caption projection iterates the
-    # full Deepgram transcript and emits fragments of removed words.
+    # Caption projection / SFX snapping consume this set so they walk the
+    # same kept-word list the splicer used.
     return final_clips, set(removed_indices)
 
 
@@ -8273,45 +7222,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # Gemini emits start_word_index + end_word_index (plus optional
     # duration_seconds_override). Python projects the anchor words' source-time
     # boundaries through the cuts timeline to get output-frame start/end. The
-    # SEMANTIC_TO_MG_ANCHOR map translates the safe-zone anchor into the MG
-    # pack's own MGAnchor vocabulary; components render against the full canvas.
-    #
-    # Face-aware anchor routing: if Gemini picks "center" for an MG and the
-    # speaker's face occupies the middle vertical band at that MG's time
-    # window, the MG would land directly on the face. Re-route to the
-    # opposite vertical zone (top if face is below, bottom if face is above)
-    # so the face stays visible. We have the smoothed face trajectory from
-    # ingest — use it instead of letting "center" anchors bury the speaker.
-    _face_traj_for_mg = edit_plan.get("_smoothed_face_trajectory") or []
-    _source_height_for_mg = float(edit_plan.get("_source_height") or 1920)
-
-    def _face_safe_semantic_anchor(semantic_anchor, src_window_start, src_window_end):
-        """If the requested anchor would put the MG on top of the speaker's
-        face during the window, return a safer anchor instead."""
-        if semantic_anchor != "center":
-            return semantic_anchor
-        if not _face_traj_for_mg or _source_height_for_mg <= 0:
-            return semantic_anchor
-        # Sample face cy across the source window. The middle vertical band is
-        # 1/3..2/3 of source height; a face cy inside that band guarantees
-        # collision with a center-anchored MG on the 1080×1920 output.
-        ys = [
-            float(s.get("cy") or 0.0) / _source_height_for_mg
-            for s in _face_traj_for_mg
-            if src_window_start <= float(s.get("t") or 0.0) <= src_window_end
-            and s.get("found")
-        ]
-        if not ys:
-            return semantic_anchor
-        avg_cy_norm = sum(ys) / len(ys)
-        if 0.33 <= avg_cy_norm <= 0.67:
-            # Face is in the middle band → center-anchored MG would cover it.
-            # Route to the opposite half: face above 0.5 → MG goes bottom;
-            # face below 0.5 → MG goes top. Pick whichever is farther from
-            # the face vertical center.
-            return "lower_third_safe" if avg_cy_norm < 0.5 else "upper_third_safe"
-        return semantic_anchor
-
+    # SEMANTIC_TO_MG_ANCHOR map translates the semantic-zone anchor into the
+    # MG pack's own MGAnchor vocabulary; components render against the full
+    # canvas. Gemini owns the anchor choice — it watched the video at 5 fps
+    # and picked an anchor that doesn't cover the speaker's face based on
+    # the actual frames in the MG window.
     motion_graphics_out = []
     for _mg in (edit_plan.get("motion_graphics") or []):
         _sw_source = float(_mg["_source_start"])
@@ -8343,10 +7258,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 f"(out_start={_out_start:.2f}s, out_end={_out_end:.2f}s, "
                 f"total_output_frames={total_output_frames})"
             )
-        _safe_semantic = _face_safe_semantic_anchor(
-            _mg["anchor"], _sw_source, _ew_source,
-        )
-        _mg_anchor = SEMANTIC_TO_MG_ANCHOR[_safe_semantic]
+        _mg_anchor = SEMANTIC_TO_MG_ANCHOR[_mg["anchor"]]
         _mg_props = {**_mg["props"], "anchor": _mg_anchor}
         motion_graphics_out.append({
             "type": _mg["type"],
@@ -8354,11 +7266,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             "durationInFrames": _to_frame - _from_frame,
             "props": _mg_props,
         })
-        _rerouted = " (face-safe rerouted)" if _safe_semantic != _mg["anchor"] else ""
         print(
             f"[mg] {_mg['type']} src=[{_sw_source:.2f}..{_ew_source:.2f}]s "
-            f"→ out=[{_out_start:.2f}..{_out_end:.2f}]s anchor={_mg['anchor']}"
-            f"→{_safe_semantic}→{_mg_anchor}{_rerouted}",
+            f"→ out=[{_out_start:.2f}..{_out_end:.2f}]s anchor={_mg['anchor']}→{_mg_anchor}",
             flush=True,
         )
 
@@ -8384,20 +7294,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # was built before the mutation happened.
 
         # Motion graphic: append to motion_graphics_out, anchored at the moment.
-        # Translate semantic anchor → MGAnchor just like the top-level loop.
+        # Translate semantic anchor → MGAnchor. Gemini's anchor choice is
+        # final — it watched the video and picked a zone that doesn't cover
+        # the speaker's face at this moment.
         if em["motion_graphic"]:
             _em_dur = float(em["duration"])
             _mg_from_frame = max(0, _em_t_frame - int(round(_em_dur * source_fps * 0.25)))
             _mg_dur_frames = int(round(_em_dur * source_fps))
-            # Same face-safe routing as the top-level MG loop. Use the
-            # emphasis source-time window for face sampling.
-            _em_src_t = float(em["t"])
-            _em_safe_semantic = _face_safe_semantic_anchor(
-                em["motion_graphic"]["anchor"],
-                _em_src_t,
-                _em_src_t + _em_dur,
-            )
-            _em_mg_anchor = SEMANTIC_TO_MG_ANCHOR[_em_safe_semantic]
+            _em_mg_anchor = SEMANTIC_TO_MG_ANCHOR[em["motion_graphic"]["anchor"]]
             _em_mg_props = {**em["motion_graphic"]["props"], "anchor": _em_mg_anchor}
             motion_graphics_out.append({
                 "type": em["motion_graphic"]["type"],
@@ -8412,72 +7316,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 flush=True,
             )
 
-    # ── 7c. Z-order auto-fix — Python OWNS "captions don't visually overlap
-    # bottom-anchored MGs". Both lists are in output-frame space here, so we
-    # split any caption segment that overlaps a bottom-MG window and flip the
-    # inside-MG portion to "top". Same structural pattern as deriving
-    # timestamps from word indices: Python computes the dependent field from
-    # the creative inputs Gemini emits. No cross-field validator, no
-    # hard-fail, no buffer — just deterministic derivation.
-    _BOTTOM_MG_ANCHORS = {"bottom", "bottom-left", "bottom-right"}
-    _bottom_mg_windows = []
-    for _mg_out in motion_graphics_out:
-        _mg_props_anchor = str((_mg_out.get("props") or {}).get("anchor") or "")
-        if _mg_props_anchor not in _BOTTOM_MG_ANCHORS:
-            continue
-        _mg_from = int(_mg_out["fromFrame"])
-        _mg_to = _mg_from + int(_mg_out["durationInFrames"])
-        if _mg_to > _mg_from:
-            _bottom_mg_windows.append((_mg_from, _mg_to))
-
-    def _flip_segments_to_top_in_window(segments, win_from, win_to):
-        """Split any segment overlapping [win_from, win_to) and flip the
-        inside-window portion to 'top'. Segments already 'top' pass through."""
-        out = []
-        for _cs in segments:
-            _cf, _ct, _pos = _cs["fromFrame"], _cs["toFrame"], _cs["position"]
-            if _ct <= win_from or _cf >= win_to or _pos == "top":
-                out.append(_cs)
-                continue
-            # Segment overlaps the window AND is bottom/center — split.
-            if _cf < win_from:
-                out.append({"fromFrame": _cf, "toFrame": win_from, "position": _pos})
-            out.append({
-                "fromFrame": max(_cf, win_from),
-                "toFrame": min(_ct, win_to),
-                "position": "top",
-            })
-            if _ct > win_to:
-                out.append({"fromFrame": win_to, "toFrame": _ct, "position": _pos})
-        return out
-
-    if _bottom_mg_windows:
-        _flips_made = 0
-        for _wf, _wt in _bottom_mg_windows:
-            _before = sum(1 for _cs in caption_position_segments_out
-                          if _cs["position"] != "top"
-                          and _cs["toFrame"] > _wf and _cs["fromFrame"] < _wt)
-            caption_position_segments_out = _flip_segments_to_top_in_window(
-                caption_position_segments_out, _wf, _wt,
-            )
-            _flips_made += _before
-
-        # Coalesce adjacent segments with the same position.
-        _coalesced = []
-        for _cs in caption_position_segments_out:
-            if (_coalesced and _coalesced[-1]["position"] == _cs["position"]
-                    and _coalesced[-1]["toFrame"] == _cs["fromFrame"]):
-                _coalesced[-1]["toFrame"] = _cs["toFrame"]
-            else:
-                _coalesced.append(dict(_cs))
-        caption_position_segments_out = _coalesced
-
-        if _flips_made:
-            print(
-                f"[render] Auto-flipped {_flips_made} caption segment portion(s) to "
-                f"'top' to clear bottom-anchored MG window(s)",
-                flush=True,
-            )
+    # Z-order: Gemini owns it. Per Rule #5 in the prompt, when any MG covers
+    # the bottom band, Gemini emits a caption_position_change to "top" for
+    # that window. Python does not auto-flip — caption_position_segments_out
+    # is whatever Gemini decided.
 
     # ── 8. Build Remotion inputs + stage source for the bundle server ──────
     # Visually-identical fast-path architecture (replaces v61 chunked render):
@@ -9019,32 +7861,21 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     if not _speed_audio_path or not os.path.exists(_speed_audio_path):
         raise RuntimeError(f"Per-cut audio pipeline produced no output at {_speed_audio_path}")
 
-    # ── 11. Build final audio (SFX mix + ducking + EQ chain) → .m4a ─────────
+    # ── 11. Build final audio (SFX mix + EQ chain) → .m4a ─────────
+    # SFX play OVER the dialogue at full volume — no ducking, no dipping.
+    # The dialogue stays at its full level throughout; SFX add on top via
+    # amix with normalize=0 (linear sum, not auto-gain-reduced).
     _audio_filter_parts = []
     _audio_out = "[audio_base]"
     _audio_out_initial = "[audio_base]"
     if sfx_audio_labels and sfx_timestamps:
-        _duck_parts = []
-        for _dt in sorted(set(sfx_timestamps)):
-            _dip_start = max(0, _dt - 0.05)
-            _dip_end = _dt + 0.25
-            _duck_parts.append(
-                f"if(between(t,{_dip_start:.3f},{_dip_end:.3f}),"
-                f"0.45+0.55*max(0,min(abs(t-{_dt:.3f})/0.15,1)),"
-                f"1)"
-            )
-        if _duck_parts:
-            _duck_expr = "*".join(_duck_parts[:20])
-            _audio_filter_parts.append(f"{_audio_out}volume='{_duck_expr}':eval=frame[audio_ducked]")
-            _audio_out = "[audio_ducked]"
-            print(f"[sfx] Audio ducking: {len(_duck_parts)} dip point(s)", flush=True)
         _n_sfx = len(sfx_audio_labels) + 1
         _sfx_labels_str = _audio_out + "".join(sfx_audio_labels)
         _audio_filter_parts.append(
             f"{_sfx_labels_str}amix=inputs={_n_sfx}:duration=first:dropout_transition=0:normalize=0[audio_sfx_mixed]"
         )
         _audio_out = "[audio_sfx_mixed]"
-        print(f"[sfx] Mixed {len(sfx_audio_labels)} SFX track(s) into audio", flush=True)
+        print(f"[sfx] Mixed {len(sfx_audio_labels)} SFX track(s) into audio (no ducking)", flush=True)
     _audio_filter_parts.append(f"{_audio_out}{audio_chain}[final_audio]")
     _audio_filter_parts.insert(0, f"[0:a]asetpts=PTS-STARTPTS{_audio_out_initial}")
     _audio_fc = ";".join(sfx_filter_strs + _audio_filter_parts)
@@ -9930,31 +8761,23 @@ def prewarm_handler(job):
         except Exception as _ps_err:
             print(f"[prewarm] presigned URL gen failed: {_ps_err}", flush=True)
 
-        # Download + transcribe in parallel.
-        pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)
-        fut_dl = None
-        fut_tx = None
+        # Download first, then transcribe with audio prep. URL-based
+        # transcription is gone — file-based with FLAC loudnorm prep gives
+        # measurably better accuracy on quiet/soft-spoken sources.
         if not source_hit:
             print(f"[prewarm] start download → {cache_key}/source.mp4", flush=True)
-            fut_dl = pool.submit(
-                lambda: _aws_s3_client.download_file(dl_bucket, dl_key, source_cache, Config=_S3_TRANSFER_CONFIG)
-            )
-        if not transcript_hit and presigned_url and DeepgramClient is not None:
-            print(f"[prewarm] start URL-based transcribe → {cache_key}/transcript.json", flush=True)
-            fut_tx = pool.submit(transcribe_audio_url, presigned_url)
+            _aws_s3_client.download_file(dl_bucket, dl_key, source_cache, Config=_S3_TRANSFER_CONFIG)
 
-        if fut_dl is not None:
-            fut_dl.result()
-        if fut_tx is not None:
-            _tx_result = fut_tx.result()
-            if _tx_result is not None:
-                with open(transcript_cache, "w") as f:
-                    json.dump(_tx_result, f)
-                print(f"[prewarm] transcript cached ({len(_tx_result.get('words') or [])} words)", flush=True)
-            else:
-                print("[prewarm] transcribe returned None (fallback will handle in main job)", flush=True)
-
-        pool.shutdown(wait=False)
+        if not transcript_hit and DeepgramClient is not None and os.path.exists(source_cache):
+            print(f"[prewarm] start file-based transcribe (with FLAC prep) → {cache_key}/transcript.json", flush=True)
+            try:
+                _tx_result = transcribe_audio(source_cache)
+                if _tx_result is not None and _tx_result.get("words"):
+                    with open(transcript_cache, "w") as f:
+                        json.dump(_tx_result, f)
+                    print(f"[prewarm] transcript cached ({len(_tx_result['words'])} words)", flush=True)
+            except Exception as _tx_err:
+                print(f"[prewarm] transcribe failed: {str(_tx_err)[:200]} (main job will retry)", flush=True)
 
         elapsed = time.time() - t0
         size_mb = os.path.getsize(source_cache) / (1024 * 1024) if os.path.exists(source_cache) else 0
@@ -10146,18 +8969,16 @@ def handler(job):
                 print(f"[pipeline] failed to read cached transcript ({_tr_err}) — will re-transcribe", flush=True)
 
         _early_pool = concurrent.futures.ThreadPoolExecutor(max_workers=3)
-        # Only run URL-based Deepgram when we actually need a transcript and
-        # don't already have one from prewarm cache or re-edit input.
-        _can_url_transcribe = (
-            mode not in ("render_only", "tweak")
-            and not provided_transcript
-            and _deepgram_presigned is not None
-            and DeepgramClient is not None
-        )
+        # URL-based Deepgram is disabled. Pointing Deepgram at the source URL
+        # makes it transcribe the raw video's compressed audio at whatever
+        # level it was recorded — talking-head sources are typically -27 dB
+        # RMS, right at the model's confidence threshold for soft consonants.
+        # File-based transcribe_audio() now extracts loudness-normalized
+        # mono FLAC first, which gives Deepgram uniform-level audio and
+        # measurably improves accuracy on quiet sources. The prep adds ~1s
+        # but the FLAC payload is much smaller than the full video, so end
+        # to end it's comparable to URL-based.
         future_url_transcript = None
-        if _can_url_transcribe:
-            print("[pipeline] kicking off Deepgram URL-based transcribe in parallel with download", flush=True)
-            future_url_transcript = _early_pool.submit(transcribe_audio_url, _deepgram_presigned)
 
         # Trend profile fetch — pure DB read, no file dependency. Skip in
         # render_only (uses snapshot) and when a snapshot was provided.
@@ -10543,11 +9364,11 @@ def handler(job):
                 print("[trend] WARNING: Style guide not available — Gemini will edit without reference video patterns", flush=True)
             return tc
 
-        # Shared transcript resolver + audio-derived boundary refinement.
-        # Both consumers (_do_content_analysis_overlapped, _do_edit_recipe_overlapped)
-        # and the main pipeline thread call this. A lock + cache ensures the
-        # resolution and audio-energy refinement run exactly once, regardless
-        # of which thread arrives first.
+        # Shared transcript resolver. The edit-recipe consumer and the main
+        # pipeline thread both call this. A lock + cache ensures resolution
+        # runs exactly once. Word boundaries are raw Deepgram timestamps —
+        # the main edit Gemini chooses cuts AT word boundaries, no acoustic
+        # refinement.
         _refined_tx_cache: Dict[str, Any] = {"value": None}
         _refined_tx_lock = threading.Lock()
 
@@ -10555,7 +9376,6 @@ def handler(job):
             with _refined_tx_lock:
                 if _refined_tx_cache["value"] is not None:
                     return _refined_tx_cache["value"]
-                # Resolve from whichever source is available (URL, file, prewarm).
                 _t = None
                 if future_url_transcript is not None:
                     _t = future_url_transcript.result()
@@ -10563,68 +9383,14 @@ def handler(job):
                     _t = future_transcribe.result()
                 if _t is None:
                     _t = provided_transcript or {"words": []}
-                # Refine word boundaries against the actual audio waveform so
-                # cuts land at real word edges, not Deepgram's ~30 ms drift.
-                if _t and _t.get("words"):
-                    _t = dict(_t)
-                    _t["words"] = refine_word_boundaries_with_audio(_t["words"], _raw_source)
                 _refined_tx_cache["value"] = _t
                 return _t
-
-        def _do_content_analysis_overlapped():
-            """Run the pre-edit content-analysis Gemini call in parallel with face
-            detection and signal computation. Depends on transcript + proxy; its
-            word classifications + tonal register feed the main edit call —
-            cuttable words are stripped from the transcript before the main
-            call, and narrative peaks become anchor hints in the prompt.
-            Returns (mechanical_cuts, content_analysis) tuple.
-            If the analysis call fails (network/rate-limit/malformed), falls
-            back to mechanical-only cuts with every surviving word kept.
-            The main edit call still runs successfully; the only effect is
-            that Gemini sees no additional contextual cuts and no narrative-
-            peak hints — the video renders, just without the analysis-driven
-            polish. This keeps a transient API failure from taking down the
-            whole job."""
-            # Resolve transcript once, with audio-derived boundary refinement.
-            _transcript = _get_resolved_transcript()
-            _dg_words = _transcript.get("words", []) or []
-            if not _dg_words:
-                return ({"word_cuts": set(), "range_cuts": [], "reasons": {}},
-                        {"word_cuts": set(), "cuttable": set(), "protected": set(),
-                         "peaks": set(), "tonal_register": "casual"})
-            # Mechanical pre-pass — deterministic, ~5ms.
-            _mech = mechanical_cut_pass(_dg_words)
-            # Need the proxy bytes for the context-aware analysis call.
-            _proxy_bytes = (
-                future_gemini_proxy.result() if future_gemini_proxy is not None else None
-            )
-            try:
-                _analysis = run_content_analysis(_dg_words, _proxy_bytes, _mech)
-            except Exception as _ae:
-                # Graceful degradation: mechanical cuts still apply; every
-                # other word is kept; no narrative peaks identified.
-                print(
-                    f"[content-analysis] FAILED — falling back to mechanical-only "
-                    f"(reason: {type(_ae).__name__}: {str(_ae)[:200]})",
-                    flush=True,
-                )
-                _mech_cuts = set(_mech.get("word_cuts") or set())
-                _protected_fallback = set(range(len(_dg_words))) - _mech_cuts
-                _analysis = {
-                    "word_cuts": set(),
-                    "cuttable": set(),
-                    "protected": _protected_fallback,
-                    "peaks": set(),
-                    "tonal_register": "casual",
-                }
-            return _mech, _analysis
 
         def _do_edit_recipe_overlapped():
             """Start Gemini as soon as transcript + proxy + trend + audio + face signals are ready.
             Transcript may come from the early_pool URL-based Deepgram call (ran in parallel
             with the download), a regular mega-pool file-based call, or the provided_transcript
-            for re-edit paths. Whichever landed first wins — shared resolver applies audio-
-            derived boundary refinement once and caches the result for both consumers."""
+            for re-edit paths. Whichever landed first wins."""
             _transcript = _get_resolved_transcript()
             _proxy_bytes = future_gemini_proxy.result() if future_gemini_proxy is not None else None
             if future_early_trend is not None:
@@ -10669,20 +9435,6 @@ def handler(job):
                 except Exception as _upe:
                     print(f"[user-style] Profile fetch failed: {_upe}", flush=True)
                     _user_profile = None
-            # Wait for content-analysis (runs in parallel with face/signals).
-            # This is the mechanism that makes anchor-on-cut structurally
-            # impossible — analysis classifies every word into disjoint cut /
-            # protected sets; the main-call schema uses those as enum
-            # constraints.
-            _mech_cuts, _analysis_result = (
-                future_content_analysis.result()
-                if future_content_analysis is not None
-                else (
-                    {"word_cuts": set(), "range_cuts": [], "reasons": {}},
-                    {"word_cuts": set(), "cuttable": set(), "protected": set(),
-                     "peaks": set(), "tonal_register": "casual"},
-                )
-            )
             return generate_edit_gemini(
                 video_path=_raw_source,
                 vibe=vibe,
@@ -10697,8 +9449,6 @@ def handler(job):
                 user_style_profile=_user_profile,
                 inline_video_bytes=_proxy_bytes,
                 cached_response=_cached_analysis,
-                content_analysis=_analysis_result,
-                mechanical_cuts=_mech_cuts,
             )
 
         def _do_face_detect_overlapped():
@@ -10753,13 +9503,7 @@ def handler(job):
         future_user_style = (
             None if _skip_edit_gen else mega_pool.submit(fetch_user_style_profile, user_id)
         )
-        # Content-analysis Gemini pre-pass — runs in parallel with face detection
-        # and signals. Waits internally on transcript + proxy. Its output drives
-        # the main edit call's disjoint schema enums. Skipped in render_only.
-        future_content_analysis = (
-            None if _skip_edit_gen else mega_pool.submit(_do_content_analysis_overlapped)
-        )
-        # Edit recipe waits on transcript + upload + content-analysis internally — skipped entirely in render_only
+        # Edit recipe waits on transcript + upload + face/signals internally — skipped entirely in render_only
         future_edit = None if _skip_edit_gen else mega_pool.submit(_do_edit_recipe_overlapped)
         # Face detection runs directly on raw source (no normalize dependency)
         future_faces = mega_pool.submit(_do_face_detect_overlapped)
@@ -10801,10 +9545,8 @@ def handler(job):
         source_info = future_normalize.result()
         source_path = source_info["source_path"]
         _normalize_vf = source_info.get("normalize_vf")
-        # Resolve transcript through the shared resolver — applies audio-derived
-        # boundary refinement once and caches the result. The overlapped
-        # consumers above already triggered this; here we just retrieve the
-        # cached refined transcript.
+        # Resolve transcript through the shared resolver. The edit-recipe
+        # consumer already triggered this; here we retrieve the cached value.
         transcript = _get_resolved_transcript()
         if not (future_url_transcript is not None or future_transcribe is not None):
             print(f"[pipeline] Using provided transcript ({len(transcript.get('words') or [])} words) — skipped Deepgram", flush=True)
@@ -10853,12 +9595,6 @@ def handler(job):
         # can map the reframe math correctly.
         _ft = source_info.get("face_transform", {})
         edit_plan["_face_transform"] = _ft
-        # Stash the smoothed face trajectory + source height so render_multi_clip
-        # can route MG anchors away from wherever the speaker's face is at the
-        # MG's time window. Without this, "center" anchor MGs (QuoteCard,
-        # ChatThread, etc.) land directly on top of a talking head's face.
-        edit_plan["_smoothed_face_trajectory"] = _smoothed_trajectory
-        edit_plan["_source_height"] = int(source_res.get("height") or 1920)
 
         _timings["normalize_transcribe_upload"] = time.time() - t
         _dg_words = transcript.get("words", [])
