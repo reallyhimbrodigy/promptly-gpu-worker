@@ -9412,15 +9412,109 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             blend_captions_input_path,
         )
         _blend_captions_video = os.path.join(work_dir, "blend_captions.mp4")
-        _blend_cmd = [
-            "node", "/remotion/render-full.mjs",
-            "--input", blend_captions_input_path,
-            "--output", _blend_captions_video,
-            "--public-dir", _bundle_public_root,
-            "--composition", "PromptlyBlendCaptionsOnly",
-            "--gl", _gl_mode,
-        ]
-        _run_remotion("blend-captions", _blend_cmd)
+
+        # Chunk the blend captions pass the same way the overlay pass is
+        # chunked. A single Remotion process hits a documented ~16-22 fps
+        # ceiling on H100 (issue #4664) regardless of vCPU count — main-
+        # thread + encoder serialization, not paint cost. 4 separate
+        # processes each get their own ceiling, so aggregate fps scales
+        # nearly linearly. For long videos this collapses the blend pass
+        # from ~195s (single process, 2865 frames) to ~50s (4-way parallel).
+        # Below 300 frames the per-process startup tax (~3.5s) dominates
+        # — single process is faster.
+        _BLEND_CHUNK_COUNT = 4 if total_output_frames >= 300 else 1
+        _blend_ranges = _split_frames(int(total_output_frames), _BLEND_CHUNK_COUNT)
+        _blend_chunked = len(_blend_ranges) > 1
+
+        if _blend_chunked:
+            _blend_chunk_paths = [
+                os.path.join(work_dir, f"blend_captions_chunk_{_i:02d}.mp4")
+                for _i in range(len(_blend_ranges))
+            ]
+            _blend_cmds = []
+            for _i, (_fs, _fe) in enumerate(_blend_ranges):
+                _blend_cmds.append((
+                    f"blend-captions-{_i:02d}",
+                    [
+                        "node", "/remotion/render-full.mjs",
+                        "--input", blend_captions_input_path,
+                        "--output", _blend_chunk_paths[_i],
+                        "--public-dir", _bundle_public_root,
+                        "--composition", "PromptlyBlendCaptionsOnly",
+                        "--gl", _gl_mode,
+                        "--frame-range", f"{_fs},{_fe}",
+                        "--composition-start", str(_fs),
+                        "--concurrency", str(_PER_CHUNK_CONCURRENCY),
+                    ],
+                ))
+            print(
+                f"[render] Spawning {len(_blend_cmds)} blend-captions chunk subprocesses "
+                f"({total_output_frames} frames split {len(_blend_ranges)}-ways, "
+                f"concurrency={_PER_CHUNK_CONCURRENCY} each)",
+                flush=True,
+            )
+            _blend_pool = concurrent.futures.ThreadPoolExecutor(max_workers=len(_blend_cmds))
+            _blend_futures = [
+                _blend_pool.submit(_run_remotion, _lbl, _cmd)
+                for _lbl, _cmd in _blend_cmds
+            ]
+            _blend_chunk_elapsed = []
+            for _bi, _f in enumerate(_blend_futures):
+                _e = _f.result(timeout=400)
+                _blend_chunk_elapsed.append(_e)
+                _path = _blend_chunk_paths[_bi]
+                if not os.path.exists(_path) or os.path.getsize(_path) < 1000:
+                    raise RuntimeError(
+                        f"blend-captions chunk {_bi} output missing/invalid: {_path}"
+                    )
+                print(
+                    f"[render] blend-captions-{_bi:02d} done in {_e:.1f}s → "
+                    f"{os.path.getsize(_path)/1024/1024:.1f}MB",
+                    flush=True,
+                )
+            _blend_pool.shutdown(wait=False)
+
+            # Lossless concat of the h264 chunks. The chunks share identical
+            # codec parameters (same composition spec, same Remotion render
+            # config), and the dense GOP (1 keyframe/sec) means the concat
+            # demuxer can stream-copy them with zero quality loss.
+            _bc_list = os.path.join(work_dir, "_blend_captions_concat_list.txt")
+            with open(_bc_list, "w") as _lf:
+                for _p in _blend_chunk_paths:
+                    _lf.write(f"file '{_p}'\n")
+            _bc_t0 = time.time()
+            _bc_r = subprocess.run(
+                ["ffmpeg", "-y", "-v", "error",
+                 "-f", "concat", "-safe", "0",
+                 "-i", _bc_list,
+                 "-c", "copy",
+                 _blend_captions_video],
+                capture_output=True, text=True, timeout=120,
+            )
+            if _bc_r.returncode != 0:
+                raise RuntimeError(
+                    f"blend-captions chunk concat failed (rc={_bc_r.returncode}): "
+                    f"{(_bc_r.stderr or '')[-1500:]}"
+                )
+            _bc_concat_elapsed = time.time() - _bc_t0
+            _max_bc_chunk = max(_blend_chunk_elapsed)
+            print(
+                f"[render] blend-captions: max chunk={_max_bc_chunk:.1f}s, "
+                f"concat={_bc_concat_elapsed:.1f}s",
+                flush=True,
+            )
+        else:
+            # Single-process for very short outputs (<300 frames).
+            _blend_cmd = [
+                "node", "/remotion/render-full.mjs",
+                "--input", blend_captions_input_path,
+                "--output", _blend_captions_video,
+                "--public-dir", _bundle_public_root,
+                "--composition", "PromptlyBlendCaptionsOnly",
+                "--gl", _gl_mode,
+            ]
+            _run_remotion("blend-captions", _blend_cmd)
+
         if (
             not os.path.exists(_blend_captions_video)
             or os.path.getsize(_blend_captions_video) < 1000
@@ -10337,32 +10431,36 @@ def handler(job):
                 for _line in (_r_out.stdout or "").splitlines():
                     if _line.startswith("[rife]"):
                         print(_line, flush=True)
-                # Second pass: scale/crop the RIFE output to 1080x1920 +
-                # yuv420p. RIFE output is already 60fps so no fps filter
-                # here; if normalize_vf is None the source was already
-                # 1080x1920 and we just re-encode for pix_fmt uniformity.
-                _vf_post = _normalize_vf or "null"
-                _scale_r = subprocess.run(
-                    ["ffmpeg", "-y", "-v", "error", "-threads", "0",
-                     "-i", _rife_out,
-                     "-vf", _vf_post,
-                     "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
-                     "-pix_fmt", "yuv420p",
-                     "-g", "60", "-keyint_min", "60", "-sc_threshold", "0",
-                     "-c:a", "copy",
-                     "-video_track_timescale", "90000",
-                     _norm_path],
-                    capture_output=True, text=True, timeout=180,
-                )
-                if _scale_r.returncode != 0 or not os.path.exists(_norm_path):
-                    raise RuntimeError(
-                        f"Source canonicalize (post-RIFE scale) failed: "
-                        f"{(_scale_r.stderr or '')[-500:]}"
+                if _normalize_vf:
+                    # Source needs scale/crop on top of RIFE's 60fps output.
+                    # One ffmpeg pass: apply normalize_vf + yuv420p re-encode.
+                    _scale_r = subprocess.run(
+                        ["ffmpeg", "-y", "-v", "error", "-threads", "0",
+                         "-i", _rife_out,
+                         "-vf", _normalize_vf,
+                         "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
+                         "-pix_fmt", "yuv420p",
+                         "-g", "60", "-keyint_min", "60", "-sc_threshold", "0",
+                         "-c:a", "copy",
+                         "-video_track_timescale", "90000",
+                         _norm_path],
+                        capture_output=True, text=True, timeout=180,
                     )
-                try:
-                    os.remove(_rife_out)
-                except OSError:
-                    pass
+                    if _scale_r.returncode != 0 or not os.path.exists(_norm_path):
+                        raise RuntimeError(
+                            f"Source canonicalize (post-RIFE scale) failed: "
+                            f"{(_scale_r.stderr or '')[-500:]}"
+                        )
+                    try:
+                        os.remove(_rife_out)
+                    except OSError:
+                        pass
+                else:
+                    # Source is already 1080x1920 — RIFE already produced
+                    # h264 yuv420p at the canonical resolution. Just rename
+                    # the file; a second ffmpeg pass would be ~10-15s of
+                    # pure waste (re-encoding bit-identical pixels).
+                    os.rename(_rife_out, _norm_path)
 
             _size_mb = os.path.getsize(_norm_path) / (1024 * 1024)
             print(
