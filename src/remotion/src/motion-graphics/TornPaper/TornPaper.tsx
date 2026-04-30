@@ -1,25 +1,35 @@
 import React from "react";
 import {
   AbsoluteFill,
+  Easing,
   Img,
   interpolate,
+  spring,
   staticFile,
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
 import { MG_FONTS } from "../shared/fonts";
-import { msToFrames } from "../shared/timing";
+import { resolveMGPosition } from "../shared/positioning";
+import { useMGPhase } from "../shared/useMGPhase";
 import type { TornPaperProps } from "./types";
 
-
-const jitter = (seed: number): number => {
-  const s = (seed * 16807 + 11) % 2147483647;
-  return ((s & 0x7fffffff) / 0x7fffffff) * 2 - 1;
-};
+// Spring tuning. Paper drop is moderately damped for a clean settle; the
+// two strips use a softer damping that gives ~15% overshoot — that's the
+// "slam and bounce" feel that makes torn-paper cards land instead of fade.
+// Damping ratio ζ = damping / (2·√(stiffness·mass)).
+const PAPER_SPRING = { damping: 14, stiffness: 110, mass: 1.2 };
+const STRIP_SPRING = { damping: 11, stiffness: 140, mass: 1.0 };
 
 export const TornPaper: React.FC<TornPaperProps> = ({
   startMs,
   durationMs,
+  enterFrames,
+  exitFrames,
+  anchor,
+  offsetX,
+  offsetY,
+  scale,
   topText,
   bottomText,
   topStripRotation = -10,
@@ -35,133 +45,93 @@ export const TornPaper: React.FC<TornPaperProps> = ({
   stripLetterSpacing = "0.06em",
   stripPadding = [14, 32],
   stripGap = 120,
-  stripsPositionTop = "25%",
 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
-  const appearFrame = msToFrames(startMs, fps);
-  const disappearFrame = msToFrames(startMs + durationMs, fps);
+  const { visible, localFrame, exitProgress, phase } = useMGPhase(
+    { startMs, durationMs, enterFrames, exitFrames },
+    { defaultEnterFrames: 26, defaultExitFrames: 14 },
+  );
+  if (!visible) return null;
 
-  if (frame < appearFrame - 2) return null;
-  if (frame > disappearFrame + 24) return null;
+  const isExiting = phase === "exiting" || phase === "after";
 
-  const stopFrame = Math.floor(frame / 4) * 4;
-
-  const paperElapsed = frame - appearFrame;
-  const paperY = interpolate(paperElapsed, [0, 6], [-100, 0], {
-    extrapolateLeft: "clamp",
-    extrapolateRight: "clamp",
-  });
-  const paperOpacity = interpolate(paperElapsed, [0, 2], [0, 1], {
-    extrapolateLeft: "clamp",
-    extrapolateRight: "clamp",
-  });
-
-  const paperExitDelay = 6;
-  const paperExitElapsed = frame - disappearFrame - paperExitDelay;
-  const paperExitY = interpolate(paperExitElapsed, [0, 6], [0, -100], {
-    extrapolateLeft: "clamp",
-    extrapolateRight: "clamp",
-  });
-  const paperExitOpacity = interpolate(paperExitElapsed, [3, 6], [1, 0], {
-    extrapolateLeft: "clamp",
-    extrapolateRight: "clamp",
+  // ── ENTRANCE ──────────────────────────────────────────────────────────
+  // Paper sheet drops from above the frame. Spring config gives a clean
+  // arrival with a tiny settle — no bounce on the banner itself, since
+  // the banner texture sells the impact, not the motion.
+  const paperEnter = spring({
+    frame: localFrame,
+    fps,
+    config: PAPER_SPRING,
+    durationInFrames: 26,
   });
 
-  const paperFinalY =
-    paperY + (paperExitElapsed >= 0 ? paperExitY : 0);
-  const paperFinalOpacity =
-    paperOpacity * (paperExitElapsed >= 0 ? paperExitOpacity : 1);
+  // Strips slam in from off-screen sides with a bouncy spring (≈15%
+  // overshoot). The second strip is staggered 4 frames behind the first
+  // for the layered "thwack thwack" cadence.
+  const strip1Enter = spring({
+    frame: localFrame - 6,
+    fps,
+    config: STRIP_SPRING,
+    durationInFrames: 22,
+  });
+  const strip2Enter = spring({
+    frame: localFrame - 10,
+    fps,
+    config: STRIP_SPRING,
+    durationInFrames: 22,
+  });
 
-  const stripsAppear = appearFrame + 8;
-  const strip1Elapsed = stopFrame - stripsAppear;
-  const strip2Elapsed = stopFrame - stripsAppear - 8;
+  // ── EXIT ──────────────────────────────────────────────────────────────
+  // Mirror of entrance but ~55% the duration — research convention is
+  // "exits 25–30% faster than entrances" but for a slammed card,
+  // committing to a quick exit reads cleaner. Ease-in cubic so the
+  // exit accelerates out (the inverse of spring-deceleration in).
+  const exitEased = Easing.bezier(0.4, 0, 1, 1)(exitProgress);
 
-  const s1Steps = [
-    { x: 500, y: -80, r: 30, o: 0 },
-    { x: 120, y: -10, r: topStripRotation - 8, o: 1 },
-    { x: -12, y: 5, r: topStripRotation + 3, o: 1 },
-    { x: 5, y: -2, r: topStripRotation - 1, o: 1 },
-    { x: 0, y: 0, r: topStripRotation, o: 1 },
-  ];
-  const s1StepIdx = Math.min(
-    Math.max(Math.floor(strip1Elapsed / 2), 0),
-    s1Steps.length - 1,
+  // Paper rises out the top.
+  const paperEnterY = interpolate(paperEnter, [0, 1], [-110, 0], {
+    extrapolateRight: "clamp",
+  });
+  const paperExitY = interpolate(exitEased, [0, 1], [0, -110]);
+  const paperY = isExiting ? paperEnterY + paperExitY : paperEnterY;
+  const paperOpacity =
+    paperEnter * (isExiting ? 1 - exitEased : 1);
+
+  // Strip 1 entrance: comes in from the right; on exit, leaves to the right.
+  const s1EnterX = interpolate(strip1Enter, [0, 1], [600, 0], {
+    extrapolateRight: "clamp",
+  });
+  const s1EnterY = interpolate(strip1Enter, [0, 1], [-40, 0], {
+    extrapolateRight: "clamp",
+  });
+  const s1ExitX = interpolate(exitEased, [0, 1], [0, 600]);
+  const s1X = isExiting ? s1EnterX + s1ExitX : s1EnterX;
+  const s1Y = s1EnterY;
+  const s1Opacity = strip1Enter * (isExiting ? 1 - exitEased : 1);
+
+  // Strip 2 entrance: from the left; exits left.
+  const s2EnterX = interpolate(strip2Enter, [0, 1], [-600, 0], {
+    extrapolateRight: "clamp",
+  });
+  const s2EnterY = interpolate(strip2Enter, [0, 1], [40, 0], {
+    extrapolateRight: "clamp",
+  });
+  const s2ExitX = interpolate(exitEased, [0, 1], [0, -600]);
+  const s2X = isExiting ? s2EnterX + s2ExitX : s2EnterX;
+  const s2Y = s2EnterY;
+  const s2Opacity = strip2Enter * (isExiting ? 1 - exitEased : 1);
+
+  // ── POSITIONING ───────────────────────────────────────────────────────
+  // Honor `anchor` from the placement system. Default to "center" because
+  // a torn-paper card is typically a chapter beat planted in the middle of
+  // the frame — that's its visual identity.
+  const { containerStyle, wrapperStyle } = resolveMGPosition(
+    { anchor, offsetX, offsetY, scale },
+    { anchor: "center" },
   );
-  const s1 = strip1Elapsed >= 0 ? s1Steps[s1StepIdx] : s1Steps[0];
-
-  const s2Steps = [
-    { x: -500, y: 70, r: -25, o: 0 },
-    { x: -100, y: 10, r: bottomStripRotation + 8, o: 1 },
-    { x: 15, y: -4, r: bottomStripRotation - 3, o: 1 },
-    { x: -4, y: 2, r: bottomStripRotation + 1, o: 1 },
-    { x: 0, y: 0, r: bottomStripRotation, o: 1 },
-  ];
-  const s2StepIdx = Math.min(
-    Math.max(Math.floor(strip2Elapsed / 2), 0),
-    s2Steps.length - 1,
-  );
-  const s2 = strip2Elapsed >= 0 ? s2Steps[s2StepIdx] : s2Steps[0];
-
-  const s1Idle =
-    s1StepIdx >= s1Steps.length - 1 && stopFrame < disappearFrame;
-  const s2Idle =
-    s2StepIdx >= s2Steps.length - 1 && stopFrame < disappearFrame;
-
-  const stripExitElapsed = stopFrame - disappearFrame;
-  const isStripExiting = stripExitElapsed >= 0;
-
-  const s1ExitSteps = [
-    { x: 0, y: 0, r: topStripRotation, o: 1 },
-    { x: 120, y: -10, r: topStripRotation - 8, o: 1 },
-    { x: 500, y: -80, r: 30, o: 0 },
-  ];
-  const s1ExitIdx = Math.min(
-    Math.max(Math.floor(stripExitElapsed / 2), 0),
-    s1ExitSteps.length - 1,
-  );
-  const s1Exit = isStripExiting
-    ? s1ExitSteps[s1ExitIdx]
-    : { x: 0, y: 0, r: 0, o: 1 };
-
-  const s2ExitSteps = [
-    { x: 0, y: 0, r: bottomStripRotation, o: 1 },
-    { x: -100, y: 10, r: bottomStripRotation + 8, o: 1 },
-    { x: -500, y: 70, r: -25, o: 0 },
-  ];
-  const s2ExitIdx = Math.min(
-    Math.max(Math.floor((stripExitElapsed - 2) / 2), 0),
-    s2ExitSteps.length - 1,
-  );
-  const s2Exit = isStripExiting
-    ? s2ExitSteps[s2ExitIdx]
-    : { x: 0, y: 0, r: 0, o: 1 };
-
-  const s1Final = {
-    x:
-      (isStripExiting ? s1Exit.x : s1.x) +
-      (s1Idle ? jitter(stopFrame * 11 + 19) * 2 : 0),
-    y:
-      (isStripExiting ? s1Exit.y : s1.y) +
-      (s1Idle ? jitter(stopFrame * 5 + 41) * 2 : 0),
-    r:
-      (isStripExiting ? s1Exit.r : s1.r) +
-      (s1Idle ? jitter(stopFrame * 3 + 7) * 1.5 : 0),
-    o: isStripExiting ? s1Exit.o : s1.o,
-  };
-  const s2Final = {
-    x:
-      (isStripExiting ? s2Exit.x : s2.x) +
-      (s2Idle ? jitter(stopFrame * 17 + 37) * 2 : 0),
-    y:
-      (isStripExiting ? s2Exit.y : s2.y) +
-      (s2Idle ? jitter(stopFrame * 7 + 59) * 2 : 0),
-    r:
-      (isStripExiting ? s2Exit.r : s2.r) +
-      (s2Idle ? jitter(stopFrame * 9 + 23) * 1.5 : 0),
-    o: isStripExiting ? s2Exit.o : s2.o,
-  };
 
   const dotTexture = {
     backgroundImage: `
@@ -185,96 +155,101 @@ export const TornPaper: React.FC<TornPaperProps> = ({
   };
 
   return (
-    <AbsoluteFill>
+    <AbsoluteFill style={containerStyle}>
       <div
         style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
+          ...wrapperStyle,
           width: "100%",
-          overflow: "hidden",
-          transform: `translateY(${paperFinalY}%)`,
-          opacity: paperFinalOpacity,
+          position: "relative",
         }}
       >
-        <Img
-          src={staticFile("torn-paper.png")}
-          style={{ width: "100%", display: "block" }}
-        />
-      </div>
-
-      <div
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          width: "100%",
-          height: stripsPositionTop,
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: stripGap,
-        }}
-      >
+        {/* Paper banner — full-width sheet that drops from above */}
         <div
           style={{
             position: "relative",
-            display: "inline-block",
-            transform: `translate(${s1Final.x}px, ${s1Final.y}px) rotate(${s1Final.r}deg)`,
-            opacity: s1Final.o,
+            width: "100%",
+            transform: `translateY(${paperY}%)`,
+            opacity: paperOpacity,
           }}
         >
-          <div
-            style={{
-              position: "absolute",
-              top: shadowOffsetY,
-              left: shadowOffsetX,
-              width: "100%",
-              height: "100%",
-              backgroundColor: shadowColor,
-            }}
+          <Img
+            src={staticFile("torn-paper.png")}
+            style={{ width: "100%", display: "block" }}
           />
-          <div
-            style={{
-              position: "relative",
-              backgroundColor: stripColor,
-              ...dotTexture,
-              padding: `${stripPadding[0]}px ${stripPadding[1]}px`,
-            }}
-          >
-            <span style={textStyle}>{topText}</span>
-          </div>
         </div>
 
+        {/* Strips — absolute-positioned over the banner so they overlap visually */}
         <div
           style={{
-            position: "relative",
-            display: "inline-block",
-            marginLeft: 10,
-            transform: `translate(${s2Final.x}px, ${s2Final.y}px) rotate(${s2Final.r}deg)`,
-            opacity: s2Final.o,
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: stripGap,
+            pointerEvents: "none",
           }}
         >
           <div
             style={{
-              position: "absolute",
-              top: shadowOffsetY,
-              left: shadowOffsetX,
-              width: "100%",
-              height: "100%",
-              backgroundColor: shadowColor,
+              position: "relative",
+              display: "inline-block",
+              transform: `translate(${s1X}px, ${s1Y}px) rotate(${topStripRotation}deg)`,
+              opacity: s1Opacity,
             }}
-          />
+          >
+            <div
+              style={{
+                position: "absolute",
+                top: shadowOffsetY,
+                left: shadowOffsetX,
+                width: "100%",
+                height: "100%",
+                backgroundColor: shadowColor,
+              }}
+            />
+            <div
+              style={{
+                position: "relative",
+                backgroundColor: stripColor,
+                ...dotTexture,
+                padding: `${stripPadding[0]}px ${stripPadding[1]}px`,
+              }}
+            >
+              <span style={textStyle}>{topText}</span>
+            </div>
+          </div>
+
           <div
             style={{
               position: "relative",
-              backgroundColor: stripColor,
-              ...dotTexture,
-              padding: `${stripPadding[0]}px ${stripPadding[1]}px`,
+              display: "inline-block",
+              marginLeft: 10,
+              transform: `translate(${s2X}px, ${s2Y}px) rotate(${bottomStripRotation}deg)`,
+              opacity: s2Opacity,
             }}
           >
-            <span style={textStyle}>{bottomText}</span>
+            <div
+              style={{
+                position: "absolute",
+                top: shadowOffsetY,
+                left: shadowOffsetX,
+                width: "100%",
+                height: "100%",
+                backgroundColor: shadowColor,
+              }}
+            />
+            <div
+              style={{
+                position: "relative",
+                backgroundColor: stripColor,
+                ...dotTexture,
+                padding: `${stripPadding[0]}px ${stripPadding[1]}px`,
+              }}
+            >
+              <span style={textStyle}>{bottomText}</span>
+            </div>
           </div>
         </div>
       </div>

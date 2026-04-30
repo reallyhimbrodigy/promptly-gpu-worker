@@ -406,6 +406,7 @@ export const GlitchHighlight: React.FC<GlitchHighlightProps> = ({
   staggerDelayFrames = 1,
   glitchDurationFrames = 14,
 }) => {
+  const frame = useCurrentFrame();
   const { fps, width } = useVideoConfig();
   const maxWidth = width * 0.85;
 
@@ -429,6 +430,22 @@ export const GlitchHighlight: React.FC<GlitchHighlightProps> = ({
         const durationFrames = msToFrames(page.durationMs, fps);
         if (durationFrames <= 0) return null;
 
+        const endFrame = startFrame + durationFrames;
+        const fadeFrames = 10;
+        const fadeIn = interpolate(
+          frame,
+          [startFrame, startFrame + fadeFrames],
+          [0, 1],
+          { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
+        );
+        const fadeOut = interpolate(
+          frame,
+          [endFrame - fadeFrames, endFrame],
+          [1, 0],
+          { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
+        );
+        const pageOpacity = fadeIn * fadeOut;
+
         return (
           <Sequence
             key={pageIndex}
@@ -438,7 +455,7 @@ export const GlitchHighlight: React.FC<GlitchHighlightProps> = ({
             name={page.tokens.map((t) => t.text).join(" ")}
           >
             <AbsoluteFill
-              style={{ display: "flex", alignItems: "center", ...positionStyle }}
+              style={{ display: "flex", alignItems: "center", opacity: pageOpacity, ...positionStyle }}
             >
               <div style={{ maxWidth, width: "100%" }}>
                 <GlitchPage

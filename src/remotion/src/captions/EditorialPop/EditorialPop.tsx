@@ -2,6 +2,7 @@ import React, { useMemo } from "react";
 import {
   AbsoluteFill,
   Sequence,
+  interpolate,
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
@@ -122,6 +123,7 @@ export const EditorialPop: React.FC<EditorialPopProps> = ({
   textColor = "#FFFFFF",
   maxWordsPerLine = 3,
 }) => {
+  const frame = useCurrentFrame();
   const { fps, width } = useVideoConfig();
   const maxWidth = width * 0.85;
   const keywordSet = useMemo(() => buildKeywordSet(keywords), [keywords]);
@@ -133,6 +135,24 @@ export const EditorialPop: React.FC<EditorialPopProps> = ({
         const startFrame = msToFrames(page.startMs, fps);
         const durationFrames = msToFrames(page.durationMs, fps);
         if (durationFrames <= 0) return null;
+
+        // Page-boundary fade: 10-frame ease at entry/exit so pages glide
+        // instead of snap.
+        const endFrame = startFrame + durationFrames;
+        const fadeFrames = 10;
+        const fadeIn = interpolate(
+          frame,
+          [startFrame, startFrame + fadeFrames],
+          [0, 1],
+          { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
+        );
+        const fadeOut = interpolate(
+          frame,
+          [endFrame - fadeFrames, endFrame],
+          [1, 0],
+          { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
+        );
+        const pageOpacity = fadeIn * fadeOut;
 
         // Split tokens into lines
         const lines: { text: string }[][] = [];
@@ -156,6 +176,7 @@ export const EditorialPop: React.FC<EditorialPopProps> = ({
               style={{
                 display: "flex",
                 alignItems: "center",
+                opacity: pageOpacity,
                 ...positionStyle,
               }}
             >

@@ -1,6 +1,7 @@
 import type { MGTimingProps } from "../shared/types";
+import type { MGPositionProps } from "../shared/positioning";
 
-export interface TornPaperProps extends MGTimingProps {
+export interface TornPaperProps extends MGTimingProps, MGPositionProps {
   // Top slammed strip text.
   topText: string;
   // Bottom slammed strip text.
@@ -24,6 +25,4 @@ export interface TornPaperProps extends MGTimingProps {
   stripPadding?: [number, number];
   // Gap between the two strips.
   stripGap?: number;
-  // Vertical area height the strips live inside (top of frame). Default "25%".
-  stripsPositionTop?: string;
 }

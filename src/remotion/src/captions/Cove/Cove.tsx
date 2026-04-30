@@ -1,5 +1,5 @@
 import React, { useMemo } from "react";
-import { AbsoluteFill, Sequence, useCurrentFrame, useVideoConfig } from "remotion";
+import { AbsoluteFill, Sequence, interpolate, useCurrentFrame, useVideoConfig } from "remotion";
 import type { CoveProps } from "./types";
 import { CAPTION_FONTS } from "../shared/fonts";
 import { msToFrames } from "../shared/timing";
@@ -64,6 +64,22 @@ export const Cove: React.FC<CoveProps> = ({
         const durationFrames = msToFrames(page.durationMs, fps);
         if (durationFrames <= 0) return null;
 
+        const endFrame = startFrame + durationFrames;
+        const fadeFrames = 10;
+        const fadeIn = interpolate(
+          frame,
+          [startFrame, startFrame + fadeFrames],
+          [0, 1],
+          { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
+        );
+        const fadeOut = interpolate(
+          frame,
+          [endFrame - fadeFrames, endFrame],
+          [1, 0],
+          { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
+        );
+        const pageOpacity = fadeIn * fadeOut;
+
         const lines: typeof page.tokens[] = [];
         for (let i = 0; i < page.tokens.length; i += maxWordsPerLine) {
           lines.push(page.tokens.slice(i, i + maxWordsPerLine));
@@ -75,7 +91,7 @@ export const Cove: React.FC<CoveProps> = ({
             from={startFrame}
             durationInFrames={durationFrames}
           >
-            <AbsoluteFill>
+            <AbsoluteFill style={{ opacity: pageOpacity }}>
               <div style={{ ...positionStyles, maxWidth }}>
                 <div
                   style={{

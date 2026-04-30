@@ -234,9 +234,29 @@ export const NegativeFlash: React.FC<NegativeFlashProps> = ({
   const lineDurationFrames = msToFrames(activeLine.endMs, fps) - lineStartFrame;
   const hasKeywords = activeLine.tokens.some((t) => keywordCheck(t.text));
 
+  // Page-boundary fade: 10-frame ease-out on entry/exit so caption pages
+  // don't visibly snap on/off at line transitions. ~167 ms at 60fps —
+  // perceptible as a soft transition without feeling slow.
+  const lineEndFrame = lineStartFrame + lineDurationFrames;
+  const fadeFrames = 10;
+  const fadeIn = interpolate(
+    frame,
+    [lineStartFrame, lineStartFrame + fadeFrames],
+    [0, 1],
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
+  );
+  const fadeOut = interpolate(
+    frame,
+    [lineEndFrame - fadeFrames, lineEndFrame],
+    [1, 0],
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
+  );
+  const lineOpacity = fadeIn * fadeOut;
+
   const layerStyle: React.CSSProperties = {
     display: "flex",
     alignItems: "center",
+    opacity: lineOpacity,
     ...positionStyle,
   };
 

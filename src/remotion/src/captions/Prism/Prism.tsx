@@ -249,15 +249,26 @@ export const Prism: React.FC<PrismProps> = ({
   const lineDurationFrames = msToFrames(activeLine.endMs, fps) - lineStartFrame;
   const hasKeywords = activeLine.tokens.some((t) => keywordCheck(t.text));
 
-  // Fade out last ~5 frames of the line
-  const fadeOutFrames = 5;
+  // Page-boundary fade: 10-frame ease-out at line entry and 10-frame
+  // ease-in at line exit. NN/g motion guidance puts UI fades at 100-400 ms;
+  // 10 frames at 60 fps = 167 ms, near the low end where it registers as
+  // "smooth" without feeling slow. Five frames (the prior value) was below
+  // perception threshold for a fade and read as a hard cut.
+  const fadeFrames = 10;
   const lineEndFrame = lineStartFrame + lineDurationFrames;
-  const lineOpacity = interpolate(
+  const fadeIn = interpolate(
     frame,
-    [lineEndFrame - fadeOutFrames, lineEndFrame],
+    [lineStartFrame, lineStartFrame + fadeFrames],
+    [0, 1],
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
+  );
+  const fadeOut = interpolate(
+    frame,
+    [lineEndFrame - fadeFrames, lineEndFrame],
     [1, 0],
     { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
   );
+  const lineOpacity = fadeIn * fadeOut;
 
   const layerStyle: React.CSSProperties = {
     display: "flex",
