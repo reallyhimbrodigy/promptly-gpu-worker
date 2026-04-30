@@ -4985,18 +4985,16 @@ REMOVE_WORDS GUIDANCE:
         # Derive t from word_indices[0].start — Gemini no longer emits `t`
         # (schema-level constraint from v34: the two could disagree so we
         # removed the degree of freedom). Because word_indices[0] is a kept
-        # word, the derived t is guaranteed to land inside a kept clip.
+        # word, the derived t is guaranteed to land inside a kept clip's
+        # source range.
         #
-        # Round to 3 decimals (1 ms precision) to match the source word
-        # timestamps. Rounding to 2 decimals (10 ms) was wrong: when the
-        # anchor word's start time was AT a clip boundary (e.g. word 66
-        # "shouldn't" at 12.871s, immediately following a removed stutter
-        # word "should"), 12.871 → 12.87 fell BEFORE the kept clip starts
-        # at 12.871, and project_source_time_to_output returned None at
-        # render time → "Emphasis moment was removed from output timeline"
-        # hard-fail. Source data is at 1 ms precision; preserve it.
+        # No rounding: clip source ranges are built from these same word
+        # timestamps without rounding, so the anchor t will hit the clip
+        # boundary exactly. Any rounding here only loses precision and
+        # introduces boundary mismatches like the v34→df1b62e bug where
+        # round(12.871, 2) = 12.87 fell below clip.source_start = 12.871.
         _anchor_word = _dg_words[_wis[0]]
-        t = round(float(_anchor_word.get("start") or 0), 3)
+        t = float(_anchor_word.get("start") or 0)
         if t < 0 or (video_duration > 0 and t > video_duration + 0.5):
             raise ValueError(
                 f"emphasis_moments[{_ei}] derived t={t:.3f}s (from word_indices[0]="
