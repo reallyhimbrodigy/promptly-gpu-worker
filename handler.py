@@ -749,7 +749,6 @@ print("[startup] all import checks done", flush=True)
 # ── GPU / NVENC detection ─────────────────────────────────────────────────────
 _HAS_NVENC = False
 _HAS_HWACCEL = False  # NVDEC hardware decoding
-_VULKAN_NVIDIA_OK = False  # set True only if vulkaninfo enumerates an NVIDIA device
 try:
     # Print GPU info for diagnostics
     _smi = subprocess.run(
@@ -795,23 +794,21 @@ try:
         os.environ["LD_LIBRARY_PATH"] = ":".join(_nvidia_lib_dirs) + (":" + _existing_ldpath if _existing_ldpath else "")
         print(f"[startup] LD_LIBRARY_PATH: {os.environ['LD_LIBRARY_PATH'][:200]}", flush=True)
 
-    # Create soname symlinks for NVIDIA libs (Modal mounts versioned .so but not symlinks).
-    # NOTE: must include libGLX_*/libEGL_* — NVIDIA's Vulkan ICD references
-    # `libGLX_nvidia.so.0` by soname, and Modal only mounts the full versioned
-    # filename (libGLX_nvidia.so.580.95.05), so the soname dlopen fails without
-    # this symlink. Was the missing piece in v56's ICD registration attempt.
+    # Create soname symlinks for NVIDIA libs (Modal mounts versioned .so
+    # but not symlinks). NVDEC and CUDA-using consumers (RIFE, FFmpeg
+    # cuvid) need libnvidia-* and libcuda.so.1 sonames to resolve.
     for _lib_dir in _nvidia_lib_dirs:
         try:
             for _f in os.listdir(_lib_dir):
-                _matches_nvidia = (
+                if (
                     _f.startswith("libnvidia-")
-                    or _f.startswith("libGLX_")
-                    or _f.startswith("libEGL_")
-                ) and ".so." in _f and not _f.endswith(".so.1") and not _f.endswith(".so.0")
-                if _matches_nvidia:
+                    and ".so." in _f
+                    and not _f.endswith(".so.1")
+                    and not _f.endswith(".so.0")
+                ):
                     _base = _f.split(".so.")[0]
                     _target = os.path.join(_lib_dir, _f)
-                    for _suf in [".so.0", ".so.1", ".so"]:
+                    for _suf in [".so.1", ".so"]:
                         _sym = os.path.join(_lib_dir, f"{_base}{_suf}")
                         if not os.path.exists(_sym):
                             try:
@@ -873,166 +870,21 @@ except Exception as _e:
     print(f"[startup] GPU check failed: {_e} — using CPU", flush=True)
 
 
-# ── Vulkan diagnostic probe + NVIDIA ICD auto-registration ──────────────
-# Confirms whether Chromium's gl='vulkan' path can possibly engage the H100.
-# The v55 diagnostic showed: NVIDIA libs not at /usr/local/nvidia/lib*,
-# vulkaninfo only sees llvmpipe, no nvidia_icd.json registered. That means
-# either (a) Modal mounts NVIDIA graphics libs at a non-standard path that
-# we can find and register, or (b) Modal strips the graphics capability
-# entirely. This block does an aggressive filesystem-wide search for
-# libGLX_nvidia / libEGL_nvidia / libnvidia-vulkan; if found anywhere, it
-# synthesizes an nvidia_icd.json pointing at the library and re-runs
-# vulkaninfo to verify the H100 is now enumerable.
-try:
-    import glob as _glob_mod
-    import json as _json_mod
-
-    # Step 1: list pre-existing ICDs
-    _icd_paths = []
-    for _icd_dir in ("/etc/vulkan/icd.d", "/usr/share/vulkan/icd.d",
-                     "/usr/local/share/vulkan/icd.d", "/etc/glvnd/egl_vendor.d",
-                     "/usr/share/glvnd/egl_vendor.d"):
-        if os.path.isdir(_icd_dir):
-            for _f in os.listdir(_icd_dir):
-                _icd_paths.append(os.path.join(_icd_dir, _f))
-    if _icd_paths:
-        print(f"[startup] Vulkan ICDs found: {_icd_paths}", flush=True)
-    else:
-        print("[startup] Vulkan ICDs: NONE registered", flush=True)
-
-    # Step 2: filesystem-wide search for NVIDIA graphics libs.
-    # We use a hand-rolled walk (faster + more controllable than `find`).
-    _nvidia_lib_candidates = []
-    _search_roots = ["/usr/local/nvidia", "/usr/lib", "/usr/lib64",
-                     "/usr/local/lib", "/lib", "/lib64", "/opt"]
-    _wanted_prefixes = ("libGLX_nvidia.so", "libEGL_nvidia.so",
-                        "libnvidia-vulkan", "libnvidia-glcore",
-                        "libnvidia-egl-wayland", "libnvidia-glsi",
-                        "libnvidia-tls.so", "libnvidia-rtcore.so")
-    for _root in _search_roots:
-        if not os.path.isdir(_root):
-            continue
-        try:
-            for _dirpath, _dirnames, _filenames in os.walk(_root, followlinks=False):
-                # skip docs / man / share dirs to keep the walk bounded
-                _dirnames[:] = [d for d in _dirnames if d not in ("doc", "man", "info", "locale", "i18n")]
-                for _fn in _filenames:
-                    if _fn.startswith(_wanted_prefixes):
-                        _nvidia_lib_candidates.append(os.path.join(_dirpath, _fn))
-        except Exception:
-            pass
-
-    if _nvidia_lib_candidates:
-        print(f"[startup] NVIDIA graphics libs found ({len(_nvidia_lib_candidates)}):", flush=True)
-        for _p in _nvidia_lib_candidates[:15]:
-            print(f"[startup]   {_p}", flush=True)
-    else:
-        print(
-            "[startup] NVIDIA graphics libs: NONE found anywhere on the "
-            "filesystem (libGLX_nvidia / libEGL_nvidia / libnvidia-vulkan). "
-            "Modal isn't mounting graphics-capability drivers despite "
-            "NVIDIA_DRIVER_CAPABILITIES='all'. Chromium gl='vulkan' will "
-            "always fall back to SwiftShader on this platform.",
-            flush=True,
-        )
-
-    # Step 3: synthesize an nvidia_icd.json pointing at the Vulkan driver lib.
-    # Modern NVIDIA drivers ship Vulkan as `libnvidia-vulkan.so.X`; legacy
-    # bundled drivers expose Vulkan symbols inside `libGLX_nvidia.so.X`.
-    # Prefer the dedicated Vulkan lib when present; fall back to libGLX.
-    # The library_path MUST match an actual file on disk — the prior
-    # hardcoded "libGLX_nvidia.so.0" silently broke whenever Modal mounted
-    # only ".so.1" (vk_icdGetInstanceProcAddr resolved to nothing because
-    # the loader was looking at a non-existent ICD file).
-    def _best_lib(prefix):
-        cands = [
-            p for p in _nvidia_lib_candidates
-            if os.path.basename(p).startswith(prefix)
-        ]
-        # Prefer versioned soname (.so.N) over the bare .so symlink — using
-        # the actual versioned name keeps the ICD stable across dlopens, and
-        # ld.so.cache resolves either form fine.
-        def _score(p):
-            bn = os.path.basename(p)
-            suffix = bn[len(prefix):]
-            if suffix.startswith(".") and suffix[1:].isdigit():
-                return int(suffix[1:])  # .so.1 → 1, .so.0 → 0
-            return -1  # bare .so symlink, lowest priority
-        cands.sort(key=_score, reverse=True)
-        return cands[0] if cands else None
-
-    _vk_lib = _best_lib("libnvidia-vulkan.so") or _best_lib("libGLX_nvidia.so")
-    if _vk_lib:
-        _vk_basename = os.path.basename(_vk_lib)
-        _icd_target = "/etc/vulkan/icd.d/nvidia_icd.json"
-        os.makedirs(os.path.dirname(_icd_target), exist_ok=True)
-        _icd_doc = {
-            "file_format_version": "1.0.0",
-            "ICD": {
-                "library_path": _vk_basename,
-                "api_version": "1.3.255",
-            },
-        }
-        try:
-            with open(_icd_target, "w") as _f:
-                _json_mod.dump(_icd_doc, _f)
-            print(
-                f"[startup] Synthesized {_icd_target} → {_vk_basename} "
-                f"(found at {_vk_lib})",
-                flush=True,
-            )
-            # Set both env vars: VK_ICD_FILENAMES (Vulkan loader < 1.3.207,
-            # which is what Ubuntu 22.04 ships) and VK_DRIVER_FILES (modern).
-            # In v56 we set only VK_DRIVER_FILES and the loader silently
-            # ignored it. Setting both covers any loader version.
-            os.environ["VK_ICD_FILENAMES"] = _icd_target
-            os.environ["VK_DRIVER_FILES"] = _icd_target
-            print(
-                f"[startup] VK_ICD_FILENAMES={_icd_target} (legacy) "
-                f"VK_DRIVER_FILES={_icd_target} (modern)",
-                flush=True,
-            )
-        except Exception as _e:
-            print(f"[startup] Failed to write nvidia_icd.json: {_e}", flush=True)
-
-    # Step 4: re-run vulkaninfo to see if the H100 is now visible.
-    # Bumped to 15 s — once the loader actually engages NVIDIA's ICD
-    # the first instance creation does GPU init (driver mmaps, queue
-    # setup, capability enumeration) which can take 8-12 s cold. 5 s
-    # was producing "timed out" before init even finished.
-    _vkinfo = subprocess.run(
-        ["vulkaninfo", "--summary"],
-        capture_output=True, text=True, timeout=15,
-        env={**os.environ},
-    )
-    if _vkinfo.returncode == 0:
-        _summary_lines = []
-        for _line in (_vkinfo.stdout or "").splitlines():
-            _stripped = _line.strip()
-            if any(_kw in _stripped for _kw in (
-                "deviceName", "driverName", "driverInfo", "apiVersion",
-                "Devices:", "GPU id", "vendorID", "deviceID")):
-                _summary_lines.append(_stripped)
-        if _summary_lines:
-            print("[startup] vulkaninfo --summary (post-ICD-registration):", flush=True)
-            for _ln in _summary_lines[:30]:
-                print(f"[startup]   {_ln}", flush=True)
-            # Heuristic: did NVIDIA appear?
-            _vk_text = " ".join(_summary_lines).lower()
-            if "nvidia" in _vk_text or "h100" in _vk_text:
-                _VULKAN_NVIDIA_OK = True
-                print("[startup] *** Vulkan now sees an NVIDIA device — gl='vulkan' should engage the H100.", flush=True)
-            else:
-                print("[startup] Vulkan still only sees software (llvmpipe). NVIDIA Vulkan path unavailable on this Modal H100 container.", flush=True)
-        else:
-            print(f"[startup] vulkaninfo --summary returned 0 devices", flush=True)
-    else:
-        _err = (_vkinfo.stderr or _vkinfo.stdout or "").strip()[:300]
-        print(f"[startup] vulkaninfo failed (rc={_vkinfo.returncode}): {_err}", flush=True)
-except FileNotFoundError:
-    print("[startup] vulkaninfo not in PATH — vulkan-tools may not be installed", flush=True)
-except Exception as _e:
-    print(f"[startup] Vulkan probe failed: {_e}", flush=True)
+# Vulkan / NVIDIA-Chromium GPU rasterization is intentionally NOT pursued.
+# Past attempts (v54-v57 + this session) reached "OS-level setup looks
+# right" but never produced a verified end-to-end frame through Chromium
+# on chrome-headless-shell with NVIDIA Vulkan. The diagnostic + ICD
+# synthesis code that used to live here added complexity in service of
+# an unproven path with a catastrophic failure mode (Vulkan crash inside
+# the headless browser kills the Remotion process; we have no fallback
+# and the user explicitly disallows them).
+#
+# The production-supported rasterizer is swangle (Skia software path).
+# Same code path every render, deterministic output, no driver-mount
+# dependencies, no version compatibility issues. Performance baseline
+# is set by the chunked overlay + chunked blend-captions architecture
+# (Phase 1) — Vulkan was supposed to help on top of that, not be
+# load-bearing.
 
 
 def get_encode_args(quality="high", threads=0):
@@ -9033,22 +8885,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # (<300 frames) where the per-process startup tax doesn't amortize.
     overlay_video_path = os.path.join(work_dir, "overlay.mov")
     micro_video_path = os.path.join(work_dir, "micro_segments.mp4")
-    # Pick the best Chromium rasterizer this container can actually drive:
-    #   - "vulkan"      : engages the NVIDIA H100 via libGLX_nvidia. Only works
-    #                     if startup confirmed _VULKAN_NVIDIA_OK (vulkaninfo saw
-    #                     an NVIDIA device).
-    #   - "swangle"     : Skia-backed software rasterizer. Sharper text +
-    #                     subpixel anti-aliasing than SwiftShader. Right
-    #                     fallback when Vulkan isn't real on this container.
-    #   - "swiftshader" : last-resort CPU rasterizer. Visibly fuzzier text,
-    #                     poor `color-mix()` and shadow rendering — what was
-    #                     producing the "captions render weird" look.
-    # NOTE: gating Vulkan on _HAS_HWACCEL was the bug — NVDEC availability
-    # says nothing about whether Chromium has an NVIDIA Vulkan ICD to load.
-    if _VULKAN_NVIDIA_OK:
-        _gl_mode = "vulkan"
-    else:
-        _gl_mode = "swangle"
+    # Chromium rasterizer: hardcoded swangle (Skia software path).
+    # Vulkan was attempted across multiple iterations and never produced a
+    # verified end-to-end frame on chrome-headless-shell; the production
+    # contract is "no fallbacks, no crashes," and Vulkan's failure mode is
+    # an unrecoverable Chromium crash mid-render. swangle has been the
+    # rasterizer behind every successful render this codebase has ever
+    # produced — deterministic output, no driver dependencies.
+    _gl_mode = "swangle"
 
     def _run_remotion(label, cmd):
         _t0 = time.time()

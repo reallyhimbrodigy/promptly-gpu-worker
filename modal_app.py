@@ -119,14 +119,6 @@ image = (
         "libcairo2",
         "libasound2",
         "libatspi2.0-0",
-        # Vulkan loader + tools — required for Chromium gl='vulkan' mode.
-        # The NVIDIA Vulkan ICD (libGLX_nvidia / libEGL_nvidia) is mounted at
-        # runtime by the nvidia-container-toolkit when NVIDIA_DRIVER_CAPABILITIES
-        # includes "graphics" or "all", so we only need the loader here.
-        # angle-egl silently falls back to SwiftShader (CPU) on H100 in headless
-        # mode — vulkan is the path that actually engages the GPU.
-        "libvulkan1",
-        "vulkan-tools",
     )
     .run_commands(
         "fc-cache -f",

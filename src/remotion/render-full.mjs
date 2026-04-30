@@ -14,7 +14,7 @@
  *                        "PromptlyMicroSegments" → h264 (transitions + complex
  *                                                  zoom clips, no alpha).
  *   --concurrency <N>    Optional. Default = half of CPU threads.
- *   --gl <mode>          Optional Chromium GL backend. Default: vulkan.
+ *   --gl <mode>          Optional Chromium GL backend. Default: swangle.
  *
  * The audio track is intentionally disabled (muted: true). Python builds the
  * full audio pipeline (speed-warped source, SFX mix, ducking, EQ, compressor)
@@ -52,14 +52,14 @@ let inputPath = null;
 let outputPath = null;
 let publicDir = null;
 let concurrency = null;
-// Vulkan is the only renderer mode in @remotion/renderer 4.0.450 that
-// passes `--enable-gpu` and `--ignore-gpu-blocklist` (see
-// node_modules/@remotion/renderer/dist/open-browser.js getOpenGlRenderer()).
-// Other modes (angle-egl, swiftshader, etc.) just set the GL backend
-// without explicitly enabling the GPU, so headless Chromium silently
-// falls through to SwiftShader. NVIDIA H100 has first-class Vulkan via
-// the NVIDIA driver; this is the most reliable hardware path on Modal.
-let glMode = "vulkan";
+// swangle (Skia-backed CPU rasterizer) is the only mode this codebase
+// supports in production. Hardware paths (vulkan / angle-egl) were tried
+// across multiple iterations and never produced verified frames on
+// chrome-headless-shell; the production contract disallows fallbacks
+// and Vulkan crashes inside the headless browser are unrecoverable.
+// handler.py always passes `--gl swangle` explicitly anyway; this
+// default is just the safe value if anyone runs render-full.mjs by hand.
+let glMode = "swangle";
 let compositionId = "PromptlyOverlay";
 // Chunked rendering: split a composition timeline into N frame ranges
 // rendered by independent processes. Required to break past Remotion's
