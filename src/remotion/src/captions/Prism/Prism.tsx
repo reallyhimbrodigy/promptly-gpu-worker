@@ -14,6 +14,27 @@ import { CAPTION_FONTS } from "../shared/fonts";
 import { getCaptionPositionStyle } from "../shared/captionPosition";
 import { isPrismKeyword } from "./prismKeywords";
 
+/** Build the per-word highlight check. When `keywords` has at least one
+ *  entry we use it as the source of truth (case-insensitive, punctuation-
+ *  stripped match) — that's the production path where Gemini supplies
+ *  contextual keywords for THIS specific video. When empty / undefined we
+ *  fall back to the bundled static dictionary so the component still works
+ *  in isolation. */
+function buildKeywordCheck(keywords?: string[]): (word: string) => boolean {
+  if (!keywords || keywords.length === 0) return isPrismKeyword;
+  const normalized = new Set<string>();
+  for (const k of keywords) {
+    if (typeof k !== "string") continue;
+    const norm = k.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (norm) normalized.add(norm);
+  }
+  if (normalized.size === 0) return isPrismKeyword;
+  return (word: string) => {
+    const key = word.toLowerCase().replace(/[^a-z0-9]/g, "");
+    return key.length > 0 && normalized.has(key);
+  };
+}
+
 /* ─── Helpers ─── */
 
 interface Line {
@@ -139,8 +160,9 @@ const PrismLine: React.FC<{
   soloKeywordScale: number;
   color: string;
   mode: "normal" | "keywords";
-}> = ({ line, lineStartFrame, fontSize, maxWidth, keywordScale, soloKeywordScale, color, mode }) => {
-  const isSoloKeyword = line.tokens.length === 1 && isPrismKeyword(line.tokens[0].text);
+  keywordCheck: (word: string) => boolean;
+}> = ({ line, lineStartFrame, fontSize, maxWidth, keywordScale, soloKeywordScale, color, mode, keywordCheck }) => {
+  const isSoloKeyword = line.tokens.length === 1 && keywordCheck(line.tokens[0].text);
   return (
     <div
       style={{
@@ -154,7 +176,7 @@ const PrismLine: React.FC<{
       }}
     >
 {line.tokens.map((token, idx) => {
-        const isKeyword = isPrismKeyword(token.text);
+        const isKeyword = keywordCheck(token.text);
         const visible =
           (mode === "normal" && !isKeyword) || (mode === "keywords" && isKeyword);
 
@@ -186,10 +208,12 @@ export const Prism: React.FC<PrismProps> = ({
   maxWordsPerLine = 4,
   keywordScale = 1.6,
   soloKeywordScale = 2.2,
+  keywords,
 }) => {
   const { fps, width } = useVideoConfig();
   const frame = useCurrentFrame();
   const maxWidth = width * maxWidthPercent;
+  const keywordCheck = React.useMemo(() => buildKeywordCheck(keywords), [keywords]);
 
   const positionStyle: React.CSSProperties = getCaptionPositionStyle(position);
 
@@ -208,7 +232,7 @@ export const Prism: React.FC<PrismProps> = ({
 
   const lineStartFrame = msToFrames(activeLine.startMs, fps);
   const lineDurationFrames = msToFrames(activeLine.endMs, fps) - lineStartFrame;
-  const hasKeywords = activeLine.tokens.some((t) => isPrismKeyword(t.text));
+  const hasKeywords = activeLine.tokens.some((t) => keywordCheck(t.text));
 
   // Fade out last ~5 frames of the line
   const fadeOutFrames = 5;
@@ -234,6 +258,7 @@ export const Prism: React.FC<PrismProps> = ({
     maxWidth,
     keywordScale,
     soloKeywordScale,
+    keywordCheck,
   };
 
   return (

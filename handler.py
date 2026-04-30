@@ -2794,8 +2794,8 @@ caption_style — pick EXACTLY ONE from 16 styles. Read each description careful
                               Best for: Quote highlights, single-word emphasis, editorial.
 
 NOTES ON KEYWORDS PER STYLE:
-  Styles that USE caption_keywords for highlighting: Prime, Cove, EditorialPop, Illuminate, Lumen, Passage, Pulse, Serif, GlitchHighlight (9 styles).
-  Styles that IGNORE caption_keywords by design: PaperII, TypewriterReveal, CinematicLetterpress, MagazineCutout, Quintessence, NegativeFlash, Prism (7 styles — animation/aesthetic IS the effect, no per-word highlighting). When you pick one of these, the caption_keywords list still has narrative value (for emphasis_moments etc.) but won't visually highlight in captions.
+  Styles that USE caption_keywords for highlighting: Prime, Cove, EditorialPop, Illuminate, Lumen, Passage, Pulse, Serif, GlitchHighlight, NegativeFlash, Prism (11 styles).
+  Styles that IGNORE caption_keywords by design: PaperII, TypewriterReveal, CinematicLetterpress, MagazineCutout, Quintessence (5 styles — animation/aesthetic IS the effect, no per-word highlighting). When you pick one of these, the caption_keywords list still has narrative value (for emphasis_moments etc.) but won't visually highlight in captions.
 
 NOTE on render time: GlitchHighlight, NegativeFlash, and Prism use CSS blend modes against video pixels — they require a different render path that's slightly slower (single-pass Remotion instead of parallel FFmpeg+Remotion). Pick them when their visual identity is right for the content; the render-time tax is small per video.
 
@@ -9647,11 +9647,13 @@ def _resolve_caption_extra_props(style, keywords, edit_plan):
     kw_list = list(keywords or [])
 
     # Style-specific default prop names for a simple string[] of keywords.
-    # Per the component-pack report, PaperII / TypewriterReveal /
-    # CinematicLetterpress / MagazineCutout / Quintessence / NegativeFlash /
-    # Prism do NOT take a keyword list (their effect is style-driven, not
-    # keyword-driven) — they're omitted from this map and the caption_keywords
-    # list goes unused for those styles.
+    # PaperII / TypewriterReveal / CinematicLetterpress / MagazineCutout /
+    # Quintessence don't highlight specific words — their effect is
+    # style-driven (typewriter sweep, cutout collage, etc.) — so they're
+    # omitted from this map. NegativeFlash and Prism DO take a keywords
+    # list, but they consume it via the caption.keywords field that
+    # PromptlyRender passes as a top-level prop directly to every caption
+    # component, so they don't need a per-style entry here either.
     simple_keyword_prop = {
         "EditorialPop": "keywords",
         "Illuminate": "keywords",

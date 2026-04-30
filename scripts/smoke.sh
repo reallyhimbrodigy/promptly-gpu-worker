@@ -211,28 +211,24 @@ cat > "$SMOKE_DIR/blend.json" <<EOF
   "height": 1920,
   "totalDurationInFrames": 30,
   "caption": {
-    "style": "GlitchHighlight",
+    "style": "NegativeFlash",
     "pages": [
       {
-        "text": "blend",
+        "text": "blend test smoke",
         "startMs": 0,
         "durationMs": 1000,
-        "tokens": [{ "text": "blend", "fromMs": 0, "toMs": 1000 }]
+        "tokens": [
+          { "text": "blend", "fromMs": 0,   "toMs": 333 },
+          { "text": "test",  "fromMs": 333, "toMs": 666 },
+          { "text": "smoke", "fromMs": 666, "toMs": 1000 }
+        ]
       }
     ],
-    "keywords": ["blend"],
+    "keywords": ["smoke"],
     "positionSegments": [{ "fromFrame": 0, "toFrame": 30, "position": "bottom" }],
     "extraProps": {}
   },
-  "captionMatchOverlays": [
-    {
-      "variant": "caption_match",
-      "fromFrame": 0,
-      "durationInFrames": 30,
-      "text": "blend",
-      "position": "center"
-    }
-  ]
+  "captionMatchOverlays": []
 }
 EOF
 

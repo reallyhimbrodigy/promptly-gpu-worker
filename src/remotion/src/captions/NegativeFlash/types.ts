@@ -23,4 +23,9 @@ export interface NegativeFlashProps extends CaptionStyleProps {
   keywordScale?: number;
   /** Color preset for the negative flash effect. Default: "red" */
   colorPreset?: NegativeFlashPresetName;
+  /** Words that get the negative-flash highlight. When provided (non-empty),
+   *  drives the per-word highlight check instead of the bundled static
+   *  dictionary. Empty / undefined falls back to the static dictionary so
+   *  the component still works standalone. */
+  keywords?: string[];
 }

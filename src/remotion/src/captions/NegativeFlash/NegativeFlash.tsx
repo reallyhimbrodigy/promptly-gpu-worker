@@ -15,6 +15,27 @@ import { CAPTION_FONTS } from "../shared/fonts";
 import { getCaptionPositionStyle } from "../shared/captionPosition";
 import { isNegativeKeyword } from "./negativeKeywords";
 
+/** Build the per-word highlight check. When `keywords` has at least one
+ *  entry we use it as the source of truth (case-insensitive, punctuation-
+ *  stripped match) — that's the production path where Gemini supplies
+ *  contextual keywords for THIS specific video. When empty / undefined we
+ *  fall back to the bundled static dictionary so the component still works
+ *  in isolation (e.g. standalone storybook, unit tests). */
+function buildKeywordCheck(keywords?: string[]): (word: string) => boolean {
+  if (!keywords || keywords.length === 0) return isNegativeKeyword;
+  const normalized = new Set<string>();
+  for (const k of keywords) {
+    if (typeof k !== "string") continue;
+    const norm = k.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (norm) normalized.add(norm);
+  }
+  if (normalized.size === 0) return isNegativeKeyword;
+  return (word: string) => {
+    const key = word.toLowerCase().replace(/[^a-z0-9]/g, "");
+    return key.length > 0 && normalized.has(key);
+  };
+}
+
 /* ─── Helpers ─── */
 
 interface Line {
@@ -117,8 +138,9 @@ const NegativeLine: React.FC<{
   color: string;
   spreadColor?: string;
   mode: "normal" | "keywords";
-}> = ({ line, lineStartFrame, fontSize, maxWidth, keywordScale, color, spreadColor, mode }) => {
-  const hasKeywords = line.tokens.some((t) => isNegativeKeyword(t.text));
+  keywordCheck: (word: string) => boolean;
+}> = ({ line, lineStartFrame, fontSize, maxWidth, keywordScale, color, spreadColor, mode, keywordCheck }) => {
+  const hasKeywords = line.tokens.some((t) => keywordCheck(t.text));
 
   return (
     <div
@@ -133,7 +155,7 @@ const NegativeLine: React.FC<{
       }}
     >
       {line.tokens.map((token, idx) => {
-        const isKeyword = isNegativeKeyword(token.text);
+        const isKeyword = keywordCheck(token.text);
         const visible =
           (mode === "normal" && !isKeyword) || (mode === "keywords" && isKeyword);
 
@@ -166,8 +188,10 @@ export const NegativeFlash: React.FC<NegativeFlashProps> = ({
   maxWordsPerLine = 4,
   keywordScale = 1.6,
   colorPreset = "red",
+  keywords,
 }) => {
   const preset = NEGATIVE_FLASH_PRESETS[colorPreset] ?? NEGATIVE_FLASH_PRESETS.red;
+  const keywordCheck = React.useMemo(() => buildKeywordCheck(keywords), [keywords]);
   const { fps, width } = useVideoConfig();
   const frame = useCurrentFrame();
   const maxWidth = width * maxWidthPercent;
@@ -191,7 +215,7 @@ export const NegativeFlash: React.FC<NegativeFlashProps> = ({
 
   const lineStartFrame = msToFrames(activeLine.startMs, fps);
   const lineDurationFrames = msToFrames(activeLine.endMs, fps) - lineStartFrame;
-  const hasKeywords = activeLine.tokens.some((t) => isNegativeKeyword(t.text));
+  const hasKeywords = activeLine.tokens.some((t) => keywordCheck(t.text));
 
   const layerStyle: React.CSSProperties = {
     display: "flex",
@@ -205,6 +229,7 @@ export const NegativeFlash: React.FC<NegativeFlashProps> = ({
     fontSize,
     maxWidth,
     keywordScale,
+    keywordCheck,
   };
 
   return (
