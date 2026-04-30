@@ -995,10 +995,14 @@ try:
         except Exception as _e:
             print(f"[startup] Failed to write nvidia_icd.json: {_e}", flush=True)
 
-    # Step 4: re-run vulkaninfo to see if the H100 is now visible
+    # Step 4: re-run vulkaninfo to see if the H100 is now visible.
+    # Bumped to 15 s — once the loader actually engages NVIDIA's ICD
+    # the first instance creation does GPU init (driver mmaps, queue
+    # setup, capability enumeration) which can take 8-12 s cold. 5 s
+    # was producing "timed out" before init even finished.
     _vkinfo = subprocess.run(
         ["vulkaninfo", "--summary"],
-        capture_output=True, text=True, timeout=5,
+        capture_output=True, text=True, timeout=15,
         env={**os.environ},
     )
     if _vkinfo.returncode == 0:
@@ -4173,15 +4177,18 @@ REMOVE_WORDS GUIDANCE:
     # inputs; Python synthesizes the float fields from word timings here.
     _dg = deepgram_words or []
 
+    # No rounding: callers feed the result through project_source_time_to_output
+    # against clip source bounds that ARE raw floats; rounding here loses
+    # sub-millisecond precision and breaks boundary checks.
     def _word_start(src_idx):
         if src_idx is None or not (0 <= int(src_idx) < len(_dg)):
             return None
-        return round(float(_dg[int(src_idx)].get("start") or 0), 3)
+        return float(_dg[int(src_idx)].get("start") or 0)
 
     def _word_end(src_idx):
         if src_idx is None or not (0 <= int(src_idx) < len(_dg)):
             return None
-        return round(float(_dg[int(src_idx)].get("end") or 0), 3)
+        return float(_dg[int(src_idx)].get("end") or 0)
 
     # caption_position_segments (synthesized from caption_position_changes)
     _changes = edit_plan.get("caption_position_changes") or []
@@ -4194,14 +4201,17 @@ REMOVE_WORDS GUIDANCE:
     _segments = []
     _cur_pos = "bottom"  # default start position
     _cur_t = 0.0
+    # No rounding: from/to_seconds get projected through clip source bounds
+    # at render time; rounding here can land the value outside its own clip
+    # due to sub-millisecond drift.
     for _ch in _changes_clean:
         _ch_t = _word_start(_ch["word_index"])
         if _ch_t is None:
             continue
         if _ch_t > _cur_t:
             _segments.append({
-                "from_seconds": round(_cur_t, 3),
-                "to_seconds": round(_ch_t, 3),
+                "from_seconds": _cur_t,
+                "to_seconds": _ch_t,
                 "position": _cur_pos,
             })
         _cur_pos = _ch["position"]
@@ -4209,15 +4219,15 @@ REMOVE_WORDS GUIDANCE:
     # Final segment to video duration
     if duration > _cur_t:
         _segments.append({
-            "from_seconds": round(_cur_t, 3),
-            "to_seconds": round(float(duration), 3),
+            "from_seconds": _cur_t,
+            "to_seconds": float(duration),
             "position": _cur_pos,
         })
     # Fallback: if no changes emitted, cover the whole video with default
     if not _segments and duration > 0:
         _segments = [{
             "from_seconds": 0.0,
-            "to_seconds": round(float(duration), 3),
+            "to_seconds": float(duration),
             "position": "bottom",
         }]
     _segments = _coalesce_caption_position_segments(_segments)
@@ -4485,29 +4495,32 @@ REMOVE_WORDS GUIDANCE:
                 _resynth_segments = []
                 _cur_pos = "bottom"
                 _cur_t = 0.0
+                # No rounding: from/to_seconds get projected through clip
+                # source bounds at render time; any rounding here can land
+                # the value outside its own clip due to sub-millisecond drift.
                 for _ch in _filtered_changes_clean:
                     _wi = int(_ch["word_index"])
                     if _wi < 0 or _wi >= len(_dg_words):
                         continue
-                    _ch_t = round(float(_dg_words[_wi].get("start") or 0), 3)
+                    _ch_t = float(_dg_words[_wi].get("start") or 0)
                     if _ch_t > _cur_t:
                         _resynth_segments.append({
-                            "from_seconds": round(_cur_t, 3),
-                            "to_seconds": round(_ch_t, 3),
+                            "from_seconds": _cur_t,
+                            "to_seconds": _ch_t,
                             "position": _cur_pos,
                         })
                     _cur_pos = _ch["position"]
                     _cur_t = _ch_t
                 if video_duration > _cur_t:
                     _resynth_segments.append({
-                        "from_seconds": round(_cur_t, 3),
-                        "to_seconds": round(float(video_duration), 3),
+                        "from_seconds": _cur_t,
+                        "to_seconds": float(video_duration),
                         "position": _cur_pos,
                     })
                 if not _resynth_segments and video_duration > 0:
                     _resynth_segments = [{
                         "from_seconds": 0.0,
-                        "to_seconds": round(float(video_duration), 3),
+                        "to_seconds": float(video_duration),
                         "position": "bottom",
                     }]
                 _resynth_segments = _coalesce_caption_position_segments(_resynth_segments)
@@ -4888,9 +4901,15 @@ REMOVE_WORDS GUIDANCE:
                     f"motion_graphics[{_i}].duration_seconds={_dur_override} "
                     f"outside [0.3, 20.0]"
                 )
-        # Derive the source-time window from the anchor words.
-        _sw_start = round(float(_dg_words[_sw].get("start") or 0), 3)
-        _ew_end = round(float(_dg_words[_ew].get("end") or 0), 3)
+        # Derive the source-time window from the anchor words. No rounding:
+        # clip source ranges in build_clips_from_words are stored as raw
+        # floats from word._start / word._end, so anchor source times
+        # MUST be raw too. Rounding here to 3 decimals lost a sub-millisecond
+        # difference between this stored value and the clip boundary,
+        # causing project_source_time_to_output to return None at render
+        # time — same precision bug class as the emphasis-moment one.
+        _sw_start = float(_dg_words[_sw].get("start") or 0)
+        _ew_end = float(_dg_words[_ew].get("end") or 0)
         validated_mg.append({
             "type": _mg_type,
             "start_word_index": _sw,
@@ -5240,7 +5259,10 @@ REMOVE_WORDS GUIDANCE:
             )
         if _du < 0.3 or _du > 10.0:
             raise ValueError(f"text_overlays[{_i}].duration_seconds out of range 0.3..10.0")
-        _source_start = round(float(_dg_words[_swi].get("start") or 0), 3)
+        # No rounding — match clip source bounds exactly. See the same
+        # comment on motion_graphics _sw_start above for the precision-bug
+        # class this avoids.
+        _source_start = float(_dg_words[_swi].get("start") or 0)
         _entry = {
             "variant": _var,
             "start_word_index": _swi,
