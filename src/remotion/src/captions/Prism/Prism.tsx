@@ -12,6 +12,7 @@ import type { PrismProps } from "./types";
 import { msToFrames } from "../shared/timing";
 import { CAPTION_FONTS } from "../shared/fonts";
 import { getCaptionPositionStyle } from "../shared/captionPosition";
+import { fitFontSize } from "../shared/fitText";
 import { isPrismKeyword } from "./prismKeywords";
 
 /** Build the per-word highlight check. When `keywords` has at least one
@@ -73,7 +74,8 @@ const PrismWord: React.FC<{
   color: string;
   visible: boolean;
   wordIndex: number;
-}> = ({ token, lineStartFrame, fontSize, isKeyword, keywordScale, color, visible, wordIndex }) => {
+  maxWidth: number;
+}> = ({ token, lineStartFrame, fontSize, isKeyword, keywordScale, color, visible, wordIndex, maxWidth }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
@@ -105,7 +107,19 @@ const PrismWord: React.FC<{
     extrapolateRight: "clamp",
   });
 
-  const wordFontSize = isKeyword ? fontSize * keywordScale : fontSize * 0.92;
+  // Auto-fit so a long keyword word never overflows the line container.
+  // Without this, the browser crops at the canvas edge.
+  const requestedSize = isKeyword ? fontSize * keywordScale : fontSize * 0.92;
+  const renderedText = isKeyword ? token.text.toUpperCase() : token.text;
+  const wordFontSize = React.useMemo(
+    () =>
+      fitFontSize(renderedText, requestedSize, maxWidth, {
+        fontFamily: isKeyword ? CAPTION_FONTS.montserrat : CAPTION_FONTS.poppins,
+        fontWeight: isKeyword ? 900 : 400,
+        fontStyle: isKeyword ? "italic" : "normal",
+      }),
+    [renderedText, requestedSize, maxWidth, isKeyword],
+  );
 
   return (
     <div style={{ padding: "0 8px", position: "relative" }}>
@@ -191,6 +205,7 @@ const PrismLine: React.FC<{
             color={visible ? color : "transparent"}
             visible={visible}
             wordIndex={idx}
+            maxWidth={maxWidth}
           />
         );
       })}

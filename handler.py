@@ -2194,15 +2194,46 @@ def refine_word_boundaries_with_audio(words, source_path, sample_rate=48000):
         n_end_snapped = 0
         max_start_delta = 0.0
         max_end_delta = 0.0
-        refined: List[dict] = []
-        for w in words:
-            new_w = dict(w)
-            old_start = float(w.get("start") or 0.0)
-            old_end = float(w.get("end") or 0.0)
 
-            # Snap start: nearest rising edge within ±SEARCH, then refine to sample.
+        # Pre-compute neighbour boundaries so the search window for each word
+        # can be CLAMPED inside [prev_word.end, next_word.start]. Without this
+        # clamp, a word with no silence to its right (back-to-back speech)
+        # would have its falling-edge search extend up to +60 ms — past the
+        # NEXT word's start — and snap to the falling edge of THAT word
+        # instead of its own. Result: the next word's audio leaks into the
+        # current clip when this word is the last kept word before a cut.
+        # This is the "10 ms residue / jagged cut" the user reported.
+        old_starts = [float(w.get("start") or 0.0) for w in words]
+        old_ends = [float(w.get("end") or 0.0) for w in words]
+
+        refined: List[dict] = []
+        for i, w in enumerate(words):
+            new_w = dict(w)
+            old_start = old_starts[i]
+            old_end = old_ends[i]
+            # Lower bound on the start search: half-way back to the previous
+            # word's end, but never further than -SEARCH. The "half-way"
+            # ensures that if previous_word.end and this_word.start are
+            # closer than 2×SEARCH, neither word's refinement can cross the
+            # midpoint between them.
+            if i > 0:
+                gap_back = max(0.0, old_start - old_ends[i - 1])
+                start_lo = old_start - min(SEARCH, gap_back / 2.0)
+            else:
+                start_lo = old_start - SEARCH
+            start_hi = old_start + SEARCH
+            # Upper bound on the end search: mirror logic with the next word.
+            if i + 1 < len(words):
+                gap_fwd = max(0.0, old_starts[i + 1] - old_end)
+                end_hi = old_end + min(SEARCH, gap_fwd / 2.0)
+            else:
+                end_hi = old_end + SEARCH
+            end_lo = old_end - SEARCH
+
+            # Snap start: nearest rising edge within the clamped window,
+            # then refine to sample.
             if len(rising_idx) > 0:
-                mask = (rising_t >= old_start - SEARCH) & (rising_t <= old_start + SEARCH)
+                mask = (rising_t >= start_lo) & (rising_t <= start_hi)
                 cand_widx = rising_idx[mask]
                 if len(cand_widx) > 0:
                     cand_t = cand_widx.astype(np.float64) * (WINDOW_MS / 1000.0)
@@ -2215,9 +2246,10 @@ def refine_word_boundaries_with_audio(words, source_path, sample_rate=48000):
                         max_start_delta = max(max_start_delta, abs(delta))
                     new_w["start"] = new_start
 
-            # Snap end: nearest falling edge within ±SEARCH, then refine to sample.
+            # Snap end: nearest falling edge within the clamped window,
+            # then refine to sample.
             if len(falling_idx) > 0:
-                mask = (falling_t >= old_end - SEARCH) & (falling_t <= old_end + SEARCH)
+                mask = (falling_t >= end_lo) & (falling_t <= end_hi)
                 cand_widx = falling_idx[mask]
                 if len(cand_widx) > 0:
                     cand_t = cand_widx.astype(np.float64) * (WINDOW_MS / 1000.0)
@@ -2924,7 +2956,17 @@ DECISION MATRIX — text overlay variant by content:
   testimonial, pull-quote, book/article quote   → "quote_card"
   motivational/hustle/Hormozi mono-brand        → "caption_match"
 
-0-2 overlays per video. More is noise.
+PER-VARIANT FREQUENCY — different overlay variants degrade at different rates when over-used. Each one has a "right cadence" baked into its visual identity:
+
+- "torn_paper" — AT MOST ONCE in a 30-60s video. Twice in a longer video ONLY if the second one marks a clear narrative turn ("THE CONFRONTATION" → "THE AFTERMATH"). It's a chapter card. Three torn-paper strips in one video is wallpaper, not punctuation — by the third the viewer ignores it. Reserve torn_paper for the single biggest narrative beat.
+
+- "sticky_note" — AT MOST ONE cluster per video. The cluster itself contains 1-3 notes, each with its own text and rotation, so one cluster does the work of three overlays.
+
+- "quote_card" — AT MOST ONCE per video, on the single most quotable line. quote_card is large (~50% of the frame) and inherently a face-cover when it lands; one is dramatic, two is intrusive.
+
+- "caption_match" — used as freely as needed for emphasis. It's a styling variant, not a punctuation device — it inherits the caption pacing.
+
+OVERALL — 0-2 non-caption_match overlays per 60s video, period. The torn_paper / sticky_note / quote_card variants are dramatic by design; their power comes from rarity. A video with one perfectly-placed torn_paper at the hook lands harder than a video with four scattered ones.
 
 === EMPHASIS MOMENTS — VISUAL HITS ===
 
@@ -8356,6 +8398,43 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # boundaries through the cuts timeline to get output-frame start/end. The
     # SEMANTIC_TO_MG_ANCHOR map translates the safe-zone anchor into the MG
     # pack's own MGAnchor vocabulary; components render against the full canvas.
+    #
+    # Face-aware anchor routing: if Gemini picks "center" for an MG and the
+    # speaker's face occupies the middle vertical band at that MG's time
+    # window, the MG would land directly on the face. Re-route to the
+    # opposite vertical zone (top if face is below, bottom if face is above)
+    # so the face stays visible. We have the smoothed face trajectory from
+    # ingest — use it instead of letting "center" anchors bury the speaker.
+    _face_traj_for_mg = edit_plan.get("_smoothed_face_trajectory") or []
+    _source_height_for_mg = float(edit_plan.get("_source_height") or 1920)
+
+    def _face_safe_semantic_anchor(semantic_anchor, src_window_start, src_window_end):
+        """If the requested anchor would put the MG on top of the speaker's
+        face during the window, return a safer anchor instead."""
+        if semantic_anchor != "center":
+            return semantic_anchor
+        if not _face_traj_for_mg or _source_height_for_mg <= 0:
+            return semantic_anchor
+        # Sample face cy across the source window. The middle vertical band is
+        # 1/3..2/3 of source height; a face cy inside that band guarantees
+        # collision with a center-anchored MG on the 1080×1920 output.
+        ys = [
+            float(s.get("cy") or 0.0) / _source_height_for_mg
+            for s in _face_traj_for_mg
+            if src_window_start <= float(s.get("t") or 0.0) <= src_window_end
+            and s.get("found")
+        ]
+        if not ys:
+            return semantic_anchor
+        avg_cy_norm = sum(ys) / len(ys)
+        if 0.33 <= avg_cy_norm <= 0.67:
+            # Face is in the middle band → center-anchored MG would cover it.
+            # Route to the opposite half: face above 0.5 → MG goes bottom;
+            # face below 0.5 → MG goes top. Pick whichever is farther from
+            # the face vertical center.
+            return "lower_third_safe" if avg_cy_norm < 0.5 else "upper_third_safe"
+        return semantic_anchor
+
     motion_graphics_out = []
     for _mg in (edit_plan.get("motion_graphics") or []):
         _sw_source = float(_mg["_source_start"])
@@ -8387,7 +8466,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 f"(out_start={_out_start:.2f}s, out_end={_out_end:.2f}s, "
                 f"total_output_frames={total_output_frames})"
             )
-        _mg_anchor = SEMANTIC_TO_MG_ANCHOR[_mg["anchor"]]
+        _safe_semantic = _face_safe_semantic_anchor(
+            _mg["anchor"], _sw_source, _ew_source,
+        )
+        _mg_anchor = SEMANTIC_TO_MG_ANCHOR[_safe_semantic]
         _mg_props = {**_mg["props"], "anchor": _mg_anchor}
         motion_graphics_out.append({
             "type": _mg["type"],
@@ -8395,9 +8477,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             "durationInFrames": _to_frame - _from_frame,
             "props": _mg_props,
         })
+        _rerouted = " (face-safe rerouted)" if _safe_semantic != _mg["anchor"] else ""
         print(
             f"[mg] {_mg['type']} src=[{_sw_source:.2f}..{_ew_source:.2f}]s "
-            f"→ out=[{_out_start:.2f}..{_out_end:.2f}]s anchor={_mg['anchor']}→{_mg_anchor}",
+            f"→ out=[{_out_start:.2f}..{_out_end:.2f}]s anchor={_mg['anchor']}"
+            f"→{_safe_semantic}→{_mg_anchor}{_rerouted}",
             flush=True,
         )
 
@@ -8428,7 +8512,15 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _em_dur = float(em["duration"])
             _mg_from_frame = max(0, _em_t_frame - int(round(_em_dur * source_fps * 0.25)))
             _mg_dur_frames = int(round(_em_dur * source_fps))
-            _em_mg_anchor = SEMANTIC_TO_MG_ANCHOR[em["motion_graphic"]["anchor"]]
+            # Same face-safe routing as the top-level MG loop. Use the
+            # emphasis source-time window for face sampling.
+            _em_src_t = float(em["t"])
+            _em_safe_semantic = _face_safe_semantic_anchor(
+                em["motion_graphic"]["anchor"],
+                _em_src_t,
+                _em_src_t + _em_dur,
+            )
+            _em_mg_anchor = SEMANTIC_TO_MG_ANCHOR[_em_safe_semantic]
             _em_mg_props = {**em["motion_graphic"]["props"], "anchor": _em_mg_anchor}
             motion_graphics_out.append({
                 "type": em["motion_graphic"]["type"],
@@ -10886,6 +10978,12 @@ def handler(job):
         # can map the reframe math correctly.
         _ft = source_info.get("face_transform", {})
         edit_plan["_face_transform"] = _ft
+        # Stash the smoothed face trajectory + source height so render_multi_clip
+        # can route MG anchors away from wherever the speaker's face is at the
+        # MG's time window. Without this, "center" anchor MGs (QuoteCard,
+        # ChatThread, etc.) land directly on top of a talking head's face.
+        edit_plan["_smoothed_face_trajectory"] = _smoothed_trajectory
+        edit_plan["_source_height"] = int(source_res.get("height") or 1920)
 
         _timings["normalize_transcribe_upload"] = time.time() - t
         _dg_words = transcript.get("words", [])

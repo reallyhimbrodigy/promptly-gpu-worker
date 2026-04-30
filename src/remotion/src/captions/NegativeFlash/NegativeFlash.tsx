@@ -13,6 +13,7 @@ import { NEGATIVE_FLASH_PRESETS } from "./types";
 import { msToFrames } from "../shared/timing";
 import { CAPTION_FONTS } from "../shared/fonts";
 import { getCaptionPositionStyle } from "../shared/captionPosition";
+import { fitFontSize } from "../shared/fitText";
 import { isNegativeKeyword } from "./negativeKeywords";
 
 /** Build the per-word highlight check. When `keywords` has at least one
@@ -78,7 +79,8 @@ const NegativeWord: React.FC<{
   spreadColor?: string;
   visible: boolean;
   wordByWord: boolean;
-}> = ({ token, lineStartFrame, fontSize, isKeyword, keywordScale, color, spreadColor, visible, wordByWord }) => {
+  maxWidth: number;
+}> = ({ token, lineStartFrame, fontSize, isKeyword, keywordScale, color, spreadColor, visible, wordByWord, maxWidth }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
@@ -98,7 +100,21 @@ const NegativeWord: React.FC<{
     extrapolateRight: "clamp",
   });
 
-  const wordFontSize = isKeyword ? fontSize * keywordScale : fontSize;
+  // Auto-fit so a long keyword word (e.g. "ELECTROCUTED" at 1.6× scale)
+  // never overflows the line container. Without this, the browser crops
+  // at the canvas edge — visible to the user as both sides chopped off.
+  // The word's text is uppercased for keywords; measure the rendered
+  // form so the fit is accurate.
+  const requestedSize = isKeyword ? fontSize * keywordScale : fontSize;
+  const renderedText = isKeyword ? token.text.toUpperCase() : token.text;
+  const wordFontSize = React.useMemo(
+    () =>
+      fitFontSize(renderedText, requestedSize, maxWidth, {
+        fontFamily: CAPTION_FONTS.montserrat,
+        fontWeight: 900,
+      }),
+    [renderedText, requestedSize, maxWidth],
+  );
 
   return (
     <div style={{ padding: "0 8px" }}>
@@ -171,6 +187,7 @@ const NegativeLine: React.FC<{
             spreadColor={visible ? spreadColor : undefined}
             visible={visible}
             wordByWord={hasKeywords}
+            maxWidth={maxWidth}
           />
         );
       })}
