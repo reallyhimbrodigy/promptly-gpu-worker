@@ -20,7 +20,7 @@ import certifi
 os.environ["SSL_CERT_FILE"] = certifi.where()
 os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
 
-HANDLER_VERSION = "3.1.0"
+HANDLER_VERSION = "3.2.0"
 GEMINI_MODEL = "gemini-3-flash-preview"
 # Bump when the edit_plan schema or render pipeline changes in a way that breaks
 # replay of older persisted plans. Returned in every job response so the server
@@ -255,32 +255,55 @@ class _RemoveWord(BaseModel):
     end: Optional[float] = None
     reason: str
 
+class CutPlan(BaseModel):
+    """Schema for the FIRST Gemini call — cuts only.
+
+    The cuts call has one job: decide which words/ranges to remove from the
+    transcript. It runs on the full source-indexed transcript with LOW
+    thinking. Output is small (just cuts + pacing + brief notes) so the
+    call is fast and focused.
+
+    Once Python receives this, it re-indexes the transcript so only kept
+    words remain (with new contiguous indices [0..M-1]) and feeds that
+    perfect transcript to the SECOND call.
+    """
+    notes: str
+    remove_words: List[_RemoveWord]
+    pacing: Literal["fast", "medium", "slow"]
+
+
+class PostCutPlan(BaseModel):
+    """Schema for the SECOND Gemini call — visual placement on a perfect transcript.
+
+    By construction, this call only ever sees the kept-only transcript with
+    new contiguous indices [0..M-1]. Cut words don't exist in this index
+    space — anchor-on-cut is physically impossible because there's no way
+    to reference a word that isn't there. Word indices in this output
+    reference the kept-only space; Python translates them back to source
+    indices after the call returns.
+    """
+    caption_style: _CAPTION_STYLES
+    caption_keywords: List[str]
+    emphasis_moments: List[_EmphasisMoment]
+    transitions: List[_Transition]
+    sound_effects: List[_SoundEffect]
+    motion_graphics: List[_MotionGraphic]
+    text_overlays: List[_TextOverlay]
+    broll_clips: List[_BrollClip]
+    caption_position_changes: List[_CaptionPositionChange]
+    thumbnail_word_index: int
+    audio_denoise: bool
+    outro: Literal["none", "fade_black", "fade_white"]
+    aspect_ratio: Literal["9:16"]
+
+
 class EditPlan(BaseModel):
-    """Structural contract for Gemini's edit-plan output.
+    """Final merged shape consumed by downstream renderer code.
 
-    Passed to generate_content as response_json_schema so invalid outputs
-    are rejected at decode time. Cross-field semantic constraints (e.g.
-    word_indices must reference kept words) still live in Python validators.
-
-    FIELD ORDER MATTERS. JSON is generated top-to-bottom; each field's
-    output flows into the model's working context for every field below it.
-    The order here mirrors the order a human editor works:
-      1. Reasoning  (notes)
-      2. Decide cuts FIRST  (remove_words) — every anchor below sees them
-      3. Set overall pace  (pacing)
-      4. Pick visual identity  (caption_style + caption_keywords)
-      5. Place the spine  (emphasis_moments) — the 2-5 strongest beats
-      6. Mark scene boundaries  (transitions)
-      7. Layer audio on emphasis  (sound_effects)
-      8. Reinforce moments visually  (motion_graphics)
-      9. Add chapter cards / hooks  (text_overlays)
-      10. Cover dialogue with cutaways  (broll_clips)
-      11. Position captions around MGs / face  (caption_position_changes)
-      12. Pick the strongest still  (thumbnail_word_index)
-      13. Settings  (audio_denoise / outro / aspect_ratio)
-
-    Reordering this without keeping the prompt sections in lockstep with it
-    will reintroduce the anchor-on-cut pattern that this order eliminates.
+    This is NOT a Gemini output schema in the two-pass architecture — it's
+    the dict shape Python builds by merging CutPlan + PostCutPlan after
+    anchor translation. Kept as a Pydantic model for type clarity and
+    documentation; not passed as response_json_schema to any Gemini call.
     """
     notes: str
     remove_words: List[_RemoveWord]
@@ -300,19 +323,21 @@ class EditPlan(BaseModel):
     aspect_ratio: Literal["9:16"]
 
 
-# ── Cutting architecture ────────────────────────────────────────────────────
-# Gemini owns every cut decision. There is no Python-side filler / stutter /
-# phrasal-restart / dead-air pre-pass — pattern matchers cannot tell the
-# difference between an abandoned restart and a rhetorical repetition, so any
-# pre-pass risks killing valuable content the main edit Gemini would have
-# kept (see "I said who is, I said who is, he?" — pre-passes cut both
-# occurrences leaving "he?" floating).
+# ── Two-pass cutting + placement architecture ──────────────────────────────
+# Call 1 (CutPlan, LOW thinking): tiny prompt focused on cut rules. Decides
+# remove_words + pacing. ~5s on Flash with the small prompt.
 #
-# The main edit call sees the full Deepgram transcript. Its `remove_words`
-# field carries every cut: filler tokens, stutters, abandoned restarts,
-# silence ranges, tangents — single source of truth. Python applies them
-# verbatim at sample-precise Deepgram timestamps; no refinement, no buffer,
-# no crossfade.
+# Python then re-indexes the transcript: only kept words survive, freshly
+# numbered [0..M-1]. New_idx → src_idx map kept for translation.
+#
+# Call 2 (PostCutPlan, MEDIUM thinking): main edit prompt minus the cut
+# section, run on the kept-only transcript. Anchor word_indices come from
+# the new index space — physically cannot reference a cut word because
+# cut words don't exist in this space.
+#
+# After Call 2 returns, Python translates every word_index field from new
+# indices back to source indices, then merges CutPlan + PostCutPlan into
+# EditPlan and continues with the existing downstream pipeline.
 
 
 print(f"[startup] Python {sys.version}", flush=True)
@@ -2007,22 +2032,229 @@ def _build_face_signals(face_positions, deepgram_words, duration):
     return face_visibility, speaker_positions, off_center, shot_scale
 
 
-def build_gemini_edit_prompt(
+def _build_cuts_prompt(vibe, duration):
+    """Tight system prompt for the FIRST Gemini call — cuts only.
+
+    This call has one job: decide which words/ranges to remove from the full
+    Deepgram transcript. Output is small (CutPlan: notes + remove_words +
+    pacing) so the call is fast on LOW thinking. Visual placement is the
+    SECOND call's job and is already excluded from this prompt.
+    """
+    system_instruction = """You are deciding which words to cut from a talking-head video transcript. You can see the full source video at 5 frames per second and you can hear every word. Output ONLY a JSON object with three fields: notes (brief reasoning, <=40 words), remove_words (the cut list), pacing ("fast" | "medium" | "slow"). A second AI call handles ALL visual placement — captions, motion graphics, B-roll, transitions, zooms, SFX, thumbnail. You are not making any visual decisions in this call.
+
+=== WORD EDITING — YOU OWN EVERY CUT ===
+
+remove_words — REQUIRED ARRAY. The transcript you see is the FULL Deepgram output, every word indexed [0..N-1]. Python applies your cuts verbatim. There is no second pass.
+
+DEFAULT IS KEEP. Only cut when removal makes the dialogue OBJECTIVELY tighter without losing meaning, sequence, or causation. There is NO target cut count. Clean talkers may yield 3 cuts on a 60-second clip; filler-heavy interviews may yield 30+. The right number is whatever makes the dialogue unambiguously better — never a quota.
+
+A correct cut passes this test: a listener hearing only the output cannot tell anything was removed. If a cut creates a noticeable rhythm break, awkward pause, or grammatical bump, it was wrong. WHEN IN DOUBT, KEEP.
+
+WHAT TO CUT — apply each rule ONLY when its specific signature is present:
+
+1. HESITATION TOKENS — single-word cut, always:
+   "um", "uh", "hmm", "er", "ah", "uhh", "uhm", "umm", "erm".
+
+2. TRAILING-DASH FALSE STARTS — Deepgram tags incomplete words with a hyphen:
+   "wh-", "shou-", "th-". Always cut.
+
+3. STUTTERS — same word repeated 2+ times in rapid succession (gap < 80 ms or first instance < 200 ms long).
+
+   THE RULE — find the instance that FLOWS INTO THE REAL SENTENCE. That's the keeper. Cut every other instance.
+
+   Two instances "I I told mommy" at words [61, 62, 63, 64]:
+     The keeper is [62] — the "I" followed by "told mommy" (the real sentence).
+     CUT [61]. KEEP [62].
+     Output: "I told mommy."
+
+   Three instances "I'm I'm I'm gonna leave" at words [161, 162, 163, 164, 165]:
+     The keeper is [163] — only this "I'm" is followed by "gonna leave" (the real sentence). The first two are stutter throat-clearing before the speaker landed.
+     CUT [161, 162]. KEEP [163].
+     Output: "I'm gonna leave for the rest of my life."
+
+     COMMON FAILURE: cutting [162, 163] instead. That leaves [161] alone, followed by 0.5s of silence (where the cut words used to be), then "gonna leave". The first "I'm" is now disconnected from "gonna leave" — sounds like the speaker trailed off. WRONG. Always cut the EARLIER instances, keep the LATEST.
+
+   Phoneme false-start "should shouldn't": the second "shouldn't" is the real word; the first "should" was abandoned mid-pronunciation. Cut "should".
+
+   Rhetorical emphasis with audible space ("very, very good", "now, now hold on", normal pacing): both instances are intentional. KEEP both.
+
+4. PHRASAL RESTARTS — speaker abandons a phrase and re-attempts it. PATTERN:
+   <abandoned phrase> [tiny gap, breath, or filler bridge] <SAME phrase EXTENDED with NEW continuation>
+
+   THE TWO PHRASES ARE NEAR-IDENTICAL IN WORDS. THE FIRST ENDS NOWHERE. THE SECOND CONTINUES INTO A COMPLETED THOUGHT.
+
+   How to identify in the transcript:
+     a. Find adjacent regions where the same word sequence appears twice.
+     b. Look at what comes AFTER each instance:
+        - First instance is followed by a near-repeat of the same words → that first instance is the ABANDONED attempt.
+        - Second instance is followed by NEW words that complete the thought → that second instance is the COMPLETED one.
+     c. CUT the abandoned (FIRST) instance. KEEP the completed (SECOND) instance with its continuation.
+     d. Anything BETWEEN them ("like", "uh", a breath) is orphan filler → CUT.
+
+   WORKED EXAMPLE A — DO THIS EXACTLY:
+     Transcript: "...where did you hear that name? I said, who is — I said, who is he?"
+       [139] I       \\
+       [140] said,    | ← FIRST instance ("I said, who is"). ABANDONED.
+       [141] who      |   CUT ALL FOUR.
+       [142] is      /
+       [143] I       \\
+       [144] said,    | ← SECOND instance, continues into "he?". COMPLETED.
+       [145] who      |   KEEP THESE FIVE.
+       [146] is       |
+       [147] he?     /
+     Correct: remove_words includes word_indices [139, 140, 141, 142].
+
+     FAILURE MODE — partial cut. If you cut only [141, 142] (just the verbatim-duplicated "who is"), you LEAVE [139, 140] "I said," still in the dialogue. The output becomes "I said, [pause] I said, who is he?" — the duplicate "I said" is still on screen, the cut accomplished nothing. The boundary of the abandoned phrase runs from its FIRST word ([139] "I") through its LAST word before the second attempt ([142] "is"). Cut all four. Don't stop at the duplicated portion.
+
+     FAILURE MODE — wrong direction. Cutting [143, 144, 145, 146] (the second instance) leaves "I said, who is — he?" — the abandoned phrase plus a fragment. The rule is always CUT THE FIRST.
+
+   WORKED EXAMPLE B — DO THIS EXACTLY:
+     Transcript: "...calling me, like, calling me every 5 seconds..."
+       [197] calling \\
+       [198] me,      | ← FIRST instance. ABANDONED.
+       [199] like,    | ← orphan filler bridge.
+       [200] calling \\
+       [201] me       | ← SECOND instance, continues into "every 5 seconds".
+       [202] every  ...
+     Correct: remove_words includes [197, 198, 199].
+     Result heard by viewer: "calling me every 5 seconds" — clean.
+
+     FAILURE MODE — half cut. Cutting only [199] "like" leaves "calling me, calling me every 5 seconds" — the duplicate is still there. Always cut the entire abandoned phrase plus its bridge filler.
+
+   PARALLEL STRUCTURE IS NOT A RESTART. If both phrases end with sentence-ending punctuation (?!.) BEFORE the next begins, neither was abandoned — that's intentional rhetorical parallelism:
+     "What are you gonna do? What are you gonna learn?"
+     "I went, I saw, I conquered."
+     "I told you. I told you again."
+   KEEP both. Cutting parallel structure destroys the rhetorical device.
+
+5. CONTEXTUAL FILLER — DEFAULT IS KEEP. Cut ONLY when the word is provably meaningless. Both signatures must hold:
+   (a) The word is pause-bracketed in delivery — there's audible space (>200 ms gap) on BOTH sides, or it's set off by commas in the transcript.
+   (b) Removing it leaves NO semantic, causal, or sequential gap — the surrounding sentence still says exactly the same thing.
+
+   - "I'm, like, totally exhausted" — "like" is pause-bracketed AND removing it doesn't change meaning. CUT "like".
+   - "they're like family to me" — "like" is a simile here, removing it changes meaning. KEEP.
+   - "So, anyway, I went..." — "anyway" is filler. CUT.
+
+   MULTI-WORD FILLERS ARE PHRASAL UNITS — cut every word of the phrase together, never just one:
+     "you know"  → cut both words. "What are you gonna learn? You know? What are you gonna play?" → cut [45, 46] together (BOTH "You" and "know?"). Cutting only [46] leaves "You" hanging at the end of the prior thought — sounds like the speaker trailed off mid-sentence.
+     "I mean"    → cut both words.
+     "kind of"   → cut both words.
+     "sort of"   → cut both words.
+   These are phrases, not individual fillers. Cut as a unit or don't cut at all.
+
+   CONJUNCTIONS BETWEEN CLAUSES ARE NOT FILLER. They carry sequence, causation, or contrast and almost always KEEP:
+     "and"     → sequence ("She was sleeping, AND I kicked the bed.")
+     "so"      → causation ("I felt electrocuted, SO I wiped the cream off.")
+     "but"     → contrast ("She said no, BUT I kept asking.")
+     "because" → reason
+     "then"    → temporal sequence
+
+   When two clauses describe a single beat, causal chain, or sequence of events, the conjunction stays. Removing it runs the clauses together and breaks the rhythm.
+
+   CONJUNCTION LITMUS TEST: read the two clauses with the conjunction removed. If the result reads as two separate sentences that were just shoved together, KEEP the conjunction.
+     "I felt electrocuted. I wiped the cream off."   ← runs together. KEEP "so".
+     "She was sleeping. I kicked the bed."           ← runs together. KEEP "and".
+     "Got in the car. I went to work."               ← runs together. KEEP "and".
+
+   SENTENCE-OPENING "AND" / "SO" / "BUT" — context-dependent:
+     - If the speaker is mid-story and "And then..." continues a single arc → KEEP. Narrative cohesion matters.
+     - If the prior thought was fully completed (long pause + topic shift) and the opener is just throat-clearing → CUT.
+     - Pure bridge openers like "So, [pause] yeah..." that lead nowhere → CUT.
+     - The very FIRST word of the video, if it's "So", "And", "Like" with no prior context → CUT.
+
+   "JUST" / "REALLY" / "ACTUALLY" — context-dependent:
+     - Pause-bracketed OR clearly used as throat-clearing → CUT.
+     - Carries emphasis or distinguishes degree ("I just barely made it" / "she really hates it") → KEEP.
+
+6. REDUNDANT RESTATEMENT — same idea expressed twice in close succession with no new information:
+     "she was angry — she was so mad" → cut the weaker phrasing.
+   Do NOT confuse with rhetorical emphasis where the repetition IS the point ("I told her once. I told her twice. I told her three times.").
+
+7. DEAD AIR / SILENCE — TIME-RANGE cuts only.
+
+   STRICT BOUNDARY RULE — the range MUST land on real word boundaries from the transcript, exactly:
+     - "start" MUST equal some word[i].end timestamp shown in the transcript above.
+     - "end" MUST equal some word[i+1].start timestamp shown in the transcript above.
+     - Compute gap = word[i+1].start - word[i].end. Emit a range cut ONLY when gap > 0.30s.
+     - The range you emit is exactly [word[i].end, word[i+1].start] — nothing else.
+
+   THE WORST ERROR YOU CAN MAKE: emitting a range whose [start, end] interval contains any word's [start, end] timestamps. The renderer treats range cuts as "remove every word fully inside this interval" — if you accidentally span a spoken word, that word is silently deleted from the dialogue.
+
+   VERIFY EACH RANGE before emitting:
+     1. Find word[i] (the word immediately before your range) and word[i+1] (the word immediately after).
+     2. Confirm range.start == word[i].end EXACTLY.
+     3. Confirm range.end == word[i+1].start EXACTLY.
+     4. Confirm no other word's [start, end] falls inside [range.start, range.end].
+
+   Sub-300 ms breath-gaps inside continuous speech are NATURAL CADENCE, not silence. KEEP them — the output won't feel choppy. Only the long pauses (>=0.3s, often >=0.5s) read as dead air to the viewer.
+
+ENTRY FORMAT
+  - Single word:   {"word_index": int, "reason": "filler"|"stutter"|"restart"|"redundant"|"orphan_filler"|"breath"|"other"}
+  - Time range:    {"start": float, "end": float, "reason": "dead_air"|"breath"|"tangent"|"section_skip"|"other"}
+
+Range cuts and word cuts coexist — a range cut removes every word fully contained in [start, end]; partial overlaps keep the word.
+
+=== COLD OPEN — LEAD WITH THE STRONGEST MOMENT ===
+
+The first 2 seconds of any short-form video are an audition — the viewer decides whether to keep watching or scroll. After your cuts are applied, the FIRST KEPT WORDS are what the viewer hears in those critical 2 seconds. Lead with strength.
+
+If the speaker's strongest moment (punchline, reveal, emotional peak) lives mid-video, REMOVE the setup leading up to it via a time-range cut so the kept transcript opens on the punchline. The post-cut visual call will see your kept transcript and treat its first words as cut[0] — the cold open.
+
+  - If the strongest moment is at source second 35, emit a range cut covering [0.0, ~34.5] (snapped to word boundaries) so kept[0] is the punchline word.
+  - The lead-up can return as later kept material — Python builds clips chronologically from kept words, so cuts after second 35 fill in narrative AFTER the cold-open hits.
+  - If the source genuinely opens with a strong moment, leave the start alone — kept[0] is already the first source word.
+
+=== PACING DECISION ===
+
+pacing — REQUIRED, one of "fast" | "medium" | "slow". This is a global rhythm signal that downstream code uses to set the silence-tightening threshold (smaller threshold = tighter jump cuts).
+
+  - "fast" — TikTok/Reels short-form default. Sub-60s talking-head, viral storytelling, hustle, comedy, narrative POV. Most videos.
+  - "medium" — interview, podcast, educational, walkthrough. The content needs breathing room between beats.
+  - "slow" — genuinely contemplative content (cinematic, documentary, meditative). Rare.
+
+Default to "fast" unless the vibe explicitly contradicts it.
+
+=== NOTES FIELD ===
+
+notes — string <=40 words. One sentence on what you cut and why (e.g. "Cut 4 stutters, 2 phrasal restarts, opening "so", and a 2.1s dead-air gap; led with the punchline at second 35.").
+
+=== RESPONSE FORMAT ===
+
+Output ONLY a JSON object — no commentary, no markdown fences, no prose.
+
+{
+  "notes": "<=40 words>",
+  "remove_words": [
+    {"word_index": int, "reason": "filler"|"stutter"|"restart"|"redundant"|"orphan_filler"|"breath"|"other"},
+    {"start": float, "end": float, "reason": "dead_air"|"breath"|"tangent"|"section_skip"|"other"}
+  ],
+  "pacing": "fast" | "medium" | "slow"
+}"""
+
+    user_content = (
+        f"The user's vibe: {vibe}\n"
+        f"Source duration: {duration:.1f} seconds.\n\n"
+        f"Make ONLY cut decisions. The next AI call handles every visual element."
+    )
+
+    return system_instruction, user_content
+
+
+def _build_post_cuts_prompt(
     vibe, duration, trend_context=None,
     shot_changes=None, vocal_emphasis=None, source_loudness=None,
     face_visibility=None, speaker_positions=None, off_center=False,
     shot_scale=None, user_style_profile=None,
 ):
-    """
-    Gemini prompt for the Remotion-primary pipeline.
+    """Gemini prompt for the SECOND call — visual placement on a kept-only transcript.
 
-    Philosophy: every visual decision is Gemini's. The renderer is a pure
-    executor — it does not clamp, buffer, repair, mutate, or substitute
-    defaults. If Gemini emits something invalid, the render fails — the
-    prompt is the single point of intelligence.
+    The first Gemini call already decided cuts. This call sees the kept-only
+    transcript renumbered [0..M-1]; every word_index it emits lands on a word
+    that survives into the rendered video by construction. Anchor-on-cut is
+    physically impossible because cut words don't exist in this index space.
 
     Signals fed alongside the video:
-      - Deepgram word timestamps with speaker IDs (injected by generate_edit_gemini)
+      - Kept-only transcript with new contiguous indices (injected by generate_edit_gemini)
       - shot_changes       — source-time seconds where the footage cuts
       - vocal_emphasis     — source-time RMS peaks (loud word hits)
       - source_loudness    — peak / rms / noise_floor dB stats
@@ -2176,27 +2408,29 @@ SPEAKER POSITIONS (where each speaker sits in frame, by diarization + face detec
     # injected via the USER message below.
     system_instruction = f"""You are a professional short-form video editor working on a 1080x1920 (9:16) vertical video for TikTok, Instagram Reels, and YouTube Shorts. You watch the full video at 5 frames per second — you see every shot, every face, every gesture, every on-screen element. You hear every word.
 
-Your job: produce an edit plan that looks professionally crafted — every cut, every caption move, every zoom, every motion graphic has a narrative reason. Not random. Not accidental. Intentional.
+Your job: place every visual element — captions, motion graphics, B-roll, transitions, zooms, SFX, thumbnail — so the edit looks professionally crafted. Every choice is anchored to specific words in the dialogue. Not random. Not accidental. Intentional.
+
+A previous AI call already decided the cuts (filler, stutters, restarts, dead air). The transcript you see below is the KEPT-ONLY transcript with words renumbered contiguously [0..M-1]. There are no removed words in this index space — every index you emit lands on a word that survives into the rendered video. You do not make any cut decisions in this call.
 
 === HOW TO THINK ABOUT THIS EDIT ===
 
-What does the user actually want? They want to watch the finished video and feel like a professional editor understood their footage and made it look incredible. The edit should feel intentional — every cut, every speed change, every sound has a reason.
+What does the user actually want? They want to watch the finished video and feel like a professional editor understood their footage and made it look incredible. The edit should feel intentional — every caption move, every zoom, every sound has a reason.
 
 As you watch, pay attention to:
   - Where the content changes (speaker → screen recording, topic shifts, visual changes)
-  - Where the energy peaks (strong statements, reveals, punchlines) and where it dips (filler, transitions between ideas, breaths)
+  - Where the energy peaks (strong statements, reveals, punchlines) and where it dips (transitions between ideas, breaths)
   - Where the viewer's attention would drift without intervention
   - What's already baked into the footage (burned-in captions, existing text, graphics)
 
-You are the editor. You decide what stays and what gets cut. You understand the emotion and humor of what's being said. You know the difference between filler and content that matters.
+You are the editor. You understand the emotion and humor of what's being said. You decide where every visual element lands.
 
 === WHAT MAKES SHORT-FORM CONTENT FEEL EDITED ===
 
-The opening is an audition. The first 2 seconds must give the viewer a reason to stay — a visual event, a sonic hit, tight framing, text that creates curiosity. Something that signals this isn't raw footage. cut[0] must be the strongest attention-grabbing moment — see the OPENING section below for placement rules. Don't bury the lede.
+The opening is an audition. The first 2 seconds must give the viewer a reason to stay — a visual event, a sonic hit, tight framing, text that creates curiosity. The cut decisions already led with the strongest moment; your visual layer makes that opening land — a tight zoom, a TornPaper hook card, a hard SFX hit on the first kept word.
 
-Pacing creates rhythm. For short-form content, the average kept clip should be 2-3 seconds. The Captions app and top TikTok editors cut every 2-3 seconds — this is the standard. Filler and setup move even faster (1-2s). Key moments — reveals, punchlines, important statements — breathe (3-4s max). The contrast between fast and slow is what makes pacing feel alive. When in doubt, cut shorter.
+Pacing creates rhythm. The kept transcript is already tight; your captions, transitions, and emphasis moments give that rhythm visual punctuation. Identify the 2-5 hardest-hitting beats — every other layer (caption_style, transitions, B-roll, SFX) should orbit those beats.
 
-Emphasis moments are the spine. The 2-5 hardest-hitting beats determine whether the edit feels professional or amateur. Identify them first — every other layer (caption_style, transitions, B-roll, per-clip speed, SFX) should orbit those beats.
+Emphasis moments are the spine. The 2-5 hardest-hitting beats determine whether the edit feels professional or amateur.
 
 Sound design adds texture. A sound effect on a punchline, a whoosh on a scene change, a boom when a statement lands — these make cuts feel physical instead of digital. But not every cut needs a sound. Continuous speech flows best with silent hard cuts.
 
@@ -2207,14 +2441,14 @@ The ending matters. On these platforms, videos auto-loop. A clean ending that fl
 The pipeline enforces these rules with strict validators. Output that violates any rule is rejected.
 
 1. POSITIONS ARE SEMANTIC ZONES. Use the named zones from the vocabulary (`upper_third_safe`, `center`, `lower_third_safe`, `left_safe`, `right_safe`). Pixel coordinates are not accepted.
-2. EVERY TIMING IS WORD-ANCHORED. You never emit raw float timestamps. Anchor every time-based decision to a specific kept word via its index (start_word_index, end_word_index, word_index, word_indices, after_word_index, thumbnail_word_index). Python derives all float timestamps from word start/end times. The only float fields in your output are non-time values like `duration_seconds` (overlay lifespan), `intensity`, `scale`, and `speed`.
+2. EVERY TIMING IS WORD-ANCHORED. You never emit raw float timestamps. Anchor every time-based decision to a specific word via its index (start_word_index, end_word_index, word_index, word_indices, after_word_index, thumbnail_word_index). Python derives all float timestamps from word start/end times. The only float fields in your output are non-time values like `duration_seconds` (overlay lifespan), `intensity`, `scale`, and `speed`.
 3. EVERY TEXT OVERLAY HAS A VARIANT + ITS REQUIRED PROPS. The `variant` field chooses which visual treatment; each variant has a specific set of required props documented in the TEXT OVERLAYS section.
-4. CAPTIONS ARE WORD-ANCHORED + FACE-AWARE. Emit `caption_position_changes` as an array of `{{word_index, position}}` events — each event says "at this kept word, captions move to this position." Python synthesizes the final segment list with exact word-start timestamps. You watch the video — when the speaker's face moves into the bottom of the frame (looking down, leaning forward, low framing), emit a change to "top" at the first kept word in that window and back to "bottom" when the face returns up. Captions over the speaker's mouth are unreadable; place them so they never cover the face.
+4. CAPTIONS ARE WORD-ANCHORED + FACE-AWARE. Emit `caption_position_changes` as an array of `{{word_index, position}}` events — each event says "at this word, captions move to this position." Python synthesizes the final segment list with exact word-start timestamps. You watch the video — when the speaker's face moves into the bottom of the frame (looking down, leaning forward, low framing), emit a change to "top" at the first word in that window and back to "bottom" when the face returns up. Captions over the speaker's mouth are unreadable; place them so they never cover the face.
 5. Z-ORDER YIELDS TO MOTION GRAPHICS — YOU OWN IT. Python does NOT auto-flip caption position for MG overlap. If a motion_graphic sits at "lower_third_safe" or any bottom-anchored zone across a window, you must emit a caption_position_change to "top" at the MG's start_word_index and back to "bottom" at the word immediately after end_word_index. Same rule for "center" MGs that visually cover the speaker.
 6. ZONE DISCIPLINE FOR OVERLAYS. Overlays in DIFFERENT visual zones can freely share a time window. Overlays in the SAME zone at the SAME time collide and are rejected. Each text_overlay variant renders into a fixed zone driven by its design (torn_paper / quote_card occupy the center band; sticky_note pins to upper_third_safe; caption_match follows its `position` prop). Motion_graphic zones come from the explicit `anchor` field — that's YOUR placement decision based on what's on screen during the MG's window. Two items collide only when their zones AND time windows both overlap. High-intensity emphasis moments are spaced ≥2.5s apart regardless of zone.
-7. ONE ZOOM PER KEPT-SOURCE CLIP. At most one emphasis_moment carries a zoom_effect within any single kept-source clip (the source range between your removed-words boundaries). When you want multiple zoom beats close together, stack their events onto a single emphasis_moment's `zoom_effect.events` array.
+7. ONE ZOOM PER KEPT-SOURCE CLIP. At most one emphasis_moment carries a zoom_effect within any single kept-source clip (the source range between word-gap boundaries). When you want multiple zoom beats close together, stack their events onto a single emphasis_moment's `zoom_effect.events` array.
 8. MOTION GRAPHIC ANCHORS ARE ABSOLUTE ZONES — FACE-AWARE. Every `motion_graphics[i].anchor` and `emphasis_moments[i].motion_graphic.anchor` is one of the 5 absolute zones. You watch the source video — look at where the speaker's face sits in the frame across the MG's word window and pick an anchor that does NOT cover the face. If the face is in the middle of the frame, do not anchor to "center". If the face is in the lower third, avoid "lower_third_safe". The MG renders exactly where you place it; there is no fallback.
-9. ANCHORS ARE KEPT WORDS. The transcript you see is the FULL Deepgram output, indexed [0..N-1]. Every word_index you emit (in `emphasis_moments[i].word_indices`, `sound_effects[i].word_index`, `text_overlays[i].start_word_index`, `motion_graphics[i].{{start,end}}_word_index`, `broll_clips[i].{{start,end}}_word_index`, `transitions[i].after_word_index`, `caption_position_changes[i].word_index`, `thumbnail_word_index`) references this same source index space. Any word you also list in remove_words is NOT a kept word and CANNOT be anchored. The renderer fails validation if you cross-reference a removed word.
+9. ANCHORS REFERENCE THE KEPT-ONLY INDEX SPACE. The transcript you see below is renumbered [0..M-1] — every word in it survives into the rendered video. Every word_index you emit (in `emphasis_moments[i].word_indices`, `sound_effects[i].word_index`, `text_overlays[i].start_word_index`, `motion_graphics[i].{{start,end}}_word_index`, `broll_clips[i].{{start,end}}_word_index`, `transitions[i].after_word_index`, `caption_position_changes[i].word_index`, `thumbnail_word_index`) references this same kept-only index space. Python translates these indices back to source-time when rendering.
 10. EXPLICIT NULLS. If an emphasis moment has no zoom, emit `"zoom_effect": null` — no downstream defaults fill gaps.
 
 === SAFE ZONES (1080x1920 canvas) ===
@@ -2342,10 +2576,8 @@ Pick keywords from across the ENTIRE transcript. If the back half has fewer keyw
 
 WHEN IN DOUBT: INCLUDE THE WORD. A keyword that doesn't fire visually is invisible; a missing keyword on a beat-landing word leaves the captions feeling flat. Sparse caption_keywords (under 1 per 10 words) is the most common failure mode — it makes every caption style look the same. Bias hard toward inclusion.
 
-caption_position_changes — REQUIRED ARRAY (can be empty). Position-change events, each at a specific kept word.
+caption_position_changes — REQUIRED ARRAY (can be empty). Position-change events, each at a specific word.
   Format: [{{"word_index": int, "position": "top" | "center" | "bottom"}}, ...]
-
-  ANCHOR CROSS-CHECK: every word_index MUST be a kept word. remove_words is at the top of your output. If you anchor a position change to a removed word, the change is dropped — orphan effect: caption moves at the wrong moment, or doesn't move when expected.
 
   Semantics:
     - Captions start at "bottom" by default.
@@ -2368,8 +2600,6 @@ caption_position_changes — REQUIRED ARRAY (can be empty). Position-change even
 Short framing text that appears 1-3 times per video (hook, chapter, quote, speaker attribution). NOT running captions. Each has a `variant` that picks a distinct visual treatment.
 
 text_overlays — REQUIRED ARRAY (can be empty).
-
-ANCHOR CROSS-CHECK: start_word_index MUST be a word you KEPT. You wrote remove_words at the top of this output — scroll back, look at it. If start_word_index is in that list, the overlay is dropped (the trigger word doesn't exist in the rendered video). The classic failure: anchoring a "THE CONFESSION" hook to word 0 'So', then also putting word 0 in remove_words because it's an opening filler. Result: the entire hook never appears. Pick a kept word.
 
 Each entry:
   {{
@@ -2421,11 +2651,9 @@ A video with no emphasis moments is a raw upload. A video with the right 3-5 emp
 
 emphasis_moments — ARRAY of 2-5 items. High-intensity moments must be ≥2.5s apart — each emphasis triggers a zoom punch, and when two zoom punches land within ~2.5 seconds the viewer sees rapid-fire zooming that looks BROKEN, not dramatic. Check every emphasis moment against the previous one before committing.
 
-ANCHOR CROSS-CHECK: every word_index in word_indices MUST be a word you KEPT. You wrote remove_words at the top of this output — scroll back, look at it. If any of these indices appears there, the emphasis moment is dropped. Pick different surviving words from the surrounding kept transcript.
-
 Each entry:
   {{
-    "word_indices": [int, ...],          # 1-3 Deepgram word indices that ARE the emphasis. Every index must target a word you are KEEPING — a word you also emit in remove_words cannot be emphasized. The pipeline derives the emphasis timestamp from word_indices[0].start; you do not emit a separate `t` field.
+    "word_indices": [int, ...],          # 1-3 word indices in the kept-only space that ARE the emphasis. The pipeline derives the emphasis timestamp from word_indices[0].start; you do not emit a separate `t` field.
     "type": "punchline" | "revelation" | "statement" | "reaction" | "question",
     "intensity": "high" | "medium",
     "duration": float,                   # output-seconds the visual hit lasts, 1.5 - 3.0
@@ -2580,183 +2808,9 @@ Types, descriptions, use cases, and REQUIRED props (in the schema below, keys en
 
 (All MG usage rules — when, where, how, anti-patterns — are covered in the "MOTION GRAPHICS — HOW TO USE THEM" section above this catalog. Re-read it if you're picking an MG; the catalog only documents what each type IS, not when to reach for it.)
 
-=== WORD EDITING — YOU OWN EVERY CUT ===
-
-remove_words — REQUIRED ARRAY. THIS IS THE ONLY CUT AUTHORITY. The transcript you see is the FULL Deepgram output, every word indexed [0..N-1]. Python applies your cuts verbatim. There is no second pass.
-
-DEFAULT IS KEEP. Only cut when removal makes the dialogue OBJECTIVELY tighter without losing meaning, sequence, or causation. There is NO target cut count. Clean talkers may yield 3 cuts on a 60-second clip; filler-heavy interviews may yield 30+. The right number is whatever makes the dialogue unambiguously better — never a quota.
-
-A correct cut passes this test: a listener hearing only the output cannot tell anything was removed. If a cut creates a noticeable rhythm break, awkward pause, or grammatical bump, it was wrong. WHEN IN DOUBT, KEEP.
-
-WHAT TO CUT — apply each rule ONLY when its specific signature is present:
-
-1. HESITATION TOKENS — single-word cut, always:
-   "um", "uh", "hmm", "er", "ah", "uhh", "uhm", "umm", "erm".
-
-2. TRAILING-DASH FALSE STARTS — Deepgram tags incomplete words with a hyphen:
-   "wh-", "shou-", "th-". Always cut.
-
-3. STUTTERS — same word repeated 2+ times in rapid succession (gap < 80 ms or first instance < 200 ms long).
-
-   THE RULE — find the instance that FLOWS INTO THE REAL SENTENCE. That's the keeper. Cut every other instance.
-
-   Two instances "I I told mommy" at words [61, 62, 63, 64]:
-     The keeper is [62] — the "I" followed by "told mommy" (the real sentence).
-     CUT [61]. KEEP [62].
-     Output: "I told mommy."
-
-   Three instances "I'm I'm I'm gonna leave" at words [161, 162, 163, 164, 165]:
-     The keeper is [163] — only this "I'm" is followed by "gonna leave" (the real sentence). The first two are stutter throat-clearing before the speaker landed.
-     CUT [161, 162]. KEEP [163].
-     Output: "I'm gonna leave for the rest of my life."
-
-     COMMON FAILURE: cutting [162, 163] instead. That leaves [161] alone, followed by 0.5s of silence (where the cut words used to be), then "gonna leave". The first "I'm" is now disconnected from "gonna leave" — sounds like the speaker trailed off. WRONG. Always cut the EARLIER instances, keep the LATEST.
-
-   Phoneme false-start "should shouldn't": the second "shouldn't" is the real word; the first "should" was abandoned mid-pronunciation. Cut "should".
-
-   Rhetorical emphasis with audible space ("very, very good", "now, now hold on", normal pacing): both instances are intentional. KEEP both.
-
-4. PHRASAL RESTARTS — speaker abandons a phrase and re-attempts it. PATTERN:
-   <abandoned phrase> [tiny gap, breath, or filler bridge] <SAME phrase EXTENDED with NEW continuation>
-
-   THE TWO PHRASES ARE NEAR-IDENTICAL IN WORDS. THE FIRST ENDS NOWHERE. THE SECOND CONTINUES INTO A COMPLETED THOUGHT.
-
-   How to identify in the transcript:
-     a. Find adjacent regions where the same word sequence appears twice.
-     b. Look at what comes AFTER each instance:
-        • First instance is followed by a near-repeat of the same words → that first instance is the ABANDONED attempt.
-        • Second instance is followed by NEW words that complete the thought → that second instance is the COMPLETED one.
-     c. CUT the abandoned (FIRST) instance. KEEP the completed (SECOND) instance with its continuation.
-     d. Anything BETWEEN them ("like", "uh", a breath) is orphan filler → CUT.
-
-   WORKED EXAMPLE A — DO THIS EXACTLY:
-     Transcript: "...where did you hear that name? I said, who is — I said, who is he?"
-       [139] I       \\
-       [140] said,    | ← FIRST instance ("I said, who is"). ABANDONED.
-       [141] who      |   CUT ALL FOUR.
-       [142] is      /
-       [143] I       \\
-       [144] said,    | ← SECOND instance, continues into "he?". COMPLETED.
-       [145] who      |   KEEP THESE FIVE.
-       [146] is       |
-       [147] he?     /
-     Correct: remove_words includes word_indices [139, 140, 141, 142].
-
-     FAILURE MODE — partial cut. If you cut only [141, 142] (just the verbatim-duplicated "who is"), you LEAVE [139, 140] "I said," still in the dialogue. The output becomes "I said, [pause] I said, who is he?" — the duplicate "I said" is still on screen, the cut accomplished nothing. The boundary of the abandoned phrase runs from its FIRST word ([139] "I") through its LAST word before the second attempt ([142] "is"). Cut all four. Don't stop at the duplicated portion.
-
-     FAILURE MODE — wrong direction. Cutting [143, 144, 145, 146] (the second instance) leaves "I said, who is — he?" — the abandoned phrase plus a fragment. The rule is always CUT THE FIRST.
-
-   WORKED EXAMPLE B — DO THIS EXACTLY:
-     Transcript: "...calling me, like, calling me every 5 seconds..."
-       [197] calling \\
-       [198] me,      | ← FIRST instance. ABANDONED.
-       [199] like,    | ← orphan filler bridge.
-       [200] calling \\
-       [201] me       | ← SECOND instance, continues into "every 5 seconds".
-       [202] every  ...
-     Correct: remove_words includes [197, 198, 199].
-     Result heard by viewer: "calling me every 5 seconds" — clean.
-
-     FAILURE MODE — half cut. Cutting only [199] "like" leaves "calling me, calling me every 5 seconds" — the duplicate is still there. Always cut the entire abandoned phrase plus its bridge filler.
-
-   PARALLEL STRUCTURE IS NOT A RESTART. If both phrases end with sentence-ending punctuation (?!.) BEFORE the next begins, neither was abandoned — that's intentional rhetorical parallelism:
-     "What are you gonna do? What are you gonna learn?"
-     "I went, I saw, I conquered."
-     "I told you. I told you again."
-   KEEP both. Cutting parallel structure destroys the rhetorical device.
-
-5. CONTEXTUAL FILLER — DEFAULT IS KEEP. Cut ONLY when the word is provably meaningless. Both signatures must hold:
-   (a) The word is pause-bracketed in delivery — there's audible space (>200 ms gap) on BOTH sides, or it's set off by commas in the transcript.
-   (b) Removing it leaves NO semantic, causal, or sequential gap — the surrounding sentence still says exactly the same thing.
-
-   ✓ "I'm, like, totally exhausted" — "like" is pause-bracketed AND removing it doesn't change meaning. CUT "like".
-   ✗ "they're like family to me" — "like" is a simile here, removing it changes meaning. KEEP.
-   ✓ "So, anyway, I went..." — "anyway" is filler. CUT.
-
-   MULTI-WORD FILLERS ARE PHRASAL UNITS — cut every word of the phrase together, never just one:
-     "you know"  → cut both words. "What are you gonna learn? You know? What are you gonna play?" → cut [45, 46] together (BOTH "You" and "know?"). Cutting only [46] leaves "You" hanging at the end of the prior thought — sounds like the speaker trailed off mid-sentence.
-     "I mean"    → cut both words.
-     "kind of"   → cut both words.
-     "sort of"   → cut both words.
-   These are phrases, not individual fillers. Cut as a unit or don't cut at all.
-
-   CONJUNCTIONS BETWEEN CLAUSES ARE NOT FILLER. They carry sequence, causation, or contrast and almost always KEEP:
-     "and"     → sequence ("She was sleeping, AND I kicked the bed.")
-     "so"      → causation ("I felt electrocuted, SO I wiped the cream off.")
-     "but"     → contrast ("She said no, BUT I kept asking.")
-     "because" → reason
-     "then"    → temporal sequence
-
-   When two clauses describe a single beat, causal chain, or sequence of events, the conjunction stays. Removing it runs the clauses together and breaks the rhythm.
-
-   CONJUNCTION LITMUS TEST: read the two clauses with the conjunction removed. If the result reads as two separate sentences that were just shoved together, KEEP the conjunction.
-     "I felt electrocuted. I wiped the cream off."   ← runs together. KEEP "so".
-     "She was sleeping. I kicked the bed."           ← runs together. KEEP "and".
-     "Got in the car. I went to work."               ← runs together. KEEP "and".
-
-   SENTENCE-OPENING "AND" / "SO" / "BUT" — context-dependent:
-     • If the speaker is mid-story and "And then..." continues a single arc → KEEP. Narrative cohesion matters.
-     • If the prior thought was fully completed (long pause + topic shift) and the opener is just throat-clearing → CUT.
-     • Pure bridge openers like "So, [pause] yeah..." that lead nowhere → CUT.
-     • The very FIRST word of the video, if it's "So", "And", "Like" with no prior context → CUT.
-
-   "JUST" / "REALLY" / "ACTUALLY" — context-dependent:
-     ✓ Pause-bracketed OR clearly used as throat-clearing → CUT.
-     ✗ Carries emphasis or distinguishes degree ("I just barely made it" / "she really hates it") → KEEP.
-
-6. REDUNDANT RESTATEMENT — same idea expressed twice in close succession with no new information:
-     "she was angry — she was so mad" → cut the weaker phrasing.
-   Do NOT confuse with rhetorical emphasis where the repetition IS the point ("I told her once. I told her twice. I told her three times.").
-
-7. DEAD AIR / SILENCE — TIME-RANGE cuts only.
-
-   STRICT BOUNDARY RULE — the range MUST land on real word boundaries from the transcript, exactly:
-     • "start" MUST equal some word[i].end timestamp shown in the transcript above.
-     • "end" MUST equal some word[i+1].start timestamp shown in the transcript above.
-     • Compute gap = word[i+1].start − word[i].end. Emit a range cut ONLY when gap > 0.30s.
-     • The range you emit is exactly [word[i].end, word[i+1].start] — nothing else.
-
-   THE WORST ERROR YOU CAN MAKE: emitting a range whose [start, end] interval contains any word's [start, end] timestamps. The renderer treats range cuts as "remove every word fully inside this interval" — if you accidentally span a spoken word, that word is silently deleted from the dialogue.
-
-   VERIFY EACH RANGE before emitting:
-     1. Find word[i] (the word immediately before your range) and word[i+1] (the word immediately after).
-     2. Confirm range.start == word[i].end EXACTLY.
-     3. Confirm range.end == word[i+1].start EXACTLY.
-     4. Confirm no other word's [start, end] falls inside [range.start, range.end].
-
-   Sub-300 ms breath-gaps inside continuous speech are NATURAL CADENCE, not silence. KEEP them — the output won't feel choppy. Only the long pauses (≥0.3s, often ≥0.5s) read as dead air to the viewer.
-
-ENTRY FORMAT
-  • Single word:   {{"word_index": int, "reason": "filler"|"stutter"|"restart"|"redundant"|"orphan_filler"|"breath"|"other"}}
-  • Time range:    {{"start": float, "end": float, "reason": "dead_air"|"breath"|"tangent"|"section_skip"|"other"}}
-
-ANCHOR INTEGRITY — any word_index you list in remove_words CANNOT be anchored elsewhere. The renderer fails validation if you anchor an emphasis_moment, motion_graphic, sound_effect, transition, broll_clip, text_overlay, or caption_position_change to a word you also removed.
-
-Range cuts and word cuts coexist — a range cut removes every word fully contained in [start, end]; partial overlaps keep the word.
-
-A low-value section that's too long to cut entirely but isn't punchline material → set that clip's `speed` to 1.30–1.40 to pace through it instead of cutting mid-clause.
-
-=== OPENING (cut[0]) ===
-
-The first 2 seconds of any short-form video are an audition — the viewer decides whether to keep watching or scroll. There is no auto-hook, no preview-then-replay structure (that pattern duplicates content and reads as amateurish; no professional editor or production tool does it).
-
-Instead: **cut[0] must be the strongest attention-grabbing moment in the video** — the punchline, the reveal, the most extreme reaction, the emotional peak. Don't bury the lede behind setup. The viewer should be hooked by what they see and hear in cut[0] alone.
-
-Concretely:
-  - cut[0]'s source range should contain a high-energy moment, not setup
-  - cut[0]'s `speed` should be 0.75–0.85x (the buildup-arrival pattern's "arrival" speed) so the moment lands with weight
-  - cut[0] should start with speech (not silence) — pick a source range whose first word lands within ~0.3s of source_start
-  - cut[0] should NOT need the rest of the video to make sense — that ambiguity is what keeps the viewer watching
-
-If the speaker's strongest moment is at source second 35, your cuts list does NOT have to start at 0. Start cut[0] at ~34.5 with the punchline; let cut[1] onward fill in the chronological narrative leading up to it (or skip back to the beginning, depending on the story shape). This is a "cold open" — the climax leads, the lead-up follows.
-
-If the source genuinely opens with a strong moment (e.g., the speaker walks in mid-rant), then cut[0] = source from 0 is fine. But this is rare; for most talking-head footage the strongest moment lives somewhere in the middle.
-
 === SFX — SOUND EFFECTS ===
 
-Sound effects amplify the speaker's energy at key moments. Emit as many as the content earns — there's no hard cap. Silence is BETTER than a wrong sound. Each entry: {{"word_index": int, "sound": <name>}} — you pick the kept word that triggers the SFX; the pipeline derives the exact timing from word.start.
-
-ANCHOR CROSS-CHECK: word_index MUST be a word you KEPT. You wrote remove_words at the top of this output — scroll back, look at it. If your word_index is in that list, the SFX is dropped (the trigger word doesn't exist in the rendered video). Pick a different surviving word.
+Sound effects amplify the speaker's energy at key moments. Emit as many as the content earns — there's no hard cap. Silence is BETTER than a wrong sound. Each entry: {{"word_index": int, "sound": <name>}} — you pick the word that triggers the SFX; the pipeline derives the exact timing from word.start.
 
 THE CORE RULE FOR EVERY SOUND: The word you anchor each sound to must BE the thing that makes that sound in reality. Not near it, not in the same sentence, not in the same phrase — the EXACT word that NAMES the action, object, or peak moment the sound represents. Before placing any sound, ask: "does this specific word literally refer to what this sound is?" If the word is a time word, a filler word, a pronoun, a conjunction, or a generic context word — even if the surrounding phrase fits — the sound belongs elsewhere or nowhere. One 1:1 match between word and sound, not a proximity match.
 
@@ -2842,8 +2896,6 @@ Pexels stock-footage cutaways that play OVER the speaker's dialogue. The viewer 
 
 broll_clips — ARRAY. {{"keyword": str (13-18 words), "start_word_index": int, "end_word_index": int, "reason": str}}
 
-ANCHOR CROSS-CHECK: start_word_index, end_word_index, and every word in [start, end] MUST be kept words. remove_words is field 2 above this one in the JSON — scroll back and verify none of the words in your B-roll range appear there. If any do, the B-roll spec drops or its window mis-aligns. Pick a range entirely inside the kept transcript.
-
 KEYWORD CONSTRUCTION:
   The VERB in the dialogue is the starting point. Build the keyword from the verb in the speaker's dialogue, then add the subject and setting around it. The clip doesn't need to show the EXACT scene — it just needs to visually CONNECT to what the speaker is describing. A phone ringing on a desk works for "she kept calling me." A man with a towel works for "I wiped my face." Good B-roll EVOKES the dialogue, it does not recreate it literally.
 
@@ -2886,8 +2938,6 @@ PLACEMENT DISCIPLINE:
 
 transitions — ARRAY. {{"after_word_index": int, "type": <name>, ...component props}}
 
-ANCHOR CROSS-CHECK: after_word_index MUST be a kept word. remove_words is field 2 above; verify your after_word_index is not in there. If it is, the transition drops and the cut between clips falls back to a hard cut.
-
 11 transitions — pick the one whose visual character fits the edit:
 
  1. "CardSwipe"      — Clip A swipes off with 3D tilt like dismissing a card. Clip B rises from behind.
@@ -2924,67 +2974,16 @@ ANCHOR CROSS-CHECK: after_word_index MUST be a kept word. remove_words is field 
   Place ON or near a shot_changes entry — that's where the viewer's eye expects a visual boundary.
   SceneTitle: 0-2 per video maximum (genuine chapter breaks only).
 
-=== PER-CLIP PACING (cut.speed) ===
-
-Each clip you emit has a `speed` field — a single constant playback rate that holds for the entire clip. Range: 0.7 to 1.4. This is your one and only pacing tool. There is no continuous speed curve, no ramp, no glide — every clip plays at one constant speed and the rhythm comes from the contrast between adjacent clips.
-
-THE EDITORIAL LOGIC — read this carefully:
-
-Pacing is storytelling. Speed UP a clip (1.2–1.4) when the content is moving TOWARD something — setup, context, transitions between beats, filler that earns its keep by getting out of the way fast. Slow DOWN a clip (0.7–0.85) when the content ARRIVES — the reveal, the punchline, the reaction, the emotional weight. Stay at 1.0 for narrative cruise — when neither building nor arriving.
-
-The CONTRAST between adjacent clips is what makes a moment land. A 1.25x clip cutting straight into a 0.75x clip on the punchline word is the entire effect. The viewer feels the deceleration as a hard transition, not a glide — that's the modern viral aesthetic, sharper than any smooth ramp.
-
-THE BUILDUP-ARRIVAL PATTERN (most important):
-
-A great emphasis isn't a single slow clip. It's a 2- or 3-cut sequence built from your `cuts` list:
-
-  Clip A — buildup at 1.20–1.30x
-           Ends just BEFORE the punchline word's start timestamp.
-           Carries the setup/context.
-
-  Clip B — arrival at 0.70–0.85x
-           Starts at the punchline word and runs 0.8–1.5 seconds.
-           Contains exactly the moment that matters.
-
-  Clip C — resume at 1.00x (or back to 1.20x if continuing momentum)
-           Picks up after the moment lands.
-
-Place Clips A→B→C as three adjacent entries in your `cuts` list. Use a hard cut or a SnapReframe / SmoothPush transition between A and B to drive the speed change visually.
-
-For every emphasis_moment you place, isolate the punchline word as its own clip at 0.7–0.85x. Don't bury an emphasis word inside a normal-speed clip — that flattens it. The emphasis_moment's `word_indices[0]` should land at or near the start of a slow-speed clip.
-
-DON'T:
-  - Use 1.0x for a clip containing an emphasis word — make it slow (0.7–0.85x).
-  - Use the same speed for every clip — pacing is created by contrast.
-  - Go below 0.7 (audio artifacts) or above 1.4 (looks like fast-forward, not pacing).
-  - Set every clip to fast or every clip to slow — without contrast, the effect dies.
-
-DO:
-  - Use 1.0x for the majority of clips (narrative cruise).
-  - Use 1.2–1.3x for setup/buildup clips that lead into a slow moment.
-  - Use 0.75x for the 1–2 clips per video that contain the hardest-hitting moment.
-  - Build 1–3 buildup-arrival sequences per 60 seconds of output.
-
-A typical 60-second video has: most clips at 1.0x, two or three clips at 1.20–1.30x (setup), and one or two clips at 0.75–0.85x (the moment lands). That's it.
-
-VIBE TUNING:
-  - If the vibe mentions "speed ramp", "speed ramping", "CapCut style", or "fast-paced edit", lean into MORE buildup-arrival sequences — every emphasis moment gets its own A→B→C trio, and the resume clip itself often runs at 1.20–1.30x to keep momentum. Aim for 3–5 buildup-arrival sequences per 60s instead of 1–3.
-  - If the vibe is contemplative, cinematic, interview, or documentary, dial pacing down: most clips at 1.0x, the occasional 0.85x for emphasis, and 1.10–1.20x only for clearly low-value setup. No 1.4x sprinting.
-  - If the vibe is purely informational/educational with no emotional peaks, you can leave every clip at 1.0x — pacing through speed contrast is optional, not mandatory.
-
 === GLOBAL FIELDS ===
 
 notes              — string <=50 words. Brief rationale.
 audio_denoise      — bool. true when noise_floor > -40 dB.
 outro              — "none" | "fade_black" | "fade_white". "none" best for looping.
 aspect_ratio       — always "9:16".
-pacing             — "fast" | "medium" | "slow". Default "fast" for short-form under 60s — TikTok/Reels live at 2-3s per cut. Use "medium" for interview/podcast/educational. Reserve "slow" for genuinely contemplative content.
 
 === THUMBNAIL ===
 
 thumbnail_word_index — int. The single most important visual decision in the entire edit. The thumbnail is what makes someone scrolling stop and click. A bad thumbnail tanks the video no matter how good the edit is.
-
-ANCHOR CROSS-CHECK: this index MUST be a kept word. remove_words is at the top of your output — verify the index is not in there. If it is, thumbnail extraction lands on a frame that doesn't exist in the rendered video.
 
 CRITICAL — DO NOT PICK THE PUNCHLINE WORD ITSELF.
 A common mistake is to pick the word whose timestamp lands ON the most dramatic moment. This is almost always WRONG because:
@@ -3027,9 +3026,8 @@ Pick the kept word whose start timestamp lands EXACTLY on the visual peak. The p
 Output ONLY a JSON object — no commentary, no markdown fences, no prose.
 
 {{
-  "notes": "<=50 words>",
   "thumbnail_word_index": int,
-  "caption_style": "<one of 21>",
+  "caption_style": "<one of 16>",
   "caption_keywords": ["<word>", "<word>", ...],
   "caption_position_changes": [
     {{"word_index": int, "position": "top" | "center" | "bottom"}},
@@ -3038,7 +3036,6 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
   "audio_denoise": bool,
   "outro": "none" | "fade_black" | "fade_white",
   "aspect_ratio": "9:16",
-  "pacing": "fast" | "medium" | "slow",
   "emphasis_moments": [
     {{
       "word_indices": [int, ...],
@@ -3063,34 +3060,10 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
   ],
   "motion_graphics": [
     {{"type": "<name>", "start_word_index": int, "end_word_index": int, "duration_seconds": float|null, "anchor": "<zone>", "props": {{...}}}}
-  ],
-  "remove_words": [
-    {{"start": float, "end": float, "reason": "section_skip"}}
   ]
 }}
 
-=== OUTPUT ORDER ===
-
-The schema generates fields top-to-bottom in this order. Each field below builds on every field above it:
-
-  1.  notes                         — your reasoning (set context, identify the spine)
-  2.  remove_words                   — DECIDE CUTS FIRST — every anchor below references the surviving words
-  3.  pacing                         — overall pace (fast / medium / slow)
-  4.  caption_style                  — visual identity
-  5.  caption_keywords               — keywords for the style
-  6.  emphasis_moments               — the 2-5 strongest beats
-  7.  transitions                    — major scene boundaries
-  8.  sound_effects                  — layer audio on emphasis
-  9.  motion_graphics                — visual reinforcement on specific moments
-  10. text_overlays                  — chapter / hook cards
-  11. broll_clips                    — cutaways during specific dialogue
-  12. caption_position_changes       — derived from where MGs / face land
-  13. thumbnail_word_index           — strongest still
-  14. audio_denoise / outro / aspect_ratio — settings
-
-By the time you write any anchor field (emphasis_moments[*].word_indices, transitions[*].after_word_index, sound_effects[*].word_index, motion_graphics[*].start_word_index/end_word_index, text_overlays[*].start_word_index, broll_clips[*].start_word_index/end_word_index, caption_position_changes[*].word_index, thumbnail_word_index), you have ALREADY committed your remove_words list above. Every anchor must reference a word that is NOT in remove_words. The renderer drops any element anchored to a removed word — silently in some cases, loudly in others. Either way, the element does not appear in the rendered video. You are responsible for not making this mistake; nothing else fixes it.
-
-Note: every anchor field in this schema is word-index-based. You never emit float timestamps that must match word boundaries — Python derives all timestamps from word indices."""
+Every anchor field is word-index-based and references the kept-only index space [0..M-1] shown in the transcript below. You never emit float timestamps — Python derives all timestamps from word indices and translates back to source-time when rendering."""
 
     user_content_parts = []
     user_content_parts.append(f"The user wants: {vibe}")
@@ -3236,6 +3209,277 @@ def _coalesce_caption_position_segments(segments, min_dur=1.5):
     return merged
 
 
+def _reindex_kept_transcript(deepgram_words, remove_words):
+    """Apply CutPlan.remove_words to the source transcript and renumber survivors.
+
+    Returns a tuple of:
+      kept_words   — list of source-word dicts that survive, in source order.
+      new_to_src   — list[int] mapping new_idx → src_idx for every kept word.
+      removed_src  — set[int] of source indices that were cut.
+
+    Range cuts are applied by the same rule the renderer uses: a word is
+    removed if its [start, end] is fully contained in [range.start, range.end].
+    Word-index entries remove that single source word.
+    """
+    if not deepgram_words:
+        return [], [], set()
+
+    removed_src = set()
+    n = len(deepgram_words)
+
+    word_starts = [float(w.get("start") or 0.0) for w in deepgram_words]
+    word_ends = [float(w.get("end") or 0.0) for w in deepgram_words]
+
+    for item in (remove_words or []):
+        if not isinstance(item, dict):
+            continue
+        if "word_index" in item:
+            try:
+                idx = int(item["word_index"])
+            except (TypeError, ValueError):
+                continue
+            if 0 <= idx < n:
+                removed_src.add(idx)
+        elif "start" in item and "end" in item:
+            try:
+                rs = float(item["start"])
+                re_ = float(item["end"])
+            except (TypeError, ValueError):
+                continue
+            if re_ <= rs:
+                continue
+            for i in range(n):
+                if word_starts[i] >= rs and word_ends[i] <= re_:
+                    removed_src.add(i)
+
+    kept_words = []
+    new_to_src = []
+    for src_idx in range(n):
+        if src_idx in removed_src:
+            continue
+        kept_words.append(deepgram_words[src_idx])
+        new_to_src.append(src_idx)
+
+    return kept_words, new_to_src, removed_src
+
+
+def _translate_post_cut_anchors_to_src(post_cut_plan, new_to_src):
+    """Walk every word_index field in PostCutPlan and remap new_idx → src_idx.
+
+    Returns a new dict with every anchor translated. Out-of-bounds indices
+    drop the offending element (logged) so a single bad index doesn't crash
+    the whole render. By construction this should never fire — the schema
+    constrains Gemini to the kept-only space — but the guard is cheap.
+    """
+    if not isinstance(post_cut_plan, dict):
+        return post_cut_plan
+
+    M = len(new_to_src)
+
+    def _xlate(new_idx):
+        if not isinstance(new_idx, (int, float)):
+            return None
+        i = int(new_idx)
+        if 0 <= i < M:
+            return new_to_src[i]
+        return None
+
+    out = dict(post_cut_plan)
+
+    # Single-int fields
+    for key in ("thumbnail_word_index",):
+        if key in out:
+            v = _xlate(out.get(key))
+            if v is None:
+                print(f"[two-pass] Dropping {key}: index {out.get(key)} out of kept-range [0..{M-1}]", flush=True)
+                out.pop(key, None)
+            else:
+                out[key] = v
+
+    # caption_position_changes — list of {word_index, position}
+    cpc = out.get("caption_position_changes") or []
+    new_cpc = []
+    for ch in cpc:
+        if not isinstance(ch, dict):
+            continue
+        v = _xlate(ch.get("word_index"))
+        if v is None:
+            continue
+        new_cpc.append({**ch, "word_index": v})
+    out["caption_position_changes"] = new_cpc
+
+    # emphasis_moments — list with word_indices: [int, ...]
+    em_in = out.get("emphasis_moments") or []
+    em_out = []
+    for em in em_in:
+        if not isinstance(em, dict):
+            continue
+        wis = em.get("word_indices") or []
+        new_wis = []
+        for wi in wis:
+            v = _xlate(wi)
+            if v is not None:
+                new_wis.append(v)
+        if not new_wis:
+            print(f"[two-pass] Dropping emphasis_moment: every word_index out of kept-range", flush=True)
+            continue
+        em_out.append({**em, "word_indices": new_wis})
+    out["emphasis_moments"] = em_out
+
+    # text_overlays — start_word_index
+    tov_in = out.get("text_overlays") or []
+    tov_out = []
+    for ov in tov_in:
+        if not isinstance(ov, dict):
+            continue
+        v = _xlate(ov.get("start_word_index"))
+        if v is None:
+            print(f"[two-pass] Dropping text_overlay: start_word_index out of kept-range", flush=True)
+            continue
+        tov_out.append({**ov, "start_word_index": v})
+    out["text_overlays"] = tov_out
+
+    # sound_effects — word_index
+    sfx_in = out.get("sound_effects") or []
+    sfx_out = []
+    for sfx in sfx_in:
+        if not isinstance(sfx, dict):
+            continue
+        v = _xlate(sfx.get("word_index"))
+        if v is None:
+            print(f"[two-pass] Dropping sound_effect: word_index out of kept-range", flush=True)
+            continue
+        sfx_out.append({**sfx, "word_index": v})
+    out["sound_effects"] = sfx_out
+
+    # transitions — after_word_index
+    tr_in = out.get("transitions") or []
+    tr_out = []
+    for tr in tr_in:
+        if not isinstance(tr, dict):
+            continue
+        v = _xlate(tr.get("after_word_index"))
+        if v is None:
+            print(f"[two-pass] Dropping transition: after_word_index out of kept-range", flush=True)
+            continue
+        tr_out.append({**tr, "after_word_index": v})
+    out["transitions"] = tr_out
+
+    # motion_graphics — start_word_index, end_word_index
+    mg_in = out.get("motion_graphics") or []
+    mg_out = []
+    for mg in mg_in:
+        if not isinstance(mg, dict):
+            continue
+        s = _xlate(mg.get("start_word_index"))
+        e = _xlate(mg.get("end_word_index"))
+        if s is None or e is None:
+            print(f"[two-pass] Dropping motion_graphic: index out of kept-range", flush=True)
+            continue
+        mg_out.append({**mg, "start_word_index": s, "end_word_index": e})
+    out["motion_graphics"] = mg_out
+
+    # broll_clips — start_word_index, end_word_index
+    bc_in = out.get("broll_clips") or []
+    bc_out = []
+    for bc in bc_in:
+        if not isinstance(bc, dict):
+            continue
+        s = _xlate(bc.get("start_word_index"))
+        e = _xlate(bc.get("end_word_index"))
+        if s is None or e is None:
+            print(f"[two-pass] Dropping broll_clip: index out of kept-range", flush=True)
+            continue
+        bc_out.append({**bc, "start_word_index": s, "end_word_index": e})
+    out["broll_clips"] = bc_out
+
+    return out
+
+
+def _call_gemini_cuts(client, system_instruction, user_content, video_part, model_name):
+    """First Gemini call: cuts only. LOW thinking, small output, fast."""
+    print(
+        f"[gemini-cuts] Calling {model_name} (thinking=LOW, CutPlan schema, "
+        f"system_instruction={len(system_instruction)} chars, user_content={len(user_content)} chars)...",
+        flush=True,
+    )
+    t0 = time.time()
+    response = client.models.generate_content(
+        model=model_name,
+        contents=[video_part, user_content],
+        config=genai_types.GenerateContentConfig(
+            system_instruction=system_instruction,
+            temperature=1.0,
+            max_output_tokens=4096,
+            response_mime_type="application/json",
+            response_json_schema=CutPlan.model_json_schema(),
+            thinking_config=genai_types.ThinkingConfig(thinking_level="LOW"),
+            media_resolution="MEDIA_RESOLUTION_LOW",
+        ),
+    )
+    dt = time.time() - t0
+    print(f"[gemini-cuts] Complete in {dt:.1f}s", flush=True)
+    try:
+        usage = getattr(response, "usage_metadata", None)
+        if usage is not None:
+            print(
+                f"[gemini-cuts] Tokens — prompt={getattr(usage,'prompt_token_count',None)} "
+                f"cached={getattr(usage,'cached_content_token_count',None)} "
+                f"thoughts={getattr(usage,'thoughts_token_count',None)} "
+                f"output={getattr(usage,'candidates_token_count',None)}",
+                flush=True,
+            )
+    except Exception:
+        pass
+    response_text = str(getattr(response, "text", "") or "").strip()
+    if not response_text:
+        raise RuntimeError("Empty Gemini cuts-call response")
+    print(f"[gemini-cuts] RAW:\n{response_text}\n[gemini-cuts] END", flush=True)
+    return extract_json(response_text)
+
+
+def _call_gemini_post_cuts(client, system_instruction, user_content, video_part, model_name):
+    """Second Gemini call: visual placement on the kept-only transcript. MEDIUM thinking."""
+    print(
+        f"[gemini-post] Calling {model_name} (thinking=MEDIUM, PostCutPlan schema, "
+        f"system_instruction={len(system_instruction)} chars, user_content={len(user_content)} chars)...",
+        flush=True,
+    )
+    t0 = time.time()
+    response = client.models.generate_content(
+        model=model_name,
+        contents=[video_part, user_content],
+        config=genai_types.GenerateContentConfig(
+            system_instruction=system_instruction,
+            temperature=1.0,
+            max_output_tokens=8192,
+            response_mime_type="application/json",
+            response_json_schema=PostCutPlan.model_json_schema(),
+            thinking_config=genai_types.ThinkingConfig(thinking_level="MEDIUM"),
+            media_resolution="MEDIA_RESOLUTION_LOW",
+        ),
+    )
+    dt = time.time() - t0
+    print(f"[gemini-post] Complete in {dt:.1f}s", flush=True)
+    try:
+        usage = getattr(response, "usage_metadata", None)
+        if usage is not None:
+            print(
+                f"[gemini-post] Tokens — prompt={getattr(usage,'prompt_token_count',None)} "
+                f"cached={getattr(usage,'cached_content_token_count',None)} "
+                f"thoughts={getattr(usage,'thoughts_token_count',None)} "
+                f"output={getattr(usage,'candidates_token_count',None)}",
+                flush=True,
+            )
+    except Exception:
+        pass
+    response_text = str(getattr(response, "text", "") or "").strip()
+    if not response_text:
+        raise RuntimeError("Empty Gemini post-cuts-call response")
+    print(f"[gemini-post] RAW:\n{response_text}\n[gemini-post] END", flush=True)
+    return extract_json(response_text)
+
+
 def generate_edit_gemini(
     video_path, vibe, duration, trend_context=None, deepgram_words=None,
     shot_changes=None, vocal_emphasis=None, source_loudness=None,
@@ -3264,7 +3508,25 @@ def generate_edit_gemini(
     ) = _build_face_signals(_face_positions, deepgram_words or [], duration)
 
     client = _get_genai_client()
-    system_instruction, user_content = build_gemini_edit_prompt(
+
+    # ── Two-pass architecture ───────────────────────────────────────────────
+    # Call 1 (CutPlan, LOW thinking): tiny prompt focused on cuts. Output is
+    #   notes + remove_words + pacing only. Fast.
+    # Re-index: Python applies cuts and renumbers kept words [0..M-1].
+    # Call 2 (PostCutPlan, MEDIUM thinking): main prompt minus cut content,
+    #   run on the kept-only transcript. Anchor word_indices come from the
+    #   new index space — physically cannot reference a cut word because
+    #   cut words don't exist in this space.
+    # Translate: every word_index in PostCutPlan back to source indices.
+    # Merge: CutPlan + translated PostCutPlan → edit_plan dict.
+    #
+    # Both calls share the same video_part (no re-upload) and the same client.
+    # The post-cuts system_instruction is independent of cuts and could in
+    # theory be built in parallel with Call 1, but it's pure string concat
+    # (microseconds) — sequential is fine.
+
+    cuts_sys, cuts_user = _build_cuts_prompt(vibe, duration)
+    post_sys, post_user_base = _build_post_cuts_prompt(
         vibe=vibe,
         duration=duration,
         trend_context=trend_context,
@@ -3278,16 +3540,13 @@ def generate_edit_gemini(
         user_style_profile=user_style_profile,
     )
 
-    # Append the full Deepgram transcript to USER content. Gemini owns every
-    # cut decision via remove_words — there is no Python-side pre-pass, no
-    # re-indexing. Word indices in the prompt match Deepgram source indices
-    # 1:1, and any anchor Gemini emits is in the same source-index space.
+    # Append the FULL source transcript to the cuts call's user content.
+    # Cuts call sees raw Deepgram indices [0..N-1].
     if deepgram_words:
         readable_transcript = " ".join(
             (_w.get("punctuated_word") or _w.get("word") or "")
             for _w in deepgram_words
         )
-
         word_lines = []
         for src_idx, _w in enumerate(deepgram_words):
             word_text = _w.get("punctuated_word") or _w.get("word") or ""
@@ -3295,39 +3554,25 @@ def generate_edit_gemini(
             end = float(_w.get("end") or 0)
             spk = int(_w.get("speaker") or 0)
             word_lines.append(f"  [{src_idx}] {start:.2f}-{end:.2f} spk{spk}: {word_text}")
-
         transcript_block = "\n".join(word_lines)
-        _first_word_start = float(deepgram_words[0].get("start") or 0)
         _word_count = len(deepgram_words)
-        user_content += f"""
+        cuts_user += f"""
 
 === FULL TRANSCRIPT ===
-
-Read this first to understand the full story before making any editing decisions. Identify the narrative structure — what is setup, what is the buildup, and where are the punchlines or reveals. Identify every filler word, stutter, abandoned restart, breath, dead-air pause, and tangent. You will cut all of them via remove_words.
 
 {readable_transcript}
 
 === WORD-BY-WORD TIMESTAMPS ({_word_count} words, indexed [0..{_word_count - 1}]) ===
 
-The following is the FULL Deepgram word-by-word transcript with millisecond-accurate timestamps. NO words have been pre-cut. Every word_index you emit in any anchor field references this index space directly.
-
 {transcript_block}
-
-RULES FOR USING THESE TIMESTAMPS:
-- word_index is in the index space [0..{_word_count - 1}] shown above. Use those exact indices in anchor fields (start_word_index, end_word_index, word_indices, word_index, after_word_index, thumbnail_word_index, caption_position_changes[*].word_index).
-- Anchor only to words you are KEEPING. Any word you also list in remove_words cannot be anchored to — the renderer will fail validation if you do.
-- Your source_start and source_end values MUST land in the gaps BETWEEN words, not inside a word.
-- A gap is the time between one word's end timestamp and the next word's start timestamp.
-- NEVER place a source_start or source_end between a word's start and end timestamps — that cuts the word in half.
-- The first word starts at {_first_word_start:.2f}s. For talking-head videos, set your first clip's source_start to the first KEPT word's start so the video starts on speech with zero dead air.
-- If the video has intentional visual content before the first word (action, scenery, product shots), start source_start at 0.0 to preserve that content.
 """
         print(
-            f"[generate-edit] Transcript prepared: {_word_count} words (raw Deepgram, no pre-cuts)",
+            f"[generate-edit] Cuts-call transcript prepared: {_word_count} words",
             flush=True,
         )
 
-    # Inject pre-analysis from content-studio if available (richer visual context)
+    # Pre-analysis goes to the post-cuts call (visual decisions benefit from
+    # richer scene context; cuts call doesn't need it).
     if _pre_analysis and isinstance(_pre_analysis, dict):
         _pa_parts = []
         if _pre_analysis.get("peak_moments"):
@@ -3340,7 +3585,7 @@ RULES FOR USING THESE TIMESTAMPS:
         # from content-studio leak into Gemini's b-roll keyword generation,
         # overriding the stock-footage-title instructions.
         if _pa_parts:
-            user_content += "\n\n=== PRE-ANALYZED VIDEO DATA ===\n" + "\n".join(_pa_parts) + "\n"
+            post_user_base += "\n\n=== PRE-ANALYZED VIDEO DATA ===\n" + "\n".join(_pa_parts) + "\n"
             print(f"[generate-edit] Injected pre-analysis context ({len(_pa_parts)} sections)", flush=True)
 
     if trend_context:
@@ -3348,7 +3593,7 @@ RULES FOR USING THESE TIMESTAMPS:
     else:
         print("[generate-edit] No trend context available", flush=True)
 
-    # Build video content part — inline bytes (fast, no upload/poll) or file reference (legacy)
+    # Build video content part — shared across both calls (no re-upload).
     if inline_video_bytes:
         _video_part = genai_types.Part.from_bytes(data=inline_video_bytes, mime_type="video/mp4")
         print(f"[generate-edit] Using inline video ({len(inline_video_bytes)/1024/1024:.1f}MB, no upload)", flush=True)
@@ -3358,91 +3603,87 @@ RULES FOR USING THESE TIMESTAMPS:
     else:
         raise RuntimeError("No video data provided — need either inline_video_bytes or gemini_file")
 
-    # Use the base EditPlan schema. Anchor integrity (no anchor on a removed
-    # word) is enforced post-decode via the validator that scans every
-    # word-index field against the remove_words set. Range cuts that cover
-    # an anchored word are dropped by the anchor-integrity guard below.
+    # ── Call 1: cuts only ───────────────────────────────────────────────────
+    cut_plan = _call_gemini_cuts(client, cuts_sys, cuts_user, _video_part, GEMINI_MODEL)
+    raw_cut_remove_words = cut_plan.get("remove_words") or []
     print(
-        f"[generate-edit] Calling Gemini model={GEMINI_MODEL} (thinking=MEDIUM, structured output, temp=1.0, "
-        f"system_instruction={len(system_instruction)} chars, user_content={len(user_content)} chars, "
-        f"words={len(deepgram_words or [])})...",
+        f"[two-pass] Cuts call returned {len(raw_cut_remove_words)} remove_word entries, "
+        f"pacing={cut_plan.get('pacing')!r}",
         flush=True,
     )
-    t = time.time()
-    # temperature=1.0 is Google's explicit recommendation for Gemini 3 — values
-    # below 1.0 "may lead to unexpected behavior, such as looping or degraded
-    # performance." (per ai.google.dev/gemini-api/docs/text-generation)
-    #
-    # system_instruction + stable prefix enables implicit prompt caching — the
-    # system block is byte-identical across calls; per-video data lives in
-    # user_content, so Gemini re-reads only the deltas (video + transcript +
-    # signals).
-    #
-    # thinking_level=HIGH. The edit decision spans dozens of inter-related
-    # field choices (cuts, anchors, zones, transitions, MGs, captions) where
-    # every later choice depends on every earlier one. MEDIUM was emitting
-    # anchored elements that referenced words it had also placed in
-    # remove_words — the model didn't have enough cycles to cross-check
-    # itself. HIGH gives it the cycles. Adds ~10s/render.
-    response = client.models.generate_content(
-        model=GEMINI_MODEL,
-        contents=[_video_part, user_content],
-        config=genai_types.GenerateContentConfig(
-            system_instruction=system_instruction,
-            temperature=1.0,
-            max_output_tokens=8192,
-            response_mime_type="application/json",
-            response_json_schema=EditPlan.model_json_schema(),
-            thinking_config=genai_types.ThinkingConfig(thinking_level="HIGH"),
-            media_resolution="MEDIA_RESOLUTION_LOW",
-        ),
+
+    # ── Re-index: source transcript → kept-only transcript with new indices ─
+    kept_words, new_to_src, removed_src = _reindex_kept_transcript(
+        deepgram_words or [], raw_cut_remove_words,
     )
-    print(f"[generate-edit] Gemini complete in {time.time()-t:.1f}s", flush=True)
-    try:
-        usage = getattr(response, "usage_metadata", None)
-        if usage is not None:
-            prompt_tokens = getattr(usage, "prompt_token_count", None)
-            cached_tokens = getattr(usage, "cached_content_token_count", None)
-            thoughts_tokens = getattr(usage, "thoughts_token_count", None)
-            output_tokens = getattr(usage, "candidates_token_count", None)
-            total_tokens = getattr(usage, "total_token_count", None)
-            print(
-                f"[generate-edit] Tokens — prompt={prompt_tokens} cached={cached_tokens} "
-                f"thoughts={thoughts_tokens} output={output_tokens} total={total_tokens}",
-                flush=True,
-            )
-    except Exception as _e:
-        print(f"[generate-edit] usage_metadata read failed: {_e}", flush=True)
+    _src_count = len(deepgram_words or [])
+    _kept_count = len(kept_words)
+    print(
+        f"[two-pass] Re-indexed transcript: {_src_count} src words → {_kept_count} kept "
+        f"({len(removed_src)} removed)",
+        flush=True,
+    )
 
-    response_text = str(getattr(response, "text", "") or "").strip()
-    try:
-        candidates = getattr(response, "candidates", None) or []
-        if candidates:
-            finish_reason = getattr(candidates[0], "finish_reason", None)
-            print(f"[generate-edit] Gemini finish_reason={finish_reason}", flush=True)
-            fr_str = str(finish_reason).upper()
-            if "MAX" in fr_str:
-                print("[generate-edit] WARNING: Gemini response TRUNCATED — increase max_output_tokens", flush=True)
-            elif "SAFETY" in fr_str:
-                print("[generate-edit] WARNING: Gemini response blocked by safety filter", flush=True)
-    except Exception:
-        pass
-    if "```json" not in response_text and "{" not in response_text:
-        print(
-            f"[generate-edit] ERROR: No JSON found in response. Response length: {len(response_text)} chars",
-            flush=True,
+    # Append the kept-only transcript to the post-cuts call's user content.
+    # Indices are NEW (kept-only space [0..M-1]); timestamps are still source-time.
+    post_user = post_user_base
+    if kept_words:
+        kept_readable = " ".join(
+            (_w.get("punctuated_word") or _w.get("word") or "")
+            for _w in kept_words
         )
-        print(f"[generate-edit] Response tail: ...{response_text[-200:]}", flush=True)
-    if not response_text:
-        raise RuntimeError("Empty Gemini response")
+        kept_word_lines = []
+        for new_idx, _w in enumerate(kept_words):
+            word_text = _w.get("punctuated_word") or _w.get("word") or ""
+            start = float(_w.get("start") or 0)
+            end = float(_w.get("end") or 0)
+            spk = int(_w.get("speaker") or 0)
+            kept_word_lines.append(f"  [{new_idx}] {start:.2f}-{end:.2f} spk{spk}: {word_text}")
+        kept_transcript_block = "\n".join(kept_word_lines)
+        post_user += f"""
 
-    print(f"[generate-edit] RAW RESPONSE:\n{response_text}\n[generate-edit] END RESPONSE", flush=True)
+=== KEPT-ONLY TRANSCRIPT ({_kept_count} words, renumbered [0..{_kept_count - 1}]) ===
 
-    edit_plan = extract_json(response_text)
+This transcript is the dialogue exactly as the viewer will hear it. Filler, stutters, restarts, and dead-air gaps are gone — every word here lands in the rendered video. Read it once before placing any visual element.
 
-    # Gemini emitted indices directly into the Deepgram source-index space —
-    # no translation step needed. Downstream code below derives float
-    # timestamps from word.start / word.end.
+{kept_readable}
+
+=== KEPT-ONLY WORD-BY-WORD TIMESTAMPS ===
+
+Indices below are the NEW kept-only space [0..{_kept_count - 1}]. Every word_index you emit references THIS space. Timestamps are still source-time (Python uses them for rendering).
+
+{kept_transcript_block}
+"""
+
+    # ── Call 2: visual placement on the kept-only transcript ────────────────
+    post_cut_plan = _call_gemini_post_cuts(client, post_sys, post_user, _video_part, GEMINI_MODEL)
+
+    # ── Translate anchors: new index space → source index space ─────────────
+    post_cut_plan = _translate_post_cut_anchors_to_src(post_cut_plan, new_to_src)
+
+    # ── Merge: CutPlan + translated PostCutPlan → edit_plan ─────────────────
+    # CutPlan owns notes, remove_words, pacing. PostCutPlan owns every other
+    # field. The merged dict has the same shape downstream code expects.
+    edit_plan = {
+        "notes": cut_plan.get("notes", "") or "",
+        "remove_words": raw_cut_remove_words,
+        "pacing": cut_plan.get("pacing", "fast") or "fast",
+    }
+    if isinstance(post_cut_plan, dict):
+        for k, v in post_cut_plan.items():
+            edit_plan[k] = v
+
+    print(
+        f"[two-pass] Merged plan — notes={len(edit_plan['notes'])} chars, "
+        f"remove_words={len(edit_plan['remove_words'])}, "
+        f"emphasis_moments={len(edit_plan.get('emphasis_moments') or [])}, "
+        f"motion_graphics={len(edit_plan.get('motion_graphics') or [])}, "
+        f"text_overlays={len(edit_plan.get('text_overlays') or [])}, "
+        f"sound_effects={len(edit_plan.get('sound_effects') or [])}, "
+        f"transitions={len(edit_plan.get('transitions') or [])}, "
+        f"broll_clips={len(edit_plan.get('broll_clips') or [])}",
+        flush=True,
+    )
 
     # ── Derivation pass: word_index → float timestamps for downstream code ──
     # Every downstream consumer (render_multi_clip, projection helpers,
@@ -3530,7 +3771,7 @@ RULES FOR USING THESE TIMESTAMPS:
     edit_plan["_vocal_emphasis"] = list(_vocal)
     edit_plan["_source_loudness_signal"] = dict(_loudness)
     # Face detections are consumed exactly once — to build the prompt signals
-    # above. Once build_gemini_edit_prompt has returned, the raw face data has
+    # above. Once _build_post_cuts_prompt has returned, the raw face data has
     # no downstream reader (the Remotion composition renders motion_graphics
     # against the canvas via resolveMGPosition; no face lookup happens at
     # render time). Do NOT stash onto edit_plan — it would be dead weight.
