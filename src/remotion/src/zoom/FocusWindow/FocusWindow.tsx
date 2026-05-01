@@ -107,12 +107,9 @@ export const FocusWindow: React.FC<FocusWindowProps> = ({
         }}
       />
 
-      <AbsoluteFill
-        style={{
-          backgroundColor: `rgba(0,0,0,${0.3 * progress})`,
-          pointerEvents: "none",
-        }}
-      />
+      {/* Removed: 30% black overlay during zoom. The PIP framing alone is
+          the effect; the darkening was a subtle color shift unrelated to
+          the zoom's intent. */}
 
       <AbsoluteFill
         style={{

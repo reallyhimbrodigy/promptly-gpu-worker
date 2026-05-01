@@ -95,9 +95,6 @@ export const DepthPull: React.FC<DepthPullProps> = ({
 
   const bgScale = 1 + (targetScale - 1) * 0.6 * zoomProgress;
   const midScale = 1 + (targetScale - 1) * 1.0 * zoomProgress;
-  const contrastBoost = 1 + 0.08 * zoomProgress;
-  const brightnessLift = 1 + 0.02 * zoomProgress;
-  const bgSaturation = 1 - 0.15 * zoomProgress;
   const currentEdgeBlur = edgeBlur * zoomProgress;
 
   const frameOpacity = interpolate(
@@ -112,7 +109,6 @@ export const DepthPull: React.FC<DepthPullProps> = ({
     <AbsoluteFill
       style={{
         overflow: "hidden",
-        filter: `contrast(${contrastBoost}) brightness(${brightnessLift})`,
         ...style,
       }}
     >
@@ -127,20 +123,15 @@ export const DepthPull: React.FC<DepthPullProps> = ({
             objectFit: "cover",
             transform: `scale(${bgScale})`,
             transformOrigin: `${originX * 100}% ${originY * 100}%`,
-            filter: `saturate(${bgSaturation}) brightness(0.95)`,
           }}
         />
       </AbsoluteFill>
 
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          background: `rgba(30, 50, 80, ${0.06 * zoomProgress})`,
-          mixBlendMode: "multiply",
-          pointerEvents: "none",
-        }}
-      />
+      {/* Removed: contrast/brightness boost, background saturate/darken,
+          and blue mixBlendMode-multiply tint. Those were a global cinematic
+          color grade that read as "subtle color effects on emphasis
+          moments" — unwanted. The geometric zoom + bokeh + edge blur
+          remain as the depth/atmosphere identity. */}
 
       <div
         style={{

@@ -101,12 +101,9 @@ export const LetterboxPush: React.FC<LetterboxPushProps> = ({
         }}
       />
 
-      <AbsoluteFill
-        style={{
-          backgroundColor: `rgba(0,0,0,${0.35 * barProgress})`,
-          pointerEvents: "none",
-        }}
-      />
+      {/* Removed: 35% black overlay during zoom. The letterbox bars and
+          zoom are the effect — the darkening read as a subtle color shift
+          that wasn't part of the zoom's intent. */}
 
       <div
         style={{

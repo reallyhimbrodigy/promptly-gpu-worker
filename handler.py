@@ -2443,9 +2443,44 @@ B. motion_graphic — should a text/graphic overlay land on this moment?
    Pick from the motion graphic vocabulary below. Reserve for the 1-2 PAYOFF moments. Too many = clutter.
    motion_graphic windows must NOT overlap with any text_overlay in the same visual zone.
 
-=== MOTION GRAPHICS — REINFORCE CONTENT ===
+=== MOTION GRAPHICS — HOW TO USE THEM ===
 
-0-5 per video. Each REINFORCES a moment, doesn't replace it.
+THE PURPOSE OF A MOTION GRAPHIC. An MG is a visual element that ADDS something the dialogue alone cannot — a screenshot the speaker is referencing, a stat the speaker is citing, a notification the speaker is reacting to, a chapter beat the editor is marking. It REINFORCES content, never substitutes for it. If the dialogue carries the moment on its own, no MG is needed.
+
+WHEN TO USE ONE. Three legitimate triggers and only three:
+  1. The speaker references something visual that isn't on camera ("she texted me", "I got an email", "the screen said") — render the artifact (Notification, IMessageBubble, ChatThread, TweetBubble).
+  2. The speaker cites a number, stat, or quotable line that lands harder rendered ("we hit 100k followers", "she said 'don't believe everything…'") — render the metric or quote (StatCard, QuoteCard).
+  3. The editor needs to mark a chapter beat or call out a detail in the frame (TornPaper for "THE CONFESSION"; AnnotationArrow for "look at THIS").
+
+If none of those triggers are present, do NOT emit an MG just because the dialogue feels like it could use "something." A clean talking-head moment with strong captions and a zoom is more polished than a forced MG.
+
+WHEN NOT TO USE ONE. Negative triggers — emit zero MGs in these situations:
+  • The dialogue is a punchline or reaction beat — that's what zoom + caption keyword highlight + SFX are for. An MG layered on top dilutes the moment.
+  • You'd be rendering text that paraphrases the dialogue verbatim — the captions already show those words. (See: TornPaper / QuoteCard text-content rule.)
+  • There's already a text_overlay or another MG firing in the same 3-second window — stacking visual elements creates clutter, not punctuation.
+  • The window is shorter than 2 seconds — anything briefer reads as a flicker.
+
+DENSITY. 0-3 MGs per 60-second video is the healthy range. Zero is fine. Five is wallpaper. Each MG you emit must justify its screen time against the alternative of zero MGs at that moment.
+
+ANCHORING — THIS IS WHERE BAD CHOICES GET DROPPED:
+  Every word_index you emit must be a KEPT word — a word you are NOT also listing in remove_words.
+  BEFORE you emit a motion_graphic, look at your remove_words array. If start_word_index, end_word_index, OR any word inside [start, end] is in remove_words, the renderer will DROP your MG entirely. The downstream caption_position_change you emitted to make room for that MG will then orphan, and captions will move for no visible reason — a clear "this video was edited badly" signal.
+  Pick anchor words from the surrounding context that are NOT in your cuts. If you remove "calling" at word 197 and want an MG showing the wife's call, anchor the MG to a SURVIVING word — the next "calling" at word 200, or "every 5 seconds" at word 202.
+
+PLACEMENT — anchor zone must not cover the speaker's face. You watch the video at 5fps; you can see exactly where the speaker sits in the frame across the MG's window. Pick the zone that keeps the face visible:
+  • Face in lower half of frame  → anchor "upper_third_safe"
+  • Face in upper half           → anchor "lower_third_safe"
+  • Face dead-center close-up    → anchor "left_safe" or "right_safe" (small MGs only) OR don't emit an MG here
+  • Face off-screen / B-roll     → "center" is fair game
+
+DURATION. Most MGs render naturally across the word range you anchor — let the word-span dictate timing. For fixed-length pins (a 3-second StatCard count-up on one punchline word), set start_word_index == end_word_index and use `duration_seconds` to override. Typical lifespan 2.0-4.0s. Under 2s reads as a flicker; over 4s overstays.
+
+NON-OVERLAP. Two MGs cannot share a time window AND a zone. Two MGs in different zones at the same time are allowed but rarely a good idea — you're asking the viewer to track two visual additions while listening to dialogue. Prefer separating MGs by ≥3 seconds.
+
+CAPTION COORDINATION. When an MG sits at `lower_third_safe` or any bottom-overlapping anchor, captions will visually overlap the MG. You MUST emit a `caption_position_change` to "top" at the MG's start_word_index and another to "bottom" at the word AFTER the MG ends. The renderer does NOT auto-flip; if you skip this, captions stack on top of the MG.
+  IMPORTANT: if you decide AFTER emitting the MG that the anchor word should be cut, you must REMOVE both the MG and any caption_position_change tied to it. Don't leave orphaned position changes — they make captions move for no reason.
+
+NEVER DUPLICATE DIALOGUE. The text inside QuoteCard / TornPaper / IMessageBubble / ChatThread / TweetBubble must NEVER be a verbatim transcript of the dialogue at that moment. The captions already show those words. The MG renders editorial framing — a paraphrase, a chapter label, a fabricated message that ADVANCES the story (the wife's text the speaker is referencing, not what the speaker is saying out loud).
 
 motion_graphics — ARRAY.
 
@@ -2515,12 +2550,7 @@ Types, descriptions, use cases, and REQUIRED props (in the schema below, keys en
                             CAP: across the ENTIRE video, TornPaper may appear AT MOST ONCE — counting both `text_overlays[i].variant=="torn_paper"` AND any `motion_graphics[i].type=="TornPaper"` AND any `emphasis_moments[i].motion_graphic.type=="TornPaper"`. If you've already used one, do not emit another. The card's power is its rarity; using it twice burns the visual currency.
                             Props: {{"topText": str (<=5 words), "bottomText": str (<=5 words)}}
 
-GUIDELINES:
-  Anchor semantically, not by pixels.
-  Duration 2.0 - 4.0s.
-  Conflict check: if a motion_graphic sits at "lower_third_safe" (or any bottom-overlapping anchor) during a window, you MUST emit a caption_position_change to "top" at the MG's start_word_index and back to "bottom" at the word right after end_word_index. The renderer does NOT auto-flip — Z-order is your responsibility.
-  Face check: look at the video across the MG's word window — pick an anchor that does NOT cover the speaker's face wherever it sits in those frames.
-  Non-overlap: no motion_graphic window may overlap any text_overlay window.
+(All MG usage rules — when, where, how, anti-patterns — are covered in the "MOTION GRAPHICS — HOW TO USE THEM" section above this catalog. Re-read it if you're picking an MG; the catalog only documents what each type IS, not when to reach for it.)
 
 === WORD EDITING — YOU OWN EVERY CUT ===
 
@@ -4934,7 +4964,12 @@ _SFX_ONSET_OFFSETS = {
     # Build-up sounds — offset to CLIMAX (the payoff moment lands on the word)
     "drum_roll":         1.657,
     "reverse":           1.372,
-    "sad_trombone":      1.290,
+    # sad_trombone is special: pre-rolling 1.29s makes the "wah wah waaah"
+    # build start playing while the speaker is still mid-sentence, which
+    # reads as accidental — a joke sound floating in over serious dialogue.
+    # Anchor to the START of the descending phrase instead so it triggers
+    # ON the word the editor picked, not 1.3s before.
+    "sad_trombone":      0.000,
     # Atmospheric — offset to ONSET (first audible whoosh on the word)
     "transition_smooth": 0.089,
     "whoosh_slow":       0.034,
@@ -5714,7 +5749,7 @@ def _download_and_validate_broll(chosen_url, keyword, work_dir, broll_entry=None
         print(f"[broll] REJECTED '{keyword}': download returned image content-type ({content_type})", flush=True)
         return None
 
-    _MAX_BROLL_BYTES = 25 * 1024 * 1024  # 25MB cap — prevents 100MB+ 4K downloads
+    _MAX_BROLL_BYTES = 30 * 1024 * 1024  # 30MB cap — was silently dropping otherwise-good Pexels picks at the boundary
     with open(dest, "wb") as f:
         total_bytes = 0
         for chunk in dl.iter_content(65536):
@@ -5724,7 +5759,7 @@ def _download_and_validate_broll(chosen_url, keyword, work_dir, broll_entry=None
                 break
 
     if total_bytes > _MAX_BROLL_BYTES:
-        print(f"[broll] SKIPPED '{keyword}': file too large ({total_bytes / 1024 / 1024:.1f}MB > 25MB cap)", flush=True)
+        print(f"[broll] SKIPPED '{keyword}': file too large ({total_bytes / 1024 / 1024:.1f}MB > 30MB cap)", flush=True)
         try:
             os.remove(dest)
         except OSError:
