@@ -2191,12 +2191,7 @@ The pipeline enforces these rules with strict validators. Output that violates a
 3. EVERY TEXT OVERLAY HAS A VARIANT + ITS REQUIRED PROPS. The `variant` field chooses which visual treatment; each variant has a specific set of required props documented in the TEXT OVERLAYS section.
 4. CAPTIONS ARE WORD-ANCHORED + FACE-AWARE. Emit `caption_position_changes` as an array of `{{word_index, position}}` events — each event says "at this kept word, captions move to this position." Python synthesizes the final segment list with exact word-start timestamps. You watch the video — when the speaker's face moves into the bottom of the frame (looking down, leaning forward, low framing), emit a change to "top" at the first kept word in that window and back to "bottom" when the face returns up. Captions over the speaker's mouth are unreadable; place them so they never cover the face.
 5. Z-ORDER YIELDS TO MOTION GRAPHICS — YOU OWN IT. Python does NOT auto-flip caption position for MG overlap. If a motion_graphic sits at "lower_third_safe" or any bottom-anchored zone across a window, you must emit a caption_position_change to "top" at the MG's start_word_index and back to "bottom" at the word immediately after end_word_index. Same rule for "center" MGs that visually cover the speaker.
-6. ZONE DISCIPLINE FOR OVERLAYS. Overlays in DIFFERENT visual zones can freely share a time window. Overlays in the SAME zone at the SAME time are what collide — those are rejected. Per-variant canonical zones:
-   - `torn_paper` → `center` (full-frame impact slam)
-   - `sticky_note` → `upper_third_safe` (corner stickies)
-   - `quote_card` → `center` (floating card)
-   - `caption_match` → zone matches its `position` (top→`upper_third_safe`, center→`center`, bottom→`lower_third_safe`)
-   A motion_graphic's zone is its explicit `anchor` field. Two items collide only when their zones AND time windows both overlap. High-intensity emphasis moments are spaced ≥2.5s apart regardless of zone.
+6. ZONE DISCIPLINE FOR OVERLAYS. Overlays in DIFFERENT visual zones can freely share a time window. Overlays in the SAME zone at the SAME time collide and are rejected. Each text_overlay variant renders into a fixed zone driven by its design (torn_paper / quote_card occupy the center band; sticky_note pins to upper_third_safe; caption_match follows its `position` prop). Motion_graphic zones come from the explicit `anchor` field — that's YOUR placement decision based on what's on screen during the MG's window. Two items collide only when their zones AND time windows both overlap. High-intensity emphasis moments are spaced ≥2.5s apart regardless of zone.
 7. ONE ZOOM PER KEPT-SOURCE CLIP. At most one emphasis_moment carries a zoom_effect within any single kept-source clip (the source range between your removed-words boundaries). When you want multiple zoom beats close together, stack their events onto a single emphasis_moment's `zoom_effect.events` array.
 8. MOTION GRAPHIC ANCHORS ARE ABSOLUTE ZONES — FACE-AWARE. Every `motion_graphics[i].anchor` and `emphasis_moments[i].motion_graphic.anchor` is one of the 5 absolute zones. You watch the source video — look at where the speaker's face sits in the frame across the MG's word window and pick an anchor that does NOT cover the face. If the face is in the middle of the frame, do not anchor to "center". If the face is in the lower third, avoid "lower_third_safe". The MG renders exactly where you place it; there is no fallback.
 9. ANCHORS ARE KEPT WORDS. The transcript you see is the FULL Deepgram output, indexed [0..N-1]. Every word_index you emit (in `emphasis_moments[i].word_indices`, `sound_effects[i].word_index`, `text_overlays[i].start_word_index`, `motion_graphics[i].{{start,end}}_word_index`, `broll_clips[i].{{start,end}}_word_index`, `transitions[i].after_word_index`, `caption_position_changes[i].word_index`, `thumbnail_word_index`) references this same source index space. Any word you also list in remove_words is NOT a kept word and CANNOT be anchored. The renderer fails validation if you cross-reference a removed word.
@@ -2362,41 +2357,35 @@ The overlay appears precisely when `start_word_index`'s word begins speaking (th
 
 Each variant has a canonical visual zone. The pipeline allows overlays in DIFFERENT zones to coexist at the same time. Same-zone at same-time is rejected.
 
-Variants, their canonical zones, and REQUIRED props:
+Variants and REQUIRED props. Each variant is a DESIGN with its own visual character — pick the variant that fits the content, then accept the consequence of where it renders:
 
-1. "torn_paper"  — zone: `center`. Two torn paper strips slam from opposite sides. Confession/framing/hook aesthetic.
+1. "torn_paper"  — Top-of-frame banner: a torn-paper sheet drops from above and two text strips slam onto it. Renders at the TOP, never covers the speaker. Confession/framing/hook/chapter-card aesthetic.
    REQUIRED: "topText" (str <=5 words UPPERCASE), "bottomText" (str <=5 words UPPERCASE)
-   Use for: POV hooks ("MY 6YO" / "EXPOSED MY WIFE"), "BEFORE" / "AFTER".
+   Text content: chapter LABEL or framing HOOK. Words like "THE CONFESSION", "BEFORE / AFTER", "MY 6YO / EXPOSED MY WIFE", "THE TURN / EVERYTHING CHANGED". Punchy short labels that frame what's coming. NEVER a verbatim quote of the dialogue at that moment — the captions already show what's being said; the torn-paper card adds editorial CONTEXT, not transcript.
 
-2. "sticky_note" — zone: `upper_third_safe`. 1-3 animated sticky notes with handwritten-style text.
+2. "sticky_note" — 1-3 animated sticky notes pinned at the upper third. Doesn't cover the speaker. Handwritten-style.
    REQUIRED: "notes" (array of {{"text": str, "color": "#hex", "rotation": float}} — 1 to 3 items)
    Use for: key takeaways, tip bullets, educational moments.
 
-3. "quote_card" — zone: `center`. Floating card with quote + em-dash attribution. Serif, premium.
+3. "quote_card" — Floating card at center of frame with quote + em-dash attribution. The card is large and WILL cover the center of the frame for its full lifespan. Use ONLY when you accept the cover, which means: the speaker is OFF-camera at this moment (cutaway, B-roll, scenery), OR the moment is a hard pause/silence where the quote IS the shot — the speaker yielding the frame to the quote.
    REQUIRED: "quote" (str <=20 words), "attribution" (str)
-   Use for: testimonials, pull-quotes, book references.
+   Do NOT use over a talking-head close-up where the speaker's face fills the center — the card lands directly on their face. If you want a quote-style emphasis WITHOUT covering the speaker, use a `Quintessence` emphasis_moment caption beat or a torn_paper at the top instead.
 
-4. "caption_match" — zone: matches `position` prop (top→`upper_third_safe`, center→`center`, bottom→`lower_third_safe`). Renders in the same style as the main captions. Mono-brand aesthetic.
+4. "caption_match" — zone follows its `position` prop (top→`upper_third_safe`, center→`center`, bottom→`lower_third_safe`). Renders in the same style as the main captions. Mono-brand aesthetic.
    REQUIRED: "text" (str <=6 words), "position" ("top" | "center" | "bottom")
    Use ONLY for Hormozi/hustle/mono-brand vibes where matching the caption IS the brand. Otherwise pick torn_paper / sticky_note / quote_card.
 
 DECISION MATRIX — text overlay variant by content:
   POV, confession, narrative, story hook        → "torn_paper"
   educational, tip, how-to, tutorial            → "sticky_note"
-  testimonial, pull-quote, book/article quote   → "quote_card"
+  testimonial, pull-quote, book/article quote   → "quote_card" (only if speaker is off-camera or yielding)
   motivational/hustle/Hormozi mono-brand        → "caption_match"
 
-PER-VARIANT FREQUENCY — different overlay variants degrade at different rates when over-used. Each one has a "right cadence" baked into its visual identity:
+CARDINAL RULE — TEXT MUST NOT DUPLICATE DIALOGUE. The text inside a torn_paper / quote_card / caption_match must NEVER be a verbatim quote of the dialogue spoken at that moment. The captions already show those words. The card adds editorial framing — a chapter label, a paraphrase, a contextual gloss — never a transcript echo. If you're tempted to put "WHO THE FUCK IS STELIUS?" on a TornPaper while the speaker is saying "who the fuck is Stelius", you've created on-screen redundancy that makes the edit feel amateur. Pick a different label ("THE NAME", "THE STRANGER", "WHO?") or skip the card.
 
-- "torn_paper" — AT MOST ONCE in a 30-60s video. Twice in a longer video ONLY if the second one marks a clear narrative turn ("THE CONFRONTATION" → "THE AFTERMATH"). It's a chapter card. Three torn-paper strips in one video is wallpaper, not punctuation — by the third the viewer ignores it. Reserve torn_paper for the single biggest narrative beat.
+WHEN TO USE A CARD AT ALL — torn_paper, quote_card, and sticky_note are CHAPTER PUNCTUATION, not punchline markers. They mark turns in the story (act break, before/after, the reveal moment, the inciting incident). They don't underline dialogue beats — that's what zoom + caption keyword highlight + SFX are for.
 
-- "sticky_note" — AT MOST ONE cluster per video. The cluster itself contains 1-3 notes, each with its own text and rotation, so one cluster does the work of three overlays.
-
-- "quote_card" — AT MOST ONCE per video, on the single most quotable line. quote_card is large (~50% of the frame) and inherently a face-cover when it lands; one is dramatic, two is intrusive.
-
-- "caption_match" — used as freely as needed for emphasis. It's a styling variant, not a punctuation device — it inherits the caption pacing.
-
-OVERALL — 0-2 non-caption_match overlays per 60s video, period. The torn_paper / sticky_note / quote_card variants are dramatic by design; their power comes from rarity. A video with one perfectly-placed torn_paper at the hook lands harder than a video with four scattered ones.
+PER-VIDEO CAP — at most ONE torn_paper across the ENTIRE video, counting every place TornPaper can appear (text_overlays AND emphasis_moments[*].motion_graphic of type "TornPaper"). Two torn-papers in a 60s video is wallpaper, not punctuation. Same cap for quote_card. sticky_note: one cluster (1-3 notes) per video. Total non-caption_match overlays per 60s: 0-2. Power comes from rarity.
 
 === EMPHASIS MOMENTS — VISUAL HITS ===
 
@@ -2520,8 +2509,10 @@ Types, descriptions, use cases, and REQUIRED props (in the schema below, keys en
                             Best for: Feature toggles, on/off reveals, settings demos.
                             Props: {{"text": str, "activateAtMs"?: int, "onColor"?: "#hex"}}
 
-14. "TornPaper"          — Two torn paper strips slam from opposite sides onto a torn-paper banner that drops from the top of the frame. By design this MG is always anchored to the TOP — its visual identity is a top-of-frame chapter card. Use anchor "upper_third_safe" or "top". The component renders at the top regardless of any other anchor; never pair TornPaper with anchor "center" or "lower_third_safe".
-                            Best for: Bold statements, key points, "vs" comparisons.
+14. "TornPaper"          — Top-of-frame chapter card: torn-paper banner drops from above with two text strips. Renders at the TOP regardless of `anchor`.
+                            Best for: chapter-break punctuation — the act break, the inciting incident, the before/after pivot, the moment-of-truth label. NOT a punchline marker, NOT a dialogue restatement.
+                            Text content: a chapter label or framing hook ("THE CONFESSION", "THE TURN", "WHAT SHE SAID NEXT"). NEVER a verbatim quote of the dialogue at that moment — captions already show that.
+                            CAP: across the ENTIRE video, TornPaper may appear AT MOST ONCE — counting both `text_overlays[i].variant=="torn_paper"` AND any `motion_graphics[i].type=="TornPaper"` AND any `emphasis_moments[i].motion_graphic.type=="TornPaper"`. If you've already used one, do not emit another. The card's power is its rarity; using it twice burns the visual currency.
                             Props: {{"topText": str (<=5 words), "bottomText": str (<=5 words)}}
 
 GUIDELINES:
@@ -2990,7 +2981,7 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
 
 Work through these checks against the plan you are about to emit. This is self-verification — do not externalize it in your output.
 
-1. Zone discipline for overlays. Two overlays (text_overlay or motion_graphic) whose time windows overlap must sit in DIFFERENT visual zones. Per-variant text_overlay zones: torn_paper→center, sticky_note→upper_third_safe, quote_card→center, caption_match→matches its `position`. motion_graphic zone = its `anchor` field. Same-zone + same-time is rejected. High-intensity emphasis moments are ≥2.5s apart regardless of zone.
+1. Zone discipline for overlays. Two overlays (text_overlay or motion_graphic) whose time windows overlap must sit in DIFFERENT visual zones. Each text_overlay variant renders into a fixed zone driven by its design (torn_paper occupies the top band; sticky_note the upper third; quote_card occupies the center band; caption_match follows its `position` prop). motion_graphic zone is its `anchor` field — your choice based on what's on screen. Same-zone + same-time overlap is rejected. High-intensity emphasis moments are ≥2.5s apart regardless of zone.
 2. One zoom per kept-source clip. Within each contiguous source range between removed-word boundaries, at most one `emphasis_moments[i].zoom_effect` is non-null. Multiple beats close together stack their events onto a single emphasis_moment's `zoom_effect.events` array.
 3. Z-order — your responsibility. When any motion_graphic occupies a bottom-anchored zone (`lower_third_safe`) across a window, you MUST emit a caption_position_change to "top" at the MG's start_word_index and back to "bottom" at the word right after end_word_index. Python does not auto-flip.
 4. MG anchors are absolute zones AND face-aware. Every `motion_graphics[i].anchor` and every `emphasis_moments[i].motion_graphic.anchor` is one of the 5 absolute zones (`upper_third_safe`, `center`, `lower_third_safe`, `left_safe`, `right_safe`). Look at the video across the MG window — pick an anchor that does NOT cover the speaker's face wherever it sits in those frames.
@@ -4461,11 +4452,15 @@ RULES FOR USING THESE TIMESTAMPS:
     # Two overlays may share a time window IF they live in different visual
     # zones. Only same-zone + overlapping-time is a real collision.
     #
-    # Per-variant canonical zone for text_overlays. Motion graphics carry
-    # their zone explicitly via the `anchor` field. `caption_match` is
-    # dynamic and resolved from its `position` prop.
+    # Per-variant rendered zone for text_overlays — used for collision
+    # detection only. Each variant's component pins to a fixed zone by
+    # design: torn_paper = top banner (TornPaper component renders at the
+    # top regardless of anchor), sticky_note = upper third pin,
+    # quote_card = center floating card. `caption_match` is dynamic from
+    # its `position` prop. Motion graphics carry their zone explicitly
+    # via the `anchor` field.
     _TEXT_OVERLAY_ZONE = {
-        "torn_paper":    "center",
+        "torn_paper":    "upper_third_safe",
         "sticky_note":   "upper_third_safe",
         "quote_card":    "center",
         # "caption_match" resolved below
