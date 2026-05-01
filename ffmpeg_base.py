@@ -10,11 +10,10 @@ filtergraph that does the same work natively:
   - Simple zoom effects (SmoothPush / SnapReframe / StepZoom / StageZoom)
     expressed as per-frame `crop` expressions using the same easing math
     the Remotion components use.
-  - B-roll cutaways via `overlay` with `enable=between(t,...)`
   - Outro fade via `fade` filter
   - Concat across all clips + Remotion-rendered micro-segments
   - Alpha-composite the PromptlyOverlay layer
-  - Final libx264 ultrafast crf 18 encode
+  - Final libx264 encode
   - Audio mux (stream-copied from the parallel audio pipeline)
 
 Composite-effect zooms (FocusWindow / LetterboxPush / DepthPull) and ALL
@@ -23,6 +22,11 @@ transitions (CardSwipe / FilmStrip / SceneTitle / NewspaperWipe / LightLeak
 stay in Remotion via PromptlyMicroSegments — those carry multi-layer
 visual identity (bokeh orbs, blur masks, custom typography, etc.) that has
 no faithful FFmpeg analog.
+
+B-roll cutaways are rendered by Remotion's BrollLayer inside PromptlyOverlay
+as a split-screen alpha layer (slide-up entrance, bottom-half inset). The
+FFmpeg side of B-roll has been removed entirely; this module no longer
+overlays B-roll.
 """
 
 from typing import List, Dict, Optional, Tuple
@@ -335,86 +339,6 @@ def build_zoom_filter_chain(
     )
 
 
-# ── B-roll mapping ───────────────────────────────────────────────────────────
-
-def build_broll_input_filter(
-    broll_idx: int,
-    broll: dict,
-    output_input_idx: int,
-    source_fps: float,
-    canvas_w: int = 1080,
-    canvas_h: int = 1920,
-) -> Tuple[str, str]:
-    """Build the per-B-roll input filter chain. Returns (filter_string, label).
-
-    The filter chain (mirrors _build_clip_segment_with_pad's exact-math
-    + post-fps trim approach so the B-roll's output frame count is
-    deterministic regardless of B-roll fps or playback rate):
-
-      1. Trims the B-roll source by SECONDS (no fps coordinate round-trip).
-         seekFromSeconds is the canonical seek field — the legacy
-         seekFromFrames field interpreted in broll's fps but used in
-         output_fps caused silent content corruption on non-output-fps
-         brolls (Pexels frequently serves 25/24fps).
-      2. Rebases timestamps to 0 and applies playbackRate via setpts.
-      3. Scales/crops to canvas dimensions (objectFit:cover semantics).
-      4. Resamples to output fps via plain fps filter (deterministic
-         frame count). Earlier versions used motion-compensated
-         minterpolate when broll fps was below output, but the CPU cost
-         (~10s per broll) compounded with per-clip minterpolate to a
-         200+ second composite step, and minterpolate's variable output
-         frame count caused B-roll frame underflow that the overlay
-         filter held as a frozen last frame. Plain fps duplicates 1-in-2
-         frames on 30→60fps brolls; with the rest of the timeline at
-         RIFE-interpolated 60fps the slight broll judder is bounded and
-         barely noticeable for talking-head content.
-      5. Clamps to exactly dur_frames so concat sees the precise frame
-         count it expects.
-      6. Rebases PTS to 0 and shifts to the output-time window.
-    """
-    label = f"br{broll_idx}"
-    seek_seconds = float(broll.get("seekFromSeconds", 0.0))
-    dur_frames = int(broll["durationInFrames"])
-    pbr = float(broll.get("playbackRate", 1.0)) or 1.0
-    br_fps = float(broll.get("brollFps") or source_fps) or source_fps
-    from_frame = int(broll["fromFrame"])
-    out_start_seconds = from_frame / source_fps
-
-    # Geometric minimum source frames at broll's native rate to produce
-    # exactly dur_frames output frames after setpts/pbr + fps=source_fps.
-    # Mirrors _build_clip_segment_with_pad's math, generalized for the
-    # broll's own fps:
-    #   dur_frames output frames span (dur_frames-1) intervals of 1/source_fps
-    #   Each output interval requires pbr source intervals at source_fps,
-    #   which equals pbr * br_fps / source_fps broll intervals.
-    #   Plus 1 frame for the fencepost.
-    src_frames_needed = max(
-        1, int(math.ceil((dur_frames - 1) * pbr * br_fps / source_fps)) + 1
-    )
-    src_seconds_needed = src_frames_needed / br_fps
-
-    # Filter chain. Explicit format=yuv420p + setsar=1 normalize colorspace
-    # and pixel ratio so the overlay doesn't show a brightness/saturation
-    # flash at the boundary when a Pexels clip's encoder used a different
-    # YUV range or non-square pixels. Without the normalization the overlay
-    # filter swallows whatever the scaler emits, and any difference vs the
-    # base shows as a visible "flash" the moment the cutaway opens or
-    # closes.
-    filters = [
-        f"trim=start={seek_seconds:.6f}:end={seek_seconds + src_seconds_needed:.6f}",
-        f"setpts=(PTS-STARTPTS)/{pbr:.6f}",
-        f"scale={canvas_w}:{canvas_h}:force_original_aspect_ratio=increase:flags=lanczos",
-        f"crop={canvas_w}:{canvas_h}",
-        f"fps={source_fps:g}",
-        f"trim=end_frame={dur_frames}",
-        f"setpts=PTS-STARTPTS+{out_start_seconds:.6f}/TB",
-        f"setsar=1",
-        f"format=yuv420p",
-    ]
-    chain = f"[{output_input_idx}:v]" + ",".join(filters) + f"[{label}]"
-    return chain, label
-
-
 # ── Clip segment filter (FFmpeg-renderable clips) ────────────────────────────
 
 def _build_clip_segment_with_pad(
@@ -503,7 +427,6 @@ def build_final_filtergraph(
     *,
     clips: List[dict],
     transitions: List[dict],
-    broll: List[dict],
     micro_segments: List[dict],
     outro: str,
     total_output_frames: int,
@@ -511,7 +434,6 @@ def build_final_filtergraph(
     source_input_idx: int = 0,
     micro_input_idx: Optional[int] = None,
     overlay_input_idx: Optional[int] = None,
-    broll_input_start_idx: Optional[int] = None,
     canvas_w: int = 1080,
     canvas_h: int = 1920,
     # Chunk-aware fields. When called for a single chunk in the chunked-
@@ -531,17 +453,18 @@ def build_final_filtergraph(
                              None if no Remotion segments are needed.
       [overlay_input_idx]    Remotion PromptlyOverlay output (ProRes 4444 alpha).
                              None if overlay is empty (no captions/MG/text — rare).
-      [broll_input_start_idx] First B-roll input index; subsequent B-rolls
-                             follow sequentially.
 
     The filtergraph:
       - Builds each timeline segment (clip or transition):
           * FFmpeg-renderable clip: trim+setpts+(zoom?)+format
           * Remotion-rendered clip or transition: trim from micro segments
       - Concats all segments in timeline order → [base]
-      - Overlays B-roll cutaways at their output windows → [base_with_broll]
       - Applies outro fade if configured → [base_faded]
       - Composites alpha overlay onto the base → [final_v]
+
+    B-roll is rendered into the alpha overlay (PromptlyOverlay's BrollLayer)
+    and arrives via [overlay_input_idx]; this filtergraph does not composite
+    B-roll directly.
 
     Returns (filtergraph_string, [final_video_label]).
     """
@@ -784,21 +707,23 @@ def slice_timeline_for_chunk(
     chunk_end: int,
     clips: List[dict],
     transitions: List[dict],
-    broll: List[dict],
     micro_segments: List[dict],
     source_fps: float,
-) -> Tuple[List[dict], List[dict], List[dict], List[dict]]:
+) -> Tuple[List[dict], List[dict], List[dict]]:
     """Produce a chunk-local view of the timeline visible in the GLOBAL output
     frame range [chunk_start, chunk_end). Frame counters in the returned dicts
     are CHUNK-LOCAL (0 = first frame of this chunk).
 
-    Returns (chunk_clips, chunk_transitions, chunk_broll, chunk_micro_segments)
-    suitable for passing into build_final_filtergraph as if they were a
-    standalone timeline of length (chunk_end - chunk_start) frames.
+    Returns (chunk_clips, chunk_transitions, chunk_micro_segments) suitable
+    for passing into build_final_filtergraph as if they were a standalone
+    timeline of length (chunk_end - chunk_start) frames.
+
+    B-roll is no longer sliced here — it's rendered by Remotion's BrollLayer
+    inside PromptlyOverlay (an alpha layer covering the full output), and
+    the overlay layer's filtergraph trim handles per-chunk visibility.
     """
     chunk_clips: List[dict] = []
     chunk_transitions: List[dict] = []
-    chunk_broll: List[dict] = []
     chunk_micro_segments: List[dict] = []
 
     transitions_by_after_idx = {int(t["afterClipIndex"]): t for t in transitions}
@@ -927,38 +852,7 @@ def slice_timeline_for_chunk(
             if trans is not None:
                 cursor_global += int(trans["durationInFrames"])
 
-    # B-roll: simple frame-range overlap check, then slice.
-    for br in broll:
-        br_global_start = int(br["fromFrame"])
-        br_dur = int(br["durationInFrames"])
-        br_global_end = br_global_start + br_dur
-        if br_global_end <= chunk_start or br_global_start >= chunk_end:
-            continue
-        v_start = max(br_global_start, chunk_start)
-        v_end = min(br_global_end, chunk_end)
-        local_start = v_start - br_global_start  # offset into broll's own timeline (output frames)
-        local_duration = v_end - v_start
-        playback_rate = float(br.get("playbackRate", 1.0)) or 1.0
-
-        sliced_br = dict(br)
-        # fromFrame is OUTPUT-frame in the chunk-local timeline (0 = first
-        # frame of this chunk).
-        sliced_br["fromFrame"] = v_start - chunk_start
-        sliced_br["durationInFrames"] = local_duration
-        # Advance the canonical seek-seconds field by the B-roll content
-        # already consumed by the chunk start. local_start is in output
-        # frames; convert to broll seconds via:
-        #   output_time = local_start / source_fps      (chunk-cut output time)
-        #   broll_time  = output_time * playback_rate    (broll content at that point)
-        # source_fps here is the output canvas fps (60 in v65); brollFps
-        # is preserved via dict(br) copy and used by build_broll_input_filter.
-        sliced_br["seekFromSeconds"] = (
-            float(br["seekFromSeconds"])
-            + (local_start * playback_rate) / float(source_fps)
-        )
-        chunk_broll.append(sliced_br)
-
-    return chunk_clips, chunk_transitions, chunk_broll, chunk_micro_segments
+    return chunk_clips, chunk_transitions, chunk_micro_segments
 
 
 def split_timeline_into_chunks(total_output_frames: int, n_chunks: int) -> List[Tuple[int, int]]:

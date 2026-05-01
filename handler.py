@@ -8583,14 +8583,13 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     #   2. Trim each Remotion-rendered clip/transition out of micro_segments.mp4
     #      by frame range
     #   3. Concat all timeline segments in order → [base]
-    #   4. Overlay each B-roll cutaway at its output-time window
-    #   5. Apply outro fade (if configured)
-    #   6. Alpha-composite the PromptlyOverlay layer (captions + MGs + non-
-    #      caption_match text overlays — blend captions are handled by the
+    #   4. Apply outro fade (if configured)
+    #   5. Alpha-composite the PromptlyOverlay layer (B-roll + captions + MGs +
+    #      non-caption_match text overlays — blend captions are handled by the
     #      second-pass PromptlyBlendCaptionsOnly composition that runs after
     #      this composite finishes, when caption_style is a blend style).
-    #   7. libx264 ultrafast crf 18 silent intermediate (audio mux is a
-    #      separate stream-copy step at the very end).
+    #   6. libx264 silent intermediate (audio mux is a separate stream-copy
+    #      step at the very end).
     # Wait for all overlay chunk subprocesses (in input order — for chunked
     # mode each chunk lands in its own .mov; we concat them in order below).
     _overlay_chunk_elapsed = []
@@ -8689,21 +8688,21 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         When include_audio=True, the audio track is muxed in the same pass
         (used by the single-chunk fallback path)."""
         if _composite_chunked:
-            _c_clips, _c_trans, _c_broll, _c_micro = slice_timeline_for_chunk(
+            _c_clips, _c_trans, _c_micro = slice_timeline_for_chunk(
                 chunk_start, chunk_end, clips_out, transitions_out,
-                broll_out, micro_segments_meta, source_fps,
+                micro_segments_meta, source_fps,
             )
         else:
             _c_clips = clips_out
             _c_trans = transitions_out
-            _c_broll = broll_out
             _c_micro = micro_segments_meta
 
         # Build inputs for THIS chunk. Source + overlay are always present;
         # micro is only present if any sliced segment is remotion-rendered
         # OR there's a transition in this chunk (transitions always live in
-        # micro_segments). broll inputs only include the broll files
-        # visible in this chunk.
+        # micro_segments). B-roll lives entirely in PromptlyOverlay (alpha
+        # layer composited via overlay_input_idx) — no per-chunk B-roll
+        # inputs needed in this filtergraph.
         chunk_inputs = [source_path]
         c_source_idx = 0
         c_micro_idx = None
@@ -8717,12 +8716,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # video and the filtergraph trims to this chunk's frame range.
         chunk_inputs.append(overlay_video_path)
         c_overlay_idx = len(chunk_inputs) - 1
-        # B-roll is no longer composited by FFmpeg — moved to PromptlyOverlay's
-        # BrollLayer (split-screen with slide-up animation). The FFmpeg
-        # filtergraph base path is now just speaker + transitions + outro,
-        # then alpha-composited with the overlay (which now contains B-roll
-        # in addition to captions/MGs/text).
-        c_broll_start_idx = None
         c_audio_idx = None
         if include_audio:
             c_audio_idx = len(chunk_inputs)
@@ -8732,7 +8725,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _fg, _final_labels = build_final_filtergraph(
             clips=_c_clips,
             transitions=_c_trans,
-            broll=_c_broll,
             micro_segments=_c_micro,
             outro=_outro,
             total_output_frames=chunk_size,
@@ -8740,7 +8732,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             source_input_idx=c_source_idx,
             micro_input_idx=c_micro_idx,
             overlay_input_idx=c_overlay_idx,
-            broll_input_start_idx=c_broll_start_idx,
             chunk_global_start_frame=(chunk_start if _composite_chunked else None),
             global_total_frames=int(total_output_frames),
         )

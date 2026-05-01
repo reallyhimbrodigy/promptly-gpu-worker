@@ -108,14 +108,14 @@ export type TransitionType =
   | "SceneTitle";
 
 // ── B-roll cutaway ───────────────────────────────────────────────────────────
-// Note: in v62+ the B-roll layer is rendered by FFmpeg, not Remotion.
-// This type stays in sync with the dict shape Python emits so the JSON
-// validates if anything ever does consume it. seekFromSeconds is the
-// canonical seek field (the legacy seekFromFrames was interpreted in
-// broll's own fps but consumed in output_fps coordinates — silent
-// content corruption on non-output-fps Pexels videos). brollFps is
-// the broll's actual fps, plumbed through for the FFmpeg side's
-// exact-frame-count math.
+// Rendered by Remotion's BrollLayer inside PromptlyOverlay (alpha layer)
+// as a split-screen inset that slides up from below to occupy the bottom
+// half of the canvas. `src` is the staged basename in the bundle public
+// dir (handler.py _stage_file). `seekFromSeconds` is the canonical seek
+// field — converted to OffthreadVideo's `startFrom` (frames) by
+// BrollLayer via Math.round(seekFromSeconds * fps). `brollFps` is no
+// longer used (OffthreadVideo handles fps mismatch automatically) but
+// stays in the schema for parity with persistence + observability.
 export interface BrollSpec {
   src: string;
   fromFrame: number;
@@ -255,12 +255,6 @@ export interface PromptlyRenderInput {
   textOverlays: TextOverlaySpec[];
   motionGraphics: MotionGraphicSpec[];
   outro?: "none" | "fade_black" | "fade_white";
-  /** B-roll output-time windows in FRAME coordinates as [startFrame, endFrame]
-   *  pairs. Used by PromptlyOverlay to suppress text-overlays/MGs whose own
-   *  window overlaps any of these — so chapter cards / message bubbles / etc.
-   *  do not render on top of cutaway footage. Captions are NOT filtered (they
-   *  are the readable bridge layer over B-roll). */
-  brollWindows?: number[][];
 }
 
 export interface PromptlyRenderProps {
