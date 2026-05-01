@@ -674,27 +674,13 @@ def build_final_filtergraph(
         concat_inputs = "".join(f"[{lbl}]" for lbl in segment_labels)
         parts.append(f"{concat_inputs}concat=n={len(segment_labels)}:v=1:a=0[base]")
 
-    # ── B-roll overlays at their output-time windows ─────────────────────────
+    # ── B-roll lives in PromptlyOverlay (Remotion) — not composited here ─────
+    # Pre-Pass 5: B-roll was overlaid at this point in the filtergraph. Now
+    # B-roll renders as a split-screen alpha layer inside PromptlyOverlay
+    # (BrollLayer), composited together with captions/text-overlays/MGs in
+    # the alpha-overlay step below. This base path is just the speaker
+    # frame + transitions + outro now.
     cur = "base"
-    if broll and broll_input_start_idx is not None:
-        for bi, br in enumerate(broll):
-            br_input_idx = broll_input_start_idx + bi
-            br_filter, br_label = build_broll_input_filter(
-                bi, br, br_input_idx, source_fps, canvas_w, canvas_h,
-            )
-            parts.append(br_filter)
-            from_frame = int(br["fromFrame"])
-            dur_frames = int(br["durationInFrames"])
-            t0 = from_frame / source_fps
-            t1 = (from_frame + dur_frames) / source_fps
-            next_label = f"base_b{bi}"
-            parts.append(
-                f"[{cur}][{br_label}]"
-                f"overlay=x=0:y=0:format=auto:eof_action=pass:"
-                f"enable='between(t,{t0:.6f},{t1:.6f})'"
-                f"[{next_label}]"
-            )
-            cur = next_label
 
     # ── Outro fade ───────────────────────────────────────────────────────────
     # Single-pass mode (chunk_global_start_frame is None): fade applied to

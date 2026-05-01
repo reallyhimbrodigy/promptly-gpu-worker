@@ -8251,15 +8251,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             "extraProps": _caption_extra_props,
         }
         _v62_text_overlays = text_overlays_out
-    # B-roll windows in FRAME coordinates — used by PromptlyOverlay's
-    # TextOverlaysLayer + MotionGraphicsLayer to suppress overlay items whose
-    # own window overlaps a B-roll cutaway. Captions are NOT filtered (they
-    # bridge over B-roll). broll_out entries already carry fromFrame +
-    # durationInFrames in output-time space.
-    _broll_windows_frames = [
-        [int(_b["fromFrame"]), int(_b["fromFrame"]) + int(_b["durationInFrames"])]
-        for _b in broll_out
-    ]
     overlay_input = {
         "sourceUrl": _source_url,
         "fps": source_fps,
@@ -8273,7 +8264,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         "textOverlays": _v62_text_overlays,
         "motionGraphics": motion_graphics_out,
         "outro": _outro,
-        "brollWindows": _broll_windows_frames,
     }
     overlay_input_path = os.path.join(_stage_dir, "overlay_input.json")
     _validate_and_write_render_input(
@@ -8727,13 +8717,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # video and the filtergraph trims to this chunk's frame range.
         chunk_inputs.append(overlay_video_path)
         c_overlay_idx = len(chunk_inputs) - 1
+        # B-roll is no longer composited by FFmpeg — moved to PromptlyOverlay's
+        # BrollLayer (split-screen with slide-up animation). The FFmpeg
+        # filtergraph base path is now just speaker + transitions + outro,
+        # then alpha-composited with the overlay (which now contains B-roll
+        # in addition to captions/MGs/text).
         c_broll_start_idx = None
-        if _c_broll:
-            c_broll_start_idx = len(chunk_inputs)
-            for _br in _c_broll:
-                # br["src"] is now a staged basename in the bundle public dir
-                # (Pass 4 staging). Resolve to absolute path for ffmpeg `-i`.
-                chunk_inputs.append(os.path.join(_bundle_public_root, _br["src"]))
         c_audio_idx = None
         if include_audio:
             c_audio_idx = len(chunk_inputs)
