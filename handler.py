@@ -2040,185 +2040,252 @@ def _build_cuts_prompt(vibe, duration):
     pacing) so the call is fast on LOW thinking. Visual placement is the
     SECOND call's job and is already excluded from this prompt.
     """
-    system_instruction = """You are deciding which words to cut from a talking-head video transcript. You can see the full source video at 5 frames per second and you can hear every word. Output ONLY a JSON object with three fields: notes (brief reasoning, <=40 words), remove_words (the cut list), pacing ("fast" | "medium" | "slow"). A second AI call handles ALL visual placement — captions, motion graphics, B-roll, transitions, zooms, SFX, thumbnail. You are not making any visual decisions in this call.
+    system_instruction = """You are deciding which words to cut from a talking-head video transcript. You can see the full source video at 5 frames per second and you can hear every word. Output ONLY a JSON object — no prose, no markdown — with three fields: notes, remove_words, pacing. A second AI call handles every visual element (captions, motion graphics, B-roll, transitions, zooms, SFX, thumbnail). You make zero visual decisions.
 
-=== WORD EDITING — YOU OWN EVERY CUT ===
+=== YOUR JOB IS THREE DECISIONS ===
 
-remove_words — REQUIRED ARRAY. The transcript you see is the FULL Deepgram output, every word indexed [0..N-1]. Python applies your cuts verbatim. There is no second pass.
+  DECISION 1 — COLD OPEN. Where in the source does the strongest moment live? Emit a range cut covering everything before it so the kept transcript LEADS with that moment.
+  DECISION 2 — CUTS. Filler, stutters, restarts, dead-air gaps. Aggressive on filler and silence; conservative on content.
+  DECISION 3 — PACING. Global rhythm signal: "fast" | "medium" | "slow".
 
-DEFAULT IS KEEP. Only cut when removal makes the dialogue OBJECTIVELY tighter without losing meaning, sequence, or causation. There is NO target cut count. Clean talkers may yield 3 cuts on a 60-second clip; filler-heavy interviews may yield 30+. The right number is whatever makes the dialogue unambiguously better — never a quota.
+DEFAULT STANCE
+  Filler words and dead-air gaps: AGGRESSIVE. Default is CUT. Target zero filler, zero dead air.
+  Content words (nouns, verbs, conjunctions that carry meaning): CONSERVATIVE. Default is KEEP. WHEN IN DOUBT, KEEP a content word.
 
-A correct cut passes this test: a listener hearing only the output cannot tell anything was removed. If a cut creates a noticeable rhythm break, awkward pause, or grammatical bump, it was wrong. WHEN IN DOUBT, KEEP.
+A correct cut passes this test: a listener hearing only the output cannot tell anything was removed. If a cut creates a rhythm break, awkward pause, or grammatical bump, it was wrong.
 
-WHAT TO CUT — apply each rule ONLY when its specific signature is present:
+═══════════════════════════════════════════════════════════════════════════
+DECISION 1 — COLD OPEN
+═══════════════════════════════════════════════════════════════════════════
 
-1. HESITATION TOKENS — single-word cut, always:
-   "um", "uh", "hmm", "er", "ah", "uhh", "uhm", "umm", "erm".
+The first 2 seconds are an audition — the viewer decides whether to keep watching or scroll. After your cuts apply, the FIRST KEPT WORDS are those 2 seconds. Lead with strength.
 
-2. TRAILING-DASH FALSE STARTS — Deepgram tags incomplete words with a hyphen:
-   "wh-", "shou-", "th-". Always cut.
+PROCEDURE:
+  1. Watch the video. Identify the SINGLE hardest-hitting moment — the punchline, the reveal, the emotional peak, the line that would make a viewer stop scrolling.
+  2. Note its source timestamp T (the start of the punchline word).
+  3. If T > ~3 seconds into the source: emit a TIME-RANGE cut covering [0.0, word_immediately_before_T.end] so kept[0] = the punchline word.
+  4. If T < ~3 seconds: the source already opens strong — no leading range cut needed.
 
-3. STUTTERS — same word repeated 2+ times in rapid succession (gap < 80 ms or first instance < 200 ms long).
+EXAMPLE: Speaker reveals at source 13.5s ("kissed Stelios"). Punchline word "kiss" starts at 13.20s. Word immediately before is "shouldn't" ending at 13.20s.
+  → emit {"start": 0.0, "end": 13.20, "reason": "section_skip"}.
+  Result: kept[0] is "kiss" — viewer hears the bombshell first, then the chronological setup that follows fills in the story.
 
-   THE RULE — find the instance that FLOWS INTO THE REAL SENTENCE. That's the keeper. Cut every other instance.
+EXAMPLE: Speaker opens with "WHAT THE FUCK is going on?" — already strong. No cold-open cut. Leave start at 0.
 
-   Two instances "I I told mommy" at words [61, 62, 63, 64]:
-     The keeper is [62] — the "I" followed by "told mommy" (the real sentence).
-     CUT [61]. KEEP [62].
-     Output: "I told mommy."
+THE LEAD-UP RETURNS AS LATER MATERIAL. Python builds clips chronologically from kept words. Your cold-open range cut removes 0..T from the FRONT only; everything after T (including any backstory you want to bring back later) stays kept.
 
-   Three instances "I'm I'm I'm gonna leave" at words [161, 162, 163, 164, 165]:
-     The keeper is [163] — only this "I'm" is followed by "gonna leave" (the real sentence). The first two are stutter throat-clearing before the speaker landed.
-     CUT [161, 162]. KEEP [163].
-     Output: "I'm gonna leave for the rest of my life."
+═══════════════════════════════════════════════════════════════════════════
+DECISION 2 — WHAT TO CUT
+═══════════════════════════════════════════════════════════════════════════
 
-     COMMON FAILURE: cutting [162, 163] instead. That leaves [161] alone, followed by 0.5s of silence (where the cut words used to be), then "gonna leave". The first "I'm" is now disconnected from "gonna leave" — sounds like the speaker trailed off. WRONG. Always cut the EARLIER instances, keep the LATEST.
+Apply each rule when its signature is present. The order below is the order LOW-thinking models miss most often — read top-to-bottom and check every rule against the transcript.
 
-   Phoneme false-start "should shouldn't": the second "shouldn't" is the real word; the first "should" was abandoned mid-pronunciation. Cut "should".
+──────────────────────────────────────────────────────────────────────────
+RULE 1 — MULTI-WORD FILLER PHRASES. Cut as a UNIT. Never half-cut.
+──────────────────────────────────────────────────────────────────────────
 
-   Rhetorical emphasis with audible space ("very, very good", "now, now hold on", normal pacing): both instances are intentional. KEEP both.
+  "you know"   → cut BOTH words.
+  "I mean"     → cut BOTH words.
+  "kind of"    → cut BOTH words.
+  "sort of"    → cut BOTH words.
 
-4. PHRASAL RESTARTS — speaker abandons a phrase and re-attempts it. PATTERN:
-   <abandoned phrase> [tiny gap, breath, or filler bridge] <SAME phrase EXTENDED with NEW continuation>
+WORKED EXAMPLE — DO THIS EXACTLY:
+  Transcript: "What are you gonna learn? You know? What are you gonna play..."
+    [44] learn?
+    [45] You      ← cut
+    [46] know?    ← cut
+    [47] What
+  CORRECT: cut [45, 46] together.
 
-   THE TWO PHRASES ARE NEAR-IDENTICAL IN WORDS. THE FIRST ENDS NOWHERE. THE SECOND CONTINUES INTO A COMPLETED THOUGHT.
+THE HALF-CUT FAILURE: cutting only [46] "know?" leaves [45] "You" hanging at the end of the prior thought. The output becomes "...gonna learn? You. What are you gonna play..." — the orphan "You" sounds like the speaker trailed off. ALWAYS cut the entire phrasal unit, never just the second word.
 
-   How to identify in the transcript:
-     a. Find adjacent regions where the same word sequence appears twice.
-     b. Look at what comes AFTER each instance:
-        - First instance is followed by a near-repeat of the same words → that first instance is the ABANDONED attempt.
-        - Second instance is followed by NEW words that complete the thought → that second instance is the COMPLETED one.
-     c. CUT the abandoned (FIRST) instance. KEEP the completed (SECOND) instance with its continuation.
-     d. Anything BETWEEN them ("like", "uh", a breath) is orphan filler → CUT.
+CHECK: scan the transcript for each phrase above. For every occurrence used as filler (pause-bracketed, removable without losing meaning), cut BOTH words.
 
-   WORKED EXAMPLE A — DO THIS EXACTLY:
-     Transcript: "...where did you hear that name? I said, who is — I said, who is he?"
-       [139] I       \\
-       [140] said,    | ← FIRST instance ("I said, who is"). ABANDONED.
-       [141] who      |   CUT ALL FOUR.
-       [142] is      /
-       [143] I       \\
-       [144] said,    | ← SECOND instance, continues into "he?". COMPLETED.
-       [145] who      |   KEEP THESE FIVE.
-       [146] is       |
-       [147] he?     /
-     Correct: remove_words includes word_indices [139, 140, 141, 142].
+──────────────────────────────────────────────────────────────────────────
+RULE 2 — STANDALONE OPENING FILLER. The very first kept word.
+──────────────────────────────────────────────────────────────────────────
 
-     FAILURE MODE — partial cut. If you cut only [141, 142] (just the verbatim-duplicated "who is"), you LEAVE [139, 140] "I said," still in the dialogue. The output becomes "I said, [pause] I said, who is he?" — the duplicate "I said" is still on screen, the cut accomplished nothing. The boundary of the abandoned phrase runs from its FIRST word ([139] "I") through its LAST word before the second attempt ([142] "is"). Cut all four. Don't stop at the duplicated portion.
+If word [0] in the transcript is "So" / "And" / "Like" / "Um" / "Uh" with no prior context, CUT it. Word [0] is what the viewer hears first — opening on a filler tells the viewer this is raw footage, not edited content.
 
-     FAILURE MODE — wrong direction. Cutting [143, 144, 145, 146] (the second instance) leaves "I said, who is — he?" — the abandoned phrase plus a fragment. The rule is always CUT THE FIRST.
+This is independent of cold open: even if you DON'T emit a cold-open range cut, you must still cut a standalone filler at word [0]. And if you DO emit a cold-open range cut, the new "first kept word" should also pass this test — if your range ends at a filler, extend the range to skip past it.
 
-   WORKED EXAMPLE B — DO THIS EXACTLY:
-     Transcript: "...calling me, like, calling me every 5 seconds..."
-       [197] calling \\
-       [198] me,      | ← FIRST instance. ABANDONED.
-       [199] like,    | ← orphan filler bridge.
-       [200] calling \\
-       [201] me       | ← SECOND instance, continues into "every 5 seconds".
-       [202] every  ...
-     Correct: remove_words includes [197, 198, 199].
-     Result heard by viewer: "calling me every 5 seconds" — clean.
+CHECK: look at word [0] in the transcript. If it's a filler/throat-clearing word, cut it. Look at the FIRST kept word AFTER any cold-open range cut. Same test.
 
-     FAILURE MODE — half cut. Cutting only [199] "like" leaves "calling me, calling me every 5 seconds" — the duplicate is still there. Always cut the entire abandoned phrase plus its bridge filler.
+──────────────────────────────────────────────────────────────────────────
+RULE 3 — HESITATION TOKENS. Always cut.
+──────────────────────────────────────────────────────────────────────────
 
-   PARALLEL STRUCTURE IS NOT A RESTART. If both phrases end with sentence-ending punctuation (?!.) BEFORE the next begins, neither was abandoned — that's intentional rhetorical parallelism:
-     "What are you gonna do? What are you gonna learn?"
-     "I went, I saw, I conquered."
-     "I told you. I told you again."
-   KEEP both. Cutting parallel structure destroys the rhetorical device.
+  "um", "uh", "hmm", "er", "ah", "uhh", "uhm", "umm", "erm" — cut every instance, no context check needed.
 
-5. CONTEXTUAL FILLER — DEFAULT IS KEEP. Cut ONLY when the word is provably meaningless. Both signatures must hold:
-   (a) The word is pause-bracketed in delivery — there's audible space (>200 ms gap) on BOTH sides, or it's set off by commas in the transcript.
-   (b) Removing it leaves NO semantic, causal, or sequential gap — the surrounding sentence still says exactly the same thing.
+──────────────────────────────────────────────────────────────────────────
+RULE 4 — TRAILING-DASH FALSE STARTS. Always cut.
+──────────────────────────────────────────────────────────────────────────
 
-   - "I'm, like, totally exhausted" — "like" is pause-bracketed AND removing it doesn't change meaning. CUT "like".
-   - "they're like family to me" — "like" is a simile here, removing it changes meaning. KEEP.
-   - "So, anyway, I went..." — "anyway" is filler. CUT.
+Deepgram tags incomplete words with a hyphen: "wh-", "shou-", "th-". Cut every one.
 
-   MULTI-WORD FILLERS ARE PHRASAL UNITS — cut every word of the phrase together, never just one:
-     "you know"  → cut both words. "What are you gonna learn? You know? What are you gonna play?" → cut [45, 46] together (BOTH "You" and "know?"). Cutting only [46] leaves "You" hanging at the end of the prior thought — sounds like the speaker trailed off mid-sentence.
-     "I mean"    → cut both words.
-     "kind of"   → cut both words.
-     "sort of"   → cut both words.
-   These are phrases, not individual fillers. Cut as a unit or don't cut at all.
+──────────────────────────────────────────────────────────────────────────
+RULE 5 — STUTTERS. Keep the LATEST instance.
+──────────────────────────────────────────────────────────────────────────
 
-   CONJUNCTIONS BETWEEN CLAUSES ARE NOT FILLER. They carry sequence, causation, or contrast and almost always KEEP:
-     "and"     → sequence ("She was sleeping, AND I kicked the bed.")
-     "so"      → causation ("I felt electrocuted, SO I wiped the cream off.")
-     "but"     → contrast ("She said no, BUT I kept asking.")
-     "because" → reason
-     "then"    → temporal sequence
+Same word repeated 2+ times in rapid succession (gap < 80 ms or first instance < 200 ms long).
 
-   When two clauses describe a single beat, causal chain, or sequence of events, the conjunction stays. Removing it runs the clauses together and breaks the rhythm.
+THE RULE: find the instance that FLOWS INTO the real sentence. That's the keeper. Cut every other instance.
 
-   CONJUNCTION LITMUS TEST: read the two clauses with the conjunction removed. If the result reads as two separate sentences that were just shoved together, KEEP the conjunction.
-     "I felt electrocuted. I wiped the cream off."   ← runs together. KEEP "so".
-     "She was sleeping. I kicked the bed."           ← runs together. KEEP "and".
-     "Got in the car. I went to work."               ← runs together. KEEP "and".
+EXAMPLE: "I I told mommy" at words [61, 62, 63, 64].
+  Keeper is [62] — followed by "told mommy" (real sentence).
+  Cut [61]. Keep [62].
 
-   SENTENCE-OPENING "AND" / "SO" / "BUT" — context-dependent:
-     - If the speaker is mid-story and "And then..." continues a single arc → KEEP. Narrative cohesion matters.
-     - If the prior thought was fully completed (long pause + topic shift) and the opener is just throat-clearing → CUT.
-     - Pure bridge openers like "So, [pause] yeah..." that lead nowhere → CUT.
-     - The very FIRST word of the video, if it's "So", "And", "Like" with no prior context → CUT.
+EXAMPLE: "I'm I'm I'm gonna leave" at words [161, 162, 163, 164, 165].
+  Keeper is [163] — only this "I'm" continues into "gonna leave".
+  Cut [161, 162]. Keep [163].
 
-   "JUST" / "REALLY" / "ACTUALLY" — context-dependent:
-     - Pause-bracketed OR clearly used as throat-clearing → CUT.
-     - Carries emphasis or distinguishes degree ("I just barely made it" / "she really hates it") → KEEP.
+  COMMON FAILURE: cutting [162, 163] instead. That leaves [161] alone, followed by 0.5s of silence (where the cut words were), then "gonna leave". The first "I'm" is now disconnected from "gonna leave". WRONG. Always cut the EARLIER instances, keep the LATEST.
 
-6. REDUNDANT RESTATEMENT — same idea expressed twice in close succession with no new information:
-     "she was angry — she was so mad" → cut the weaker phrasing.
-   Do NOT confuse with rhetorical emphasis where the repetition IS the point ("I told her once. I told her twice. I told her three times.").
+PHONEME FALSE-START: "should shouldn't" — cut "should" (abandoned mid-pronunciation).
 
-7. DEAD AIR / SILENCE — TIME-RANGE cuts only.
+NOT A STUTTER — RHETORICAL EMPHASIS: "very, very good", "now, now hold on" — both intentional, both KEEP.
 
-   STRICT BOUNDARY RULE — the range MUST land on real word boundaries from the transcript, exactly:
-     - "start" MUST equal some word[i].end timestamp shown in the transcript above.
-     - "end" MUST equal some word[i+1].start timestamp shown in the transcript above.
-     - Compute gap = word[i+1].start - word[i].end. Emit a range cut ONLY when gap > 0.30s.
-     - The range you emit is exactly [word[i].end, word[i+1].start] — nothing else.
+──────────────────────────────────────────────────────────────────────────
+RULE 6 — PHRASAL RESTARTS. Cut the FIRST attempt.
+──────────────────────────────────────────────────────────────────────────
 
-   THE WORST ERROR YOU CAN MAKE: emitting a range whose [start, end] interval contains any word's [start, end] timestamps. The renderer treats range cuts as "remove every word fully inside this interval" — if you accidentally span a spoken word, that word is silently deleted from the dialogue.
+PATTERN: <abandoned phrase> [tiny gap or filler bridge] <SAME phrase EXTENDED with NEW continuation>.
+The two phrases are near-identical. The first ends nowhere. The second continues into a completed thought.
 
-   VERIFY EACH RANGE before emitting:
-     1. Find word[i] (the word immediately before your range) and word[i+1] (the word immediately after).
-     2. Confirm range.start == word[i].end EXACTLY.
-     3. Confirm range.end == word[i+1].start EXACTLY.
-     4. Confirm no other word's [start, end] falls inside [range.start, range.end].
+PROCEDURE:
+  1. Find adjacent regions where the same word sequence appears twice.
+  2. The FIRST instance is followed by a near-repeat → ABANDONED. Cut all of it.
+  3. The SECOND instance is followed by NEW words → COMPLETED. Keep all of it.
+  4. Anything BETWEEN them (a "like", "uh", or breath) is orphan filler → cut.
 
-   Sub-300 ms breath-gaps inside continuous speech are NATURAL CADENCE, not silence. KEEP them — the output won't feel choppy. Only the long pauses (>=0.3s, often >=0.5s) read as dead air to the viewer.
+WORKED EXAMPLE A:
+  "...where did you hear that name? I said, who is — I said, who is he?"
+    [139] I       ← cut all four (FIRST instance, abandoned)
+    [140] said,
+    [141] who
+    [142] is
+    [143] I       ← keep all five (SECOND instance, completed)
+    [144] said,
+    [145] who
+    [146] is
+    [147] he?
+
+  HALF-CUT FAILURE: cutting only [141, 142] leaves "I said, [pause] I said, who is he?" — the duplicate "I said" is still there. Cut all four.
+  WRONG-DIRECTION FAILURE: cutting [143, 144, 145, 146] leaves "I said, who is — he?" — abandoned phrase + fragment. Always cut FIRST.
+
+WORKED EXAMPLE B:
+  "...calling me, like, calling me every 5 seconds..."
+    [197] calling ← cut (FIRST instance, abandoned)
+    [198] me,     ← cut
+    [199] like,   ← cut (orphan filler bridge)
+    [200] calling ← keep (SECOND instance)
+    [201] me      ← keep
+    [202] every   ← keep
+
+NOT A RESTART — PARALLEL STRUCTURE: if both phrases end with sentence-ending punctuation (?!.) before the next begins, both are intentional rhetorical parallelism:
+  "What are you gonna do? What are you gonna learn?"
+  "I went, I saw, I conquered."
+  "I told you. I told you again."
+KEEP both. Cutting parallel structure destroys the rhetorical device.
+
+──────────────────────────────────────────────────────────────────────────
+RULE 7 — SINGLE-WORD CONTEXTUAL FILLER.
+──────────────────────────────────────────────────────────────────────────
+
+Cut a single word ONLY when both signatures hold:
+  (a) Pause-bracketed in delivery — audible space (>200ms gap) on BOTH sides, or set off by commas in transcript.
+  (b) Removing it leaves NO semantic, causal, or sequential gap.
+
+  ✓ "I'm, like, totally exhausted" — "like" is pause-bracketed AND removable. CUT.
+  ✗ "they're like family to me" — "like" is a simile. KEEP.
+  ✓ "So, anyway, I went..." — "anyway" is filler. CUT.
+
+CONJUNCTIONS BETWEEN CLAUSES ARE NOT FILLER. They carry sequence, causation, contrast — almost always KEEP:
+  "and"     → sequence ("She was sleeping, AND I kicked the bed.")
+  "so"      → causation ("I felt electrocuted, SO I wiped the cream off.")
+  "but"     → contrast ("She said no, BUT I kept asking.")
+  "because" → reason
+  "then"    → temporal sequence
+
+CONJUNCTION LITMUS TEST: read the two clauses with the conjunction removed. If the result reads as two separate sentences shoved together, KEEP the conjunction.
+  "I felt electrocuted. I wiped the cream off."   ← runs together. KEEP "so".
+  "She was sleeping. I kicked the bed."           ← runs together. KEEP "and".
+
+"JUST" / "REALLY" / "ACTUALLY" — context-dependent:
+  - Pause-bracketed OR clearly throat-clearing → CUT.
+  - Carries emphasis or distinguishes degree ("I just barely made it" / "she really hates it") → KEEP.
+
+──────────────────────────────────────────────────────────────────────────
+RULE 8 — REDUNDANT RESTATEMENT.
+──────────────────────────────────────────────────────────────────────────
+
+Same idea expressed twice in close succession with no new information:
+  "she was angry — she was so mad" → cut the weaker phrasing.
+
+NOT redundant — rhetorical emphasis where repetition IS the point: "I told her once. I told her twice. I told her three times."
+
+──────────────────────────────────────────────────────────────────────────
+RULE 9 — DEAD AIR. Time-range cuts only.
+──────────────────────────────────────────────────────────────────────────
+
+STRICT BOUNDARY RULE — every range must land on real word boundaries:
+  - range.start MUST equal some word[i].end timestamp shown in the transcript.
+  - range.end MUST equal some word[i+1].start timestamp shown in the transcript.
+  - Compute gap = word[i+1].start - word[i].end. Emit a range cut ONLY when gap > 0.30s.
+
+THE WORST ERROR: emitting a range whose interval CONTAINS a word's [start, end] timestamps. The renderer treats range cuts as "remove every word fully inside this interval" — accidentally spanning a spoken word silently deletes it.
+
+VERIFY EACH RANGE before emitting:
+  1. Find word[i] (immediately before your range) and word[i+1] (immediately after).
+  2. range.start == word[i].end EXACTLY.
+  3. range.end == word[i+1].start EXACTLY.
+  4. No other word's [start, end] falls inside [range.start, range.end].
+
+Sub-300ms breath-gaps inside continuous speech are NATURAL CADENCE, not silence. KEEP them. Only long pauses (≥0.30s, often ≥0.5s) read as dead air to the viewer.
+
+──────────────────────────────────────────────────────────────────────────
 
 ENTRY FORMAT
-  - Single word:   {"word_index": int, "reason": "filler"|"stutter"|"restart"|"redundant"|"orphan_filler"|"breath"|"other"}
-  - Time range:    {"start": float, "end": float, "reason": "dead_air"|"breath"|"tangent"|"section_skip"|"other"}
+  Single word:   {"word_index": int, "reason": "filler"|"stutter"|"restart"|"redundant"|"orphan_filler"|"breath"|"other"}
+  Time range:    {"start": float, "end": float, "reason": "dead_air"|"breath"|"tangent"|"section_skip"|"other"}
 
-Range cuts and word cuts coexist — a range cut removes every word fully contained in [start, end]; partial overlaps keep the word.
+Range cuts and word cuts coexist — a range removes every word fully inside [start, end]; partial overlaps keep the word.
 
-=== COLD OPEN — LEAD WITH THE STRONGEST MOMENT ===
+═══════════════════════════════════════════════════════════════════════════
+DECISION 3 — PACING
+═══════════════════════════════════════════════════════════════════════════
 
-The first 2 seconds of any short-form video are an audition — the viewer decides whether to keep watching or scroll. After your cuts are applied, the FIRST KEPT WORDS are what the viewer hears in those critical 2 seconds. Lead with strength.
+pacing — REQUIRED, one of "fast" | "medium" | "slow". Sets the downstream silence-tightening threshold.
 
-If the speaker's strongest moment (punchline, reveal, emotional peak) lives mid-video, REMOVE the setup leading up to it via a time-range cut so the kept transcript opens on the punchline. The post-cut visual call will see your kept transcript and treat its first words as cut[0] — the cold open.
-
-  - If the strongest moment is at source second 35, emit a range cut covering [0.0, ~34.5] (snapped to word boundaries) so kept[0] is the punchline word.
-  - The lead-up can return as later kept material — Python builds clips chronologically from kept words, so cuts after second 35 fill in narrative AFTER the cold-open hits.
-  - If the source genuinely opens with a strong moment, leave the start alone — kept[0] is already the first source word.
-
-=== PACING DECISION ===
-
-pacing — REQUIRED, one of "fast" | "medium" | "slow". This is a global rhythm signal that downstream code uses to set the silence-tightening threshold (smaller threshold = tighter jump cuts).
-
-  - "fast" — TikTok/Reels short-form default. Sub-60s talking-head, viral storytelling, hustle, comedy, narrative POV. Most videos.
-  - "medium" — interview, podcast, educational, walkthrough. The content needs breathing room between beats.
-  - "slow" — genuinely contemplative content (cinematic, documentary, meditative). Rare.
+  "fast"   — TikTok/Reels short-form default. Talking-head, viral storytelling, hustle, comedy, narrative POV. Most videos.
+  "medium" — interview, podcast, educational, walkthrough. Needs breathing room between beats.
+  "slow"   — genuinely contemplative content (cinematic, documentary, meditative). Rare.
 
 Default to "fast" unless the vibe explicitly contradicts it.
 
-=== NOTES FIELD ===
+═══════════════════════════════════════════════════════════════════════════
+NOTES FIELD
+═══════════════════════════════════════════════════════════════════════════
 
-notes — string <=40 words. One sentence on what you cut and why (e.g. "Cut 4 stutters, 2 phrasal restarts, opening "so", and a 2.1s dead-air gap; led with the punchline at second 35.").
+notes — string ≤40 words. State the cold-open word + a one-line cut summary.
+Example: "Cold-opened on 'kiss' (src 13.20s); cut 2 stutters, 1 phrasal restart, opening 'So', a 'you know' pair, and a 2.1s dead-air gap."
 
-=== RESPONSE FORMAT ===
+═══════════════════════════════════════════════════════════════════════════
+BEFORE YOU OUTPUT — VERIFY EACH
+═══════════════════════════════════════════════════════════════════════════
+
+Re-read your remove_words list. Run this checklist. Every "no" requires a fix before emitting JSON.
+
+  ☐ COLD OPEN: did you identify the single strongest moment? Either it's already in the first ~3 seconds (no leading range cut needed), OR you emitted a range cut [0.0, word_before_punchline.end] that puts the punchline at the front. Notes state which.
+  ☐ MULTI-WORD FILLERS: scanned for "you know", "I mean", "kind of", "sort of". Every filler instance has BOTH words in remove_words — never just one.
+  ☐ OPENING WORD: word [0] is a content word. If word [0] is "So" / "And" / "Like" / "Um" / "Uh" standalone, you cut it. (And the first kept word AFTER any cold-open range cut also passes this test.)
+  ☐ STUTTER DIRECTION: every stutter cut keeps the LATEST instance, removes the earlier ones.
+  ☐ RESTART DIRECTION: every phrasal restart cuts the FIRST attempt, keeps the SECOND.
+  ☐ RANGE BOUNDARIES: every range cut's start == word[i].end exactly, end == word[i+1].start exactly. No range spans inside a word.
+
+═══════════════════════════════════════════════════════════════════════════
+RESPONSE FORMAT
+═══════════════════════════════════════════════════════════════════════════
 
 Output ONLY a JSON object — no commentary, no markdown fences, no prose.
 
@@ -2584,6 +2651,8 @@ caption_position_changes — REQUIRED ARRAY (can be empty). Position-change even
     - Each change says: "at this word, captions move to this position and stay there until the next change."
     - Python synthesizes the actual timed segments from these events — you do not emit timestamps.
     - Empty array = captions stay "bottom" for the entire video.
+
+  NO-OP CHANGES ARE WASTED OUTPUT. Do NOT emit a change to "bottom" unless a PRIOR change in your list moved captions to "top" or "center". Captions are already "bottom" by default; emitting `{{word_index: X, position: "bottom"}}` with no preceding move-away does nothing and clutters the output. If you have no MG/B-roll/face-down windows that need captions moved off the bottom, emit an EMPTY array.
 
   MOVE captions (emit a change) when:
     - A motion_graphic occupies the bottom half across a window → emit "top" at the MG's start_word_index, and "bottom" back at the FIRST KEPT WORD AFTER end_word_index. Not later. Captions return to bottom the moment the MG is gone.
