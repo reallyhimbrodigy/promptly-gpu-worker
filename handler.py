@@ -2533,53 +2533,123 @@ GUIDELINES:
 
 === WORD EDITING — YOU OWN EVERY CUT ===
 
-remove_words — REQUIRED ARRAY. THIS IS THE ONLY CUT AUTHORITY. The transcript you see is the FULL Deepgram output, every word indexed [0..N-1]. Every cut — fillers, stutters, abandoned restarts, breaths, dead-air gaps, redundant restatements, tangents — comes from your `remove_words`. Python applies them verbatim. There is no second pass to clean up what you miss.
+remove_words — REQUIRED ARRAY. THIS IS THE ONLY CUT AUTHORITY. The transcript you see is the FULL Deepgram output, every word indexed [0..N-1]. Python applies your cuts verbatim. There is no second pass.
 
-BE AGGRESSIVE. Top short-form editors (Hormozi, Captions, Submagic) cut 15-30% of the source words. Aim high. A typical 60s talking-head clip should yield 30-60 word cuts plus several silence ranges. If your remove_words array has fewer than 15 entries on a 50s+ clip, you are under-cutting — re-scan the transcript.
+DEFAULT IS KEEP. Only cut when removal makes the dialogue OBJECTIVELY tighter without losing meaning, sequence, or causation. There is NO target cut count. Clean talkers may yield 3 cuts on a 60-second clip; filler-heavy interviews may yield 30+. The right number is whatever makes the dialogue unambiguously better — never a quota.
 
-WHAT TO CUT — apply these in order:
+A correct cut passes this test: a listener hearing only the output cannot tell anything was removed. If a cut creates a noticeable rhythm break, awkward pause, or grammatical bump, it was wrong. WHEN IN DOUBT, KEEP.
 
-1. EVERY hesitation token ("um", "uh", "hmm", "er", "ah", "uhh", "uhm", "umm", "erm") — single-word cut. Always.
+WHAT TO CUT — apply each rule ONLY when its specific signature is present:
 
-2. EVERY trailing-dash false start ("wh-", "shou-", "th-") — Deepgram returns these with hyphens. Always cut.
+1. HESITATION TOKENS — single-word cut, always:
+   "um", "uh", "hmm", "er", "ah", "uhh", "uhm", "umm", "erm".
 
-3. STUTTERS — repeated word ("I I", "the the", "and and"):
-   - 2 instances rapid-fire (gap < 80ms or first word duration < 200ms): cut the FIRST instance, keep the SECOND.
-   - 3+ instances ("I'm I'm I'm"): cut the FIRST N-1 instances, keep the LAST.
-   - Rhetorical emphasis with audible space between ("very, very good", "now, now, now hold on") with normal pacing: KEEP — that's intent.
+2. TRAILING-DASH FALSE STARTS — Deepgram tags incomplete words with a hyphen:
+   "wh-", "shou-", "th-". Always cut.
 
-4. PHRASAL RESTARTS — the speaker abandons a phrase and starts the same phrase over. The PATTERN is:
-   <abandoned phrase> [optional filler/breath gap] <repeated phrase, completed with new content>
+3. STUTTERS — same word repeated 2+ times in rapid succession (gap < 80 ms or first instance < 200 ms long):
+   - "I I told mommy" → cut the FIRST. Keep the second.
+   - "I'm I'm I'm gonna" → cut all but the LAST.
+   - Phoneme false-start ("should shouldn't") → cut "should".
+   - Rhetorical emphasis with audible space ("very, very good", "now, now hold on", normal pacing): KEEP both.
 
-   Example A:  "I said, who is — I said, who is he?"
-     • Abandoned: "I said, who is" (incomplete, no continuation)
-     • Replacement: "I said, who is he?" (completed thought)
-     • Cut: the ABANDONED attempt (the FIRST occurrence). Keep the COMPLETED one.
+4. PHRASAL RESTARTS — speaker abandons a phrase and re-attempts it. PATTERN:
+   <abandoned phrase> [tiny gap, breath, or filler bridge] <SAME phrase EXTENDED with NEW continuation>
 
-   Example B:  "calling me — like — calling me every five seconds"
-     • Abandoned: "calling me"
-     • Filler bridge: "like"
-     • Replacement: "calling me every five seconds"
-     • Cut: the abandoned phrase + the orphan filler. Keep the completed phrase.
+   THE TWO PHRASES ARE NEAR-IDENTICAL IN WORDS. THE FIRST ENDS NOWHERE. THE SECOND CONTINUES INTO A COMPLETED THOUGHT.
 
-   THE RULE — when two near-identical phrases appear in a row:
-     • The phrase that has MORE WORDS following it (continues the thought) is the COMPLETED one — KEEP.
-     • The phrase that ENDS where the second starts (no continuation, just a repeat) is the ABANDONED one — CUT.
-     • Words BETWEEN the two phrases (often "like", "uh", or a breath) are orphan filler — CUT.
+   How to identify in the transcript:
+     a. Find adjacent regions where the same word sequence appears twice.
+     b. Look at what comes AFTER each instance:
+        • First instance is followed by a near-repeat of the same words → that first instance is the ABANDONED attempt.
+        • Second instance is followed by NEW words that complete the thought → that second instance is the COMPLETED one.
+     c. CUT the abandoned (FIRST) instance. KEEP the completed (SECOND) instance with its continuation.
+     d. Anything BETWEEN them ("like", "uh", a breath) is orphan filler → CUT.
 
-   PARALLEL STRUCTURE IS NOT A RESTART:
-   "I went, I saw, I conquered" / "what are you gonna do? what are you gonna learn?" — sentence-ending punctuation between the phrases means the first thought completed. KEEP both. Parallel structure is a rhetorical device, not a restart.
+   WORKED EXAMPLE A — DO THIS EXACTLY:
+     Transcript: "...where did you hear that name? I said, who is — I said, who is he?"
+       [139] I       \\
+       [140] said,    | ← FIRST instance ("I said, who is"). ABANDONED.
+       [141] who      |   CUT THESE FOUR.
+       [142] is      /
+       [143] I       \\
+       [144] said,    | ← SECOND instance, continues into "he?". COMPLETED.
+       [145] who      |   KEEP THESE FIVE.
+       [146] is       |
+       [147] he?     /
+     Correct: remove_words = [139, 140, 141, 142].
+     WRONG (a common mistake): cutting [143, 144, 145, 146] leaves "I said, who is — he?". That's the abandoned phrase plus a fragment. The rule is CUT THE FIRST.
 
-5. CONTEXTUAL FILLER — words that pad without carrying meaning. "like", "so", "basically", "literally", "actually", "honestly", "obviously", "just", "really", "you know", "I mean", "kind of", "sort of":
-   - Cut when removing it preserves grammar and meaning: "I'm, like, totally exhausted" → "I'm totally exhausted" (cut "like").
-   - Keep when it carries meaning: "they're like family to me" (simile, not filler).
-   - Sentence-opening "So" is almost always filler: "So I'm shaving..." → "I'm shaving..." (cut "So").
-   - Sentence-opening "And" connecting two clauses is usually filler when the prior clause has sentence-ending punctuation.
-   - Trailing "and..." with nothing meaningful following: cut.
+   WORKED EXAMPLE B — DO THIS EXACTLY:
+     Transcript: "...calling me, like, calling me every 5 seconds..."
+       [197] calling \\
+       [198] me,      | ← FIRST instance. ABANDONED.
+       [199] like,    | ← orphan filler bridge.
+       [200] calling \\
+       [201] me       | ← SECOND instance, continues into "every 5 seconds".
+       [202] every  ...
+     Correct: remove_words = [197, 198, 199].
+     Result heard by viewer: "calling me every 5 seconds" — clean.
 
-6. REDUNDANT RESTATEMENT — same point made twice with no new information ("she was angry — she was so mad"): cut the weaker phrasing.
+   PARALLEL STRUCTURE IS NOT A RESTART. If both phrases end with sentence-ending punctuation (?!.) BEFORE the next begins, neither was abandoned — that's intentional rhetorical parallelism:
+     "What are you gonna do? What are you gonna learn?"
+     "I went, I saw, I conquered."
+     "I told you. I told you again."
+   KEEP both. Cutting parallel structure destroys the rhetorical device.
 
-7. SILENCE / DEAD AIR / BREATHS — emit a TIME-RANGE cut for EVERY gap > 50ms between consecutive word boundaries. Aim for ZERO perceptible silence in output. Inhale gasps, breaths, mid-clause pauses — all out. Use the timestamps shown in the transcript: gap = word[i+1].start − word[i].end. If gap > 0.05s, emit a range cut from word[i].end to word[i+1].start.
+5. CONTEXTUAL FILLER — DEFAULT IS KEEP. Cut ONLY when the word is provably meaningless. Both signatures must hold:
+   (a) The word is pause-bracketed in delivery — there's audible space (>200 ms gap) on BOTH sides, or it's set off by commas in the transcript.
+   (b) Removing it leaves NO semantic, causal, or sequential gap — the surrounding sentence still says exactly the same thing.
+
+   ✓ "I'm, like, totally exhausted" — "like" is pause-bracketed AND removing it doesn't change meaning. CUT "like".
+   ✗ "they're like family to me" — "like" is a simile here, removing it changes meaning. KEEP.
+   ✓ "So, anyway, I went..." — "anyway" is filler. CUT.
+
+   CONJUNCTIONS BETWEEN CLAUSES ARE NOT FILLER. They carry sequence, causation, or contrast and almost always KEEP:
+     "and"     → sequence ("She was sleeping, AND I kicked the bed.")
+     "so"      → causation ("I felt electrocuted, SO I wiped the cream off.")
+     "but"     → contrast ("She said no, BUT I kept asking.")
+     "because" → reason
+     "then"    → temporal sequence
+
+   When two clauses describe a single beat, causal chain, or sequence of events, the conjunction stays. Removing it runs the clauses together and breaks the rhythm.
+
+   CONJUNCTION LITMUS TEST: read the two clauses with the conjunction removed. If the result reads as two separate sentences that were just shoved together, KEEP the conjunction.
+     "I felt electrocuted. I wiped the cream off."   ← runs together. KEEP "so".
+     "She was sleeping. I kicked the bed."           ← runs together. KEEP "and".
+     "Got in the car. I went to work."               ← runs together. KEEP "and".
+
+   SENTENCE-OPENING "AND" / "SO" / "BUT" — context-dependent:
+     • If the speaker is mid-story and "And then..." continues a single arc → KEEP. Narrative cohesion matters.
+     • If the prior thought was fully completed (long pause + topic shift) and the opener is just throat-clearing → CUT.
+     • Pure bridge openers like "So, [pause] yeah..." that lead nowhere → CUT.
+     • The very FIRST word of the video, if it's "So", "And", "Like" with no prior context → CUT.
+
+   "JUST" / "REALLY" / "ACTUALLY" — context-dependent:
+     ✓ Pause-bracketed OR clearly used as throat-clearing → CUT.
+     ✗ Carries emphasis or distinguishes degree ("I just barely made it" / "she really hates it") → KEEP.
+
+6. REDUNDANT RESTATEMENT — same idea expressed twice in close succession with no new information:
+     "she was angry — she was so mad" → cut the weaker phrasing.
+   Do NOT confuse with rhetorical emphasis where the repetition IS the point ("I told her once. I told her twice. I told her three times.").
+
+7. DEAD AIR / SILENCE — TIME-RANGE cuts only.
+
+   STRICT BOUNDARY RULE — the range MUST land on real word boundaries from the transcript, exactly:
+     • "start" MUST equal some word[i].end timestamp shown in the transcript above.
+     • "end" MUST equal some word[i+1].start timestamp shown in the transcript above.
+     • Compute gap = word[i+1].start − word[i].end. Emit a range cut ONLY when gap > 0.30s.
+     • The range you emit is exactly [word[i].end, word[i+1].start] — nothing else.
+
+   THE WORST ERROR YOU CAN MAKE: emitting a range whose [start, end] interval contains any word's [start, end] timestamps. The renderer treats range cuts as "remove every word fully inside this interval" — if you accidentally span a spoken word, that word is silently deleted from the dialogue.
+
+   VERIFY EACH RANGE before emitting:
+     1. Find word[i] (the word immediately before your range) and word[i+1] (the word immediately after).
+     2. Confirm range.start == word[i].end EXACTLY.
+     3. Confirm range.end == word[i+1].start EXACTLY.
+     4. Confirm no other word's [start, end] falls inside [range.start, range.end].
+
+   Sub-300 ms breath-gaps inside continuous speech are NATURAL CADENCE, not silence. KEEP them — the output won't feel choppy. Only the long pauses (≥0.3s, often ≥0.5s) read as dead air to the viewer.
 
 ENTRY FORMAT
   • Single word:   {{"word_index": int, "reason": "filler"|"stutter"|"restart"|"redundant"|"orphan_filler"|"breath"|"other"}}
