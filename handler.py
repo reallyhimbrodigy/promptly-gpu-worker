@@ -261,23 +261,43 @@ class EditPlan(BaseModel):
     Passed to generate_content as response_json_schema so invalid outputs
     are rejected at decode time. Cross-field semantic constraints (e.g.
     word_indices must reference kept words) still live in Python validators.
+
+    FIELD ORDER MATTERS. JSON is generated top-to-bottom; each field's
+    output flows into the model's working context for every field below it.
+    The order here mirrors the order a human editor works:
+      1. Reasoning  (notes)
+      2. Decide cuts FIRST  (remove_words) — every anchor below sees them
+      3. Set overall pace  (pacing)
+      4. Pick visual identity  (caption_style + caption_keywords)
+      5. Place the spine  (emphasis_moments) — the 2-5 strongest beats
+      6. Mark scene boundaries  (transitions)
+      7. Layer audio on emphasis  (sound_effects)
+      8. Reinforce moments visually  (motion_graphics)
+      9. Add chapter cards / hooks  (text_overlays)
+      10. Cover dialogue with cutaways  (broll_clips)
+      11. Position captions around MGs / face  (caption_position_changes)
+      12. Pick the strongest still  (thumbnail_word_index)
+      13. Settings  (audio_denoise / outro / aspect_ratio)
+
+    Reordering this without keeping the prompt sections in lockstep with it
+    will reintroduce the anchor-on-cut pattern that this order eliminates.
     """
     notes: str
-    thumbnail_word_index: int
+    remove_words: List[_RemoveWord]
+    pacing: Literal["fast", "medium", "slow"]
     caption_style: _CAPTION_STYLES
     caption_keywords: List[str]
+    emphasis_moments: List[_EmphasisMoment]
+    transitions: List[_Transition]
+    sound_effects: List[_SoundEffect]
+    motion_graphics: List[_MotionGraphic]
+    text_overlays: List[_TextOverlay]
+    broll_clips: List[_BrollClip]
     caption_position_changes: List[_CaptionPositionChange]
+    thumbnail_word_index: int
     audio_denoise: bool
     outro: Literal["none", "fade_black", "fade_white"]
     aspect_ratio: Literal["9:16"]
-    pacing: Literal["fast", "medium", "slow"]
-    emphasis_moments: List[_EmphasisMoment]
-    text_overlays: List[_TextOverlay]
-    sound_effects: List[_SoundEffect]
-    broll_clips: List[_BrollClip]
-    transitions: List[_Transition]
-    motion_graphics: List[_MotionGraphic]
-    remove_words: List[_RemoveWord]
 
 
 # ── Cutting architecture ────────────────────────────────────────────────────
@@ -2325,6 +2345,8 @@ WHEN IN DOUBT: INCLUDE THE WORD. A keyword that doesn't fire visually is invisib
 caption_position_changes — REQUIRED ARRAY (can be empty). Position-change events, each at a specific kept word.
   Format: [{{"word_index": int, "position": "top" | "center" | "bottom"}}, ...]
 
+  ANCHOR CROSS-CHECK: every word_index MUST be a kept word. remove_words is at the top of your output. If you anchor a position change to a removed word, the change is dropped — orphan effect: caption moves at the wrong moment, or doesn't move when expected.
+
   Semantics:
     - Captions start at "bottom" by default.
     - Each change says: "at this word, captions move to this position and stay there until the next change."
@@ -2332,18 +2354,22 @@ caption_position_changes — REQUIRED ARRAY (can be empty). Position-change even
     - Empty array = captions stay "bottom" for the entire video.
 
   MOVE captions (emit a change) when:
-    - A motion_graphic occupies the bottom half across a window → emit a change to "top" at the MG's start_word_index, and another back to "bottom" at the word right after MG ends.
-    - The speaker is looking down / mouth is in the lower third of the frame → change to "top" at the word where the downward look starts.
-    - B-roll cutaway covers the bottom with busy imagery → change to "top" at the b-roll's start_word_index, back to "bottom" at its end_word_index + 1.
+    - A motion_graphic occupies the bottom half across a window → emit "top" at the MG's start_word_index, and "bottom" back at the FIRST KEPT WORD AFTER end_word_index. Not later. Captions return to bottom the moment the MG is gone.
+    - The speaker is looking down / mouth is in the lower third of the frame → "top" at the word where the downward look starts, "bottom" at the word where they look up again.
+    - B-roll cutaway covers the bottom with busy imagery → "top" at the b-roll's start_word_index, "bottom" at the FIRST KEPT WORD AFTER end_word_index.
   Speaker changes alone don't require caption moves — face position does.
 
-  MINIMUM SUSTAINED DURATION — every position must hold for AT LEAST 1.5 SECONDS of OUTPUT time (≈4-6 spoken words at typical pacing). The renderer drops any segment shorter than that as flicker — the captions visibly snap up, then back down inside half a second, which reads as broken instead of intentional. Don't emit a change to "center" for a single word and another back to "bottom" on the very next word — that's a flicker and the renderer will collapse it back to "bottom" anyway. If you want a single dramatic word to stand out, use a Quintessence emphasis_moment or a torn_paper text_overlay, NOT a 1-word caption position flip.
+  WINDOW TIMING — match position windows EXACTLY to what's covering the captions. If your IMessageBubble runs from word 66 to word 72, the caption flip is {{66, top}} and {{73, bottom}} (or whatever the next kept word is — skip over any word in remove_words). Do NOT extend the top window past end_word+1 to give the viewer "extra reading time" — the MG's own duration handles its visual lifespan. Captions sitting at top after the MG is gone reads as broken.
+
+  MINIMUM SUSTAINED DURATION — every position must hold for AT LEAST 1.5 SECONDS of OUTPUT time (≈4-6 spoken words at typical pacing). The renderer drops any segment shorter than that as flicker. If your MG is too brief to justify a 1.5s caption flip, don't move captions at all for it.
 
 === TEXT OVERLAYS — BRIEF TITLE CARDS ===
 
 Short framing text that appears 1-3 times per video (hook, chapter, quote, speaker attribution). NOT running captions. Each has a `variant` that picks a distinct visual treatment.
 
 text_overlays — REQUIRED ARRAY (can be empty).
+
+ANCHOR CROSS-CHECK: start_word_index MUST be a word you KEPT. You wrote remove_words at the top of this output — scroll back, look at it. If start_word_index is in that list, the overlay is dropped (the trigger word doesn't exist in the rendered video). The classic failure: anchoring a "THE CONFESSION" hook to word 0 'So', then also putting word 0 in remove_words because it's an opening filler. Result: the entire hook never appears. Pick a kept word.
 
 Each entry:
   {{
@@ -2394,6 +2420,8 @@ Emphasis moments are THE MOST IMPORTANT PART OF YOUR EDIT. They are the 2-5 beat
 A video with no emphasis moments is a raw upload. A video with the right 3-5 emphasis moments feels professionally crafted — every other choice (caption style, transitions, B-roll) orbits around them.
 
 emphasis_moments — ARRAY of 2-5 items. High-intensity moments must be ≥2.5s apart — each emphasis triggers a zoom punch, and when two zoom punches land within ~2.5 seconds the viewer sees rapid-fire zooming that looks BROKEN, not dramatic. Check every emphasis moment against the previous one before committing.
+
+ANCHOR CROSS-CHECK: every word_index in word_indices MUST be a word you KEPT. You wrote remove_words at the top of this output — scroll back, look at it. If any of these indices appears there, the emphasis moment is dropped. Pick different surviving words from the surrounding kept transcript.
 
 Each entry:
   {{
@@ -2462,10 +2490,10 @@ WHEN NOT TO USE ONE. Negative triggers — emit zero MGs in these situations:
 
 DENSITY. 0-3 MGs per 60-second video is the healthy range. Zero is fine. Five is wallpaper. Each MG you emit must justify its screen time against the alternative of zero MGs at that moment.
 
-ANCHORING — THIS IS WHERE BAD CHOICES GET DROPPED:
-  Every word_index you emit must be a KEPT word — a word you are NOT also listing in remove_words.
-  BEFORE you emit a motion_graphic, look at your remove_words array. If start_word_index, end_word_index, OR any word inside [start, end] is in remove_words, the renderer will DROP your MG entirely. The downstream caption_position_change you emitted to make room for that MG will then orphan, and captions will move for no visible reason — a clear "this video was edited badly" signal.
-  Pick anchor words from the surrounding context that are NOT in your cuts. If you remove "calling" at word 197 and want an MG showing the wife's call, anchor the MG to a SURVIVING word — the next "calling" at word 200, or "every 5 seconds" at word 202.
+ANCHORING — THIS IS WHERE BAD CHOICES GET DROPPED.
+  remove_words is field 2 in your output schema; you committed to it BEFORE writing any motion_graphic. Now scroll back and look at it. Every word_index you reference here — start_word_index, end_word_index, AND any word in the [start, end] range — must NOT be in that array. If any of them is, the renderer will DROP this MG entirely. The caption_position_change you wrote to make room for it will orphan, and captions will move for no visible reason — a clear "this video was edited badly" signal.
+
+  Pick anchor words from kept words only. Example: if you cut "calling" at word 197 and want an MG illustrating the wife's call, anchor the MG to a SURVIVING word in the same passage — the next "calling" at word 200, or "every 5 seconds" at word 202.
 
 PLACEMENT — anchor zone must not cover the speaker's face. You watch the video at 5fps; you can see exactly where the speaker sits in the frame across the MG's window. Pick the zone that keeps the face visible:
   • Face in lower half of frame  → anchor "upper_third_safe"
@@ -2568,11 +2596,25 @@ WHAT TO CUT — apply each rule ONLY when its specific signature is present:
 2. TRAILING-DASH FALSE STARTS — Deepgram tags incomplete words with a hyphen:
    "wh-", "shou-", "th-". Always cut.
 
-3. STUTTERS — same word repeated 2+ times in rapid succession (gap < 80 ms or first instance < 200 ms long):
-   - "I I told mommy" → cut the FIRST. Keep the second.
-   - "I'm I'm I'm gonna" → cut all but the LAST.
-   - Phoneme false-start ("should shouldn't") → cut "should".
-   - Rhetorical emphasis with audible space ("very, very good", "now, now hold on", normal pacing): KEEP both.
+3. STUTTERS — same word repeated 2+ times in rapid succession (gap < 80 ms or first instance < 200 ms long).
+
+   THE RULE — find the instance that FLOWS INTO THE REAL SENTENCE. That's the keeper. Cut every other instance.
+
+   Two instances "I I told mommy" at words [61, 62, 63, 64]:
+     The keeper is [62] — the "I" followed by "told mommy" (the real sentence).
+     CUT [61]. KEEP [62].
+     Output: "I told mommy."
+
+   Three instances "I'm I'm I'm gonna leave" at words [161, 162, 163, 164, 165]:
+     The keeper is [163] — only this "I'm" is followed by "gonna leave" (the real sentence). The first two are stutter throat-clearing before the speaker landed.
+     CUT [161, 162]. KEEP [163].
+     Output: "I'm gonna leave for the rest of my life."
+
+     COMMON FAILURE: cutting [162, 163] instead. That leaves [161] alone, followed by 0.5s of silence (where the cut words used to be), then "gonna leave". The first "I'm" is now disconnected from "gonna leave" — sounds like the speaker trailed off. WRONG. Always cut the EARLIER instances, keep the LATEST.
+
+   Phoneme false-start "should shouldn't": the second "shouldn't" is the real word; the first "should" was abandoned mid-pronunciation. Cut "should".
+
+   Rhetorical emphasis with audible space ("very, very good", "now, now hold on", normal pacing): both instances are intentional. KEEP both.
 
 4. PHRASAL RESTARTS — speaker abandons a phrase and re-attempts it. PATTERN:
    <abandoned phrase> [tiny gap, breath, or filler bridge] <SAME phrase EXTENDED with NEW continuation>
@@ -2591,15 +2633,18 @@ WHAT TO CUT — apply each rule ONLY when its specific signature is present:
      Transcript: "...where did you hear that name? I said, who is — I said, who is he?"
        [139] I       \\
        [140] said,    | ← FIRST instance ("I said, who is"). ABANDONED.
-       [141] who      |   CUT THESE FOUR.
+       [141] who      |   CUT ALL FOUR.
        [142] is      /
        [143] I       \\
        [144] said,    | ← SECOND instance, continues into "he?". COMPLETED.
        [145] who      |   KEEP THESE FIVE.
        [146] is       |
        [147] he?     /
-     Correct: remove_words = [139, 140, 141, 142].
-     WRONG (a common mistake): cutting [143, 144, 145, 146] leaves "I said, who is — he?". That's the abandoned phrase plus a fragment. The rule is CUT THE FIRST.
+     Correct: remove_words includes word_indices [139, 140, 141, 142].
+
+     FAILURE MODE — partial cut. If you cut only [141, 142] (just the verbatim-duplicated "who is"), you LEAVE [139, 140] "I said," still in the dialogue. The output becomes "I said, [pause] I said, who is he?" — the duplicate "I said" is still on screen, the cut accomplished nothing. The boundary of the abandoned phrase runs from its FIRST word ([139] "I") through its LAST word before the second attempt ([142] "is"). Cut all four. Don't stop at the duplicated portion.
+
+     FAILURE MODE — wrong direction. Cutting [143, 144, 145, 146] (the second instance) leaves "I said, who is — he?" — the abandoned phrase plus a fragment. The rule is always CUT THE FIRST.
 
    WORKED EXAMPLE B — DO THIS EXACTLY:
      Transcript: "...calling me, like, calling me every 5 seconds..."
@@ -2609,8 +2654,10 @@ WHAT TO CUT — apply each rule ONLY when its specific signature is present:
        [200] calling \\
        [201] me       | ← SECOND instance, continues into "every 5 seconds".
        [202] every  ...
-     Correct: remove_words = [197, 198, 199].
+     Correct: remove_words includes [197, 198, 199].
      Result heard by viewer: "calling me every 5 seconds" — clean.
+
+     FAILURE MODE — half cut. Cutting only [199] "like" leaves "calling me, calling me every 5 seconds" — the duplicate is still there. Always cut the entire abandoned phrase plus its bridge filler.
 
    PARALLEL STRUCTURE IS NOT A RESTART. If both phrases end with sentence-ending punctuation (?!.) BEFORE the next begins, neither was abandoned — that's intentional rhetorical parallelism:
      "What are you gonna do? What are you gonna learn?"
@@ -2625,6 +2672,13 @@ WHAT TO CUT — apply each rule ONLY when its specific signature is present:
    ✓ "I'm, like, totally exhausted" — "like" is pause-bracketed AND removing it doesn't change meaning. CUT "like".
    ✗ "they're like family to me" — "like" is a simile here, removing it changes meaning. KEEP.
    ✓ "So, anyway, I went..." — "anyway" is filler. CUT.
+
+   MULTI-WORD FILLERS ARE PHRASAL UNITS — cut every word of the phrase together, never just one:
+     "you know"  → cut both words. "What are you gonna learn? You know? What are you gonna play?" → cut [45, 46] together (BOTH "You" and "know?"). Cutting only [46] leaves "You" hanging at the end of the prior thought — sounds like the speaker trailed off mid-sentence.
+     "I mean"    → cut both words.
+     "kind of"   → cut both words.
+     "sort of"   → cut both words.
+   These are phrases, not individual fillers. Cut as a unit or don't cut at all.
 
    CONJUNCTIONS BETWEEN CLAUSES ARE NOT FILLER. They carry sequence, causation, or contrast and almost always KEEP:
      "and"     → sequence ("She was sleeping, AND I kicked the bed.")
@@ -2701,6 +2755,8 @@ If the source genuinely opens with a strong moment (e.g., the speaker walks in m
 === SFX — SOUND EFFECTS ===
 
 Sound effects amplify the speaker's energy at key moments. Emit as many as the content earns — there's no hard cap. Silence is BETTER than a wrong sound. Each entry: {{"word_index": int, "sound": <name>}} — you pick the kept word that triggers the SFX; the pipeline derives the exact timing from word.start.
+
+ANCHOR CROSS-CHECK: word_index MUST be a word you KEPT. You wrote remove_words at the top of this output — scroll back, look at it. If your word_index is in that list, the SFX is dropped (the trigger word doesn't exist in the rendered video). Pick a different surviving word.
 
 THE CORE RULE FOR EVERY SOUND: The word you anchor each sound to must BE the thing that makes that sound in reality. Not near it, not in the same sentence, not in the same phrase — the EXACT word that NAMES the action, object, or peak moment the sound represents. Before placing any sound, ask: "does this specific word literally refer to what this sound is?" If the word is a time word, a filler word, a pronoun, a conjunction, or a generic context word — even if the surrounding phrase fits — the sound belongs elsewhere or nowhere. One 1:1 match between word and sound, not a proximity match.
 
@@ -2786,6 +2842,8 @@ Pexels stock-footage cutaways that play OVER the speaker's dialogue. The viewer 
 
 broll_clips — ARRAY. {{"keyword": str (13-18 words), "start_word_index": int, "end_word_index": int, "reason": str}}
 
+ANCHOR CROSS-CHECK: start_word_index, end_word_index, and every word in [start, end] MUST be kept words. remove_words is field 2 above this one in the JSON — scroll back and verify none of the words in your B-roll range appear there. If any do, the B-roll spec drops or its window mis-aligns. Pick a range entirely inside the kept transcript.
+
 KEYWORD CONSTRUCTION:
   The VERB in the dialogue is the starting point. Build the keyword from the verb in the speaker's dialogue, then add the subject and setting around it. The clip doesn't need to show the EXACT scene — it just needs to visually CONNECT to what the speaker is describing. A phone ringing on a desk works for "she kept calling me." A man with a towel works for "I wiped my face." Good B-roll EVOKES the dialogue, it does not recreate it literally.
 
@@ -2827,6 +2885,8 @@ PLACEMENT DISCIPLINE:
 90%+ of cuts are hard cuts. Transitions EARN their place — ideally ON a shot change.
 
 transitions — ARRAY. {{"after_word_index": int, "type": <name>, ...component props}}
+
+ANCHOR CROSS-CHECK: after_word_index MUST be a kept word. remove_words is field 2 above; verify your after_word_index is not in there. If it is, the transition drops and the cut between clips falls back to a hard cut.
 
 11 transitions — pick the one whose visual character fits the edit:
 
@@ -2924,6 +2984,8 @@ pacing             — "fast" | "medium" | "slow". Default "fast" for short-form
 
 thumbnail_word_index — int. The single most important visual decision in the entire edit. The thumbnail is what makes someone scrolling stop and click. A bad thumbnail tanks the video no matter how good the edit is.
 
+ANCHOR CROSS-CHECK: this index MUST be a kept word. remove_words is at the top of your output — verify the index is not in there. If it is, thumbnail extraction lands on a frame that doesn't exist in the rendered video.
+
 CRITICAL — DO NOT PICK THE PUNCHLINE WORD ITSELF.
 A common mistake is to pick the word whose timestamp lands ON the most dramatic moment. This is almost always WRONG because:
   - Mid-syllable mouths are in awkward shapes (open mid-vowel, contorted mid-consonant)
@@ -3007,20 +3069,28 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
   ]
 }}
 
-=== BEFORE YOU EMIT — INTERNAL VERIFICATION ===
+=== OUTPUT ORDER ===
 
-Work through these checks against the plan you are about to emit. This is self-verification — do not externalize it in your output.
+The schema generates fields top-to-bottom in this order. Each field below builds on every field above it:
 
-1. Zone discipline for overlays. Two overlays (text_overlay or motion_graphic) whose time windows overlap must sit in DIFFERENT visual zones. Each text_overlay variant renders into a fixed zone driven by its design (torn_paper occupies the top band; sticky_note the upper third; quote_card occupies the center band; caption_match follows its `position` prop). motion_graphic zone is its `anchor` field — your choice based on what's on screen. Same-zone + same-time overlap is rejected. High-intensity emphasis moments are ≥2.5s apart regardless of zone.
-2. One zoom per kept-source clip. Within each contiguous source range between removed-word boundaries, at most one `emphasis_moments[i].zoom_effect` is non-null. Multiple beats close together stack their events onto a single emphasis_moment's `zoom_effect.events` array.
-3. Z-order — your responsibility. When any motion_graphic occupies a bottom-anchored zone (`lower_third_safe`) across a window, you MUST emit a caption_position_change to "top" at the MG's start_word_index and back to "bottom" at the word right after end_word_index. Python does not auto-flip.
-4. MG anchors are absolute zones AND face-aware. Every `motion_graphics[i].anchor` and every `emphasis_moments[i].motion_graphic.anchor` is one of the 5 absolute zones (`upper_third_safe`, `center`, `lower_third_safe`, `left_safe`, `right_safe`). Look at the video across the MG window — pick an anchor that does NOT cover the speaker's face wherever it sits in those frames.
-5. Explicit nulls. Every emphasis_moment has explicit `zoom_effect` (value or null) and `motion_graphic` (value or null) fields — no omissions.
-6. sad_trombone tonal gate. If `sad_trombone` appears, the surrounding dialogue must be being played for laughs. Otherwise remove it.
+  1.  notes                         — your reasoning (set context, identify the spine)
+  2.  remove_words                   — DECIDE CUTS FIRST — every anchor below references the surviving words
+  3.  pacing                         — overall pace (fast / medium / slow)
+  4.  caption_style                  — visual identity
+  5.  caption_keywords               — keywords for the style
+  6.  emphasis_moments               — the 2-5 strongest beats
+  7.  transitions                    — major scene boundaries
+  8.  sound_effects                  — layer audio on emphasis
+  9.  motion_graphics                — visual reinforcement on specific moments
+  10. text_overlays                  — chapter / hook cards
+  11. broll_clips                    — cutaways during specific dialogue
+  12. caption_position_changes       — derived from where MGs / face land
+  13. thumbnail_word_index           — strongest still
+  14. audio_denoise / outro / aspect_ratio — settings
 
-Note: every anchor field in this schema is word-index-based. You never emit float timestamps that must match word boundaries — Python derives all timestamps from word indices. Caption segments, hook boundaries, and thumbnail time are all synthesized from the word indices you emit.
+By the time you write any anchor field (emphasis_moments[*].word_indices, transitions[*].after_word_index, sound_effects[*].word_index, motion_graphics[*].start_word_index/end_word_index, text_overlays[*].start_word_index, broll_clips[*].start_word_index/end_word_index, caption_position_changes[*].word_index, thumbnail_word_index), you have ALREADY committed your remove_words list above. Every anchor must reference a word that is NOT in remove_words. The renderer drops any element anchored to a removed word — silently in some cases, loudly in others. Either way, the element does not appear in the rendered video. You are responsible for not making this mistake; nothing else fixes it.
 
-If any check fails, revise the plan before emitting JSON. The validators reject violations — fixing them here is cheaper than re-generating."""
+Note: every anchor field in this schema is word-index-based. You never emit float timestamps that must match word boundaries — Python derives all timestamps from word indices."""
 
     user_content_parts = []
     user_content_parts.append(f"The user wants: {vibe}")
@@ -3308,9 +3378,12 @@ RULES FOR USING THESE TIMESTAMPS:
     # user_content, so Gemini re-reads only the deltas (video + transcript +
     # signals).
     #
-    # thinking_level=MEDIUM is the working baseline. The schema + validators
-    # + word-anchored overlays make HIGH thinking unnecessary — structural
-    # correctness is enforced at decode time, not reasoned about.
+    # thinking_level=HIGH. The edit decision spans dozens of inter-related
+    # field choices (cuts, anchors, zones, transitions, MGs, captions) where
+    # every later choice depends on every earlier one. MEDIUM was emitting
+    # anchored elements that referenced words it had also placed in
+    # remove_words — the model didn't have enough cycles to cross-check
+    # itself. HIGH gives it the cycles. Adds ~10s/render.
     response = client.models.generate_content(
         model=GEMINI_MODEL,
         contents=[_video_part, user_content],
@@ -3320,7 +3393,7 @@ RULES FOR USING THESE TIMESTAMPS:
             max_output_tokens=8192,
             response_mime_type="application/json",
             response_json_schema=EditPlan.model_json_schema(),
-            thinking_config=genai_types.ThinkingConfig(thinking_level="MEDIUM"),
+            thinking_config=genai_types.ThinkingConfig(thinking_level="HIGH"),
             media_resolution="MEDIA_RESOLUTION_LOW",
         ),
     )
