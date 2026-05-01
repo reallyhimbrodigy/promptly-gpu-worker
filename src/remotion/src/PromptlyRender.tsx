@@ -5,12 +5,15 @@ import {
   OffthreadVideo,
   staticFile,
   useCurrentFrame,
+  useVideoConfig,
   interpolate,
+  spring,
 } from "remotion";
 import type {
   PromptlyRenderProps,
   PromptlyMicroSegmentsProps,
   PromptlyBlendCaptionsOnlyProps,
+  BrollSpec,
   CaptionMatchOverlay,
   ClipSpec,
   TransitionSpec,
@@ -448,6 +451,111 @@ const resolveSrc = (s: string): string => {
   if (/^[a-z][a-z0-9+.-]*:/i.test(s) || s.startsWith("//")) return s;
   return staticFile(s);
 };
+
+// ─── B-roll layer (split-screen with slide-up entrance) ───────────────────
+//
+// Each B-roll occupies the BOTTOM HALF of the canvas (1080×960 on a 1080×1920
+// canvas) with the speaker frame visible above. Spring-driven entrance slides
+// the inset up from off-canvas; linear-eased exit slides it back down.
+// Source video is 9:16 — `objectFit: cover` crops vertically to fit the 9:8
+// inset shape, preserving horizontal width.
+//
+// Z-order: B-roll sits UNDER text overlays / MGs / captions in PromptlyOverlay.
+// The captions stay on top so the viewer can read dialogue during cutaways.
+//
+// Animation timing: 250ms entrance spring, 250ms linear exit. Tight enough
+// to feel intentional, slow enough to read as motion (not a flash).
+
+const BrollClip: React.FC<{ spec: BrollSpec; fps: number }> = ({ spec, fps }) => {
+  const frame = useCurrentFrame();
+  const { width, height } = useVideoConfig();
+
+  // Geometry: B-roll inset fills the bottom half of canvas.
+  const insetHeight = Math.round(height / 2);
+  const dockedY = height - insetHeight;     // top of inset when docked
+  const offscreenY = height;                 // top of inset when fully off-canvas below
+
+  // Animation timing.
+  const enterFrames = Math.max(1, Math.round(fps * 0.25));   // 250ms slide-up
+  const exitFrames  = Math.max(1, Math.round(fps * 0.25));   // 250ms slide-down
+
+  // Spring-driven entrance — settles cleanly without bounce.
+  const enterSpring = spring({
+    fps,
+    frame,
+    config: { damping: 18, mass: 0.7, stiffness: 200, overshootClamping: true },
+    durationInFrames: enterFrames,
+  });
+
+  // Linear-eased exit (last `exitFrames` of the sequence's duration).
+  const totalFrames = spec.durationInFrames;
+  const exitStart = totalFrames - exitFrames;
+  const exitProgress = interpolate(
+    frame,
+    [exitStart, totalFrames],
+    [0, 1],
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
+  );
+
+  // Compose the y-position. Entrance interpolates offscreen → docked; exit
+  // interpolates docked → offscreen. The exit takes over once it has begun
+  // (exitProgress > 0), keeping the animation monotonic.
+  const enterY = interpolate(enterSpring, [0, 1], [offscreenY, dockedY]);
+  const exitY = interpolate(exitProgress, [0, 1], [dockedY, offscreenY]);
+  const y = exitProgress > 0 ? exitY : enterY;
+
+  // Source resolution: handler.py stages B-roll files into /remotion/bundle/
+  // public with a stage-key-prefixed basename; spec.src is just that basename.
+  // resolveSrc → staticFile() resolves it to a public URL.
+  const resolvedSrc = resolveSrc(spec.src);
+
+  // OffthreadVideo `startFrom` is in COMPOSITION frames. Match Python's
+  // int(round(seekFromSeconds * fps)) exactly — same rounding policy =
+  // no drift between Python's framing and Remotion's seek.
+  const startFromFrames = Math.round(spec.seekFromSeconds * fps);
+
+  return (
+    <AbsoluteFill style={{ pointerEvents: "none" }}>
+      <div
+        style={{
+          position: "absolute",
+          left: 0,
+          top: y,
+          width,
+          height: insetHeight,
+          overflow: "hidden",
+          // Subtle top-edge shadow only — sells the layer-on-top feel
+          // without competing with the seam.
+          boxShadow: "0 -8px 24px rgba(0,0,0,0.35)",
+        }}
+      >
+        <OffthreadVideo
+          src={resolvedSrc}
+          startFrom={startFromFrames}
+          playbackRate={spec.playbackRate || 1.0}
+          style={{ width: "100%", height: "100%", objectFit: "cover" }}
+        />
+      </div>
+    </AbsoluteFill>
+  );
+};
+
+const BrollLayer: React.FC<{
+  items: BrollSpec[];
+  fps: number;
+}> = ({ items, fps }) => (
+  <>
+    {items.map((br, i) => (
+      <Sequence
+        key={`broll-${i}`}
+        from={br.fromFrame}
+        durationInFrames={br.durationInFrames}
+      >
+        <BrollClip spec={br} fps={fps} />
+      </Sequence>
+    ))}
+  </>
+);
 
 // ─── PromptlyOverlay composition ───────────────────────────────────────────
 // Renders ONLY the text/graphic overlay layer on a TRANSPARENT canvas:
