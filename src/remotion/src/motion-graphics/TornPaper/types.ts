@@ -1,7 +1,10 @@
 import type { MGTimingProps } from "../shared/types";
-import type { MGPositionProps } from "../shared/positioning";
 
-export interface TornPaperProps extends MGTimingProps, MGPositionProps {
+// TornPaper is a top-of-frame banner by design — it does NOT take a
+// position anchor. Placing it anywhere else breaks the visual metaphor
+// (the paper sheet drops from above; the strips slam onto its top
+// portion). The renderer's anchor field is ignored for this component.
+export interface TornPaperProps extends MGTimingProps {
   // Top slammed strip text.
   topText: string;
   // Bottom slammed strip text.

@@ -2520,7 +2520,7 @@ Types, descriptions, use cases, and REQUIRED props (in the schema below, keys en
                             Best for: Feature toggles, on/off reveals, settings demos.
                             Props: {{"text": str, "activateAtMs"?: int, "onColor"?: "#hex"}}
 
-14. "TornPaper"          — Two torn paper strips slam from opposite sides with stop-motion impact. Shadow blocks for depth.
+14. "TornPaper"          — Two torn paper strips slam from opposite sides onto a torn-paper banner that drops from the top of the frame. By design this MG is always anchored to the TOP — its visual identity is a top-of-frame chapter card. Use anchor "upper_third_safe" or "top". The component renders at the top regardless of any other anchor; never pair TornPaper with anchor "center" or "lower_third_safe".
                             Best for: Bold statements, key points, "vs" comparisons.
                             Props: {{"topText": str (<=5 words), "bottomText": str (<=5 words)}}
 
@@ -2533,38 +2533,63 @@ GUIDELINES:
 
 === WORD EDITING — YOU OWN EVERY CUT ===
 
-remove_words — REQUIRED ARRAY. THIS IS THE ONLY CUT AUTHORITY. There is no upstream filler/stutter/dead-air pre-pass. The transcript you see is the FULL Deepgram output, every word indexed [0..N-1]. Every cut — fillers, stutters, abandoned restarts, breaths, dead-air gaps, redundant restatements, tangents — comes from your `remove_words`. Python applies them verbatim at sample-precise Deepgram timestamps; no padding, no buffer, no second-guessing.
+remove_words — REQUIRED ARRAY. THIS IS THE ONLY CUT AUTHORITY. The transcript you see is the FULL Deepgram output, every word indexed [0..N-1]. Every cut — fillers, stutters, abandoned restarts, breaths, dead-air gaps, redundant restatements, tangents — comes from your `remove_words`. Python applies them verbatim. There is no second pass to clean up what you miss.
 
-WHAT TO CUT — apply the four checks to every candidate word or span:
+BE AGGRESSIVE. Top short-form editors (Hormozi, Captions, Submagic) cut 15-30% of the source words. Aim high. A typical 60s talking-head clip should yield 30-60 word cuts plus several silence ranges. If your remove_words array has fewer than 15 entries on a 50s+ clip, you are under-cutting — re-scan the transcript.
 
-  1. AUDIO   — does the surrounding speech sound natural without the candidate?
-  2. GRAMMAR — is the remaining clause well-formed?
-  3. INFORMATION — does removing it preserve the meaning the listener takes from the surrounding speech?
-  4. DELIVERY — was the candidate delivered without deliberate emphasis?
+WHAT TO CUT — apply these in order:
 
-If all four are affirmed, cut. If any one fails, keep. The conjunction is the only conservatism.
+1. EVERY hesitation token ("um", "uh", "hmm", "er", "ah", "uhh", "uhm", "umm", "erm") — single-word cut. Always.
 
-Apply this to:
-  - Hesitation tokens: um, uh, hmm, er, ah — almost always cut.
-  - Throat clears, lip smacks, mouth noise — cut.
-  - Trailing-dash false starts ("wh-", "shou-") — cut.
-  - 1-word stutters ("I I", "the the") when the timing looks rushed (short duration or tight gap). Keep when the speaker used rhetorical emphasis ("very, very good") — that's intent, not a stutter.
-  - Phrasal restarts: the speaker abandons a phrase and starts over with a verbatim repeat, paraphrase, or correction. Cut the abandoned attempt; KEEP the replacement. CRITICAL: a parallel structure ("I went, I saw, I conquered" / "what are you gonna do? what are you gonna learn?") is NOT a restart — sentence-ending punctuation between the two phrases means the first thought completed. Don't cut parallel structure.
-  - Context-dependent filler ("like", "so", "basically", "you know") — cut when the four checks pass; keep when it carries meaning.
-  - Narratively redundant restatement — pure repetition with no new information and no emphasis value.
+2. EVERY trailing-dash false start ("wh-", "shou-", "th-") — Deepgram returns these with hyphens. Always cut.
 
-Emit two kinds of entries:
+3. STUTTERS — repeated word ("I I", "the the", "and and"):
+   - 2 instances rapid-fire (gap < 80ms or first word duration < 200ms): cut the FIRST instance, keep the SECOND.
+   - 3+ instances ("I'm I'm I'm"): cut the FIRST N-1 instances, keep the LAST.
+   - Rhetorical emphasis with audible space between ("very, very good", "now, now, now hold on") with normal pacing: KEEP — that's intent.
 
-  • Single-word cut:    {{"word_index": int, "reason": "filler"|"stutter"|"restart"|"redundant"|"breath"|"other"}}
-  • Time-range cut:     {{"start": float, "end": float, "reason": "dead_air"|"breath"|"tangent"|"section_skip"|"other"}}
+4. PHRASAL RESTARTS — the speaker abandons a phrase and starts the same phrase over. The PATTERN is:
+   <abandoned phrase> [optional filler/breath gap] <repeated phrase, completed with new content>
 
-DEAD AIR / SILENCE / BREATHS — emit a time-range cut for every silence gap longer than ~50 ms between words. Aim for ZERO perceptible silence in the output. Silence is never content; breaths are never content. Use the gap between consecutive word.end → next word.start to find them.
+   Example A:  "I said, who is — I said, who is he?"
+     • Abandoned: "I said, who is" (incomplete, no continuation)
+     • Replacement: "I said, who is he?" (completed thought)
+     • Cut: the ABANDONED attempt (the FIRST occurrence). Keep the COMPLETED one.
+
+   Example B:  "calling me — like — calling me every five seconds"
+     • Abandoned: "calling me"
+     • Filler bridge: "like"
+     • Replacement: "calling me every five seconds"
+     • Cut: the abandoned phrase + the orphan filler. Keep the completed phrase.
+
+   THE RULE — when two near-identical phrases appear in a row:
+     • The phrase that has MORE WORDS following it (continues the thought) is the COMPLETED one — KEEP.
+     • The phrase that ENDS where the second starts (no continuation, just a repeat) is the ABANDONED one — CUT.
+     • Words BETWEEN the two phrases (often "like", "uh", or a breath) are orphan filler — CUT.
+
+   PARALLEL STRUCTURE IS NOT A RESTART:
+   "I went, I saw, I conquered" / "what are you gonna do? what are you gonna learn?" — sentence-ending punctuation between the phrases means the first thought completed. KEEP both. Parallel structure is a rhetorical device, not a restart.
+
+5. CONTEXTUAL FILLER — words that pad without carrying meaning. "like", "so", "basically", "literally", "actually", "honestly", "obviously", "just", "really", "you know", "I mean", "kind of", "sort of":
+   - Cut when removing it preserves grammar and meaning: "I'm, like, totally exhausted" → "I'm totally exhausted" (cut "like").
+   - Keep when it carries meaning: "they're like family to me" (simile, not filler).
+   - Sentence-opening "So" is almost always filler: "So I'm shaving..." → "I'm shaving..." (cut "So").
+   - Sentence-opening "And" connecting two clauses is usually filler when the prior clause has sentence-ending punctuation.
+   - Trailing "and..." with nothing meaningful following: cut.
+
+6. REDUNDANT RESTATEMENT — same point made twice with no new information ("she was angry — she was so mad"): cut the weaker phrasing.
+
+7. SILENCE / DEAD AIR / BREATHS — emit a TIME-RANGE cut for EVERY gap > 50ms between consecutive word boundaries. Aim for ZERO perceptible silence in output. Inhale gasps, breaths, mid-clause pauses — all out. Use the timestamps shown in the transcript: gap = word[i+1].start − word[i].end. If gap > 0.05s, emit a range cut from word[i].end to word[i+1].start.
+
+ENTRY FORMAT
+  • Single word:   {{"word_index": int, "reason": "filler"|"stutter"|"restart"|"redundant"|"orphan_filler"|"breath"|"other"}}
+  • Time range:    {{"start": float, "end": float, "reason": "dead_air"|"breath"|"tangent"|"section_skip"|"other"}}
 
 ANCHOR INTEGRITY — any word_index you list in remove_words CANNOT be anchored elsewhere. The renderer fails validation if you anchor an emphasis_moment, motion_graphic, sound_effect, transition, broll_clip, text_overlay, or caption_position_change to a word you also removed.
 
-Range cuts and word cuts can coexist — a range cut removes every word fully contained in [start, end]; partial overlaps keep the word.
+Range cuts and word cuts coexist — a range cut removes every word fully contained in [start, end]; partial overlaps keep the word.
 
-If a low-value section is too long to cut entirely but isn't punchline material, prefer setting that clip's `speed` to 1.30–1.40 so it pace-flies through the content. Hard cuts mid-clause are jarring; a fast clip preserves continuity while still removing weight.
+A low-value section that's too long to cut entirely but isn't punchline material → set that clip's `speed` to 1.30–1.40 to pace through it instead of cutting mid-clause.
 
 === OPENING (cut[0]) ===
 

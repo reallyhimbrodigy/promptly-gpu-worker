@@ -10,7 +10,6 @@ import {
   useVideoConfig,
 } from "remotion";
 import { MG_FONTS } from "../shared/fonts";
-import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
 import type { TornPaperProps } from "./types";
 
@@ -21,15 +20,17 @@ import type { TornPaperProps } from "./types";
 const PAPER_SPRING = { damping: 14, stiffness: 110, mass: 1.2 };
 const STRIP_SPRING = { damping: 11, stiffness: 140, mass: 1.0 };
 
+// Vertical area within the frame where the strips sit, anchored to the
+// top of the torn-paper banner. The component is intentionally a top-of-
+// frame banner element — that's its visual identity. Anchor / offsetY
+// arguments from the placement system are deliberately ignored here.
+const STRIPS_AREA_HEIGHT = "32%";
+
 export const TornPaper: React.FC<TornPaperProps> = ({
   startMs,
   durationMs,
   enterFrames,
   exitFrames,
-  anchor,
-  offsetX,
-  offsetY,
-  scale,
   topText,
   bottomText,
   topStripRotation = -10,
@@ -125,13 +126,12 @@ export const TornPaper: React.FC<TornPaperProps> = ({
   const s2Opacity = strip2Enter * (isExiting ? 1 - exitEased : 1);
 
   // ── POSITIONING ───────────────────────────────────────────────────────
-  // Honor `anchor` from the placement system. Default to "center" because
-  // a torn-paper card is typically a chapter beat planted in the middle of
-  // the frame — that's its visual identity.
-  const { containerStyle, wrapperStyle } = resolveMGPosition(
-    { anchor, offsetX, offsetY, scale },
-    { anchor: "center" },
-  );
+  // TornPaper is a top-of-frame banner by design. The torn-paper PNG is a
+  // horizontal sheet that drops from above and the two text strips slam
+  // onto it. Placing it anywhere else (center, bottom) breaks the visual
+  // metaphor. We deliberately do NOT honor anchor from the placement
+  // system — the component pins to the top regardless of what Gemini
+  // requested.
 
   const dotTexture = {
     backgroundImage: `
@@ -155,42 +155,43 @@ export const TornPaper: React.FC<TornPaperProps> = ({
   };
 
   return (
-    <AbsoluteFill style={containerStyle}>
+    <AbsoluteFill>
+      {/* Paper banner — full-width sheet anchored to the top of the frame.
+          Drops in from above, rises out the same way on exit. */}
       <div
         style={{
-          ...wrapperStyle,
+          position: "absolute",
+          top: 0,
+          left: 0,
           width: "100%",
-          position: "relative",
+          overflow: "hidden",
+          transform: `translateY(${paperY}%)`,
+          opacity: paperOpacity,
         }}
       >
-        {/* Paper banner — full-width sheet that drops from above */}
-        <div
-          style={{
-            position: "relative",
-            width: "100%",
-            transform: `translateY(${paperY}%)`,
-            opacity: paperOpacity,
-          }}
-        >
-          <Img
-            src={staticFile("torn-paper.png")}
-            style={{ width: "100%", display: "block" }}
-          />
-        </div>
+        <Img
+          src={staticFile("torn-paper.png")}
+          style={{ width: "100%", display: "block" }}
+        />
+      </div>
 
-        {/* Strips — absolute-positioned over the banner so they overlap visually */}
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: stripGap,
-            pointerEvents: "none",
-          }}
-        >
+      {/* Strips — sit inside the top band of the canvas, vertically
+          centered within the banner area. Slam in from the sides. */}
+      <div
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          width: "100%",
+          height: STRIPS_AREA_HEIGHT,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: stripGap,
+          pointerEvents: "none",
+        }}
+      >
           <div
             style={{
               position: "relative",
@@ -251,7 +252,6 @@ export const TornPaper: React.FC<TornPaperProps> = ({
               <span style={textStyle}>{bottomText}</span>
             </div>
           </div>
-        </div>
       </div>
     </AbsoluteFill>
   );
