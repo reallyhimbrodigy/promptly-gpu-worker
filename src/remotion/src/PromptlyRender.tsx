@@ -351,29 +351,56 @@ const TextOverlayRenderer: React.FC<{
   );
 };
 
+/** Returns true if [from, from+duration) overlaps any [start, end) in
+ *  brollWindows. Used to suppress text-overlays / MGs that would otherwise
+ *  render on top of B-roll cutaways. Half-open intervals so a window
+ *  ending exactly when the overlay starts doesn't count as overlap. */
+const overlapsAnyBroll = (
+  from: number,
+  duration: number,
+  brollWindows: number[][] | undefined,
+): boolean => {
+  if (!brollWindows || brollWindows.length === 0) return false;
+  const a = from;
+  const b = from + duration;
+  for (const win of brollWindows) {
+    if (!Array.isArray(win) || win.length < 2) continue;
+    const s = win[0];
+    const e = win[1];
+    if (a < e && b > s) return true;
+  }
+  return false;
+};
+
 const TextOverlaysLayer: React.FC<{
   overlays: TextOverlaySpec[];
   captionStyle: CaptionSpec["style"];
   captionExtraProps?: Record<string, unknown>;
   captionKeywords: string[];
   fps: number;
-}> = ({ overlays, captionStyle, captionExtraProps, captionKeywords, fps }) => (
+  brollWindows?: number[][];
+}> = ({ overlays, captionStyle, captionExtraProps, captionKeywords, fps, brollWindows }) => (
   <>
-    {overlays.map((ov, i) => (
-      <Sequence
-        key={`txt-${i}`}
-        from={ov.fromFrame}
-        durationInFrames={ov.durationInFrames}
-      >
-        <TextOverlayRenderer
-          overlay={ov}
-          captionStyle={captionStyle}
-          captionExtraProps={captionExtraProps}
-          captionKeywords={captionKeywords}
-          fps={fps}
-        />
-      </Sequence>
-    ))}
+    {overlays.map((ov, i) => {
+      if (overlapsAnyBroll(ov.fromFrame, ov.durationInFrames, brollWindows)) {
+        return null;
+      }
+      return (
+        <Sequence
+          key={`txt-${i}`}
+          from={ov.fromFrame}
+          durationInFrames={ov.durationInFrames}
+        >
+          <TextOverlayRenderer
+            overlay={ov}
+            captionStyle={captionStyle}
+            captionExtraProps={captionExtraProps}
+            captionKeywords={captionKeywords}
+            fps={fps}
+          />
+        </Sequence>
+      );
+    })}
   </>
 );
 
@@ -396,17 +423,23 @@ const MotionGraphicRenderer: React.FC<{
 const MotionGraphicsLayer: React.FC<{
   items: MotionGraphicSpec[];
   fps: number;
-}> = ({ items, fps }) => (
+  brollWindows?: number[][];
+}> = ({ items, fps, brollWindows }) => (
   <>
-    {items.map((mg, i) => (
-      <Sequence
-        key={`mg-${i}`}
-        from={mg.fromFrame}
-        durationInFrames={mg.durationInFrames}
-      >
-        <MotionGraphicRenderer spec={mg} fps={fps} />
-      </Sequence>
-    ))}
+    {items.map((mg, i) => {
+      if (overlapsAnyBroll(mg.fromFrame, mg.durationInFrames, brollWindows)) {
+        return null;
+      }
+      return (
+        <Sequence
+          key={`mg-${i}`}
+          from={mg.fromFrame}
+          durationInFrames={mg.durationInFrames}
+        >
+          <MotionGraphicRenderer spec={mg} fps={fps} />
+        </Sequence>
+      );
+    })}
   </>
 );
 
@@ -425,19 +458,25 @@ const resolveSrc = (s: string): string => {
 // Output is encoded with alpha (ProRes 4444) so FFmpeg can composite it
 // over the base in the final mux step.
 export const PromptlyOverlay: React.FC<PromptlyRenderProps> = ({ input }) => {
-  const { caption, motionGraphics, textOverlays, fps } = input;
+  const { caption, motionGraphics, textOverlays, fps, brollWindows } = input;
 
   return (
     <AbsoluteFill style={{ background: "transparent" }}>
+      {/* Captions render UNCONDITIONALLY — they bridge over B-roll so the
+          viewer can still read the dialogue during cutaways. */}
       <CaptionsLayer caption={caption} fps={fps} />
+      {/* Text overlays + MGs are SUPPRESSED during B-roll windows so cards,
+          message bubbles, and notification stacks don't stack on top of
+          stock-footage cutaways. */}
       <TextOverlaysLayer
         overlays={textOverlays ?? []}
         captionStyle={caption.style}
         captionExtraProps={caption.extraProps}
         captionKeywords={caption.keywords}
         fps={fps}
+        brollWindows={brollWindows}
       />
-      <MotionGraphicsLayer items={motionGraphics} fps={fps} />
+      <MotionGraphicsLayer items={motionGraphics} fps={fps} brollWindows={brollWindows} />
     </AbsoluteFill>
   );
 };

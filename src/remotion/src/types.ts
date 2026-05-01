@@ -255,6 +255,12 @@ export interface PromptlyRenderInput {
   textOverlays: TextOverlaySpec[];
   motionGraphics: MotionGraphicSpec[];
   outro?: "none" | "fade_black" | "fade_white";
+  /** B-roll output-time windows in FRAME coordinates as [startFrame, endFrame]
+   *  pairs. Used by PromptlyOverlay to suppress text-overlays/MGs whose own
+   *  window overlaps any of these — so chapter cards / message bubbles / etc.
+   *  do not render on top of cutaway footage. Captions are NOT filtered (they
+   *  are the readable bridge layer over B-roll). */
+  brollWindows?: number[][];
 }
 
 export interface PromptlyRenderProps {

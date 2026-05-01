@@ -227,6 +227,12 @@ class PromptlyRenderInput(_RemotionModel):
     textOverlays: List[TextOverlaySpec]
     motionGraphics: List[MotionGraphicSpec]
     outro: Optional[OutroKind] = None
+    # B-roll output windows in frame coordinates: [[startFrame, endFrame], ...].
+    # Used by PromptlyOverlay to suppress text-overlays/MGs during B-roll
+    # so chapter cards / message bubbles / etc. don't render on top of
+    # cutaway footage. Captions still render over B-roll (they're the
+    # readable bridge layer).
+    brollWindows: Optional[List[List[int]]] = None
 
 
 # ── Micro-segments (discriminated by type) ─────────────────────────────────
