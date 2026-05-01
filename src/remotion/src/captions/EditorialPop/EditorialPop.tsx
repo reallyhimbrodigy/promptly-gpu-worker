@@ -136,10 +136,10 @@ export const EditorialPop: React.FC<EditorialPopProps> = ({
         const durationFrames = msToFrames(page.durationMs, fps);
         if (durationFrames <= 0) return null;
 
-        // Page-boundary fade: 10-frame ease at entry/exit so pages glide
-        // instead of snap.
+        // 3 frames (~50ms at 60fps) — tight page-boundary fade so captions
+        // land ON the spoken word rather than trailing it.
         const endFrame = startFrame + durationFrames;
-        const fadeFrames = 10;
+        const fadeFrames = 3;
         const fadeIn = interpolate(
           frame,
           [startFrame, startFrame + fadeFrames],

@@ -431,7 +431,9 @@ export const GlitchHighlight: React.FC<GlitchHighlightProps> = ({
         if (durationFrames <= 0) return null;
 
         const endFrame = startFrame + durationFrames;
-        const fadeFrames = 10;
+        // 3 frames (~50ms at 60fps) — tight page-boundary fade so captions
+        // land ON the spoken word rather than trailing it.
+        const fadeFrames = 3;
         const fadeIn = interpolate(
           frame,
           [startFrame, startFrame + fadeFrames],

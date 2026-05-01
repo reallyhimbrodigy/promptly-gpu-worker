@@ -249,12 +249,10 @@ export const Prism: React.FC<PrismProps> = ({
   const lineDurationFrames = msToFrames(activeLine.endMs, fps) - lineStartFrame;
   const hasKeywords = activeLine.tokens.some((t) => keywordCheck(t.text));
 
-  // Page-boundary fade: 10-frame ease-out at line entry and 10-frame
-  // ease-in at line exit. NN/g motion guidance puts UI fades at 100-400 ms;
-  // 10 frames at 60 fps = 167 ms, near the low end where it registers as
-  // "smooth" without feeling slow. Five frames (the prior value) was below
-  // perception threshold for a fade and read as a hard cut.
-  const fadeFrames = 10;
+  // Page-boundary fade: 3 frames (~50 ms at 60fps). Audio-sync trumps
+  // smoothness — captions need to land ON the spoken word, not trail it.
+  // Longer fades (10+ frames / 167+ ms) made captions feel laggy.
+  const fadeFrames = 3;
   const lineEndFrame = lineStartFrame + lineDurationFrames;
   const fadeIn = interpolate(
     frame,

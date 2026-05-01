@@ -140,7 +140,7 @@ const SerifPage: React.FC<{
   const pageLocalMs = (frame / fps) * 1000;
   const fadeOut = interpolate(
     pageLocalMs,
-    [page.durationMs - 120, page.durationMs],
+    [page.durationMs - 50, page.durationMs],
     [1, 0],
     { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
   );

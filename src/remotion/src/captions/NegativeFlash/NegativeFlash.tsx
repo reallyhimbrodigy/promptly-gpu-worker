@@ -234,11 +234,11 @@ export const NegativeFlash: React.FC<NegativeFlashProps> = ({
   const lineDurationFrames = msToFrames(activeLine.endMs, fps) - lineStartFrame;
   const hasKeywords = activeLine.tokens.some((t) => keywordCheck(t.text));
 
-  // Page-boundary fade: 10-frame ease-out on entry/exit so caption pages
-  // don't visibly snap on/off at line transitions. ~167 ms at 60fps —
-  // perceptible as a soft transition without feeling slow.
+  // Page-boundary fade: 3 frames (~50 ms at 60fps). Tight enough that the
+  // caption page lands ON the spoken word rather than trailing it. Longer
+  // fades (10+ frames / 167+ ms) make captions feel out of sync with audio.
   const lineEndFrame = lineStartFrame + lineDurationFrames;
-  const fadeFrames = 10;
+  const fadeFrames = 3;
   const fadeIn = interpolate(
     frame,
     [lineStartFrame, lineStartFrame + fadeFrames],

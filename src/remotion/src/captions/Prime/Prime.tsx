@@ -151,11 +151,11 @@ const PrimePage: React.FC<{
     lines.push({ tokens: buffer, hasSpecial: false });
   }
 
-  // Fade out
+  // Fade out — 50ms tight so caption pages snap to spoken-word timing.
   const pageLocalMs = (frame / fps) * 1000;
   const fadeOut = interpolate(
     pageLocalMs,
-    [page.durationMs - 120, page.durationMs],
+    [page.durationMs - 50, page.durationMs],
     [1, 0],
     { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
   );

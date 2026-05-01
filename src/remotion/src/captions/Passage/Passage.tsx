@@ -134,7 +134,7 @@ const PassagePage: React.FC<{
 
   const fadeOut = interpolate(
     pageLocalMs,
-    [page.durationMs - 260, page.durationMs],
+    [page.durationMs - 50, page.durationMs],
     [1, 0],
     { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
   );
