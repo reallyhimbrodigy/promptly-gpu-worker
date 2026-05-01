@@ -8089,16 +8089,22 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _stage_dir = work_dir
     _staged_for_cleanup: list = []
 
-    def _stage_file(src_abs_path):
+    def _stage_file(src_abs_path, dest_basename=None):
         """Materialize `src_abs_path` into the bundle public root with a
         stage-key-prefixed basename. Returns the URL Remotion sees relative to
         publicDir (just the prefixed basename — staticFile resolves it to
-        /<basename> served from /remotion/bundle/public/<basename>)."""
+        /<basename> served from /remotion/bundle/public/<basename>).
+
+        `dest_basename` (optional): override the basename used for the staged
+        file. Useful when the source file's basename collides with another
+        stage call in the same render (e.g. two B-rolls whose 30-char-truncated
+        keywords happen to slugify to the same thing). When None, falls back
+        to `os.path.basename(src_abs_path)`."""
         if not os.path.exists(src_abs_path):
             raise RuntimeError(
                 f"Cannot stage local file for Remotion: {src_abs_path} does not exist."
             )
-        _orig = os.path.basename(src_abs_path)
+        _orig = dest_basename or os.path.basename(src_abs_path)
         _name = f"{_stage_key}__{_orig}"
         _dst = os.path.join(_bundle_public_root, _name)
         if os.path.lexists(_dst):
@@ -8189,10 +8195,20 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _br_fps = 30.0
         if _br_fps <= 0 or _br_fps > 240:
             _br_fps = 30.0
-        # B-roll is always composited by FFmpeg in v62. The src is the
-        # absolute on-disk /tmp path; FFmpeg reads it directly.
+        # Stage the B-roll into the bundle public dir so Remotion's BrollLayer
+        # can resolve it via staticFile(). Use an explicitly indexed basename
+        # so two B-rolls whose truncated-keyword slugs happen to collide (rare
+        # but possible: see _download_and_validate_broll's safe_kw[:30] cap)
+        # get distinct staged filenames within this render.
+        _broll_idx_in_out = len(broll_out)
+        _orig_local_name = os.path.basename(_local_path)
+        _broll_dest_basename = f"broll_{_broll_idx_in_out:02d}_{_orig_local_name}"
+        _broll_staged_basename = _stage_file(_local_path, dest_basename=_broll_dest_basename)
         broll_out.append({
-            "src": _local_path,
+            # `src` is the staged basename (e.g. "<job_id>__broll_00_...mp4").
+            # FFmpeg reads it via os.path.join(_bundle_public_root, src);
+            # Remotion BrollLayer resolves it via staticFile(src).
+            "src": _broll_staged_basename,
             "fromFrame": _from_frame,
             "durationInFrames": _dur_frames,
             "seekFromSeconds": float(_seek_seconds),
@@ -8715,7 +8731,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         if _c_broll:
             c_broll_start_idx = len(chunk_inputs)
             for _br in _c_broll:
-                chunk_inputs.append(_br["src"])
+                # br["src"] is now a staged basename in the bundle public dir
+                # (Pass 4 staging). Resolve to absolute path for ffmpeg `-i`.
+                chunk_inputs.append(os.path.join(_bundle_public_root, _br["src"]))
         c_audio_idx = None
         if include_audio:
             c_audio_idx = len(chunk_inputs)
