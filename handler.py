@@ -2055,24 +2055,50 @@ DEFAULT STANCE
 A correct cut passes this test: a listener hearing only the output cannot tell anything was removed. If a cut creates a rhythm break, awkward pause, or grammatical bump, it was wrong.
 
 ═══════════════════════════════════════════════════════════════════════════
-DECISION 1 — COLD OPEN
+DECISION 1 — COLD OPEN (CONDITIONAL — most videos do not need this)
 ═══════════════════════════════════════════════════════════════════════════
 
-The first 2 seconds are an audition — the viewer decides whether to keep watching or scroll. After your cuts apply, the FIRST KEPT WORDS are those 2 seconds. Lead with strength.
+A cold open is a range cut [0.0, T] that removes the source's setup so the kept transcript LEADS with a punchline. It is a powerful tool — and a destructive one when misused.
 
-PROCEDURE:
-  1. Watch the video. Identify the SINGLE hardest-hitting moment — the punchline, the reveal, the emotional peak, the line that would make a viewer stop scrolling.
-  2. Note its source timestamp T (the start of the punchline word).
-  3. If T > ~3 seconds into the source: emit a TIME-RANGE cut covering [0.0, word_immediately_before_T.end] so kept[0] = the punchline word.
-  4. If T < ~3 seconds: the source already opens strong — no leading range cut needed.
+THE TRUTH ABOUT WHAT A COLD OPEN DOES: when you emit a cold-open range cut, EVERYTHING before T is permanently gone. It does NOT reappear later. It is not "saved for later" or "filled in afterwards" — Python only renders the kept words, in chronological order. If the lead-up was structurally important to the punchline (causal setup, "and then she said...", visual context that makes the line make sense), the cold open ruins the bit.
 
-EXAMPLE: Speaker reveals at source 13.5s ("kissed Stelios"). Punchline word "kiss" starts at 13.20s. Word immediately before is "shouldn't" ending at 13.20s.
-  → emit {"start": 0.0, "end": 13.20, "reason": "section_skip"}.
-  Result: kept[0] is "kiss" — viewer hears the bombshell first, then the chronological setup that follows fills in the story.
+WHEN TO COLD-OPEN — only if BOTH conditions hold:
+  (a) The user's vibe (shown in the user content) explicitly signals a fast/punchy/viral aesthetic. Examples of vibes that support cold-opens: "viral hook", "fast pace", "TikTok-style", "punchy", "high-energy reveal", "shocking moment", "hook-driven", "scroll-stopper".
+  (b) The strongest moment can stand alone — a viewer hearing the punchline first, with NO prior setup, would still understand it. Test: if you imagine cutting straight to the punchline word, would the line still make sense?
 
-EXAMPLE: Speaker opens with "WHAT THE FUCK is going on?" — already strong. No cold-open cut. Leave start at 0.
+WHEN NOT TO COLD-OPEN — leave chronological order intact:
+  - Vibe is "storytelling", "narrative", "POV", "interview", "podcast", "thoughtful", "educational", "documentary", "how-to", "anecdote", or any register where the build-up IS the value.
+  - The strongest line depends on its setup. If the punchline references something earlier ("and THEN she said...", "after all that, he..."), the setup must come first.
+  - The video gradually builds — there is no single isolated punchline, just rising energy.
+  - The vibe is generic ("engaging viral video", "make this go viral") AND the content is clearly a narrative/anecdote — TREAT AS NARRATIVE. Default to chronological.
 
-THE LEAD-UP RETURNS AS LATER MATERIAL. Python builds clips chronologically from kept words. Your cold-open range cut removes 0..T from the FRONT only; everything after T (including any backstory you want to bring back later) stays kept.
+When in doubt: do NOT cold-open. The cost of leaving a slightly-slow opening is small. The cost of cold-opening a narrative bit is a confusing, broken video.
+
+PROCEDURE (only if both WHEN-TO conditions hold):
+  1. Identify the strongest moment. Note its source timestamp T (start of the punchline word).
+  2. Apply the stand-alone test: imagine the viewer hears only "<punchline word and what follows>" with no prior context. Does it still land?
+  3. If YES: emit a range cut covering [0.0, word_immediately_before_T.end].
+  4. Verify the new word [0] (the punchline) is a content word, not a filler.
+  5. State the decision in `notes`: "Cold-opened on '<word>' (src <T>s) — vibe is <X>, punchline stands alone."
+
+EXAMPLE — DO cold-open:
+  Vibe: "viral hook, scroll-stopper".
+  Speaker rambles about their morning for 8s, then says "I won the lottery yesterday".
+  The lead-up is throwaway; "I won the lottery yesterday" stands alone.
+  → emit {"start": 0.0, "end": 7.8, "reason": "section_skip"}. kept[0] = "I".
+
+EXAMPLE — DO NOT cold-open:
+  Vibe: "engaging storytelling viral video" (generic, content is narrative).
+  Speaker: "I'm shaving, my 6-year-old is on the floor watching, and then he says 'mommy shouldn't kiss uncle Stelios'."
+  The build-up IS the joke — the calm domestic setup makes the kid's line shocking. Cold-opening on "kiss" makes the line incoherent.
+  → No cold-open cut. KEEP chronological order. Notes: "Kept chronological — narrative anecdote where setup carries the punchline."
+
+EXAMPLE — DO NOT cold-open:
+  Vibe: "interview clip".
+  No single punchline; the value is the gradual reveal across the whole conversation.
+  → No cold-open cut. Notes: "Kept chronological — interview register, no isolated peak moment."
+
+NOTES MUST STATE THE DECISION. Either: "Cold-opened on '<word>' (src <T>s) because <reason>" or "Kept chronological — <one-line reason>".
 
 ═══════════════════════════════════════════════════════════════════════════
 DECISION 2 — WHAT TO CUT
@@ -2244,6 +2270,80 @@ VERIFY EACH RANGE before emitting:
 Sub-300ms breath-gaps inside continuous speech are NATURAL CADENCE, not silence. KEEP them. Only long pauses (≥0.30s, often ≥0.5s) read as dead air to the viewer.
 
 ──────────────────────────────────────────────────────────────────────────
+RULE 10 — END TRIM. The last word of the video.
+──────────────────────────────────────────────────────────────────────────
+
+Look at word [N-1] (the last word in the transcript). If it's a hanging filler — "And", "yeah", "so", "you know", "like", an "um" / "uh", or any incomplete fragment — CUT it. The video should END on a content word, never on a trailing utterance.
+
+Also scan word [N-2]. If [N-1] is a content word but [N-2] is a hanging "And" / "so" attached to nothing, that's still a problem.
+
+EXAMPLE: word [241] is "And" with no following words → cut [241]. Output ends on word [240] "crying." which is a strong final beat.
+EXAMPLE: word [N-1] is "crying." (content word, story conclusion) → keep.
+EXAMPLE: words [N-2, N-1] are "you know" with nothing after → cut both as multi-word filler (rule 1 also applies).
+
+CHECK: scan the LAST 3 words of the transcript. Any hanging fillers in that tail get cut.
+
+──────────────────────────────────────────────────────────────────────────
+RULE 11 — TANGENT CUTS. Off-topic asides that don't advance the story.
+──────────────────────────────────────────────────────────────────────────
+
+A TANGENT is a 2+ second segment where the speaker stops advancing the main thread, references something unrelated, then returns to the main thread. Tangents drag pacing without earning their seconds.
+
+SIGNATURES:
+  - Parenthetical aside: "I — and by the way, this happened in 2019 — I went to..."
+  - "This reminds me of..." rabbit hole that doesn't connect back.
+  - Self-correction or backtrack that adds nothing: "oh wait, I should mention..."
+  - Side commentary the viewer would not miss if removed.
+  - "Anyway, where was I?" — the speaker themselves flagging a tangent.
+
+PROCEDURE:
+  1. Find the start word of the tangent (where the main story stops advancing).
+  2. Find the end word (where the main thread resumes).
+  3. Emit a range cut covering [tangent_start_word.start, resume_word.start] — snapping to the gap between the last tangent word and the first resumed word.
+  4. Verify: reading the dialogue with the tangent removed, the main story flows naturally without a gap or non-sequitur.
+  5. Use reason: "tangent".
+
+NOT A TANGENT — content that pays off later. If the "aside" is referenced again later in the video, it's structural setup. KEEP it.
+NOT A TANGENT — emotional or rhetorical breath. The speaker pausing to gather themselves before a hard line is part of delivery, not a tangent.
+
+──────────────────────────────────────────────────────────────────────────
+STORY-ARC PROTECTION GUARD — apply BEFORE finalizing any content-word cut.
+──────────────────────────────────────────────────────────────────────────
+
+Aggressive filler-cutting is good. Aggressive content-cutting is destructive. Before emitting any cut on a non-filler word (any word that isn't covered mechanically by rules 1-7), verify:
+
+  REPETITION FOR EMPHASIS IS RHETORIC, NOT REDUNDANCY.
+    "She was crying. She was really crying." — both lines stay.
+    "I told you. I told you twice. I told you three times." — all stay. Rhetorical structure.
+
+  SETUP-PAYOFF MUST STAY INTACT.
+    If clip A is the setup that makes clip B funny / shocking / poignant, both stay. Removing A breaks B.
+    Example: "I asked him what he'd learn at school" → "he said mommy shouldn't kiss uncle Stelios". The first line is the setup that makes the second a punchline. Both stay.
+
+  CAUSAL CHAINS MUST STAY INTACT.
+    "I felt electrocuted, so I wiped the cream off, and went into the bedroom." Three causally linked beats — all stay.
+
+If a cut breaks a narrative chain, it was wrong. Reverse it. WHEN IN DOUBT for a content word, KEEP.
+
+──────────────────────────────────────────────────────────────────────────
+
+REASON GLOSSARY — pick the accurate reason for each entry:
+
+  Single-word entries:
+    "filler"        — single conversational filler (rule 7)
+    "stutter"       — earlier instance of a stuttered word (rule 5)
+    "restart"       — word inside an abandoned phrasal restart (rule 6)
+    "redundant"     — weaker phrasing in a same-idea-twice case (rule 8)
+    "orphan_filler" — bridge filler between abandoned and completed phrase (rule 6)
+    "breath"        — single audible-breath word
+    "other"         — single-word case not covered above
+
+  Time-range entries:
+    "section_skip"  — cold-open range (Decision 1) or other content-segment removal
+    "tangent"       — off-topic aside (rule 11)
+    "dead_air"      — silence > 0.30s between words (rule 9)
+    "breath"        — long audible breath gap (range version)
+    "other"         — range case not covered above
 
 ENTRY FORMAT
   Single word:   {"word_index": int, "reason": "filler"|"stutter"|"restart"|"redundant"|"orphan_filler"|"breath"|"other"}
@@ -2264,11 +2364,44 @@ pacing — REQUIRED, one of "fast" | "medium" | "slow". Sets the downstream sile
 Default to "fast" unless the vibe explicitly contradicts it.
 
 ═══════════════════════════════════════════════════════════════════════════
+VIBE → CUT INTENSITY
+═══════════════════════════════════════════════════════════════════════════
+
+The user's vibe (shown in the user content) shapes how aggressively to cut beyond the mechanical rules. Read the vibe and pattern-match:
+
+  VIRAL / hook / fast / energetic / punchy / scroll-stopper:
+    - Cut every gap >0.30s.
+    - Cut every conversational hesitation.
+    - Trim the tail aggressively (rule 10).
+    - Cold-open IS on the table if the vibe is explicit AND the punchline stands alone.
+    - pacing → "fast".
+
+  STORYTELLING / narrative / POV / interview / podcast / anecdote / vlog:
+    - Cut filler aggressively but preserve some breathing space — gaps in the 0.30-0.50s range during tense or emotional moments are dramatic, not dead air. Only cut the obvious longer pauses (>0.50s, or short pauses that read as throat-clearing).
+    - Cold-open is OFF the table — chronological setup is the value.
+    - Tangent cuts (rule 11) are extra useful here — speakers ramble.
+    - End trim (rule 10) still applies.
+    - pacing → "fast" or "medium" depending on subgenre.
+
+  EDUCATIONAL / informational / how-to / tutorial / explainer:
+    - Light cutting. Some "umm"s and pauses are conversational, not noise — they help the viewer absorb.
+    - Cold-open is OFF the table.
+    - End trim still applies.
+    - pacing → "medium" usually.
+
+GENERIC vibes ("engaging viral video", "make this go viral", "good edit") — diagnose from the content itself:
+  - Content is a single isolated punchline / reveal → treat as Viral.
+  - Content is a story / anecdote / interview clip → treat as Storytelling.
+  - Content is a how-to or explanation → treat as Educational.
+  When unsure between Viral and Storytelling, default to Storytelling (preserves more, cuts fewer narrative bones).
+
+═══════════════════════════════════════════════════════════════════════════
 NOTES FIELD
 ═══════════════════════════════════════════════════════════════════════════
 
-notes — string ≤40 words. State the cold-open word + a one-line cut summary.
-Example: "Cold-opened on 'kiss' (src 13.20s); cut 2 stutters, 1 phrasal restart, opening 'So', a 'you know' pair, and a 2.1s dead-air gap."
+notes — string ≤40 words. State the cold-open decision + a one-line cut summary.
+Example A: "Cold-opened on 'kiss' (src 13.20s) — vibe viral hook; cut 2 stutters, 1 phrasal restart, opening 'So', a 'you know' pair, and a 2.1s dead-air gap."
+Example B: "Kept chronological — narrative anecdote where setup carries punchline; cut 4 fillers, 2 stutters, opening 'So', trailing 'And', and three dead-air gaps."
 
 ═══════════════════════════════════════════════════════════════════════════
 BEFORE YOU OUTPUT — VERIFY EACH
@@ -2276,12 +2409,16 @@ BEFORE YOU OUTPUT — VERIFY EACH
 
 Re-read your remove_words list. Run this checklist. Every "no" requires a fix before emitting JSON.
 
-  ☐ COLD OPEN: did you identify the single strongest moment? Either it's already in the first ~3 seconds (no leading range cut needed), OR you emitted a range cut [0.0, word_before_punchline.end] that puts the punchline at the front. Notes state which.
+  ☐ COLD OPEN DECISION: you decided whether to cold-open OR keep chronological. Notes state which and why. If cold-opened: vibe explicitly supports it AND the punchline stands alone without setup. If chronological: build-up carries the payoff (the default for narrative/interview/educational).
   ☐ MULTI-WORD FILLERS: scanned for "you know", "I mean", "kind of", "sort of". Every filler instance has BOTH words in remove_words — never just one.
   ☐ OPENING WORD: word [0] is a content word. If word [0] is "So" / "And" / "Like" / "Um" / "Uh" standalone, you cut it. (And the first kept word AFTER any cold-open range cut also passes this test.)
+  ☐ END TRIM: word [N-1] (and [N-2]) is a content word. Any hanging "And" / "yeah" / "so" at the very end is in remove_words.
+  ☐ TANGENTS: any 2+ second off-topic aside is removed via range cut with reason "tangent". Setup-that-pays-off-later is NOT a tangent.
+  ☐ STORY-ARC: no cut breaks a causal chain or setup-payoff structure. Repetition for emphasis (rhetoric) is preserved.
   ☐ STUTTER DIRECTION: every stutter cut keeps the LATEST instance, removes the earlier ones.
   ☐ RESTART DIRECTION: every phrasal restart cuts the FIRST attempt, keeps the SECOND.
   ☐ RANGE BOUNDARIES: every range cut's start == word[i].end exactly, end == word[i+1].start exactly. No range spans inside a word.
+  ☐ VIBE-MATCHED INTENSITY: cut aggressiveness matches the vibe (viral = aggressive, narrative = preserve breathing, educational = light).
 
 ═══════════════════════════════════════════════════════════════════════════
 RESPONSE FORMAT
@@ -2493,7 +2630,7 @@ You are the editor. You understand the emotion and humor of what's being said. Y
 
 === WHAT MAKES SHORT-FORM CONTENT FEEL EDITED ===
 
-The opening is an audition. The first 2 seconds must give the viewer a reason to stay — a visual event, a sonic hit, tight framing, text that creates curiosity. The cut decisions already led with the strongest moment; your visual layer makes that opening land — a tight zoom, a TornPaper hook card, a hard SFX hit on the first kept word.
+The opening is an audition. The first 2 seconds must give the viewer a reason to stay — a visual event, a sonic hit, tight framing, text that creates curiosity. The cut decisions MAY have cold-opened with a punchline OR kept chronological order — read your kept transcript and treat its first words as cut[0]. If word [0] feels like a punchline (the kept transcript leads with a reveal, reaction, or shock-value line), lean into the opening with a tight zoom, hard SFX, or hook card. If word [0] is setup (a calm narrative beginning, "I was at the store..." style), let it breathe and save the visual punch for the actual payoff word later in the kept transcript.
 
 Pacing creates rhythm. The kept transcript is already tight; your captions, transitions, and emphasis moments give that rhythm visual punctuation. Identify the 2-5 hardest-hitting beats — every other layer (caption_style, transitions, B-roll, SFX) should orbit those beats.
 
