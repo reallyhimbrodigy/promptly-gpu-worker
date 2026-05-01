@@ -49,9 +49,10 @@ BASELINE="${BASELINE:-0}"
 BASELINES_FILE="$REPO_ROOT/scripts/smoke-baselines.json"
 
 cleanup() {
-  # Always remove the staged fixture from the bundle cache — leaving it
+  # Always remove the staged fixtures from the bundle cache — leaving them
   # behind would shadow the production assets the next prebundle pulls in.
   rm -f "$BUNDLE_CACHE/public/smoke-fixture.mp4" 2>/dev/null || true
+  rm -f "$BUNDLE_CACHE/public/smoke-broll.mp4" 2>/dev/null || true
   if [[ "$KEEP" == "1" ]]; then
     echo "smoke: KEEP=1, leaving $SMOKE_DIR for inspection"
   else
@@ -105,6 +106,19 @@ ffmpeg -y -loglevel error \
   -movflags +faststart \
   "$FIXTURE_PATH"
 
+# B-roll fixture — solid-red test clip distinct from the speaker testsrc2
+# pattern so the BrollLayer's split-screen position is visually obvious in
+# rendered frames. Same fps + size + codec as the speaker fixture so
+# OffthreadVideo treats it identically.
+BROLL_FIXTURE_BASENAME="smoke-broll.mp4"
+BROLL_FIXTURE_PATH="$PUBLIC_DIR/$BROLL_FIXTURE_BASENAME"
+echo "smoke: generating B-roll fixture $BROLL_FIXTURE_BASENAME"
+ffmpeg -y -loglevel error \
+  -f lavfi -i "color=c=red:size=1080x1920:rate=30:duration=1" \
+  -c:v libx264 -preset ultrafast -crf 23 -pix_fmt yuv420p \
+  -movflags +faststart \
+  "$BROLL_FIXTURE_PATH"
+
 # ── 5. Synthetic input JSONs ───────────────────────────────────────────────
 # Tiny but real: each composition mounts every layer it owns at least once.
 # Caption pages have one token each so CaptionsLayer renders the actual
@@ -120,7 +134,16 @@ cat > "$SMOKE_DIR/overlay.json" <<EOF
   "totalDurationInFrames": 30,
   "clips": [],
   "transitions": [],
-  "broll": [],
+  "broll": [
+    {
+      "src": "smoke-broll.mp4",
+      "fromFrame": 5,
+      "durationInFrames": 20,
+      "seekFromSeconds": 0.0,
+      "brollFps": 30.0,
+      "playbackRate": 1.0
+    }
+  ],
   "caption": {
     "style": "PaperII",
     "pages": [

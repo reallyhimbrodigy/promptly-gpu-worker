@@ -566,10 +566,16 @@ const BrollLayer: React.FC<{
 // Output is encoded with alpha (ProRes 4444) so FFmpeg can composite it
 // over the base in the final mux step.
 export const PromptlyOverlay: React.FC<PromptlyRenderProps> = ({ input }) => {
-  const { caption, motionGraphics, textOverlays, fps, brollWindows } = input;
+  const { caption, motionGraphics, textOverlays, fps, broll, brollWindows } = input;
 
   return (
     <AbsoluteFill style={{ background: "transparent" }}>
+      {/* B-roll cutaways render at the BOTTOM of the overlay z-stack —
+          under captions, text overlays, and MGs. Each B-roll occupies the
+          bottom half of canvas with a slide-up entrance. The speaker frame
+          (rendered by FFmpeg below this alpha overlay) shows through the
+          transparent top half. */}
+      <BrollLayer items={broll ?? []} fps={fps} />
       {/* Captions render UNCONDITIONALLY — they bridge over B-roll so the
           viewer can still read the dialogue during cutaways. */}
       <CaptionsLayer caption={caption} fps={fps} />
