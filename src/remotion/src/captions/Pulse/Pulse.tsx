@@ -64,6 +64,8 @@ const PulseLine: React.FC<{
                     ]
                   : []),
               ].join(", "),
+              // Universal stroke for guaranteed readability over any background.
+              WebkitTextStroke: "0.75px rgba(0,0,0,0.6)",
               whiteSpace: "nowrap",
             }}
           >

@@ -95,6 +95,8 @@ const SerifWord: React.FC<{
         letterSpacing: isKw ? keywordLetterSpacing : letterSpacing,
         lineHeight: 1.15,
         textShadow: kwShadow,
+        // Universal stroke for guaranteed readability over any background.
+        WebkitTextStroke: "0.75px rgba(0,0,0,0.6)",
         whiteSpace: "nowrap",
         transform: `scale(${scale})`,
         transformOrigin: "center bottom",

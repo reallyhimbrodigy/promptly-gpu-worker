@@ -116,6 +116,16 @@ const NegativeWord: React.FC<{
     [renderedText, requestedSize, maxWidth],
   );
 
+  // Universal readability: every visible word gets a dark stroke + soft
+  // shadow that holds up over any background (speaker face, B-roll
+  // cutaway, light footage). The keyword spread-glow stacks on top.
+  const baseShadow = "0 2px 6px rgba(0,0,0,0.55), 0 0 2px rgba(0,0,0,0.85)";
+  const composedShadow = visible
+    ? spreadColor
+      ? `${baseShadow}, 0 0 3px ${spreadColor}, 0 0 3px ${spreadColor}`
+      : baseShadow
+    : "none";
+
   return (
     <div style={{ padding: "0 8px" }}>
       <span
@@ -128,10 +138,8 @@ const NegativeWord: React.FC<{
           letterSpacing: "0.04em",
           lineHeight: 1,
           color: visible ? color : "transparent",
-          textShadow:
-            visible && spreadColor
-              ? `0 0 3px ${spreadColor}, 0 0 3px ${spreadColor}`
-              : "none",
+          textShadow: composedShadow,
+          WebkitTextStroke: visible ? "1px rgba(0,0,0,0.7)" : undefined,
           transform: `scale(${scale})`,
           transformOrigin: "center bottom",
           whiteSpace: "nowrap",

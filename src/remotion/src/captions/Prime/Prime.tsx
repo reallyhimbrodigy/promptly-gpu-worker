@@ -83,6 +83,8 @@ const PrimeWord: React.FC<{
         letterSpacing,
         lineHeight: 1.1,
         textShadow,
+        // Universal stroke for guaranteed readability over any background.
+        WebkitTextStroke: "0.75px rgba(0,0,0,0.6)",
         textTransform: "lowercase",
         whiteSpace: "nowrap",
         transform: `translateY(${slideY}px)`,

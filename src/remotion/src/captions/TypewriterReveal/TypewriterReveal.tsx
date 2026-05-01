@@ -144,6 +144,8 @@ const TypewriterPage: React.FC<{
       "0 0 40px rgba(0,0,0,0.4)",
       "0 4px 12px rgba(0,0,0,0.5)",
     ].join(", "),
+    // Universal stroke for guaranteed readability over any background.
+    WebkitTextStroke: "0.5px rgba(0,0,0,0.55)",
   };
 
   return (

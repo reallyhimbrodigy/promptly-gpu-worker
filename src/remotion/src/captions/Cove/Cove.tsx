@@ -160,7 +160,9 @@ export const Cove: React.FC<CoveProps> = ({
                                   ? "none"
                                   : isSpecial
                                     ? "0 0 12px rgba(255,255,255,0.7), 0 0 28px rgba(255,245,230,0.4), 0 0 50px rgba(255,240,220,0.2), 0 -20px 30px rgba(0,0,0,0.45), 0 -12px 20px rgba(0,0,0,0.35), 0 -6px 10px rgba(0,0,0,0.25), 0 0 6px rgba(0,0,0,0.15)"
-                                    : "none",
+                                    : "0 2px 6px rgba(0,0,0,0.55), 0 0 2px rgba(0,0,0,0.85)",
+                                // Universal stroke for guaranteed readability over any background.
+                                WebkitTextStroke: isSpoken ? "0.75px rgba(0,0,0,0.65)" : undefined,
                               }}
                             >
                               {/* Word-shaped blurred shadow biased above */}

@@ -81,6 +81,8 @@ const PassageWord: React.FC<{
         lineHeight: 1,
         whiteSpace: "nowrap",
         textShadow,
+        // Universal stroke for guaranteed readability over any background.
+        WebkitTextStroke: "0.75px rgba(0,0,0,0.6)",
         opacity,
       }}
     >

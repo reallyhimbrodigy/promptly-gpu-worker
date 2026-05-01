@@ -82,6 +82,8 @@ const IlluminateWord: React.FC<{
         color: textColor,
         letterSpacing: "-0.01em",
         textShadow: `${SHADOW}${kwGlow ? `, ${kwGlow}` : ""}`,
+        // Universal stroke for guaranteed readability over any background.
+        WebkitTextStroke: "0.75px rgba(0,0,0,0.6)",
         opacity: brightness,
         WebkitMaskImage: `linear-gradient(110deg, black ${maskPos - 30}%, rgba(0,0,0,0.3) ${maskPos}%, black ${maskPos + 30}%)`,
         maskImage: `linear-gradient(110deg, black ${maskPos - 30}%, rgba(0,0,0,0.3) ${maskPos}%, black ${maskPos + 30}%)`,

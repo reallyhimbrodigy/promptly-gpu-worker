@@ -65,6 +65,8 @@ const NormalWord: React.FC<{
         textTransform: "uppercase",
         letterSpacing: "0.04em",
         textShadow: `0 2px 12px rgba(0,0,0,0.7), 0 0 4px rgba(0,0,0,0.5)${activeGlow ? `, ${activeGlow}` : ""}`,
+        // Universal stroke for guaranteed readability over any background.
+        WebkitTextStroke: "1px rgba(0,0,0,0.7)",
         transform: `translateY(${y}px) scale(${scale})`,
         transformOrigin: "center bottom",
         opacity,
@@ -220,7 +222,7 @@ const GlitchWord: React.FC<{
         </>
       )}
 
-      {/* Main text — sliced during glitch */}
+      {/* Main text — sliced during glitch. Universal stroke for readability. */}
       {intensity > 0.05 ? (
         slices.map((slice, i) => (
           <span
@@ -229,6 +231,7 @@ const GlitchWord: React.FC<{
               ...baseFont,
               color: mainColor,
               textShadow: `0 2px 8px rgba(0,0,0,0.6), ${glowShadow}`,
+              WebkitTextStroke: "1px rgba(0,0,0,0.7)",
               transform: `translateX(${slice.shift}px)`,
               clipPath: `inset(${slice.top}% -200px ${slice.bottom}% -200px)`,
             }}
@@ -242,6 +245,7 @@ const GlitchWord: React.FC<{
             ...baseFont,
             color,
             textShadow: `0 2px 8px rgba(0,0,0,0.6), ${glowShadow}`,
+            WebkitTextStroke: "1px rgba(0,0,0,0.7)",
           }}
         >
           {text}

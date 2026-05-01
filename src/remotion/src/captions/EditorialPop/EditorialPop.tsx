@@ -54,6 +54,8 @@ const EditorialPopLine: React.FC<{
               color: textColor,
               letterSpacing: "-0.02em",
               textShadow: SHADOW,
+              // Universal stroke for guaranteed readability over any background.
+              WebkitTextStroke: "0.75px rgba(0,0,0,0.6)",
               whiteSpace: "nowrap",
             }}
           >

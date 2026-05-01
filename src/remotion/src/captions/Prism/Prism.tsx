@@ -152,6 +152,12 @@ const PrismWord: React.FC<{
           letterSpacing: isKeyword ? "-0.05em" : "-0.09em",
           lineHeight: 1,
           color: visible ? color : "transparent",
+          // Universal readability: dark stroke + soft shadow that holds up
+          // over any background (speaker, B-roll, light footage).
+          textShadow: visible
+            ? "0 2px 6px rgba(0,0,0,0.55), 0 0 2px rgba(0,0,0,0.85)"
+            : "none",
+          WebkitTextStroke: visible ? "1px rgba(0,0,0,0.7)" : undefined,
           transform: `translate(${offsetX}px, ${offsetY}px)`,
           opacity,
           whiteSpace: "nowrap",

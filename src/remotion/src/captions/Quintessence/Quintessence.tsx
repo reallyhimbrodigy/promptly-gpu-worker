@@ -131,6 +131,9 @@ export const Quintessence: React.FC<QuintessenceProps> = ({
             transform: `scaleY(${stretchY})`,
             transformOrigin: "center bottom",
             textAlign: "center",
+            // Universal stroke for guaranteed readability over any background.
+            WebkitTextStroke: "1px rgba(0,0,0,0.55)",
+            textShadow: "0 2px 8px rgba(0,0,0,0.5), 0 0 2px rgba(0,0,0,0.7)",
           }}
         >
           {toTitleCase(activeSlot.token.text)}

@@ -93,6 +93,8 @@ const LetterpressWord: React.FC<{
         color: textColor,
         letterSpacing,
         textShadow,
+        // Universal stroke for guaranteed readability over any background.
+        WebkitTextStroke: "0.75px rgba(0,0,0,0.55)",
         lineHeight,
         filter: `blur(${blur}px)`,
         opacity,

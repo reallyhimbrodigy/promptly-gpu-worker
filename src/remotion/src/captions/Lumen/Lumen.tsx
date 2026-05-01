@@ -109,6 +109,8 @@ const LumenWord: React.FC<{
             ? [...diffusedShadow, ...kwGlow].join(", ")
             : diffusedShadow.join(", ")
           : "none",
+        // Universal stroke for guaranteed readability over any background.
+        WebkitTextStroke: hasAppeared ? "0.75px rgba(0,0,0,0.6)" : undefined,
       }}
     >
       {token.text}
