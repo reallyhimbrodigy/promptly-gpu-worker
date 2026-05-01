@@ -393,6 +393,13 @@ def build_broll_input_filter(
     )
     src_seconds_needed = src_frames_needed / br_fps
 
+    # Filter chain. Explicit format=yuv420p + setsar=1 normalize colorspace
+    # and pixel ratio so the overlay doesn't show a brightness/saturation
+    # flash at the boundary when a Pexels clip's encoder used a different
+    # YUV range or non-square pixels. Without the normalization the overlay
+    # filter swallows whatever the scaler emits, and any difference vs the
+    # base shows as a visible "flash" the moment the cutaway opens or
+    # closes.
     filters = [
         f"trim=start={seek_seconds:.6f}:end={seek_seconds + src_seconds_needed:.6f}",
         f"setpts=(PTS-STARTPTS)/{pbr:.6f}",
@@ -401,6 +408,8 @@ def build_broll_input_filter(
         f"fps={source_fps:g}",
         f"trim=end_frame={dur_frames}",
         f"setpts=PTS-STARTPTS+{out_start_seconds:.6f}/TB",
+        f"setsar=1",
+        f"format=yuv420p",
     ]
     chain = f"[{output_input_idx}:v]" + ",".join(filters) + f"[{label}]"
     return chain, label

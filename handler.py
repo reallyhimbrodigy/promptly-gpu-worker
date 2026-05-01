@@ -2703,10 +2703,28 @@ KEYWORD CONSTRUCTION:
   Keep keyword 13-18 words. No two keywords should return the same clip — each clip visually distinct (different settings, different subjects, different shot types).
 
 WORD WINDOW (start_word_index → end_word_index):
-  The window is SEPARATE from the keyword. The window defines how long the B-roll stays on screen. It must span the COMPLETE sentence or clause the B-roll covers — every word from the beginning to the end of the thought. Cutting B-roll short mid-phrase looks like a glitch.
-  - start_word_index = the first kept word of the relevant sentence/clause
-  - end_word_index = the last kept word of that sentence/clause
-  - The pipeline derives precise on-screen timing from these indices. No duration field.
+  The window defines exactly when the B-roll appears on screen. The viewer hears those words while seeing the B-roll, so the dialogue at those word indices MUST literally describe what's in the cutaway.
+
+  ANCHOR TO THE ACTION WORDS — the verbs and concrete nouns that name what's visible in the clip. Do NOT anchor to adjacent context that mentions the same SUBJECT but a different action.
+
+  Example A — RIGHT vs WRONG anchoring:
+    Dialogue: "...my oldest son is 6 years old at the time. He's sitting on the floor next to me watching me shave..."
+    B-roll keyword: "young boy sitting on floor playing with toys"
+    ✗ WRONG anchor: words covering "oldest son is 6 years old" — those words name the SUBJECT (the son) but describe his AGE, not what the visual shows him DOING.
+    ✓ RIGHT anchor: words covering "He's sitting on the floor next to me" — these are the words that LITERALLY describe the visual (a boy sitting on the floor).
+    The rule: pick the words that, if a viewer read them out loud while seeing the cutaway, the words and visual would feel synonymous.
+
+  Example B — RIGHT vs WRONG anchoring:
+    Dialogue: "...so I wiped the shaving cream off my face. I went into the bedroom..."
+    B-roll keyword: "person wiping shaving cream off face"
+    ✓ RIGHT anchor: words covering "wiped the shaving cream off my face" — verb "wiped" + concrete noun "shaving cream" + body part "face" — every word pulls its weight visually.
+    ✗ WRONG anchor: words covering "I went into the bedroom" — wrong room, wrong action.
+
+  WINDOW SPAN:
+    - start_word_index = the first word of the action phrase being visualized.
+    - end_word_index = the last word of the action phrase. Don't bleed past the action into unrelated words; don't cut off mid-action.
+    - 4-10 word span is typical. Long enough to register; short enough to stay synced.
+    - The pipeline derives precise on-screen timing from these indices. No duration field.
 
 PLACEMENT DISCIPLINE:
   Only place B-roll on moments where the speaker describes a physical action or concrete scene. Stay on the speaker's face during emotional beats, opinions, punchlines, reveals, and reactions — during those moments the speaker's facial expression IS the content and cutting away destroys the impact. B-roll in the main body, NEVER during cut[0] (the opening needs the speaker's face for the first 2 seconds — viewers form snap judgments from human faces).
