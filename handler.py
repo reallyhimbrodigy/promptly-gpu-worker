@@ -3098,7 +3098,11 @@ RULE OF THUMB: pick a sound only when it adds meaning. A punchline without SFX i
 
 === B-ROLL ===
 
-Pexels stock-footage cutaways that play OVER the speaker's dialogue. The viewer hears the speaker's words while watching your B-roll clip. Good B-roll makes the viewer FEEL the words — the clip reinforces and amplifies what the speaker is saying.
+Pexels stock-footage cutaways that render as a SPLIT-SCREEN INSET (bottom half of canvas) while the speaker stays visible above the seam. The viewer hears the speaker's audio AND sees both visually — the speaker reacting in the top half, the B-roll content playing in the bottom half. The B-roll slides up from below over ~250ms when its window starts and slides down when it ends.
+
+Because the speaker is still visible: B-roll COMPLEMENTS the speaker's expression rather than replacing it. The cutaway should add visual context to what the speaker is saying without competing with the speaker's face for attention.
+
+Because the B-roll occupies only the bottom half: MGs anchored to `upper_third_safe` (the most common anchor — TornPaper, sticky notes, notification stacks) coexist cleanly with B-roll. MGs anchored to `lower_third_safe` / `center` / `left_safe` / `right_safe` collide with the bottom-half inset and get dropped — so don't place those during a B-roll window.
 
 broll_clips — ARRAY. {{"keyword": str (13-18 words), "start_word_index": int, "end_word_index": int, "reason": str}}
 
@@ -3134,9 +3138,9 @@ WORD WINDOW (start_word_index → end_word_index):
     - The pipeline derives precise on-screen timing from these indices. No duration field.
 
 PLACEMENT DISCIPLINE:
-  Only place B-roll on moments where the speaker describes a physical action or concrete scene. Stay on the speaker's face during emotional beats, opinions, punchlines, reveals, and reactions — during those moments the speaker's facial expression IS the content and cutting away destroys the impact. B-roll in the main body, NEVER during cut[0] (the opening needs the speaker's face for the first 2 seconds — viewers form snap judgments from human faces).
+  Place B-roll on moments where the speaker describes a physical action or concrete scene. Avoid B-roll during the most facially-expressive emotional beats (the punchline word itself, the moment of recognition on the speaker's face) — even though split-screen keeps the speaker visible, the bottom-half cutaway competes with the face for the viewer's attention at the exact moment that face needs to land. NEVER during cut[0] (the opening needs the full canvas dedicated to the speaker for the first 2 seconds — viewers form snap judgments from human faces).
 
-  Spacing: 3+ seconds of speaker face between B-roll clips. Coverage: ~30-40% of runtime is a healthy ceiling. Place B-roll on 1.0x or 1.2–1.3x clips, not on the 0.7–0.85x slow-speed clips that contain a punchline beat.
+  Spacing: 3+ seconds of speaker-only frame between B-roll clips. Coverage: ~30-40% of runtime is a healthy ceiling. Place B-roll on 1.0x or 1.2–1.3x clips, not on the 0.7–0.85x slow-speed clips that contain a punchline beat.
 
 === TRANSITIONS ===
 
@@ -4621,12 +4625,18 @@ Indices below are the NEW kept-only space [0..{_kept_count - 1}]. Every word_ind
         print(f"[mg] Gemini requested {len(validated_mg)} motion graphic(s)", flush=True)
 
     # ── B-roll vs motion-graphic temporal overlap validator ─────────────────
-    # B-roll renders full-frame (covers the entire canvas). MGs render in
-    # anchored zones. If a MG and B-roll overlap in time, the MG visually
-    # appears ON TOP of the B-roll — a stack the user didn't ask for and
-    # most viewers read as a layout glitch. Drop any MG whose word-window
-    # overlaps a B-roll word-window, prioritizing the B-roll (it's larger
-    # and conveys narrative content; MGs are accents).
+    # B-roll now renders as a split-screen inset (bottom half of canvas) via
+    # Remotion's BrollLayer; the speaker frame stays visible above the seam.
+    # An MG anchored to upper_third_safe sits in the speaker half — no
+    # collision with the B-roll inset. MGs anchored to bottom-half zones
+    # (lower_third_safe, center) or to side-edges (left_safe, right_safe,
+    # whose vertical extent crosses the seam) DO collide. Drop those.
+    #
+    # The drop is zone-aware on purpose: dropping every overlapping MG
+    # (regardless of anchor) was the pre-Remotion-B-roll behavior and
+    # silently killed chapter cards / sticky notes / notification stacks
+    # that would have been visible above the inset.
+    _BROLL_SAFE_ANCHORS = {"upper_third_safe"}
     if validated_mg and validated_broll:
         _broll_windows = []
         for _bc in validated_broll:
@@ -4642,24 +4652,30 @@ Indices below are the NEW kept-only space [0..{_kept_count - 1}]. Every word_ind
                 if _ms < 0 or _me < _ms:
                     _kept_mgs.append(_mg)
                     continue
+                _mg_anchor = str(_mg.get("anchor") or "").strip()
                 _conflicts = False
                 for (_bs2, _be2) in _broll_windows:
                     # Word-index overlap: max(start_a, start_b) <= min(end_a, end_b)
                     if max(_ms, _bs2) <= min(_me, _be2):
-                        _conflicts = True
-                        break
+                        # Time windows overlap. Now check zone — only drop
+                        # if the MG's anchor would actually collide with
+                        # the bottom-half B-roll inset.
+                        if _mg_anchor not in _BROLL_SAFE_ANCHORS:
+                            _conflicts = True
+                            break
                 if _conflicts:
                     print(
                         f"[mg] Dropping {_mg.get('type')!r} at words "
-                        f"[{_ms}-{_me}] — overlaps B-roll window. "
-                        f"B-roll is full-frame; MG would stack on top.",
+                        f"[{_ms}-{_me}] anchor={_mg_anchor!r} — overlaps a "
+                        f"B-roll window AND the anchor zone collides with "
+                        f"the bottom-half B-roll inset.",
                         flush=True,
                     )
                     continue
                 _kept_mgs.append(_mg)
             if len(_kept_mgs) != len(validated_mg):
                 _dropped_count = len(validated_mg) - len(_kept_mgs)
-                print(f"[mg] Dropped {_dropped_count} MG(s) for B-roll overlap", flush=True)
+                print(f"[mg] Dropped {_dropped_count} MG(s) for B-roll overlap (zone-aware)", flush=True)
                 validated_mg = _kept_mgs
                 edit_plan["motion_graphics"] = validated_mg
 
