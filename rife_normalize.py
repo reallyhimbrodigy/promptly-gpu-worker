@@ -34,6 +34,7 @@ import os
 import subprocess
 import sys
 import time
+import traceback
 
 import numpy as np
 import torch
@@ -130,6 +131,28 @@ def main():
         )
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    # Sanity-check the device with a tiny op. torch.cuda.is_available() can
+    # return True even when the actual driver/runtime handshake is broken
+    # (e.g. lib resolution found something but CUDA init later fails). A
+    # 1KB tensor + add catches that synchronously here, with a clear error
+    # message, instead of letting it abort silently mid-inference and
+    # leaving us to debug Broken-pipe ffmpeg output.
+    if device.type == "cuda":
+        try:
+            _probe = torch.zeros(4, device=device) + 1.0
+            torch.cuda.synchronize()
+            _ = _probe.cpu().numpy()
+            print(
+                f"[rife] cuda probe OK on {torch.cuda.get_device_name(0)} "
+                f"(torch {torch.__version__}, cuda {torch.version.cuda})",
+                flush=True,
+            )
+        except Exception as e:
+            raise RuntimeError(
+                f"CUDA probe failed despite torch.cuda.is_available()=True: "
+                f"{type(e).__name__}: {e}"
+            ) from e
+
     print(
         f"[rife] {args.input} -> {args.output}: "
         f"{width}x{height} {src_fps:.3f}fps -> {target_fps:.3f}fps "
@@ -140,6 +163,22 @@ def main():
     t0 = time.time()
     model = _load_rife_model(args.rife_dir, device)
     print(f"[rife] model loaded in {time.time() - t0:.1f}s", flush=True)
+
+    # Run one inference on dummy 256x256 inputs to trigger lazy CUDA kernel
+    # compilation and surface any model/runtime mismatch with a real Python
+    # traceback BEFORE we hand stdin/stdout off to ffmpeg subprocesses
+    # (where downstream symptoms are just Broken-pipe noise).
+    if device.type == "cuda":
+        try:
+            _d0 = torch.zeros(1, 3, 256, 256, device=device)
+            _d1 = torch.zeros(1, 3, 256, 256, device=device)
+            _ = model.inference(_d0, _d1, 0.5)
+            torch.cuda.synchronize()
+            print("[rife] cuda inference probe OK", flush=True)
+        except Exception as e:
+            raise RuntimeError(
+                f"RIFE inference probe failed on cuda: {type(e).__name__}: {e}"
+            ) from e
 
     # RIFE 4.x requires input dimensions to be multiples of 32. Pad
     # bottom-right with edge replication so the original content stays
@@ -278,4 +317,16 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except SystemExit:
+        raise
+    except BaseException as _e:
+        # Force the traceback to stderr and flush before exit. Without
+        # this, an unhandled exception during inference can race with
+        # subprocess teardown and leave only ffmpeg's Broken-pipe lines
+        # in the captured stderr — wiping out the actual root cause.
+        sys.stderr.write(f"[rife] FATAL: {type(_e).__name__}: {_e}\n")
+        traceback.print_exc(file=sys.stderr)
+        sys.stderr.flush()
+        sys.exit(1)

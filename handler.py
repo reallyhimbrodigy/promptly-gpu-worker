@@ -10017,10 +10017,15 @@ def handler(job):
                     capture_output=True, text=True, timeout=480,
                 )
                 if _r_out.returncode != 0 or not os.path.exists(_rife_out):
+                    # Capture wide stderr/stdout slices so a real Python
+                    # traceback survives next to the FutureWarning noise that
+                    # torch.load emits during model loading. Truncating to
+                    # 1000 chars previously buried the actual exception.
                     raise RuntimeError(
                         f"Source canonicalize (RIFE) failed: "
-                        f"stderr={(_r_out.stderr or '')[-1000:]} "
-                        f"stdout={(_r_out.stdout or '')[-500:]}"
+                        f"rc={_r_out.returncode} "
+                        f"stderr={(_r_out.stderr or '')[-3000:]} "
+                        f"stdout={(_r_out.stdout or '')[-1500:]}"
                     )
                 # Forward RIFE's progress lines so they appear in job logs.
                 for _line in (_r_out.stdout or "").splitlines():
