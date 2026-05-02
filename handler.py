@@ -587,10 +587,21 @@ try:
                     except Exception:
                         pass
 
-    # Modal mounts NVIDIA drivers at runtime — real driver is in /usr/local/nvidia/
-    # CRITICAL: NVIDIA dirs must come FIRST so the real driver (580.x) is found before any stale libs
+    # Modal mounts NVIDIA drivers at runtime. Two possible mount locations
+    # (Modal's nvidia-container-toolkit picked the second one as of May 2026):
+    #   - /usr/local/nvidia/lib*       (legacy mount path)
+    #   - /usr/local/cuda*/compat/     (current mount path — this is what
+    #                                   nvidia-container-cli lstat's during
+    #                                   container creation, and where the
+    #                                   bind-mount of the host's libcuda.so
+    #                                   actually lands at runtime)
+    # CRITICAL: include BOTH so ld.so can resolve libcuda.so.1 regardless of
+    # which scheme Modal uses. Without compat in the search path, torch's
+    # dlopen("libcuda.so.1") fails and torch.cuda.is_available() returns
+    # False even though the GPU is allocated and the driver is mounted.
     _nvidia_lib_dirs = []
     for _search_dir in ["/usr/local/nvidia/lib", "/usr/local/nvidia/lib64",
+                        "/usr/local/cuda/compat", "/usr/local/cuda-12.6/compat",
                         "/usr/lib/x86_64-linux-gnu", "/usr/lib64", "/usr/local/cuda/lib64"]:
         if os.path.isdir(_search_dir):
             _nvidia_lib_dirs.append(_search_dir)
@@ -598,6 +609,26 @@ try:
         _existing_ldpath = os.environ.get("LD_LIBRARY_PATH", "")
         os.environ["LD_LIBRARY_PATH"] = ":".join(_nvidia_lib_dirs) + (":" + _existing_ldpath if _existing_ldpath else "")
         print(f"[startup] LD_LIBRARY_PATH: {os.environ['LD_LIBRARY_PATH'][:200]}", flush=True)
+
+    # Diagnostic: locate libcuda.so* in each search dir so we can see exactly
+    # where the host driver was mounted. If torch.cuda.is_available() fails
+    # later, the [startup] cuda-libs log line shows whether the driver is
+    # missing entirely (Modal mount issue) vs misindexed by ldconfig
+    # (LD_LIBRARY_PATH issue).
+    _cuda_lib_locations = []
+    for _d in _nvidia_lib_dirs:
+        try:
+            for _f in os.listdir(_d):
+                if "cuda.so" in _f.lower():
+                    _full = os.path.join(_d, _f)
+                    try:
+                        _size = os.path.getsize(_full)
+                    except OSError:
+                        _size = -1
+                    _cuda_lib_locations.append(f"{_full}({_size}B)")
+        except OSError:
+            pass
+    print(f"[startup] cuda-libs found: {_cuda_lib_locations or '(none)'}", flush=True)
 
     # Create soname symlinks for NVIDIA libs (Modal mounts versioned .so
     # but not symlinks). NVDEC and CUDA-using consumers (RIFE, FFmpeg
