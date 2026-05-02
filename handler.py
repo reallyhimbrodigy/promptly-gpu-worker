@@ -587,21 +587,23 @@ try:
                     except Exception:
                         pass
 
-    # Modal mounts NVIDIA drivers at runtime. Two possible mount locations
-    # (Modal's nvidia-container-toolkit picked the second one as of May 2026):
-    #   - /usr/local/nvidia/lib*       (legacy mount path)
-    #   - /usr/local/cuda*/compat/     (current mount path — this is what
-    #                                   nvidia-container-cli lstat's during
-    #                                   container creation, and where the
-    #                                   bind-mount of the host's libcuda.so
-    #                                   actually lands at runtime)
-    # CRITICAL: include BOTH so ld.so can resolve libcuda.so.1 regardless of
-    # which scheme Modal uses. Without compat in the search path, torch's
-    # dlopen("libcuda.so.1") fails and torch.cuda.is_available() returns
-    # False even though the GPU is allocated and the driver is mounted.
+    # Modal mounts the NVIDIA driver libs into /usr/lib/x86_64-linux-gnu/
+    # (e.g. libcuda.so.580.95.05, libnvidia-ptxjitcompiler.so.580.95.05).
+    # Older mount paths /usr/local/nvidia/lib* are kept in the list as a
+    # defensive include for the legacy Modal scheme.
+    #
+    # CRITICAL: do NOT include /usr/local/cuda*/compat in the search path.
+    # Those dirs ship CUDA forward-compatibility libs (libnvidia-nvvm,
+    # libnvidia-ptxjitcompiler) at version 560.35.05, which are designed
+    # to let new toolkit run on an OLDER driver. With Modal's NEW driver
+    # (580.95.05) bind-mounted into /usr/lib/x86_64-linux-gnu/, putting
+    # compat first made libcuda.so.580 dlopen libnvidia-ptxjitcompiler.so
+    # 560 — a 20-major-version ABI mismatch that segfaulted as soon as
+    # any CUDA kernel hit JIT compilation (e.g. RIFE's first
+    # model.inference call → SIGSEGV → silent rife_normalize.py exit
+    # rc=-11 with no Python traceback).
     _nvidia_lib_dirs = []
     for _search_dir in ["/usr/local/nvidia/lib", "/usr/local/nvidia/lib64",
-                        "/usr/local/cuda/compat", "/usr/local/cuda-12.6/compat",
                         "/usr/lib/x86_64-linux-gnu", "/usr/lib64", "/usr/local/cuda/lib64"]:
         if os.path.isdir(_search_dir):
             _nvidia_lib_dirs.append(_search_dir)
@@ -609,26 +611,6 @@ try:
         _existing_ldpath = os.environ.get("LD_LIBRARY_PATH", "")
         os.environ["LD_LIBRARY_PATH"] = ":".join(_nvidia_lib_dirs) + (":" + _existing_ldpath if _existing_ldpath else "")
         print(f"[startup] LD_LIBRARY_PATH: {os.environ['LD_LIBRARY_PATH'][:200]}", flush=True)
-
-    # Diagnostic: locate libcuda.so* in each search dir so we can see exactly
-    # where the host driver was mounted. If torch.cuda.is_available() fails
-    # later, the [startup] cuda-libs log line shows whether the driver is
-    # missing entirely (Modal mount issue) vs misindexed by ldconfig
-    # (LD_LIBRARY_PATH issue).
-    _cuda_lib_locations = []
-    for _d in _nvidia_lib_dirs:
-        try:
-            for _f in os.listdir(_d):
-                if "cuda.so" in _f.lower():
-                    _full = os.path.join(_d, _f)
-                    try:
-                        _size = os.path.getsize(_full)
-                    except OSError:
-                        _size = -1
-                    _cuda_lib_locations.append(f"{_full}({_size}B)")
-        except OSError:
-            pass
-    print(f"[startup] cuda-libs found: {_cuda_lib_locations or '(none)'}", flush=True)
 
     # Create soname symlinks for NVIDIA libs (Modal mounts versioned .so
     # but not symlinks). NVDEC and CUDA-using consumers (RIFE, FFmpeg
@@ -720,8 +702,44 @@ try:
                     _symlink_log.append(_msg)
 
     if _symlink_log:
-        print(f"[startup] soname symlinks: {_symlink_log[:8]}", flush=True)
+        # Print the FULL list — earlier truncation to first 8 was hiding
+        # libcuda.so/libcuda.so.1 entries (they came after the libnvidia-*
+        # entries in the loop), making it impossible to verify the fix.
+        for _msg in _symlink_log:
+            print(f"[startup] symlink: {_msg}", flush=True)
     subprocess.run(["ldconfig"], capture_output=True, timeout=5)
+
+    # Diagnostic AFTER symlink fix + ldconfig: list every libcuda* and
+    # libnvidia-* in the real driver dirs AND in the compat dirs we
+    # excluded from LD_LIBRARY_PATH. The compat-dir scan stays in so a
+    # future driver-mount mismatch is visible at a glance: if compat
+    # shows version X and real-driver dir shows version Y and X != Y,
+    # we know we're back in segfault-prone territory.
+    _diag_dirs = list(_nvidia_lib_dirs)
+    for _d in ["/usr/local/cuda/compat", "/usr/local/cuda-12.6/compat"]:
+        if os.path.isdir(_d) and _d not in _diag_dirs:
+            _diag_dirs.append(_d)
+    for _d in _diag_dirs:
+        try:
+            _hits = []
+            for _f in sorted(os.listdir(_d)):
+                if _f.startswith("libcuda.so") or _f.startswith("libnvidia-"):
+                    _full = os.path.join(_d, _f)
+                    try:
+                        _size = os.path.getsize(_full)
+                    except OSError:
+                        _size = -1
+                    _link = ""
+                    if os.path.islink(_full):
+                        try:
+                            _link = f"->{os.readlink(_full)}"
+                        except OSError:
+                            pass
+                    _hits.append(f"{_f}({_size}B){_link}")
+            if _hits:
+                print(f"[startup] nvlibs in {_d}: {_hits}", flush=True)
+        except OSError:
+            pass
 
     # L40S has NVENC (8th gen Ada) — detect and enable automatically.
     # H100/A100 do NOT have NVENC (encode ASIC physically absent).
