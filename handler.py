@@ -2292,6 +2292,14 @@ Example A: "Cold-opened on 'kiss' (src 13.20s) — vibe viral hook; cut 2 stutte
 Example B: "Kept chronological — narrative anecdote where setup carries punchline; cut 4 fillers, 2 stutters, opening 'So', trailing 'And', and three dead-air gaps."
 
 ═══════════════════════════════════════════════════════════════════════════
+SMOOTHNESS OVER COMPRESSION
+═══════════════════════════════════════════════════════════════════════════
+
+Cutting filler is good; cutting so aggressively that the remaining transcript reads jumpy is bad. After every cut you make, the surviving sequence still has to sound like natural speech. If removing a "so" or "and" leaves two clauses crashing into each other ("I went to work she called me" instead of "I went to work, and she called me"), keep that connective word — it isn't filler in that context, it's the speaker's natural cadence carrying the rhythm. Viewers reading captions feel jumps the editor doesn't.
+
+A cut is only correct if the surviving transcript still reads smoothly. Compression that breaks flow is worse than no compression at all.
+
+═══════════════════════════════════════════════════════════════════════════
 BEFORE YOU OUTPUT — VERIFY EACH
 ═══════════════════════════════════════════════════════════════════════════
 
@@ -2307,6 +2315,7 @@ Re-read your remove_words list. Run this checklist. Every "no" requires a fix be
   ☐ RESTART DIRECTION: every phrasal restart cuts the FIRST attempt, keeps the SECOND.
   ☐ RANGE BOUNDARIES: every range cut's start == word[i].end exactly, end == word[i+1].start exactly. No range spans inside a word.
   ☐ VIBE-MATCHED INTENSITY: cut aggressiveness matches the vibe (viral = aggressive, narrative = preserve breathing, educational = light).
+  ☐ READ-THROUGH SMOOTHNESS: with your removals applied, mentally read the kept transcript end-to-end. Every concatenation should sound like natural speech — no jarring word jumps, no sentence fragments smashed together, no rhythm breaks where a connective word was carrying the cadence. If any cut creates an awkward read, undo it. Smooth flow > maximum compression.
 
 ═══════════════════════════════════════════════════════════════════════════
 RESPONSE FORMAT
@@ -2801,7 +2810,12 @@ B. motion_graphic — should a text/graphic overlay land on this moment?
 THE PURPOSE OF A MOTION GRAPHIC. An MG is a visual element that ADDS something the dialogue alone cannot — a screenshot the speaker is referencing, a stat the speaker is citing, a notification the speaker is reacting to, a chapter beat the editor is marking. It REINFORCES content, never substitutes for it. If the dialogue carries the moment on its own, no MG is needed.
 
 WHEN TO USE ONE. Three legitimate triggers and only three:
-  1. The speaker references something visual that isn't on camera ("she texted me", "I got an email", "the screen said") — render the artifact (Notification, IMessageBubble, ChatThread, TweetBubble).
+  1. The speaker references something visual that isn't on camera. Match the dialogue cue to ONE specific MG — each component has its own trigger phrase, and using the wrong one for the moment is a clear "edited badly" signal:
+     - "she texted me" / "I sent her a message" / "the message said" → IMessageBubble (single bubble) OR ChatThread (multi-message back-and-forth)
+     - "she called me" / "missed call" / "phone was blowing up" / "voicemail" → Notification with `app: "imessage"` body styled as a missed call (e.g. "Missed Call" / "Wife")
+     - "I got an email" / "the bank alert" / "Venmo went off" / "Stripe deposit" → Notification with the matching `app` field
+     - "she tweeted" / "the post said" / "the comment was" → TweetBubble / InstagramComment / TikTokComment matching the actual platform
+     Do NOT reach for IMessageBubble for any "phone-related" moment — only when the dialogue specifically refers to a text/iMessage being sent or received. A missed call is Notification, not IMessageBubble.
   2. The speaker cites a number, stat, or quotable line that lands harder rendered ("we hit 100k followers", "she said 'don't believe everything…'") — render the metric or quote (StatCard, QuoteCard).
   3. The editor needs to mark a chapter beat or call out a detail in the frame (TornPaper for "THE CONFESSION"; AnnotationArrow for "look at THIS").
 
@@ -2820,11 +2834,23 @@ ANCHORING — THIS IS WHERE BAD CHOICES GET DROPPED.
 
   Pick anchor words from kept words only. Example: if you cut "calling" at word 197 and want an MG illustrating the wife's call, anchor the MG to a SURVIVING word in the same passage — the next "calling" at word 200, or "every 5 seconds" at word 202.
 
-PLACEMENT — anchor zone must not cover the speaker's face. You watch the video at 5fps; you can see exactly where the speaker sits in the frame across the MG's window. Pick the zone that keeps the face visible:
+PLACEMENT — anchor zone must not cover the speaker's face AND must accommodate the MG's footprint.
+
+Each MG has a fixed canvas footprint. A LARGE MG anchored at "left_safe" or "right_safe" still bleeds across the center of the frame and covers the speaker's face — the side anchors do not shrink the component, they only shift its origin. Pick the anchor by SIZE FIRST, then by face position:
+
+MG SIZE CLASSIFICATION (fixed by component design):
+  LARGE (≥50% canvas height, will dominate the frame): IMessageBubble, ChatThread, Notification (any 2-3 banner stack), QuoteCard, RecordingFrame, TornPaper.
+    Allowed anchors: "upper_third_safe" OR "lower_third_safe" ONLY. These are the only zones with enough vertical room. Center / left_safe / right_safe will cover the speaker — large means large.
+  MEDIUM (~25-40% height): TweetBubble, single-banner Notification (1 notification in the array), InstagramComment, TikTokComment, StatCard, StickyNotes.
+    Allowed anchors: "upper_third_safe" / "lower_third_safe" / "left_safe" / "right_safe". Avoid "center" on a talking-head shot.
+  SMALL (<20% canvas): AnnotationArrow, ProgressBar, Toggle.
+    Any anchor works.
+
+THEN apply the face-aware rule (within the size-allowed anchors above):
   • Face in lower half of frame  → anchor "upper_third_safe"
   • Face in upper half           → anchor "lower_third_safe"
-  • Face dead-center close-up    → anchor "left_safe" or "right_safe" (small MGs only) OR don't emit an MG here
-  • Face off-screen / B-roll     → "center" is fair game
+  • Face dead-center close-up    → SMALL MGs at "left_safe" / "right_safe" only; LARGE/MEDIUM MGs skip this moment entirely
+  • Face off-screen / B-roll     → "center" is fair game (any size)
 
 DURATION. Most MGs render naturally across the word range you anchor — let the word-span dictate timing. For fixed-length pins (a 3-second StatCard count-up on one punchline word), set start_word_index == end_word_index and use `duration_seconds` to override. Typical lifespan 2.0-4.0s. Under 2s reads as a flicker; over 4s overstays.
 
@@ -2855,11 +2881,13 @@ Types, descriptions, use cases, and REQUIRED props (in the schema below, keys en
                             Props: {{"start": {{"x": 0-1, "y": 0-1}}, "end": {{"x": 0-1, "y": 0-1}}, "pathType"?: "straight"|"curved-arc"|"j-shape"|"custom", "color"?: "#hex"}}
 
  2. "ChatThread"         — iMessage-style conversation with typing indicators, sequential delivery, status bar.
-                            Best for: Text recreations, testimonials, DM screenshots.
+                            Best for: Multi-message text BACK-AND-FORTH between two people (speaker quoting an exchange, "I said X, she said Y, I said Z").
+                            NOT for: a single isolated message (use IMessageBubble), missed calls (use Notification), email/social-app alerts (use Notification with the matching app).
                             Props: {{"messages": [{{"sender": "me"|"them", "text": str, "typingMs"?: int, "holdMs"?: int}}, ...], "header"?: {{"name": str, "subtitle"?: str}}}}
 
  3. "Notification"       — iOS/Android notification stack. 1–3 banners drop in with platform styling. 7 built-in app icons.
-                            Best for: Income proof, social proof, notification montages.
+                            Best for: Phone calls / missed calls (app="imessage", title="Missed Call"), payment receipts (Venmo / Stripe / Apple Pay / bank), email alerts, IG/social pings — anything that arrives as a system banner.
+                            NOT for: an actual back-and-forth text conversation (use ChatThread), a single text message bubble shown verbatim (use IMessageBubble).
                             Props: {{"notifications": [{{"app": "apple-pay"|"venmo"|"stripe"|"imessage"|"instagram"|"email"|"bank", "appName": str, "title": str, "body": str, "timestamp"?: str}}, ...], "platform"?: "ios"|"android"}}
 
  4. "ProgressBar"        — Animated progress bar with count-up. Optional milestones.
@@ -2880,7 +2908,9 @@ Types, descriptions, use cases, and REQUIRED props (in the schema below, keys en
                             Props: {{"name": str, "handle": str, "text": str, "verified"?: bool, "stats"?: {{"replies": int, "reposts": int, "likes": int, "views": int}}, "darkMode"?: bool}}
  8. "InstagramComment"   — Instagram comment with avatar and like count.
                             Props: {{"username": str, "comment": str, "timestamp"?: str, "likes"?: int}}
- 9. "IMessageBubble"     — iMessage bubble with typewriter mode.
+ 9. "IMessageBubble"     — Single iMessage bubble with typewriter mode.
+                            Best for: One isolated text/iMessage the speaker quotes verbatim ("she texted me 'I'm leaving'"). The bubble shows that one message.
+                            NOT for: phone calls or missed calls (use Notification), back-and-forth conversations (use ChatThread), any non-text phone moment ("she called me" is NOT IMessageBubble).
                             Props: {{"text": str, "messageType": "incoming"|"outgoing", "status"?: "Delivered"|"Read", "typewriter"?: bool}}
 10. "TikTokComment"      — TikTok comment with likes.
                             Props: {{"username": str, "comment": str, "likes"?: int}}
