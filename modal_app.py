@@ -76,10 +76,17 @@ image = (
     # Without this, NVENC silently fails and pipeline falls back to CPU encoding (10-15x slower)
     .env({"NVIDIA_DRIVER_CAPABILITIES": "all"})
     .run_commands(
-        "echo 'build v24 - H100 + 64CPU + 128GB + Remotion 4.0.450 primary-render + genai SDK'",
+        "echo 'build v25 - H100 + 64CPU + 128GB + Remotion 4.0.450 primary-render + genai SDK + libcuda.so.1 placeholder'",
         "apt-get update && apt-get install -y ca-certificates && update-ca-certificates",
-        # Remove CUDA stubs AND compat libs that intercept dlopen before Modal's real driver libs
+        # Remove CUDA stubs AND compat libs that intercept dlopen before Modal's
+        # real driver libs. THEN recreate /usr/local/cuda-12.6/compat/libcuda.so.1
+        # as an empty placeholder — Modal's nvidia-container-cli lstat's this
+        # path during container-creation and mount-binds the host's real driver
+        # lib over it at runtime. Without the placeholder the toolkit fails
+        # with "lstat failed: no such file or directory" and the container
+        # can't start at all (nvidia-container-cli runs BEFORE our Python).
         "rm -rf /usr/local/cuda/lib64/stubs/libnvidia-encode* /usr/local/cuda/lib64/stubs/libcuda* /usr/local/cuda/compat/libcuda* /usr/local/cuda/lib64/libcuda.so* 2>/dev/null || true",
+        "mkdir -p /usr/local/cuda-12.6/compat && touch /usr/local/cuda-12.6/compat/libcuda.so.1",
     )
     .apt_install(
         "ca-certificates",
