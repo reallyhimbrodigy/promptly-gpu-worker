@@ -318,6 +318,7 @@ image = (
     .add_local_file("ffmpeg_base.py", "/ffmpeg_base.py")
     .add_local_file("rife_normalize.py", "/rife_normalize.py")
     .add_local_file("render_schemas.py", "/render_schemas.py")
+    .add_local_file("cuda_driver_setup.py", "/cuda_driver_setup.py")
 )
 
 # ── Secrets ────────────────────────────────────────────────────────────────────
@@ -451,7 +452,19 @@ def rife_normalize_remote(source_bytes: bytes, target_fps: int) -> bytes:
     """
     import os
     import subprocess
+    import sys
     import tempfile
+
+    # Modal's NVIDIA driver mount leaves 0-byte stubs at the SONAME paths
+    # (libcuda.so / libcuda.so.1) and ships forward-compat libs at version
+    # 560.35.05 in /usr/local/cuda*/compat that ABI-mismatch the real 580
+    # driver. The setup helper replaces stubs with proper symlinks and
+    # excludes compat from LD_LIBRARY_PATH. Idempotent — kept symlinks
+    # return immediately, so calling on every invocation is cheap.
+    if "/" not in sys.path:
+        sys.path.insert(0, "/")
+    from cuda_driver_setup import setup_cuda_driver_mount
+    setup_cuda_driver_mount()
 
     with tempfile.TemporaryDirectory(prefix="rife-") as work:
         src = os.path.join(work, "src.mp4")
