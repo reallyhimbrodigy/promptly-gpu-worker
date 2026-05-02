@@ -10021,34 +10021,29 @@ def handler(job):
                         f"{(_r_out.stderr or '')[-500:]}"
                     )
             else:
-                # Source below target — RIFE 4.18 first to bring fps to 60
-                # at original resolution, then ffmpeg pass to scale/crop
-                # to 1080x1920 yuv420p.
+                # Source below target — RIFE 4.18 on a dedicated H100 worker
+                # via the rife_normalize_remote Modal function. The
+                # orchestrator runs CPU-only, so it dispatches the GPU work
+                # to a separate container that scales independently. Bytes
+                # in / bytes out — Modal handles arg blob storage for large
+                # payloads automatically.
                 _interp_mode = "rife-4.18"
                 _rife_out = os.path.join(work_dir, "_rife_60fps.mp4")
-                _r_out = subprocess.run(
-                    ["python", "/rife_normalize.py",
-                     "--input", _raw_source,
-                     "--output", _rife_out,
-                     "--target-fps", "60",
-                     "--rife-dir", "/opt/rife"],
-                    capture_output=True, text=True, timeout=480,
+
+                from modal import Function as _ModalFunction
+                _rife_fn = _ModalFunction.from_name(
+                    "promptly-gpu-worker", "rife_normalize_remote"
                 )
-                if _r_out.returncode != 0 or not os.path.exists(_rife_out):
-                    # Capture wide stderr/stdout slices so a real Python
-                    # traceback survives next to the FutureWarning noise that
-                    # torch.load emits during model loading. Truncating to
-                    # 1000 chars previously buried the actual exception.
+                with open(_raw_source, "rb") as _f:
+                    _src_bytes = _f.read()
+                _out_bytes = _rife_fn.remote(_src_bytes, 60)
+                with open(_rife_out, "wb") as _f:
+                    _f.write(_out_bytes)
+                if not os.path.exists(_rife_out) or os.path.getsize(_rife_out) < 1024:
                     raise RuntimeError(
-                        f"Source canonicalize (RIFE) failed: "
-                        f"rc={_r_out.returncode} "
-                        f"stderr={(_r_out.stderr or '')[-3000:]} "
-                        f"stdout={(_r_out.stdout or '')[-1500:]}"
+                        f"Source canonicalize (RIFE remote) returned empty "
+                        f"output ({os.path.getsize(_rife_out) if os.path.exists(_rife_out) else 'missing'}B)"
                     )
-                # Forward RIFE's progress lines so they appear in job logs.
-                for _line in (_r_out.stdout or "").splitlines():
-                    if _line.startswith("[rife]"):
-                        print(_line, flush=True)
                 if _normalize_vf:
                     # Source needs scale/crop on top of RIFE's 60fps output.
                     # One ffmpeg pass: apply normalize_vf + yuv420p re-encode.

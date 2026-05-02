@@ -340,10 +340,15 @@ prewarm_volume = modal.Volume.from_name("promptly-prewarm-cache", create_if_miss
 # ── Web endpoint ───────────────────────────────────────────────────────────────
 @app.cls(
     timeout=600,          # 10 min — orchestrator runs init + audio + remotion + composite + upload
-    scaledown_window=300, # keep warm 5 min — bursty traffic; 120s was killing containers between idle users (15-20s cold boot penalty)
+    scaledown_window=30,  # tear down fast — at $8.27/hr full spec, idle scaledown was costing ~$0.69 per render (83% of total bill). 30s window catches back-to-back jobs without paying for long idle.
     cpu=64,
     memory=131072,        # 128GB — Remotion overlay + Remotion micro-segments run in parallel here, plus per-cut numpy audio resampler, plus the big single-pass ffmpeg composite
-    gpu="H100",           # H100 useful for fps-normalize CUDA decode + parallel-friendly libx264 ultrafast on 64 cores. Remotion's Chromium paint stays software-bound (per v55-v58 Vulkan investigation).
+    # No GPU on the orchestrator — moved to the dedicated rife_normalize_remote
+    # function below. The orchestrator does Remotion (Chromium software paint),
+    # ffmpeg libx264 ultrafast on 64 cores, audio numpy work, and network I/O.
+    # All CPU/memory-bound. Paying H100 rates for the ~35-50s of non-GPU work
+    # in each render was costing ~$0.04 of pure waste per render. NVDEC decode
+    # falls back to software automatically (handler.py _HAS_HWACCEL stays False).
     region="us-west",     # colocate with Supabase (West US) for minimal network latency
     volumes={"/prewarm": prewarm_volume},
 )
@@ -412,6 +417,66 @@ class PromptlyPrewarmWorker:
         except Exception as e:
             print(f"[prewarm] volume commit failed: {e}", flush=True)
         return result
+
+
+# ── RIFE GPU function ─────────────────────────────────────────────────────────
+# Stateless H100-backed function that the CPU orchestrator calls when a source
+# needs frame interpolation. Splitting RIFE off lets the orchestrator drop its
+# H100 — the orchestrator does Remotion + ffmpeg + audio (all CPU/memory) for
+# 60s, but only ~5-15s of that needs the GPU. Paying H100 rates for the full
+# 60s on every render was the main cost driver.
+#
+# Pricing: H100 + 4 CPU + 16 GB ≈ $4.13/hr. A typical RIFE call is 5-15s + a
+# 15-20s cold start when the function isn't warm. With scaledown_window=30,
+# back-to-back renders (within 30s) reuse the warm GPU container and pay only
+# the 5-15s exec time.
+@app.function(
+    gpu="H100",
+    cpu=4,
+    memory=16384,
+    scaledown_window=30,
+    timeout=480,
+    region="us-west",
+)
+def rife_normalize_remote(source_bytes: bytes, target_fps: int) -> bytes:
+    """Interpolate a video to `target_fps` via RIFE 4.18 on H100.
+
+    Input/output are full mp4 bytes. Internally writes to /tmp, runs the
+    same /rife_normalize.py script the orchestrator used to call locally,
+    reads the output back. Forwards `[rife] ...` log lines so the GPU
+    container's logs match what the orchestrator used to print.
+
+    Raises RuntimeError with rc + last 3000 chars of stderr on failure
+    (preserves the diagnostics added when chasing the SIGSEGV).
+    """
+    import os
+    import subprocess
+    import tempfile
+
+    with tempfile.TemporaryDirectory(prefix="rife-") as work:
+        src = os.path.join(work, "src.mp4")
+        out = os.path.join(work, "out.mp4")
+        with open(src, "wb") as f:
+            f.write(source_bytes)
+        r = subprocess.run(
+            ["python", "/rife_normalize.py",
+             "--input", src,
+             "--output", out,
+             "--target-fps", str(target_fps),
+             "--rife-dir", "/opt/rife"],
+            capture_output=True, text=True, timeout=420,
+        )
+        for _line in (r.stdout or "").splitlines():
+            if _line.startswith("[rife]"):
+                print(_line, flush=True)
+        if r.returncode != 0 or not os.path.exists(out):
+            raise RuntimeError(
+                f"RIFE remote failed: rc={r.returncode} "
+                f"stderr={(r.stderr or '')[-3000:]} "
+                f"stdout={(r.stdout or '')[-1500:]}"
+            )
+        with open(out, "rb") as f:
+            return f.read()
 
 
 # ── Prewarm cache janitor ──────────────────────────────────────────────────────
