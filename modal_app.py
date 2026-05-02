@@ -76,17 +76,27 @@ image = (
     # Without this, NVENC silently fails and pipeline falls back to CPU encoding (10-15x slower)
     .env({"NVIDIA_DRIVER_CAPABILITIES": "all"})
     .run_commands(
-        "echo 'build v25 - H100 + 64CPU + 128GB + Remotion 4.0.450 primary-render + genai SDK + libcuda.so.1 placeholder'",
+        "echo 'build v26 - H100 + 64CPU + 128GB + Remotion 4.0.450 primary-render + genai SDK + defensive CUDA placeholders'",
         "apt-get update && apt-get install -y ca-certificates && update-ca-certificates",
         # Remove CUDA stubs AND compat libs that intercept dlopen before Modal's
-        # real driver libs. THEN recreate /usr/local/cuda-12.6/compat/libcuda.so.1
-        # as an empty placeholder — Modal's nvidia-container-cli lstat's this
-        # path during container-creation and mount-binds the host's real driver
-        # lib over it at runtime. Without the placeholder the toolkit fails
-        # with "lstat failed: no such file or directory" and the container
-        # can't start at all (nvidia-container-cli runs BEFORE our Python).
+        # real driver libs. THEN recreate placeholders for every libcuda* file
+        # name Modal's nvidia-container-cli might lstat + mount-bind during
+        # container creation. The toolkit runs BEFORE our Python; if any target
+        # path is missing it hard-fails with "lstat failed: no such file or
+        # directory" and the container never starts.
+        #
+        # We restore TWO placeholders in /usr/local/cuda-12.6/compat/:
+        #   - libcuda.so.1 — the canonical SONAME the loader uses (this is
+        #     what failed in the original error). Most NVIDIA Container
+        #     Toolkit configurations bind-mount the host driver here.
+        #   - libcuda.so — the unversioned name some loaders use as the
+        #     `dlopen("libcuda.so")` entry point. Defensive in case the
+        #     toolkit also wants to mount-bind this path.
+        # Both are empty files; the bind-mount at runtime replaces them with
+        # the host's real driver lib, so dlopen still falls through to
+        # Modal's mounted version (the original goal of the rm -rf).
         "rm -rf /usr/local/cuda/lib64/stubs/libnvidia-encode* /usr/local/cuda/lib64/stubs/libcuda* /usr/local/cuda/compat/libcuda* /usr/local/cuda/lib64/libcuda.so* 2>/dev/null || true",
-        "mkdir -p /usr/local/cuda-12.6/compat && touch /usr/local/cuda-12.6/compat/libcuda.so.1",
+        "mkdir -p /usr/local/cuda-12.6/compat && touch /usr/local/cuda-12.6/compat/libcuda.so.1 /usr/local/cuda-12.6/compat/libcuda.so",
     )
     .apt_install(
         "ca-certificates",

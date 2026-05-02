@@ -4,6 +4,7 @@ import os
 import sys
 import ssl
 import glob
+import hashlib
 import math
 import requests
 import tempfile
@@ -6270,8 +6271,17 @@ def _download_and_validate_broll(chosen_url, keyword, work_dir, broll_entry=None
     """Download + validate a single B-roll file. Shared by fresh picks and
     pre-resolved re-edit replays. Mutates broll_entry (if provided) with the
     resolved asset metadata so callers can persist it."""
+    # Filename = first 30 alphanum chars (human-readable hint) + 8-char MD5
+    # of the FULL keyword (collision guard). The :30 prefix can collide for
+    # keywords that share a long common prefix ("person walking through
+    # hallway alone in fog" vs "...with rain"); the hash makes distinct
+    # keywords always produce distinct filenames, eliminating both the
+    # silent-overwrite case AND the parallel-fetch race-corruption case
+    # (broll fetches run in a thread pool — concurrent writes to the same
+    # file would interleave bytes from two downloads).
     safe_kw = re.sub(r"[^a-z0-9]", "_", keyword.lower())[:30] if keyword else "broll"
-    dest = os.path.join(work_dir, f"broll_{safe_kw}.mp4")
+    kw_hash = hashlib.md5((keyword or "noop").encode("utf-8")).hexdigest()[:8]
+    dest = os.path.join(work_dir, f"broll_{safe_kw}_{kw_hash}.mp4")
 
     try:
         dl = requests.get(chosen_url, stream=True, timeout=30)
