@@ -3534,6 +3534,64 @@ def _coalesce_caption_position_segments(segments, min_dur=1.5):
     return merged
 
 
+def _force_center_position_during_broll(segments, broll_frame_ranges):
+    """Override caption position to "center" for every output frame inside a
+    B-roll window. Returns a new contiguous segment list.
+
+    B-roll always renders as a slide-up split-screen inset occupying the
+    bottom half of the canvas. Captions positioned "bottom" (lower-third
+    safe zone) sit directly on the inset; "top" can collide with upper MGs.
+    "center" sits at the seam between speaker and B-roll — doesn't cover
+    either, looks intentional. So during any B-roll window the position is
+    forced to "center" regardless of what Gemini specified, then restored
+    to Gemini's choice on the frames immediately after the window ends.
+
+    Pure layout fix — no prompt-side rule for Gemini to remember. Inputs
+    are already projected to output frames so the override is frame-precise.
+    """
+    if not broll_frame_ranges or not segments:
+        return segments
+    # Collect every boundary frame (segment edges + broll edges) and walk
+    # adjacent pairs.
+    boundaries = set()
+    for s in segments:
+        boundaries.add(int(s["fromFrame"]))
+        boundaries.add(int(s["toFrame"]))
+    for f, t in broll_frame_ranges:
+        boundaries.add(int(f))
+        boundaries.add(int(t))
+    sorted_b = sorted(boundaries)
+    out: List[dict] = []
+    overrides = 0
+    for i in range(len(sorted_b) - 1):
+        a, b = sorted_b[i], sorted_b[i + 1]
+        if a >= b:
+            continue
+        orig_pos = None
+        for s in segments:
+            if int(s["fromFrame"]) <= a < int(s["toFrame"]):
+                orig_pos = s["position"]
+                break
+        if orig_pos is None:
+            continue
+        in_broll = any(int(bf) <= a and int(bt) >= b for bf, bt in broll_frame_ranges)
+        pos = "center" if in_broll else orig_pos
+        if in_broll and orig_pos != "center":
+            overrides += 1
+        if out and out[-1]["position"] == pos and int(out[-1]["toFrame"]) == a:
+            out[-1]["toFrame"] = b
+        else:
+            out.append({"fromFrame": a, "toFrame": b, "position": pos})
+    if overrides:
+        print(
+            f"[caption-segments] forced position=center over "
+            f"{len(broll_frame_ranges)} B-roll window(s) "
+            f"({overrides} sub-segment override(s))",
+            flush=True,
+        )
+    return out
+
+
 def _reindex_kept_transcript(deepgram_words, remove_words):
     """Apply CutPlan.remove_words to the source transcript and renumber survivors.
 
@@ -8119,10 +8177,16 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 flush=True,
             )
 
-    # Z-order: Gemini owns it. Per Rule #5 in the prompt, when any MG covers
-    # the bottom band, Gemini emits a caption_position_change to "top" for
-    # that window. Python does not auto-flip — caption_position_segments_out
-    # is whatever Gemini decided.
+    # Z-order: Gemini owns MG-driven position changes. Per Rule #5 in the
+    # prompt, when any MG covers the bottom band, Gemini emits a
+    # caption_position_change to "top" for that window. Python does NOT
+    # auto-flip for MG collisions — that stays Gemini's call.
+    #
+    # The exception is B-roll: B-roll always renders as a slide-up inset on
+    # the bottom half of the canvas, so its layout collision with captions
+    # is mechanical, not creative. Python auto-flips position to "center"
+    # over every B-roll window after the loop below. See
+    # _force_center_position_during_broll.
 
     # ── 8. Build Remotion inputs + stage source for the bundle server ──────
     # Visually-identical fast-path architecture (replaces v61 chunked render):
@@ -8362,6 +8426,19 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             f"dur={_eff:.2f}s seek={_seek_seconds:.2f}s",
             flush=True,
         )
+
+    # Force caption position=center over every B-roll window. B-roll always
+    # renders as a slide-up split-screen inset on the bottom half, so a
+    # "bottom"-positioned caption sits directly on top of the inset content
+    # (looks unprofessional) and "top" can collide with upper MGs. "center"
+    # sits at the seam — clear of both. Pure layout fix, no prompt rule.
+    _broll_frame_ranges_for_caption = [
+        (int(_b["fromFrame"]), int(_b["fromFrame"]) + int(_b["durationInFrames"]))
+        for _b in broll_out
+    ]
+    caption_position_segments_out = _force_center_position_during_broll(
+        caption_position_segments_out, _broll_frame_ranges_for_caption
+    )
 
     # PromptlyOverlay input — captions/MG/text on a transparent canvas. In
     # blend-mode renders, captions and caption_match-variant text overlays
