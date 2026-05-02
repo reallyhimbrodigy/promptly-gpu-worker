@@ -2934,9 +2934,11 @@ Variants and REQUIRED props. Each variant is a DESIGN with its own visual charac
    REQUIRED: "topText" (str <=5 words UPPERCASE), "bottomText" (str <=5 words UPPERCASE)
    Text content: chapter LABEL or framing HOOK. Words like "THE CONFESSION", "BEFORE / AFTER", "MY 6YO / EXPOSED MY WIFE", "THE TURN / EVERYTHING CHANGED". Punchy short labels that frame what's coming. NEVER a verbatim quote of the dialogue at that moment — the captions already show what's being said; the torn-paper card adds editorial CONTEXT, not transcript.
 
-2. "sticky_note" — 1-3 animated sticky notes pinned at the upper third. Doesn't cover the speaker. Handwritten-style.
-   REQUIRED: "notes" (array of {{"text": str, "color": "#hex", "rotation": float}} — 1 to 3 items)
-   Use for: key takeaways, tip bullets, educational moments.
+2. "sticky_note" — EXACTLY 3 animated sticky notes pinned at the upper third (left + center + right positions, fixed layout: left has a checkmark, right has italic + underline, center is plain). Doesn't cover the speaker. Handwritten-style.
+   REQUIRED: "notes" (array of {{"text": str ≤4 words, "color": "#hex", "rotation": float}} — MUST be 3 items, no fewer)
+   Use ONLY when you have 3 standalone short items that each stand alone as a complete thought — a checklist, a tip triple, a 3-item key-takeaways set. Each note is independent; the three notes do NOT form one continuous sentence between them.
+   ANTI-PATTERN: DO NOT use to display ONE quote split across multiple notes. Sticky notes are 3 parallel items, not a fragmented quote. For a single quote, use quote_card (if speaker is yielding) or torn_paper (chapter label / framing hook).
+   If you only have 1 or 2 items to highlight, DO NOT USE STICKY NOTES. Pick a different overlay (torn_paper, quote_card) or skip the overlay entirely — leaving the right slot empty creates a visibly unbalanced layout.
 
 3. "quote_card" — Floating card at center of frame with quote + em-dash attribution. The card is large and WILL cover the center of the frame for its full lifespan, straddling the split-screen B-roll seam if a B-roll is active. Use ONLY when you accept the cover, which means: the moment is a hard pause/silence where the quote IS the shot (speaker yielding the frame to the quote), OR the speaker is genuinely off-camera (no face in frame at all).
    REQUIRED: "quote" (str <=20 words), "attribution" (str)
@@ -2948,7 +2950,8 @@ Variants and REQUIRED props. Each variant is a DESIGN with its own visual charac
 
 DECISION MATRIX — text overlay variant by content:
   POV, confession, narrative, story hook        → "torn_paper"
-  educational, tip, how-to, tutorial            → "sticky_note"
+  educational + 3 standalone takeaways          → "sticky_note" (3 notes required)
+  educational + 1-2 takeaways or single quote   → "torn_paper" (or skip the overlay)
   testimonial, pull-quote, book/article quote   → "quote_card" (only if speaker is off-camera or yielding)
   motivational/hustle/Hormozi mono-brand        → "caption_match"
 
@@ -3107,9 +3110,10 @@ Types, descriptions, use cases, and REQUIRED props (in the schema below, keys en
                             Best for: Revenue stats, subscriber counts, KPIs.
                             Props: {{"value": number, "label": str, "prefix"?: str, "suffix"?: str, "fromValue"?: number, "decimals"?: int, "accentColor"?: "#hex"}}
 
-12. "StickyNotes"        — 1–3 sticky notes slam on with spring physics. Color, rotation, handwritten text (Caveat Brush).
-                            Best for: Key takeaways, tip lists, educational content.
-                            Props: {{"notes": [{{"text": str, "color": "#hex", "rotation": float}}, ...]}} (1-3 notes)
+12. "StickyNotes"        — EXACTLY 3 sticky notes slam on with spring physics. Fixed layout: left position has a checkmark, center is plain, right has italic + underline. Color, rotation, handwritten text (Caveat Brush).
+                            Best for: 3 standalone short items that each stand alone as a complete thought (checklist, tip triple, 3-item key-takeaways). NOT for a single quote split across notes.
+                            Props: {{"notes": [{{"text": str ≤4 words, "color": "#hex", "rotation": float}}, ...]}} (MUST be exactly 3 notes — sending 1 or 2 leaves the layout unbalanced)
+                            ANTI-PATTERN: do NOT split one continuous quote across the 3 notes. The 3 notes are parallel items, not sentence fragments. For a single quote, use TornPaper or quote_card text overlay instead.
 
 13. "Toggle"             — iOS-style toggle that flips on at configurable time. Label text.
                             Best for: Feature toggles, on/off reveals, settings demos.
@@ -3243,7 +3247,9 @@ WORD WINDOW (start_word_index → end_word_index):
   WINDOW SPAN:
     - start_word_index = the first word of the action phrase being visualized.
     - end_word_index = the last word of the action phrase. Don't bleed past the action into unrelated words; don't cut off mid-action.
-    - 4-10 word span is typical. Long enough to register; short enough to stay synced.
+    - MINIMUM DURATION 1.0s. Compute `duration = word[end].end - word[start].start` from the transcript timestamps you were given. If the action phrase is shorter than 1.0s in the source, DO NOT EMIT THE B-ROLL. A sub-second cutaway is a flicker, not B-roll — it reads as a glitch and undermines every other clip.
+    - Do NOT extend the window into unrelated adjacent words just to hit 1.0s. Either the action phrase itself spans ≥1.0s of dialogue, or you skip the clip. Stretching into unrelated words to pad the duration makes the cutaway disagree with the audio.
+    - 4-10 word span is typical once the duration floor is satisfied.
     - The pipeline derives precise on-screen timing from these indices. No duration field.
 
 PLACEMENT DISCIPLINE:
