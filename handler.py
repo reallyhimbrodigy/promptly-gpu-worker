@@ -2829,9 +2829,9 @@ Variants and REQUIRED props. Each variant is a DESIGN with its own visual charac
    REQUIRED: "notes" (array of {{"text": str, "color": "#hex", "rotation": float}} — 1 to 3 items)
    Use for: key takeaways, tip bullets, educational moments.
 
-3. "quote_card" — Floating card at center of frame with quote + em-dash attribution. The card is large and WILL cover the center of the frame for its full lifespan. Use ONLY when you accept the cover, which means: the speaker is OFF-camera at this moment (cutaway, B-roll, scenery), OR the moment is a hard pause/silence where the quote IS the shot — the speaker yielding the frame to the quote.
+3. "quote_card" — Floating card at center of frame with quote + em-dash attribution. The card is large and WILL cover the center of the frame for its full lifespan, straddling the split-screen B-roll seam if a B-roll is active. Use ONLY when you accept the cover, which means: the moment is a hard pause/silence where the quote IS the shot (speaker yielding the frame to the quote), OR the speaker is genuinely off-camera (no face in frame at all).
    REQUIRED: "quote" (str <=20 words), "attribution" (str)
-   Do NOT use over a talking-head close-up where the speaker's face fills the center — the card lands directly on their face. If you want a quote-style emphasis WITHOUT covering the speaker, use a `Quintessence` emphasis_moment caption beat or a torn_paper at the top instead.
+   Do NOT use over a talking-head close-up where the speaker's face fills the center — the card lands directly on their face. Do NOT use during a B-roll window — the card covers both the speaker (top half) and the B-roll inset (bottom half), creating a busy stack. If you want a quote-style emphasis WITHOUT covering the speaker, use a `Quintessence` emphasis_moment caption beat or a torn_paper at the top instead.
 
 4. "caption_match" — zone follows its `position` prop (top→`upper_third_safe`, center→`center`, bottom→`lower_third_safe`). Renders in the same style as the main captions. Mono-brand aesthetic.
    REQUIRED: "text" (str <=6 words), "position" ("top" | "center" | "bottom")
@@ -9057,7 +9057,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     _mux_elapsed = time.time() - _mux_t0
     print(
-        f"[render] Final composite (clips+broll+overlay+encode"
+        f"[render] Final composite (clips+overlay+encode"
         f"{'+blend-captions' if _is_blend_render else ''}+audio) done in {_mux_elapsed:.1f}s "
         f"(audio mux={_am_elapsed:.1f}s)",
         flush=True,
