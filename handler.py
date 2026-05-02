@@ -633,35 +633,94 @@ try:
     # Create soname symlinks for NVIDIA libs (Modal mounts versioned .so
     # but not symlinks). NVDEC and CUDA-using consumers (RIFE, FFmpeg
     # cuvid) need libnvidia-* and libcuda.so.1 sonames to resolve.
+    #
+    # CRITICAL: Modal's mount layout includes 0-BYTE STUB files at the
+    # SONAME paths (e.g. /usr/lib/x86_64-linux-gnu/libcuda.so.1 exists as
+    # an empty file alongside the real libcuda.so.580.95.05). The previous
+    # `if not os.path.exists` check skipped symlink creation when the stub
+    # was present, leaving the empty file to shadow the real driver and
+    # making torch.cuda.is_available() return False. Now: if the existing
+    # path is a stub (0 bytes) or a broken symlink, unlink and replace
+    # with a symlink to the real versioned lib.
+
+    def _ensure_soname_symlink(sym_path, target_name, lib_dir):
+        """Make `sym_path` a symlink to `lib_dir/target_name`.
+        If sym_path is a working symlink already pointing at a real file,
+        leave it. If it's an empty stub or broken symlink, replace it.
+        Returns (action, msg) for logging."""
+        target_abs = os.path.join(lib_dir, target_name)
+        try:
+            existing_size = os.path.getsize(sym_path)  # follows symlinks
+        except OSError:
+            existing_size = -1
+        try:
+            is_link = os.path.islink(sym_path)
+        except OSError:
+            is_link = False
+        # Working: existing is a real file (>1KB; real libs are MB-sized).
+        # Stub: 0-byte regular file. Broken: dangling symlink (size = -1).
+        if existing_size > 1024:
+            return ("kept", f"{sym_path} → existing ({existing_size}B)")
+        try:
+            if os.path.lexists(sym_path):
+                os.unlink(sym_path)
+            os.symlink(target_abs, sym_path)
+            return ("linked", f"{sym_path} → {target_abs}")
+        except Exception as _e:
+            return ("failed", f"{sym_path}: {_e}")
+
+    _symlink_log = []
     for _lib_dir in _nvidia_lib_dirs:
         try:
-            for _f in os.listdir(_lib_dir):
-                if (
-                    _f.startswith("libnvidia-")
-                    and ".so." in _f
-                    and not _f.endswith(".so.1")
-                    and not _f.endswith(".so.0")
-                ):
-                    _base = _f.split(".so.")[0]
-                    _target = os.path.join(_lib_dir, _f)
-                    for _suf in [".so.1", ".so"]:
-                        _sym = os.path.join(_lib_dir, f"{_base}{_suf}")
-                        if not os.path.exists(_sym):
-                            try:
-                                os.symlink(_target, _sym)
-                            except Exception:
-                                pass
-                if _f.startswith("libcuda.so.") and not _f.endswith(".so.1"):
-                    _target = os.path.join(_lib_dir, _f)
-                    for _sym_name in ["libcuda.so.1", "libcuda.so"]:
-                        _sym = os.path.join(_lib_dir, _sym_name)
-                        if not os.path.exists(_sym):
-                            try:
-                                os.symlink(_target, _sym)
-                            except Exception:
-                                pass
-        except Exception:
-            pass
+            _entries = os.listdir(_lib_dir)
+        except OSError:
+            continue
+
+        # libnvidia-* sonames: find the real versioned file (>1KB) and
+        # ensure libnvidia-<base>.so + .so.1 symlinks point at it.
+        _libnvidia_real = {}
+        for _f in _entries:
+            if (
+                _f.startswith("libnvidia-")
+                and ".so." in _f
+                and not _f.endswith(".so.1")
+                and not _f.endswith(".so.0")
+            ):
+                _full = os.path.join(_lib_dir, _f)
+                try:
+                    if os.path.getsize(_full) > 1024:
+                        _base = _f.split(".so.")[0]
+                        _libnvidia_real.setdefault(_base, _f)
+                except OSError:
+                    pass
+        for _base, _real_f in _libnvidia_real.items():
+            for _suf in [".so.1", ".so"]:
+                _sym = os.path.join(_lib_dir, f"{_base}{_suf}")
+                _action, _msg = _ensure_soname_symlink(_sym, _real_f, _lib_dir)
+                if _action != "kept":
+                    _symlink_log.append(_msg)
+
+        # libcuda.so + libcuda.so.1: same logic — find the real
+        # libcuda.so.<version> file and ensure both sonames symlink to it.
+        _libcuda_real = None
+        for _f in _entries:
+            if _f.startswith("libcuda.so.") and not _f.endswith(".so.1") and not _f.endswith(".so.0"):
+                _full = os.path.join(_lib_dir, _f)
+                try:
+                    if os.path.getsize(_full) > 1024:
+                        _libcuda_real = _f
+                        break
+                except OSError:
+                    pass
+        if _libcuda_real:
+            for _sym_name in ["libcuda.so.1", "libcuda.so"]:
+                _sym = os.path.join(_lib_dir, _sym_name)
+                _action, _msg = _ensure_soname_symlink(_sym, _libcuda_real, _lib_dir)
+                if _action != "kept":
+                    _symlink_log.append(_msg)
+
+    if _symlink_log:
+        print(f"[startup] soname symlinks: {_symlink_log[:8]}", flush=True)
     subprocess.run(["ldconfig"], capture_output=True, timeout=5)
 
     # L40S has NVENC (8th gen Ada) — detect and enable automatically.
