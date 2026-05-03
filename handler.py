@@ -1286,6 +1286,39 @@ def smooth_face_trajectory(detections, total_duration=0.0, alpha=0.15):
     return smoothed
 
 
+def _face_position_at(trajectory, t_seconds, canvas_w=1080, canvas_h=1920):
+    """Find the smoothed face position closest to `t_seconds`.
+
+    Returns (origin_x, origin_y, confidence) where origin_x/origin_y are
+    normalized to the canonical 1080x1920 canvas with rule-of-thirds
+    adjustment (eyes sit ~10% of canvas height above face center, so the
+    zoom origin lands on the eyes — that's the perceptual focal point on
+    a face). Returns (None, None, 0.0) if no detection nearby or the
+    closest detection failed (found=False).
+
+    Smoothed trajectory is dense (one keyframe every ~3s); nearest-
+    neighbor lookup is enough — the smoothing pass already made cx/cy
+    continuous between samples.
+    """
+    if not trajectory:
+        return None, None, 0.0
+    closest = min(trajectory, key=lambda p: abs(float(p.get("t", 0.0)) - float(t_seconds)))
+    if not closest.get("found"):
+        return None, None, 0.0
+    cx = float(closest.get("cx", 0))
+    cy = float(closest.get("cy", 0))
+    conf = float(closest.get("confidence", 0))
+    # Normalize + rule-of-thirds eye offset. Face center ≈ nose; eyes sit
+    # roughly 10% of canvas height above center for a typical talking-head
+    # framing. Subtracting 0.1 in normalized space lands the zoom origin
+    # on the eyes — the natural focal point. Clamp to [0, 1] in case the
+    # face lies outside the canonical canvas (non-9:16 source where the
+    # detection coords may overshoot the post-crop frame).
+    origin_x = max(0.0, min(1.0, cx / float(canvas_w)))
+    origin_y = max(0.0, min(1.0, cy / float(canvas_h) - 0.1))
+    return origin_x, origin_y, conf
+
+
 def calculate_reframe_crop(face_positions, source_w, source_h, target_w=1080, target_h=1920):
     """
     Calculate a crop window that keeps the detected face near frame center.
@@ -1930,11 +1963,10 @@ def _build_cuts_prompt(vibe, duration):
     """
     system_instruction = """You are deciding which words to cut from a talking-head video transcript. You can see the full source video at 5 frames per second and you can hear every word. Output ONLY a JSON object — no prose, no markdown — with three fields: notes, remove_words, pacing. A second AI call handles every visual element (captions, motion graphics, B-roll, transitions, zooms, SFX, thumbnail). You make zero visual decisions.
 
-=== YOUR JOB IS THREE DECISIONS ===
+=== YOUR JOB IS TWO DECISIONS ===
 
-  DECISION 1 — COLD OPEN. Where in the source does the strongest moment live? Emit a range cut covering everything before it so the kept transcript LEADS with that moment.
-  DECISION 2 — CUTS. Filler, stutters, restarts, dead-air gaps. Aggressive on filler and silence; conservative on content.
-  DECISION 3 — PACING. Global rhythm signal: "fast" | "medium" | "slow".
+  DECISION 1 — CUTS. Filler, stutters, restarts, dead-air gaps. Aggressive on filler and silence; conservative on content.
+  DECISION 2 — PACING. Global rhythm signal: "fast" | "medium" | "slow".
 
 DEFAULT STANCE
   Filler words and dead-air gaps: AGGRESSIVE. Default is CUT. Target zero filler, zero dead air.
@@ -1942,54 +1974,10 @@ DEFAULT STANCE
 
 A correct cut passes this test: a listener hearing only the output cannot tell anything was removed. If a cut creates a rhythm break, awkward pause, or grammatical bump, it was wrong.
 
-═══════════════════════════════════════════════════════════════════════════
-DECISION 1 — COLD OPEN (CONDITIONAL — most videos do not need this)
-═══════════════════════════════════════════════════════════════════════════
-
-A cold open is a range cut [0.0, T] that removes the source's setup so the kept transcript LEADS with a punchline. It is a powerful tool — and a destructive one when misused.
-
-THE TRUTH ABOUT WHAT A COLD OPEN DOES: when you emit a cold-open range cut, EVERYTHING before T is permanently gone. It does NOT reappear later. It is not "saved for later" or "filled in afterwards" — Python only renders the kept words, in chronological order. If the lead-up was structurally important to the punchline (causal setup, "and then she said...", visual context that makes the line make sense), the cold open ruins the bit.
-
-WHEN TO COLD-OPEN — only if BOTH conditions hold:
-  (a) The user's vibe (shown in the user content) explicitly signals a fast/punchy/viral aesthetic. Examples of vibes that support cold-opens: "viral hook", "fast pace", "TikTok-style", "punchy", "high-energy reveal", "shocking moment", "hook-driven", "scroll-stopper".
-  (b) The strongest moment can stand alone — a viewer hearing the punchline first, with NO prior setup, would still understand it. Test: if you imagine cutting straight to the punchline word, would the line still make sense?
-
-WHEN NOT TO COLD-OPEN — leave chronological order intact:
-  - Vibe is "storytelling", "narrative", "POV", "interview", "podcast", "thoughtful", "educational", "documentary", "how-to", "anecdote", or any register where the build-up IS the value.
-  - The strongest line depends on its setup. If the punchline references something earlier ("and THEN she said...", "after all that, he..."), the setup must come first.
-  - The video gradually builds — there is no single isolated punchline, just rising energy.
-  - The vibe is generic ("engaging viral video", "make this go viral") AND the content is clearly a narrative/anecdote — TREAT AS NARRATIVE. Default to chronological.
-
-When in doubt: do NOT cold-open. The cost of leaving a slightly-slow opening is small. The cost of cold-opening a narrative bit is a confusing, broken video.
-
-PROCEDURE (only if both WHEN-TO conditions hold):
-  1. Identify the strongest moment. Note its source timestamp T (start of the punchline word).
-  2. Apply the stand-alone test: imagine the viewer hears only "<punchline word and what follows>" with no prior context. Does it still land?
-  3. If YES: emit a range cut covering [0.0, word_immediately_before_T.end].
-  4. Verify the new word [0] (the punchline) is a content word, not a filler.
-  5. State the decision in `notes`: "Cold-opened on '<word>' (src <T>s) — vibe is <X>, punchline stands alone."
-
-EXAMPLE — DO cold-open:
-  Vibe: "viral hook, scroll-stopper".
-  Speaker rambles about their morning for 8s, then says "I won the lottery yesterday".
-  The lead-up is throwaway; "I won the lottery yesterday" stands alone.
-  → emit {"start": 0.0, "end": 7.8, "reason": "section_skip"}. kept[0] = "I".
-
-EXAMPLE — DO NOT cold-open:
-  Vibe: "engaging storytelling viral video" (generic, content is narrative).
-  Speaker: "I'm shaving, my 6-year-old is on the floor watching, and then he says 'mommy shouldn't kiss uncle Stelios'."
-  The build-up IS the joke — the calm domestic setup makes the kid's line shocking. Cold-opening on "kiss" makes the line incoherent.
-  → No cold-open cut. KEEP chronological order. Notes: "Kept chronological — narrative anecdote where setup carries the punchline."
-
-EXAMPLE — DO NOT cold-open:
-  Vibe: "interview clip".
-  No single punchline; the value is the gradual reveal across the whole conversation.
-  → No cold-open cut. Notes: "Kept chronological — interview register, no isolated peak moment."
-
-NOTES MUST STATE THE DECISION. Either: "Cold-opened on '<word>' (src <T>s) because <reason>" or "Kept chronological — <one-line reason>".
+CHRONOLOGICAL ORDER IS NON-NEGOTIABLE. Do NOT rearrange the transcript. Do NOT emit a range cut at the start of the source to "lead with the punchline" — kept words render in source order, and removing setup before a punchline that depends on it produces an incoherent video. The opening of the kept transcript should be word[0] of the source after standard filler trimming. The rest of the pipeline (visual emphasis, zoom, SFX, captions) lands on whatever beats matter — your job is to remove fillers and silence, not to choose what comes first.
 
 ═══════════════════════════════════════════════════════════════════════════
-DECISION 2 — WHAT TO CUT
+DECISION 1 — WHAT TO CUT
 ═══════════════════════════════════════════════════════════════════════════
 
 Apply each rule when its signature is present. The order below is the order LOW-thinking models miss most often — read top-to-bottom and check every rule against the transcript.
@@ -2021,9 +2009,7 @@ RULE 2 — STANDALONE OPENING FILLER. The very first kept word.
 
 If word [0] in the transcript is "So" / "And" / "Like" / "Um" / "Uh" with no prior context, CUT it. Word [0] is what the viewer hears first — opening on a filler tells the viewer this is raw footage, not edited content.
 
-This is independent of cold open: even if you DON'T emit a cold-open range cut, you must still cut a standalone filler at word [0]. And if you DO emit a cold-open range cut, the new "first kept word" should also pass this test — if your range ends at a filler, extend the range to skip past it.
-
-CHECK: look at word [0] in the transcript. If it's a filler/throat-clearing word, cut it. Look at the FIRST kept word AFTER any cold-open range cut. Same test.
+CHECK: look at word [0] in the transcript. If it's a filler/throat-clearing word, cut it. After cutting, the new first kept word should also pass this test (if word [1] was also a standalone filler, cut it too).
 
 ──────────────────────────────────────────────────────────────────────────
 RULE 3 — HESITATION TOKENS. Always cut.
@@ -2227,7 +2213,7 @@ REASON GLOSSARY — pick the accurate reason for each entry:
     "other"         — single-word case not covered above
 
   Time-range entries:
-    "section_skip"  — cold-open range (Decision 1) or other content-segment removal
+    "section_skip"  — content-segment removal (e.g. an entire off-topic block; rare — most range cuts are tangent or dead_air)
     "tangent"       — off-topic aside (rule 11)
     "dead_air"      — silence > 0.30s between words (rule 9)
     "breath"        — long audible breath gap (range version)
@@ -2261,19 +2247,16 @@ The user's vibe (shown in the user content) shapes how aggressively to cut beyon
     - Cut every gap >0.30s.
     - Cut every conversational hesitation.
     - Trim the tail aggressively (rule 10).
-    - Cold-open IS on the table if the vibe is explicit AND the punchline stands alone.
     - pacing → "fast".
 
   STORYTELLING / narrative / POV / interview / podcast / anecdote / vlog:
     - Cut filler aggressively but preserve some breathing space — gaps in the 0.30-0.50s range during tense or emotional moments are dramatic, not dead air. Only cut the obvious longer pauses (>0.50s, or short pauses that read as throat-clearing).
-    - Cold-open is OFF the table — chronological setup is the value.
     - Tangent cuts (rule 11) are extra useful here — speakers ramble.
     - End trim (rule 10) still applies.
     - pacing → "fast" or "medium" depending on subgenre.
 
   EDUCATIONAL / informational / how-to / tutorial / explainer:
     - Light cutting. Some "umm"s and pauses are conversational, not noise — they help the viewer absorb.
-    - Cold-open is OFF the table.
     - End trim still applies.
     - pacing → "medium" usually.
 
@@ -2287,9 +2270,9 @@ GENERIC vibes ("engaging viral video", "make this go viral", "good edit") — di
 NOTES FIELD
 ═══════════════════════════════════════════════════════════════════════════
 
-notes — string ≤40 words. State the cold-open decision + a one-line cut summary.
-Example A: "Cold-opened on 'kiss' (src 13.20s) — vibe viral hook; cut 2 stutters, 1 phrasal restart, opening 'So', a 'you know' pair, and a 2.1s dead-air gap."
-Example B: "Kept chronological — narrative anecdote where setup carries punchline; cut 4 fillers, 2 stutters, opening 'So', trailing 'And', and three dead-air gaps."
+notes — string ≤40 words. One-line cut summary.
+Example A: "Cut 2 stutters, 1 phrasal restart, opening 'So', a 'you know' pair, and a 2.1s dead-air gap."
+Example B: "Cut 4 fillers, 2 stutters, opening 'So', trailing 'And', and three dead-air gaps."
 
 ═══════════════════════════════════════════════════════════════════════════
 SMOOTHNESS OVER COMPRESSION
@@ -2305,9 +2288,9 @@ BEFORE YOU OUTPUT — VERIFY EACH
 
 Re-read your remove_words list. Run this checklist. Every "no" requires a fix before emitting JSON.
 
-  ☐ COLD OPEN DECISION: you decided whether to cold-open OR keep chronological. Notes state which and why. If cold-opened: vibe explicitly supports it AND the punchline stands alone without setup. If chronological: build-up carries the payoff (the default for narrative/interview/educational).
+  ☐ CHRONOLOGICAL ORDER: you did NOT emit a range cut at the start of the source to "lead with the punchline." Kept words remain in source order; the opening of the kept transcript is whatever survives standard filler trimming at word [0].
   ☐ MULTI-WORD FILLERS: scanned for "you know", "I mean", "kind of", "sort of". Every filler instance has BOTH words in remove_words — never just one.
-  ☐ OPENING WORD: word [0] is a content word. If word [0] is "So" / "And" / "Like" / "Um" / "Uh" standalone, you cut it. (And the first kept word AFTER any cold-open range cut also passes this test.)
+  ☐ OPENING WORD: word [0] is a content word. If word [0] is "So" / "And" / "Like" / "Um" / "Uh" standalone, you cut it.
   ☐ END TRIM: word [N-1] (and [N-2]) is a content word. Any hanging "And" / "yeah" / "so" at the very end is in remove_words.
   ☐ TANGENTS: any 2+ second off-topic aside is removed via range cut with reason "tangent". Setup-that-pays-off-later is NOT a tangent.
   ☐ STORY-ARC: no cut breaks a causal chain or setup-payoff structure. Repetition for emphasis (rhetoric) is preserved.
@@ -2527,7 +2510,7 @@ You are the editor. You understand the emotion and humor of what's being said. Y
 
 === WHAT MAKES SHORT-FORM CONTENT FEEL EDITED ===
 
-The opening is an audition. The first 2 seconds must give the viewer a reason to stay — a visual event, a sonic hit, tight framing, text that creates curiosity. The cut decisions MAY have cold-opened with a punchline OR kept chronological order — read your kept transcript and treat its first words as cut[0]. If word [0] feels like a punchline (the kept transcript leads with a reveal, reaction, or shock-value line), lean into the opening with a tight zoom, hard SFX, or hook card. If word [0] is setup (a calm narrative beginning, "I was at the store..." style), let it breathe and save the visual punch for the actual payoff word later in the kept transcript.
+The opening is an audition. The first 2 seconds must give the viewer a reason to stay — a visual event, a sonic hit, tight framing, text that creates curiosity. The kept transcript leads with whatever survives the cuts pass at word [0]; treat that as cut[0]. If word [0] is setup (a calm narrative beginning, "I was at the store..." style), let it breathe and save the visual punch for the payoff word later in the kept transcript. Place emphasis_moments where the content actually earns them — on punchlines, reveals, reactions — wherever those land in the kept transcript.
 
 Pacing creates rhythm. The kept transcript is already tight; your captions, transitions, and emphasis moments give that rhythm visual punctuation. Identify the 2-5 hardest-hitting beats — every other layer (caption_style, transitions, B-roll, SFX) should orbit those beats.
 
@@ -3062,7 +3045,7 @@ WORD WINDOW (start_word_index → end_word_index):
     - The pipeline derives precise on-screen timing from these indices. No duration field.
 
 PLACEMENT DISCIPLINE:
-  Place B-roll on moments where the speaker describes a physical action, place, object, or concrete scene — anything where seeing the thing reinforces the dialogue. NEVER on the most facially-expressive emotional beats (the punchline word itself, the moment of recognition, the visible reaction) — full-canvas cutaway HIDES the speaker entirely, and viewers feel the loss when the face was the payoff. NEVER during cut[0] (the opening needs the speaker dedicated to the first 2 seconds — viewers form snap judgments from human faces in the cold open).
+  Place B-roll on moments where the speaker describes a physical action, place, object, or concrete scene — anything where seeing the thing reinforces the dialogue. NEVER on the most facially-expressive emotional beats (the punchline word itself, the moment of recognition, the visible reaction) — full-canvas cutaway HIDES the speaker entirely, and viewers feel the loss when the face was the payoff. NEVER during cut[0] (the opening needs the speaker dedicated to the first 2 seconds — viewers form snap judgments from human faces).
 
   Spacing: 3+ seconds of speaker-only frame between B-roll clips so the speaker's presence reasserts. Coverage: ~30-40% of runtime is a healthy ceiling. Place B-roll on 1.0x or 1.2–1.3x clips, not on the 0.7–0.85x slow-speed clips that contain a punchline beat.
 
@@ -3914,11 +3897,76 @@ def generate_edit_gemini(
     # ── Call 1: cuts only ───────────────────────────────────────────────────
     cut_plan = _call_gemini_cuts(client, cuts_sys, cuts_user, _video_part, GEMINI_MODEL)
     raw_cut_remove_words = cut_plan.get("remove_words") or []
+    _cut_pacing = str(cut_plan.get("pacing") or "fast").lower()
     print(
         f"[two-pass] Cuts call returned {len(raw_cut_remove_words)} remove_word entries, "
         f"pacing={cut_plan.get('pacing')!r}",
         flush=True,
     )
+
+    # ── Silence-aware micro-gap tightening ──────────────────────────────────
+    # Gemini cuts dead-air >0.30s in viral pacing (>0.50s in narrative). The
+    # gaps that survive (200-300ms range) are usually borderline-natural
+    # breath, but on talking-head shorts they accumulate and make the edit
+    # feel slack. This pass walks adjacent kept words, finds remaining gaps
+    # above a pacing-aware threshold, and adds range cuts that trim each
+    # gap down to a 100ms breath. Pure data augmentation: the new range
+    # cuts get fed into the same _reindex_kept_transcript pass below
+    # alongside Gemini's, so all downstream timing math stays consistent.
+    _gap_threshold_by_pacing = {"fast": 0.200, "medium": 0.350, "slow": 0.500}
+    _gap_threshold = _gap_threshold_by_pacing.get(_cut_pacing, 0.200)
+    _gap_keep = 0.100  # preserved breath after cut
+    _src_words = deepgram_words or []
+    if _src_words:
+        # Apply Gemini's remove_words to find which indices survive (mirrors
+        # _reindex_kept_transcript logic, just without renumbering).
+        _removed_initial: set = set()
+        _n = len(_src_words)
+        _starts = [float(w.get("start") or 0.0) for w in _src_words]
+        _ends = [float(w.get("end") or 0.0) for w in _src_words]
+        for _it in raw_cut_remove_words:
+            if not isinstance(_it, dict):
+                continue
+            if "word_index" in _it:
+                try:
+                    _wi = int(_it["word_index"])
+                except (TypeError, ValueError):
+                    continue
+                if 0 <= _wi < _n:
+                    _removed_initial.add(_wi)
+            elif "start" in _it and "end" in _it:
+                try:
+                    _rs = float(_it["start"]); _re = float(_it["end"])
+                except (TypeError, ValueError):
+                    continue
+                if _re <= _rs:
+                    continue
+                for _i in range(_n):
+                    if _starts[_i] >= _rs and _ends[_i] <= _re:
+                        _removed_initial.add(_i)
+        _kept_indices = [_i for _i in range(_n) if _i not in _removed_initial]
+        _micro_cuts: list = []
+        for _prev, _next in zip(_kept_indices, _kept_indices[1:]):
+            _prev_end = _ends[_prev]
+            _next_start = _starts[_next]
+            _gap = _next_start - _prev_end
+            if _gap > _gap_threshold:
+                _cut_start = _prev_end + _gap_keep
+                _cut_end = _next_start
+                if _cut_end > _cut_start + 0.001:
+                    _micro_cuts.append({
+                        "start": round(_cut_start, 4),
+                        "end": round(_cut_end, 4),
+                        "reason": "dead_air",
+                    })
+        if _micro_cuts:
+            raw_cut_remove_words = list(raw_cut_remove_words) + _micro_cuts
+            print(
+                f"[two-pass] Silence-tighten: added {len(_micro_cuts)} micro-cut(s) "
+                f"(pacing={_cut_pacing}, threshold={int(_gap_threshold * 1000)}ms, "
+                f"keep={int(_gap_keep * 1000)}ms)",
+                flush=True,
+            )
 
     # ── Re-index: source transcript → kept-only transcript with new indices ─
     kept_words, new_to_src, removed_src = _reindex_kept_transcript(
@@ -4747,9 +4795,10 @@ Indices below are the NEW kept-only space [0..{_kept_count - 1}]. Every word_ind
 
     # Defensive: drop any legacy hook_clip field a stale caller might pass.
     # Auto-hook (climax replay at start) was removed because it duplicates
-    # source content in the timeline — no production NLE does this. The
-    # opening punch comes from cut[0] being the strongest moment, picked
-    # by Gemini per the prompt.
+    # source content in the timeline — no production NLE does this. Cold-
+    # open / strongest-moment range cuts were also removed: the cuts prompt
+    # now requires chronological order. The opening of the kept transcript
+    # is whatever survives standard filler trimming at word [0].
     edit_plan.pop("hook_clip", None)
     edit_plan["cuts"] = list(validated_cuts)
 
@@ -5719,6 +5768,23 @@ def select_best_thumbnail_frame(video_path, seed_ts, work_dir):
     except Exception:
         _eye_cascade = None
 
+    # Smile/expression cascade — lets the thumbnail picker prefer frames
+    # where the speaker is mid-smile or mid-laugh over neutral frames at
+    # the same sharpness. OpenCV ships haarcascade_smile.xml in the same
+    # data/haarcascades directory as the eye cascade — no extra deps,
+    # no model download. Cascade is tuned for forward-facing smiles, so
+    # it's fast (<5ms per face region) and conservative (low false-
+    # positive rate, occasional false-negatives on closed-mouth grins).
+    _smile_cascade = None
+    try:
+        _smile_xml = os.path.join(cv2.data.haarcascades, "haarcascade_smile.xml")
+        if os.path.exists(_smile_xml):
+            _smile_cascade = cv2.CascadeClassifier(_smile_xml)
+            if _smile_cascade.empty():
+                _smile_cascade = None
+    except Exception:
+        _smile_cascade = None
+
     # ── Probe video duration ────────────────────────────────────────────
     _probe = subprocess.run(
         ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_streams", video_path],
@@ -5860,6 +5926,33 @@ def select_best_thumbnail_frame(video_path, seed_ts, work_dir):
                 else:
                     _eye_score = 0.15
 
+            # Smile / expression detection — runs on the bottom half of the
+            # face region (mouth area) for speed and tighter accuracy. A
+            # frame where the speaker is smiling or laughing is a stronger
+            # thumbnail than the same person mid-syllable with a neutral
+            # mouth. We score it as a [0, 1] continuous signal weighted by
+            # detection count: any detection = 0.7 (baseline smile), two+
+            # = 1.0 (strong smile, often laughing), zero = 0.4 (neutral —
+            # not penalized to zero because most talking-head frames are
+            # mid-speech and shouldn't be punished, just out-prioritized
+            # by frames with visible joy).
+            _smile_score = 0.4
+            if _smile_cascade is not None and _face_gray.size > 0:
+                _mouth_y_start = (_fy2 - _fy1) // 2
+                _mouth_region = _face_gray[_mouth_y_start:, :]
+                if _mouth_region.size > 0:
+                    _smiles = _smile_cascade.detectMultiScale(
+                        _mouth_region,
+                        scaleFactor=1.7,
+                        minNeighbors=22,
+                        minSize=(int((_fx2 - _fx1) * 0.25), int((_fy2 - _fy1) * 0.10)),
+                    )
+                    _n_smiles = len(_smiles)
+                    if _n_smiles >= 2:
+                        _smile_score = 1.0
+                    elif _n_smiles == 1:
+                        _smile_score = 0.7
+
             _raw.append({
                 "ts": _cand_ts,
                 "has_face": True,
@@ -5869,6 +5962,7 @@ def select_best_thumbnail_frame(video_path, seed_ts, work_dir):
                 "lap_var": _lap_var,
                 "mean_lum": _mean_lum,
                 "eye_score": _eye_score,
+                "smile_score": _smile_score,
             })
         else:
             _gray = cv2.cvtColor(_frame, cv2.COLOR_BGR2GRAY)
@@ -5918,19 +6012,27 @@ def select_best_thumbnail_frame(video_path, seed_ts, work_dir):
             _seed_dist = abs(_r["ts"] - seed_ts)
             _proximity = max(0.0, 1.0 - _seed_dist / _window)
 
+            # Smile factors in at 10% — enough to break ties between equally-
+            # sharp frames in favor of the one with visible expression, but
+            # not enough to override fundamentals (sharpness, eyes-open,
+            # framing). Proximity drops 0.25 → 0.20 to make room without
+            # dethroning Gemini's seed timestamp.
+            _smile_score = float(_r.get("smile_score", 0.4))
             _total = (
                 0.10 * _conf_score
                 + 0.10 * _area_score
                 + 0.05 * _r["center"]
                 + 0.20 * _sharp_score
-                + 0.10 * _bright_score
+                + 0.05 * _bright_score
                 + 0.20 * _r["eye_score"]
-                + 0.25 * _proximity
+                + 0.10 * _smile_score
+                + 0.20 * _proximity
             )
             _breakdown = {
                 "has_face": True,
                 "conf": _conf_score, "area": _area_score, "center": _r["center"],
                 "sharp": _sharp_score, "bright": _bright_score, "eye": _r["eye_score"],
+                "smile": _smile_score,
                 "proximity": _proximity,
                 "lap_var": _r["lap_var"], "mean_lum": _r["mean_lum"],
                 "face_conf": _r["face_conf"],
@@ -6004,6 +6106,7 @@ def select_best_thumbnail_frame(video_path, seed_ts, work_dir):
             f"sharp={_winner_breakdown['sharp']:.2f}(lap={_winner_breakdown['lap_var']:.0f}) "
             f"bright={_winner_breakdown['bright']:.2f}(lum={_winner_breakdown['mean_lum']:.0f}) "
             f"eye={_winner_breakdown['eye']:.2f} "
+            f"smile={_winner_breakdown.get('smile', 0):.2f} "
             f"prox={_winner_breakdown['proximity']:.2f}",
             flush=True,
         )
@@ -6013,7 +6116,8 @@ def select_best_thumbnail_frame(video_path, seed_ts, work_dir):
                 print(
                     f"[thumbnail]   #{_idx+1} t={_ts:.3f}s score={_s:.3f} "
                     f"sharp={_b['sharp']:.2f} bright={_b['bright']:.2f} "
-                    f"eye={_b['eye']:.2f} prox={_b['proximity']:.2f}",
+                    f"eye={_b['eye']:.2f} smile={_b.get('smile', 0):.2f} "
+                    f"prox={_b['proximity']:.2f}",
                     flush=True,
                 )
 
@@ -7758,6 +7862,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _clip_render_source_start_ms = _source_start_seconds * 1000.0
             _clip_render_output_ms = (_dur_frames / float(source_fps)) * 1000.0
             _raw_events = _zoom.get("events") or []
+            _face_traj = edit_plan.get("_face_trajectory") or []
             _overlapping_events = []
             for _ev in _raw_events:
                 if not isinstance(_ev, dict):
@@ -7776,10 +7881,34 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                     continue
                 if _new_start_ms >= _clip_render_output_ms:
                     continue
+                # Face-aware origin override. Gemini doesn't know exactly where
+                # the face is; the prompt tells it to default to originY≈0.4
+                # for talking heads. When face detection produced a confident
+                # sample at this source moment AND Gemini's origin is close to
+                # the talking-head default (within ±0.1), substitute the real
+                # face position with rule-of-thirds eye offset. If Gemini set
+                # a non-default origin (deliberately pointing the zoom at a
+                # gesture, prop, or off-center subject), trust that choice.
+                _origin_x = float(_ev.get("originX", 0.5)) if _ev.get("originX") is not None else 0.5
+                _origin_y = float(_ev.get("originY", 0.4)) if _ev.get("originY") is not None else 0.4
+                _is_th_default = (
+                    abs(_origin_x - 0.5) < 0.1 and abs(_origin_y - 0.4) < 0.1
+                )
+                _face_origin_x, _face_origin_y, _face_conf = (
+                    _face_position_at(_face_traj, _src_start_ms / 1000.0)
+                    if _face_traj else (None, None, 0.0)
+                )
+                _final_origin_x = _origin_x
+                _final_origin_y = _origin_y
+                if _is_th_default and _face_origin_x is not None and _face_conf >= 0.7:
+                    _final_origin_x = _face_origin_x
+                    _final_origin_y = _face_origin_y
                 _overlapping_events.append({
                     **_ev,
                     "startMs": _new_start_ms,
                     "durationMs": _new_dur_ms,
+                    "originX": _final_origin_x,
+                    "originY": _final_origin_y,
                 })
             if _overlapping_events:
                 _clip_spec["zoomEffect"] = {
@@ -10098,11 +10227,17 @@ def handler(job):
             _norm_t0 = time.time()
             _norm_path = os.path.join(work_dir, "source_canonical.mp4")
 
-            # Compose the filter chain. fps=60 + (optional) scale/crop
-            # + setsar=1 + final pix_fmt-yuv420p output. When normalize_vf
-            # is None the source is already 1080x1920 so we just do fps
-            # conversion and a yuv420p re-encode for downstream uniformity.
-            _vf_parts = ["fps=60"]
+            # Compose the filter chain. deshake (single-pass stabilization)
+            # runs FIRST so motion-vector analysis sees the raw source frames
+            # before any scale/crop alters geometry — required for accurate
+            # transform compensation. deshake produces minimal artifacts on
+            # stable footage (it only transforms when motion is detected) so
+            # applying unconditionally is safe; the cost is ~3-8s on a 60s
+            # source which lands inside the canonicalize step's parallel
+            # window with Gemini cuts/post calls. Then fps=60, then scale/
+            # crop normalize_vf. Final pix_fmt=yuv420p re-encode for
+            # downstream uniformity.
+            _vf_parts = ["deshake=rx=16:ry=16:edge=mirror", "fps=60"]
             if _normalize_vf:
                 _vf_parts.append(_normalize_vf)
             _vf_combined = ",".join(_vf_parts)
@@ -10154,11 +10289,16 @@ def handler(job):
                     )
                 if _normalize_vf:
                     # Source needs scale/crop on top of RIFE's 60fps output.
-                    # One ffmpeg pass: apply normalize_vf + yuv420p re-encode.
+                    # deshake runs first (motion analysis on the RIFE-
+                    # interpolated frames is fine — RIFE preserves geometry,
+                    # only adds intermediate frames). Then scale/crop. Single
+                    # ffmpeg pass; no extra wall-clock since we're already
+                    # running this pass for the scale.
+                    _post_rife_vf = "deshake=rx=16:ry=16:edge=mirror," + _normalize_vf
                     _scale_r = subprocess.run(
                         ["ffmpeg", "-y", "-v", "error", "-threads", "0",
                          "-i", _rife_out,
-                         "-vf", _normalize_vf,
+                         "-vf", _post_rife_vf,
                          "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
                          "-pix_fmt", "yuv420p",
                          "-g", "60", "-keyint_min", "60", "-sc_threshold", "0",
@@ -10508,6 +10648,13 @@ def handler(job):
         # can map the reframe math correctly.
         _ft = source_info.get("face_transform", {})
         edit_plan["_face_transform"] = _ft
+
+        # Stash the smoothed face trajectory for render_multi_clip to use as
+        # the face-aware zoom-origin source. Coords are normalized to the
+        # canonical 1080x1920 canvas via target_w/target_h in
+        # detect_face_positions_dense (or scaled from raw source dims when
+        # called without targets — see clamping in _face_position_at).
+        edit_plan["_face_trajectory"] = list(_smoothed_trajectory or [])
 
         _timings["normalize_transcribe_upload"] = time.time() - t
         _dg_words = transcript.get("words", [])
