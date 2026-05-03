@@ -2921,9 +2921,21 @@ Types, descriptions, use cases, and REQUIRED props (in the schema below, keys en
 
 === SFX — SOUND EFFECTS ===
 
-Sound effects amplify the speaker's energy at key moments. Emit as many as the content earns — there's no hard cap. Silence is BETTER than a wrong sound. Each entry: {{"word_index": int, "sound": <name>}} — you pick the word that triggers the SFX; the pipeline derives the exact timing from word.start.
+Sound effects amplify the speaker's energy at key moments. Silence is BETTER than a wrong sound. Each entry: {{"word_index": int, "sound": <name>}} — you pick the word that triggers the SFX; the pipeline derives the exact timing from word.start.
 
-THE CORE RULE FOR EVERY SOUND: The word you anchor each sound to must BE the thing that makes that sound in reality. Not near it, not in the same sentence, not in the same phrase — the EXACT word that NAMES the action, object, or peak moment the sound represents. Before placing any sound, ask: "does this specific word literally refer to what this sound is?" If the word is a time word, a filler word, a pronoun, a conjunction, or a generic context word — even if the surrounding phrase fits — the sound belongs elsewhere or nowhere. One 1:1 match between word and sound, not a proximity match.
+DENSITY CAP: Maximum 1 SFX per ~8 seconds of OUTPUT runtime, AND no two SFX within 2.0 seconds of each other on the output timeline. For a 60-second video that's ~6 SFX max. Crossing the cap produces audio chaos that fights the dialogue — viewers register it as "this video is trying too hard." When you have more candidate moments than the cap allows, keep only the strongest (the punchline impact, the revelation, the major reveal) and drop the rest.
+
+THE CORE RULE FOR EVERY SOUND: The speaker is NARRATING past events — they are not living them in real time. A sound effect must hook to the word that, with eyes closed, you'd EXPECT to hear that exact sound on. That means the word must represent an EVENT (action, peak moment, reaction) — NOT a noun that merely names a device, location, platform, or time reference being mentioned in narration.
+
+VERBS over NOUNS. ACTIONS over OBJECTS:
+  ✓ "she was *calling* me" → ding can fire on `calling` (the act of a phone ringing produces the ding sound the listener mentally hears).
+  ✗ "your wife's on the *phone*" → NO ding on `phone` (it's a noun in narration; the phone isn't ringing in this moment, the speaker is just saying the word).
+  ✗ "I let it go to *voicemail*" → NO click on `voicemail` (voicemail is a destination, not a click event).
+  ✗ "every 5 *seconds*" → NO sound on `seconds` (time reference, not an event).
+  ✗ "I felt *like* I had been electrocuted" → NO thunder on `like` (filler word; the sonic peak is on `electrocuted`).
+  ✗ "fucking *secretary* came in" → NO sound on the JOB TITLE — sounds belong on what the secretary DID, not on naming her.
+
+Before placing any sound, ask: "does this specific word literally refer to a sonic event happening in the scene the speaker is describing?" If the word is a noun naming a device/place/platform, a time word, a filler word, a pronoun, a conjunction, or a generic context word — even if the surrounding phrase fits — the sound belongs elsewhere or nowhere. One 1:1 match between word and sound, not a proximity match.
 
 Tonal context still beats vocabulary matching. If the surrounding content doesn't fit the sound's character, skip it even when a trigger word literally matches — `sad_trombone` on a serious moment is wrong even if someone says "failed."
 
@@ -2939,8 +2951,9 @@ IMPACT SOUNDS — instant transient. `t` is exactly the moment the hit should la
                         Triggers on: *money, cash, paid, earned, dollar, jackpot, profit, million, K, revenue*.
  3. "ding"           — Clean single-tone notification bell. iMessage-style — bright mid-high with a clean decay, NOT metallic like ching.
                         Best for: notification events ONLY — on-screen notifications, incoming messages/alerts, phone notification reveals, "you've got mail" beats. Pair naturally with the Notification motion-graphic.
-                        Triggers on: *notification, alert, message, text, email, ping, notified*.
-                        Skip for: correct answers, lightbulb ideas, general "yes" acknowledgments, level-ups, positive-check moments — the Notification MG pairing makes those contexts feel mismatched. Reach for `pop` or silence instead.
+                        Triggers on: *notification, alert, message, text, email, ping, notified*. The trigger must be the EVENT word (the verb of receiving/being notified), not a noun naming the device/platform.
+                        Hard skip — words that are nouns naming the device/platform, not the event: `phone`, `voicemail`, `mail`, `inbox`, `app`, `screen`, `notification` used as a label rather than the event ("the notification said"). The phone isn't ringing on the word "phone" — it's just the speaker mentioning the noun. If a phone-ringing moment IS being narrated, the ding goes on `calling` / `rang` / `vibrated` / `dinged` — the verb that produces the sound.
+                        Also skip for: correct answers, lightbulb ideas, general "yes" acknowledgments, level-ups, positive-check moments — the Notification MG pairing makes those contexts feel mismatched. Reach for `pop` or silence instead.
  4. "pop"            — Quick cartoony bubble-burst. Bright, playful, mid-energy transient.
                         Best for: item appearances, playful reveals, text-pops, sticker/emoji reveals, lighthearted visual punctuation.
                         Triggers on: *pop, appeared, suddenly, out of nowhere, surprise*, any lighthearted reveal word.
@@ -2950,7 +2963,8 @@ IMPACT SOUNDS — instant transient. `t` is exactly the moment the hit should la
                         Skip for: metaphorical "capture the moment", "freeze frame", still-moment visuals without an actual camera reference, or generic punctuation. When unsure, pick silence.
  6. "click"          — Very soft, quiet UI button click. Low-energy tap, almost subliminal. Punctuates without intruding.
                         Best for: UI interactions, toggle moments, checkbox confirmations, micro-beats where you want rhythm but can't have loudness.
-                        Triggers on: *click, tap, press, select, enable, tick, checked*.
+                        Triggers on: *click, tap, press, select, enable, tick, checked* — the explicit interaction VERB.
+                        Hard skip — words that name the destination/platform of a UI flow, not the click itself: `voicemail`, `mail`, `inbox`, `email`, `app`, `phone`, `text`. "Letting it go to voicemail" is the destination of an unanswered call, not a click event — the click would be on `pressed` / `tapped` / `clicked` if the speaker described the interaction. When the dialogue describes WHERE something went rather than HOW it got there, skip the click entirely.
 
 CINEMATIC IMPACT + BUILD — these sounds have a short build (0.4–0.7s) before the peak. The renderer automatically schedules the file to START before the trigger word so the climax lands ON the word. You just pick the trigger word.
 
