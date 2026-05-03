@@ -320,6 +320,15 @@ export interface PromptlyBlendCaptionsOnlyInput {
    *  variants (torn_paper / sticky_note / quote_card) are baked in by the
    *  v62 pass and must NOT be repeated here. */
   captionMatchOverlays: CaptionMatchOverlay[];
+  /** Absolute composition frame at which the videoUrl's frame 0 should
+   *  appear. Used by the pipelined chunked-blend path: each blend chunk
+   *  K reads composite_chunk_K.mp4 (chunk-local video, frames 0..N/4-1
+   *  internally) and renders against absolute composition frames
+   *  K*N/4..K*N/4+N/4-1. With videoStartFrame=K*N/4 the OffthreadVideo
+   *  is wrapped in a `<Sequence from={K*N/4}>` so its internal frame
+   *  counter aligns with absolute composition time. Single-pass /
+   *  un-pipelined renders default to 0. */
+  videoStartFrame?: number;
 }
 
 export interface PromptlyBlendCaptionsOnlyProps {

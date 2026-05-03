@@ -595,12 +595,24 @@ export const PromptlyBlendCaptionsOnly: React.FC<PromptlyBlendCaptionsOnlyProps>
 }) => {
   const { videoUrl, caption, captionMatchOverlays, fps } = input;
   const resolvedVideoUrl = resolveSrc(videoUrl);
+  // videoStartFrame: absolute composition frame at which videoUrl's frame
+  // 0 should play. The pipelined chunked-blend path passes K*N/4 here so
+  // that each chunk's blend pass can read its corresponding composite
+  // chunk (frames 0..N/4-1 internally) instead of the concat'd silent
+  // intermediate. <Sequence from={...}> shifts the OffthreadVideo's
+  // local-frame counter so source frame 0 plays at composition frame
+  // videoStartFrame; captions and caption_match overlays sit at top
+  // level (use absolute composition frames) and are unaffected.
+  // Default 0 = no shift = legacy single-pass / un-pipelined behavior.
+  const videoStartFrame = input.videoStartFrame ?? 0;
   return (
     <AbsoluteFill style={{ background: "#000" }}>
-      <OffthreadVideo
-        src={resolvedVideoUrl}
-        style={{ width: "100%", height: "100%", objectFit: "cover" }}
-      />
+      <Sequence from={videoStartFrame}>
+        <OffthreadVideo
+          src={resolvedVideoUrl}
+          style={{ width: "100%", height: "100%", objectFit: "cover" }}
+        />
+      </Sequence>
       <CaptionsLayer caption={caption} fps={fps} />
       <TextOverlaysLayer
         overlays={captionMatchOverlays}

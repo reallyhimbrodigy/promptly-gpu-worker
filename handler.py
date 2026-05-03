@@ -443,8 +443,8 @@ try:
     from boto3.s3.transfer import TransferConfig as _BotoTransferConfig
     _S3_TRANSFER_CONFIG = _BotoTransferConfig(
         multipart_threshold=8 * 1024 * 1024,
-        multipart_chunksize=16 * 1024 * 1024,
-        max_concurrency=32,
+        multipart_chunksize=8 * 1024 * 1024,
+        max_concurrency=100,
         use_threads=True,
     )
 except ImportError:
@@ -8835,6 +8835,177 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             f"{' + PromptlyMicroSegments' if micro_cmd else ''} (gl={_gl_mode})",
             flush=True,
         )
+
+    # ── Composite chunk planning (computed up-front so we can pipeline) ───
+    # _N_COMPOSITE_CHUNKS / _composite_ranges / _build_composite_cmd are
+    # declared here, BEFORE _render_pool, so the pipelined path can spawn
+    # composite chunk subprocesses as soon as their corresponding overlay
+    # chunks finish — no barrier-wait-then-concat between phases.
+    #
+    # Below 400 frames the per-process startup tax dominates → composite
+    # falls back to single-pass. Below 300 frames overlay is also single,
+    # so pipelining is meaningless either way.
+    _N_COMPOSITE_CHUNKS = 4 if total_output_frames >= 400 else 1
+    _composite_ranges = split_timeline_into_chunks(int(total_output_frames), _N_COMPOSITE_CHUNKS)
+    _composite_chunked = len(_composite_ranges) > 1
+    _composite_chunk_paths = (
+        [os.path.join(work_dir, f"composite_chunk_{_i:02d}.mp4")
+         for _i in range(len(_composite_ranges))]
+        if _composite_chunked else []
+    )
+    # Pipelining condition: BOTH phases 4-way chunked. If composite is
+    # single-pass it has no chunk to pair with overlay chunk K, so we fall
+    # back to the legacy wave-based pattern (overlay all → concat → composite).
+    _pipeline_chunks = _composite_chunked and _overlay_chunked
+
+    # Blend-captions chunk planning. When the chosen caption style needs a
+    # second-pass blend render (mixBlendMode CSS over real video pixels),
+    # _BLEND_CHUNK_COUNT=4 if the output is long enough to amortize the
+    # per-process startup tax. Below 300 frames the single-process path
+    # is faster.
+    _BLEND_CHUNK_COUNT = 4 if total_output_frames >= 300 else 1
+    _blend_ranges = _split_frames(int(total_output_frames), _BLEND_CHUNK_COUNT)
+    _blend_chunked = len(_blend_ranges) > 1
+    _blend_chunk_paths = (
+        [os.path.join(work_dir, f"blend_captions_chunk_{_i:02d}.mp4")
+         for _i in range(len(_blend_ranges))]
+        if _blend_chunked else []
+    )
+    # Composite→blend pipelining: each blend chunk K reads composite
+    # chunk K (chunk-local) instead of the concat'd silent intermediate.
+    # Only kicks in when both phases are 4-way chunked AND we're a blend
+    # render. Conditions:
+    #   - _is_blend_render (otherwise no blend pass at all)
+    #   - _composite_chunked (need composite chunks to pair with)
+    #   - _blend_chunked (need blend chunks to pair with)
+    # Saves: silent_full concat skipped + blend chunk K starts as soon as
+    # composite chunk K finishes (no barrier on slowest composite chunk +
+    # concat). Quality identical: the Sequence wrap inside
+    # PromptlyBlendCaptionsOnly aligns the chunk video's local time with
+    # absolute composition frame K*chunk_size.
+    _pipeline_blend_chunks = (
+        _is_blend_render and _composite_chunked and _blend_chunked
+    )
+
+    def _build_composite_cmd(
+        chunk_idx: int,
+        chunk_start: int,
+        chunk_end: int,
+        output_path_for_chunk: str,
+        include_audio: bool,
+        overlay_path: Optional[str] = None,
+    ) -> list:
+        """Construct a single ffmpeg command for one composite chunk.
+        When include_audio=True, the audio track is muxed in the same pass
+        (used by the single-chunk fallback path).
+        When overlay_path is set, that file is used as the overlay input
+        directly — it must already contain exactly chunk_size frames at
+        internal time 0 (chunk-local). The filtergraph is told via
+        overlay_is_chunk_local=True so it skips the global trim. Used by
+        the pipelined chunk path (composite chunk K reads overlay chunk K
+        instead of the concat'd full overlay)."""
+        if _composite_chunked:
+            _c_clips, _c_trans, _c_micro = slice_timeline_for_chunk(
+                chunk_start, chunk_end, clips_out, transitions_out,
+                micro_segments_meta, source_fps,
+            )
+        else:
+            _c_clips = clips_out
+            _c_trans = transitions_out
+            _c_micro = micro_segments_meta
+
+        # Build inputs for THIS chunk. Source + overlay are always present;
+        # micro is only present if any sliced segment is remotion-rendered
+        # OR there's a transition in this chunk (transitions always live in
+        # micro_segments). B-roll lives entirely in PromptlyOverlay (alpha
+        # layer composited via overlay_input_idx) — no per-chunk B-roll
+        # inputs needed in this filtergraph.
+        chunk_inputs = [source_path]
+        c_source_idx = 0
+        c_micro_idx = None
+        c_micro_needed = (
+            micro_input is not None and len(_c_micro) > 0
+        )
+        if c_micro_needed:
+            chunk_inputs.append(micro_video_path)
+            c_micro_idx = len(chunk_inputs) - 1
+        # Overlay input: chunk-local file (pipelined path) or the global
+        # overlay (legacy / single-pass path). The filtergraph's
+        # overlay_is_chunk_local flag toggles whether to trim by
+        # chunk_global_start_frame.
+        _ov_input = overlay_path if overlay_path is not None else overlay_video_path
+        chunk_inputs.append(_ov_input)
+        c_overlay_idx = len(chunk_inputs) - 1
+        c_audio_idx = None
+        if include_audio:
+            c_audio_idx = len(chunk_inputs)
+            chunk_inputs.append(_final_audio_path)
+
+        chunk_size = chunk_end - chunk_start
+        _fg, _final_labels = build_final_filtergraph(
+            clips=_c_clips,
+            transitions=_c_trans,
+            micro_segments=_c_micro,
+            outro=_outro,
+            total_output_frames=chunk_size,
+            source_fps=source_fps,
+            source_input_idx=c_source_idx,
+            micro_input_idx=c_micro_idx,
+            overlay_input_idx=c_overlay_idx,
+            chunk_global_start_frame=(chunk_start if _composite_chunked else None),
+            global_total_frames=int(total_output_frames),
+            overlay_is_chunk_local=(overlay_path is not None),
+        )
+
+        cmd = ["ffmpeg", "-y", "-v", "warning", "-threads", "0"]
+        for _inp in chunk_inputs:
+            cmd += ["-i", _inp]
+        cmd += [
+            "-filter_complex", _fg,
+            "-map", f"[{_final_labels[0]}]",
+        ]
+        if include_audio and c_audio_idx is not None:
+            cmd += ["-map", f"{c_audio_idx}:a:0", "-c:a", "copy"]
+        cmd += [
+            # `veryfast` preset replaces `ultrafast`. ultrafast disables
+            # CABAC entropy coding, B-frames, deblocking filter, and
+            # advanced motion estimation — at a capped 8M bitrate that
+            # produces visible blocking, banding, and motion noise (the
+            # "static" + "10fps look" users were reporting). veryfast
+            # enables all of those at ~2-3× the encode time, which the
+            # H100 absorbs trivially since chunks run in parallel.
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+            # Force constant frame rate at the output stage. Filter
+            # graphs with speed-ramps produce non-uniform PTS — VFR
+            # output then makes AVPlayer's display loop look juddery
+            # on some devices. Targeting source_fps duplicates frames
+            # during slow-mo (fine) and the source is often 60fps so
+            # fast-mo segments don't lose detail.
+            "-fps_mode", "cfr", "-r", str(int(round(source_fps))),
+            # 14M / 28M cap for 1080p60. The previous 8M ceiling was below
+            # the floor for this resolution+framerate — VBV-clamped libx264
+            # could not hold detail through speed ramps, hard cuts, zoom
+            # regions, or B-roll overlays, producing the visible blocking +
+            # banding ("static") that users reported. 14M sits comfortably
+            # under iOS Level 4.1's 50M ceiling and is in line with TikTok's
+            # 1080p60 upload spec. CRF 18 is still the rate driver; the cap
+            # is just a safety lid.
+            "-maxrate", "14M", "-bufsize", "28M",
+            # High Profile + Level 4.1 = max compatibility for iOS
+            # AVPlayer / web HLS without limiting quality.
+            "-profile:v", "high", "-level:v", "4.1",
+            "-pix_fmt", "yuv420p",
+            # Force dense keyframes on every chunk so concat -c copy joins
+            # cleanly without GOP-boundary glitches.
+            "-g", str(int(round(source_fps))),
+            "-keyint_min", str(int(round(source_fps))),
+            "-sc_threshold", "0",
+            "-shortest",
+            "-movflags", "+faststart",
+            output_path_for_chunk,
+        ]
+        return cmd
+
     _render_pool = concurrent.futures.ThreadPoolExecutor(
         max_workers=max(1, len(overlay_cmds) + (1 if micro_cmd else 0)),
     )
@@ -8843,6 +9014,144 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         for _lbl, _cmd in overlay_cmds
     ]
     micro_future = _render_pool.submit(_run_remotion, "micro", micro_cmd) if micro_cmd else None
+
+    # ── Pipelined composite chunk dispatch ────────────────────────────────
+    # When both phases are 4-way chunked (total >= 400 frames), each
+    # composite chunk K runs as soon as its overlay chunk K finishes —
+    # no barrier-wait for all overlay chunks + concat. Chains run in
+    # parallel on a dedicated pool. Composite chunk K reads
+    # overlay_chunk_K.mov (chunk-local) directly, so the legacy overlay
+    # concat is skipped entirely for this path. Quality is identical:
+    # filtergraph trims source/transitions/micro the same way; the
+    # overlay branch just takes the no-trim path (overlay file is
+    # already chunk-local).
+    _composite_pool = None
+    _composite_chain_futures: list = []
+    if _pipeline_chunks:
+        _composite_pool = concurrent.futures.ThreadPoolExecutor(
+            max_workers=len(_composite_ranges)
+        )
+
+        def _composite_chain(K):
+            _t_chain = time.time()
+            # Block on this chunk's overlay before starting composite.
+            overlay_futures[K].result(timeout=320)
+            _ov_path = _overlay_chunk_paths[K]
+            if not os.path.exists(_ov_path) or os.path.getsize(_ov_path) < 1000:
+                raise RuntimeError(
+                    f"Overlay chunk {K} missing/invalid: {_ov_path}"
+                )
+            # micro is rendered as a single full-duration Remotion process,
+            # shared across all composite chunks (filtergraph trims to this
+            # chunk's range internally). Wait for it once per chain — the
+            # first chain to reach this point usually pays the cost; later
+            # chains find the future already resolved (Future caches result).
+            if micro_future is not None:
+                micro_future.result(timeout=320)
+            _cs, _ce = _composite_ranges[K]
+            _cmd = _build_composite_cmd(
+                K, _cs, _ce, _composite_chunk_paths[K],
+                include_audio=False,
+                overlay_path=_ov_path,
+            )
+            _t_ff = time.time()
+            _r = subprocess.run(
+                _cmd, capture_output=True, text=True, timeout=600,
+            )
+            _e_ff = time.time() - _t_ff
+            if _r.returncode != 0:
+                raise RuntimeError(
+                    f"[composite-{K:02d}] ffmpeg failed (rc={_r.returncode}) "
+                    f"in {_e_ff:.1f}s: {(_r.stderr or '')[-1500:]}"
+                )
+            return time.time() - _t_chain
+
+        _composite_chain_futures = [
+            _composite_pool.submit(_composite_chain, K)
+            for K in range(len(_composite_ranges))
+        ]
+        print(
+            f"[render] Pipelined composite chains dispatched "
+            f"({len(_composite_ranges)} chains, each waits on its overlay "
+            f"chunk then runs ffmpeg with chunk-local overlay)",
+            flush=True,
+        )
+
+    # ── Pipelined blend chunk dispatch ────────────────────────────────────
+    # When the chosen caption style requires a blend pass AND both
+    # composite and blend phases are 4-way chunked, each blend chunk K
+    # runs as soon as composite chunk K finishes — no barrier-wait for
+    # all composite chunks + silent_full concat. The chain stages
+    # composite_chunk_K.mp4 into bundle public root, writes a per-chunk
+    # input JSON with chunk-local videoUrl + videoStartFrame=K*chunk_size,
+    # then runs Remotion. The Sequence wrap inside
+    # PromptlyBlendCaptionsOnly aligns the chunk video's local time with
+    # absolute composition frames so captions stay correctly timed.
+    _blend_pool = None
+    _blend_futures: list = []
+    if _pipeline_blend_chunks:
+        _blend_pool = concurrent.futures.ThreadPoolExecutor(
+            max_workers=len(_blend_chunk_paths)
+        )
+
+        def _blend_chain(K):
+            _t_start = time.time()
+            # Block on this chunk's composite chain.
+            _composite_chain_futures[K].result(timeout=600)
+            _comp_path = _composite_chunk_paths[K]
+            if not os.path.exists(_comp_path) or os.path.getsize(_comp_path) < 1000:
+                raise RuntimeError(
+                    f"Composite chunk {K} missing/invalid for blend chain: {_comp_path}"
+                )
+            # Stage the chunk video into bundle public root — Remotion's
+            # OffthreadVideo fetches it via the static serveBundle HTTP
+            # endpoint. _stage_file uses the unique chunk basename so
+            # multiple chains don't collide.
+            _staged_url = _stage_file(_comp_path)
+            # Per-chunk input JSON. Every other field is shared (caption
+            # pages, captionMatchOverlays, fps, dims) — only videoUrl +
+            # videoStartFrame change.
+            _per_chunk_input = dict(blend_captions_input)
+            _per_chunk_input["videoUrl"] = _staged_url
+            _per_chunk_input["videoStartFrame"] = int(_blend_ranges[K][0])
+            _per_chunk_input_path = os.path.join(
+                _stage_dir, f"blend_captions_input_{K:02d}.json"
+            )
+            _validate_and_write_render_input(
+                f"blend-captions-{K:02d}",
+                _per_chunk_input,
+                _SchemaBlendCaptionsInput,
+                _per_chunk_input_path,
+            )
+            _fs, _fe = _blend_ranges[K]
+            _cmd = [
+                "node", "/remotion/render-full.mjs",
+                "--input", _per_chunk_input_path,
+                "--output", _blend_chunk_paths[K],
+                "--public-dir", _bundle_public_root,
+                "--composition", "PromptlyBlendCaptionsOnly",
+                "--gl", _gl_mode,
+                "--frame-range", f"{_fs},{_fe}",
+                "--composition-start", str(_fs),
+                "--concurrency", str(_PER_CHUNK_CONCURRENCY),
+            ]
+            _run_remotion(f"blend-captions-{K:02d}", _cmd)
+            if not os.path.exists(_blend_chunk_paths[K]) or os.path.getsize(_blend_chunk_paths[K]) < 1000:
+                raise RuntimeError(
+                    f"blend-captions chunk {K} missing/invalid: {_blend_chunk_paths[K]}"
+                )
+            return time.time() - _t_start  # whole-chain time including composite wait
+
+        _blend_futures = [
+            _blend_pool.submit(_blend_chain, K)
+            for K in range(len(_blend_chunk_paths))
+        ]
+        print(
+            f"[render] Pipelined blend chains dispatched "
+            f"({len(_blend_chunk_paths)} chains, each waits on its composite "
+            f"chunk then runs Remotion with chunk-local videoUrl + Sequence wrap)",
+            flush=True,
+        )
 
     # ── Audio pipeline (running on a separate thread) —
     # Collect its output now so the final-audio build can start while the
@@ -8927,7 +9236,13 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # profile, pixel format, color space) since they all came from the same
     # composition spec — concat demuxer can stream-copy them with zero
     # quality loss in <1s.
-    if _overlay_chunked:
+    #
+    # Pipelined path (`_pipeline_chunks=True`) skips this concat entirely:
+    # composite chunks read overlay_chunk_KK.mov directly, so the global
+    # overlay file is never assembled. Saves one ffmpeg pass + ~50-100MB
+    # intermediate write, and lets composite chunks start as soon as their
+    # overlay chunk finishes (not after the slowest one + concat).
+    if _overlay_chunked and not _pipeline_chunks:
         for _p in _overlay_chunk_paths:
             if not os.path.exists(_p) or os.path.getsize(_p) < 1000:
                 raise RuntimeError(f"Overlay chunk missing/invalid: {_p}")
@@ -8957,240 +9272,144 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             f"{os.path.getsize(overlay_video_path)/1024/1024:.1f}MB",
             flush=True,
         )
+    elif _pipeline_chunks:
+        _max_chunk = max(_overlay_chunk_elapsed)
+        print(
+            f"[render] Overlay chunks: max={_max_chunk:.1f}s, "
+            f"concat=skipped (composite chunks read overlay chunks directly)",
+            flush=True,
+        )
 
     print(f"[render] All Remotion renders done in {_render_elapsed:.1f}s", flush=True)
 
-    # Validate v62 Remotion outputs (always produced — blend mode no longer
-    # bypasses these; it adds a second pass on top of the v62 result).
-    if not os.path.exists(overlay_video_path) or os.path.getsize(overlay_video_path) < 1000:
-        raise RuntimeError(f"PromptlyOverlay output missing/invalid: {overlay_video_path}")
+    # Validate v62 Remotion outputs. In the pipelined path overlay_video_path
+    # is never produced (composite reads chunks directly) — validate the
+    # individual chunks here as a defensive sanity check; the chain
+    # function already raised if any chunk failed.
+    if _pipeline_chunks:
+        for _p in _overlay_chunk_paths:
+            if not os.path.exists(_p) or os.path.getsize(_p) < 1000:
+                raise RuntimeError(f"Overlay chunk missing/invalid: {_p}")
+    else:
+        if not os.path.exists(overlay_video_path) or os.path.getsize(overlay_video_path) < 1000:
+            raise RuntimeError(f"PromptlyOverlay output missing/invalid: {overlay_video_path}")
     if micro_input is not None and (
         not os.path.exists(micro_video_path) or os.path.getsize(micro_video_path) < 1000
     ):
         raise RuntimeError(f"PromptlyMicroSegments output missing/invalid: {micro_video_path}")
 
-    # ── Chunked composite (4-way parallel ffmpeg) ─────────────────────────
-    # The single-pass final-mux step was a libx264-encode-bound bottleneck
-    # (22.9s for 1363 frames on 64 vCPUs). Splitting the work into 4 parallel
-    # ffmpeg invocations on the same container — each producing one mp4
-    # piece for 1/4 of the timeline — gives each piece its own encoder
-    # thread pool. Lossless concat (`-c copy`) stitches the pieces and a
-    # final stream-copy pass muxes the audio.
-    #
-    # Quality identical: same libx264 ultrafast crf 18 settings per piece;
-    # concat is bit-exact, audio mux is stream-copy. The slicer
-    # (slice_timeline_for_chunk) shifts zoom events with their full
-    # original duration preserved, so easing curves stay smooth across
-    # chunk boundaries (verified pixel-exact at boundary frames).
-    #
-    # For very short outputs (<400 frames) the per-process startup tax
-    # dominates — fall back to single-pass.
-    _N_COMPOSITE_CHUNKS = 4 if total_output_frames >= 400 else 1
-    _composite_ranges = split_timeline_into_chunks(int(total_output_frames), _N_COMPOSITE_CHUNKS)
-    _composite_chunked = len(_composite_ranges) > 1
-
-    def _build_composite_cmd(
-        chunk_idx: int,
-        chunk_start: int,
-        chunk_end: int,
-        output_path_for_chunk: str,
-        include_audio: bool,
-    ) -> list:
-        """Construct a single ffmpeg command for one composite chunk.
-        When include_audio=True, the audio track is muxed in the same pass
-        (used by the single-chunk fallback path)."""
-        if _composite_chunked:
-            _c_clips, _c_trans, _c_micro = slice_timeline_for_chunk(
-                chunk_start, chunk_end, clips_out, transitions_out,
-                micro_segments_meta, source_fps,
-            )
-        else:
-            _c_clips = clips_out
-            _c_trans = transitions_out
-            _c_micro = micro_segments_meta
-
-        # Build inputs for THIS chunk. Source + overlay are always present;
-        # micro is only present if any sliced segment is remotion-rendered
-        # OR there's a transition in this chunk (transitions always live in
-        # micro_segments). B-roll lives entirely in PromptlyOverlay (alpha
-        # layer composited via overlay_input_idx) — no per-chunk B-roll
-        # inputs needed in this filtergraph.
-        chunk_inputs = [source_path]
-        c_source_idx = 0
-        c_micro_idx = None
-        c_micro_needed = (
-            micro_input is not None and len(_c_micro) > 0
-        )
-        if c_micro_needed:
-            chunk_inputs.append(micro_video_path)
-            c_micro_idx = len(chunk_inputs) - 1
-        # Overlay is included for every chunk — captions span the full
-        # video and the filtergraph trims to this chunk's frame range.
-        chunk_inputs.append(overlay_video_path)
-        c_overlay_idx = len(chunk_inputs) - 1
-        c_audio_idx = None
-        if include_audio:
-            c_audio_idx = len(chunk_inputs)
-            chunk_inputs.append(_final_audio_path)
-
-        chunk_size = chunk_end - chunk_start
-        _fg, _final_labels = build_final_filtergraph(
-            clips=_c_clips,
-            transitions=_c_trans,
-            micro_segments=_c_micro,
-            outro=_outro,
-            total_output_frames=chunk_size,
-            source_fps=source_fps,
-            source_input_idx=c_source_idx,
-            micro_input_idx=c_micro_idx,
-            overlay_input_idx=c_overlay_idx,
-            chunk_global_start_frame=(chunk_start if _composite_chunked else None),
-            global_total_frames=int(total_output_frames),
-        )
-
-        cmd = ["ffmpeg", "-y", "-v", "warning", "-threads", "0"]
-        for _inp in chunk_inputs:
-            cmd += ["-i", _inp]
-        cmd += [
-            "-filter_complex", _fg,
-            "-map", f"[{_final_labels[0]}]",
-        ]
-        if include_audio and c_audio_idx is not None:
-            cmd += ["-map", f"{c_audio_idx}:a:0", "-c:a", "copy"]
-        cmd += [
-            # `veryfast` preset replaces `ultrafast`. ultrafast disables
-            # CABAC entropy coding, B-frames, deblocking filter, and
-            # advanced motion estimation — at a capped 8M bitrate that
-            # produces visible blocking, banding, and motion noise (the
-            # "static" + "10fps look" users were reporting). veryfast
-            # enables all of those at ~2-3× the encode time, which the
-            # H100 absorbs trivially since chunks run in parallel.
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
-            # Force constant frame rate at the output stage. Filter
-            # graphs with speed-ramps produce non-uniform PTS — VFR
-            # output then makes AVPlayer's display loop look juddery
-            # on some devices. Targeting source_fps duplicates frames
-            # during slow-mo (fine) and the source is often 60fps so
-            # fast-mo segments don't lose detail.
-            "-fps_mode", "cfr", "-r", str(int(round(source_fps))),
-            # 14M / 28M cap for 1080p60. The previous 8M ceiling was below
-            # the floor for this resolution+framerate — VBV-clamped libx264
-            # could not hold detail through speed ramps, hard cuts, zoom
-            # regions, or B-roll overlays, producing the visible blocking +
-            # banding ("static") that users reported. 14M sits comfortably
-            # under iOS Level 4.1's 50M ceiling and is in line with TikTok's
-            # 1080p60 upload spec. CRF 18 is still the rate driver; the cap
-            # is just a safety lid.
-            "-maxrate", "14M", "-bufsize", "28M",
-            # High Profile + Level 4.1 = max compatibility for iOS
-            # AVPlayer / web HLS without limiting quality.
-            "-profile:v", "high", "-level:v", "4.1",
-            "-pix_fmt", "yuv420p",
-            # Force dense keyframes on every chunk so concat -c copy joins
-            # cleanly without GOP-boundary glitches.
-            "-g", str(int(round(source_fps))),
-            "-keyint_min", str(int(round(source_fps))),
-            "-sc_threshold", "0",
-            "-shortest",
-            "-movflags", "+faststart",
-            output_path_for_chunk,
-        ]
-        return cmd
-
     _mux_t0 = time.time()
     _silent_full = os.path.join(work_dir, "silent_full.mp4")
 
     if _composite_chunked:
-        # ── Spawn N parallel ffmpeg processes for the silent video pieces ──
-        _composite_chunk_paths = [
-            os.path.join(work_dir, f"composite_chunk_{_i:02d}.mp4")
-            for _i in range(len(_composite_ranges))
-        ]
-        _composite_cmds = [
-            (
-                f"composite-{_i:02d}",
-                _build_composite_cmd(
-                    _i, _cs, _ce, _composite_chunk_paths[_i], include_audio=False,
-                ),
-            )
-            for _i, (_cs, _ce) in enumerate(_composite_ranges)
-        ]
-
-        def _run_ffmpeg_chunk(label, cmd):
-            _t0 = time.time()
-            # Composite chunks may include minterpolate on B-roll inputs
-            # when broll fps < output fps. With several B-rolls in a
-            # chunk, minterpolate cost can reach ~60-90s; 600s gives
-            # ample headroom while still failing loud on a stuck chunk.
-            _r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-            _e = time.time() - _t0
-            if _r.returncode != 0:
-                raise RuntimeError(
-                    f"[{label}] composite ffmpeg failed (rc={_r.returncode}) in "
-                    f"{_e:.1f}s: {(_r.stderr or '')[-1500:]}"
-                )
-            return _e
-
+        # Composite chunked ⇔ total >= 400 frames ⇔ overlay also chunked
+        # (overlay threshold is 300) ⇔ _pipeline_chunks=True. So the only
+        # composite-chunked path is the pipelined one: chains were
+        # dispatched immediately after _render_pool spawned overlay
+        # futures, with each chain waiting on its overlay chunk + micro
+        # before running composite ffmpeg with chunk-local overlay.
         print(
-            f"[render] Spawning {len(_composite_cmds)} parallel composite ffmpegs "
-            f"({total_output_frames} frames split {len(_composite_ranges)}-ways)",
+            f"[render] Collecting {len(_composite_chain_futures)} pipelined "
+            f"composite chunks ({total_output_frames} frames split "
+            f"{len(_composite_ranges)}-ways)",
             flush=True,
         )
-        _composite_pool = concurrent.futures.ThreadPoolExecutor(max_workers=len(_composite_cmds))
-        _composite_futures = [
-            _composite_pool.submit(_run_ffmpeg_chunk, _lbl, _cmd)
-            for _lbl, _cmd in _composite_cmds
-        ]
         _composite_chunk_elapsed = []
-        for _ci, _f in enumerate(_composite_futures):
-            _e = _f.result(timeout=320)
+        for _ci, _f in enumerate(_composite_chain_futures):
+            # 600s ≥ overlay max + composite max + safety margin — chain
+            # blocks on overlay_K, then micro, then runs ffmpeg.
+            _e = _f.result(timeout=600)
             _composite_chunk_elapsed.append(_e)
             _path = _composite_chunk_paths[_ci]
             print(
-                f"[render] composite-{_ci:02d} done in {_e:.1f}s → "
+                f"[render] composite-{_ci:02d} chain done in {_e:.1f}s → "
                 f"{os.path.getsize(_path)/1024/1024:.1f}MB",
                 flush=True,
             )
-        _composite_pool.shutdown(wait=False)
+        if _composite_pool is not None:
+            _composite_pool.shutdown(wait=False)
 
-        # Concat the silent pieces (lossless `-c copy`).
-        _cc_list = os.path.join(work_dir, "_composite_concat_list.txt")
-        with open(_cc_list, "w") as _lf:
-            for _p in _composite_chunk_paths:
-                _lf.write(f"file '{_p}'\n")
-        _cc_t0 = time.time()
-        _cc_r = subprocess.run(
-            ["ffmpeg", "-y", "-v", "error",
-             "-f", "concat", "-safe", "0",
-             "-i", _cc_list,
-             "-c", "copy",
-             _silent_full],
-            capture_output=True, text=True, timeout=120,
-        )
-        if _cc_r.returncode != 0:
-            raise RuntimeError(
-                f"Composite chunk concat failed (rc={_cc_r.returncode}): "
-                f"{(_cc_r.stderr or '')[-1500:]}"
-            )
-        _cc_elapsed = time.time() - _cc_t0
         _max_chunk = max(_composite_chunk_elapsed)
-        print(
-            f"[render] Composite: max chunk={_max_chunk:.1f}s, concat={_cc_elapsed:.1f}s",
-            flush=True,
-        )
+        # silent_full concat happens ONLY when the blend pass needs a
+        # single videoUrl on disk AND we're not pipelining composite→blend.
+        # Three cases:
+        #   - non-blend: chunks pass straight into the final concat+mux
+        #     pass (Wave 1) — silent_full skipped.
+        #   - blend + pipelined (#5): each blend chunk reads its
+        #     corresponding composite chunk directly via per-chunk JSON
+        #     videoUrl + videoStartFrame Sequence wrap — silent_full
+        #     skipped, blend chunks chain off composite chains.
+        #   - blend + un-pipelined: composite was single-pass (300 ≤
+        #     frames < 400) so silent_full is already a single file from
+        #     the composite single call; OR blend is single (frames < 300)
+        #     so this entire chunked composite block doesn't fire. Either
+        #     way, silent_full concat from chunks isn't needed in this
+        #     branch.
+        if _is_blend_render and not _pipeline_blend_chunks:
+            _cc_list = os.path.join(work_dir, "_composite_concat_list.txt")
+            with open(_cc_list, "w") as _lf:
+                for _p in _composite_chunk_paths:
+                    _lf.write(f"file '{_p}'\n")
+            _cc_t0 = time.time()
+            _cc_r = subprocess.run(
+                ["ffmpeg", "-y", "-v", "error",
+                 "-f", "concat", "-safe", "0",
+                 "-i", _cc_list,
+                 "-c", "copy",
+                 _silent_full],
+                capture_output=True, text=True, timeout=120,
+            )
+            if _cc_r.returncode != 0:
+                raise RuntimeError(
+                    f"Composite chunk concat failed (rc={_cc_r.returncode}): "
+                    f"{(_cc_r.stderr or '')[-1500:]}"
+                )
+            _cc_elapsed = time.time() - _cc_t0
+            print(
+                f"[render] Composite: max chunk={_max_chunk:.1f}s, concat={_cc_elapsed:.1f}s",
+                flush=True,
+            )
+        elif _pipeline_blend_chunks:
+            print(
+                f"[render] Composite: max chunk={_max_chunk:.1f}s, "
+                f"concat=skipped (blend chunks read composite chunks directly)",
+                flush=True,
+            )
+        else:
+            print(
+                f"[render] Composite: max chunk={_max_chunk:.1f}s, concat=deferred (folded into final mux)",
+                flush=True,
+            )
     else:
-        # Single-pass for short outputs (<400 frames). Always produces a
-        # silent intermediate so the downstream blend-captions / audio-mux
-        # steps share the same shape as the chunked path.
+        # Single-pass for short outputs (<400 frames). For blend renders
+        # we still need a silent intermediate (the blend pass reads it as
+        # videoUrl), so target=silent_full and include_audio=False. For
+        # non-blend renders we write video + audio directly to output_path
+        # in one libx264 pass — the AAC track is `-c:a copy` stream-copied
+        # alongside the encode, so this is bit-exact with the previous
+        # silent_full → audio-mux chain.
+        _single_target = _silent_full if _is_blend_render else output_path
         _single_cmd = _build_composite_cmd(
-            0, 0, int(total_output_frames), _silent_full, include_audio=False,
+            0, 0, int(total_output_frames), _single_target,
+            include_audio=(not _is_blend_render),
         )
         _r = subprocess.run(_single_cmd, capture_output=True, text=True, timeout=300)
         if _r.returncode != 0:
             raise RuntimeError(f"Final composite failed: {(_r.stderr or '')[-1500:]}")
 
-    if not os.path.exists(_silent_full) or os.path.getsize(_silent_full) < 1000:
-        raise RuntimeError(f"Silent intermediate missing/invalid: {_silent_full}")
+    # silent_full is produced only when the blend pass needs it as a
+    # single videoUrl AND we are NOT pipelining composite→blend chunks.
+    # Cases that produce silent_full:
+    #   - blend + composite single (300 ≤ frames < 400): composite single
+    #     wrote silent_full directly.
+    #   - blend + composite chunked + NOT pipelined (impossible with
+    #     current thresholds, but kept as a safe path).
+    # Cases that skip silent_full:
+    #   - any non-blend render (output already in chunks or output_path).
+    #   - blend + pipelined: blend chunks read composite chunks directly.
+    if _is_blend_render and not _pipeline_blend_chunks:
+        if not os.path.exists(_silent_full) or os.path.getsize(_silent_full) < 1000:
+            raise RuntimeError(f"Silent intermediate missing/invalid: {_silent_full}")
 
     # ── Blend-mode second pass ────────────────────────────────────────────
     # For blend captions (GlitchHighlight / NegativeFlash / Prism), v62 has
@@ -9199,109 +9418,133 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # to draw blend captions + caption_match overlays on top with the
     # existing mixBlendMode CSS against real frame content, and use the
     # output of THAT pass as the source for the final audio mux.
-    _audio_source_video = _silent_full
+    #
+    # Tracking for the final concat+mux pass:
+    #   _output_already_written=True → non-blend single composite muxed
+    #     video+audio directly to output_path; final mux is a no-op.
+    #   _final_video_inputs is None  → set later by the blend block.
+    #   _final_video_inputs == [p]   → single-file mux (blend single path).
+    #   _final_video_inputs == [p,…] → concat demuxer + audio mux in one
+    #     ffmpeg pass (non-blend chunked, or blend chunked).
+    _output_already_written = (not _is_blend_render) and (not _composite_chunked)
+    if _output_already_written:
+        _final_video_inputs = None
+    elif _is_blend_render:
+        _final_video_inputs = None  # populated by the blend block below
+    else:
+        # Non-blend chunked: composite chunks go straight into the final
+        # concat+mux pass — silent_full intermediate skipped.
+        _final_video_inputs = list(_composite_chunk_paths)
     _blend_pass_elapsed = 0.0
     if _is_blend_render:
         _blend_t0 = time.time()
-        _blend_video_basename = _stage_file(_silent_full)
-        blend_captions_input["videoUrl"] = _blend_video_basename
-        blend_captions_input_path = os.path.join(_stage_dir, "blend_captions_input.json")
-        _validate_and_write_render_input(
-            "blend-captions",
-            blend_captions_input,
-            _SchemaBlendCaptionsInput,
-            blend_captions_input_path,
-        )
         _blend_captions_video = os.path.join(work_dir, "blend_captions.mp4")
 
-        # Chunk the blend captions pass the same way the overlay pass is
-        # chunked. A single Remotion process hits a documented ~16-22 fps
-        # ceiling on H100 (issue #4664) regardless of vCPU count — main-
-        # thread + encoder serialization, not paint cost. 4 separate
-        # processes each get their own ceiling, so aggregate fps scales
-        # nearly linearly. For long videos this collapses the blend pass
-        # from ~195s (single process, 2865 frames) to ~50s (4-way parallel).
-        # Below 300 frames the per-process startup tax (~3.5s) dominates
-        # — single process is faster.
-        _BLEND_CHUNK_COUNT = 4 if total_output_frames >= 300 else 1
-        _blend_ranges = _split_frames(int(total_output_frames), _BLEND_CHUNK_COUNT)
-        _blend_chunked = len(_blend_ranges) > 1
+        # Stage silent_full + write a SHARED input JSON only when the
+        # blend pass needs it (un-pipelined paths read silent_full). The
+        # pipelined path stages each composite chunk + writes a per-chunk
+        # JSON inside its blend chain instead.
+        if not _pipeline_blend_chunks:
+            _blend_video_basename = _stage_file(_silent_full)
+            blend_captions_input["videoUrl"] = _blend_video_basename
+            blend_captions_input_path = os.path.join(_stage_dir, "blend_captions_input.json")
+            _validate_and_write_render_input(
+                "blend-captions",
+                blend_captions_input,
+                _SchemaBlendCaptionsInput,
+                blend_captions_input_path,
+            )
 
         if _blend_chunked:
-            _blend_chunk_paths = [
-                os.path.join(work_dir, f"blend_captions_chunk_{_i:02d}.mp4")
-                for _i in range(len(_blend_ranges))
-            ]
-            _blend_cmds = []
-            for _i, (_fs, _fe) in enumerate(_blend_ranges):
-                _blend_cmds.append((
-                    f"blend-captions-{_i:02d}",
-                    [
-                        "node", "/remotion/render-full.mjs",
-                        "--input", blend_captions_input_path,
-                        "--output", _blend_chunk_paths[_i],
-                        "--public-dir", _bundle_public_root,
-                        "--composition", "PromptlyBlendCaptionsOnly",
-                        "--gl", _gl_mode,
-                        "--frame-range", f"{_fs},{_fe}",
-                        "--composition-start", str(_fs),
-                        "--concurrency", str(_PER_CHUNK_CONCURRENCY),
-                    ],
-                ))
-            print(
-                f"[render] Spawning {len(_blend_cmds)} blend-captions chunk subprocesses "
-                f"({total_output_frames} frames split {len(_blend_ranges)}-ways, "
-                f"concurrency={_PER_CHUNK_CONCURRENCY} each)",
-                flush=True,
-            )
-            _blend_pool = concurrent.futures.ThreadPoolExecutor(max_workers=len(_blend_cmds))
-            _blend_futures = [
-                _blend_pool.submit(_run_remotion, _lbl, _cmd)
-                for _lbl, _cmd in _blend_cmds
-            ]
-            _blend_chunk_elapsed = []
-            for _bi, _f in enumerate(_blend_futures):
-                _e = _f.result(timeout=400)
-                _blend_chunk_elapsed.append(_e)
-                _path = _blend_chunk_paths[_bi]
-                if not os.path.exists(_path) or os.path.getsize(_path) < 1000:
-                    raise RuntimeError(
-                        f"blend-captions chunk {_bi} output missing/invalid: {_path}"
+            # 4 separate Remotion processes — a single process hits the
+            # documented ~16-22 fps ceiling on H100 (issue #4664) regardless
+            # of vCPU count (main-thread + encoder serialization). 4 each
+            # get their own ceiling so aggregate fps scales nearly
+            # linearly. For long videos this collapses the blend pass
+            # from ~195s (single process, 2865 frames) to ~50s (4-way).
+            if _pipeline_blend_chunks:
+                # Pipelined: blend chains were dispatched immediately
+                # after the composite chains (way back next to
+                # _render_pool setup). Each chain blocks on its composite
+                # chunk K, stages composite_chunk_K.mp4, writes a
+                # per-chunk JSON (videoUrl + videoStartFrame), then runs
+                # Remotion. Collect the futures here.
+                _blend_chunk_elapsed = []
+                for _bi, _f in enumerate(_blend_futures):
+                    # 900s ≥ composite max + blend max + safety margin —
+                    # the chain time includes the wait for composite_K.
+                    _e = _f.result(timeout=900)
+                    _blend_chunk_elapsed.append(_e)
+                    print(
+                        f"[render] blend-captions-{_bi:02d} chain done in {_e:.1f}s → "
+                        f"{os.path.getsize(_blend_chunk_paths[_bi])/1024/1024:.1f}MB",
+                        flush=True,
                     )
+                if _blend_pool is not None:
+                    _blend_pool.shutdown(wait=False)
+            else:
+                # Un-pipelined chunked path: shared input JSON
+                # (silent_full as videoUrl), 4 Remotion processes
+                # dispatched together after silent_full is ready.
+                _blend_cmds = []
+                for _i, (_fs, _fe) in enumerate(_blend_ranges):
+                    _blend_cmds.append((
+                        f"blend-captions-{_i:02d}",
+                        [
+                            "node", "/remotion/render-full.mjs",
+                            "--input", blend_captions_input_path,
+                            "--output", _blend_chunk_paths[_i],
+                            "--public-dir", _bundle_public_root,
+                            "--composition", "PromptlyBlendCaptionsOnly",
+                            "--gl", _gl_mode,
+                            "--frame-range", f"{_fs},{_fe}",
+                            "--composition-start", str(_fs),
+                            "--concurrency", str(_PER_CHUNK_CONCURRENCY),
+                        ],
+                    ))
                 print(
-                    f"[render] blend-captions-{_bi:02d} done in {_e:.1f}s → "
-                    f"{os.path.getsize(_path)/1024/1024:.1f}MB",
+                    f"[render] Spawning {len(_blend_cmds)} blend-captions chunk subprocesses "
+                    f"({total_output_frames} frames split {len(_blend_ranges)}-ways, "
+                    f"concurrency={_PER_CHUNK_CONCURRENCY} each)",
                     flush=True,
                 )
-            _blend_pool.shutdown(wait=False)
+                _blend_pool = concurrent.futures.ThreadPoolExecutor(max_workers=len(_blend_cmds))
+                _blend_futures = [
+                    _blend_pool.submit(_run_remotion, _lbl, _cmd)
+                    for _lbl, _cmd in _blend_cmds
+                ]
+                _blend_chunk_elapsed = []
+                for _bi, _f in enumerate(_blend_futures):
+                    _e = _f.result(timeout=400)
+                    _blend_chunk_elapsed.append(_e)
+                    _path = _blend_chunk_paths[_bi]
+                    if not os.path.exists(_path) or os.path.getsize(_path) < 1000:
+                        raise RuntimeError(
+                            f"blend-captions chunk {_bi} output missing/invalid: {_path}"
+                        )
+                    print(
+                        f"[render] blend-captions-{_bi:02d} done in {_e:.1f}s → "
+                        f"{os.path.getsize(_path)/1024/1024:.1f}MB",
+                        flush=True,
+                    )
+                _blend_pool.shutdown(wait=False)
 
-            # Lossless concat of the h264 chunks. The chunks share identical
-            # codec parameters (same composition spec, same Remotion render
-            # config), and the dense GOP (1 keyframe/sec) means the concat
-            # demuxer can stream-copy them with zero quality loss.
-            _bc_list = os.path.join(work_dir, "_blend_captions_concat_list.txt")
-            with open(_bc_list, "w") as _lf:
-                for _p in _blend_chunk_paths:
-                    _lf.write(f"file '{_p}'\n")
-            _bc_t0 = time.time()
-            _bc_r = subprocess.run(
-                ["ffmpeg", "-y", "-v", "error",
-                 "-f", "concat", "-safe", "0",
-                 "-i", _bc_list,
-                 "-c", "copy",
-                 _blend_captions_video],
-                capture_output=True, text=True, timeout=120,
-            )
-            if _bc_r.returncode != 0:
-                raise RuntimeError(
-                    f"blend-captions chunk concat failed (rc={_bc_r.returncode}): "
-                    f"{(_bc_r.stderr or '')[-1500:]}"
-                )
-            _bc_concat_elapsed = time.time() - _bc_t0
+            # Both chunked paths defer the chunk concat into the final
+            # concat+mux pass — chunks share identical codec parameters
+            # (same composition spec, same Remotion render config) and
+            # the dense GOP (1 keyframe/sec) guarantees a bit-exact
+            # concat. Folding into audio mux skips one ffmpeg invocation
+            # and one 50-100MB intermediate write.
+            for _p in _blend_chunk_paths:
+                if not os.path.exists(_p) or os.path.getsize(_p) < 1000:
+                    raise RuntimeError(
+                        f"PromptlyBlendCaptionsOnly chunk missing/invalid: {_p}"
+                    )
+            _final_video_inputs = list(_blend_chunk_paths)
             _max_bc_chunk = max(_blend_chunk_elapsed)
             print(
                 f"[render] blend-captions: max chunk={_max_bc_chunk:.1f}s, "
-                f"concat={_bc_concat_elapsed:.1f}s",
+                f"concat=deferred (folded into final mux)",
                 flush=True,
             )
         else:
@@ -9315,41 +9558,89 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 "--gl", _gl_mode,
             ]
             _run_remotion("blend-captions", _blend_cmd)
+            if (
+                not os.path.exists(_blend_captions_video)
+                or os.path.getsize(_blend_captions_video) < 1000
+            ):
+                raise RuntimeError(
+                    f"PromptlyBlendCaptionsOnly output missing/invalid: {_blend_captions_video}"
+                )
+            _final_video_inputs = [_blend_captions_video]
 
-        if (
-            not os.path.exists(_blend_captions_video)
-            or os.path.getsize(_blend_captions_video) < 1000
-        ):
-            raise RuntimeError(
-                f"PromptlyBlendCaptionsOnly output missing/invalid: {_blend_captions_video}"
-            )
-        _audio_source_video = _blend_captions_video
         _blend_pass_elapsed = time.time() - _blend_t0
-        print(
-            f"[render] PromptlyBlendCaptionsOnly done in {_blend_pass_elapsed:.1f}s → "
-            f"{os.path.getsize(_blend_captions_video)/1024/1024:.1f}MB",
-            flush=True,
-        )
+        if _blend_chunked:
+            _bc_total_mb = sum(
+                os.path.getsize(_p) for _p in _blend_chunk_paths
+            ) / 1024 / 1024
+            print(
+                f"[render] PromptlyBlendCaptionsOnly done in {_blend_pass_elapsed:.1f}s → "
+                f"{_bc_total_mb:.1f}MB across {len(_blend_chunk_paths)} chunks",
+                flush=True,
+            )
+        else:
+            print(
+                f"[render] PromptlyBlendCaptionsOnly done in {_blend_pass_elapsed:.1f}s → "
+                f"{os.path.getsize(_blend_captions_video)/1024/1024:.1f}MB",
+                flush=True,
+            )
 
-    # ── Final audio mux: stream-copy silent video + AAC audio → output ────
+    # ── Final concat + audio mux ──────────────────────────────────────────
+    # Three execution paths driven by what the composite/blend phase left
+    # behind (see _output_already_written / _final_video_inputs setup
+    # above). Every path is stream-copy on both video and audio — the
+    # final file is bit-exact with what the previous separate-concat +
+    # separate-mux pipeline produced, just one ffmpeg invocation fewer.
     _am_t0 = time.time()
-    _am_r = subprocess.run(
-        ["ffmpeg", "-y", "-v", "warning",
-         "-i", _audio_source_video,
-         "-i", _final_audio_path,
-         "-c:v", "copy",
-         "-c:a", "copy",
-         "-shortest",
-         "-movflags", "+faststart",
-         output_path],
-        capture_output=True, text=True, timeout=120,
-    )
-    if _am_r.returncode != 0:
-        raise RuntimeError(
-            f"Audio mux failed (rc={_am_r.returncode}): "
-            f"{(_am_r.stderr or '')[-1500:]}"
+    if _output_already_written:
+        # Non-blend single composite already wrote video + AAC audio in
+        # one libx264 pass. Nothing to do here.
+        _am_elapsed = 0.0
+    elif len(_final_video_inputs) == 1:
+        # Single video file (blend single path) — plain stream-copy mux.
+        _am_r = subprocess.run(
+            ["ffmpeg", "-y", "-v", "warning",
+             "-i", _final_video_inputs[0],
+             "-i", _final_audio_path,
+             "-c:v", "copy",
+             "-c:a", "copy",
+             "-shortest",
+             "-movflags", "+faststart",
+             output_path],
+            capture_output=True, text=True, timeout=120,
         )
-    _am_elapsed = time.time() - _am_t0
+        if _am_r.returncode != 0:
+            raise RuntimeError(
+                f"Audio mux failed (rc={_am_r.returncode}): "
+                f"{(_am_r.stderr or '')[-1500:]}"
+            )
+        _am_elapsed = time.time() - _am_t0
+    else:
+        # Multiple chunks (non-blend chunked, or blend chunked). Concat
+        # demuxer joins them losslessly while the same pass muxes audio.
+        _final_concat_list = os.path.join(work_dir, "_final_concat_list.txt")
+        with open(_final_concat_list, "w") as _lf:
+            for _p in _final_video_inputs:
+                _lf.write(f"file '{_p}'\n")
+        _am_r = subprocess.run(
+            ["ffmpeg", "-y", "-v", "warning",
+             "-f", "concat", "-safe", "0",
+             "-i", _final_concat_list,
+             "-i", _final_audio_path,
+             "-map", "0:v",
+             "-map", "1:a",
+             "-c:v", "copy",
+             "-c:a", "copy",
+             "-shortest",
+             "-movflags", "+faststart",
+             output_path],
+            capture_output=True, text=True, timeout=180,
+        )
+        if _am_r.returncode != 0:
+            raise RuntimeError(
+                f"Final concat+mux failed (rc={_am_r.returncode}): "
+                f"{(_am_r.stderr or '')[-1500:]}"
+            )
+        _am_elapsed = time.time() - _am_t0
 
     _mux_elapsed = time.time() - _mux_t0
     print(

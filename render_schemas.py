@@ -256,3 +256,8 @@ class PromptlyBlendCaptionsOnlyInput(_RemotionModel):
     totalDurationInFrames: int
     caption: CaptionSpec
     captionMatchOverlays: List[CaptionMatchOverlay]
+    # Optional: absolute composition frame at which videoUrl frame 0 plays.
+    # Used by the pipelined chunked-blend path so each chunk can read its
+    # corresponding composite chunk (chunk-local video) instead of the
+    # concat'd silent intermediate. Defaults to 0 (single-pass / un-pipelined).
+    videoStartFrame: Optional[int] = None

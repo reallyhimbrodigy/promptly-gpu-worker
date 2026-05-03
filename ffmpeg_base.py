@@ -442,6 +442,12 @@ def build_final_filtergraph(
     # correctly. None = legacy single-pass mode.
     chunk_global_start_frame: Optional[int] = None,
     global_total_frames: Optional[int] = None,
+    # When True, the overlay input file already contains exactly this
+    # chunk's frames (chunk-local 0..total_output_frames-1) — no global
+    # trim needed. The outro-fade math still uses chunk_global_start_frame
+    # against global_total_frames to figure out whether the fade lands in
+    # this chunk and at what chunk-local offset.
+    overlay_is_chunk_local: bool = False,
 ) -> Tuple[str, List[str]]:
     """Build the full FFmpeg filtergraph that produces the final composited
     video (pre-audio mux). Caller wraps this in an `ffmpeg -i ... -filter_complex
@@ -642,11 +648,23 @@ def build_final_filtergraph(
             cur = next_label
 
     # ── Alpha overlay composite ──────────────────────────────────────────────
-    # Single-pass mode: overlay.mov covers the full output, no trim needed.
-    # Chunked mode: overlay.mov covers the GLOBAL output; we trim to this
-    #   chunk's frame range and rebase to chunk-local PTS.
+    # Three input shapes for the overlay file:
+    #   * Single-pass mode (chunk_global_start_frame is None): overlay.mov
+    #     covers the full output, no trim needed.
+    #   * Chunked mode + global overlay (overlay_is_chunk_local=False):
+    #     overlay.mov covers the GLOBAL output; we trim to this chunk's
+    #     frame range and rebase to chunk-local PTS.
+    #   * Chunked mode + chunk-local overlay (overlay_is_chunk_local=True):
+    #     overlay file already holds exactly this chunk's frames at
+    #     internal time 0 — no trim needed, identical to single-pass case
+    #     for the overlay branch. Outro-fade math is unaffected (it uses
+    #     chunk_global_start_frame against the base segment, not the
+    #     overlay input).
     if overlay_input_idx is not None:
-        if chunk_global_start_frame is not None:
+        _needs_global_overlay_trim = (
+            chunk_global_start_frame is not None and not overlay_is_chunk_local
+        )
+        if _needs_global_overlay_trim:
             ov_lbl = f"ov_chunk"
             sf = int(chunk_global_start_frame)
             ef = sf + int(total_output_frames)
