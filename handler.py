@@ -8692,8 +8692,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     )
 
     # ── 10. Spawn Remotion renders in parallel (overlay chunks + micro) ────
-    # The orchestrator (64 vCPU, 128 GB) runs N parallel Remotion overlay
-    # subprocesses + 1 micro-segments subprocess on the same container.
+    # The orchestrator (128 physical cores ≈ 256 vCPU, 128 GB) runs N
+    # parallel Remotion overlay subprocesses + 1 micro-segments subprocess
+    # on the same container.
     # Subprocess parallelism is OS-level (Python ThreadPoolExecutor →
     # subprocess.Popen → kernel scheduler distributes across vCPUs); there's
     # no Modal Function.map() involved, so the v61 inter-container scheduling
@@ -8705,8 +8706,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # processes each get their own ceiling, so aggregate fps scales nearly
     # linearly with chunk count up to ~6-8 chunks on this container.
     #
-    # Chunk sizing: 4 chunks at concurrency=8 each → ~16 vCPUs per process,
-    # fits cleanly in 64 vCPUs. Skip chunking for very short overlays
+    # Chunk sizing: 4 chunks at concurrency=8 each → ~32 vCPUs per process
+    # on the 256-vCPU container. Skip chunking for very short overlays
     # (<300 frames) where the per-process startup tax doesn't amortize.
     overlay_video_path = os.path.join(work_dir, "overlay.mov")
     micro_video_path = os.path.join(work_dir, "micro_segments.mp4")
@@ -8764,7 +8765,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # Decide chunk count based on total frames. Below 300 frames the
     # per-process startup tax (~3.5s) dominates — single process is faster.
     _OVERLAY_CHUNK_COUNT = 4 if total_output_frames >= 300 else 1
-    _PER_CHUNK_CONCURRENCY = 8  # 4 chunks × 8 tabs = 32 tabs across 64 vCPUs
+    _PER_CHUNK_CONCURRENCY = 8  # 4 chunks × 8 tabs = 32 tabs on the 256-vCPU container
     _overlay_ranges = _split_frames(int(total_output_frames), _OVERLAY_CHUNK_COUNT)
     _overlay_chunked = len(_overlay_ranges) > 1
     _overlay_chunk_paths: list = []
@@ -8971,7 +8972,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     # ── Chunked composite (4-way parallel ffmpeg) ─────────────────────────
     # The single-pass final-mux step was a libx264-encode-bound bottleneck
-    # (22.9s for 1363 frames on 64 vCPUs). Splitting the work into 4 parallel
+    # (22.9s for 1363 frames on the previous 64-vCPU container). Splitting the work into 4 parallel
     # ffmpeg invocations on the same container — each producing one mp4
     # piece for 1/4 of the timeline — gives each piece its own encoder
     # thread pool. Lossless concat (`-c copy`) stitches the pieces and a

@@ -342,7 +342,7 @@ prewarm_volume = modal.Volume.from_name("promptly-prewarm-cache", create_if_miss
 @app.cls(
     timeout=600,          # 10 min — orchestrator runs init + audio + remotion + composite + upload
     scaledown_window=30,  # tear down fast — at $8.27/hr full spec, idle scaledown was costing ~$0.69 per render (83% of total bill). 30s window catches back-to-back jobs without paying for long idle.
-    cpu=64,
+    cpu=128,              # 128 physical cores ≈ 256 vCPUs (per Modal, `cpu=` is physical cores, hyperthreaded 1:2). The 4 parallel composite ffmpeg processes each at `-threads 0` request up to libx264's 128-thread cap; on 128 vCPUs (cpu=64) they were oversubscribing 4× (4×128=512 vs 128 actual). Doubling to 256 vCPUs reduces contention enough for libx264 to hit closer to its per-encode thread cap, shaving ~5-15s off the composite phase. Cost: ~+$0.10/render at $0.047/core-hour.
     memory=131072,        # 128GB — Remotion overlay + Remotion micro-segments run in parallel here, plus per-cut numpy audio resampler, plus the big single-pass ffmpeg composite
     # No GPU on the orchestrator — moved to the dedicated rife_normalize_remote
     # function below. The orchestrator does Remotion (Chromium software paint),
