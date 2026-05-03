@@ -412,23 +412,7 @@ class PromptlyPrewarmWorker:
         client-side upload to S3 finishes (well before the user taps Send).
         By the time the real render request arrives, the source is on the
         Modal Volume and the download step is a no-op.
-
-        Also fires a fire-and-forget GPU warmup spawn — provisions the
-        rife_normalize_remote H100 container with the driver-mount fix +
-        torch CUDA init, so the real RIFE call (typically 30-60s later
-        when the user taps render) hits a warm container instead of
-        paying a 15-20s cold start on the critical path. Cost: ~$0.05 per
-        warmup of GPU time. Tracking that against the 15-20s of pipeline
-        latency saved per render — clear UX win.
         """
-        # Spawn GPU warmup BEFORE the synchronous source-download work
-        # so they overlap. Spawn returns immediately; Modal scheduler
-        # provisions the H100 in the background while we download.
-        try:
-            rife_normalize_remote.spawn(b"", 60, True)
-        except Exception as _spawn_err:
-            print(f"[prewarm] rife warmup spawn failed (non-fatal): {_spawn_err}", flush=True)
-
         result = self._prewarm({"input": body})
         try:
             self._prewarm_volume.commit()

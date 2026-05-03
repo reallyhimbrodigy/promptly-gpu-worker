@@ -8977,14 +8977,17 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         if include_audio and c_audio_idx is not None:
             cmd += ["-map", f"{c_audio_idx}:a:0", "-c:a", "copy"]
         cmd += [
-            # `veryfast` preset replaces `ultrafast`. ultrafast disables
-            # CABAC entropy coding, B-frames, deblocking filter, and
-            # advanced motion estimation — at a capped 8M bitrate that
-            # produces visible blocking, banding, and motion noise (the
-            # "static" + "10fps look" users were reporting). veryfast
-            # enables all of those at ~2-3× the encode time, which the
-            # H100 absorbs trivially since chunks run in parallel.
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+            # `medium` preset replaces `veryfast`. veryfast cut corners on
+            # rate-distortion (smaller B-frame search, looser ME) which
+            # produced visible pixel-level artifacts on hard-motion frames
+            # (head turns, hand gestures, B-roll cuts, scene changes).
+            # medium enables full B-frames, full ME, full subpel refinement
+            # — meaningfully sharper output at the same CRF. Cost: ~2-3×
+            # encode time per frame, but composite chunks already run 4-way
+            # parallel and chunks finish in 60-90s either way, so this lands
+            # inside the existing render window with negligible critical-
+            # path impact.
+            "-c:v", "libx264", "-preset", "medium", "-crf", "18",
             # Force constant frame rate at the output stage. Filter
             # graphs with speed-ramps produce non-uniform PTS — VFR
             # output then makes AVPlayer's display loop look juddery
@@ -8992,15 +8995,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             # during slow-mo (fine) and the source is often 60fps so
             # fast-mo segments don't lose detail.
             "-fps_mode", "cfr", "-r", str(int(round(source_fps))),
-            # 14M / 28M cap for 1080p60. The previous 8M ceiling was below
-            # the floor for this resolution+framerate — VBV-clamped libx264
-            # could not hold detail through speed ramps, hard cuts, zoom
-            # regions, or B-roll overlays, producing the visible blocking +
-            # banding ("static") that users reported. 14M sits comfortably
-            # under iOS Level 4.1's 50M ceiling and is in line with TikTok's
-            # 1080p60 upload spec. CRF 18 is still the rate driver; the cap
-            # is just a safety lid.
-            "-maxrate", "14M", "-bufsize", "28M",
+            # 18M / 36M cap for 1080p60. The previous 14M ceiling clipped
+            # detail on heavy-motion segments (hard cuts, B-roll, zooms +
+            # transitions stacked). 18M is in TikTok's recommended range
+            # for 1080p60 short-form and well under iOS Level 4.1's 50M
+            # ceiling. CRF 18 is still the rate driver; the cap is just
+            # a safety lid that almost never engages on talking-head
+            # content but stays out of the way when it would.
+            "-maxrate", "18M", "-bufsize", "36M",
             # High Profile + Level 4.1 = max compatibility for iOS
             # AVPlayer / web HLS without limiting quality.
             "-profile:v", "high", "-level:v", "4.1",
@@ -10481,25 +10483,26 @@ def handler(job):
         def _do_fps_normalize():
             """Canonicalize source to 1080×1920 60fps CFR yuv420p.
 
-            Single ingest pass that produces the ONE canonical shape every
-            downstream module operates against. Replaces the prior dual-pass
-            arrangement (a separate fps-only step, then a second scale/crop
-            pass at the start of render_multi_clip).
+            Single-pass ffmpeg ingest. The fps=60 filter handles every
+            source FPS (60, 30, 24, 25, 23.976, etc.) via deterministic
+            frame duplication — each source frame is emitted as many times
+            as needed to hit 60fps output. Zero interpolation, zero
+            invented pixels.
 
-            Routes:
-              * Source already >=60fps -> plain ffmpeg pass with fps=60
-                plus the analyze-derived normalize_vf (face-aware crop or
-                center-crop) folded into a single filter chain. No frame
-                synthesis cost.
-              * Source <60fps -> RIFE 4.18 on H100 GPU via
-                /rife_normalize.py for motion-compensated frame synthesis,
-                then a second ffmpeg pass that applies normalize_vf and
-                pix_fmt = yuv420p. Two passes is unavoidable: RIFE outputs
-                its own mp4 and we don't want RIFE to know about cropping.
+            We previously used RIFE 4.18 to synthesize new in-between
+            frames for sub-60fps sources. RIFE produced visible warping
+            artifacts ("invented pixels") on fast head/hand motion AND
+            cost ~84s on the critical path per render. Frame duplication
+            is bit-faithful to the source AND ~80s faster. The "smooth
+            60fps" feel of the final video comes from Remotion's overlays
+            (zooms, motion graphics, captions) rendering at 60fps over the
+            duplicated speaker frames — those layers are fresh-rendered,
+            not interpolated, so they stay buttery without depending on
+            the speaker layer's source FPS.
 
             Awaits future_normalize so it can read the analyze-derived
-            normalize_vf. analyze typically finishes in 2-5s; the await is
-            negligible against the ~30s normalize cost.
+            normalize_vf. analyze typically finishes in 2-5s; the await
+            is negligible against the ~10s normalize cost.
 
             Output: source_canonical.mp4 (1080x1920 60fps yuv420p h264
             ultrafast crf 18, 1-keyframe-per-second GOP for fast seeks).
@@ -10523,111 +10526,47 @@ def handler(job):
 
             _avg = _parse_rate(_avg_rate_str)
             _r_val = _parse_rate(_r_rate_str)
-            _src_fps_estimate = _avg or _r_val or 30.0
 
             _norm_t0 = time.time()
             _norm_path = os.path.join(work_dir, "source_canonical.mp4")
 
-            # Compose the filter chain. deshake (single-pass stabilization)
-            # runs FIRST so motion-vector analysis sees the raw source frames
-            # before any scale/crop alters geometry — required for accurate
-            # transform compensation. deshake produces minimal artifacts on
-            # stable footage (it only transforms when motion is detected) so
-            # applying unconditionally is safe; the cost is ~3-8s on a 60s
-            # source which lands inside the canonicalize step's parallel
-            # window with Gemini cuts/post calls. Then fps=60, then scale/
-            # crop normalize_vf. Final pix_fmt=yuv420p re-encode for
-            # downstream uniformity.
+            # deshake (single-pass stabilization) runs FIRST so motion-vector
+            # analysis sees the raw source frames before any scale/crop
+            # alters geometry — required for accurate transform compensation.
+            # deshake produces minimal artifacts on stable footage (it only
+            # transforms when motion is detected) so applying unconditionally
+            # is safe; the cost is ~3-8s on a 60s source which lands inside
+            # the canonicalize step's parallel window with Gemini cuts/post
+            # calls. Then fps=60 (frame-doubles sub-60fps inputs, no-op for
+            # 60fps), then scale/crop normalize_vf. Final pix_fmt=yuv420p
+            # re-encode for downstream uniformity.
             _vf_parts = ["deshake=rx=16:ry=16:edge=mirror", "fps=60"]
             if _normalize_vf:
                 _vf_parts.append(_normalize_vf)
             _vf_combined = ",".join(_vf_parts)
 
-            if _src_fps_estimate >= 59.5:
-                # Source already at or above target — plain fps filter +
-                # normalize_vf in a single pass.
-                _interp_mode = "fps-only"
-                _r_out = subprocess.run(
-                    ["ffmpeg", "-y", "-v", "error", "-threads", "0",
-                     "-i", _raw_source,
-                     "-vf", _vf_combined,
-                     "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
-                     "-pix_fmt", "yuv420p",
-                     "-g", "60", "-keyint_min", "60", "-sc_threshold", "0",
-                     "-c:a", "copy",
-                     "-video_track_timescale", "90000",
-                     _norm_path],
-                    capture_output=True, text=True, timeout=180,
+            _r_out = subprocess.run(
+                ["ffmpeg", "-y", "-v", "error", "-threads", "0",
+                 "-i", _raw_source,
+                 "-vf", _vf_combined,
+                 "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
+                 "-pix_fmt", "yuv420p",
+                 "-g", "60", "-keyint_min", "60", "-sc_threshold", "0",
+                 "-c:a", "copy",
+                 "-video_track_timescale", "90000",
+                 _norm_path],
+                capture_output=True, text=True, timeout=180,
+            )
+            if _r_out.returncode != 0 or not os.path.exists(_norm_path):
+                raise RuntimeError(
+                    f"Source canonicalize failed: "
+                    f"{(_r_out.stderr or '')[-500:]}"
                 )
-                if _r_out.returncode != 0 or not os.path.exists(_norm_path):
-                    raise RuntimeError(
-                        f"Source canonicalize (fps-only) failed: "
-                        f"{(_r_out.stderr or '')[-500:]}"
-                    )
-            else:
-                # Source below target — RIFE 4.18 on a dedicated H100 worker
-                # via the rife_normalize_remote Modal function. The
-                # orchestrator runs CPU-only, so it dispatches the GPU work
-                # to a separate container that scales independently. Bytes
-                # in / bytes out — Modal handles arg blob storage for large
-                # payloads automatically.
-                _interp_mode = "rife-4.18"
-                _rife_out = os.path.join(work_dir, "_rife_60fps.mp4")
-
-                from modal import Function as _ModalFunction
-                _rife_fn = _ModalFunction.from_name(
-                    "promptly-gpu-worker", "rife_normalize_remote"
-                )
-                with open(_raw_source, "rb") as _f:
-                    _src_bytes = _f.read()
-                _out_bytes = _rife_fn.remote(_src_bytes, 60)
-                with open(_rife_out, "wb") as _f:
-                    _f.write(_out_bytes)
-                if not os.path.exists(_rife_out) or os.path.getsize(_rife_out) < 1024:
-                    raise RuntimeError(
-                        f"Source canonicalize (RIFE remote) returned empty "
-                        f"output ({os.path.getsize(_rife_out) if os.path.exists(_rife_out) else 'missing'}B)"
-                    )
-                if _normalize_vf:
-                    # Source needs scale/crop on top of RIFE's 60fps output.
-                    # deshake runs first (motion analysis on the RIFE-
-                    # interpolated frames is fine — RIFE preserves geometry,
-                    # only adds intermediate frames). Then scale/crop. Single
-                    # ffmpeg pass; no extra wall-clock since we're already
-                    # running this pass for the scale.
-                    _post_rife_vf = "deshake=rx=16:ry=16:edge=mirror," + _normalize_vf
-                    _scale_r = subprocess.run(
-                        ["ffmpeg", "-y", "-v", "error", "-threads", "0",
-                         "-i", _rife_out,
-                         "-vf", _post_rife_vf,
-                         "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
-                         "-pix_fmt", "yuv420p",
-                         "-g", "60", "-keyint_min", "60", "-sc_threshold", "0",
-                         "-c:a", "copy",
-                         "-video_track_timescale", "90000",
-                         _norm_path],
-                        capture_output=True, text=True, timeout=180,
-                    )
-                    if _scale_r.returncode != 0 or not os.path.exists(_norm_path):
-                        raise RuntimeError(
-                            f"Source canonicalize (post-RIFE scale) failed: "
-                            f"{(_scale_r.stderr or '')[-500:]}"
-                        )
-                    try:
-                        os.remove(_rife_out)
-                    except OSError:
-                        pass
-                else:
-                    # Source is already 1080x1920 — RIFE already produced
-                    # h264 yuv420p at the canonical resolution. Just rename
-                    # the file; a second ffmpeg pass would be ~10-15s of
-                    # pure waste (re-encoding bit-identical pixels).
-                    os.rename(_rife_out, _norm_path)
 
             _size_mb = os.path.getsize(_norm_path) / (1024 * 1024)
             print(
-                f"[fps-normalize] Converted r={_r_val:.4f}fps avg={_avg:.4f}fps "
-                f"-> 60.0000fps CFR ({_interp_mode}) in {time.time() - _norm_t0:.1f}s "
+                f"[fps-normalize] r={_r_val:.4f}fps avg={_avg:.4f}fps "
+                f"-> 60.0000fps CFR (frame-dup) in {time.time() - _norm_t0:.1f}s "
                 f"({_size_mb:.1f}MB)",
                 flush=True,
             )
