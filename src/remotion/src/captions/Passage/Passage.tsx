@@ -134,9 +134,10 @@ const PassagePage: React.FC<{
   const { fps } = useVideoConfig();
   const pageLocalMs = (frame / fps) * 1000;
 
+  // 15ms snap fade-out so the page exits on spoken-word timing.
   const fadeOut = interpolate(
     pageLocalMs,
-    [page.durationMs - 50, page.durationMs],
+    [page.durationMs - 15, page.durationMs],
     [1, 0],
     { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
   );

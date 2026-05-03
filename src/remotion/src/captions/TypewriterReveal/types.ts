@@ -46,9 +46,9 @@ export interface TypewriterRevealProps extends CaptionStyleProps {
   letterSpacing?: string;
   /** Line height. Default: 1.4 */
   lineHeight?: number;
-  /** Page fade-in duration in ms. Default: 150 */
+  /** Page fade-in duration in ms. Default: 15 */
   fadeInDurationMs?: number;
-  /** Page fade-out duration in ms. Default: 150 */
+  /** Page fade-out duration in ms. Default: 15 */
   fadeOutDurationMs?: number;
   /** Box border radius. Default: 8 */
   boxBorderRadius?: number;

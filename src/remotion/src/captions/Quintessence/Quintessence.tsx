@@ -66,15 +66,15 @@ export const Quintessence: React.FC<QuintessenceProps> = ({
   const endFrame = msToFrames(activeSlot.endMs, fps);
   const elapsed = frame - startFrame;
 
-  // Quick fade in
-  const fadeInFrames = 3;
+  // Snap fade in (1 frame ~17ms at 60fps)
+  const fadeInFrames = 1;
   const fadeIn = interpolate(elapsed, [0, fadeInFrames], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
 
-  // Quick fade out
-  const fadeOutFrames = 3;
+  // Snap fade out (1 frame ~17ms at 60fps)
+  const fadeOutFrames = 1;
   const fadeOut = interpolate(
     frame,
     [endFrame - fadeOutFrames, endFrame],

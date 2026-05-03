@@ -138,10 +138,10 @@ export const EditorialPop: React.FC<EditorialPopProps> = ({
         const durationFrames = msToFrames(page.durationMs, fps);
         if (durationFrames <= 0) return null;
 
-        // 3 frames (~50ms at 60fps) — tight page-boundary fade so captions
-        // land ON the spoken word rather than trailing it.
+        // 1 frame (~17ms at 60fps) — captions snap on/off with the spoken
+        // word; single-frame is enough to avoid a hard pop.
         const endFrame = startFrame + durationFrames;
-        const fadeFrames = 3;
+        const fadeFrames = 1;
         const fadeIn = interpolate(
           frame,
           [startFrame, startFrame + fadeFrames],

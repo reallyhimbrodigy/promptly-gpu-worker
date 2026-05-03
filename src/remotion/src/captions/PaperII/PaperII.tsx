@@ -188,17 +188,18 @@ const PaperIIPage: React.FC<{
     lines.push(page.tokens.slice(i, i + maxWordsPerLine));
   }
 
-  // Tight 50ms fade in/out — captions land ON the spoken word.
+  // Snap 15ms fade in/out — captions land ON the spoken word with no
+  // perceptible delay; the tiny ramp avoids hard popping.
   const pageLocalMs = (frame / fps) * 1000;
   const fadeInOpacity = interpolate(
     pageLocalMs,
-    [0, 50],
+    [0, 15],
     [0, 1],
     { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
   );
   const fadeOutOpacity = interpolate(
     pageLocalMs,
-    [page.durationMs - 50, page.durationMs],
+    [page.durationMs - 15, page.durationMs],
     [1, 0],
     { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
   );

@@ -7,6 +7,6 @@ export interface PulseProps extends CaptionStyleProps {
   textColor?: string;
   /** Keyword accent color. Default: "#00BFFF" */
   keywordColor?: string;
-  /** Fade duration in frames (opacity transition). Default: 5 (~167ms at 30fps) */
+  /** Fade duration in frames (opacity transition). Default: 1 (~17ms at 60fps) — captions snap to spoken-word timing. */
   fadeDurationFrames?: number;
 }

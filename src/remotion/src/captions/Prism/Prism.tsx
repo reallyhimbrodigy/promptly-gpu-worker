@@ -255,10 +255,9 @@ export const Prism: React.FC<PrismProps> = ({
   const lineDurationFrames = msToFrames(activeLine.endMs, fps) - lineStartFrame;
   const hasKeywords = activeLine.tokens.some((t) => keywordCheck(t.text));
 
-  // Page-boundary fade: 3 frames (~50 ms at 60fps). Audio-sync trumps
-  // smoothness — captions need to land ON the spoken word, not trail it.
-  // Longer fades (10+ frames / 167+ ms) made captions feel laggy.
-  const fadeFrames = 3;
+  // Page-boundary fade: 1 frame (~17 ms at 60fps). Captions snap on/off
+  // with the spoken word — single-frame is just enough to avoid hard pop.
+  const fadeFrames = 1;
   const lineEndFrame = lineStartFrame + lineDurationFrames;
   const fadeIn = interpolate(
     frame,
