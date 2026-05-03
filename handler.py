@@ -8871,21 +8871,17 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
          for _i in range(len(_blend_ranges))]
         if _blend_chunked else []
     )
-    # Composite→blend pipelining: each blend chunk K reads composite
-    # chunk K (chunk-local) instead of the concat'd silent intermediate.
-    # Only kicks in when both phases are 4-way chunked AND we're a blend
-    # render. Conditions:
-    #   - _is_blend_render (otherwise no blend pass at all)
-    #   - _composite_chunked (need composite chunks to pair with)
-    #   - _blend_chunked (need blend chunks to pair with)
-    # Saves: silent_full concat skipped + blend chunk K starts as soon as
-    # composite chunk K finishes (no barrier on slowest composite chunk +
-    # concat). Quality identical: the Sequence wrap inside
-    # PromptlyBlendCaptionsOnly aligns the chunk video's local time with
-    # absolute composition frame K*chunk_size.
-    _pipeline_blend_chunks = (
-        _is_blend_render and _composite_chunked and _blend_chunked
-    )
+    # Composite→blend pipelining: DISABLED.
+    # The pipelined path (Sequence-wrap on OffthreadVideo with chunk-local
+    # videoUrl + videoStartFrame=K*chunk_size) shipped a regression on
+    # NegativeFlash blend captions in production — visible triangle
+    # artifacts around the rendered text. Smoke test only validated
+    # videoStartFrame=0 (bit-identical to pre-change), so the chunk paths
+    # with videoStartFrame > 0 were never visually verified end-to-end.
+    # Forcing False keeps the un-pipelined wave path: blend chunks read
+    # the concat'd silent_full as before. Wave 2 #4 (overlay→composite
+    # chunk pipeline) is unaffected and remains active.
+    _pipeline_blend_chunks = False
 
     def _build_composite_cmd(
         chunk_idx: int,
