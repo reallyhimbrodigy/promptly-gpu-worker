@@ -179,31 +179,13 @@ const PaperIIPage: React.FC<{
   stripGap,
   ...stripProps
 }) => {
-  const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
-
   // Split tokens into lines
   const lines: TikTokToken[][] = [];
   for (let i = 0; i < page.tokens.length; i += maxWordsPerLine) {
     lines.push(page.tokens.slice(i, i + maxWordsPerLine));
   }
 
-  // Snap 15ms fade in/out — captions land ON the spoken word with no
-  // perceptible delay; the tiny ramp avoids hard popping.
-  const pageLocalMs = (frame / fps) * 1000;
-  const fadeInOpacity = interpolate(
-    pageLocalMs,
-    [0, 15],
-    [0, 1],
-    { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
-  );
-  const fadeOutOpacity = interpolate(
-    pageLocalMs,
-    [page.durationMs - 15, page.durationMs],
-    [1, 0],
-    { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
-  );
-
+  // Hard cut on/off — no fade. Captions snap to the spoken word.
   return (
     <div
       style={{
@@ -211,7 +193,6 @@ const PaperIIPage: React.FC<{
         flexDirection: "column",
         alignItems: "center",
         gap: stripGap,
-        opacity: Math.min(fadeInOpacity, fadeOutOpacity),
       }}
     >
       {lines.map((lineTokens, lineIdx) => (

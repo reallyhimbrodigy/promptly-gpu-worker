@@ -3,7 +3,6 @@ import {
   AbsoluteFill,
   useCurrentFrame,
   useVideoConfig,
-  interpolate,
 } from "remotion";
 import type { PulseProps } from "./types";
 import { msToFrames } from "../shared/timing";
@@ -86,7 +85,9 @@ export const Pulse: React.FC<PulseProps> = ({
   keywords = [],
   textColor = "#FFFFFF",
   keywordColor = "#00BFFF",
-  fadeDurationFrames = 1,
+  // fadeDurationFrames retained for prop-API back-compat but unused —
+  // page transitions are hard cuts now (snap on/off, no fade).
+  fadeDurationFrames: _fadeDurationFrames = 0,
 }) => {
   const frame = useCurrentFrame();
   const { fps, width } = useVideoConfig();
@@ -114,23 +115,11 @@ export const Pulse: React.FC<PulseProps> = ({
 
   const activeStart = msToFrames(pages[activeIdx].startMs, fps);
 
+  // Hard cut on/off — slots become visible instantly at their start frame
+  // and disappear instantly when the final page ends.
   const slot1Start = msToFrames(pages[slot1PageIdx].startMs, fps);
-  let slot1Opacity = interpolate(
-    frame,
-    [slot1Start, slot1Start + fadeDurationFrames],
-    [0, 1],
-    { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
-  );
-
-  let slot2Opacity = 0;
-  if (hasSlot2) {
-    slot2Opacity = interpolate(
-      frame,
-      [activeStart, activeStart + fadeDurationFrames],
-      [0, 1],
-      { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
-    );
-  }
+  let slot1Opacity = frame >= slot1Start ? 1 : 0;
+  let slot2Opacity = hasSlot2 && frame >= activeStart ? 1 : 0;
 
   const lastVisibleIdx = hasSlot2 ? slot2PageIdx : slot1PageIdx;
   if (lastVisibleIdx === pages.length - 1) {
@@ -138,16 +127,9 @@ export const Pulse: React.FC<PulseProps> = ({
       pages[lastVisibleIdx].startMs + pages[lastVisibleIdx].durationMs,
       fps,
     );
-    const fadeOut = interpolate(
-      frame,
-      [activeEnd - fadeDurationFrames, activeEnd],
-      [1, 0],
-      { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
-    );
-    if (hasSlot2) {
-      slot2Opacity *= fadeOut;
-    } else {
-      slot1Opacity *= fadeOut;
+    if (frame >= activeEnd) {
+      slot1Opacity = 0;
+      slot2Opacity = 0;
     }
   }
 

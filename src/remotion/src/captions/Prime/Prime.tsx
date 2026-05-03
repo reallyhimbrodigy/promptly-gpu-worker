@@ -153,15 +153,7 @@ const PrimePage: React.FC<{
     lines.push({ tokens: buffer, hasSpecial: false });
   }
 
-  // Fade out — 15ms snap so caption pages exit on spoken-word timing.
-  const pageLocalMs = (frame / fps) * 1000;
-  const fadeOut = interpolate(
-    pageLocalMs,
-    [page.durationMs - 15, page.durationMs],
-    [1, 0],
-    { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
-  );
-
+  // Hard cut on/off — no fade. Captions snap to the spoken word.
   let globalWordIdx = 0;
 
   return (
@@ -170,7 +162,6 @@ const PrimePage: React.FC<{
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        opacity: fadeOut,
       }}
     >
       {(() => {

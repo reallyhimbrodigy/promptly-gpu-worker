@@ -64,23 +64,8 @@ export const Cove: React.FC<CoveProps> = ({
         const durationFrames = msToFrames(page.durationMs, fps);
         if (durationFrames <= 0) return null;
 
-        const endFrame = startFrame + durationFrames;
-        // 1 frame (~17ms at 60fps) — captions snap on/off with the spoken
-        // word; single-frame is enough to avoid a hard pop.
-        const fadeFrames = 1;
-        const fadeIn = interpolate(
-          frame,
-          [startFrame, startFrame + fadeFrames],
-          [0, 1],
-          { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
-        );
-        const fadeOut = interpolate(
-          frame,
-          [endFrame - fadeFrames, endFrame],
-          [1, 0],
-          { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
-        );
-        const pageOpacity = fadeIn * fadeOut;
+        // Hard cut on/off — no fade. Captions snap to the spoken word.
+        const pageOpacity = 1;
 
         const lines: typeof page.tokens[] = [];
         for (let i = 0; i < page.tokens.length; i += maxWordsPerLine) {

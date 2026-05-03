@@ -242,25 +242,11 @@ export const NegativeFlash: React.FC<NegativeFlashProps> = ({
   const lineDurationFrames = msToFrames(activeLine.endMs, fps) - lineStartFrame;
   const hasKeywords = activeLine.tokens.some((t) => keywordCheck(t.text));
 
-  // Page-boundary fade: 1 frame (~17 ms at 60fps). Captions snap on/off
-  // with the spoken word — anything longer makes them feel laggy. The
-  // single-frame transition is just enough to avoid hard popping while
-  // remaining imperceptible as a "fade".
-  const lineEndFrame = lineStartFrame + lineDurationFrames;
-  const fadeFrames = 1;
-  const fadeIn = interpolate(
-    frame,
-    [lineStartFrame, lineStartFrame + fadeFrames],
-    [0, 1],
-    { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
-  );
-  const fadeOut = interpolate(
-    frame,
-    [lineEndFrame - fadeFrames, lineEndFrame],
-    [1, 0],
-    { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
-  );
-  const lineOpacity = fadeIn * fadeOut;
+  // Hard cut on/off — no fade. Captions snap to the spoken word the way
+  // professional caption tools (captions.ai, etc.) render them. At 60fps
+  // even a 1-frame fade is 16.67ms which exceeds the user's 10ms ceiling
+  // and produces a perceptible halo at page boundaries.
+  const lineOpacity = 1;
 
   const layerStyle: React.CSSProperties = {
     display: "flex",

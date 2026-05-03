@@ -130,25 +130,13 @@ const PassagePage: React.FC<{
   positionStyle,
   maxWidth,
 }) => {
-  const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
-  const pageLocalMs = (frame / fps) * 1000;
-
-  // 15ms snap fade-out so the page exits on spoken-word timing.
-  const fadeOut = interpolate(
-    pageLocalMs,
-    [page.durationMs - 15, page.durationMs],
-    [1, 0],
-    { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
-  );
-
+  // Hard cut on/off — no fade. Captions snap to the spoken word.
   return (
     <AbsoluteFill
       style={{
         display: "flex",
         alignItems: "center",
         ...positionStyle,
-        opacity: fadeOut,
       }}
     >
       <div

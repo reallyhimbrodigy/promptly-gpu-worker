@@ -101,20 +101,14 @@ const TypewriterPage: React.FC<{
     [page, lowercase],
   );
 
-  // Page fade
-  const pageLocalMs = (frame / fps) * 1000;
-  const fadeIn = interpolate(pageLocalMs, [0, fadeInDurationMs], [0, 1], {
-    extrapolateLeft: "clamp",
-    extrapolateRight: "clamp",
-  });
-  const fadeOutStart = page.durationMs - fadeOutDurationMs;
-  const fadeOut = interpolate(
-    pageLocalMs,
-    [fadeOutStart, page.durationMs],
-    [1, 0],
-    { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
-  );
-  const pageOpacity = Math.min(fadeIn, fadeOut);
+  // Hard cut on/off — no page fade. Captions snap to the spoken word.
+  // The character-by-character typewriter reveal IS the entrance effect;
+  // a separate page-level fade on top would just delay the typewriter
+  // from starting and feel laggy. fadeInDurationMs / fadeOutDurationMs
+  // props are retained for prop-API back-compat but ignored.
+  void fadeInDurationMs;
+  void fadeOutDurationMs;
+  const pageOpacity = 1;
 
   // Find last revealed character
   let lastRevealedIdx = -1;

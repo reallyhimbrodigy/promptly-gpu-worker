@@ -62,27 +62,8 @@ export const Quintessence: React.FC<QuintessenceProps> = ({
 
   if (!activeSlot) return null;
 
-  const startFrame = msToFrames(activeSlot.startMs, fps);
-  const endFrame = msToFrames(activeSlot.endMs, fps);
-  const elapsed = frame - startFrame;
-
-  // Snap fade in (1 frame ~17ms at 60fps)
-  const fadeInFrames = 1;
-  const fadeIn = interpolate(elapsed, [0, fadeInFrames], [0, 1], {
-    extrapolateLeft: "clamp",
-    extrapolateRight: "clamp",
-  });
-
-  // Snap fade out (1 frame ~17ms at 60fps)
-  const fadeOutFrames = 1;
-  const fadeOut = interpolate(
-    frame,
-    [endFrame - fadeOutFrames, endFrame],
-    [1, 0],
-    { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
-  );
-
-  const opacity = fadeIn * fadeOut;
+  // Hard cut on/off — no fade. Captions snap to the spoken word.
+  const opacity = 1;
 
   return (
     <AbsoluteFill

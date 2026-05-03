@@ -255,23 +255,8 @@ export const Prism: React.FC<PrismProps> = ({
   const lineDurationFrames = msToFrames(activeLine.endMs, fps) - lineStartFrame;
   const hasKeywords = activeLine.tokens.some((t) => keywordCheck(t.text));
 
-  // Page-boundary fade: 1 frame (~17 ms at 60fps). Captions snap on/off
-  // with the spoken word — single-frame is just enough to avoid hard pop.
-  const fadeFrames = 1;
-  const lineEndFrame = lineStartFrame + lineDurationFrames;
-  const fadeIn = interpolate(
-    frame,
-    [lineStartFrame, lineStartFrame + fadeFrames],
-    [0, 1],
-    { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
-  );
-  const fadeOut = interpolate(
-    frame,
-    [lineEndFrame - fadeFrames, lineEndFrame],
-    [1, 0],
-    { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
-  );
-  const lineOpacity = fadeIn * fadeOut;
+  // Hard cut on/off — no fade. Same rationale as NegativeFlash.
+  const lineOpacity = 1;
 
   const layerStyle: React.CSSProperties = {
     display: "flex",
