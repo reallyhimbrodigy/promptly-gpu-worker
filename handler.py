@@ -3024,7 +3024,7 @@ Pexels stock-footage cutaways that render as a FULL-CANVAS CUTAWAY — the speak
 
 Because the speaker's face is fully replaced for the window: B-roll is a SHOT, not an inset. Treat each cutaway as if you're cutting to a different camera. The viewer's eye follows the cutaway content; the speaker's face is unavailable for that beat.
 
-NO MOTION GRAPHICS during a B-roll window. The cutaway covers the whole canvas, so any MG whose word range overlaps a B-roll window will be hidden underneath and the pipeline will drop it. If you want both an MG and a B-roll in the same passage, separate them in time — MG before/after the cutaway, never during.
+STRICT SEPARATION — B-ROLL AND OVERLAYS NEVER SHARE SCREEN TIME. Motion graphics AND text_overlays (TornPaper, sticky_note, quote_card, IMessageBubble, ChatThread, Notification, AnnotationArrow, StatCard, Toggle, RecordingFrame, ProgressBar, etc.) cannot coexist with B-roll. If you emit a B-roll whose on-screen window overlaps any motion_graphic or text_overlay window, **the pipeline drops the B-roll** (overlay wins because it's the more deliberate editorial moment — chapter cards, quotes, and stats are scarce and word-anchored to specific beats; B-roll is fill that has 2-3s of timing flexibility). This isn't a hint — it's a hard rule. Plan B-roll BEFORE or AFTER your overlays, never during. Production editors don't stack a chapter card on top of a B-roll cutaway, and neither should you.
 
 broll_clips — ARRAY. {{"keyword": str (13-18 words), "start_word_index": int, "end_word_index": int, "reason": str}}
 
@@ -4722,50 +4722,12 @@ Indices below are the NEW kept-only space [0..{_kept_count - 1}]. Every word_ind
     if validated_mg:
         print(f"[mg] Gemini requested {len(validated_mg)} motion graphic(s)", flush=True)
 
-    # ── B-roll vs motion-graphic temporal overlap validator ─────────────────
-    # B-roll renders as a full-canvas cutaway via Remotion's BrollLayer —
-    # the speaker is fully covered for the duration of every B-roll window.
-    # ANY motion graphic whose word window overlaps a B-roll window is
-    # invisible underneath the cutaway, regardless of its anchor zone, so
-    # we drop it unconditionally rather than rendering a hidden component.
-    # The PostCutPlan prompt tells Gemini not to emit MGs over B-roll
-    # windows in the first place; this validator is the safety net.
-    if validated_mg and validated_broll:
-        _broll_windows = []
-        for _bc in validated_broll:
-            _bs = int(_bc.get("start_word_index", -1))
-            _be = int(_bc.get("end_word_index", -1))
-            if _bs >= 0 and _be >= _bs:
-                _broll_windows.append((_bs, _be))
-        if _broll_windows:
-            _kept_mgs = []
-            for _mg in validated_mg:
-                _ms = int(_mg.get("start_word_index", -1))
-                _me = int(_mg.get("end_word_index", -1))
-                if _ms < 0 or _me < _ms:
-                    _kept_mgs.append(_mg)
-                    continue
-                _conflicts = False
-                for (_bs2, _be2) in _broll_windows:
-                    # Word-index overlap: max(start_a, start_b) <= min(end_a, end_b)
-                    if max(_ms, _bs2) <= min(_me, _be2):
-                        _conflicts = True
-                        break
-                if _conflicts:
-                    print(
-                        f"[mg] Dropping {_mg.get('type')!r} at words "
-                        f"[{_ms}-{_me}] anchor={str(_mg.get('anchor') or '')!r} — "
-                        f"overlaps a B-roll window (B-roll is full-canvas; MG "
-                        f"would be invisible underneath the cutaway).",
-                        flush=True,
-                    )
-                    continue
-                _kept_mgs.append(_mg)
-            if len(_kept_mgs) != len(validated_mg):
-                _dropped_count = len(validated_mg) - len(_kept_mgs)
-                print(f"[mg] Dropped {_dropped_count} MG(s) for B-roll overlap", flush=True)
-                validated_mg = _kept_mgs
-                edit_plan["motion_graphics"] = validated_mg
+    # B-roll vs overlay (motion_graphic / text_overlay) deconfliction has
+    # MOVED to render_multi_clip — see "Strict separation" block right after
+    # the B-roll output projection. Doing it on actual output frame ranges
+    # (instead of word indices here) catches MGs/text-overlays whose
+    # duration_seconds extends past their anchor word and would otherwise
+    # slip past a word-index check.
 
     # Defensive: in case any legacy upstream caller still hands us a
     # `speed_curve` field on the plan (it's no longer in the schema), drop
@@ -8355,6 +8317,73 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             f"dur={_eff:.2f}s seek={_seek_seconds:.2f}s",
             flush=True,
         )
+
+    # ── Strict separation: B-roll vs overlays (MG + text_overlay) ──────────
+    # Professional editing rule: B-roll cutaways and overlays NEVER share
+    # screen time. The PostCutPlan prompt tells Gemini to plan accordingly;
+    # this is the safety net for cases where Gemini emits an overlap.
+    #
+    # Priority: overlay wins, B-roll loses. Reasons:
+    #   1. Overlays are scarce (1-3 per video) and carry deliberate
+    #      editorial weight (chapter card = THE pivot, sticky notes =
+    #      THE takeaways, quote = THE thesis).
+    #   2. B-roll is fill (5+ per video) — losing one cutaway barely
+    #      changes the edit; losing a chapter card breaks the structure.
+    #   3. Overlays are word-anchored to specific beats with timing that
+    #      can't move; B-roll has flexibility — there's usually a 2-3s
+    #      window where the cutaway works equally well.
+    #
+    # We work in OUTPUT FRAMES (not word indices) so an overlay with
+    # duration_seconds extending past its anchor word is correctly
+    # included in the conflict check.
+    _overlay_frame_ranges: list = []
+    for _mg in motion_graphics_out:
+        _f0 = int(_mg["fromFrame"])
+        _f1 = _f0 + int(_mg["durationInFrames"])
+        _overlay_frame_ranges.append((_f0, _f1, "motion_graphic", str(_mg.get("type", "?"))))
+    for _ov in text_overlays_out:
+        _f0 = int(_ov["fromFrame"])
+        _f1 = _f0 + int(_ov["durationInFrames"])
+        _overlay_frame_ranges.append((_f0, _f1, "text_overlay", str(_ov.get("variant", "?"))))
+
+    if _overlay_frame_ranges and broll_out:
+        _kept_indices: list = []
+        for _i, _br in enumerate(broll_out):
+            _bf0 = int(_br["fromFrame"])
+            _bf1 = _bf0 + int(_br["durationInFrames"])
+            _conflict = None
+            for (_of0, _of1, _kind, _name) in _overlay_frame_ranges:
+                # Frame-window overlap: max(start_a, start_b) < min(end_a, end_b)
+                if max(_bf0, _of0) < min(_bf1, _of1):
+                    _conflict = (_kind, _name, _of0, _of1)
+                    break
+            if _conflict:
+                _ck, _cn, _co0, _co1 = _conflict
+                print(
+                    f"[broll] Dropping cutaway window=[{_bf0}-{_bf1}]f — "
+                    f"overlaps {_ck} {_cn!r} window=[{_co0}-{_co1}]f. "
+                    f"Overlay wins (more deliberate editorial moment).",
+                    flush=True,
+                )
+            else:
+                _kept_indices.append(_i)
+        if len(_kept_indices) != len(broll_out):
+            _dropped_count = len(broll_out) - len(_kept_indices)
+            broll_out = [broll_out[_i] for _i in _kept_indices]
+            # _broll_output_ranges was appended in lockstep with broll_out;
+            # filter it the same way so downstream consumers (thumbnail
+            # seed-shifter, persistence) see the same surviving set.
+            _existing_ranges = edit_plan.get("_broll_output_ranges") or []
+            if len(_existing_ranges) > 0:
+                edit_plan["_broll_output_ranges"] = [
+                    _existing_ranges[_i] for _i in _kept_indices
+                    if _i < len(_existing_ranges)
+                ]
+            print(
+                f"[broll] {_dropped_count} cutaway(s) dropped for overlay "
+                f"conflicts; {len(broll_out)} kept",
+                flush=True,
+            )
 
     # Force caption position=top over every B-roll window. B-roll renders as
     # a full-canvas cutaway, so "bottom" captions would land near the
