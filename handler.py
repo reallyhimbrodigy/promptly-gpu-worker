@@ -10616,22 +10616,36 @@ def handler(job):
         def _upload_main():
             print("[pipeline] step=upload", flush=True)
             # Direct S3 multipart upload — much faster than single-stream HTTP PUT
-            # for 100-200 MB videos. The Node dispatcher pre-generates a presigned
-            # PUT URL targeting the bucket's `renders/{jobId}/{ts}-edited.mp4`
-            # key; we parse bucket+key out of that URL (same path the thumbnail
-            # upload at _extract_and_upload_cover already uses) and write
-            # directly via _s3_client with _S3_TRANSFER_CONFIG (32 concurrent
-            # 16-MB parts via boto3[crt]). End destination is identical to what
-            # the dispatcher pre-signed, so CloudFront origin access works.
+            # for 100-200 MB videos. boto3[crt] does multipart automatically with
+            # _S3_TRANSFER_CONFIG (32 concurrent 16-MB parts).
+            #
+            # Route by URL scheme:
+            #   AWS S3 (virtual-host or accelerate or path-style or CloudFront)
+            #     → _aws_s3_client. This is the normal dispatcher path.
+            #   Supabase storage (legacy)
+            #     → _s3_client (Supabase S3-compatible endpoint).
+            # End destination is identical to what the dispatcher pre-signed,
+            # so any CDN origin access remains valid.
             if not upload_url:
                 raise RuntimeError("No upload_url provided — Node dispatcher must pre-generate the presigned PUT URL")
-            if not _s3_client:
-                raise RuntimeError("Supabase S3 client not initialized — cannot upload (check SUPABASE_S3_ACCESS_KEY/SECRET_KEY env)")
-            _bucket, _key = _parse_supabase_storage_url(upload_url)
-            if not _bucket or not _key:
-                raise RuntimeError(f"Could not parse bucket/key from upload_url: {upload_url[:120]}")
+            _aws_b, _aws_k = _parse_aws_s3_url(upload_url)
+            if _aws_b and _aws_k:
+                if not _aws_s3_client:
+                    raise RuntimeError("AWS S3 client not initialized — cannot upload (check AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY env)")
+                _client, _bucket, _key, _scheme = _aws_s3_client, _aws_b, _aws_k, "aws"
+            else:
+                _sb_b, _sb_k = _parse_supabase_storage_url(upload_url)
+                if _sb_b and _sb_k:
+                    if not _s3_client:
+                        raise RuntimeError("Supabase S3 client not initialized — cannot upload (check SUPABASE_S3_ACCESS_KEY/SECRET_KEY env)")
+                    _client, _bucket, _key, _scheme = _s3_client, _sb_b, _sb_k, "supabase"
+                else:
+                    raise RuntimeError(
+                        f"Could not parse bucket/key from upload_url (neither AWS nor Supabase pattern matched): "
+                        f"{upload_url[:120]}"
+                    )
             _ut0 = time.time()
-            _s3_client.upload_file(
+            _client.upload_file(
                 output_path, _bucket, _key,
                 ExtraArgs={"ContentType": "video/mp4"},
                 Config=_S3_TRANSFER_CONFIG,
@@ -10643,7 +10657,7 @@ def handler(job):
                 _video_url = upload_url.split("?")[0]
             _mb = os.path.getsize(output_path) / (1024 * 1024)
             print(
-                f"[pipeline] upload complete (s3-multipart {_mb:.1f}MB in {_ue:.1f}s "
+                f"[pipeline] upload complete ({_scheme}-multipart {_mb:.1f}MB in {_ue:.1f}s "
                 f"@ {_mb / max(_ue, 0.001):.1f}MB/s → {_video_url})",
                 flush=True,
             )
