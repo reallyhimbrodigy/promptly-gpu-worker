@@ -2728,9 +2728,9 @@ Variants and REQUIRED props. Each variant is a DESIGN with its own visual charac
    ANTI-PATTERN: DO NOT use to display ONE quote split across multiple notes. Sticky notes are 3 parallel items, not a fragmented quote. For a single quote, use quote_card (if speaker is yielding) or torn_paper (chapter label / framing hook).
    If you only have 1 or 2 items to highlight, DO NOT USE STICKY NOTES. Pick a different overlay (torn_paper, quote_card) or skip the overlay entirely — leaving the right slot empty creates a visibly unbalanced layout.
 
-3. "quote_card" — Floating card at center of frame with quote + em-dash attribution. The card is large and WILL cover the center of the frame for its full lifespan, straddling the split-screen B-roll seam if a B-roll is active. Use ONLY when you accept the cover, which means: the moment is a hard pause/silence where the quote IS the shot (speaker yielding the frame to the quote), OR the speaker is genuinely off-camera (no face in frame at all).
+3. "quote_card" — Floating card at center of frame with quote + em-dash attribution. The card is large and WILL cover the center of the frame for its full lifespan. Use ONLY when you accept the cover, which means: the moment is a hard pause/silence where the quote IS the shot (speaker yielding the frame to the quote), OR the speaker is genuinely off-camera (no face in frame at all).
    REQUIRED: "quote" (str <=20 words), "attribution" (str)
-   Do NOT use over a talking-head close-up where the speaker's face fills the center — the card lands directly on their face. Do NOT use during a B-roll window — the card covers both the speaker (top half) and the B-roll inset (bottom half), creating a busy stack. If you want a quote-style emphasis WITHOUT covering the speaker, use a `Quintessence` emphasis_moment caption beat or a torn_paper at the top instead.
+   Do NOT use over a talking-head close-up where the speaker's face fills the center — the card lands directly on their face. Do NOT use during a B-roll window — B-roll is full-canvas and the pipeline will drop any overlay that overlaps a B-roll window. If you want a quote-style emphasis WITHOUT covering the speaker, use a `Quintessence` emphasis_moment caption beat or a torn_paper at the top instead.
 
 4. "caption_match" — zone follows its `position` prop (top→`upper_third_safe`, center→`center`, bottom→`lower_third_safe`). Renders in the same style as the main captions. Mono-brand aesthetic.
    REQUIRED: "text" (str <=6 words), "position" ("top" | "center" | "bottom")
@@ -3020,11 +3020,11 @@ RULE OF THUMB: pick a sound only when it adds meaning. A punchline without SFX i
 
 === B-ROLL ===
 
-Pexels stock-footage cutaways that render as a SPLIT-SCREEN INSET (bottom half of canvas) while the speaker stays visible above the seam. The viewer hears the speaker's audio AND sees both visually — the speaker reacting in the top half, the B-roll content playing in the bottom half. The B-roll slides up from below over ~250ms when its window starts and slides down when it ends.
+Pexels stock-footage cutaways that render as a FULL-CANVAS CUTAWAY — the speaker's video disappears for the duration and the B-roll fills the entire 1080×1920 frame. The speaker's audio continues over the cutaway. Captions auto-flip to the upper-third position so they remain readable above the cutaway content (you don't need to emit caption_position_changes for B-roll windows; the pipeline handles this).
 
-Because the speaker is still visible: B-roll COMPLEMENTS the speaker's expression rather than replacing it. The cutaway should add visual context to what the speaker is saying without competing with the speaker's face for attention.
+Because the speaker's face is fully replaced for the window: B-roll is a SHOT, not an inset. Treat each cutaway as if you're cutting to a different camera. The viewer's eye follows the cutaway content; the speaker's face is unavailable for that beat.
 
-Because the B-roll occupies only the bottom half: MGs anchored to `upper_third_safe` (the most common anchor — TornPaper, sticky notes, notification stacks) coexist cleanly with B-roll. MGs anchored to `lower_third_safe` / `center` / `left_safe` / `right_safe` collide with the bottom-half inset and get dropped — so don't place those during a B-roll window.
+NO MOTION GRAPHICS during a B-roll window. The cutaway covers the whole canvas, so any MG whose word range overlaps a B-roll window will be hidden underneath and the pipeline will drop it. If you want both an MG and a B-roll in the same passage, separate them in time — MG before/after the cutaway, never during.
 
 broll_clips — ARRAY. {{"keyword": str (13-18 words), "start_word_index": int, "end_word_index": int, "reason": str}}
 
@@ -3062,9 +3062,9 @@ WORD WINDOW (start_word_index → end_word_index):
     - The pipeline derives precise on-screen timing from these indices. No duration field.
 
 PLACEMENT DISCIPLINE:
-  Place B-roll on moments where the speaker describes a physical action or concrete scene. Avoid B-roll during the most facially-expressive emotional beats (the punchline word itself, the moment of recognition on the speaker's face) — even though split-screen keeps the speaker visible, the bottom-half cutaway competes with the face for the viewer's attention at the exact moment that face needs to land. NEVER during cut[0] (the opening needs the full canvas dedicated to the speaker for the first 2 seconds — viewers form snap judgments from human faces).
+  Place B-roll on moments where the speaker describes a physical action, place, object, or concrete scene — anything where seeing the thing reinforces the dialogue. NEVER on the most facially-expressive emotional beats (the punchline word itself, the moment of recognition, the visible reaction) — full-canvas cutaway HIDES the speaker entirely, and viewers feel the loss when the face was the payoff. NEVER during cut[0] (the opening needs the speaker dedicated to the first 2 seconds — viewers form snap judgments from human faces in the cold open).
 
-  Spacing: 3+ seconds of speaker-only frame between B-roll clips. Coverage: ~30-40% of runtime is a healthy ceiling. Place B-roll on 1.0x or 1.2–1.3x clips, not on the 0.7–0.85x slow-speed clips that contain a punchline beat.
+  Spacing: 3+ seconds of speaker-only frame between B-roll clips so the speaker's presence reasserts. Coverage: ~30-40% of runtime is a healthy ceiling. Place B-roll on 1.0x or 1.2–1.3x clips, not on the 0.7–0.85x slow-speed clips that contain a punchline beat.
 
 === TRANSITIONS ===
 
@@ -3343,17 +3343,18 @@ def _coalesce_caption_position_segments(segments, min_dur=1.5):
     return merged
 
 
-def _force_center_position_during_broll(segments, broll_frame_ranges):
-    """Override caption position to "center" for every output frame inside a
+def _force_top_position_during_broll(segments, broll_frame_ranges):
+    """Override caption position to "top" for every output frame inside a
     B-roll window. Returns a new contiguous segment list.
 
-    B-roll always renders as a slide-up split-screen inset occupying the
-    bottom half of the canvas. Captions positioned "bottom" (lower-third
-    safe zone) sit directly on the inset; "top" can collide with upper MGs.
-    "center" sits at the seam between speaker and B-roll — doesn't cover
-    either, looks intentional. So during any B-roll window the position is
-    forced to "center" regardless of what Gemini specified, then restored
-    to Gemini's choice on the frames immediately after the window ends.
+    B-roll renders as a full-canvas cutaway (the speaker disappears for the
+    duration). Captions positioned "bottom" (lower-third safe zone) sit
+    near the platform UI rail; "center" sits over the focal point of the
+    cutaway. "top" lands in the upper-third safe zone where it doesn't
+    compete with the cutaway subject and stays readable thanks to the
+    universal text-stroke. So during any B-roll window the position is
+    forced to "top" regardless of what Gemini specified, then restored to
+    Gemini's choice on the frames immediately after the window ends.
 
     Pure layout fix — no prompt-side rule for Gemini to remember. Inputs
     are already projected to output frames so the override is frame-precise.
@@ -3384,8 +3385,8 @@ def _force_center_position_during_broll(segments, broll_frame_ranges):
         if orig_pos is None:
             continue
         in_broll = any(int(bf) <= a and int(bt) >= b for bf, bt in broll_frame_ranges)
-        pos = "center" if in_broll else orig_pos
-        if in_broll and orig_pos != "center":
+        pos = "top" if in_broll else orig_pos
+        if in_broll and orig_pos != "top":
             overrides += 1
         if out and out[-1]["position"] == pos and int(out[-1]["toFrame"]) == a:
             out[-1]["toFrame"] = b
@@ -3393,7 +3394,7 @@ def _force_center_position_during_broll(segments, broll_frame_ranges):
             out.append({"fromFrame": a, "toFrame": b, "position": pos})
     if overrides:
         print(
-            f"[caption-segments] forced position=center over "
+            f"[caption-segments] forced position=top over "
             f"{len(broll_frame_ranges)} B-roll window(s) "
             f"({overrides} sub-segment override(s))",
             flush=True,
@@ -4722,18 +4723,13 @@ Indices below are the NEW kept-only space [0..{_kept_count - 1}]. Every word_ind
         print(f"[mg] Gemini requested {len(validated_mg)} motion graphic(s)", flush=True)
 
     # ── B-roll vs motion-graphic temporal overlap validator ─────────────────
-    # B-roll now renders as a split-screen inset (bottom half of canvas) via
-    # Remotion's BrollLayer; the speaker frame stays visible above the seam.
-    # An MG anchored to upper_third_safe sits in the speaker half — no
-    # collision with the B-roll inset. MGs anchored to bottom-half zones
-    # (lower_third_safe, center) or to side-edges (left_safe, right_safe,
-    # whose vertical extent crosses the seam) DO collide. Drop those.
-    #
-    # The drop is zone-aware on purpose: dropping every overlapping MG
-    # (regardless of anchor) was the pre-Remotion-B-roll behavior and
-    # silently killed chapter cards / sticky notes / notification stacks
-    # that would have been visible above the inset.
-    _BROLL_SAFE_ANCHORS = {"upper_third_safe"}
+    # B-roll renders as a full-canvas cutaway via Remotion's BrollLayer —
+    # the speaker is fully covered for the duration of every B-roll window.
+    # ANY motion graphic whose word window overlaps a B-roll window is
+    # invisible underneath the cutaway, regardless of its anchor zone, so
+    # we drop it unconditionally rather than rendering a hidden component.
+    # The PostCutPlan prompt tells Gemini not to emit MGs over B-roll
+    # windows in the first place; this validator is the safety net.
     if validated_mg and validated_broll:
         _broll_windows = []
         for _bc in validated_broll:
@@ -4749,30 +4745,25 @@ Indices below are the NEW kept-only space [0..{_kept_count - 1}]. Every word_ind
                 if _ms < 0 or _me < _ms:
                     _kept_mgs.append(_mg)
                     continue
-                _mg_anchor = str(_mg.get("anchor") or "").strip()
                 _conflicts = False
                 for (_bs2, _be2) in _broll_windows:
                     # Word-index overlap: max(start_a, start_b) <= min(end_a, end_b)
                     if max(_ms, _bs2) <= min(_me, _be2):
-                        # Time windows overlap. Now check zone — only drop
-                        # if the MG's anchor would actually collide with
-                        # the bottom-half B-roll inset.
-                        if _mg_anchor not in _BROLL_SAFE_ANCHORS:
-                            _conflicts = True
-                            break
+                        _conflicts = True
+                        break
                 if _conflicts:
                     print(
                         f"[mg] Dropping {_mg.get('type')!r} at words "
-                        f"[{_ms}-{_me}] anchor={_mg_anchor!r} — overlaps a "
-                        f"B-roll window AND the anchor zone collides with "
-                        f"the bottom-half B-roll inset.",
+                        f"[{_ms}-{_me}] anchor={str(_mg.get('anchor') or '')!r} — "
+                        f"overlaps a B-roll window (B-roll is full-canvas; MG "
+                        f"would be invisible underneath the cutaway).",
                         flush=True,
                     )
                     continue
                 _kept_mgs.append(_mg)
             if len(_kept_mgs) != len(validated_mg):
                 _dropped_count = len(validated_mg) - len(_kept_mgs)
-                print(f"[mg] Dropped {_dropped_count} MG(s) for B-roll overlap (zone-aware)", flush=True)
+                print(f"[mg] Dropped {_dropped_count} MG(s) for B-roll overlap", flush=True)
                 validated_mg = _kept_mgs
                 edit_plan["motion_graphics"] = validated_mg
 
@@ -8118,11 +8109,13 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # caption_position_change to "top" for that window. Python does NOT
     # auto-flip for MG collisions — that stays Gemini's call.
     #
-    # The exception is B-roll: B-roll always renders as a slide-up inset on
-    # the bottom half of the canvas, so its layout collision with captions
-    # is mechanical, not creative. Python auto-flips position to "center"
-    # over every B-roll window after the loop below. See
-    # _force_center_position_during_broll.
+    # The exception is B-roll: B-roll renders as a full-canvas cutaway
+    # (speaker disappears for the duration). Captions sitting at "bottom"
+    # would land near the platform UI rail with the cutaway content behind
+    # them; Python auto-flips position to "top" over every B-roll window
+    # after the loop below — captions land in the upper-third safe zone
+    # where they stay readable above the cutaway. See
+    # _force_top_position_during_broll.
 
     # ── 8. Build Remotion inputs + stage source for the bundle server ──────
     # Visually-identical fast-path architecture (replaces v61 chunked render):
@@ -8363,16 +8356,16 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             flush=True,
         )
 
-    # Force caption position=center over every B-roll window. B-roll always
-    # renders as a slide-up split-screen inset on the bottom half, so a
-    # "bottom"-positioned caption sits directly on top of the inset content
-    # (looks unprofessional) and "top" can collide with upper MGs. "center"
-    # sits at the seam — clear of both. Pure layout fix, no prompt rule.
+    # Force caption position=top over every B-roll window. B-roll renders as
+    # a full-canvas cutaway, so "bottom" captions would land near the
+    # platform UI rail with the cutaway behind them. "top" sits in the
+    # upper-third safe zone — readable above the cutaway, doesn't compete
+    # with the focal point. Pure layout fix, no prompt rule.
     _broll_frame_ranges_for_caption = [
         (int(_b["fromFrame"]), int(_b["fromFrame"]) + int(_b["durationInFrames"]))
         for _b in broll_out
     ]
-    caption_position_segments_out = _force_center_position_during_broll(
+    caption_position_segments_out = _force_top_position_during_broll(
         caption_position_segments_out, _broll_frame_ranges_for_caption
     )
 

@@ -24,7 +24,7 @@ visual identity (bokeh orbs, blur masks, custom typography, etc.) that has
 no faithful FFmpeg analog.
 
 B-roll cutaways are rendered by Remotion's BrollLayer inside PromptlyOverlay
-as a split-screen alpha layer (slide-up entrance, bottom-half inset). The
+as a full-canvas cutaway (replaces the speaker for the duration). The
 FFmpeg side of B-roll has been removed entirely; this module no longer
 overlays B-roll.
 """
@@ -599,7 +599,7 @@ def build_final_filtergraph(
 
     # ── B-roll lives in PromptlyOverlay (Remotion) — not composited here ─────
     # Pre-Pass 5: B-roll was overlaid at this point in the filtergraph. Now
-    # B-roll renders as a split-screen alpha layer inside PromptlyOverlay
+    # B-roll renders as a full-canvas cutaway inside PromptlyOverlay
     # (BrollLayer), composited together with captions/text-overlays/MGs in
     # the alpha-overlay step below. This base path is just the speaker
     # frame + transitions + outro now.

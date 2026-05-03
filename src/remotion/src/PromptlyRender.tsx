@@ -5,9 +5,7 @@ import {
   OffthreadVideo,
   staticFile,
   useCurrentFrame,
-  useVideoConfig,
   interpolate,
-  spring,
 } from "remotion";
 import type {
   PromptlyRenderProps,
@@ -419,57 +417,41 @@ const resolveSrc = (s: string): string => {
   return staticFile(s);
 };
 
-// ─── B-roll layer (split-screen with slide-up entrance) ───────────────────
+// ─── B-roll layer (full-frame cutaway) ────────────────────────────────────
 //
-// Each B-roll occupies the BOTTOM HALF of the canvas (1080×960 on a 1080×1920
-// canvas) with the speaker frame visible above. Spring-driven entrance slides
-// the inset up from off-canvas; linear-eased exit slides it back down.
-// Source video is 9:16 — `objectFit: cover` crops vertically to fit the 9:8
-// inset shape, preserving horizontal width.
+// B-roll replaces the entire canvas during its window — same as a standard
+// short-form B-roll cutaway in TikTok/Reels/YouTube edits. The speaker's
+// audio continues over the B-roll; the speaker's video disappears for the
+// duration. Source is 9:16 (1080x1920); `objectFit: cover` crops to fit
+// arbitrary aspect ratios so we always fill the canvas without letterbox.
 //
-// Z-order: B-roll sits UNDER text overlays / MGs / captions in PromptlyOverlay.
-// The captions stay on top so the viewer can read dialogue during cutaways.
+// Z-order: B-roll sits UNDER captions in PromptlyOverlay so dialogue stays
+// readable through the cutaway. Captions auto-flip to "top" during B-roll
+// windows (Python pipeline; see _force_top_position_during_broll) so they
+// land in the upper third where they don't compete with the B-roll subject.
 //
-// Animation timing: 250ms entrance spring, 250ms linear exit. Tight enough
-// to feel intentional, slow enough to read as motion (not a flash).
+// Boundary fade: 4 frames in, 4 frames out (~67ms@60fps). Tight enough to
+// feel like a hard cut, soft enough to avoid harsh boundary artifacts on
+// the encoder.
 
 const BrollClip: React.FC<{ spec: BrollSpec; fps: number }> = ({ spec, fps }) => {
   const frame = useCurrentFrame();
-  const { width, height } = useVideoConfig();
 
-  // Geometry: B-roll inset fills the bottom half of canvas.
-  const insetHeight = Math.round(height / 2);
-  const dockedY = height - insetHeight;     // top of inset when docked
-  const offscreenY = height;                 // top of inset when fully off-canvas below
-
-  // Animation timing.
-  const enterFrames = Math.max(1, Math.round(fps * 0.25));   // 250ms slide-up
-  const exitFrames  = Math.max(1, Math.round(fps * 0.25));   // 250ms slide-down
-
-  // Spring-driven entrance — settles cleanly without bounce.
-  const enterSpring = spring({
-    fps,
-    frame,
-    config: { damping: 18, mass: 0.7, stiffness: 200, overshootClamping: true },
-    durationInFrames: enterFrames,
-  });
-
-  // Linear-eased exit (last `exitFrames` of the sequence's duration).
   const totalFrames = spec.durationInFrames;
-  const exitStart = totalFrames - exitFrames;
-  const exitProgress = interpolate(
+  const fadeFrames = 4;
+  const fadeIn = interpolate(
     frame,
-    [exitStart, totalFrames],
+    [0, fadeFrames],
     [0, 1],
     { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
   );
-
-  // Compose the y-position. Entrance interpolates offscreen → docked; exit
-  // interpolates docked → offscreen. The exit takes over once it has begun
-  // (exitProgress > 0), keeping the animation monotonic.
-  const enterY = interpolate(enterSpring, [0, 1], [offscreenY, dockedY]);
-  const exitY = interpolate(exitProgress, [0, 1], [dockedY, offscreenY]);
-  const y = exitProgress > 0 ? exitY : enterY;
+  const fadeOut = interpolate(
+    frame,
+    [totalFrames - fadeFrames, totalFrames],
+    [1, 0],
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
+  );
+  const opacity = Math.min(fadeIn, fadeOut);
 
   // Source resolution: handler.py stages B-roll files into /remotion/bundle/
   // public with a stage-key-prefixed basename; spec.src is just that basename.
@@ -482,27 +464,13 @@ const BrollClip: React.FC<{ spec: BrollSpec; fps: number }> = ({ spec, fps }) =>
   const startFromFrames = Math.round(spec.seekFromSeconds * fps);
 
   return (
-    <AbsoluteFill style={{ pointerEvents: "none" }}>
-      <div
-        style={{
-          position: "absolute",
-          left: 0,
-          top: y,
-          width,
-          height: insetHeight,
-          overflow: "hidden",
-          // Subtle top-edge shadow only — sells the layer-on-top feel
-          // without competing with the seam.
-          boxShadow: "0 -8px 24px rgba(0,0,0,0.35)",
-        }}
-      >
-        <OffthreadVideo
-          src={resolvedSrc}
-          startFrom={startFromFrames}
-          playbackRate={spec.playbackRate || 1.0}
-          style={{ width: "100%", height: "100%", objectFit: "cover" }}
-        />
-      </div>
+    <AbsoluteFill style={{ pointerEvents: "none", opacity, backgroundColor: "#000" }}>
+      <OffthreadVideo
+        src={resolvedSrc}
+        startFrom={startFromFrames}
+        playbackRate={spec.playbackRate || 1.0}
+        style={{ width: "100%", height: "100%", objectFit: "cover" }}
+      />
     </AbsoluteFill>
   );
 };
@@ -538,10 +506,12 @@ export const PromptlyOverlay: React.FC<PromptlyRenderProps> = ({ input }) => {
   return (
     <AbsoluteFill style={{ background: "transparent" }}>
       {/* B-roll cutaways render at the BOTTOM of the overlay z-stack —
-          under captions, text overlays, and MGs. Each B-roll occupies the
-          bottom half of canvas with a slide-up entrance. The speaker frame
-          (rendered by FFmpeg below this alpha overlay) shows through the
-          transparent top half. */}
+          under captions, text overlays, and MGs. Each B-roll fills the
+          ENTIRE canvas during its window (full-frame cutaway, standard
+          short-form B-roll convention). The speaker frame rendered by
+          FFmpeg below this alpha overlay is fully covered for the duration
+          of every B-roll window. Captions auto-flip to "top" during B-roll
+          windows so they remain readable over the cutaway content. */}
       <BrollLayer items={broll ?? []} fps={fps} />
       {/* Captions on top — readable over speaker, B-roll, and any
           text-overlay/MG underneath. Universal text-stroke ensures contrast
