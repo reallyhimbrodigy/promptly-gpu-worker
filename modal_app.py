@@ -411,7 +411,24 @@ class PromptlyPrewarmWorker:
         """Lightweight S3→Volume cache warm-up. Called by iOS the moment the
         client-side upload to S3 finishes (well before the user taps Send).
         By the time the real render request arrives, the source is on the
-        Modal Volume and the download step is a no-op."""
+        Modal Volume and the download step is a no-op.
+
+        Also fires a fire-and-forget GPU warmup spawn — provisions the
+        rife_normalize_remote H100 container with the driver-mount fix +
+        torch CUDA init, so the real RIFE call (typically 30-60s later
+        when the user taps render) hits a warm container instead of
+        paying a 15-20s cold start on the critical path. Cost: ~$0.05 per
+        warmup of GPU time. Tracking that against the 15-20s of pipeline
+        latency saved per render — clear UX win.
+        """
+        # Spawn GPU warmup BEFORE the synchronous source-download work
+        # so they overlap. Spawn returns immediately; Modal scheduler
+        # provisions the H100 in the background while we download.
+        try:
+            rife_normalize_remote.spawn(b"", 60, True)
+        except Exception as _spawn_err:
+            print(f"[prewarm] rife warmup spawn failed (non-fatal): {_spawn_err}", flush=True)
+
         result = self._prewarm({"input": body})
         try:
             self._prewarm_volume.commit()
@@ -435,17 +452,29 @@ class PromptlyPrewarmWorker:
     gpu="H100",
     cpu=4,
     memory=16384,
-    scaledown_window=30,
+    # 90s scaledown so a prewarm spawn (fired the moment iOS upload completes)
+    # keeps the GPU container warm long enough to absorb the user's typical
+    # decision delay before tapping "render". 30s was tight — covered back-to-
+    # back renders only. 90s reliably covers prewarm → real render gaps. Each
+    # extra 60s of idle warmth costs ~$0.07 of GPU time, but saves 15-20s of
+    # critical-path cold start per render — net win.
+    scaledown_window=90,
     timeout=480,
     region="us-west",
 )
-def rife_normalize_remote(source_bytes: bytes, target_fps: int) -> bytes:
+def rife_normalize_remote(source_bytes: bytes, target_fps: int, warmup: bool = False) -> bytes:
     """Interpolate a video to `target_fps` via RIFE 4.18 on H100.
 
     Input/output are full mp4 bytes. Internally writes to /tmp, runs the
     same /rife_normalize.py script the orchestrator used to call locally,
     reads the output back. Forwards `[rife] ...` log lines so the GPU
     container's logs match what the orchestrator used to print.
+
+    `warmup=True` mode runs the CUDA driver fix + a tiny torch CUDA probe
+    and returns immediately (no real RIFE work). Used by PromptlyPrewarmWorker
+    to provision the GPU container the moment iOS uploads complete, so the
+    real RIFE call ~30-60s later hits a warm container instead of paying
+    a 15-20s cold start on the critical path.
 
     Raises RuntimeError with rc + last 3000 chars of stderr on failure
     (preserves the diagnostics added when chasing the SIGSEGV).
@@ -465,6 +494,27 @@ def rife_normalize_remote(source_bytes: bytes, target_fps: int) -> bytes:
         sys.path.insert(0, "/")
     from cuda_driver_setup import setup_cuda_driver_mount
     setup_cuda_driver_mount()
+
+    if warmup:
+        # Provision the container, run the driver-mount fix, do a tiny
+        # torch CUDA probe to force CUDA init + libcuda resolution, then
+        # return. Real RIFE work skipped. The container stays warm for
+        # scaledown_window so the next real call reuses it.
+        _r = subprocess.run(
+            ["python", "-c",
+             "import torch; "
+             "assert torch.cuda.is_available(), 'cuda not available'; "
+             "_ = torch.zeros(4, device='cuda') + 1.0; "
+             "torch.cuda.synchronize(); "
+             "print('[rife-warmup] cuda OK on', torch.cuda.get_device_name(0), flush=True)"],
+            capture_output=True, text=True, timeout=60,
+        )
+        for _line in (_r.stdout or "").splitlines():
+            if _line.strip():
+                print(_line, flush=True)
+        if _r.returncode != 0:
+            print(f"[rife-warmup] cuda probe failed: {(_r.stderr or '')[:500]}", flush=True)
+        return b""
 
     with tempfile.TemporaryDirectory(prefix="rife-") as work:
         src = os.path.join(work, "src.mp4")

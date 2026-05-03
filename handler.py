@@ -3588,6 +3588,121 @@ def _translate_post_cut_anchors_to_src(post_cut_plan, new_to_src):
     return out
 
 
+# ── Gemini explicit prompt caching ─────────────────────────────────────────────
+# CutPlan and PostCutPlan both have large static system_instruction strings
+# (24KB and 67KB respectively). Gemini's explicit cache lets us send the
+# system_instruction ONCE per (model, hash) and reference it on subsequent
+# calls — Gemini processes cached tokens at ~75% reduced latency. With our
+# TTL=1h, every render after the first within an hour saves ~5-10s on each
+# of the two Gemini calls.
+#
+# Cache failure (creation or expired-on-server) falls through to the
+# non-cached call: the helper returns None on create failure; the wrapper
+# below catches "cache not found" errors on use and retries once without
+# the cached_content reference. No silent quality compromise — both paths
+# produce identical Gemini output.
+import hashlib as _hashlib
+import threading as _threading
+
+_GEMINI_CACHE_LOCK = _threading.Lock()
+_GEMINI_CACHE_REGISTRY: dict = {}  # (model, sys_hash) -> (cache_name, expires_at_epoch)
+_GEMINI_CACHE_TTL_SECONDS = 3600  # 1h — Gemini default; renews on use
+
+
+def _gemini_cache_key(model_name: str, system_instruction: str) -> tuple:
+    h = _hashlib.sha256(system_instruction.encode("utf-8")).hexdigest()[:16]
+    return (model_name, h)
+
+
+def _drop_gemini_cache(model_name: str, system_instruction: str) -> None:
+    key = _gemini_cache_key(model_name, system_instruction)
+    with _GEMINI_CACHE_LOCK:
+        _GEMINI_CACHE_REGISTRY.pop(key, None)
+
+
+def _get_or_create_gemini_system_cache(client, model_name: str, system_instruction: str):
+    """Return a Gemini cache resource name covering `system_instruction`,
+    creating one if needed. Returns None on failure — caller should fall
+    back to passing system_instruction directly in the generate config."""
+    if genai_types is None:
+        return None
+    key = _gemini_cache_key(model_name, system_instruction)
+    now = time.time()
+    with _GEMINI_CACHE_LOCK:
+        entry = _GEMINI_CACHE_REGISTRY.get(key)
+        if entry is not None:
+            cache_name, expires_at = entry
+            if expires_at > now + 60:
+                return cache_name
+            # Local entry near/past TTL — drop and recreate.
+            _GEMINI_CACHE_REGISTRY.pop(key, None)
+    try:
+        _t0 = time.time()
+        cache = client.caches.create(
+            model=model_name,
+            config=genai_types.CreateCachedContentConfig(
+                system_instruction=system_instruction,
+                ttl=f"{_GEMINI_CACHE_TTL_SECONDS}s",
+            ),
+        )
+        cache_name = getattr(cache, "name", None)
+        if not cache_name:
+            return None
+        with _GEMINI_CACHE_LOCK:
+            _GEMINI_CACHE_REGISTRY[key] = (cache_name, now + _GEMINI_CACHE_TTL_SECONDS)
+        print(
+            f"[gemini-cache] created {cache_name} for {model_name} "
+            f"({len(system_instruction)} chars, ttl={_GEMINI_CACHE_TTL_SECONDS}s, "
+            f"{time.time() - _t0:.1f}s)",
+            flush=True,
+        )
+        return cache_name
+    except Exception as e:
+        print(f"[gemini-cache] create failed: {e} — proceeding without cache", flush=True)
+        return None
+
+
+def _gemini_generate_with_cache(client, model_name, contents, base_config_kwargs, system_instruction):
+    """Run client.models.generate_content with explicit prompt caching.
+
+    `base_config_kwargs` is the dict of keyword args for GenerateContentConfig
+    EXCLUDING system_instruction / cached_content — those are added here based
+    on whether a cache resolved successfully. On cache-miss errors at use time,
+    drops the local registry entry and retries once without the cache."""
+    cache_name = _get_or_create_gemini_system_cache(client, model_name, system_instruction)
+
+    def _build_config(use_cache: bool):
+        kwargs = dict(base_config_kwargs)
+        if use_cache and cache_name:
+            kwargs["cached_content"] = cache_name
+        else:
+            kwargs["system_instruction"] = system_instruction
+        return genai_types.GenerateContentConfig(**kwargs)
+
+    try:
+        return client.models.generate_content(
+            model=model_name,
+            contents=contents,
+            config=_build_config(use_cache=cache_name is not None),
+        )
+    except Exception as e:
+        if cache_name:
+            _msg = str(e).lower()
+            if "cache" in _msg or "not found" in _msg or "404" in _msg:
+                print(
+                    f"[gemini-cache] cached call failed ({type(e).__name__}: {e}) — "
+                    f"dropping cache, retrying without",
+                    flush=True,
+                )
+                _drop_gemini_cache(model_name, system_instruction)
+                return client.models.generate_content(
+                    model=model_name,
+                    contents=contents,
+                    config=_build_config(use_cache=False),
+                )
+        raise
+
+
 def _call_gemini_cuts(client, system_instruction, user_content, video_part, model_name):
     """First Gemini call: cuts only. LOW thinking, small output, fast."""
     print(
@@ -3596,11 +3711,10 @@ def _call_gemini_cuts(client, system_instruction, user_content, video_part, mode
         flush=True,
     )
     t0 = time.time()
-    response = client.models.generate_content(
-        model=model_name,
+    response = _gemini_generate_with_cache(
+        client, model_name,
         contents=[video_part, user_content],
-        config=genai_types.GenerateContentConfig(
-            system_instruction=system_instruction,
+        base_config_kwargs=dict(
             temperature=1.0,
             max_output_tokens=4096,
             response_mime_type="application/json",
@@ -3608,6 +3722,7 @@ def _call_gemini_cuts(client, system_instruction, user_content, video_part, mode
             thinking_config=genai_types.ThinkingConfig(thinking_level="LOW"),
             media_resolution="MEDIA_RESOLUTION_LOW",
         ),
+        system_instruction=system_instruction,
     )
     dt = time.time() - t0
     print(f"[gemini-cuts] Complete in {dt:.1f}s", flush=True)
@@ -3638,11 +3753,10 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
         flush=True,
     )
     t0 = time.time()
-    response = client.models.generate_content(
-        model=model_name,
+    response = _gemini_generate_with_cache(
+        client, model_name,
         contents=[video_part, user_content],
-        config=genai_types.GenerateContentConfig(
-            system_instruction=system_instruction,
+        base_config_kwargs=dict(
             temperature=1.0,
             max_output_tokens=8192,
             response_mime_type="application/json",
@@ -3650,6 +3764,7 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
             thinking_config=genai_types.ThinkingConfig(thinking_level="MEDIUM"),
             media_resolution="MEDIA_RESOLUTION_LOW",
         ),
+        system_instruction=system_instruction,
     )
     dt = time.time() - t0
     print(f"[gemini-post] Complete in {dt:.1f}s", flush=True)
@@ -6834,18 +6949,30 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
     output_wav = os.path.join(work_dir, "per_cut_audio.wav")
 
     # ── Single source extraction ────────────────────────────────────────
+    # Skip the ffmpeg extraction if a wav was already dropped here by the
+    # prewarm path (handler.py copies cached audio to this exact path right
+    # after the source copy when both are available on the prewarm volume).
+    # The wav's sample rate matches what we'd extract since both paths probe
+    # the same source file. Saves ~3-5s on warm renders.
     full_src_wav = os.path.join(work_dir, "source_audio_full.wav")
-    _ext = subprocess.run(
-        ["ffmpeg", "-y", "-v", "error",
-         "-i", source_path, "-vn",
-         "-acodec", "pcm_s16le", "-ar", str(sample_rate), "-ac", "1",
-         full_src_wav],
-        capture_output=True, text=True, timeout=120,
-    )
-    if _ext.returncode != 0 or not os.path.exists(full_src_wav):
-        raise RuntimeError(
-            f"Source audio extraction failed: {(_ext.stderr or '')[-500:]}"
+    if os.path.exists(full_src_wav) and os.path.getsize(full_src_wav) > 1024:
+        print(
+            f"[audio] using prewarm-cached source wav "
+            f"({os.path.getsize(full_src_wav) // (1024 * 1024)}MB) — skipping extraction",
+            flush=True,
         )
+    else:
+        _ext = subprocess.run(
+            ["ffmpeg", "-y", "-v", "error",
+             "-i", source_path, "-vn",
+             "-acodec", "pcm_s16le", "-ar", str(sample_rate), "-ac", "1",
+             full_src_wav],
+            capture_output=True, text=True, timeout=120,
+        )
+        if _ext.returncode != 0 or not os.path.exists(full_src_wav):
+            raise RuntimeError(
+                f"Source audio extraction failed: {(_ext.stderr or '')[-500:]}"
+            )
 
     with wave.open(full_src_wav, "rb") as wf:
         n_channels = wf.getnchannels()
@@ -8524,6 +8651,13 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         ))
 
     if micro_input is not None:
+        # MicroSegments concurrency capped at 8 — without --concurrency, render-full.mjs
+        # defaults to floor(cpu/2) = 32 tabs, which combined with the 4×8 overlay chunks
+        # would oversubscribe the 64-vCPU container (32+32=64 tabs sharing 64 cores =
+        # 1 vCPU per tab → contention). MicroSegments contains only transitions + complex
+        # zooms (much smaller workload than the full overlay), so 8 tabs is plenty;
+        # freeing the other 24 vCPUs for the overlay chunks (the slowest pole) reliably
+        # speeds up the critical path without changing what Remotion outputs.
         micro_cmd = [
             "node", "/remotion/render-full.mjs",
             "--input", micro_input_path,
@@ -8531,6 +8665,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             "--public-dir", _bundle_public_root,
             "--composition", "PromptlyMicroSegments",
             "--gl", _gl_mode,
+            "--concurrency", str(_PER_CHUNK_CONCURRENCY),
         ]
 
     _render_t0 = time.time()
@@ -9369,6 +9504,12 @@ def _prewarm_cached_transcript_path(bucket, key):
     return os.path.join(PREWARM_CACHE_ROOT, _prewarm_cache_key(bucket, key), "transcript.json")
 
 
+def _prewarm_cached_audio_path(bucket, key):
+    """Pre-extracted source audio wav. Saves ~3-5s in build_per_cut_audio
+    when render finds it sitting next to source.mp4 in work_dir."""
+    return os.path.join(PREWARM_CACHE_ROOT, _prewarm_cache_key(bucket, key), "source_audio_full.wav")
+
+
 def prewarm_handler(job):
     """Aggressive pre-processing during iOS upload.
 
@@ -9402,13 +9543,15 @@ def prewarm_handler(job):
         cache_dir = os.path.join(PREWARM_CACHE_ROOT, cache_key)
         source_cache = os.path.join(cache_dir, "source.mp4")
         transcript_cache = os.path.join(cache_dir, "transcript.json")
+        audio_cache = os.path.join(cache_dir, "source_audio_full.wav")
 
         source_hit = os.path.exists(source_cache) and os.path.getsize(source_cache) > 1024
         transcript_hit = os.path.exists(transcript_cache) and os.path.getsize(transcript_cache) > 2
+        audio_hit = os.path.exists(audio_cache) and os.path.getsize(audio_cache) > 1024
 
-        if source_hit and transcript_hit:
+        if source_hit and transcript_hit and audio_hit:
             size_mb = os.path.getsize(source_cache) / (1024 * 1024)
-            print(f"[prewarm] FULL HIT {cache_key} ({size_mb:.1f}MB source + transcript)", flush=True)
+            print(f"[prewarm] FULL HIT {cache_key} ({size_mb:.1f}MB source + transcript + audio)", flush=True)
             return {"status": "cached", "cache_key": cache_key, "size_mb": round(size_mb, 1)}
 
         os.makedirs(cache_dir, exist_ok=True)
@@ -9475,6 +9618,39 @@ def prewarm_handler(job):
                     print(f"[prewarm] transcript cached ({len(_tx_result['words'])} words)", flush=True)
             except Exception as _tx_err:
                 print(f"[prewarm] transcribe failed: {str(_tx_err)[:200]} (main job will retry)", flush=True)
+
+        # Extract source audio to a wav alongside source.mp4. The render's
+        # build_per_cut_audio runs the SAME ffmpeg extraction at the start of
+        # the audio pipeline (~2-4s on a 60s source); doing it here means
+        # render finds the wav already sitting in work_dir and skips the
+        # extraction. Sample rate matches what render's probe will pick
+        # because we probe the same source file.
+        if not audio_hit and os.path.exists(source_cache):
+            try:
+                _audio_rate = probe_audio_sample_rate(source_cache) or 48000
+                _audio_t0 = time.time()
+                _ar = subprocess.run(
+                    ["ffmpeg", "-y", "-v", "error",
+                     "-i", source_cache, "-vn",
+                     "-acodec", "pcm_s16le", "-ar", str(_audio_rate), "-ac", "1",
+                     audio_cache],
+                    capture_output=True, text=True, timeout=120,
+                )
+                if _ar.returncode == 0 and os.path.exists(audio_cache) and os.path.getsize(audio_cache) > 1024:
+                    _wav_mb = os.path.getsize(audio_cache) / (1024 * 1024)
+                    print(
+                        f"[prewarm] audio cached ({_audio_rate}Hz, {_wav_mb:.1f}MB in "
+                        f"{time.time() - _audio_t0:.1f}s)",
+                        flush=True,
+                    )
+                else:
+                    print(
+                        f"[prewarm] audio extraction skipped (rc={_ar.returncode}) — "
+                        f"render will extract on demand",
+                        flush=True,
+                    )
+            except Exception as _ae:
+                print(f"[prewarm] audio extraction error: {_ae} — render will extract", flush=True)
 
         elapsed = time.time() - t0
         size_mb = os.path.getsize(source_cache) / (1024 * 1024) if os.path.exists(source_cache) else 0
@@ -9690,6 +9866,24 @@ def handler(job):
             import shutil as _sh
             _sh.copy(_cached_source_path, source_path)
             _dl_method = "prewarm-cache"
+            # If prewarm also pre-extracted source audio, copy it next to
+            # source.mp4 in the same work_dir. build_per_cut_audio writes its
+            # full-source wav to work_dir/source_audio_full.wav, so dropping
+            # the cached wav at exactly that path makes the extraction step
+            # in build_per_cut_audio see "already exists" and skip the ffmpeg
+            # call (saves ~3-5s on the audio-pipeline critical path).
+            _cached_audio_path = _prewarm_cached_audio_path(_dl_bucket, _dl_key)
+            if os.path.exists(_cached_audio_path) and os.path.getsize(_cached_audio_path) > 1024:
+                _audio_local = os.path.join(os.path.dirname(source_path), "source_audio_full.wav")
+                try:
+                    _sh.copy(_cached_audio_path, _audio_local)
+                    print(
+                        f"[pipeline] prewarm audio hit "
+                        f"({os.path.getsize(_audio_local) // (1024 * 1024)}MB)",
+                        flush=True,
+                    )
+                except Exception as _ae:
+                    print(f"[pipeline] failed to copy cached audio: {_ae}", flush=True)
         else:
             _aws_s3_client.download_file(_dl_bucket, _dl_key, source_path, Config=_S3_TRANSFER_CONFIG)
             _dl_method = "s3-crt"
@@ -10421,31 +10615,38 @@ def handler(job):
 
         def _upload_main():
             print("[pipeline] step=upload", flush=True)
-            # Direct SDK upload to S3 — faster than presigned URL PUT.
-            # CloudFront serves the content via CDN.
-            _s3_bucket = os.environ.get("S3_BUCKET_NAME", "")
-            _cf_domain = os.environ.get("CLOUDFRONT_DOMAIN", "")
-            # Single deterministic upload path. The Node.js dispatcher
-            # always pre-generates a presigned PUT URL targeting the
-            # bucket's `renders/{jobId}/{ts}-edited.mp4` key. If it
-            # didn't, fail loudly — no direct-SDK fallback to a
-            # different prefix that may not be covered by CloudFront
-            # origin access.
+            # Direct S3 multipart upload — much faster than single-stream HTTP PUT
+            # for 100-200 MB videos. The Node dispatcher pre-generates a presigned
+            # PUT URL targeting the bucket's `renders/{jobId}/{ts}-edited.mp4`
+            # key; we parse bucket+key out of that URL (same path the thumbnail
+            # upload at _extract_and_upload_cover already uses) and write
+            # directly via _s3_client with _S3_TRANSFER_CONFIG (32 concurrent
+            # 16-MB parts via boto3[crt]). End destination is identical to what
+            # the dispatcher pre-signed, so CloudFront origin access works.
             if not upload_url:
                 raise RuntimeError("No upload_url provided — Node dispatcher must pre-generate the presigned PUT URL")
-            with open(output_path, "rb") as f:
-                resp = requests.put(
-                    upload_url,
-                    data=f,
-                    headers={"Content-Type": "video/mp4"},
-                    timeout=600,
-                )
-                resp.raise_for_status()
+            if not _s3_client:
+                raise RuntimeError("Supabase S3 client not initialized — cannot upload (check SUPABASE_S3_ACCESS_KEY/SECRET_KEY env)")
+            _bucket, _key = _parse_supabase_storage_url(upload_url)
+            if not _bucket or not _key:
+                raise RuntimeError(f"Could not parse bucket/key from upload_url: {upload_url[:120]}")
+            _ut0 = time.time()
+            _s3_client.upload_file(
+                output_path, _bucket, _key,
+                ExtraArgs={"ContentType": "video/mp4"},
+                Config=_S3_TRANSFER_CONFIG,
+            )
+            _ue = time.time() - _ut0
             if input_data.get("public_url"):
                 _video_url = input_data["public_url"]
             else:
                 _video_url = upload_url.split("?")[0]
-            print(f"[pipeline] upload complete (presigned-put → {_video_url})", flush=True)
+            _mb = os.path.getsize(output_path) / (1024 * 1024)
+            print(
+                f"[pipeline] upload complete (s3-multipart {_mb:.1f}MB in {_ue:.1f}s "
+                f"@ {_mb / max(_ue, 0.001):.1f}MB/s → {_video_url})",
+                flush=True,
+            )
             edit_plan["_rendered_video_url"] = _video_url
 
         def _extract_and_upload_cover():
