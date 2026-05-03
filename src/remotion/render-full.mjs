@@ -248,7 +248,31 @@ try {
         pixelFormat: "yuva444p10le",
         imageFormat: "png",
       }
-    : { x264Preset: "ultrafast", crf: 18, pixelFormat: "yuv420p" }),
+    : {
+        // veryfast vs ultrafast: enables CABAC + B-frames + deblocking
+        // filter at ~2-3× encode time per frame on the orchestrator's 64
+        // vCPU CPU encoder. The quality jump is substantial — far less
+        // blocking around faces (lips, eyes) and dramatically smaller
+        // files at the same visual quality. ~10-20s extra wall-clock per
+        // render is an acceptable trade for the visible quality gain.
+        x264Preset: "veryfast",
+        crf: 18,
+        pixelFormat: "yuv420p",
+        // Bitrate cap ONLY for the final user-facing render
+        // (PromptlyBlendCaptionsOnly). Without it, CRF 18 produces 30-50
+        // Mbps streams that AVPlayer can't sustain over residential Wi-Fi.
+        // 8M is YouTube's 1080p60 reference rate; transparent for talking-
+        // head content; streams smoothly through CloudFront + AVPlayer.
+        //
+        // PromptlyMicroSegments is an INTERMEDIATE — FFmpeg decodes it
+        // and re-encodes the final composite. Capping it at 8M before
+        // re-encode would throw away quality on exactly the high-motion
+        // content (transitions, zoom punches) it contains. Leave it
+        // uncapped so the FFmpeg final pass has full intermediate fidelity.
+        ...(isBlendCaptions
+          ? { encodingMaxRate: "8M", encodingBufferSize: "16M" }
+          : {}),
+      }),
   outputLocation: outputPath,
   inputProps,
   concurrency: resolvedConcurrency,
