@@ -675,14 +675,41 @@ def build_final_filtergraph(
                 f"[{ov_lbl}]"
             )
             parts.append(
-                f"[{cur}][{ov_lbl}]overlay=format=auto:shortest=0[final_v]"
+                f"[{cur}][{ov_lbl}]overlay=format=auto:shortest=0[composited]"
             )
         else:
             parts.append(
-                f"[{cur}][{overlay_input_idx}:v]overlay=format=auto:shortest=0[final_v]"
+                f"[{cur}][{overlay_input_idx}:v]overlay=format=auto:shortest=0[composited]"
             )
     else:
-        parts.append(f"[{cur}]null[final_v]")
+        parts.append(f"[{cur}]null[composited]")
+
+    # ── Denoise pass (subtle, CapCut-style) ──────────────────────────────────
+    # hqdn3d=1.5:1.5:6:6 is a "barely-touch-detail" recipe: light spatial
+    # (1.5) + default temporal (6) on both luma and chroma. Removes the
+    # high-frequency phone-camera grain that survives the source's in-ISP
+    # NR — particularly chroma blotch in shadows and skin shimmer — while
+    # leaving facial detail and rendered text edges intact (text edges
+    # are high-contrast hard transitions; hqdn3d's threshold leaves them
+    # alone at 1.5 spatial). This is the same subtle clean-up CapCut
+    # applies on every export.
+    #
+    # Placement: AFTER alpha overlay flatten (hqdn3d has no alpha-aware
+    # mode and would silently drop the alpha plane), BEFORE the libx264
+    # encode. format=yuv420p is explicit insurance — the overlay step's
+    # `format=auto` could in theory yield a 10-bit format if the overlay
+    # was 10-bit, but the encoder is 8-bit anyway.
+    #
+    # Parallelization: this filter runs INSIDE the per-chunk ffmpeg
+    # invocation, so each composite chunk denoises its own slice. With
+    # 4-way chunked composite already in place (handler.py), denoise is
+    # naturally parallel across chunks. FFmpeg's frame threading inside
+    # each invocation utilizes the per-chunk thread budget further.
+    # ~2-5s added wall-clock cost per render (negligible vs the composite
+    # encode itself).
+    parts.append(
+        f"[composited]hqdn3d=1.5:1.5:6:6,format=yuv420p[final_v]"
+    )
 
     return ";".join(parts), ["final_v"]
 
