@@ -3105,6 +3105,52 @@ transitions — ARRAY. {{"after_word_index": int, "type": <name>, ...component p
   Place ON or near a shot_changes entry — that's where the viewer's eye expects a visual boundary.
   SceneTitle: 0-2 per video maximum (genuine chapter breaks only).
 
+=== VISUAL CHANGE SPACING — DO NOT STACK EFFECTS ===
+
+Two visual changes on the same beat reads as a glitch, not as punctuation. When B-roll, transitions, zoom emphasis, and motion graphics fire too close together in OUTPUT TIME, the viewer sees three or four visual states in <1 second and registers it as broken playback. Plan placements so the eye lands on ONE thing at a time.
+
+Before emitting any transition / B-roll / zoom_effect / motion_graphic, check the OUTPUT-TIME positions of every other visual element you've already placed and apply these minimum gaps. OUTPUT TIME = the time after cuts and pacing — derive it from the kept-transcript word timings the same way you derive emphasis_moments timing.
+
+  Transition ↔ B-roll: minimum 1.0 second gap, in EITHER direction.
+    A B-roll's `end_word_index` must point to a kept word whose end-time
+    is at least 1.0 second BEFORE any transition's `after_word_index`
+    trigger. Same in reverse — a B-roll cannot start until 1.0s after a
+    transition ends. Failure pattern: a B-roll on "got in the *car*"
+    (ending word 186) plus a transition on "*work*" (word 191, the next
+    clip boundary) leaves only 0.2s of speaker frame between the cutaway
+    ending and the transition starting. Viewer sees: B-roll → speaker
+    flash → transition zoom → next clip — three visual states in 600ms,
+    reads as broken. Either move the B-roll's window earlier (end on a
+    word ≥1s before the transition's trigger word) or skip the B-roll.
+
+  Transition ↔ Zoom emphasis: minimum 0.5 second gap.
+    A SnapReframe / StepZoom landing on the punchline AND a transition
+    immediately after stacks two camera moves on the same beat. Pick
+    one — usually the transition wins because it's structural; the zoom
+    is replaceable.
+
+  Transition ↔ Transition: minimum 2.0 second gap.
+    Back-to-back transitions inside a 2-second window feel like a glitch
+    loop. Sparse, deliberate use is the rule.
+
+  B-roll ↔ Zoom emphasis: minimum 0.8 second gap.
+    B-roll already replaces the speaker frame. A zoom right before or
+    after the cutaway is a redundant camera move on top of a camera move.
+
+  HARD CEILING: maximum 1 visual change per 1.5-second OUTPUT window.
+    "Visual change" = transition, B-roll start, zoom_effect start,
+    motion_graphic start (caption position changes don't count).
+    If your plan has more than one visual change in any 1.5s window,
+    drop the lower-priority element BEFORE emitting it. Priority order
+    when something has to go:
+        transition  >  motion_graphic  >  zoom_effect  >  B-roll
+    Transitions are structural (they ARE the cut); MGs are deliberate
+    editorial moments; zooms are per-clip emphasis; B-roll is fill with
+    placement flexibility. When choosing what to keep on a contested
+    beat, work down that list.
+
+These rules are not aesthetic suggestions — they prevent the most common short-form-video glitch viewers register. A transition that lands cleanly with 1+ second of breathing room on each side ALWAYS reads as professional. A transition stacked on top of a B-roll cutaway with 0.2s gap looks broken even when each effect is rendered correctly.
+
 === GLOBAL FIELDS ===
 
 notes              — string <=50 words. Brief rationale.
@@ -8101,10 +8147,20 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             if _f_out > 0.001 and _f_out < total_output_duration - 0.001:
                 _position_boundaries_out_sec.append(_f_out)
 
+    # Clip boundaries in OUTPUT seconds — every cut between two source clips
+    # forces a caption page break so a single page never spans a transition.
+    # Skip the final clip's end (= total duration) since there's no "next clip"
+    # to break against. Without this, pages built from the kept transcript
+    # could group the last word of clip A with the first word of clip B —
+    # rendering both phrases on top of the transition between them.
+    _clip_boundaries_out_sec = [
+        float(_cr["end"]) for _cr in (_clip_ranges[:-1] if len(_clip_ranges) > 1 else [])
+    ]
     caption_pages = _build_tiktok_pages_from_projected(
         _projected_words,
         max_words_per_page=3,
         position_boundaries_sec=sorted(set(_position_boundaries_out_sec)),
+        clip_boundaries_sec=sorted(set(_clip_boundaries_out_sec)),
     )
     if not caption_position_segments_out:
         # The validator guarantees at least one segment covering [0, duration].
@@ -9742,7 +9798,7 @@ VALID_MG_TYPES = {
 }
 
 
-def _build_tiktok_pages_from_projected(projected_words, max_words_per_page=3, position_boundaries_sec=None):
+def _build_tiktok_pages_from_projected(projected_words, max_words_per_page=3, position_boundaries_sec=None, clip_boundaries_sec=None):
     """Convert projected Deepgram words into TikTokPage[] structured for the
     @remotion/captions types consumed by the pack caption components.
 
@@ -9753,10 +9809,19 @@ def _build_tiktok_pages_from_projected(projected_words, max_words_per_page=3, po
       - position-change boundaries (so a page never spans top→bottom etc.;
         if it did, the page would be assigned by midpoint to one position
         and visually drift relative to its actual time range)
+      - clip boundaries (so a page never spans a cut between two source
+        clips; without this break, words from the end of clip A and the
+        start of clip B render together during the transition window
+        producing visible word-salad — e.g. the kept-transcript words
+        "you gonna learn? What are you gonna play" cross a cut and the
+        page renders both phrases on top of the LightLeak transition).
+        Clip boundary breaks are independent of position-change breaks
+        — a single timeline can have many clip cuts within one position
+        segment.
 
-    `position_boundaries_sec` is an optional sorted list of output-time
-    seconds where the caption position changes. Pages are flushed when
-    crossing one.
+    `position_boundaries_sec` and `clip_boundaries_sec` are both optional
+    sorted lists of output-time seconds. Pages flush whenever a word's
+    start time crosses any boundary in either list.
     """
     if not projected_words:
         return []
@@ -9767,6 +9832,7 @@ def _build_tiktok_pages_from_projected(projected_words, max_words_per_page=3, po
     last_word_end = None
     SENTENCE_END = {".", "!", "?"}
     _bounds = list(position_boundaries_sec or [])
+    _clip_bounds = list(clip_boundaries_sec or [])
 
     def _flush():
         nonlocal current_tokens, current_start_ms, current_text_parts, last_word_end
@@ -9791,17 +9857,30 @@ def _build_tiktok_pages_from_projected(projected_words, max_words_per_page=3, po
                 return True
         return False
 
+    def _crosses_clip_boundary(prev_end_sec, next_start_sec):
+        # True iff a cut between two source clips falls in [prev_end, next_start].
+        # Same shape as _crosses_boundary; kept separate so each break-class can
+        # be tuned / disabled independently from its callers.
+        if not _clip_bounds:
+            return False
+        for b in _clip_bounds:
+            if prev_end_sec <= b <= next_start_sec:
+                return True
+        return False
+
     for w in projected_words:
         w_start = float(w.get("start") or 0)
         w_end = float(w.get("end") or w_start)
         w_text = w.get("punctuated_word") or w.get("word") or ""
         if not w_text.strip():
             continue
-        # Break on big gap OR position-change boundary
+        # Break on big gap, position-change boundary, or clip boundary
         if current_tokens and last_word_end is not None:
             if w_start - last_word_end > 0.6:
                 _flush()
             elif _crosses_boundary(last_word_end, w_start):
+                _flush()
+            elif _crosses_clip_boundary(last_word_end, w_start):
                 _flush()
         if current_start_ms is None:
             current_start_ms = int(round(w_start * 1000))
