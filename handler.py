@@ -2702,17 +2702,33 @@ Variants and REQUIRED props. Each variant is a DESIGN with its own visual charac
 
 1. "torn_paper"  — Top-of-frame banner: a torn-paper sheet drops from above and two text strips slam onto it. Renders at the TOP, never covers the speaker. Confession/framing/hook/chapter-card aesthetic.
    REQUIRED: "topText" (str <=5 words UPPERCASE), "bottomText" (str <=5 words UPPERCASE)
-   Text content: chapter LABEL or framing HOOK. Words like "THE CONFESSION", "BEFORE / AFTER", "MY 6YO / EXPOSED MY WIFE", "THE TURN / EVERYTHING CHANGED". Punchy short labels that frame what's coming. NEVER a verbatim quote of the dialogue at that moment — the captions already show what's being said; the torn-paper card adds editorial CONTEXT, not transcript.
+   Text content: chapter LABEL or framing HOOK. Punchy short labels that frame what's coming. NEVER a verbatim quote of the dialogue at that moment — the captions already show what's being said; the torn-paper card adds editorial CONTEXT, not transcript.
+
+   TONE MATCHES NARRATIVE REGISTER. Read the kept transcript and pick text that fits the genre:
+   • Personal stories (someone recounting their own real experience, family/relationship beats, confessions, "the time I…") → literary chapter labels: "THE CONFESSION", "WHAT SHE SAID", "THE TURN", "BEFORE / AFTER", "THE NAME", "THE CALL". Understated. Earns the moment by sitting back.
+   • Genuinely sensational/news-mock content (gossip, exposing-public-figure, true-crime parody) → tabloid framing is fair: "EXPOSED!", "YOU WON'T BELIEVE", "THE SCANDAL".
+   • Educational/business/instructional → labels: "RULE 1", "THE FIX", "THE MISTAKE", "STEP 1 / STEP 2", "THE LESSON".
+
+   DO NOT default to tabloid headlines on personal stories — `6YO EXPOSES WIFE`, `SHOCKING TRUTH`, `YOU WON'T BELIEVE WHAT HAPPENED` on a real-life family beat reads as cringe clickbait, not editorial. Match the register the speaker is using.
 
 2. "sticky_note" — EXACTLY 3 animated sticky notes pinned at the upper third (left + center + right positions, fixed layout: left has a checkmark, right has italic + underline, center is plain). Doesn't cover the speaker. Handwritten-style.
    REQUIRED: "notes" (array of {{"text": str ≤4 words, "color": "#hex", "rotation": float}} — MUST be 3 items, no fewer)
    Use ONLY when you have 3 standalone short items that each stand alone as a complete thought — a checklist, a tip triple, a 3-item key-takeaways set. Each note is independent; the three notes do NOT form one continuous sentence between them.
-   ANTI-PATTERN: DO NOT use to display ONE quote split across multiple notes. Sticky notes are 3 parallel items, not a fragmented quote. For a single quote, use quote_card (if speaker is yielding) or torn_paper (chapter label / framing hook).
+   ANTI-PATTERN: DO NOT use to display ONE quote split across multiple notes. Sticky notes are 3 parallel items, not a fragmented quote. For a single quote, use quote_card (only if its hard gate below passes) or torn_paper (chapter label / framing hook).
    If you only have 1 or 2 items to highlight, DO NOT USE STICKY NOTES. Pick a different overlay (torn_paper, quote_card) or skip the overlay entirely — leaving the right slot empty creates a visibly unbalanced layout.
 
-3. "quote_card" — Floating card at center of frame with quote + em-dash attribution. The card is large and WILL cover the center of the frame for its full lifespan. Use ONLY when you accept the cover, which means: the moment is a hard pause/silence where the quote IS the shot (speaker yielding the frame to the quote), OR the speaker is genuinely off-camera (no face in frame at all).
+3. "quote_card" — Floating card at center of frame with quote + em-dash attribution. The card occupies the center band of the canvas; for its full lifespan, the speaker's face IS covered if a face is in frame.
    REQUIRED: "quote" (str <=20 words), "attribution" (str)
-   Do NOT use over a talking-head close-up where the speaker's face fills the center — the card lands directly on their face. Do NOT use during a B-roll window — B-roll is full-canvas and the pipeline will drop any overlay that overlaps a B-roll window. If you want a quote-style emphasis WITHOUT covering the speaker, use a `Quintessence` emphasis_moment caption beat or a torn_paper at the top instead.
+
+   HARD GATE — quote_card is FORBIDDEN unless ONE of these objective conditions is true. Check the gate explicitly before emitting; if both fail, do NOT use quote_card. There is no "the speaker is yielding to the quote" exception — that phrase is too easy to rationalize. Use the gate.
+
+   (a) FACE-OFF-SCREEN. The FACE VISIBILITY array shows a `NO` segment that fully covers the window `[start_word.fromMs, start_word.fromMs + duration_seconds*1000]`. If the speaker is on-camera at any point during your card's lifespan, condition (a) fails.
+
+   (b) PRE-CARD SILENCE. The kept transcript shows ≥1.5s of silence ending at `start_word.fromMs` — i.e. previous-kept-word.toMs + 1500ms ≤ start_word.fromMs. (Read the transcript timestamps directly.) This silence is what makes a quote land — the card breathes into a pause, not over dialogue.
+
+   If neither (a) nor (b) holds, replace the quote_card with a torn_paper (chapter label at top), or skip the overlay entirely. The wife's quote being voiced by the speaker is NOT condition (b) — the speaker is mid-dialogue, no silence preceded the moment.
+
+   B-roll is full-canvas; the pipeline drops any overlay that overlaps a B-roll window. quote_card during a B-roll window is also forbidden (you don't need this rule explicitly because B-roll counts as face-off-screen, but a B-roll window cannot become the (a) source on its own — it's the pipeline's drop, not your placement).
 
 4. "caption_match" — zone follows its `position` prop (top→`upper_third_safe`, center→`center`, bottom→`lower_third_safe`). Renders in the same style as the main captions. Mono-brand aesthetic.
    REQUIRED: "text" (str <=6 words), "position" ("top" | "center" | "bottom")
@@ -3789,9 +3805,16 @@ def _call_gemini_cuts(client, system_instruction, user_content, video_part, mode
 
 
 def _call_gemini_post_cuts(client, system_instruction, user_content, video_part, model_name):
-    """Second Gemini call: visual placement on the kept-only transcript. MEDIUM thinking."""
+    """Second Gemini call: visual placement on the kept-only transcript. HIGH thinking.
+
+    Bumped MEDIUM → HIGH because the post-cut model frequently shipped center-band
+    overlays (quote_card) over on-camera speakers, against an explicit prompt rule
+    — a placement-vs-rules consistency failure that more thinking budget addresses.
+    Latency cost: a few extra seconds on a call that's already off the critical
+    path (renders dwarf it).
+    """
     print(
-        f"[gemini-post] Calling {model_name} (thinking=MEDIUM, PostCutPlan schema, "
+        f"[gemini-post] Calling {model_name} (thinking=HIGH, PostCutPlan schema, "
         f"system_instruction={len(system_instruction)} chars, user_content={len(user_content)} chars)...",
         flush=True,
     )
@@ -3804,7 +3827,7 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
             max_output_tokens=8192,
             response_mime_type="application/json",
             response_json_schema=PostCutPlan.model_json_schema(),
-            thinking_config=genai_types.ThinkingConfig(thinking_level="MEDIUM"),
+            thinking_config=genai_types.ThinkingConfig(thinking_level="HIGH"),
             media_resolution="MEDIA_RESOLUTION_LOW",
         ),
         system_instruction=system_instruction,

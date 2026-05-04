@@ -7,12 +7,12 @@ import { useMGPhase } from "../shared/useMGPhase";
 import type { QuoteCardProps } from "./types";
 
 
-const CARD_PADDING_X = 96;
-const CARD_PADDING_Y = 80;
-const DEFAULT_CARD_WIDTH = 918; // ~85% of 1080
+const CARD_PADDING_X = 72;
+const CARD_PADDING_Y = 60;
+const DEFAULT_CARD_WIDTH = 756; // ~70% of 1080 — smaller footprint
 const CARD_RADIUS = 8;
-const GIANT_MARK_SIZE = 340;
-const ATTRIBUTION_GAP = 32;
+const GIANT_MARK_SIZE = 260;
+const ATTRIBUTION_GAP = 24;
 
 const THEMES = {
   dark: {
@@ -48,7 +48,7 @@ export const QuoteCard: React.FC<QuoteCardProps> = ({
   attributionColor,
   accentColor,
   quoteFont,
-  quoteFontSize = 64,
+  quoteFontSize = 52,
   width = DEFAULT_CARD_WIDTH,
   anchor,
   offsetX,
@@ -155,8 +155,8 @@ export const QuoteCard: React.FC<QuoteCardProps> = ({
         <div
           style={{
             position: "absolute",
-            top: -90,
-            left: 40,
+            top: -70,
+            left: 32,
             fontFamily: resolvedQuoteFont,
             fontStyle: "italic",
             fontWeight: 400,
@@ -200,7 +200,7 @@ export const QuoteCard: React.FC<QuoteCardProps> = ({
             marginTop: ATTRIBUTION_GAP,
             fontFamily: MG_FONTS.inter,
             fontWeight: 500,
-            fontSize: 28,
+            fontSize: 24,
             letterSpacing: "0.08em",
             color: resolvedAttributionColor,
             textAlign: "left",
