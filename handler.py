@@ -8939,8 +8939,17 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _N_COMPOSITE_CHUNKS = 4 if total_output_frames >= 400 else 1
     _composite_ranges = split_timeline_into_chunks(int(total_output_frames), _N_COMPOSITE_CHUNKS)
     _composite_chunked = len(_composite_ranges) > 1
+    # Chunks are LOSSLESS ProRes 4444 intermediates (.mov) — see encoder
+    # branch in _build_composite_cmd below. The lone H.264 lossy encode in
+    # the pipeline happens at the final concat+mux step, decoding all
+    # chunks back through libx264 in one pass over the full timeline. This
+    # eliminates the B-frame-lookahead boundary frame loss the per-chunk
+    # libx264 encode used to suffer from (1-2 frames dropped at the tail
+    # of each chunk because libx264 couldn't see future frames to encode
+    # them as B-frames → ~3-4 frames missing across 4 chunks → ~100ms A/V
+    # drift in the final output, observed in production).
     _composite_chunk_paths = (
-        [os.path.join(work_dir, f"composite_chunk_{_i:02d}.mp4")
+        [os.path.join(work_dir, f"composite_chunk_{_i:02d}.mov")
          for _i in range(len(_composite_ranges))]
         if _composite_chunked else []
     )
@@ -9028,46 +9037,49 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         ]
         if include_audio and c_audio_idx is not None:
             cmd += ["-map", f"{c_audio_idx}:a:0", "-c:a", "copy"]
-        cmd += [
-            # `medium` preset replaces `veryfast`. veryfast cut corners on
-            # rate-distortion (smaller B-frame search, looser ME) which
-            # produced visible pixel-level artifacts on hard-motion frames
-            # (head turns, hand gestures, B-roll cuts, scene changes).
-            # medium enables full B-frames, full ME, full subpel refinement
-            # — meaningfully sharper output at the same CRF. Cost: ~2-3×
-            # encode time per frame, but composite chunks already run 4-way
-            # parallel and chunks finish in 60-90s either way, so this lands
-            # inside the existing render window with negligible critical-
-            # path impact.
-            "-c:v", "libx264", "-preset", "medium", "-crf", "18",
-            # Force constant frame rate at the output stage. Filter
-            # graphs with speed-ramps produce non-uniform PTS — VFR
-            # output then makes AVPlayer's display loop look juddery
-            # on some devices. Targeting source_fps duplicates frames
-            # during slow-mo (fine) and the source is often 60fps so
-            # fast-mo segments don't lose detail.
-            "-fps_mode", "cfr", "-r", str(int(round(source_fps))),
-            # 18M / 36M cap for 1080p60. The previous 14M ceiling clipped
-            # detail on heavy-motion segments (hard cuts, B-roll, zooms +
-            # transitions stacked). 18M is in TikTok's recommended range
-            # for 1080p60 short-form and well under iOS Level 4.1's 50M
-            # ceiling. CRF 18 is still the rate driver; the cap is just
-            # a safety lid that almost never engages on talking-head
-            # content but stays out of the way when it would.
-            "-maxrate", "18M", "-bufsize", "36M",
-            # High Profile + Level 4.1 = max compatibility for iOS
-            # AVPlayer / web HLS without limiting quality.
-            "-profile:v", "high", "-level:v", "4.1",
-            "-pix_fmt", "yuv420p",
-            # Force dense keyframes on every chunk so concat -c copy joins
-            # cleanly without GOP-boundary glitches.
-            "-g", str(int(round(source_fps))),
-            "-keyint_min", str(int(round(source_fps))),
-            "-sc_threshold", "0",
-            "-shortest",
-            "-movflags", "+faststart",
-            output_path_for_chunk,
-        ]
+
+        # Two encoder paths:
+        #
+        # 1. Single-pass (include_audio=True, output is final): libx264
+        #    medium crf 18 with platform-tuned settings. The full
+        #    1401-frame timeline is encoded in one pass — B-frame
+        #    lookahead works correctly across the whole video, no
+        #    boundary frame loss. This is the path for short outputs
+        #    (<400 frames) that don't need chunking.
+        #
+        # 2. Chunked (include_audio=False): each chunk renders to a
+        #    LOSSLESS ProRes 4444 intermediate. Intra-only codec means
+        #    every frame is a keyframe — no B-frame lookahead, no
+        #    boundary frame loss. The single H.264 lossy encode happens
+        #    later, in the final concat+mux step, where the concatenated
+        #    ProRes is decoded and re-encoded in ONE libx264 invocation
+        #    over the full timeline. This is the pro-tool pattern
+        #    (Premiere/Resolve render preview to ProRes, encode H.264
+        #    once on export) and structurally eliminates the chunk-
+        #    boundary A/V drift bug the previous chunked-libx264
+        #    architecture had.
+        if include_audio:
+            cmd += [
+                "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+                "-fps_mode", "cfr", "-r", str(int(round(source_fps))),
+                "-maxrate", "18M", "-bufsize", "36M",
+                "-profile:v", "high", "-level:v", "4.1",
+                "-pix_fmt", "yuv420p",
+                "-g", str(int(round(source_fps))),
+                "-keyint_min", str(int(round(source_fps))),
+                "-sc_threshold", "0",
+                "-shortest",
+                "-movflags", "+faststart",
+                output_path_for_chunk,
+            ]
+        else:
+            cmd += [
+                "-c:v", "prores_ks", "-profile:v", "4444",
+                "-pix_fmt", "yuv444p10le",
+                "-vendor", "apl0",
+                "-fps_mode", "cfr", "-r", str(int(round(source_fps))),
+                output_path_for_chunk,
+            ]
         return cmd
 
     _render_pool = concurrent.futures.ThreadPoolExecutor(
@@ -9343,31 +9355,46 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # Two paths driven by _output_already_written / _final_video_inputs:
     #   - Single composite (<400 frames): video + audio already muxed by
     #     _build_composite_cmd in one libx264 pass; nothing to do here.
-    #   - Chunked composite (≥400 frames): concat demuxer joins composite
-    #     chunks losslessly while the same pass muxes audio. Stream-copy
-    #     on both — bit-exact join.
+    #   - Chunked composite (≥400 frames): chunks were rendered as LOSSLESS
+    #     ProRes 4444 intermediates. Decode them through concat demuxer,
+    #     re-encode the ENTIRE concatenated timeline in ONE libx264 pass,
+    #     and mux audio in the same invocation. This is the lone H.264
+    #     lossy encode in the chunked pipeline — B-frame lookahead works
+    #     correctly across the full timeline (no chunk boundaries inside
+    #     this encode), structurally eliminating the ~100ms A/V drift
+    #     that the previous stream-copy concat suffered from (per-chunk
+    #     libx264 dropped 1-2 frames at each chunk's tail).
     _am_t0 = time.time()
     if _output_already_written:
         _am_elapsed = 0.0
     else:
-        # Composite chunks → single output via concat demuxer + audio mux.
         _final_concat_list = os.path.join(work_dir, "_final_concat_list.txt")
         with open(_final_concat_list, "w") as _lf:
             for _p in _final_video_inputs:
                 _lf.write(f"file '{_p}'\n")
         _am_r = subprocess.run(
-            ["ffmpeg", "-y", "-v", "warning",
+            ["ffmpeg", "-y", "-v", "warning", "-threads", "0",
              "-f", "concat", "-safe", "0",
              "-i", _final_concat_list,
              "-i", _final_audio_path,
              "-map", "0:v",
              "-map", "1:a",
-             "-c:v", "copy",
+             # Single libx264 encode over the FULL concatenated timeline.
+             # Same settings the single-pass path uses — keeps output
+             # quality identical regardless of which path produced it.
+             "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+             "-fps_mode", "cfr", "-r", str(int(round(source_fps))),
+             "-maxrate", "18M", "-bufsize", "36M",
+             "-profile:v", "high", "-level:v", "4.1",
+             "-pix_fmt", "yuv420p",
+             "-g", str(int(round(source_fps))),
+             "-keyint_min", str(int(round(source_fps))),
+             "-sc_threshold", "0",
              "-c:a", "copy",
              "-shortest",
              "-movflags", "+faststart",
              output_path],
-            capture_output=True, text=True, timeout=180,
+            capture_output=True, text=True, timeout=300,
         )
         if _am_r.returncode != 0:
             raise RuntimeError(
