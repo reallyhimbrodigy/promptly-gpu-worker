@@ -10644,31 +10644,31 @@ def handler(job):
             return detect_vocal_emphasis(_raw_source)
 
         def _do_fps_normalize():
-            """Canonicalize source to 1080×1920 60fps CFR yuv420p.
+            """Canonicalize source to 1080×1920 yuv420p CFR at SOURCE fps.
 
-            Single-pass ffmpeg ingest. The fps=60 filter handles every
-            source FPS (60, 30, 24, 25, 23.976, etc.) via deterministic
-            frame duplication — each source frame is emitted as many times
-            as needed to hit 60fps output. Zero interpolation, zero
-            invented pixels.
+            Single-pass ffmpeg ingest. We pass `fps=<source_rate>` to lock
+            CFR at the source's native rate (handles VFR phone uploads).
+            For a 29.97fps source the output is 29.97 CFR; for a 60fps
+            source it stays 60 CFR. Downstream Remotion compositions read
+            this fps from the canonicalized file and run at the same rate
+            so per-frame springs / SFX onset / MG timing stay in lock-step
+            with the speaker footage.
 
-            We previously used RIFE 4.18 to synthesize new in-between
-            frames for sub-60fps sources. RIFE produced visible warping
-            artifacts ("invented pixels") on fast head/hand motion AND
-            cost ~84s on the critical path per render. Frame duplication
-            is bit-faithful to the source AND ~80s faster. The "smooth
-            60fps" feel of the final video comes from Remotion's overlays
-            (zooms, motion graphics, captions) rendering at 60fps over the
-            duplicated speaker frames — those layers are fresh-rendered,
-            not interpolated, so they stay buttery without depending on
-            the speaker layer's source FPS.
+            Earlier code force-duped every source to 60fps to give Remotion
+            overlays a "smooth" 60fps timeline. That cost ~115s of
+            normalize compute and 200MB+ of intermediate file size for
+            zero motion benefit (frame-dup adds NO smoothness, just
+            duplicate pixels). The "smoothness" of overlays at 30fps is
+            already buttery — they're computed, not warped, and 30fps is
+            the TikTok / IG native cadence for short-form.
 
             Awaits future_normalize so it can read the analyze-derived
             normalize_vf. analyze typically finishes in 2-5s; the await
             is negligible against the ~10s normalize cost.
 
-            Output: source_canonical.mp4 (1080x1920 60fps yuv420p h264
-            ultrafast crf 18, 1-keyframe-per-second GOP for fast seeks).
+            Output: source_canonical.mp4 (1080x1920 source-fps yuv420p
+            h264 ultrafast crf 18, ~1-keyframe-per-second GOP for fast
+            seeks).
             """
             _shape = future_normalize.result()
             _normalize_vf = _shape.get("normalize_vf")
@@ -10717,10 +10717,26 @@ def handler(job):
                 f"in {time.time() - _shake_t0:.1f}s",
                 flush=True,
             )
+            # Target the source's native fps — no artificial frame-dup.
+            # Prefer r_frame_rate (the canonical container rate) when
+            # present; fall back to avg_frame_rate; final fallback to 30.
+            # ffmpeg's fps filter accepts the value as either a float
+            # (e.g. 29.97) or a fraction string (e.g. 30000/1001) — float
+            # is precise enough for our needs.
+            _target_fps = (
+                _r_val if _r_val and _r_val > 0
+                else _avg if _avg and _avg > 0
+                else 30.0
+            )
+            # Clamp absurd values that can come from broken probes.
+            if _target_fps < 10 or _target_fps > 120:
+                _target_fps = 30.0
+            _gop_frames = max(1, int(round(_target_fps)))
+
             _vf_parts = []
             if _needs_deshake:
                 _vf_parts.append("deshake=rx=16:ry=16:edge=mirror")
-            _vf_parts.append("fps=60")
+            _vf_parts.append(f"fps={_target_fps:.6f}")
             if _normalize_vf:
                 _vf_parts.append(_normalize_vf)
             _vf_combined = ",".join(_vf_parts)
@@ -10731,7 +10747,8 @@ def handler(job):
                  "-vf", _vf_combined,
                  "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
                  "-pix_fmt", "yuv420p",
-                 "-g", "60", "-keyint_min", "60", "-sc_threshold", "0",
+                 "-g", str(_gop_frames), "-keyint_min", str(_gop_frames),
+                 "-sc_threshold", "0",
                  "-c:a", "copy",
                  "-video_track_timescale", "90000",
                  _norm_path],
@@ -10746,8 +10763,8 @@ def handler(job):
             _size_mb = os.path.getsize(_norm_path) / (1024 * 1024)
             print(
                 f"[fps-normalize] r={_r_val:.4f}fps avg={_avg:.4f}fps "
-                f"-> 60.0000fps CFR (frame-dup) in {time.time() - _norm_t0:.1f}s "
-                f"({_size_mb:.1f}MB)",
+                f"-> {_target_fps:.4f}fps CFR (source-native) in "
+                f"{time.time() - _norm_t0:.1f}s ({_size_mb:.1f}MB)",
                 flush=True,
             )
             # Verify dense keyframes actually landed in the encoded file.
@@ -10787,7 +10804,7 @@ def handler(job):
                         print(
                             f"[fps-normalize] *** WARNING: max keyframe gap "
                             f"{_max_gap:.2f}s exceeds 1.5s — Remotion seeks "
-                            f"will be slow despite -g 30. v49 didn't take.",
+                            f"will be slow despite -g {_gop_frames}.",
                             flush=True,
                         )
                 else:
@@ -11038,10 +11055,11 @@ def handler(job):
                 trend_used = None
         else:
             trend_used = provided_trend
-        # Swap in the 60fps-normalized source for render. fps_normalize ran in
-        # parallel with Gemini so this is already done by the time we get here.
-        # Downstream render detects source_fps=60.0 from the new file's r_frame_rate
-        # and all frame-count math becomes exact.
+        # Swap in the canonicalized source for render. fps_normalize ran in
+        # parallel with Gemini so this is already done by the time we get
+        # here. Downstream render detects source_fps from the new file's
+        # r_frame_rate (preserved at the source's native rate — 30, 24,
+        # 60, etc.) and all frame-count math becomes exact.
         source_path = future_fps_normalize.result()
         # Collect face trajectory: render_multi_clip uses it for face-aware
         # MG placement (re-routing center anchors when the speaker's face
