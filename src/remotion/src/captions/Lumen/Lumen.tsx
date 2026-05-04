@@ -13,6 +13,13 @@ import { msToFrames } from "../shared/timing";
 import { CAPTION_FONTS } from "../shared/fonts";
 import { getCaptionPositionStyle } from "../shared/captionPosition";
 import { buildKeywordSet, isKeyword } from "../shared/keywords";
+import { textOutline } from "../shared/textOutline";
+
+// 8-direction text-shadow stand-in for `WebkitTextStroke: 0.75px`. Stroke
+// rasterizes as a single geometric outline that breaks at letter apexes
+// under the entrance `transform: scale` mid-spring; 8-direction shadow
+// is multi-sampled and survives any transform.
+const STROKE_OUTLINE = textOutline(0.75, "rgba(0,0,0,0.6)");
 
 /* ─── Word Component ─── */
 
@@ -106,11 +113,9 @@ const LumenWord: React.FC<{
         transformOrigin: "center bottom",
         textShadow: hasAppeared
           ? isKw
-            ? [...diffusedShadow, ...kwGlow].join(", ")
-            : diffusedShadow.join(", ")
+            ? [...diffusedShadow, STROKE_OUTLINE, ...kwGlow].join(", ")
+            : [...diffusedShadow, STROKE_OUTLINE].join(", ")
           : "none",
-        // Universal stroke for guaranteed readability over any background.
-        WebkitTextStroke: hasAppeared ? "0.75px rgba(0,0,0,0.6)" : undefined,
       }}
     >
       {token.text}

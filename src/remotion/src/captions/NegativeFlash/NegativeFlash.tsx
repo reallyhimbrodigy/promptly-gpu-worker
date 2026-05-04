@@ -14,6 +14,7 @@ import { msToFrames } from "../shared/timing";
 import { CAPTION_FONTS } from "../shared/fonts";
 import { getCaptionPositionStyle } from "../shared/captionPosition";
 import { fitFontSize } from "../shared/fitText";
+import { textOutline } from "../shared/textOutline";
 import { isNegativeKeyword } from "./negativeKeywords";
 
 /** Build the per-word highlight check. When `keywords` has at least one
@@ -116,14 +117,22 @@ const NegativeWord: React.FC<{
     [renderedText, requestedSize, maxWidth],
   );
 
-  // Universal readability: every visible word gets a dark stroke + soft
+  // Universal readability: every visible word gets a dark outline + soft
   // shadow that holds up over any background (speaker face, B-roll
-  // cutaway, light footage). The keyword spread-glow stacks on top.
+  // cutaway, light footage). The outline is rendered as an 8-direction
+  // text-shadow rather than WebkitTextStroke — strokes are single-sampled
+  // along the letter contour and break under fractional `transform: scale`
+  // (sub-pixel coverage at W/A/V apexes leaves "triangle" notches mid-
+  // entrance-spring). The 8-direction shadow is multi-sampled, so apex
+  // joins survive any transform. Visual appearance at fontSize 80+ is
+  // sub-pixel-identical to a 1px stroke. The keyword spread-glow stacks
+  // on top.
   const baseShadow = "0 2px 6px rgba(0,0,0,0.55), 0 0 2px rgba(0,0,0,0.85)";
+  const outlineShadow = textOutline(1, "rgba(0,0,0,0.7)");
   const composedShadow = visible
     ? spreadColor
-      ? `${baseShadow}, 0 0 3px ${spreadColor}, 0 0 3px ${spreadColor}`
-      : baseShadow
+      ? `${baseShadow}, ${outlineShadow}, 0 0 3px ${spreadColor}, 0 0 3px ${spreadColor}`
+      : `${baseShadow}, ${outlineShadow}`
     : "none";
 
   return (
@@ -139,7 +148,6 @@ const NegativeWord: React.FC<{
           lineHeight: 1,
           color: visible ? color : "transparent",
           textShadow: composedShadow,
-          WebkitTextStroke: visible ? "1px rgba(0,0,0,0.7)" : undefined,
           transform: `scale(${scale})`,
           transformOrigin: "center bottom",
           whiteSpace: "nowrap",
@@ -164,8 +172,6 @@ const NegativeLine: React.FC<{
   mode: "normal" | "keywords";
   keywordCheck: (word: string) => boolean;
 }> = ({ line, lineStartFrame, fontSize, maxWidth, keywordScale, color, spreadColor, mode, keywordCheck }) => {
-  const hasKeywords = line.tokens.some((t) => keywordCheck(t.text));
-
   return (
     <div
       style={{
@@ -183,6 +189,12 @@ const NegativeLine: React.FC<{
         const visible =
           (mode === "normal" && !isKeyword) || (mode === "keywords" && isKeyword);
 
+        // wordByWord is always true so every word springs at its own
+        // triggerFrame. Previously this was gated on `hasKeywords`, which
+        // meant lines without a keyword sprang every word synchronously
+        // off the line's frame=0 — visually identical to a page-level
+        // fade-in, which is exactly what we don't want. Per-word stagger
+        // is the entire entrance animation we keep.
         return (
           <NegativeWord
             key={idx}
@@ -194,7 +206,7 @@ const NegativeLine: React.FC<{
             color={visible ? color : "transparent"}
             spreadColor={visible ? spreadColor : undefined}
             visible={visible}
-            wordByWord={hasKeywords}
+            wordByWord={true}
             maxWidth={maxWidth}
           />
         );

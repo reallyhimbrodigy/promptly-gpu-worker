@@ -591,23 +591,22 @@ def get_encode_args(quality="high", threads=0):
         else:
             # p4 = high quality NVENC preset. H100 NVENC is so fast that p4 adds
             # negligible time vs p1 but produces significantly better quality.
-            # CQ 18 = visually lossless on mobile. -maxrate 8M -bufsize 16M
-            # caps streaming bandwidth so AVPlayer doesn't freeze mid-playback
-            # on typical wifi/LTE.
+            # CQ 18 = visually lossless on mobile. 12M maxrate / 24M bufsize
+            # is YouTube's 1080p60 reference rate — the floor where 1080p60
+            # talking-head content stops showing visible macroblocks.
+            # Streams smoothly through CloudFront on any home wifi.
             return ["-c:v", "h264_nvenc", "-preset", "p4", "-tune", "hq",
                     "-rc", "vbr", "-cq", "18", "-b:v", "0",
-                    "-maxrate", "8M", "-bufsize", "16M",
+                    "-maxrate", "12M", "-bufsize", "24M",
                     "-spatial-aq", "1", "-temporal-aq", "1",
                     "-b_ref_mode", "middle"]
     else:
-        # CPU encoding (H100 has no NVENC). `veryfast` is the right floor
-        # for any encode the user actually watches: enables CABAC, B-frames,
-        # and the deblocking filter that ultrafast disables. ultrafast was
-        # producing visible compression artifacts at the 8M bitrate cap.
-        # threads=0 lets x264 auto-detect (use all cores). Pass an explicit
-        # value when running many ffmpeg processes in parallel — otherwise
-        # each process tries to claim every core, producing massive
-        # context-switch contention.
+        # CPU encoding (H100 has no NVENC). `medium` preset (was `veryfast`)
+        # for proper rate-distortion optimization — full motion estimation,
+        # no early-termination shortcuts. ~2-3× slower per frame, but
+        # parallel chunked rendering keeps wall-clock impact small. The
+        # quality jump at 12M is significant: 0.10 bpp (visible-blocking
+        # threshold disappears) vs 0.064 bpp at 8M+veryfast.
         # `lossless` intermediates stay on `ultrafast` since the quality
         # ceiling is already perfect (no loss) and the speed matters for
         # parallel render time.
@@ -617,8 +616,8 @@ def get_encode_args(quality="high", threads=0):
                     "-fps_mode", "passthrough",
                     "-x264-params", _x264_threads]
         else:
-            return ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
-                    "-maxrate", "8M", "-bufsize", "16M",
+            return ["-c:v", "libx264", "-preset", "medium", "-crf", "18",
+                    "-maxrate", "12M", "-bufsize", "24M",
                     "-fps_mode", "passthrough",
                     "-x264-params", _x264_threads]
 
@@ -6798,6 +6797,91 @@ def probe_cache_clear(file_path=None):
         _probe_cache.clear()
 
 
+def _probe_shake_intensity(file_path: str, sample_count: int = 12) -> float:
+    """Sample N frames at 240p and return the mean inter-frame translation
+    magnitude in pixels (Lucas-Kanade sparse optical flow on a Shi-Tomasi
+    feature grid, then median over good tracks per pair, mean over pairs).
+
+    Drives the deshake gate in `_do_fps_normalize`. We only want to pay the
+    cost of `deshake=rx=16:ry=16` (≈100s on 1080p×60fps) when the source
+    actually moves; on stable phone footage the filter does 100s of
+    block-matching only to decide every frame is a no-op.
+
+    Returns 0.0 (no motion) if the source is unreadable or has fewer than
+    two sampled frames — fail-closed: treat unreadable input as stable so
+    the pipeline doesn't pay deshake cost just to recover from a probe
+    failure. The downstream encode still succeeds either way.
+    """
+    import cv2 as _cv2
+    import numpy as _np
+
+    cap = _cv2.VideoCapture(file_path)
+    try:
+        if not cap.isOpened():
+            return 0.0
+        total_frames = int(cap.get(_cv2.CAP_PROP_FRAME_COUNT) or 0)
+        src_w = int(cap.get(_cv2.CAP_PROP_FRAME_WIDTH) or 0)
+        if total_frames < 2 or src_w <= 0:
+            return 0.0
+
+        # Sample evenly across the source. Skip the first/last 5% to dodge
+        # leader/trailer black frames that some phone cameras embed.
+        stride = max(1, int(total_frames * 0.9 // sample_count))
+        start = max(1, int(total_frames * 0.05))
+
+        # Probe at 240p — feature tracking is robust at this resolution and
+        # 16× cheaper than full-res. Result will be a 240p-pixel score; the
+        # threshold in the caller is calibrated for that scale.
+        probe_h = 240
+        probe_w = max(1, int(probe_h * src_w / max(1, int(cap.get(_cv2.CAP_PROP_FRAME_HEIGHT) or 1))))
+
+        prev_gray = None
+        magnitudes: list[float] = []
+        feature_params = dict(
+            maxCorners=120, qualityLevel=0.01, minDistance=8, blockSize=7
+        )
+        lk_params = dict(
+            winSize=(15, 15), maxLevel=2,
+            criteria=(_cv2.TERM_CRITERIA_EPS | _cv2.TERM_CRITERIA_COUNT, 10, 0.03),
+        )
+
+        for i in range(sample_count):
+            frame_idx = start + i * stride
+            if frame_idx >= total_frames:
+                break
+            cap.set(_cv2.CAP_PROP_POS_FRAMES, float(frame_idx))
+            ok, frame = cap.read()
+            if not ok or frame is None:
+                continue
+            small = _cv2.resize(frame, (probe_w, probe_h), interpolation=_cv2.INTER_AREA)
+            gray = _cv2.cvtColor(small, _cv2.COLOR_BGR2GRAY)
+
+            if prev_gray is not None:
+                p0 = _cv2.goodFeaturesToTrack(prev_gray, mask=None, **feature_params)
+                if p0 is not None and len(p0) >= 8:
+                    p1, st, _err = _cv2.calcOpticalFlowPyrLK(
+                        prev_gray, gray, p0, None, **lk_params
+                    )
+                    if p1 is not None and st is not None:
+                        good_new = p1[st.flatten() == 1]
+                        good_old = p0[st.flatten() == 1]
+                        if len(good_new) >= 8:
+                            d = good_new - good_old
+                            mag = _np.sqrt((d * d).sum(axis=-1)).flatten()
+                            # Median is robust to a few large flow vectors
+                            # caused by intentional motion (a hand entering
+                            # frame, etc.). Mean of medians over pairs gives
+                            # a stable per-frame motion estimate.
+                            magnitudes.append(float(_np.median(mag)))
+            prev_gray = gray
+
+        if not magnitudes:
+            return 0.0
+        return float(_np.mean(magnitudes))
+    finally:
+        cap.release()
+
+
 def probe_duration(file_path):
     data = _probe_full(file_path)
     # Try format duration first, then video stream duration
@@ -10609,17 +10693,34 @@ def handler(job):
             _norm_t0 = time.time()
             _norm_path = os.path.join(work_dir, "source_canonical.mp4")
 
-            # deshake (single-pass stabilization) runs FIRST so motion-vector
-            # analysis sees the raw source frames before any scale/crop
-            # alters geometry — required for accurate transform compensation.
-            # deshake produces minimal artifacts on stable footage (it only
-            # transforms when motion is detected) so applying unconditionally
-            # is safe; the cost is ~3-8s on a 60s source which lands inside
-            # the canonicalize step's parallel window with Gemini cuts/post
-            # calls. Then fps=60 (frame-doubles sub-60fps inputs, no-op for
-            # 60fps), then scale/crop normalize_vf. Final pix_fmt=yuv420p
-            # re-encode for downstream uniformity.
-            _vf_parts = ["deshake=rx=16:ry=16:edge=mirror", "fps=60"]
+            # Stability probe BEFORE deshake. Sample 12 frames at 240p, compute
+            # frame-to-frame mean translation magnitude via OpenCV's optical
+            # flow, then decide whether deshake is worth its compute cost.
+            # Earlier comments claimed deshake@rx=16:ry=16 cost "3-8s on a
+            # 60s source" — the production logs show ~115s for that filter on
+            # 1080p×60fps, which is the dominant cost in the normalize step.
+            # On stable phone footage (most uploads) the filter is doing 100s
+            # of expensive block-matching work just to decide every frame is
+            # a no-op. Probe is ~1-2s, free when we need to deshake anyway,
+            # and unlocks a real 100s saving on stable sources.
+            _shake_t0 = time.time()
+            _shake_score = _probe_shake_intensity(_raw_source)
+            # Threshold is in pixels of mean inter-frame motion at 240p. ~0.6
+            # corresponds to ≈2-3 pixel motion at 1080p — clearly handheld.
+            # Below this, the source is steady enough that deshake's
+            # transforms add micro-jitter without removing real shake.
+            _SHAKE_DESHAKE_THRESHOLD = 0.6
+            _needs_deshake = _shake_score >= _SHAKE_DESHAKE_THRESHOLD
+            print(
+                f"[fps-normalize] shake probe: score={_shake_score:.2f} "
+                f"({'deshake' if _needs_deshake else 'skip'}) "
+                f"in {time.time() - _shake_t0:.1f}s",
+                flush=True,
+            )
+            _vf_parts = []
+            if _needs_deshake:
+                _vf_parts.append("deshake=rx=16:ry=16:edge=mirror")
+            _vf_parts.append("fps=60")
             if _normalize_vf:
                 _vf_parts.append(_normalize_vf)
             _vf_combined = ",".join(_vf_parts)

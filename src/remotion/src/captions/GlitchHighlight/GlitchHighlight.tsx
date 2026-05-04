@@ -14,6 +14,13 @@ import { GLITCH_PRESETS } from "./types";
 import { CAPTION_FONTS } from "../shared/fonts";
 import { msToFrames } from "../shared/timing";
 import { getCaptionPositionStyle } from "../shared/captionPosition";
+import { textOutline } from "../shared/textOutline";
+
+// 8-direction text-shadow stand-in for `WebkitTextStroke: 1px`. Strokes
+// break apart at letter apexes under fractional `transform: scale` (the
+// component's entrance scale + glitch scaleX wrappers); 8-direction
+// shadow is multi-sampled and survives any transform.
+const STROKE_OUTLINE = textOutline(1, "rgba(0,0,0,0.7)");
 
 function normalizeWord(text: string): string {
   return text.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
@@ -64,9 +71,7 @@ const NormalWord: React.FC<{
         color: "#FFFFFF",
         textTransform: "uppercase",
         letterSpacing: "0.04em",
-        textShadow: `0 2px 12px rgba(0,0,0,0.7), 0 0 4px rgba(0,0,0,0.5)${activeGlow ? `, ${activeGlow}` : ""}`,
-        // Universal stroke for guaranteed readability over any background.
-        WebkitTextStroke: "1px rgba(0,0,0,0.7)",
+        textShadow: `0 2px 12px rgba(0,0,0,0.7), 0 0 4px rgba(0,0,0,0.5), ${STROKE_OUTLINE}${activeGlow ? `, ${activeGlow}` : ""}`,
         transform: `translateY(${y}px) scale(${scale})`,
         transformOrigin: "center bottom",
         opacity,
@@ -230,8 +235,7 @@ const GlitchWord: React.FC<{
             style={{
               ...baseFont,
               color: mainColor,
-              textShadow: `0 2px 8px rgba(0,0,0,0.6), ${glowShadow}`,
-              WebkitTextStroke: "1px rgba(0,0,0,0.7)",
+              textShadow: `0 2px 8px rgba(0,0,0,0.6), ${STROKE_OUTLINE}, ${glowShadow}`,
               transform: `translateX(${slice.shift}px)`,
               clipPath: `inset(${slice.top}% -200px ${slice.bottom}% -200px)`,
             }}
@@ -244,8 +248,7 @@ const GlitchWord: React.FC<{
           style={{
             ...baseFont,
             color,
-            textShadow: `0 2px 8px rgba(0,0,0,0.6), ${glowShadow}`,
-            WebkitTextStroke: "1px rgba(0,0,0,0.7)",
+            textShadow: `0 2px 8px rgba(0,0,0,0.6), ${STROKE_OUTLINE}, ${glowShadow}`,
           }}
         >
           {text}

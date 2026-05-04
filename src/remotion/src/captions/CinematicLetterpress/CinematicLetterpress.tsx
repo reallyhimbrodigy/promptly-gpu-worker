@@ -11,6 +11,13 @@ import type { CinematicLetterpressProps } from "./types";
 import { CAPTION_FONTS } from "../shared/fonts";
 import { msToFrames } from "../shared/timing";
 import { CAPTION_PADDING } from "../shared/captionPosition";
+import { textOutline } from "../shared/textOutline";
+
+// 8-direction text-shadow stand-in for `WebkitTextStroke: 0.75px`. Stroke
+// rasterizes as a single geometric outline that breaks at letter apexes
+// under the entrance `transform: scale` mid-spring; 8-direction shadow
+// is multi-sampled and survives any transform.
+const STROKE_OUTLINE = textOutline(0.75, "rgba(0,0,0,0.55)");
 
 // ── LetterpressWord ───────────────────────────────────────────────────────
 // Each word does a blur-to-sharp "focus pull" when it activates.
@@ -92,9 +99,7 @@ const LetterpressWord: React.FC<{
         fontWeight,
         color: textColor,
         letterSpacing,
-        textShadow,
-        // Universal stroke for guaranteed readability over any background.
-        WebkitTextStroke: "0.75px rgba(0,0,0,0.55)",
+        textShadow: textShadow ? `${textShadow}, ${STROKE_OUTLINE}` : STROKE_OUTLINE,
         lineHeight,
         filter: `blur(${blur}px)`,
         opacity,

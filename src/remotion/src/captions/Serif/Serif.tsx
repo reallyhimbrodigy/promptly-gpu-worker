@@ -14,6 +14,13 @@ import { msToFrames } from "../shared/timing";
 import { CAPTION_FONTS } from "../shared/fonts";
 import { getCaptionPositionStyle } from "../shared/captionPosition";
 import { buildKeywordSet, isKeyword } from "../shared/keywords";
+import { textOutline } from "../shared/textOutline";
+
+// 8-direction text-shadow stand-in for `WebkitTextStroke: 0.75px`. Stroke
+// rasterizes as a single geometric outline that breaks at letter apexes
+// under the entrance `transform: scale` mid-spring; 8-direction shadow
+// is multi-sampled and survives any transform.
+const STROKE_OUTLINE = textOutline(0.75, "rgba(0,0,0,0.6)");
 
 // Smooth deceleration, zero bounce — editorial feel
 const SPRING_EDITORIAL: SpringConfig = {
@@ -94,9 +101,7 @@ const SerifWord: React.FC<{
         color: isKw ? keywordColor : textColor,
         letterSpacing: isKw ? keywordLetterSpacing : letterSpacing,
         lineHeight: 1.15,
-        textShadow: kwShadow,
-        // Universal stroke for guaranteed readability over any background.
-        WebkitTextStroke: "0.75px rgba(0,0,0,0.6)",
+        textShadow: `${kwShadow}, ${STROKE_OUTLINE}`,
         whiteSpace: "nowrap",
         transform: `scale(${scale})`,
         transformOrigin: "center bottom",
