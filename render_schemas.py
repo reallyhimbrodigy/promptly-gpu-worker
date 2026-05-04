@@ -45,7 +45,6 @@ CaptionStyle = Literal[
     "PaperII", "Prime", "TypewriterReveal", "CinematicLetterpress", "Cove",
     "EditorialPop", "Illuminate", "Lumen", "MagazineCutout", "Passage",
     "Pulse", "Quintessence", "Serif",
-    "GlitchHighlight", "NegativeFlash", "Prism",
 ]
 
 MotionGraphicType = Literal[
@@ -247,17 +246,3 @@ class PromptlyMicroSegmentsInput(_RemotionModel):
     segments: List[MicroSegmentSpec]
 
 
-# ── Blend captions only (second-pass composition) ───────────────────────────
-class PromptlyBlendCaptionsOnlyInput(_RemotionModel):
-    videoUrl: str
-    fps: float
-    width: int
-    height: int
-    totalDurationInFrames: int
-    caption: CaptionSpec
-    captionMatchOverlays: List[CaptionMatchOverlay]
-    # Optional: absolute composition frame at which videoUrl frame 0 plays.
-    # Used by the pipelined chunked-blend path so each chunk can read its
-    # corresponding composite chunk (chunk-local video) instead of the
-    # concat'd silent intermediate. Defaults to 0 (single-pass / un-pipelined).
-    videoStartFrame: Optional[int] = None

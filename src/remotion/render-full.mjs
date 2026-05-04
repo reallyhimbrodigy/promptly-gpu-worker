@@ -10,9 +10,13 @@
  *                        All `src`/`sourceUrl` values in the input JSON are
  *                        BASENAMES resolved against this directory by
  *                        Remotion's bundle server.
- *   --composition <id>   "PromptlyOverlay"      → ProRes 4444 alpha (overlay).
- *                        "PromptlyMicroSegments" → h264 (transitions + complex
- *                                                  zoom clips, no alpha).
+ *   --composition <id>   "PromptlyOverlay"      → ProRes 4444 yuva444p10le
+ *                                                 (alpha, for FFmpeg composite).
+ *                        "PromptlyMicroSegments" → ProRes 4444 yuv444p10le
+ *                                                 (lossless intermediate read by
+ *                                                  the FFmpeg composite step —
+ *                                                  zero quality loss into the
+ *                                                  final encode).
  *   --concurrency <N>    Optional. Default = half of CPU threads.
  *   --gl <mode>          Optional Chromium GL backend. Default: swangle.
  *
@@ -43,7 +47,6 @@ const PREBUNDLE_DIR = process.env.PROMPTLY_BUNDLE_DIR || "/remotion/bundle";
 const VALID_COMPOSITIONS = new Set([
   "PromptlyOverlay",
   "PromptlyMicroSegments",
-  "PromptlyBlendCaptionsOnly",
 ]);
 
 // ── CLI ────────────────────────────────────────────────────────────────────
@@ -99,7 +102,7 @@ for (let i = 0; i < args.length; i++) {
 if (!inputPath || !outputPath || !publicDir) {
   console.error(
     "Usage: node render-full.mjs --input <json> --output <file> --public-dir <dir> " +
-    "[--composition PromptlyOverlay|PromptlyMicroSegments|PromptlyBlendCaptionsOnly] " +
+    "[--composition PromptlyOverlay|PromptlyMicroSegments] " +
     "[--concurrency N] [--gl mode] [--frame-range start,end --composition-start N]",
   );
   process.exit(1);
@@ -113,13 +116,9 @@ if (!VALID_COMPOSITIONS.has(compositionId)) {
 }
 
 const isOverlay = compositionId === "PromptlyOverlay";
-// PromptlyBlendCaptionsOnly is the second-pass composition for blend-mode
-// caption styles (GlitchHighlight, NegativeFlash, Prism). It reads the v62
-// silent intermediate as <OffthreadVideo> source and lays the blend-mode
-// captions + caption_match overlays on top so the existing mixBlendMode CSS
-// has real frame content underneath. h264, plus a generous OffthreadVideo
-// cache because the source video is read end-to-end.
-const isBlendCaptions = compositionId === "PromptlyBlendCaptionsOnly";
+// Both compositions output ProRes 4444 — alpha for overlay, no-alpha for
+// micro-segments. Both are lossless intermediates read by the FFmpeg final
+// composite step, which is the ONE lossy encode in the pipeline.
 
 if (!existsSync(inputPath)) {
   console.error(`[render-full] Input JSON not found: ${inputPath}`);
@@ -145,11 +144,9 @@ const frameRangeLabel = isChunked
   : `frames 0-${inputJson.totalDurationInFrames - 1}`;
 const _summary = isOverlay
   ? `${inputJson.caption?.pages?.length ?? 0} caption pages, ${inputJson.motionGraphics?.length ?? 0} MG, ${inputJson.textOverlays?.length ?? 0} text overlays`
-  : isBlendCaptions
-  ? `${inputJson.caption?.pages?.length ?? 0} caption pages, ${inputJson.captionMatchOverlays?.length ?? 0} caption-match overlays`
   : `${inputJson.segments?.length ?? 0} segments`;
 console.log(
-  `[render-full] composition=${compositionId} (${isOverlay ? "ProRes 4444 alpha" : "h264"}) ` +
+  `[render-full] composition=${compositionId} (ProRes 4444 ${isOverlay ? "alpha" : "no-alpha"}) ` +
   `${frameRangeLabel}, ${_summary}, concurrency=${resolvedConcurrency}`,
 );
 
@@ -232,47 +229,22 @@ try {
   serveUrl: bundleLocation,
   composition,
   // Codec selection by composition:
-  //   PromptlyOverlay           → ProRes 4444 yuva444p10le (alpha required
-  //                               for the alpha-composite step). PNG
-  //                               intermediates required for yuva pixel
-  //                               formats (JPEG can't carry alpha).
-  //   PromptlyMicroSegments     → h264 yuv420p (no alpha, fast encode,
-  //                               decoded by FFmpeg in the final composite).
-  //   PromptlyBlendCaptionsOnly → h264 yuv420p (output of the second pass:
-  //                               v62 silent video + blend captions baked
-  //                               in. Audio mux is the only step after.)
-  codec: isOverlay ? "prores" : "h264",
-  ...(isOverlay
-    ? {
-        proResProfile: "4444",
-        pixelFormat: "yuva444p10le",
-        imageFormat: "png",
-      }
-    : {
-        // veryfast vs ultrafast: enables CABAC + B-frames + deblocking
-        // filter at ~2-3× encode time per frame on the orchestrator's 64
-        // vCPU CPU encoder. The quality jump is substantial — far less
-        // blocking around faces (lips, eyes) and dramatically smaller
-        // files at the same visual quality. ~10-20s extra wall-clock per
-        // render is an acceptable trade for the visible quality gain.
-        x264Preset: "veryfast",
-        crf: 18,
-        pixelFormat: "yuv420p",
-        // Bitrate cap ONLY for the final user-facing render
-        // (PromptlyBlendCaptionsOnly). Without it, CRF 18 produces 30-50
-        // Mbps streams that AVPlayer can't sustain over residential Wi-Fi.
-        // 8M is YouTube's 1080p60 reference rate; transparent for talking-
-        // head content; streams smoothly through CloudFront + AVPlayer.
-        //
-        // PromptlyMicroSegments is an INTERMEDIATE — FFmpeg decodes it
-        // and re-encodes the final composite. Capping it at 8M before
-        // re-encode would throw away quality on exactly the high-motion
-        // content (transitions, zoom punches) it contains. Leave it
-        // uncapped so the FFmpeg final pass has full intermediate fidelity.
-        ...(isBlendCaptions
-          ? { encodingMaxRate: "8M", encodingBufferSize: "16M" }
-          : {}),
-      }),
+  //   PromptlyOverlay       → ProRes 4444 yuva444p10le (alpha required
+  //                           for the FFmpeg alpha-composite step).
+  //   PromptlyMicroSegments → ProRes 4444 yuv444p10le (no alpha, lossless
+  //                           intermediate read by the FFmpeg composite —
+  //                           zero quality loss into the final encode).
+  //
+  // Both are PRE-FINAL intermediates. The ONE lossy H.264 encode in the
+  // pipeline happens in the FFmpeg composite step (handler.py) which
+  // reads source + overlay + micro and produces the final user-facing
+  // video. PNG intermediates are required for ProRes pixel formats
+  // (JPEG can't carry alpha and Remotion's decoder pipeline routes both
+  // 4444 variants through the same PNG path).
+  codec: "prores",
+  proResProfile: "4444",
+  pixelFormat: isOverlay ? "yuva444p10le" : "yuv444p10le",
+  imageFormat: "png",
   outputLocation: outputPath,
   inputProps,
   concurrency: resolvedConcurrency,
@@ -296,11 +268,9 @@ try {
   // OffthreadVideo cache, sized per composition. Overlay is a transparent
   // canvas — no source video reads — so a small cache suffices. Micro
   // segments seek heavily into source for transitions + complex-zoom clips.
-  // PromptlyBlendCaptionsOnly reads the v62 silent intermediate end-to-end,
-  // so it needs the largest cache.
   offthreadVideoCacheSizeInBytes: isOverlay
     ? 256 * 1024 * 1024     // 256 MB (overlay never reads video)
-    : 4 * 1024 * 1024 * 1024, // 4 GB (micro + blend-captions read source heavily)
+    : 4 * 1024 * 1024 * 1024, // 4 GB (micro reads source heavily)
   logLevel: "info",
   onProgress: (info) => {
     const { progress, encodedFrames, renderedFrames } = info || {};

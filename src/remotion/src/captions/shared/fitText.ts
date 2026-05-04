@@ -2,12 +2,11 @@
  * Per-word font-size auto-fit. Returns a fontSize that guarantees `text`
  * renders within `maxWidth` for the given font specification.
  *
- * Why this exists: NegativeFlash and Prism scale keyword tokens by 1.6x.
- * For long keywords like "ELECTROCUTED" (12 chars), 80px × 1.6 = 128px
- * font lands at ~1100px rendered width — wider than the 918px line
- * (1080 × 0.85 maxWidth). The browser doesn't shrink to fit; it just
- * crops at the canvas edge. Result: the user sees "LECTROCUTE" with
- * both sides chopped.
+ * Why this exists: caption styles that scale keyword tokens (e.g. 1.6×)
+ * produce long words like "ELECTROCUTED" at 128px font, which lands at
+ * ~1100px rendered width — wider than the 918px line (1080 × 0.85 max
+ * width). The browser doesn't shrink to fit; it just crops at the canvas
+ * edge. Result: the user sees "LECTROCUTE" with both sides chopped.
  *
  * Solution: before rendering, measure the natural width at the requested
  * fontSize using Canvas's measureText(). If it exceeds the budget, scale

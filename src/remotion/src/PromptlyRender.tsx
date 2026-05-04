@@ -10,9 +10,7 @@ import {
 import type {
   PromptlyRenderProps,
   PromptlyMicroSegmentsProps,
-  PromptlyBlendCaptionsOnlyProps,
   BrollSpec,
-  CaptionMatchOverlay,
   ClipSpec,
   TransitionSpec,
   CaptionSpec,
@@ -21,24 +19,13 @@ import type {
   TikTokPageLike,
 } from "./types";
 
-// Caption styles. NegativeFlash, Prism, GlitchHighlight use CSS mixBlendMode
-// against video pixels and can ONLY render correctly when real pixels sit
-// underneath the captions. The pipeline handles this in two passes:
-//   1. v62 produces the full video without those captions (handler.py zeroes
-//      out caption.pages and filters out caption_match text overlays from
-//      PromptlyOverlay's input when the chosen style is a blend style).
-//   2. PromptlyBlendCaptionsOnly takes the v62 output as `<OffthreadVideo>`
-//      source and draws the blend-mode captions + caption_match overlays on
-//      top so the existing mixBlendMode components have real frame content
-//      to blend against. Output is muxed with audio as the only further step.
-// Components themselves are dumb — they render whatever input they receive.
-// Routing happens in handler.py.
+// Caption styles. All render through PromptlyOverlay's transparent canvas
+// and composite onto the source via FFmpeg in a single final encode.
 import {
   PaperII,
   Prime, TypewriterReveal, CinematicLetterpress, Cove,
   EditorialPop, Illuminate, Lumen,
   MagazineCutout, Passage, Pulse, Quintessence, Serif,
-  GlitchHighlight, NegativeFlash, Prism,
 } from "./captions";
 
 // Transitions — all 11
@@ -67,7 +54,6 @@ const CAPTION_MAP: Record<string, React.FC<any>> = {
   Prime, TypewriterReveal, CinematicLetterpress, Cove,
   EditorialPop, Illuminate, Lumen,
   MagazineCutout, Passage, Pulse, Quintessence, Serif,
-  GlitchHighlight, NegativeFlash, Prism,
 };
 
 const TRANSITION_MAP: Record<string, React.FC<any>> = {
@@ -572,43 +558,3 @@ export const PromptlyMicroSegments: React.FC<PromptlyMicroSegmentsProps> = ({
   );
 };
 
-// ─── PromptlyBlendCaptionsOnly composition ─────────────────────────────────
-// Second-pass composition for blend-mode caption styles (GlitchHighlight,
-// NegativeFlash, Prism). The v62 path produces the full video first WITHOUT
-// captions (handler.py zeroes out caption.pages + filters caption_match
-// overlays from the v62 PromptlyOverlay input). This composition then takes
-// the v62 silent intermediate as its source, lays the blend-mode captions
-// (and any caption_match-variant text overlays, which also render through
-// the caption component) on top so the existing mixBlendMode CSS has real
-// frame content to blend against — visually identical to before.
-//
-// Surface area: just captions + caption_match overlays + an OffthreadVideo
-// background. No clips, transitions, B-roll, MGs, non-caption_match
-// overlays, or outro fade — those are all handled by v62 and baked into
-// the source video this composition consumes. That makes this a much
-// smaller test surface than the previous PromptlyBlendRender.
-//
-// Output: h264 (no alpha — captions baked in). handler.py muxes audio
-// onto this output as the only further step.
-export const PromptlyBlendCaptionsOnly: React.FC<PromptlyBlendCaptionsOnlyProps> = ({
-  input,
-}) => {
-  const { videoUrl, caption, captionMatchOverlays, fps } = input;
-  const resolvedVideoUrl = resolveSrc(videoUrl);
-  return (
-    <AbsoluteFill style={{ background: "#000" }}>
-      <OffthreadVideo
-        src={resolvedVideoUrl}
-        style={{ width: "100%", height: "100%", objectFit: "cover" }}
-      />
-      <CaptionsLayer caption={caption} fps={fps} />
-      <TextOverlaysLayer
-        overlays={captionMatchOverlays}
-        captionStyle={caption.style}
-        captionExtraProps={caption.extraProps}
-        captionKeywords={caption.keywords}
-        fps={fps}
-      />
-    </AbsoluteFill>
-  );
-};

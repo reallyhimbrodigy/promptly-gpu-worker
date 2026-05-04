@@ -70,7 +70,6 @@ from typing import List, Optional, Literal, Dict, Any
 from render_schemas import (
     PromptlyRenderInput as _SchemaOverlayInput,
     PromptlyMicroSegmentsInput as _SchemaMicroInput,
-    PromptlyBlendCaptionsOnlyInput as _SchemaBlendCaptionsInput,
 )
 
 
@@ -104,17 +103,7 @@ _CAPTION_STYLES = Literal[
     "Prime", "TypewriterReveal", "CinematicLetterpress", "Cove",
     "EditorialPop", "Illuminate", "Lumen",
     "MagazineCutout", "Passage", "Pulse", "Quintessence", "Serif",
-    "GlitchHighlight", "NegativeFlash", "Prism",
 ]
-# Caption styles that use CSS mixBlendMode against video pixels. They CANNOT
-# render correctly on the transparent overlay alone (no pixels to blend
-# against). The pipeline handles this in two passes: v62 produces the full
-# video without these captions (handler zeroes out caption.pages and filters
-# caption_match overlays for PromptlyOverlay's input), then a small second
-# Remotion pass — PromptlyBlendCaptionsOnly — takes the v62 silent
-# intermediate as <OffthreadVideo> source and lays the blend captions on top.
-# Audio mux is the only further step.
-_BLEND_MODE_CAPTION_STYLES = frozenset({"GlitchHighlight", "NegativeFlash", "Prism"})
 _TRANSITION_TYPES = Literal[
     "CardSwipe", "ZoomThrough", "SlideOver", "Stack", "CrossfadeZoom",
     "ShutterFlash", "LightLeak", "StepPush", "NewspaperWipe", "FilmStrip",
@@ -574,9 +563,8 @@ _HAS_HWACCEL = False
 # The production-supported rasterizer is swangle (Skia software path).
 # Same code path every render, deterministic output, no driver-mount
 # dependencies, no version compatibility issues. Performance baseline
-# is set by the chunked overlay + chunked blend-captions architecture
-# (Phase 1) — Vulkan was supposed to help on top of that, not be
-# load-bearing.
+# is set by the chunked overlay + chunked composite architecture —
+# Vulkan was supposed to help on top of that, not be load-bearing.
 
 
 def get_encode_args(quality="high", threads=0):
@@ -2597,37 +2585,27 @@ caption_style — pick EXACTLY ONE from 16 styles. Read each description careful
                               Use for: Single-word emphasis moments, dramatic pauses, poetry, art-house.
 13. "Serif"                — DM Serif Display body with keywords that scale up (1.35x) in italic with blue accent. Premium editorial / brand-message feel.
                               Best for: Premium editorial, interview quotes, brand messaging, calm.
-14. "GlitchHighlight"      — Montserrat body with highlighted words that explode into RGB chromatic aberration. Scanlines, slice displacement, flicker, then settle into a glow color. Uses video-pixel blend modes.
-                              Optional extraProps: {{"colorPreset": "cyan"|"blue"|"red"|"green"|"yellow"|"pink"}} (default "blue") — color the keyword settles into after the glitch.
-                              Best for: Tech, gaming, edgy reels, cyberpunk aesthetic.
-15. "NegativeFlash"        — Playfair Display serif. Keywords trigger a negative/inverted color flash with warm tint and glow, then settle into a distinctive color. Uses video-pixel blend modes for the inversion effect.
-                              Optional extraProps: {{"colorPreset": "red"|"blue"|"green"|"purple"|"gold"|"cyan"}} (default "red") — color the keyword settles into after the flash.
-                              Best for: Bold statements, dramatic reveals, cinematic reels.
-16. "Prism"                — Playfair Display with keywords that dramatically scale up. Solo keywords on a line get 2.2x. Shares NegativeFlash's color system. Uses video-pixel blend modes.
-                              Best for: Quote highlights, single-word emphasis, editorial.
 
 NOTES ON KEYWORDS PER STYLE:
-  Styles that USE caption_keywords for highlighting: Prime, Cove, EditorialPop, Illuminate, Lumen, Passage, Pulse, Serif, GlitchHighlight, NegativeFlash, Prism (11 styles).
+  Styles that USE caption_keywords for highlighting: Prime, Cove, EditorialPop, Illuminate, Lumen, Passage, Pulse, Serif (8 styles).
   Styles that IGNORE caption_keywords by design: PaperII, TypewriterReveal, CinematicLetterpress, MagazineCutout, Quintessence (5 styles — animation/aesthetic IS the effect, no per-word highlighting). When you pick one of these, the caption_keywords list still has narrative value (for emphasis_moments etc.) but won't visually highlight in captions.
-
-NOTE on render time: GlitchHighlight, NegativeFlash, and Prism use CSS blend modes against video pixels — they require a different render path that's slightly slower (single-pass Remotion instead of parallel FFmpeg+Remotion). Pick them when their visual identity is right for the content; the render-time tax is small per video.
 
 DECISION MATRIX — caption_style by content. Each row gives 4–5 valid choices in order of typical fit; rotate among them rather than always defaulting to the first. The user's past videos are visible to you in their style profile — if your top candidate matches the style they used in their LAST video, pick a different option from the same row.
 
   business, hustle, agency, motivational    → Lumen / Pulse / Cove / EditorialPop
   interview, podcast, thoughtful, calm      → Serif / Cove / Passage / Illuminate / EditorialPop
-  gaming, tech, cyberpunk                   → TypewriterReveal / GlitchHighlight / Pulse
-  cinematic, documentary, dramatic          → CinematicLetterpress / Illuminate / Quintessence / Passage / NegativeFlash / PaperII
+  gaming, tech, cyberpunk                   → TypewriterReveal / Pulse
+  cinematic, documentary, dramatic          → CinematicLetterpress / Illuminate / Quintessence / Passage / PaperII
   aesthetic, lifestyle, travel, minimal     → Cove / Passage / Lumen / EditorialPop / Serif
-  creative, artistic, collage, music        → MagazineCutout / Pulse / Quintessence / GlitchHighlight
+  creative, artistic, collage, music        → MagazineCutout / Pulse / Quintessence
   luxury, fashion, premium                  → Prime / Passage / EditorialPop / Quintessence / Cove
-  editorial, magazine, interview quote      → EditorialPop / Quintessence / Prism / Serif / Passage / PaperII
+  editorial, magazine, interview quote      → EditorialPop / Quintessence / Serif / Passage / PaperII
   storytelling, narrative, POV              → PaperII / Cove / Illuminate / Passage / CinematicLetterpress
-  workout, fitness, energetic               → Pulse / GlitchHighlight
-  music, rhythmic, lyric-driven             → Pulse / Lumen / Quintessence / GlitchHighlight
+  workout, fitness, energetic               → Pulse / EditorialPop
+  music, rhythmic, lyric-driven             → Pulse / Lumen / Quintessence
   comedy, casual, fun                       → MagazineCutout / Pulse
-  art house, poetic, contemplative          → Quintessence / CinematicLetterpress / Passage / Illuminate / EditorialPop / Prism
-  bold reveals, single-word emphasis         → Prism / Quintessence / NegativeFlash / EditorialPop
+  art house, poetic, contemplative          → Quintessence / CinematicLetterpress / Passage / Illuminate / EditorialPop
+  bold reveals, single-word emphasis         → Quintessence / EditorialPop
   unsure                                    → pick from any vibe row above that matches the dominant register
 
 DON'T REPEAT YOURSELF. Top short-form creators use a VARIETY of caption styles across their videos — never the same one every time. If the user's profile shows they recently used a particular style, deliberately choose a different option from the appropriate row this time. Different content deserves different visual identity.
@@ -4679,7 +4657,6 @@ Indices below are the NEW kept-only space [0..{_kept_count - 1}]. Every word_ind
         "Prime", "TypewriterReveal", "CinematicLetterpress", "Cove",
         "EditorialPop", "Illuminate", "Lumen",
         "MagazineCutout", "Passage", "Pulse", "Quintessence", "Serif",
-        "GlitchHighlight", "NegativeFlash", "Prism",
     }
     _valid_zoom_types = {
         "SmoothPush", "SnapReframe", "FocusWindow", "StepZoom", "LetterboxPush",
@@ -8523,23 +8500,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _source_url = _stage_file(source_path)
     print(f"[render] Staged source as {_source_url} (under {_bundle_public_root})", flush=True)
 
-    # ── Blend-mode caption flag ────────────────────────────────────────────
-    # When the chosen caption_style uses CSS mixBlendMode (GlitchHighlight /
-    # NegativeFlash / Prism), v62 still runs end-to-end — it just produces the
-    # video WITHOUT those captions (handler zeroes their pages out and filters
-    # any caption_match-variant text overlays from PromptlyOverlay's input).
-    # After v62 is done, a small second Remotion pass (PromptlyBlendCaptionsOnly)
-    # reads the silent intermediate as <OffthreadVideo> source and draws the
-    # blend captions + caption_match overlays on top so the existing mixBlendMode
-    # CSS has real frame content underneath. Audio mux happens last.
-    _is_blend_render = _caption_style in _BLEND_MODE_CAPTION_STYLES
-    if _is_blend_render:
-        print(
-            f"[render] Caption style '{_caption_style}' uses CSS blend modes — "
-            f"will run v62 + PromptlyBlendCaptionsOnly second pass.",
-            flush=True,
-        )
-
     # ── B-roll timing projection ────────────────────────────────────────────
     # Every entry in `broll_clips` has a `_local_path` pointing at a verified
     # asset (handler.handler() ran prefetch_and_verify_broll before calling
@@ -8704,34 +8664,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         caption_position_segments_out, _broll_frame_ranges_for_caption
     )
 
-    # PromptlyOverlay input — captions/MG/text on a transparent canvas. In
-    # blend-mode renders, captions and caption_match-variant text overlays
-    # are dropped here because they need real video pixels underneath; they
-    # render in the second-pass PromptlyBlendCaptionsOnly composition
-    # instead. Other text-overlay variants (torn_paper / sticky_note /
-    # quote_card) and MGs render here in both modes — they don't depend on
-    # video pixels.
-    if _is_blend_render:
-        _v62_caption = {
-            "style": _caption_style,
-            "pages": [],
-            "keywords": _caption_keywords,
-            "positionSegments": caption_position_segments_out,
-            "extraProps": _caption_extra_props,
-        }
-        _v62_text_overlays = [
-            ov for ov in text_overlays_out
-            if ov.get("variant") != "caption_match"
-        ]
-    else:
-        _v62_caption = {
-            "style": _caption_style,
-            "pages": caption_pages,
-            "keywords": _caption_keywords,
-            "positionSegments": caption_position_segments_out,
-            "extraProps": _caption_extra_props,
-        }
-        _v62_text_overlays = text_overlays_out
+    # PromptlyOverlay input — captions/MG/text on a transparent canvas. The
+    # FFmpeg composite step lays this onto the source in a single encode.
     overlay_input = {
         "sourceUrl": _source_url,
         "fps": source_fps,
@@ -8741,8 +8675,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         "clips": clips_out,
         "transitions": transitions_out,
         "broll": broll_out,
-        "caption": _v62_caption,
-        "textOverlays": _v62_text_overlays,
+        "caption": {
+            "style": _caption_style,
+            "pages": caption_pages,
+            "keywords": _caption_keywords,
+            "positionSegments": caption_position_segments_out,
+            "extraProps": _caption_extra_props,
+        },
+        "textOverlays": text_overlays_out,
         "motionGraphics": motion_graphics_out,
         "outro": _outro,
     }
@@ -8755,8 +8695,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # Each segment carries its own clip/transition spec; Python tracks a
     # parallel list of metadata (with _clipIndex / _afterClipIndex tags) so
     # the FFmpeg final-mux filtergraph can find each segment by source.
-    # Always runs — blend mode goes through v62 too, just with a captions
-    # second pass on top afterwards.
     micro_input, micro_segments_meta = build_micro_segments_input(
         clips_out, transitions_out, _source_url, source_fps,
     )
@@ -8766,34 +8704,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _validate_and_write_render_input(
             "micro", micro_input, _SchemaMicroInput, micro_input_path,
         )
-
-    # PromptlyBlendCaptionsOnly input — built only when caption style needs
-    # video pixels for blend modes. videoUrl is set later, after the v62
-    # silent intermediate is staged into the bundle public root. captionMatch
-    # overlays are the subset of text_overlays that render through the
-    # caption component, so they also need to be drawn on top of the video.
-    blend_captions_input = None
-    blend_captions_input_path = None
-    if _is_blend_render:
-        _blend_caption_match_overlays = [
-            ov for ov in text_overlays_out
-            if ov.get("variant") == "caption_match"
-        ]
-        blend_captions_input = {
-            "videoUrl": "",  # filled in after v62 silent intermediate is staged
-            "fps": source_fps,
-            "width": 1080,
-            "height": 1920,
-            "totalDurationInFrames": total_output_frames,
-            "caption": {
-                "style": _caption_style,
-                "pages": caption_pages,
-                "keywords": _caption_keywords,
-                "positionSegments": caption_position_segments_out,
-                "extraProps": _caption_extra_props,
-            },
-            "captionMatchOverlays": _blend_caption_match_overlays,
-        }
 
     _ffmpeg_clip_count = sum(1 for c in clips_out if categorize_clip(c) == "ffmpeg")
     _remotion_clip_count = len(clips_out) - _ffmpeg_clip_count
@@ -8886,7 +8796,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # fits cleanly in 64 vCPUs. Skip chunking for very short overlays
     # (<300 frames) where the per-process startup tax doesn't amortize.
     overlay_video_path = os.path.join(work_dir, "overlay.mov")
-    micro_video_path = os.path.join(work_dir, "micro_segments.mp4")
+    # ProRes 4444 yuv444p10le — lossless intermediate. .mov container is
+    # ProRes's canonical wrapper; FFmpeg decodes it transparently in the
+    # composite step. The composite ffmpeg call doesn't care about the
+    # container (it just reads via -i), so this is a drop-in change.
+    micro_video_path = os.path.join(work_dir, "micro_segments.mov")
     # Chromium rasterizer: hardcoded swangle (Skia software path).
     # Vulkan was attempted across multiple iterations and never produced a
     # verified end-to-end frame on chrome-headless-shell; the production
@@ -9034,31 +8948,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # single-pass it has no chunk to pair with overlay chunk K, so we fall
     # back to the legacy wave-based pattern (overlay all → concat → composite).
     _pipeline_chunks = _composite_chunked and _overlay_chunked
-
-    # Blend-captions chunk planning. When the chosen caption style needs a
-    # second-pass blend render (mixBlendMode CSS over real video pixels),
-    # _BLEND_CHUNK_COUNT=4 if the output is long enough to amortize the
-    # per-process startup tax. Below 300 frames the single-process path
-    # is faster.
-    _BLEND_CHUNK_COUNT = 4 if total_output_frames >= 300 else 1
-    _blend_ranges = _split_frames(int(total_output_frames), _BLEND_CHUNK_COUNT)
-    _blend_chunked = len(_blend_ranges) > 1
-    _blend_chunk_paths = (
-        [os.path.join(work_dir, f"blend_captions_chunk_{_i:02d}.mp4")
-         for _i in range(len(_blend_ranges))]
-        if _blend_chunked else []
-    )
-    # Composite→blend pipelining: DISABLED.
-    # The pipelined path (Sequence-wrap on OffthreadVideo with chunk-local
-    # videoUrl + videoStartFrame=K*chunk_size) shipped a regression on
-    # NegativeFlash blend captions in production — visible triangle
-    # artifacts around the rendered text. Smoke test only validated
-    # videoStartFrame=0 (bit-identical to pre-change), so the chunk paths
-    # with videoStartFrame > 0 were never visually verified end-to-end.
-    # Forcing False keeps the un-pipelined wave path: blend chunks read
-    # the concat'd silent_full as before. Wave 2 #4 (overlay→composite
-    # chunk pipeline) is unaffected and remains active.
-    _pipeline_blend_chunks = False
 
     def _build_composite_cmd(
         chunk_idx: int,
@@ -9252,82 +9141,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             flush=True,
         )
 
-    # ── Pipelined blend chunk dispatch ────────────────────────────────────
-    # When the chosen caption style requires a blend pass AND both
-    # composite and blend phases are 4-way chunked, each blend chunk K
-    # runs as soon as composite chunk K finishes — no barrier-wait for
-    # all composite chunks + silent_full concat. The chain stages
-    # composite_chunk_K.mp4 into bundle public root, writes a per-chunk
-    # input JSON with chunk-local videoUrl + videoStartFrame=K*chunk_size,
-    # then runs Remotion. The Sequence wrap inside
-    # PromptlyBlendCaptionsOnly aligns the chunk video's local time with
-    # absolute composition frames so captions stay correctly timed.
-    _blend_pool = None
-    _blend_futures: list = []
-    if _pipeline_blend_chunks:
-        _blend_pool = concurrent.futures.ThreadPoolExecutor(
-            max_workers=len(_blend_chunk_paths)
-        )
-
-        def _blend_chain(K):
-            _t_start = time.time()
-            # Block on this chunk's composite chain.
-            _composite_chain_futures[K].result(timeout=600)
-            _comp_path = _composite_chunk_paths[K]
-            if not os.path.exists(_comp_path) or os.path.getsize(_comp_path) < 1000:
-                raise RuntimeError(
-                    f"Composite chunk {K} missing/invalid for blend chain: {_comp_path}"
-                )
-            # Stage the chunk video into bundle public root — Remotion's
-            # OffthreadVideo fetches it via the static serveBundle HTTP
-            # endpoint. _stage_file uses the unique chunk basename so
-            # multiple chains don't collide.
-            _staged_url = _stage_file(_comp_path)
-            # Per-chunk input JSON. Every other field is shared (caption
-            # pages, captionMatchOverlays, fps, dims) — only videoUrl +
-            # videoStartFrame change.
-            _per_chunk_input = dict(blend_captions_input)
-            _per_chunk_input["videoUrl"] = _staged_url
-            _per_chunk_input["videoStartFrame"] = int(_blend_ranges[K][0])
-            _per_chunk_input_path = os.path.join(
-                _stage_dir, f"blend_captions_input_{K:02d}.json"
-            )
-            _validate_and_write_render_input(
-                f"blend-captions-{K:02d}",
-                _per_chunk_input,
-                _SchemaBlendCaptionsInput,
-                _per_chunk_input_path,
-            )
-            _fs, _fe = _blend_ranges[K]
-            _cmd = [
-                "node", "/remotion/render-full.mjs",
-                "--input", _per_chunk_input_path,
-                "--output", _blend_chunk_paths[K],
-                "--public-dir", _bundle_public_root,
-                "--composition", "PromptlyBlendCaptionsOnly",
-                "--gl", _gl_mode,
-                "--frame-range", f"{_fs},{_fe}",
-                "--composition-start", str(_fs),
-                "--concurrency", str(_PER_CHUNK_CONCURRENCY),
-            ]
-            _run_remotion(f"blend-captions-{K:02d}", _cmd)
-            if not os.path.exists(_blend_chunk_paths[K]) or os.path.getsize(_blend_chunk_paths[K]) < 1000:
-                raise RuntimeError(
-                    f"blend-captions chunk {K} missing/invalid: {_blend_chunk_paths[K]}"
-                )
-            return time.time() - _t_start  # whole-chain time including composite wait
-
-        _blend_futures = [
-            _blend_pool.submit(_blend_chain, K)
-            for K in range(len(_blend_chunk_paths))
-        ]
-        print(
-            f"[render] Pipelined blend chains dispatched "
-            f"({len(_blend_chunk_paths)} chains, each waits on its composite "
-            f"chunk then runs Remotion with chunk-local videoUrl + Sequence wrap)",
-            flush=True,
-        )
-
     # ── Audio pipeline (running on a separate thread) —
     # Collect its output now so the final-audio build can start while the
     # Remotion renders are still in flight.
@@ -9376,16 +9189,13 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # ── 12. Wait for Remotion renders, then ffmpeg composite ────────────
     # All the heavy v62 work happens in this one ffmpeg invocation:
     #   1. Build each ffmpeg-renderable clip from source via trim+setpts+(zoom?)
-    #   2. Trim each Remotion-rendered clip/transition out of micro_segments.mp4
+    #   2. Trim each Remotion-rendered clip/transition out of micro_segments.mov
     #      by frame range
     #   3. Concat all timeline segments in order → [base]
     #   4. Apply outro fade (if configured)
-    #   5. Alpha-composite the PromptlyOverlay layer (B-roll + captions + MGs +
-    #      non-caption_match text overlays — blend captions are handled by the
-    #      second-pass PromptlyBlendCaptionsOnly composition that runs after
-    #      this composite finishes, when caption_style is a blend style).
-    #   6. libx264 silent intermediate (audio mux is a separate stream-copy
-    #      step at the very end).
+    #   5. Alpha-composite the PromptlyOverlay layer (captions + MGs + text
+    #      overlays + B-roll cutaways — every visible non-source pixel).
+    #   6. libx264 final encode + AAC stream-copy in a single pass.
     # Wait for all overlay chunk subprocesses (in input order — for chunked
     # mode each chunk lands in its own .mov; we concat them in order below).
     _overlay_chunk_elapsed = []
@@ -9474,15 +9284,13 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         raise RuntimeError(f"PromptlyMicroSegments output missing/invalid: {micro_video_path}")
 
     _mux_t0 = time.time()
-    _silent_full = os.path.join(work_dir, "silent_full.mp4")
 
     if _composite_chunked:
         # Composite chunked ⇔ total >= 400 frames ⇔ overlay also chunked
-        # (overlay threshold is 300) ⇔ _pipeline_chunks=True. So the only
-        # composite-chunked path is the pipelined one: chains were
-        # dispatched immediately after _render_pool spawned overlay
-        # futures, with each chain waiting on its overlay chunk + micro
-        # before running composite ffmpeg with chunk-local overlay.
+        # (overlay threshold is 300) ⇔ _pipeline_chunks=True. Each composite
+        # chunk chain was dispatched immediately after _render_pool spawned
+        # its overlay future, with the chain waiting on its overlay chunk +
+        # micro before running composite ffmpeg with chunk-local overlay.
         print(
             f"[render] Collecting {len(_composite_chain_futures)} pipelined "
             f"composite chunks ({total_output_frames} frames split "
@@ -9491,8 +9299,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         )
         _composite_chunk_elapsed = []
         for _ci, _f in enumerate(_composite_chain_futures):
-            # 600s ≥ overlay max + composite max + safety margin — chain
-            # blocks on overlay_K, then micro, then runs ffmpeg.
+            # 600s ≥ overlay max + composite max + safety margin.
             _e = _f.result(timeout=600)
             _composite_chunk_elapsed.append(_e)
             _path = _composite_chunk_paths[_ci]
@@ -9505,293 +9312,45 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _composite_pool.shutdown(wait=False)
 
         _max_chunk = max(_composite_chunk_elapsed)
-        # silent_full concat happens ONLY when the blend pass needs a
-        # single videoUrl on disk AND we're not pipelining composite→blend.
-        # Three cases:
-        #   - non-blend: chunks pass straight into the final concat+mux
-        #     pass (Wave 1) — silent_full skipped.
-        #   - blend + pipelined (#5): each blend chunk reads its
-        #     corresponding composite chunk directly via per-chunk JSON
-        #     videoUrl + videoStartFrame Sequence wrap — silent_full
-        #     skipped, blend chunks chain off composite chains.
-        #   - blend + un-pipelined: composite was single-pass (300 ≤
-        #     frames < 400) so silent_full is already a single file from
-        #     the composite single call; OR blend is single (frames < 300)
-        #     so this entire chunked composite block doesn't fire. Either
-        #     way, silent_full concat from chunks isn't needed in this
-        #     branch.
-        if _is_blend_render and not _pipeline_blend_chunks:
-            _cc_list = os.path.join(work_dir, "_composite_concat_list.txt")
-            with open(_cc_list, "w") as _lf:
-                for _p in _composite_chunk_paths:
-                    _lf.write(f"file '{_p}'\n")
-            _cc_t0 = time.time()
-            _cc_r = subprocess.run(
-                ["ffmpeg", "-y", "-v", "error",
-                 "-f", "concat", "-safe", "0",
-                 "-i", _cc_list,
-                 "-c", "copy",
-                 _silent_full],
-                capture_output=True, text=True, timeout=120,
-            )
-            if _cc_r.returncode != 0:
-                raise RuntimeError(
-                    f"Composite chunk concat failed (rc={_cc_r.returncode}): "
-                    f"{(_cc_r.stderr or '')[-1500:]}"
-                )
-            _cc_elapsed = time.time() - _cc_t0
-            print(
-                f"[render] Composite: max chunk={_max_chunk:.1f}s, concat={_cc_elapsed:.1f}s",
-                flush=True,
-            )
-        elif _pipeline_blend_chunks:
-            print(
-                f"[render] Composite: max chunk={_max_chunk:.1f}s, "
-                f"concat=skipped (blend chunks read composite chunks directly)",
-                flush=True,
-            )
-        else:
-            print(
-                f"[render] Composite: max chunk={_max_chunk:.1f}s, concat=deferred (folded into final mux)",
-                flush=True,
-            )
+        print(
+            f"[render] Composite: max chunk={_max_chunk:.1f}s, concat=deferred (folded into final mux)",
+            flush=True,
+        )
     else:
-        # Single-pass for short outputs (<400 frames). For blend renders
-        # we still need a silent intermediate (the blend pass reads it as
-        # videoUrl), so target=silent_full and include_audio=False. For
-        # non-blend renders we write video + audio directly to output_path
-        # in one libx264 pass — the AAC track is `-c:a copy` stream-copied
-        # alongside the encode, so this is bit-exact with the previous
-        # silent_full → audio-mux chain.
-        _single_target = _silent_full if _is_blend_render else output_path
+        # Single-pass for short outputs (<400 frames). One libx264 invocation
+        # writes video + audio directly to output_path — AAC stream-copied
+        # alongside the encode in the same pass.
         _single_cmd = _build_composite_cmd(
-            0, 0, int(total_output_frames), _single_target,
-            include_audio=(not _is_blend_render),
+            0, 0, int(total_output_frames), output_path,
+            include_audio=True,
         )
         _r = subprocess.run(_single_cmd, capture_output=True, text=True, timeout=300)
         if _r.returncode != 0:
             raise RuntimeError(f"Final composite failed: {(_r.stderr or '')[-1500:]}")
 
-    # silent_full is produced only when the blend pass needs it as a
-    # single videoUrl AND we are NOT pipelining composite→blend chunks.
-    # Cases that produce silent_full:
-    #   - blend + composite single (300 ≤ frames < 400): composite single
-    #     wrote silent_full directly.
-    #   - blend + composite chunked + NOT pipelined (impossible with
-    #     current thresholds, but kept as a safe path).
-    # Cases that skip silent_full:
-    #   - any non-blend render (output already in chunks or output_path).
-    #   - blend + pipelined: blend chunks read composite chunks directly.
-    if _is_blend_render and not _pipeline_blend_chunks:
-        if not os.path.exists(_silent_full) or os.path.getsize(_silent_full) < 1000:
-            raise RuntimeError(f"Silent intermediate missing/invalid: {_silent_full}")
-
-    # ── Blend-mode second pass ────────────────────────────────────────────
-    # For blend captions (GlitchHighlight / NegativeFlash / Prism), v62 has
-    # produced the full video without those captions. Stage the silent
-    # intermediate into the bundle public root, run PromptlyBlendCaptionsOnly
-    # to draw blend captions + caption_match overlays on top with the
-    # existing mixBlendMode CSS against real frame content, and use the
-    # output of THAT pass as the source for the final audio mux.
-    #
-    # Tracking for the final concat+mux pass:
-    #   _output_already_written=True → non-blend single composite muxed
-    #     video+audio directly to output_path; final mux is a no-op.
-    #   _final_video_inputs is None  → set later by the blend block.
-    #   _final_video_inputs == [p]   → single-file mux (blend single path).
-    #   _final_video_inputs == [p,…] → concat demuxer + audio mux in one
-    #     ffmpeg pass (non-blend chunked, or blend chunked).
-    _output_already_written = (not _is_blend_render) and (not _composite_chunked)
+    # Single composite render is always the final lossy encode. Two paths:
+    #   _output_already_written=True → composite single wrote video+audio
+    #     directly to output_path; final concat+mux is a no-op.
+    #   _final_video_inputs == [chunk0, chunk1, ...] → composite chunked;
+    #     concat demuxer + audio mux in one ffmpeg pass below.
+    _output_already_written = not _composite_chunked
     if _output_already_written:
         _final_video_inputs = None
-    elif _is_blend_render:
-        _final_video_inputs = None  # populated by the blend block below
     else:
-        # Non-blend chunked: composite chunks go straight into the final
-        # concat+mux pass — silent_full intermediate skipped.
         _final_video_inputs = list(_composite_chunk_paths)
-    _blend_pass_elapsed = 0.0
-    if _is_blend_render:
-        _blend_t0 = time.time()
-        _blend_captions_video = os.path.join(work_dir, "blend_captions.mp4")
-
-        # Stage silent_full + write a SHARED input JSON only when the
-        # blend pass needs it (un-pipelined paths read silent_full). The
-        # pipelined path stages each composite chunk + writes a per-chunk
-        # JSON inside its blend chain instead.
-        if not _pipeline_blend_chunks:
-            _blend_video_basename = _stage_file(_silent_full)
-            blend_captions_input["videoUrl"] = _blend_video_basename
-            blend_captions_input_path = os.path.join(_stage_dir, "blend_captions_input.json")
-            _validate_and_write_render_input(
-                "blend-captions",
-                blend_captions_input,
-                _SchemaBlendCaptionsInput,
-                blend_captions_input_path,
-            )
-
-        if _blend_chunked:
-            # 4 separate Remotion processes — a single process hits the
-            # documented ~16-22 fps ceiling on H100 (issue #4664) regardless
-            # of vCPU count (main-thread + encoder serialization). 4 each
-            # get their own ceiling so aggregate fps scales nearly
-            # linearly. For long videos this collapses the blend pass
-            # from ~195s (single process, 2865 frames) to ~50s (4-way).
-            if _pipeline_blend_chunks:
-                # Pipelined: blend chains were dispatched immediately
-                # after the composite chains (way back next to
-                # _render_pool setup). Each chain blocks on its composite
-                # chunk K, stages composite_chunk_K.mp4, writes a
-                # per-chunk JSON (videoUrl + videoStartFrame), then runs
-                # Remotion. Collect the futures here.
-                _blend_chunk_elapsed = []
-                for _bi, _f in enumerate(_blend_futures):
-                    # 900s ≥ composite max + blend max + safety margin —
-                    # the chain time includes the wait for composite_K.
-                    _e = _f.result(timeout=900)
-                    _blend_chunk_elapsed.append(_e)
-                    print(
-                        f"[render] blend-captions-{_bi:02d} chain done in {_e:.1f}s → "
-                        f"{os.path.getsize(_blend_chunk_paths[_bi])/1024/1024:.1f}MB",
-                        flush=True,
-                    )
-                if _blend_pool is not None:
-                    _blend_pool.shutdown(wait=False)
-            else:
-                # Un-pipelined chunked path: shared input JSON
-                # (silent_full as videoUrl), 4 Remotion processes
-                # dispatched together after silent_full is ready.
-                _blend_cmds = []
-                for _i, (_fs, _fe) in enumerate(_blend_ranges):
-                    _blend_cmds.append((
-                        f"blend-captions-{_i:02d}",
-                        [
-                            "node", "/remotion/render-full.mjs",
-                            "--input", blend_captions_input_path,
-                            "--output", _blend_chunk_paths[_i],
-                            "--public-dir", _bundle_public_root,
-                            "--composition", "PromptlyBlendCaptionsOnly",
-                            "--gl", _gl_mode,
-                            "--frame-range", f"{_fs},{_fe}",
-                            "--composition-start", str(_fs),
-                            "--concurrency", str(_PER_CHUNK_CONCURRENCY),
-                        ],
-                    ))
-                print(
-                    f"[render] Spawning {len(_blend_cmds)} blend-captions chunk subprocesses "
-                    f"({total_output_frames} frames split {len(_blend_ranges)}-ways, "
-                    f"concurrency={_PER_CHUNK_CONCURRENCY} each)",
-                    flush=True,
-                )
-                _blend_pool = concurrent.futures.ThreadPoolExecutor(max_workers=len(_blend_cmds))
-                _blend_futures = [
-                    _blend_pool.submit(_run_remotion, _lbl, _cmd)
-                    for _lbl, _cmd in _blend_cmds
-                ]
-                _blend_chunk_elapsed = []
-                for _bi, _f in enumerate(_blend_futures):
-                    _e = _f.result(timeout=400)
-                    _blend_chunk_elapsed.append(_e)
-                    _path = _blend_chunk_paths[_bi]
-                    if not os.path.exists(_path) or os.path.getsize(_path) < 1000:
-                        raise RuntimeError(
-                            f"blend-captions chunk {_bi} output missing/invalid: {_path}"
-                        )
-                    print(
-                        f"[render] blend-captions-{_bi:02d} done in {_e:.1f}s → "
-                        f"{os.path.getsize(_path)/1024/1024:.1f}MB",
-                        flush=True,
-                    )
-                _blend_pool.shutdown(wait=False)
-
-            # Both chunked paths defer the chunk concat into the final
-            # concat+mux pass — chunks share identical codec parameters
-            # (same composition spec, same Remotion render config) and
-            # the dense GOP (1 keyframe/sec) guarantees a bit-exact
-            # concat. Folding into audio mux skips one ffmpeg invocation
-            # and one 50-100MB intermediate write.
-            for _p in _blend_chunk_paths:
-                if not os.path.exists(_p) or os.path.getsize(_p) < 1000:
-                    raise RuntimeError(
-                        f"PromptlyBlendCaptionsOnly chunk missing/invalid: {_p}"
-                    )
-            _final_video_inputs = list(_blend_chunk_paths)
-            _max_bc_chunk = max(_blend_chunk_elapsed)
-            print(
-                f"[render] blend-captions: max chunk={_max_bc_chunk:.1f}s, "
-                f"concat=deferred (folded into final mux)",
-                flush=True,
-            )
-        else:
-            # Single-process for very short outputs (<300 frames).
-            _blend_cmd = [
-                "node", "/remotion/render-full.mjs",
-                "--input", blend_captions_input_path,
-                "--output", _blend_captions_video,
-                "--public-dir", _bundle_public_root,
-                "--composition", "PromptlyBlendCaptionsOnly",
-                "--gl", _gl_mode,
-            ]
-            _run_remotion("blend-captions", _blend_cmd)
-            if (
-                not os.path.exists(_blend_captions_video)
-                or os.path.getsize(_blend_captions_video) < 1000
-            ):
-                raise RuntimeError(
-                    f"PromptlyBlendCaptionsOnly output missing/invalid: {_blend_captions_video}"
-                )
-            _final_video_inputs = [_blend_captions_video]
-
-        _blend_pass_elapsed = time.time() - _blend_t0
-        if _blend_chunked:
-            _bc_total_mb = sum(
-                os.path.getsize(_p) for _p in _blend_chunk_paths
-            ) / 1024 / 1024
-            print(
-                f"[render] PromptlyBlendCaptionsOnly done in {_blend_pass_elapsed:.1f}s → "
-                f"{_bc_total_mb:.1f}MB across {len(_blend_chunk_paths)} chunks",
-                flush=True,
-            )
-        else:
-            print(
-                f"[render] PromptlyBlendCaptionsOnly done in {_blend_pass_elapsed:.1f}s → "
-                f"{os.path.getsize(_blend_captions_video)/1024/1024:.1f}MB",
-                flush=True,
-            )
 
     # ── Final concat + audio mux ──────────────────────────────────────────
-    # Three execution paths driven by what the composite/blend phase left
-    # behind (see _output_already_written / _final_video_inputs setup
-    # above). Every path is stream-copy on both video and audio — the
-    # final file is bit-exact with what the previous separate-concat +
-    # separate-mux pipeline produced, just one ffmpeg invocation fewer.
+    # Two paths driven by _output_already_written / _final_video_inputs:
+    #   - Single composite (<400 frames): video + audio already muxed by
+    #     _build_composite_cmd in one libx264 pass; nothing to do here.
+    #   - Chunked composite (≥400 frames): concat demuxer joins composite
+    #     chunks losslessly while the same pass muxes audio. Stream-copy
+    #     on both — bit-exact join.
     _am_t0 = time.time()
     if _output_already_written:
-        # Non-blend single composite already wrote video + AAC audio in
-        # one libx264 pass. Nothing to do here.
         _am_elapsed = 0.0
-    elif len(_final_video_inputs) == 1:
-        # Single video file (blend single path) — plain stream-copy mux.
-        _am_r = subprocess.run(
-            ["ffmpeg", "-y", "-v", "warning",
-             "-i", _final_video_inputs[0],
-             "-i", _final_audio_path,
-             "-c:v", "copy",
-             "-c:a", "copy",
-             "-shortest",
-             "-movflags", "+faststart",
-             output_path],
-            capture_output=True, text=True, timeout=120,
-        )
-        if _am_r.returncode != 0:
-            raise RuntimeError(
-                f"Audio mux failed (rc={_am_r.returncode}): "
-                f"{(_am_r.stderr or '')[-1500:]}"
-            )
-        _am_elapsed = time.time() - _am_t0
     else:
-        # Multiple chunks (non-blend chunked, or blend chunked). Concat
-        # demuxer joins them losslessly while the same pass muxes audio.
+        # Composite chunks → single output via concat demuxer + audio mux.
         _final_concat_list = os.path.join(work_dir, "_final_concat_list.txt")
         with open(_final_concat_list, "w") as _lf:
             for _p in _final_video_inputs:
@@ -9819,8 +9378,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     _mux_elapsed = time.time() - _mux_t0
     print(
-        f"[render] Final composite (clips+overlay+encode"
-        f"{'+blend-captions' if _is_blend_render else ''}+audio) done in {_mux_elapsed:.1f}s "
+        f"[render] Final composite (clips+overlay+encode+audio) done in {_mux_elapsed:.1f}s "
         f"(audio mux={_am_elapsed:.1f}s)",
         flush=True,
     )
@@ -9883,7 +9441,6 @@ VALID_CAPTION_STYLES = {
     "Prime", "TypewriterReveal", "CinematicLetterpress", "Cove",
     "EditorialPop", "Illuminate", "Lumen",
     "MagazineCutout", "Passage", "Pulse", "Quintessence", "Serif",
-    "GlitchHighlight", "NegativeFlash", "Prism",
 }
 
 VALID_TRANSITION_TYPES = {
@@ -10034,10 +9591,7 @@ def _resolve_caption_extra_props(style, keywords, edit_plan):
     # PaperII / TypewriterReveal / CinematicLetterpress / MagazineCutout /
     # Quintessence don't highlight specific words — their effect is
     # style-driven (typewriter sweep, cutout collage, etc.) — so they're
-    # omitted from this map. NegativeFlash and Prism DO take a keywords
-    # list, but they consume it via the caption.keywords field that
-    # PromptlyRender passes as a top-level prop directly to every caption
-    # component, so they don't need a per-style entry here either.
+    # omitted from this map.
     simple_keyword_prop = {
         "EditorialPop": "keywords",
         "Illuminate": "keywords",
@@ -10048,11 +9602,6 @@ def _resolve_caption_extra_props(style, keywords, edit_plan):
         "Prime": "specialWords",
         "Cove": "boxedWords",
     }
-    # Styles that expect [{text, preset?}] entries (GlitchHighlight). The
-    # color preset is global; per-word preset is rare so we emit just text.
-    if style == "GlitchHighlight" and kw_list and "highlightWords" not in out:
-        out["highlightWords"] = [{"text": w} for w in kw_list]
-
     if style in simple_keyword_prop:
         prop_name = simple_keyword_prop[style]
         if kw_list and prop_name not in out:
@@ -10669,29 +10218,31 @@ def handler(job):
         def _do_fps_normalize():
             """Canonicalize source to 1080×1920 yuv420p CFR at SOURCE fps.
 
-            Single-pass ffmpeg ingest. We pass `fps=<source_rate>` to lock
-            CFR at the source's native rate (handles VFR phone uploads).
-            For a 29.97fps source the output is 29.97 CFR; for a 60fps
-            source it stays 60 CFR. Downstream Remotion compositions read
-            this fps from the canonicalized file and run at the same rate
-            so per-frame springs / SFX onset / MG timing stay in lock-step
-            with the speaker footage.
+            Production-pipeline pattern: NEVER re-encode the source if we
+            don't have to. Most modern phone uploads (iPhone 12+, Pixel 6+,
+            Galaxy S20+) are already 1080×1920 yuv420p CFR — we passthrough
+            those by symlinking the raw file. For sources that genuinely
+            need format conversion (VFR phones, old/cheap Androids, wrong
+            aspect ratios), we re-encode at libx264 medium so the one
+            re-encode we DO pay produces a clean intermediate.
 
-            Earlier code force-duped every source to 60fps to give Remotion
-            overlays a "smooth" 60fps timeline. That cost ~115s of
-            normalize compute and 200MB+ of intermediate file size for
-            zero motion benefit (frame-dup adds NO smoothness, just
-            duplicate pixels). The "smoothness" of overlays at 30fps is
-            already buttery — they're computed, not warped, and 30fps is
-            the TikTok / IG native cadence for short-form.
+            Passthrough is what CapCut, Premiere, Final Cut, DaVinci all
+            do. Each H.264 generation introduces irreversible quality loss
+            (compression noise, color drift, blocking); the only way to
+            avoid the loss is to skip the encode. For ~90% of uploads that
+            means the entire pipeline runs at 1 H.264 generation total
+            (the final composite) — strictly fewer than CapCut's pattern.
+
+            The shake probe runs unconditionally (cheap, ~1-2s). If the
+            source needs deshake we're forced to re-encode anyway, so the
+            passthrough check defers to the deshake decision.
 
             Awaits future_normalize so it can read the analyze-derived
-            normalize_vf. analyze typically finishes in 2-5s; the await
-            is negligible against the ~10s normalize cost.
+            normalize_vf (which says whether the source needs scale/crop).
 
-            Output: source_canonical.mp4 (1080x1920 source-fps yuv420p
-            h264 ultrafast crf 18, ~1-keyframe-per-second GOP for fast
-            seeks).
+            Output: source_canonical.mp4 (1080x1920 source-fps yuv420p,
+            either passthrough symlink or libx264 medium crf 18 with
+            ~1-keyframe-per-second GOP for fast Remotion seeks).
             """
             _shape = future_normalize.result()
             _normalize_vf = _shape.get("normalize_vf")
@@ -10700,6 +10251,10 @@ def handler(job):
             _vs = next((s for s in (_cached.get("streams") or []) if s.get("codec_type") == "video"), {})
             _r_rate_str = _vs.get("r_frame_rate", "")
             _avg_rate_str = _vs.get("avg_frame_rate", "")
+            _src_pix_fmt = _vs.get("pix_fmt") or ""
+            _src_w = int(_vs.get("width") or 0)
+            _src_h = int(_vs.get("height") or 0)
+            _src_codec = _vs.get("codec_name") or ""
 
             def _parse_rate(s):
                 if not s or s == "0/0":
@@ -10716,22 +10271,10 @@ def handler(job):
             _norm_t0 = time.time()
             _norm_path = os.path.join(work_dir, "source_canonical.mp4")
 
-            # Stability probe BEFORE deshake. Sample 12 frames at 240p, compute
-            # frame-to-frame mean translation magnitude via OpenCV's optical
-            # flow, then decide whether deshake is worth its compute cost.
-            # Earlier comments claimed deshake@rx=16:ry=16 cost "3-8s on a
-            # 60s source" — the production logs show ~115s for that filter on
-            # 1080p×60fps, which is the dominant cost in the normalize step.
-            # On stable phone footage (most uploads) the filter is doing 100s
-            # of expensive block-matching work just to decide every frame is
-            # a no-op. Probe is ~1-2s, free when we need to deshake anyway,
-            # and unlocks a real 100s saving on stable sources.
+            # Cheap probe: ~12 frames @ 240p Lucas-Kanade flow, 1-2s. Decides
+            # whether deshake is worth the re-encode cost.
             _shake_t0 = time.time()
             _shake_score = _probe_shake_intensity(_raw_source)
-            # Threshold is in pixels of mean inter-frame motion at 240p. ~0.6
-            # corresponds to ≈2-3 pixel motion at 1080p — clearly handheld.
-            # Below this, the source is steady enough that deshake's
-            # transforms add micro-jitter without removing real shake.
             _SHAKE_DESHAKE_THRESHOLD = 0.6
             _needs_deshake = _shake_score >= _SHAKE_DESHAKE_THRESHOLD
             print(
@@ -10740,22 +10283,67 @@ def handler(job):
                 f"in {time.time() - _shake_t0:.1f}s",
                 flush=True,
             )
+
             # Target the source's native fps — no artificial frame-dup.
-            # Prefer r_frame_rate (the canonical container rate) when
-            # present; fall back to avg_frame_rate; final fallback to 30.
-            # ffmpeg's fps filter accepts the value as either a float
-            # (e.g. 29.97) or a fraction string (e.g. 30000/1001) — float
-            # is precise enough for our needs.
             _target_fps = (
                 _r_val if _r_val and _r_val > 0
                 else _avg if _avg and _avg > 0
                 else 30.0
             )
-            # Clamp absurd values that can come from broken probes.
             if _target_fps < 10 or _target_fps > 120:
                 _target_fps = 30.0
             _gop_frames = max(1, int(round(_target_fps)))
 
+            # Passthrough check: if the source is already canonical (right
+            # dimensions, yuv420p, h264, sane CFR) AND no deshake needed
+            # AND no scale/crop normalize_vf required, symlink the raw
+            # source instead of re-encoding. Pure quality preservation.
+            _is_canonical = (
+                _src_w == 1080
+                and _src_h == 1920
+                and _src_pix_fmt in ("yuv420p", "yuvj420p")
+                and _src_codec == "h264"
+                and not _normalize_vf
+                and not _needs_deshake
+                # CFR sanity: avg and r_rate should agree within ~1%, and
+                # both should be in the sane fps range.
+                and _avg > 0 and _r_val > 0
+                and abs(_avg - _r_val) / max(_r_val, 1e-6) < 0.02
+                and 10 <= _r_val <= 120
+            )
+            if _is_canonical:
+                # Symlink (no copy, no re-encode). Downstream tools read
+                # the symlink transparently. Source pixels reach the final
+                # composite encode bit-perfect.
+                try:
+                    if os.path.lexists(_norm_path):
+                        os.unlink(_norm_path)
+                    os.symlink(os.path.abspath(_raw_source), _norm_path)
+                except OSError:
+                    # Filesystem doesn't support symlinks — fall back to
+                    # hard link, then copy. Same end result.
+                    try:
+                        os.link(os.path.abspath(_raw_source), _norm_path)
+                    except OSError:
+                        shutil.copy2(_raw_source, _norm_path)
+                _size_mb = os.path.getsize(_norm_path) / (1024 * 1024)
+                print(
+                    f"[fps-normalize] r={_r_val:.4f}fps avg={_avg:.4f}fps "
+                    f"-> passthrough (already canonical: {_src_w}x{_src_h} "
+                    f"{_src_pix_fmt} {_src_codec} CFR) in "
+                    f"{time.time() - _norm_t0:.1f}s ({_size_mb:.1f}MB)",
+                    flush=True,
+                )
+                # Skip the keyframe verification block — we don't control
+                # the source's GOP structure on the passthrough path. If
+                # iPhone uploads have 2-3s GOPs, Remotion seeks will be
+                # slightly slower (decode-from-prev-keyframe), but quality
+                # preservation matters more than seek speed.
+                return _norm_path
+
+            # Re-encode path: source needs format conversion (VFR, wrong
+            # shape, deshake) — preset is `medium` so the one re-encode we
+            # pay produces a clean intermediate, not blocky `ultrafast`.
             _vf_parts = []
             if _needs_deshake:
                 _vf_parts.append("deshake=rx=16:ry=16:edge=mirror")
@@ -10768,14 +10356,14 @@ def handler(job):
                 ["ffmpeg", "-y", "-v", "error", "-threads", "0",
                  "-i", _raw_source,
                  "-vf", _vf_combined,
-                 "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
+                 "-c:v", "libx264", "-preset", "medium", "-crf", "18",
                  "-pix_fmt", "yuv420p",
                  "-g", str(_gop_frames), "-keyint_min", str(_gop_frames),
                  "-sc_threshold", "0",
                  "-c:a", "copy",
                  "-video_track_timescale", "90000",
                  _norm_path],
-                capture_output=True, text=True, timeout=180,
+                capture_output=True, text=True, timeout=240,
             )
             if _r_out.returncode != 0 or not os.path.exists(_norm_path):
                 raise RuntimeError(
@@ -10786,7 +10374,8 @@ def handler(job):
             _size_mb = os.path.getsize(_norm_path) / (1024 * 1024)
             print(
                 f"[fps-normalize] r={_r_val:.4f}fps avg={_avg:.4f}fps "
-                f"-> {_target_fps:.4f}fps CFR (source-native) in "
+                f"-> {_target_fps:.4f}fps CFR (re-encoded: medium preset, "
+                f"deshake={_needs_deshake}, normalize_vf={'yes' if _normalize_vf else 'no'}) in "
                 f"{time.time() - _norm_t0:.1f}s ({_size_mb:.1f}MB)",
                 flush=True,
             )

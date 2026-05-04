@@ -10,7 +10,7 @@
 #   1. TypeScript still compiles  (tsc --noEmit)
 #   2. Remotion bundle still produces an index.html  (prebundle.mjs)
 #   3. Each composition's React tree mounts without throwing
-#      (PromptlyOverlay, PromptlyMicroSegments, PromptlyBlendCaptionsOnly)
+#      (PromptlyOverlay, PromptlyMicroSegments)
 #   4. Each composition renders at least one frame and writes a non-empty
 #      output file
 #
@@ -226,35 +226,6 @@ cat > "$SMOKE_DIR/micro.json" <<EOF
 }
 EOF
 
-cat > "$SMOKE_DIR/blend.json" <<EOF
-{
-  "videoUrl": "$FIXTURE_BASENAME",
-  "fps": 30,
-  "width": 1080,
-  "height": 1920,
-  "totalDurationInFrames": 30,
-  "caption": {
-    "style": "NegativeFlash",
-    "pages": [
-      {
-        "text": "blend test smoke",
-        "startMs": 0,
-        "durationMs": 1000,
-        "tokens": [
-          { "text": "blend", "fromMs": 0,   "toMs": 333 },
-          { "text": "test",  "fromMs": 333, "toMs": 666 },
-          { "text": "smoke", "fromMs": 666, "toMs": 1000 }
-        ]
-      }
-    ],
-    "keywords": ["smoke"],
-    "positionSegments": [{ "fromFrame": 0, "toFrame": 30, "position": "bottom" }],
-    "extraProps": {}
-  },
-  "captionMatchOverlays": []
-}
-EOF
-
 # ── 6. Validate inputs against Pydantic schemas ────────────────────────────
 # render_schemas.py mirrors src/remotion/src/types.ts. If the schemas drift
 # from what the React tree actually accepts, the synthetic JSONs would
@@ -268,11 +239,9 @@ sys.path.insert(0, '$REPO_ROOT')
 from render_schemas import (
     PromptlyRenderInput,
     PromptlyMicroSegmentsInput,
-    PromptlyBlendCaptionsOnlyInput,
 )
 PromptlyRenderInput.model_validate(json.load(open('$SMOKE_DIR/overlay.json')))
 PromptlyMicroSegmentsInput.model_validate(json.load(open('$SMOKE_DIR/micro.json')))
-PromptlyBlendCaptionsOnlyInput.model_validate(json.load(open('$SMOKE_DIR/blend.json')))
 print('smoke: schemas OK')
 "
 
@@ -320,8 +289,7 @@ run_render() {
 }
 
 run_render "overlay"          "PromptlyOverlay"          "$SMOKE_DIR/overlay.json" "$SMOKE_DIR/overlay.mov" "rgba"
-run_render "micro-segments"   "PromptlyMicroSegments"    "$SMOKE_DIR/micro.json"   "$SMOKE_DIR/micro.mp4"   "yuv420p"
-run_render "blend-captions"   "PromptlyBlendCaptionsOnly" "$SMOKE_DIR/blend.json"   "$SMOKE_DIR/blend.mp4"   "yuv420p"
+run_render "micro-segments"   "PromptlyMicroSegments"    "$SMOKE_DIR/micro.json"   "$SMOKE_DIR/micro.mov"   "yuv444p10le"
 
 # ── 8. Visual regression check ─────────────────────────────────────────────
 # Compare observed hashes to baselines. A mismatch fails smoke unless
