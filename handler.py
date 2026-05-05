@@ -10686,12 +10686,96 @@ def handler(job):
                 _refined_tx_cache["value"] = _t
                 return _t
 
+        # Lock for the alignment step — same pattern as _get_resolved_transcript:
+        # multiple callers (the recipe overlap path AND the post-Gemini render
+        # path) may both reach the alignment slot, but the work should run
+        # exactly once. The lock + idempotency check serializes them.
+        _align_lock = threading.Lock()
+
+        def _refine_transcript_with_alignment(_transcript: dict, _src_video: str, _work_dir: str) -> None:
+            """Refine transcript word boundaries via CTC forced alignment.
+
+            Mutates _transcript["words"] in place. No-op when:
+              - transcript has no words (silent video)
+              - all words already carry _align_logprob (re-edit path / second
+                call from the same render)
+
+            Raises on alignment failure — never silently degrades to Deepgram
+            timestamps (no-fallbacks invariant).
+            """
+            with _align_lock:
+                _words = _transcript.get("words") or []
+                if not _words:
+                    return
+                if all(isinstance(w, dict) and w.get("_align_logprob") is not None for w in _words):
+                    print(
+                        f"[align] {len(_words)} words already aligned — skipping",
+                        flush=True,
+                    )
+                    return
+                _t0 = time.time()
+                _wav_16k_path = os.path.join(_work_dir, "source_audio_16k.wav")
+                _ar = subprocess.run(
+                    ["ffmpeg", "-y", "-v", "error",
+                     "-i", _src_video, "-vn",
+                     "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
+                     _wav_16k_path],
+                    capture_output=True, text=True, timeout=120,
+                )
+                if _ar.returncode != 0 or not os.path.exists(_wav_16k_path):
+                    raise RuntimeError(
+                        f"Forced-align audio extraction failed: rc={_ar.returncode} "
+                        f"stderr={(_ar.stderr or '')[-500:]}"
+                    )
+                with open(_wav_16k_path, "rb") as _wf:
+                    _audio_bytes = _wf.read()
+                # Lazy import — modal_app imports handler at top level, can't
+                # import the other direction at module load.
+                from modal_app import align_audio_remote as _align_remote
+                _refined = _align_remote.remote(_audio_bytes, _words)
+                if not isinstance(_refined, list) or len(_refined) != len(_words):
+                    raise RuntimeError(
+                        f"Forced alignment returned bad shape: got "
+                        f"{type(_refined).__name__} of length "
+                        f"{len(_refined) if isinstance(_refined, list) else 'n/a'}, "
+                        f"expected list of length {len(_words)}"
+                    )
+                _transcript["words"] = _refined
+                _n_snap = sum(1 for w in _refined if w.get("_align_snapped"))
+                # Score distribution for tuning. CTC summed log-probs scale
+                # with word duration; report the median (more robust than
+                # mean to OOV outliers) so we can adjust the snap threshold
+                # against real production data.
+                _scores = [float(w.get("_align_logprob") or 0.0) for w in _refined]
+                _scores.sort()
+                _med = _scores[len(_scores) // 2] if _scores else 0.0
+                _p10 = _scores[max(0, int(len(_scores) * 0.10) - 1)] if _scores else 0.0
+                _p90 = _scores[max(0, int(len(_scores) * 0.90) - 1)] if _scores else 0.0
+                print(
+                    f"[align] forced-aligned {len(_refined)} words in "
+                    f"{time.time() - _t0:.1f}s "
+                    f"(snapped={_n_snap}/{len(_refined)}, "
+                    f"logprob p10={_p10:.1f} median={_med:.1f} p90={_p90:.1f})",
+                    flush=True,
+                )
+
         def _do_edit_recipe_overlapped():
             """Start Gemini as soon as transcript + proxy + trend + audio + face signals are ready.
             Transcript may come from the early_pool URL-based Deepgram call (ran in parallel
             with the download), a regular mega-pool file-based call, or the provided_transcript
-            for re-edit paths. Whichever landed first wins."""
+            for re-edit paths. Whichever landed first wins.
+
+            Forced alignment runs HERE — between transcript resolution and the
+            Gemini call. This is critical: build_clips_from_words runs INSIDE
+            generate_edit_gemini and reads word.start/word.end to compute clip
+            source ranges. If alignment ran later, clips would be built with
+            un-refined Deepgram timestamps and the entire point of alignment
+            would be moot for cut planning. The cache + lock in
+            _get_resolved_transcript ensures alignment runs exactly once even
+            under racing callers; downstream consumers see refined timestamps.
+            """
             _transcript = _get_resolved_transcript()
+            _refine_transcript_with_alignment(_transcript, _raw_source, work_dir)
             _proxy_bytes = future_gemini_proxy.result() if future_gemini_proxy is not None else None
             if future_early_trend is not None:
                 try:
@@ -10889,76 +10973,13 @@ def handler(job):
         mega_pool.shutdown(wait=False)
 
         # ── Forced alignment: refine Deepgram word boundaries ──────────────
-        # Deepgram word.start / word.end are model-predicted timestamps with
-        # ~30-150ms imprecision. The half-handle audio model cuts at
-        # word boundaries; that imprecision causes phoneme leakage at
-        # transitions when adjacent removed-words have voiced tails (the
-        # "kno-" leak the user reported on the production "you know?" filler
-        # cut). We refine boundaries against the actual waveform via CTC
-        # forced alignment on a wav2vec2/MMS-300M head — produces 10-20ms
-        # waveform-accurate timestamps.
-        #
-        # Runs on a dedicated GPU function (align_audio_remote in modal_app)
-        # since the orchestrator is CPU-only. Cold start ~5-10s first call;
-        # warm ~0.5-2s for a 60s clip. We slot here — AFTER source_path is
-        # finalized to the fps-normalized canonical, BEFORE any downstream
-        # consumer reads word timestamps. Gemini already ran above using the
-        # un-refined transcript (it picks words by index, not timestamp;
-        # refinement before Gemini would block the critical path for no
-        # quality benefit).
-        _dg_words_pre_align = transcript.get("words") or []
-        # Skip re-alignment when timestamps already carry _align_logprob from
-        # a prior render (re-edit / render_only paths). Alignment is
-        # idempotent in the values it produces, but ~1-2s warm + ~5-10s cold
-        # is wasted compute on every re-edit if we don't gate.
-        _already_aligned = bool(_dg_words_pre_align) and all(
-            isinstance(w, dict) and w.get("_align_logprob") is not None
-            for w in _dg_words_pre_align
-        )
-        if _already_aligned:
-            print(
-                f"[align] {len(_dg_words_pre_align)} words already aligned "
-                f"(re-edit path) — skipping",
-                flush=True,
-            )
-        if _dg_words_pre_align and not _already_aligned:
-            _align_t0 = time.time()
-            _wav_16k_path = os.path.join(work_dir, "source_audio_16k.wav")
-            _ar = subprocess.run(
-                ["ffmpeg", "-y", "-v", "error",
-                 "-i", source_path, "-vn",
-                 "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
-                 _wav_16k_path],
-                capture_output=True, text=True, timeout=120,
-            )
-            if _ar.returncode != 0 or not os.path.exists(_wav_16k_path):
-                raise RuntimeError(
-                    f"Forced-align audio extraction failed: rc={_ar.returncode} "
-                    f"stderr={(_ar.stderr or '')[-500:]}"
-                )
-            with open(_wav_16k_path, "rb") as _wf:
-                _audio_bytes = _wf.read()
-            # Lazy import — modal_app imports handler at top level, can't
-            # import the other direction at module load.
-            from modal_app import align_audio_remote as _align_remote
-            _refined_words = _align_remote.remote(
-                _audio_bytes, _dg_words_pre_align,
-            )
-            if not isinstance(_refined_words, list) or len(_refined_words) != len(_dg_words_pre_align):
-                raise RuntimeError(
-                    f"Forced alignment returned bad shape: got "
-                    f"{type(_refined_words).__name__} of length "
-                    f"{len(_refined_words) if isinstance(_refined_words, list) else 'n/a'}, "
-                    f"expected list of length {len(_dg_words_pre_align)}"
-                )
-            transcript["words"] = _refined_words
-            _n_snapped = sum(1 for w in _refined_words if w.get("_align_snapped"))
-            print(
-                f"[align] forced-aligned {len(_refined_words)} words in "
-                f"{time.time() - _align_t0:.1f}s "
-                f"({_n_snapped} snapped to zero-crossing)",
-                flush=True,
-            )
+        # Belt-and-suspenders call site: the recipe-overlap path inside
+        # _do_edit_recipe_overlapped already invokes _refine_transcript_with_alignment
+        # before generate_edit_gemini (so build_clips_from_words sees refined
+        # timestamps). For render_only / paths that bypass _do_edit_recipe_overlapped,
+        # this is the catch-all. Idempotent — second call skips when all words
+        # already carry _align_logprob.
+        _refine_transcript_with_alignment(transcript, source_path, work_dir)
 
         # Source res is what it is — normalize filter will handle conversion in render
         source_res = {"width": source_info["width"], "height": source_info["height"]}

@@ -53,11 +53,26 @@ _MODEL_PATH = os.environ.get("PROMPTLY_ALIGN_MODEL_PATH", "/models/aligner")
 # we don't burn GPU time on a resample at request time.
 SAMPLE_RATE = 16000
 
-# Default confidence floor (per-word summed log-probability). Words below
-# this snap to zero-crossings instead of trusting CTC's predicted boundary.
-# Empirically tuned: below -3.0 typically corresponds to OOV proper nouns
-# the aligner couldn't lock onto, or non-speech segments.
-DEFAULT_LOGPROB_THRESHOLD = -3.0
+# Default per-frame confidence floor.
+#
+# The library returns SUMMED log-probability over a word's CTC frames, so
+# the absolute score scales with word duration — a long word ("electrocuted")
+# has a large negative sum even when correctly aligned, while a short word
+# ("a") near zero. Comparing the sum against a fixed threshold systematically
+# over-snaps long words.
+#
+# Per-frame normalization (score / num_frames) gives a duration-invariant
+# confidence: ~-0.5 is matched speech, -1.0 is borderline, < -2.0 typically
+# indicates OOV / mismatch / noise. Threshold of -1.5 catches the truly bad
+# alignments without misfiring on normal multi-syllable words. Production
+# log distribution will tell us if this needs further tuning (we log p10 /
+# median / p90 of the score distribution per render).
+DEFAULT_LOGPROB_PER_FRAME_THRESHOLD = -1.5
+
+# CTC frame stride for wav2vec2/MMS at 16kHz. Conv layers downsample 16kHz
+# audio to 50fps emissions (= 320 samples = 20ms per frame). Used to convert
+# word duration in seconds → number of CTC frames for normalization.
+CTC_FRAME_STRIDE_SEC = 0.020
 
 # Zero-crossing search window for low-confidence words. ±50ms is short
 # enough to stay near the CTC-predicted boundary but long enough to find
@@ -148,7 +163,7 @@ def forced_align(
     audio_wav_path: str,
     deepgram_words: list[dict[str, Any]],
     language: str = "eng",
-    logprob_threshold: float = DEFAULT_LOGPROB_THRESHOLD,
+    logprob_per_frame_threshold: float = DEFAULT_LOGPROB_PER_FRAME_THRESHOLD,
     snap_window_ms: float = DEFAULT_SNAP_WINDOW_MS,
 ) -> list[dict[str, Any]]:
     """Refine Deepgram word boundaries using CTC forced alignment.
@@ -248,6 +263,8 @@ def forced_align(
 
     # Zip refined timestamps onto the original list, applying the
     # confidence gate + zero-crossing snap for low-logprob words.
+    # Confidence is normalized PER CTC FRAME so the threshold is duration-
+    # invariant (see DEFAULT_LOGPROB_PER_FRAME_THRESHOLD comment).
     n_snapped = 0
     refined: list[dict[str, Any]] = []
     for orig, ref in zip(deepgram_words, aligned):
@@ -256,7 +273,13 @@ def forced_align(
         end_sec = float(ref.get("end") or 0.0)
         snapped = False
 
-        if score < logprob_threshold:
+        # Number of CTC frames spanning this word — used to normalize the
+        # summed logprob into a per-frame confidence. Floor at 1 to avoid
+        # divide-by-zero for degenerate spans.
+        n_frames = max(1, int(round((end_sec - start_sec) / CTC_FRAME_STRIDE_SEC)))
+        per_frame_score = score / n_frames
+
+        if per_frame_score < logprob_per_frame_threshold:
             start_idx = int(round(start_sec * SAMPLE_RATE))
             end_idx = int(round(end_sec * SAMPLE_RATE))
             new_start_idx = _snap_to_zero_crossing(
@@ -291,7 +314,8 @@ def forced_align(
 
     print(
         f"[align] refined {len(refined)} words "
-        f"({n_snapped} snapped to zero-crossing, threshold={logprob_threshold})",
+        f"({n_snapped} snapped to zero-crossing, "
+        f"per-frame threshold={logprob_per_frame_threshold})",
         flush=True,
     )
     return refined
