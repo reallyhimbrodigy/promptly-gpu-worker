@@ -291,6 +291,59 @@ run_render() {
 run_render "overlay"          "PromptlyOverlay"          "$SMOKE_DIR/overlay.json" "$SMOKE_DIR/overlay.mov" "rgba"
 run_render "micro-segments"   "PromptlyMicroSegments"    "$SMOKE_DIR/micro.json"   "$SMOKE_DIR/micro.mov"   "yuv444p10le"
 
+# ── 7b. Chunked micro path (production code path proof) ───────────────────
+# Production renders PromptlyMicroSegments as N parallel processes with
+# --frame-range / --composition-start, then concats via `ffmpeg -f concat
+# -c copy`. This proves that path is bit-exact vs the single-pass output:
+# the decoded-pixel md5 of (chunk0+chunk1 concat) must equal the md5 of
+# the single-pass render. ProRes 4444 is intra-only, so a stream-copy
+# concat preserves every frame's bytes.
+echo "smoke: rendering chunked micro (frames 0-14, 15-29) for parity check"
+PROMPTLY_BUNDLE_DIR="$BUNDLE_CACHE" \
+  node "$REMOTION_DIR/render-full.mjs" \
+    --input "$SMOKE_DIR/micro.json" \
+    --output "$SMOKE_DIR/micro_chunk_00.mov" \
+    --public-dir "$PUBLIC_DIR" \
+    --composition "PromptlyMicroSegments" \
+    --gl swangle \
+    --frame-range "0,14" \
+    --composition-start "0" \
+    --concurrency "2"
+PROMPTLY_BUNDLE_DIR="$BUNDLE_CACHE" \
+  node "$REMOTION_DIR/render-full.mjs" \
+    --input "$SMOKE_DIR/micro.json" \
+    --output "$SMOKE_DIR/micro_chunk_01.mov" \
+    --public-dir "$PUBLIC_DIR" \
+    --composition "PromptlyMicroSegments" \
+    --gl swangle \
+    --frame-range "15,29" \
+    --composition-start "15" \
+    --concurrency "2"
+for p in "$SMOKE_DIR/micro_chunk_00.mov" "$SMOKE_DIR/micro_chunk_01.mov"; do
+  if [[ ! -s "$p" ]]; then
+    echo "smoke: ERROR — micro chunk produced no output at $p" >&2
+    exit 1
+  fi
+done
+cat > "$SMOKE_DIR/_micro_concat_list.txt" <<EOF
+file '$SMOKE_DIR/micro_chunk_00.mov'
+file '$SMOKE_DIR/micro_chunk_01.mov'
+EOF
+ffmpeg -y -loglevel error \
+  -f concat -safe 0 -i "$SMOKE_DIR/_micro_concat_list.txt" \
+  -c copy "$SMOKE_DIR/micro_concat.mov"
+SINGLE_HASH=$(ffmpeg -loglevel error -i "$SMOKE_DIR/micro.mov" -an -pix_fmt yuv444p10le -f md5 - 2>&1 | sed 's/^MD5=//')
+CHUNKED_HASH=$(ffmpeg -loglevel error -i "$SMOKE_DIR/micro_concat.mov" -an -pix_fmt yuv444p10le -f md5 - 2>&1 | sed 's/^MD5=//')
+if [[ "$SINGLE_HASH" != "$CHUNKED_HASH" ]]; then
+  echo "smoke: ERROR — chunked micro != single-pass micro" >&2
+  echo "smoke:   single-pass = $SINGLE_HASH" >&2
+  echo "smoke:   chunked     = $CHUNKED_HASH" >&2
+  echo "smoke: this means the production parallel-micro path produces a different result" >&2
+  echo "smoke: than the smoke baseline — chunking is NOT bit-exact" >&2
+  exit 1
+fi
+echo "smoke: chunked micro parity OK (hash=$CHUNKED_HASH)"
+
 # ── 8. Visual regression check ─────────────────────────────────────────────
 # Compare observed hashes to baselines. A mismatch fails smoke unless
 # BASELINE=update, in which case we overwrite the baselines file (review

@@ -8913,7 +8913,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _overlay_chunked = len(_overlay_ranges) > 1
     _overlay_chunk_paths: list = []
     overlay_cmds: list = []
-    micro_cmd = None
     if _overlay_chunked:
         for _i, (_fs, _fe) in enumerate(_overlay_ranges):
             _chunk_path = os.path.join(work_dir, f"overlay_chunk_{_i:02d}.mov")
@@ -8945,38 +8944,90 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             ],
         ))
 
+    # ── Micro-segments chunk planning ──────────────────────────────────────
+    # PromptlyMicroSegments was the last serial bottleneck. Single-process
+    # render at 2.4 fps was ~130s for ~314 frames in production — the slowest
+    # leg of the parallel render phase. Splitting 4-way mirrors the overlay
+    # chunking pattern (Remotion's documented Lambda architecture, just on a
+    # single box). All transitions/zoom components are deterministic (no
+    # Math.random / Date.now calls in src/remotion); ProRes 4444 is intra-
+    # only so chunk concat is bit-exact via `-f concat -c copy`.
+    #
+    # Concurrency tuned conservatively: 4 micro chunks × 4 tabs each = 16
+    # micro tabs. Combined with the 4×8 overlay chunks (32 tabs), total is
+    # 48 tabs sharing 64 vCPUs = 1.33 vCPU/tab — a small step up from the
+    # current 40 tabs / 1.6 vCPU per tab. Avoids the full 32+32=64-tabs
+    # oversubscription edge case the prior single-process comment warned
+    # against. If the next render shows clean wins without overlay
+    # regression, this can be bumped to concurrency=8 in a follow-up.
+    #
+    # Below ~200 frames of micro content (small renders with few
+    # transitions / no complex zoom), the single-process path is faster
+    # because per-chunk Remotion startup tax (~5-10s × N chunks) dominates.
+    micro_cmds: list = []
+    micro_chunk_paths: list = []
+    _micro_chunked = False
     if micro_input is not None:
-        # MicroSegments concurrency capped at 8 — without --concurrency, render-full.mjs
-        # defaults to floor(cpu/2) = 32 tabs, which combined with the 4×8 overlay chunks
-        # would oversubscribe the 64-vCPU container (32+32=64 tabs sharing 64 cores =
-        # 1 vCPU per tab → contention). MicroSegments contains only transitions + complex
-        # zooms (much smaller workload than the full overlay), so 8 tabs is plenty;
-        # freeing the other 24 vCPUs for the overlay chunks (the slowest pole) reliably
-        # speeds up the critical path without changing what Remotion outputs.
-        micro_cmd = [
-            "node", "/remotion/render-full.mjs",
-            "--input", micro_input_path,
-            "--output", micro_video_path,
-            "--public-dir", _bundle_public_root,
-            "--composition", "PromptlyMicroSegments",
-            "--gl", _gl_mode,
-            "--concurrency", str(_PER_CHUNK_CONCURRENCY),
-        ]
+        _MICRO_CHUNK_THRESHOLD = 200
+        _micro_total_frames = int(micro_input.get("totalDurationInFrames") or 0)
+        _MICRO_CHUNK_COUNT = 4 if _micro_total_frames >= _MICRO_CHUNK_THRESHOLD else 1
+        _micro_ranges = _split_frames(_micro_total_frames, _MICRO_CHUNK_COUNT)
+        _micro_chunked = len(_micro_ranges) > 1
+        _MICRO_CONCURRENCY = 4 if _micro_chunked else _PER_CHUNK_CONCURRENCY
+        if _micro_chunked:
+            for _i, (_fs, _fe) in enumerate(_micro_ranges):
+                _chunk_path = os.path.join(work_dir, f"micro_chunk_{_i:02d}.mov")
+                micro_chunk_paths.append(_chunk_path)
+                micro_cmds.append((
+                    f"micro-{_i:02d}",
+                    [
+                        "node", "/remotion/render-full.mjs",
+                        "--input", micro_input_path,
+                        "--output", _chunk_path,
+                        "--public-dir", _bundle_public_root,
+                        "--composition", "PromptlyMicroSegments",
+                        "--gl", _gl_mode,
+                        "--frame-range", f"{_fs},{_fe}",
+                        "--composition-start", str(_fs),
+                        "--concurrency", str(_MICRO_CONCURRENCY),
+                    ],
+                ))
+        else:
+            # Single-process path for short micros where chunking would
+            # cost more in startup tax than it saves in parallelism.
+            micro_cmds.append((
+                "micro",
+                [
+                    "node", "/remotion/render-full.mjs",
+                    "--input", micro_input_path,
+                    "--output", micro_video_path,
+                    "--public-dir", _bundle_public_root,
+                    "--composition", "PromptlyMicroSegments",
+                    "--gl", _gl_mode,
+                    "--concurrency", str(_MICRO_CONCURRENCY),
+                ],
+            ))
 
     _render_t0 = time.time()
+    _micro_descr = ""
+    if micro_cmds:
+        if _micro_chunked:
+            _micro_descr = f" + {len(micro_cmds)}-way micro chunks (concurrency={_MICRO_CONCURRENCY} each)"
+        else:
+            _micro_descr = f" + 1 micro subprocess"
     if _overlay_chunked:
         print(
             f"[render] Spawning {len(overlay_cmds)} overlay chunk subprocesses "
             f"({total_output_frames} frames split {len(_overlay_ranges)}-ways, "
             f"concurrency={_PER_CHUNK_CONCURRENCY} each)"
-            f"{' + 1 micro subprocess' if micro_cmd else ''} (gl={_gl_mode})",
+            f"{_micro_descr} (gl={_gl_mode})",
             flush=True,
         )
     else:
         print(
             f"[render] Spawning Remotion renders: PromptlyOverlay (single, "
             f"{total_output_frames}f)"
-            f"{' + PromptlyMicroSegments' if micro_cmd else ''} (gl={_gl_mode})",
+            f"{_micro_descr} (gl={_gl_mode})",
             flush=True,
         )
 
@@ -9135,14 +9186,66 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             ]
         return cmd
 
+    # +1 worker reserved for _finalize_micros (waits on micros + runs the
+    # tiny concat). Without it, finalize could occupy a render slot the
+    # moment one render finishes and block on the slowest micro chunk,
+    # starving the remaining renders by one worker.
     _render_pool = concurrent.futures.ThreadPoolExecutor(
-        max_workers=max(1, len(overlay_cmds) + (1 if micro_cmd else 0)),
+        max_workers=max(1, len(overlay_cmds) + len(micro_cmds) + 1),
     )
     overlay_futures = [
         _render_pool.submit(_run_remotion, _lbl, _cmd)
         for _lbl, _cmd in overlay_cmds
     ]
-    micro_future = _render_pool.submit(_run_remotion, "micro", micro_cmd) if micro_cmd else None
+    # micro_futures: list of (label, future) tuples. For chunked path,
+    # one future per chunk; chunks render in parallel and write to
+    # micro_chunk_XX.mov. For single-process path, one future writes to
+    # micro_video_path directly (matching the pre-chunking shape).
+    micro_futures = [
+        (_lbl, _render_pool.submit(_run_remotion, _lbl, _cmd))
+        for _lbl, _cmd in micro_cmds
+    ]
+
+    # _micro_finalize_future: single shared barrier that waits for all
+    # micro renders to finish and, in the chunked path, concats them into
+    # micro_video_path via `-f concat -c copy` (intra-only ProRes 4444 →
+    # bit-exact stream copy, <1s). Submitted immediately so the wait + the
+    # concat run concurrently with the overlay renders. Both the pipelined
+    # composite chains and the synchronous collection path await this
+    # future — Future.result() caches, so calling from multiple threads is
+    # safe (concat runs exactly once). For the non-chunked path this is
+    # just a join; micro_video_path is already the direct output.
+    def _finalize_micros() -> tuple:
+        _t0 = time.time()
+        _per_chunk: list = []
+        for _mlbl, _mfut in micro_futures:
+            _per_chunk.append((_mlbl, _mfut.result(timeout=320)))
+        if _micro_chunked:
+            for _p in micro_chunk_paths:
+                if not os.path.exists(_p) or os.path.getsize(_p) < 1000:
+                    raise RuntimeError(f"Micro chunk missing/invalid: {_p}")
+            _concat_list = os.path.join(work_dir, "_micro_concat_list.txt")
+            with open(_concat_list, "w") as _lf:
+                for _p in micro_chunk_paths:
+                    _lf.write(f"file '{_p}'\n")
+            _r = subprocess.run(
+                ["ffmpeg", "-y", "-v", "error",
+                 "-f", "concat", "-safe", "0",
+                 "-i", _concat_list,
+                 "-c", "copy",
+                 micro_video_path],
+                capture_output=True, text=True, timeout=120,
+            )
+            if _r.returncode != 0:
+                raise RuntimeError(
+                    f"Micro chunk concat failed (rc={_r.returncode}): "
+                    f"{(_r.stderr or '')[-1000:]}"
+                )
+        return time.time() - _t0, _per_chunk
+
+    _micro_finalize_future = (
+        _render_pool.submit(_finalize_micros) if micro_cmds else None
+    )
 
     # ── Pipelined composite chunk dispatch ────────────────────────────────
     # When both phases are 4-way chunked (total >= 400 frames), each
@@ -9170,13 +9273,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 raise RuntimeError(
                     f"Overlay chunk {K} missing/invalid: {_ov_path}"
                 )
-            # micro is rendered as a single full-duration Remotion process,
-            # shared across all composite chunks (filtergraph trims to this
-            # chunk's range internally). Wait for it once per chain — the
-            # first chain to reach this point usually pays the cost; later
-            # chains find the future already resolved (Future caches result).
-            if micro_future is not None:
-                micro_future.result(timeout=320)
+            # micro is rendered as N parallel Remotion processes (4-way
+            # chunked when totalDurationInFrames >= 200; otherwise single
+            # process) and concat'd into micro_video_path by a shared
+            # finalize future. Wait on it here; later chains find the
+            # future already resolved (Future caches → concat runs exactly
+            # once across all chains).
+            if _micro_finalize_future is not None:
+                _micro_finalize_future.result(timeout=400)
             _cs, _ce = _composite_ranges[K]
             _cmd = _build_composite_cmd(
                 K, _cs, _ce, _composite_chunk_paths[K],
@@ -9274,10 +9378,24 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             f"{os.path.getsize(_path)/1024/1024:.1f}MB",
             flush=True,
         )
-    if micro_future:
-        micro_elapsed = micro_future.result(timeout=320)
-        print(f"[render] PromptlyMicroSegments done in {micro_elapsed:.1f}s → "
-              f"{os.path.getsize(micro_video_path)/1024/1024:.1f}MB", flush=True)
+    if _micro_finalize_future is not None:
+        _micro_total_elapsed, _micro_per_chunk = _micro_finalize_future.result(timeout=400)
+        if _micro_chunked:
+            _micro_max = max(e for _, e in _micro_per_chunk)
+            print(
+                f"[render] PromptlyMicroSegments: {len(_micro_per_chunk)}-way "
+                f"chunked, max chunk={_micro_max:.1f}s, finalize+concat="
+                f"{_micro_total_elapsed:.1f}s → "
+                f"{os.path.getsize(micro_video_path)/1024/1024:.1f}MB",
+                flush=True,
+            )
+        else:
+            _, _e = _micro_per_chunk[0]
+            print(
+                f"[render] PromptlyMicroSegments done in {_e:.1f}s → "
+                f"{os.path.getsize(micro_video_path)/1024/1024:.1f}MB",
+                flush=True,
+            )
     _render_pool.shutdown(wait=False)
     _render_elapsed = time.time() - _render_t0
 
