@@ -7308,6 +7308,39 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
             wf.writeframes(b"\x00" * sample_rate * 2)
         return output_wav
 
+    # ── Click-mask micro-fades at every concat boundary ────────────────────
+    # The half-handle model concatenates segments at sample-precise word
+    # boundaries. Even when the cut math is exact, the boundary samples land
+    # on different signal phases (a hard cut from one waveform to another
+    # produces a sample-edge transient — a "click"). Premiere ships its
+    # Default Audio Transition exactly for this reason: a brief crossfade
+    # at every cut to mask the discontinuity.
+    #
+    # Sequential equal-power tapers: last 5ms of every segment with a
+    # successor is cos-windowed (1→0); first 5ms of every segment with a
+    # predecessor is sin-windowed (0→1). The boundary itself sits at near-
+    # silence (~2 samples ≈ 42 µs) so any sample-edge click is replaced
+    # with a smooth ramp into and out of zero. The 5ms dip is below
+    # perception threshold for amplitude modulation in speech context.
+    # Doesn't shift any cut points; doesn't remove content; just smooths
+    # the boundary phase break.
+    _fade_samples = int(round(0.005 * sample_rate))
+    if _fade_samples > 0 and len(all_clips) >= 2:
+        _fade_out = np.cos(
+            np.linspace(0.0, np.pi / 2.0, _fade_samples, dtype=np.float32)
+        )
+        _fade_in = np.sin(
+            np.linspace(0.0, np.pi / 2.0, _fade_samples, dtype=np.float32)
+        )
+        for _i in range(len(all_clips) - 1):
+            _seg = all_clips[_i]
+            if len(_seg) >= _fade_samples:
+                _seg[-_fade_samples:] *= _fade_out
+        for _i in range(1, len(all_clips)):
+            _seg = all_clips[_i]
+            if len(_seg) >= _fade_samples:
+                _seg[:_fade_samples] *= _fade_in
+
     full_audio = np.concatenate(all_clips)
     full_audio = np.clip(full_audio, -32768, 32767).astype(np.int16)
     with wave.open(output_wav, "wb") as wf:
