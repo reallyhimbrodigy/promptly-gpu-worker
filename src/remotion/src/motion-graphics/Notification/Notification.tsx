@@ -194,15 +194,22 @@ export const Notification: React.FC<NotificationProps> = ({
   exitFrames,
   platform = "ios",
   notifications,
-  anchor,
-  offsetX,
-  offsetY,
+  // anchor / offsetX / offsetY are deliberately destructured-but-ignored.
+  // The Notification is an iOS / Android notification banner that DROPS
+  // DOWN from the top of the screen — placing it anywhere else (center,
+  // bottom) makes the entry animation nonsensical. We honor `scale`
+  // only because fine-tuning the size is safe; fine-tuning the position
+  // breaks the visual metaphor. Same locked-position pattern TornPaper
+  // uses. (Earlier renders shipped Notification at lower_third_safe
+  // because Gemini interpreted "LARGE MGs allowed at upper OR lower
+  // third" as a green light to place it at the bottom — the prompt has
+  // since been tightened to call out Notification specifically, and
+  // this component-level lock is the defensive backstop.)
   scale,
 }) => {
   const platformTopOffset = STYLES[platform].topOffset;
   const { containerStyle, wrapperStyle } = resolveMGPosition(
-    { anchor, offsetX, offsetY, scale },
-    { anchor: "top", offsetY: platformTopOffset },
+    { anchor: "top", offsetY: platformTopOffset, scale },
   );
   const { fps } = useVideoConfig();
   const { visible, localFrame, exitProgress, phase } = useMGPhase(

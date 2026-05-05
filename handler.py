@@ -2815,9 +2815,11 @@ PLACEMENT — anchor zone must not cover the speaker's face AND must accommodate
 Each MG has a fixed canvas footprint. A LARGE MG anchored at "left_safe" or "right_safe" still bleeds across the center of the frame and covers the speaker's face — the side anchors do not shrink the component, they only shift its origin. Pick the anchor by SIZE FIRST, then by face position:
 
 MG SIZE CLASSIFICATION (fixed by component design):
-  LARGE (≥50% canvas height, will dominate the frame): IMessageBubble, ChatThread, Notification (any 2-3 banner stack), QuoteCard, RecordingFrame, TornPaper.
+  LARGE (≥50% canvas height, will dominate the frame): IMessageBubble, ChatThread, QuoteCard, RecordingFrame.
     Allowed anchors: "upper_third_safe" OR "lower_third_safe" ONLY. These are the only zones with enough vertical room. Center / left_safe / right_safe will cover the speaker — large means large.
-  MEDIUM (~25-40% height): TweetBubble, single-banner Notification (1 notification in the array), InstagramComment, TikTokComment, StatCard, StickyNotes.
+  TOP-PINNED (animation requires top placement, anchor is structurally locked): Notification, TornPaper.
+    Allowed anchor: "upper_third_safe" ONLY. These components animate dropping down from the top of the frame; placing them anywhere else makes the entry animation visually nonsensical. The components themselves ignore any anchor other than top — but emit "upper_third_safe" so caption_position_changes are correct (captions need to flip to bottom while these are on screen).
+  MEDIUM (~25-40% height): TweetBubble, InstagramComment, TikTokComment, StatCard, StickyNotes.
     Allowed anchors: "upper_third_safe" / "lower_third_safe" / "left_safe" / "right_safe". Avoid "center" on a talking-head shot.
   SMALL (<20% canvas): AnnotationArrow, ProgressBar, Toggle.
     Any anchor works.
@@ -2861,9 +2863,11 @@ Types, descriptions, use cases, and REQUIRED props (in the schema below, keys en
                             NOT for: a single isolated message (use IMessageBubble), missed calls (use Notification), email/social-app alerts (use Notification with the matching app).
                             Props: {{"messages": [{{"sender": "me"|"them", "text": str, "typingMs"?: int, "holdMs"?: int}}, ...], "header"?: {{"name": str, "subtitle"?: str}}}}
 
- 3. "Notification"       — iOS/Android notification stack. 1–3 banners drop in with platform styling. 7 built-in app icons.
+ 3. "Notification"       — iOS/Android notification stack. 1–3 banners drop down FROM THE TOP with platform styling. 7 built-in app icons.
                             Best for: Phone calls / missed calls (app="imessage", title="Missed Call"), payment receipts (Venmo / Stripe / Apple Pay / bank), email alerts, IG/social pings — anything that arrives as a system banner.
                             NOT for: an actual back-and-forth text conversation (use ChatThread), a single text message bubble shown verbatim (use IMessageBubble).
+                            Renders at the TOP regardless of `anchor` — the drop-down animation is the entire visual metaphor; placing it elsewhere is rendered the same as placing it at top. Use anchor="upper_third_safe" for clarity.
+                            CAP: across the ENTIRE video, Notification may appear AT MOST ONCE. The banner is meant to mark a SPECIFIC, NAMED beat (a missed call moment, a payment receipt moment, a specific incoming message); two Notifications in a 60s video reads as random and breaks the editorial weight. If you've already used one, do not emit another.
                             Props: {{"notifications": [{{"app": "apple-pay"|"venmo"|"stripe"|"imessage"|"instagram"|"email"|"bank", "appName": str, "title": str, "body": str, "timestamp"?: str}}, ...], "platform"?: "ios"|"android"}}
 
  4. "ProgressBar"        — Animated progress bar with count-up. Optional milestones.
