@@ -76,7 +76,7 @@ image = (
     # Without this, NVENC silently fails and pipeline falls back to CPU encoding (10-15x slower)
     .env({"NVIDIA_DRIVER_CAPABILITIES": "all"})
     .run_commands(
-        "echo 'build v26 - H100 + 64CPU + 128GB + Remotion 4.0.450 primary-render + genai SDK + defensive CUDA placeholders'",
+        "echo 'build v27 - CTC forced alignment via wav2vec2/MMS-300M for waveform-accurate word boundaries'",
         "apt-get update && apt-get install -y ca-certificates && update-ca-certificates",
         # Remove CUDA stubs AND compat libs that intercept dlopen before Modal's
         # real driver libs. THEN recreate placeholders for every libcuda* file
@@ -205,7 +205,36 @@ image = (
     .pip_install(
         "torch==2.5.1",
         "torchvision==0.20.1",
+        "torchaudio==2.5.1",
         extra_options="--index-url https://download.pytorch.org/whl/cu124",
+    )
+    # CTC forced-alignment dependencies. The aligner refines Deepgram word
+    # boundaries against the actual waveform — Deepgram timestamps are
+    # model-predicted with ~30-150ms imprecision, which causes phoneme
+    # leakage at clip cuts. CTC FA on a wav2vec2/MMS-300M head gives 10-20ms
+    # waveform-accurate boundaries.
+    .pip_install(
+        "transformers>=4.34,<5",
+        "huggingface_hub",
+        "uroman",
+        "nltk",
+        "Unidecode",
+    )
+    .pip_install(
+        "git+https://github.com/MahmoudAshraf97/ctc-forced-aligner@main",
+    )
+    .run_commands(
+        # Bake the wav2vec2/MMS-300M alignment model into the image at build
+        # time. ~1.2GB safetensors. Mirrors the face-detector / RNNoise
+        # pattern at modal_app.py:174-182 — every ML model in this image is
+        # baked at build time, never downloaded at runtime. Deterministic
+        # and reproducible: if HF is down at deploy, `modal deploy` fails
+        # loud; if HF is down at request time, we don't care.
+        "mkdir -p /models/aligner",
+        "python -c \"from huggingface_hub import snapshot_download; "
+        "snapshot_download('MahmoudAshraf/mms-300m-1130-forced-aligner', "
+        "local_dir='/models/aligner', local_dir_use_symlinks=False)\"",
+        "ls -la /models/aligner/ | head -5",
     )
     .run_commands(
         # Clone Practical-RIFE — provides the support modules
@@ -319,6 +348,7 @@ image = (
     .add_local_file("rife_normalize.py", "/rife_normalize.py")
     .add_local_file("render_schemas.py", "/render_schemas.py")
     .add_local_file("cuda_driver_setup.py", "/cuda_driver_setup.py")
+    .add_local_file("align_audio.py", "/align_audio.py")
 )
 
 # ── Secrets ────────────────────────────────────────────────────────────────────
@@ -603,3 +633,61 @@ def prewarm_janitor():
     return {"deleted": deleted_count, "bytes_freed": bytes_freed, "errors": errors}
 
 
+# ── Forced-alignment GPU function ─────────────────────────────────────────────
+# Runs the wav2vec2/MMS-300M CTC forced aligner on a single audio clip + word
+# list. Refines Deepgram word boundaries (model-predicted, ~30-150ms imprecise)
+# to waveform-accurate timestamps (~10-20ms). The orchestrator (CPU-only)
+# calls this synchronously after Deepgram returns and before render starts.
+#
+# Architecture parity with rife_normalize_remote: stateless, one input/output
+# round-trip, no caching across calls. Lazy model load means the first
+# invocation in a warm container pays ~2-4s to load weights from disk + push
+# to GPU; subsequent calls within scaledown_window=180s are hot (~0.5-2s for
+# a 60s clip on L4).
+#
+# Pricing rationale: L4 + 2 CPU + 4GB ≈ $0.80/hr. Typical alignment is 1-2s +
+# 5-10s cold start. Scaledown 180s is generous because prewarm+real-render
+# pairs are common (prewarm spawns alignment, real render uses cached
+# refined transcript). Wider window saves cold-start tax across pairs.
+@app.function(
+    image=image,
+    gpu="L4",
+    cpu=2,
+    memory=4096,
+    scaledown_window=180,
+    timeout=120,
+    region="us-west",
+)
+def align_audio_remote(audio_bytes: bytes, deepgram_words: list, language: str = "eng") -> list:
+    """Refine Deepgram word boundaries via CTC forced alignment.
+
+    Input: raw bytes of a 16kHz mono PCM wav file + Deepgram word list.
+    Output: same word list with `start`/`end` rewritten to waveform-accurate
+    timestamps and `_align_logprob` / `_align_snapped` fields added.
+
+    Raises RuntimeError on alignment failure. Per the no-fallbacks
+    philosophy, the orchestrator should let this surface — never silently
+    degrade to Deepgram timestamps.
+    """
+    import os
+    import sys
+    import tempfile
+
+    if "/" not in sys.path:
+        sys.path.insert(0, "/")
+    from align_audio import forced_align
+
+    if not deepgram_words:
+        return []
+
+    # Modal RPC delivers bytes; we need a file path for the audio loader.
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+        f.write(audio_bytes)
+        wav_path = f.name
+    try:
+        return forced_align(wav_path, deepgram_words, language=language)
+    finally:
+        try:
+            os.unlink(wav_path)
+        except OSError:
+            pass

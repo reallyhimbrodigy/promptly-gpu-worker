@@ -10888,6 +10888,64 @@ def handler(job):
         # has no downstream consumer anyway.
         mega_pool.shutdown(wait=False)
 
+        # ── Forced alignment: refine Deepgram word boundaries ──────────────
+        # Deepgram word.start / word.end are model-predicted timestamps with
+        # ~30-150ms imprecision. The half-handle audio model cuts at
+        # word boundaries; that imprecision causes phoneme leakage at
+        # transitions when adjacent removed-words have voiced tails (the
+        # "kno-" leak the user reported on the production "you know?" filler
+        # cut). We refine boundaries against the actual waveform via CTC
+        # forced alignment on a wav2vec2/MMS-300M head — produces 10-20ms
+        # waveform-accurate timestamps.
+        #
+        # Runs on a dedicated GPU function (align_audio_remote in modal_app)
+        # since the orchestrator is CPU-only. Cold start ~5-10s first call;
+        # warm ~0.5-2s for a 60s clip. We slot here — AFTER source_path is
+        # finalized to the fps-normalized canonical, BEFORE any downstream
+        # consumer reads word timestamps. Gemini already ran above using the
+        # un-refined transcript (it picks words by index, not timestamp;
+        # refinement before Gemini would block the critical path for no
+        # quality benefit).
+        _dg_words_pre_align = transcript.get("words") or []
+        if _dg_words_pre_align:
+            _align_t0 = time.time()
+            _wav_16k_path = os.path.join(work_dir, "source_audio_16k.wav")
+            _ar = subprocess.run(
+                ["ffmpeg", "-y", "-v", "error",
+                 "-i", source_path, "-vn",
+                 "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
+                 _wav_16k_path],
+                capture_output=True, text=True, timeout=120,
+            )
+            if _ar.returncode != 0 or not os.path.exists(_wav_16k_path):
+                raise RuntimeError(
+                    f"Forced-align audio extraction failed: rc={_ar.returncode} "
+                    f"stderr={(_ar.stderr or '')[-500:]}"
+                )
+            with open(_wav_16k_path, "rb") as _wf:
+                _audio_bytes = _wf.read()
+            # Lazy import — modal_app imports handler at top level, can't
+            # import the other direction at module load.
+            from modal_app import align_audio_remote as _align_remote
+            _refined_words = _align_remote.remote(
+                _audio_bytes, _dg_words_pre_align,
+            )
+            if not isinstance(_refined_words, list) or len(_refined_words) != len(_dg_words_pre_align):
+                raise RuntimeError(
+                    f"Forced alignment returned bad shape: got "
+                    f"{type(_refined_words).__name__} of length "
+                    f"{len(_refined_words) if isinstance(_refined_words, list) else 'n/a'}, "
+                    f"expected list of length {len(_dg_words_pre_align)}"
+                )
+            transcript["words"] = _refined_words
+            _n_snapped = sum(1 for w in _refined_words if w.get("_align_snapped"))
+            print(
+                f"[align] forced-aligned {len(_refined_words)} words in "
+                f"{time.time() - _align_t0:.1f}s "
+                f"({_n_snapped} snapped to zero-crossing)",
+                flush=True,
+            )
+
         # Source res is what it is — normalize filter will handle conversion in render
         source_res = {"width": source_info["width"], "height": source_info["height"]}
         print(f"[DIAG] Source: {source_res['width']}x{source_res['height']} @ {source_info['fps']:.1f}fps, normalize_vf={'yes' if _normalize_vf else 'no'}", flush=True)
