@@ -7469,13 +7469,15 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15, v
     Pipeline:
       1. Apply Gemini's remove_words (word indices + time ranges)
       2. Build clips from kept words, splitting on silence > max_silence_gap
-      3. Reject sub-120ms micro-clips (orphan-island removals — Gemini's job
-         to consolidate)
+      3. Drop only degenerate (zero-or-inverted) spans — no length floor.
+         Word boundaries come from CTC forced alignment (waveform-accurate),
+         so a 50ms `she` is real fast speech, not a bug. The renderer
+         trusts whatever clip lengths the model + Gemini produced.
       4. Verify non-overlap invariant
 
-    Cut times are sample-precise raw Deepgram timestamps — no padding,
-    no cushion, no rounding. The audio cut path uses round(t * sample_rate)
-    for indexing, so the rendered splice lands at the exact sample.
+    Cut times are sample-precise (refined by CTC forced alignment in the
+    orchestrator). The audio cut path uses round(t * sample_rate) for
+    indexing, so the rendered splice lands at the exact sample.
 
     video_duration (when > 0) clamps every word's end timestamp so that
     no clip ever requests source frames past the actual end of the video.
@@ -7624,25 +7626,6 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15, v
             "word_count": len(word_group),
         })
 
-    # ── Step 4: Reject micro-clips ────────────────────────────────────────
-    # Any clip shorter than 120ms is too small to be a standalone segment —
-    # it would be unplayable. This is a symptom of a removal pattern that
-    # orphans a tiny word island between two removal ranges. Fail hard so
-    # Gemini fixes the removal pattern at its root rather than us silently
-    # merging the orphan into a neighbor.
-    MIN_CLIP_DURATION = 0.120
-    for _ci, clip in enumerate(raw_clips):
-        dur = clip["padded_end"] - clip["padded_start"]
-        if dur < MIN_CLIP_DURATION:
-            raise ValueError(
-                f"build_clips_from_words produced a micro-clip ({dur*1000:.0f}ms, "
-                f"words[{clip['first_word']!r}..{clip['last_word']!r}], "
-                f"t={clip['padded_start']:.3f}s-{clip['padded_end']:.3f}s). Your "
-                f"remove_words pattern orphans a tiny kept segment between two "
-                f"removal ranges. Extend or consolidate the surrounding removals "
-                f"so the kept segment is at least {MIN_CLIP_DURATION*1000:.0f}ms."
-            )
-
     # ── Step 5: Non-overlap invariant ─────────────────────────────────────
     # Clips are derived from sorted word groups with strictly non-overlapping
     # source ranges. If two adjacent clips overlap, the derivation logic is
@@ -7658,16 +7641,20 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15, v
             )
 
     # ── Build final clip dicts ────────────────────────────────────────────
-    # Raw Deepgram timestamps. The downstream audio cut path uses
-    # round(time * sample_rate) for indexing, so an unrounded float here
-    # produces a sample-precise splice.
+    # Sample-precise word boundaries (refined by CTC forced alignment in the
+    # orchestrator). The audio cut path uses round(time * sample_rate) for
+    # indexing, so an unrounded float here produces a sample-precise splice.
+    # No length floor — the renderer trusts whatever clip lengths the model
+    # + Gemini produced. Only guard: skip degenerate (zero-or-inverted)
+    # spans, which can only arise from FP edge cases against video_duration
+    # clamping above.
     final_clips = []
     for rc in raw_clips:
         s = float(rc["padded_start"])
         e = float(rc["padded_end"])
         if _vd > 0 and e > _vd:
             e = float(_vd)
-        if e - s < 0.05:
+        if e <= s:
             continue
         final_clips.append({
             "source_start": s,
