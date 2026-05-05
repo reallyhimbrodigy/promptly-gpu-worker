@@ -7132,32 +7132,36 @@ def get_pitch_preserving_speed_filter(speed: float) -> str:
 
 
 def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample_rate=48000, trans_dur_after=None, per_cut_render_dur_frames=None, source_fps=60.0, trim_head_dur=None, trim_tail_dur=None):
-    """Build the per-cut audio track in one numpy pass — pro NLE overlap model.
+    """Build the per-cut audio track in one numpy pass — half-handle model.
 
-    Source audio is extracted ONCE (one ffmpeg invocation) and held in
-    memory. Each cut's RENDER range (source[start + trim_head*speed,
-    end − trim_tail*speed]) is sliced and resampled at the cut's
-    constant speed. Each transition's audio is the cross-fade of the
-    HANDLE source ranges that were trimmed from clips A and B —
-    SAME source content the transition video is rendering, so audio
-    and video stay in lockstep, and no source content is heard twice.
+    Each cut's RENDER range (source[start + trim_head*speed, end −
+    trim_tail*speed]) is sliced and resampled at the cut's constant
+    speed. trim_head/trim_tail = trans_dur/2 (half-trim — see the
+    explanatory comment in the caller where the trim values are
+    initialised). The transition slot between clip A and clip B holds
+    A_tail_half (source[end_A − trim_tail, end_A]) followed
+    SEQUENTIALLY by B_head_half (source[start_B, start_B + trim_head]) —
+    no cross-fade, no mixing. Two consecutive halves of source audio,
+    no overlap.
 
-    SAMPLE-LOCKED ALIGNMENT (sub-20ms drift target):
-      Audio sample count per cut is derived from the *exact* video frame
-      count (per_cut_render_dur_frames[i]) so audio and video lengths
-      match within ±1 sample (~21 µs) per cut.
+    DIALOGUE INTELLIGIBILITY:
+      The previous design ran an equal-power cos/sin cross-fade between
+      clip A's last trans_dur seconds and clip B's first trans_dur
+      seconds, compressing 2*trans_dur seconds of source audio into
+      trans_dur seconds of timeline. Worked fine for ambient/music
+      handoffs; destroyed dialogue intelligibility because the speech
+      from both sides mixed into mush at every transition. Half-handle
+      sequential concat plays each side's words at full volume in
+      half the slot — every word heard cleanly, hard cut at the
+      transition midpoint (the standard L-cut pattern in pro NLEs).
 
-    PRO NLE OVERLAP — NO PADDING:
-      Old model: clip A renders full eff_dur, transition adds trans_dur,
-      clip B renders full eff_dur. Audio had to pad with silence or
-      cross-fade buffer to match the longer video, AND clip A's tail
-      was shown twice (in clip A's render and again as part of the
-      transition). The "fix" was a buffer.
-      New model: clip A renders for (eff_dur_A − trim_tail_A), clip B
-      renders for (eff_dur_B − trim_head_B), transition fills the
-      trans_dur gap using the trimmed-off handles from A and B. Audio
-      and video durations match by construction. Each piece of source
-      content shown ONCE.
+    SAMPLE-LOCKED ALIGNMENT:
+      Per-cut audio sample count is derived from the *exact* video
+      frame count (per_cut_render_dur_frames[i]) so audio and video
+      lengths match within ±1 sample (~21 µs) per cut. Transition
+      slot audio is exactly trans_dur*sample_rate samples (= n_half
+      A_tail_half + n_half B_head_half), matching the 12-frame visual
+      transition at 30fps.
 
     Returns the path to the concatenated WAV.
     """
@@ -7252,12 +7256,17 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
         else:
             cut_audios.append(_resample_range(render_src_start, render_src_end, n_out))
 
-    # ── Transition audio — equal-power cross-fade of the handle ranges ──
-    # For each transition, the trimmed-off source content from clip A's
-    # tail and clip B's head IS the audio for the transition. No
-    # duplication: that source content is NOT played anywhere else.
+    # ── Transition audio — sequential half-handles (NO cross-fade) ─────
+    # A_tail_half (clip A's last trans_dur/2 of source, matching the
+    # half-trim model in the caller) is concatenated with B_head_half
+    # (clip B's first trans_dur/2 of source). No mixing, no overlap.
+    # The viewer hears clip A's words decay naturally, then clip B's
+    # words begin — the audio cut lands at the midpoint of the visual
+    # transition (the standard L-cut pattern in pro NLEs). Combined
+    # with the clip's main render audio, every word in clip A's source
+    # range and clip B's source range is heard exactly once.
     all_clips: List[np.ndarray] = []
-    _n_crossfades = 0
+    _n_transitions = 0
     for ci, cut_audio in enumerate(cut_audios):
         all_clips.append(cut_audio)
         _t_after = 0.0
@@ -7269,18 +7278,27 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
         cut_b = cuts[ci + 1]
         speed_a = float(cut_a.get("speed") or 1.0)
         speed_b = float(cut_b.get("speed") or 1.0)
-        n_trans = max(1, int(round(_t_after * sample_rate)))
-        # A's tail HANDLE: source[c_a_end − t_after*speed_a, c_a_end] resampled to n_trans
+        # Half-handle: each side fills half the trans slot. Total handle
+        # audio = trans_dur*sample_rate samples = exactly the visual
+        # transition's duration in samples. trim_head/trim_tail in the
+        # caller are also trans_dur/2, so source[end_A - trim_tail,
+        # end_A] is the EXACT segment that's been trimmed from clip A's
+        # render audio — concatenating it here puts that source content
+        # back in the timeline immediately after clip A's render audio,
+        # at the natural rate, no cross-fade, no time compression.
+        half = _t_after / 2.0
+        n_half = max(1, int(round(half * sample_rate)))
         c_a_end = float(cut_a["source_end"])
-        a_handle = _resample_range(c_a_end - _t_after * speed_a, c_a_end, n_trans)
-        # B's head HANDLE: source[c_b_start, c_b_start + t_after*speed_b] resampled to n_trans
+        a_tail_half = _resample_range(
+            c_a_end - half * speed_a, c_a_end, n_half,
+        )
         c_b_start = float(cut_b["source_start"])
-        b_handle = _resample_range(c_b_start, c_b_start + _t_after * speed_b, n_trans)
-        # Equal-power cross-fade (cos²/sin² = 1 → constant perceived loudness).
-        t = np.linspace(0, np.pi / 2, n_trans, dtype=np.float32)
-        cross = a_handle * np.cos(t) + b_handle * np.sin(t)
-        all_clips.append(cross)
-        _n_crossfades += 1
+        b_head_half = _resample_range(
+            c_b_start, c_b_start + half * speed_b, n_half,
+        )
+        all_clips.append(a_tail_half)
+        all_clips.append(b_head_half)
+        _n_transitions += 1
 
     if not all_clips:
         with wave.open(output_wav, "wb") as wf:
@@ -7301,7 +7319,7 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
     _total_dur = len(full_audio) / sample_rate
     print(
         f"[audio] Built per-cut audio: {len(cuts)} cuts, "
-        f"{_n_crossfades} cross-fade(s), "
+        f"{_n_transitions} transition(s), "
         f"{_total_dur:.3f}s, {len(full_audio)} samples (single-extract)",
         flush=True,
     )
@@ -7892,13 +7910,25 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     def _has_real_transition(_rc):
         return str(_rc.get("transition_out") or "none") in VALID_TRANSITION_TYPES
 
+    # HALF-TRIM model: each clip surrenders trans_dur/2 to the adjacent
+    # transition slot, audio plays clip A's main render + A_tail_half +
+    # B_head_half + clip B's main render BACK-TO-BACK with no cross-fade.
+    # Each clip's source content is heard in full across (clip render
+    # audio + half-handle audio); no dialogue mashing. Trade-off: the
+    # visual transition's clip-A side spans source[end_A - trans_dur,
+    # end_A] which overlaps clip A's render-tail by trans_dur/2 — that
+    # 0.2s of source is shown both in clip A's render and (blended with
+    # clip B) in the transition. The slide / flash / zoom motion of the
+    # transition hides the brief duplication; mouth detail isn't readable
+    # mid-slide. Worth it to preserve dialogue intelligibility.
+    _T_TRIM = _T_trans / 2.0
     _trim_head_dur = [0.0] * len(render_cuts)
     _trim_tail_dur = [0.0] * len(render_cuts)
     for _i in range(len(render_cuts)):
         _has_in = _i > 0 and _has_real_transition(render_cuts[_i - 1])
         _has_out = _i < len(render_cuts) - 1 and _has_real_transition(render_cuts[_i])
-        _trim_head_dur[_i] = _T_trans if _has_in else 0.0
-        _trim_tail_dur[_i] = _T_trans if _has_out else 0.0
+        _trim_head_dur[_i] = _T_TRIM if _has_in else 0.0
+        _trim_tail_dur[_i] = _T_TRIM if _has_out else 0.0
 
     # Drop transitions on clips that can't afford the handles. Iterate
     # left-to-right; if a cut's render dur would go below _MIN_RENDER_DUR,
@@ -7957,13 +7987,19 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     # Output clip ranges — each cut's full output window (eff_dur span,
     # including handle portions consumed by adjacent transitions). Cursor
-    # advances by (eff_dur − trans_dur_after) per cut: the transition
-    # OVERLAPS with this cut's tail and the next cut's head, so we
-    # SUBTRACT trans_dur instead of adding. This is the pro NLE model.
+    # Cursor advances by full eff_dur per cut — NO overlap subtraction.
+    # In the half-trim audio model (see _T_TRIM block above), each clip's
+    # full eff_dur of source audio plays in the output (split across the
+    # clip's main render audio + half-handle audio in the adjacent
+    # transition slot). The output timeline length equals sum(eff_dur)
+    # regardless of transitions; transitions don't compress the timeline.
+    # Word projections must use no-overlap ranges or captions/MGs/SFX
+    # would project shifted by sum(trans_dur) seconds (e.g. 2s for 5
+    # transitions = caption appears 2s before the speaker says it).
     _clip_ranges = get_output_clip_ranges(
         render_cuts, effective_durations,
         transition_duration=None,
-        trans_dur_after=_trans_dur_after,
+        trans_dur_after=None,
     )
 
     # Project Deepgram words onto output timeline (for captions + SFX + b-roll)
@@ -7972,7 +8008,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         transcript, render_cuts, effective_durations,
         transition_duration=None, clip_time_maps=_clip_time_maps,
         removed_word_indices=_removed_word_indices, fps=source_fps,
-        trans_dur_after=_trans_dur_after,
+        trans_dur_after=None,
     )
     edit_plan["_projected_words"] = _projected_words
     _pw_by_idx = {pw["_word_index"]: pw for pw in _projected_words if pw.get("_word_index") is not None}
