@@ -10741,21 +10741,28 @@ def handler(job):
                         f"expected list of length {len(_words)}"
                     )
                 _transcript["words"] = _refined
-                _n_snap = sum(1 for w in _refined if w.get("_align_snapped"))
-                # Score distribution for tuning. CTC summed log-probs scale
-                # with word duration; report the median (more robust than
-                # mean to OOV outliers) so we can adjust the snap threshold
-                # against real production data.
-                _scores = [float(w.get("_align_logprob") or 0.0) for w in _refined]
-                _scores.sort()
-                _med = _scores[len(_scores) // 2] if _scores else 0.0
-                _p10 = _scores[max(0, int(len(_scores) * 0.10) - 1)] if _scores else 0.0
-                _p90 = _scores[max(0, int(len(_scores) * 0.90) - 1)] if _scores else 0.0
+                # Per-frame logprob distribution for visibility. Summed
+                # log-probs scale with word duration so the absolute number
+                # is meaningless on its own; normalizing by CTC frames
+                # (~20ms stride) gives a duration-invariant confidence.
+                # Healthy speech sits around -0.5; consistently below -1.5
+                # would suggest the model is fighting the audio (consider
+                # language flag / model swap, NOT a buffer).
+                _per_frame = []
+                for _w in _refined:
+                    _score = float(_w.get("_align_logprob") or 0.0)
+                    _dur = float(_w.get("end") or 0.0) - float(_w.get("start") or 0.0)
+                    _frames = max(1, int(round(_dur / 0.020)))
+                    _per_frame.append(_score / _frames)
+                _per_frame.sort()
+                _med = _per_frame[len(_per_frame) // 2] if _per_frame else 0.0
+                _p10 = _per_frame[max(0, int(len(_per_frame) * 0.10) - 1)] if _per_frame else 0.0
+                _p90 = _per_frame[max(0, int(len(_per_frame) * 0.90) - 1)] if _per_frame else 0.0
                 print(
                     f"[align] forced-aligned {len(_refined)} words in "
                     f"{time.time() - _t0:.1f}s "
-                    f"(snapped={_n_snap}/{len(_refined)}, "
-                    f"logprob p10={_p10:.1f} median={_med:.1f} p90={_p90:.1f})",
+                    f"(per-frame logprob p10={_p10:.2f} "
+                    f"median={_med:.2f} p90={_p90:.2f})",
                     flush=True,
                 )
 

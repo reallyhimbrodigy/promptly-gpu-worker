@@ -23,14 +23,16 @@ modal_app.py). The orchestrator extracts a 16kHz mono PCM wav and sends
 its bytes + the Deepgram word list over RPC. We return the same word
 list with `start` / `end` rewritten and `_align_logprob` added per word.
 
-Confidence gate
----------------
-CTC produces a per-word log-probability. When confidence is too low
-(typically: heavy background music, overlapping speech, extreme accents
-far from the training distribution), instead of falling back to Deepgram
-timestamps (which would defeat the point), we snap that word's boundary
-to the nearest audio zero-crossing within ±50ms. Deterministic, waveform-
-derived, no second model. One branch — not a fallback chain.
+Why no zero-crossing snap / no buffer
+-------------------------------------
+CTC's output IS the answer. Layering a zero-crossing snap on top of low-
+confidence words is just trading model uncertainty for an arbitrary
+deterministic shift — a different flavor of the same buffer-style heuristic
+this whole integration was meant to replace. If a word has weak alignment
+(OOV, music overlap, accent mismatch), CTC's best estimate is still our
+best estimate. The per-word logprob is logged so we can find systematic
+weakness and address it at the source (e.g., language flag, model swap),
+not paper over it with snaps.
 """
 
 from __future__ import annotations
@@ -53,31 +55,11 @@ _MODEL_PATH = os.environ.get("PROMPTLY_ALIGN_MODEL_PATH", "/models/aligner")
 # we don't burn GPU time on a resample at request time.
 SAMPLE_RATE = 16000
 
-# Default per-frame confidence floor.
-#
-# The library returns SUMMED log-probability over a word's CTC frames, so
-# the absolute score scales with word duration — a long word ("electrocuted")
-# has a large negative sum even when correctly aligned, while a short word
-# ("a") near zero. Comparing the sum against a fixed threshold systematically
-# over-snaps long words.
-#
-# Per-frame normalization (score / num_frames) gives a duration-invariant
-# confidence: ~-0.5 is matched speech, -1.0 is borderline, < -2.0 typically
-# indicates OOV / mismatch / noise. Threshold of -1.5 catches the truly bad
-# alignments without misfiring on normal multi-syllable words. Production
-# log distribution will tell us if this needs further tuning (we log p10 /
-# median / p90 of the score distribution per render).
-DEFAULT_LOGPROB_PER_FRAME_THRESHOLD = -1.5
-
 # CTC frame stride for wav2vec2/MMS at 16kHz. Conv layers downsample 16kHz
 # audio to 50fps emissions (= 320 samples = 20ms per frame). Used to convert
-# word duration in seconds → number of CTC frames for normalization.
+# word duration in seconds → number of CTC frames for normalized logprob
+# logging (which is duration-invariant unlike the raw summed score).
 CTC_FRAME_STRIDE_SEC = 0.020
-
-# Zero-crossing search window for low-confidence words. ±50ms is short
-# enough to stay near the CTC-predicted boundary but long enough to find
-# a real zero-crossing in voiced speech (period of ~5-10ms at 100-200Hz F0).
-DEFAULT_SNAP_WINDOW_MS = 50.0
 
 
 def _get_aligner():
@@ -99,45 +81,6 @@ def _get_aligner():
             flush=True,
         )
     return _aligner_model, _aligner_tokenizer
-
-
-def _snap_to_zero_crossing(
-    samples: np.ndarray,
-    target_idx: int,
-    sample_rate: int,
-    search_window_ms: float = DEFAULT_SNAP_WINDOW_MS,
-) -> int:
-    """Find the nearest zero-crossing to `target_idx` within ±search_window_ms.
-
-    A zero-crossing is a sample boundary where the signal changes sign — at
-    that exact sample the audio is at silence by definition, so cutting
-    there avoids any sample-edge transient.
-
-    Returns target_idx unchanged if no zero-crossing exists in the window
-    (rare in voiced speech; possible in pure silence where any sample is
-    already "zero").
-    """
-    if len(samples) <= 1:
-        return target_idx
-    window = int(search_window_ms * sample_rate / 1000.0)
-    lo = max(1, target_idx - window)
-    hi = min(len(samples), target_idx + window)
-    if hi <= lo:
-        return target_idx
-
-    # Sign-change between consecutive samples = zero-crossing.
-    seg = samples[lo - 1: hi]
-    signs = np.sign(seg)
-    # Treat exact zeros as crossings too.
-    signs[signs == 0] = 1
-    crossings = np.where(np.diff(signs) != 0)[0]
-    if len(crossings) == 0:
-        return target_idx
-
-    # Pick the crossing closest to target_idx in absolute samples.
-    crossing_abs = lo + crossings  # sample indices in `samples` space
-    best = crossing_abs[np.argmin(np.abs(crossing_abs - target_idx))]
-    return int(best)
 
 
 def _read_wav_mono_16k(path: str) -> np.ndarray:
@@ -163,8 +106,6 @@ def forced_align(
     audio_wav_path: str,
     deepgram_words: list[dict[str, Any]],
     language: str = "eng",
-    logprob_per_frame_threshold: float = DEFAULT_LOGPROB_PER_FRAME_THRESHOLD,
-    snap_window_ms: float = DEFAULT_SNAP_WINDOW_MS,
 ) -> list[dict[str, Any]]:
     """Refine Deepgram word boundaries using CTC forced alignment.
 
@@ -175,22 +116,19 @@ def forced_align(
             `confidence`, `speaker`) are preserved verbatim.
         language: ISO-639-3 code for the aligner. "eng" by default; the
             MMS-300M model supports 1000+ languages.
-        logprob_threshold: Words with summed CTC log-probability below this
-            value have their boundaries snapped to zero-crossings.
-        snap_window_ms: Half-width of the zero-crossing search window for
-            low-confidence words.
 
     Returns:
         New list of dicts (same length and order as input) with:
           - `start` and `end` REPLACED with refined seconds-precision values
-          - `_align_logprob` ADDED (float, summed log-prob from CTC)
-          - `_align_snapped` ADDED (bool, true if zero-crossing snap fired)
+          - `_align_logprob` ADDED (float, summed log-prob from CTC over the
+            word's frames; scales with duration, see CTC_FRAME_STRIDE_SEC)
           - all other fields preserved verbatim
 
     Raises:
         RuntimeError if alignment fails on the entire clip. We do NOT fall
-        back to Deepgram timestamps — that defeats the purpose. Per-word
-        failures snap to zero-crossings instead (see logprob_threshold).
+        back to Deepgram timestamps — that defeats the purpose. The model's
+        per-word output IS the answer; low-confidence words still report
+        CTC's best estimate (no snaps, no buffers).
     """
     if not deepgram_words:
         return []
@@ -208,27 +146,18 @@ def forced_align(
     )
 
     model, tokenizer = _get_aligner()
-
-    # Two reads of the audio: one as a torch tensor for the aligner
-    # (their helper handles dtype/device placement), and one as a numpy
-    # array for the zero-crossing snap.
     waveform = load_audio(audio_wav_path, model.dtype, model.device)
-    samples = _read_wav_mono_16k(audio_wav_path)
 
     # Concatenate all words into one transcript string. The aligner's
     # `preprocess_text` strips punctuation and handles contractions
     # (e.g. "don't" → "dont"), and `split_size="word"` ensures the output
     # spans match the input list 1:1. OOV proper nouns are absorbed by
     # `<star>` tokens (`star_frequency="segment"`) — the neighboring words'
-    # alignment stays accurate; only the OOV word itself snaps to ZC.
+    # alignment stays accurate; the OOV word itself reports CTC's best guess
+    # with a low logprob (visible in the score distribution log).
     text = " ".join(str(w.get("word") or "").strip() for w in deepgram_words)
     if not text.strip():
-        # All words are empty strings — return input unmodified except mark
-        # _align_logprob as None so callers can detect.
-        return [
-            {**w, "_align_logprob": None, "_align_snapped": False}
-            for w in deepgram_words
-        ]
+        return [{**w, "_align_logprob": None} for w in deepgram_words]
 
     tokens_starred, text_starred = preprocess_text(
         text,
@@ -261,49 +190,15 @@ def forced_align(
             f"normalization (contractions, punctuation, hyphenation)."
         )
 
-    # Zip refined timestamps onto the original list, applying the
-    # confidence gate + zero-crossing snap for low-logprob words.
-    # Confidence is normalized PER CTC FRAME so the threshold is duration-
-    # invariant (see DEFAULT_LOGPROB_PER_FRAME_THRESHOLD comment).
-    n_snapped = 0
+    # Zip refined timestamps onto the original list. Trust CTC's output —
+    # no confidence gate, no snap. The model's prediction IS the answer.
     refined: list[dict[str, Any]] = []
     for orig, ref in zip(deepgram_words, aligned):
-        score = float(ref.get("score") or 0.0)
-        start_sec = float(ref.get("start") or 0.0)
-        end_sec = float(ref.get("end") or 0.0)
-        snapped = False
-
-        # Number of CTC frames spanning this word — used to normalize the
-        # summed logprob into a per-frame confidence. Floor at 1 to avoid
-        # divide-by-zero for degenerate spans.
-        n_frames = max(1, int(round((end_sec - start_sec) / CTC_FRAME_STRIDE_SEC)))
-        per_frame_score = score / n_frames
-
-        if per_frame_score < logprob_per_frame_threshold:
-            start_idx = int(round(start_sec * SAMPLE_RATE))
-            end_idx = int(round(end_sec * SAMPLE_RATE))
-            new_start_idx = _snap_to_zero_crossing(
-                samples, start_idx, SAMPLE_RATE, snap_window_ms,
-            )
-            new_end_idx = _snap_to_zero_crossing(
-                samples, end_idx, SAMPLE_RATE, snap_window_ms,
-            )
-            # Guard: end must remain after start. If snapping produced a
-            # zero-or-negative span (rare but possible in dense voicing),
-            # keep CTC's original boundaries for this word — the leakage
-            # mitigation isn't worth a degenerate clip range.
-            if new_end_idx > new_start_idx:
-                start_sec = new_start_idx / SAMPLE_RATE
-                end_sec = new_end_idx / SAMPLE_RATE
-                snapped = True
-                n_snapped += 1
-
         refined.append({
             **orig,
-            "start": start_sec,
-            "end": end_sec,
-            "_align_logprob": score,
-            "_align_snapped": snapped,
+            "start": float(ref.get("start") or 0.0),
+            "end": float(ref.get("end") or 0.0),
+            "_align_logprob": float(ref.get("score") or 0.0),
         })
 
     # Free GPU memory between calls — wav2vec2 emissions tensor for a 60s
@@ -312,10 +207,4 @@ def forced_align(
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-    print(
-        f"[align] refined {len(refined)} words "
-        f"({n_snapped} snapped to zero-crossing, "
-        f"per-frame threshold={logprob_per_frame_threshold})",
-        flush=True,
-    )
     return refined

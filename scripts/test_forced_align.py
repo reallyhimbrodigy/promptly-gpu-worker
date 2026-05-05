@@ -2,10 +2,10 @@
 """Wiring smoke test for align_audio.py.
 
 Runs WITHOUT requiring a GPU or the wav2vec2 model — exercises the
-module's import surface, the zero-crossing snap helper, and the input
-validation. Real alignment is exercised only inside the Modal container
-on every production render; this catches local regressions in the
-helper code that are easy to introduce and hard to detect otherwise.
+module's import surface, the wav-format validation, and the empty-input
+shortcut. Real alignment is exercised end-to-end on every production
+render; this catches local regressions in the helper code that are easy
+to introduce and hard to detect otherwise.
 
 Usage: python3 scripts/test_forced_align.py
 Exit 0 on success, non-zero on failure.
@@ -35,47 +35,6 @@ def _write_synthetic_wav(path: str, duration_sec: float = 1.0, freq_hz: float = 
         wf.setsampwidth(2)
         wf.setframerate(sr)
         wf.writeframes(samples.tobytes())
-
-
-def test_zero_crossing_snap_finds_nearest() -> None:
-    """A sine wave has a zero-crossing every half-period; snap should locate one."""
-    from align_audio import _snap_to_zero_crossing, SAMPLE_RATE
-
-    # 200Hz sine wave: period 80 samples at 16kHz, half-period 40 samples.
-    n = SAMPLE_RATE  # 1 second
-    t = np.linspace(0, 1.0, n, endpoint=False)
-    samples = np.sin(2 * np.pi * 200.0 * t).astype(np.float32)
-
-    # Target deliberately off a zero-crossing — should snap to within
-    # one half-period (40 samples).
-    target = 5000  # 0.3125s — sin(2π·200·0.3125) ≈ sin(125π) = 0, but we
-    # add a small offset to make sure we're not already on a zc.
-    target = 5005
-    snapped = _snap_to_zero_crossing(samples, target, SAMPLE_RATE, search_window_ms=50.0)
-
-    # Snapped index should differ from target (we're not on a zc) and
-    # should be within ±50ms = 800 samples.
-    assert abs(snapped - target) <= 800, (
-        f"snap moved {snapped - target} samples — outside 50ms window"
-    )
-    # And it should be near a true zero-crossing — i.e., the sample value
-    # at `snapped` is small in absolute terms.
-    assert abs(samples[snapped]) < abs(samples[target]) or abs(samples[snapped]) < 0.1, (
-        f"snap landed at sample value {samples[snapped]:.3f}, "
-        f"vs target value {samples[target]:.3f} — should be closer to zero"
-    )
-
-
-def test_zero_crossing_snap_no_movement_on_silence() -> None:
-    """Pure silence has no sign-change; snap should return the original index."""
-    from align_audio import _snap_to_zero_crossing, SAMPLE_RATE
-
-    samples = np.zeros(SAMPLE_RATE, dtype=np.float32)
-    target = 8000
-    snapped = _snap_to_zero_crossing(samples, target, SAMPLE_RATE, search_window_ms=50.0)
-    assert snapped == target, (
-        f"snap on pure silence should be a no-op; moved {target} → {snapped}"
-    )
 
 
 def test_wav_reader_validates_format() -> None:
@@ -135,8 +94,6 @@ def test_empty_word_list_returns_empty() -> None:
 
 def main() -> int:
     tests = [
-        ("zero_crossing snap finds nearest", test_zero_crossing_snap_finds_nearest),
-        ("zero_crossing snap no-op on silence", test_zero_crossing_snap_no_movement_on_silence),
         ("wav reader validates 16kHz mono", test_wav_reader_validates_format),
         ("empty word list returns empty", test_empty_word_list_returns_empty),
     ]
