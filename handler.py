@@ -2723,7 +2723,11 @@ CARDINAL RULE — TEXT MUST NOT DUPLICATE DIALOGUE. The text inside a torn_paper
 
 WHEN TO USE A CARD AT ALL — torn_paper, quote_card, and sticky_note are CHAPTER PUNCTUATION, not punchline markers. They mark turns in the story (act break, before/after, the reveal moment, the inciting incident). They don't underline dialogue beats — that's what zoom + caption keyword highlight + SFX are for.
 
-PER-VIDEO CAP — at most ONE torn_paper across the ENTIRE video, counting every place TornPaper can appear (text_overlays AND emphasis_moments[*].motion_graphic of type "TornPaper"). Two torn-papers in a 60s video is wallpaper, not punctuation. Same cap for quote_card. sticky_note: one cluster (1-3 notes) per video. Total non-caption_match overlays per 60s: 0-2. Power comes from rarity.
+EARN EVERY PLACEMENT. There are no count caps on these components. But each instance must mark a structurally distinct beat — not a vague vibe, not a punchline that already has zoom + caption highlight + SFX, not a moment that "felt important." Before emitting a second card of any variant, you must answer:
+  • What story turn does this card mark, that's DIFFERENT from the previous card's beat?
+  • Is the text on this card content the captions don't already convey?
+  • If a viewer paused the video at this moment with no audio, would the card make sense?
+If you can't answer all three confidently, skip the card. A clean edit with one well-placed card beats a busy edit with three.
 
 === EMPHASIS MOMENTS — VISUAL HITS ===
 
@@ -2863,11 +2867,21 @@ Types, descriptions, use cases, and REQUIRED props (in the schema below, keys en
                             NOT for: a single isolated message (use IMessageBubble), missed calls (use Notification), email/social-app alerts (use Notification with the matching app).
                             Props: {{"messages": [{{"sender": "me"|"them", "text": str, "typingMs"?: int, "holdMs"?: int}}, ...], "header"?: {{"name": str, "subtitle"?: str}}}}
 
- 3. "Notification"       — iOS/Android notification stack. 1–3 banners drop down FROM THE TOP with platform styling. 7 built-in app icons.
-                            Best for: Phone calls / missed calls (app="imessage", title="Missed Call"), payment receipts (Venmo / Stripe / Apple Pay / bank), email alerts, IG/social pings — anything that arrives as a system banner.
-                            NOT for: an actual back-and-forth text conversation (use ChatThread), a single text message bubble shown verbatim (use IMessageBubble).
-                            Renders at the TOP regardless of `anchor` — the drop-down animation is the entire visual metaphor; placing it elsewhere is rendered the same as placing it at top. Use anchor="upper_third_safe" for clarity.
-                            CAP: across the ENTIRE video, Notification may appear AT MOST ONCE. The banner is meant to mark a SPECIFIC, NAMED beat (a missed call moment, a payment receipt moment, a specific incoming message); two Notifications in a 60s video reads as random and breaks the editorial weight. If you've already used one, do not emit another.
+ 3. "Notification"       — iOS/Android notification stack. 1–3 banners drop down FROM THE TOP with platform styling. 7 built-in app icons. Renders at the TOP regardless of `anchor` (the drop-down animation IS the metaphor); use anchor="upper_third_safe" so caption_position_changes flip captions to bottom while it's on screen.
+
+                            WHEN TO USE — only when the dialogue NAMES a specific notification event. The banner content must MATCH what the speaker just said:
+                              • "She called me 12 times" / "she kept calling" → Missed Call banner with body="Missed Call (12)"
+                              • "I got the Venmo" / "she paid me $200" → Venmo banner with body="$200 from {{name}}"
+                              • "I texted him" / "the message said" → iMessage banner with body=the actual message paraphrase
+                              • "I got the email" / "the email said" → Email banner with body=the subject line
+                            The notification body should be the SAME content the speaker is referencing in dialogue. If you can't match the banner content to what's being said, the moment isn't a Notification moment — pick a different MG or skip it.
+
+                            WHEN NOT TO USE:
+                              • The dialogue is generally about phones/calls but doesn't reference a SPECIFIC notification event ("I was on my phone all day" — too vague, no specific banner).
+                              • A back-and-forth text conversation (use ChatThread).
+                              • A single text message shown verbatim with the bubble UI (use IMessageBubble).
+                              • The same beat already used a Notification — repeating the banner reads as random and tells the viewer the editor ran out of ideas. The beat earns ONE banner; subsequent moments need different visual punctuation (zoom + caption keyword highlight + SFX).
+
                             Props: {{"notifications": [{{"app": "apple-pay"|"venmo"|"stripe"|"imessage"|"instagram"|"email"|"bank", "appName": str, "title": str, "body": str, "timestamp"?: str}}, ...], "platform"?: "ios"|"android"}}
 
  4. "ProgressBar"        — Animated progress bar with count-up. Optional milestones.
@@ -2911,7 +2925,6 @@ Types, descriptions, use cases, and REQUIRED props (in the schema below, keys en
 14. "TornPaper"          — Top-of-frame chapter card: torn-paper banner drops from above with two text strips. Renders at the TOP regardless of `anchor`.
                             Best for: chapter-break punctuation — the act break, the inciting incident, the before/after pivot, the moment-of-truth label. NOT a punchline marker, NOT a dialogue restatement.
                             Text content: a chapter label or framing hook ("THE CONFESSION", "THE TURN", "WHAT SHE SAID NEXT"). NEVER a verbatim quote of the dialogue at that moment — captions already show that.
-                            CAP: across the ENTIRE video, TornPaper may appear AT MOST ONCE — counting both `text_overlays[i].variant=="torn_paper"` AND any `motion_graphics[i].type=="TornPaper"` AND any `emphasis_moments[i].motion_graphic.type=="TornPaper"`. If you've already used one, do not emit another. The card's power is its rarity; using it twice burns the visual currency.
                             Props: {{"topText": str (<=5 words), "bottomText": str (<=5 words)}}
 
 (All MG usage rules — when, where, how, anti-patterns — are covered in the "MOTION GRAPHICS — HOW TO USE THEM" section above this catalog. Re-read it if you're picking an MG; the catalog only documents what each type IS, not when to reach for it.)
