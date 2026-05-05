@@ -12,6 +12,7 @@ import type { PaperIIProps } from "./types";
 import { CAPTION_FONTS } from "../shared/fonts";
 import { msToFrames } from "../shared/timing";
 import { getCaptionPositionStyle } from "../shared/captionPosition";
+import { leadInRange } from "../shared/leadIn";
 
 // ---------------------------------------------------------------------------
 // PaperIIWord
@@ -48,10 +49,11 @@ const PaperIIWord: React.FC<{
   const currentTimeMs = (frame / fps) * 1000 + pageStartMs;
   const isPast = currentTimeMs >= token.toMs;
 
-  // Smooth color transition over colorTransitionMs
+  // Smooth color transition over colorTransitionMs, anchored so the word
+  // hits its active color AT the spoken moment (not colorTransitionMs after).
   const transitionProgress = interpolate(
     currentTimeMs,
-    [token.fromMs, token.fromMs + colorTransitionMs],
+    leadInRange(token.fromMs, colorTransitionMs),
     [0, 1],
     { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
   );

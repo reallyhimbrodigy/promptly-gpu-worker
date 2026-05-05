@@ -12,6 +12,7 @@ import type { PrimeProps } from "./types";
 import { CAPTION_FONTS } from "../shared/fonts";
 import { msToFrames } from "../shared/timing";
 import { CAPTION_PADDING } from "../shared/captionPosition";
+import { leadInElapsed } from "../shared/leadIn";
 
 // ---------------------------------------------------------------------------
 // PrimeWord — single word with staggered entrance
@@ -55,13 +56,15 @@ const PrimeWord: React.FC<{
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
-  // Spring entrance per word
+  // Spring entrance per word — lead-in matches the spring's 0.25s duration
+  // so the slide-up settles AT the spoken moment, not 0.25s after.
   const activateFrame = Math.round(((token.fromMs - pageStartMs) / 1000) * fps);
+  const springFrames = Math.round(fps * 0.25);
   const wordSpring = spring({
-    frame: frame - activateFrame,
+    frame: leadInElapsed(frame, activateFrame, springFrames),
     fps,
     config: { damping: 200 },
-    durationInFrames: Math.round(fps * 0.25),
+    durationInFrames: springFrames,
   });
 
   const slideY = interpolate(wordSpring, [0, 1], [20, 0]);

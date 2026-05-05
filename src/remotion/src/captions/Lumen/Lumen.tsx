@@ -14,6 +14,13 @@ import { CAPTION_FONTS } from "../shared/fonts";
 import { getCaptionPositionStyle } from "../shared/captionPosition";
 import { buildKeywordSet, isKeyword } from "../shared/keywords";
 import { textOutline } from "../shared/textOutline";
+import { leadInElapsed } from "../shared/leadIn";
+
+// Lead-in matches the spring's settle (damping:200 → ~8-10 frames) so the
+// word is at full opacity + scale exactly when audibly delivered. Sweep
+// also runs over the lead-in window so the lens-flare crosses the word
+// AS it's spoken, not after.
+const LUMEN_LEAD_IN = 10;
 
 // 8-direction text-shadow stand-in for `WebkitTextStroke: 0.75px`. Stroke
 // rasterizes as a single geometric outline that breaks at letter apexes
@@ -46,7 +53,7 @@ const LumenWord: React.FC<{
   const { fps } = useVideoConfig();
 
   const activateFrame = msToFrames(token.fromMs - pageStartMs, fps);
-  const elapsed = frame - activateFrame;
+  const elapsed = leadInElapsed(frame, activateFrame, LUMEN_LEAD_IN);
   const hasAppeared = elapsed >= 0;
 
   const entranceSpring = hasAppeared

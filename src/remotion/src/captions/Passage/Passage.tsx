@@ -12,6 +12,7 @@ import { msToFrames } from "../shared/timing";
 import { CAPTION_FONTS } from "../shared/fonts";
 import { getCaptionPositionStyle } from "../shared/captionPosition";
 import { buildKeywordSet, isKeyword } from "../shared/keywords";
+import { leadInRange } from "../shared/leadIn";
 
 /* ─── Word ─── */
 
@@ -49,15 +50,17 @@ const PassageWord: React.FC<{
 
   const opacity = interpolate(
     pageLocalMs,
-    [tokenLocalMs, tokenLocalMs + fadeDurationMs],
+    leadInRange(tokenLocalMs, fadeDurationMs),
     [0, 1],
     { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
   );
 
-  // Keyword tracking shift: starts tight (at reveal) and expands over trackingShiftDurationMs
+  // Keyword tracking shift: starts tight (just before reveal) and reaches
+  // the open setting AT the spoken moment. Same shift, anchored to end at
+  // the audible word instead of starting from it.
   const trackingProgress = interpolate(
     pageLocalMs,
-    [tokenLocalMs, tokenLocalMs + trackingShiftDurationMs],
+    leadInRange(tokenLocalMs, trackingShiftDurationMs),
     [0, 1],
     { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
   );

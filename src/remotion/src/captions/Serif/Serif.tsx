@@ -15,6 +15,12 @@ import { CAPTION_FONTS } from "../shared/fonts";
 import { getCaptionPositionStyle } from "../shared/captionPosition";
 import { buildKeywordSet, isKeyword } from "../shared/keywords";
 import { textOutline } from "../shared/textOutline";
+import { leadInElapsed } from "../shared/leadIn";
+
+// Lead-in for the editorial spring (damping:28, mass:1.2, stiffness:100).
+// Settles in ~12 frames; lead-in matches that so the word is at rest AT
+// the spoken moment, not mid-spring.
+const SERIF_LEAD_IN = 12;
 
 // 8-direction text-shadow stand-in for `WebkitTextStroke: 0.75px`. Stroke
 // rasterizes as a single geometric outline that breaks at letter apexes
@@ -61,7 +67,7 @@ const SerifWord: React.FC<{
   const { fps } = useVideoConfig();
 
   const activateFrame = msToFrames(token.fromMs - pageStartMs, fps);
-  const elapsed = frame - activateFrame;
+  const elapsed = leadInElapsed(frame, activateFrame, SERIF_LEAD_IN);
   const hasAppeared = elapsed >= 0;
 
   const entranceSpring = hasAppeared

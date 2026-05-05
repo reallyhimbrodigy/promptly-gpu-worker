@@ -12,6 +12,7 @@ import { CAPTION_FONTS } from "../shared/fonts";
 import { msToFrames } from "../shared/timing";
 import { CAPTION_PADDING } from "../shared/captionPosition";
 import { textOutline } from "../shared/textOutline";
+import { leadInRange } from "../shared/leadIn";
 
 // 8-direction text-shadow stand-in for `WebkitTextStroke: 0.75px`. Stroke
 // rasterizes as a single geometric outline that breaks at letter apexes
@@ -62,30 +63,26 @@ const LetterpressWord: React.FC<{
   // When this word activates relative to the page start
   const tokenLocalMs = token.fromMs - pageStartMs;
 
-  // ── Blur: focus pull from blurry to sharp ──────────────────────────────
-  const blur = interpolate(
-    pageLocalMs,
-    [tokenLocalMs, tokenLocalMs + blurDurationMs],
-    [blurAmount, 0],
-    { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
-  );
+  // ── Blur / opacity / scale anchored to END at the spoken moment ───────
+  // The focus-pull, fade-in, and entry-scale all build up TO tokenLocalMs
+  // so the word is sharp + fully visible the instant it's audibly delivered.
+  const range = leadInRange(tokenLocalMs, blurDurationMs);
 
-  // ── Opacity: invisible before activation, fades in with blur ──────────
-  const opacity = interpolate(
-    pageLocalMs,
-    [tokenLocalMs, tokenLocalMs + blurDurationMs],
-    [0, 1],
-    { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
-  );
+  const blur = interpolate(pageLocalMs, range, [blurAmount, 0], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
 
-  // ── Scale: subtle grow on entry ───────────────────────────────────────
+  const opacity = interpolate(pageLocalMs, range, [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+
   const scale = enableScale
-    ? interpolate(
-        pageLocalMs,
-        [tokenLocalMs, tokenLocalMs + blurDurationMs],
-        [scaleFrom, 1.0],
-        { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
-      )
+    ? interpolate(pageLocalMs, range, [scaleFrom, 1.0], {
+        extrapolateLeft: "clamp",
+        extrapolateRight: "clamp",
+      })
     : 1.0;
 
   const displayText = lowercase ? token.text.toLowerCase() : token.text;
