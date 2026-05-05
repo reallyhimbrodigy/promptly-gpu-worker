@@ -4353,28 +4353,43 @@ Indices below are the NEW kept-only space [0..{_kept_count - 1}]. Every word_ind
                     )
 
         edit_plan["remove_words"] = normalized_remove_words
-        # Adapt tightening threshold to speech rate AND pacing.
-        # Lower gap = more aggressive silence removal = tighter jump cuts.
-        # Captions app aggressively removes ALL dead air — we match that.
+        # Clip-split silence threshold. The splitter starts a new clip
+        # whenever the gap between adjacent kept words exceeds this — so
+        # the value has to be ABOVE natural inter-word breath but BELOW
+        # real phrase / sentence pauses.
+        #
+        # Natural fluent speech has ~50-150 ms inter-word gaps (humans
+        # breathe between words). Phrase breaks are ~300-500 ms. Sentence
+        # breaks are 500 ms+. Forced alignment via CTC reveals these gaps
+        # accurately — Deepgram used to round word.end outward, hiding
+        # them, which is why the previous 60-130 ms threshold worked back
+        # then but now over-splits every fluent sentence into micro-clips.
+        #
+        # Calibrated to land between natural breath (~150 ms ceiling) and
+        # phrase breaks (~300 ms floor): 300/400/500 ms by pacing.
         _pacing = str(edit_plan.get("pacing") or "fast").lower()
         if _pacing == "fast":
-            _speech_gap = 0.06  # ultra-tight — gaps become noticeable at 0.75x slow-mo
+            _speech_gap = 0.30
         elif _pacing == "medium":
-            _speech_gap = 0.10
+            _speech_gap = 0.40
         else:
-            _speech_gap = 0.13  # slow pacing — more breathing room
+            _speech_gap = 0.50
         if len(_dg_words) >= 5:
             _first_t = float(_dg_words[0].get("start", 0))
             _last_t = float(_dg_words[-1].get("end", 0))
             _speech_dur = _last_t - _first_t
             if _speech_dur > 0:
                 _wpm = len(_dg_words) / (_speech_dur / 60.0)
+                # Very fast talkers compress inter-word gaps slightly —
+                # widen the threshold a little so we don't catch phrasing.
+                # Slow talkers genuinely pause more between words; tighten
+                # so real phrase breaks still register as splits.
                 if _wpm > 180:
-                    _speech_gap += 0.05  # very fast talker — widen slightly to preserve phrasing
+                    _speech_gap += 0.10
                 elif _wpm > 150:
-                    _speech_gap += 0.03  # fast talker
+                    _speech_gap += 0.05
                 elif _wpm < 100:
-                    _speech_gap = max(0.08, _speech_gap - 0.03)  # slow talker — even tighter
+                    _speech_gap = max(0.25, _speech_gap - 0.05)
                 print(f"[tighten] Speech rate: {_wpm:.0f} wpm, pacing={_pacing} → gap threshold: {_speech_gap*1000:.0f}ms", flush=True)
         print(
             f"[generate-edit] Building clips: {len(_dg_words)} words, "
