@@ -10907,7 +10907,21 @@ def handler(job):
         # refinement before Gemini would block the critical path for no
         # quality benefit).
         _dg_words_pre_align = transcript.get("words") or []
-        if _dg_words_pre_align:
+        # Skip re-alignment when timestamps already carry _align_logprob from
+        # a prior render (re-edit / render_only paths). Alignment is
+        # idempotent in the values it produces, but ~1-2s warm + ~5-10s cold
+        # is wasted compute on every re-edit if we don't gate.
+        _already_aligned = bool(_dg_words_pre_align) and all(
+            isinstance(w, dict) and w.get("_align_logprob") is not None
+            for w in _dg_words_pre_align
+        )
+        if _already_aligned:
+            print(
+                f"[align] {len(_dg_words_pre_align)} words already aligned "
+                f"(re-edit path) — skipping",
+                flush=True,
+            )
+        if _dg_words_pre_align and not _already_aligned:
             _align_t0 = time.time()
             _wav_16k_path = os.path.join(work_dir, "source_audio_16k.wav")
             _ar = subprocess.run(

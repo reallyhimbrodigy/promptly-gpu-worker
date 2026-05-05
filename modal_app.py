@@ -675,6 +675,17 @@ def align_audio_remote(audio_bytes: bytes, deepgram_words: list, language: str =
 
     if "/" not in sys.path:
         sys.path.insert(0, "/")
+
+    # Same Modal-NVIDIA-driver-mount fixup as rife_normalize_remote: the
+    # SONAME stubs at libcuda.so / libcuda.so.1 hide the real driver libs
+    # unless we replace them with symlinks, AND /usr/local/cuda*/compat
+    # ships forward-compat libs that ABI-mismatch the real 580 driver and
+    # must be excluded from LD_LIBRARY_PATH. Without this, torch.cuda
+    # availability returns False and model.to('cuda') raises "Found no
+    # NVIDIA driver". Idempotent — repeat-calls are cheap.
+    from cuda_driver_setup import setup_cuda_driver_mount
+    setup_cuda_driver_mount()
+
     from align_audio import forced_align
 
     if not deepgram_words:
