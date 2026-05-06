@@ -7767,14 +7767,15 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15, v
       1. Apply Gemini's remove_words (word indices + time ranges)
       2. Build clips from kept words, splitting on silence > max_silence_gap
       3. Drop only degenerate (zero-or-inverted) spans — no length floor.
-         Word boundaries come from CTC forced alignment (waveform-accurate),
-         so a 50ms `she` is real fast speech, not a bug. The renderer
-         trusts whatever clip lengths the model + Gemini produced.
+         The renderer trusts whatever clip lengths the model + Gemini
+         produced; sub-frame and degenerate spans are filtered, but a
+         50ms clip is real fast speech, not a bug.
       4. Verify non-overlap invariant
 
-    Cut times are sample-precise (refined by CTC forced alignment in the
-    orchestrator). The audio cut path uses round(t * sample_rate) for
-    indexing, so the rendered splice lands at the exact sample.
+    Cut times here are Deepgram seeds — refined later in the orchestrator
+    by refine_clip_cuts() (RMS-min + zero-crossing + fricative bias). The
+    audio cut path uses round(t * sample_rate) for indexing, so the
+    rendered splice lands at the exact sample.
 
     video_duration (when > 0) clamps every word's end timestamp so that
     no clip ever requests source frames past the actual end of the video.
@@ -7938,8 +7939,10 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15, v
             )
 
     # ── Build final clip dicts ────────────────────────────────────────────
-    # Sample-precise word boundaries (refined by CTC forced alignment in the
-    # orchestrator). The audio cut path uses round(time * sample_rate) for
+    # Cut times here are Deepgram seeds. The orchestrator runs
+    # refine_clip_cuts() on these (RMS-min + zero-crossing + fricative
+    # bias) before the render so video and audio share the refined cut
+    # times. The audio cut path uses round(time * sample_rate) for
     # indexing, so an unrounded float here produces a sample-precise splice.
     # No length floor — the renderer trusts whatever clip lengths the model
     # + Gemini produced. Only guard: skip degenerate (zero-or-inverted)
