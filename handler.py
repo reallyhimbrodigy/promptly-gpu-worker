@@ -4353,43 +4353,31 @@ Indices below are the NEW kept-only space [0..{_kept_count - 1}]. Every word_ind
                     )
 
         edit_plan["remove_words"] = normalized_remove_words
-        # Clip-split silence threshold. The splitter starts a new clip
-        # whenever the gap between adjacent kept words exceeds this — so
-        # the value has to be ABOVE natural inter-word breath but BELOW
-        # real phrase / sentence pauses.
-        #
-        # Natural fluent speech has ~50-150 ms inter-word gaps (humans
-        # breathe between words). Phrase breaks are ~300-500 ms. Sentence
-        # breaks are 500 ms+. Forced alignment via CTC reveals these gaps
-        # accurately — Deepgram used to round word.end outward, hiding
-        # them, which is why the previous 60-130 ms threshold worked back
-        # then but now over-splits every fluent sentence into micro-clips.
-        #
-        # Calibrated to land between natural breath (~150 ms ceiling) and
-        # phrase breaks (~300 ms floor): 300/400/500 ms by pacing.
+        # Adapt tightening threshold to speech rate AND pacing.
+        # Lower gap = more aggressive silence removal = tighter jump cuts.
+        # Captions app aggressively removes ALL dead air — we match that.
+        # Operates on Deepgram word.end values (outward-rounded, so natural
+        # inter-word gaps register as ~0-50ms, leaving comfortable headroom
+        # for the threshold to detect real phrase breaks at 60-150ms).
         _pacing = str(edit_plan.get("pacing") or "fast").lower()
         if _pacing == "fast":
-            _speech_gap = 0.30
+            _speech_gap = 0.06
         elif _pacing == "medium":
-            _speech_gap = 0.40
+            _speech_gap = 0.10
         else:
-            _speech_gap = 0.50
+            _speech_gap = 0.13
         if len(_dg_words) >= 5:
             _first_t = float(_dg_words[0].get("start", 0))
             _last_t = float(_dg_words[-1].get("end", 0))
             _speech_dur = _last_t - _first_t
             if _speech_dur > 0:
                 _wpm = len(_dg_words) / (_speech_dur / 60.0)
-                # Very fast talkers compress inter-word gaps slightly —
-                # widen the threshold a little so we don't catch phrasing.
-                # Slow talkers genuinely pause more between words; tighten
-                # so real phrase breaks still register as splits.
                 if _wpm > 180:
-                    _speech_gap += 0.10
-                elif _wpm > 150:
                     _speech_gap += 0.05
+                elif _wpm > 150:
+                    _speech_gap += 0.03
                 elif _wpm < 100:
-                    _speech_gap = max(0.25, _speech_gap - 0.05)
+                    _speech_gap = max(0.08, _speech_gap - 0.03)
                 print(f"[tighten] Speech rate: {_wpm:.0f} wpm, pacing={_pacing} → gap threshold: {_speech_gap*1000:.0f}ms", flush=True)
         print(
             f"[generate-edit] Building clips: {len(_dg_words)} words, "
@@ -7280,7 +7268,13 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
     # transition (the standard L-cut pattern in pro NLEs). Combined
     # with the clip's main render audio, every word in clip A's source
     # range and clip B's source range is heard exactly once.
+    # all_clips: ordered list of audio segments to concatenate.
+    # is_splice_after[i]: True if the boundary between all_clips[i] and
+    # all_clips[i+1] is a SPLICE (jump in source time = needs crossfade).
+    # False if it's a CONTIGUOUS source slice (same source range, no
+    # crossfade — fading would attenuate continuous audio for no gain).
     all_clips: List[np.ndarray] = []
+    is_splice_after: List[bool] = []
     _n_transitions = 0
     for ci, cut_audio in enumerate(cut_audios):
         all_clips.append(cut_audio)
@@ -7288,19 +7282,25 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
         if trans_dur_after is not None and ci < len(trans_dur_after):
             _t_after = float(trans_dur_after[ci] or 0.0)
         if _t_after <= 0 or ci + 1 >= len(cuts):
+            # No transition. Boundary cut_audio[ci] → cut_audio[ci+1] is a
+            # SPLICE (different source ranges with removed content between).
+            if ci + 1 < len(cut_audios):
+                is_splice_after.append(True)
             continue
         cut_a = cuts[ci]
         cut_b = cuts[ci + 1]
         speed_a = float(cut_a.get("speed") or 1.0)
         speed_b = float(cut_b.get("speed") or 1.0)
-        # Half-handle: each side fills half the trans slot. Total handle
-        # audio = trans_dur*sample_rate samples = exactly the visual
-        # transition's duration in samples. trim_head/trim_tail in the
-        # caller are also trans_dur/2, so source[end_A - trim_tail,
-        # end_A] is the EXACT segment that's been trimmed from clip A's
-        # render audio — concatenating it here puts that source content
-        # back in the timeline immediately after clip A's render audio,
-        # at the natural rate, no cross-fade, no time compression.
+        # Half-handle: each side fills half the trans slot. trim_head /
+        # trim_tail in the caller are also trans_dur/2, so source[end_A -
+        # trim_tail, end_A] is the EXACT segment that's been trimmed from
+        # clip A's render audio — concatenating it here puts that source
+        # content back in the timeline immediately after clip A's render
+        # audio. Boundary cut_audio[ci] → a_tail_half is CONTIGUOUS source
+        # (same render_src_end → c_a_end - 0 step), so no crossfade.
+        # Boundary a_tail_half → b_head_half is the SPLICE (jumps from
+        # clip A's source_end to clip B's source_start). Boundary
+        # b_head_half → cut_audio[ci+1] is CONTIGUOUS again.
         half = _t_after / 2.0
         n_half = max(1, int(round(half * sample_rate)))
         c_a_end = float(cut_a["source_end"])
@@ -7311,8 +7311,16 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
         b_head_half = _resample_range(
             c_b_start, c_b_start + half * speed_b, n_half,
         )
+        # cut_audio[ci] → a_tail_half: contiguous (no fade)
+        is_splice_after.append(False)
         all_clips.append(a_tail_half)
+        # a_tail_half → b_head_half: splice (fade)
+        is_splice_after.append(True)
         all_clips.append(b_head_half)
+        # b_head_half → cut_audio[ci+1]: contiguous (no fade); this entry
+        # marks the boundary that the NEXT iteration's cut_audio creates.
+        if ci + 1 < len(cut_audios):
+            is_splice_after.append(False)
         _n_transitions += 1
 
     if not all_clips:
@@ -7322,6 +7330,52 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
             wf.setframerate(sample_rate)
             wf.writeframes(b"\x00" * sample_rate * 2)
         return output_wav
+
+    # ── Equal-power crossfade at SPLICE boundaries only ───────────────────
+    # The professional splice technique. Pro Tools' "Smart Tool", Premiere's
+    # "Default Audio Transition", Audition's auto-crossfade, Descript's
+    # "automatic seamless edits" — every digital dialogue splice has one.
+    #
+    # Last 5ms of segment A (just before splice) gets cos²(πt/2) (1→0);
+    # first 5ms of segment B (just after splice) gets sin²(πt/2) (0→1).
+    # Eliminates sample-edge transients AND spectral discontinuities
+    # (formants, breath noise, room tone all transition smoothly). 10ms
+    # total window is below human perception for amplitude modulation in
+    # speech context — verified industry-standard.
+    #
+    # CRITICAL: only apply at SPLICE boundaries (different source ranges).
+    # Contiguous boundaries (cut_audio → a_tail_half → b_head_half →
+    # cut_audio chain inside a transition slot) are continuous source —
+    # crossfading those would attenuate continuous audio for no gain.
+    #
+    # With DSP-refined cut points (refine_clip_cuts), most splices already
+    # land in silence so the crossfade is essentially a no-op. Where it
+    # matters: continuous speech across a removal with no clean silence
+    # to cut into. The crossfade makes those splices inaudible too.
+    _fade_samples = int(round(0.005 * sample_rate))
+    if _fade_samples > 0 and len(all_clips) >= 2:
+        _fade_out = (np.cos(
+            np.linspace(0.0, np.pi / 2.0, _fade_samples, dtype=np.float32)
+        ) ** 2)
+        _fade_in = (np.sin(
+            np.linspace(0.0, np.pi / 2.0, _fade_samples, dtype=np.float32)
+        ) ** 2)
+        _n_xfade = 0
+        for _i, _is_splice in enumerate(is_splice_after):
+            if not _is_splice:
+                continue
+            _seg_a = all_clips[_i]
+            _seg_b = all_clips[_i + 1]
+            if len(_seg_a) >= _fade_samples:
+                _seg_a[-_fade_samples:] *= _fade_out
+            if len(_seg_b) >= _fade_samples:
+                _seg_b[:_fade_samples] *= _fade_in
+            _n_xfade += 1
+        if _n_xfade:
+            print(
+                f"[audio] crossfaded {_n_xfade} splice boundaries (5ms each side)",
+                flush=True,
+            )
 
     full_audio = np.concatenate(all_clips)
     full_audio = np.clip(full_audio, -32768, 32767).astype(np.int16)
@@ -7470,6 +7524,234 @@ def get_output_clip_ranges(cuts, effective_durations, transition_duration=None, 
         if trans_dur_after is not None and i < len(trans_dur_after):
             cursor -= float(trans_dur_after[i] or 0.0)
     return ranges
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# DSP cut-point refinement
+# ──────────────────────────────────────────────────────────────────────────────
+# Deepgram word.start/word.end are model-predicted seeds — outward-rounded by
+# ~30-150ms with no commitment to landing on actual silence. Cutting at those
+# raw seeds either truncates words (too tight) or leaks adjacent removed-word
+# audio (too loose). Forced alignment doesn't help — CTC marks the voiced
+# phoneme core, also wrong for cut points.
+#
+# Pro dialogue editors do the same thing on every cut: zoom into the waveform
+# near the seed, find the lowest-amplitude moment, snap to a zero-crossing.
+# That's the actual professional cut technique (Purcell, *Dialogue Editing for
+# Motion Pictures*; Sound on Sound *Using Fades & Crossfades*; ProTools'
+# "Smart Tool" defaults; Descript's "automatic seamless edits"). It's what
+# every Pro Tools / Audition / Premiere splice does, mechanized into ~50 lines
+# of numpy.
+#
+# Bias: when a kept word ends in a fricative (/s/, /f/, /ʃ/, /θ/) or the next
+# starts with one, the cut biases ~25ms INTO the fricative — its broadband
+# noise masks the splice (also documented in Sound on Sound, "If a splice
+# sounds unnatural, try cutting in the middle of a word, on an S, F, or TH").
+
+# Word suffixes / prefixes that indicate fricative phonemes — used to bias
+# cut placement INTO the fricative, where its broadband noise masks the
+# splice. Conservative list: only matches that are unambiguously fricative.
+_FRICATIVE_SUFFIXES = ("s", "ss", "ce", "ze", "sh", "ch", "th", "f", "ff", "ph")
+_FRICATIVE_PREFIXES = ("s", "sh", "ch", "th", "f", "ph")
+
+
+def _word_ends_in_fricative(word_text: str) -> bool:
+    if not word_text:
+        return False
+    w = word_text.strip().lower().rstrip("?.!,:;\"'")
+    return any(w.endswith(suf) for suf in _FRICATIVE_SUFFIXES)
+
+
+def _word_starts_with_fricative(word_text: str) -> bool:
+    if not word_text:
+        return False
+    w = word_text.strip().lower().lstrip("\"'")
+    return any(w.startswith(pre) for pre in _FRICATIVE_PREFIXES)
+
+
+def _refine_cut_point(
+    samples,  # np.ndarray, mono float32 in [-1, 1]
+    sample_rate: int,
+    seed_sec: float,
+    search_window_ms: float = 60.0,
+    rms_window_ms: float = 5.0,
+    fricative_bias_ms: float = 0.0,
+):
+    """Refine a single cut-point seed to the local RMS minimum + zero-crossing.
+
+    Args:
+        samples: source audio as float32 numpy array in [-1, 1].
+        sample_rate: samples per second (typically 16000).
+        seed_sec: rough cut-point time from Deepgram's word.start/word.end.
+        search_window_ms: half-width of search window around the seed.
+        rms_window_ms: width of the RMS averaging window (smooths out noise).
+        fricative_bias_ms: shift the search center by this much (positive =
+            bias forward into the next sound). Used when a fricative phoneme
+            is adjacent to the cut.
+
+    Returns: refined cut-point in seconds (sample-precise).
+    """
+    import numpy as np
+
+    if len(samples) == 0:
+        return seed_sec
+    seed_idx = int(round((seed_sec + fricative_bias_ms / 1000.0) * sample_rate))
+    seed_idx = max(0, min(len(samples) - 1, seed_idx))
+
+    win_samples = int(round(search_window_ms * sample_rate / 1000.0))
+    rms_samples = max(1, int(round(rms_window_ms * sample_rate / 1000.0)))
+
+    lo = max(0, seed_idx - win_samples)
+    hi = min(len(samples), seed_idx + win_samples)
+    if hi - lo < rms_samples * 2:
+        return seed_sec
+
+    # Local RMS in a sliding window over the search range. We use the
+    # square of the signal averaged over rms_samples — proportional to RMS²
+    # which is fine for finding the minimum (monotonic transform).
+    seg = samples[lo:hi].astype(np.float32, copy=False)
+    sq = seg * seg
+    # Cumulative-sum trick for fast windowed mean.
+    csum = np.concatenate(([0.0], np.cumsum(sq, dtype=np.float64)))
+    win_energy = (csum[rms_samples:] - csum[:-rms_samples]) / rms_samples
+    # Centre of each window in the seg index space.
+    centre_offsets = np.arange(len(win_energy)) + rms_samples // 2
+
+    if len(win_energy) == 0:
+        return seed_sec
+    min_centre = centre_offsets[int(np.argmin(win_energy))]
+    refined_idx = lo + min_centre
+
+    # Snap to nearest zero-crossing within ±2ms of the RMS minimum. This
+    # eliminates sample-edge transients at the cut sample itself.
+    zc_window = max(1, int(round(0.002 * sample_rate)))  # ±2ms
+    zc_lo = max(1, refined_idx - zc_window)
+    zc_hi = min(len(samples), refined_idx + zc_window)
+    if zc_hi > zc_lo:
+        signs = np.sign(samples[zc_lo - 1: zc_hi])
+        signs[signs == 0] = 1
+        crossings_rel = np.where(np.diff(signs) != 0)[0]
+        if len(crossings_rel) > 0:
+            crossings_abs = zc_lo + crossings_rel
+            best = crossings_abs[np.argmin(np.abs(crossings_abs - refined_idx))]
+            refined_idx = int(best)
+
+    return refined_idx / sample_rate
+
+
+def refine_clip_cuts(
+    clips: list,
+    audio_wav_path: str,
+    transcript_words: list,
+    search_window_ms: float = 60.0,
+    fricative_bias_ms: float = 25.0,
+):
+    """Refine each clip's source_start / source_end to land in waveform silence.
+
+    Mutates clips in place. Cut points move from Deepgram's loose word
+    boundaries to the local RMS minimum (snapped to a zero-crossing) within
+    ±search_window_ms of the seed. When the kept word adjacent to the cut
+    ends/starts in a fricative, the cut biases by `fricative_bias_ms` to land
+    inside the fricative's noise — which masks the splice.
+
+    Returns the same clips list (mutated). Reports the typical refinement
+    delta in the log so we can sanity-check that the DSP is doing real work.
+    """
+    import numpy as np
+    import wave
+
+    if not clips:
+        return clips
+
+    with wave.open(audio_wav_path, "rb") as wf:
+        sr = wf.getframerate()
+        n_chan = wf.getnchannels()
+        n_frames = wf.getnframes()
+        raw = wf.readframes(n_frames)
+    samples = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+    if n_chan > 1:
+        samples = samples[::n_chan]
+
+    # Build a quick sorted list of (word_start, word_end, word_text) for
+    # fricative lookup at clip boundaries.
+    word_lookup = []
+    for w in transcript_words or []:
+        try:
+            word_lookup.append((
+                float(w.get("start") or 0.0),
+                float(w.get("end") or 0.0),
+                str(w.get("punctuated_word") or w.get("word") or ""),
+            ))
+        except Exception:
+            continue
+    word_lookup.sort(key=lambda x: x[0])
+
+    def _word_at_time(t_sec: float, prefer_end: bool):
+        """Find the word whose [start, end] contains t_sec, or the closest one."""
+        if not word_lookup:
+            return None
+        # Binary-ish search via numpy. For small word lists (~250) linear is fine.
+        best = None
+        best_dist = float("inf")
+        for ws, we, wtext in word_lookup:
+            if ws <= t_sec <= we:
+                return (ws, we, wtext)
+            d = min(abs(ws - t_sec), abs(we - t_sec))
+            if d < best_dist:
+                best_dist = d
+                best = (ws, we, wtext)
+        return best
+
+    deltas_ms = []
+    for clip in clips:
+        s_seed = float(clip["source_start"])
+        e_seed = float(clip["source_end"])
+
+        # source_start: bias forward into a fricative if first word starts
+        # with one (cuts INTO fricative noise = inaudible splice).
+        first_w = _word_at_time(s_seed, prefer_end=False)
+        start_bias = 0.0
+        if first_w and _word_starts_with_fricative(first_w[2]):
+            start_bias = fricative_bias_ms
+
+        # source_end: bias forward into a fricative if last word ends with
+        # one (cut lands inside the fricative tail — its noise masks the
+        # splice on this side too).
+        last_w = _word_at_time(e_seed, prefer_end=True)
+        end_bias = 0.0
+        if last_w and _word_ends_in_fricative(last_w[2]):
+            end_bias = fricative_bias_ms
+
+        s_refined = _refine_cut_point(
+            samples, sr, s_seed,
+            search_window_ms=search_window_ms,
+            fricative_bias_ms=start_bias,
+        )
+        e_refined = _refine_cut_point(
+            samples, sr, e_seed,
+            search_window_ms=search_window_ms,
+            fricative_bias_ms=end_bias,
+        )
+
+        # Guard: never produce a degenerate or inverted clip.
+        if e_refined <= s_refined:
+            continue
+
+        deltas_ms.append((s_refined - s_seed) * 1000.0)
+        deltas_ms.append((e_refined - e_seed) * 1000.0)
+        clip["source_start"] = s_refined
+        clip["source_end"] = e_refined
+
+    if deltas_ms:
+        import statistics as _stats
+        abs_deltas = [abs(d) for d in deltas_ms]
+        print(
+            f"[cut-refine] Refined {len(clips)} clips "
+            f"(boundary deltas: median={_stats.median(abs_deltas):.1f}ms, "
+            f"max={max(abs_deltas):.1f}ms)",
+            flush=True,
+        )
+    return clips
 
 
 def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15, video_duration=0.0):
@@ -10688,103 +10970,13 @@ def handler(job):
                 _refined_tx_cache["value"] = _t
                 return _t
 
-        # Lock for the alignment step — same pattern as _get_resolved_transcript:
-        # multiple callers (the recipe overlap path AND the post-Gemini render
-        # path) may both reach the alignment slot, but the work should run
-        # exactly once. The lock + idempotency check serializes them.
-        _align_lock = threading.Lock()
-
-        def _refine_transcript_with_alignment(_transcript: dict, _src_video: str, _work_dir: str) -> None:
-            """Refine transcript word boundaries via CTC forced alignment.
-
-            Mutates _transcript["words"] in place. No-op when:
-              - transcript has no words (silent video)
-              - all words already carry _align_logprob (re-edit path / second
-                call from the same render)
-
-            Raises on alignment failure — never silently degrades to Deepgram
-            timestamps (no-fallbacks invariant).
-            """
-            with _align_lock:
-                _words = _transcript.get("words") or []
-                if not _words:
-                    return
-                if all(isinstance(w, dict) and w.get("_align_logprob") is not None for w in _words):
-                    print(
-                        f"[align] {len(_words)} words already aligned — skipping",
-                        flush=True,
-                    )
-                    return
-                _t0 = time.time()
-                _wav_16k_path = os.path.join(_work_dir, "source_audio_16k.wav")
-                _ar = subprocess.run(
-                    ["ffmpeg", "-y", "-v", "error",
-                     "-i", _src_video, "-vn",
-                     "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
-                     _wav_16k_path],
-                    capture_output=True, text=True, timeout=120,
-                )
-                if _ar.returncode != 0 or not os.path.exists(_wav_16k_path):
-                    raise RuntimeError(
-                        f"Forced-align audio extraction failed: rc={_ar.returncode} "
-                        f"stderr={(_ar.stderr or '')[-500:]}"
-                    )
-                with open(_wav_16k_path, "rb") as _wf:
-                    _audio_bytes = _wf.read()
-                # Lazy import — modal_app imports handler at top level, can't
-                # import the other direction at module load.
-                from modal_app import align_audio_remote as _align_remote
-                _refined = _align_remote.remote(_audio_bytes, _words)
-                if not isinstance(_refined, list) or len(_refined) != len(_words):
-                    raise RuntimeError(
-                        f"Forced alignment returned bad shape: got "
-                        f"{type(_refined).__name__} of length "
-                        f"{len(_refined) if isinstance(_refined, list) else 'n/a'}, "
-                        f"expected list of length {len(_words)}"
-                    )
-                _transcript["words"] = _refined
-                # Per-frame logprob distribution for visibility. Summed
-                # log-probs scale with word duration so the absolute number
-                # is meaningless on its own; normalizing by CTC frames
-                # (~20ms stride) gives a duration-invariant confidence.
-                # Healthy speech sits around -0.5; consistently below -1.5
-                # would suggest the model is fighting the audio (consider
-                # language flag / model swap, NOT a buffer).
-                _per_frame = []
-                for _w in _refined:
-                    _score = float(_w.get("_align_logprob") or 0.0)
-                    _dur = float(_w.get("end") or 0.0) - float(_w.get("start") or 0.0)
-                    _frames = max(1, int(round(_dur / 0.020)))
-                    _per_frame.append(_score / _frames)
-                _per_frame.sort()
-                _med = _per_frame[len(_per_frame) // 2] if _per_frame else 0.0
-                _p10 = _per_frame[max(0, int(len(_per_frame) * 0.10) - 1)] if _per_frame else 0.0
-                _p90 = _per_frame[max(0, int(len(_per_frame) * 0.90) - 1)] if _per_frame else 0.0
-                print(
-                    f"[align] forced-aligned {len(_refined)} words in "
-                    f"{time.time() - _t0:.1f}s "
-                    f"(per-frame logprob p10={_p10:.2f} "
-                    f"median={_med:.2f} p90={_p90:.2f})",
-                    flush=True,
-                )
-
         def _do_edit_recipe_overlapped():
             """Start Gemini as soon as transcript + proxy + trend + audio + face signals are ready.
             Transcript may come from the early_pool URL-based Deepgram call (ran in parallel
             with the download), a regular mega-pool file-based call, or the provided_transcript
             for re-edit paths. Whichever landed first wins.
-
-            Forced alignment runs HERE — between transcript resolution and the
-            Gemini call. This is critical: build_clips_from_words runs INSIDE
-            generate_edit_gemini and reads word.start/word.end to compute clip
-            source ranges. If alignment ran later, clips would be built with
-            un-refined Deepgram timestamps and the entire point of alignment
-            would be moot for cut planning. The cache + lock in
-            _get_resolved_transcript ensures alignment runs exactly once even
-            under racing callers; downstream consumers see refined timestamps.
             """
             _transcript = _get_resolved_transcript()
-            _refine_transcript_with_alignment(_transcript, _raw_source, work_dir)
             _proxy_bytes = future_gemini_proxy.result() if future_gemini_proxy is not None else None
             if future_early_trend is not None:
                 try:
@@ -10981,14 +11173,42 @@ def handler(job):
         # has no downstream consumer anyway.
         mega_pool.shutdown(wait=False)
 
-        # ── Forced alignment: refine Deepgram word boundaries ──────────────
-        # Belt-and-suspenders call site: the recipe-overlap path inside
-        # _do_edit_recipe_overlapped already invokes _refine_transcript_with_alignment
-        # before generate_edit_gemini (so build_clips_from_words sees refined
-        # timestamps). For render_only / paths that bypass _do_edit_recipe_overlapped,
-        # this is the catch-all. Idempotent — second call skips when all words
-        # already carry _align_logprob.
-        _refine_transcript_with_alignment(transcript, source_path, work_dir)
+        # ── DSP cut-point refinement ─────────────────────────────────────
+        # Deepgram word.start/word.end are seeds — outward-rounded by ~30-150ms
+        # with no commitment to landing in actual silence. Cutting at raw
+        # seeds either truncates words or leaks adjacent removed-word audio.
+        # The professional fix (Purcell, Sound on Sound, Pro Tools "Smart
+        # Tool", Descript): snap each cut-point to the local RMS minimum +
+        # nearest zero-crossing, with a small fricative bias when applicable.
+        # See refine_clip_cuts() — pure DSP on the source waveform, no model.
+        # Runs once on the orchestrator (CPU-only); refines the SAME cut
+        # points that drive both video (ffmpeg trims) and audio (build_per_cut_audio
+        # numpy slices), so A/V stay in sync.
+        _cuts_for_refine = edit_plan.get("cuts") or []
+        if _cuts_for_refine and mode != "render_only":
+            _refine_t0 = time.time()
+            _wav_16k_path = os.path.join(work_dir, "source_audio_16k.wav")
+            _ar = subprocess.run(
+                ["ffmpeg", "-y", "-v", "error",
+                 "-i", source_path, "-vn",
+                 "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
+                 _wav_16k_path],
+                capture_output=True, text=True, timeout=120,
+            )
+            if _ar.returncode != 0 or not os.path.exists(_wav_16k_path):
+                raise RuntimeError(
+                    f"Cut-refine audio extraction failed: rc={_ar.returncode} "
+                    f"stderr={(_ar.stderr or '')[-500:]}"
+                )
+            refine_clip_cuts(
+                _cuts_for_refine,
+                _wav_16k_path,
+                transcript.get("words") or [],
+            )
+            print(
+                f"[cut-refine] Done in {time.time() - _refine_t0:.1f}s",
+                flush=True,
+            )
 
         # Source res is what it is — normalize filter will handle conversion in render
         source_res = {"width": source_info["width"], "height": source_info["height"]}

@@ -392,12 +392,4 @@ print(f"smoke: visual regression check OK ({len(observed)} hashes match)")
 PY
 fi
 
-# ── 9. Forced-alignment helper unit tests ─────────────────────────────────
-# Exercises align_audio.py's pure-Python helpers (zero-crossing snap,
-# wav reader, empty-input shortcut) without requiring a GPU or the
-# wav2vec2 model. Catches regressions in the helper logic — the actual
-# alignment itself is exercised end-to-end on every production render.
-echo "smoke: forced-align helper unit tests"
-python3 "$REPO_ROOT/scripts/test_forced_align.py"
-
 echo "smoke: all compositions rendered successfully"
