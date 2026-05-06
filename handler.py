@@ -8462,23 +8462,24 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     text_overlays_out = []
     for _ov in (edit_plan.get("text_overlays") or []):
         _du = float(_ov["duration_seconds"])
-        _source_start = float(_ov["_source_start"])
-        _out_start = project_source_time_to_output(
-            _source_start, render_cuts, _clip_ranges,
-            clip_time_maps=_clip_time_maps,
-        )
-        if _out_start is None:
-            # Same DROP-DON'T-CRASH pattern as motion_graphics. Anchor source
-            # time fell outside refined clip ranges (DSP cut-point refinement
-            # most often, silence-tighten less often). One missing decoration
-            # is acceptable; killing the render isn't.
-            print(
-                f"[text-overlay] DROP {_ov.get('variant')!r} "
-                f"(source t={_source_start:.2f}s): anchor projects outside "
-                f"refined clip ranges. Render continues without this overlay.",
-                flush=True,
+        # Project by WORD INDEX, not by frozen source-time. The kept word's
+        # output position is computed against the REFINED clip ranges in
+        # _pw_by_idx — so DSP cut-point refinement of clip boundaries
+        # propagates to anchors automatically. Falling back to source-time
+        # projection (as before) introduced a precision drift after DSP
+        # refinement and dropped MGs/overlays anchored to clip-edge words.
+        _swi = _ov.get("start_word_index")
+        _pw = _pw_by_idx.get(_swi) if _swi is not None else None
+        if _pw is None:
+            # Word is not in the projected-words map. Validator already
+            # screens removed words — if we hit this it means the upstream
+            # data is malformed.
+            raise RuntimeError(
+                f"text_overlays[{_ov.get('variant')}] start_word_index="
+                f"{_swi} not in projected words. Validator should have "
+                f"caught this — investigate validator/projector divergence."
             )
-            continue
+        _out_start = float(_pw["start"])
         _entry = {
             "variant": _ov["variant"],
             "fromFrame": int(round(_out_start * source_fps)),
@@ -8570,33 +8571,35 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # the actual frames in the MG window.
     motion_graphics_out = []
     for _mg in (edit_plan.get("motion_graphics") or []):
-        _sw_source = float(_mg["_source_start"])
-        _ew_source = float(_mg["_source_end"])
-        _out_start = project_source_time_to_output(
-            _sw_source, render_cuts, _clip_ranges,
-            clip_time_maps=_clip_time_maps,
-        )
-        _out_end = project_source_time_to_output(
-            _ew_source, render_cuts, _clip_ranges,
-            clip_time_maps=_clip_time_maps,
-        )
-        if _out_start is None or _out_end is None:
-            # Anchor source time fell outside the refined clip ranges. Most
-            # common cause: the DSP cut-point refinement pushed a clip's
-            # source_start/source_end slightly inward (into the kept word's
-            # interior), excluding an anchor that sat right at the original
-            # word.start/word.end. Less common: silence-tighten range
-            # removal swept across the anchor word's source time.
-            #
-            # Either way, killing the entire render for one missing decoration
-            # is the wrong trade-off. Drop the MG with a warning and continue.
-            print(
-                f"[mg] DROP {_mg['type']} (source {_sw_source:.2f}-"
-                f"{_ew_source:.2f}s): anchor projects outside refined clip "
-                f"ranges. Render continues without this MG.",
-                flush=True,
+        # Project by WORD INDEX (start_word_index, end_word_index), not by
+        # frozen source-time. _pw_by_idx contains every kept word's OUTPUT
+        # position, computed against the REFINED clip ranges — so DSP
+        # cut-point refinement of clip boundaries propagates to anchors
+        # automatically. The previous source-time projection used the
+        # original (unrefined) Deepgram word.start/word.end, which fell
+        # OUTSIDE the refined clip range when DSP shifted source_start
+        # forward into the kept word — projection returned None, MG was
+        # dropped. Word-index lookup eliminates the drift.
+        _swi = _mg.get("start_word_index")
+        _ewi = _mg.get("end_word_index")
+        _pw_start = _pw_by_idx.get(_swi) if _swi is not None else None
+        _pw_end = _pw_by_idx.get(_ewi) if _ewi is not None else None
+        if _pw_start is None or _pw_end is None:
+            # Anchor word is not in the projected-words map. Validator
+            # already screens removed words upstream — if we hit this it
+            # means the upstream data is malformed.
+            raise RuntimeError(
+                f"motion_graphic {_mg['type']} word indices "
+                f"start={_swi} end={_ewi} not in projected words. "
+                f"Validator should have caught this — investigate "
+                f"validator/projector divergence."
             )
-            continue
+        _out_start = float(_pw_start["start"])
+        _out_end = float(_pw_end["end"])
+        # Preserve _sw_source / _ew_source for the diagnostics print at the
+        # bottom of the loop.
+        _sw_source = float(_mg.get("_source_start") or 0.0)
+        _ew_source = float(_mg.get("_source_end") or 0.0)
         # duration_seconds_override lets a fixed-length pin extend beyond the
         # natural word span. Anchor start unchanged; end = start + override.
         _dur_override = _mg.get("duration_seconds_override")
@@ -8628,23 +8631,20 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # Each emphasis moment's visual layers (zoom / MG) get projected and
     # merged into the Remotion input here.
     for em in edit_plan.get("_emphasis_moments", []):
-        _em_t_out = project_source_time_to_output(
-            float(em["t"]), render_cuts, _clip_ranges,
-            clip_time_maps=_clip_time_maps,
-        )
-        if _em_t_out is None:
-            # Same DROP-DON'T-CRASH pattern as motion_graphics / text_overlays.
-            # Emphasis moment fell outside refined clip ranges (most often
-            # because DSP cut-point refinement shifted a clip boundary past
-            # the emphasis source time). Drop the layer rather than kill the
-            # render.
-            print(
-                f"[emphasis] DROP moment @ source {em['t']:.2f}s: "
-                f"projects outside refined clip ranges. Render continues "
-                f"without this zoom/MG.",
-                flush=True,
+        # Project by WORD INDEX (first word in word_indices list), not by
+        # frozen source-time. Same rationale as MG / text_overlay above —
+        # _pw_by_idx tracks the REFINED clip ranges, so anchors stay valid
+        # across DSP cut-point refinement.
+        _em_word_indices = em.get("word_indices") or []
+        _em_first_wi = _em_word_indices[0] if _em_word_indices else None
+        _em_pw = _pw_by_idx.get(_em_first_wi) if _em_first_wi is not None else None
+        if _em_pw is None:
+            raise RuntimeError(
+                f"Emphasis moment word_indices[0]={_em_first_wi} not in "
+                f"projected words. Validator should have caught this — "
+                f"investigate validator/projector divergence."
             )
-            continue
+        _em_t_out = float(_em_pw["start"])
         _em_t_frame = int(round(_em_t_out * source_fps))
 
         # Zoom is already attached to validated_cuts during the validation
