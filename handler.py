@@ -7543,39 +7543,22 @@ def get_output_clip_ranges(cuts, effective_durations, transition_duration=None, 
 # every Pro Tools / Audition / Premiere splice does, mechanized into ~50 lines
 # of numpy.
 #
-# Bias: when a kept word ends in a fricative (/s/, /f/, /ʃ/, /θ/) or the next
-# starts with one, the cut biases ~25ms INTO the fricative — its broadband
-# noise masks the splice (also documented in Sound on Sound, "If a splice
-# sounds unnatural, try cutting in the middle of a word, on an S, F, or TH").
-
-# Word suffixes / prefixes that indicate fricative phonemes — used to bias
-# cut placement INTO the fricative, where its broadband noise masks the
-# splice. Conservative list: only matches that are unambiguously fricative.
-_FRICATIVE_SUFFIXES = ("s", "ss", "ce", "ze", "sh", "ch", "th", "f", "ff", "ph")
-_FRICATIVE_PREFIXES = ("s", "sh", "ch", "th", "f", "ph")
-
-
-def _word_ends_in_fricative(word_text: str) -> bool:
-    if not word_text:
-        return False
-    w = word_text.strip().lower().rstrip("?.!,:;\"'")
-    return any(w.endswith(suf) for suf in _FRICATIVE_SUFFIXES)
-
-
-def _word_starts_with_fricative(word_text: str) -> bool:
-    if not word_text:
-        return False
-    w = word_text.strip().lower().lstrip("\"'")
-    return any(w.startswith(pre) for pre in _FRICATIVE_PREFIXES)
+# CRITICAL: search is ONE-SIDED. source_end can only refine BACKWARD into
+# the kept clip's last word (never forward into the removed region). source_start
+# can only refine FORWARD into the kept clip's first word (never backward
+# into the removed region). This guarantees cuts can never leak removed-word
+# audio — the leak path is closed by construction. A bidirectional search
+# would let the RMS minimum land mid-syllable inside a removed stutter and
+# capture it (the "im- I'm gonna leave" failure mode that motivated this).
 
 
 def _refine_cut_point(
     samples,  # np.ndarray, mono float32 in [-1, 1]
     sample_rate: int,
     seed_sec: float,
+    direction: str,  # "forward" (search [seed, seed+window]) or "backward" ([seed-window, seed])
     search_window_ms: float = 60.0,
     rms_window_ms: float = 5.0,
-    fricative_bias_ms: float = 0.0,
 ):
     """Refine a single cut-point seed to the local RMS minimum + zero-crossing.
 
@@ -7583,11 +7566,12 @@ def _refine_cut_point(
         samples: source audio as float32 numpy array in [-1, 1].
         sample_rate: samples per second (typically 16000).
         seed_sec: rough cut-point time from Deepgram's word.start/word.end.
-        search_window_ms: half-width of search window around the seed.
+        direction: "forward" for source_start (search inward into the kept
+            clip's first word), "backward" for source_end (search inward
+            into the kept clip's last word). Never search across the seed
+            into removed-word territory.
+        search_window_ms: half-width of search window into the kept content.
         rms_window_ms: width of the RMS averaging window (smooths out noise).
-        fricative_bias_ms: shift the search center by this much (positive =
-            bias forward into the next sound). Used when a fricative phoneme
-            is adjacent to the cut.
 
     Returns: refined cut-point in seconds (sample-precise).
     """
@@ -7595,14 +7579,26 @@ def _refine_cut_point(
 
     if len(samples) == 0:
         return seed_sec
-    seed_idx = int(round((seed_sec + fricative_bias_ms / 1000.0) * sample_rate))
+    seed_idx = int(round(seed_sec * sample_rate))
     seed_idx = max(0, min(len(samples) - 1, seed_idx))
 
     win_samples = int(round(search_window_ms * sample_rate / 1000.0))
     rms_samples = max(1, int(round(rms_window_ms * sample_rate / 1000.0)))
 
-    lo = max(0, seed_idx - win_samples)
-    hi = min(len(samples), seed_idx + win_samples)
+    # One-sided search: kept content lies on ONE side of the seed only.
+    # source_end → kept content is BEFORE seed → search [seed - window, seed]
+    # source_start → kept content is AFTER seed → search [seed, seed + window]
+    if direction == "backward":
+        lo = max(0, seed_idx - win_samples)
+        hi = min(len(samples), seed_idx)
+    elif direction == "forward":
+        lo = max(0, seed_idx)
+        hi = min(len(samples), seed_idx + win_samples)
+    else:
+        raise ValueError(
+            f"_refine_cut_point: direction must be 'forward' or 'backward', "
+            f"got {direction!r}"
+        )
     if hi - lo < rms_samples * 2:
         return seed_sec
 
@@ -7644,15 +7640,22 @@ def refine_clip_cuts(
     audio_wav_path: str,
     transcript_words: list,
     search_window_ms: float = 60.0,
-    fricative_bias_ms: float = 25.0,
 ):
-    """Refine each clip's source_start / source_end to land in waveform silence.
+    """Refine each clip's source_start / source_end inward into kept content.
 
     Mutates clips in place. Cut points move from Deepgram's loose word
-    boundaries to the local RMS minimum (snapped to a zero-crossing) within
-    ±search_window_ms of the seed. When the kept word adjacent to the cut
-    ends/starts in a fricative, the cut biases by `fricative_bias_ms` to land
-    inside the fricative's noise — which masks the splice.
+    boundaries to the local RMS minimum (snapped to a zero-crossing). The
+    search is ONE-SIDED: source_start refines FORWARD into the kept clip's
+    first word, source_end refines BACKWARD into the kept clip's last word.
+    Never crosses the seed into removed-word territory.
+
+    Worst case (no quiet moment exists in the kept word's interior): cut
+    stays at the Deepgram seed. Best case (Deepgram's boundary is slightly
+    off and there's actual silence in the last few ms of the kept word):
+    cut snaps to that silence. Either way, removed-word audio cannot leak.
+
+    transcript_words is unused at the moment but kept on the signature so
+    future enhancements that need word context don't churn the call site.
 
     Returns the same clips list (mutated). Reports the typical refinement
     delta in the log so we can sanity-check that the DSP is doing real work.
@@ -7672,65 +7675,24 @@ def refine_clip_cuts(
     if n_chan > 1:
         samples = samples[::n_chan]
 
-    # Build a quick sorted list of (word_start, word_end, word_text) for
-    # fricative lookup at clip boundaries.
-    word_lookup = []
-    for w in transcript_words or []:
-        try:
-            word_lookup.append((
-                float(w.get("start") or 0.0),
-                float(w.get("end") or 0.0),
-                str(w.get("punctuated_word") or w.get("word") or ""),
-            ))
-        except Exception:
-            continue
-    word_lookup.sort(key=lambda x: x[0])
-
-    def _word_at_time(t_sec: float, prefer_end: bool):
-        """Find the word whose [start, end] contains t_sec, or the closest one."""
-        if not word_lookup:
-            return None
-        # Binary-ish search via numpy. For small word lists (~250) linear is fine.
-        best = None
-        best_dist = float("inf")
-        for ws, we, wtext in word_lookup:
-            if ws <= t_sec <= we:
-                return (ws, we, wtext)
-            d = min(abs(ws - t_sec), abs(we - t_sec))
-            if d < best_dist:
-                best_dist = d
-                best = (ws, we, wtext)
-        return best
-
     deltas_ms = []
     for clip in clips:
         s_seed = float(clip["source_start"])
         e_seed = float(clip["source_end"])
 
-        # source_start: bias forward into a fricative if first word starts
-        # with one (cuts INTO fricative noise = inaudible splice).
-        first_w = _word_at_time(s_seed, prefer_end=False)
-        start_bias = 0.0
-        if first_w and _word_starts_with_fricative(first_w[2]):
-            start_bias = fricative_bias_ms
-
-        # source_end: bias forward into a fricative if last word ends with
-        # one (cut lands inside the fricative tail — its noise masks the
-        # splice on this side too).
-        last_w = _word_at_time(e_seed, prefer_end=True)
-        end_bias = 0.0
-        if last_w and _word_ends_in_fricative(last_w[2]):
-            end_bias = fricative_bias_ms
-
+        # source_start refines FORWARD only — the kept clip's first word
+        # is to the right of the seed; the removed region is to the left.
         s_refined = _refine_cut_point(
             samples, sr, s_seed,
+            direction="forward",
             search_window_ms=search_window_ms,
-            fricative_bias_ms=start_bias,
         )
+        # source_end refines BACKWARD only — the kept clip's last word is
+        # to the left of the seed; the removed region is to the right.
         e_refined = _refine_cut_point(
             samples, sr, e_seed,
+            direction="backward",
             search_window_ms=search_window_ms,
-            fricative_bias_ms=end_bias,
         )
 
         # Guard: never produce a degenerate or inverted clip.
