@@ -8468,11 +8468,17 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             clip_time_maps=_clip_time_maps,
         )
         if _out_start is None:
-            raise RuntimeError(
-                f"text_overlays[{_ov.get('variant')}] anchor word (source "
-                f"t={_source_start:.2f}s) projected to None — anchor word was "
-                f"removed after validation, which should be impossible."
+            # Same DROP-DON'T-CRASH pattern as motion_graphics. Anchor source
+            # time fell outside refined clip ranges (DSP cut-point refinement
+            # most often, silence-tighten less often). One missing decoration
+            # is acceptable; killing the render isn't.
+            print(
+                f"[text-overlay] DROP {_ov.get('variant')!r} "
+                f"(source t={_source_start:.2f}s): anchor projects outside "
+                f"refined clip ranges. Render continues without this overlay.",
+                flush=True,
             )
+            continue
         _entry = {
             "variant": _ov["variant"],
             "fromFrame": int(round(_out_start * source_fps)),
@@ -8575,11 +8581,22 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             clip_time_maps=_clip_time_maps,
         )
         if _out_start is None or _out_end is None:
-            raise RuntimeError(
-                f"motion_graphic {_mg['type']} anchor words projected to None "
-                f"(source {_sw_source:.2f}-{_ew_source:.2f}s) — anchor word "
-                f"was removed after validation."
+            # Anchor source time fell outside the refined clip ranges. Most
+            # common cause: the DSP cut-point refinement pushed a clip's
+            # source_start/source_end slightly inward (into the kept word's
+            # interior), excluding an anchor that sat right at the original
+            # word.start/word.end. Less common: silence-tighten range
+            # removal swept across the anchor word's source time.
+            #
+            # Either way, killing the entire render for one missing decoration
+            # is the wrong trade-off. Drop the MG with a warning and continue.
+            print(
+                f"[mg] DROP {_mg['type']} (source {_sw_source:.2f}-"
+                f"{_ew_source:.2f}s): anchor projects outside refined clip "
+                f"ranges. Render continues without this MG.",
+                flush=True,
             )
+            continue
         # duration_seconds_override lets a fixed-length pin extend beyond the
         # natural word span. Anchor start unchanged; end = start + override.
         _dur_override = _mg.get("duration_seconds_override")
@@ -8616,10 +8633,18 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             clip_time_maps=_clip_time_maps,
         )
         if _em_t_out is None:
-            raise RuntimeError(
-                f"Emphasis moment at source {em['t']}s was removed from the output "
-                f"timeline — Gemini flagged a moment in a cut segment."
+            # Same DROP-DON'T-CRASH pattern as motion_graphics / text_overlays.
+            # Emphasis moment fell outside refined clip ranges (most often
+            # because DSP cut-point refinement shifted a clip boundary past
+            # the emphasis source time). Drop the layer rather than kill the
+            # render.
+            print(
+                f"[emphasis] DROP moment @ source {em['t']:.2f}s: "
+                f"projects outside refined clip ranges. Render continues "
+                f"without this zoom/MG.",
+                flush=True,
             )
+            continue
         _em_t_frame = int(round(_em_t_out * source_fps))
 
         # Zoom is already attached to validated_cuts during the validation
