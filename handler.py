@@ -8438,8 +8438,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 continue
             _entry[_k] = _v
         text_overlays_out.append(_entry)
+        _src_t = float(_pw.get("_source_start") or 0.0)
         print(
-            f"[text-overlay] {_ov['variant']} @ src={_source_start:.2f}s "
+            f"[text-overlay] {_ov['variant']} @ src={_src_t:.2f}s "
             f"→ out={_out_start:.2f}s for {_du:.2f}s",
             flush=True,
         )
