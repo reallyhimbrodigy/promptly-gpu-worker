@@ -76,7 +76,7 @@ image = (
     # Without this, NVENC silently fails and pipeline falls back to CPU encoding (10-15x slower)
     .env({"NVIDIA_DRIVER_CAPABILITIES": "all"})
     .run_commands(
-        "echo 'build v29 - Room-tone hole-fill at non-silent splices (Purcell hole-fill technique), drop DSP cut refinement'",
+        "echo 'build v30 - L-cut audio at transitions: clip A audio plays through full transition slot, splice lands at end of transition, drop room-tone bridge'",
         "apt-get update && apt-get install -y ca-certificates && update-ca-certificates",
         # Remove CUDA stubs AND compat libs that intercept dlopen before Modal's
         # real driver libs. THEN recreate placeholders for every libcuda* file

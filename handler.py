@@ -7135,36 +7135,36 @@ def get_pitch_preserving_speed_filter(speed: float) -> str:
 
 
 def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample_rate=48000, trans_dur_after=None, per_cut_render_dur_frames=None, source_fps=60.0, trim_head_dur=None, trim_tail_dur=None):
-    """Build the per-cut audio track in one numpy pass — half-handle model.
+    """Build the per-cut audio track — L-cut transition model.
 
-    Each cut's RENDER range (source[start + trim_head*speed, end −
-    trim_tail*speed]) is sliced and resampled at the cut's constant
-    speed. trim_head/trim_tail = trans_dur/2 (half-trim — see the
-    explanatory comment in the caller where the trim values are
-    initialised). The transition slot between clip A and clip B holds
-    A_tail_half (source[end_A − trim_tail, end_A]) followed
-    SEQUENTIALLY by B_head_half (source[start_B, start_B + trim_head]) —
-    no cross-fade, no mixing. Two consecutive halves of source audio,
-    no overlap.
+    Each cut's RENDER range (source[start, end − trim_tail*speed]) is
+    sliced and resampled at the cut's constant speed. trim_head = 0
+    (always) and trim_tail = trans_dur for clips with an outgoing
+    transition, 0 otherwise (see the L-cut block in the caller).
 
-    DIALOGUE INTELLIGIBILITY:
-      The previous design ran an equal-power cos/sin cross-fade between
-      clip A's last trans_dur seconds and clip B's first trans_dur
-      seconds, compressing 2*trans_dur seconds of source audio into
-      trans_dur seconds of timeline. Worked fine for ambient/music
-      handoffs; destroyed dialogue intelligibility because the speech
-      from both sides mixed into mush at every transition. Half-handle
-      sequential concat plays each side's words at full volume in
-      half the slot — every word heard cleanly, hard cut at the
-      transition midpoint (the standard L-cut pattern in pro NLEs).
+    L-CUT AUDIO MODEL:
+      Clip A's audio plays through the ENTIRE visual transition slot.
+      The transition slot holds source[end_A − trans_dur*speed_A, end_A]
+      — clip A's natural sentence-end tail, played continuously from
+      where its render left off. Clip B's audio starts at the END of
+      the transition (source[start_B], in clip B's render).
+
+      The audio splice lands at the moment the visual transition
+      completes and clip B's full shot is revealed: viewer's attention
+      shifts to "new shot, new line" at exactly the moment the audio
+      changes. The previous half-handle model placed the splice in the
+      MIDDLE of the visual transition motion, which on continuous-speech
+      cuts surfaced as audible "glitching" — listener was still
+      processing the visual motion when audio jumped mid-phoneme.
+      L-cut is the universal pro-NLE convention for cuts across visual
+      transitions (Premiere, Resolve, Final Cut, Avid all default to it).
 
     SAMPLE-LOCKED ALIGNMENT:
       Per-cut audio sample count is derived from the *exact* video
       frame count (per_cut_render_dur_frames[i]) so audio and video
       lengths match within ±1 sample (~21 µs) per cut. Transition
-      slot audio is exactly trans_dur*sample_rate samples (= n_half
-      A_tail_half + n_half B_head_half), matching the 12-frame visual
-      transition at 30fps.
+      slot audio is exactly trans_dur*sample_rate samples, matching
+      the visual transition's frame count.
 
     Returns the path to the concatenated WAV.
     """
@@ -7259,20 +7259,23 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
         else:
             cut_audios.append(_resample_range(render_src_start, render_src_end, n_out))
 
-    # ── Transition audio — sequential half-handles (NO cross-fade) ─────
-    # A_tail_half (clip A's last trans_dur/2 of source, matching the
-    # half-trim model in the caller) is concatenated with B_head_half
-    # (clip B's first trans_dur/2 of source). No mixing, no overlap.
-    # The viewer hears clip A's words decay naturally, then clip B's
-    # words begin — the audio cut lands at the midpoint of the visual
-    # transition (the standard L-cut pattern in pro NLEs). Combined
-    # with the clip's main render audio, every word in clip A's source
-    # range and clip B's source range is heard exactly once.
-    # all_clips: ordered list of audio segments to concatenate.
-    # is_splice_after[i]: True if the boundary between all_clips[i] and
-    # all_clips[i+1] is a SPLICE (jump in source time = needs crossfade).
-    # False if it's a CONTIGUOUS source slice (same source range, no
-    # crossfade — fading would attenuate continuous audio for no gain).
+    # ── Transition audio — L-cut: clip A's tail plays through full slot ──
+    # The transition slot holds source[end_A − trans_dur*speed_A, end_A]
+    # — clip A's last trans_dur of source content, played continuously
+    # from where its render audio left off. Clip B's first trans_dur of
+    # source is NOT heard during the transition (clip B's render audio
+    # starts at source[start_B] AFTER the transition completes). This is
+    # the universal pro-NLE L-cut convention.
+    #
+    # Boundaries:
+    #   cut_audio[ci] → trans_audio: CONTIGUOUS — render ends at
+    #     source[end_A − trans_dur*speed_A] and trans_audio begins at
+    #     that exact source position (no jump, no fade needed).
+    #   trans_audio → cut_audio[ci+1]: SPLICE — trans ends at source[end_A]
+    #     and next cut starts at source[start_B] (typically a scene/sentence
+    #     boundary chosen by Gemini). Splice lands at the moment the visual
+    #     transition completes and clip B's full shot is revealed —
+    #     listener perceives it as "new shot, new line".
     all_clips: List[np.ndarray] = []
     is_splice_after: List[bool] = []
     _n_transitions = 0
@@ -7288,39 +7291,21 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
                 is_splice_after.append(True)
             continue
         cut_a = cuts[ci]
-        cut_b = cuts[ci + 1]
         speed_a = float(cut_a.get("speed") or 1.0)
-        speed_b = float(cut_b.get("speed") or 1.0)
-        # Half-handle: each side fills half the trans slot. trim_head /
-        # trim_tail in the caller are also trans_dur/2, so source[end_A -
-        # trim_tail, end_A] is the EXACT segment that's been trimmed from
-        # clip A's render audio — concatenating it here puts that source
-        # content back in the timeline immediately after clip A's render
-        # audio. Boundary cut_audio[ci] → a_tail_half is CONTIGUOUS source
-        # (same render_src_end → c_a_end - 0 step), so no crossfade.
-        # Boundary a_tail_half → b_head_half is the SPLICE (jumps from
-        # clip A's source_end to clip B's source_start). Boundary
-        # b_head_half → cut_audio[ci+1] is CONTIGUOUS again.
-        half = _t_after / 2.0
-        n_half = max(1, int(round(half * sample_rate)))
+        n_trans = max(1, int(round(_t_after * sample_rate)))
         c_a_end = float(cut_a["source_end"])
-        a_tail_half = _resample_range(
-            c_a_end - half * speed_a, c_a_end, n_half,
+        # Single segment: clip A's last _t_after of source, resampled at
+        # speed_a to fill the trans_dur output slot.
+        transition_audio = _resample_range(
+            c_a_end - _t_after * speed_a, c_a_end, n_trans,
         )
-        c_b_start = float(cut_b["source_start"])
-        b_head_half = _resample_range(
-            c_b_start, c_b_start + half * speed_b, n_half,
-        )
-        # cut_audio[ci] → a_tail_half: contiguous (no fade)
+        # cut_audio[ci] → transition_audio: contiguous (no fade)
         is_splice_after.append(False)
-        all_clips.append(a_tail_half)
-        # a_tail_half → b_head_half: splice (fade)
-        is_splice_after.append(True)
-        all_clips.append(b_head_half)
-        # b_head_half → cut_audio[ci+1]: contiguous (no fade); this entry
+        all_clips.append(transition_audio)
+        # transition_audio → cut_audio[ci+1]: splice (fade); this entry
         # marks the boundary that the NEXT iteration's cut_audio creates.
         if ci + 1 < len(cut_audios):
-            is_splice_after.append(False)
+            is_splice_after.append(True)
         _n_transitions += 1
 
     if not all_clips:
@@ -7331,116 +7316,18 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
             wf.writeframes(b"\x00" * sample_rate * 2)
         return output_wav
 
-    # ── Silence-aware splice handling: room-tone hole-fill ─────────────────
-    # For each SPLICE boundary in is_splice_after, we look at the actual
-    # waveform on both sides. If both sides are silence (the speaker had
-    # a natural pause around the cut), we apply a 5ms equal-power crossfade
-    # — same Pro Tools / Audition / Premiere "Default Audio Transition"
-    # pattern.
-    #
-    # If either side is NON-silent (continuous-speech splices, where
-    # cutting at the word boundary lands mid-phoneme), a butt-splice or
-    # short crossfade can't sound clean — coarticulation makes the
-    # waveform discontinuous on both sides. The professional fix from
-    # Purcell's *Dialogue Editing for Motion Pictures* is "hole-fill":
-    # replace the splice region with REAL ROOM TONE sampled from a
-    # natural silence elsewhere in this same recording. The kept content's
-    # last 15ms (which in continuous speech is voiced energy that's part
-    # of the artifact problem) gets trimmed and replaced with 30ms of
-    # ambient room tone. The viewer hears: kept content → smooth fade →
-    # 30ms of ambient sound (sounds like a natural micro-breath) → smooth
-    # fade → kept content. Every transition is across silence/near-zero
-    # amplitude, so every transition is artifact-free by construction.
-    #
-    # Total inserted time per non-silent splice = 0ms (15ms trimmed each
-    # side, 30ms bridge inserted between them = unchanged duration). No
-    # A/V drift introduced.
+    # ── Splice fades: 5ms equal-power crossfade on every splice ────────────
+    # Every SPLICE boundary in is_splice_after gets a short cos²/sin²
+    # equal-power crossfade — the universal Pro Tools / Audition / Premiere
+    # "Default Audio Transition" pattern. 5ms is short enough to be
+    # imperceptible in dialogue yet long enough to smooth waveform
+    # discontinuities at the joint. Contiguous boundaries (no source jump)
+    # get NO fade — fading there would attenuate continuous audio for no
+    # gain. No trimming, no bridges, no validators: the L-cut places every
+    # splice at a natural sentence boundary (chosen by Gemini), so a clean
+    # short crossfade is sufficient.
     _fade_samples = int(round(0.005 * sample_rate))
-    _trim_samples = int(round(0.015 * sample_rate))
-    _bridge_samples = int(round(0.030 * sample_rate))
-
-    # Threshold for "this audio is silence" — relative to peak. 3% of peak
-    # ≈ -30dB. Conservative; classifies real speech as non-silent reliably
-    # while accepting reasonable room-tone characterization as "silent."
-    _src_peak = max(1.0, float(np.max(np.abs(src_samples))))
-    _silence_threshold_amp = _src_peak * 0.03
-
-    def _detect_silence_regions(samples, sr, thresh_amp, min_dur_sec=0.10, win_ms=20):
-        """List of (start_sec, end_sec) in source audio where RMS < thresh_amp."""
-        win = int(sr * win_ms / 1000)
-        if win <= 0 or len(samples) < win:
-            return []
-        n_full = len(samples) // win
-        if n_full == 0:
-            return []
-        trimmed = samples[:n_full * win].reshape(n_full, win).astype(np.float32, copy=False)
-        rms = np.sqrt(np.mean(trimmed * trimmed, axis=1))
-        silent = rms < thresh_amp
-        regions: List[tuple] = []
-        in_silence = False
-        start = 0
-        for i, s in enumerate(silent):
-            if s and not in_silence:
-                in_silence = True
-                start = i
-            elif not s and in_silence:
-                in_silence = False
-                t_start = start * win / sr
-                t_end = i * win / sr
-                if t_end - t_start >= min_dur_sec:
-                    regions.append((t_start, t_end))
-        if in_silence:
-            t_start = start * win / sr
-            t_end = n_full * win / sr
-            if t_end - t_start >= min_dur_sec:
-                regions.append((t_start, t_end))
-        return regions
-
-    def _sample_room_tone(samples, sr, regions, target_n):
-        """Sample target_n samples of room tone from longest silence region."""
-        if not regions:
-            # No detected silence — use digital zero-amplitude. Better than
-            # nothing; bridge will be true silence rather than ambient.
-            return np.zeros(target_n, dtype=np.float32)
-        longest = max(regions, key=lambda r: r[1] - r[0])
-        s_idx = int(longest[0] * sr)
-        e_idx = int(longest[1] * sr)
-        region = samples[s_idx:e_idx]
-        if len(region) <= target_n:
-            out = np.zeros(target_n, dtype=np.float32)
-            out[:len(region)] = region.astype(np.float32, copy=False)
-            return out
-        # Center within region (skip edges where speech might tail off).
-        pad = (len(region) - target_n) // 2
-        return region[pad:pad + target_n].astype(np.float32, copy=True)
-
-    def _edge_is_silent(seg, edge):
-        """RMS of seg's tail (edge='tail') or head (edge='head') vs threshold."""
-        win = min(len(seg), int(sample_rate * 0.020))
-        if win <= 0:
-            return True
-        region = seg[-win:] if edge == "tail" else seg[:win]
-        return float(np.sqrt(np.mean(region * region))) < _silence_threshold_amp
-
-    # Build the room-tone bridge segment once. Shape: 5ms sin² fade-in,
-    # 20ms steady at room-tone amplitude, 5ms cos² fade-out — both ends
-    # land at zero amplitude so they butt seamlessly against the trimmed
-    # kept-content edges (which also end at zero via their own fades).
-    _silence_regions = _detect_silence_regions(
-        src_samples, sample_rate, _silence_threshold_amp,
-    )
-    _bridge_template: Optional[np.ndarray] = None
-    if _bridge_samples > 0:
-        _rt = _sample_room_tone(
-            src_samples, sample_rate, _silence_regions, _bridge_samples,
-        ).astype(np.float32, copy=True)
-        if len(_rt) >= _fade_samples * 2:
-            _fi = (np.sin(np.linspace(0.0, np.pi / 2.0, _fade_samples, dtype=np.float32)) ** 2)
-            _fo = (np.cos(np.linspace(0.0, np.pi / 2.0, _fade_samples, dtype=np.float32)) ** 2)
-            _rt[:_fade_samples] *= _fi
-            _rt[-_fade_samples:] *= _fo
-        _bridge_template = _rt
-
+    _n_splices = 0
     if _fade_samples > 0 and len(all_clips) >= 2:
         _fade_out = (np.cos(
             np.linspace(0.0, np.pi / 2.0, _fade_samples, dtype=np.float32)
@@ -7448,72 +7335,23 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
         _fade_in = (np.sin(
             np.linspace(0.0, np.pi / 2.0, _fade_samples, dtype=np.float32)
         ) ** 2)
-        # Pre-compute splice silence classification (must read tails/heads
-        # BEFORE we mutate them with fades / trims).
-        _splice_silent: List[bool] = []
-        for _i, _is_splice in enumerate(is_splice_after):
-            if not _is_splice:
-                _splice_silent.append(True)
-                continue
-            _seg_a = all_clips[_i]
-            _seg_b = all_clips[_i + 1]
-            _splice_silent.append(
-                _edge_is_silent(_seg_a, "tail") and _edge_is_silent(_seg_b, "head")
-            )
-        _n_silent = 0
-        _n_bridge = 0
         for _i, _is_splice in enumerate(is_splice_after):
             if not _is_splice:
                 continue
             _seg_a = all_clips[_i]
             _seg_b = all_clips[_i + 1]
-            if _splice_silent[_i]:
-                # Silent splice: standard 5ms equal-power crossfade.
-                if len(_seg_a) >= _fade_samples:
-                    _seg_a[-_fade_samples:] *= _fade_out
-                if len(_seg_b) >= _fade_samples:
-                    _seg_b[:_fade_samples] *= _fade_in
-                _n_silent += 1
-            else:
-                # Non-silent splice: trim 15ms from each side to make
-                # room for the 30ms room-tone bridge (net 0ms duration
-                # change). The trimmed content was voiced energy that
-                # was going to be the artifact source anyway.
-                if len(_seg_a) > _trim_samples + _fade_samples:
-                    all_clips[_i] = _seg_a[:-_trim_samples]
-                    _seg_a = all_clips[_i]
-                if len(_seg_b) > _trim_samples + _fade_samples:
-                    all_clips[_i + 1] = _seg_b[_trim_samples:].copy()
-                    _seg_b = all_clips[_i + 1]
-                if len(_seg_a) >= _fade_samples:
-                    _seg_a[-_fade_samples:] *= _fade_out
-                if len(_seg_b) >= _fade_samples:
-                    _seg_b[:_fade_samples] *= _fade_in
-                _n_bridge += 1
-        if _n_silent or _n_bridge:
+            if len(_seg_a) >= _fade_samples:
+                _seg_a[-_fade_samples:] *= _fade_out
+            if len(_seg_b) >= _fade_samples:
+                _seg_b[:_fade_samples] *= _fade_in
+            _n_splices += 1
+        if _n_splices:
             print(
-                f"[audio] splices: {_n_silent} silent (5ms crossfade), "
-                f"{_n_bridge} non-silent (30ms room-tone bridge)",
+                f"[audio] splices: {_n_splices} (5ms equal-power crossfade)",
                 flush=True,
             )
-    else:
-        _splice_silent = [True] * len(is_splice_after)
 
-    # Concatenate with bridge insertion at non-silent splices.
-    if all_clips:
-        _output_segments: List[np.ndarray] = [all_clips[0]]
-        for _i in range(len(all_clips) - 1):
-            if (
-                _i < len(is_splice_after)
-                and is_splice_after[_i]
-                and not _splice_silent[_i]
-                and _bridge_template is not None
-            ):
-                _output_segments.append(_bridge_template.copy())
-            _output_segments.append(all_clips[_i + 1])
-        full_audio = np.concatenate(_output_segments)
-    else:
-        full_audio = np.concatenate(all_clips)
+    full_audio = np.concatenate(all_clips)
     full_audio = np.clip(full_audio, -32768, 32767).astype(np.int16)
     with wave.open(output_wav, "wb") as wf:
         wf.setnchannels(1)
@@ -8086,21 +7924,18 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # content is shown EXACTLY ONCE (no duplication of clip A's tail or
     # clip B's head, which the previous concat-with-padding model produced).
     #
-    # Implementation: for each cut, compute trim_head_dur (output seconds
-    # consumed by the incoming transition) and trim_tail_dur (output
-    # seconds consumed by the outgoing transition). The cut's RENDER
-    # duration is `eff_dur − trim_head − trim_tail`; its render source
-    # range is `[c_start + trim_head*speed, c_end − trim_tail*speed]`.
-    # The "handles" — `[c_start, c_start + trim_head*speed]` and
-    # `[c_end − trim_tail*speed, c_end]` — are reserved for the
-    # adjacent transitions (which already pull from those exact ranges
-    # via clipAStartFromFrames / clipBStartFromFrames).
+    # Implementation: for each cut, compute trim_tail_dur (output seconds
+    # consumed by the outgoing transition; trim_head is always 0 in the
+    # L-cut model). The cut's RENDER duration is `eff_dur − trim_tail`;
+    # its render source range is `[c_start, c_end − trim_tail*speed]`.
+    # The tail handle `[c_end − trim_tail*speed, c_end]` is reserved for
+    # the outgoing transition (which already pulls from that exact range
+    # via clipAStartFromFrames).
     #
-    # If a cut is too short to accommodate its transition handles
-    # (eff_dur < trim_head + trim_tail + min_render), drop the
-    # outgoing transition (preferred: affects only this pair) or the
-    # incoming transition. This matches NLE behavior — "insufficient
-    # handles" produces a warning, not a render failure.
+    # If a cut is too short to accommodate its tail handle
+    # (eff_dur < trim_tail + min_render), drop the outgoing transition.
+    # This matches NLE behavior — "insufficient handles" produces a
+    # warning, not a render failure.
     _T_trans = TRANSITION_DURATION
     _T_trans_frames = max(1, int(round(_T_trans * source_fps)))
     _MIN_RENDER_DUR = 0.05  # min seconds a clip must render after handles
@@ -8108,56 +7943,35 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     def _has_real_transition(_rc):
         return str(_rc.get("transition_out") or "none") in VALID_TRANSITION_TYPES
 
-    # HALF-TRIM model: each clip surrenders trans_dur/2 to the adjacent
-    # transition slot, audio plays clip A's main render + A_tail_half +
-    # B_head_half + clip B's main render BACK-TO-BACK with no cross-fade.
-    # Each clip's source content is heard in full across (clip render
-    # audio + half-handle audio); no dialogue mashing. Trade-off: the
-    # visual transition's clip-A side spans source[end_A - trans_dur,
-    # end_A] which overlaps clip A's render-tail by trans_dur/2 — that
-    # 0.2s of source is shown both in clip A's render and (blended with
-    # clip B) in the transition. The slide / flash / zoom motion of the
-    # transition hides the brief duplication; mouth detail isn't readable
-    # mid-slide. Worth it to preserve dialogue intelligibility.
-    _T_TRIM = _T_trans / 2.0
+    # L-CUT model: clip A's audio plays through the entire visual
+    # transition. trim_head = 0 (always); trim_tail = trans_dur for clips
+    # with an outgoing transition. Per pair, total trim = trans_dur (all
+    # on the A side), so total output frames = sum(eff_dur) — same as
+    # before. The audio splice lands at the END of the transition (where
+    # the visual motion completes and clip B's full shot is revealed),
+    # not in the middle of the transition motion. Universal pro-NLE
+    # convention; eliminates the mid-transition audio "glitching" that
+    # the prior half-handle model produced on continuous-speech splices.
     _trim_head_dur = [0.0] * len(render_cuts)
     _trim_tail_dur = [0.0] * len(render_cuts)
     for _i in range(len(render_cuts)):
-        _has_in = _i > 0 and _has_real_transition(render_cuts[_i - 1])
         _has_out = _i < len(render_cuts) - 1 and _has_real_transition(render_cuts[_i])
-        _trim_head_dur[_i] = _T_TRIM if _has_in else 0.0
-        _trim_tail_dur[_i] = _T_TRIM if _has_out else 0.0
+        _trim_tail_dur[_i] = _T_trans if _has_out else 0.0
 
-    # Drop transitions on clips that can't afford the handles. Iterate
-    # left-to-right; if a cut's render dur would go below _MIN_RENDER_DUR,
-    # drop its outgoing transition first (cascades cleanly), then incoming.
+    # Drop transitions on clips that can't afford the tail handle. Only
+    # the outgoing side carries trim now, so dropping is single-sided.
     _dropped = 0
     for _i in range(len(render_cuts)):
         _eff = effective_durations[_i]
-        while _eff - _trim_head_dur[_i] - _trim_tail_dur[_i] < _MIN_RENDER_DUR:
-            if _trim_tail_dur[_i] > 0 and _i < len(render_cuts) - 1:
-                print(
-                    f"[transitions] Cut {_i} eff_dur={_eff:.3f}s lacks handles; "
-                    f"dropping outgoing {render_cuts[_i].get('transition_out')!r}.",
-                    flush=True,
-                )
-                render_cuts[_i]["transition_out"] = "none"
-                _trim_tail_dur[_i] = 0.0
-                _trim_head_dur[_i + 1] = 0.0
-                _dropped += 1
-            elif _trim_head_dur[_i] > 0 and _i > 0:
-                print(
-                    f"[transitions] Cut {_i} eff_dur={_eff:.3f}s lacks handles; "
-                    f"dropping incoming "
-                    f"{render_cuts[_i - 1].get('transition_out')!r}.",
-                    flush=True,
-                )
-                render_cuts[_i - 1]["transition_out"] = "none"
-                _trim_tail_dur[_i - 1] = 0.0
-                _trim_head_dur[_i] = 0.0
-                _dropped += 1
-            else:
-                break  # nothing left to drop; clip is just short
+        if _trim_tail_dur[_i] > 0 and _eff - _trim_tail_dur[_i] < _MIN_RENDER_DUR:
+            print(
+                f"[transitions] Cut {_i} eff_dur={_eff:.3f}s lacks tail handle; "
+                f"dropping outgoing {render_cuts[_i].get('transition_out')!r}.",
+                flush=True,
+            )
+            render_cuts[_i]["transition_out"] = "none"
+            _trim_tail_dur[_i] = 0.0
+            _dropped += 1
     if _dropped > 0:
         print(f"[transitions] Dropped {_dropped} transition(s) for insufficient handles.", flush=True)
 
@@ -8184,13 +7998,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     total_output_duration = total_output_frames / float(source_fps)
 
     # Output clip ranges — each cut's full output window (eff_dur span,
-    # including handle portions consumed by adjacent transitions). Cursor
+    # including the tail handle consumed by the outgoing transition).
     # Cursor advances by full eff_dur per cut — NO overlap subtraction.
-    # In the half-trim audio model (see _T_TRIM block above), each clip's
-    # full eff_dur of source audio plays in the output (split across the
-    # clip's main render audio + half-handle audio in the adjacent
-    # transition slot). The output timeline length equals sum(eff_dur)
-    # regardless of transitions; transitions don't compress the timeline.
+    # In the L-cut audio model (see L-CUT block above), each clip's
+    # full eff_dur of source audio plays in the output: clip A's main
+    # render covers source[start_A, end_A − trans_dur*speed_A] and
+    # clip A's transition slot covers source[end_A − trans_dur*speed_A,
+    # end_A], so all of clip A's source is heard. Total output length
+    # equals sum(eff_dur); transitions don't compress the timeline.
     # Word projections must use no-overlap ranges or captions/MGs/SFX
     # would project shifted by sum(trans_dur) seconds (e.g. 2s for 5
     # transitions = caption appears 2s before the speaker says it).
@@ -8229,11 +8044,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _pbr = float(tm.get("avg_speed") or 1.0)
         _trim_h = _trim_head_dur[i]
         _trim_t = _trim_tail_dur[i]
-        # The clip's RENDER source range is shifted forward by trim_head*speed
-        # (handles for the incoming transition) and shortened by trim_tail*speed
-        # (handles for the outgoing transition). Clip A's tail handle and
-        # clip B's head handle are reserved for the adjacent transitions —
-        # rendered there, not here, eliminating duplication.
+        # The clip's RENDER source range starts at source_start (trim_head=0
+        # in the L-cut model) and is shortened by trim_tail*speed at the end
+        # (the tail handle is rendered by the outgoing transition instead).
         _source_start_seconds = float(rc["source_start"]) + _trim_h * _pbr
         _source_start_frames = int(round(_source_start_seconds * source_fps))
         _dur_frames = _per_cut_render_dur_frames[i]
@@ -9039,11 +8852,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         f"loudnorm=I=-14:TP=-1.5:LRA=11"
     )
 
-    # Per-cut audio — pro NLE overlap model. Each cut's audio uses its
-    # RENDER range (source[start + trim_head*speed, end − trim_tail*speed]);
-    # transition audio is a real cross-fade of the trimmed-off handles
-    # (same source the transition video is rendering). Audio + video
-    # durations match by construction — no padding, no buffer.
+    # Per-cut audio — L-cut transition model. Each cut's audio uses its
+    # RENDER range (source[start, end − trim_tail*speed]); transition slot
+    # audio is clip A's last trans_dur of source, played continuously into
+    # the visual transition. Audio splice lands at the end of the
+    # transition (where the visual motion completes), not in the middle.
+    # Audio + video durations match by construction — no padding, no buffer.
     _audio_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     _speed_audio_future = _audio_pool.submit(
         build_per_cut_audio, source_path, render_cuts,
