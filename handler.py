@@ -11246,116 +11246,116 @@ def handler(job):
         # AVPlayer's fastest playback path is HLS — first segment is
         # independently playable in <100ms, adaptive bitrate handles
         # network changes gracefully, no whole-file metadata to load.
-        # Falls back to MP4-only if any step fails (best-effort).
+        # Required: failure raises and fails the whole render so the
+        # client never sees a half-baked job that's missing the streaming
+        # variants.
         def _upload_hls():
-            # AWS S3 only — Supabase storage path doesn't have the access
-            # pattern we need to upload many small segments efficiently.
             if not _aws_s3_client:
-                return None
+                raise RuntimeError(
+                    "HLS encode requires AWS S3 — _aws_s3_client is None "
+                    "(check AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY env)"
+                )
             _aws_b, _aws_k = _parse_aws_s3_url(upload_url)
             if not (_aws_b and _aws_k):
-                return None
+                raise RuntimeError(
+                    f"HLS encode requires the upload_url to be an AWS S3 URL — "
+                    f"could not parse bucket/key from: {upload_url[:120]}"
+                )
 
             hls_dir = os.path.join(work_dir, "hls")
             os.makedirs(hls_dir, exist_ok=True)
             _hls_t0 = time.time()
-            try:
-                # 1080p variant copies the master's bitrate (no perceptible
-                # quality loss vs source); lower variants re-encode at
-                # progressively lower bitrates. veryfast preset keeps the
-                # added render time under ~25s for typical clips.
-                _hls_cmd = [
-                    "ffmpeg", "-y", "-i", output_path,
-                    "-filter_complex",
-                    "[0:v]split=4[v1][v2][v3][v4];"
-                    "[v1]scale=-2:360[v360];"
-                    "[v2]scale=-2:540[v540];"
-                    "[v3]scale=-2:720[v720];"
-                    "[v4]scale=-2:1080[v1080]",
-                    # 360p
-                    "-map", "[v360]", "-map", "0:a:0",
-                    "-c:v:0", "libx264", "-preset:v:0", "veryfast",
-                    "-b:v:0", "1500k", "-maxrate:v:0", "1700k", "-bufsize:v:0", "3M",
-                    "-c:a:0", "aac", "-b:a:0", "96k", "-ar:a:0", "48000",
-                    # 540p
-                    "-map", "[v540]", "-map", "0:a:0",
-                    "-c:v:1", "libx264", "-preset:v:1", "veryfast",
-                    "-b:v:1", "2500k", "-maxrate:v:1", "2750k", "-bufsize:v:1", "5M",
-                    "-c:a:1", "aac", "-b:a:1", "128k", "-ar:a:1", "48000",
-                    # 720p
-                    "-map", "[v720]", "-map", "0:a:0",
-                    "-c:v:2", "libx264", "-preset:v:2", "veryfast",
-                    "-b:v:2", "4000k", "-maxrate:v:2", "4400k", "-bufsize:v:2", "8M",
-                    "-c:a:2", "aac", "-b:a:2", "128k", "-ar:a:2", "48000",
-                    # 1080p
-                    "-map", "[v1080]", "-map", "0:a:0",
-                    "-c:v:3", "libx264", "-preset:v:3", "veryfast",
-                    "-b:v:3", "6000k", "-maxrate:v:3", "6600k", "-bufsize:v:3", "12M",
-                    "-c:a:3", "aac", "-b:a:3", "128k", "-ar:a:3", "48000",
-                    # Common
-                    "-pix_fmt", "yuv420p",
-                    "-g", "60", "-keyint_min", "60", "-sc_threshold", "0",
-                    # HLS — fMP4 (CMAF) segments, 4s, VOD playlist
-                    "-f", "hls",
-                    "-hls_time", "4",
-                    "-hls_list_size", "0",
-                    "-hls_playlist_type", "vod",
-                    "-hls_segment_type", "fmp4",
-                    "-master_pl_name", "master.m3u8",
-                    "-hls_segment_filename", os.path.join(hls_dir, "stream_%v", "seg_%d.m4s"),
-                    "-var_stream_map",
-                    "v:0,a:0,name:360p v:1,a:1,name:540p v:2,a:2,name:720p v:3,a:3,name:1080p",
-                    os.path.join(hls_dir, "stream_%v", "playlist.m3u8"),
-                ]
-                _hls_r = subprocess.run(_hls_cmd, capture_output=True, text=True, timeout=600)
-                if _hls_r.returncode != 0:
-                    print(
-                        f"[hls] encode failed (rc={_hls_r.returncode}): "
-                        f"{(_hls_r.stderr or '')[-1500:]}",
-                        flush=True,
-                    )
-                    return None
-            except Exception as _hls_enc_err:
-                print(f"[hls] encode error: {_hls_enc_err}", flush=True)
-                return None
+
+            # 1080p variant copies the master's bitrate (no perceptible
+            # quality loss vs source); lower variants re-encode at
+            # progressively lower bitrates. veryfast preset keeps the
+            # added render time under ~25s for typical clips.
+            _hls_cmd = [
+                "ffmpeg", "-y", "-i", output_path,
+                "-filter_complex",
+                "[0:v]split=4[v1][v2][v3][v4];"
+                "[v1]scale=-2:360[v360];"
+                "[v2]scale=-2:540[v540];"
+                "[v3]scale=-2:720[v720];"
+                "[v4]scale=-2:1080[v1080]",
+                # 360p
+                "-map", "[v360]", "-map", "0:a:0",
+                "-c:v:0", "libx264", "-preset:v:0", "veryfast",
+                "-b:v:0", "1500k", "-maxrate:v:0", "1700k", "-bufsize:v:0", "3M",
+                "-c:a:0", "aac", "-b:a:0", "96k", "-ar:a:0", "48000",
+                # 540p
+                "-map", "[v540]", "-map", "0:a:0",
+                "-c:v:1", "libx264", "-preset:v:1", "veryfast",
+                "-b:v:1", "2500k", "-maxrate:v:1", "2750k", "-bufsize:v:1", "5M",
+                "-c:a:1", "aac", "-b:a:1", "128k", "-ar:a:1", "48000",
+                # 720p
+                "-map", "[v720]", "-map", "0:a:0",
+                "-c:v:2", "libx264", "-preset:v:2", "veryfast",
+                "-b:v:2", "4000k", "-maxrate:v:2", "4400k", "-bufsize:v:2", "8M",
+                "-c:a:2", "aac", "-b:a:2", "128k", "-ar:a:2", "48000",
+                # 1080p
+                "-map", "[v1080]", "-map", "0:a:0",
+                "-c:v:3", "libx264", "-preset:v:3", "veryfast",
+                "-b:v:3", "6000k", "-maxrate:v:3", "6600k", "-bufsize:v:3", "12M",
+                "-c:a:3", "aac", "-b:a:3", "128k", "-ar:a:3", "48000",
+                # Common
+                "-pix_fmt", "yuv420p",
+                "-g", "60", "-keyint_min", "60", "-sc_threshold", "0",
+                # HLS — fMP4 (CMAF) segments, 4s, VOD playlist
+                "-f", "hls",
+                "-hls_time", "4",
+                "-hls_list_size", "0",
+                "-hls_playlist_type", "vod",
+                "-hls_segment_type", "fmp4",
+                "-master_pl_name", "master.m3u8",
+                "-hls_segment_filename", os.path.join(hls_dir, "stream_%v", "seg_%d.m4s"),
+                "-var_stream_map",
+                "v:0,a:0,name:360p v:1,a:1,name:540p v:2,a:2,name:720p v:3,a:3,name:1080p",
+                os.path.join(hls_dir, "stream_%v", "playlist.m3u8"),
+            ]
+            _hls_r = subprocess.run(_hls_cmd, capture_output=True, text=True, timeout=600)
+            if _hls_r.returncode != 0:
+                raise RuntimeError(
+                    f"HLS encode failed (rc={_hls_r.returncode}): "
+                    f"{(_hls_r.stderr or '')[-1500:]}"
+                )
 
             # Upload all generated files. Key prefix is derived from the
             # main MP4's S3 key: `videos/abc.mp4` → `videos/abc-hls/`.
             base_key, _ = os.path.splitext(_aws_k)
             hls_prefix = f"{base_key}-hls"
-            try:
-                _hls_upload_count = 0
-                for root, _, files in os.walk(hls_dir):
-                    for fname in files:
-                        local_path = os.path.join(root, fname)
-                        rel_path = os.path.relpath(local_path, hls_dir)
-                        s3_key = f"{hls_prefix}/{rel_path}".replace(os.sep, "/")
-                        if fname.endswith(".m3u8"):
-                            ct = "application/vnd.apple.mpegurl"
-                        elif fname.endswith(".m4s"):
-                            ct = "video/iso.segment"
-                        elif fname.endswith(".mp4"):
-                            ct = "video/mp4"
-                        else:
-                            ct = "application/octet-stream"
-                        _aws_s3_client.upload_file(
-                            local_path, _aws_b, s3_key,
-                            ExtraArgs={"ContentType": ct, "CacheControl": "public, max-age=31536000"},
-                        )
-                        _hls_upload_count += 1
-            except Exception as _hls_up_err:
-                print(f"[hls] upload error: {_hls_up_err}", flush=True)
-                return None
+            _hls_upload_count = 0
+            for root, _, files in os.walk(hls_dir):
+                for fname in files:
+                    local_path = os.path.join(root, fname)
+                    rel_path = os.path.relpath(local_path, hls_dir)
+                    s3_key = f"{hls_prefix}/{rel_path}".replace(os.sep, "/")
+                    if fname.endswith(".m3u8"):
+                        ct = "application/vnd.apple.mpegurl"
+                    elif fname.endswith(".m4s"):
+                        ct = "video/iso.segment"
+                    elif fname.endswith(".mp4"):
+                        ct = "video/mp4"
+                    else:
+                        ct = "application/octet-stream"
+                    _aws_s3_client.upload_file(
+                        local_path, _aws_b, s3_key,
+                        ExtraArgs={"ContentType": ct, "CacheControl": "public, max-age=31536000"},
+                    )
+                    _hls_upload_count += 1
+            if _hls_upload_count == 0:
+                raise RuntimeError("HLS encode produced no output files")
 
-            # Compute the master manifest URL. Prefer the dispatcher's
-            # public_url so the manifest serves through the same CDN as
-            # the main MP4 (CloudFront, with cached edges). Fallback is
-            # the raw S3 URL — playable but slower.
-            if input_data.get("public_url"):
-                main_no_ext, _ = os.path.splitext(input_data["public_url"])
-                hls_url = f"{main_no_ext}-hls/master.m3u8"
-            else:
-                hls_url = f"https://{_aws_b}.s3.amazonaws.com/{hls_prefix}/master.m3u8"
+            # Compute the master manifest URL. Public_url is required —
+            # it's how the iOS app finds the master through CloudFront.
+            # If the dispatcher didn't pass one, the render is mis-wired.
+            if not input_data.get("public_url"):
+                raise RuntimeError(
+                    "HLS upload requires input_data['public_url'] to derive "
+                    "the manifest URL — dispatcher did not pass it"
+                )
+            main_no_ext, _ = os.path.splitext(input_data["public_url"])
+            hls_url = f"{main_no_ext}-hls/master.m3u8"
 
             _hls_elapsed = time.time() - _hls_t0
             print(
@@ -11370,12 +11370,12 @@ def handler(job):
             f_upload = post_executor.submit(_upload_main)
             f_cover  = post_executor.submit(_extract_and_upload_cover)
             f_hls    = post_executor.submit(_upload_hls)
+            # Surface every failure — any one of these missing means the
+            # render is incomplete. The .result() calls re-raise whatever
+            # was caught inside the thread.
             f_upload.result()
             cover_bytes, _ = f_cover.result()
-            try:
-                f_hls.result()  # populates edit_plan["_hls_manifest_url"] on success
-            except Exception as _hls_err:
-                print(f"[hls] task failed (non-fatal): {_hls_err}", flush=True)
+            f_hls.result()
 
         if cover_bytes:
             import base64
