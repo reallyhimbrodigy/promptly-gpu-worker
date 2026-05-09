@@ -1598,37 +1598,30 @@ def _parse_deepgram_response(resp, video_duration=None):
     if len(speaker_ids) > 1:
         print(f"[deepgram] Detected {len(speaker_ids)} speakers", flush=True)
 
+    print(f"[deepgram] Transcribed {len(words)} words", flush=True)
+
     # Phoneme-class-aware boundary correction. Deepgram's word.end lands
     # at the peak of the last high-energy phoneme; for words ending in
     # diphthongs / nasals / liquids / glides / voiced fricatives the
     # audible decay tail lives in the gap to the next word and is lost
-    # at cuts. correct_word_ends extends each affected word's end by a
-    # per-class amount (0-60ms), capped at next_word.start, in-place.
-    # Stop-ending words ("stop", "back") get no extension and are
-    # bit-identical to today. See phoneme_boundary.py for full rationale.
+    # at cuts. apply_phoneme_correction extends each affected word's
+    # `end` per phoneme class (0-60ms), capped at next_word.start, and
+    # marks the transcript with a `_phoneme_corrected` sentinel so the
+    # consumption-time hook in the main pipeline doesn't double-apply.
+    # Stop-ending words ("stop", "back") get no extension and remain
+    # bit-identical to v30. See phoneme_boundary.py for full rationale.
+    result = {"text": alt.transcript or "", "words": words}
     try:
-        from phoneme_boundary import correct_word_ends
-        _phoneme_stats = correct_word_ends(words, video_duration=video_duration)
-        if _phoneme_stats.get("applied"):
-            print(
-                f"[deepgram] Phoneme boundary correction: "
-                f"applied={_phoneme_stats['applied']} "
-                f"skipped={_phoneme_stats['skipped']} "
-                f"capped={_phoneme_stats['capped']} "
-                f"total_extended_ms={_phoneme_stats['total_extended_ms']:.1f} "
-                f"by_ms={dict(sorted(_phoneme_stats['by_ms'].items()))}",
-                flush=True,
-            )
+        from phoneme_boundary import apply_phoneme_correction
+        apply_phoneme_correction(result, video_duration=video_duration)
     except Exception as _phoneme_err:
-        # Boundary correction is purely additive — any failure leaves
-        # the transcript at Deepgram's raw boundaries (today's behavior).
+        # Correction is purely additive — any failure leaves the
+        # transcript at Deepgram's raw boundaries (v30 behavior).
         print(
             f"[deepgram] Phoneme boundary correction skipped: {_phoneme_err!r}",
             flush=True,
         )
-
-    print(f"[deepgram] Transcribed {len(words)} words", flush=True)
-    return {"text": alt.transcript or "", "words": words}
+    return result
 
 
 def _deepgram_is_retriable_error(msg):
@@ -10742,9 +10735,22 @@ def handler(job):
 
         # Shared transcript resolver. The edit-recipe consumer and the main
         # pipeline thread both call this. A lock + cache ensures resolution
-        # runs exactly once. Word boundaries are raw Deepgram timestamps —
-        # the main edit Gemini chooses cuts AT word boundaries, no acoustic
-        # refinement.
+        # runs exactly once.
+        #
+        # PHONEME BOUNDARY CORRECTION runs here as the consumption-time
+        # safety net for v31's word-end extension. The intake-time hook in
+        # _parse_deepgram_response covers fresh Deepgram calls, but every
+        # other transcript path lands here unconditionally:
+        #   - prewarm cache populated by an OLDER build (pre-v31) — no
+        #     correction was ever applied; sentinel absent; we apply now.
+        #   - prewarm cache populated by THIS build — sentinel present;
+        #     apply_phoneme_correction is a no-op.
+        #   - render_only / reinterpret with provided_transcript — sentinel
+        #     usually absent; we apply.
+        #   - URL-based or fresh file Deepgram (already corrected at intake) —
+        #     sentinel present; no-op.
+        # apply_phoneme_correction is idempotent via the sentinel field, so
+        # double-wiring (intake + consumption) is safe by design.
         _refined_tx_cache: Dict[str, Any] = {"value": None}
         _refined_tx_lock = threading.Lock()
 
@@ -10759,6 +10765,16 @@ def handler(job):
                     _t = future_transcribe.result()
                 if _t is None:
                     _t = provided_transcript or {"words": []}
+                # Idempotent — no-op if the transcript already carries
+                # the _phoneme_corrected sentinel from intake-time correction.
+                try:
+                    from phoneme_boundary import apply_phoneme_correction
+                    apply_phoneme_correction(_t, video_duration=source_duration)
+                except Exception as _phon_err:
+                    print(
+                        f"[phoneme] consumption-time correction skipped: {_phon_err!r}",
+                        flush=True,
+                    )
                 _refined_tx_cache["value"] = _t
                 return _t
 

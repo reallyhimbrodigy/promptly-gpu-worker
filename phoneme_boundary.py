@@ -146,6 +146,63 @@ def _classify_extension_ms(phones: str) -> int:
     return 0
 
 
+def apply_phoneme_correction(
+    transcript: dict,
+    video_duration: Optional[float] = None,
+) -> dict:
+    """Idempotent phoneme boundary correction on a transcript dict.
+
+    Wraps correct_word_ends with a sentinel field on the transcript
+    (`_phoneme_corrected`) so the correction is applied EXACTLY ONCE
+    regardless of how many times it's invoked, where the transcript
+    came from (fresh Deepgram, prewarm cache, render_only's
+    provided_transcript), or which build populated it.
+
+    The sentinel persists through json.dump/load (it's a regular dict
+    field), so prewarm-cached transcripts carry their correction
+    status across container/build boundaries: a transcript cached by
+    a v31 prewarm worker has the sentinel set; a transcript cached by
+    a v30 (pre-correction) prewarm worker does not, and the
+    consumption-time hook in the main pipeline will apply correction
+    when it loads.
+
+    Returns the stats dict from correct_word_ends, plus the
+    `already_corrected` flag indicating whether the call was a no-op.
+    """
+    if transcript.get("_phoneme_corrected"):
+        return {
+            "applied": 0, "skipped": 0, "capped": 0,
+            "total_extended_ms": 0.0, "by_ms": {},
+            "already_corrected": True,
+        }
+    words = transcript.get("words") or []
+    stats = correct_word_ends(words, video_duration=video_duration)
+    # Set sentinel even when stats["applied"] is 0 (e.g., transcript
+    # has zero diphthong/sonorant words, or every extension was capped
+    # at 0 by zero-gap boundaries). The transcript HAS been processed;
+    # re-running would do nothing useful and waste a phonemize call.
+    transcript["_phoneme_corrected"] = True
+    if stats.get("applied"):
+        print(
+            f"[phoneme] Boundary correction applied: "
+            f"applied={stats['applied']} "
+            f"skipped={stats['skipped']} "
+            f"capped={stats['capped']} "
+            f"total_extended_ms={stats['total_extended_ms']:.1f} "
+            f"by_ms={dict(sorted(stats['by_ms'].items()))}",
+            flush=True,
+        )
+    else:
+        print(
+            f"[phoneme] Boundary correction ran (no extensions applied): "
+            f"skipped={stats['skipped']} capped={stats['capped']} "
+            f"({len(words)} words)",
+            flush=True,
+        )
+    stats["already_corrected"] = False
+    return stats
+
+
 def correct_word_ends(
     words: List[dict],
     video_duration: Optional[float] = None,

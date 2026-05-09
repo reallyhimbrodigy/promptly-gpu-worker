@@ -76,7 +76,7 @@ image = (
     # Without this, NVENC silently fails and pipeline falls back to CPU encoding (10-15x slower)
     .env({"NVIDIA_DRIVER_CAPABILITIES": "all"})
     .run_commands(
-        "echo 'build v31 - phoneme-class-aware word boundary correction (espeak-ng + phonemizer): extend word.end for diphthong/long-vowel/nasal/liquid/glide/voiced-fricative endings by class-specific decay constants (0-60ms), capped at next_word.start. Stop-ending words bit-identical to v30. Fixes -ow/-ay/-ee/-m/-n/-l clipping at cut boundaries (the noticeable Kno- problem) without buffers, fallbacks, or audio analysis.'",
+        "echo 'build v32 - cache-invalidation fix for phoneme boundary correction: move correction wiring from intake-only to BOTH intake and consumption-time, with an idempotent _phoneme_corrected sentinel on the transcript dict so it runs exactly once regardless of source (fresh Deepgram, prewarm cache populated by older build, render_only provided_transcript). v31 was a no-op for prewarm-cached renders because the cached transcript skipped _parse_deepgram_response entirely.'",
         "apt-get update && apt-get install -y ca-certificates && update-ca-certificates",
         # Remove CUDA stubs AND compat libs that intercept dlopen before Modal's
         # real driver libs. THEN recreate placeholders for every libcuda* file
