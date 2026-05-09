@@ -76,7 +76,7 @@ image = (
     # Without this, NVENC silently fails and pipeline falls back to CPU encoding (10-15x slower)
     .env({"NVIDIA_DRIVER_CAPABILITIES": "all"})
     .run_commands(
-        "echo 'build v30 - L-cut audio at transitions: clip A audio plays through full transition slot, splice lands at end of transition, drop room-tone bridge'",
+        "echo 'build v31 - phoneme-class-aware word boundary correction (espeak-ng + phonemizer): extend word.end for diphthong/long-vowel/nasal/liquid/glide/voiced-fricative endings by class-specific decay constants (0-60ms), capped at next_word.start. Stop-ending words bit-identical to v30. Fixes -ow/-ay/-ee/-m/-n/-l clipping at cut boundaries (the noticeable Kno- problem) without buffers, fallbacks, or audio analysis.'",
         "apt-get update && apt-get install -y ca-certificates && update-ca-certificates",
         # Remove CUDA stubs AND compat libs that intercept dlopen before Modal's
         # real driver libs. THEN recreate placeholders for every libcuda* file
@@ -120,6 +120,11 @@ image = (
         "libswresample-dev",
         "libsndfile1-dev",
         "libsamplerate0-dev",
+        # espeak-ng: rules-based grapheme-to-phoneme converter used by
+        # phoneme_boundary.py to classify each Deepgram word's trailing
+        # phoneme. 100% coverage by construction (handles any text),
+        # ~5MB binary + dict, no model weights, deterministic.
+        "espeak-ng",
         # Chromium dependencies for Remotion headless rendering
         "libnss3",
         "libatk1.0-0",
@@ -196,6 +201,9 @@ image = (
         "pydantic",
         "tqdm",
         "Pillow",
+        # Pure-Python wrapper around the espeak-ng binary; provides batch
+        # phonemize() that returns IPA strings for each word in one pass.
+        "phonemizer==3.2.1",
     )
     # PyTorch with CUDA 12.4 — for RIFE 4.18 motion-compensated frame
     # interpolation on the H100 GPU at the fps-normalize step. Verified
@@ -319,6 +327,7 @@ image = (
     .add_local_file("rife_normalize.py", "/rife_normalize.py")
     .add_local_file("render_schemas.py", "/render_schemas.py")
     .add_local_file("cuda_driver_setup.py", "/cuda_driver_setup.py")
+    .add_local_file("phoneme_boundary.py", "/phoneme_boundary.py")
 )
 
 # ── Secrets ────────────────────────────────────────────────────────────────────

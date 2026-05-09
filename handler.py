@@ -1557,8 +1557,13 @@ def _deepgram_options():
     )
 
 
-def _parse_deepgram_response(resp):
-    """Common response parsing for both file-based and URL-based Deepgram calls."""
+def _parse_deepgram_response(resp, video_duration=None):
+    """Common response parsing for both file-based and URL-based Deepgram calls.
+
+    `video_duration` (when known) caps the last word's audible-end
+    extension. Pass None when the duration isn't readily available;
+    downstream clamping in build_clips_from_words handles overshoot.
+    """
     alt = resp.results.channels[0].alternatives[0]
     raw_words = alt.words or []
     words = [
@@ -1592,6 +1597,36 @@ def _parse_deepgram_response(resp):
     speaker_ids = set(w["speaker"] for w in words)
     if len(speaker_ids) > 1:
         print(f"[deepgram] Detected {len(speaker_ids)} speakers", flush=True)
+
+    # Phoneme-class-aware boundary correction. Deepgram's word.end lands
+    # at the peak of the last high-energy phoneme; for words ending in
+    # diphthongs / nasals / liquids / glides / voiced fricatives the
+    # audible decay tail lives in the gap to the next word and is lost
+    # at cuts. correct_word_ends extends each affected word's end by a
+    # per-class amount (0-60ms), capped at next_word.start, in-place.
+    # Stop-ending words ("stop", "back") get no extension and are
+    # bit-identical to today. See phoneme_boundary.py for full rationale.
+    try:
+        from phoneme_boundary import correct_word_ends
+        _phoneme_stats = correct_word_ends(words, video_duration=video_duration)
+        if _phoneme_stats.get("applied"):
+            print(
+                f"[deepgram] Phoneme boundary correction: "
+                f"applied={_phoneme_stats['applied']} "
+                f"skipped={_phoneme_stats['skipped']} "
+                f"capped={_phoneme_stats['capped']} "
+                f"total_extended_ms={_phoneme_stats['total_extended_ms']:.1f} "
+                f"by_ms={dict(sorted(_phoneme_stats['by_ms'].items()))}",
+                flush=True,
+            )
+    except Exception as _phoneme_err:
+        # Boundary correction is purely additive — any failure leaves
+        # the transcript at Deepgram's raw boundaries (today's behavior).
+        print(
+            f"[deepgram] Phoneme boundary correction skipped: {_phoneme_err!r}",
+            flush=True,
+        )
+
     print(f"[deepgram] Transcribed {len(words)} words", flush=True)
     return {"text": alt.transcript or "", "words": words}
 
@@ -1622,6 +1657,10 @@ def transcribe_audio(source_path):
     audio_bytes = prepare_audio_for_deepgram(source_path)
     print(f"[deepgram] Sending {len(audio_bytes) / 1024:.0f}KB FLAC audio", flush=True)
     options = _deepgram_options()
+    # Probe duration once so the phoneme boundary corrector can cap
+    # the LAST word's audible-end extension at video_duration. Cheap
+    # (~50ms ffprobe), result is cached by probe_duration.
+    _video_duration = probe_duration(source_path) or None
     _t0 = time.time()
     last_err = None
     for attempt in range(3):
@@ -1630,7 +1669,7 @@ def transcribe_audio(source_path):
                 {"buffer": audio_bytes, "mimetype": "audio/flac"},
                 options,
             )
-            result = _parse_deepgram_response(resp)
+            result = _parse_deepgram_response(resp, video_duration=_video_duration)
             print(f"[metric] stage_duration stage=transcribe_file duration_ms={int((time.time()-_t0)*1000)} attempt={attempt+1}", flush=True)
             return result
         except Exception as e:
