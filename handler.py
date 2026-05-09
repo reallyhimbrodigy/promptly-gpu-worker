@@ -1105,9 +1105,10 @@ def detect_face_positions_dense(video_path, every_n_frames=5, target_w=None, tar
         capture_output=True, text=True, timeout=30,
     )
     if _extract_cmd.returncode != 0:
-        print(f"[dense-face] FFmpeg extraction failed, falling back to OpenCV: {_extract_cmd.stderr[-200:]}", flush=True)
-        # Fallback: use basic OpenCV approach
-        return _detect_face_positions_dense_fallback(video_path, every_n_frames)
+        raise RuntimeError(
+            f"FFmpeg face-frame extraction failed (rc={_extract_cmd.returncode}): "
+            f"{(_extract_cmd.stderr or '')[-300:]}"
+        )
 
     _extract_elapsed = time.time() - _t_start
     _frame_files = sorted(glob.glob(os.path.join(_extract_dir, "face_*.jpg")))
@@ -1185,52 +1186,6 @@ def detect_face_positions_dense(video_path, every_n_frames=5, target_w=None, tar
         f"({frame_count} total frames, every {every_n_frames}th @ {fps:.1f}fps, extracted at {_extract_w}x{_extract_h})",
         flush=True,
     )
-    return positions
-
-
-def _detect_face_positions_dense_fallback(video_path, every_n_frames=5):
-    """Fallback face detection using OpenCV sequential read (slower, no FFmpeg)."""
-    import cv2
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        return []
-    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-    frame_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 1080)
-    frame_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 1920)
-    center_x, center_y = frame_w // 2, frame_h // 2
-    net = cv2.dnn.readNetFromCaffe(
-        "/models/face_detector/deploy.prototxt",
-        "/models/face_detector/res10_300x300_ssd_iter_140000.caffemodel",
-    )
-    last_cx, last_cy = center_x, center_y
-    positions = []
-    frame_idx = 0
-    while True:
-        if frame_idx % every_n_frames == 0:
-            ret, frame = cap.read()
-            if not ret:
-                break
-            h, w = frame.shape[:2]
-            blob = cv2.dnn.blobFromImage(cv2.resize(frame, (300, 300)), 1.0, (300, 300), (104.0, 177.0, 123.0), swapRB=False, crop=False)
-            net.setInput(blob)
-            detections = net.forward()
-            found, best_cx, best_cy, best_conf, best_area = False, center_x, center_y, 0.0, 0
-            for di in range(detections.shape[2]):
-                conf = float(detections[0, 0, di, 2])
-                if conf < 0.5:
-                    continue
-                x1, y1, x2, y2 = int(detections[0,0,di,3]*w), int(detections[0,0,di,4]*h), int(detections[0,0,di,5]*w), int(detections[0,0,di,6]*h)
-                area = (x2-x1)*(y2-y1)
-                if conf > best_conf or area > best_area:
-                    best_conf, best_area, best_cx, best_cy, found = conf, area, (x1+x2)//2, (y1+y2)//2, True
-            if found:
-                last_cx, last_cy = best_cx, best_cy
-            positions.append({"t": round(frame_idx/fps, 4), "cx": float(best_cx if found else last_cx), "cy": float(best_cy if found else last_cy), "found": found, "confidence": round(best_conf, 4) if found else 0.0})
-        else:
-            if not cap.grab():
-                break
-        frame_idx += 1
-    cap.release()
     return positions
 
 
