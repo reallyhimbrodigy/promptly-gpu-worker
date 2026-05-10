@@ -76,7 +76,7 @@ image = (
     # Without this, NVENC silently fails and pipeline falls back to CPU encoding (10-15x slower)
     .env({"NVIDIA_DRIVER_CAPABILITIES": "all"})
     .run_commands(
-        "echo 'build v34 - A/V drift root fix: build final_audio as PCM WAV (sample-exact, no encoder padding) instead of AAC m4a, encode AAC ONCE in the final composite mux where -shortest can actually trim to exact video duration. Previous design encoded AAC at audio-build then -c:a copy at final mux, which left ~33ms of AAC end-padding that -shortest cannot trim on copy mode. Post-mux drift check upgraded from WARNING-only to RAISE on >20ms.'",
+        "echo 'build v35 - caption position auto-flip around MG windows: Python computes the caption-position override from MG geometry (Notification always renders top → captions forced bottom; bottom-anchored MGs → captions forced top; center/left/right MGs → no caption move). Mirrors the existing B-roll auto-flip pattern. Gemini prompt updated to NOT emit caption_position_changes for MG/B-roll windows (only for face-down windows). Stops Gemini from emitting wrong-direction caption flips that the 1.5s flicker filter was silently absorbing. v34 included.'",
         "apt-get update && apt-get install -y ca-certificates && update-ca-certificates",
         # Remove CUDA stubs AND compat libs that intercept dlopen before Modal's
         # real driver libs. THEN recreate placeholders for every libcuda* file

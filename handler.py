@@ -2602,17 +2602,17 @@ caption_position_changes — REQUIRED ARRAY (can be empty). Position-change even
     - Python synthesizes the actual timed segments from these events — you do not emit timestamps.
     - Empty array = captions stay "bottom" for the entire video.
 
-  NO-OP CHANGES ARE WASTED OUTPUT. Do NOT emit a change to "bottom" unless a PRIOR change in your list moved captions to "top" or "center". Captions are already "bottom" by default; emitting `{{word_index: X, position: "bottom"}}` with no preceding move-away does nothing and clutters the output. If you have no MG/B-roll/face-down windows that need captions moved off the bottom, emit an EMPTY array.
+  THE PIPELINE AUTO-MOVES CAPTIONS FOR MG AND B-ROLL WINDOWS.
+  Do NOT emit caption_position_changes for motion_graphic or broll_clip windows. Python sees the MG's effective render zone (Notification always renders top; other MGs at their anchor) and the B-roll's full-canvas cutaway, then forces captions to the OPPOSITE edge across exactly those frame ranges. Whatever you emit here for MG/B-roll regions is overridden by the auto-move, so emitting it is wasted output.
 
-  MOVE captions (emit a change) when:
-    - A motion_graphic occupies the bottom half across a window → emit "top" at the MG's start_word_index, and "bottom" back at the FIRST KEPT WORD AFTER end_word_index. Not later. Captions return to bottom the moment the MG is gone.
-    - The speaker is looking down / mouth is in the lower third of the frame → "top" at the word where the downward look starts, "bottom" at the word where they look up again.
-    - B-roll cutaway covers the bottom with busy imagery → "top" at the b-roll's start_word_index, "bottom" at the FIRST KEPT WORD AFTER end_word_index.
-  Speaker changes alone don't require caption moves — face position does.
+  YOU ONLY EMIT caption_position_changes FOR FACE-POSITION REASONS.
+  The single legitimate case: the speaker is LOOKING DOWN or their MOUTH is in the lower third of the frame, and the FACE VISIBILITY signal confirms it. Emit "top" at the word where the downward look starts, "bottom" at the word where they look up again. Speaker changes alone don't require caption moves — face position does.
 
-  WINDOW TIMING — match position windows EXACTLY to what's covering the captions. If your IMessageBubble runs from word 66 to word 72, the caption flip is {{66, top}} and {{73, bottom}} (or whatever the next kept word is — skip over any word in remove_words). Do NOT extend the top window past end_word+1 to give the viewer "extra reading time" — the MG's own duration handles its visual lifespan. Captions sitting at top after the MG is gone reads as broken.
+  If you have no face-down windows in this video, emit an EMPTY ARRAY.
 
-  MINIMUM SUSTAINED DURATION — every position must hold for AT LEAST 1.5 SECONDS of OUTPUT time (≈4-6 spoken words at typical pacing). The renderer drops any segment shorter than that as flicker. If your MG is too brief to justify a 1.5s caption flip, don't move captions at all for it.
+  NO-OP CHANGES ARE WASTED OUTPUT. Do NOT emit a change to "bottom" unless a PRIOR change in your list moved captions to "top" or "center". Captions are already "bottom" by default.
+
+  MINIMUM SUSTAINED DURATION — every position you emit must hold for AT LEAST 1.5 SECONDS of OUTPUT time (≈4-6 spoken words at typical pacing). The renderer drops any segment shorter than that as flicker.
 
 === TEXT OVERLAYS — BRIEF TITLE CARDS ===
 
@@ -3350,6 +3350,106 @@ def _coalesce_caption_position_segments(segments, min_dur=1.5):
         else:
             merged.append(seg)
     return merged
+
+
+def _force_caption_position_around_mgs(segments, motion_graphics):
+    """Override caption position to AVOID colliding with motion-graphic
+    components. Returns a new contiguous segment list.
+
+    Notifications always render at the TOP regardless of their anchor field
+    (the drop-down animation is the metaphor — see Notification.tsx). Other
+    MGs render at the position their `props.anchor` specifies (top / center
+    / bottom / left / right via SEMANTIC_TO_MG_ANCHOR). Captions default to
+    BOTTOM. Collision rules:
+
+      MG occupies TOP    → captions forced to BOTTOM
+      MG occupies BOTTOM → captions forced to TOP
+      MG at center / left / right → no caption move (no overlap with the
+                                    bottom default)
+
+    Why we need this: Gemini's caption_position_changes plan over MG windows
+    is unreliable. Even though the prompt explains "captions need to flip
+    to bottom while [Notifications] are on screen", the cuts call routinely
+    emits the WRONG direction (e.g., flip captions UP toward the top-anchored
+    notification, which would put both elements in the same zone). Pre-this
+    change, those bad flips were silently absorbed by the 1.5s flicker filter
+    if they happened to be short. This function makes the override explicit
+    and direction-correct, so the editor never trusts Gemini for this layer.
+
+    Pure layout fix — no prompt-side rule for Gemini to remember. Inputs are
+    already projected to output frames so the override is frame-precise.
+
+    NB: B-roll already wins the conflict check at the broll-vs-overlay
+    filter step earlier, so by the time this function runs, no MG overlaps
+    a B-roll window. _force_top_position_during_broll therefore commutes
+    safely with this function regardless of call order.
+    """
+    if not motion_graphics or not segments:
+        return segments
+
+    # Build override windows: each MG that occupies top/bottom contributes
+    # one (from_frame, to_frame, forced_caption_pos) tuple.
+    overrides: List[tuple] = []
+    for _mg in motion_graphics:
+        _mg_type = str(_mg.get("type") or "")
+        _mg_anchor = str((_mg.get("props") or {}).get("anchor") or "")
+        # Notification renders at top regardless of anchor (drop-down anim).
+        _effective_pos = "top" if _mg_type == "Notification" else _mg_anchor
+        if _effective_pos == "top":
+            _forced = "bottom"
+        elif _effective_pos == "bottom":
+            _forced = "top"
+        else:
+            continue  # center / left / right — no caption-zone collision
+        _ff = int(_mg.get("fromFrame") or 0)
+        _tf = _ff + int(_mg.get("durationInFrames") or 0)
+        if _tf > _ff:
+            overrides.append((_ff, _tf, _forced))
+
+    if not overrides:
+        return segments
+
+    boundaries = set()
+    for s in segments:
+        boundaries.add(int(s["fromFrame"]))
+        boundaries.add(int(s["toFrame"]))
+    for _ff, _tf, _ in overrides:
+        boundaries.add(_ff)
+        boundaries.add(_tf)
+    sorted_b = sorted(boundaries)
+    out: List[dict] = []
+    n_overrides = 0
+    for i in range(len(sorted_b) - 1):
+        a, b = sorted_b[i], sorted_b[i + 1]
+        if a >= b:
+            continue
+        orig_pos = None
+        for s in segments:
+            if int(s["fromFrame"]) <= a < int(s["toFrame"]):
+                orig_pos = s["position"]
+                break
+        if orig_pos is None:
+            continue
+        forced = None
+        for _ff, _tf, _pos in overrides:
+            if _ff <= a and _tf >= b:
+                forced = _pos
+                break
+        pos = forced if forced is not None else orig_pos
+        if forced is not None and forced != orig_pos:
+            n_overrides += 1
+        if out and out[-1]["position"] == pos and int(out[-1]["toFrame"]) == a:
+            out[-1]["toFrame"] = b
+        else:
+            out.append({"fromFrame": a, "toFrame": b, "position": pos})
+    if n_overrides:
+        print(
+            f"[caption-segments] forced caption position around "
+            f"{len(overrides)} MG window(s) "
+            f"({n_overrides} sub-segment override(s))",
+            flush=True,
+        )
+    return out
 
 
 def _force_top_position_during_broll(segments, broll_frame_ranges):
@@ -8708,6 +8808,18 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     ]
     caption_position_segments_out = _force_top_position_during_broll(
         caption_position_segments_out, _broll_frame_ranges_for_caption
+    )
+
+    # Force caption position around MG windows. Notifications always render
+    # at top (regardless of anchor); other MGs honor their anchor. Captions
+    # are pushed to the OPPOSITE edge during the MG's frame range so they
+    # never land in the same zone. This stops Gemini's caption_position_
+    # changes from being a source of collisions — the layer is computed
+    # automatically from MG geometry, no prompt rule. B-roll already won
+    # the conflict check above, so MGs and B-roll windows never overlap;
+    # the two functions don't fight.
+    caption_position_segments_out = _force_caption_position_around_mgs(
+        caption_position_segments_out, motion_graphics_out
     )
 
     # PromptlyOverlay input — captions/MG/text on a transparent canvas. The
