@@ -9133,7 +9133,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             "-map", f"[{_final_labels[0]}]",
         ]
         if include_audio and c_audio_idx is not None:
-            cmd += ["-map", f"{c_audio_idx}:a:0", "-c:a", "copy"]
+            # final_audio is PCM WAV; encode AAC here. With re-encoding,
+            # `-shortest` (set below for include_audio=True) will trim the
+            # audio to exact video duration — `-c:a copy` cannot truncate
+            # AAC mid-frame and was the source of the v32 33ms drift.
+            cmd += ["-map", f"{c_audio_idx}:a:0", "-c:a", "aac", "-b:a", "192k"]
 
         # Two encoder paths:
         #
@@ -9311,10 +9315,20 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     if not _speed_audio_path or not os.path.exists(_speed_audio_path):
         raise RuntimeError(f"Per-cut audio pipeline produced no output at {_speed_audio_path}")
 
-    # ── 11. Build final audio (SFX mix + EQ chain) → .m4a ─────────
+    # ── 11. Build final audio (SFX mix + EQ chain) → .wav (PCM) ─────────
     # SFX play OVER the dialogue at full volume — no ducking, no dipping.
     # The dialogue stays at its full level throughout; SFX add on top via
     # amix with normalize=0 (linear sum, not auto-gain-reduced).
+    #
+    # OUTPUT FORMAT: PCM s16le WAV, NOT AAC. The previous design encoded
+    # AAC here and let the final mux do `-c:a copy`, which left the audio
+    # 33ms longer than video at output (AAC pads the final frame to a
+    # 1024-sample boundary; `-c:a copy` cannot truncate AAC mid-frame so
+    # the muxer's `-shortest` flag had no effect on duration). PCM is
+    # sample-exact — no encoder padding, no frame-boundary rounding. The
+    # final composite step (which already re-encodes video) does the AAC
+    # encode in one pass with proper duration enforcement, so the audio
+    # leaves the pipeline at exactly the same length as the video.
     _audio_filter_parts = []
     _audio_out = "[audio_base]"
     _audio_out_initial = "[audio_base]"
@@ -9330,7 +9344,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _audio_filter_parts.insert(0, f"[0:a]asetpts=PTS-STARTPTS{_audio_out_initial}")
     _audio_fc = ";".join(sfx_filter_strs + _audio_filter_parts)
 
-    _final_audio_path = os.path.join(work_dir, "final_audio.m4a")
+    _final_audio_path = os.path.join(work_dir, "final_audio.wav")
     _audio_t0 = time.time()
     _audio_cmd = (
         ["ffmpeg", "-y", "-v", "warning", "-threads", "0",
@@ -9338,8 +9352,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         + sfx_input_args
         + ["-filter_complex", _audio_fc,
            "-map", "[final_audio]",
-           "-c:a", "aac", "-b:a", "192k",
-           "-movflags", "+faststart",
+           "-c:a", "pcm_s16le",
            _final_audio_path]
     )
     _audio_r = subprocess.run(_audio_cmd, capture_output=True, text=True, timeout=180)
@@ -9554,7 +9567,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
              "-g", str(int(round(source_fps))),
              "-keyint_min", str(int(round(source_fps))),
              "-sc_threshold", "0",
-             "-c:a", "copy",
+             # Audio is PCM input — encode AAC HERE, in the one place
+             # that sees both streams, so `-shortest` actually trims to
+             # video duration. With `-c:a copy` the muxer cannot split
+             # AAC frames mid-block and the output ends up 20-40ms long.
+             "-c:a", "aac", "-b:a", "192k",
              "-shortest",
              "-movflags", "+faststart",
              output_path],
@@ -9579,40 +9596,36 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         flush=True,
     )
 
-    # ── A/V sync verification — fail loud on drift > 20 ms ─────────────
+    # ── A/V sync verification — RAISE on drift > 20 ms ────────────────
     # The pipeline is engineered for sample-accurate A/V alignment:
     # video frame count and audio sample count both derive from the same
     # per-cut effective durations, with transitions accounted for in
     # both pipelines. After mux, the rendered file's video and audio
-    # stream durations should match within ~1 frame (16.7 ms at 60fps).
-    # Anything beyond 20 ms indicates a structural drift bug — log it
-    # loudly so it shows up in production logs immediately, not three
-    # bug reports later.
-    try:
-        _final_probe = _probe_full(output_path)
-        _final_streams = _final_probe.get("streams") or []
-        _final_v = next((s for s in _final_streams if s.get("codec_type") == "video"), {})
-        _final_a = next((s for s in _final_streams if s.get("codec_type") == "audio"), {})
-        _v_dur = float(_final_v.get("duration") or 0.0)
-        _a_dur = float(_final_a.get("duration") or 0.0)
-        _av_drift_ms = (_v_dur - _a_dur) * 1000.0
-        _expected_dur = total_output_frames / float(source_fps)
-        _v_drift_vs_expected_ms = (_v_dur - _expected_dur) * 1000.0
-        print(
-            f"[av-sync] video={_v_dur:.4f}s audio={_a_dur:.4f}s "
-            f"v−a={_av_drift_ms:+.2f}ms  v−expected={_v_drift_vs_expected_ms:+.2f}ms "
-            f"(expected={_expected_dur:.4f}s, target ≤±20ms)",
-            flush=True,
+    # stream durations match within ~1 frame (33 ms at 30fps). Anything
+    # beyond 20 ms indicates a structural drift bug — fail the render
+    # so the bad file never ships and the next deploy gets a real
+    # diagnostic, not three bug reports later.
+    _final_probe = _probe_full(output_path)
+    _final_streams = _final_probe.get("streams") or []
+    _final_v = next((s for s in _final_streams if s.get("codec_type") == "video"), {})
+    _final_a = next((s for s in _final_streams if s.get("codec_type") == "audio"), {})
+    _v_dur = float(_final_v.get("duration") or 0.0)
+    _a_dur = float(_final_a.get("duration") or 0.0)
+    _av_drift_ms = (_v_dur - _a_dur) * 1000.0
+    _expected_dur = total_output_frames / float(source_fps)
+    _v_drift_vs_expected_ms = (_v_dur - _expected_dur) * 1000.0
+    print(
+        f"[av-sync] video={_v_dur:.4f}s audio={_a_dur:.4f}s "
+        f"v−a={_av_drift_ms:+.2f}ms  v−expected={_v_drift_vs_expected_ms:+.2f}ms "
+        f"(expected={_expected_dur:.4f}s, target ≤±20ms)",
+        flush=True,
+    )
+    if abs(_av_drift_ms) > 20.0:
+        raise RuntimeError(
+            f"A/V drift {_av_drift_ms:+.2f}ms exceeds 20ms target "
+            f"(video={_v_dur:.4f}s audio={_a_dur:.4f}s expected={_expected_dur:.4f}s). "
+            f"Investigate cuts, transitions, audio extraction, or composite filtergraph."
         )
-        if abs(_av_drift_ms) > 20.0:
-            print(
-                f"[av-sync] WARNING: A/V drift {_av_drift_ms:+.2f}ms exceeds 20ms target. "
-                f"Audio and video stream durations don't match — investigate cuts, "
-                f"transitions, audio extraction, or composite filtergraph.",
-                flush=True,
-            )
-    except Exception as _av_e:
-        print(f"[av-sync] sync probe skipped: {_av_e}", flush=True)
 
     # Cleanup staged files in the bundle public root so it doesn't pile up.
     # work_dir itself is cleaned up by the caller (handler() in the finally

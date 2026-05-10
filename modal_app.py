@@ -76,7 +76,7 @@ image = (
     # Without this, NVENC silently fails and pipeline falls back to CPU encoding (10-15x slower)
     .env({"NVIDIA_DRIVER_CAPABILITIES": "all"})
     .run_commands(
-        "echo 'build v33 - revert phoneme boundary correction (v31+v32) entirely: drop espeak-ng + phonemizer + phoneme_boundary.py. Architecture cannot fix zero-gap continuous-speech splices (cap-at-next_word.start = 0 by definition); the partial improvement on gap-bearing splices is not worth the dependency surface and the misattribution risk for residual diphthong clipping. Restoring raw Deepgram word boundaries throughout.'",
+        "echo 'build v34 - A/V drift root fix: build final_audio as PCM WAV (sample-exact, no encoder padding) instead of AAC m4a, encode AAC ONCE in the final composite mux where -shortest can actually trim to exact video duration. Previous design encoded AAC at audio-build then -c:a copy at final mux, which left ~33ms of AAC end-padding that -shortest cannot trim on copy mode. Post-mux drift check upgraded from WARNING-only to RAISE on >20ms.'",
         "apt-get update && apt-get install -y ca-certificates && update-ca-certificates",
         # Remove CUDA stubs AND compat libs that intercept dlopen before Modal's
         # real driver libs. THEN recreate placeholders for every libcuda* file
