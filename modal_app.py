@@ -76,7 +76,7 @@ image = (
     # Without this, NVENC silently fails and pipeline falls back to CPU encoding (10-15x slower)
     .env({"NVIDIA_DRIVER_CAPABILITIES": "all"})
     .run_commands(
-        "echo 'build v36 - range cuts as word indices: Gemini emits {after_word_index, before_word_index} instead of float {start, end} for range removals. Python derives the float boundaries from word.end and word.start, so cuts always land on real word boundaries by construction — no precision-class bugs at the LLM/code interface. Anchor-integrity guard switches from float-overlap to index-strict-between (cleaner, no edge cases). Legacy float-range form still accepted for cached plans and silence-tighten. v35 included.'",
+        "echo 'build v37 - master MP4 audio: AAC -> PCM s16le for 0ms A/V drift. AAC has a 1024-sample frame size at 44.1kHz = 23.2ms per frame; the encoded stream length is always a multiple of frame size, placing a structural ~21ms floor on |video-audio| drift no matter how -shortest is configured. PCM has no frame-size structure: stream length = samples / sample_rate exactly, so master audio aligns with video to a single sample (~21us). HLS variants still encode AAC (HLS spec requires it). Drift check threshold 20ms -> 1ms, raises on violation. v36 included.'",
         "apt-get update && apt-get install -y ca-certificates && update-ca-certificates",
         # Remove CUDA stubs AND compat libs that intercept dlopen before Modal's
         # real driver libs. THEN recreate placeholders for every libcuda* file

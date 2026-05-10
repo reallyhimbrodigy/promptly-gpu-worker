@@ -9343,11 +9343,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             "-map", f"[{_final_labels[0]}]",
         ]
         if include_audio and c_audio_idx is not None:
-            # final_audio is PCM WAV; encode AAC here. With re-encoding,
-            # `-shortest` (set below for include_audio=True) will trim the
-            # audio to exact video duration — `-c:a copy` cannot truncate
-            # AAC mid-frame and was the source of the v32 33ms drift.
-            cmd += ["-map", f"{c_audio_idx}:a:0", "-c:a", "aac", "-b:a", "192k"]
+            # PCM s16le for the master MP4 audio — sample-exact, 0ms drift.
+            # See the longer rationale at the final concat+mux step. Do NOT
+            # swap to AAC: any frame-based codec reintroduces the structural
+            # ~21ms drift floor that produced audible word clipping pre-v37.
+            cmd += ["-map", f"{c_audio_idx}:a:0", "-c:a", "pcm_s16le"]
 
         # Two encoder paths:
         #
@@ -9778,11 +9778,22 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
              "-g", str(int(round(source_fps))),
              "-keyint_min", str(int(round(source_fps))),
              "-sc_threshold", "0",
-             # Audio is PCM input — encode AAC HERE, in the one place
-             # that sees both streams, so `-shortest` actually trims to
-             # video duration. With `-c:a copy` the muxer cannot split
-             # AAC frames mid-block and the output ends up 20-40ms long.
-             "-c:a", "aac", "-b:a", "192k",
+             # Audio: PCM s16le (sample-exact, zero drift by construction).
+             # AAC has a hardcoded 1024-sample frame size — at 44.1kHz that
+             # places a ~21ms structural floor on |video - audio| duration
+             # difference no matter how `-shortest` is configured, because
+             # the encoded stream length is always K × 1024 / sample_rate.
+             # PCM has no frame-size structure: stream length = samples /
+             # sample_rate, equal to the input WAV exactly. The master MP4
+             # is consequently sample-aligned with the video to within a
+             # single sample (~21µs at 44.1kHz). Do NOT swap this back to
+             # AAC: the drift check below now raises on >1ms, but the real
+             # cost is audible word clipping at cut boundaries — that's the
+             # bug PCM exists to prevent. AAC remains in the HLS variants
+             # below (HLS spec requires it) and segments compute frame
+             # alignment in isolation, so per-segment drift doesn't
+             # accumulate over the playback timeline.
+             "-c:a", "pcm_s16le",
              "-shortest",
              "-movflags", "+faststart",
              output_path],
@@ -9807,15 +9818,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         flush=True,
     )
 
-    # ── A/V sync verification — RAISE on drift > 20 ms ────────────────
-    # The pipeline is engineered for sample-accurate A/V alignment:
-    # video frame count and audio sample count both derive from the same
-    # per-cut effective durations, with transitions accounted for in
-    # both pipelines. After mux, the rendered file's video and audio
-    # stream durations match within ~1 frame (33 ms at 30fps). Anything
-    # beyond 20 ms indicates a structural drift bug — fail the render
-    # so the bad file never ships and the next deploy gets a real
-    # diagnostic, not three bug reports later.
+    # ── A/V sync verification — RAISE on drift > 1 ms ─────────────────
+    # The master MP4 audio is PCM s16le (sample-exact); video frame count
+    # and audio sample count both derive from the same per-cut effective
+    # durations. With PCM there is no codec frame-size to round to, so
+    # stream durations should match within a single sample (~21µs at
+    # 44.1kHz). Anything beyond 1ms indicates a real drift bug in the
+    # filter chain or the cut math — fail the render so the bad file
+    # never ships.
     _final_probe = _probe_full(output_path)
     _final_streams = _final_probe.get("streams") or []
     _final_v = next((s for s in _final_streams if s.get("codec_type") == "video"), {})
@@ -9828,14 +9838,15 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     print(
         f"[av-sync] video={_v_dur:.4f}s audio={_a_dur:.4f}s "
         f"v−a={_av_drift_ms:+.2f}ms  v−expected={_v_drift_vs_expected_ms:+.2f}ms "
-        f"(expected={_expected_dur:.4f}s, target ≤±20ms)",
+        f"(expected={_expected_dur:.4f}s, target ≤±1ms)",
         flush=True,
     )
-    if abs(_av_drift_ms) > 20.0:
+    if abs(_av_drift_ms) > 1.0:
         raise RuntimeError(
-            f"A/V drift {_av_drift_ms:+.2f}ms exceeds 20ms target "
+            f"A/V drift {_av_drift_ms:+.2f}ms exceeds 1ms target "
             f"(video={_v_dur:.4f}s audio={_a_dur:.4f}s expected={_expected_dur:.4f}s). "
-            f"Investigate cuts, transitions, audio extraction, or composite filtergraph."
+            f"With PCM master audio drift should be sub-sample. Investigate cuts, "
+            f"transitions, audio extraction, or composite filtergraph."
         )
 
     # Cleanup staged files in the bundle public root so it doesn't pile up.
