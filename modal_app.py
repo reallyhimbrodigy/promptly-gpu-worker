@@ -76,7 +76,7 @@ image = (
     # Without this, NVENC silently fails and pipeline falls back to CPU encoding (10-15x slower)
     .env({"NVIDIA_DRIVER_CAPABILITIES": "all"})
     .run_commands(
-        "echo 'build v35 - caption position auto-flip around MG windows: Python computes the caption-position override from MG geometry (Notification always renders top → captions forced bottom; bottom-anchored MGs → captions forced top; center/left/right MGs → no caption move). Mirrors the existing B-roll auto-flip pattern. Gemini prompt updated to NOT emit caption_position_changes for MG/B-roll windows (only for face-down windows). Stops Gemini from emitting wrong-direction caption flips that the 1.5s flicker filter was silently absorbing. v34 included.'",
+        "echo 'build v36 - range cuts as word indices: Gemini emits {after_word_index, before_word_index} instead of float {start, end} for range removals. Python derives the float boundaries from word.end and word.start, so cuts always land on real word boundaries by construction — no precision-class bugs at the LLM/code interface. Anchor-integrity guard switches from float-overlap to index-strict-between (cleaner, no edge cases). Legacy float-range form still accepted for cached plans and silence-tighten. v35 included.'",
         "apt-get update && apt-get install -y ca-certificates && update-ca-certificates",
         # Remove CUDA stubs AND compat libs that intercept dlopen before Modal's
         # real driver libs. THEN recreate placeholders for every libcuda* file

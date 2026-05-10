@@ -235,12 +235,28 @@ class _Transition(BaseModel):
     flashColor: Optional[str] = None
 
 class _RemoveWord(BaseModel):
-    # Either a word_index (surgical single-word removal) or a start/end range
-    # (continuous span — dead air, abandoned tangent, breath, etc.). Gemini
-    # owns every cut decision; Python applies them verbatim. `reason` is a
-    # free-form short label (filler / stutter / restart / dead_air / breath /
-    # tangent / redundant / ...) — informational only.
+    # Three forms, exactly one of which must be populated:
+    #   (a) word_index — surgical single-word removal of word[i].
+    #   (b) after_word_index + before_word_index — continuous range
+    #       between two kept words (dead air / abandoned tangent / breath).
+    #       Python computes the float boundaries as
+    #         range_start = words[after_word_index].end
+    #         range_end   = words[before_word_index].start
+    #       so the cut lands on real word boundaries by construction.
+    #   (c) start/end — LEGACY float-timestamp range. Accepted for
+    #       backward compatibility with older cached plans, but new
+    #       Gemini calls emit the index-based form (see CutPlan prompt
+    #       rule 9). When float ranges are supplied, the same word-end /
+    #       word-start computation is applied — a range that doesn't
+    #       align with the nearest word boundaries will still be snapped
+    #       to them by the splicer's "word fully inside [start, end]"
+    #       rule, so the legacy form is functionally equivalent.
+    # Gemini owns every cut decision; Python applies them verbatim.
+    # `reason` is a free-form short label (filler / stutter / restart /
+    # dead_air / breath / tangent / redundant / ...) — informational only.
     word_index: Optional[int] = None
+    after_word_index: Optional[int] = None
+    before_word_index: Optional[int] = None
     start: Optional[float] = None
     end: Optional[float] = None
     reason: str
@@ -2068,23 +2084,30 @@ Same idea expressed twice in close succession with no new information:
 NOT redundant — rhetorical emphasis where repetition IS the point: "I told her once. I told her twice. I told her three times."
 
 ──────────────────────────────────────────────────────────────────────────
-RULE 9 — DEAD AIR. Time-range cuts only.
+RULE 9 — DEAD AIR. Index-anchored range cuts.
 ──────────────────────────────────────────────────────────────────────────
 
-STRICT BOUNDARY RULE — every range must land on real word boundaries:
-  - range.start MUST equal some word[i].end timestamp shown in the transcript.
-  - range.end MUST equal some word[i+1].start timestamp shown in the transcript.
-  - Compute gap = word[i+1].start - word[i].end. Emit a range cut ONLY when gap > 0.30s.
+Range cuts are anchored by word index, never by float timestamp. You emit:
 
-THE WORST ERROR: emitting a range whose interval CONTAINS a word's [start, end] timestamps. The renderer treats range cuts as "remove every word fully inside this interval" — accidentally spanning a spoken word silently deletes it.
+  {"after_word_index": A, "before_word_index": B, "reason": "dead_air"}
+
+Semantics: every word with index `i` such that A < i < B is removed. The kept word at index A and the kept word at index B both survive. Python derives the float boundaries from the actual word.end of A and word.start of B, so the cut lands exactly on word boundaries by construction. You never emit floats.
+
+WHEN TO USE A RANGE CUT
+  - There is a kept word at index A and a kept word at index B with A < B.
+  - You want every word between them removed (silence pad, abandoned tangent, breath gap, off-topic aside).
+  - The gap word[A+1].start - word[A].end > 0.30s — sub-300ms gaps are NATURAL CADENCE inside speech, not dead air, KEEP them.
+
+WHAT NEVER WORKS
+  - Emitting a range that brackets a word you anchored elsewhere (emphasis_moments / motion_graphics / sfx / transitions / text_overlays / broll_clips). Anchors win — the pipeline drops your range and the words inside survive into the cut.
+  - Pointing both anchors at the same index (A == B) — empty range, no effect.
+  - Pointing the range at a removed word_index — invalid index, range dropped.
 
 VERIFY EACH RANGE before emitting:
-  1. Find word[i] (immediately before your range) and word[i+1] (immediately after).
-  2. range.start == word[i].end EXACTLY.
-  3. range.end == word[i+1].start EXACTLY.
-  4. No other word's [start, end] falls inside [range.start, range.end].
-
-Sub-300ms breath-gaps inside continuous speech are NATURAL CADENCE, not silence. KEEP them. Only long pauses (≥0.30s, often ≥0.5s) read as dead air to the viewer.
+  1. word[A] and word[B] are both KEPT (not in your remove_words word_index entries above).
+  2. A < B (strictly).
+  3. word[B].start - word[A].end > 0.30s (real dead air, not natural cadence).
+  4. No word in (A, B) is referenced by any other anchor field.
 
 ──────────────────────────────────────────────────────────────────────────
 RULE 10 — END TRIM. The last word of the video.
@@ -2114,11 +2137,10 @@ SIGNATURES:
   - "Anyway, where was I?" — the speaker themselves flagging a tangent.
 
 PROCEDURE:
-  1. Find the start word of the tangent (where the main story stops advancing).
-  2. Find the end word (where the main thread resumes).
-  3. Emit a range cut covering [tangent_start_word.start, resume_word.start] — snapping to the gap between the last tangent word and the first resumed word.
+  1. Find the start word of the tangent (the first word of the off-topic aside).
+  2. Find the end word — the LAST word of the tangent (where the main thread resumes on the NEXT word).
+  3. Emit a range cut: {"after_word_index": <word before tangent>, "before_word_index": <first word of resumed thread>, "reason": "tangent"}.
   4. Verify: reading the dialogue with the tangent removed, the main story flows naturally without a gap or non-sequitur.
-  5. Use reason: "tangent".
 
 NOT A TANGENT — content that pays off later. If the "aside" is referenced again later in the video, it's structural setup. KEEP it.
 NOT A TANGENT — emotional or rhetorical breath. The speaker pausing to gather themselves before a hard line is part of delivery, not a tangent.
@@ -2164,9 +2186,11 @@ REASON GLOSSARY — pick the accurate reason for each entry:
 
 ENTRY FORMAT
   Single word:   {"word_index": int, "reason": "filler"|"stutter"|"restart"|"redundant"|"orphan_filler"|"breath"|"other"}
-  Time range:    {"start": float, "end": float, "reason": "dead_air"|"breath"|"tangent"|"section_skip"|"other"}
+  Range:         {"after_word_index": int, "before_word_index": int, "reason": "dead_air"|"breath"|"tangent"|"section_skip"|"other"}
 
-Range cuts and word cuts coexist — a range removes every word fully inside [start, end]; partial overlaps keep the word.
+The range form removes every word strictly between two anchor words: every word with index `i` such that `after_word_index < i < before_word_index`. Both anchors must be REAL transcript word indices; Python derives the float boundaries from the actual word.end and word.start, so cuts always land exactly on word boundaries by construction — you never emit floats.
+
+Range cuts and word cuts coexist freely. A range cut whose interval contains a word that you ALSO anchored to (via emphasis_moments / motion_graphics / sfx / transitions / text_overlays / broll_clips) is rejected by the pipeline — anchors win, the range is dropped, and the words inside it survive into the cut.
 
 ═══════════════════════════════════════════════════════════════════════════
 DECISION 3 — PACING
@@ -2239,7 +2263,7 @@ Re-read your remove_words list. Run this checklist. Every "no" requires a fix be
   ☐ STORY-ARC: no cut breaks a causal chain or setup-payoff structure. Repetition for emphasis (rhetoric) is preserved.
   ☐ STUTTER DIRECTION: every stutter cut keeps the LATEST instance, removes the earlier ones.
   ☐ RESTART DIRECTION: every phrasal restart cuts the FIRST attempt, keeps the SECOND.
-  ☐ RANGE BOUNDARIES: every range cut's start == word[i].end exactly, end == word[i+1].start exactly. No range spans inside a word.
+  ☐ RANGE FORMAT: every range cut uses {"after_word_index": int, "before_word_index": int, "reason": ...}. NO float timestamps in remove_words — Python derives them from the anchor word indices.
   ☐ VIBE-MATCHED INTENSITY: cut aggressiveness matches the vibe (viral = aggressive, narrative = preserve breathing, educational = light).
   ☐ READ-THROUGH SMOOTHNESS: with your removals applied, mentally read the kept transcript end-to-end. Every concatenation should sound like natural speech — no jarring word jumps, no sentence fragments smashed together, no rhythm breaks where a connective word was carrying the cadence. If any cut creates an awkward read, undo it. Smooth flow > maximum compression.
 
@@ -2253,7 +2277,7 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
   "notes": "<=40 words>",
   "remove_words": [
     {"word_index": int, "reason": "filler"|"stutter"|"restart"|"redundant"|"orphan_filler"|"breath"|"other"},
-    {"start": float, "end": float, "reason": "dead_air"|"breath"|"tangent"|"section_skip"|"other"}
+    {"after_word_index": int, "before_word_index": int, "reason": "dead_air"|"breath"|"tangent"|"section_skip"|"other"}
   ],
   "pacing": "fast" | "medium" | "slow"
 }"""
@@ -3511,38 +3535,54 @@ def _force_top_position_during_broll(segments, broll_frame_ranges):
     return out
 
 
-def _reindex_kept_transcript(deepgram_words, remove_words):
-    """Apply CutPlan.remove_words to the source transcript and renumber survivors.
+def _remove_words_to_src_indices(remove_words, deepgram_words):
+    """Resolve every entry in remove_words to a set of source-word indices.
 
-    Returns a tuple of:
-      kept_words   — list of source-word dicts that survive, in source order.
-      new_to_src   — list[int] mapping new_idx → src_idx for every kept word.
-      removed_src  — set[int] of source indices that were cut.
+    Three accepted entry shapes (see _RemoveWord schema for full doc):
+      (a) {"word_index": int}                                    — single
+      (b) {"after_word_index": int, "before_word_index": int}    — range,
+          removes every word with index in (after, before) exclusive.
+      (c) {"start": float, "end": float}                         — legacy
+          float-range; removes every word whose [start, end] is fully
+          contained in [rs, re]. Kept for silence-tighten's internally
+          computed micro-cuts and for any cached plans predating the
+          index-based range schema.
 
-    Range cuts are applied by the same rule the renderer uses: a word is
-    removed if its [start, end] is fully contained in [range.start, range.end].
-    Word-index entries remove that single source word.
+    Malformed or out-of-range entries are silently skipped (the caller
+    logs the originating remove_words list, so a bad entry is observable).
     """
-    if not deepgram_words:
-        return [], [], set()
-
-    removed_src = set()
+    removed_src: set = set()
     n = len(deepgram_words)
-
+    if n == 0:
+        return removed_src
     word_starts = [float(w.get("start") or 0.0) for w in deepgram_words]
     word_ends = [float(w.get("end") or 0.0) for w in deepgram_words]
-
     for item in (remove_words or []):
         if not isinstance(item, dict):
             continue
-        if "word_index" in item:
+        if "word_index" in item and item["word_index"] is not None:
             try:
                 idx = int(item["word_index"])
             except (TypeError, ValueError):
                 continue
             if 0 <= idx < n:
                 removed_src.add(idx)
-        elif "start" in item and "end" in item:
+            continue
+        if (
+            item.get("after_word_index") is not None
+            and item.get("before_word_index") is not None
+        ):
+            try:
+                _aw = int(item["after_word_index"])
+                _bw = int(item["before_word_index"])
+            except (TypeError, ValueError):
+                continue
+            if _aw < 0 or _bw <= _aw or _bw > n:
+                continue
+            for i in range(_aw + 1, _bw):
+                removed_src.add(i)
+            continue
+        if "start" in item and "end" in item:
             try:
                 rs = float(item["start"])
                 re_ = float(item["end"])
@@ -3553,10 +3593,27 @@ def _reindex_kept_transcript(deepgram_words, remove_words):
             for i in range(n):
                 if word_starts[i] >= rs and word_ends[i] <= re_:
                     removed_src.add(i)
+    return removed_src
+
+
+def _reindex_kept_transcript(deepgram_words, remove_words):
+    """Apply CutPlan.remove_words to the source transcript and renumber survivors.
+
+    Returns a tuple of:
+      kept_words   — list of source-word dicts that survive, in source order.
+      new_to_src   — list[int] mapping new_idx → src_idx for every kept word.
+      removed_src  — set[int] of source indices that were cut.
+
+    See _remove_words_to_src_indices for the accepted entry shapes.
+    """
+    if not deepgram_words:
+        return [], [], set()
+
+    removed_src = _remove_words_to_src_indices(remove_words, deepgram_words)
 
     kept_words = []
     new_to_src = []
-    for src_idx in range(n):
+    for src_idx in range(len(deepgram_words)):
         if src_idx in removed_src:
             continue
         kept_words.append(deepgram_words[src_idx])
@@ -4051,32 +4108,16 @@ def generate_edit_gemini(
     _gap_keep = 0.100  # preserved breath after cut
     _src_words = deepgram_words or []
     if _src_words:
-        # Apply Gemini's remove_words to find which indices survive (mirrors
-        # _reindex_kept_transcript logic, just without renumbering).
-        _removed_initial: set = set()
+        # Apply Gemini's remove_words to find which indices survive. Shares
+        # the canonical resolver with _reindex_kept_transcript so all three
+        # accepted entry shapes (word_index / after+before_word_index /
+        # legacy float start+end) collapse to the same removed-set.
         _n = len(_src_words)
         _starts = [float(w.get("start") or 0.0) for w in _src_words]
         _ends = [float(w.get("end") or 0.0) for w in _src_words]
-        for _it in raw_cut_remove_words:
-            if not isinstance(_it, dict):
-                continue
-            if "word_index" in _it:
-                try:
-                    _wi = int(_it["word_index"])
-                except (TypeError, ValueError):
-                    continue
-                if 0 <= _wi < _n:
-                    _removed_initial.add(_wi)
-            elif "start" in _it and "end" in _it:
-                try:
-                    _rs = float(_it["start"]); _re = float(_it["end"])
-                except (TypeError, ValueError):
-                    continue
-                if _re <= _rs:
-                    continue
-                for _i in range(_n):
-                    if _starts[_i] >= _rs and _ends[_i] <= _re:
-                        _removed_initial.add(_i)
+        _removed_initial = _remove_words_to_src_indices(
+            raw_cut_remove_words, _src_words,
+        )
         _kept_indices = [_i for _i in range(_n) if _i not in _removed_initial]
         _micro_cuts: list = []
         for _prev, _next in zip(_kept_indices, _kept_indices[1:]):
@@ -4318,7 +4359,37 @@ Indices below are the NEW kept-only space [0..{_kept_count - 1}]. Every word_ind
         for _rw in raw_remove_words:
             if not isinstance(_rw, dict):
                 continue
-            if "start" in _rw and "end" in _rw and "word_index" not in _rw:
+            # Index-based range: covers the open interval (after, before).
+            # An anchored word i with after < i < before is "covered."
+            if (
+                _rw.get("after_word_index") is not None
+                and _rw.get("before_word_index") is not None
+                and _rw.get("word_index") is None
+            ):
+                try:
+                    _aw = int(_rw["after_word_index"])
+                    _bw = int(_rw["before_word_index"])
+                except (TypeError, ValueError):
+                    continue
+                _covers_anchor = next(
+                    (_pi for _pi in _anchored_src_indices if _aw < _pi < _bw),
+                    None,
+                )
+                if _covers_anchor is not None:
+                    _pword = _dg_words[_covers_anchor]
+                    _pw_text = str(_pword.get("punctuated_word") or _pword.get("word") or "").strip()
+                    print(
+                        f"[generate-edit] Dropping Gemini range cut "
+                        f"after_word={_aw}/before_word={_bw} "
+                        f"— covers ANCHORED word [{_covers_anchor}] '{_pw_text}' "
+                        f"(anchor-integrity guard)",
+                        flush=True,
+                    )
+                    continue
+            # Legacy float range: open-interval overlap with anchored word's
+            # [start, end]. Kept for cached plans and silence-tighten micro-
+            # cuts (Python-internal, not Gemini-emitted).
+            elif "start" in _rw and "end" in _rw and "word_index" not in _rw:
                 try:
                     _rs = float(_rw["start"])
                     _re = float(_rw["end"])
@@ -4557,11 +4628,12 @@ Indices below are the NEW kept-only space [0..{_kept_count - 1}]. Every word_ind
             "SceneTitle",
         }
         # Build set of removed word indices so we can reject transitions that
-        # target removed words (Gemini must pick kept words).
-        _tr_removed = set()
-        for rw in (edit_plan.get("remove_words") or []):
-            if "word_index" in rw:
-                _tr_removed.add(int(rw["word_index"]))
+        # target removed words (Gemini must pick kept words). Reuses the
+        # canonical resolver so all three remove_words shapes collapse to
+        # the same removed-set the splicer will use.
+        _tr_removed = _remove_words_to_src_indices(
+            edit_plan.get("remove_words") or [], _dg_words,
+        )
         for _ti, tr in enumerate(raw_transitions):
             if not isinstance(tr, dict):
                 raise ValueError(f"transitions[{_ti}] must be an object")
@@ -7576,11 +7648,9 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15, v
 
     Cut times are Deepgram word boundaries. The audio cut path uses
     round(t * sample_rate) for indexing, so the rendered splice lands
-    at the exact sample. Continuous-speech splices (where the cut is
-    mid-phoneme because the speaker didn't pause) are handled by the
-    silence-aware splice logic in build_per_cut_audio — non-silent
-    cuts get a 30 ms room-tone bridge inserted to mask the splice,
-    silent cuts use a 5 ms equal-power crossfade.
+    at the exact sample. Every audio splice gets a 5 ms equal-power
+    cos²/sin² crossfade in build_per_cut_audio (the standard pro-NLE
+    "Default Audio Transition") to smooth the joint.
 
     video_duration (when > 0) clamps every word's end timestamp so that
     no clip ever requests source frames past the actual end of the video.
@@ -7632,44 +7702,71 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15, v
                 continue
             removed_indices.add(idx)
 
-    # ── Step 1b: Time-range removals (section_skip / dead_air / non_speech_gap) ──
-    # Gemini can also send {"start": X, "end": Y, "reason": "..."} entries.
-    # Originally these were silently ignored (only word_index removed words),
-    # but the prompt advertises section_skip and Gemini relies on it.
+    # ── Step 1b: Range removals — index-based AND legacy float-range ──────
+    # Index-based form: {"after_word_index": int, "before_word_index": int,
+    #                    "reason": "..."}
+    #   Removes every word with index strictly between (after, before).
+    #   Boundary anchors are real word indices, so no float-precision risk.
+    #   This is the canonical form Gemini emits in the post-v35 schema.
     #
-    # SAFETY: only remove words whose ENTIRE acoustic span [start, end] is
-    # FULLY CONTAINED inside the requested range. A word that partially
-    # overlaps the boundary is kept. This is the protection that the original
-    # silent-ignore was trying to provide — Gemini's slightly-off timestamps
-    # cannot accidentally clip content at the edges.
+    # Legacy float-range form: {"start": X, "end": Y, "reason": "..."}
+    #   Removes every word whose [start, end] is FULLY CONTAINED in [X, Y].
+    #   Strict containment is the protection that prevents Gemini's
+    #   slightly-off timestamps from accidentally clipping content at the
+    #   edges. Used by silence-tighten (Python-internal) and accepted for
+    #   any cached pre-v35 plans.
     _range_removed_count = 0
     for item in remove_words or []:
         if not isinstance(item, dict):
             continue
-        if "word_index" in item:
+        if "word_index" in item and item["word_index"] is not None:
             continue  # already handled in Step 1
-        if "start" not in item or "end" not in item:
-            continue
-        try:
-            _r_start = float(item["start"])
-            _r_end = float(item["end"])
-        except Exception:
-            continue
-        if _r_end <= _r_start:
-            continue
         _reason = str(item.get("reason") or "range_remove")
-        for _w in sorted_words:
-            if _w["_word_index"] in removed_indices:
+        # Prefer index-based when present.
+        if (
+            item.get("after_word_index") is not None
+            and item.get("before_word_index") is not None
+        ):
+            try:
+                _aw = int(item["after_word_index"])
+                _bw = int(item["before_word_index"])
+            except Exception:
                 continue
-            # Strict containment: word must be entirely inside the range
-            if _w["_start"] >= _r_start and _w["_end"] <= _r_end:
-                removed_indices.add(_w["_word_index"])
-                _range_removed_count += 1
-                print(
-                    f"[tighten] Word '{_w['_text']}' at {_w['_start']:.3f}s removed "
-                    f"(inside {_reason} range {_r_start:.3f}-{_r_end:.3f}s)",
-                    flush=True,
-                )
+            if _bw <= _aw:
+                continue
+            for _w in sorted_words:
+                _wi = _w["_word_index"]
+                if _wi in removed_indices:
+                    continue
+                if _aw < _wi < _bw:
+                    removed_indices.add(_wi)
+                    _range_removed_count += 1
+                    print(
+                        f"[tighten] Word '{_w['_text']}' at {_w['_start']:.3f}s removed "
+                        f"(inside {_reason} range word[{_aw}]→word[{_bw}])",
+                        flush=True,
+                    )
+            continue
+        if "start" in item and "end" in item:
+            try:
+                _r_start = float(item["start"])
+                _r_end = float(item["end"])
+            except Exception:
+                continue
+            if _r_end <= _r_start:
+                continue
+            for _w in sorted_words:
+                if _w["_word_index"] in removed_indices:
+                    continue
+                # Strict containment: word must be entirely inside the range
+                if _w["_start"] >= _r_start and _w["_end"] <= _r_end:
+                    removed_indices.add(_w["_word_index"])
+                    _range_removed_count += 1
+                    print(
+                        f"[tighten] Word '{_w['_text']}' at {_w['_start']:.3f}s removed "
+                        f"(inside {_reason} range {_r_start:.3f}-{_r_end:.3f}s)",
+                        flush=True,
+                    )
     if _range_removed_count:
         print(f"[tighten] Range removals removed {_range_removed_count} word(s)", flush=True)
 
