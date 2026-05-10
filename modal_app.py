@@ -76,7 +76,7 @@ image = (
     # Without this, NVENC silently fails and pipeline falls back to CPU encoding (10-15x slower)
     .env({"NVIDIA_DRIVER_CAPABILITIES": "all"})
     .run_commands(
-        "echo 'build v32 - cache-invalidation fix for phoneme boundary correction: move correction wiring from intake-only to BOTH intake and consumption-time, with an idempotent _phoneme_corrected sentinel on the transcript dict so it runs exactly once regardless of source (fresh Deepgram, prewarm cache populated by older build, render_only provided_transcript). v31 was a no-op for prewarm-cached renders because the cached transcript skipped _parse_deepgram_response entirely.'",
+        "echo 'build v33 - revert phoneme boundary correction (v31+v32) entirely: drop espeak-ng + phonemizer + phoneme_boundary.py. Architecture cannot fix zero-gap continuous-speech splices (cap-at-next_word.start = 0 by definition); the partial improvement on gap-bearing splices is not worth the dependency surface and the misattribution risk for residual diphthong clipping. Restoring raw Deepgram word boundaries throughout.'",
         "apt-get update && apt-get install -y ca-certificates && update-ca-certificates",
         # Remove CUDA stubs AND compat libs that intercept dlopen before Modal's
         # real driver libs. THEN recreate placeholders for every libcuda* file
@@ -120,11 +120,6 @@ image = (
         "libswresample-dev",
         "libsndfile1-dev",
         "libsamplerate0-dev",
-        # espeak-ng: rules-based grapheme-to-phoneme converter used by
-        # phoneme_boundary.py to classify each Deepgram word's trailing
-        # phoneme. 100% coverage by construction (handles any text),
-        # ~5MB binary + dict, no model weights, deterministic.
-        "espeak-ng",
         # Chromium dependencies for Remotion headless rendering
         "libnss3",
         "libatk1.0-0",
@@ -201,9 +196,6 @@ image = (
         "pydantic",
         "tqdm",
         "Pillow",
-        # Pure-Python wrapper around the espeak-ng binary; provides batch
-        # phonemize() that returns IPA strings for each word in one pass.
-        "phonemizer==3.2.1",
     )
     # PyTorch with CUDA 12.4 — for RIFE 4.18 motion-compensated frame
     # interpolation on the H100 GPU at the fps-normalize step. Verified
@@ -327,7 +319,6 @@ image = (
     .add_local_file("rife_normalize.py", "/rife_normalize.py")
     .add_local_file("render_schemas.py", "/render_schemas.py")
     .add_local_file("cuda_driver_setup.py", "/cuda_driver_setup.py")
-    .add_local_file("phoneme_boundary.py", "/phoneme_boundary.py")
 )
 
 # ── Secrets ────────────────────────────────────────────────────────────────────
