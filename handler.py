@@ -7809,7 +7809,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
       - voice ducking at SFX onsets
       - adaptive EQ + double-compressor voice chain
 
-    Final step: ffmpeg mux — stream-copy video + AAC audio into output_path.
+    Final step: ffmpeg mux — stream-copy video chunks + AAC-encode the PCM
+    audio inline so `-shortest` can trim to exact video duration.
     """
     import math
 
@@ -8424,7 +8425,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     #                              FFmpeg in the final composite pass.
     # Net: Remotion only paints the visual layers it has to (overlay +
     # complex-segment windows). FFmpeg handles every video-paint frame at
-    # native speed (libx264 ultrafast + lanczos resample on 64 cores).
+    # native speed (libx264 medium + lanczos resample on 64 cores).
     _outro = edit_plan.get("outro") or "none"
 
     from ffmpeg_base import (
@@ -9370,7 +9371,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     #   4. Apply outro fade (if configured)
     #   5. Alpha-composite the PromptlyOverlay layer (captions + MGs + text
     #      overlays + B-roll cutaways — every visible non-source pixel).
-    #   6. libx264 final encode + AAC stream-copy in a single pass.
+    #   6. libx264 final encode + AAC encode (from PCM WAV) in a single pass.
     # Wait for all overlay chunk subprocesses (in input order — for chunked
     # mode each chunk lands in its own .mov; we concat them in order below).
     _overlay_chunk_elapsed = []
@@ -9507,8 +9508,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         )
     else:
         # Single-pass for short outputs (<400 frames). One libx264 invocation
-        # writes video + audio directly to output_path — AAC stream-copied
-        # alongside the encode in the same pass.
+        # writes video + audio directly to output_path — PCM WAV input is
+        # AAC-encoded inline alongside the video encode (so -shortest can
+        # actually trim audio to video duration; see commit 5387f96).
         _single_cmd = _build_composite_cmd(
             0, 0, int(total_output_frames), output_path,
             include_audio=True,
@@ -10968,7 +10970,10 @@ def handler(job):
         render_elapsed = time.time() - t
         _timings["render"] = render_elapsed
         print(f"[pipeline] parallel_render complete in {render_elapsed:.1f}s", flush=True)
-        _enc_label = "NVENC" if _HAS_NVENC else "libx264/ultrafast threads=auto"
+        # NB: this label must match the actual encode in _build_composite_cmd
+        # / final concat+mux; both currently use libx264 -preset medium -crf 18.
+        # Update here too if you change the encoder.
+        _enc_label = "NVENC" if _HAS_NVENC else "libx264/medium crf=18 threads=auto"
         print(f"[render] Encoding: {_enc_label}", flush=True)
         # Validate render output — single ffprobe for file check + duration extraction
         if not os.path.exists(output_path) or os.path.getsize(output_path) < 100000:
