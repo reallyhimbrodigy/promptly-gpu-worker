@@ -5925,6 +5925,13 @@ def export_additional_format(output_path, aspect_ratio, dest_path):
         "-vf", vf,
     ] + get_encode_args("high") + [
         "-c:a", "copy",
+        # Tag color space explicitly. Without these, iOS AVPlayer
+        # assumes sRGB and crushes Rec.709 luma — visible as washed-out
+        # / dim playback on iPhone. Apple-recommended for VOD H.264.
+        "-color_primaries", "bt709",
+        "-color_trc", "bt709",
+        "-colorspace", "bt709",
+        "-color_range", "tv",
         "-movflags", "+faststart",
         dest_path,
     ])
@@ -9379,6 +9386,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 "-g", str(int(round(source_fps))),
                 "-keyint_min", str(int(round(source_fps))),
                 "-sc_threshold", "0",
+                "-color_primaries", "bt709",
+                "-color_trc", "bt709",
+                "-colorspace", "bt709",
+                "-color_range", "tv",
                 "-shortest",
                 "-movflags", "+faststart",
                 output_path_for_chunk,
@@ -9778,6 +9789,15 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
              "-g", str(int(round(source_fps))),
              "-keyint_min", str(int(round(source_fps))),
              "-sc_threshold", "0",
+             # Tag Rec.709 color space + tv-range explicitly. Without these
+             # the output's color_primaries/transfer/matrix read as
+             # "unknown" and AVPlayer falls back to assuming sRGB —
+             # visible as washed-out / dim playback. This is the
+             # single biggest fix for "quality looks bad" complaints.
+             "-color_primaries", "bt709",
+             "-color_trc", "bt709",
+             "-colorspace", "bt709",
+             "-color_range", "tv",
              # Audio: PCM s16le (sample-exact, zero drift by construction).
              # AAC has a hardcoded 1024-sample frame size — at 44.1kHz that
              # places a ~21ms structural floor on |video - audio| duration
