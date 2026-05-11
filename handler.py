@@ -10317,6 +10317,14 @@ def handler(job):
 
         job_id    = input_data["job_id"]
         video_url = input_data["video_url"]
+        # Optional client-side low-res proxy. When the iOS client extracts
+        # a 640x480 proxy on-device and uploads it ahead of the high-res
+        # source, this URL points to the proxy file. The worker uses it
+        # for Gemini visual analysis — eliminating the worker's own
+        # on-server proxy encode step (~7s saved) AND letting Gemini
+        # start running the moment the small proxy lands (the high-res
+        # is typically still uploading in the client's background).
+        proxy_video_url = str(input_data.get("proxy_video_url") or "").strip()
         vibe      = input_data["vibe"]
         upload_url = input_data["upload_url"]
         user_id   = input_data["user_id"]
@@ -10626,10 +10634,38 @@ def handler(job):
             return result
 
         def _do_gemini_proxy():
-            """Encode 240p proxy and return bytes for inline Gemini API call.
-            Skips the file upload + poll cycle (~6s) by sending bytes directly."""
+            """Provide low-res video bytes for inline Gemini API call.
+
+            Two paths:
+              1. Client provided `proxy_video_url` — download the small
+                 pre-uploaded proxy from S3/CloudFront (~3-6 MB, lands
+                 in under a second). Skips the on-server encode entirely.
+              2. No client proxy — encode 240p proxy ourselves from the
+                 high-res source (~7s on the orchestrator).
+
+            Path 1 is dramatically better for end-to-end latency: client
+            proxy uploads in parallel with the user typing their vibe,
+            so by the time the render dispatches, Gemini analysis can
+            start immediately.
+            """
+            _proxy_t = time.time()
+            if proxy_video_url:
+                try:
+                    _resp = requests.get(proxy_video_url, timeout=30)
+                    _resp.raise_for_status()
+                    _proxy_bytes = _resp.content
+                    _proxy_mb = len(_proxy_bytes) / (1024 * 1024)
+                    print(
+                        f"[pipeline] Gemini proxy: client-uploaded {_proxy_mb:.1f}MB "
+                        f"downloaded in {time.time()-_proxy_t:.1f}s (no on-server encode)",
+                        flush=True,
+                    )
+                    return _proxy_bytes
+                except Exception as _client_proxy_err:
+                    # Surface but fall through to on-server encode below.
+                    print(f"[pipeline] Client proxy download failed ({_client_proxy_err}) — falling back to on-server encode", flush=True)
+
             try:
-                _proxy_t = time.time()
                 _proxy_path = os.path.join(work_dir, "gemini_proxy.mp4")
                 _proxy_venc = (["-c:v", "h264_nvenc", "-preset", "p1", "-rc", "vbr", "-cq", "35"]
                                if _HAS_NVENC else
@@ -10647,7 +10683,7 @@ def handler(job):
                 with open(_proxy_path, "rb") as f:
                     _proxy_bytes = f.read()
                 _proxy_mb = len(_proxy_bytes) / (1024 * 1024)
-                print(f"[pipeline] Gemini proxy: 240p@10fps {_proxy_mb:.1f}MB in {time.time()-_proxy_t:.1f}s (inline, no upload)", flush=True)
+                print(f"[pipeline] Gemini proxy: 240p@10fps {_proxy_mb:.1f}MB in {time.time()-_proxy_t:.1f}s (on-server encode, no client proxy)", flush=True)
                 return _proxy_bytes
             except Exception as e:
                 raise RuntimeError(f"Gemini proxy encode failed: {e}") from e
