@@ -3087,6 +3087,8 @@ transitions — ARRAY. {{"after_word_index": int, "type": <name>, ...component p
   Place ON or near a shot_changes entry — that's where the viewer's eye expects a visual boundary.
   SceneTitle: 0-2 per video maximum (genuine chapter breaks only).
 
+  INTER-CLIP GAP REQUIREMENT. A transition needs SOURCE breathing room on either side of the cut. The 0.4s transition window pulls visual content from the source range immediately PRECEDING the next clip's first kept word — so the gap between (last kept word of clip A).end and (first kept word of clip B).start in source time MUST be ≥ 0.5s. Place transitions ONLY at cut boundaries where you can see a real pause in the dialogue ≥ 0.5s long. If the cut is a tight word-to-word splice with no pause around it, emit a hard cut (no transition entry) — the pipeline drops any transition whose inter-clip gap is too narrow, and a dropped transition is wasted output. Verify by reading the transcript's word.end / word.start timestamps directly.
+
 === VISUAL CHANGE SPACING — DO NOT STACK EFFECTS ===
 
 Two visual changes on the same beat reads as a glitch, not as punctuation. When B-roll, transitions, zoom emphasis, and motion graphics fire too close together in OUTPUT TIME, the viewer sees three or four visual states in <1 second and registers it as broken playback. Plan placements so the eye lands on ONE thing at a time.
@@ -8128,6 +8130,36 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     if _dropped > 0:
         print(f"[transitions] Dropped {_dropped} transition(s) for insufficient handles.", flush=True)
 
+    # PRECONDITION: the inter-clip source gap must be ≥ trans_dur * pbrB
+    # so the transition's B-side range [start_B - trans_dur*pbrB, start_B]
+    # lies entirely AFTER clip A's source range. Without this, the
+    # transition's B-side would render content from inside clip A — a
+    # source-range overlap that produces a visual glitch the L-cut model
+    # cannot mask. If Gemini placed a transition at a tighter splice, drop
+    # the transition (revert to a hard cut, always glitch-free) before any
+    # of the timing math below runs.
+    _gap_dropped = 0
+    for _i in range(len(render_cuts) - 1):
+        if _trim_tail_dur[_i] <= 0:
+            continue  # transition already dropped or none requested
+        _gap = float(render_cuts[_i + 1]["source_start"]) - float(render_cuts[_i]["source_end"])
+        _pbr_B = float(_clip_time_maps[_i + 1].get("avg_speed") or 1.0)
+        _gap_required = _T_trans * _pbr_B
+        if _gap < _gap_required - 1e-6:
+            print(
+                f"[transitions] Cut {_i} → {_i+1}: inter-clip gap "
+                f"{_gap*1000:.0f}ms < required {_gap_required*1000:.0f}ms "
+                f"(trans_dur×pbrB); dropping outgoing "
+                f"{render_cuts[_i].get('transition_out')!r} (would force "
+                f"clipA→clipB source overlap on transition B-side).",
+                flush=True,
+            )
+            render_cuts[_i]["transition_out"] = "none"
+            _trim_tail_dur[_i] = 0.0
+            _gap_dropped += 1
+    if _gap_dropped > 0:
+        print(f"[transitions] Dropped {_gap_dropped} transition(s) for insufficient inter-clip gap.", flush=True)
+
     # Final transition durations after drops (used by audio + projection)
     _trans_dur_after = []
     _trans_frames_after = 0
@@ -8292,10 +8324,24 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _clipA_pbr = float(_clip_time_maps[i].get("avg_speed") or 1.0)
         _clipB_pbr = float(_clip_time_maps[i + 1].get("avg_speed") or 1.0)
         _clipA_src_end = float(render_cuts[i]["source_end"])
+        _clipB_src_start = float(render_cuts[i + 1]["source_start"])
+        # SYMMETRIC TRANSITION HANDLES.
+        # Clip A surrenders its last trans_dur*pbrA seconds of source to the
+        # transition's A-side (matches trim_tail logic at the L-CUT block above).
+        # Clip B's render starts at start_B (trim_head=0); the transition's
+        # B-side must therefore pull from source PRECEDING start_B so that
+        # every source frame is rendered exactly once across (clip A render +
+        # transition A-side + transition B-side + clip B render). Without the
+        # backward shift on clipB_start_from, the transition shows source
+        # [start_B, start_B + trans_dur] and clip B render then re-shows the
+        # same range — a 0.4s backward "rewind" glitch at every transition seam.
+        # The inter-clip gap check at the trim-drop block above guarantees
+        # start_B - trans_dur*pbrB ≥ end_A, so the transition's B-side never
+        # overlaps with clip A's source range.
         _clipA_start_from = max(0.0, _clipA_src_end - _T_trans * _clipA_pbr)
         _clipA_start_from_frames = int(round(_clipA_start_from * source_fps))
-        _clipB_src_start = float(render_cuts[i + 1]["source_start"])
-        _clipB_start_from_frames = int(round(_clipB_src_start * source_fps))
+        _clipB_start_from = max(0.0, _clipB_src_start - _T_trans * _clipB_pbr)
+        _clipB_start_from_frames = int(round(_clipB_start_from * source_fps))
         _trans_extras = render_cuts[i].get("_transition_extras") or {}
         transitions_out.append({
             "afterClipIndex": i,
