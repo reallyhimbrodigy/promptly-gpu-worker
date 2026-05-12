@@ -2720,62 +2720,6 @@ EARN EVERY PLACEMENT. There are no count caps on these components. But each inst
   • If a viewer paused the video at this moment with no audio, would the card make sense?
 If you can't answer all three confidently, skip the card. A clean edit with one well-placed card beats a busy edit with three.
 
-=== EMPHASIS MOMENTS — VISUAL HITS ===
-
-Emphasis moments are THE MOST IMPORTANT PART OF YOUR EDIT. They are the 2-5 beats in the video that HIT HARDEST — every emphasis moment composes up to three visual layers (zoom + motion graphic) that fire simultaneously to make a moment land. Think like a professional editor: which moments make the viewer FEEL something? Those are the emphasis moments. Everything else is connective tissue.
-
-A video with no emphasis moments is a raw upload. A video with the right 3-5 emphasis moments feels professionally crafted — every other choice (caption style, transitions, B-roll) orbits around them.
-
-emphasis_moments — ARRAY of 2-5 items. High-intensity moments must be ≥2.5s apart — each emphasis triggers a zoom punch, and when two zoom punches land within ~2.5 seconds the viewer sees rapid-fire zooming that looks BROKEN, not dramatic. Check every emphasis moment against the previous one before committing.
-
-Each entry:
-  {{
-    "word_indices": [int, ...],          # 1-3 word indices in the kept-only space that ARE the emphasis. The pipeline derives the emphasis timestamp from word_indices[0].start; you do not emit a separate `t` field.
-    "type": "punchline" | "revelation" | "statement" | "reaction" | "question",
-    "intensity": "high" | "medium",
-    "duration": float,                   # output-seconds the visual hit lasts, 1.5 - 3.0
-
-    # ── Visual layers — each field REQUIRED (value or null) ──
-    # zoom_effect.events: each event has {{"startMs": int, "durationMs": int, "scale": float, "originX": float, "originY": float}}
-    # IMPORTANT: startMs is the ABSOLUTE source-time in milliseconds where the zoom event begins
-    # (relative to the start of the source video — same coordinate system as the word timestamps
-    # you see in the transcript). durationMs is the event's duration in source ms. The zoom is
-    # anchored to source content — when the underlying clip plays in slow-motion, the rendered
-    # zoom takes proportionally longer wall-clock time; when it speeds up, the zoom finishes
-    # faster. This keeps the zoom climax synced with the spoken content regardless of speed
-    # ramping. Typical durationMs: 500-1500ms. Place startMs slightly after the emphasis word's
-    # start (e.g., emphasis word at 12.32s, startMs around 13500 for a 1.2s lead-in).
-    "zoom_effect": {{"type": zoom_type, "events": [...]}} | null,
-    "motion_graphic": {{"type": mg_type, "anchor": zone, "props": {{...}}}} | null
-  }}
-
-For each emphasis moment, deliberately choose each layer:
-
-A. zoom_effect — does this moment need a zoom?
-
-   1. "SmoothPush"    — Slow, deliberate forward zoom with refined easing. Starts imperceptibly, accelerates, decelerates to stop.
-                         Best for: Drawing attention, emphasis moments, B-roll enhancement.
-   2. "SnapReframe"   — Fast, precise zoom with critically-damped spring. No bounce, no overshoot.
-                         Best for: Beat-synced reframes, reaction shots.
-   3. "FocusWindow"   — Background shows zoomed detail, smaller rectangle shows normal framing. Picture-in-picture context.
-                         Best for: Revealing context around a detail, before/after in same frame.
-   4. "StepZoom"      — Instant jump cuts between zoom levels. No easing. Clean editorial reframes on the beat.
-                         Best for: Music videos, fast-paced edits, beat-matched.
-   5. "LetterboxPush" — Zoomed-in view pushes from center with cinematic letterbox bars. Aspect ratio narrows with depth.
-                         Best for: Cinematic emphasis, dramatic reveals.
-   6. "StageZoom"     — Two-stage zoom: first push settles, holds, then second deeper push. Like finding focus then committing.
-                         Best for: Two-beat emphasis, building tension.
-   7. "DepthPull"     — Multi-layer cinematic depth. Background zooms slowly with floating bokeh, edge blur, haze, and frame lines.
-                         Best for: Premium intros, title sequences, high-production moments.
-
-   Events are CLIP-relative (startMs from the clip's start). A single event tied to this moment's position within its clip is the common pattern.
-   For the `scale` value, use the SHOT SCALE block above as your single source of truth — it's tuned to the actual framing of THIS video. The scale ranges there supersede any general-purpose defaults. Too-tight zoom on an already-close face crops out eyes/chin.
-   originY ≈ 0.4 for talking heads (faces sit in the upper half).
-
-B. motion_graphic — should a text/graphic overlay land on this moment?
-   Pick from the motion graphic vocabulary below. Reserve for the 1-2 PAYOFF moments. Too many = clutter.
-   motion_graphic windows must NOT overlap with any text_overlay in the same visual zone.
-
 === MOTION GRAPHICS — HOW TO USE THEM ===
 
 THE PURPOSE OF A MOTION GRAPHIC. An MG is a visual element that ADDS something the dialogue alone cannot — a screenshot the speaker is referencing, a stat the speaker is citing, a notification the speaker is reacting to, a chapter beat the editor is marking. It REINFORCES content, never substitutes for it. If the dialogue carries the moment on its own, no MG is needed.
@@ -2919,6 +2863,62 @@ Types, descriptions, use cases, and REQUIRED props (in the schema below, keys en
                             Props: {{"topText": str (<=5 words), "bottomText": str (<=5 words)}}
 
 (All MG usage rules — when, where, how, anti-patterns — are covered in the "MOTION GRAPHICS — HOW TO USE THEM" section above this catalog. Re-read it if you're picking an MG; the catalog only documents what each type IS, not when to reach for it.)
+
+=== EMPHASIS MOMENTS — VISUAL HITS ===
+
+Emphasis moments are THE MOST IMPORTANT PART OF YOUR EDIT. They are the 2-5 beats in the video that HIT HARDEST — every emphasis moment composes up to three visual layers (zoom + motion graphic) that fire simultaneously to make a moment land. Think like a professional editor: which moments make the viewer FEEL something? Those are the emphasis moments. Everything else is connective tissue.
+
+A video with no emphasis moments is a raw upload. A video with the right 3-5 emphasis moments feels professionally crafted — every other choice (caption style, transitions, B-roll) orbits around them.
+
+emphasis_moments — ARRAY of 2-5 items. High-intensity moments must be ≥2.5s apart — each emphasis triggers a zoom punch, and when two zoom punches land within ~2.5 seconds the viewer sees rapid-fire zooming that looks BROKEN, not dramatic. Check every emphasis moment against the previous one before committing.
+
+Each entry:
+  {{
+    "word_indices": [int, ...],          # 1-3 word indices in the kept-only space that ARE the emphasis. The pipeline derives the emphasis timestamp from word_indices[0].start; you do not emit a separate `t` field.
+    "type": "punchline" | "revelation" | "statement" | "reaction" | "question",
+    "intensity": "high" | "medium",
+    "duration": float,                   # output-seconds the visual hit lasts, 1.5 - 3.0
+
+    # ── Visual layers — each field REQUIRED (value or null) ──
+    # zoom_effect.events: each event has {{"startMs": int, "durationMs": int, "scale": float, "originX": float, "originY": float}}
+    # IMPORTANT: startMs is the ABSOLUTE source-time in milliseconds where the zoom event begins
+    # (relative to the start of the source video — same coordinate system as the word timestamps
+    # you see in the transcript). durationMs is the event's duration in source ms. The zoom is
+    # anchored to source content — when the underlying clip plays in slow-motion, the rendered
+    # zoom takes proportionally longer wall-clock time; when it speeds up, the zoom finishes
+    # faster. This keeps the zoom climax synced with the spoken content regardless of speed
+    # ramping. Typical durationMs: 500-1500ms. Place startMs slightly after the emphasis word's
+    # start (e.g., emphasis word at 12.32s, startMs around 13500 for a 1.2s lead-in).
+    "zoom_effect": {{"type": zoom_type, "events": [...]}} | null,
+    "motion_graphic": {{"type": mg_type, "anchor": zone, "props": {{...}}}} | null
+  }}
+
+For each emphasis moment, deliberately choose each layer:
+
+A. zoom_effect — does this moment need a zoom?
+
+   1. "SmoothPush"    — Slow, deliberate forward zoom with refined easing. Starts imperceptibly, accelerates, decelerates to stop.
+                         Best for: Drawing attention, emphasis moments, B-roll enhancement.
+   2. "SnapReframe"   — Fast, precise zoom with critically-damped spring. No bounce, no overshoot.
+                         Best for: Beat-synced reframes, reaction shots.
+   3. "FocusWindow"   — Background shows zoomed detail, smaller rectangle shows normal framing. Picture-in-picture context.
+                         Best for: Revealing context around a detail, before/after in same frame.
+   4. "StepZoom"      — Instant jump cuts between zoom levels. No easing. Clean editorial reframes on the beat.
+                         Best for: Music videos, fast-paced edits, beat-matched.
+   5. "LetterboxPush" — Zoomed-in view pushes from center with cinematic letterbox bars. Aspect ratio narrows with depth.
+                         Best for: Cinematic emphasis, dramatic reveals.
+   6. "StageZoom"     — Two-stage zoom: first push settles, holds, then second deeper push. Like finding focus then committing.
+                         Best for: Two-beat emphasis, building tension.
+   7. "DepthPull"     — Multi-layer cinematic depth. Background zooms slowly with floating bokeh, edge blur, haze, and frame lines.
+                         Best for: Premium intros, title sequences, high-production moments.
+
+   Events are CLIP-relative (startMs from the clip's start). A single event tied to this moment's position within its clip is the common pattern.
+   For the `scale` value, use the SHOT SCALE block above as your single source of truth — it's tuned to the actual framing of THIS video. The scale ranges there supersede any general-purpose defaults. Too-tight zoom on an already-close face crops out eyes/chin.
+   originY ≈ 0.4 for talking heads (faces sit in the upper half).
+
+B. motion_graphic — should a text/graphic overlay land on this moment?
+   Pick from the motion graphic vocabulary above. Reserve for the 1-2 PAYOFF moments. Too many = clutter.
+   motion_graphic windows must NOT overlap with any text_overlay in the same visual zone.
 
 === SFX — SOUND EFFECTS ===
 

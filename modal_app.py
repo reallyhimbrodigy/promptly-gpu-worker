@@ -76,7 +76,7 @@ image = (
     # Without this, NVENC silently fails and pipeline falls back to CPU encoding (10-15x slower)
     .env({"NVIDIA_DRIVER_CAPABILITIES": "all"})
     .run_commands(
-        "echo 'build v40 - TONE FIRST stripped of taxonomy and examples: previous version named six example tones (storytime/punchy/educational/corporate/comedy/dramatic) and three component-mismatch examples (quote_card on storytime, Banger on corporate, thunder on comedy) which anchored Gemini judgment to those specific cases. Now pure intent: Gemini forms its own understanding of what the video IS in its own words (no taxonomy, no labels, no list) and chooses every component from that understanding. quote_card tone-fit also stripped of explicit allowed/forbidden tone list — only the print-media character description remains, judgment of fit is Gemini.'",
+        "echo 'build v41 - prompt section reorder: MOTION GRAPHICS section moved BEFORE EMPHASIS MOMENTS to fix the only forward-reference jump in the post-cuts prompt. Previously EMPHASIS told Gemini to pick an inline motion_graphic from the vocabulary below — but MGs were defined in the NEXT section. Gemini had to flip forward, learn 14 MG types, then return to write the emphasis entry. Now MGs are defined first; EMPHASIS references them as above. SFX still references MGs from above (unchanged). Component sections now read top-to-bottom in workflow order: CAPTIONS / TEXT OVERLAYS / MOTION GRAPHICS / EMPHASIS MOMENTS / SFX / B-ROLL / TRANSITIONS.'",
         "apt-get update && apt-get install -y ca-certificates && update-ca-certificates",
         # Remove CUDA stubs AND compat libs that intercept dlopen before Modal's
         # real driver libs. THEN recreate placeholders for every libcuda* file
