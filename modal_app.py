@@ -76,7 +76,7 @@ image = (
     # Without this, NVENC silently fails and pipeline falls back to CPU encoding (10-15x slower)
     .env({"NVIDIA_DRIVER_CAPABILITIES": "all"})
     .run_commands(
-        "echo 'build v37 - master MP4 audio: AAC -> PCM s16le for 0ms A/V drift. AAC has a 1024-sample frame size at 44.1kHz = 23.2ms per frame; the encoded stream length is always a multiple of frame size, placing a structural ~21ms floor on |video-audio| drift no matter how -shortest is configured. PCM has no frame-size structure: stream length = samples / sample_rate exactly, so master audio aligns with video to a single sample (~21us). HLS variants still encode AAC (HLS spec requires it). Drift check threshold 20ms -> 1ms, raises on violation. v36 included.'",
+        "echo 'build v38 - editorial judgment via prompt: (1) B-roll window selection rewritten as intent-only - pick the phrase the cutaway is MOST relevant to and stay on screen for exactly that phrase, no specific length floors/typical-span guidance, trust Gemini judgment. (2) New TONE FIRST section at top of post-cuts prompt asks Gemini to identify the videos register in its own words (no fixed taxonomy) before choosing any visual element, then match every component to that tone. (3) quote_card explicitly gated by tone-fit on top of the existing face-off-screen / pre-silence hard gate - corporate/editorial/dramatic only, NOT casual storytime / comedy / playful / punchy hook content.'",
         "apt-get update && apt-get install -y ca-certificates && update-ca-certificates",
         # Remove CUDA stubs AND compat libs that intercept dlopen before Modal's
         # real driver libs. THEN recreate placeholders for every libcuda* file
