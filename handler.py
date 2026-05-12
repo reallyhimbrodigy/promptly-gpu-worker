@@ -10529,6 +10529,40 @@ def handler(job):
                 except Exception as _ae:
                     print(f"[pipeline] failed to copy cached audio: {_ae}", flush=True)
         else:
+            # iOS uploads the source via background URLSession in parallel
+            # with the client uploading the proxy (which gates the job
+            # dispatch). When the user is on a slow network, the source
+            # may still be mid-upload at the moment this handler runs.
+            # Poll HEAD until the object materializes — same pattern as
+            # prewarm_handler. Without this, the worker hits a 404 from
+            # download_file the moment it races ahead of the upload.
+            _main_poll_start = time.time()
+            _main_poll_deadline = _main_poll_start + 180
+            _main_poll_attempt = 0
+            while True:
+                _main_poll_attempt += 1
+                try:
+                    _aws_s3_client.head_object(Bucket=_dl_bucket, Key=_dl_key)
+                    if _main_poll_attempt > 1:
+                        print(
+                            f"[pipeline] source available after "
+                            f"{time.time() - _main_poll_start:.1f}s "
+                            f"({_main_poll_attempt} polls)",
+                            flush=True,
+                        )
+                    break
+                except Exception as _head_err:
+                    _now = time.time()
+                    if _now >= _main_poll_deadline:
+                        _code = getattr(_head_err, 'response', {}).get('Error', {}).get('Code', 'unknown')
+                        raise RuntimeError(
+                            f"Source video did not arrive on S3 within 180s "
+                            f"(last HEAD error={_code}). The client upload likely "
+                            f"failed or was cancelled — check upload progress on iOS."
+                        )
+                    _elapsed = _now - _main_poll_start
+                    _wait = 1.0 if _elapsed < 10 else (2.0 if _elapsed < 60 else 4.0)
+                    time.sleep(_wait)
             _aws_s3_client.download_file(_dl_bucket, _dl_key, source_path, Config=_S3_TRANSFER_CONFIG)
             _dl_method = "s3-crt"
         size_mb = os.path.getsize(source_path) / (1024*1024)
