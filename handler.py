@@ -2538,65 +2538,103 @@ DECISION — which anchor:
 - Speaker centered or off-camera → `upper_third_safe` / `lower_third_safe` / `center`.
 - Notification stacks / top title cards → `upper_third_safe`.
 
+=== LAYER RESPONSIBILITIES — WHICH COMPONENT OWNS WHICH JOB ===
+
+Every visual element answers a different question. When you place a component, you're committing to its layer's job — not borrowing the layer to do something another layer already covers.
+
+  captions         — carry the LITERAL WORDS. The viewer reads what's being said.
+  emphasis_moments — carry AUDIENCE REACTION via zoom. The camera leans in, punctuates, or accelerates on the beat that earned it.
+  motion_graphics  — carry VISUAL CLAIMS. The MG renders an off-camera thing the speaker references — a notification, a stat, a quote, a chapter marker. The viewer SEES the thing.
+  text_overlays    — carry FRAMING. The card introduces or labels — a chapter, a hook, a pulled quote. Not transcribed dialogue; editorial context.
+  sound_effects    — carry SONIC PUNCTUATION. A single peak on the word a listener would expect, with eyes closed, to make that sound.
+  broll_clips      — carry the OFF-SCREEN REFERENT. The speaker described a scene; the B-roll shows that scene without the speaker.
+  transitions      — carry CHAPTER BOUNDARIES. The transition is the cut's own visual punctuation, not generic motion-for-motion's-sake.
+
+Doubling up dilutes. If captions show the words, don't render those same words in an MG. If a zoom is the punctuation, an MG layered on top is two effects fighting for one beat. If a transition does the chapter break, a text_overlay redoing the break is redundant.
+
+RESTRAINT IS AN EDITORIAL SIGNAL. The cleanest professional edits use FEWER components, more deliberately. Most beats in any video do NOT deserve an emphasis moment, an MG, a transition, a B-roll, or an SFX. The default for any moment is no special component — a clean talking-head with captions running. Components earn their place by making something land harder than it would unadorned. When you cannot articulate WHAT a component is adding that the dialogue is not already carrying, skip it.
+
 === CAPTIONS — WORD-BY-WORD RUNNING SUBTITLES ===
 
 ONE style for the whole video. POSITION can change per segment.
 
-caption_style — pick EXACTLY ONE from 16 styles. Read each description carefully — these are real components with distinct visual identities. Pick the one whose AESTHETIC matches the video's content register, not the one you used last time.
+caption_style — pick EXACTLY ONE for the whole video. This is one of the 2-3 decisions that defines the video's identity to the viewer; a creator using the same style on every video looks like a template, not a voice. Each style below has an editorial signal — what the style CLAIMS about the video — and reach/fight conditions. Pretty visual descriptions are not enough; pick the style whose claim is the claim you want to make about THIS video (anchored to the TONE FIRST step).
 
- 1. "PaperII"              — Lora serif. Words transition from dim to bright as spoken. Strip-based stacking, heavy shadow. Editorial paper-strip feel.
-                              Best for: Storytelling, narrative, poetry, journal-style, long-form.
- 2. "Prime"                — Two-tier system: Inter body, special words break out onto a new line in oversized italic Playfair Display. The keyword break-line is the entire visual identity.
-                              Best for: Aspirational content, premium branding, lifestyle.
- 3. "TypewriterReveal"     — Character-by-character typewriter in Space Mono. Blinking cursor. NO keyword highlighting (animation IS the effect — every word looks the same).
-                              Optional extraProps: {{"scheme": "classic"|"terminal"|"amber"}} — classic = white on black, terminal = green-on-black hacker, amber = orange phosphor monitor.
-                              Best for: Tech/coding, thoughtful narration, documentary, retro.
- 4. "CinematicLetterpress" — Words emerge from blur into focus — cinematic "focus pull" effect. Cormorant Garamond serif, light weight, wide letter-spacing. NO keyword highlighting (the blur-to-focus animation IS the effect).
-                              Best for: Documentary, film-style intros, art house, slow contemplative.
- 5. "Cove"                 — Bold Montserrat base, special words switch to oversized italic Playfair Display with warm ethereal glow. ~2x scale contrast. Keywords get the glow treatment.
-                              Best for: Premium/luxury, brand storytelling, wellness, aspirational.
- 6. "EditorialPop"         — All Playfair Display — keywords scale to 1.7x bold italic, body stays light. Two-line staggered reveal. Magazine-headline feel.
-                              Best for: Magazine-style, fashion, interview quotes, premium editorial.
- 7. "Illuminate"           — Playfair Display with a diagonal light sweep across each word as it appears. Keywords keep a warm lingering glow. Cinematic spotlight feel.
-                              Best for: Cinematic narration, atmospheric storytelling, premium docs.
- 8. "Lumen"                — Montserrat body, keywords switch to Playfair with amber glow and gold underline sweep. Shine words get a brightness flash.
-                              Best for: Warm inspirational, golden-hour aesthetics, brand campaigns.
- 9. "MagazineCutout"       — Individually cut-out paper pieces with cream background, random rotation, size variation. Collage / zine aesthetic. NO keyword highlighting (every word is its own cutout — the chaos IS the effect).
-                              Optional extraProps: {{"maxRotation": 3}} for tight controlled craft, {{"maxRotation": 10}} for wild DIY chaos. Default 6.
-                              Best for: Creative/art, collage, DIY/craft, zine-style, indie.
-10. "Passage"              — Cormorant Garamond serif. Keywords expand letter-spacing on reveal and switch to italic warm gold. Literary, book-page feel.
-                              Best for: Literary content, book quotes, long-form storytelling.
-11. "Pulse"                — Two-slot paired display — words appear in pairs that fade in together. Keywords get cyan accent. Rhythmic, lyric-video feel.
-                              Best for: Music, rhythmic narration, fast dialogue, lyric videos.
-12. "Quintessence"         — Single word at a time, centered, Playfair Display with dramatic vertical stretch (scaleY). Gold text, spring entrance. NO keyword highlighting (every word is the focus — that's the whole point).
-                              Optional extraProps: {{"stretchY": 1.6}} default, increase to 2.0 for more dramatic stretch, decrease to 1.3 for subtle.
-                              Use for: Single-word emphasis moments, dramatic pauses, poetry, art-house.
-13. "Serif"                — DM Serif Display body with keywords that scale up (1.35x) in italic with blue accent. Premium editorial / brand-message feel.
-                              Best for: Premium editorial, interview quotes, brand messaging, calm.
+ 1. "PaperII" — Lora serif; words transition from dim to bright as spoken; strip-based stacking with heavy shadow gives a physical paper-on-table feel.
+                Editorial signal: the captions are PRINTED MATTER. The words have substance, like type set on a page. Dim-to-bright pulls the viewer forward word by word.
+                Reach for it when: the voice has authority worth waiting for, each word matters individually, the pacing respects its own breath.
+                It fights: rapid-fire delivery where words tumble — the strip-stacking can't keep up; the paper-feel reads as slow against fast audio.
+
+ 2. "Prime" — Two-tier: Inter body for ordinary words; special words break out onto a new line in oversized italic Playfair Display. The keyword break-line IS the visual identity.
+              Editorial signal: the edit has a HIERARCHY. Some words land harder than others; the break-out line says "this is what mattered in that sentence."
+              Reach for it when: the dialogue has clear keyword peaks worth elevating — names, numbers, the punctuating word of a phrase.
+              It fights: dialogue where every word feels equally weighted (every word becomes a break-out and hierarchy collapses), or speakers too casual for the elevated typography.
+
+ 3. "TypewriterReveal" — Character-by-character typewriter in Space Mono with blinking cursor. NO keyword highlighting — the per-character reveal IS the effect.
+                         Optional extraProps: {{"scheme": "classic"|"terminal"|"amber"}} — classic = white-on-black, terminal = green-on-black hacker, amber = phosphor CRT.
+                         Editorial signal: the captions are BEING TYPED IN REAL TIME. There's a person at a keyboard, considering, committing. Process visible.
+                         Reach for it when: tech, code, documentary, or thoughtful narration where the slow reveal IS the texture. Terminal scheme leans hacker; amber leans retro CRT; classic is neutral.
+                         It fights: high-energy short-form where per-character delay drags pacing. Also fights speech faster than the typing animation can keep up — captions visibly lag the audio.
+
+ 4. "CinematicLetterpress" — Words emerge from blur into focus — a "focus pull" effect — in Cormorant Garamond serif, light weight, wide letter-spacing. NO keyword highlighting — the blur-to-focus IS the effect.
+                              Editorial signal: this is a FILM, not a clip. The blur-to-focus is the camera's eye landing. Atmospheric, deliberate.
+                              Reach for it when: the content has cinematic intent — documentary, slow contemplative essay, film-style intro. The pacing breathes; the audio carries silences.
+                              It fights: comedic timing or punchline beats — the focus-pull reads as drama where the moment wanted lightness. Also fights talking-head close-ups where wide letter-spacing sprawls awkwardly.
+
+ 5. "Cove" — Bold Montserrat base; special words swap to oversized italic Playfair Display with warm ethereal glow at roughly 2x scale.
+              Editorial signal: an editor treating the keywords as ARTIFACTS — holding them up to the viewer with reverence. The glow lingers; the moment breathes.
+              Reach for it when: the dialogue itself carries the weight and the captions should AMPLIFY rather than punctuate. Slower delivery, words worth dwelling on.
+              It fights: aggressive fast-cut hustle content where every beat is a punch — the warmth softens what should land hard, and the lingering glow reads as slow-motion on rapid pacing.
+
+ 6. "EditorialPop" — All Playfair Display. Keywords scale to 1.7x bold italic; body stays light. Two-line staggered reveal feels like a magazine headline being typeset.
+                      Editorial signal: the video is MAGAZINE-CLASS. Every line composed, every keyword a headline beat.
+                      Reach for it when: the content has interview, quote, or curated-fashion DNA. Each emphasized keyword genuinely deserves headline-level treatment.
+                      It fights: casual storytime where the magazine-headline feel is too formal, or fast-cut content where the two-line stagger creates simultaneous text rows the viewer can't track.
+
+ 7. "Illuminate" — Playfair Display with a diagonal light sweep across each word as it appears; keywords keep a warm lingering glow. Cinematic spotlight feel.
+                    Editorial signal: each word is being LIT. The editor is spotlighting what to attend to.
+                    Reach for it when: dramatic narration, golden-hour aesthetic, atmospheric storytelling. The sweep adds energy without breaking the cinematic register.
+                    It fights: technical, informational, or fast content — the spotlight feels theatrical against utilitarian dialogue.
+
+ 8. "Lumen" — Montserrat body; keywords switch to Playfair with amber glow and gold underline sweep. Shine words get a brightness flash.
+              Editorial signal: the keywords are MONEY MOMENTS. Gold-toned, warmly lit; the underline sweep is a brand stamp.
+              Reach for it when: hustle, motivational, brand-storytelling where the warm gold IS the brand. Each emphasized word reads as a takeaway.
+              It fights: anything understated or melancholic — the gold is celebratory by default. Also fights videos with no clear "money words"; the gold feels arbitrary.
+
+ 9. "MagazineCutout" — Individual paper cutouts on cream background with random rotation and size variation. Collage / zine aesthetic. NO keyword highlighting — the chaos IS the effect.
+                       Optional extraProps: {{"maxRotation": 3}} for tight controlled craft, {{"maxRotation": 10}} for wild DIY chaos. Default 6.
+                       Editorial signal: this video has CRAFT. There's a human assembling captions with scissors and tape, not a machine running a typeface. Indie, DIY, zine.
+                       Reach for it when: the content is genuinely creative, hand-made, art-collage, or playfully chaotic in spirit. The cutout chaos earns its place.
+                       It fights: serious, premium, dramatic, or corporate content — the indie chaos undercuts the register. Also fights videos where readability matters most; the rotation can hurt scannability.
+
+10. "Passage" — Cormorant Garamond serif. Keywords expand letter-spacing on reveal and switch to italic warm gold. Literary, book-page feel.
+                Editorial signal: this is LITERATURE. The captions are passages from a book, not subtitles.
+                Reach for it when: storytelling that reads like prose, book-quote videos, long-form personal essay, literary register. The letter-spacing expansion is a punctuation mark on the keyword.
+                It fights: quick punchlines or modern social-media energy — the book-page feel is too slow, too formal.
+
+11. "Pulse" — Two-slot paired display: words appear in PAIRS that fade in together. Keywords get cyan accent. Rhythmic, beat-driven lyric-video feel.
+              Editorial signal: the captions are SCORED — they move in rhythm with the audio, like a music-video lyric track. Cyan says "modern, beat-matched."
+              Reach for it when: music, rapid dialogue, beat-locked editing, lyric-style content, energetic narration. The pairing rhythm matches the audio rhythm.
+              It fights: contemplative content where words need to BREATHE individually — pairing two at once collapses per-word weight. Also fights videos with very different word lengths in adjacent positions; layout gets visually uneven.
+
+12. "Quintessence" — ONE word at a time, centered, Playfair Display with dramatic vertical stretch (scaleY). Gold text, spring entrance. NO keyword highlighting — every word is the focus.
+                      Optional extraProps: {{"stretchY": 1.6}} default; 2.0 for more dramatic stretch, 1.3 for subtle.
+                      Editorial signal: the words demand INDIVIDUAL attention. Art-house, poetic, dramatic-pause energy.
+                      Reach for it when: single-word emphasis, dramatic pauses, poetry, art-house. Content with weight and silence between words.
+                      It fights: dense or fast dialogue — one-word-at-a-time can't keep up, and the spring entrance becomes a visual stutter.
+
+13. "Serif" — DM Serif Display body with keywords that scale up (1.35x) in italic with blue accent. Premium editorial / brand-message feel.
+              Editorial signal: refined, calm, branded. The captions look like they came from a polished brand campaign; the blue accent says "trusted, designed."
+              Reach for it when: premium editorial, interview quotes, brand messaging, calm thoughtful narration. The serif body grounds the video; the italic blue accent lifts the keywords just enough.
+              It fights: edgy, comedic, or DIY content — the refined serif is too composed for messy energy.
 
 NOTES ON KEYWORDS PER STYLE:
   Styles that USE caption_keywords for highlighting: Prime, Cove, EditorialPop, Illuminate, Lumen, Passage, Pulse, Serif (8 styles).
   Styles that IGNORE caption_keywords by design: PaperII, TypewriterReveal, CinematicLetterpress, MagazineCutout, Quintessence (5 styles — animation/aesthetic IS the effect, no per-word highlighting). When you pick one of these, the caption_keywords list still has narrative value (for emphasis_moments etc.) but won't visually highlight in captions.
 
-DECISION MATRIX — caption_style by content. Each row gives 4–5 valid choices in order of typical fit; rotate among them rather than always defaulting to the first. The user's past videos are visible to you in their style profile — if your top candidate matches the style they used in their LAST video, pick a different option from the same row.
+DON'T REPEAT YOURSELF. The user's recent caption styles are visible in their style profile. Whatever they used in their last 2-3 videos is OFF YOUR CANDIDATE LIST for this one — different content earns different visual identity, and a creator who uses the same style on every video looks like a template, not a voice. From the remaining candidates, pick the style whose editorial signal (above) best matches what THIS video IS.
 
-  business, hustle, agency, motivational    → Lumen / Pulse / Cove / EditorialPop
-  interview, podcast, thoughtful, calm      → Serif / Cove / Passage / Illuminate / EditorialPop
-  gaming, tech, cyberpunk                   → TypewriterReveal / Pulse
-  cinematic, documentary, dramatic          → CinematicLetterpress / Illuminate / Quintessence / Passage / PaperII
-  aesthetic, lifestyle, travel, minimal     → Cove / Passage / Lumen / EditorialPop / Serif
-  creative, artistic, collage, music        → MagazineCutout / Pulse / Quintessence
-  luxury, fashion, premium                  → Prime / Passage / EditorialPop / Quintessence / Cove
-  editorial, magazine, interview quote      → EditorialPop / Quintessence / Serif / Passage / PaperII
-  storytelling, narrative, POV              → PaperII / Cove / Illuminate / Passage / CinematicLetterpress
-  workout, fitness, energetic               → Pulse / EditorialPop
-  music, rhythmic, lyric-driven             → Pulse / Lumen / Quintessence
-  comedy, casual, fun                       → MagazineCutout / Pulse
-  art house, poetic, contemplative          → Quintessence / CinematicLetterpress / Passage / Illuminate / EditorialPop
-  bold reveals, single-word emphasis         → Quintessence / EditorialPop
-  unsure                                    → pick from any vibe row above that matches the dominant register
-
-DON'T REPEAT YOURSELF. Top short-form creators use a VARIETY of caption styles across their videos — never the same one every time. If the user's profile shows they recently used a particular style, deliberately choose a different option from the appropriate row this time. Different content deserves different visual identity.
+A caption-style monoculture across a creator's library is the most common amateur signal in short-form. The 13 styles are NOT interchangeable backgrounds — each one CLAIMS something specific about the video. Picking the wrong style says the wrong thing about the video. Picking the same style every time says the editor isn't paying attention.
 
 caption_keywords — REQUIRED. The words that get visually highlighted by the caption style. THIS IS THE VISUAL IDENTITY OF THE STYLE — keyword highlighting is what makes PaperII feel like PaperII, Cove feel like Cove, Lumen feel like Lumen. With 11 keywords on a 60-second video, the highlight color barely fires and the captions look flat and generic. With 30+ keywords, the style sings.
 
@@ -2722,7 +2760,9 @@ If you can't answer all three confidently, skip the card. A clean edit with one 
 
 === MOTION GRAPHICS — HOW TO USE THEM ===
 
-THE PURPOSE OF A MOTION GRAPHIC. An MG is a visual element that ADDS something the dialogue alone cannot — a screenshot the speaker is referencing, a stat the speaker is citing, a notification the speaker is reacting to, a chapter beat the editor is marking. It REINFORCES content, never substitutes for it. If the dialogue carries the moment on its own, no MG is needed.
+THE PURPOSE OF A MOTION GRAPHIC. An MG renders a VISUAL CLAIM — something the speaker is referencing that the viewer can SEE for themselves. A screenshot of a text message. A notification banner of an event being described. A stat being cited. A chapter marker. If the dialogue doesn't reference an off-camera referent the viewer would benefit from seeing rendered, no MG is needed — captions + zoom + SFX carry punctuation, not MGs.
+
+NO MG IS THE DEFAULT. Most beats in any video do NOT earn an MG. A clean talking-head with strong captions, a single emphasis zoom, and one SFX hits harder than the same beat with an MG layered on top. ZERO MGs in a 60-second video is a totally legitimate output. Each MG you emit must answer: "what SPECIFIC off-camera referent am I rendering that the viewer would want to see?" If the answer is anything vague ("the speaker mentioned a phone," "the dialogue feels like it could use something"), skip it.
 
 WHEN TO USE ONE. Three legitimate triggers and only three:
   1. The speaker references something visual that isn't on camera. Match the dialogue cue to ONE specific MG — each component has its own trigger phrase, and using the wrong one for the moment is a clear "edited badly" signal:
@@ -2742,7 +2782,7 @@ WHEN NOT TO USE ONE. Negative triggers — emit zero MGs in these situations:
   • There's already a text_overlay or another MG firing in the same 3-second window — stacking visual elements creates clutter, not punctuation.
   • The window is shorter than 2 seconds — anything briefer reads as a flicker.
 
-DENSITY. 0-3 MGs per 60-second video is the healthy range. Zero is fine. Five is wallpaper. Each MG you emit must justify its screen time against the alternative of zero MGs at that moment.
+DENSITY. 0-3 MGs per 60-second video is the healthy total range; zero is fine, five is wallpaper. Per-type caps tighten further (see each MG type below) — most types are 0-1 per video. If you have a candidate MG and you've already placed a stronger MG nearby, drop this one — restraint reads as competence.
 
 ANCHORING — THIS IS WHERE BAD CHOICES GET DROPPED.
   remove_words is field 2 in your output schema; you committed to it BEFORE writing any motion_graphic. Now scroll back and look at it. Every word_index you reference here — start_word_index, end_word_index, AND any word in the [start, end] range — must NOT be in that array. If any of them is, the renderer will DROP this MG entirely. The caption_position_change you wrote to make room for it will orphan, and captions will move for no visible reason — a clear "this video was edited badly" signal.
@@ -2793,74 +2833,109 @@ Each entry is WORD-ANCHORED — Gemini picks the kept words the MG stretches acr
 
 Types, descriptions, use cases, and REQUIRED props (in the schema below, keys ending in `?` are optional):
 
- 1. "AnnotationArrow"    — Hand-drawn SVG arrow animated along bezier path. Straight, curved-arc, j-shape, or custom SVG.
-                            Best for: Callouts, UI annotations, "look here" moments.
-                            Props: {{"start": {{"x": 0-1, "y": 0-1}}, "end": {{"x": 0-1, "y": 0-1}}, "pathType"?: "straight"|"curved-arc"|"j-shape"|"custom", "color"?: "#hex"}}
+ 1. "AnnotationArrow" — Hand-drawn SVG arrow animated along a bezier path (straight, curved-arc, j-shape, custom).
+                          Editorial claim: "LOOK AT THIS SPECIFIC DETAIL in the frame." The arrow points at something visible the viewer might otherwise miss.
+                          Reach for it when: the speaker references a specific element ON THE CURRENT FRAME (UI element, object, area of the shot) and the viewer needs help locating it.
+                          Anti-pattern: arrows on talking-head shots where there's nothing visible to point at; arrows that just float toward the speaker's face for emphasis (that's what zoom does).
+                          Density: 0-2 per video. Each arrow needs a real target on screen.
+                          Props: {{"start": {{"x": 0-1, "y": 0-1}}, "end": {{"x": 0-1, "y": 0-1}}, "pathType"?: "straight"|"curved-arc"|"j-shape"|"custom", "color"?: "#hex"}}
 
- 2. "ChatThread"         — iMessage-style conversation with typing indicators, sequential delivery, status bar.
-                            Best for: Multi-message text BACK-AND-FORTH between two people (speaker quoting an exchange, "I said X, she said Y, I said Z").
-                            NOT for: a single isolated message (use IMessageBubble), missed calls (use Notification), email/social-app alerts (use Notification with the matching app).
-                            Props: {{"messages": [{{"sender": "me"|"them", "text": str, "typingMs"?: int, "holdMs"?: int}}, ...], "header"?: {{"name": str, "subtitle"?: str}}}}
+ 2. "ChatThread" — iMessage-style conversation with typing indicators, sequential delivery, status bar.
+                    Editorial claim: "THIS IS THE LITERAL TEXT EXCHANGE — both sides of it — that I'm describing." The viewer reads both people's messages as back-and-forth.
+                    Reach for it when: the speaker quotes a multi-message exchange ("I said X, she said Y, I said Z"). Three or more messages with clear turn-taking.
+                    Anti-pattern: ChatThread for a single message (that's IMessageBubble). ChatThread when the speaker describes the GIST of a conversation rather than quoting specific messages (nothing specific to render).
+                    Density: 0-1 per video. One conversation reconstruction; subsequent text moments use other layers.
+                    Props: {{"messages": [{{"sender": "me"|"them", "text": str, "typingMs"?: int, "holdMs"?: int}}, ...], "header"?: {{"name": str, "subtitle"?: str}}}}
 
- 3. "Notification"       — iOS/Android notification stack. 1–3 banners drop down FROM THE TOP with platform styling. 7 built-in app icons. Renders at the TOP regardless of `anchor` (the drop-down animation IS the metaphor); use anchor="upper_third_safe" so caption_position_changes flip captions to bottom while it's on screen.
+ 3. "Notification" — iOS/Android notification stack. 1–3 banners drop down FROM THE TOP with platform styling. 7 built-in app icons. Renders at the TOP regardless of `anchor` (the drop-down animation IS the metaphor); emit anchor="upper_third_safe" so caption_position_changes flip captions to bottom while it's on screen.
+                      Editorial claim: "THIS EXACT NOTIFICATION EVENT happened — here it is on the phone screen." The viewer sees evidence of the event the speaker is describing.
+                      Reach for it when: the dialogue NAMES a specific notification event with content the banner can match. The banner body must SAY the same thing the speaker just said:
+                        • "She called me 12 times" / "she kept calling" → Missed Call banner with body="Missed Call (12)"
+                        • "I got the Venmo" / "she paid me $200" → Venmo banner with body="$200 from {{name}}"
+                        • "I texted him" / "the message said X" → iMessage banner with body=X paraphrase
+                        • "I got the email" / "the email said X" → Email banner with body=subject line
+                      Anti-pattern: Notification on any generic phone mention. "I was on my phone all day" is NOT a Notification moment — no specific notification event was referenced. Notification on every phone-related beat in the same video — viewers register "the editor ran out of ideas." Notification body that doesn't match what the speaker said — the viewer feels the disconnect immediately.
+                      Density: 0-1 per video. Notification is a SCARCE resource; the beat earns ONE banner. Don't reach for it just because the dialogue mentions a phone.
+                      Props: {{"notifications": [{{"app": "apple-pay"|"venmo"|"stripe"|"imessage"|"instagram"|"email"|"bank", "appName": str, "title": str, "body": str, "timestamp"?: str}}, ...], "platform"?: "ios"|"android"}}
 
-                            WHEN TO USE — only when the dialogue NAMES a specific notification event. The banner content must MATCH what the speaker just said:
-                              • "She called me 12 times" / "she kept calling" → Missed Call banner with body="Missed Call (12)"
-                              • "I got the Venmo" / "she paid me $200" → Venmo banner with body="$200 from {{name}}"
-                              • "I texted him" / "the message said" → iMessage banner with body=the actual message paraphrase
-                              • "I got the email" / "the email said" → Email banner with body=the subject line
-                            The notification body should be the SAME content the speaker is referencing in dialogue. If you can't match the banner content to what's being said, the moment isn't a Notification moment — pick a different MG or skip it.
+ 4. "ProgressBar" — Animated progress bar with count-up. Optional milestones.
+                     Editorial claim: "HERE IS THE QUANTITATIVE ARC of what I'm describing — see it fill, advance." The viewer experiences the progression visually.
+                     Reach for it when: the speaker describes a goal, fundraising, skill development, or any process with a measurable target and a current state.
+                     Anti-pattern: ProgressBar on a single number with no arc (that's StatCard). ProgressBar with vague targets ("we made a lot of progress" with no actual numbers).
+                     Density: 0-1 per video.
+                     Props: EITHER {{"value": number, "total": number, "label"?: str, "fillColor"?: "#hex", "accentColor"?: "#hex"}}  OR  {{"percentage": 0-100, "label"?: str, "fillColor"?: "#hex", "accentColor"?: "#hex"}}
 
-                            WHEN NOT TO USE:
-                              • The dialogue is generally about phones/calls but doesn't reference a SPECIFIC notification event ("I was on my phone all day" — too vague, no specific banner).
-                              • A back-and-forth text conversation (use ChatThread).
-                              • A single text message shown verbatim with the bubble UI (use IMessageBubble).
-                              • The same beat already used a Notification — repeating the banner reads as random and tells the viewer the editor ran out of ideas. The beat earns ONE banner; subsequent moments need different visual punctuation (zoom + caption keyword highlight + SFX).
+ 5. "QuoteCard" — Floating card with decorative quotation mark, serif text, em-dash attribution. Spring entrance.
+                   Editorial claim: "THIS EXACT QUOTE, ATTRIBUTED TO THIS EXACT PERSON, should be held up." The viewer reads it as a pull-quote from print or testimonial.
+                   Reach for it when: a third-party quote the speaker is citing (book, article, expert, well-known figure), or a testimonial. The quote and attribution carry the weight.
+                   Anti-pattern: QuoteCard for the speaker's OWN words — captions already show those. QuoteCard with a vague or fabricated attribution. QuoteCard on casual content where the print-media framing fights the register (see TONE FIRST).
+                   Density: 0-1 per video. Per the TONE FIRST step, only when the print-media character belongs in THIS video.
+                   Props: {{"quote": str, "attribution": str, "theme"?: "dark"|"light", "accentColor"?: "#hex"}}
 
-                            Props: {{"notifications": [{{"app": "apple-pay"|"venmo"|"stripe"|"imessage"|"instagram"|"email"|"bank", "appName": str, "title": str, "body": str, "timestamp"?: str}}, ...], "platform"?: "ios"|"android"}}
+ 6. "RecordingFrame" — Full-screen recording overlay with inset border, scan line, corner annotations (timestamp, WPM).
+                        Editorial claim: "WHAT YOU'RE SEEING IS RAW — caught, unfiltered, behind-the-scenes." The viewer feels like an insider watching the unpolished version.
+                        Reach for it when: behind-the-scenes content, documentary-style raw moments, "I caught this on camera" reveals.
+                        Anti-pattern: RecordingFrame on polished talking-head content — the frame insists on "raw" when the footage is clearly composed. Reads as costume.
+                        Density: 0-1 per video.
+                        Props: {{"accentColor"?: "#hex", "showScanLine"?: bool}}
 
- 4. "ProgressBar"        — Animated progress bar with count-up. Optional milestones.
-                            Best for: Goal tracking, fundraising, skill bars.
-                            Props: EITHER {{"value": number, "total": number, "label"?: str, "fillColor"?: "#hex", "accentColor"?: "#hex"}}  OR  {{"percentage": 0-100, "label"?: str, "fillColor"?: "#hex", "accentColor"?: "#hex"}}
+    — SpeechBubble variants (4) — Platform-specific social bubbles. Each one claims "this is the platform-authentic rendering of what the speaker is quoting."
 
- 5. "QuoteCard"          — Floating card with decorative quotation mark, serif text, em-dash attribution. Spring entrance.
-                            Best for: Testimonials, pull quotes, book excerpts.
-                            Props: {{"quote": str, "attribution": str, "theme"?: "dark"|"light", "accentColor"?: "#hex"}}
+ 7. "TweetBubble" — Twitter/X post with verified badge and engagement stats.
+                     Editorial claim: "THIS IS THE EXACT TWEET I'm referencing — see the platform context."
+                     Reach for it when: the speaker quotes a specific tweet, references X discourse, or shows social-proof from Twitter.
+                     Anti-pattern: TweetBubble for content that wasn't actually a tweet (use the matching platform's component). Made-up tweets / fake handles that the viewer doesn't believe.
+                     Density: 0-1 per video.
+                     Props: {{"name": str, "handle": str, "text": str, "verified"?: bool, "stats"?: {{"replies": int, "reposts": int, "likes": int, "views": int}}, "darkMode"?: bool}}
 
- 6. "RecordingFrame"     — Full-screen recording overlay with inset border, scan line, corner annotations (timestamp, WPM).
-                            Best for: Behind-the-scenes, raw/unfiltered, documentary.
-                            Props: {{"accentColor"?: "#hex", "showScanLine"?: bool}}
+ 8. "InstagramComment" — Instagram comment with avatar and like count.
+                          Editorial claim: "THIS SPECIFIC IG COMMENT EXISTS — here's the social context."
+                          Reach for it when: the speaker references a comment they got on Instagram, IG-discourse callout, social-proof from IG.
+                          Anti-pattern: InstagramComment for anything other than IG content. Made-up usernames with no plausibility.
+                          Density: 0-1 per video.
+                          Props: {{"username": str, "comment": str, "timestamp"?: str, "likes"?: int}}
 
-    — SpeechBubble variants (4) — Platform-specific social bubbles. Best for: Social proof, testimonials, comment highlights.
+ 9. "IMessageBubble" — Single iMessage bubble with optional typewriter reveal.
+                        Editorial claim: "THIS EXACT TEXT MESSAGE, sent or received, is what I'm quoting." Viewer reads the literal SMS.
+                        Reach for it when: the speaker quotes ONE specific text message verbatim ("she texted me, 'I'm leaving'"). The bubble shows that one message.
+                        Anti-pattern: IMessageBubble for phone calls or missed calls (use Notification). For back-and-forth conversations (use ChatThread). For any non-text phone moment — "she called me" is NOT an IMessageBubble. For paraphrased messages where the speaker doesn't actually quote text.
+                        Density: 0-2 per video. Two single-message moments in a 60s video is the ceiling.
+                        Props: {{"text": str, "messageType": "incoming"|"outgoing", "status"?: "Delivered"|"Read", "typewriter"?: bool}}
 
- 7. "TweetBubble"        — Twitter/X post with verified badge and engagement stats.
-                            Props: {{"name": str, "handle": str, "text": str, "verified"?: bool, "stats"?: {{"replies": int, "reposts": int, "likes": int, "views": int}}, "darkMode"?: bool}}
- 8. "InstagramComment"   — Instagram comment with avatar and like count.
-                            Props: {{"username": str, "comment": str, "timestamp"?: str, "likes"?: int}}
- 9. "IMessageBubble"     — Single iMessage bubble with typewriter mode.
-                            Best for: One isolated text/iMessage the speaker quotes verbatim ("she texted me 'I'm leaving'"). The bubble shows that one message.
-                            NOT for: phone calls or missed calls (use Notification), back-and-forth conversations (use ChatThread), any non-text phone moment ("she called me" is NOT IMessageBubble).
-                            Props: {{"text": str, "messageType": "incoming"|"outgoing", "status"?: "Delivered"|"Read", "typewriter"?: bool}}
-10. "TikTokComment"      — TikTok comment with likes.
-                            Props: {{"username": str, "comment": str, "likes"?: int}}
+10. "TikTokComment" — TikTok comment with likes.
+                       Editorial claim: "THIS TIKTOK COMMENT EXISTS — here it is in platform context."
+                       Reach for it when: the speaker references a TikTok comment, TikTok-discourse, social-proof from TikTok.
+                       Anti-pattern: TikTokComment for non-TikTok content.
+                       Density: 0-1 per video.
+                       Props: {{"username": str, "comment": str, "likes"?: int}}
 
-11. "StatCard"           — Animated count-up number with label and accent divider. Prefix/suffix formatting.
-                            Best for: Revenue stats, subscriber counts, KPIs.
-                            Props: {{"value": number, "label": str, "prefix"?: str, "suffix"?: str, "fromValue"?: number, "decimals"?: int, "accentColor"?: "#hex"}}
+11. "StatCard" — Animated count-up number with label and accent divider. Prefix/suffix formatting.
+                  Editorial claim: "THIS NUMBER IS THE PROOF of what I just said — watch it count up." The viewer absorbs a quantitative claim visually.
+                  Reach for it when: the speaker cites a SPECIFIC number worth dwelling on — revenue, subscriber count, KPI, dollar amount, count. The number IS the moment.
+                  Anti-pattern: StatCard on vague numbers ("a few weeks ago" is not a stat). StatCard on numbers the dialogue mentions in passing rather than as the headline of the moment. StatCard with no surrounding context for why the number matters.
+                  Density: 0-1 per video.
+                  Props: {{"value": number, "label": str, "prefix"?: str, "suffix"?: str, "fromValue"?: number, "decimals"?: int, "accentColor"?: "#hex"}}
 
-12. "StickyNotes"        — EXACTLY 3 sticky notes slam on with spring physics. Fixed layout: left position has a checkmark, center is plain, right has italic + underline. Color, rotation, handwritten text (Caveat Brush).
-                            Best for: 3 standalone short items that each stand alone as a complete thought (checklist, tip triple, 3-item key-takeaways). NOT for a single quote split across notes.
-                            Props: {{"notes": [{{"text": str ≤4 words, "color": "#hex", "rotation": float}}, ...]}} (MUST be exactly 3 notes — sending 1 or 2 leaves the layout unbalanced)
-                            ANTI-PATTERN: do NOT split one continuous quote across the 3 notes. The 3 notes are parallel items, not sentence fragments. For a single quote, use TornPaper or quote_card text overlay instead.
+12. "StickyNotes" — EXACTLY 3 sticky notes slam on with spring physics. Fixed layout: left = checkmark, center = plain, right = italic + underline. Handwritten Caveat Brush text.
+                     Editorial claim: "HERE ARE THREE DISTINCT ITEMS — a checklist, a triple takeaway, three points worth pinning."
+                     Reach for it when: the dialogue genuinely contains three parallel, standalone items each of which works on its own (three tips, three takeaways, three checklist items). Each note is INDEPENDENT.
+                     Anti-pattern: StickyNotes for two items only — the third slot is empty, layout breaks. StickyNotes for one continuous quote split across three notes — sticky notes are parallel items, not sentence fragments (use TornPaper instead). StickyNotes for content with no clear triple-item structure.
+                     Density: 0-1 per video. Three-item moments are rare; faking them reads as fake.
+                     Props: {{"notes": [{{"text": str ≤4 words, "color": "#hex", "rotation": float}}, ...]}} (MUST be exactly 3 notes)
 
-13. "Toggle"             — iOS-style toggle that flips on at configurable time. Label text.
-                            Best for: Feature toggles, on/off reveals, settings demos.
-                            Props: {{"text": str, "activateAtMs"?: int, "onColor"?: "#hex"}}
+13. "Toggle" — iOS-style toggle that flips on at a configurable time. Label text.
+                Editorial claim: "A STATE JUST FLIPPED ON — here's the moment of change."
+                Reach for it when: feature reveal, settings demo, on/off transformation the speaker is describing.
+                Anti-pattern: Toggle for any content that isn't literally a state change.
+                Density: 0-1 per video.
+                Props: {{"text": str, "activateAtMs"?: int, "onColor"?: "#hex"}}
 
-14. "TornPaper"          — Top-of-frame chapter card: torn-paper banner drops from above with two text strips. Renders at the TOP regardless of `anchor`.
-                            Best for: chapter-break punctuation — the act break, the inciting incident, the before/after pivot, the moment-of-truth label. NOT a punchline marker, NOT a dialogue restatement.
-                            Text content: a chapter label or framing hook ("THE CONFESSION", "THE TURN", "WHAT SHE SAID NEXT"). NEVER a verbatim quote of the dialogue at that moment — captions already show that.
-                            Props: {{"topText": str (<=5 words), "bottomText": str (<=5 words)}}
+14. "TornPaper" — Top-of-frame chapter card: torn-paper banner drops from above with two text strips. Renders at the TOP regardless of `anchor`.
+                   Editorial claim: "WE'RE ENTERING A NEW CHAPTER of the story — here's the label for this section."
+                   Reach for it when: the narrative has a STRUCTURAL beat-change worth marking — an act break, an inciting incident, a before/after pivot, a moment-of-truth label. The text is a chapter label or framing hook ("THE CONFESSION", "THE TURN", "WHAT SHE SAID NEXT"), NEVER a verbatim quote of the dialogue (captions already show that).
+                   Anti-pattern: TornPaper as a punchline marker — that's not a chapter break, it's a single beat. TornPaper text duplicating what the captions are already saying. TornPaper as wallpaper between sections that aren't actually act-breaks. Tabloid headlines on personal stories ("YOU WON'T BELIEVE", "SHOCKING TRUTH") — reads as cringe clickbait, not editorial. Match the register of the speaker.
+                   Density: 0-2 per video. One chapter card per real act break. A video without clear act breaks doesn't get TornPaper.
+                   Props: {{"topText": str (<=5 words), "bottomText": str (<=5 words)}}
 
 (All MG usage rules — when, where, how, anti-patterns — are covered in the "MOTION GRAPHICS — HOW TO USE THEM" section above this catalog. Re-read it if you're picking an MG; the catalog only documents what each type IS, not when to reach for it.)
 
@@ -2893,31 +2968,72 @@ Each entry:
     "motion_graphic": {{"type": mg_type, "anchor": zone, "props": {{...}}}} | null
   }}
 
+The five emphasis types — each names a different audience reaction the beat creates:
+
+  "punchline"  — the joke landing, the comedic beat resolution. The moment that earned LAUGHTER.
+  "revelation" — the "aha" / twist / "and then it turned out…" moment. The moment that earned a GASP or a "no way."
+  "statement"  — a hard declarative, a thesis, a position. The moment that earned a NOD.
+  "reaction"   — the speaker's visible response to what they just said or to what happened in the story. The moment that earned EMPATHY.
+  "question"   — a rhetorical or genuine question that creates tension. The moment that earned a LEAN-IN.
+
+The type is a FORECAST of how the viewer will receive the beat. Pick the zoom (next section) whose camera-motion FEEL matches that reception. A "punchline" wants a SnapReframe; a "revelation" wants a LetterboxPush or StageZoom; a "statement" can hold steady with no zoom. The type-to-zoom pairing is suggestive, not mandatory — but if you can't articulate why your zoom choice matches the type, reconsider.
+
 For each emphasis moment, deliberately choose each layer:
 
 A. zoom_effect — does this moment need a zoom?
 
-   1. "SmoothPush"    — Slow, deliberate forward zoom with refined easing. Starts imperceptibly, accelerates, decelerates to stop.
-                         Best for: Drawing attention, emphasis moments, B-roll enhancement.
-   2. "SnapReframe"   — Fast, precise zoom with critically-damped spring. No bounce, no overshoot.
-                         Best for: Beat-synced reframes, reaction shots.
-   3. "FocusWindow"   — Background shows zoomed detail, smaller rectangle shows normal framing. Picture-in-picture context.
-                         Best for: Revealing context around a detail, before/after in same frame.
-   4. "StepZoom"      — Instant jump cuts between zoom levels. No easing. Clean editorial reframes on the beat.
-                         Best for: Music videos, fast-paced edits, beat-matched.
-   5. "LetterboxPush" — Zoomed-in view pushes from center with cinematic letterbox bars. Aspect ratio narrows with depth.
-                         Best for: Cinematic emphasis, dramatic reveals.
-   6. "StageZoom"     — Two-stage zoom: first push settles, holds, then second deeper push. Like finding focus then committing.
-                         Best for: Two-beat emphasis, building tension.
-   7. "DepthPull"     — Multi-layer cinematic depth. Background zooms slowly with floating bokeh, edge blur, haze, and frame lines.
-                         Best for: Premium intros, title sequences, high-production moments.
+NULL IS A REAL CHOICE. Not every emphasis moment needs a zoom. Some beats land harder with the camera holding steady while the caption keyword and SFX do the punctuation. Use null when:
+  • the dialogue's own weight IS the hit (particularly for "statement" type at medium intensity);
+  • an MG is already firing on this moment (zoom + MG together is two effects fighting for one beat);
+  • the preceding emphasis just used a zoom and back-to-back zooms read as machine-gun camera moves.
+Holding steady is an EDITORIAL CHOICE, not laziness. A 2-second hold on the speaker's face during a hard statement is more powerful than yet another SnapReframe.
 
-   Events are CLIP-relative (startMs from the clip's start). A single event tied to this moment's position within its clip is the common pattern.
+When you do reach for a zoom, pick the camera motion whose KINESTHETIC feel matches the emphasis type. The seven types are NOT interchangeable — each one CLAIMS something specific about the beat:
+
+   1. "SmoothPush" — Slow, deliberate forward zoom; refined easing; imperceptible start, decelerates to a stop.
+                      Kinesthetic feel: the camera is LEANING IN to hear you better. The viewer leans in with it.
+                      Pairs with: "statement" or "revelation" at medium intensity. Reflective beats where the moment unfolds slowly.
+                      Fights: hard punchlines and fast reactions — the slow build is the wrong tempo.
+
+   2. "SnapReframe" — Fast, precise zoom with critically-damped spring; no bounce, no overshoot.
+                       Kinesthetic feel: the camera is the EXCLAMATION POINT. Sudden commitment to the new framing.
+                       Pairs with: "punchline" and "reaction" at high intensity. Beat-synced reveals.
+                       Fights: contemplative beats — the snap reads as urgency where the moment wanted weight.
+
+   3. "FocusWindow" — Background shows zoomed detail; smaller rectangle shows normal framing. Picture-in-picture context.
+                       Kinesthetic feel: the camera is SHOWING TWO VIEWS at once — context and detail. The viewer compares them.
+                       Pairs with: rare structural moments where a detail AND its context both matter (before/after, callout with surroundings).
+                       Fights: everything else — FocusWindow is a specialty tool. If you can't articulate why both views matter, skip it.
+
+   4. "StepZoom" — Instant jump cuts between zoom levels; no easing. Clean editorial reframes on the beat.
+                    Kinesthetic feel: the camera is BEAT-MATCHING. Each step lands on a rhythm hit.
+                    Pairs with: music videos, fast-paced edits, "punchline" at high intensity on beat-locked content.
+                    Fights: any contemplative or slow content — the jumps read as broken playback rather than punctuation.
+
+   5. "LetterboxPush" — Zoom pushes from center with cinematic letterbox bars closing in; aspect ratio narrows with depth.
+                         Kinesthetic feel: the camera is going CINEMATIC for this beat. Letterbox says "this is a film moment."
+                         Pairs with: "revelation" at high intensity. Dramatic story beats where the moment deserves cinematic weight.
+                         Fights: casual storytime or comedy — the letterbox is too theatrical for the register.
+
+   6. "StageZoom" — Two-stage: first push settles, holds, then a deeper second push. Like finding focus then committing.
+                     Kinesthetic feel: the camera is THINKING — first move settles, hold lets it land, second move commits harder.
+                     Pairs with: two-beat emphasis (setup + payoff), "revelation" with a buildup. Multi-event zoom_effect is the natural pattern — chain two events.
+                     Fights: single-beat moments — the second stage feels like an afterthought.
+
+   7. "DepthPull" — Multi-layer cinematic depth; background zooms slowly with floating bokeh, edge blur, haze, frame lines.
+                     Kinesthetic feel: the camera is doing PREMIUM PRODUCTION — atmosphere, depth, weight.
+                     Pairs with: premium intros, title sequences, "revelation" or "statement" at high intensity on high-production-value content.
+                     Fights: anything quick, casual, or low-budget — the heavy atmosphere overstates the moment.
+
+   Events are CLIP-relative (startMs from the clip's start). A single event tied to this moment's position within its clip is the common pattern; chain two events on a `StageZoom` to make the two-stage motion explicit.
+
    For the `scale` value, use the SHOT SCALE block above as your single source of truth — it's tuned to the actual framing of THIS video. The scale ranges there supersede any general-purpose defaults. Too-tight zoom on an already-close face crops out eyes/chin.
    originY ≈ 0.4 for talking heads (faces sit in the upper half).
 
+   ZOOM VARIETY. If your previous emphasis moment used SmoothPush, consider a different zoom for the next one — using the same zoom on every emphasis collapses them all to one camera move. Each of the seven types CLAIMS something specific; match the claim to the beat.
+
 B. motion_graphic — should a text/graphic overlay land on this moment?
-   Pick from the motion graphic vocabulary above. Reserve for the 1-2 PAYOFF moments. Too many = clutter.
+   Pick from the motion graphic vocabulary above. Reserve for the 1-2 PAYOFF moments per video — too many = clutter, and an MG layered on top of a zoom fights itself (the zoom is the camera commitment; the MG asks the viewer to read something at the same time). If the zoom is doing the work, leave motion_graphic null. NULL IS THE DEFAULT.
    motion_graphic windows must NOT overlap with any text_overlay in the same visual zone.
 
 === SFX — SOUND EFFECTS ===
