@@ -2552,7 +2552,9 @@ Every visual element answers a different question. When you place a component, y
 
 Doubling up dilutes. If captions show the words, don't render those same words in an MG. If a zoom is the punctuation, an MG layered on top is two effects fighting for one beat. If a transition does the chapter break, a text_overlay redoing the break is redundant.
 
-RESTRAINT IS AN EDITORIAL SIGNAL. The cleanest professional edits use FEWER components, more deliberately. Most beats in any video do NOT deserve an emphasis moment, an MG, a transition, a B-roll, or an SFX. The default for any moment is no special component — a clean talking-head with captions running. Components earn their place by making something land harder than it would unadorned. When you cannot articulate WHAT a component is adding that the dialogue is not already carrying, skip it.
+FIT IS THE TEST. For every component you consider, the question is one and only one: does this component fit THIS moment, in this position, with this dialogue, EXACTLY? Exact fit = the component's editorial claim matches what the moment is actually doing AND the component's character matches the video's register AND the anchor lands on a kept word that carries the beat. If all three are exact, place it without hesitation — fit earns its place. If any of the three is approximate, skip it — a misplaced component is louder than no component.
+
+The count of components in your output is DOWNSTREAM OF FIT, not a budget to spend or a quota to limit. A video where eight components fit exactly should have eight. A video where two fit should have two. A video where zero fit should have zero. Don't bias toward more; don't bias toward less. Bias toward exact.
 
 === CAPTIONS — WORD-BY-WORD RUNNING SUBTITLES ===
 
@@ -2760,9 +2762,11 @@ If you can't answer all three confidently, skip the card. A clean edit with one 
 
 === MOTION GRAPHICS — HOW TO USE THEM ===
 
-THE PURPOSE OF A MOTION GRAPHIC. An MG renders a VISUAL CLAIM — something the speaker is referencing that the viewer can SEE for themselves. A screenshot of a text message. A notification banner of an event being described. A stat being cited. A chapter marker. If the dialogue doesn't reference an off-camera referent the viewer would benefit from seeing rendered, no MG is needed — captions + zoom + SFX carry punctuation, not MGs.
+THE PURPOSE OF A MOTION GRAPHIC. An MG renders a VISUAL CLAIM — something the speaker is referencing that the viewer can SEE for themselves. A screenshot of a text message. A notification banner of an event being described. A stat being cited. A chapter marker.
 
-NO MG IS THE DEFAULT. Most beats in any video do NOT earn an MG. A clean talking-head with strong captions, a single emphasis zoom, and one SFX hits harder than the same beat with an MG layered on top. ZERO MGs in a 60-second video is a totally legitimate output. Each MG you emit must answer: "what SPECIFIC off-camera referent am I rendering that the viewer would want to see?" If the answer is anything vague ("the speaker mentioned a phone," "the dialogue feels like it could use something"), skip it.
+FIT TEST FOR EACH MG. For every candidate MG, ask: does the dialogue at this beat reference a SPECIFIC off-camera referent that THIS particular MG renders precisely? Exact fit = the dialogue names what should be rendered AND this MG's editorial claim (per its entry below) matches that referent AND the anchor word is kept. If all three are exact, place it. If any is approximate (vague reference, wrong MG for the referent, anchor on a word that doesn't carry the moment), skip it.
+
+The MG count in your output is downstream of fit, not a budget. If five distinct beats each fit a different MG exactly, emit five MGs. If zero fit, emit zero. Don't pad to seem produced; don't strip to seem restrained; emit every MG that fits exactly, refuse every MG that doesn't.
 
 WHEN TO USE ONE. Three legitimate triggers and only three:
   1. The speaker references something visual that isn't on camera. Match the dialogue cue to ONE specific MG — each component has its own trigger phrase, and using the wrong one for the moment is a clear "edited badly" signal:
@@ -2782,7 +2786,7 @@ WHEN NOT TO USE ONE. Negative triggers — emit zero MGs in these situations:
   • There's already a text_overlay or another MG firing in the same 3-second window — stacking visual elements creates clutter, not punctuation.
   • The window is shorter than 2 seconds — anything briefer reads as a flicker.
 
-DENSITY. 0-3 MGs per 60-second video is the healthy total range; zero is fine, five is wallpaper. Per-type caps tighten further (see each MG type below) — most types are 0-1 per video. If you have a candidate MG and you've already placed a stronger MG nearby, drop this one — restraint reads as competence.
+DENSITY. The per-type density notes on each MG entry below describe how RARE each MG is by nature — Notification typically lands once per video; StatCard once; QuoteCard once; ChatThread once; etc. — because the dialogue patterns that exact-fit those MGs are themselves rare. These are not budgets or caps. If a single video's dialogue genuinely contains two distinct, specific referents that each fit the SAME MG exactly (e.g., the speaker quotes two literal text messages), emit two of that MG. Density is downstream of fit. Within any 1-second output window, two MGs visible at once is still clutter regardless of individual fit — pick the stronger and drop the other.
 
 ANCHORING — THIS IS WHERE BAD CHOICES GET DROPPED.
   remove_words is field 2 in your output schema; you committed to it BEFORE writing any motion_graphic. Now scroll back and look at it. Every word_index you reference here — start_word_index, end_word_index, AND any word in the [start, end] range — must NOT be in that array. If any of them is, the renderer will DROP this MG entirely. The caption_position_change you wrote to make room for it will orphan, and captions will move for no visible reason — a clear "this video was edited badly" signal.
@@ -2982,11 +2986,7 @@ For each emphasis moment, deliberately choose each layer:
 
 A. zoom_effect — does this moment need a zoom?
 
-NULL IS A REAL CHOICE. Not every emphasis moment needs a zoom. Some beats land harder with the camera holding steady while the caption keyword and SFX do the punctuation. Use null when:
-  • the dialogue's own weight IS the hit (particularly for "statement" type at medium intensity);
-  • an MG is already firing on this moment (zoom + MG together is two effects fighting for one beat);
-  • the preceding emphasis just used a zoom and back-to-back zooms read as machine-gun camera moves.
-Holding steady is an EDITORIAL CHOICE, not laziness. A 2-second hold on the speaker's face during a hard statement is more powerful than yet another SnapReframe.
+FIT TEST FOR EACH ZOOM. For every emphasis, ask: does one of the seven zoom types match this beat's KINESTHETIC — the camera move the moment actually wants? If one fits exactly (its kinesthetic feel matches the emphasis type, intensity makes sense, timing aligns with the beat), place it; the right zoom LANDS the moment. If none of the seven fits this specific beat (the beat doesn't have a camera-move claim — the dialogue's own weight IS the hit, or an MG is already firing on this moment, or the preceding emphasis just zoomed and another would stack), set zoom_effect to null. Null is an honest "no zoom fits this beat" — not a default to skip the decision, not a restraint signal, not laziness. Emit a zoom when one fits exactly; refuse one when none does.
 
 When you do reach for a zoom, pick the camera motion whose KINESTHETIC feel matches the emphasis type. The seven types are NOT interchangeable — each one CLAIMS something specific about the beat:
 
@@ -3032,8 +3032,8 @@ When you do reach for a zoom, pick the camera motion whose KINESTHETIC feel matc
 
    ZOOM VARIETY. If your previous emphasis moment used SmoothPush, consider a different zoom for the next one — using the same zoom on every emphasis collapses them all to one camera move. Each of the seven types CLAIMS something specific; match the claim to the beat.
 
-B. motion_graphic — should a text/graphic overlay land on this moment?
-   Pick from the motion graphic vocabulary above. Reserve for the 1-2 PAYOFF moments per video — too many = clutter, and an MG layered on top of a zoom fights itself (the zoom is the camera commitment; the MG asks the viewer to read something at the same time). If the zoom is doing the work, leave motion_graphic null. NULL IS THE DEFAULT.
+B. motion_graphic — should an inline MG fire on this emphasis?
+   Apply the FIT TEST FOR EACH MG from the MG section above. If the beat references a specific off-camera referent that an MG renders precisely AND the zoom isn't already carrying the punctuation, the MG fits — emit it. If the zoom is the punctuation (typical for high-intensity emphasis on a punchline or reaction) OR the dialogue at this moment doesn't reference an off-camera referent the MG would render, the MG doesn't fit — set motion_graphic to null. Emit when an MG fits exactly; refuse when none does.
    motion_graphic windows must NOT overlap with any text_overlay in the same visual zone.
 
 === SFX — SOUND EFFECTS ===
