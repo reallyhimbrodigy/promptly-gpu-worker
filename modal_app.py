@@ -76,7 +76,6 @@ image = (
     # Without this, NVENC silently fails and pipeline falls back to CPU encoding (10-15x slower)
     .env({"NVIDIA_DRIVER_CAPABILITIES": "all"})
     .run_commands(
-        "echo 'build v42 - component-section expansion: gives Gemini editorial signal + reach-for + anti-pattern per type, not just visual descriptions. New LAYER RESPONSIBILITIES block (which component owns which job + restraint principle). CAPTIONS: each of 13 styles now has editorial signal / reach for it when / it fights — replaced the content-to-style decision matrix (which was anchoring monoculture) with explicit variety pressure against user style profile. MOTION GRAPHICS: NO MG IS THE DEFAULT framing, per-type density caps (0-1 for most, 0-2 for IMessageBubble/TornPaper/AnnotationArrow), each of 14 types now has editorial claim / reach-for / specific anti-pattern. EMPHASIS: five emphasis types defined with audience reactions; NULL IS A REAL CHOICE on zoom_effect; each of 7 zooms has kinesthetic feel / pairs with / fights; ZOOM VARIETY pressure. No new taxonomy tables, no anchored content-to-component lists.'",
         "apt-get update && apt-get install -y ca-certificates && update-ca-certificates",
         # Remove CUDA stubs AND compat libs that intercept dlopen before Modal's
         # real driver libs. THEN recreate placeholders for every libcuda* file
