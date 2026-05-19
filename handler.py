@@ -7833,6 +7833,15 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15, v
     #   edges. Used by silence-tighten (Python-internal) and accepted for
     #   any cached pre-v35 plans.
     _range_removed_count = 0
+    # Dead-air anchor pairs from Gemini. Each pair (_aw, _bw) means "drop
+    # the silence between word[_aw].end and word[_bw].start." For
+    # consecutive anchors (_bw == _aw + 1) there are zero words strictly
+    # between, so Step 2 must still split the clip at this boundary or
+    # the dead air plays through. Multi-word ranges (_bw > _aw + 1) already
+    # force a split via the `removed_between` check in Step 2, but tracking
+    # the anchors uniformly keeps the contract clean: every accepted
+    # dead_air range becomes a clip break.
+    _dead_air_split_pairs = set()
     for item in remove_words or []:
         if not isinstance(item, dict):
             continue
@@ -7851,6 +7860,22 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15, v
                 continue
             if _bw <= _aw:
                 continue
+            # Speaker-turn guard: dead_air range between two speakers is
+            # actually a turn break (conversation, not silence). Refuse
+            # range removals whose anchor words are on different speakers.
+            if _reason == "dead_air":
+                _aw_spk = (sorted_words[_aw].get("speaker") if 0 <= _aw < len(sorted_words) else None)
+                _bw_spk = (sorted_words[_bw].get("speaker") if 0 <= _bw < len(sorted_words) else None)
+                if _aw_spk is not None and _bw_spk is not None and _aw_spk != _bw_spk:
+                    print(
+                        f"[tighten] REJECTED dead_air word[{_aw}]→word[{_bw}] "
+                        f"— spans speaker turn (spk{_aw_spk}→spk{_bw_spk}); "
+                        f"keeping the turn-break audio",
+                        flush=True,
+                    )
+                    continue
+            if _reason == "dead_air":
+                _dead_air_split_pairs.add((_aw, _bw))
             for _w in sorted_words:
                 _wi = _w["_word_index"]
                 if _wi in removed_indices:
@@ -7904,6 +7929,16 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15, v
     for prev, curr in zip(kept_words, kept_words[1:]):
         gap = curr["_start"] - prev["_end"]
 
+        # Speaker-overlap guard. kept_words is time-sorted; with multi-speaker
+        # recordings, two adjacent entries can be contemporaneous (curr.start
+        # < prev.end). Splitting between them would produce clip ranges that
+        # overlap in source time (the non-overlap invariant below would fire).
+        # No "between" exists in the overlap case, so removed_between logic is
+        # meaningless here — keep them in the same clip regardless.
+        if curr["_start"] < prev["_end"]:
+            current_words.append(curr)
+            continue
+
         # If any removed word exists between these two kept words, we MUST
         # split here. Otherwise the clip's audio range spans the removed
         # word and its audio bleeds through (e.g. "shou-" before "shouldn't").
@@ -7914,7 +7949,27 @@ def build_clips_from_words(deepgram_words, remove_words, max_silence_gap=0.15, v
             for idx in range(prev["_word_index"] + 1, curr["_word_index"])
         )
 
-        if gap > NATURAL_PAUSE or removed_between:
+        # Gemini-flagged dead_air boundary. Honor every dead_air anchor
+        # Gemini emits — that's the architectural promise: cuts come from
+        # Gemini's decisions, not from a threshold over the top of them.
+        # The consecutive-anchor case `(N, N+1)` has zero words strictly
+        # between, so the range-removal logic above adds nothing to
+        # `removed_indices` and `removed_between` is False; without this
+        # check the clip stays continuous and the dead air plays through.
+        dead_air_split = any(
+            _aw <= prev["_word_index"] and _bw >= curr["_word_index"]
+            for (_aw, _bw) in _dead_air_split_pairs
+        )
+
+        if gap > NATURAL_PAUSE or removed_between or dead_air_split:
+            if dead_air_split and gap <= NATURAL_PAUSE and not removed_between:
+                print(
+                    f"[tighten] Splitting at dead_air boundary "
+                    f"word[{prev['_word_index']}]→word[{curr['_word_index']}] "
+                    f"(gap {gap*1000:.0f}ms, below natural-pause threshold "
+                    f"{NATURAL_PAUSE*1000:.0f}ms — Gemini flagged it removable)",
+                    flush=True,
+                )
             clips.append(current_words)
             current_words = [curr]
         else:
