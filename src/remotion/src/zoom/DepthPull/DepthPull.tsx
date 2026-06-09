@@ -5,8 +5,8 @@ import {
   useVideoConfig,
   interpolate,
   Easing,
-  OffthreadVideo,
 } from "remotion";
+import { Video } from "@remotion/media";
 import { msToFrames } from "../shared/timing";
 import type { DepthPullProps } from "../types";
 
@@ -30,8 +30,6 @@ export const DepthPull: React.FC<DepthPullProps> = ({
   style,
   edgeBlur = 4,
   frameLines = true,
-  startFrom,
-  playbackRate = 1,
 }) => {
   const frame = useCurrentFrame();
   const { fps, durationInFrames } = useVideoConfig();
@@ -95,6 +93,9 @@ export const DepthPull: React.FC<DepthPullProps> = ({
 
   const bgScale = 1 + (targetScale - 1) * 0.6 * zoomProgress;
   const midScale = 1 + (targetScale - 1) * 1.0 * zoomProgress;
+  const contrastBoost = 1 + 0.08 * zoomProgress;
+  const brightnessLift = 1 + 0.02 * zoomProgress;
+  const bgSaturation = 1 - 0.15 * zoomProgress;
   const currentEdgeBlur = edgeBlur * zoomProgress;
 
   const frameOpacity = interpolate(
@@ -109,29 +110,33 @@ export const DepthPull: React.FC<DepthPullProps> = ({
     <AbsoluteFill
       style={{
         overflow: "hidden",
+        filter: `contrast(${contrastBoost}) brightness(${brightnessLift})`,
         ...style,
       }}
     >
       <AbsoluteFill>
-        <OffthreadVideo
+        <Video
           src={src}
-          startFrom={startFrom}
-          playbackRate={playbackRate}
           style={{
             width: "100%",
             height: "100%",
             objectFit: "cover",
             transform: `scale(${bgScale})`,
             transformOrigin: `${originX * 100}% ${originY * 100}%`,
+            filter: `saturate(${bgSaturation}) brightness(0.95)`,
           }}
         />
       </AbsoluteFill>
 
-      {/* Removed: contrast/brightness boost, background saturate/darken,
-          and blue mixBlendMode-multiply tint. Those were a global cinematic
-          color grade that read as "subtle color effects on emphasis
-          moments" — unwanted. The geometric zoom + bokeh + edge blur
-          remain as the depth/atmosphere identity. */}
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          background: `rgba(30, 50, 80, ${0.06 * zoomProgress})`,
+          mixBlendMode: "multiply",
+          pointerEvents: "none",
+        }}
+      />
 
       <div
         style={{

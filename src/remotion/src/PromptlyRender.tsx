@@ -44,7 +44,7 @@ import {
 import {
   AnnotationArrow, QuoteCard, StatCard,
   Notification, ProgressBar, ChatThread,
-  TornPaper, StickyNotes, Toggle, RecordingFrame,
+  StickyNotes, Toggle, RecordingFrame,
   TweetBubble, InstagramComment, IMessageBubble, TikTokComment,
 } from "./motion-graphics";
 
@@ -69,23 +69,30 @@ const ZOOM_MAP: Record<string, React.FC<any>> = {
 const MG_MAP: Record<string, React.FC<any>> = {
   AnnotationArrow, QuoteCard, StatCard,
   Notification, ProgressBar, ChatThread,
-  TornPaper, StickyNotes, Toggle, RecordingFrame,
+  StickyNotes, Toggle, RecordingFrame,
   TweetBubble, InstagramComment, IMessageBubble, TikTokComment,
 };
 
 // ─── Per-clip renderer ─────────────────────────────────────────────────────
+// Zoom clips render via the ABE.zip zoom components UNMODIFIED. Those
+// components accept `src` + `events` + their component-specific extras only —
+// no startFrom, no playbackRate. The pipeline pre-extracts a per-clip source
+// file (frame 0 = clip's first kept frame, already speed-adjusted) and puts
+// its URL in `clip.src`, so the component just plays it from frame 0 as
+// designed. The component renderer never wraps or intercepts the components.
+//
+// Non-zoom clips (no zoomEffect) don't reach this renderer at all — they're
+// rendered directly by FFmpeg in the final composite step.
 const ClipRenderer: React.FC<{ clip: ClipSpec; sourceUrl: string }> = ({
   clip, sourceUrl,
 }) => {
-  if (clip.zoomEffect) {
+  if (clip.zoomEffect && clip.src) {
     const ZoomComp = ZOOM_MAP[clip.zoomEffect.type];
     if (ZoomComp) {
       const { type: _t, events, ...extraZoomProps } = clip.zoomEffect;
       return (
         <ZoomComp
-          src={sourceUrl}
-          startFrom={clip.startFromFrames}
-          playbackRate={clip.playbackRate}
+          src={resolveSrc(clip.src)}
           events={events}
           {...extraZoomProps}
         />
@@ -287,18 +294,6 @@ const TextOverlayRenderer: React.FC<{
   fps: number;
 }> = ({ overlay, captionStyle, captionExtraProps, captionKeywords, fps }) => {
   const ovDurMs = Math.round((overlay.durationInFrames / fps) * 1000);
-  if (overlay.variant === "torn_paper") {
-    return (
-      <AbsoluteFill style={{ pointerEvents: "none" }}>
-        <TornPaper
-          startMs={0}
-          durationMs={ovDurMs}
-          topText={overlay.topText}
-          bottomText={overlay.bottomText}
-        />
-      </AbsoluteFill>
-    );
-  }
   if (overlay.variant === "sticky_note") {
     return (
       <AbsoluteFill style={{ pointerEvents: "none" }}>
@@ -416,15 +411,16 @@ const resolveSrc = (s: string): string => {
 // windows (Python pipeline; see _force_top_position_during_broll) so they
 // land in the upper third where they don't compete with the B-roll subject.
 //
-// Boundary fade: 4 frames in, 4 frames out (~67ms@60fps). Tight enough to
-// feel like a hard cut, soft enough to avoid harsh boundary artifacts on
-// the encoder.
+// Boundary fade: ~67ms in, ~67ms out, fps-aware (was hardcoded at 4 frames,
+// which doubled to 133ms at the comp's 30fps and made B-roll feel delayed
+// against word-onset). Tight enough to feel like a hard cut, soft enough to
+// avoid harsh boundary artifacts on the encoder.
 
 const BrollClip: React.FC<{ spec: BrollSpec; fps: number }> = ({ spec, fps }) => {
   const frame = useCurrentFrame();
 
   const totalFrames = spec.durationInFrames;
-  const fadeFrames = 4;
+  const fadeFrames = Math.max(1, Math.round(fps * 0.067));
   const fadeIn = interpolate(
     frame,
     [0, fadeFrames],

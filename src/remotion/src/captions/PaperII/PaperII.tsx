@@ -12,7 +12,6 @@ import type { PaperIIProps } from "./types";
 import { CAPTION_FONTS } from "../shared/fonts";
 import { msToFrames } from "../shared/timing";
 import { getCaptionPositionStyle } from "../shared/captionPosition";
-import { leadInRange } from "../shared/leadIn";
 
 // ---------------------------------------------------------------------------
 // PaperIIWord
@@ -49,11 +48,10 @@ const PaperIIWord: React.FC<{
   const currentTimeMs = (frame / fps) * 1000 + pageStartMs;
   const isPast = currentTimeMs >= token.toMs;
 
-  // Smooth color transition over colorTransitionMs, anchored so the word
-  // hits its active color AT the spoken moment (not colorTransitionMs after).
+  // Smooth color transition over colorTransitionMs
   const transitionProgress = interpolate(
     currentTimeMs,
-    leadInRange(token.fromMs, colorTransitionMs),
+    [token.fromMs, token.fromMs + colorTransitionMs],
     [0, 1],
     { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
   );
@@ -76,8 +74,6 @@ const PaperIIWord: React.FC<{
         lineHeight: 1.15,
         whiteSpace: "nowrap",
         textShadow,
-        // Universal stroke for guaranteed readability over any background.
-        WebkitTextStroke: "0.75px rgba(0,0,0,0.6)",
       }}
     >
       {token.text}
@@ -181,13 +177,32 @@ const PaperIIPage: React.FC<{
   stripGap,
   ...stripProps
 }) => {
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+
+  if (frame < 0) return null;
+
   // Split tokens into lines
   const lines: TikTokToken[][] = [];
   for (let i = 0; i < page.tokens.length; i += maxWordsPerLine) {
     lines.push(page.tokens.slice(i, i + maxWordsPerLine));
   }
 
-  // Hard cut on/off — no fade. Captions snap to the spoken word.
+  // Simple fade in/out
+  const pageLocalMs = (frame / fps) * 1000;
+  const fadeInOpacity = interpolate(
+    pageLocalMs,
+    [0, 120],
+    [0, 1],
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
+  );
+  const fadeOutOpacity = interpolate(
+    pageLocalMs,
+    [page.durationMs - 150, page.durationMs],
+    [1, 0],
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
+  );
+
   return (
     <div
       style={{
@@ -195,6 +210,7 @@ const PaperIIPage: React.FC<{
         flexDirection: "column",
         alignItems: "center",
         gap: stripGap,
+        opacity: Math.min(fadeInOpacity, fadeOutOpacity),
       }}
     >
       {lines.map((lineTokens, lineIdx) => (

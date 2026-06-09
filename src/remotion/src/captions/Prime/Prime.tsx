@@ -12,7 +12,6 @@ import type { PrimeProps } from "./types";
 import { CAPTION_FONTS } from "../shared/fonts";
 import { msToFrames } from "../shared/timing";
 import { CAPTION_PADDING } from "../shared/captionPosition";
-import { leadInElapsed } from "../shared/leadIn";
 
 // ---------------------------------------------------------------------------
 // PrimeWord — single word with staggered entrance
@@ -56,15 +55,13 @@ const PrimeWord: React.FC<{
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
-  // Spring entrance per word — lead-in matches the spring's 0.25s duration
-  // so the slide-up settles AT the spoken moment, not 0.25s after.
+  // Spring entrance per word
   const activateFrame = Math.round(((token.fromMs - pageStartMs) / 1000) * fps);
-  const springFrames = Math.round(fps * 0.25);
   const wordSpring = spring({
-    frame: leadInElapsed(frame, activateFrame, springFrames),
+    frame: frame - activateFrame,
     fps,
     config: { damping: 200 },
-    durationInFrames: springFrames,
+    durationInFrames: Math.round(fps * 0.25),
   });
 
   const slideY = interpolate(wordSpring, [0, 1], [20, 0]);
@@ -86,8 +83,6 @@ const PrimeWord: React.FC<{
         letterSpacing,
         lineHeight: 1.1,
         textShadow,
-        // Universal stroke for guaranteed readability over any background.
-        WebkitTextStroke: "0.75px rgba(0,0,0,0.6)",
         textTransform: "lowercase",
         whiteSpace: "nowrap",
         transform: `translateY(${slideY}px)`,
@@ -130,6 +125,8 @@ const PrimePage: React.FC<{
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
+  if (frame < 0) return null;
+
   const isSpecial = (text: string) =>
     specialWords.some((w) => w.toLowerCase() === text.toLowerCase());
 
@@ -156,7 +153,15 @@ const PrimePage: React.FC<{
     lines.push({ tokens: buffer, hasSpecial: false });
   }
 
-  // Hard cut on/off — no fade. Captions snap to the spoken word.
+  // Fade out
+  const pageLocalMs = (frame / fps) * 1000;
+  const fadeOut = interpolate(
+    pageLocalMs,
+    [page.durationMs - 120, page.durationMs],
+    [1, 0],
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
+  );
+
   let globalWordIdx = 0;
 
   return (
@@ -165,6 +170,7 @@ const PrimePage: React.FC<{
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
+        opacity: fadeOut,
       }}
     >
       {(() => {
@@ -221,7 +227,10 @@ export const Prime: React.FC<PrimeProps> = ({
   line2FontWeight = 800,
   maxWordsPerLine = 3,
   letterSpacing = "0.01em",
-  lineGap = -30,
+  // Positive gap so the oversized italic "break-out" keyword line and the
+  // regular sans line below it don't visibly overlap. Prior value of -30
+  // pulled them on top of each other on long keywords.
+  lineGap = 12,
   textShadow = "0 2px 8px rgba(0,0,0,0.7), 0 0 4px rgba(0,0,0,0.4)",
   specialWords = [],
   specialFontFamily = CAPTION_FONTS.playfairDisplay,

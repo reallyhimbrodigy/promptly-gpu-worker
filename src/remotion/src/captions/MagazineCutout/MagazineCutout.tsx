@@ -12,12 +12,6 @@ import type { MagazineCutoutProps } from "./types";
 import { CAPTION_FONTS } from "../shared/fonts";
 import { msToFrames } from "../shared/timing";
 import { getCaptionPositionStyle } from "../shared/captionPosition";
-import { leadInElapsed } from "../shared/leadIn";
-
-// Lead-in for the cutout flutter spring (mass:0.65, damping:13,
-// stiffness:180). Slightly slower settle than the editorial springs —
-// 14 frames gives the paper-drop time to land before the word is spoken.
-const CUTOUT_LEAD_IN = 14;
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -121,12 +115,10 @@ const MagazineCutoutWord: React.FC<{
   const wordFontSize = fontSize + sizeShift;
 
   // ── Entry spring ───────────────────────────────────────────────────────
-  // Floaty, slight overshoot: the clipping flutters down and settles AT the
-  // spoken moment (the lead-in shifts the spring start earlier so the paper
-  // is at rest when the word is audibly delivered).
+  // Floaty, slight overshoot: the clipping flutters down and settles.
   const entrySpring = spring({
     fps,
-    frame: leadInElapsed(frame, wordOnsetFrame, CUTOUT_LEAD_IN),
+    frame: frame - wordOnsetFrame,
     config: {
       mass: 0.65,
       damping: 13,
@@ -247,6 +239,8 @@ const MagazineCutoutPage: React.FC<{
 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
+
+  if (frame < 0) return null;
 
   const currentTimeMs = page.startMs + (frame / fps) * 1000;
 

@@ -50,7 +50,7 @@ CaptionStyle = Literal[
 MotionGraphicType = Literal[
     "AnnotationArrow", "ChatThread", "Notification", "ProgressBar",
     "QuoteCard", "RecordingFrame", "StatCard", "StickyNotes", "Toggle",
-    "TornPaper", "TweetBubble", "InstagramComment", "IMessageBubble",
+    "TweetBubble", "InstagramComment", "IMessageBubble",
     "TikTokComment",
 ]
 
@@ -91,6 +91,15 @@ class ClipSpec(_RemotionModel):
     playbackRate: float
     durationInFrames: int
     zoomEffect: Optional[ZoomEffectSpec] = None
+    # Optional pre-extracted source URL for Remotion-rendered zoom clips.
+    # The ABE zoom components play their `src` from frame 0 with no seek
+    # or playback-rate prop, so the pipeline materializes a frame-accurate
+    # per-clip mp4 (source[startFromFrames..+durationInFrames*playbackRate])
+    # and passes its staticFile() URL here. When set, the Remotion clip
+    # renderer uses this src instead of the top-level sourceUrl and ignores
+    # startFromFrames/playbackRate (the file is already trimmed and speed-
+    # adjusted). When None, the clip is rendered by FFmpeg (no zoom path).
+    src: Optional[str] = None
 
 
 class TransitionSpec(_RemotionModel):
@@ -174,12 +183,6 @@ class _TextOverlayBase(_RemotionModel):
     durationInFrames: int
 
 
-class TornPaperOverlay(_TextOverlayBase):
-    variant: Literal["torn_paper"]
-    topText: str
-    bottomText: str
-
-
 class _StickyNoteEntry(_RemotionModel):
     text: str
     color: str
@@ -204,7 +207,7 @@ class CaptionMatchOverlay(_TextOverlayBase):
 
 
 TextOverlaySpec = Annotated[
-    Union[TornPaperOverlay, StickyNoteOverlay, QuoteCardOverlay, CaptionMatchOverlay],
+    Union[StickyNoteOverlay, QuoteCardOverlay, CaptionMatchOverlay],
     Field(discriminator="variant"),
 ]
 

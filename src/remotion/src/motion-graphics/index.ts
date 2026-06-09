@@ -36,8 +36,6 @@ export type {
   ChatMessage,
   ChatThreadHeader,
 } from "./ChatThread";
-export { TornPaper } from "./TornPaper";
-export type { TornPaperProps } from "./TornPaper";
 export { StickyNotes } from "./StickyNotes";
 export type { StickyNotesProps, StickyNote } from "./StickyNotes";
 export { Toggle } from "./Toggle";

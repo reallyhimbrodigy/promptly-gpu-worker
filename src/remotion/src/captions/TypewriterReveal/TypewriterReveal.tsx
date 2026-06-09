@@ -93,6 +93,8 @@ const TypewriterPage: React.FC<{
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
+  if (frame < 0) return null;
+
   // Absolute time for character timing lookups
   const currentTimeMs = page.startMs + (frame / fps) * 1000;
 
@@ -101,14 +103,20 @@ const TypewriterPage: React.FC<{
     [page, lowercase],
   );
 
-  // Hard cut on/off — no page fade. Captions snap to the spoken word.
-  // The character-by-character typewriter reveal IS the entrance effect;
-  // a separate page-level fade on top would just delay the typewriter
-  // from starting and feel laggy. fadeInDurationMs / fadeOutDurationMs
-  // props are retained for prop-API back-compat but ignored.
-  void fadeInDurationMs;
-  void fadeOutDurationMs;
-  const pageOpacity = 1;
+  // Page fade
+  const pageLocalMs = (frame / fps) * 1000;
+  const fadeIn = interpolate(pageLocalMs, [0, fadeInDurationMs], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  const fadeOutStart = page.durationMs - fadeOutDurationMs;
+  const fadeOut = interpolate(
+    pageLocalMs,
+    [fadeOutStart, page.durationMs],
+    [1, 0],
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
+  );
+  const pageOpacity = Math.min(fadeIn, fadeOut);
 
   // Find last revealed character
   let lastRevealedIdx = -1;
@@ -138,8 +146,6 @@ const TypewriterPage: React.FC<{
       "0 0 40px rgba(0,0,0,0.4)",
       "0 4px 12px rgba(0,0,0,0.5)",
     ].join(", "),
-    // Universal stroke for guaranteed readability over any background.
-    WebkitTextStroke: "0.5px rgba(0,0,0,0.55)",
   };
 
   return (
@@ -187,8 +193,8 @@ export const TypewriterReveal: React.FC<TypewriterRevealProps> = ({
   lowercase = true,
   letterSpacing = "0.03em",
   lineHeight = 1.4,
-  fadeInDurationMs = 15,
-  fadeOutDurationMs = 15,
+  fadeInDurationMs = 150,
+  fadeOutDurationMs = 150,
   boxBorderRadius = 8,
   maxWidthPercent = 0.85,
 }) => {

@@ -12,13 +12,6 @@ import { msToFrames } from "../shared/timing";
 import { CAPTION_FONTS } from "../shared/fonts";
 import { getCaptionPositionStyle } from "../shared/captionPosition";
 import { buildKeywordSet, isKeyword } from "../shared/keywords";
-import { leadInRange } from "../shared/leadIn";
-
-// Lead-in: word fully lit at the spoken moment, sweep + glow build up to
-// the audible delivery (not from it).
-const SWEEP_FRAMES = 7;
-const KW_GLOW_BUILD_FRAMES = 5;
-
 
 const SHADOW = [
   "0 0 10px rgba(0,0,0,0.7)",
@@ -48,18 +41,12 @@ const IlluminateWord: React.FC<{
   const wordStart = msToFrames(fromMs - pageStartMs, fps);
   const localFrame = frame - wordStart;
 
-  // Sweep progress: the light beam crosses this word, ending AT the spoken
-  // moment so the word is fully lit when audibly delivered.
-  const sweep = interpolate(
-    localFrame,
-    leadInRange(0, SWEEP_FRAMES),
-    [0, 1],
-    {
-      easing: Easing.out(Easing.cubic),
-      extrapolateLeft: "clamp",
-      extrapolateRight: "clamp",
-    },
-  );
+  // Sweep progress: the light beam crosses this word
+  const sweep = interpolate(localFrame, [0, 7], [0, 1], {
+    easing: Easing.out(Easing.cubic),
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
 
   // Before sweep: dim. After sweep: fully lit.
   const brightness = interpolate(sweep, [0, 0.4, 1], [0.2, 0.6, 1], {
@@ -73,18 +60,12 @@ const IlluminateWord: React.FC<{
     extrapolateRight: "clamp",
   });
 
-  // Keyword glow: builds up TO the spoken moment so the warm halo is
-  // present when the word is delivered, then lingers.
+  // Keyword glow: fades in after sweep completes
   const glowOpacity = isKw
-    ? interpolate(
-        localFrame,
-        leadInRange(0, KW_GLOW_BUILD_FRAMES),
-        [0, 1],
-        {
-          extrapolateLeft: "clamp",
-          extrapolateRight: "clamp",
-        },
-      )
+    ? interpolate(localFrame, [5, 10], [0, 1], {
+        extrapolateLeft: "clamp",
+        extrapolateRight: "clamp",
+      })
     : 0;
 
   const kwGlow = glowOpacity > 0
@@ -101,8 +82,6 @@ const IlluminateWord: React.FC<{
         color: textColor,
         letterSpacing: "-0.01em",
         textShadow: `${SHADOW}${kwGlow ? `, ${kwGlow}` : ""}`,
-        // Universal stroke for guaranteed readability over any background.
-        WebkitTextStroke: "0.75px rgba(0,0,0,0.6)",
         opacity: brightness,
         WebkitMaskImage: `linear-gradient(110deg, black ${maskPos - 30}%, rgba(0,0,0,0.3) ${maskPos}%, black ${maskPos + 30}%)`,
         maskImage: `linear-gradient(110deg, black ${maskPos - 30}%, rgba(0,0,0,0.3) ${maskPos}%, black ${maskPos + 30}%)`,

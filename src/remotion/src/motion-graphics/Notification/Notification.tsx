@@ -199,8 +199,7 @@ export const Notification: React.FC<NotificationProps> = ({
   // DOWN from the top of the screen — placing it anywhere else (center,
   // bottom) makes the entry animation nonsensical. We honor `scale`
   // only because fine-tuning the size is safe; fine-tuning the position
-  // breaks the visual metaphor. Same locked-position pattern TornPaper
-  // uses. (Earlier renders shipped Notification at lower_third_safe
+  // breaks the visual metaphor. (Earlier renders shipped Notification at lower_third_safe
   // because Gemini interpreted "LARGE MGs allowed at upper OR lower
   // third" as a green light to place it at the bottom — the prompt has
   // since been tightened to call out Notification specifically, and
@@ -219,7 +218,9 @@ export const Notification: React.FC<NotificationProps> = ({
 
   if (!visible) return null;
 
-  const items = notifications.slice(0, 3);
+  const items = Array.isArray(notifications)
+    ? notifications.slice(0, 3)
+    : [];
   if (items.length === 0) return null;
 
   const style = STYLES[platform];

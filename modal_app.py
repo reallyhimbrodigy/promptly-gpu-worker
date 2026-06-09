@@ -59,7 +59,7 @@ _BUILD_TS = str(int(time.time()))
 # rebuild trigger v62 — FFmpeg base + Remotion micro-segments architecture. Replaces v61's chunked Remotion fan-out (which delivered 140s, not the projected 60s, because Modal's Function.map only ran ~4 workers in parallel without warm pool, and the per-chunk Remotion startup tax of ~10s didn't amortize on small chunks). Visually-identical fast path:
 # (1) PromptlyOverlay (transparent canvas — captions/MG/text overlays) renders once on the orchestrator. ProRes 4444 alpha, unchanged.
 # (2) PromptlyMicroSegments (NEW composition) renders ALL transitions (11 types: CardSwipe / FilmStrip / SceneTitle / NewspaperWipe / LightLeak / SlideOver / Stack / CrossfadeZoom / ShutterFlash / StepPush / ZoomThrough) AND composite-effect zoom clips (FocusWindow / LetterboxPush / DepthPull) in ONE Remotion process — segments concatenated end-to-end so ~10s startup tax amortizes across all of them. h264 (no alpha).
-# (3) Base video — clip cuts, simple-zoom clips (SmoothPush / SnapReframe / StepZoom / StageZoom) ported to per-frame `crop` expressions, B-roll cutaways, outro fade — built directly by FFmpeg in one big filter_complex. SnapReframe spring (damping=28 mass=0.6 stiffness=260) uses closed-form over-damped step response (1 + (-33.87*exp(-12.79*t) + 12.79*exp(-33.87*t))/21.08); SmoothPush/StageZoom use cubic ease pieces matching the Remotion components exactly.
+# (3) Base video — clip cuts, simple-zoom clips (SmoothPush / SnapReframe / StepZoom / StageZoom) ported to per-frame `crop` expressions, B-roll cutaways, outro fade — built directly by FFmpeg in one big filter_complex. SmoothPush / SnapReframe / StepZoom / StageZoom use cubic ease pieces matching the Remotion components exactly.
 # (4) Single-pass final ffmpeg invocation: builds each clip segment via filter chains, trims Remotion-rendered segments out of micro_segments.mp4 by frame range, concats in timeline order, overlays B-roll at output windows, applies outro fade, alpha-composites the overlay layer, libx264 ultrafast crf 18 final encode + AAC audio mux.
 # Net: Remotion only paints the visual layers it has to (overlay layer + complex-segment windows). Every video-paint frame goes through FFmpeg at native libx264 ultrafast + lanczos resample on 64 cores. Removes render_chunk function, render_volume, render_staging_janitor — all chunked-render infra is dead. handler.py and orchestrator container unchanged in resource shape (H100 + 64 vCPU + 128 GB). Expected end-to-end (warm): ~30-50s for typical talking-head videos (no complex zoom), ~50-70s if a clip uses FocusWindow/LetterboxPush/DepthPull. Quality preserved: every Remotion component renders exactly the frames it always did; FFmpeg-rendered clips use the same scale/origin math the components compute, just with FFmpeg's lanczos resampler instead of Chromium's compositor — visually indistinguishable.
 
@@ -142,7 +142,13 @@ image = (
     .run_commands(
         # Build FFmpeg from source WITH NVENC support (nonfree, not available in prebuilts)
         # Install NVIDIA codec headers (nv-codec-headers) for NVENC/NVDEC
-        "apt-get install -y nasm yasm libx264-dev libx265-dev libfdk-aac-dev libmp3lame-dev libopus-dev libvpx-dev libass-dev libfreetype6-dev libfontconfig1-dev libfribidi-dev libharfbuzz-dev git",
+        # libvidstab-dev — the vid.stab library underpinning FFmpeg's
+        # vidstabdetect + vidstabtransform filters. We use these for
+        # auto-stabilization of handheld phone footage; the older built-in
+        # `deshake` filter is too weak for real-world hand shake. vidstab
+        # is the same library DaVinci Resolve and Final Cut use under the
+        # hood for their Smooth Motion stabilization.
+        "apt-get install -y nasm yasm libx264-dev libx265-dev libfdk-aac-dev libmp3lame-dev libopus-dev libvpx-dev libass-dev libfreetype6-dev libfontconfig1-dev libfribidi-dev libharfbuzz-dev libzimg-dev libvidstab-dev git",
         "git clone --depth 1 https://git.videolan.org/git/ffmpeg/nv-codec-headers.git /tmp/nv-codec-headers",
         "cd /tmp/nv-codec-headers && make install",
         # Build FFmpeg with NVENC + NVDEC + key codecs
@@ -154,6 +160,7 @@ image = (
         "--enable-libx264 --enable-libx265 --enable-libfdk-aac --enable-libmp3lame "
         "--enable-libopus --enable-libvpx --enable-libass --enable-librubberband "
         "--enable-libfreetype --enable-libfontconfig --enable-libfribidi --enable-libharfbuzz "
+        "--enable-libzimg --enable-libvidstab "
         "--enable-filter=drawtext --enable-filter=ass --enable-filter=subtitles "
         "--disable-doc --disable-debug --enable-optimizations "
         "&& make -j$(nproc) && make install",
@@ -161,6 +168,16 @@ image = (
         "which ffmpeg && which ffprobe",
         "ffmpeg -version | head -3",
         "ffmpeg -filters 2>/dev/null | grep drawtext && echo 'DRAWTEXT: OK' || (echo 'DRAWTEXT: MISSING' && ffmpeg -version | head -5 && ffmpeg -filters 2>/dev/null | grep -i 'draw' && exit 1)",
+        # zscale required for HDR→SDR tone-mapping at fps-normalize. Without
+        # libzimg-backed zscale, iPhone HDR sources render with pink/magenta
+        # cast on SDR playback (BT.2020/HLG tags pass through to BT.709 output).
+        "ffmpeg -filters 2>/dev/null | grep -E '\\bzscale\\b' && echo 'ZSCALE: OK' || (echo 'ZSCALE: MISSING — HDR tone-mapping will fail' && exit 1)",
+        "ffmpeg -filters 2>/dev/null | grep -E '\\btonemap\\b' && echo 'TONEMAP: OK' || echo 'TONEMAP: MISSING'",
+        # vidstab is REQUIRED — auto-stabilization for shaky handheld footage
+        # depends on vidstabdetect + vidstabtransform. Fail the image build if
+        # the FFmpeg configure didn't pick it up.
+        "ffmpeg -filters 2>/dev/null | grep -E '\\bvidstabdetect\\b' && echo 'VIDSTABDETECT: OK' || (echo 'VIDSTABDETECT: MISSING — stabilization will fail' && exit 1)",
+        "ffmpeg -filters 2>/dev/null | grep -E '\\bvidstabtransform\\b' && echo 'VIDSTABTRANSFORM: OK' || (echo 'VIDSTABTRANSFORM: MISSING — stabilization will fail' && exit 1)",
         "ffmpeg -filters 2>/dev/null | grep -E 'ass|subtitles' || echo 'WARNING: ass/subtitles filters not found'",
         "ffmpeg -encoders 2>/dev/null | grep nvenc && echo 'NVENC: OK' || echo 'NVENC: MISSING'",
     )
@@ -186,13 +203,22 @@ image = (
         "opencv-python-headless",
         "requests",
         "anthropic",
-        "google-genai",
+        # google-genai is pinned to a known-good range. The previous floating
+        # spec ("google-genai") would let pip resolve breaking minor versions
+        # at any rebuild — exactly the failure mode that bit us with Deepgram
+        # (keywords→keyterm) and pyannote (use_auth_token→token). Same class
+        # of bug, same fix: pin to a tested range.
+        "google-genai>=1.0,<2",
         "deepgram-sdk==3.4.0",
         "supabase",
         "boto3[crt]",   # AWS Common Runtime — 2-6× S3 throughput vs stock boto3
         "httpx",
         "fastapi",
-        "pydantic",
+        # pydantic v2 syntax (BaseModel + ConfigDict) is used throughout
+        # render_schemas.py and the handler. Pin to v2 so a future pip
+        # resolve doesn't drop us into a hypothetical v3 with breaking
+        # API changes — same class of bug as the Deepgram/pyannote ones.
+        "pydantic>=2,<3",
         "tqdm",
         "Pillow",
     )
@@ -204,8 +230,53 @@ image = (
     .pip_install(
         "torch==2.5.1",
         "torchvision==0.20.1",
+        "torchaudio==2.5.1",
         extra_options="--index-url https://download.pytorch.org/whl/cu124",
     )
+    # Single-ASR architecture (Deepgram Nova-3 only) as of 2026-05-23.
+    # The previous stack of Whisper-large-v3 + wav2vec2 forced alignment +
+    # speaker-label merge was removed — it produced more failures
+    # (hallucinated word positions, duplicate transcriptions, over-
+    # extended boundaries) than its marginal accuracy gain justified.
+    # Deepgram alone gives word timing, speakers, and punctuation in one
+    # API call with no hallucination/duplication failure modes. Proper-
+    # noun accuracy is boosted via the `keywords` parameter (extracted
+    # from the user's vibe text at job time).
+    #
+    # Silero VAD for amplitude-based silence detection on the actual
+    # audio waveform. Replaces the previous transcript-word-gap heuristic
+    # for dead_air cuts. Word boundaries mark phoneme ends — they're 200-
+    # 300ms off from where audio actually drops to silence. Silero VAD is
+    # a 2MB neural model that classifies speech/silence per 30ms chunk
+    # with 97% ROC-AUC (vs WebRTC's 73%); it correctly distinguishes
+    # natural breath/lip noise from true dead air. Industry standard for
+    # auto-editors (Captions.ai, Auto-Editor, FireCut, Premiere all use
+    # amplitude/VAD signals — never transcript gaps).
+    .pip_install("silero-vad>=5.1,<6")
+    # pyannote.audio 3.1 — SOTA speaker diarization. Deepgram's per-word and
+    # per-utterance speaker labels are unreliable on 2-speaker interview
+    # content (frequent mid-utterance speaker swaps, whole-turn misattribution)
+    # even on audio where the voices are trivially distinguishable by ear.
+    # pyannote runs ECAPA-TDNN embeddings + agglomerative clustering on
+    # speaker turns and produces clean segment boundaries; we then override
+    # Deepgram's per-word speaker labels by mapping each word's midpoint
+    # into the pyannote segment that contains it.
+    #
+    # The pyannote/speaker-diarization-3.1 + pyannote/segmentation-3.0 models
+    # are gated on HuggingFace — the HF_TOKEN env var (provided via the
+    # huggingface Modal secret below) is required to download them at first
+    # use. Models cache to disk via the standard HF cache so subsequent runs
+    # in a warm container reuse them.
+    # huggingface_hub MUST be pinned <0.26 — 0.26.0 (Oct 2024) removed the
+    # `use_auth_token` argument that pyannote.audio 3.3 still calls
+    # internally inside Pipeline.from_pretrained. Without this pin, pip
+    # resolves the latest huggingface_hub and every pyannote load fails
+    # with "hf_hub_download() got an unexpected keyword argument
+    # 'use_auth_token'". 0.25.x is the highest version that still accepts
+    # the deprecated arg. Install huggingface_hub BEFORE pyannote so pip
+    # doesn't bump it as a transitive dep.
+    .pip_install("huggingface_hub>=0.20,<0.26")
+    .pip_install("pyannote.audio>=3.3,<4")
     .run_commands(
         # Clone Practical-RIFE — provides the support modules
         # (model/warplayer.py, model/loss.py) that RIFE_HDv3.py and
@@ -322,6 +393,11 @@ image = (
 
 # ── Secrets ────────────────────────────────────────────────────────────────────
 secrets = [
+    # promptly-secrets carries HF_TOKEN for pyannote.audio gated model
+    # downloads (pyannote/speaker-diarization-3.1 + pyannote/segmentation-3.0)
+    # alongside the other API keys. When HF_TOKEN is unset or empty,
+    # diarize_with_pyannote falls back to Deepgram's native speaker labels
+    # with a warning.
     modal.Secret.from_name("promptly-secrets"),
     modal.Secret.from_name("promptly-cloudfront"),
 ]
@@ -341,15 +417,17 @@ prewarm_volume = modal.Volume.from_name("promptly-prewarm-cache", create_if_miss
 @app.cls(
     timeout=600,          # 10 min — orchestrator runs init + audio + remotion + composite + upload
     scaledown_window=30,  # tear down fast — at $8.27/hr full spec, idle scaledown was costing ~$0.69 per render (83% of total bill). 30s window catches back-to-back jobs without paying for long idle.
+    gpu="H100",           # H100 retained for RIFE frame interpolation + general
+                          # rendering speed. ASR no longer needs it (Whisper + wav2vec2
+                          # were ripped out 2026-05-23 in favor of Deepgram-only ASR).
+                          # Could downgrade to a smaller GPU if RIFE budget allows.
     cpu=64,
     memory=131072,        # 128GB — Remotion overlay + Remotion micro-segments run in parallel here, plus per-cut numpy audio resampler, plus the big single-pass ffmpeg composite
-    # No GPU on the orchestrator — moved to the dedicated rife_normalize_remote
-    # function below. The orchestrator does Remotion (Chromium software paint),
-    # ffmpeg libx264 ultrafast on 64 cores, audio numpy work, and network I/O.
-    # All CPU/memory-bound. Paying H100 rates for the ~35-50s of non-GPU work
-    # in each render was costing ~$0.04 of pure waste per render. NVDEC decode
-    # falls back to software automatically (handler.py _HAS_HWACCEL stays False).
-    region="us-west",     # colocate with Supabase (West US) for minimal network latency
+    region=["us-west", "us-east"],  # prefer us-west colocated with Supabase,
+                                     # fall back to us-east when Modal lacks
+                                     # 64-CPU/128GB capacity in us-west.
+                                     # Cross-region S3 download adds ~0.5-1s
+                                     # vs render never starting at all.
     volumes={"/prewarm": prewarm_volume},
 )
 class PromptlyWorker:
@@ -357,9 +435,19 @@ class PromptlyWorker:
     def startup(self):
         """Import handler at container startup, not per-request. Saves ~10-12s
         of Python import overhead (opencv, numpy, google-genai, deepgram, etc.)
-        that was being paid on EVERY request even on warm containers."""
+        that was being paid on EVERY request even on warm containers.
+
+        CUDA driver-mount fix runs BEFORE handler import. Without this,
+        Modal's libcuda.so SONAME stubs intercept dlopen, torch.cuda.is_available()
+        returns False, and Whisper + wav2vec2 silently fall to CPU+int8 (52s
+        instead of 5s per transcribe, AND less acoustic precision — int8 misreads
+        weak isolated speech). The setup is idempotent and ~50ms when already
+        applied, so it's safe to call on every container startup. Same fix
+        `rife_normalize_remote` uses for the GPU function it owns."""
         import sys
         sys.path.insert(0, "/")
+        from cuda_driver_setup import setup_cuda_driver_mount
+        setup_cuda_driver_mount()
         from handler import handler as _h
         self._handler = _h
         self._prewarm_volume = prewarm_volume
@@ -418,6 +506,61 @@ class PromptlyPrewarmWorker:
         except Exception as e:
             print(f"[prewarm] volume commit failed: {e}", flush=True)
         return result
+
+
+# ── Validator: fast pre-upload talking-head check ────────────────────────────
+# iOS calls this BEFORE committing to the full upload + render. iOS extracts
+# a small 5-second sample of the user's video, uploads it to S3, then POSTs
+# the sample URL here. The validator downloads the sample (~1-2s), runs face
+# detection (~1-2s), and returns is_talking_head: bool.
+#
+# This catches non-talking-head uploads in 3-7s of user wait instead of the
+# 30-60s the full pipeline would take. Combined with iOS on-device Vision-
+# framework pre-check (sub-second), users get instant feedback on whether
+# their video can be edited.
+#
+# CPU-only, scales to zero when idle. Validation is pure I/O + OpenCV face
+# detection (no GPU, no Gemini, no Deepgram). Cheap to keep online.
+@app.cls(
+    timeout=60,           # Sample download + face detect < 10s; 60s leaves headroom
+    scaledown_window=300, # Stay warm 5 min after last request
+    cpu=4,                # Concurrent sample downloads + face detection
+    memory=2048,          # 2GB plenty for in-memory video buffers
+    region="us-west",     # Same region as the S3 bucket
+)
+class PromptlyValidator:
+    @modal.enter()
+    def startup(self):
+        """Import validate_handler at container start (not per-request).
+        Saves ~5-8s of OpenCV + boto3 import cost on every validation call.
+        """
+        import sys
+        sys.path.insert(0, "/")
+        from handler import validate_handler as _v
+        self._validate = _v
+
+    @modal.fastapi_endpoint(method="POST")
+    def validate(self, body: dict):
+        """Fast pre-upload validation: is this a talking-head video?
+
+        Expected body:
+          {"sample_url": "https://<bucket>.<region>.amazonaws.com/.../sample.mp4"}
+
+        Response:
+          {
+            "is_talking_head": bool,
+            "confidence": float (0-1),
+            "face_ratio": float (0-1),
+            "face_samples": int,
+            "reason": str,
+            "user_message": str | null   # null when valid; rejection text when not
+          }
+
+        iOS uses `is_talking_head` to decide whether to proceed with the
+        full upload. When false, `user_message` is the text to show the
+        user with a "Choose Different Video" button.
+        """
+        return self._validate({"input": body})
 
 
 # ── RIFE GPU function ─────────────────────────────────────────────────────────

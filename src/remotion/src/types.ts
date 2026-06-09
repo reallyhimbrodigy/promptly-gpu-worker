@@ -32,6 +32,11 @@ export interface ClipSpec {
   playbackRate: number;
   durationInFrames: number;
   zoomEffect?: ZoomEffectSpec;
+  // When set, the clip plays this pre-extracted source instead of seeking
+  // into the composition-level sourceUrl. Frame 0 of this file is the
+  // clip's first kept frame, already speed-adjusted, so the ABE zoom
+  // components receive `src` only — no startFrom, no playbackRate.
+  src?: string;
 }
 
 export interface ZoomEffectSpec {
@@ -180,7 +185,6 @@ export type MotionGraphicType =
   | "StatCard"
   | "StickyNotes"
   | "Toggle"
-  | "TornPaper"
   | "TweetBubble"
   | "InstagramComment"
   | "IMessageBubble"
@@ -198,7 +202,6 @@ export interface MotionGraphicSpec {
 
 // ── Text overlays (discriminated by variant) ─────────────────────────────────
 export type TextOverlayVariant =
-  | "torn_paper"
   | "sticky_note"
   | "quote_card"
   | "caption_match";
@@ -206,12 +209,6 @@ export type TextOverlayVariant =
 interface TextOverlayBase {
   fromFrame: number;
   durationInFrames: number;
-}
-
-export interface TornPaperOverlay extends TextOverlayBase {
-  variant: "torn_paper";
-  topText: string;
-  bottomText: string;
 }
 
 export interface StickyNoteOverlay extends TextOverlayBase {
@@ -232,7 +229,6 @@ export interface CaptionMatchOverlay extends TextOverlayBase {
 }
 
 export type TextOverlaySpec =
-  | TornPaperOverlay
   | StickyNoteOverlay
   | QuoteCardOverlay
   | CaptionMatchOverlay;

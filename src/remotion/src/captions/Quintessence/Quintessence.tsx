@@ -62,8 +62,27 @@ export const Quintessence: React.FC<QuintessenceProps> = ({
 
   if (!activeSlot) return null;
 
-  // Hard cut on/off — no fade. Captions snap to the spoken word.
-  const opacity = 1;
+  const startFrame = msToFrames(activeSlot.startMs, fps);
+  const endFrame = msToFrames(activeSlot.endMs, fps);
+  const elapsed = frame - startFrame;
+
+  // Quick fade in
+  const fadeInFrames = 3;
+  const fadeIn = interpolate(elapsed, [0, fadeInFrames], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+
+  // Quick fade out
+  const fadeOutFrames = 3;
+  const fadeOut = interpolate(
+    frame,
+    [endFrame - fadeOutFrames, endFrame],
+    [1, 0],
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
+  );
+
+  const opacity = fadeIn * fadeOut;
 
   return (
     <AbsoluteFill
@@ -112,9 +131,6 @@ export const Quintessence: React.FC<QuintessenceProps> = ({
             transform: `scaleY(${stretchY})`,
             transformOrigin: "center bottom",
             textAlign: "center",
-            // Universal stroke for guaranteed readability over any background.
-            WebkitTextStroke: "1px rgba(0,0,0,0.55)",
-            textShadow: "0 2px 8px rgba(0,0,0,0.5), 0 0 2px rgba(0,0,0,0.7)",
           }}
         >
           {toTitleCase(activeSlot.token.text)}

@@ -4,17 +4,20 @@ import {
   useCurrentFrame,
   useVideoConfig,
   spring,
-  OffthreadVideo,
 } from "remotion";
+import { Video } from "@remotion/media";
 import { msToFrames } from "../shared/timing";
 import type { SnapReframeProps } from "../types";
 
+/**
+ * Snap Reframe — fast, precise zoom to a tighter composition.
+ * Critically-damped spring: no bounce, no overshoot. Just a quick,
+ * clean reframe like a professional camera operator pulling focus.
+ */
 export const SnapReframe: React.FC<SnapReframeProps> = ({
   src,
   events,
   style,
-  startFrom,
-  playbackRate = 1,
 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
@@ -66,10 +69,8 @@ export const SnapReframe: React.FC<SnapReframeProps> = ({
 
   return (
     <AbsoluteFill style={{ overflow: "hidden", ...style }}>
-      <OffthreadVideo
+      <Video
         src={src}
-        startFrom={startFrom}
-        playbackRate={playbackRate}
         style={{
           width: "100%",
           height: "100%",

@@ -35,13 +35,27 @@ import math
 
 # ── Zoom categorization ──────────────────────────────────────────────────────
 
-# Pure scale + origin transforms — paint identical between Chromium's
-# `transform: scale()` and FFmpeg's crop+lanczos-scale to 1080×1920.
-SIMPLE_ZOOM_TYPES = {"SmoothPush", "SnapReframe", "StepZoom", "StageZoom"}
+# All zooms render through Remotion using the ABE.zip components verbatim.
+# Each clip with a zoomEffect gets a per-clip pre-extracted source file from
+# the handler (frame 0 = clip's first kept frame), and the ABE component
+# plays that file with no seek/playback-rate prop — `src` + `events` only.
+#
+# The FFmpeg crop+lanczos path that was used for "pure scale" zoom types
+# (SmoothPush/SnapReframe/StepZoom/StageZoom) has been retired. It depended
+# on the FFmpeg crop filter re-evaluating `out_w`/`out_h` per frame, which
+# n7.1 (production) doesn't do — `w`/`h` evaluate once at filter init with
+# n=0 and the `eval` option was removed before n7.1 (see vf_crop.c on the
+# n7.1 branch). With our scale_expr returning 1 at n=0 for any event with
+# es>0, crop dims locked at full source and no zoom actually rendered —
+# only the per-frame x/y expressions shifted a locked-dim crop, producing
+# the "snaps to center, slides upper-left, stays for multiple seconds"
+# drift. Routing every zoom through Remotion eliminates that whole path.
+SIMPLE_ZOOM_TYPES: set = set()
 
-# Composite-effect zooms — multi-layer overlays, blur masks, bokeh orbs, etc.
-# Stay in Remotion via PromptlyMicroSegments to preserve visual identity.
-COMPLEX_ZOOM_TYPES = {"FocusWindow", "LetterboxPush", "DepthPull"}
+COMPLEX_ZOOM_TYPES = {
+    "SmoothPush", "SnapReframe", "StepZoom", "StageZoom",
+    "FocusWindow", "LetterboxPush", "DepthPull",
+}
 
 # Default scale per zoom type (matches Remotion components' fallbacks).
 _DEFAULT_SCALE = {
@@ -228,24 +242,23 @@ def _spring_response_expr(t_seconds_expr: str) -> str:
 
 
 def _snap_reframe_event_scale_expr(es: int, ed: int, target_scale: float, fps: float) -> str:
-    """SnapReframe per-event scale contribution.
+    """SnapReframe per-event scale: HARD SNAP to target_scale, hold, smooth decay.
 
-    Remotion (SnapReframe.tsx):
-      zoomIn  = spring(t1) where t1 = max(0, frame-eventStart) / fps
-      zoomOut = spring(t2) where t2 = max(0, frame-eventEnd)   / fps  (else 0)
-      eventScale = 1 + (TS-1) * zoomIn * (1 - zoomOut)
-    Returns the eventScale expression (always ≥ 1).
-
-    Negative es/ed values (from the chunked-composite slicer) are wrapped in
-    parens so FFmpeg's expression parser tokenizes correctly.
+    Timeline (output frames):
+      - n < es                  → scale = 1
+      - es ≤ n < ed             → scale = target_scale (HARD SNAP, no ramp)
+      - ed ≤ n < ed + decay     → cubic ease-out target_scale → 1 (250ms release)
+      - n ≥ ed + decay          → scale = 1 (no tail, no drift)
     """
-    t1_expr = f"((n-({es}))/{fps})"
-    t2_expr = f"((n-({ed}))/{fps})"
-    spring_in = _spring_response_expr(t1_expr)
-    spring_out = f"if(lt(n,({ed})),0,{_spring_response_expr(t2_expr)})"
+    decay_frames = max(1, int(round(0.25 * fps)))    # 250ms release
+    decay_end = ed + decay_frames
+    decay_progress = f"((n-({ed}))/{decay_frames})"
     return (
         f"if(lt(n,({es})),1,"
-        f"(1+({target_scale}-1)*({spring_in})*(1-({spring_out}))))"
+        f"if(lt(n,({ed})),({target_scale}),"
+        f"if(lt(n,({decay_end})),"
+        f"({target_scale}-({target_scale}-1)*(1-pow(1-{decay_progress},3))),"
+        f"1)))"
     )
 
 
@@ -312,8 +325,16 @@ def build_zoom_filter_chain(
             else:
                 continue
             scale_terms.append(term)
-            ox_branches.append((es, ed, ev["originX"]))
-            oy_branches.append((es, ed, ev["originY"]))
+            # Origin window matches the visible scale window. For
+            # SmoothPush/StepZoom/StageZoom that's [es, ed]. For SnapReframe
+            # the scale decays past ed for ~250ms — extend the origin
+            # window so the crop doesn't pop sideways mid-decay.
+            if ztype == "SnapReframe":
+                _origin_window_end = ed + max(1, int(round(0.25 * source_fps)))
+            else:
+                _origin_window_end = ed
+            ox_branches.append((es, _origin_window_end, ev["originX"]))
+            oy_branches.append((es, _origin_window_end, ev["originY"]))
         if not scale_terms:
             return ""
         # max(a, b) ≡ if(gt(a,b), a, b)

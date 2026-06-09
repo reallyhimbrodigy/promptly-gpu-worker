@@ -245,6 +245,18 @@ try {
   proResProfile: "4444",
   pixelFormat: isOverlay ? "yuva444p10le" : "yuv444p10le",
   imageFormat: "png",
+  // Force BT.709 colorspace for the RGB→YUV encode. Remotion 4.x defaults
+  // to "default" which equals "bt601" — Chrome's RGB frames get encoded
+  // through the BT.601 matrix, then the downstream FFmpeg composite tags
+  // the output BT.709, producing a ~3-level chroma shift toward magenta
+  // on warm tones (skin, lit faces). Setting colorSpace="bt709" makes
+  // Remotion's internal FFmpeg do the math with the BT.709 matrix end-to-
+  // end so the ProRes chroma values match the BT.709 container tag.
+  // Mathematical conversion (vs just tagging) ships since v4.0.83; we're
+  // on 4.0.450, so this is a real conversion not a label change.
+  // Confirmed via Remotion issue #2936 ("Correct bt709 colorspace
+  // conversion") on their tracker.
+  colorSpace: "bt709",
   outputLocation: outputPath,
   inputProps,
   concurrency: resolvedConcurrency,

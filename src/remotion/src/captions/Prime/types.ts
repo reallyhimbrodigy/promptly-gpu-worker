@@ -17,7 +17,7 @@ export interface PrimeProps extends CaptionStyleProps {
   maxWordsPerLine?: number;
   /** CSS letter-spacing (default: "0.01em") */
   letterSpacing?: string;
-  /** Gap between lines in px (default: -30) */
+  /** Gap between lines in px (default: 12) */
   lineGap?: number;
   /** Text shadow for readability (default: "0 2px 8px rgba(0,0,0,0.7), 0 0 4px rgba(0,0,0,0.4)") */
   textShadow?: string;

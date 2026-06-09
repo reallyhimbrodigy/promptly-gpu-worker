@@ -5,8 +5,8 @@ import {
   useVideoConfig,
   interpolate,
   Easing,
-  OffthreadVideo,
 } from "remotion";
+import { Video } from "@remotion/media";
 import { msToFrames } from "../shared/timing";
 import type { SmoothPushProps } from "../types";
 
@@ -19,8 +19,6 @@ export const SmoothPush: React.FC<SmoothPushProps> = ({
   src,
   events,
   style,
-  startFrom,
-  playbackRate = 1,
 }) => {
   const frame = useCurrentFrame();
   const { fps, durationInFrames } = useVideoConfig();
@@ -85,10 +83,8 @@ export const SmoothPush: React.FC<SmoothPushProps> = ({
 
   return (
     <AbsoluteFill style={{ overflow: "hidden", ...style }}>
-      <OffthreadVideo
+      <Video
         src={src}
-        startFrom={startFrom}
-        playbackRate={playbackRate}
         style={{
           width: "100%",
           height: "100%",

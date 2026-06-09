@@ -1,5 +1,5 @@
 import React, { useMemo } from "react";
-import { AbsoluteFill, Sequence, interpolate, useCurrentFrame, useVideoConfig } from "remotion";
+import { AbsoluteFill, Sequence, useCurrentFrame, useVideoConfig } from "remotion";
 import type { CoveProps } from "./types";
 import { CAPTION_FONTS } from "../shared/fonts";
 import { msToFrames } from "../shared/timing";
@@ -64,9 +64,6 @@ export const Cove: React.FC<CoveProps> = ({
         const durationFrames = msToFrames(page.durationMs, fps);
         if (durationFrames <= 0) return null;
 
-        // Hard cut on/off — no fade. Captions snap to the spoken word.
-        const pageOpacity = 1;
-
         const lines: typeof page.tokens[] = [];
         for (let i = 0; i < page.tokens.length; i += maxWordsPerLine) {
           lines.push(page.tokens.slice(i, i + maxWordsPerLine));
@@ -78,7 +75,7 @@ export const Cove: React.FC<CoveProps> = ({
             from={startFrame}
             durationInFrames={durationFrames}
           >
-            <AbsoluteFill style={{ opacity: pageOpacity }}>
+            <AbsoluteFill>
               <div style={{ ...positionStyles, maxWidth }}>
                 <div
                   style={{
@@ -145,9 +142,7 @@ export const Cove: React.FC<CoveProps> = ({
                                   ? "none"
                                   : isSpecial
                                     ? "0 0 12px rgba(255,255,255,0.7), 0 0 28px rgba(255,245,230,0.4), 0 0 50px rgba(255,240,220,0.2), 0 -20px 30px rgba(0,0,0,0.45), 0 -12px 20px rgba(0,0,0,0.35), 0 -6px 10px rgba(0,0,0,0.25), 0 0 6px rgba(0,0,0,0.15)"
-                                    : "0 2px 6px rgba(0,0,0,0.55), 0 0 2px rgba(0,0,0,0.85)",
-                                // Universal stroke for guaranteed readability over any background.
-                                WebkitTextStroke: isSpoken ? "0.75px rgba(0,0,0,0.65)" : undefined,
+                                    : "none",
                               }}
                             >
                               {/* Word-shaped blurred shadow biased above */}

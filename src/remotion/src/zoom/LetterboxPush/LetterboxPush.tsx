@@ -21,8 +21,6 @@ export const LetterboxPush: React.FC<LetterboxPushProps> = ({
   events,
   style,
   maxBarHeight = 0.12,
-  startFrom,
-  playbackRate = 1,
 }) => {
   const frame = useCurrentFrame();
   const { fps, durationInFrames, height } = useVideoConfig();
@@ -92,8 +90,6 @@ export const LetterboxPush: React.FC<LetterboxPushProps> = ({
     <AbsoluteFill style={{ overflow: "hidden", ...style }}>
       <OffthreadVideo
         src={src}
-        startFrom={startFrom}
-        playbackRate={playbackRate}
         style={{
           width: "100%",
           height: "100%",
@@ -101,9 +97,12 @@ export const LetterboxPush: React.FC<LetterboxPushProps> = ({
         }}
       />
 
-      {/* Removed: 35% black overlay during zoom. The letterbox bars and
-          zoom are the effect — the darkening read as a subtle color shift
-          that wasn't part of the zoom's intent. */}
+      <AbsoluteFill
+        style={{
+          backgroundColor: `rgba(0,0,0,${0.35 * barProgress})`,
+          pointerEvents: "none",
+        }}
+      />
 
       <div
         style={{
@@ -117,8 +116,6 @@ export const LetterboxPush: React.FC<LetterboxPushProps> = ({
       >
         <OffthreadVideo
           src={src}
-          startFrom={startFrom}
-          playbackRate={playbackRate}
           style={{
             width: "100%",
             height: `${height}px`,

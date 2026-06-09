@@ -24,8 +24,6 @@ export const FocusWindow: React.FC<FocusWindowProps> = ({
   borderWidth = 0,
   borderColor = "transparent",
   bgScale = 1.8,
-  startFrom,
-  playbackRate = 1,
 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
@@ -78,8 +76,6 @@ export const FocusWindow: React.FC<FocusWindowProps> = ({
       <AbsoluteFill style={{ overflow: "hidden", ...style }}>
         <OffthreadVideo
           src={src}
-          startFrom={startFrom}
-          playbackRate={playbackRate}
           style={{
             width: "100%",
             height: "100%",
@@ -107,9 +103,12 @@ export const FocusWindow: React.FC<FocusWindowProps> = ({
         }}
       />
 
-      {/* Removed: 30% black overlay during zoom. The PIP framing alone is
-          the effect; the darkening was a subtle color shift unrelated to
-          the zoom's intent. */}
+      <AbsoluteFill
+        style={{
+          backgroundColor: `rgba(0,0,0,${0.3 * progress})`,
+          pointerEvents: "none",
+        }}
+      />
 
       <AbsoluteFill
         style={{

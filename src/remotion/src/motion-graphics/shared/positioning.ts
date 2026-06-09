@@ -70,6 +70,16 @@ export interface ResolvedPositioning {
   wrapperStyle: React.CSSProperties;
 }
 
+// Auto-inset values keep edge-anchored components off the very edge of the
+// 1080×1920 canvas. The "safe" in `left_safe` / `right_safe` (semantic anchor
+// names from the recipe) is honored here: when an MG is anchored to a side,
+// it gets pushed ~80px inward so the content doesn't render flush against the
+// edge or clip on letter-spacing / text-shadow. Top / bottom get a smaller
+// vertical inset for the same reason — components like StatCard have rules
+// and labels below the number that need a few px of breathing room.
+const SAFE_INSET_X = 80;
+const SAFE_INSET_Y = 60;
+
 // Resolve the user-provided position props into container + wrapper styles.
 // `defaults` lets each component pick its own sensible default anchor/offset.
 export function resolveMGPosition(
@@ -77,9 +87,26 @@ export function resolveMGPosition(
   defaults: { anchor?: MGAnchor; offsetX?: number; offsetY?: number } = {},
 ): ResolvedPositioning {
   const anchor = props?.anchor ?? defaults.anchor ?? "center";
-  const offsetX = props?.offsetX ?? defaults.offsetX ?? 0;
-  const offsetY = props?.offsetY ?? defaults.offsetY ?? 0;
+  const userOffsetX = props?.offsetX ?? defaults.offsetX ?? 0;
+  const userOffsetY = props?.offsetY ?? defaults.offsetY ?? 0;
   const scale = props?.scale ?? 1;
+
+  // Apply edge insets. Direction matters: positive offsetX pushes RIGHT,
+  // so left-anchored components inset with +X, right-anchored with -X.
+  let anchorInsetX = 0;
+  let anchorInsetY = 0;
+  if (anchor === "left" || anchor === "top-left" || anchor === "bottom-left") {
+    anchorInsetX = SAFE_INSET_X;
+  } else if (anchor === "right" || anchor === "top-right" || anchor === "bottom-right") {
+    anchorInsetX = -SAFE_INSET_X;
+  }
+  if (anchor === "top" || anchor === "top-left" || anchor === "top-right") {
+    anchorInsetY = SAFE_INSET_Y;
+  } else if (anchor === "bottom" || anchor === "bottom-left" || anchor === "bottom-right") {
+    anchorInsetY = -SAFE_INSET_Y;
+  }
+  const offsetX = userOffsetX + anchorInsetX;
+  const offsetY = userOffsetY + anchorInsetY;
 
   const flex = ANCHOR_FLEX[anchor];
   const transformOrigin = ANCHOR_ORIGIN[anchor];

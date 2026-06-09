@@ -14,19 +14,6 @@ import { msToFrames } from "../shared/timing";
 import { CAPTION_FONTS } from "../shared/fonts";
 import { getCaptionPositionStyle } from "../shared/captionPosition";
 import { buildKeywordSet, isKeyword } from "../shared/keywords";
-import { textOutline } from "../shared/textOutline";
-import { leadInElapsed } from "../shared/leadIn";
-
-// Lead-in for the editorial spring (damping:28, mass:1.2, stiffness:100).
-// Settles in ~12 frames; lead-in matches that so the word is at rest AT
-// the spoken moment, not mid-spring.
-const SERIF_LEAD_IN = 12;
-
-// 8-direction text-shadow stand-in for `WebkitTextStroke: 0.75px`. Stroke
-// rasterizes as a single geometric outline that breaks at letter apexes
-// under the entrance `transform: scale` mid-spring; 8-direction shadow
-// is multi-sampled and survives any transform.
-const STROKE_OUTLINE = textOutline(0.75, "rgba(0,0,0,0.6)");
 
 // Smooth deceleration, zero bounce — editorial feel
 const SPRING_EDITORIAL: SpringConfig = {
@@ -67,7 +54,7 @@ const SerifWord: React.FC<{
   const { fps } = useVideoConfig();
 
   const activateFrame = msToFrames(token.fromMs - pageStartMs, fps);
-  const elapsed = leadInElapsed(frame, activateFrame, SERIF_LEAD_IN);
+  const elapsed = frame - activateFrame;
   const hasAppeared = elapsed >= 0;
 
   const entranceSpring = hasAppeared
@@ -107,7 +94,7 @@ const SerifWord: React.FC<{
         color: isKw ? keywordColor : textColor,
         letterSpacing: isKw ? keywordLetterSpacing : letterSpacing,
         lineHeight: 1.15,
-        textShadow: `${kwShadow}, ${STROKE_OUTLINE}`,
+        textShadow: kwShadow,
         whiteSpace: "nowrap",
         transform: `scale(${scale})`,
         transformOrigin: "center bottom",
@@ -147,13 +134,26 @@ const SerifPage: React.FC<{
   positionStyle,
   ...wordProps
 }) => {
-  // Hard cut on/off — no fade. Captions snap to the spoken word.
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+
+  if (frame < 0) return null;
+
+  const pageLocalMs = (frame / fps) * 1000;
+  const fadeOut = interpolate(
+    pageLocalMs,
+    [page.durationMs - 120, page.durationMs],
+    [1, 0],
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
+  );
+
   return (
     <AbsoluteFill
       style={{
         display: "flex",
         alignItems: "center",
         ...positionStyle,
+        opacity: fadeOut,
       }}
     >
       <div

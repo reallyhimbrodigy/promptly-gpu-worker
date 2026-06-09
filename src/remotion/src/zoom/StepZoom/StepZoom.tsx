@@ -3,17 +3,20 @@ import {
   AbsoluteFill,
   useCurrentFrame,
   useVideoConfig,
-  OffthreadVideo,
 } from "remotion";
+import { Video } from "@remotion/media";
 import { msToFrames } from "../shared/timing";
 import type { StepZoomProps } from "../types";
 
+/**
+ * Step Zoom — instant jump cuts between zoom levels. No smooth animation,
+ * no easing. Clean, precise editorial reframes that happen on the beat.
+ * Like cutting between a wide and tight shot of the same camera.
+ */
 export const StepZoom: React.FC<StepZoomProps> = ({
   src,
   events,
   style,
-  startFrom,
-  playbackRate = 1,
 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
@@ -36,10 +39,8 @@ export const StepZoom: React.FC<StepZoomProps> = ({
 
   return (
     <AbsoluteFill style={{ overflow: "hidden", ...style }}>
-      <OffthreadVideo
+      <Video
         src={src}
-        startFrom={startFrom}
-        playbackRate={playbackRate}
         style={{
           width: "100%",
           height: "100%",

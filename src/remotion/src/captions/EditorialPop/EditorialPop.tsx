@@ -2,7 +2,6 @@ import React, { useMemo } from "react";
 import {
   AbsoluteFill,
   Sequence,
-  interpolate,
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
@@ -54,8 +53,6 @@ const EditorialPopLine: React.FC<{
               color: textColor,
               letterSpacing: "-0.02em",
               textShadow: SHADOW,
-              // Universal stroke for guaranteed readability over any background.
-              WebkitTextStroke: "0.75px rgba(0,0,0,0.6)",
               whiteSpace: "nowrap",
             }}
           >
@@ -80,6 +77,8 @@ const EditorialPopPage: React.FC<{
 }> = ({ lines, lineDelayMs, keywordSet, fontSize, keywordScale, textColor, maxWidth }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
+
+  if (frame < 0) return null;
 
   const line2Visible = lines.length > 1 && frame >= msToFrames(lineDelayMs, fps);
 
@@ -118,14 +117,13 @@ const EditorialPopPage: React.FC<{
 
 export const EditorialPop: React.FC<EditorialPopProps> = ({
   pages,
-  fontSize = 80,
+  fontSize = 62,
   position = "bottom",
   keywords = [],
-  keywordScale = 1.7,
+  keywordScale = 1.35,
   textColor = "#FFFFFF",
   maxWordsPerLine = 3,
 }) => {
-  const frame = useCurrentFrame();
   const { fps, width } = useVideoConfig();
   const maxWidth = width * 0.85;
   const keywordSet = useMemo(() => buildKeywordSet(keywords), [keywords]);
@@ -137,9 +135,6 @@ export const EditorialPop: React.FC<EditorialPopProps> = ({
         const startFrame = msToFrames(page.startMs, fps);
         const durationFrames = msToFrames(page.durationMs, fps);
         if (durationFrames <= 0) return null;
-
-        // Hard cut on/off — no fade. Captions snap to the spoken word.
-        const pageOpacity = 1;
 
         // Split tokens into lines
         const lines: { text: string }[][] = [];
@@ -163,7 +158,6 @@ export const EditorialPop: React.FC<EditorialPopProps> = ({
               style={{
                 display: "flex",
                 alignItems: "center",
-                opacity: pageOpacity,
                 ...positionStyle,
               }}
             >

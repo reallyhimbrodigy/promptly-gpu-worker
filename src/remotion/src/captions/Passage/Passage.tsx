@@ -12,7 +12,6 @@ import { msToFrames } from "../shared/timing";
 import { CAPTION_FONTS } from "../shared/fonts";
 import { getCaptionPositionStyle } from "../shared/captionPosition";
 import { buildKeywordSet, isKeyword } from "../shared/keywords";
-import { leadInRange } from "../shared/leadIn";
 
 /* ─── Word ─── */
 
@@ -50,17 +49,15 @@ const PassageWord: React.FC<{
 
   const opacity = interpolate(
     pageLocalMs,
-    leadInRange(tokenLocalMs, fadeDurationMs),
+    [tokenLocalMs, tokenLocalMs + fadeDurationMs],
     [0, 1],
     { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
   );
 
-  // Keyword tracking shift: starts tight (just before reveal) and reaches
-  // the open setting AT the spoken moment. Same shift, anchored to end at
-  // the audible word instead of starting from it.
+  // Keyword tracking shift: starts tight (at reveal) and expands over trackingShiftDurationMs
   const trackingProgress = interpolate(
     pageLocalMs,
-    leadInRange(tokenLocalMs, trackingShiftDurationMs),
+    [tokenLocalMs, tokenLocalMs + trackingShiftDurationMs],
     [0, 1],
     { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
   );
@@ -84,8 +81,6 @@ const PassageWord: React.FC<{
         lineHeight: 1,
         whiteSpace: "nowrap",
         textShadow,
-        // Universal stroke for guaranteed readability over any background.
-        WebkitTextStroke: "0.75px rgba(0,0,0,0.6)",
         opacity,
       }}
     >
@@ -133,13 +128,27 @@ const PassagePage: React.FC<{
   positionStyle,
   maxWidth,
 }) => {
-  // Hard cut on/off — no fade. Captions snap to the spoken word.
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+
+  if (frame < 0) return null;
+
+  const pageLocalMs = (frame / fps) * 1000;
+
+  const fadeOut = interpolate(
+    pageLocalMs,
+    [page.durationMs - 260, page.durationMs],
+    [1, 0],
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
+  );
+
   return (
     <AbsoluteFill
       style={{
         display: "flex",
         alignItems: "center",
         ...positionStyle,
+        opacity: fadeOut,
       }}
     >
       <div

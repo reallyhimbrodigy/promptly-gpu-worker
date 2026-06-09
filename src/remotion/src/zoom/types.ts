@@ -21,10 +21,6 @@ export interface BaseZoomProps {
   events: ZoomEvent[];
   // Optional style override on the outer container.
   style?: CSSProperties;
-  // Source frames to skip before playback starts (Promptly fork).
-  startFrom?: number;
-  // Playback speed multiplier, 0.25–4 (Promptly fork).
-  playbackRate?: number;
 }
 
 export interface SmoothPushProps extends BaseZoomProps {}

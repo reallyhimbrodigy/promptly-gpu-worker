@@ -52,7 +52,20 @@ const GOOGLE_FONT_ALIASES = {
 mkdirSync(BUNDLE_DIR, { recursive: true });
 
 console.log("[prebundle] Bundling Remotion project...");
+// Redirect `@remotion/media` to a local shim that re-exports `OffthreadVideo`
+// as `Video`. The five ABE.zip zoom components import `Video` from
+// `@remotion/media`; on short pre-extracted zoom clips that WebCodecs path
+// times out at frame 1-3 with "Timeout while extracting frame at time Nsec".
+// OffthreadVideo uses Chromium's standard HTMLVideoElement + frame capture,
+// which decodes every frame the components ask for. The component files
+// remain byte-identical to ABE.zip — only the package resolution is
+// redirected at build time.
+const REMOTION_MEDIA_ALIAS = {
+  "@remotion/media": resolve(__dirname, "src/shims/remotion-media.ts"),
+};
+
 console.log(`[prebundle] Aliasing ${Object.keys(GOOGLE_FONT_ALIASES).length} @remotion/google-fonts imports to local shims (no network fetches at render time).`);
+console.log(`[prebundle] Aliasing @remotion/media → src/shims/remotion-media.ts (Video → OffthreadVideo, avoids WebCodecs frame-extract timeouts on short clips).`);
 const t0 = Date.now();
 
 const bundleLocation = await bundle({
@@ -64,6 +77,7 @@ const bundleLocation = await bundle({
       alias: {
         ...(config.resolve?.alias ?? {}),
         ...GOOGLE_FONT_ALIASES,
+        ...REMOTION_MEDIA_ALIAS,
       },
     },
   }),
