@@ -13748,7 +13748,6 @@ def prewarm_handler(job):
         poll_start = time.time()
         poll_deadline = poll_start + 300
         poll_attempt = 0
-        multipart_check_done = False
         while True:
             poll_attempt += 1
             try:
@@ -13762,46 +13761,13 @@ def prewarm_handler(job):
                 elapsed = now - poll_start
                 code = getattr(head_err, 'response', {}).get('Error', {}).get('Code', 'unknown')
 
-                # Stage-2 early detection at 60s (gives small single-PUT
-                # uploads time to land — multipart only kicks in for larger files).
-                if not multipart_check_done and elapsed >= 60:
-                    multipart_check_done = True
-                    upload_in_progress = False
-                    try:
-                        mp_resp = _aws_s3_client.list_multipart_uploads(
-                            Bucket=dl_bucket,
-                            Prefix=dl_key,
-                        )
-                        mp_list = mp_resp.get("Uploads") or []
-                        for mp in mp_list:
-                            if mp.get("Key") == dl_key:
-                                upload_in_progress = True
-                                print(
-                                    f"[prewarm] multipart upload in progress — "
-                                    f"continuing to poll up to 300s",
-                                    flush=True,
-                                )
-                                break
-                    except Exception as mp_err:
-                        # Give slow path benefit of doubt on list failure.
-                        print(
-                            f"[prewarm] multipart-upload check failed ({mp_err}) — "
-                            f"continuing to poll up to 300s anyway",
-                            flush=True,
-                        )
-                        upload_in_progress = True
-
-                    if not upload_in_progress:
-                        print(
-                            f"[prewarm] UPLOAD_NEVER_STARTED — no object after 30s AND "
-                            f"no in-progress multipart upload. iOS dispatch-ordering bug. "
-                            f"Aborting prewarm; main render will surface the error.",
-                            flush=True,
-                        )
-                        return {
-                            "error": "UPLOAD_NEVER_STARTED",
-                            "cache_key": cache_key,
-                        }
+                # NOTE: previously there was a 60s "UPLOAD_NEVER_STARTED" precheck
+                # here that aborted the prewarm if list_multipart_uploads showed
+                # nothing in flight. Removed — single PUT uploads (URLSession
+                # background, used by iOS Promptly client for small files) NEVER
+                # appear in list_multipart_uploads, so the precheck was killing
+                # 100% of single-PUT prewarms at exactly 60s and forcing the
+                # user-visible upload to fail. Just poll until the deadline.
 
                 if now >= poll_deadline:
                     print(f"[prewarm] timed out waiting for S3 object after "
