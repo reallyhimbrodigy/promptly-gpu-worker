@@ -13746,7 +13746,12 @@ def prewarm_handler(job):
         # dispatch-before-upload race condition. See the matching logic in
         # the render handler for full context. Same fail-fast pattern.
         poll_start = time.time()
-        poll_deadline = poll_start + 300
+        # 30 min. iOS background URLSession is willing to push for 30 min
+        # before iOS itself gives up (timeoutIntervalForResource), and a
+        # multi-hundred-MB clip on slow cellular legitimately takes ~10-15
+        # min. The old 5-min cap was hard-failing healthy uploads that
+        # were still streaming bytes. Match the client's tolerance.
+        poll_deadline = poll_start + 1800
         poll_attempt = 0
         while True:
             poll_attempt += 1
@@ -14382,7 +14387,10 @@ def handler(job):
             # This saves ~90% of the compute previously burned on doomed jobs
             # AND gives the frontend an actionable error code.
             _main_poll_start = time.time()
-            _main_poll_deadline = _main_poll_start + 300
+            # 30 min — match the iOS background URLSession resource
+            # timeout. See identical reasoning at the prewarm-side
+            # poll_deadline above.
+            _main_poll_deadline = _main_poll_start + 1800
             _main_poll_attempt = 0
             _last_progress_log = _main_poll_start
             while True:
