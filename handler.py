@@ -14419,7 +14419,6 @@ def handler(job):
             _main_poll_deadline = _main_poll_start + 300
             _main_poll_attempt = 0
             _last_progress_log = _main_poll_start
-            _multipart_check_done = False
             while True:
                 _main_poll_attempt += 1
                 try:
@@ -14437,53 +14436,31 @@ def handler(job):
                     _elapsed = _now - _main_poll_start
                     _code = getattr(_head_err, 'response', {}).get('Error', {}).get('Code', 'unknown')
 
-                    # Stage-2 early detection: at the 60s mark (NOT 30s),
-                    # check whether an upload is actually in progress via
-                    # ListMultipartUploads. 60s gives small single-PUT uploads
-                    # time to complete normally (S3 multipart only kicks in
-                    # for ~5MB+ files; small clips upload as one PUT and
-                    # wouldn't show up in ListMultipartUploads even mid-flight).
-                    if not _multipart_check_done and _elapsed >= 60:
-                        _multipart_check_done = True
-                        _upload_in_progress = False
-                        try:
-                            _mp_resp = _aws_s3_client.list_multipart_uploads(
-                                Bucket=_dl_bucket,
-                                Prefix=_dl_key,
-                            )
-                            _mp_list = _mp_resp.get("Uploads") or []
-                            # An exact-key match means iOS is uploading THIS file.
-                            for _mp in _mp_list:
-                                if _mp.get("Key") == _dl_key:
-                                    _upload_in_progress = True
-                                    print(
-                                        f"[pipeline] multipart upload in progress "
-                                        f"(UploadId={_mp.get('UploadId', 'unknown')[:16]}…) — "
-                                        f"continuing to poll up to 300s",
-                                        flush=True,
-                                    )
-                                    break
-                        except Exception as _mp_err:
-                            # If the list call itself fails, give the slow path
-                            # the benefit of the doubt — keep polling.
-                            print(
-                                f"[pipeline] multipart-upload check failed ({_mp_err}) — "
-                                f"continuing to poll up to 300s anyway",
-                                flush=True,
-                            )
-                            _upload_in_progress = True
-
-                        if not _upload_in_progress:
-                            raise RuntimeError(
-                                f"UPLOAD_NEVER_STARTED: No object at "
-                                f"bucket={_dl_bucket!r} key={_dl_key!r} after 30s "
-                                f"AND no in-progress multipart upload found. "
-                                f"This means the iOS app dispatched the render job "
-                                f"BEFORE starting the S3 upload — a dispatch-ordering "
-                                f"bug. The fix is iOS-side: ensure the render-job POST "
-                                f"happens AFTER S3 CompleteMultipartUpload returns "
-                                f"successfully, not in parallel with the upload."
-                            )
+                    # ⚠️ The "Stage-2 early UPLOAD_NEVER_STARTED detection"
+                    # that used to live here (raised at 60s if no in-
+                    # progress multipart upload was visible) was removed
+                    # — it was producing 100% false positives in
+                    # production.
+                    #
+                    # Why it was wrong:
+                    #   - iOS source uploads under ~30MB use SINGLE PUT
+                    #     via URLSession.background, not multipart.
+                    #   - Single PUTs never appear in
+                    #     list_multipart_uploads. Not pre-flight, not
+                    #     mid-flight, not ever.
+                    #   - Real-world cellular uploads for a 50MB 1080p
+                    #     clip legitimately take 60-180s.
+                    #   - iOS build 160+ already dispatches createVideoJob
+                    #     AFTER the PUT returns 200 (EditorView dispatch
+                    #     loop gates on sourceUploadCompleted &&
+                    #     proxyUploadFinished). The dispatch-before-upload
+                    #     race the precheck assumed was the cause does
+                    #     not exist in production code.
+                    #
+                    # The 300s main_poll_deadline below covers every case
+                    # (slow upload, dead upload, network drop, etc.) with
+                    # a single accurate error message. No upside left to
+                    # the early check.
 
                     if _now >= _main_poll_deadline:
                         raise RuntimeError(
