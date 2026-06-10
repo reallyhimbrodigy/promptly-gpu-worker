@@ -206,64 +206,78 @@ def _vpm_requires_what_i_saw():
         assert "what_i_saw" in str(e).lower(), f"expected what_i_saw error, got: {e}"
 
 
-@check("_EmphasisMoment requires visual_evidence + viewer_feeling")
-def _em_required_fields():
+@check("_VideoPlan requires editorial_vision")
+def _vp_requires_vision():
+    # The editorial_vision field is the editor's creative stake in the
+    # ground — required so every component choice flows from it.
     try:
-        handler._EmphasisMoment(
-            word_indices=[0],
-            type="punchline",
-            intensity="high",
-            duration=2.0,
+        handler._VideoPlan(
+            what_happens="x",
+            hook_word_index=0,
+            payoff_word_index=5,
+            close_word_index=9,
+            key_moments=[
+                handler._VideoPlanMoment(
+                    word_index=0, what_lands="x", why_emphasis="y", what_i_saw="z"
+                )
+            ],
+            story_shape="x",
+            arc_segments=[
+                handler._ArcSegment(
+                    start_word_index=0, end_word_index=9,
+                    position="hook", intensity=1.0,
+                )
+            ],
         )
-        raise AssertionError("should have raised ValidationError")
+        raise AssertionError("should have raised ValidationError for missing editorial_vision")
     except Exception as e:
-        msg = str(e).lower()
-        assert "visual_evidence" in msg or "viewer_feeling" in msg, (
-            f"expected required field error, got: {e}"
+        assert "editorial_vision" in str(e).lower(), (
+            f"expected editorial_vision error, got: {e}"
         )
 
 
-@check("_Transition requires viewer_feeling")
-def _trans_requires_vf():
-    try:
-        handler._Transition(after_word_index=5, type="ZoomThrough")
-        raise AssertionError("should have raised ValidationError")
-    except Exception as e:
-        assert "viewer_feeling" in str(e).lower()
+@check("_EmphasisMoment NO LONGER requires viewer_feeling/visual_evidence")
+def _em_no_defense_required():
+    # Defense fields removed — Gemini shouldn't justify each choice.
+    # The single editorial_vision drives all component choices.
+    em = handler._EmphasisMoment(
+        word_indices=[0],
+        type="punchline",
+        intensity="high",
+        duration=2.0,
+    )
+    assert em is not None
 
 
-@check("_BrollClip requires viewer_feeling")
-def _broll_requires_vf():
-    try:
-        handler._BrollClip(
-            keyword="x", start_word_index=0, end_word_index=5, reason="x"
-        )
-        raise AssertionError("should have raised ValidationError")
-    except Exception as e:
-        assert "viewer_feeling" in str(e).lower()
+@check("_Transition NO LONGER requires viewer_feeling")
+def _trans_no_defense():
+    t = handler._Transition(after_word_index=5, type="ZoomThrough")
+    assert t is not None
 
 
-@check("_MotionGraphic requires viewer_feeling")
-def _mg_requires_vf():
-    try:
-        handler._MotionGraphic(
-            type="StatCard",
-            start_word_index=0,
-            end_word_index=5,
-            anchor="upper_third_safe",
-        )
-        raise AssertionError("should have raised ValidationError")
-    except Exception as e:
-        assert "viewer_feeling" in str(e).lower()
+@check("_BrollClip NO LONGER requires viewer_feeling")
+def _broll_no_defense():
+    b = handler._BrollClip(
+        keyword="x", start_word_index=0, end_word_index=5, reason="x",
+    )
+    assert b is not None
 
 
-@check("_SoundEffect requires viewer_feeling")
-def _sfx_requires_vf():
-    try:
-        handler._SoundEffect(word_index=5, sound="hit")
-        raise AssertionError("should have raised ValidationError")
-    except Exception as e:
-        assert "viewer_feeling" in str(e).lower()
+@check("_MotionGraphic NO LONGER requires viewer_feeling")
+def _mg_no_defense():
+    m = handler._MotionGraphic(
+        type="StatCard",
+        start_word_index=0,
+        end_word_index=5,
+        anchor="upper_third_safe",
+    )
+    assert m is not None
+
+
+@check("_SoundEffect NO LONGER requires viewer_feeling")
+def _sfx_no_defense():
+    s = handler._SoundEffect(word_index=5, sound="hit")
+    assert s is not None
 
 
 @check("Full valid PostCutPlan can be constructed")
@@ -294,6 +308,7 @@ def _full_plan_constructs():
                     "intensity": 1.0,
                 }
             ],
+            "editorial_vision": "test creative vision for the video",
         },
         "caption_style": "PaperII",
         "caption_keywords": [],

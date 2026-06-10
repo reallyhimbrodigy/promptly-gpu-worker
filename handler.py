@@ -203,22 +203,17 @@ class _EmphasisMoment(BaseModel):
     # (optional). Color effects were removed from the pipeline (talking-head
     # videos don't need cinematic grades) — emphasis is now purely a
     # zoom/MG/SFX combo.
+    #
+    # No required justification fields here. Earlier required
+    # `visual_evidence` + `viewer_feeling` fields forced Gemini to DEFEND
+    # every choice, which produced hedging — Gemini reached for the safest
+    # defensible choice (SnapReframe, repeated) on every emphasis. Removing
+    # the defense burden lets Gemini make bolder, more varied choices that
+    # serve the video's editorial vision rather than rule compliance.
     word_indices: List[int]
     type: Literal["punchline", "statement", "question", "reaction", "transition", "revelation"]
     intensity: Literal["high", "medium"]
     duration: float
-    # REQUIRED visual-grounding field. One sentence on what is VISIBLE in the
-    # proxy at this exact word that justifies the zoom personality chosen.
-    # Example: "Speaker's eyes widen and head tilts back on the word 'forty'
-    # — the moment of disbelief." Forces the zoom_effect.type choice to
-    # ground in observed energy rather than rule paraphrase.
-    visual_evidence: str
-    # REQUIRED feeling-defense field. One short phrase naming the specific
-    # viewer feeling this emphasis produces at this exact word. Example:
-    # "Camera commits as the line lands — viewer feels weight." If you
-    # can't fill this with a concrete feeling, the emphasis_moment is
-    # decoration and shouldn't be placed.
-    viewer_feeling: str
     zoom_effect: Optional[_ZoomEffect] = None
     motion_graphic: Optional[_EmphasisMotionGraphic] = None
 
@@ -250,6 +245,9 @@ class _TextOverlay(BaseModel):
     position: Optional[Literal["top", "center"]] = None
 
 class _MotionGraphic(BaseModel):
+    # No `viewer_feeling` — removed because defense fields force hedging.
+    # Gemini's editorial vision (set in video_plan.editorial_vision) is the
+    # single source of truth for whether a component fits.
     type: _MG_TYPES
     # Word-anchored timing. MG appears when `start_word_index`'s word is
     # spoken and disappears when `end_word_index`'s word ends. Python
@@ -263,45 +261,21 @@ class _MotionGraphic(BaseModel):
     duration_seconds: Optional[float] = None  # override; null = use word span
     anchor: _SEMANTIC_ANCHOR
     props: Dict[str, Any] = Field(default_factory=dict)
-    # REQUIRED feeling-defense field. One short phrase naming the viewer
-    # feeling this MG produces. Example: "Viewer sees the actual texted
-    # words — the off-camera evidence the speaker named." MGs without a
-    # fillable feeling here are decoration; if the field can't be filled
-    # specifically, the MG doesn't belong.
-    viewer_feeling: str
 
 class _SoundEffect(BaseModel):
     # Gemini emits word_index only; Python derives t + word text from transcript.
     word_index: int
     sound: _SFX_SOUNDS
-    # REQUIRED feeling-defense field. One short phrase naming the viewer
-    # feeling this SFX produces and the visual event it pairs with.
-    # Example: "Boom under the payoff zoom locking — viewer feels the
-    # line land with weight." SFX without a visual partner OR without a
-    # fillable feeling is the random-audio failure mode.
-    viewer_feeling: str
 
 class _BrollClip(BaseModel):
     keyword: str
     start_word_index: int
     end_word_index: int
     reason: str
-    # REQUIRED feeling-defense field. One short phrase naming the viewer
-    # feeling this cutaway produces in this build/breather/close moment.
-    # Example: "Viewer sees the office hallway she's walking down — the
-    # approach itself, not just the office she named." Forces the keyword
-    # to ground in moment-specific feeling rather than generic noun match.
-    viewer_feeling: str
 
 class _Transition(BaseModel):
     after_word_index: int
     type: _TRANSITION_TYPES
-    # REQUIRED feeling-defense field. One short phrase naming the viewer
-    # feeling this transition produces across the cut boundary. Example:
-    # "ZoomThrough accelerating from build into payoff — viewer feels the
-    # camera lean forward into the moment." Transitions without a fillable
-    # feeling are usually wrong-type-for-the-boundary.
-    viewer_feeling: str
     # Component-specific optional props; most are passthrough.
     direction: Optional[str] = None
     palette: Optional[str] = None
@@ -424,6 +398,21 @@ class _VideoPlan(BaseModel):
     # AFTER hook/payoff/close/key_moments are committed but BEFORE any
     # other field is touched.
     arc_segments: List[_ArcSegment]
+    # THE EDITORIAL VISION — one specific sentence committing to HOW this
+    # video will be cut. Not what the video IS (that's video_identity).
+    # Not what HAPPENS (that's what_happens). Not the SHAPE (that's
+    # story_shape or arc_segments). The VISION is the editor's creative
+    # stake: "I'm going to lean into the absurdity with bright caption
+    # styles, pop SFX on every receipt detail, and a slow LetterboxPush
+    # on the moment he opens the bag." Or: "I'm keeping this close and
+    # quiet — gentle SmoothPush, warm cinematic captions, silence
+    # between sentences earning the payoff." The vision drives EVERY
+    # subsequent component choice. When a component fits the vision,
+    # place it boldly. When it doesn't, skip it. The vision replaces
+    # the previous per-component `viewer_feeling` defense — instead of
+    # justifying each choice individually, Gemini commits to one creative
+    # treatment for the whole video and lets every component flow from it.
+    editorial_vision: str
 
 
 class PostCutPlan(BaseModel):
@@ -2561,9 +2550,25 @@ SPEAKER POSITIONS (where each speaker sits in frame, by diarization + face detec
     # duration, signals) lives here so the prefix stays byte-identical across
     # calls and implicit prompt caching can take effect. Per-video data is
     # injected via the USER message below.
-    system_instruction = f"""Your single goal is to produce a 1080×1920 vertical short-form video edit that FLOWS — where every visible element FITS EXACTLY where it sits, and the finished video feels like one editor made every choice in service of one connected vision instead of rules firing on triggers. This is the only thing that matters. Every word that follows in this prompt is in service of this goal. If a decision you're about to make doesn't move the output closer to "this flows and every choice fits," reverse the decision. The bar is not "a video Gemini produced." The bar is "a video a freelance editor would put their name on." If you cannot defend a choice to a freelance editor watching over your shoulder, do not make the choice.
+    system_instruction = f"""You are a freelance short-form video editor. Thousands of cuts behind you. You don't pick from a catalog — you have a VISION for every video you touch, and every choice serves that vision.
 
-You are editing for TikTok, Instagram Reels, and YouTube Shorts. You have watched the source video at 10 frames per second — every shot, every face, every gesture, every micro-reaction. You have heard every word, every pause, every breath. You are NOT picking components from a catalog. You are composing the visual and sonic layer that makes the speaker's words land like a piece of music, and every component you place either serves that music or it gets cut.
+You have TASTE. You have OPINIONS. You have a perspective that makes your edits feel like YOURS, not like template output. The first thing you do on any video is watch it twice and decide what THIS video specifically needs. Not the genre default. THIS video.
+
+You believe a few things hard, and they show up in your work:
+
+**Boring is the only sin.** Safe edits are forgettable. You'd rather take a risk that almost works than play it safe and produce something a viewer scrolls past. When two components could fit a moment, you pick the more interesting one. When you're undecided, you commit to the bolder choice.
+
+**SnapReframe is the amateur's hammer.** Every junior editor reaches for it on every emphasis because it's safe and punchy. You don't. You vary your zooms because the moment varies. LetterboxPush on a commitment beat. DepthPull on a contemplative reveal. StageZoom when the scene calls for it. SmoothPush on the slow lean-in. Different emotions, different cameras. Same zoom on every emphasis means you weren't paying attention.
+
+**A hard cut without a transition reads as broken editing on this platform.** Every cut boundary is a beat — your job is to make that beat feel intentional. The default is a transition. Skipping one is the exception, not the rule. You vary the transition type to match each specific shift's character: ZoomThrough into a payoff, CardSwipe on a casual pivot, ShutterFlash on a punchline cut, SceneTitle on a real chapter break.
+
+**Specificity over genre. Always.** A B-roll keyword that could fit ANY pitch video doesn't fit THIS pitch video. A caption_style that could fit ANY vulnerable story doesn't fit THIS one. Reach into the dialogue's actual details — the specific named thing, the specific moment, the specific texture — and let your component choices anchor there.
+
+**Density is the floor; hierarchy is the craft.** Every moment that earns something gets something. Every cut boundary gets a transition. Every concrete noun in a build segment gets a B-roll. Every off-camera referent gets an MG. But each beat gets ONE primary device, not three stacked. Density without hierarchy is decoration; density with hierarchy is composition.
+
+**The spine is everything.** Before you touch components, you commit to: what is THIS video, what HAPPENS in it, where the hook lands, where the payoff lands, where the close lands, what beats matter in between. Then you write your EDITORIAL VISION — one sentence that captures HOW you'll cut this specific video. Every component choice flows from that vision. Components that don't serve the vision get cut.
+
+You don't have to justify each individual choice — you have to make choices that all serve the same vision. The vision IS your justification.
 
 ═══════════════════════════════════════════════════════════════════════════
 WATCH THE VIDEO FIRST — analyze before you place anything
@@ -4761,11 +4766,15 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
         "word_index": int,
         "what_lands": "<one short sentence>",
         "why_emphasis": "<one short sentence>",
-        "what_i_saw": "<REQUIRED — one short phrase on what's visible in the proxy at this word. Speaker's expression, gesture, framing. Example: 'eyes widen, head tilts back'>"
+        "what_i_saw": "<one short phrase on what's visible in the proxy. Example: 'eyes widen, head tilts back'>"
       }},
       ... 2-4 items total ...
     ],
-    "story_shape": "<one sentence: how the video moves from hook through setup through development through payoff through close>"
+    "story_shape": "<one sentence: how the video moves from hook through setup through development through payoff through close>",
+    "arc_segments": [
+      {{"start_word_index": int, "end_word_index": int, "position": "hook" | "build" | "mid_peak" | "payoff" | "breather" | "close", "intensity": float}}
+    ],
+    "editorial_vision": "<REQUIRED — ONE SPECIFIC SENTENCE committing to HOW you'll edit THIS video. Your creative stake in the ground. Examples: 'I'm leaning into the absurdity with MagazineCutout captions, pop SFX on every receipt detail, and a slow LetterboxPush when he opens the bag.' OR 'I'm keeping this close and quiet — gentle SmoothPush, PaperII captions, silence between sentences earning the payoff.' Every component below flows from this vision.>"
   }},
   "thumbnail_word_index": int,
 
@@ -4786,8 +4795,6 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
       "type": "punchline" | "revelation" | "statement" | "reaction" | "question" | "transition",
       "intensity": "high" | "medium",
       "duration": float,                              // 1.5-3.0 output-seconds the visual hit lasts
-      "visual_evidence": "<REQUIRED — short phrase, what's visible justifying the zoom type. Example: 'eyes widen on forty, disbelief frame'>",
-      "viewer_feeling": "<REQUIRED — short phrase naming the viewer feeling. Example: 'camera commits, line lands with weight'>",
       "zoom_effect": {{
         "type": "SmoothPush" | "SnapReframe" | "FocusWindow" | "StepZoom" | "LetterboxPush" | "StageZoom" | "DepthPull",
         "events": [
@@ -4815,8 +4822,7 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
   "sound_effects": [
     {{
       "word_index": int,
-      "sound": "boom" | "hit" | "drum_roll" | "reverse" | "ching" | "ding" | "click" | "camera_shutter" | "sad_trombone" | "typing" | "whoosh_slow" | "transition_smooth" | "thunder" | "pop",
-      "viewer_feeling": "<REQUIRED — short phrase, feeling + visual partner. Example: 'boom under payoff zoom locking'>"
+      "sound": "boom" | "hit" | "drum_roll" | "reverse" | "ching" | "ding" | "click" | "camera_shutter" | "sad_trombone" | "typing" | "whoosh_slow" | "transition_smooth" | "thunder" | "pop"
     }}
   ],
 
@@ -4825,8 +4831,7 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
       "keyword": "<13-18 words evoking what the speaker is describing>",
       "start_word_index": int,
       "end_word_index": int,
-      "reason": "<one short sentence>",
-      "viewer_feeling": "<REQUIRED — short phrase, moment-specific feeling. Example: 'office hallway approach building dread'>"
+      "reason": "<one short sentence>"
     }}
   ],
 
@@ -4834,7 +4839,6 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
     {{
       "after_word_index": int,                         // pick from the CUT BOUNDARIES list shown later in this prompt
       "type": "CardSwipe" | "ZoomThrough" | "SlideOver" | "Stack" | "CrossfadeZoom" | "ShutterFlash" | "StepPush" | "NewspaperWipe" | "FilmStrip" | "SceneTitle",
-      "viewer_feeling": "<REQUIRED — short phrase, feeling across the cut. Example: 'accelerating from build into payoff'>",
       // ...transition-specific optional props (direction / palette / title / etc. — see TRANSITIONS section)
     }}
   ],
@@ -4846,8 +4850,7 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
       "end_word_index": int,
       "duration_seconds": float | null,                // optional fixed lifespan; null = natural word-span
       "anchor": "upper_third_safe" | "center" | "lower_third_safe" | "left_safe" | "right_safe",
-      "props": {{...}},                                  // see each component's Required/Optional props in MOTION GRAPHICS section
-      "viewer_feeling": "<REQUIRED — short phrase, feeling produced. Example: 'viewer sees the actual texted words'>"
+      "props": {{...}}                                  // see each component's Required/Optional props in MOTION GRAPHICS section
     }}
   ]
 }}
