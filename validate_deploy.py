@@ -197,13 +197,18 @@ def _schema_gen():
     assert "properties" in schema, "schema missing top-level properties"
 
 
-@check("_VideoPlanMoment requires what_i_saw")
-def _vpm_requires_what_i_saw():
+@check("_VideoPlanMoment requires what_i_saw + viewer_feeling")
+def _vpm_required_fields():
+    # v2 prompt schema: key_moment carries word_index, what_lands,
+    # why_emphasis, what_i_saw, viewer_feeling — all required.
     try:
         handler._VideoPlanMoment(word_index=0, what_lands="x", why_emphasis="y")
-        raise AssertionError("should have raised ValidationError for missing what_i_saw")
+        raise AssertionError("should have raised ValidationError")
     except Exception as e:
-        assert "what_i_saw" in str(e).lower(), f"expected what_i_saw error, got: {e}"
+        msg = str(e).lower()
+        assert "what_i_saw" in msg or "viewer_feeling" in msg, (
+            f"expected required-field error, got: {e}"
+        )
 
 
 @check("_VideoPlan requires editorial_vision")
@@ -218,7 +223,8 @@ def _vp_requires_vision():
             close_word_index=9,
             key_moments=[
                 handler._VideoPlanMoment(
-                    word_index=0, what_lands="x", why_emphasis="y", what_i_saw="z"
+                    word_index=0, what_lands="x", why_emphasis="y",
+                    what_i_saw="z", viewer_feeling="f",
                 )
             ],
             story_shape="x",
@@ -236,17 +242,47 @@ def _vp_requires_vision():
         )
 
 
-@check("_EmphasisMoment NO LONGER requires viewer_feeling/visual_evidence")
-def _em_no_defense_required():
-    # Defense fields removed — Gemini shouldn't justify each choice.
-    # The single editorial_vision drives all component choices.
+@check("_EmphasisMoment requires viewer_feeling (v2 prompt)")
+def _em_requires_viewer_feeling():
+    # v2 prompt: viewer_feeling is back as required — it's the named end-state
+    # tying the emphasis to the arc position's intended feeling. Removed
+    # visual_evidence is staying out (the prompt doesn't ask for it).
+    try:
+        handler._EmphasisMoment(
+            word_indices=[0],
+            type="punchline",
+            intensity="high",
+            duration=2.0,
+        )
+        raise AssertionError("should have raised ValidationError for missing viewer_feeling")
+    except Exception as e:
+        assert "viewer_feeling" in str(e).lower()
+    # With viewer_feeling present, construct succeeds:
     em = handler._EmphasisMoment(
         word_indices=[0],
         type="punchline",
         intensity="high",
         duration=2.0,
+        viewer_feeling="x",
     )
     assert em is not None
+
+
+@check("_EmphasisMoment type enum dropped 'transition' (v2)")
+def _em_type_enum():
+    # v2 prompt enumerates only 5 types: punchline | revelation | statement |
+    # reaction | question. The old "transition" value is gone.
+    try:
+        handler._EmphasisMoment(
+            word_indices=[0],
+            type="transition",  # no longer valid
+            intensity="high",
+            duration=2.0,
+            viewer_feeling="x",
+        )
+        raise AssertionError("'transition' should no longer be a valid type")
+    except Exception as e:
+        assert "transition" in str(e).lower() or "literal" in str(e).lower()
 
 
 @check("_Transition NO LONGER requires viewer_feeling")
@@ -297,6 +333,7 @@ def _full_plan_constructs():
                     "what_lands": "x",
                     "why_emphasis": "y",
                     "what_i_saw": "z",
+                    "viewer_feeling": "f",
                 }
             ],
             "story_shape": "x",
@@ -372,6 +409,80 @@ def _classify_returns_dict():
         assert isinstance(result["retryable"], bool)
         assert isinstance(result["requires_new_video"], bool)
         assert isinstance(result["requires_vibe_change"], bool)
+
+
+# ─── 5b. RECIPE EVAL — window doctrine + hard-constraint checker ──────
+print("\n[5b/6] recipe_eval")
+
+
+@check("recipe_eval module imports cleanly")
+def _recipe_eval_imports():
+    import recipe_eval
+    assert hasattr(recipe_eval, "evaluate_recipe")
+    assert hasattr(recipe_eval, "Report")
+
+
+@check("recipe_eval flags zoom on a build word (zoom-arc rule)")
+def _recipe_eval_zoom_arc():
+    import recipe_eval
+    bad_plan = {
+        "video_plan": {
+            "arc_segments": [
+                {"start_word_index": 0, "end_word_index": 4, "position": "hook", "intensity": 0.9},
+                {"start_word_index": 5, "end_word_index": 9, "position": "build", "intensity": 0.3},
+                {"start_word_index": 10, "end_word_index": 12, "position": "payoff", "intensity": 1.0},
+            ],
+            "key_moments": [
+                {"word_index": 7},  # build word
+            ],
+            "payoff_word_index": 11,
+            "close_word_index": 12,
+        },
+        "emphasis_moments": [
+            {
+                "word_indices": [7],
+                "zoom_effect": {"type": "StepZoom", "events": [{"startMs": 0}]},
+            }
+        ],
+        "transitions": [],
+        "broll_clips": [],
+        "motion_graphics": [],
+        "text_overlays": [],
+        "sound_effects": [],
+    }
+    words = [{"word": str(i), "start": i * 0.5, "end": i * 0.5 + 0.4} for i in range(13)]
+    rep = recipe_eval.evaluate_recipe(bad_plan, words, [], 6.5)
+    rule_ids = {r for (r, _) in rep.failures}
+    assert "zoom-arc" in rule_ids, f"expected zoom-arc failure, got: {rule_ids}"
+
+
+@check("recipe_eval flags StepZoom on payoff (payoff-commitment rule)")
+def _recipe_eval_payoff_commitment():
+    import recipe_eval
+    bad_plan = {
+        "video_plan": {
+            "arc_segments": [
+                {"start_word_index": 0, "end_word_index": 4, "position": "hook", "intensity": 0.9},
+                {"start_word_index": 5, "end_word_index": 8, "position": "build", "intensity": 0.3},
+                {"start_word_index": 9, "end_word_index": 11, "position": "payoff", "intensity": 1.0},
+            ],
+            "key_moments": [{"word_index": 10}],
+            "payoff_word_index": 10,
+            "close_word_index": 11,
+        },
+        "emphasis_moments": [
+            {
+                "word_indices": [10],
+                "zoom_effect": {"type": "StepZoom", "events": [{"startMs": 0}]},
+            }
+        ],
+        "transitions": [], "broll_clips": [], "motion_graphics": [],
+        "text_overlays": [], "sound_effects": [],
+    }
+    words = [{"word": str(i), "start": i * 0.5, "end": i * 0.5 + 0.4} for i in range(12)]
+    rep = recipe_eval.evaluate_recipe(bad_plan, words, [], 6.0)
+    rule_ids = {r for (r, _) in rep.failures}
+    assert "payoff-commitment" in rule_ids
 
 
 # ─── 6. HANDLER ENTRY POINTS ───────────────────────────────────────────
