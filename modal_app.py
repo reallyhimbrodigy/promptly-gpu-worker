@@ -563,6 +563,45 @@ class PromptlyValidator:
         return self._validate({"input": body})
 
 
+# ── Diagnostic: inspect an S3 upload's actual state in real time ─────────────
+# When iOS shows "uploading video" forever and then fails, this endpoint tells
+# us EXACTLY what S3 sees right now: object exists, multipart in progress,
+# zero parts uploaded, parts stalled, etc. Use during a failing upload to
+# diagnose which iOS-side step is broken without guessing.
+#
+# Curl example (run while iOS shows "uploading"):
+#   curl -X POST https://...promptlydiagnoseupload-diagnose.modal.run \
+#     -H 'Content-Type: application/json' \
+#     -d '{"bucket":"thisismybucketagainwooo","key":"sources/<user>/<file>.mp4"}'
+@app.cls(
+    timeout=30,
+    scaledown_window=300,
+    cpu=2,
+    memory=1024,
+    region="us-west",
+)
+class PromptlyDiagnoseUpload:
+    @modal.enter()
+    def startup(self):
+        import sys
+        sys.path.insert(0, "/")
+        from handler import diagnose_upload_handler as _d
+        self._diagnose = _d
+
+    @modal.fastapi_endpoint(method="POST")
+    def diagnose(self, body: dict):
+        """Inspect the live S3 state for a specific bucket/key.
+
+        Expected body:
+          {"bucket": "<bucket-name>", "key": "<object-key>"}
+
+        Response includes `diagnosis` field with human-readable interpretation
+        of what stage the upload is at (or failed at). See handler's
+        diagnose_upload_handler for the full schema.
+        """
+        return self._diagnose({"input": body})
+
+
 # ── RIFE GPU function ─────────────────────────────────────────────────────────
 # Stateless H100-backed function that the CPU orchestrator calls when a source
 # needs frame interpolation. Splitting RIFE off lets the orchestrator drop its
