@@ -928,7 +928,15 @@ def format_user_style_section(profile):
         d = profile.get(field) or {}
         if not isinstance(d, dict) or not d:
             return []
-        _items = sorted(d.items(), key=lambda kv: (-float(kv[1] or 0), str(kv[0])))
+        # Skip sentinel sub-keys (double-underscore framed) — those carry
+        # piggyback data (e.g. _RECENT_CAPTION_STYLES_SENTINEL holds a list,
+        # not a count). Also skip non-numeric values defensively.
+        _items = [
+            (k, v) for k, v in d.items()
+            if not (isinstance(k, str) and k.startswith("__") and k.endswith("__"))
+            and isinstance(v, (int, float))
+        ]
+        _items = sorted(_items, key=lambda kv: (-float(kv[1] or 0), str(kv[0])))
         return [(k, float(v or 0)) for k, v in _items[:n]]
 
     def _fmt_top(items):
@@ -976,6 +984,37 @@ GUIDANCE — important:
 """
 
 
+# Sentinel sub-key used to piggyback the chronological recent-caption-styles
+# list inside the existing `caption_styles` JSONB column on Supabase, since
+# adding a top-level `recent_caption_styles` column requires a SQL migration
+# and PostgREST otherwise rejects unknown columns. JSONB is schemaless, so
+# a sub-key sidesteps the migration. Reads in `format_user_style_section`
+# and `_decayed` skip this key by name.
+_RECENT_CAPTION_STYLES_SENTINEL = "__chronological__"
+
+
+def _read_recent_caption_styles(profile):
+    """Read the chronological recent-caption-styles list from the profile.
+
+    Looks in two places in order: the dedicated `recent_caption_styles`
+    column (if a future SQL migration adds it), then the sentinel sub-key
+    inside `caption_styles` JSONB. Returns [] when nothing usable exists.
+    """
+    if not isinstance(profile, dict):
+        return []
+    # Dedicated column — preferred when present (post-migration).
+    direct = profile.get("recent_caption_styles")
+    if isinstance(direct, list) and direct:
+        return list(direct)
+    # Piggyback sentinel inside the existing JSONB column.
+    cs = profile.get("caption_styles")
+    if isinstance(cs, dict):
+        piggyback = cs.get(_RECENT_CAPTION_STYLES_SENTINEL)
+        if isinstance(piggyback, list) and piggyback:
+            return list(piggyback)
+    return []
+
+
 def format_recent_caption_styles_section(profile):
     """Render the chronological recent-caption-styles list as its own user
     message block.
@@ -995,7 +1034,7 @@ def format_recent_caption_styles_section(profile):
     """
     if not isinstance(profile, dict):
         return ""
-    recent = profile.get("recent_caption_styles")
+    recent = _read_recent_caption_styles(profile)
     if not isinstance(recent, list) or not recent:
         return ""
     cleaned = [str(s) for s in recent if s and str(s) != "none"][-5:]
@@ -1028,7 +1067,17 @@ def update_user_style_profile(user_id, edit_plan, vibe, duration):
             d = prior.get(field) or {}
             if not isinstance(d, dict):
                 d = {}
-            return {k: round(float(v or 0) * _USER_STYLE_RECENCY_DECAY, 3) for k, v in d.items()}
+            # Skip sentinel sub-keys (e.g. _RECENT_CAPTION_STYLES_SENTINEL
+            # piggybacked inside caption_styles JSONB). Their values are
+            # lists / non-numerics; float(v) would crash _decayed and break
+            # the whole upsert. Style-count keys are normal strings without
+            # the double-underscore prefix.
+            return {
+                k: round(float(v or 0) * _USER_STYLE_RECENCY_DECAY, 3)
+                for k, v in d.items()
+                if not (isinstance(k, str) and k.startswith("__") and k.endswith("__"))
+                and isinstance(v, (int, float))
+            }
 
         def _bump(bucket, key):
             if not key:
@@ -1106,11 +1155,24 @@ def update_user_style_profile(user_id, edit_plan, vibe, duration):
         # the data shape that rule was always asking for. Tail-capped at
         # 5 (≈ enough rotation history that #1 vs #4 is meaningful, not
         # so deep that ancient picks influence the avoid list).
-        _recent_caption_styles = list(prior.get("recent_caption_styles") or [])
+        #
+        # Storage: PIGGYBACK as a sentinel sub-key inside the existing
+        # `caption_styles` JSONB column. Adding a dedicated
+        # `recent_caption_styles` top-level column would require a
+        # Supabase SQL migration (PostgREST rejects upserts containing
+        # unknown columns and silently truncates the payload). JSONB
+        # columns are schemaless by design, so a sub-key works without
+        # external action. `_read_recent_caption_styles` reads either
+        # the sentinel sub-key OR a dedicated column if one is later
+        # added — both paths work, no migration required.
+        _prior_recent_chronological = _read_recent_caption_styles(prior)
+        _recent_caption_styles = list(_prior_recent_chronological)
         _current_caption_style = edit_plan.get("caption_style")
         if _current_caption_style and str(_current_caption_style) != "none":
             _recent_caption_styles.append(str(_current_caption_style))
         _recent_caption_styles = _recent_caption_styles[-5:]
+        if _recent_caption_styles:
+            _caption_styles[_RECENT_CAPTION_STYLES_SENTINEL] = _recent_caption_styles
 
         _row = {
             "user_id": user_id,
@@ -1122,7 +1184,6 @@ def update_user_style_profile(user_id, edit_plan, vibe, duration):
             "motion_graphics": _mg_freq,
             "zoom_types": _zoom_freq,
             "recent_vibes": _recent_vibes,
-            "recent_caption_styles": _recent_caption_styles,
             "avg_emphasis_per_30s": round(_new_em_avg, 3),
             "avg_mgs_per_video": round(_new_mg_avg, 3),
             "total_videos": _prior_total + 1,
@@ -1703,14 +1764,25 @@ def cluster_shot_changes(shot_changes, min_gap=0.5):
     return clustered
 
 
-def shot_change_word_boundaries(shot_changes, kept_words, snap_tolerance=0.30):
+def shot_change_word_boundaries(shot_changes, kept_words, snap_tolerance=0.60):
     """Map each clustered shot change to a kept-word boundary (in kept-word
     index space) and its corresponding split-time (source seconds).
 
-    For each shot change, find the kept-word whose .end is closest within
-    `snap_tolerance` seconds — that word becomes the LAST word of the
-    pre-split sub-clip; the next kept word starts the post-split sub-clip.
-    The split time is the word's end (in source-time).
+    For each shot change, find the kept-word EDGE (end of word N OR start
+    of word N+1) closest within `snap_tolerance` seconds. The chosen
+    boundary becomes the after-word-index N (last word of pre-split clip);
+    the split time is word N's `.end` in source-time.
+
+    Snap tolerance bumped from 0.30s → 0.60s — production sweep showed
+    real cuts at score 12.60 and 12.07 silently dropped because the
+    speaker was mid-sentence at the cut and the nearest word END was
+    >0.30s away (even though the next word's START was <0.05s away).
+    0.60s covers the longest English word at slow expressive tempo;
+    also-check-the-next-word-start covers the mid-sentence case.
+
+    When a detection can't be snapped after both expansions, _record_divergence
+    logs it instead of dropping silently — that is the audit fix for
+    the "FLAGGED cuts vanishing" bug.
 
     Returns a list of (new_idx, source_time_seconds) tuples, sorted by
     new_idx, deduplicated. Used by both:
@@ -1728,11 +1800,23 @@ def shot_change_word_boundaries(shot_changes, kept_words, snap_tolerance=0.30):
         _best_we = None
         for _new_idx, _w in enumerate(kept_words):
             _we = float(_w.get("end") or 0)
-            _dist = abs(_we - _sc)
-            if _dist <= _best_dist:
-                _best_dist = _dist
+            # Distance to end of this word.
+            _dist_end = abs(_we - _sc)
+            if _dist_end <= _best_dist:
+                _best_dist = _dist_end
                 _best_idx = _new_idx
                 _best_we = _we
+            # Also check distance to start of the NEXT word — covers
+            # mid-sentence cuts where the speaker resumes from a different
+            # word and the cut lands inside the word-gap. The pre-split
+            # boundary is still word N (the LAST kept word before the cut).
+            if _new_idx + 1 < len(kept_words):
+                _next_ws = float(kept_words[_new_idx + 1].get("start") or 0)
+                _dist_start = abs(_next_ws - _sc)
+                if _dist_start <= _best_dist:
+                    _best_dist = _dist_start
+                    _best_idx = _new_idx
+                    _best_we = _we
         if (
             _best_idx is not None
             and 0 <= _best_idx < len(kept_words) - 1  # not the last word
@@ -1740,6 +1824,29 @@ def shot_change_word_boundaries(shot_changes, kept_words, snap_tolerance=0.30):
         ):
             out.append((_best_idx, _best_we))
             seen_indices.add(_best_idx)
+        else:
+            # Detection didn't snap. Could not place a boundary — log so
+            # the silent drop becomes visible. The pre-Gemini boundary
+            # union loses this cut, but at least we know.
+            _reason = (
+                "no_kept_word_edge_within_tolerance"
+                if _best_idx is None
+                else ("last_word_boundary" if _best_idx == len(kept_words) - 1
+                      else "duplicate_after_clustering")
+            )
+            _record_divergence(
+                "shot_change_snap",
+                {
+                    "source_time_s": round(float(_sc), 3),
+                    "snap_tolerance_s": snap_tolerance,
+                    "best_kept_word_idx": _best_idx,
+                    "best_distance_s": (
+                        round(float(_best_dist), 3) if _best_idx is not None else None
+                    ),
+                },
+                "drop_unsnapped",
+                reason=_reason,
+            )
     out.sort(key=lambda t: t[0])
     return out
 
@@ -1822,7 +1929,7 @@ def _parse_scdet_output(stdout, stderr):
 _SCDET_SWEEP_THRESHOLD = 1.0
 
 
-def detect_shot_changes(source_path, threshold=12.0):
+def detect_shot_changes(source_path, threshold=7.0):
     """Detect hard shot changes in the source video via ffmpeg's `scdet`
     (scene change detect) filter.
 
@@ -1830,9 +1937,23 @@ def detect_shot_changes(source_path, threshold=12.0):
     (ffmpeg's vf_scdet.c sets default=10, range 0-100). Previously we
     passed 0.30 thinking it was a 0-1 sensitivity dial — that produced
     300+ detections on a 22s video (every frame with any motion at all).
-    threshold=12.0 captures real hard cuts while filtering motion noise
-    — but it MISSES same-framing same-spot splices, which score ~2-6
-    because the visual delta between back-to-back takes is near zero.
+    Then 12.0 — which filtered motion noise but ALSO filtered real cuts
+    on normal-framing footage that scored 8-11.
+
+    Lowered to 7.0 based on production sweep data showing real cuts on
+    normal-framing footage at 8.72-10.23 (well above motion floor 1-3)
+    with a ~5.7 gap between motion ceiling and cut floor. Threshold 7.0
+    sits in that gap. Caveat: footage with extreme gestures may produce
+    motion scores 8-9 (false positives). The [scdet-sweep] log shows
+    every detection with its score so false-positive surface stays
+    visible across renders — escalate to adaptive thresholding if FPs
+    become frequent.
+
+    SEPARATELY: same-framing same-spot splices score ~2-6 because the
+    visual delta between back-to-back takes is near zero — below ANY
+    threshold the noise floor allows. Those need an audio-discontinuity
+    detector, not threshold tuning. See the sweep log to confirm the
+    score distribution on this source.
 
     To diagnose that miss rate without guessing, scdet runs internally
     at _SCDET_SWEEP_THRESHOLD (much lower) and every parsed detection
@@ -5383,12 +5504,44 @@ def generate_edit_gemini(
         # Both kinds of boundaries are exposed to Gemini so it knows every
         # valid `after_word_index` it can place a transition on. A
         # transition placed at any other word is dropped by the pipeline.
+        # Pre-compute the consecutive-anchor dead_air pairs from the
+        # mechanical-cut plan. For ranges like {after=N, before=N+1,
+        # reason="dead_air"}, ZERO source words are actually removed but
+        # build_clips_from_words still splits the clip at this boundary
+        # so the silence between N and N+1 is dropped. Without surfacing
+        # these in the boundary list, Gemini never sees the cut and the
+        # cross-check guard fires `clip_split_without_known_boundary`.
+        # This catches them in src-word space; the iteration below then
+        # maps each pair to its kept-word boundary index.
+        _consecutive_da_src_pairs = set()
+        for _rw in (raw_cut_remove_words or []):
+            if not isinstance(_rw, dict):
+                continue
+            _aw_val = _rw.get("after_word_index")
+            _bw_val = _rw.get("before_word_index")
+            if _aw_val is None or _bw_val is None:
+                continue
+            try:
+                _aw_int = int(_aw_val)
+                _bw_int = int(_bw_val)
+            except (TypeError, ValueError):
+                continue
+            if _bw_int == _aw_int + 1 and str(_rw.get("reason", "")) == "dead_air":
+                _consecutive_da_src_pairs.add((_aw_int, _bw_int))
+
         _dead_air_boundary_indices = []
         for new_idx, src_idx in enumerate(new_to_src):
             if new_idx + 1 >= len(new_to_src):
                 continue
             next_src_idx = new_to_src[new_idx + 1]
             if next_src_idx != src_idx + 1:
+                _dead_air_boundary_indices.append(new_idx)
+            elif (src_idx, next_src_idx) in _consecutive_da_src_pairs:
+                # No gap in src space, but a dead_air range marks the
+                # boundary explicitly — the silence between two adjacent
+                # words gets cut. build_clips_from_words splits here too;
+                # adding the boundary keeps the union in sync with the
+                # renderer's actual cuts.
                 _dead_air_boundary_indices.append(new_idx)
         # Shot-change-derived boundaries (kept-word indices)
         _shot_boundaries = shot_change_word_boundaries(_shots, kept_words)
@@ -6734,15 +6887,106 @@ For each chosen `after_word_index`, pick a transition `type` whose character mat
         })
     emphasis_moments.sort(key=lambda x: x["t"])
 
+    # ── PRE-PASS: split clips at zoom-type boundaries ─────────────────────
+    # Multiple emphasis_moments can target the same clip; the Remotion
+    # ClipRenderer at src/remotion/src/PromptlyRender.tsx:89-100 picks ONE
+    # zoom component per clip by `zoomEffect.type`. To preserve Gemini's
+    # per-event zoom variety (instead of coercing every event on a clip
+    # to one type), split the clip at the midpoint between adjacent
+    # emphases that differ in zoom type. Each resulting sub-clip then
+    # naturally has emphases of a single type — the existing grouping
+    # loop below sees one type per clip and no coercion is needed.
+    #
+    # Reuses the validated-cuts split pattern from the post-Gemini shot-
+    # split block above. Internal sub-clip boundaries get
+    # transition_out="none" (hard cut between same-take sub-clips).
+    _zoom_type_split_times: List[float] = []
+    _zoom_em_by_clip: Dict[int, List[int]] = {}
+    for _ei, em in enumerate(emphasis_moments):
+        if not em.get("zoom_effect"):
+            continue
+        for _ci, _clip in enumerate(validated_cuts):
+            _cs = float(_clip["source_start"])
+            _ce = float(_clip["source_end"])
+            if _cs <= em["t"] <= _ce:
+                _zoom_em_by_clip.setdefault(_ci, []).append(_ei)
+                break
+
+    for _ci, _ei_list in _zoom_em_by_clip.items():
+        _ei_sorted = sorted(_ei_list, key=lambda i: emphasis_moments[i]["t"])
+        _types_in_order = [
+            str(emphasis_moments[i]["zoom_effect"]["type"]) for i in _ei_sorted
+        ]
+        if len(set(_types_in_order)) <= 1:
+            continue  # single type on this clip — no split needed
+        for _k in range(1, len(_ei_sorted)):
+            if _types_in_order[_k] == _types_in_order[_k - 1]:
+                continue
+            _t_prev = float(emphasis_moments[_ei_sorted[_k - 1]]["t"])
+            _t_curr = float(emphasis_moments[_ei_sorted[_k]]["t"])
+            if _t_curr <= _t_prev:
+                continue
+            _split_t = (_t_prev + _t_curr) / 2.0
+            _zoom_type_split_times.append(_split_t)
+            _record_divergence(
+                "zoom_type_split",
+                {
+                    "owning_clip_idx": _ci,
+                    "type_a": _types_in_order[_k - 1],
+                    "type_b": _types_in_order[_k],
+                    "em_idx_a": _ei_sorted[_k - 1],
+                    "em_idx_b": _ei_sorted[_k],
+                    "split_at_source_s": round(_split_t, 3),
+                },
+                "clip_split_to_preserve_zoom_variety",
+                reason="adjacent_emphases_on_same_clip_have_different_zoom_types",
+            )
+
+    if _zoom_type_split_times:
+        _split_times_sorted = sorted(set(_zoom_type_split_times))
+        _new_cuts = []
+        _total_splits = 0
+        for _clip in validated_cuts:
+            _cs = float(_clip["source_start"])
+            _ce = float(_clip["source_end"])
+            _internal = [
+                _st for _st in _split_times_sorted
+                if _cs + 0.05 < _st < _ce - 0.05
+            ]
+            if not _internal:
+                _new_cuts.append(_clip)
+                continue
+            _boundaries = [_cs] + _internal + [_ce]
+            for _bi in range(len(_boundaries) - 1):
+                _sub_start = _boundaries[_bi]
+                _sub_end = _boundaries[_bi + 1]
+                if _sub_end - _sub_start <= 0:
+                    continue
+                _sub = {**_clip, "source_start": _sub_start, "source_end": _sub_end}
+                # Internal sub-clip boundary → no transition (hard cut
+                # between same-take takes; matches shot-split convention).
+                if _bi != len(_boundaries) - 2:
+                    _sub["transition_out"] = "none"
+                _new_cuts.append(_sub)
+            _total_splits += len(_internal)
+        if _total_splits > 0:
+            print(
+                f"[zoom-type-split] Validated cuts: {len(validated_cuts)} → "
+                f"{len(_new_cuts)} clips ({_total_splits} zoom-variety split(s) "
+                f"applied)",
+                flush=True,
+            )
+            validated_cuts = _new_cuts
+
     # Multiple emphasis_moments can target the same clip — each gets a zoom
     # EVENT, all merged into the clip's single zoomEffect spec. The spec carries
     # one `type` (SmoothPush / StepZoom / etc.) but can hold multiple `events`
-    # spaced across the clip's render window. When emphasis moments disagree on
-    # type, the highest-intensity moment's type wins and the others' events are
-    # rendered under that type (a small editorial compromise vs dropping the
-    # other zooms entirely, which was the previous behavior). Emphasis moments
-    # landing in a cut/removed segment lose their zoom but keep the rest of the
-    # emphasis (text, MG) intact.
+    # spaced across the clip's render window. After the zoom-type-split pass
+    # above, each sub-clip naturally has emphases of a single type, so the
+    # coercion path is effectively dead on the happy path. It is preserved
+    # here as a defensive fallback in case the split fails to apply (e.g.,
+    # an emphasis whose t falls in the 0.05s edge zone of a clip boundary).
+    # When coercion DOES fire, _record_divergence makes it visible.
     _INTENSITY_RANK = {"high": 3, "medium": 2, "low": 1}
     _clip_zoom_emphasis: dict = {}  # clip_idx -> list of emphasis_moment indices
     for _ei, em in enumerate(emphasis_moments):
@@ -6816,6 +7060,24 @@ For each chosen `after_word_index`, pick a transition `type` whose character mat
                     f"coerced: {_coerce_str}).",
                     flush=True,
                 )
+                # If the zoom-type pre-split missed a transition (e.g., an
+                # emphasis whose t fell in the edge zone of a clip boundary
+                # and got grouped here despite differing types), the
+                # divergence log surfaces it so we can audit why the split
+                # didn't apply.
+                for _coerced_ei, _orig_type in _coerced_types:
+                    _record_divergence(
+                        "zoom_type_coerced",
+                        {
+                            "clip_idx": _clip_idx,
+                            "em_idx": _coerced_ei,
+                            "original_type": _orig_type,
+                            "em_t": round(float(emphasis_moments[_coerced_ei]["t"]), 3),
+                        },
+                        "coerced_to_dominant",
+                        final={"type": _dominant_type},
+                        reason="zoom_type_pre_split_missed_this_emphasis",
+                    )
             else:
                 print(
                     f"[generate-edit] Clip {_clip_idx}: merged {len(_ei_list)} "
