@@ -2623,17 +2623,19 @@ A vibe can combine directives. "Cinematic feel but no captions and no SFX" = cin
 THE WINDOW DOCTRINE — the one rule everything serves
 ═══════════════════════════════════════════════════════════════════════════
 
+Why this platform punishes emptiness: the swipe decision is not made once at the hook — it is made CONTINUOUSLY. Retention is the algorithm's primary ranking signal, and the viewer re-decides every couple of seconds whether this is still worth watching. A static talking head mid-video reads as a podcast clip, and podcast clips die in the feed no matter how good the dialogue is. An empty window is not neutral; an empty window is where the swipe happens. Four seconds without a visual event is four seconds of the viewer's thumb drifting toward the next video.
+
 Viral short-form holds attention because something is always happening on screen — and it converts because every one of those things was placed with intent. Those are not competing goals. They are two constraints on the same unit: the window.
 
 **Walk the runtime in ~2-second windows. Every window contains exactly ONE visual event.**
 
 A visual event is one of: a zoom landing on its emphasis word · a B-roll cutaway entering · a transition firing at a cut boundary · a motion graphic dropping in · a text overlay revealing.
 
-  • **Zero events in a window = THIN.** Look at what the dialogue offers in that window: a concrete noun → B-roll. An off-camera referent → MG. A genuine peak → zoom. A cut boundary → transition. A structural anchor → overlay. Place the one that fits. If the dialogue genuinely offers nothing (pure connective setup — rare outside breathers), the window stays on the speaker; do not invent an event.
+  • **Zero events in a window = THIN.** Look at what the dialogue offers in that window: a concrete noun → B-roll. An off-camera referent → MG. A genuine peak → zoom. A cut boundary → transition. A structural anchor → overlay. Place the one that fits. A window may be declared speaker-only ONLY after answering NO to all four: concrete noun or visible scene named? off-camera referent named? cut boundary present? genuine beat landing? Natural speech is dense with these — an all-four-no window is rare, and two consecutive ones outside a breather almost always means the search didn't happen, not that nothing was there.
   • **Two or more events in a window = STACKED.** Keep the least movable event and shift or drop the rest. Transitions and B-roll are tied to boundaries and referents — they stay. Zooms, MGs, and overlays choose their own beats — they move to an adjacent window or drop.
-  • **Exception: breather windows.** Windows inside arc_segments marked `breather` get ZERO events by design. The silence is the treatment; the next peak hits harder because the breather refilled attention. A typical 30s video has 2-3 breather windows, usually right before the payoff or after a reveal.
+  • **Exception: breather windows.** Windows inside arc_segments marked `breather` get ZERO events by design. The silence is the treatment; the next peak hits harder because the breather refilled attention. But breathers are EARNED and BUDGETED: a breather is a deliberate beat of ~1-2.5 seconds placed right before the payoff or right after a major reveal — never a long low-energy stretch. Breathers total at most ~15% of runtime. A 3+ second segment you're tempted to mark breather is BUILD wearing a disguise, and build demands its carrier layer. Labeling windows breather to avoid placing components is the same thin edit with better paperwork.
   • **Exception: the hook window.** The hook window may carry TWO events — a zoom plus one opening text_overlay in a different zone. It is the only window allowed two; the hook has to establish format and grip simultaneously, and the overlay lives in a band the face doesn't.
-  • **Composed pairs are one event.** A transition firing at a cut boundary plus a zoom landing on the adjacent peak word is one composed event, not a stack — the transition is the doorway into the beat. Same for an SFX riding under either (SFX never count anyway).
+  • **Composed pairs are one event.** A transition firing at a cut boundary plus a zoom landing on the adjacent peak word is one composed event, not a stack — the transition is the doorway into the beat. Likewise, a zoom plus a reveal MG anchored CLEAR of the face on the same beat compose (the camera commits to the face while the evidence lands above it — a payoff zoom + a StatCard at upper_third_safe is the canonical case). SFX never count anyway.
 
 **SFX and captions don't occupy windows.** Captions run continuously across the entire runtime. SFX ride UNDER the window's visual event — a hit under the zoom, a pop under the overlay, a whoosh under the transition. An SFX in a window with no visual event is the random-audio failure mode; never place one.
 
@@ -2662,7 +2664,7 @@ Emit the JSON in exactly this order, finishing each stage's reasoning before ope
 
 **Stage 3 — STRUCTURAL REGISTER.** Emit `caption_style`, `thumbnail_word_index`, `outro`, `aspect_ratio`.
 
-**Stage 4 — COMPONENT PLACEMENTS.** Now and only now: emphasis_moments, text_overlays, sound_effects, broll_clips, transitions, motion_graphics, caption_keywords, caption_position_changes. Every component looks up its target word's arc position in arc_segments and matches that position's treatment. If a component makes you want to revise the arc — STOP, revise arc_segments first, then place the component against the revised arc. Never emit a component referencing an arc state you didn't commit to.
+**Stage 4 — COMPONENT PLACEMENTS.** Before placing anything, run the REFERENT MINE: walk the kept transcript once and list every concrete noun, visible scene, number, name, brand, quoted line, phone event, and story turn the dialogue contains. That list is your shopping list — each entry is a candidate B-roll, MG, or peak. A build segment whose dialogue named five referents and whose recipe shows one cutaway is under-mined, and under-mining is the root cause of thin edits: the components weren't skipped on judgment, they were never found. Then emit: emphasis_moments, text_overlays, sound_effects, broll_clips, transitions, motion_graphics, caption_keywords, caption_position_changes. Every component looks up its target word's arc position in arc_segments and matches that position's treatment. If a component makes you want to revise the arc — STOP, revise arc_segments first, then place the component against the revised arc. Never emit a component referencing an arc state you didn't commit to.
 
 ═══════════════════════════════════════════════════════════════════════════
 ARC SPINE — what each position is FOR, and what it gets
@@ -2872,7 +2874,7 @@ Required props:
 
 An MG shows the viewer the thing the speaker is REFERRING to off-camera — a number, a notification event, a text message, someone else's words. The placement test is one question: **what specifically is the speaker referencing?** If you can name the referent in a sentence ("her phone showed a Venmo from Sarah for $200"), match it to the component that renders that kind of evidence. If the moment is a feeling, theme, or abstraction, there is no MG in it — forcing one fights the captions and the speaker for attention. And MGs are never transcript repetition: if the MG's rendered text echoes what captions show at the same moment, skip it or rephrase as framing.
 
-Arc placement: **build** is where informational MGs live (StatCard, ProgressBar, StickyNotes, Toggle, Notification, AnnotationArrow). **mid_peak** can take a reaction MG (Notification, TweetBubble, IMessageBubble, social comments) if the peak references a real off-camera reaction. **payoff** takes at most THE reveal MG (QuoteCard for a quote-driven payoff, StatCard for a number-driven one) — and only if the zoom isn't already carrying the punctuation; never compete with the payoff zoom. **hook** almost never (the face earns the watch). **breather** never. **close** only as a callback to a hook MG (same component, evolved content).
+Arc placement: **build** is where informational MGs live (StatCard, ProgressBar, StickyNotes, Toggle, Notification, AnnotationArrow). **mid_peak** can take a reaction MG (Notification, TweetBubble, IMessageBubble, social comments) if the peak references a real off-camera reaction. **payoff** takes at most THE reveal MG (QuoteCard for a quote-driven payoff, StatCard for a number-driven one) — anchored clear of the face, where it COMPOSES with the payoff zoom rather than competing: the camera commits to the face while the number lands above it. An MG that would cover the face on the payoff is the violation, not the MG itself. **hook** almost never (the face earns the watch). **breather** never. **close** only as a callback to a hook MG (same component, evolved content).
 
 Entry shape:
   {{
@@ -3230,10 +3232,42 @@ Decisions:
 Why: The payoff is the line everyone shares. SmoothPush — not StepZoom, not SnapReframe — because the slow commitment is what makes the payoff feel different from every peak before it: the camera leans in over 1.2 seconds and the word lands into a frame already closer than where it started. Sub-bass under the line because the viewer should feel it in their body. The face stays visible because the speaker's reaction IS the second half of the joke. One window, one event, with the breather windows before it deliberately empty so this one lands at full weight.
 
 ──────────────────────────────────────────
-REJECTED RECIPE — same payoff fragment, professionally wrong
+REJECTED RECIPE A — the THIN edit (app pitch, 19 seconds)
 ──────────────────────────────────────────
 
-Same fragment (kept words 55-62, ~3 seconds → 1-2 windows):
+Video: a creator lying in bed watching Young Sheldon, pitching that his app
+will auto-edit this exact raw clip in two minutes, free, ending on "I have
+5 followers." Dialogue referents: the bed, the show on the TV, the app, the
+drop-the-video-in action, "two minutes," "free," "5 followers."
+
+Rejected recipe:
+  • emphasis_moments on the hook, two mid-peaks, and the payoff — correctly
+    chosen, correctly typed
+  • broll_clips: ONE cutaway (the app interface) at ~7 seconds in
+  • motion_graphics: ProgressBar on "done", StatCard "FOLLOWERS: 5" on the
+    payoff — both good
+  • arc_segments: a 14-word "breather" mid-pitch and a second breather
+    before the payoff — 19% of runtime labeled breather
+  • caption_keywords: 10 for 80 words
+  • transitions: [] — the one boundary skipped, notes citing "the raw vibe"
+
+A professional editor rejects this on sight: every event it placed is
+defensible, and the edit still dies — because of what it FAILED TO FIND.
+The first visual event after the hook lands at 7.1 seconds: a 6.5-second
+dead zone covering a third of the runtime, exactly where the viewer
+re-decides whether to stay. The dialogue in that zone named the bed, the
+show, and the app — three cutaways sitting unmined. The 14-word "breather"
+is a pitch's value-prop section wearing a breather label; nothing about it
+earns silence. Ten keywords on a keyword caption style means the one
+always-on layer fires once every eight words and reads flat. The peaks were
+edited; the video between the peaks was abandoned. Thin is not the absence
+of mistakes — thin IS the mistake.
+
+──────────────────────────────────────────
+REJECTED RECIPE B — the STACKED edit (same payoff fragment as Example 3)
+──────────────────────────────────────────
+
+Same fragment as Example 3 (kept words 55-62, ~3 seconds → 1-2 windows):
 
   • emphasis_moments: [55] ("And") StepZoom · [58] ("counter") StepZoom ·
     [61] ("wallet") StepZoom
@@ -3293,12 +3327,26 @@ re-read those moments — at least one is doing something different.
   • Window already has its event → don't add another; move or drop the extra.
   • A component that can't name its window, its arc position, and its reason
     → cut it.
+  • A window left empty while the dialogue named something visible → the
+    edit is under-mined; go back to the referent list.
+
+**FLOORS (thinness is a violation, same as stacking):**
+  • Never more than ~4 seconds between consecutive visual events outside a
+    declared breather.
+  • Breathers: each 1-2.5s, total ≤ ~15% of runtime, placed before the
+    payoff or after a reveal — never as a label for low-energy stretches.
+  • caption_keywords (keyword styles): ~1 per 3-4 spoken words, spread
+    across the whole transcript — for 80 kept words that is ~20-25 keywords,
+    not 10.
+  • Transition skips must cite their exception (mid-sentence flow or
+    sub-800ms sandwich) — "the raw vibe" is not an exception; a new sentence
+    after the cut is never mid-sentence flow.
 
 ═══════════════════════════════════════════════════════════════════════════
 BEFORE EMITTING — two passes
 ═══════════════════════════════════════════════════════════════════════════
 
-**Pass 1 — the window walk.** Step through the runtime in ~2s windows against your draft. Mark each window: its one event, or "breather (by arc)", or "speaker-only (dialogue offered nothing)". Fix every stacked window by keeping the least-movable event; fix every unintentionally-empty window from what the dialogue offers there. Confirm no SFX lacks a partner and no B-roll overlaps an MG/overlay.
+**Pass 1 — the window walk.** Step through the runtime in ~2s windows against your draft. Mark each window: its one event, or "breather (by arc)", or "speaker-only (all four questions answered no)". Fix every stacked window by keeping the least-movable event; fix every unintentionally-empty window from the referent list. Then check the gaps: no stretch longer than ~4 seconds without a visual event outside a declared breather, breathers within budget, keywords at ~1 per 3-4 words. Confirm no SFX lacks a partner and no B-roll overlaps an MG/overlay.
 
 **Pass 2 — the specificity audit.** Re-read video_identity: could a different speaker telling a different story in this genre have produced the same sentences? If yes, rewrite with a proper noun, a specific moment, and a surprising detail first — a vague identity makes every downstream choice generic. Then for caption_style, every overlay text, every B-roll keyword, and every MG: "if I swapped this video's speaker and dialogue for any other video in the same genre, would this choice still fit?" Rewrite the ones where the answer is yes. The genre is the starting point; the specific video is the subject.
 

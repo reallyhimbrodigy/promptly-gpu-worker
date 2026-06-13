@@ -246,9 +246,12 @@ def evaluate_recipe(plan, words, cut_boundaries, duration):
         evs = windows.get(i, [])
         pos = window_position(i)
         kinds = [k for k, _ in evs]
-        # composed pair: transition + zoom = one event; hook window: zoom + overlay allowed
+        # composed pairs: transition+zoom = one; zoom+MG on the same beat = one;
+        # hook window: zoom + overlay allowed
         effective = len(evs)
         if "transition" in kinds and "zoom" in kinds:
+            effective -= 1
+        if "zoom" in kinds and "mg" in kinds:
             effective -= 1
         if pos == "hook" and "zoom" in kinds and "overlay" in kinds:
             effective -= 1
@@ -262,8 +265,42 @@ def evaluate_recipe(plan, words, cut_boundaries, duration):
 
     for i, evs in stacked:
         r.fail("window-stacked", f"window {i} ({i*2}-{i*2+2}s) has {len(evs)} events: {evs}")
-    if len(empty) > max(1, n_windows // 5):
-        r.warn("window-empty", f"{len(empty)} non-breather windows empty: {empty} — thin unless the dialogue truly offered nothing")
+    if len(empty) > max(1, n_windows // 4):
+        r.fail("window-empty", f"{len(empty)}/{n_windows} non-breather windows empty: {empty} — under-mined")
+    elif empty:
+        r.warn("window-empty", f"{len(empty)} non-breather windows empty: {empty}")
+
+    # max dead gap between consecutive visual events (thinness killer metric)
+    ev_times = sorted([t for t, _, _ in events]) + [end_t]
+    prev_t, max_gap, gap_at = 0.0, 0.0, 0.0
+    for t in ev_times:
+        if t - prev_t > max_gap:
+            max_gap, gap_at = t - prev_t, prev_t
+        prev_t = t
+    r.stats_max_gap = round(max_gap, 1)
+    if max_gap > 4.0:
+        r.fail("dead-zone", f"{max_gap:.1f}s with no visual event starting at {gap_at:.1f}s — the swipe happens here")
+
+    # breather budget: each ≤3.0s, total ≤20% of runtime
+    breather_total = 0.0
+    for seg in arc:
+        if seg["position"] == "breather":
+            bs = _word_time(words, seg["start_word_index"]) or 0.0
+            be = _word_time(words, seg["end_word_index"], "end") or bs
+            d = be - bs
+            breather_total += d
+            if d > 3.0:
+                r.fail("breather-budget", f"breather [{seg['start_word_index']}-{seg['end_word_index']}] runs {d:.1f}s (max ~2.5s) — that's build wearing a disguise")
+    if end_t > 0 and breather_total / end_t > 0.20:
+        r.fail("breather-budget", f"breathers total {breather_total:.1f}s = {breather_total/end_t*100:.0f}% of runtime (max ~15%)")
+
+    # caption keyword density for keyword styles
+    KEYWORD_STYLES = {"Prime", "Cove", "EditorialPop", "Illuminate", "Lumen", "Passage", "Pulse", "Serif"}
+    if plan.get("caption_style") in KEYWORD_STYLES:
+        kw = len(plan.get("caption_keywords") or [])
+        floor = n_words // 5  # hard floor: 1 per 5 words (target 1 per 3-4)
+        if kw < floor:
+            r.fail("keyword-density", f"{kw} keywords for {n_words} words on keyword style '{plan['caption_style']}' — floor is {floor} (target ~{n_words//4}-{n_words//3})")
 
     r.stats = {
         "runtime_windows": n_windows,
@@ -273,6 +310,7 @@ def evaluate_recipe(plan, words, cut_boundaries, duration):
             f"{len(emphases)}/{len(transitions)}/{len(brolls)}/{len(mgs)}/{len(overlays)}/{len(sfx)}",
         "empty_windows": len(empty),
         "stacked_windows": len(stacked),
+        "max_dead_gap_s": getattr(r, "stats_max_gap", 0.0),
     }
     return r
 

@@ -485,6 +485,69 @@ def _recipe_eval_payoff_commitment():
     assert "payoff-commitment" in rule_ids
 
 
+@check("recipe_eval flags long dead zone (v2.1 dead-zone rule)")
+def _recipe_eval_dead_zone():
+    # v2.1 adds the "no stretch > 4s without a visual event outside a
+    # breather" floor. Construct a plan with a 6s dead zone in build.
+    import recipe_eval
+    bad_plan = {
+        "video_plan": {
+            "arc_segments": [
+                {"start_word_index": 0, "end_word_index": 1, "position": "hook", "intensity": 0.9},
+                {"start_word_index": 2, "end_word_index": 18, "position": "build", "intensity": 0.3},
+                {"start_word_index": 19, "end_word_index": 20, "position": "payoff", "intensity": 1.0},
+            ],
+            "key_moments": [{"word_index": 1}, {"word_index": 20}],
+            "payoff_word_index": 20,
+            "close_word_index": 20,
+        },
+        "emphasis_moments": [
+            {"word_indices": [1], "zoom_effect": {"type": "SnapReframe", "events": [{"startMs": 0}]}},
+            {"word_indices": [20], "zoom_effect": {"type": "SmoothPush", "events": [{"startMs": 0}]}},
+        ],
+        "transitions": [], "broll_clips": [], "motion_graphics": [],
+        "text_overlays": [], "sound_effects": [],
+    }
+    # 21 words spaced 0.5s apart → ~10s total. Two zooms at word 1 (0.5s)
+    # and word 20 (10s) leave a ~9.5s gap in between — well over the 4s
+    # floor.
+    words = [{"word": str(i), "start": i * 0.5, "end": i * 0.5 + 0.4} for i in range(21)]
+    rep = recipe_eval.evaluate_recipe(bad_plan, words, [], 10.5)
+    rule_ids = {r for (r, _) in rep.failures}
+    assert "dead-zone" in rule_ids, f"expected dead-zone failure, got: {rule_ids}"
+
+
+@check("recipe_eval flags oversized breather (v2.1 breather-budget rule)")
+def _recipe_eval_breather_budget():
+    # v2.1 adds breather-budget — each breather ≤2.5s and total ≤15% of
+    # runtime. Construct a single 5s breather → fails per-segment cap.
+    import recipe_eval
+    bad_plan = {
+        "video_plan": {
+            "arc_segments": [
+                {"start_word_index": 0, "end_word_index": 1, "position": "hook", "intensity": 0.9},
+                {"start_word_index": 2, "end_word_index": 5, "position": "build", "intensity": 0.3},
+                {"start_word_index": 6, "end_word_index": 15, "position": "breather", "intensity": 0.2},
+                {"start_word_index": 16, "end_word_index": 17, "position": "payoff", "intensity": 1.0},
+            ],
+            "key_moments": [{"word_index": 1}, {"word_index": 17}],
+            "payoff_word_index": 17,
+            "close_word_index": 17,
+        },
+        "emphasis_moments": [
+            {"word_indices": [1], "zoom_effect": {"type": "SnapReframe", "events": [{"startMs": 0}]}},
+            {"word_indices": [17], "zoom_effect": {"type": "SmoothPush", "events": [{"startMs": 0}]}},
+        ],
+        "transitions": [], "broll_clips": [], "motion_graphics": [],
+        "text_overlays": [], "sound_effects": [],
+    }
+    # words 6-15 span 10 words × 0.5s = 5s breather, well over the 2.5s cap.
+    words = [{"word": str(i), "start": i * 0.5, "end": i * 0.5 + 0.4} for i in range(18)]
+    rep = recipe_eval.evaluate_recipe(bad_plan, words, [], 9.0)
+    rule_ids = {r for (r, _) in rep.failures}
+    assert "breather-budget" in rule_ids, f"expected breather-budget failure, got: {rule_ids}"
+
+
 # ─── 6. HANDLER ENTRY POINTS ───────────────────────────────────────────
 print("\n[6/6] Handler entry points")
 
