@@ -4971,6 +4971,41 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
     return extract_json(response_text)
 
 
+def _record_divergence(component, original, action, *, final=None, reason=""):
+    """Single grep-stable log line for any post-Gemini drop / coerce / clamp /
+    withhold / override.
+
+    A render's silent attrition stops being silent the moment every site that
+    deletes or mutates a component goes through this helper. One
+    `grep '\\[divergence\\]' modal.log` then surfaces every drift, sorted by
+    component, with the original payload + reason intact.
+
+    component — recipe component or signal class ("cut_boundary", "broll",
+                "transition", "mg", "overlay", "sfx", "caption_position", ...)
+    original  — pre-mutation value, serialized as compact JSON
+    action    — what happened: "drop" / "coerce" / "clamp" / "withhold" /
+                "withheld_as_tight" / "clip_split_without_known_boundary" / etc.
+    final     — post-mutation value (None for full drops)
+    reason    — short machine-readable code (snake_case)
+    """
+    try:
+        _orig = json.dumps(original, separators=(",", ":"), default=str)
+    except Exception:
+        _orig = str(original)
+    if final is None:
+        _final = "null"
+    else:
+        try:
+            _final = json.dumps(final, separators=(",", ":"), default=str)
+        except Exception:
+            _final = str(final)
+    print(
+        f"[divergence] component={component} action={action} "
+        f"reason={reason} original={_orig} final={_final}",
+        flush=True,
+    )
+
+
 def generate_edit_gemini(
     video_path, vibe, duration, trend_context=None, deepgram_words=None,
     shot_changes=None, vocal_emphasis=None, source_loudness=None,
@@ -5131,29 +5166,39 @@ def generate_edit_gemini(
         # Both kinds of boundaries are exposed to Gemini so it knows every
         # valid `after_word_index` it can place a transition on. A
         # transition placed at any other word is dropped by the pipeline.
-        _cut_boundary_indices = []
+        _dead_air_boundary_indices = []
         for new_idx, src_idx in enumerate(new_to_src):
             if new_idx + 1 >= len(new_to_src):
                 continue
             next_src_idx = new_to_src[new_idx + 1]
             if next_src_idx != src_idx + 1:
-                _cut_boundary_indices.append(new_idx)
+                _dead_air_boundary_indices.append(new_idx)
         # Shot-change-derived boundaries (kept-word indices)
         _shot_boundaries = shot_change_word_boundaries(_shots, kept_words)
         _shot_boundary_set = {_ni for (_ni, _) in _shot_boundaries}
-        _dead_air_set = set(_cut_boundary_indices)
+        _dead_air_set = set(_dead_air_boundary_indices)
 
-        # ── Handle-availability filter ───────────────────────────────────────
+        # ── Handle-availability split (NO silent discards) ───────────────────
         # Each transition consumes natural pause between cut A's last kept
         # word and cut B's first kept word. With gap-sharing handle, each
         # side of the boundary gets gap/2 of source-time room. To render a
         # transition at its FULL natural duration, gap must be ≥ 2 × that
         # type's natural duration. The shortest natural duration in
-        # TRANSITION_NATURAL_DURATION_MS is the floor — boundaries with less
-        # gap can't fit any transition at full duration and are filtered out
-        # entirely. Boundaries above the floor make the list, annotated
-        # with their available audio gap so Gemini can pick whichever
-        # transition type FITS at that boundary.
+        # TRANSITION_NATURAL_DURATION_MS is the floor.
+        #
+        # Previously this floor was used as a silent filter — boundaries
+        # below it were discarded entirely, and Gemini never learned the
+        # cut existed. That caused same-spot same-framing splices (which
+        # have effectively zero audio gap) to be hidden from Gemini, who
+        # would then rationalize the video as "one continuous clip" while
+        # the renderer still split clips at the missing boundary via
+        # build_clips_from_words. Net: silent jump-cuts with no transition.
+        #
+        # Now: every detected boundary lands in exactly one of two lists.
+        # Cuts with handle room go to CUT BOUNDARIES (Gemini may place
+        # transitions). Cuts without go to TIGHT BOUNDARIES (awareness
+        # only — Gemini knows the cut exists, plans energy around it, but
+        # does not attempt to dress it).
         _trans_dur_for_filter = 2.0 * (_TRANSITION_MIN_NATURAL_MS / 1000.0)
         def _audio_gap_at_boundary(ni):
             if ni < 0 or ni + 1 >= len(kept_words):
@@ -5162,11 +5207,39 @@ def generate_edit_gemini(
             _b_start = float(kept_words[ni + 1].get("start") or 0.0)
             return max(0.0, _b_start - _a_end)
         _candidate_indices = sorted(_dead_air_set | _shot_boundary_set)
-        _all_boundary_indices = [
-            _ni for _ni in _candidate_indices
-            if _audio_gap_at_boundary(_ni) >= _trans_dur_for_filter
-        ]
-        _filtered_count = len(_candidate_indices) - len(_all_boundary_indices)
+
+        _cut_boundary_indices = []
+        _tight_boundary_indices = []
+        for _ni in _candidate_indices:
+            _gap = _audio_gap_at_boundary(_ni)
+            if _gap >= _trans_dur_for_filter:
+                _cut_boundary_indices.append(_ni)
+            else:
+                _tight_boundary_indices.append(_ni)
+
+        # Divergence log — every tight boundary is named, with its gap and
+        # which detector surfaced it. One grep finds them all.
+        for _ni in _tight_boundary_indices:
+            _record_divergence(
+                "cut_boundary",
+                {
+                    "kept_word_index": _ni,
+                    "gap_ms": int(round(_audio_gap_at_boundary(_ni) * 1000)),
+                    "source": (
+                        "dead_air" if _ni in _dead_air_set and _ni not in _shot_boundary_set
+                        else "shot_change" if _ni in _shot_boundary_set and _ni not in _dead_air_set
+                        else "both"
+                    ),
+                },
+                "withheld_as_tight",
+                reason="audio_gap_below_transition_min",
+            )
+
+        # Union for any downstream consumer that needs every boundary
+        # (recipe_eval, the clip-split cross-check guard later in this
+        # function). Order preserved by index.
+        _all_boundary_indices = sorted(set(_cut_boundary_indices) | set(_tight_boundary_indices))
+
         _shot_only_indices = sorted(
             _ni for _ni in _all_boundary_indices
             if _ni in _shot_boundary_set and _ni not in _dead_air_set
@@ -5174,22 +5247,32 @@ def generate_edit_gemini(
         print(
             f"[shot-split] {len(_shot_boundaries)} shot-change boundary(ies) "
             f"({len(_shot_only_indices)} new beyond dead-air); "
-            f"total boundary count: {len(_all_boundary_indices)} "
-            f"(filtered out {_filtered_count} with audio gap < "
-            f"{_trans_dur_for_filter*1000:.0f}ms — no handle room for transition)",
+            f"transition slots: {len(_cut_boundary_indices)}, "
+            f"tight (awareness-only): {len(_tight_boundary_indices)}, "
+            f"min handle: {_trans_dur_for_filter*1000:.0f}ms",
             flush=True,
         )
-        # Annotate each boundary with its available audio gap so Gemini can
-        # match transition type to gap. Format: "12@820ms" means boundary at
-        # after_word_index=12 has 820ms of audio gap; a transition whose
-        # natural duration is ≤ 410ms (= 820/2) renders at its full arc.
-        _cut_boundary_str = (
-            ", ".join(
-                f"{i}@{int(round(_audio_gap_at_boundary(i) * 1000))}ms"
-                for i in _all_boundary_indices
-            )
-            if _all_boundary_indices else "(none — single continuous clip)"
-        )
+
+        # Human-readable list formatter — used by both message blocks.
+        def _fmt_boundary_list(indices):
+            if not indices:
+                return "(none)"
+            _parts = []
+            for _ni in indices:
+                if 0 <= _ni < len(kept_words):
+                    _w = (
+                        kept_words[_ni].get("punctuated_word")
+                        or kept_words[_ni].get("word")
+                        or "?"
+                    )
+                else:
+                    _w = "?"
+                _parts.append(f'{_ni} (after "{_w}")')
+            return ", ".join(_parts)
+
+        _cut_boundary_block = _fmt_boundary_list(_cut_boundary_indices)
+        _tight_boundary_block = _fmt_boundary_list(_tight_boundary_indices)
+
         _natural_dur_lines = "\n".join(
             f"  - {_name}: {_ms}ms  (fits when boundary gap ≥ {2 * _ms}ms)"
             for _name, _ms in sorted(
@@ -5211,23 +5294,25 @@ Indices below are the NEW kept-only space [0..{_kept_count - 1}]. Every word_ind
 
 {kept_transcript_block}
 
-=== CUT BOUNDARIES (the ONLY valid `after_word_index` values for transitions) ===
+=== CUT BOUNDARIES (transition slots — place at most one transition per entry, after_word_index = the listed index) ===
 
-These are kept-word indices where the rendered video has a visible splice AND the boundary has enough audio gap to fit AT LEAST the shortest transition's animation arc. Each entry is annotated with the available audio gap in ms — `12@820ms` means boundary at `after_word_index=12` has 820ms of natural pause. The pipeline has already filtered out zero-gap shot-splits and any boundary too tight for the shortest transition.
+  {_cut_boundary_block}
 
-cut_boundary_word_indices_with_gap: [{_cut_boundary_str}]
+=== TIGHT BOUNDARIES (real cuts with no handle room — these render as HARD CUTS; do NOT place transitions here. Listed so you know the cut exists: land a zoom on the first word after a tight cut to mask the jump, and never treat the video as one continuous clip) ===
+
+  {_tight_boundary_block}
 
 === TRANSITION NATURAL DURATIONS ===
 
-Each transition component renders at its natural duration — the cadence its ramp-in / hold / ramp-out was designed for. Shortened transitions look glitchy; the pipeline doesn't compress them. A transition fits at a boundary when the audio gap is at least 2 × the type's natural duration (gap-sharing means each side of the boundary gets gap/2 of source room, and the animation needs a full natural duration per side).
+Each transition component renders at its natural duration — the cadence its ramp-in / hold / ramp-out was designed for. Shortened transitions look glitchy; the pipeline doesn't compress them. Every entry in CUT BOUNDARIES above has enough audio gap to fit AT LEAST the shortest transition; longer transitions (like SceneTitle at 1800ms natural) may not fit at every CUT BOUNDARIES entry — when uncertain, prefer shorter natural-duration transitions or leave the boundary alone.
 
 {_natural_dur_lines}
 
 === HOW TO PLACE TRANSITIONS ===
 
-**HARD RULE 1 — `after_word_index` MUST come from `cut_boundary_word_indices_with_gap` above.** A transition placed at any other index has no valid cut to play across and the renderer will not produce it.
+**HARD RULE 1 — `after_word_index` MUST come from the CUT BOUNDARIES list above (NOT TIGHT BOUNDARIES, NOT any other index).** A transition placed at any other index — including any TIGHT BOUNDARIES entry — has no valid cut to play across and the renderer will not produce it.
 
-**HARD RULE 2 — the transition's natural duration must fit the boundary's gap.** Look at the `@Nms` annotation on each boundary: a transition fits when its natural duration ≤ gap/2. If you want SceneTitle (1800ms natural) at a boundary annotated `@2400ms`, that does NOT fit (need ≥ 3600ms gap). Pick a transition whose natural duration fits, or don't place a transition at that boundary.
+**HARD RULE 2 — pick a transition whose character matches the dialogue's shift at that boundary, not whose duration is smallest.** The pipeline already verified CUT BOUNDARIES entries have enough gap for the shortest transitions; for longer transitions (especially SceneTitle), if a boundary feels too tight on dialogue rhythm, leave it as a hard cut rather than forcing a transition that compresses.
 
 **If no transition type fits a particular boundary, leave it alone.** The cut plays straight (hard cut). That is the correct behavior — better a clean hard cut than a compressed flicker. Do NOT force a transition where it doesn't fit.
 
@@ -5718,6 +5803,46 @@ For each chosen `after_word_index`, pick a transition `type` whose character mat
                         flush=True,
                     )
                     validated_cuts = _new_cuts
+
+        # ── Cross-check guard: every clip-split boundary must be a known cut ─
+        # The original transitions bug was two boundary sources that never
+        # agreed — the list shown to Gemini (CUT BOUNDARIES + TIGHT BOUNDARIES
+        # union) and the clip-split path inside build_clips_from_words. If the
+        # renderer splits a clip at a kept-word index that's in NEITHER list,
+        # that's a new instance of the same bug class and means a third
+        # boundary source has appeared (or a code path drifted). Loud log
+        # rather than silent jump-cut.
+        try:
+            if validated_cuts and len(validated_cuts) > 1 and kept_words:
+                try:
+                    _known = set(_all_boundary_indices)
+                except NameError:
+                    # kept_words was empty so the boundary block never ran.
+                    # No known boundaries — every split is unknown by definition.
+                    _known = set()
+                _split_boundaries = set()
+                for _ci in range(len(validated_cuts) - 1):
+                    _end_t = float(validated_cuts[_ci].get("source_end") or 0.0)
+                    # Find the kept-word whose .end is closest to _end_t within tolerance.
+                    _best_ni = None
+                    _best_dist = 0.10
+                    for _ni, _w in enumerate(kept_words):
+                        _dist = abs(float(_w.get("end") or 0.0) - _end_t)
+                        if _dist <= _best_dist:
+                            _best_dist = _dist
+                            _best_ni = _ni
+                    if _best_ni is not None:
+                        _split_boundaries.add(_best_ni)
+                for _b in sorted(_split_boundaries - _known):
+                    _record_divergence(
+                        "cut_boundary",
+                        {"kept_word_index": _b},
+                        "clip_split_without_known_boundary",
+                        reason="renderer_split_at_boundary_gemini_never_saw",
+                    )
+        except Exception as _xc_err:
+            # The guard is observability only — must never break the render.
+            print(f"[divergence] cross-check guard error: {_xc_err}", flush=True)
 
         # Drop caption_position_changes anchored to removed words and
         # re-derive caption_position_segments. If Gemini happens to anchor
