@@ -5254,6 +5254,11 @@ def generate_edit_gemini(
         )
 
         # Human-readable list formatter — used by both message blocks.
+        # Gap annotation is essential: without it Gemini can't tell a 1100ms
+        # slot from a 4000ms one and rationally defaults to short safe
+        # transitions everywhere, never reaching for SceneTitle / FilmStrip
+        # at the long pauses that earn them. Same "withhold information
+        # Gemini needs to choose well" failure mode that hid tight cuts.
         def _fmt_boundary_list(indices):
             if not indices:
                 return "(none)"
@@ -5267,7 +5272,8 @@ def generate_edit_gemini(
                     )
                 else:
                     _w = "?"
-                _parts.append(f'{_ni} (after "{_w}")')
+                _gap_ms = int(round(_audio_gap_at_boundary(_ni) * 1000))
+                _parts.append(f'{_ni} (after "{_w}", {_gap_ms}ms gap)')
             return ", ".join(_parts)
 
         _cut_boundary_block = _fmt_boundary_list(_cut_boundary_indices)
@@ -5304,7 +5310,7 @@ Indices below are the NEW kept-only space [0..{_kept_count - 1}]. Every word_ind
 
 === TRANSITION NATURAL DURATIONS ===
 
-Each transition component renders at its natural duration — the cadence its ramp-in / hold / ramp-out was designed for. Shortened transitions look glitchy; the pipeline doesn't compress them. Every entry in CUT BOUNDARIES above has enough audio gap to fit AT LEAST the shortest transition; longer transitions (like SceneTitle at 1800ms natural) may not fit at every CUT BOUNDARIES entry — when uncertain, prefer shorter natural-duration transitions or leave the boundary alone.
+Each transition component renders at its natural duration — the cadence its ramp-in / hold / ramp-out was designed for. Shortened transitions look glitchy; the pipeline doesn't compress them. A transition fits at a boundary when the boundary's audio gap is at least 2 × the type's natural duration (gap-sharing means each side of the boundary gets gap/2 of source room, and the animation needs a full natural duration per side).
 
 {_natural_dur_lines}
 
@@ -5312,7 +5318,7 @@ Each transition component renders at its natural duration — the cadence its ra
 
 **HARD RULE 1 — `after_word_index` MUST come from the CUT BOUNDARIES list above (NOT TIGHT BOUNDARIES, NOT any other index).** A transition placed at any other index — including any TIGHT BOUNDARIES entry — has no valid cut to play across and the renderer will not produce it.
 
-**HARD RULE 2 — pick a transition whose character matches the dialogue's shift at that boundary, not whose duration is smallest.** The pipeline already verified CUT BOUNDARIES entries have enough gap for the shortest transitions; for longer transitions (especially SceneTitle), if a boundary feels too tight on dialogue rhythm, leave it as a hard cut rather than forcing a transition that compresses.
+**HARD RULE 2 — the transition's natural duration must fit the boundary's gap.** Each CUT BOUNDARIES entry shows its available audio gap (`820ms gap`). A transition fits when its natural duration ≤ gap/2. If you want SceneTitle (1800ms natural) at a boundary annotated `2400ms gap`, that does NOT fit (need ≥ 3600ms gap). Match the transition's weight to both the dialogue's shift AND the available room — the long heavy transitions (SceneTitle, FilmStrip) are precisely the ones that earn the long pauses, so don't default to short safe transitions everywhere when a 4000ms-gap boundary is sitting right there asking for a chapter break.
 
 **If no transition type fits a particular boundary, leave it alone.** The cut plays straight (hard cut). That is the correct behavior — better a clean hard cut than a compressed flicker. Do NOT force a transition where it doesn't fit.
 
@@ -5350,11 +5356,25 @@ For each chosen `after_word_index`, pick a transition `type` whose character mat
                 }
                 for _w in kept_words
             ]
+            # cut_boundaries = SLOTS ONLY (the list Gemini was actually
+            # allowed to place transitions at). Passing the union here
+            # would wrongly mask "transition placed at tight cut" failures
+            # — same wires-disagreeing bug class one layer down.
+            # tight_boundaries enables the transition-tight-boundary fail
+            # and the tight-no-mask warning in recipe_eval.
+            try:
+                _eval_slots = list(_cut_boundary_indices or [])
+                _eval_tight = list(_tight_boundary_indices or [])
+            except NameError:
+                # kept_words was empty — boundary block never ran.
+                _eval_slots = []
+                _eval_tight = []
             _eval_report = _eval_recipe(
                 post_cut_plan,
                 _eval_words,
-                list(_all_boundary_indices or []),
+                _eval_slots,
                 float(_eval_words[-1]["end"] if _eval_words else 0.0),
+                tight_boundaries=_eval_tight,
             )
             print(f"[recipe-eval]\n{_eval_report.summary()}", flush=True)
         except Exception as _eval_err:

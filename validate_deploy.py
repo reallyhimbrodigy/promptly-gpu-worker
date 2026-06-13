@@ -548,6 +548,91 @@ def _recipe_eval_breather_budget():
     assert "breather-budget" in rule_ids, f"expected breather-budget failure, got: {rule_ids}"
 
 
+@check("recipe_eval flags transition placed at a TIGHT boundary")
+def _recipe_eval_transition_tight():
+    # The new tight_boundaries kwarg must route transitions placed at tight
+    # cuts to the dedicated `transition-tight-boundary` fail (not the
+    # generic `transition-boundary` miss). This exercises the post-bug-fix
+    # eval path: slots-only cut_boundaries + tight_boundaries explicit.
+    import recipe_eval
+    bad_plan = {
+        "video_plan": {
+            "arc_segments": [
+                {"start_word_index": 0, "end_word_index": 1, "position": "hook", "intensity": 0.9},
+                {"start_word_index": 2, "end_word_index": 5, "position": "build", "intensity": 0.4},
+                {"start_word_index": 6, "end_word_index": 7, "position": "payoff", "intensity": 1.0},
+            ],
+            "key_moments": [{"word_index": 1}, {"word_index": 7}],
+            "payoff_word_index": 7,
+            "close_word_index": 7,
+        },
+        "emphasis_moments": [
+            {"word_indices": [1], "zoom_effect": {"type": "SnapReframe", "events": [{"startMs": 0}]}},
+            {"word_indices": [7], "zoom_effect": {"type": "SmoothPush", "events": [{"startMs": 0}]}},
+        ],
+        "transitions": [
+            {"after_word_index": 3, "type": "CardSwipe"},   # at TIGHT boundary
+        ],
+        "broll_clips": [], "motion_graphics": [],
+        "text_overlays": [], "sound_effects": [],
+    }
+    words = [{"word": str(i), "start": i * 0.5, "end": i * 0.5 + 0.4} for i in range(8)]
+    rep = recipe_eval.evaluate_recipe(
+        bad_plan, words, cut_boundaries=[], duration=4.0,
+        tight_boundaries=[3],
+    )
+    rule_ids = {r for (r, _) in rep.failures}
+    assert "transition-tight-boundary" in rule_ids, f"expected transition-tight-boundary, got: {rule_ids}"
+    # Crucially must NOT also fire the generic boundary miss for the same index.
+    assert "transition-boundary" not in rule_ids, "tight should not double-fire as boundary-miss"
+
+
+@check("recipe_eval warns when TIGHT cut has no masking zoom on next word")
+def _recipe_eval_tight_no_mask():
+    # Tight cut at word 3 with no emphasis on word 4 → tight-no-mask warning.
+    # Prompt rule: "land a zoom on the first word after a tight cut to mask
+    # the jump." Eval surfaces the missing mask as a non-blocking warning.
+    import recipe_eval
+    bad_plan = {
+        "video_plan": {
+            "arc_segments": [
+                {"start_word_index": 0, "end_word_index": 1, "position": "hook", "intensity": 0.9},
+                {"start_word_index": 2, "end_word_index": 5, "position": "build", "intensity": 0.4},
+                {"start_word_index": 6, "end_word_index": 7, "position": "payoff", "intensity": 1.0},
+            ],
+            "key_moments": [{"word_index": 1}, {"word_index": 7}],
+            "payoff_word_index": 7,
+            "close_word_index": 7,
+        },
+        "emphasis_moments": [
+            {"word_indices": [1], "zoom_effect": {"type": "SnapReframe", "events": [{"startMs": 0}]}},
+            {"word_indices": [7], "zoom_effect": {"type": "SmoothPush", "events": [{"startMs": 0}]}},
+        ],
+        "transitions": [], "broll_clips": [], "motion_graphics": [],
+        "text_overlays": [], "sound_effects": [],
+    }
+    words = [{"word": str(i), "start": i * 0.5, "end": i * 0.5 + 0.4} for i in range(8)]
+    rep = recipe_eval.evaluate_recipe(
+        bad_plan, words, cut_boundaries=[], duration=4.0,
+        tight_boundaries=[3],
+    )
+    warn_ids = {r for (r, _) in rep.warnings}
+    assert "tight-no-mask" in warn_ids, f"expected tight-no-mask warning, got: {warn_ids}"
+
+    # Inverse — add a masking zoom on word 4; warning must disappear.
+    bad_plan["emphasis_moments"].append(
+        {"word_indices": [4], "zoom_effect": {"type": "SnapReframe", "events": [{"startMs": 0}]}}
+    )
+    # And give word 4 a matching key_moment so the 1:1 zoom-key rule is happy.
+    bad_plan["video_plan"]["key_moments"].append({"word_index": 4})
+    rep2 = recipe_eval.evaluate_recipe(
+        bad_plan, words, cut_boundaries=[], duration=4.0,
+        tight_boundaries=[3],
+    )
+    warn_ids2 = {r for (r, _) in rep2.warnings}
+    assert "tight-no-mask" not in warn_ids2, f"masking zoom should clear the warning, got: {warn_ids2}"
+
+
 # ─── 6. HANDLER ENTRY POINTS ───────────────────────────────────────────
 print("\n[6/6] Handler entry points")
 

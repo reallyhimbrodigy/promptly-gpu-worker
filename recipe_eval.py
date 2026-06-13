@@ -69,7 +69,21 @@ def _arc_position_of(arc_segments, word_index):
     return None
 
 
-def evaluate_recipe(plan, words, cut_boundaries, duration):
+def evaluate_recipe(plan, words, cut_boundaries, duration, tight_boundaries=None):
+    """Evaluate a Gemini edit recipe against the window doctrine + hard rules.
+
+    cut_boundaries     — slots-only list (boundaries with enough handle room
+                         for a transition). Gemini may place transitions
+                         only at these indices.
+    tight_boundaries   — real cuts with no handle room. Gemini sees them as
+                         awareness-only (per the user-message TIGHT BOUNDARIES
+                         block) — must NOT place transitions here, but should
+                         mask each with a zoom on the immediately-following
+                         word to hide the jump.
+
+    Passing tight_boundaries=None preserves the pre-tight-awareness behavior:
+    only the slots check runs and the new tight-mask warning is skipped.
+    """
     r = Report()
     vp = plan.get("video_plan") or {}
     arc = vp.get("arc_segments") or []
@@ -133,12 +147,20 @@ def evaluate_recipe(plan, words, cut_boundaries, duration):
             r.fail("variety-zoom", "only one zoom type across all emphases")
 
     # ----------------------------------------------------------- transitions
+    # boundary_set is SLOTS-ONLY (handle-room verified). tight_set is real
+    # cuts that render as hard cuts. A transition emitted at a tight index
+    # would be dropped by the renderer's handle check — the eval flags
+    # this distinctly so the failure points to the right fix (re-anchor
+    # the transition to a slot, or replace with a masking zoom).
     boundary_set = set(cut_boundaries)
+    tight_set = set(tight_boundaries or [])
     seen_boundaries = set()
     prev_type = None
     for t in transitions:
         awi = t["after_word_index"]
-        if awi not in boundary_set:
+        if awi in tight_set:
+            r.fail("transition-tight-boundary", f"transition '{t['type']}' at word {awi} — boundary is TIGHT (no handle room); renderer will drop it. Replace with a masking zoom on word {awi + 1}.")
+        elif awi not in boundary_set:
             r.fail("transition-boundary", f"after_word_index {awi} not in CUT BOUNDARIES {sorted(boundary_set)}")
         seen_boundaries.add(awi)
         if t["type"] == prev_type:
@@ -146,6 +168,24 @@ def evaluate_recipe(plan, words, cut_boundaries, duration):
         prev_type = t["type"]
     for b in boundary_set - seen_boundaries:
         r.warn("transition-coverage", f"cut boundary at word {b} has no transition (valid only if mid-sentence flow or sub-800ms sandwich)")
+
+    # ──────────────────────────────────────────────── tight-boundary masking
+    # Prompt rule: "land a zoom on the first word after a tight cut to mask
+    # the jump." Warn for every tight boundary whose following word doesn't
+    # carry a zoom emphasis. This catches the same-spot-splice case where
+    # the cut WAS surfaced to Gemini but no masking treatment was placed.
+    if tight_set:
+        zoom_anchor_indices = {
+            (e.get("word_indices") or [None])[0]
+            for e in emphases
+            if e.get("zoom_effect")
+        }
+        for tb in sorted(tight_set):
+            mask_word = tb + 1
+            if mask_word >= n_words:
+                continue
+            if mask_word not in zoom_anchor_indices:
+                r.warn("tight-no-mask", f"tight cut at word {tb} has no masking zoom on word {mask_word} — jump will read as broken editing")
 
     # ----------------------------------------------------------------- B-roll
     emphasis_words = {w for e in emphases if e.get("zoom_effect") for w in e["word_indices"]}
