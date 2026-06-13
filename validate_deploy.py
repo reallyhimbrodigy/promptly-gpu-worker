@@ -185,6 +185,8 @@ def _symbols_present():
         "_force_caption_position_around_overlays",
         "_resolve_zoom_origin",
         "_face_position_at",
+        "_parse_scdet_output",
+        "format_recent_caption_styles_section",
     ]
     missing = [s for s in required if not hasattr(handler, s)]
     assert not missing, f"missing symbols: {missing}"
@@ -368,6 +370,119 @@ def _zoom_origin_empty_trajectory():
     )
     assert was_face_locked is False
     assert (origin_x, origin_y) == (0.5, 0.5)
+
+
+# ─── 3c. scdet SWEEP PARSER + RECENT-CAPTION-STYLES INJECTION ──────────
+# Audit Problem 1 (sweep diagnostic) and Problem 2 (rotation rule wire).
+# Per feedback_smoke_must_cover_real_paths.md, both tests exercise the
+# ACTIVE path — the parser parsing real scdet stdout, the formatter
+# rendering a real chronological list — not just the no-op default.
+print("\n[3c/6] scdet sweep + recent caption styles")
+
+
+@check("scdet sweep parser extracts (timestamp, score) tuples from stdout")
+def _scdet_parser_stdout():
+    # Synthetic but realistic scdet output. Three flagged frames, scores
+    # 3.12, 7.85, 14.50. The 14.50 is above production threshold (12.0);
+    # the others are exactly the same-framing-splice / motion-noise zone
+    # we built this diagnostic to surface.
+    stdout = (
+        "frame:120 pts:40000 pts_time:1.333\n"
+        "lavfi.scdet.mafd=...\n"
+        "lavfi.scdet.score=3.12\n"
+        "frame:540 pts:180000 pts_time:6.000\n"
+        "lavfi.scdet.mafd=...\n"
+        "lavfi.scdet.score=7.85\n"
+        "frame:900 pts:300000 pts_time:10.000\n"
+        "lavfi.scdet.mafd=...\n"
+        "lavfi.scdet.score=14.50\n"
+    )
+    detections = handler._parse_scdet_output(stdout, "")
+    assert len(detections) == 3, f"expected 3 detections, got {len(detections)}: {detections}"
+    assert detections[0] == (1.333, 3.12), f"first: {detections[0]}"
+    assert detections[1] == (6.0,   7.85), f"second: {detections[1]}"
+    assert detections[2] == (10.0,  14.5), f"third: {detections[2]}"
+
+
+@check("scdet sweep parser handles stderr fallback when stdout has no metadata blocks")
+def _scdet_parser_stderr_fallback():
+    # Older ffmpeg builds emit only to stderr in the format:
+    #   [Parsed_scdet_0 @ 0x...] lavfi.scdet.score:5.20 pts_time:3.500
+    stderr = (
+        "[Parsed_scdet_0 @ 0x7f] lavfi.scdet.score:5.20 pts_time:3.500\n"
+        "[Parsed_scdet_0 @ 0x7f] lavfi.scdet.score:13.10 pts_time:9.200\n"
+    )
+    detections = handler._parse_scdet_output("", stderr)
+    assert len(detections) == 2, f"expected 2 detections from stderr, got {detections}"
+    assert detections[0] == (3.5,  5.20), f"first: {detections[0]}"
+    assert detections[1] == (9.2, 13.10), f"second: {detections[1]}"
+
+
+@check("scdet sweep parser dedupes by timestamp, sorts ascending")
+def _scdet_parser_dedupe_sort():
+    # Two emissions for the same frame (rare but seen with some builds);
+    # plus out-of-order frames. Parser must dedupe and sort.
+    stdout = (
+        "frame:600 pts:200000 pts_time:6.667\n"
+        "lavfi.scdet.score=8.50\n"
+        "frame:240 pts:80000 pts_time:2.667\n"
+        "lavfi.scdet.score=4.20\n"
+        "frame:600 pts:200000 pts_time:6.667\n"  # duplicate
+        "lavfi.scdet.score=8.50\n"
+    )
+    detections = handler._parse_scdet_output(stdout, "")
+    assert len(detections) == 2, f"expected dedup to 2, got {detections}"
+    assert detections[0][0] < detections[1][0], f"sort order: {detections}"
+
+
+@check("recent_caption_styles injector renders chronological list when data present (active path)")
+def _recent_styles_active():
+    # Active path: user has rotated through 3 distinct styles; newest
+    # LAST. Block must contain all three in render order.
+    profile = {
+        "total_videos": 4,
+        "recent_caption_styles": ["Lumen", "Prime", "Lumen"],
+    }
+    block = handler.format_recent_caption_styles_section(profile)
+    assert block, "block must be non-empty when recent_caption_styles has entries"
+    assert "Lumen, Prime, Lumen" in block, f"styles must appear in chronological order. block:\n{block}"
+    assert "RECENT CAPTION STYLES" in block, "block must carry the labeled header"
+    assert "newest LAST" in block, "block must tell Gemini the order convention"
+
+
+@check("recent_caption_styles injector returns empty when list absent")
+def _recent_styles_empty():
+    # No data → empty string. Belt-and-suspenders against leaking a
+    # junk block into the user message on cold-start users.
+    assert handler.format_recent_caption_styles_section({}) == ""
+    assert handler.format_recent_caption_styles_section({"recent_caption_styles": []}) == ""
+    assert handler.format_recent_caption_styles_section({"recent_caption_styles": None}) == ""
+    assert handler.format_recent_caption_styles_section(None) == ""
+
+
+@check("recent_caption_styles injector fires INDEPENDENTLY of total_videos gate")
+def _recent_styles_independent_of_gate():
+    # The aggregate `format_user_style_section` is gated at
+    # total_videos >= 3. The chronological rotation block must NOT be
+    # — even one prior pick is meaningful rotation data ("avoid Lumen
+    # on this user's second video").
+    profile = {"total_videos": 1, "recent_caption_styles": ["Lumen"]}
+    block = handler.format_recent_caption_styles_section(profile)
+    assert block, "rotation block must fire at video #2 (total_videos=1) — not wait for gate"
+    assert "Lumen" in block
+
+
+@check("recent_caption_styles injector filters 'none' entries (no captions vibe)")
+def _recent_styles_filters_none():
+    # When the user picks the "no captions" vibe, caption_style is "none".
+    # Storing it in the rotation list would lead Gemini to AVOID "none"
+    # later — nonsensical, since "none" isn't a style to rotate against.
+    profile = {"total_videos": 3, "recent_caption_styles": ["Lumen", "none", "Prime"]}
+    block = handler.format_recent_caption_styles_section(profile)
+    assert "Lumen, Prime" in block, f"'none' must be filtered. block:\n{block}"
+    assert "none" not in block.split("renders, in render order:")[-1].split("\n")[0], (
+        f"'none' must not appear in the styles list. block:\n{block}"
+    )
 
 
 # ─── 4. PYDANTIC SCHEMA VALIDATION ────────────────────────────────────

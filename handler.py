@@ -878,6 +878,10 @@ Follow these patterns for pacing and cuts only.
 #   motion_graphics        {mg_type: count}
 #   zoom_types             {zoom_type: count}
 #   recent_vibes           list of strings (tail-capped to 20)
+#   recent_caption_styles  list of strings (tail-capped to 5; chronological,
+#                          newest LAST) — separate from `caption_styles` counts
+#                          because the system prompt's rotation rule needs the
+#                          chronological order, not the aggregate count.
 #   avg_emphasis_per_30s   real
 #   avg_mgs_per_video      real
 #   total_videos           int
@@ -972,6 +976,42 @@ GUIDANCE — important:
 """
 
 
+def format_recent_caption_styles_section(profile):
+    """Render the chronological recent-caption-styles list as its own user
+    message block.
+
+    Shown whenever the list is non-empty — independent of the
+    `_USER_STYLE_MIN_VIDEOS` gate that hides `format_user_style_section`,
+    because rotation is meaningful even at video #2 (one prior pick → one
+    style to avoid). The system prompt's CAPTIONS rotation rule
+    (handler.py:~2810) asks for chronological "last N videos" data; the
+    aggregate counts in `format_user_style_section` conflate "used
+    recently" with "used a lot." This block is the data shape the rule
+    was always asking for.
+
+    Returns the formatted block string, or "" when the profile carries no
+    usable list (the no-op default test exists to keep this from leaking
+    junk into the user message on cold-start users).
+    """
+    if not isinstance(profile, dict):
+        return ""
+    recent = profile.get("recent_caption_styles")
+    if not isinstance(recent, list) or not recent:
+        return ""
+    cleaned = [str(s) for s in recent if s and str(s) != "none"][-5:]
+    if not cleaned:
+        return ""
+    _joined = ", ".join(cleaned)
+    return f"""
+
+=== RECENT CAPTION STYLES (chronological — last {len(cleaned)} videos, newest LAST) ===
+
+The user's caption_style picks across their last {len(cleaned)} renders, in render order: {_joined}
+
+Per the CAPTIONS rotation rule, prefer a style NOT in this list. Repeating the same caption style across consecutive videos reads as template; rotating across the 13 styles is how a creator's feed feels deliberate. The current vibe wins over this rotation — if the vibe asks for a specific style by name, use it. If the vibe is silent on style, pick a style outside this list that best fits the video's character.
+"""
+
+
 def update_user_style_profile(user_id, edit_plan, vibe, duration):
     """Upsert the user's style profile with the choices from this successful render.
 
@@ -1057,6 +1097,21 @@ def update_user_style_profile(user_id, edit_plan, vibe, duration):
             _recent_vibes.append(str(vibe))
         _recent_vibes = _recent_vibes[-20:]
 
+        # Chronological caption-style picks (tail-capped, newest LAST).
+        # The aggregate `caption_styles` counts above can't distinguish
+        # "used Lumen 5 times across last 30 videos" from "used Lumen in
+        # each of the last 3 videos" — both produce a similar recency-
+        # weighted count, but only the second is what the system prompt's
+        # CAPTIONS rotation rule cares about. This chronological list is
+        # the data shape that rule was always asking for. Tail-capped at
+        # 5 (≈ enough rotation history that #1 vs #4 is meaningful, not
+        # so deep that ancient picks influence the avoid list).
+        _recent_caption_styles = list(prior.get("recent_caption_styles") or [])
+        _current_caption_style = edit_plan.get("caption_style")
+        if _current_caption_style and str(_current_caption_style) != "none":
+            _recent_caption_styles.append(str(_current_caption_style))
+        _recent_caption_styles = _recent_caption_styles[-5:]
+
         _row = {
             "user_id": user_id,
             "caption_styles": _caption_styles,
@@ -1067,6 +1122,7 @@ def update_user_style_profile(user_id, edit_plan, vibe, duration):
             "motion_graphics": _mg_freq,
             "zoom_types": _zoom_freq,
             "recent_vibes": _recent_vibes,
+            "recent_caption_styles": _recent_caption_styles,
             "avg_emphasis_per_30s": round(_new_em_avg, 3),
             "avg_mgs_per_video": round(_new_mg_avg, 3),
             "total_videos": _prior_total + 1,
@@ -1688,6 +1744,84 @@ def shot_change_word_boundaries(shot_changes, kept_words, snap_tolerance=0.30):
     return out
 
 
+def _parse_scdet_output(stdout, stderr):
+    """Parse scdet's metadata output → list of (timestamp_s, score) tuples,
+    sorted by timestamp, deduplicated.
+
+    scdet at sc_pass=1 emits per-frame metadata blocks to stdout like:
+        frame:123 pts:41000 pts_time:1.366
+        lavfi.scdet.mafd=...
+        lavfi.scdet.score=0.412
+
+    Some ffmpeg builds emit `lavfi.scd.score=` (older name) or send the
+    info to stderr only. Both fallbacks are handled here.
+
+    When the timestamp is parseable but the score isn't, the score is
+    returned as 0.0 — the caller can filter it out if it cares about
+    score-based filtering.
+    """
+    detections = []
+    _pending_t = None
+    for _line in (stdout or "").splitlines():
+        _line = _line.strip()
+        if _line.startswith("frame:") and "pts_time:" in _line:
+            _tok = _line.split("pts_time:")[-1].split()[0]
+            try:
+                _pending_t = float(_tok)
+            except ValueError:
+                _pending_t = None
+        elif "lavfi.scdet.score=" in _line or "lavfi.scd.score=" in _line:
+            _stok = _line.split("score=")[-1].strip()
+            try:
+                _score = float(_stok)
+            except ValueError:
+                _score = 0.0
+            if _pending_t is not None:
+                detections.append((round(_pending_t, 3), round(_score, 3)))
+                _pending_t = None
+    # Stderr fallback for builds that send metadata there without the
+    # per-frame stdout block. scdet logs flagged frames like:
+    #   [Parsed_scdet_0 @ 0x...] lavfi.scdet.score:3.12 pts_time:5.482
+    if not detections and stderr:
+        for _line in stderr.splitlines():
+            if "Parsed_scdet" not in _line or "pts_time:" not in _line:
+                continue
+            _ttok = _line.split("pts_time:")[-1].split()[0]
+            try:
+                _t = float(_ttok)
+            except ValueError:
+                continue
+            _score = 0.0
+            if "score:" in _line:
+                _stok = _line.split("score:")[-1].split()[0]
+                try:
+                    _score = float(_stok)
+                except ValueError:
+                    pass
+            detections.append((round(_t, 3), round(_score, 3)))
+    # De-duplicate by timestamp, keep first observed score.
+    seen = set()
+    out = []
+    for _t, _s in detections:
+        if _t in seen:
+            continue
+        seen.add(_t)
+        out.append((_t, _s))
+    out.sort(key=lambda ts: ts[0])
+    return out
+
+
+# scdet runs at this wide-net threshold so EVERY potential cut surfaces
+# (down to mild motion). Python then filters to the production threshold
+# (default 12.0) for the return value, AND logs every parsed detection
+# under `[scdet-sweep]` so a single grep tells the operator what scores
+# the source actually produced. Load-bearing for diagnosing same-framing
+# splices that live below threshold=12 — the "I expect" → "I know"
+# conversion. Set to 1.0 to capture the typical same-framing splice
+# zone (~1.5-6) without flooding pure-noise frames at 0.x.
+_SCDET_SWEEP_THRESHOLD = 1.0
+
+
 def detect_shot_changes(source_path, threshold=12.0):
     """Detect hard shot changes in the source video via ffmpeg's `scdet`
     (scene change detect) filter.
@@ -1696,49 +1830,72 @@ def detect_shot_changes(source_path, threshold=12.0):
     (ffmpeg's vf_scdet.c sets default=10, range 0-100). Previously we
     passed 0.30 thinking it was a 0-1 sensitivity dial — that produced
     300+ detections on a 22s video (every frame with any motion at all).
-    threshold=12.0 captures real hard cuts while filtering motion noise.
-    Raise to ~20 for very conservative detection; lower to ~8 for more
-    sensitive.
+    threshold=12.0 captures real hard cuts while filtering motion noise
+    — but it MISSES same-framing same-spot splices, which score ~2-6
+    because the visual delta between back-to-back takes is near zero.
+
+    To diagnose that miss rate without guessing, scdet runs internally
+    at _SCDET_SWEEP_THRESHOLD (much lower) and every parsed detection
+    is logged with its score under `[scdet-sweep]`. The RETURN value
+    is filtered to >= `threshold` so production behavior is unchanged;
+    the sweep is purely observational. After a render, grep
+    `[scdet-sweep]` and check whether the user's known cut timestamps
+    appear as low-score detections — if so, the visual signal exists
+    but the threshold is filtering it; if not, the visual signal genuinely
+    isn't there and the cut needs a different detector (e.g. audio
+    discontinuity).
     """
     cmd = [
         "ffmpeg", "-i", source_path, "-an",
-        "-vf", f"scdet=threshold={threshold}:sc_pass=1,metadata=print:file=-",
+        "-vf", f"scdet=threshold={_SCDET_SWEEP_THRESHOLD}:sc_pass=1,metadata=print:file=-",
         "-f", "null", "-",
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-    # scdet + metadata=print:file=- writes metadata lines to stdout.
-    # Each detection produces blocks like:
-    #   frame:123 pts:41000 pts_time:1.366
-    #   lavfi.scdet.mafd=...
-    #   lavfi.scdet.score=0.412
-    changes = []
-    _pending_t = None
-    for _line in (proc.stdout or "").splitlines():
-        _line = _line.strip()
-        if _line.startswith("frame:") and "pts_time:" in _line:
-            _tok = _line.split("pts_time:")[-1].split()[0]
-            try:
-                _pending_t = float(_tok)
-            except ValueError:
-                _pending_t = None
-        elif "lavfi.scd.score" in _line or "lavfi.scdet.score" in _line:
-            if _pending_t is not None:
-                changes.append(round(_pending_t, 3))
-                _pending_t = None
-    # Some ffmpeg builds emit score=... on its own metadata line without a
-    # prior frame: header — in that case, fall back to parsing pts_time from
-    # stderr (scdet also logs every flagged frame to stderr with [Parsed_scdet_0]).
-    if not changes and proc.stderr:
-        for _line in proc.stderr.splitlines():
-            if "Parsed_scdet" in _line and "pts_time:" in _line:
-                _tok = _line.split("pts_time:")[-1].split()[0]
-                try:
-                    changes.append(round(float(_tok), 3))
-                except ValueError:
-                    continue
-    # De-duplicate and sort.
-    changes = sorted(set(changes))
-    print(f"[shot-changes] Detected {len(changes)} cuts (threshold={threshold})", flush=True)
+    detections = _parse_scdet_output(proc.stdout, proc.stderr)
+
+    # Sweep log — one grep-stable line per detection. Score-tagged so we
+    # can see the distribution and decide whether a threshold sweep would
+    # have caught the missed cuts, or whether they live below the noise
+    # floor entirely.
+    for _t, _score in detections:
+        _flag = "FLAGGED" if _score >= threshold else "below"
+        print(
+            f"[scdet-sweep] t={_t:.3f}s score={_score:.2f} "
+            f"({_flag} @ threshold={threshold:.1f})",
+            flush=True,
+        )
+
+    # Production return: timestamps whose score crossed the production
+    # threshold. If score parsing failed across the board (score=0.0 for
+    # every entry — older ffmpeg builds), fall back to the legacy behavior
+    # of trusting scdet's own threshold filter by running ONCE more at the
+    # production threshold instead. This is the no-regression guard.
+    _scored = [(t, s) for t, s in detections if s > 0.0]
+    if not _scored and detections:
+        # Parser couldn't recover scores; re-run scdet at the production
+        # threshold (the original 2025 behavior) and take its filtered set.
+        print(
+            f"[shot-changes] WARNING: scdet output had no parsable scores — "
+            f"falling back to legacy single-call threshold filter "
+            f"(detections={len(detections)}, all score=0.0)",
+            flush=True,
+        )
+        cmd_legacy = [
+            "ffmpeg", "-i", source_path, "-an",
+            "-vf", f"scdet=threshold={threshold}:sc_pass=1,metadata=print:file=-",
+            "-f", "null", "-",
+        ]
+        proc_legacy = subprocess.run(cmd_legacy, capture_output=True, text=True, timeout=60)
+        legacy_detections = _parse_scdet_output(proc_legacy.stdout, proc_legacy.stderr)
+        changes = sorted({t for t, _ in legacy_detections})
+    else:
+        changes = sorted({t for t, s in detections if s >= threshold})
+
+    print(
+        f"[shot-changes] Detected {len(changes)} cuts "
+        f"(threshold={threshold}, sweep_window>={_SCDET_SWEEP_THRESHOLD})",
+        flush=True,
+    )
     return changes
 
 
@@ -2453,6 +2610,13 @@ def _build_post_cuts_prompt(
     _usp = dict(user_style_profile or {})
     if _usp and int(_usp.get("total_videos") or 0) >= 3:
         _usr_block = format_user_style_section(_usp)
+
+    # Chronological caption-style rotation — independent of the
+    # total_videos gate above. Empty list → empty string → no block leaked
+    # into the message. Even one prior pick is useful for rotation, so this
+    # block fires at video #2 onward (whereas the aggregate counts block
+    # waits for ≥ 3 videos before it's a meaningful taste signal).
+    _recent_styles_block = format_recent_caption_styles_section(_usp)
 
     signals_block = f"""
 === PIPELINE SIGNALS (ground-truth data computed on the source) ===
@@ -3522,6 +3686,8 @@ Every anchor field references the kept-only index space [0..M-1] shown in the tr
     user_content_parts.append(signals_block.strip())
     if _usr_block:
         user_content_parts.append(_usr_block.strip())
+    if _recent_styles_block:
+        user_content_parts.append(_recent_styles_block.strip())
     if trend_block:
         user_content_parts.append(trend_block.strip())
     user_content = "\n\n".join(user_content_parts)
