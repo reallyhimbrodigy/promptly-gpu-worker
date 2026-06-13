@@ -1436,6 +1436,54 @@ def _face_position_at(trajectory, t_seconds, canvas_w=1080, canvas_h=1920):
     return origin_x, origin_y, conf
 
 
+def _resolve_zoom_origin(ev, source_time_s, face_trajectory):
+    """Resolve the zoom origin for a single ABE event.
+
+    Contract (matches handler.py:~2980 in the system prompt):
+      - If Gemini emitted originX/originY explicitly, use them verbatim.
+        This is the non-face-element path (prop, gesture, whiteboard) —
+        Gemini watched the proxy and chose coords on a thing the pipeline
+        cannot detect.
+      - Otherwise (the default face-zoom path), look up the nearest
+        smoothed face detection to `source_time_s` and lock the origin
+        onto the face's eye line via `_face_position_at`. Reuses the
+        existing sparse trajectory; no new sampling.
+      - When the trajectory has no `found=True` detection nearby, fall
+        back to canvas center (0.5, 0.5) AND emit a `[divergence]
+        component=zoom_origin` line so the gap is visible instead of
+        silently drifting off-subject.
+
+    Returns (origin_x, origin_y, was_resolved_by_face_lock: bool).
+    """
+    _gemini_x = ev.get("originX")
+    _gemini_y = ev.get("originY")
+    if _gemini_x is not None and _gemini_y is not None:
+        return float(_gemini_x), float(_gemini_y), False
+
+    _ox, _oy, _conf = _face_position_at(face_trajectory, source_time_s)
+    if _ox is not None and _oy is not None:
+        return round(_ox, 4), round(_oy, 4), True
+
+    # No face box near this frame on a face-zoom event — log + center.
+    # The prompt promised Gemini face-locking; the trajectory failed to
+    # produce one. Either face detection found no face at that moment
+    # (genuine — speaker turned, occlusion) or the sparse keyframes are
+    # too sparse for this particular event. Either way, viewer-visible
+    # if we just stay silent.
+    _record_divergence(
+        "zoom_origin",
+        {
+            "source_time_s": round(float(source_time_s), 3),
+            "event_startMs": ev.get("startMs"),
+            "expected": "face",
+        },
+        "fallback_to_center",
+        final={"originX": 0.5, "originY": 0.5},
+        reason="no_face_box_at_frame",
+    )
+    return 0.5, 0.5, False
+
+
 def calculate_reframe_crop(face_positions, source_w, source_h, target_w=1080, target_h=1920):
     """
     Calculate a crop window that keeps the detected face near frame center.
@@ -10095,6 +10143,13 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # range overlaps the cut's output window. Cuts that don't actually
     # contain the event window stay on the FFmpeg path — no wasteful
     # Remotion routing.
+    #
+    # Face trajectory feeds zoom-origin face-lock at the event loop
+    # (see _resolve_zoom_origin). Pulled once here from edit_plan so the
+    # per-event call is dict access only — no recomputation per zoom event.
+    # Reuses the SPARSE existing trajectory per
+    # feedback_no_face_detect_stride_change.md — no new face sampling.
+    _face_trajectory = list(edit_plan.get("_face_trajectory") or [])
     clips_out = []
     for i, (rc, tm, eff_dur) in enumerate(zip(render_cuts, _clip_time_maps, effective_durations)):
         _pbr = float(tm.get("avg_speed") or 1.0)
@@ -10187,26 +10242,37 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 if _new_dur_ms < 100:
                     # Less than 100ms of zoom isn't perceptible — skip.
                     continue
-                # Origin: pass Gemini's explicit coords through if present,
-                # otherwise leave originX/originY off the event so the ABE
-                # component's documented default (0.5, 0.5 center) applies.
-                # No face-detection-baked-into-JSON path — that produced
-                # off-center origins per event, then static origin during
-                # the hold while the speaker moved naturally → visible
-                # drift between events on the same clip.
+                # Origin resolution: fulfill the prompt's contract at
+                # handler.py:~2980 ("the pipeline runs face detection at
+                # the event's start frame to lock the zoom origin onto
+                # the face"). For face zooms (Gemini omitted originX/Y),
+                # look up the smoothed trajectory at the event's source
+                # time and lock to the face's eye line. For explicit
+                # origins (non-face elements), pass them through verbatim.
+                # No-face-box fallbacks to (0.5, 0.5) emit a divergence
+                # so the gap is visible.
+                _event_source_t = _src_start_ms / 1000.0
+                _resolved_ox, _resolved_oy, _face_locked = _resolve_zoom_origin(
+                    _ev, _event_source_t, _face_trajectory,
+                )
                 _new_event = {
                     **_ev,
                     "startMs": _new_start_ms,
                     "durationMs": _new_dur_ms,
+                    "originX": _resolved_ox,
+                    "originY": _resolved_oy,
                 }
                 _overlapping_events.append(_new_event)
-                _ox_log = _ev.get("originX")
-                _oy_log = _ev.get("originY")
+                _origin_src = (
+                    "face_lock" if _face_locked
+                    else "gemini_explicit" if _ev.get("originX") is not None
+                    else "center_fallback"
+                )
                 print(
                     f"[zoom-event] clip={i} type={_zoom.get('type')} "
                     f"start={_new_start_ms}ms dur={_new_dur_ms}ms "
-                    f"origin=({_ox_log if _ox_log is not None else 'default'},"
-                    f"{_oy_log if _oy_log is not None else 'default'})",
+                    f"origin=({_resolved_ox:.3f},{_resolved_oy:.3f}) "
+                    f"src={_origin_src}",
                     flush=True,
                 )
             if _overlapping_events:
@@ -14653,11 +14719,10 @@ def handler(job):
         edit_plan["_face_transform"] = _ft
 
         # The smoothed dense trajectory feeds prompt signals (FACE
-        # VISIBILITY, FACE VERTICAL ZONE, SPEAKER POSITIONS, OFF-CENTER).
-        # render_multi_clip does NOT consume it for zoom origin — instead
-        # it runs fresh per-event face detection at the exact frame of
-        # each zoom for sub-frame accuracy (see "Per-event face detection
-        # for zoom origin alignment" in render_multi_clip).
+        # VISIBILITY, FACE VERTICAL ZONE, SPEAKER POSITIONS, OFF-CENTER)
+        # AND drives zoom-origin face-lock in render_multi_clip via
+        # _resolve_zoom_origin. Reusing the SAME trajectory respects the
+        # sparse-sampling preference — no per-event re-detection.
         edit_plan["_face_trajectory"] = list(_smoothed_trajectory or [])
 
         _timings["normalize_transcribe_upload"] = time.time() - t

@@ -183,6 +183,8 @@ def _symbols_present():
         "_Transition",
         "_record_divergence",
         "_force_caption_position_around_overlays",
+        "_resolve_zoom_origin",
+        "_face_position_at",
     ]
     missing = [s for s in required if not hasattr(handler, s)]
     assert not missing, f"missing symbols: {missing}"
@@ -282,6 +284,90 @@ def _caption_override_broll_forces_top():
     assert _pos_at(out, 100) == "bottom"
     assert _pos_at(out, 400) == "center"
     assert _pos_at(out, 700) == "bottom"
+
+
+# ─── 3b. ZOOM-ORIGIN FACE-LOCK ────────────────────────────────────────
+# These tests cover audit Tier-1 #3: the zoom-origin face-lock that the
+# prompt promises Gemini. They exercise _resolve_zoom_origin, the same
+# function the render-time event loop calls — per
+# feedback_smoke_must_cover_real_paths.md, the smoke must hit the ACTIVE
+# face-lock path (face box present, origin resolves to non-center) and
+# not just the no-face fallback.
+print("\n[3b/6] Zoom-origin face-lock")
+
+
+@check("zoom-origin face-lock resolves to FACE coords when trajectory has a found detection (active path)")
+def _zoom_origin_active_face_lock():
+    # Off-center talking-head: face center sits at x=400/1080 (well left
+    # of canvas center 540/1080), y=600/1920 (upper-middle band where
+    # eyes naturally sit). _face_position_at applies a -0.10 normalized
+    # rule-of-thirds eye offset on y. Expected normalized origin:
+    #   originX ≈ 400/1080 = 0.3704
+    #   originY ≈ 600/1920 - 0.10 = 0.2125
+    # NOT canvas center (0.5, 0.5).
+    trajectory = [
+        {"t": 0.0,  "cx": 400, "cy": 600, "found": True,  "confidence": 0.95},
+        {"t": 3.0,  "cx": 400, "cy": 600, "found": True,  "confidence": 0.95},
+        {"t": 6.0,  "cx": 400, "cy": 600, "found": True,  "confidence": 0.95},
+    ]
+    ev = {"startMs": 4200}  # source-time 4.2s — nearest detection at t=3.0
+    origin_x, origin_y, was_face_locked = handler._resolve_zoom_origin(
+        ev, source_time_s=4.2, face_trajectory=trajectory,
+    )
+    assert was_face_locked is True, "expected face_lock path; got fallback"
+    assert abs(origin_x - 0.3704) < 0.01, f"originX should track face center, got {origin_x}"
+    assert abs(origin_y - 0.2125) < 0.01, f"originY should track face center w/ eye offset, got {origin_y}"
+    # And specifically NOT (0.5, 0.5) — this is the regression the audit caught.
+    assert (origin_x, origin_y) != (0.5, 0.5), "face-locked origin must not be canvas center"
+
+
+@check("zoom-origin face-lock passes Gemini's explicit origins through verbatim (non-face element)")
+def _zoom_origin_gemini_explicit():
+    # Gemini zooming on a prop / gesture / whiteboard emits originX/Y
+    # explicitly. The face lock must NOT override these — even when a
+    # face trajectory is available, Gemini's intent wins because it
+    # watched the proxy and chose coordinates on something the pipeline
+    # can't detect.
+    trajectory = [
+        {"t": 5.0, "cx": 400, "cy": 600, "found": True, "confidence": 0.95},
+    ]
+    ev = {"startMs": 5000, "originX": 0.78, "originY": 0.62}
+    origin_x, origin_y, was_face_locked = handler._resolve_zoom_origin(
+        ev, source_time_s=5.0, face_trajectory=trajectory,
+    )
+    assert was_face_locked is False, "explicit Gemini origin must not be a face-lock"
+    assert origin_x == 0.78, f"Gemini originX must pass through verbatim, got {origin_x}"
+    assert origin_y == 0.62, f"Gemini originY must pass through verbatim, got {origin_y}"
+
+
+@check("zoom-origin face-lock falls back to center when no face box near event frame")
+def _zoom_origin_no_face_fallback():
+    # No found detection at all — fallback path. Must return canvas center
+    # AND emit a [divergence] line (the fallback is logged so the gap is
+    # visible). Trajectory with found=False entries simulates speaker
+    # turned away or occlusion.
+    trajectory = [
+        {"t": 0.0, "cx": 0, "cy": 0, "found": False, "confidence": 0.0},
+        {"t": 5.0, "cx": 0, "cy": 0, "found": False, "confidence": 0.0},
+    ]
+    ev = {"startMs": 3000}  # face zoom (no explicit origin)
+    origin_x, origin_y, was_face_locked = handler._resolve_zoom_origin(
+        ev, source_time_s=3.0, face_trajectory=trajectory,
+    )
+    assert was_face_locked is False, "no-face path is not face_lock"
+    assert (origin_x, origin_y) == (0.5, 0.5), f"fallback must be canvas center, got ({origin_x}, {origin_y})"
+
+
+@check("zoom-origin face-lock falls back to center when trajectory is empty")
+def _zoom_origin_empty_trajectory():
+    # Empty trajectory (e.g. face-detection skipped or produced nothing).
+    # Same fallback contract.
+    ev = {"startMs": 1000}
+    origin_x, origin_y, was_face_locked = handler._resolve_zoom_origin(
+        ev, source_time_s=1.0, face_trajectory=[],
+    )
+    assert was_face_locked is False
+    assert (origin_x, origin_y) == (0.5, 0.5)
 
 
 # ─── 4. PYDANTIC SCHEMA VALIDATION ────────────────────────────────────
