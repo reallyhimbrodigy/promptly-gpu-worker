@@ -14546,11 +14546,14 @@ def handler(job):
 
         print("[pipeline] step=parallel_render", flush=True)
         send_progress(job_id, "render", 65, "Rendering your edit", app_url)
-        # Heartbeat: render_multi_clip is the longest single phase
-        # (~60-120s for a 30s source). The 65%→92% gap was the second-
-        # worst stuck-bar gap after the Gemini wait. Ticks the bar to 90%
-        # over the expected duration; the real 92% update fires after
-        # render returns and snaps the bar to the final stretch.
+        # Heartbeat: render_multi_clip is the longest single phase. Duration
+        # scales with source length — a 30s source renders in ~60-90s, a 60s
+        # source in ~120-180s. Previously fixed at 90s, which under-estimated
+        # for longer videos and parked the bar at 90% for 30-60s before the
+        # 92% thumbnail event fired. Now: ~3× source duration, clamped to
+        # [60, 240]s, so the bar paces the actual render and snaps cleanly
+        # to the next milestone instead of stalling.
+        _render_est = max(60.0, min(240.0, float(source_duration) * 3.0))
         _render_hb_stop = _start_progress_heartbeat(
             job_id, "render", 65, 90,
             [
@@ -14562,7 +14565,7 @@ def handler(job):
                 "Finalizing your video",
             ],
             app_url,
-            duration_estimate_s=90.0,
+            duration_estimate_s=_render_est,
         )
         t = time.time()
         try:
@@ -14935,16 +14938,39 @@ def handler(job):
             edit_plan["_hls_manifest_url"] = hls_url
             return hls_url
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as post_executor:
-            f_upload = post_executor.submit(_upload_main)
-            f_cover  = post_executor.submit(_extract_and_upload_cover)
-            f_hls    = post_executor.submit(_upload_hls)
-            # Surface every failure — any one of these missing means the
-            # render is incomplete. The .result() calls re-raise whatever
-            # was caught inside the thread.
-            f_upload.result()
-            cover_bytes, _ = f_cover.result()
-            f_hls.result()
+        # Heartbeat: the post-render fan-out (main MP4 upload + HLS encode +
+        # HLS multi-file upload + cover frame upload) was the worst stuck-bar
+        # gap in the entire pipeline — the user saw 96% for 30-90 seconds with
+        # NO signal that anything was still happening, indistinguishable from
+        # a frozen client. HLS encoding alone is 30-50s on a typical clip,
+        # then segment uploads add 10-30s. The bar now creeps 96→99 over
+        # the estimate (60s default — short videos finish well before, long
+        # videos cap at 99 and hold until `complete` fires at 100).
+        _upload_hb_stop = _start_progress_heartbeat(
+            job_id, "upload", 96, 99,
+            [
+                "Building HD stream",
+                "Building HQ stream",
+                "Packaging for fast playback",
+                "Uploading to your library",
+                "Almost there",
+            ],
+            app_url,
+            duration_estimate_s=60.0,
+        )
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as post_executor:
+                f_upload = post_executor.submit(_upload_main)
+                f_cover  = post_executor.submit(_extract_and_upload_cover)
+                f_hls    = post_executor.submit(_upload_hls)
+                # Surface every failure — any one of these missing means the
+                # render is incomplete. The .result() calls re-raise whatever
+                # was caught inside the thread.
+                f_upload.result()
+                cover_bytes, _ = f_cover.result()
+                f_hls.result()
+        finally:
+            _upload_hb_stop.set()
 
         if cover_bytes:
             import base64
