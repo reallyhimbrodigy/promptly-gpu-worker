@@ -12515,7 +12515,7 @@ def prewarm_handler(job):
                     ["ffmpeg", "-y", "-v", "error", "-threads", "0"] + _hw_dec + [
                      "-i", source_cache,
                      "-vf", "scale=480:-2,fps=24"] + _proxy_venc + [
-                     "-c:a", "aac", "-b:a", "48k", "-ac", "1",
+                     "-c:a", "libopus", "-b:a", "64k", "-ac", "1",
                      proxy_cache],
                     capture_output=True, text=True, timeout=60,
                 )
@@ -13459,10 +13459,16 @@ def handler(job):
                                if _HAS_NVENC else
                                ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "30"])
                 _hw_dec = ["-hwaccel", "cuda"] if _HAS_HWACCEL else []
+                # Audio: Opus mono @ 64kbps. Opus at 64k beats AAC at 96k for
+                # speech intelligibility AND prosodic detail (voice rise/drop,
+                # micro-pauses, laugh/gasp texture) — the acoustic signal the
+                # prompt explicitly tells Gemini to listen for. The previous
+                # AAC @ 48kbps smeared that texture. Modern ffmpeg writes
+                # Opus into MP4 natively; Gemini's MP4 ingestion accepts it.
                 _proxy_cmd = subprocess.run(
                     ["ffmpeg", "-y", "-threads", "0"] + _hw_dec + ["-i", _raw_source,
                      "-vf", "scale=480:-2,fps=24"] + _proxy_venc + [
-                     "-c:a", "aac", "-b:a", "48k", "-ac", "1",
+                     "-c:a", "libopus", "-b:a", "64k", "-ac", "1",
                      _proxy_path],
                     capture_output=True, text=True, timeout=30,
                 )
