@@ -181,9 +181,107 @@ def _symbols_present():
         "_SoundEffect",
         "_BrollClip",
         "_Transition",
+        "_record_divergence",
+        "_force_caption_position_around_overlays",
     ]
     missing = [s for s in required if not hasattr(handler, s)]
     assert not missing, f"missing symbols: {missing}"
+
+
+def _pos_at(segments_list, frame):
+    """Return the caption position at a specific output frame, or None."""
+    for s in segments_list:
+        if s["fromFrame"] <= frame < s["toFrame"]:
+            return s["position"]
+    return None
+
+
+@check("caption override forces TOP under MG at bottom (bed/Young Sheldon case)")
+def _caption_override_mg_at_bottom():
+    """Simulates the bed/Young Sheldon fixture: ProgressBar at frames 300-360
+    and StatCard at frames 540-600, both anchored "bottom". Captions default
+    to "bottom" everywhere. After the override, captions during both windows
+    must be "top"; outside the windows must remain "bottom".
+    """
+    segments = [{"fromFrame": 0, "toFrame": 900, "position": "bottom"}]
+    mgs = [
+        {"type": "ProgressBar", "fromFrame": 300, "durationInFrames": 60,
+         "props": {"anchor": "bottom"}},
+        {"type": "StatCard",    "fromFrame": 540, "durationInFrames": 60,
+         "props": {"anchor": "bottom"}},
+    ]
+    out = handler._force_caption_position_around_overlays(segments, mgs, [])
+    # Inside each MG window: captions must be at top.
+    assert _pos_at(out, 320) == "top",  f"inside ProgressBar window, expected top, got: {out}"
+    assert _pos_at(out, 570) == "top",  f"inside StatCard window, expected top, got: {out}"
+    # Outside the windows: captions stay at Gemini's default (bottom).
+    assert _pos_at(out, 100) == "bottom"
+    assert _pos_at(out, 450) == "bottom"
+    assert _pos_at(out, 700) == "bottom"
+
+
+@check("caption override forces BOTTOM under MG at top (Notification)")
+def _caption_override_mg_at_top():
+    """Notification renders top regardless of its anchor field (drop-down anim)."""
+    mgs = [
+        {"type": "Notification", "fromFrame": 200, "durationInFrames": 90,
+         "props": {"anchor": "center"}},  # anchor lies; Notification still renders top
+    ]
+    # Scenario A: orig=bottom under top-rendering Notification → no change needed.
+    out1 = handler._force_caption_position_around_overlays(
+        [{"fromFrame": 0, "toFrame": 600, "position": "bottom"}], mgs, [],
+    )
+    assert _pos_at(out1, 250) == "bottom",  f"orig=bottom under top-MG: stays bottom, got: {out1}"
+    # Scenario B: orig=top under top-rendering Notification → forced to bottom.
+    out2 = handler._force_caption_position_around_overlays(
+        [{"fromFrame": 0, "toFrame": 600, "position": "top"}], mgs, [],
+    )
+    assert _pos_at(out2, 250) == "bottom",  f"orig=top under top-MG: forced to bottom, got: {out2}"
+    assert _pos_at(out2, 100) == "top"      # before MG: untouched
+    assert _pos_at(out2, 400) == "top"      # after MG: restored
+
+
+@check("caption override forces CENTER when both TOP and BOTTOM occupied")
+def _caption_override_both_zones_occupied():
+    """Top-anchored Notification overlaps with bottom-anchored ProgressBar →
+    captions get squeezed to center for the overlap window."""
+    segments = [{"fromFrame": 0, "toFrame": 600, "position": "bottom"}]
+    mgs = [
+        {"type": "Notification", "fromFrame": 100, "durationInFrames": 200,
+         "props": {"anchor": "top"}},
+        {"type": "ProgressBar",  "fromFrame": 150, "durationInFrames": 100,
+         "props": {"anchor": "bottom"}},
+    ]
+    out = handler._force_caption_position_around_overlays(segments, mgs, [])
+    # Frames 150-250: BOTH top and bottom occupied → captions forced to center.
+    assert _pos_at(out, 200) == "center",  f"both-zones-occupied window should be center, got: {out}"
+    # Frames 100-150: only top (Notification) → orig=bottom, MG forces bottom (no-op).
+    assert _pos_at(out, 120) == "bottom"
+    # Frames 250-300: only top still occupied → orig=bottom, MG forces bottom (no-op).
+    assert _pos_at(out, 270) == "bottom"
+    # Outside the MG windows: orig preserved.
+    assert _pos_at(out, 50)  == "bottom"
+    assert _pos_at(out, 400) == "bottom"
+
+
+@check("caption override forces TOP during B-roll windows")
+def _caption_override_broll_forces_top():
+    """B-roll is full-canvas. Captions forced to top regardless of Gemini's choice."""
+    segments = [
+        {"fromFrame": 0,   "toFrame": 200, "position": "bottom"},
+        {"fromFrame": 200, "toFrame": 500, "position": "center"},
+        {"fromFrame": 500, "toFrame": 800, "position": "bottom"},
+    ]
+    broll_ranges = [(150, 250), (550, 650)]
+    out = handler._force_caption_position_around_overlays(segments, [], broll_ranges)
+    # Inside B-roll: top.
+    assert _pos_at(out, 180) == "top",  f"inside first B-roll window, expected top, got: {out}"
+    assert _pos_at(out, 220) == "top",  f"inside first B-roll (crossing orig boundary), expected top, got: {out}"
+    assert _pos_at(out, 600) == "top",  f"inside second B-roll window, expected top, got: {out}"
+    # Outside B-roll: Gemini's original choice preserved.
+    assert _pos_at(out, 100) == "bottom"
+    assert _pos_at(out, 400) == "center"
+    assert _pos_at(out, 700) == "bottom"
 
 
 # ─── 4. PYDANTIC SCHEMA VALIDATION ────────────────────────────────────

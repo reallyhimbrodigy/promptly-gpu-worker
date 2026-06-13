@@ -3612,77 +3612,97 @@ def _coalesce_caption_position_segments(segments, min_dur=1.5):
     return merged
 
 
-def _force_caption_position_around_mgs(segments, motion_graphics):
-    """Override caption position to AVOID colliding with motion-graphic
-    components. Returns a new contiguous segment list.
+def _force_caption_position_around_overlays(
+    segments, motion_graphics, broll_frame_ranges
+):
+    """Frame-precise AUTHORITATIVE caption-position override during MG and
+    B-roll windows. Returns a new contiguous segment list.
 
-    Notifications always render at the TOP regardless of their anchor field
-    (the drop-down animation is the metaphor — see Notification.tsx). Other
-    MGs render at the position their `props.anchor` specifies (top / center
-    / bottom / left / right via SEMANTIC_TO_MG_ANCHOR). Captions default to
-    BOTTOM. Collision rules:
+    The system prompt promises "the pipeline owns caption position during MG
+    and B-roll windows" and explicitly tells Gemini NOT to emit
+    caption_position_changes that overlap those windows. This function is
+    the code side of that contract. Any caption_position_change Gemini
+    emitted that lands inside an MG or B-roll window is OVERRIDDEN here
+    in favor of the deterministic zone-clearing rule below.
 
-      MG occupies TOP    → captions forced to BOTTOM
-      MG occupies BOTTOM → captions forced to TOP
-      MG at center / left / right → no caption move (no overlap with the
-                                    bottom default)
+    Per-frame zone-occupancy rule:
 
-    Why we need this: Gemini's caption_position_changes plan over MG windows
-    is unreliable. Even though the prompt explains "captions need to flip
-    to bottom while [Notifications] are on screen", the cuts call routinely
-    emits the WRONG direction (e.g., flip captions UP toward the top-anchored
-    notification, which would put both elements in the same zone). Pre-this
-    change, those bad flips were silently absorbed by the 1.5s flicker filter
-    if they happened to be short. This function makes the override explicit
-    and direction-correct, so the editor never trusts Gemini for this layer.
+      B-roll alone               → captions forced to TOP
+        B-roll is a full-canvas cutaway. "bottom" sits near the platform
+        UI rail; "center" lands on the focal subject of the cutaway.
+        "top" is the readable safe zone.
 
-    Pure layout fix — no prompt-side rule for Gemini to remember. Inputs are
+      MG occupies TOP only       → captions forced to BOTTOM
+        Notification always renders top (drop-down animation), and any
+        MG with anchor="top" reaches into the upper-third safe zone.
+
+      MG occupies BOTTOM only    → captions forced to TOP
+        MG with anchor="bottom" sits in the lower-third where captions
+        default.
+
+      Both TOP and BOTTOM occupied in the same frames → captions to CENTER
+        Two overlapping MGs (top + bottom anchored) squeeze the caption
+        track into the middle. Rare but real on dense payoffs.
+
+      MG at center / left / right (only)                  → no override
+        Captions stay where Gemini placed them.
+
+    Every per-sub-segment reposition is logged via _record_divergence so
+    `grep '\\[divergence\\] component=caption_position'` surfaces the
+    exact frames + zones + reasons.
+
+    Pure layout pass — no prompt-side rule for Gemini to remember. Inputs
     already projected to output frames so the override is frame-precise.
-
-    NB: B-roll already wins the conflict check at the broll-vs-overlay
-    filter step earlier, so by the time this function runs, no MG overlaps
-    a B-roll window. _force_top_position_during_broll therefore commutes
-    safely with this function regardless of call order.
     """
-    if not motion_graphics or not segments:
+    if not segments:
+        return segments
+    if not motion_graphics and not broll_frame_ranges:
         return segments
 
-    # Build override windows: each MG that occupies top/bottom contributes
-    # one (from_frame, to_frame, forced_caption_pos) tuple.
-    overrides: List[tuple] = []
-    for _mg in motion_graphics:
+    # MG windows that occupy a caption-relevant zone (top or bottom).
+    # Notifications render top regardless of anchor (drop-down animation).
+    mg_windows = []  # (from_frame, to_frame, zone)
+    for _mg in motion_graphics or []:
         _mg_type = str(_mg.get("type") or "")
         _mg_anchor = str((_mg.get("props") or {}).get("anchor") or "")
-        # Notification renders at top regardless of anchor (drop-down anim).
         _effective_pos = "top" if _mg_type == "Notification" else _mg_anchor
-        if _effective_pos == "top":
-            _forced = "bottom"
-        elif _effective_pos == "bottom":
-            _forced = "top"
-        else:
-            continue  # center / left / right — no caption-zone collision
-        _ff = int(_mg.get("fromFrame") or 0)
-        _tf = _ff + int(_mg.get("durationInFrames") or 0)
-        if _tf > _ff:
-            overrides.append((_ff, _tf, _forced))
+        if _effective_pos in ("top", "bottom"):
+            _ff = int(_mg.get("fromFrame") or 0)
+            _tf = _ff + int(_mg.get("durationInFrames") or 0)
+            if _tf > _ff:
+                mg_windows.append((_ff, _tf, _effective_pos))
 
-    if not overrides:
+    broll_windows = [
+        (int(_f), int(_t)) for _f, _t in (broll_frame_ranges or []) if int(_t) > int(_f)
+    ]
+
+    if not mg_windows and not broll_windows:
         return segments
 
+    # Collect every frame boundary that could change the override decision.
     boundaries = set()
     for s in segments:
         boundaries.add(int(s["fromFrame"]))
         boundaries.add(int(s["toFrame"]))
-    for _ff, _tf, _ in overrides:
+    for _ff, _tf, _ in mg_windows:
+        boundaries.add(_ff)
+        boundaries.add(_tf)
+    for _ff, _tf in broll_windows:
         boundaries.add(_ff)
         boundaries.add(_tf)
     sorted_b = sorted(boundaries)
+
     out: List[dict] = []
-    n_overrides = 0
+    n_mg_overrides = 0
+    n_broll_overrides = 0
+    n_both_overrides = 0
+
     for i in range(len(sorted_b) - 1):
         a, b = sorted_b[i], sorted_b[i + 1]
         if a >= b:
             continue
+
+        # Original caption position (Gemini's choice) for this sub-range.
         orig_pos = None
         for s in segments:
             if int(s["fromFrame"]) <= a < int(s["toFrame"]):
@@ -3690,84 +3710,67 @@ def _force_caption_position_around_mgs(segments, motion_graphics):
                 break
         if orig_pos is None:
             continue
-        forced = None
-        for _ff, _tf, _pos in overrides:
+
+        # Inside a B-roll window?
+        in_broll = any(_ff <= a and _tf >= b for _ff, _tf in broll_windows)
+
+        # Which MG zones (top / bottom) are occupied in [a, b)?
+        zones_occupied = set()
+        for _ff, _tf, _zone in mg_windows:
             if _ff <= a and _tf >= b:
-                forced = _pos
-                break
+                zones_occupied.add(_zone)
+
+        # Decide override (B-roll takes precedence — full-canvas always
+        # wants "top" regardless of which MG zones happen to overlap).
+        forced = None
+        reason = None
+        if in_broll:
+            forced = "top"
+            reason = "broll_window"
+        elif zones_occupied == {"top", "bottom"}:
+            forced = "center"
+            reason = "mg_top_and_bottom_both_occupied"
+        elif "top" in zones_occupied:
+            forced = "bottom"
+            reason = "mg_at_top"
+        elif "bottom" in zones_occupied:
+            forced = "top"
+            reason = "mg_at_bottom"
+
         pos = forced if forced is not None else orig_pos
+
         if forced is not None and forced != orig_pos:
-            n_overrides += 1
+            _record_divergence(
+                "caption_position",
+                {"from_frame": a, "to_frame": b, "position": orig_pos},
+                "force_clear_of_overlay",
+                final={"from_frame": a, "to_frame": b, "position": forced},
+                reason=f"forced_clear_of_mg_or_broll:{reason}",
+            )
+            if in_broll:
+                n_broll_overrides += 1
+            elif reason == "mg_top_and_bottom_both_occupied":
+                n_both_overrides += 1
+            else:
+                n_mg_overrides += 1
+
+        # Coalesce adjacent same-position sub-segments.
         if out and out[-1]["position"] == pos and int(out[-1]["toFrame"]) == a:
             out[-1]["toFrame"] = b
         else:
             out.append({"fromFrame": a, "toFrame": b, "position": pos})
-    if n_overrides:
+
+    if n_mg_overrides or n_broll_overrides or n_both_overrides:
         print(
-            f"[caption-segments] forced caption position around "
-            f"{len(overrides)} MG window(s) "
-            f"({n_overrides} sub-segment override(s))",
+            f"[caption-segments] authoritative override pass: "
+            f"MG repositions={n_mg_overrides}, "
+            f"B-roll repositions={n_broll_overrides}, "
+            f"both-zones-occupied=>center repositions={n_both_overrides} "
+            f"(across {len(mg_windows)} MG window(s), "
+            f"{len(broll_windows)} B-roll window(s))",
             flush=True,
         )
-    return out
 
-
-def _force_top_position_during_broll(segments, broll_frame_ranges):
-    """Override caption position to "top" for every output frame inside a
-    B-roll window. Returns a new contiguous segment list.
-
-    B-roll renders as a full-canvas cutaway (the speaker disappears for the
-    duration). Captions positioned "bottom" (lower-third safe zone) sit
-    near the platform UI rail; "center" sits over the focal point of the
-    cutaway. "top" lands in the upper-third safe zone where it doesn't
-    compete with the cutaway subject and stays readable thanks to the
-    universal text-stroke. So during any B-roll window the position is
-    forced to "top" regardless of what Gemini specified, then restored to
-    Gemini's choice on the frames immediately after the window ends.
-
-    Pure layout fix — no prompt-side rule for Gemini to remember. Inputs
-    are already projected to output frames so the override is frame-precise.
-    """
-    if not broll_frame_ranges or not segments:
-        return segments
-    # Collect every boundary frame (segment edges + broll edges) and walk
-    # adjacent pairs.
-    boundaries = set()
-    for s in segments:
-        boundaries.add(int(s["fromFrame"]))
-        boundaries.add(int(s["toFrame"]))
-    for f, t in broll_frame_ranges:
-        boundaries.add(int(f))
-        boundaries.add(int(t))
-    sorted_b = sorted(boundaries)
-    out: List[dict] = []
-    overrides = 0
-    for i in range(len(sorted_b) - 1):
-        a, b = sorted_b[i], sorted_b[i + 1]
-        if a >= b:
-            continue
-        orig_pos = None
-        for s in segments:
-            if int(s["fromFrame"]) <= a < int(s["toFrame"]):
-                orig_pos = s["position"]
-                break
-        if orig_pos is None:
-            continue
-        in_broll = any(int(bf) <= a and int(bt) >= b for bf, bt in broll_frame_ranges)
-        pos = "top" if in_broll else orig_pos
-        if in_broll and orig_pos != "top":
-            overrides += 1
-        if out and out[-1]["position"] == pos and int(out[-1]["toFrame"]) == a:
-            out[-1]["toFrame"] = b
-        else:
-            out.append({"fromFrame": a, "toFrame": b, "position": pos})
-    if overrides:
-        print(
-            f"[caption-segments] forced position=top over "
-            f"{len(broll_frame_ranges)} B-roll window(s) "
-            f"({overrides} sub-segment override(s))",
-            flush=True,
-        )
     return out
 
 
@@ -10878,16 +10881,29 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 flush=True,
             )
 
-    # Caption position is ENTIRELY Gemini's responsibility. The prompt
-    # teaches the rule: for every B-roll, motion_graphic, and text_overlay
-    # window, plan a caption_position_change that moves captions to a zone
-    # the overlay doesn't occupy. The pipeline used to auto-flip captions
-    # around MG/B-roll windows here — that's been removed because it
-    # ignored text_overlay windows (causing the exact collisions the
-    # auto-flip was meant to prevent) AND because papering over Gemini's
-    # editorial decisions with pipeline snapping is the wrong layer.
-    # If captions land in the same zone as an overlay, the prompt rule
-    # is what gets sharpened — never a pipeline override.
+    # ── Authoritative caption-position override over MG / B-roll windows ─
+    # The system prompt promises the pipeline owns caption position during
+    # MG and B-roll windows (and explicitly tells Gemini NOT to emit
+    # caption_position_changes for those windows). This is the code side
+    # of that contract. Any change Gemini emitted that landed inside an
+    # MG or B-roll window is overridden here in favor of the deterministic
+    # zone-clearing rule in _force_caption_position_around_overlays.
+    #
+    # Wired-in point: AFTER motion_graphics_out + broll_out have been
+    # finalized (B-roll collision drops at 10860+ already ran) but BEFORE
+    # caption_position_segments_out is sent to the Remotion overlay input.
+    # Every reposition is logged via _record_divergence — grep
+    # [divergence] component=caption_position for the exact frames.
+    _broll_ranges_for_caption_override = [
+        (int(_b.get("fromFrame") or 0),
+         int(_b.get("fromFrame") or 0) + int(_b.get("durationInFrames") or 0))
+        for _b in broll_out
+    ]
+    caption_position_segments_out = _force_caption_position_around_overlays(
+        caption_position_segments_out,
+        motion_graphics_out,
+        _broll_ranges_for_caption_override,
+    )
 
 
     # PromptlyOverlay input — captions/MG/text on a transparent canvas. The
