@@ -3373,7 +3373,7 @@ Pick each emphasis by the AUDIENCE REACTION it earns with sound on: laugh = punc
 
 **Variety happens at the moment, not the clip.** Pick the type each peak's actual reaction wants — the pipeline splits the underlying clip behind the scenes so adjacent emphases with different types each render their own. You are never forced to reuse a type because two peaks share a clip, so a row of identical zooms means you didn't ask what each moment wanted. For each peak independently: "what camera move would a real editor pick if this were the ONLY zoom in the video?"
 
-**Build-and-release pulse: the cut is the reset.** The default emphasis on a sustained moment — a claim landing, a serious point, a number arriving — is a slow push (SmoothPush, LetterboxPush) that begins gently and RESOLVES on the next cut. The lean-in mirrors how a listener leans toward something interesting; the cut snaps attention back. That push → cut release IS the rhythm of pro short-form editing, and it's what makes a series of zooms read as a pulse rather than scattered punches. SnapReframe is the EXCEPTION — reserved for the punchline or reaction beat where the sound itself earns a snap (a laugh, a gasp, the speaker's expression breaking). On tight-cut footage (most boundaries play as hard splices with no handle room), the cut itself IS the release — a slow push landing INTO a tight cut is the canonical move, and what would otherwise feel like a jump cut becomes the engine of the pulse.
+**Build-and-release pulse** — this governs HOW a peak you ALREADY chose moves, never WHICH moments get a zoom. The peak set is fixed upstream: the 3-5 true peaks in key_moments, never a build or breather word. This paragraph only shapes the motion of those few approved peaks. For a sustained peak (a payoff or mid_peak that lands and holds), the move is a slow push (SmoothPush, LetterboxPush) that begins gently and RESOLVES on the next cut — the lean-in mirrors how a listener leans toward something interesting; the cut snaps attention back. That push → cut release is the rhythm of pro short-form editing, and it is what makes the handful of zooms read as a composed pulse rather than scattered punches. SnapReframe is the EXCEPTION — reserved for the punchline or reaction beat where the sound itself earns a snap (a laugh, a gasp, the speaker's expression breaking). On tight-cut footage (most boundaries play as hard splices with no handle room), the cut itself IS the release — a slow push landing INTO a tight cut is the canonical move, and what would otherwise feel like a jump cut becomes the engine of the pulse. If this paragraph makes you want to add a zoom to a serious-sounding statement that is not one of your 3-5 true peaks, the answer is no zoom — a statement being important is not the same as it being a peak.
 
 ──────────────────────────────────────────
 PIPELINE MECHANICS — read carefully, these are load-bearing
@@ -3499,7 +3499,7 @@ A B-roll is a Pexels stock cutaway that fully replaces the speaker — a SHOT, n
 Entry shape:
   {{ "keyword": str (13-18 words), "start_word_index": int, "end_word_index": int, "reason": str }}
 
-**Keyword construction.** Start from the VERB the speaker is using, then add subject and setting: concrete noun + motion + mood, never abstract concepts. The clip should EVOKE the dialogue, not literally recreate its nouns. "The secretary came into my office" — not "modern office secretary typing on computer" (noun-recreation; the viewer sees the noun they just heard and gains nothing) but "anxious woman walking down corporate office hallway dim lighting late evening" (the approach itself). Abstract emotions ("feeling of dread") produce generic stock — always anchor on something filmable. 13-18 words, one subject doing one thing, context words only to disambiguate ("cinematic lighting" to filter cartoons). Each B-roll in the video must be visually distinct from the others — different settings, subjects, shot types. **The bar is one-result specificity:** subject + action + setting pinned tightly enough that the single top stock result can only be the thing the speaker described. If you can name two other dialogues that would also fit the same keyword, sharpen one more detail until you can't — that's when the cutaway will land.
+**Keyword construction.** First decide which KIND of moment this is, because the two kinds want opposite keywords. **(1) CONCRETE / PRODUCT / DEMO dialogue** — the speaker names a specific action, object, screen, app, or result the viewer must literally SEE to follow the point ("upload your video," "type in the vibe," "it launched on the App Store," "every edit is tailored"). Here the keyword must depict THAT LITERAL THING: the app interface, the upload happening on a screen, the actual object. An evocative stand-in fails here — for "upload your video," a person typing on a phone is literally a person typing on a phone, not uploading to an app, and a stock search will match the surface action to the wrong scene. Name the real thing: "screen recording uploading video file to mobile app interface progress bar." **(2) NARRATIVE / ABSTRACT dialogue** — the speaker describes a feeling, a scene, an approach, a story beat with no specific object the viewer must see ("the office she walked into," "the frustration of it all"). Here EVOKE, don't recreate the nouns: "The secretary came into my office" — not "modern office secretary typing on computer" (noun-recreation; the viewer gains nothing) but "anxious woman walking down corporate office hallway dim lighting late evening" (the approach itself). Abstract emotions ("feeling of dread") produce generic stock — always anchor on something filmable. **For BOTH kinds:** start from the VERB, add subject and setting (concrete noun + motion + mood), 13-18 words, one subject doing one thing, context words only to disambiguate ("cinematic lighting" to filter cartoons). Each B-roll must be visually distinct from the others. **The bar is one-result specificity:** pinned tightly enough that the single top stock result can only be the thing the speaker meant — and for concrete/demo dialogue, "the thing the speaker meant" is the literal action or object, not a vibe that rhymes with it. If you can name two other dialogues that would fit the same keyword, sharpen one more detail until you can't.
 
 **Window:** keep the cutaway on screen for exactly the phrase it illustrates — one word if the referent is one verb, a full sentence if it's a scene. The dialogue at those indices should describe what's in the cutaway. Don't pad with surrounding context; don't clip the phrase short.
 
@@ -8636,69 +8636,155 @@ def fetch_broll_clip(broll_entry, duration_needed, work_dir, dialogue_reason="",
                     pass
 
         if _candidate_frames and len(_candidate_frames) >= 2:
-            try:
-                _pick_client = _get_genai_client()
-                _spoken = (dialogue_text or "").strip()
-                _note = (dialogue_reason or "").strip()
-                _content_parts = []
-                _poster_idx_map = {}
-                _num = 1
-                for _ci in sorted(_candidate_frames.keys()):
-                    _desc = _top_n[_ci].get("slug_desc", "")
-                    _n_frames = len(_candidate_frames[_ci])
-                    _frame_label = f"({_n_frames} frames from this clip)" if _n_frames > 1 else ""
-                    _content_parts.append(f"\nOption {_num} — \"{_desc}\" {_frame_label}:")
-                    for _frame_bytes in _candidate_frames[_ci][:3]:
-                        _content_parts.append(genai_types.Part.from_bytes(
-                            data=_frame_bytes, mime_type="image/jpeg"
-                        ))
-                    _poster_idx_map[_num] = _ci
-                    _num += 1
-                _ctx_lines = []
-                if _spoken:
-                    _ctx_lines.append(f'The viewer hears these exact words: "{_spoken}"')
-                else:
-                    _ctx_lines.append(f'Search context: "{keyword}"')
-                if _note and _note.lower() != _spoken.lower():
-                    _ctx_lines.append(f'Editor\'s note for this cutaway: "{_note}"')
-                _content_parts.append(
-                    "\n" + "\n".join(_ctx_lines) + "\n"
-                    "Which clip would feel most natural playing on screen while the viewer hears those exact words? "
-                    "B-roll doesn't need to show the exact scene — it just needs to visually connect to what the speaker is actually saying. "
-                    "Pick the strongest match. Reply with ONLY the option number. "
-                    "NONE if every option is unrelated to the actual words being spoken."
-                )
+            _pick_client = _get_genai_client()
+            _spoken = (dialogue_text or "").strip()
+            _note = (dialogue_reason or "").strip()
+            _content_parts = []
+            _poster_idx_map = {}
+            _num = 1
+            for _ci in sorted(_candidate_frames.keys()):
+                _desc = _top_n[_ci].get("slug_desc", "")
+                _n_frames = len(_candidate_frames[_ci])
+                _frame_label = f"({_n_frames} frames from this clip)" if _n_frames > 1 else ""
+                _content_parts.append(f"\nOption {_num} — \"{_desc}\" {_frame_label}:")
+                for _frame_bytes in _candidate_frames[_ci][:3]:
+                    _content_parts.append(genai_types.Part.from_bytes(
+                        data=_frame_bytes, mime_type="image/jpeg"
+                    ))
+                _poster_idx_map[_num] = _ci
+                _num += 1
+            _ctx_lines = []
+            if _spoken:
+                _ctx_lines.append(f'The viewer hears these exact words: "{_spoken}"')
+            else:
+                _ctx_lines.append(f'Search context: "{keyword}"')
+            if _note and _note.lower() != _spoken.lower():
+                _ctx_lines.append(f'Editor\'s note for this cutaway: "{_note}"')
+            _ctx_block = "\n" + "\n".join(_ctx_lines) + "\n"
+            _instruction_base = (
+                "Which clip would feel most natural playing on screen while the viewer hears those exact words? "
+                "B-roll doesn't need to show the exact scene — it just needs to visually connect to what the speaker is actually saying. "
+                "Pick the strongest match. Reply with ONLY the option number. "
+                "NONE if every option is unrelated to the actual words being spoken."
+            )
+            _instruction_strict = (
+                _instruction_base
+                + " CRITICAL FORMAT: respond with a single digit only — "
+                  + ", ".join(f"'{i}'" for i in range(1, len(_poster_idx_map) + 1))
+                  + ", or 'NONE'. No words, no labels, no explanation, no formatting. Just the digit or 'NONE'."
+            )
 
-                _pick_t0 = time.time()
-                _pick_resp = _pick_client.models.generate_content(
-                    model=GEMINI_MODEL,
-                    contents=_content_parts,
-                    config=genai_types.GenerateContentConfig(
-                        temperature=0.2,
-                        max_output_tokens=128,
-                        thinking_config=genai_types.ThinkingConfig(thinking_budget=32),
-                    ),
-                )
-                _pick_elapsed = time.time() - _pick_t0
-                _pick_text = str(getattr(_pick_resp, "text", "") or "").strip().upper()
+            def _parse_pick(text):
+                """Returns one of ('NONE', None) / ('PICKED', valid_num) /
+                ('MALFORMED', None). Valid means the digit maps to an
+                actual option in _poster_idx_map."""
+                if "NONE" in text:
+                    return ("NONE", None)
+                for _ch in text:
+                    if _ch.isdigit():
+                        _n = int(_ch)
+                        if _n in _poster_idx_map:
+                            return ("PICKED", _n)
+                        return ("MALFORMED", None)
+                return ("MALFORMED", None)
 
-                if "NONE" in _pick_text:
-                    print(f"[broll] Gemini visual pick: NONE matched in {_pick_elapsed:.1f}s for '{keyword}' — skipping (no fallback)", flush=True)
+            def _attempt_pick(instruction):
+                """Single Gemini call + parse. Returns
+                (status, num, raw_text_or_error, elapsed_s).
+                On API exception returns ('ERROR', None, str(err), elapsed)."""
+                _parts = list(_content_parts) + [_ctx_block + instruction]
+                _t0 = time.time()
+                try:
+                    _resp = _pick_client.models.generate_content(
+                        model=GEMINI_MODEL,
+                        contents=_parts,
+                        config=genai_types.GenerateContentConfig(
+                            temperature=0.2,
+                            max_output_tokens=128,
+                            thinking_config=genai_types.ThinkingConfig(thinking_budget=32),
+                        ),
+                    )
+                except Exception as _e:
+                    return ("ERROR", None, str(_e), time.time() - _t0)
+                _text = str(getattr(_resp, "text", "") or "").strip().upper()
+                _status, _num_or_none = _parse_pick(_text)
+                return (_status, _num_or_none, _text, time.time() - _t0)
+
+            # First attempt — standard instruction.
+            _status1, _num1, _raw1, _elapsed1 = _attempt_pick(_instruction_base)
+            _pick_text = _raw1  # preserve for downstream log compatibility
+
+            if _status1 == "NONE":
+                print(
+                    f"[broll] Gemini visual pick: NONE matched in {_elapsed1:.1f}s "
+                    f"for '{keyword}' — skipping (no fallback)",
+                    flush=True,
+                )
+                return None
+            elif _status1 == "PICKED":
+                _winner_idx = _poster_idx_map[_num1]
+                _top_n[_winner_idx]["score"] += 50
+                print(
+                    f"[broll] Gemini visual pick: #{_num1} "
+                    f"('{_top_n[_winner_idx].get('slug_desc','')}') in "
+                    f"{_elapsed1:.1f}s for '{keyword}'",
+                    flush=True,
+                )
+            else:
+                # MALFORMED or ERROR on first attempt — re-issue with strict
+                # format instruction. Do NOT fall through to score-rank: a
+                # broken picker response is not a signal to trust the score.
+                _why1 = "MALFORMED" if _status1 == "MALFORMED" else f"ERROR ({_raw1})"
+                print(
+                    f"[broll] Gemini visual pick: {_why1} response='{_raw1[:80]}' "
+                    f"in {_elapsed1:.1f}s for '{keyword}' — re-issuing with strict format",
+                    flush=True,
+                )
+                _status2, _num2, _raw2, _elapsed2 = _attempt_pick(_instruction_strict)
+
+                if _status2 == "NONE":
+                    print(
+                        f"[broll] Gemini visual pick (strict re-pick): NONE matched in "
+                        f"{_elapsed2:.1f}s for '{keyword}' — skipping",
+                        flush=True,
+                    )
                     return None
+                elif _status2 == "PICKED":
+                    _winner_idx = _poster_idx_map[_num2]
+                    _top_n[_winner_idx]["score"] += 50
+                    print(
+                        f"[broll] Gemini visual pick (strict re-pick): #{_num2} "
+                        f"('{_top_n[_winner_idx].get('slug_desc','')}') in "
+                        f"{_elapsed2:.1f}s for '{keyword}'",
+                        flush=True,
+                    )
                 else:
-                    _pick_num = None
-                    for _ch in _pick_text:
-                        if _ch.isdigit():
-                            _pick_num = int(_ch)
-                            break
-                    if _pick_num and _pick_num in _poster_idx_map:
-                        _winner_idx = _poster_idx_map[_pick_num]
-                        _top_n[_winner_idx]["score"] += 50
-                        print(f"[broll] Gemini visual pick: #{_pick_num} ('{_top_n[_winner_idx].get('slug_desc','')}') in {_pick_elapsed:.1f}s for '{keyword}'", flush=True)
-                    else:
-                        print(f"[broll] Gemini visual pick: response='{_pick_text}' in {_pick_elapsed:.1f}s for '{keyword}'", flush=True)
-            except Exception as _pick_err:
-                print(f"[broll] Gemini visual pick error: {_pick_err}", flush=True)
+                    # Still malformed/errored after a strict re-pick. The
+                    # picker is genuinely failing on this candidate set.
+                    # Fall back to FACE (return None) rather than a
+                    # score-ranked stock clip — per the principle established
+                    # earlier this session, a weak/uncertain cutaway is
+                    # strictly worse than no cutaway.
+                    _why2 = "MALFORMED" if _status2 == "MALFORMED" else f"ERROR ({_raw2})"
+                    print(
+                        f"[broll] Gemini visual pick (strict re-pick): {_why2} "
+                        f"response='{_raw2[:80]}' for '{keyword}' — "
+                        f"dropping cutaway, falling back to face",
+                        flush=True,
+                    )
+                    _record_divergence(
+                        "broll",
+                        {
+                            "keyword": keyword,
+                            "picker_response_first": _raw1[:200],
+                            "picker_response_retry": _raw2[:200],
+                            "first_status": _status1,
+                            "retry_status": _status2,
+                        },
+                        "drop_face_fallback",
+                        reason="visual_pick_malformed_after_retry",
+                    )
+                    return None
 
         _candidates = _top_n + _candidates[5:]
 

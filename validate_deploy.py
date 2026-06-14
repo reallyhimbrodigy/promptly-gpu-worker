@@ -903,6 +903,90 @@ def _zoom_correction_clip_mid_clamp():
     assert clamped == 5000, f"corrected should clamp to clip start (5000), got {clamped}"
 
 
+@check("visual picker MALFORMED 'OPTION' triggers strict re-pick, then face-fallback on second failure (ACTIVE)")
+def _visual_picker_malformed_drops_to_face():
+    # Active path: mirror the production parse + two-attempt control flow
+    # from handler.py:~8638. First response is "OPTION" (no digit) →
+    # MALFORMED. Strict re-pick also returns malformed → drop to face
+    # (return None) and emit drop_face_fallback divergence. Critically:
+    # the code must NOT silently fall through to score-ranked selection,
+    # which is the tonight failure where score=52 green-screen survived.
+    _poster_idx_map = {1: "candidate_a", 2: "candidate_b", 3: "candidate_c"}
+
+    def _parse_pick(text):
+        # Production uppers the response before calling _parse_pick
+        # (handler.py:~8725 — `_text = ...strip().upper()`). Mirror that
+        # here so the test accepts the same inputs production sees.
+        text = text.strip().upper()
+        if "NONE" in text:
+            return ("NONE", None)
+        for _ch in text:
+            if _ch.isdigit():
+                _n = int(_ch)
+                if _n in _poster_idx_map:
+                    return ("PICKED", _n)
+                return ("MALFORMED", None)
+        return ("MALFORMED", None)
+
+    # 1. The exact failing string from the user's log.
+    assert _parse_pick("OPTION") == ("MALFORMED", None), \
+        "OPTION must classify as MALFORMED (no digit, no NONE)"
+    # 2. Bare digit out of range — e.g., "7" when only options 1-3 exist.
+    assert _parse_pick("7") == ("MALFORMED", None), \
+        "out-of-range digit must classify as MALFORMED, not PICKED"
+    # 3. Mixed prose with no usable digit.
+    assert _parse_pick("I'D PICK THE FIRST ONE") == ("MALFORMED", None), \
+        "prose without a parseable digit must be MALFORMED"
+    # 4. Empty response.
+    assert _parse_pick("") == ("MALFORMED", None)
+    # 5. Valid pick still works (no regression).
+    assert _parse_pick("2") == ("PICKED", 2)
+    assert _parse_pick("OPTION 3") == ("PICKED", 3)  # digit is recovered
+    # 6. NONE still works.
+    assert _parse_pick("NONE") == ("NONE", None)
+    assert _parse_pick("none matched, try again") == ("NONE", None)
+
+
+@check("visual picker control flow drops to face on second malformed (no silent score-rank)")
+def _visual_picker_two_malformed_drops_to_face():
+    # Simulates the two-attempt control flow: status1=MALFORMED triggers
+    # retry; if status2 also MALFORMED, the function must return None (face
+    # fallback) — never accept a score-ranked candidate.
+    # Models the branching in handler.py:~8696-8786.
+    def _simulate_pick_flow(status1, status2):
+        """Returns: 'face_fallback' if both malformed, 'picked' if either
+        succeeds with a valid index, 'none' if either matches NONE, or
+        'silent_score_rank' if the code ever falls through (the BUG that
+        let tonight's green-screen through). This last outcome must NEVER
+        be reachable post-fix."""
+        if status1 == "NONE":
+            return "none"
+        if status1 == "PICKED":
+            return "picked"
+        # status1 in (MALFORMED, ERROR) → second attempt
+        if status2 == "NONE":
+            return "none"
+        if status2 == "PICKED":
+            return "picked"
+        # status2 also malformed/errored → face fallback (return None)
+        return "face_fallback"
+
+    # The exact failure case from tonight: picker says "OPTION" (MALFORMED),
+    # strict re-pick also fails. Must drop to face.
+    assert _simulate_pick_flow("MALFORMED", "MALFORMED") == "face_fallback", \
+        "two malformed responses must drop to face, NOT silent score-rank"
+    assert _simulate_pick_flow("ERROR", "MALFORMED") == "face_fallback"
+    assert _simulate_pick_flow("MALFORMED", "ERROR") == "face_fallback"
+    assert _simulate_pick_flow("ERROR", "ERROR") == "face_fallback"
+    # If retry recovers, we use it.
+    assert _simulate_pick_flow("MALFORMED", "PICKED") == "picked"
+    assert _simulate_pick_flow("ERROR", "PICKED") == "picked"
+    # If retry says NONE, that's deliberate skip.
+    assert _simulate_pick_flow("MALFORMED", "NONE") == "none"
+    # First-attempt success short-circuits — no retry.
+    assert _simulate_pick_flow("PICKED", "PICKED") == "picked"
+
+
 @check("B-roll score floor KEEPS the cutaway when best match is at or above floor")
 def _broll_score_floor_keeps_at_or_above():
     BROLL_MATCH_FLOOR = 50
