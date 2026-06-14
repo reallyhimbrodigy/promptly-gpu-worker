@@ -27,14 +27,19 @@ HANDLER_VERSION = "3.2.0"
 # is too low for any decision in this pipeline; the cost/latency premium of
 # Pro is worth it for consistent quality across every call.
 #
-# Google deprecated gemini-3-pro-preview on 2026-03-09 and replaced it with
-# gemini-3.1-pro-preview. 3.1 Pro went GA; previous 404 attempting the
-# swap was on an API key without GA access. New key (2026-06-14) has
-# access — back to GA SKU. If this 404s again, check the
-# [startup] available gemini-3.x models: line printed at container
-# init for the exact list of model IDs this key can call.
-GEMINI_MODEL = "gemini-3.1-pro"
-GEMINI_EDITORIAL_MODEL = "gemini-3.1-pro"
+# Gemini 3.1 Pro is STILL IN PREVIEW per Google's docs at
+# https://ai.google.dev/gemini-api/docs/models (verified 2026-06-14).
+# There is no `gemini-3.1-pro` GA SKU yet — the only working API ID is
+# `gemini-3.1-pro-preview`. Confirmed twice now: tried the GA swap
+# 2026-06-14 morning (404), reverted, billing was empty so we hypothesized
+# the 404 was downstream of the 429 prepayment-depleted error, paid for
+# credits, tried again — still 404. Google's docs are authoritative:
+# 3.1 Pro = Preview. When Google ships the GA SKU, the startup
+# diagnostic (`[startup] available gemini-3.x models:` line, see
+# _log_available_gemini_models below) will show the new ID and we
+# can swap to a VERIFIED name from the API, not a guessed one.
+GEMINI_MODEL = "gemini-3.1-pro-preview"
+GEMINI_EDITORIAL_MODEL = "gemini-3.1-pro-preview"
 # Bump when the edit_plan schema or render pipeline changes in a way that breaks
 # replay of older persisted plans. Returned in every job response so the server
 # can tag video_jobs.render_version and gate re-edit compatibility.
