@@ -28,15 +28,13 @@ HANDLER_VERSION = "3.2.0"
 # Pro is worth it for consistent quality across every call.
 #
 # Google deprecated gemini-3-pro-preview on 2026-03-09 and replaced it with
-# gemini-3.1-pro-preview. There is no `gemini-3-pro` GA SKU (404). On
-# 2026-06-14 I tried switching to `gemini-3.1-pro` thinking it had gone
-# GA — also 404. Reverted to the preview SKU. Before the next attempt
-# to migrate off preview, RUN ListModels against the API key
-# (genai.models.list()) and pick the actual returned ID — do not guess
-# at GA naming conventions. The preview SKU works; switching to a name
-# the API doesn't recognize fails every render.
-GEMINI_MODEL = "gemini-3.1-pro-preview"
-GEMINI_EDITORIAL_MODEL = "gemini-3.1-pro-preview"
+# gemini-3.1-pro-preview. 3.1 Pro went GA; previous 404 attempting the
+# swap was on an API key without GA access. New key (2026-06-14) has
+# access — back to GA SKU. If this 404s again, check the
+# [startup] available gemini-3.x models: line printed at container
+# init for the exact list of model IDs this key can call.
+GEMINI_MODEL = "gemini-3.1-pro"
+GEMINI_EDITORIAL_MODEL = "gemini-3.1-pro"
 # Bump when the edit_plan schema or render pipeline changes in a way that breaks
 # replay of older persisted plans. Returned in every job response so the server
 # can tag video_jobs.render_version and gate re-edit compatibility.
@@ -550,6 +548,45 @@ except Exception as e:
     print(f"[startup] google-genai SDK FAILED: {e}", flush=True)
     genai_client_mod = None
     genai_types = None
+
+
+def _log_available_gemini_models():
+    """One-time startup diagnostic: list gemini-3.x models this API key
+    can call. Printed under `[startup]` so it shows in every container
+    init log — when a model 404s, the next render's startup log shows
+    exactly what IDs are available without needing another roundtrip.
+    Failures are swallowed (this is observability, never blocks)."""
+    if genai_client_mod is None:
+        return
+    _api_key = os.environ.get("GEMINI_API_KEY")
+    if not _api_key:
+        print("[startup] GEMINI_API_KEY not set — skipping ListModels", flush=True)
+        return
+    try:
+        _probe_client = genai_client_mod.Client(api_key=_api_key)
+        _names = []
+        for _m in _probe_client.models.list():
+            _nm = str(getattr(_m, "name", "") or "")
+            if "gemini-3" in _nm:
+                _methods = list(getattr(_m, "supported_generation_methods", []) or [])
+                _names.append(f"{_nm} {_methods}" if _methods else _nm)
+        if _names:
+            print(
+                "[startup] available gemini-3.x models: "
+                + ", ".join(_names),
+                flush=True,
+            )
+        else:
+            print(
+                "[startup] WARNING: ListModels returned NO gemini-3.x models "
+                "for this API key — the key may lack access to Gemini 3.x",
+                flush=True,
+            )
+    except Exception as _le:
+        print(f"[startup] ListModels failed (non-blocking): {_le}", flush=True)
+
+
+_log_available_gemini_models()
 
 def _get_genai_client():
     """Get or create the Gemini API client (lazy init with API key from env)."""
