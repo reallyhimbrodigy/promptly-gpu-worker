@@ -3850,8 +3850,8 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
 
   "transitions": [
     {{
-      "after_word_index": int,                    // ALWAYS from the CUT BOUNDARIES list
-      "type": "CardSwipe" | "ZoomThrough" | "SlideOver" | "Stack" | "CrossfadeZoom" | "ShutterFlash" | "StepPush" | "NewspaperWipe" | "FilmStrip" | "SceneTitle"
+      "after_word_index": int,                    // CUT BOUNDARIES (any type) or TIGHT BOUNDARIES (DipToBlack only)
+      "type": "CardSwipe" | "ZoomThrough" | "SlideOver" | "Stack" | "CrossfadeZoom" | "ShutterFlash" | "StepPush" | "NewspaperWipe" | "FilmStrip" | "SceneTitle" | "DipToBlack"
       // ...transition-specific props per the TRANSITIONS section
     }}
   ],
@@ -7858,14 +7858,11 @@ For each chosen `after_word_index`, pick a transition `type` whose character mat
     else:
         edit_plan["audio_denoise"] = bool(_ad)
 
-    # Transitions — one of the 11 pack transitions (PascalCase). "none" kept
-    # as a valid sentinel for no transition.
-    valid_transitions = {
-        "none",
-        "CardSwipe", "ZoomThrough", "SlideOver", "Stack", "CrossfadeZoom",
-        "ShutterFlash", "StepPush", "NewspaperWipe", "FilmStrip",
-        "SceneTitle",
-    }
+    # Transitions — mirror VALID_TRANSITION_TYPES so adding a type only
+    # edits ONE place (rather than re-syncing several duplicated sets,
+    # which is what caused the DipToBlack derivation-bug crash). "none"
+    # kept as a valid sentinel for no transition.
+    valid_transitions = set(VALID_TRANSITION_TYPES) | {"none"}
 
     final_cuts = []
     for _ci, clip_entry in enumerate(validated_cuts):

@@ -1100,6 +1100,49 @@ def _diptoblack_registry_ready():
     )
 
 
+@check("transition-type source-of-truth consistency: no hardcoded duplicate set drift")
+def _no_hardcoded_transition_set_drift():
+    # The DipToBlack rollout crashed on a hardcoded duplicate of the
+    # transition-type set at handler.py:~7865 that didn't include the new
+    # type. This check pins every place that enumerates transition types
+    # against VALID_TRANSITION_TYPES so the same drift cannot recur for
+    # the NEXT type added.
+    import os
+    _root = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(_root, "handler.py"), "r") as _f:
+        _src = _f.read()
+
+    # The sanity check at handler.py:~7865 (validated_cuts transition_out)
+    # MUST mirror VALID_TRANSITION_TYPES, not hardcode the list.
+    assert "valid_transitions = set(VALID_TRANSITION_TYPES) | {\"none\"}" in _src, (
+        "validated_cuts sanity check at handler.py:~7865 no longer "
+        "mirrors VALID_TRANSITION_TYPES. A hardcoded subset will drift "
+        "the next time a transition type is added (DipToBlack crash, "
+        "deployed render 2026-06-14 21:43Z)."
+    )
+
+    # The generate-edit transition validator at handler.py:~6452 also
+    # must mirror VALID_TRANSITION_TYPES (not the old hardcoded set).
+    assert "_valid_tr_types = set(VALID_TRANSITION_TYPES)" in _src, (
+        "transition validator at handler.py:~6452 no longer mirrors "
+        "VALID_TRANSITION_TYPES — risk of the same drift class."
+    )
+
+    # The prompt's transitions schema example MUST include DipToBlack.
+    # If we add another type in the future, this assertion will catch a
+    # forgotten update.
+    _expected_in_schema_line = (
+        '"CardSwipe" | "ZoomThrough" | "SlideOver" | "Stack" | '
+        '"CrossfadeZoom" | "ShutterFlash" | "StepPush" | "NewspaperWipe" | '
+        '"FilmStrip" | "SceneTitle" | "DipToBlack"'
+    )
+    assert _expected_in_schema_line in _src, (
+        "Prompt schema example for transitions/type at handler.py:~3854 "
+        "no longer lists every VALID_TRANSITION_TYPES entry. Gemini may "
+        "not see DipToBlack as a valid type and stop emitting it."
+    )
+
+
 @check("get_output_clip_ranges: additive slot inserts trans_dur between cuts (ACTIVE)")
 def _additive_slot_inserts_time():
     # Two clips, gap=0 (tight cut), DipToBlack additive slot.
