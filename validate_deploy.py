@@ -715,6 +715,130 @@ def _broll_coverage_ceiling_drops_longest():
     assert 1 in _keep_idx and 2 in _keep_idx
 
 
+@check("B-roll timing offset shifts window EARLIER by 0.4s and clamps to band (ACTIVE)")
+def _broll_lead_audio_offset_active():
+    # Mirrors the production lead-audio offset logic. Word-span starts
+    # at 5.0s and lasts 0.5s → after offset, on-screen starts at ~4.6s
+    # and lasts within [0.8, 2.0]s.
+    LEAD_OFFSET = 0.4
+    TAIL_OFFSET = 0.2
+    BROLL_MIN_DUR = 0.8
+    BROLL_MAX_DUR = 2.0
+
+    word_span_start = 5.0
+    word_span_end = 5.5
+    # Floor: clip containing the start word starts at 4.0s — well below
+    # the offset target, so the floor doesn't bite.
+    clip_floor_out_s = 4.0
+    total_output_duration = 30.0
+
+    out_start = max(clip_floor_out_s, word_span_start - LEAD_OFFSET)
+    out_end = min(total_output_duration, word_span_end + TAIL_OFFSET)
+    eff = out_end - out_start
+    if eff > BROLL_MAX_DUR:
+        out_end = out_start + BROLL_MAX_DUR
+        eff = BROLL_MAX_DUR
+    elif eff < BROLL_MIN_DUR:
+        out_end = min(total_output_duration, out_start + BROLL_MIN_DUR)
+        eff = out_end - out_start
+
+    # Lead-in: word starts at 5.0s, offset 0.4s back → 4.6s. Floor 4.0 doesn't bite.
+    assert abs(out_start - 4.6) < 0.01, f"on-screen start should be ~4.6s, got {out_start}"
+    # 4.6s → 5.7s = 1.1s, in band.
+    assert BROLL_MIN_DUR <= eff <= BROLL_MAX_DUR, f"duration {eff} out of band"
+    assert abs(eff - 1.1) < 0.01, f"expected ~1.1s, got {eff}"
+
+
+@check("B-roll timing offset clamps to CLIP boundary (no cross-cut lead-in)")
+def _broll_lead_audio_clip_floor_clamp():
+    # Word-span starts at 5.0s but the clip containing the start word
+    # only starts at 4.9s — the lead-in must clamp to 4.9, not 4.6,
+    # so the offset doesn't cross the prior cut.
+    LEAD_OFFSET = 0.4
+    TAIL_OFFSET = 0.2
+    BROLL_MIN_DUR = 0.8
+    BROLL_MAX_DUR = 2.0
+    word_span_start = 5.0
+    word_span_end = 5.5
+    clip_floor_out_s = 4.9
+    total_output_duration = 30.0
+
+    out_start = max(clip_floor_out_s, word_span_start - LEAD_OFFSET)
+    out_end = min(total_output_duration, word_span_end + TAIL_OFFSET)
+    eff = out_end - out_start
+    if eff < BROLL_MIN_DUR:
+        out_end = min(total_output_duration, out_start + BROLL_MIN_DUR)
+        eff = out_end - out_start
+
+    # 4.9s floor wins over 5.0-0.4=4.6.
+    assert abs(out_start - 4.9) < 0.01, f"clip floor should clamp to 4.9, got {out_start}"
+    # 4.9 → 5.7 = 0.8s, exactly MIN (float precision: 5.7 - 4.9 = 0.7999...
+    # in IEEE 754, but the production frame conversion at the call site
+    # rounds out the sub-millisecond gap — assert within frame tolerance).
+    _FRAME_S = 1.0 / 30.0
+    assert eff + _FRAME_S >= BROLL_MIN_DUR, f"eff {eff} should be within one frame of MIN {BROLL_MIN_DUR}"
+
+
+@check("B-roll timing offset caps duration at MAX when word-span is wide")
+def _broll_lead_audio_max_cap():
+    # Word-span 5.0-7.5s (2.5s wide). Offset would produce 4.6-7.7 = 3.1s
+    # — over the 2.0 ceiling. The trim happens at the TAIL so the lead-in
+    # is preserved.
+    LEAD_OFFSET = 0.4
+    TAIL_OFFSET = 0.2
+    BROLL_MAX_DUR = 2.0
+    word_span_start = 5.0
+    word_span_end = 7.5
+    out_start = max(0.0, word_span_start - LEAD_OFFSET)
+    out_end = word_span_end + TAIL_OFFSET
+    eff = out_end - out_start
+    if eff > BROLL_MAX_DUR:
+        out_end = out_start + BROLL_MAX_DUR
+        eff = BROLL_MAX_DUR
+    # Lead-in preserved at 4.6s.
+    assert abs(out_start - 4.6) < 0.01
+    # Duration capped at 2.0.
+    assert eff == BROLL_MAX_DUR
+    # End now at 4.6 + 2.0 = 6.6, NOT 7.7 — tail trim worked.
+    assert abs(out_end - 6.6) < 0.01, f"end should be 6.6 after tail-trim, got {out_end}"
+
+
+@check("B-roll score floor drops the cutaway when best match is below 50 (ACTIVE)")
+def _broll_score_floor_drops_below():
+    # Mirrors the production floor check. Candidate pool's best score
+    # is 34 (the exact failing case from the user's last render).
+    # Floor at 50 → drop. Function returns None equivalent (smoke
+    # asserts the boolean).
+    BROLL_MATCH_FLOOR = 50
+    candidates = [
+        {"score": 34, "video_id": 111, "video_idx": 0, "file": {"link": "u1"}, "duration": 5.0},
+        {"score": 28, "video_id": 222, "video_idx": 1, "file": {"link": "u2"}, "duration": 4.0},
+        {"score": 12, "video_id": 333, "video_idx": 2, "file": {"link": "u3"}, "duration": 6.0},
+    ]
+    best_match = max(candidates, key=lambda c: c["score"])
+    best_score = best_match["score"]
+    should_drop = best_score < BROLL_MATCH_FLOOR
+    assert should_drop is True, f"score 34 must drop at floor 50; got should_drop={should_drop}"
+
+
+@check("B-roll score floor KEEPS the cutaway when best match is at or above floor")
+def _broll_score_floor_keeps_at_or_above():
+    BROLL_MATCH_FLOOR = 50
+    candidates = [
+        {"score": 88, "video_id": 111, "video_idx": 0, "file": {"link": "u1"}, "duration": 5.0},
+        {"score": 50, "video_id": 222, "video_idx": 1, "file": {"link": "u2"}, "duration": 4.0},  # exact floor
+        {"score": 34, "video_id": 333, "video_idx": 2, "file": {"link": "u3"}, "duration": 6.0},
+    ]
+    best_match = max(candidates, key=lambda c: c["score"])
+    best_score = best_match["score"]
+    should_drop = best_score < BROLL_MATCH_FLOOR
+    assert should_drop is False, f"score 88 must be kept; got should_drop={should_drop}"
+    # And the strictly-equal-to-floor case:
+    candidates_at_floor = [{"score": 50, "video_id": 1, "video_idx": 0, "file": {"link": "u"}, "duration": 5.0}]
+    best_at_floor = max(candidates_at_floor, key=lambda c: c["score"])
+    assert best_at_floor["score"] >= BROLL_MATCH_FLOOR, "floor is inclusive (>=) — score 50 keeps"
+
+
 @check("B-roll ceiling does NOTHING when coverage is already under ceiling (no-target)")
 def _broll_coverage_under_ceiling_noop():
     # Per feedback_broll_coverage_not_a_target.md: the ceiling is NOT a

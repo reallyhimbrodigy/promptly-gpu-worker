@@ -3299,6 +3299,8 @@ Pick each emphasis by the AUDIENCE REACTION it earns with sound on: laugh = punc
 
 **Variety happens at the moment, not the clip.** Pick the type each peak's actual reaction wants — the pipeline splits the underlying clip behind the scenes so adjacent emphases with different types each render their own. You are never forced to reuse a type because two peaks share a clip, so a row of identical zooms means you didn't ask what each moment wanted. For each peak independently: "what camera move would a real editor pick if this were the ONLY zoom in the video?"
 
+**Build-and-release pulse: the cut is the reset.** The default emphasis on a sustained moment — a claim landing, a serious point, a number arriving — is a slow push (SmoothPush, LetterboxPush) that begins gently and RESOLVES on the next cut. The lean-in mirrors how a listener leans toward something interesting; the cut snaps attention back. That push → cut release IS the rhythm of pro short-form editing, and it's what makes a series of zooms read as a pulse rather than scattered punches. SnapReframe is the EXCEPTION — reserved for the punchline or reaction beat where the sound itself earns a snap (a laugh, a gasp, the speaker's expression breaking). On tight-cut footage (most boundaries play as hard splices with no handle room), the cut itself IS the release — a slow push landing INTO a tight cut is the canonical move, and what would otherwise feel like a jump cut becomes the engine of the pulse.
+
 ──────────────────────────────────────────
 PIPELINE MECHANICS — read carefully, these are load-bearing
 ──────────────────────────────────────────
@@ -3423,7 +3425,7 @@ A B-roll is a Pexels stock cutaway that fully replaces the speaker — a SHOT, n
 Entry shape:
   {{ "keyword": str (13-18 words), "start_word_index": int, "end_word_index": int, "reason": str }}
 
-**Keyword construction.** Start from the VERB the speaker is using, then add subject and setting: concrete noun + motion + mood, never abstract concepts. The clip should EVOKE the dialogue, not literally recreate its nouns. "The secretary came into my office" — not "modern office secretary typing on computer" (noun-recreation; the viewer sees the noun they just heard and gains nothing) but "anxious woman walking down corporate office hallway dim lighting late evening" (the approach itself). Abstract emotions ("feeling of dread") produce generic stock — always anchor on something filmable. 13-18 words, one subject doing one thing, context words only to disambiguate ("cinematic lighting" to filter cartoons). Each B-roll in the video must be visually distinct from the others — different settings, subjects, shot types.
+**Keyword construction.** Start from the VERB the speaker is using, then add subject and setting: concrete noun + motion + mood, never abstract concepts. The clip should EVOKE the dialogue, not literally recreate its nouns. "The secretary came into my office" — not "modern office secretary typing on computer" (noun-recreation; the viewer sees the noun they just heard and gains nothing) but "anxious woman walking down corporate office hallway dim lighting late evening" (the approach itself). Abstract emotions ("feeling of dread") produce generic stock — always anchor on something filmable. 13-18 words, one subject doing one thing, context words only to disambiguate ("cinematic lighting" to filter cartoons). Each B-roll in the video must be visually distinct from the others — different settings, subjects, shot types. **The bar is one-result specificity:** subject + action + setting pinned tightly enough that the single top stock result can only be the thing the speaker described. If you can name two other dialogues that would also fit the same keyword, sharpen one more detail until you can't — that's when the cutaway will land.
 
 **Window:** keep the cutaway on screen for exactly the phrase it illustrates — one word if the referent is one verb, a full sentence if it's a scene. The dialogue at those indices should describe what's in the cutaway. Don't pad with surrounding context; don't clip the phrase short.
 
@@ -8584,6 +8586,37 @@ def fetch_broll_clip(broll_entry, duration_needed, work_dir, dialogue_reason="",
         print(f"[broll] No portrait video files found across {len(videos)} results for '{keyword}' — SKIPPING", flush=True)
         return None
 
+    # ── Match-score floor ─────────────────────────────────────────────
+    # Generic/vague stock that doesn't match the dialogue is the #1
+    # amateur tell. The parallel two-phase search above already runs the
+    # original keyword AND a 4-5-content-word short variant in parallel
+    # (handler.py:~8348-8371) — so the candidate pool already reflects a
+    # re-query with the strongest content words. If the best candidate
+    # STILL scores below the floor, no further re-query will help: the
+    # keyword as constructed doesn't have a matching stock asset in
+    # Pexels. Drop the cutaway — the face is a fine default for that
+    # window. A weak/wrong cutaway is strictly worse than no cutaway.
+    _BROLL_MATCH_FLOOR = 50
+    if best_score < _BROLL_MATCH_FLOOR:
+        print(
+            f"[broll] DROP '{keyword}': best score {best_score} < floor "
+            f"{_BROLL_MATCH_FLOOR}; falling back to speaker for that window",
+            flush=True,
+        )
+        _record_divergence(
+            "broll",
+            {
+                "keyword": keyword,
+                "best_score": int(best_score),
+                "n_candidates": len(_candidates),
+                "floor": _BROLL_MATCH_FLOOR,
+            },
+            "drop",
+            final=None,
+            reason="below_match_score_floor",
+        )
+        return None
+
     chosen_file = best_match["file"]
     chosen_url = chosen_file["link"]
     if not chosen_url:
@@ -11311,14 +11344,60 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _out_end = float(_pw_end["end"])
         if _out_start >= total_output_duration or _out_end <= _out_start:
             continue
-        # AUTHORITATIVE word-span clamp: the cutaway plays for exactly
-        # the OUTPUT-time distance between the start word's output start
-        # and the end word's output end. Never the Pexels file's
-        # intrinsic length, never extended to fill. Per
-        # feedback_broll_coverage_not_a_target — the face is the default,
-        # B-roll is the exception.
+        # ── Lead-audio timing offset ─────────────────────────────────
+        # Research finding (consistent across pro short-form sources):
+        # viewers process visuals ~0.2-0.5s BEFORE the audio context
+        # connects. A cutaway anchored dead-on the word reads as late.
+        # Shift the on-screen window ~0.4s earlier and extend ~0.2s
+        # past the phrase, then clamp the total on-screen duration to
+        # the 0.8-2.0s vertical-short-form band.
+        # Clamps:
+        #   - Start floor: the OUTPUT start of the clip containing
+        #     the start word (never cross the prior cut)
+        #   - End ceiling: total runtime (never overshoot end of video)
+        #   - Duration band: [0.8, 2.0]s (trim TAIL first when over MAX
+        #     so we preserve the entire lead-in — the whole point of
+        #     the offset)
+        _LEAD_OFFSET = 0.4
+        _TAIL_OFFSET = 0.2
+        _BROLL_MIN_DUR = 0.8
+        _BROLL_MAX_DUR = 2.0
         _word_span_eff = _out_end - _out_start
-        _eff = _word_span_eff
+        # Find the clip range containing _out_start so the lead-in
+        # never crosses a cut boundary into the prior clip.
+        _clip_floor_out_s = 0.0
+        for _cr in _clip_ranges:
+            if float(_cr.get("start", 0.0)) <= _out_start < float(_cr.get("end", 0.0)):
+                _clip_floor_out_s = float(_cr["start"])
+                break
+        _orig_out_start = _out_start
+        _orig_out_end = _out_end
+        _out_start = max(_clip_floor_out_s, _out_start - _LEAD_OFFSET)
+        _out_end = min(total_output_duration, _out_end + _TAIL_OFFSET)
+        _eff = _out_end - _out_start
+        # Enforce duration band — trim TAIL when over MAX (preserve
+        # lead-in), extend tail when under MIN (don't add more lead).
+        if _eff > _BROLL_MAX_DUR:
+            _out_end = _out_start + _BROLL_MAX_DUR
+            _eff = _BROLL_MAX_DUR
+        elif _eff < _BROLL_MIN_DUR:
+            _out_end = min(total_output_duration, _out_start + _BROLL_MIN_DUR)
+            _eff = _out_end - _out_start
+        _record_divergence(
+            "broll_timing",
+            {
+                "word_span_start_s": round(_orig_out_start, 3),
+                "word_span_end_s": round(_orig_out_end, 3),
+                "word_span_dur_s": round(_word_span_eff, 3),
+            },
+            "shifted_to_lead_audio",
+            final={
+                "onscreen_start_s": round(_out_start, 3),
+                "onscreen_end_s": round(_out_end, 3),
+                "onscreen_dur_s": round(_eff, 3),
+            },
+            reason=f"lead_audio_{_LEAD_OFFSET}s",
+        )
         _br_dur = get_video_duration(_local_path)
         # If the Pexels file is SHORTER than the word span, the
         # cutaway plays for the Pexels length (can't show more frames
