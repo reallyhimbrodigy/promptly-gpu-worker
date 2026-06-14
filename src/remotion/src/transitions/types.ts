@@ -66,6 +66,8 @@ export interface FilmStripProps extends TransitionProps {
   advanceFrames?: number;
 }
 
+export interface DipToBlackProps extends TransitionProps {}
+
 export interface SceneTitleProps extends TransitionProps {
   title: string;
   label?: string;

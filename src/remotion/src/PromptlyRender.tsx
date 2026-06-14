@@ -28,10 +28,11 @@ import {
   MagazineCutout, Passage, Pulse, Quintessence, Serif,
 } from "./captions";
 
-// Transitions — all 11
+// Transitions — all 12
 import {
   CardSwipe, ZoomThrough, SlideOver, Stack, CrossfadeZoom,
   ShutterFlash, LightLeak, StepPush, NewspaperWipe, FilmStrip, SceneTitle,
+  DipToBlack,
 } from "./transitions";
 
 // Zoom effects — all 7
@@ -59,6 +60,7 @@ const CAPTION_MAP: Record<string, React.FC<any>> = {
 const TRANSITION_MAP: Record<string, React.FC<any>> = {
   CardSwipe, ZoomThrough, SlideOver, Stack, CrossfadeZoom,
   ShutterFlash, LightLeak, StepPush, NewspaperWipe, FilmStrip, SceneTitle,
+  DipToBlack,
 };
 
 const ZOOM_MAP: Record<string, React.FC<any>> = {

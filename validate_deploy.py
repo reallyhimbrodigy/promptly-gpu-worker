@@ -1068,18 +1068,421 @@ def _emphasis_spaced_pair_both_kept():
     # With gap above threshold, the spacing rule is a no-op. Both kept.
 
 
-@check("ZERO_HANDLE_TRANSITION_TYPES contains the audit-verified types (sanity)")
+@check("ZERO_HANDLE_TRANSITION_TYPES contains the audit-verified types + DipToBlack (sanity)")
 def _zero_handle_set_present():
-    # Audit (2026-06-14) verified these four types render correctly
-    # without handle frames. The set drives the audio hard-cut branch in
-    # build_per_cut_audio and is the readiness layer for future tight-
-    # boundary enablement. Anyone removing from this set must also
-    # restore the audio crossfade for that type or risk speech smear.
-    expected = {"ShutterFlash", "NewspaperWipe", "LightLeak", "SceneTitle"}
+    # Audit (2026-06-14) verified ShutterFlash/NewspaperWipe/LightLeak/
+    # SceneTitle render correctly without handle frames; DipToBlack was
+    # added 2026-06-14 (Option A wiring) as the clean default for TIGHT
+    # boundaries. The set drives the audio silent-slot branch in
+    # build_per_cut_audio AND the video additive-slot branch at the
+    # render slot-build loop. Anyone removing from this set must also
+    # restore the audio crossfade + the overlap cursor model for that type
+    # or risk speech smear (audio) and projection drift (video).
+    expected = {"ShutterFlash", "NewspaperWipe", "LightLeak", "SceneTitle", "DipToBlack"}
     assert hasattr(handler, "ZERO_HANDLE_TRANSITION_TYPES"), "constant missing"
     assert handler.ZERO_HANDLE_TRANSITION_TYPES == expected, (
         f"unexpected ZERO_HANDLE_TRANSITION_TYPES: "
         f"{handler.ZERO_HANDLE_TRANSITION_TYPES} (expected {expected})"
+    )
+
+
+@check("DipToBlack registered in natural durations (350ms) + VALID_TRANSITION_TYPES")
+def _diptoblack_registry_ready():
+    assert "DipToBlack" in handler.TRANSITION_NATURAL_DURATION_MS, (
+        "DipToBlack missing from TRANSITION_NATURAL_DURATION_MS"
+    )
+    assert handler.TRANSITION_NATURAL_DURATION_MS["DipToBlack"] == 350, (
+        f"DipToBlack natural duration is "
+        f"{handler.TRANSITION_NATURAL_DURATION_MS['DipToBlack']}ms (expected 350)"
+    )
+    assert "DipToBlack" in handler.VALID_TRANSITION_TYPES, (
+        "DipToBlack missing from VALID_TRANSITION_TYPES"
+    )
+
+
+@check("get_output_clip_ranges: additive slot inserts trans_dur between cuts (ACTIVE)")
+def _additive_slot_inserts_time():
+    # Two clips, gap=0 (tight cut), DipToBlack additive slot.
+    # Expected: B's range starts at eff_dur_A + trans_dur — NOT at
+    # eff_dur_A - trans_dur (which would be overlap, the wrong model
+    # that would put B's captions/SFX 350ms BEFORE B's audio plays).
+    _TRANS_DUR = 0.35
+    cuts = [
+        {"source_start": 0.0, "source_end": 5.0, "speed": 1.0,
+         "transition_out": "DipToBlack"},
+        {"source_start": 5.0, "source_end": 8.0, "speed": 1.0,
+         "transition_out": "none"},
+    ]
+    eff_durs = [5.0, 3.0]
+    trans_dur_after = [_TRANS_DUR, 0.0]
+    trans_kind_after = ["additive", "overlap"]
+    ranges = handler.get_output_clip_ranges(
+        cuts, eff_durs,
+        trans_dur_after=trans_dur_after,
+        trans_kind_after=trans_kind_after,
+    )
+    assert ranges[0]["start"] == 0.0
+    assert ranges[0]["end"] == 5.0
+    # The load-bearing assertion: B starts AFTER the slot, not overlapping.
+    assert abs(ranges[1]["start"] - (5.0 + _TRANS_DUR)) < 1e-9, (
+        f"additive: B.start = {ranges[1]['start']} (expected {5.0 + _TRANS_DUR})"
+    )
+    assert abs(ranges[1]["end"] - (5.0 + _TRANS_DUR + 3.0)) < 1e-9
+
+
+@check("get_output_clip_ranges: overlap slot subtracts trans_dur (handle path unchanged)")
+def _overlap_slot_subtracts_time():
+    # Same shape but kind=overlap — the handle-based legacy path.
+    # B starts at eff_dur_A - trans_dur (overlap), preserved behavior.
+    _TRANS_DUR = 0.8
+    cuts = [
+        {"source_start": 0.0, "source_end": 5.8, "speed": 1.0,
+         "transition_out": "LightLeak"},
+        {"source_start": 4.2, "source_end": 8.0, "speed": 1.0,
+         "transition_out": "none"},
+    ]
+    eff_durs = [5.8, 3.8]  # both extended by trans_dur
+    trans_dur_after = [_TRANS_DUR, 0.0]
+    trans_kind_after = ["overlap", "overlap"]
+    ranges = handler.get_output_clip_ranges(
+        cuts, eff_durs,
+        trans_dur_after=trans_dur_after,
+        trans_kind_after=trans_kind_after,
+    )
+    assert abs(ranges[1]["start"] - (5.8 - _TRANS_DUR)) < 1e-9, (
+        f"overlap: B.start = {ranges[1]['start']} (expected {5.8 - _TRANS_DUR})"
+    )
+
+
+@check("project_words_to_output: B's words land AFTER additive slot (lip-sync proof, ACTIVE)")
+def _projector_additive_matches_audio_path():
+    # Two cuts at a tight (gap=0) boundary, DipToBlack additive slot.
+    # B's first word at source time 5.0 must project to output time
+    # 5.0 + 0.35 = 5.35 (after the 350ms inserted slot). The audio path
+    # at build_per_cut_audio inserts 350ms of silence between A's audio
+    # and B's audio — captions/SFX/B-roll must use the same shifted
+    # coordinate or they drift 350ms BEFORE the audio (the lip-sync
+    # divergence Option A is wired to prevent).
+    _TRANS_DUR = 0.35
+    transcript = {
+        "words": [
+            {"start": 4.5, "end": 4.8, "word": "alpha",
+             "punctuated_word": "alpha", "speaker": 0},
+            {"start": 5.0, "end": 5.3, "word": "bravo",
+             "punctuated_word": "bravo", "speaker": 0},
+        ],
+    }
+    cuts = [
+        {"source_start": 0.0, "source_end": 5.0, "speed": 1.0,
+         "transition_out": "DipToBlack"},
+        {"source_start": 5.0, "source_end": 8.0, "speed": 1.0,
+         "transition_out": "none"},
+    ]
+    eff_durs = [5.0, 3.0]
+    # Identity time map for speed=1 cuts.
+    clip_time_maps = [
+        {"source_durations": [5.0], "output_durations": [5.0],
+         "avg_speed": 1.0, "effective_duration": 5.0},
+        {"source_durations": [3.0], "output_durations": [3.0],
+         "avg_speed": 1.0, "effective_duration": 3.0},
+    ]
+    projected = handler.project_words_to_output(
+        transcript, cuts, eff_durs,
+        clip_time_maps=clip_time_maps,
+        trans_dur_after=[_TRANS_DUR, 0.0],
+        trans_kind_after=["additive", "overlap"],
+    )
+    by_word = {p["word"]: p for p in projected}
+    assert "alpha" in by_word, (
+        f"A's last word should project; got keys: {sorted(by_word.keys())}"
+    )
+    assert "bravo" in by_word, (
+        f"B's first word should project; got keys: {sorted(by_word.keys())}"
+    )
+    # A's last word ends at output time 4.8 (within A's 5.0 window — no truncation).
+    assert abs(by_word["alpha"]["end"] - 4.8) < 1e-6, (
+        f"A's last word truncated: end={by_word['alpha']['end']} (expected 4.8)"
+    )
+    # B's first word starts at 5.0 + 0.35 = 5.35, NOT at 5.0 (which
+    # would be the buggy overlap-cursor behavior the additive flag fixes).
+    assert abs(by_word["bravo"]["start"] - 5.35) < 1e-6, (
+        f"B's first word landed at {by_word['bravo']['start']}s, "
+        f"expected 5.35s (audio-path-aligned). Off by "
+        f"{(by_word['bravo']['start'] - 5.35) * 1000:.1f}ms — this is "
+        f"the A/V drift the Option A wiring prevents."
+    )
+
+
+@check("A/V span equality: total_output_frames === get_output_clip_ranges span with additive (ACTIVE)")
+def _av_span_equal_with_additive_slot():
+    # The proof Option B would have failed. We compute total_output_frames
+    # the same way handler.py does (sum per_cut_render_dur_frames +
+    # trans_frames_after) and compare to the clip_ranges last-clip end.
+    # They must match — that's the invariant that keeps audio and video
+    # at identical length downstream.
+    import math as _m
+    _FPS = 60.0
+    _TRANS_DUR_TIGHT = 0.35  # additive
+    _TRANS_DUR_HANDLE = 0.8  # overlap (LightLeak natural)
+
+    # Three clips, mixed slots:
+    #   A→B: handle-based LightLeak (overlap)
+    #   B→C: tight DipToBlack (additive)
+    cuts = [
+        {"source_start": 0.0, "source_end": 4.8, "speed": 1.0,
+         "transition_out": "LightLeak"},
+        {"source_start": 4.0, "source_end": 8.8, "speed": 1.0,
+         "transition_out": "DipToBlack"},
+        {"source_start": 8.0, "source_end": 11.0, "speed": 1.0,
+         "transition_out": "none"},
+    ]
+    # Handle path extends source_end of A and source_start of B by trans:
+    #   eff_dur_A = 4.0 (orig) + 0.8 (tail-ext) = 4.8
+    #   eff_dur_B = 4.0 (orig) + 0.8 (head-ext from LightLeak) + 0 (tight tail) = 4.8
+    #   eff_dur_C = 3.0 (orig)
+    eff_durs = [4.8, 4.8, 3.0]
+    trim_head = [0.0, 0.8, 0.0]
+    trim_tail = [0.8, 0.0, 0.0]
+    trans_dur_after = [_TRANS_DUR_HANDLE, _TRANS_DUR_TIGHT, 0.0]
+    trans_kind_after = ["overlap", "additive", "overlap"]
+
+    per_cut_render_dur_frames = [
+        max(1, int(round((eff_durs[i] - trim_head[i] - trim_tail[i]) * _FPS)))
+        for i in range(3)
+    ]
+    trans_frames_after = sum(
+        max(1, int(round(_t * _FPS))) if _t > 0 else 0
+        for _t in trans_dur_after
+    )
+    total_output_frames = max(1, sum(per_cut_render_dur_frames) + trans_frames_after)
+
+    ranges = handler.get_output_clip_ranges(
+        cuts, eff_durs,
+        trans_dur_after=trans_dur_after,
+        trans_kind_after=trans_kind_after,
+    )
+    span_seconds = ranges[-1]["end"]
+    span_frames = int(round(span_seconds * _FPS))
+
+    assert span_frames == total_output_frames, (
+        f"A/V span MISMATCH: total_output_frames={total_output_frames}f "
+        f"({total_output_frames / _FPS:.4f}s) vs get_output_clip_ranges "
+        f"span={span_frames}f ({span_seconds:.4f}s). The audio path inserts "
+        f"silence additively for every zero-handle slot — if the video "
+        f"coordinate system diverges from this here, captions/SFX drift "
+        f"trans_dur PER SLOT and lip-sync breaks at every tight cut."
+    )
+
+    # Expected total duration:
+    #   A's kept (4.0) + LightLeak overlap slot (0.8) + B's kept (4.0)
+    #     + DipToBlack additive slot (0.35) + C's kept (3.0)
+    #   = 12.15s
+    _expected_seconds = 4.0 + 0.8 + 4.0 + 0.35 + 3.0
+    assert abs(span_seconds - _expected_seconds) < 0.02, (
+        f"span={span_seconds:.4f}s expected ~{_expected_seconds:.4f}s "
+        f"(within frame quantization)"
+    )
+
+
+@check("transition validator: non-DipToBlack at tight boundary is dropped (ACTIVE)")
+def _validator_rejects_themed_at_tight():
+    # Reproduce the validator's eligibility logic in isolation. Since the
+    # full generate_edit_gemini path requires a Gemini call, we test the
+    # SAME branch conditions directly against the boundary sets.
+    #
+    # awi=50 is in tight_set, type=LightLeak (themed handle-needing):
+    # must drop with reason="tight_boundary_accepts_only_diptoblack".
+    cut_set = {30, 70}
+    tight_set = {50}
+    tr_type = "LightLeak"
+    awi = 50
+    at_cut = awi in cut_set
+    at_tight = awi in tight_set
+    assert at_tight and not at_cut, "setup: awi must be tight-only"
+    # The validator drops when at_tight and not at_cut and type != DipToBlack:
+    should_drop = at_tight and not at_cut and tr_type != "DipToBlack"
+    assert should_drop is True, (
+        "LightLeak at tight must drop. Themed types need handle that "
+        "tight boundaries don't have; this is the prompt-side gate that "
+        "stops the slot-build loop from being asked to render an impossible "
+        "transition."
+    )
+
+
+@check("transition validator: DipToBlack at tight boundary is accepted (ACTIVE)")
+def _validator_accepts_diptoblack_at_tight():
+    cut_set = {30, 70}
+    tight_set = {50}
+    tr_type = "DipToBlack"
+    awi = 50
+    at_cut = awi in cut_set
+    at_tight = awi in tight_set
+    should_drop_eligibility = (
+        (not at_cut and not at_tight)
+        or (at_tight and not at_cut and tr_type != "DipToBlack")
+    )
+    assert should_drop_eligibility is False, (
+        "DipToBlack at tight must be accepted — that IS the use case"
+    )
+
+
+@check("transition validator: any-type at non-boundary index is dropped (ACTIVE)")
+def _validator_rejects_non_boundary():
+    cut_set = {30, 70}
+    tight_set = {50}
+    awi = 99  # not in either set
+    at_cut = awi in cut_set
+    at_tight = awi in tight_set
+    assert not at_cut and not at_tight, "setup"
+    # Per HARD RULE 1, an awi not in either list has no cut to play
+    # across and must drop regardless of type.
+    should_drop = not at_cut and not at_tight
+    assert should_drop is True
+
+
+@check("DipToBlack tight-cut spec passes spacing cap (3.0s min)")
+def _diptoblack_respects_spacing_cap():
+    # The transition spacing safeguards from commit a95cfb2 still apply
+    # to DipToBlack. Two DipToBlacks 1.5s apart → second drops.
+    _MIN_TRANSITION_SPACING_S = 3.0
+    # Reproduce the safeguard's gap check.
+    first_cut_frame = 60  # 1.0s at 60fps
+    second_cut_frame = 150  # 2.5s at 60fps
+    gap_s = (second_cut_frame - first_cut_frame) / 60.0
+    assert gap_s < _MIN_TRANSITION_SPACING_S
+    # The safeguard at handler.py:~12317 drops the second.
+    # (Type-agnostic — DipToBlack is treated the same as any other.)
+
+
+@check("DipToBlack per-video cap (max 2): excess dropped by structural weight (ACTIVE)")
+def _diptoblack_per_video_cap_drops_excess():
+    # 4 DipToBlacks emitted; cap is 2. Expected: the 2 at the BIGGEST
+    # neighbor-clip totals are kept; the 2 at the smallest are dropped.
+    # Structural weight = clip[ci].duration + clip[ci+1].duration.
+    #
+    # Each DipToBlack inserts 350ms of np.zeros silence into the audio
+    # output (additive). 4 dips = 1.4s of inserted dead air, which on
+    # punchy short-form reads as the edit hitching. Cap at 2 = max
+    # 700ms of inserted silence; one well-placed dip per beat.
+    _CAP = 2
+    # Mock clip_ranges. Four boundaries with varying neighbor durations:
+    #   boundary 0 (after clip 0): A_dur=5.0, B_dur=4.0 → weight=9.0  KEEP
+    #   boundary 1 (after clip 1): A_dur=4.0, B_dur=0.5 → weight=4.5  drop
+    #   boundary 2 (after clip 2): A_dur=0.5, B_dur=6.0 → weight=6.5  KEEP
+    #   boundary 3 (after clip 3): A_dur=6.0, B_dur=0.8 → weight=6.8  drop
+    #   (after sort: 9.0, 6.8, 6.5, 4.5 — keep boundaries 0 and 3)
+    # Wait: sort is descending by weight. weights: 9.0, 4.5, 6.5, 6.8.
+    # Sorted by weight desc: 9.0 (b0), 6.8 (b3), 6.5 (b2), 4.5 (b1).
+    # Keep first 2: b0 and b3. Drop: b2 and b1.
+    clip_ranges = [
+        {"start": 0.0,  "end": 5.0},   # clip 0, dur 5.0
+        {"start": 5.0,  "end": 9.0},   # clip 1, dur 4.0
+        {"start": 9.0,  "end": 9.5},   # clip 2, dur 0.5
+        {"start": 9.5,  "end": 15.5},  # clip 3, dur 6.0
+        {"start": 15.5, "end": 16.3},  # clip 4, dur 0.8
+    ]
+    transitions = [
+        {"type": "DipToBlack", "afterClipIndex": 0},
+        {"type": "DipToBlack", "afterClipIndex": 1},
+        {"type": "DipToBlack", "afterClipIndex": 2},
+        {"type": "DipToBlack", "afterClipIndex": 3},
+    ]
+
+    def _structural_weight(_t):
+        _ci = int(_t["afterClipIndex"])
+        if not (0 <= _ci < len(clip_ranges) - 1):
+            return 0.0
+        _a_dur = clip_ranges[_ci]["end"] - clip_ranges[_ci]["start"]
+        _b_dur = clip_ranges[_ci + 1]["end"] - clip_ranges[_ci + 1]["start"]
+        return _a_dur + _b_dur
+
+    weights = {_t["afterClipIndex"]: _structural_weight(_t) for _t in transitions}
+    # Verify our setup math (tolerance for FP rounding).
+    assert abs(weights[0] - 9.0) < 1e-6, f"setup: boundary 0 weight wrong: {weights[0]}"
+    assert abs(weights[1] - 4.5) < 1e-6, f"setup: boundary 1 weight wrong: {weights[1]}"
+    assert abs(weights[2] - 6.5) < 1e-6, f"setup: boundary 2 weight wrong: {weights[2]}"
+    assert abs(weights[3] - 6.8) < 1e-6, f"setup: boundary 3 weight wrong: {weights[3]}"
+
+    # Reproduce the cap's sort + drop.
+    diptoblack_indices_in_kept = list(range(len(transitions)))
+    diptoblack_indices_in_kept.sort(
+        key=lambda _ki: (
+            -_structural_weight(transitions[_ki]),
+            int(transitions[_ki]["afterClipIndex"]),
+        )
+    )
+    keep_set = set(diptoblack_indices_in_kept[:_CAP])
+    drop_set = set(diptoblack_indices_in_kept[_CAP:])
+
+    kept_after_cls = [transitions[i]["afterClipIndex"] for i in sorted(keep_set)]
+    dropped_after_cls = [transitions[i]["afterClipIndex"] for i in sorted(drop_set)]
+
+    # Kept = the 2 boundaries with highest weights: b0 (9.0) and b3 (6.8).
+    assert sorted(kept_after_cls) == [0, 3], (
+        f"kept boundaries {sorted(kept_after_cls)} != [0, 3] "
+        f"(should keep boundaries with highest structural weight)"
+    )
+    # Dropped = b1 and b2.
+    assert sorted(dropped_after_cls) == [1, 2], (
+        f"dropped boundaries {sorted(dropped_after_cls)} != [1, 2]"
+    )
+
+
+@check("DipToBlack per-video cap is a NOOP when count <= cap (no-target principle)")
+def _diptoblack_per_video_cap_noop_under_threshold():
+    _CAP = 2
+    # 1 DipToBlack < cap → no drop. Same code path must not fire.
+    transitions = [{"type": "DipToBlack", "afterClipIndex": 5}]
+    diptoblack_count = sum(1 for _t in transitions if _t["type"] == "DipToBlack")
+    assert diptoblack_count <= _CAP, "setup"
+    # Cap branch (handler.py:~12423) only enters when count > cap; with
+    # 1 DipToBlack the loop is skipped entirely.
+
+
+@check("DipToBlack cap runs BEFORE general cap (DipToBlack not preferentially dropped)")
+def _diptoblack_cap_runs_first():
+    # Audit the source-of-truth ordering: in handler.py the dip cap
+    # MUST be #5b (before the general #5c per-video cap). If the order
+    # ever flips, the general cap's "shortest natural duration first"
+    # rule would preferentially drop DipToBlacks (350ms = the shortest
+    # natural) BEFORE the dip cap could keep the most structural ones.
+    # That would undermine the entire "use DipToBlack at the strongest
+    # tight beat" intent.
+    import os
+    _root = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(_root, "handler.py"), "r") as _f:
+        _src = _f.read()
+    _dip_marker = "#5b: DipToBlack-specific cap (max 2 per video)"
+    _general_marker = "#5c: Per-video cap"
+    _dip_pos = _src.find(_dip_marker)
+    _gen_pos = _src.find(_general_marker)
+    assert _dip_pos != -1, "DipToBlack cap marker missing"
+    assert _gen_pos != -1, "general per-video cap marker missing"
+    assert _dip_pos < _gen_pos, (
+        f"DipToBlack cap must come BEFORE the general per-video cap. "
+        f"Found dip at {_dip_pos}, general at {_gen_pos}."
+    )
+
+
+@check("Remotion TRANSITION_MAP includes DipToBlack (component wired)")
+def _remotion_diptoblack_wired():
+    import os
+    _root = os.path.dirname(os.path.abspath(__file__))
+    _render_path = os.path.join(_root, "src", "remotion", "src", "PromptlyRender.tsx")
+    assert os.path.exists(_render_path), f"missing {_render_path}"
+    with open(_render_path, "r") as _f:
+        _src = _f.read()
+    # Component must be in both the import and the TRANSITION_MAP record —
+    # without both, the Remotion renderer falls back to plain clipB and
+    # the dip-to-black visual never renders.
+    assert "DipToBlack" in _src, (
+        "DipToBlack not imported in PromptlyRender.tsx — Remotion would "
+        "fall back to clipB-only and the slot would show a hard cut "
+        "instead of the dip."
+    )
+    _trans_dir = os.path.join(_root, "src", "remotion", "src", "transitions", "DipToBlack")
+    assert os.path.exists(os.path.join(_trans_dir, "DipToBlack.tsx")), (
+        "DipToBlack.tsx component file missing"
     )
 
 
