@@ -209,7 +209,16 @@ image = (
         # (keywords→keyterm) and pyannote (use_auth_token→token). Same class
         # of bug, same fix: pin to a tested range.
         "google-genai>=1.0,<2",
-        "deepgram-sdk==3.4.0",
+        # 3.8.0+ adds Nova-3 keyterm prompting (PrerecordedOptions.keyterm).
+        # 3.4.0 was rejecting the keyterm kwarg with
+        # `TypeError: PrerecordedOptions.__init__() got an unexpected keyword
+        # argument 'keyterm'` — handler.py:_deepgram_options has been
+        # passing keyterm for Nova-3 since the Nova-2 → Nova-3 switch.
+        # Capped below 4.0 because 4.x is a major version with breaking
+        # changes to the listen-streaming API surface; the prerecorded
+        # surface we use is stable across the 3.x line and 3.8 → 3.10 is
+        # a minor-feature bump only.
+        "deepgram-sdk>=3.8.0,<4.0",
         "supabase",
         "boto3[crt]",   # AWS Common Runtime — 2-6× S3 throughput vs stock boto3
         "httpx",
