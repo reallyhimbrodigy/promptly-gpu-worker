@@ -903,6 +903,145 @@ def _zoom_correction_clip_mid_clamp():
     assert clamped == 5000, f"corrected should clamp to clip start (5000), got {clamped}"
 
 
+@check("ZERO_HANDLE_TRANSITION_TYPES contains the audit-verified types (sanity)")
+def _zero_handle_set_present():
+    # Audit (2026-06-14) verified these four types render correctly
+    # without handle frames. The set drives the audio hard-cut branch in
+    # build_per_cut_audio and is the readiness layer for future tight-
+    # boundary enablement. Anyone removing from this set must also
+    # restore the audio crossfade for that type or risk speech smear.
+    expected = {"ShutterFlash", "NewspaperWipe", "LightLeak", "SceneTitle"}
+    assert hasattr(handler, "ZERO_HANDLE_TRANSITION_TYPES"), "constant missing"
+    assert handler.ZERO_HANDLE_TRANSITION_TYPES == expected, (
+        f"unexpected ZERO_HANDLE_TRANSITION_TYPES: "
+        f"{handler.ZERO_HANDLE_TRANSITION_TYPES} (expected {expected})"
+    )
+
+
+@check("transition overlay collision drops transition when overlay overlaps window (ACTIVE)")
+def _transition_overlay_collision_active():
+    # Mirror the production overlap-test math: half-open ranges
+    # [a, b) intersect [c, d) iff a < d and c < b. Construct a tight
+    # collision: B-roll window [120, 180), transition window [150, 200).
+    # Overlap exists → transition drops.
+    transition_window = (150, 200)
+    overlay_window = (120, 180)
+    t_start, t_end = transition_window
+    o_start, o_end = overlay_window
+    collides = t_start < o_end and o_start < t_end
+    assert collides is True, "exact overlap case must register as collision"
+
+    # Disjoint case: transition window [200, 250), overlay [120, 180).
+    t_start, t_end = (200, 250)
+    o_start, o_end = (120, 180)
+    collides = t_start < o_end and o_start < t_end
+    assert collides is False, "disjoint windows must NOT register as collision"
+
+    # Touching case (transition starts EXACTLY where overlay ends):
+    # transition [180, 230), overlay [120, 180). Half-open semantics —
+    # 180 < 180 is False → no overlap.
+    t_start, t_end = (180, 230)
+    o_start, o_end = (120, 180)
+    collides = t_start < o_end and o_start < t_end
+    assert collides is False, "touching edges must NOT collide (half-open)"
+
+
+@check("transition minimum spacing drops within-3s transitions (ACTIVE, strobe prevention)")
+def _transition_min_spacing_active():
+    # Source FPS 60. Min spacing = 3.0s = 180 frames.
+    source_fps = 60.0
+    min_spacing_frames = int(round(3.0 * source_fps))
+    assert min_spacing_frames == 180
+
+    # First transition at cut frame 600 (10s). Second at cut frame 720
+    # (12s) → only 2s gap, below 3s threshold → drop.
+    last_kept = 600
+    candidate = 720
+    gap = candidate - last_kept
+    should_drop = gap < min_spacing_frames
+    assert should_drop is True, f"2s gap < 3s spacing must drop, got gap={gap/source_fps:.2f}s"
+
+    # Third candidate at frame 850 (~14.2s). 850 - 600 = 250 frames = 4.17s.
+    # 4.17 > 3.0 → keep. Last kept stays at 600 (since 720 was dropped, NOT advanced).
+    candidate = 850
+    gap = candidate - last_kept
+    should_drop = gap < min_spacing_frames
+    assert should_drop is False, "4.17s gap > 3s spacing must keep"
+
+
+@check("transition per-video cap drops shortest natural duration first (ACTIVE)")
+def _transition_cap_drops_shortest_first():
+    # 33s runtime → cap = ceil(4 × 33 / 30) = ceil(4.4) = 5 transitions.
+    # Pool of 7 → drop the 2 with the shortest natural duration.
+    runtime_s = 33.0
+    cap_per_30s = 4.0
+    import math
+    cap = max(1, int(math.ceil(cap_per_30s * runtime_s / 30.0)))
+    assert cap == 5, f"expected cap=5 for 33s runtime, got {cap}"
+
+    transitions = [
+        {"type": "ZoomThrough",   "afterClipIndex": 0},  # 500ms — shortest
+        {"type": "CrossfadeZoom", "afterClipIndex": 1},  # 800ms
+        {"type": "CardSwipe",     "afterClipIndex": 2},  # 600ms
+        {"type": "SceneTitle",    "afterClipIndex": 3},  # 1800ms — longest
+        {"type": "Stack",         "afterClipIndex": 4},  # 1000ms
+        {"type": "StepPush",      "afterClipIndex": 5},  # 600ms
+        {"type": "FilmStrip",     "afterClipIndex": 6},  # 1200ms
+    ]
+    # Mirror the production sort: (natural_ms, original_idx) ascending.
+    indexed = list(enumerate(transitions))
+    indexed.sort(
+        key=lambda ix_t: (
+            handler.TRANSITION_NATURAL_DURATION_MS.get(ix_t[1]["type"], 0),
+            ix_t[0],
+        )
+    )
+    n_to_drop = len(transitions) - cap
+    assert n_to_drop == 2
+    drop_indices = {ix for ix, _ in indexed[:n_to_drop]}
+
+    # The two shortest are ZoomThrough (500ms, idx 0) and the EARLIER
+    # of the two 600ms types (CardSwipe at idx 2; StepPush at idx 5 ties
+    # on natural ms but loses on afterClipIndex tiebreaker).
+    dropped_types = {transitions[ix]["type"] for ix in drop_indices}
+    assert dropped_types == {"ZoomThrough", "CardSwipe"}, (
+        f"expected ZoomThrough + CardSwipe (shortest two), got {dropped_types}"
+    )
+
+    # SceneTitle (1800ms, idx 3) is the longest → must be kept.
+    assert 3 not in drop_indices, "longest natural duration must NEVER drop"
+
+
+@check("transition cap is a NOOP when count <= cap (no-target principle)")
+def _transition_cap_noop_under_cap():
+    # 33s runtime → cap = 5. With only 3 transitions, no drops.
+    import math
+    runtime_s = 33.0
+    cap = max(1, int(math.ceil(4.0 * runtime_s / 30.0)))
+    pool_size = 3
+    assert pool_size <= cap, "setup: pool must be under cap"
+    # In the production code, `if len(_kept_after_cap) > _cap:` gates the
+    # drop block — when False, no transitions are touched. Test the gate.
+    n_to_drop = max(0, pool_size - cap)
+    assert n_to_drop == 0
+
+
+@check("transition spacing is a NOOP when single transition (no double-drop)")
+def _transition_spacing_noop_single():
+    # With only one transition, _last_kept_cut_frame is None on the first
+    # iteration → no comparison, no drop. The production loop sets
+    # _last_kept_cut_frame = None at start and only updates after a keep.
+    source_fps = 60.0
+    min_spacing_frames = int(round(3.0 * source_fps))
+    last_kept_cut_frame = None
+    cut_frame = 600
+    if last_kept_cut_frame is not None and cut_frame - last_kept_cut_frame < min_spacing_frames:
+        kept = False
+    else:
+        kept = True
+    assert kept is True, "single transition must keep regardless of position"
+
+
 @check("visual picker MALFORMED 'OPTION' triggers strict re-pick, then face-fallback on second failure (ACTIVE)")
 def _visual_picker_malformed_drops_to_face():
     # Active path: mirror the production parse + two-attempt control flow

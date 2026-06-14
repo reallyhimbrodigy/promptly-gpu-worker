@@ -9141,6 +9141,29 @@ TRANSITION_NATURAL_DURATION_MS = {
     "SceneTitle":   1800,
 }
 
+# ── Zero-handle transition class ──────────────────────────────────────
+# Transitions whose renderers either (a) render ONE clip at a time and
+# swap at peak under a cover graphic (NewspaperWipe, LightLeak,
+# SceneTitle) or (b) squash both clips into invisibility under a
+# generated overlay at peak (ShutterFlash). These technically don't
+# need handle frames — they work even when the audio gap is 0ms.
+#
+# Architecture note (2026-06-14): the four documented zero-handle-viable
+# types are listed here so the audio-hard-cut path in build_per_cut_audio
+# is reachable. They are NOT YET enabled at the CUT BOUNDARIES filter
+# (handler.py:~5697) — that filter still requires the standard 2 × min
+# natural-duration handle for ALL types, so today no zero-handle
+# transition can reach a tight boundary via Gemini's recipe. The set is
+# the readiness layer for when a clean-default zero-handle transition
+# (e.g. DipToBlack) ships and the boundary filter is relaxed for the
+# zero-handle class.
+ZERO_HANDLE_TRANSITION_TYPES = {
+    "ShutterFlash",
+    "NewspaperWipe",
+    "LightLeak",
+    "SceneTitle",
+}
+
 # Shortest natural transition — used as the CUT BOUNDARIES filter floor.
 # A boundary with audio gap below 2 × this value cannot fit ANY transition
 # at its natural duration, so the list omits it. Above it, the gap is
@@ -9824,6 +9847,32 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
         c_a_end = float(cut_a["source_end"])
         c_b_start = float(cut_b["source_start"])
         _off = float(audio_stream_offset or 0.0)
+
+        # ── Zero-handle transition: hard audio cut, video covers slot ─
+        # Audit #4 from 2026-06-14: when the transition type is in
+        # ZERO_HANDLE_TRANSITION_TYPES, the equal-power crossfade below
+        # would smear A's last word of speech with B's first word
+        # (audibly bad on tight cuts where both halves contain dialogue).
+        # The zero-handle transition's video animation generates its own
+        # pixels covering the cut; the audio path should NOT mix A's tail
+        # with B's head. Replace the crossfade with silence under the
+        # visual transition; 5ms equal-power splice fades on either side
+        # prevent click. This branch is forward-looking: today the
+        # CUT BOUNDARIES filter (handler.py:~5697) excludes zero-handle
+        # transitions from tight cuts, so it fires only after the boundary
+        # classifier is updated. Architecture-in-place per the audit.
+        _trans_type = str(cut_a.get("transition_out") or "").strip()
+        if _trans_type in ZERO_HANDLE_TRANSITION_TYPES:
+            transition_audio = np.zeros(n_trans, dtype=np.float32)
+            # Mark both boundary edges as splices so the 5ms cos²/sin²
+            # fade pass below applies on each side of the silent slot.
+            is_splice_after.append(True)
+            all_clips.append(transition_audio)
+            if ci + 1 < len(cut_audios):
+                is_splice_after.append(True)
+            _n_transitions += 1
+            continue
+
         # A's tail audio: source[end_A − trans_dur*speed_A, end_A]
         a_tail = _resample_range(
             max(0.0, c_a_end - _t_after * speed_a - _off),
@@ -11817,6 +11866,200 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 f"conflicts; {len(broll_out)} kept",
                 flush=True,
             )
+
+    # ── Transition pro-grade safeguards (#3 + #5 from the 2026-06-14 audit) ──
+    # Three checks applied to transitions_out AFTER overlay lists (broll_out,
+    # motion_graphics_out, text_overlays_out) are finalized. Each drop logs a
+    # divergence so the post-hoc grep tells the story. Order matters:
+    #   1. OVERLAY COLLISION — drop transitions whose output-frame window
+    #      overlaps an active B-roll, MG, or text_overlay. Overlay wins
+    #      (mirrors the B-roll-vs-overlay precedence at handler.py:~11410+).
+    #   2. MINIMUM SPACING — drop transitions whose cut frame is within
+    #      _MIN_TRANSITION_SPACING_S of a previously-kept transition's cut
+    #      frame. The cut still plays as a hard cut; this just prevents
+    #      strobe.
+    #   3. PER-VIDEO CAP — drop lowest-priority transitions until
+    #      len(transitions_out) <= _TRANSITION_CAP_PER_30S × (runtime / 30s).
+    #      Priority = natural duration: shorter transitions feel less
+    #      editorially weighted, so they drop first.
+    _MIN_TRANSITION_SPACING_S = 3.0
+    _TRANSITION_CAP_PER_30S = 4.0
+
+    if transitions_out:
+        # ── Helper: transition's output frame range ──────────────────────
+        # The transition plays during the trailing _slot_frames of clip
+        # afterClipIndex. The cut frame = clip_ranges[i].end × fps. The
+        # visual window spans [cut_frame - slot/2, cut_frame + slot/2]
+        # (covers both sides of the cut perceptually — collapse phase
+        # before, expand phase after).
+        def _transition_frame_window(_t):
+            _ci = int(_t.get("afterClipIndex", -1))
+            _slot = int(_t.get("durationInFrames", 0))
+            if not (0 <= _ci < len(_clip_ranges)) or _slot <= 0:
+                return None
+            _cut_frame = int(round(float(_clip_ranges[_ci]["end"]) * source_fps))
+            _half = _slot // 2
+            return (_cut_frame - _half, _cut_frame + _slot - _half)
+
+        def _overlay_windows():
+            """Return list of (from_frame, to_frame, kind, name) for every
+            overlay that could collide with a transition. Overlay 'to'
+            frame is exclusive."""
+            _out = []
+            for _b in broll_out:
+                _f = int(_b.get("fromFrame") or 0)
+                _d = int(_b.get("durationInFrames") or 0)
+                if _d > 0:
+                    _out.append((_f, _f + _d, "broll", _b.get("src", "")))
+            for _mg in motion_graphics_out:
+                _f = int(_mg.get("fromFrame") or 0)
+                _d = int(_mg.get("durationInFrames") or 0)
+                if _d > 0:
+                    _out.append((_f, _f + _d, "mg", str(_mg.get("type", ""))))
+            for _to in text_overlays_out:
+                _f = int(_to.get("fromFrame") or 0)
+                _d = int(_to.get("durationInFrames") or 0)
+                if _d > 0:
+                    _out.append((_f, _f + _d, "text_overlay", str(_to.get("variant", ""))))
+            return _out
+
+        _overlay_winds = _overlay_windows()
+
+        # ── #3: Overlay collision ────────────────────────────────────────
+        _kept_after_collision = []
+        for _t in transitions_out:
+            _twin = _transition_frame_window(_t)
+            if _twin is None:
+                _kept_after_collision.append(_t)
+                continue
+            _t_start, _t_end = _twin
+            _collided_with = None
+            for _o_start, _o_end, _o_kind, _o_name in _overlay_winds:
+                # Half-open overlap test: [a,b) intersects [c,d) iff a<d and c<b.
+                if _t_start < _o_end and _o_start < _t_end:
+                    _collided_with = (_o_kind, _o_name, _o_start, _o_end)
+                    break
+            if _collided_with is None:
+                _kept_after_collision.append(_t)
+                continue
+            _o_kind, _o_name, _o_start, _o_end = _collided_with
+            print(
+                f"[transition] DROP '{_t.get('type','?')}' after clip "
+                f"{_t.get('afterClipIndex','?')} — overlaps {_o_kind} "
+                f"'{_o_name}' window=[{_o_start}..{_o_end}). Overlay wins.",
+                flush=True,
+            )
+            _record_divergence(
+                "transition",
+                {
+                    "type": _t.get("type", ""),
+                    "after_clip_index": _t.get("afterClipIndex", -1),
+                    "transition_window_frames": [_t_start, _t_end],
+                    "overlay_kind": _o_kind,
+                    "overlay_name": _o_name,
+                    "overlay_window_frames": [_o_start, _o_end],
+                },
+                "drop_overlay_collision",
+                final=None,
+                reason=f"overlaps_{_o_kind}",
+            )
+
+        # ── #5a: Minimum spacing ─────────────────────────────────────────
+        _kept_after_spacing = []
+        _last_kept_cut_frame = None
+        _min_spacing_frames = int(round(_MIN_TRANSITION_SPACING_S * source_fps))
+        for _t in _kept_after_collision:
+            _twin = _transition_frame_window(_t)
+            if _twin is None:
+                _kept_after_spacing.append(_t)
+                continue
+            _t_start, _t_end = _twin
+            _cut_frame_t = (_t_start + _t_end) // 2
+            if (
+                _last_kept_cut_frame is not None
+                and _cut_frame_t - _last_kept_cut_frame < _min_spacing_frames
+            ):
+                _gap_s = (_cut_frame_t - _last_kept_cut_frame) / float(source_fps)
+                print(
+                    f"[transition] DROP '{_t.get('type','?')}' after clip "
+                    f"{_t.get('afterClipIndex','?')} — only {_gap_s:.2f}s "
+                    f"after previous kept transition (min {_MIN_TRANSITION_SPACING_S}s).",
+                    flush=True,
+                )
+                _record_divergence(
+                    "transition",
+                    {
+                        "type": _t.get("type", ""),
+                        "after_clip_index": _t.get("afterClipIndex", -1),
+                        "gap_to_previous_s": round(_gap_s, 3),
+                        "min_spacing_s": _MIN_TRANSITION_SPACING_S,
+                    },
+                    "drop_too_close",
+                    final=None,
+                    reason=f"min_spacing_{_MIN_TRANSITION_SPACING_S}s",
+                )
+                continue
+            _kept_after_spacing.append(_t)
+            _last_kept_cut_frame = _cut_frame_t
+
+        # ── #5b: Per-video cap ───────────────────────────────────────────
+        # 4 transitions per 30s of output runtime, rounded up. Drop the
+        # SHORTEST natural-duration transitions first (shorter = less
+        # editorial weight). Stable sort: ties broken by afterClipIndex.
+        _runtime_s = float(total_output_duration or 0.0)
+        if _runtime_s > 0:
+            _cap = max(1, int(math.ceil(_TRANSITION_CAP_PER_30S * _runtime_s / 30.0)))
+        else:
+            _cap = len(_kept_after_spacing)
+        _kept_after_cap = list(_kept_after_spacing)
+        if len(_kept_after_cap) > _cap:
+            # Sort kept transitions by ascending natural duration (shortest
+            # first = lowest priority = dropped first).
+            _indexed = list(enumerate(_kept_after_cap))
+            _indexed.sort(
+                key=lambda _ix_t: (
+                    TRANSITION_NATURAL_DURATION_MS.get(_ix_t[1].get("type", ""), 0),
+                    _ix_t[0],
+                )
+            )
+            _n_to_drop = len(_kept_after_cap) - _cap
+            _drop_indices = {_ix for _ix, _ in _indexed[:_n_to_drop]}
+            _new_kept = []
+            for _ix, _t in enumerate(_kept_after_cap):
+                if _ix in _drop_indices:
+                    _nat_ms = TRANSITION_NATURAL_DURATION_MS.get(_t.get("type", ""), 0)
+                    print(
+                        f"[transition] DROP '{_t.get('type','?')}' after clip "
+                        f"{_t.get('afterClipIndex','?')} — over cap "
+                        f"({len(_kept_after_cap)} > {_cap} for {_runtime_s:.1f}s "
+                        f"runtime). Shortest-natural-duration drops first.",
+                        flush=True,
+                    )
+                    _record_divergence(
+                        "transition",
+                        {
+                            "type": _t.get("type", ""),
+                            "after_clip_index": _t.get("afterClipIndex", -1),
+                            "natural_duration_ms": _nat_ms,
+                            "total_before_cap": len(_kept_after_cap),
+                            "cap": _cap,
+                            "runtime_s": round(_runtime_s, 2),
+                        },
+                        "drop_over_cap",
+                        final=None,
+                        reason=f"exceeds_{_TRANSITION_CAP_PER_30S}_per_30s_cap",
+                    )
+                else:
+                    _new_kept.append(_t)
+            _kept_after_cap = _new_kept
+
+        if len(_kept_after_cap) != len(transitions_out):
+            print(
+                f"[transition] safeguards: {len(transitions_out)} → "
+                f"{len(_kept_after_cap)} (collision/spacing/cap drops applied)",
+                flush=True,
+            )
+        transitions_out = _kept_after_cap
 
     # ── Authoritative caption-position override over MG / B-roll windows ─
     # The system prompt promises the pipeline owns caption position during
