@@ -2988,7 +2988,7 @@ What you believe, and how it shows in your work:
 WATCH THE VIDEO FIRST
 ═══════════════════════════════════════════════════════════════════════════
 
-The proxy attached to this call is the actual source video — 480p, 24fps, full audio. Watch it before you place anything. The transcript and signal annotations are supporting evidence, not substitutes. While you watch, read:
+The proxy attached to this call is the actual source video — 480p, 22fps, full audio. Watch it before you place anything. The transcript and signal annotations are supporting evidence, not substitutes. While you watch, read:
 
   • **Energy, moment by moment** — where the voice rises/drops/accelerates, where the eyes widen or lock onto camera, where the hands gesture or settle. The speaker's body is telling you where the peaks are.
   • **Micro-expressions** — the half-second face shift before a line lands (the setup), the smile breaking after a punchline (the release), the eyebrow raise on the surprise word (the punctuation). These are what you place treatments around.
@@ -5499,27 +5499,27 @@ def generate_edit_gemini(
         print("[generate-edit] No trend context available", flush=True)
 
     # Build video content part — shared across both calls (no re-upload).
-    # video_metadata.fps=24 tells Gemini to SAMPLE at 24fps. Without this,
+    # video_metadata.fps=22 tells Gemini to SAMPLE at 22fps. Without this,
     # the SDK defaults to ~1fps regardless of the source's encoded frame
     # rate, so bumping the proxy encoder alone is a no-op for perception.
     # 24 is the API's hard cap (validated 2026-06-13: server returns
     # INVALID_ARGUMENT "threshold must be less than or equal to 24" on any
-    # higher value). Paired with the 480p@24fps proxy encode (see
+    # higher value). Paired with the 480p@22fps proxy encode (see
     # _do_gemini_proxy), this is what actually delivers "Gemini watches
     # at the model's max supported rate".
-    _video_fps_meta = genai_types.VideoMetadata(fps=24) if hasattr(genai_types, "VideoMetadata") else None
+    _video_fps_meta = genai_types.VideoMetadata(fps=22) if hasattr(genai_types, "VideoMetadata") else None
     if inline_video_bytes:
         _video_part = genai_types.Part(
             inline_data=genai_types.Blob(data=inline_video_bytes, mime_type="video/mp4"),
             video_metadata=_video_fps_meta,
         )
-        print(f"[generate-edit] Using inline video ({len(inline_video_bytes)/1024/1024:.1f}MB, no upload, sample_fps=24)", flush=True)
+        print(f"[generate-edit] Using inline video ({len(inline_video_bytes)/1024/1024:.1f}MB, no upload, sample_fps=22)", flush=True)
     elif gemini_file is not None:
         _video_part = genai_types.Part(
             file_data=genai_types.FileData(file_uri=gemini_file.uri, mime_type=getattr(gemini_file, "mime_type", "video/mp4")),
             video_metadata=_video_fps_meta,
         )
-        print(f"[generate-edit] Using pre-uploaded Gemini file: {gemini_file.uri} (sample_fps=24)", flush=True)
+        print(f"[generate-edit] Using pre-uploaded Gemini file: {gemini_file.uri} (sample_fps=22)", flush=True)
     else:
         raise RuntimeError("No video data provided — need either inline_video_bytes or gemini_file")
 
@@ -13328,7 +13328,7 @@ def _prewarm_cached_audio_path(bucket, key):
 
 
 def _prewarm_cached_proxy_path(bucket, key):
-    """Pre-encoded 480p@24fps Gemini proxy. When the prewarm worker runs
+    """Pre-encoded 480p@22fps Gemini proxy. When the prewarm worker runs
     during the iOS upload, we encode this proxy from the source as soon as
     the source lands. By the time the render dispatches, the proxy is
     sitting in the cache and `_do_gemini_proxy` finds it instead of
@@ -13502,7 +13502,7 @@ def prewarm_handler(job):
             except Exception as _ae:
                 print(f"[prewarm] audio extraction error: {_ae} — render will extract", flush=True)
 
-        # Gemini proxy encode — 480p @ 24fps, matches the render-time
+        # Gemini proxy encode — 480p @ 22fps, matches the render-time
         # _do_gemini_proxy spec exactly. Encoding here during prewarm (while
         # iOS upload is still completing or just after) hides the encode
         # cost behind upload latency, saving ~7-10s off the render's
@@ -13521,7 +13521,7 @@ def prewarm_handler(job):
                 _pr = subprocess.run(
                     ["ffmpeg", "-y", "-v", "error", "-threads", "0"] + _hw_dec + [
                      "-i", source_cache,
-                     "-vf", "scale=480:-2,fps=24"] + _proxy_venc + [
+                     "-vf", "scale=480:-2,fps=22"] + _proxy_venc + [
                      "-c:a", "libopus", "-b:a", "64k", "-ac", "1",
                      proxy_cache],
                     capture_output=True, text=True, timeout=60,
@@ -13529,7 +13529,7 @@ def prewarm_handler(job):
                 if _pr.returncode == 0 and os.path.exists(proxy_cache) and os.path.getsize(proxy_cache) > 1024:
                     _px_mb = os.path.getsize(proxy_cache) / (1024 * 1024)
                     print(
-                        f"[prewarm] proxy cached (480p@24fps, {_px_mb:.1f}MB in "
+                        f"[prewarm] proxy cached (480p@22fps, {_px_mb:.1f}MB in "
                         f"{time.time() - _proxy_t0:.1f}s)",
                         flush=True,
                     )
@@ -14405,7 +14405,7 @@ def handler(job):
               2. Prewarm cache hit — proxy was encoded during the iOS
                  upload window and sits in the Modal volume. Reading
                  from local disk is ~10-100ms vs. a fresh re-encode.
-              3. No client proxy AND no prewarm cache — encode 480p@24fps
+              3. No client proxy AND no prewarm cache — encode 480p@22fps
                  proxy ourselves from the high-res source (~7-10s on
                  the orchestrator).
             """
@@ -14449,12 +14449,12 @@ def handler(job):
 
             try:
                 _proxy_path = os.path.join(work_dir, "gemini_proxy.mp4")
-                # 480p @ 24fps proxy (bumped from 480p @ 10fps). Paired with
-                # video_metadata.fps=24 on the Gemini Part so Gemini SAMPLES
-                # at 24fps — without that metadata the SDK defaults to ~1fps
+                # 480p @ 22fps proxy (bumped from 480p @ 10fps). Paired with
+                # video_metadata.fps=22 on the Gemini Part so Gemini SAMPLES
+                # at 22fps — without that metadata the SDK defaults to ~1fps
                 # and bumping the encoder is performative. 24 is the API's
                 # hard cap (validated 2026-06-13: fps>24 returns
-                # INVALID_ARGUMENT). At 24fps the model sees micro-expression
+                # INVALID_ARGUMENT). At 22fps the model sees micro-expression
                 # transitions (the half-beat face shift before a line lands),
                 # gesture velocity (where the hand actually moves vs.
                 # settles), and eye-direction changes between blinks — the
@@ -14474,7 +14474,7 @@ def handler(job):
                 # Opus into MP4 natively; Gemini's MP4 ingestion accepts it.
                 _proxy_cmd = subprocess.run(
                     ["ffmpeg", "-y", "-threads", "0"] + _hw_dec + ["-i", _raw_source,
-                     "-vf", "scale=480:-2,fps=24"] + _proxy_venc + [
+                     "-vf", "scale=480:-2,fps=22"] + _proxy_venc + [
                      "-c:a", "libopus", "-b:a", "64k", "-ac", "1",
                      _proxy_path],
                     capture_output=True, text=True, timeout=30,
@@ -14484,7 +14484,7 @@ def handler(job):
                 with open(_proxy_path, "rb") as f:
                     _proxy_bytes = f.read()
                 _proxy_mb = len(_proxy_bytes) / (1024 * 1024)
-                print(f"[pipeline] Gemini proxy: 480p@24fps {_proxy_mb:.1f}MB in {time.time()-_proxy_t:.1f}s (on-server encode, no client proxy)", flush=True)
+                print(f"[pipeline] Gemini proxy: 480p@22fps {_proxy_mb:.1f}MB in {time.time()-_proxy_t:.1f}s (on-server encode, no client proxy)", flush=True)
                 return _proxy_bytes
             except Exception as e:
                 raise RuntimeError(f"Gemini proxy encode failed: {e}") from e
