@@ -38,7 +38,7 @@ ZoomType = Literal[
 TransitionType = Literal[
     "CardSwipe", "ZoomThrough", "SlideOver", "Stack", "CrossfadeZoom",
     "ShutterFlash", "LightLeak", "StepPush", "NewspaperWipe", "FilmStrip",
-    "SceneTitle",
+    "SceneTitle", "DipToBlack",
 ]
 
 CaptionStyle = Literal[

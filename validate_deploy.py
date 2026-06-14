@@ -1100,13 +1100,16 @@ def _diptoblack_registry_ready():
     )
 
 
-@check("transition-type source-of-truth consistency: no hardcoded duplicate set drift")
+@check("transition-type source-of-truth consistency: every registry includes every type")
 def _no_hardcoded_transition_set_drift():
-    # The DipToBlack rollout crashed on a hardcoded duplicate of the
-    # transition-type set at handler.py:~7865 that didn't include the new
-    # type. This check pins every place that enumerates transition types
-    # against VALID_TRANSITION_TYPES so the same drift cannot recur for
-    # the NEXT type added.
+    # The DipToBlack rollout crashed TWICE on duplicate transition-type
+    # enumerations that lived outside the canonical set: first the
+    # validated_cuts sanity check (handler.py:~7865, fixed 2bdc91e),
+    # then the Pydantic render-input Literal (render_schemas.py:38).
+    # This check now pins EVERY known enumeration against the canonical
+    # set so the same drift cannot recur for the NEXT type added — the
+    # only authoritative addition path is `VALID_TRANSITION_TYPES` (with
+    # mirrors), every Literal, and the Remotion TRANSITION_MAP.
     import os
     _root = os.path.dirname(os.path.abspath(__file__))
     with open(os.path.join(_root, "handler.py"), "r") as _f:
@@ -1128,9 +1131,8 @@ def _no_hardcoded_transition_set_drift():
         "VALID_TRANSITION_TYPES — risk of the same drift class."
     )
 
-    # The prompt's transitions schema example MUST include DipToBlack.
-    # If we add another type in the future, this assertion will catch a
-    # forgotten update.
+    # The prompt's transitions schema example MUST include every type
+    # so Gemini sees it as valid in its schema window.
     _expected_in_schema_line = (
         '"CardSwipe" | "ZoomThrough" | "SlideOver" | "Stack" | '
         '"CrossfadeZoom" | "ShutterFlash" | "StepPush" | "NewspaperWipe" | '
@@ -1141,6 +1143,28 @@ def _no_hardcoded_transition_set_drift():
         "no longer lists every VALID_TRANSITION_TYPES entry. Gemini may "
         "not see DipToBlack as a valid type and stop emitting it."
     )
+
+    # The Pydantic render-input schema at render_schemas.py:~38 ALSO has
+    # a Literal of transition types. If it drifts from VALID_TRANSITION_TYPES,
+    # the per-render schema validation rejects every render that uses the
+    # missing type (DipToBlack crash #2, deployed render 2026-06-14 ~22Z).
+    with open(os.path.join(_root, "render_schemas.py"), "r") as _f:
+        _rs = _f.read()
+    # Every type in VALID_TRANSITION_TYPES MUST appear as a string literal
+    # in the TransitionType Literal block. Match against the canonical set.
+    _trans_type_block_start = _rs.find("TransitionType = Literal[")
+    assert _trans_type_block_start != -1, (
+        "render_schemas.py: TransitionType Literal not found"
+    )
+    _trans_type_block_end = _rs.find("]", _trans_type_block_start)
+    _trans_type_block = _rs[_trans_type_block_start:_trans_type_block_end + 1]
+    for _t in handler.VALID_TRANSITION_TYPES:
+        _quoted = f'"{_t}"'
+        assert _quoted in _trans_type_block, (
+            f"render_schemas.py:TransitionType missing {_t!r}. The render "
+            f"input validator will reject every payload using this type. "
+            f"Block currently: {_trans_type_block!r}"
+        )
 
 
 @check("get_output_clip_ranges: additive slot inserts trans_dur between cuts (ACTIVE)")
