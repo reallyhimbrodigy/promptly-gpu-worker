@@ -1144,27 +1144,143 @@ def _no_hardcoded_transition_set_drift():
         "not see DipToBlack as a valid type and stop emitting it."
     )
 
-    # The Pydantic render-input schema at render_schemas.py:~38 ALSO has
-    # a Literal of transition types. If it drifts from VALID_TRANSITION_TYPES,
-    # the per-render schema validation rejects every render that uses the
-    # missing type (DipToBlack crash #2, deployed render 2026-06-14 ~22Z).
-    with open(os.path.join(_root, "render_schemas.py"), "r") as _f:
-        _rs = _f.read()
-    # Every type in VALID_TRANSITION_TYPES MUST appear as a string literal
-    # in the TransitionType Literal block. Match against the canonical set.
-    _trans_type_block_start = _rs.find("TransitionType = Literal[")
-    assert _trans_type_block_start != -1, (
-        "render_schemas.py: TransitionType Literal not found"
+    # The Pydantic render-input schema at render_schemas.py:~38 used to
+    # carry its own hardcoded Literal that crashed when it drifted from
+    # VALID_TRANSITION_TYPES (DipToBlack crash #2, 2026-06-14 ~22Z).
+    # After the type_registries.py refactor, render_schemas.py's
+    # TransitionType DERIVES from VALID_TRANSITION_TYPES via
+    # `Literal[tuple(sorted(VALID_TRANSITION_TYPES))]` — structurally
+    # impossible to drift. Verify the derive is still in place AND that
+    # the runtime args of the derived Literal exactly equal the canonical
+    # set. The runtime equality check is the load-bearing one: a string
+    # match could be fooled by anyone "fixing" the derive while still
+    # hardcoding the list.
+    import render_schemas as _rs_mod
+    import typing as _typing
+    _derived_args = set(_typing.get_args(_rs_mod.TransitionType))
+    _canonical = set(handler.VALID_TRANSITION_TYPES)
+    assert _derived_args == _canonical, (
+        f"render_schemas.TransitionType args drift from "
+        f"VALID_TRANSITION_TYPES. Derived={sorted(_derived_args)}, "
+        f"Canonical={sorted(_canonical)}. The Literal must be derived "
+        f"from type_registries — not hardcoded."
     )
-    _trans_type_block_end = _rs.find("]", _trans_type_block_start)
-    _trans_type_block = _rs[_trans_type_block_start:_trans_type_block_end + 1]
-    for _t in handler.VALID_TRANSITION_TYPES:
-        _quoted = f'"{_t}"'
-        assert _quoted in _trans_type_block, (
-            f"render_schemas.py:TransitionType missing {_t!r}. The render "
-            f"input validator will reject every payload using this type. "
-            f"Block currently: {_trans_type_block!r}"
-        )
+    # And the analogous check for the other 3 derived Literals so the
+    # drift class can't reappear in render_schemas for any taxonomy.
+    assert set(_typing.get_args(_rs_mod.ZoomType)) == set(handler.VALID_ZOOM_TYPES), (
+        "render_schemas.ZoomType args drift from VALID_ZOOM_TYPES"
+    )
+    assert set(_typing.get_args(_rs_mod.MotionGraphicType)) == set(handler.VALID_MG_TYPES), (
+        "render_schemas.MotionGraphicType args drift from VALID_MG_TYPES"
+    )
+    # CaptionStyle subtracts "none" (render-input never carries the
+    # renderer sentinel), see render_schemas.py:~50 comment.
+    assert set(_typing.get_args(_rs_mod.CaptionStyle)) == (set(handler.VALID_CAPTION_STYLES) - {"none"}), (
+        "render_schemas.CaptionStyle args drift from "
+        "VALID_CAPTION_STYLES - {'none'}"
+    )
+
+
+def _parse_ts_literal_block(ts_src: str, type_name: str) -> set:
+    """Extract the string members of a TypeScript `export type X = | "a" | "b" ...`
+    Literal block. Used by the Python↔TypeScript boundary checks below to
+    pin each TS Literal against the canonical Python set."""
+    import re
+    _match = re.search(
+        r"export\s+type\s+" + re.escape(type_name) +
+        r"\s*=\s*((?:\s*\|\s*\"[^\"]+\")+)",
+        ts_src,
+    )
+    assert _match, f"TypeScript `export type {type_name}` Literal block not found"
+    return set(re.findall(r'"([^"]+)"', _match.group(1)))
+
+
+@check("Python↔TS CaptionStyle: types.ts Literal === VALID_CAPTION_STYLES (minus 'none')")
+def _ts_caption_style_matches_python():
+    # The TS `CaptionStyle` Literal at src/remotion/src/types.ts is a
+    # SEPARATE runtime — Python cannot derive it. Pin it to the canonical
+    # Python set. Python carries the renderer sentinel "none" (caption opt-
+    # out); TS omits "none" because CaptionSpec is only emitted when there's
+    # a real style. Subtract it before comparing.
+    import os
+    _root = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(_root, "src/remotion/src/types.ts"), "r") as _f:
+        _ts = _f.read()
+    _ts_set = _parse_ts_literal_block(_ts, "CaptionStyle")
+    _py_set = set(handler.VALID_CAPTION_STYLES) - {"none"}
+    _missing_in_ts = _py_set - _ts_set
+    _extra_in_ts = _ts_set - _py_set
+    assert not _missing_in_ts and not _extra_in_ts, (
+        f"Python↔TS drift in CaptionStyle: "
+        f"missing from TS={sorted(_missing_in_ts)}, "
+        f"extra in TS={sorted(_extra_in_ts)}. "
+        f"Adding a new caption style on the Python side without updating "
+        f"src/remotion/src/types.ts is the latent crash class — the "
+        f"renderer's TypeScript would type-error on the new style and "
+        f"Remotion may fall back silently or crash at the encoder."
+    )
+
+
+@check("Python↔TS ZoomType: types.ts Literal === VALID_ZOOM_TYPES")
+def _ts_zoom_type_matches_python():
+    # Same shape, ZoomType.
+    import os
+    _root = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(_root, "src/remotion/src/types.ts"), "r") as _f:
+        _ts = _f.read()
+    _ts_set = _parse_ts_literal_block(_ts, "ZoomType")
+    _py_set = set(handler.VALID_ZOOM_TYPES)
+    _missing_in_ts = _py_set - _ts_set
+    _extra_in_ts = _ts_set - _py_set
+    assert not _missing_in_ts and not _extra_in_ts, (
+        f"Python↔TS drift in ZoomType: "
+        f"missing from TS={sorted(_missing_in_ts)}, "
+        f"extra in TS={sorted(_extra_in_ts)}."
+    )
+
+
+@check("Python↔TS MotionGraphicType: types.ts Literal === VALID_MG_TYPES")
+def _ts_motion_graphic_type_matches_python():
+    # Same shape, MotionGraphicType.
+    import os
+    _root = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(_root, "src/remotion/src/types.ts"), "r") as _f:
+        _ts = _f.read()
+    _ts_set = _parse_ts_literal_block(_ts, "MotionGraphicType")
+    _py_set = set(handler.VALID_MG_TYPES)
+    _missing_in_ts = _py_set - _ts_set
+    _extra_in_ts = _ts_set - _py_set
+    assert not _missing_in_ts and not _extra_in_ts, (
+        f"Python↔TS drift in MotionGraphicType: "
+        f"missing from TS={sorted(_missing_in_ts)}, "
+        f"extra in TS={sorted(_extra_in_ts)}."
+    )
+
+
+@check("Python↔TS TransitionType: types.ts Literal === VALID_TRANSITION_TYPES")
+def _ts_transition_type_matches_python():
+    # The 4th boundary check. The DipToBlack rollout shipped without
+    # updating types.ts — TS TransitionType lacked DipToBlack for the
+    # entire ship of d87a471 / 2bdc91e / 59205c6. Existing Python↔Python
+    # source-of-truth check (handler.py + render_schemas.py) did NOT
+    # cover the TS side, so this drift was invisible to the gate.
+    import os
+    _root = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(_root, "src/remotion/src/types.ts"), "r") as _f:
+        _ts = _f.read()
+    _ts_set = _parse_ts_literal_block(_ts, "TransitionType")
+    _py_set = set(handler.VALID_TRANSITION_TYPES)
+    _missing_in_ts = _py_set - _ts_set
+    _extra_in_ts = _ts_set - _py_set
+    assert not _missing_in_ts and not _extra_in_ts, (
+        f"Python↔TS drift in TransitionType: "
+        f"missing from TS={sorted(_missing_in_ts)}, "
+        f"extra in TS={sorted(_extra_in_ts)}. "
+        f"This is the gate that would have caught the d87a471 ship — "
+        f"DipToBlack was in VALID_TRANSITION_TYPES but missing from "
+        f"types.ts. Adding a new transition type requires editing "
+        f"both type_registries.py AND src/remotion/src/types.ts."
+    )
 
 
 @check("get_output_clip_ranges: additive slot inserts trans_dur between cuts (ACTIVE)")

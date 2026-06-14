@@ -397,6 +397,11 @@ image = (
     .add_local_file("ffmpeg_base.py", "/ffmpeg_base.py")
     .add_local_file("rife_normalize.py", "/rife_normalize.py")
     .add_local_file("render_schemas.py", "/render_schemas.py")
+    # Leaf module — canonical component-type frozensets shared between
+    # handler.py + render_schemas.py. Both import from here; without
+    # this entry the container starts and immediately crashes on
+    # `ModuleNotFoundError: No module named 'type_registries'`.
+    .add_local_file("type_registries.py", "/type_registries.py")
     .add_local_file("cuda_driver_setup.py", "/cuda_driver_setup.py")
     # recipe_eval.py was missing from this list since the eval was first
     # wired — handler.py imports it at runtime via `from recipe_eval

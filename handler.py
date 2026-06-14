@@ -89,6 +89,18 @@ from render_schemas import (
     PromptlyMicroSegmentsInput as _SchemaMicroInput,
 )
 
+# Component-type vocabularies — single source of truth shared with
+# render_schemas.py. Adding a new type means editing type_registries.py
+# only; both this file's Pydantic Literals (at handler.py:~118) and
+# render_schemas.py's mirror derive automatically. See type_registries.py
+# for the rationale and the failure mode this structure prevents.
+from type_registries import (
+    VALID_CAPTION_STYLES,
+    VALID_MG_TYPES,
+    VALID_TRANSITION_TYPES,
+    VALID_ZOOM_TYPES,
+)
+
 
 def _validate_and_write_render_input(
     label: str,
@@ -115,25 +127,13 @@ def _validate_and_write_render_input(
     with open(output_path, "w") as _f:
         json.dump(payload, _f)
 
-_CAPTION_STYLES = Literal[
-    "PaperII",
-    "Prime", "TypewriterReveal", "CinematicLetterpress", "Cove",
-    "EditorialPop", "Illuminate", "Lumen",
-    "MagazineCutout", "Passage", "Pulse", "Quintessence", "Serif",
-    # "none" = user explicitly asked for no captions (in vibe or re-edit).
-    # Renderer skips caption rendering entirely; downstream code still
-    # accepts the value.
-    "none",
-]
-_TRANSITION_TYPES = Literal[
-    "CardSwipe", "ZoomThrough", "SlideOver", "Stack", "CrossfadeZoom",
-    "ShutterFlash", "StepPush", "NewspaperWipe", "FilmStrip",
-    "SceneTitle", "DipToBlack",
-]
-_ZOOM_TYPES = Literal[
-    "SmoothPush", "SnapReframe", "FocusWindow", "StepZoom", "LetterboxPush",
-    "StageZoom", "DepthPull",
-]
+# Pydantic Literals derive from type_registries — single source of truth
+# for handler.py + render_schemas.py. See type_registries.py for the
+# canonical frozensets. Adding a new component type means editing that
+# one file; these Literals update automatically.
+_CAPTION_STYLES = Literal[tuple(sorted(VALID_CAPTION_STYLES))]
+_TRANSITION_TYPES = Literal[tuple(sorted(VALID_TRANSITION_TYPES))]
+_ZOOM_TYPES = Literal[tuple(sorted(VALID_ZOOM_TYPES))]
 # Natural duration per zoom type (ms). When Gemini omits durationMs from a
 # zoom event, the pipeline fills in the per-type natural duration so the
 # camera move plays at the look it was designed for. This removes a degree
@@ -187,12 +187,7 @@ ZOOM_PEAK_REACH_MS = {
     "StageZoom":     1170,   # 65% × 1800ms (second-stage peak)
     "DepthPull":      770,   # 35% × 2200ms (ramp-in end)
 }
-_MG_TYPES = Literal[
-    "AnnotationArrow", "ChatThread",
-    "Notification", "ProgressBar", "QuoteCard", "RecordingFrame",
-    "StatCard", "StickyNotes", "Toggle",
-    "TweetBubble", "InstagramComment", "IMessageBubble", "TikTokComment",
-]
+_MG_TYPES = Literal[tuple(sorted(VALID_MG_TYPES))]
 _SEMANTIC_ANCHOR = Literal[
     "upper_third_safe", "center", "lower_third_safe", "left_safe", "right_safe",
 ]
@@ -13659,33 +13654,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             print(f"[render] WARNING: stage cleanup failed for {_staged_path}: {_rm_err}", flush=True)
 
 
-# ─── CAPTION / COMPONENT VOCABULARIES (enforced at validation + render time) ───
-
-VALID_CAPTION_STYLES = {
-    "PaperII",
-    "Prime", "TypewriterReveal", "CinematicLetterpress", "Cove",
-    "EditorialPop", "Illuminate", "Lumen",
-    "MagazineCutout", "Passage", "Pulse", "Quintessence", "Serif",
-    "none",
-}
-
-VALID_TRANSITION_TYPES = {
-    "CardSwipe", "ZoomThrough", "SlideOver", "Stack", "CrossfadeZoom",
-    "ShutterFlash", "StepPush", "NewspaperWipe", "FilmStrip",
-    "SceneTitle", "DipToBlack",
-}
-
-VALID_ZOOM_TYPES = {
-    "SmoothPush", "SnapReframe", "FocusWindow", "StepZoom", "LetterboxPush",
-    "StageZoom", "DepthPull",
-}
-
-VALID_MG_TYPES = {
-    "AnnotationArrow", "ChatThread",
-    "Notification", "ProgressBar", "QuoteCard", "RecordingFrame",
-    "StatCard", "StickyNotes", "Toggle",
-    "TweetBubble", "InstagramComment", "IMessageBubble", "TikTokComment",
-}
+# ─── CAPTION / COMPONENT VOCABULARIES ─────────────────────────────────────
+# VALID_CAPTION_STYLES, VALID_TRANSITION_TYPES, VALID_ZOOM_TYPES, and
+# VALID_MG_TYPES are imported from type_registries (handler.py:~88) — the
+# canonical frozensets shared with render_schemas.py. Removed from this
+# location 2026-06-14 to eliminate the duplicate-declaration drift class
+# that produced three DipToBlack production crashes.
 
 
 def _build_tiktok_pages_from_projected(projected_words, max_words_per_page=3, position_boundaries_sec=None, clip_boundaries_sec=None):

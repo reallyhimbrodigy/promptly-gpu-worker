@@ -24,35 +24,38 @@ from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from type_registries import (
+    VALID_CAPTION_STYLES,
+    VALID_MG_TYPES,
+    VALID_TRANSITION_TYPES,
+    VALID_ZOOM_TYPES,
+)
+
 # ── Vocabulary ──────────────────────────────────────────────────────────────
+# Component-type Literals derive from the canonical frozensets in
+# type_registries.py — single source of truth for both handler.py (Python
+# validation) and this module (render-input validation). Adding a new
+# component type means editing type_registries only; this Literal updates
+# automatically and Pydantic accepts the same set both sides validate.
+#
+# `Literal[tuple(sorted(...))]` is the Python 3.10+ derivation pattern:
+# Literal's subscript collapses a tuple of strings into the equivalent
+# `Literal["a", "b", ...]` form. Verified at import — Pydantic v2
+# accepts it identically to a hand-written Literal.
 MGAnchor = Literal[
     "center", "top", "bottom", "left", "right",
     "top-left", "top-right", "bottom-left", "bottom-right",
 ]
 
-ZoomType = Literal[
-    "SmoothPush", "SnapReframe", "FocusWindow", "StepZoom",
-    "LetterboxPush", "StageZoom", "DepthPull",
-]
+ZoomType = Literal[tuple(sorted(VALID_ZOOM_TYPES))]
 
-TransitionType = Literal[
-    "CardSwipe", "ZoomThrough", "SlideOver", "Stack", "CrossfadeZoom",
-    "ShutterFlash", "LightLeak", "StepPush", "NewspaperWipe", "FilmStrip",
-    "SceneTitle", "DipToBlack",
-]
+TransitionType = Literal[tuple(sorted(VALID_TRANSITION_TYPES))]
 
-CaptionStyle = Literal[
-    "PaperII", "Prime", "TypewriterReveal", "CinematicLetterpress", "Cove",
-    "EditorialPop", "Illuminate", "Lumen", "MagazineCutout", "Passage",
-    "Pulse", "Quintessence", "Serif",
-]
+# Render-input never carries the renderer "none" sentinel — CaptionSpec is
+# only emitted when there's a real style — so subtract it before deriving.
+CaptionStyle = Literal[tuple(sorted(VALID_CAPTION_STYLES - {"none"}))]
 
-MotionGraphicType = Literal[
-    "AnnotationArrow", "ChatThread", "Notification", "ProgressBar",
-    "QuoteCard", "RecordingFrame", "StatCard", "StickyNotes", "Toggle",
-    "TweetBubble", "InstagramComment", "IMessageBubble",
-    "TikTokComment",
-]
+MotionGraphicType = Literal[tuple(sorted(VALID_MG_TYPES))]
 
 CaptionPosition = Literal["top", "center", "bottom"]
 

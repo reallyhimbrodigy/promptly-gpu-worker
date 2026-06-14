@@ -106,11 +106,11 @@ export type TransitionType =
   | "Stack"
   | "CrossfadeZoom"
   | "ShutterFlash"
-  | "LightLeak"
   | "StepPush"
   | "NewspaperWipe"
   | "FilmStrip"
-  | "SceneTitle";
+  | "SceneTitle"
+  | "DipToBlack";
 
 // ── B-roll cutaway ───────────────────────────────────────────────────────────
 // Rendered by Remotion's BrollLayer inside PromptlyOverlay (alpha layer)
