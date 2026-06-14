@@ -389,6 +389,14 @@ image = (
     .add_local_file("rife_normalize.py", "/rife_normalize.py")
     .add_local_file("render_schemas.py", "/render_schemas.py")
     .add_local_file("cuda_driver_setup.py", "/cuda_driver_setup.py")
+    # recipe_eval.py was missing from this list since the eval was first
+    # wired — handler.py imports it at runtime via `from recipe_eval
+    # import evaluate_recipe`, but the module never made it into the
+    # image, so every render logged
+    # `[recipe-eval] error: No module named 'recipe_eval'` and the
+    # rules (dead-zone, tight-no-mask, zoom-arc, payoff-commitment,
+    # tight-boundary) never ran in production. Adding it here.
+    .add_local_file("recipe_eval.py", "/recipe_eval.py")
 )
 
 # ── Secrets ────────────────────────────────────────────────────────────────────

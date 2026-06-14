@@ -2990,7 +2990,7 @@ Emit the JSON in exactly this order, finishing each stage's reasoning before ope
   • **hook_word_index** — where the curiosity gap OPENS, not necessarily word 0. On a trivia video the hook is the question; on a story video it's the moment the premise lands. "Hello, what's your name?" is exposition, not a hook.
   • **payoff_word_index** — the single strongest moment. ONE peak only.
   • **close_word_index** — the final beat, usually the last or second-to-last kept word.
-  • **key_moments** — 4-7 items for a typical 30s narrative (some videos genuinely have fewer or more — count what's there, never pad). Each: word_index, what_lands, why_emphasis, what_i_saw, viewer_feeling. **key_moments and emphasis_moments are 1:1** — this list is the ground truth for what gets a zoom. To add a zoom, expand this list first; if you can't justify the peak here, don't zoom it.
+  • **key_moments** — 3-5 true peaks for a typical 30s video; a flat even-energy stretch may have only 2-3 — count the real peaks, never pad. Each: word_index, what_lands, why_emphasis, what_i_saw, viewer_feeling. **key_moments and emphasis_moments are 1:1** — this list is the ground truth for what gets a zoom. To add a zoom, expand this list first; if you can't justify the peak here, don't zoom it.
   • **story_shape** — one sentence: how the video moves hook → setup → development → payoff → close.
   • **arc_segments** — THE SPINE. Walk the full kept transcript and tile it into contiguous segments, no gaps, no overlaps, last segment ending on the final kept word. Each segment: position (hook | build | mid_peak | payoff | breather | close) + intensity (0.0-1.0). Until this is complete, you do not pick components.
   • **editorial_vision** — ONE specific sentence committing to HOW you'll cut THIS video. ("I'm leaning into the absurdity with MagazineCutout captions, pop SFX on every receipt detail, and a slow LetterboxPush when he opens the bag.") Every component below flows from this sentence.
@@ -3282,18 +3282,22 @@ Props: {{ "text": "Dark Mode", "activateAtMs"?: int, "onColor"?: "#hex" }}
 === EMPHASIS MOMENTS + ZOOM ===
 ═══════════════════════════════════════════════════════════════════════════
 
-An emphasis moment is a PEAK — a moment the viewer will remember a minute after watching, not every stressed word. **Map 1:1 to video_plan.key_moments**; that list is the ground truth, and 4-7 peaks is what a typical 30-second narrative actually contains. Never place an emphasis on connector words, qualifiers, or generic nouns ("entire", "this", "after") — those are dialogue glue, and a zoom there reads as the camera zooming on random words. Every emphasis carries a zoom by default (null is the rare exception).
+An emphasis moment is a PEAK — a moment the viewer will physically react to, not every word the pitch treats as important. The test is the body, not the meaning: does the viewer FEEL something land here — a laugh, a small gasp, a nod, a lean-in? "Important to the argument" is not a peak. "Free", "professional", "done" can each be semantically central and still earn NO zoom if the delivery just states them. A word the speaker leans on with voice, face, or timing is a peak; a word that merely carries information is not. Map emphasis 1:1 to video_plan.key_moments. Never place an emphasis on connector words, qualifiers, or generic nouns ("entire", "this", "after") — a zoom there reads as the camera zooming on random words. Every emphasis carries a zoom by default (null is the rare exception).
 
-Pick the emphasis by the AUDIENCE REACTION it earns with sound on: laugh = punchline, gasp = revelation, nod = statement, empathy = reaction, lean-in = question. Two beats side-by-side are usually revelation then reaction — the fact arriving, then the speaker responding — and they want different cameras: weight for the revelation (LetterboxPush, StageZoom), snap for the reaction (StepZoom).
+**Count follows the footage, not a quota.** Most 30-second videos have 3-5 TRUE peaks — a flat, even-energy stretch may have only 2-3, and that is correct. If you find yourself at 6+ similar-weight emphases spaced evenly every few seconds, you are padding semantic highlights to hit a number, and the result reads as a metronome: same punch, same cadence, nothing standing out. When in doubt, cut the weakest — three peaks that each land beat five that blur together.
+
+**Peaks must differ in WEIGHT, not just type.** A real edit has a rhythm of sizes: ONE deepest moment (the payoff — the line the video exists to deliver), a few mid-peaks that punctuate without competing with it, and a hook that grips. Look at your emphasis list as a SET before finalizing: if more than half share one type, or they're all "high" intensity, or they're spaced evenly end-to-end, you haven't found the real peaks — you've highlighted the transcript. The payoff must be unmistakably the biggest move; every other beat yields to it.
+
+Pick each emphasis by the AUDIENCE REACTION it earns with sound on: laugh = punchline, gasp = revelation, nod = statement, empathy = reaction, lean-in = question. Two beats side-by-side are usually revelation then reaction — the fact arriving, then the speaker responding — and they want different cameras: weight for the revelation (LetterboxPush, StageZoom), snap for the reaction (StepZoom).
 
 **Zoom personality by arc position** (this rule outranks "what feels punchy"):
   • hook → GRIP: StepZoom or SnapReframe, instant.
   • mid_peak → PUNCTUATION: StepZoom or SnapReframe, quick in/out.
-  • payoff → COMMITMENT: SmoothPush or LetterboxPush, the slowest and deepest move of the video. Never StepZoom here.
+  • payoff → COMMITMENT: SmoothPush or LetterboxPush, the slowest and deepest move of the video. Never StepZoom here — the snap reads as just another mid-peak, and the slow commitment is the only thing that makes the payoff feel bigger than the beats before it.
   • close → CALLBACK: echo the hook's type at lower intensity; if the hook had no zoom, SmoothPush as confident lock-in.
   • build / breather → NO ZOOM. Wanting one there means the word isn't a peak; drop it from key_moments.
 
-**Variety is composition.** Each peak should feel like its own moment. Ask "what camera move would a real editor pick if this were the ONLY zoom in the video?" — then notice if a nearby clip already used that type, and whether the second moment genuinely wants the same personality or you defaulted. Most videos mix punchline/revelation/statement/reaction beats, which naturally pulls toward different types.
+**Variety happens at the moment, not the clip.** Pick the type each peak's actual reaction wants — the pipeline splits the underlying clip behind the scenes so adjacent emphases with different types each render their own. You are never forced to reuse a type because two peaks share a clip, so a row of identical zooms means you didn't ask what each moment wanted. For each peak independently: "what camera move would a real editor pick if this were the ONLY zoom in the video?"
 
 ──────────────────────────────────────────
 PIPELINE MECHANICS — read carefully, these are load-bearing
@@ -3318,7 +3322,7 @@ Natural durations (for back-timing math): SmoothPush 1200ms · SnapReframe 700ms
 
 **Hard constraint: startMs must live inside the owning clip's source range.** If back-timing would land before the clip's source_start, anchor startMs at source_start instead — the zoom begins at the clip's first frame and lands a moment after the cut opens. Never emit startMs outside [source_start, source_end]; out-of-range events get truncated into a glitchy frame-0 blip.
 
-**Zoom type is per-CLIP, not per-emphasis.** All events on one kept-source clip share ONE zoom_effect.type — the renderer takes it from the highest-intensity emphasis and silently coerces the rest. Plan the type as a clip property: pick the personality fitting the clip's strongest beat, then every emphasis on that clip uses it. Variety happens BETWEEN clips.
+**Zoom type is per-emphasis, not per-clip.** Each emphasis's `zoom_effect.type` renders independently — when adjacent emphases on the same kept-source clip differ in type, the pipeline splits the clip at the midpoint between them so each event plays under its own component. Plan each peak's type by what THAT peak's reaction wants; the pipeline handles the split behind the scenes.
 
 **Per-clip event budget:** the camera must fully play each event (in → hold → out) before the next, so max events ≈ clip_duration / natural_duration, and consecutive startMs values on a clip must be ≥ natural_duration apart. A 6s clip fits ~3 LetterboxPush events or ~6 StepZoom events. Past the budget, the camera visibly oscillates; over-budget extras keep their SFX/captions but lose their zoom at the pipeline level.
 
@@ -3630,8 +3634,9 @@ These override creative reasoning when they conflict.
     Far above that = stacked windows. Far below = empty windows. Re-walk.
 
 **PER-COMPONENT RULES:**
-  • emphasis_moments: 1:1 with key_moments (4-7 for a typical 30s video —
-    count the real peaks, never pad). At least 2 distinct zoom types across
+  • emphasis_moments: 1:1 with key_moments (3-5 true peaks for a typical
+    30s video; a flat even-energy stretch may have only 2-3 — count the real
+    peaks, never pad). At least 2 distinct zoom types across
     them. Never on build or breather words. Payoff = SmoothPush or
     LetterboxPush, never StepZoom. Events emit startMs only.
   • transitions: one per CUT BOUNDARIES entry, except mid-sentence flow and
@@ -3704,7 +3709,7 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
         "what_i_saw": "<one short phrase on what's visible in the proxy at this word. Example: 'eyes widen, head tilts back'>",
         "viewer_feeling": "<one specific phrase: the feeling this moment produces>"
       }},
-      ... 4-7 items for a typical 30s video; count the real peaks ...
+      ... 3-5 true peaks; count what the footage actually has, never pad ...
     ],
     "story_shape": "<one sentence: hook → setup → development → payoff → close>",
     "arc_segments": [
