@@ -6491,20 +6491,74 @@ For each chosen `after_word_index`, pick a transition `type` whose character mat
             continue
         _br_ts = float(_broll_dg_words[_sw_kept].get("start") or 0)
         _br_end = float(_broll_dg_words[_ew_kept].get("end") or 0)
-        _br_dur = _br_end - _br_ts
-        if _br_dur <= 0:
+        # SOURCE-TIME span between the two words — INCLUDES any
+        # mechanically-removed silence/filler. Computed but no longer
+        # surfaced as the recipe `duration` field, because downstream
+        # consumers (Pexels fetch filter, recipe log, debugging) all
+        # want OUTPUT-time speech duration, not raw source span.
+        _src_span = _br_end - _br_ts
+        if _src_span <= 0:
             continue
-        print(f"[broll] Word-index timing: [{_sw_kept}]-[{_ew_kept}] → {_br_ts:.3f}s-{_br_end:.3f}s ({_br_dur:.2f}s)", flush=True)
-        if not (math.isfinite(_br_ts) and math.isfinite(_br_dur)):
+
+        # OUTPUT-time SPEECH duration of just the kept words in the
+        # range. Equals sum of each kept word's natural duration; ignores
+        # inter-word silences (those vanish in mechanical removal anyway).
+        # For 5 consecutive kept words at normal speech, ~2-3s — which
+        # is what a 5-word cutaway should actually be on screen.
+        _speech_dur = 0.0
+        for _wi in range(_sw_kept, _ew_kept + 1):
+            if _wi in _broll_removed:
+                continue
+            _w = _broll_dg_words[_wi]
+            _ws = float(_w.get("start") or 0)
+            _we = float(_w.get("end") or 0)
+            if _we > _ws:
+                _speech_dur += (_we - _ws)
+        if _speech_dur <= 0:
+            # Defensive — kept-word filter should leave at least one
+            # word with positive duration. Skip the entry rather than
+            # ship an obviously-broken zero-duration cutaway.
             continue
-        if _br_ts < 0 or _br_dur <= 0:
+
+        # The recipe `duration` field now carries OUTPUT-time speech
+        # duration. Downstream Pexels fetch sizing (handler.py:~15075)
+        # gets a sensible request length (~2-3s for a 5-word phrase, NOT
+        # the inflated source span). Render-time bounding uses the
+        # output-projected word span via _pw_by_idx, unchanged.
+        if not (math.isfinite(_br_ts) and math.isfinite(_speech_dur)):
+            continue
+        if _br_ts < 0 or _speech_dur <= 0:
             continue
         if video_duration > 0 and _br_ts >= video_duration:
             continue
+
+        # Emit the divergence whenever source-span and output-speech
+        # diverge by > 2x — that's the misleading-recipe symptom the
+        # user reported and would have made invisible without this log.
+        if _src_span > _speech_dur * 2.0:
+            _record_divergence(
+                "broll",
+                {
+                    "keyword": _br_kw,
+                    "start_word_src": _sw_kept,
+                    "end_word_src": _ew_kept,
+                    "src_span_s": round(_src_span, 3),
+                },
+                "duration_recomputed_to_speech",
+                final={"duration_s": round(_speech_dur, 3)},
+                reason="src_span_inflated_by_mechanical_removals_between_words",
+            )
+
+        print(
+            f"[broll] Word-index timing: [{_sw_kept}]-[{_ew_kept}] → "
+            f"{_br_ts:.3f}s+{_speech_dur:.2f}s speech "
+            f"(src span {_src_span:.2f}s)",
+            flush=True,
+        )
         validated_broll.append({
             "keyword": _br_kw,
             "timestamp": _br_ts,
-            "duration": _br_dur,
+            "duration": _speech_dur,
             "reason": str(_br.get("reason") or "").strip(),
             "_start_word_kept": _sw_kept,
             "_end_word_kept": _ew_kept,
@@ -11252,14 +11306,27 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _out_end = float(_pw_end["end"])
         if _out_start >= total_output_duration or _out_end <= _out_start:
             continue
-        _eff = _out_end - _out_start
+        # AUTHORITATIVE word-span clamp: the cutaway plays for exactly
+        # the OUTPUT-time distance between the start word's output start
+        # and the end word's output end. Never the Pexels file's
+        # intrinsic length, never extended to fill. Per
+        # feedback_broll_coverage_not_a_target — the face is the default,
+        # B-roll is the exception.
+        _word_span_eff = _out_end - _out_start
+        _eff = _word_span_eff
         _br_dur = get_video_duration(_local_path)
+        # If the Pexels file is SHORTER than the word span, the
+        # cutaway plays for the Pexels length (can't show more frames
+        # than the file has). Logged as `clamped_to_pexels_length`.
+        _clamp_reason = None
         if _br_dur > 0 and _eff > _br_dur:
             _eff = _br_dur
             _out_end = _out_start + _eff
+            _clamp_reason = "clamped_to_pexels_length"
         if _out_start + _eff > total_output_duration:
             _eff = total_output_duration - _out_start
             _out_end = _out_start + _eff
+            _clamp_reason = "clamped_to_runtime_end"
         if _eff <= 0.05:
             continue
         _seek_seconds = 0.0
@@ -11307,6 +11374,85 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             f"dur={_eff:.2f}s seek={_seek_seconds:.2f}s",
             flush=True,
         )
+        # Divergence: every B-roll's word-span vs requested-duration vs
+        # final-render-duration is visible. `kept` = no clamp fired;
+        # `clamped_to_pexels_length` = source file shorter than word span;
+        # `clamped_to_runtime_end` = word span past the end of output.
+        _record_divergence(
+            "broll",
+            {
+                "keyword": _kw,
+                "word_span_s": round(_word_span_eff, 3),
+                "requested_duration_s": round(float(_bc.get("duration") or 0.0), 3),
+            },
+            "clamped_to_word_span" if _clamp_reason is None else _clamp_reason,
+            final={"final_duration_s": round(_eff, 3)},
+            reason=(_clamp_reason or "kept"),
+        )
+
+    # ── Total-coverage ceiling — feedback_broll_coverage_not_a_target.md ───
+    # ~10-15% B-roll coverage is normal; ~30-40% is a CEILING, not a target.
+    # When Gemini's per-clip windows happen to add up past ~40% of runtime,
+    # the rendered output reads as a stock-footage reel instead of a
+    # talking-head edit. Enforce here: sort B-roll by output duration DESC
+    # and drop the longest until the total is back under the ceiling. Each
+    # drop logs via _record_divergence so the lost cutaway is visible.
+    _BROLL_COVERAGE_CEILING = 0.40
+    if broll_out and total_output_duration > 0:
+        _total_coverage = sum(_b["durationInFrames"] / float(source_fps) for _b in broll_out)
+        _coverage_fraction = _total_coverage / total_output_duration
+        if _coverage_fraction > _BROLL_COVERAGE_CEILING:
+            print(
+                f"[broll] coverage {_total_coverage:.2f}s / {total_output_duration:.2f}s = "
+                f"{_coverage_fraction*100:.1f}% — over {_BROLL_COVERAGE_CEILING*100:.0f}% ceiling; "
+                f"trimming longest first",
+                flush=True,
+            )
+            # Build index list sorted by descending duration so we drop
+            # the most-flooding clips first (matches user's "longest first"
+            # request). Stable sort by (-dur, original_idx) for deterministic
+            # behavior when two clips have identical duration.
+            _keep_idx = set(range(len(broll_out)))
+            _sorted_by_dur = sorted(
+                range(len(broll_out)),
+                key=lambda i: (-broll_out[i]["durationInFrames"], i),
+            )
+            for _drop_i in _sorted_by_dur:
+                if _coverage_fraction <= _BROLL_COVERAGE_CEILING:
+                    break
+                if _drop_i not in _keep_idx:
+                    continue
+                _dropped = broll_out[_drop_i]
+                _dropped_dur = _dropped["durationInFrames"] / float(source_fps)
+                _keep_idx.discard(_drop_i)
+                _total_coverage -= _dropped_dur
+                _coverage_fraction = _total_coverage / total_output_duration
+                _record_divergence(
+                    "broll",
+                    {
+                        "src": _dropped.get("src"),
+                        "dropped_duration_s": round(_dropped_dur, 3),
+                        "coverage_before_drop_pct": round(
+                            (_total_coverage + _dropped_dur) / total_output_duration * 100, 1
+                        ),
+                    },
+                    "trimmed_for_coverage_ceiling",
+                    final=None,
+                    reason=f"exceeds_coverage_ceiling_{int(_BROLL_COVERAGE_CEILING*100)}pct",
+                )
+            broll_out = [broll_out[i] for i in range(len(broll_out)) if i in _keep_idx]
+            # Filter _broll_output_ranges lockstep so the strict-separation
+            # block + thumbnail seed-shifter see the same surviving set.
+            _existing_ranges = edit_plan.get("_broll_output_ranges") or []
+            edit_plan["_broll_output_ranges"] = [
+                _existing_ranges[i] for i in range(len(_existing_ranges)) if i in _keep_idx
+            ]
+            print(
+                f"[broll] coverage after trim: {_total_coverage:.2f}s / "
+                f"{total_output_duration:.2f}s = {_coverage_fraction*100:.1f}% "
+                f"({len(broll_out)} clip(s) kept)",
+                flush=True,
+            )
 
     # ── Strict separation: B-roll vs overlays (MG + text_overlay) ──────────
     # Professional editing rule: B-roll cutaways and overlays NEVER share

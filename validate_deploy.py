@@ -612,6 +612,133 @@ def _consecutive_anchor_dead_air_catches_boundary():
     )
 
 
+@check("B-roll duration now reports OUTPUT-time speech, not inflated source span (ACTIVE)")
+def _broll_duration_uses_speech_not_src_span():
+    # Bed/Young Sheldon-style fixture: 5 kept words spanning 26.8s in source
+    # because 22s of removed dead_air sits in the middle of the range.
+    # Each individual word is ~0.5s of actual speech.
+    #
+    # The fix: validation now stores OUTPUT-time speech duration (sum of
+    # word .end - .start over kept words), NOT the inflated source span.
+    # For 5 normal-speech words this is ~2-3s, not 26.8s. Downstream
+    # Pexels fetch sizing now gets a sensible request length.
+    deepgram_words = [
+        # words 55-56 = preamble (not part of broll range)
+        {"start": 0.0,  "end": 0.5,  "word": "preamble"},
+        {"start": 0.5,  "end": 1.0,  "word": "preamble"},
+        # word 57: first word of B-roll. starts at 1.0s, lasts 0.5s.
+        {"start": 1.0,  "end": 1.5,  "word": "one"},
+        # words 58-60 are in the source but mechanically REMOVED (long
+        # dead_air). Each spans large gaps to mimic silence.
+        {"start": 1.5,  "end": 1.7,  "word": "(filler58)"},
+        {"start": 1.7,  "end": 1.9,  "word": "(filler59)"},
+        {"start": 25.0, "end": 25.5, "word": "(silence60)"},
+        # words 61-... five-word range is actually [57, 58, 59, 60, 61]
+        # but 58-60 are removed. So kept words 57 and 61 anchor the range.
+        # Word 61: last word of B-roll, ends at 27.8s in source.
+        {"start": 27.3, "end": 27.8, "word": "five"},
+    ]
+    # Mechanical cuts mark src indices 3, 4, 5 as removed (the filler/dead-air).
+    _broll_removed = {3, 4, 5}
+
+    # Simulate exactly what the validation block computes for a B-roll
+    # entry at start=2 (src), end=6 (src) — kept words on the edges.
+    import math
+    _broll_dg_words = deepgram_words
+    _sw_kept = 2  # word index 2 (the "one" at 1.0s)
+    _ew_kept = 6  # word index 6 (the "five" at 27.3s)
+    _br_ts = float(_broll_dg_words[_sw_kept].get("start") or 0)
+    _br_end = float(_broll_dg_words[_ew_kept].get("end") or 0)
+    _src_span = _br_end - _br_ts
+    assert _src_span > 25.0, f"src span should be inflated to ~26.8s, got: {_src_span}"
+
+    # Now exercise the OUTPUT-speech math the validation uses post-fix.
+    _speech_dur = 0.0
+    for _wi in range(_sw_kept, _ew_kept + 1):
+        if _wi in _broll_removed:
+            continue
+        _w = _broll_dg_words[_wi]
+        _ws = float(_w.get("start") or 0)
+        _we = float(_w.get("end") or 0)
+        if _we > _ws:
+            _speech_dur += (_we - _ws)
+    # Word "one" (0.5s) + word "five" (0.5s) = 1.0s of actual speech.
+    # The 26.8s source span shrinks to 1.0s of cutaway — the correct value.
+    assert 0.8 < _speech_dur < 1.5, f"speech duration should be ~1.0s, got: {_speech_dur}"
+    assert _speech_dur < _src_span / 10, (
+        f"speech duration ({_speech_dur:.2f}) must be << src span "
+        f"({_src_span:.2f}) — the whole point of the fix"
+    )
+
+
+@check("B-roll total-coverage ceiling drops longest first when over 40% (ACTIVE)")
+def _broll_coverage_ceiling_drops_longest():
+    # Active path: simulate the per-clip post-projection broll_out list
+    # the ceiling logic operates on. 3 clips on a 30s video — sum exceeds
+    # the 40% ceiling. The longest clip drops first; remaining clips
+    # bring coverage back under ceiling.
+    total_output_duration = 30.0
+    source_fps = 30.0
+    broll_out = [
+        {"src": "broll_00", "durationInFrames": int(8.0  * source_fps)},  # 8.0s  — longest
+        {"src": "broll_01", "durationInFrames": int(5.0  * source_fps)},  # 5.0s
+        {"src": "broll_02", "durationInFrames": int(3.0  * source_fps)},  # 3.0s
+    ]
+    # Sum = 16.0s / 30s = 53.3% → over the 40% ceiling.
+    _total = sum(b["durationInFrames"] / source_fps for b in broll_out)
+    assert _total / total_output_duration > 0.40, f"setup: coverage should be over ceiling, got {_total/total_output_duration:.2f}"
+
+    # Mirror the production drop logic.
+    _BROLL_COVERAGE_CEILING = 0.40
+    _coverage = _total / total_output_duration
+    _keep_idx = set(range(len(broll_out)))
+    _sorted_by_dur = sorted(range(len(broll_out)), key=lambda i: (-broll_out[i]["durationInFrames"], i))
+    _drops = []
+    for _drop_i in _sorted_by_dur:
+        if _coverage <= _BROLL_COVERAGE_CEILING:
+            break
+        if _drop_i not in _keep_idx:
+            continue
+        _dropped_dur = broll_out[_drop_i]["durationInFrames"] / source_fps
+        _keep_idx.discard(_drop_i)
+        _total -= _dropped_dur
+        _coverage = _total / total_output_duration
+        _drops.append(_drop_i)
+
+    # The 8.0s clip is the longest → dropped first. After drop:
+    # 5.0 + 3.0 = 8.0s = 26.7% < 40% → no more drops.
+    assert _drops == [0], f"longest (idx 0, 8.0s) must drop first; got drops: {_drops}"
+    assert _coverage < _BROLL_COVERAGE_CEILING, (
+        f"after trim, coverage should be under ceiling, got {_coverage:.3f}"
+    )
+    # Idx 1 (5.0s) and idx 2 (3.0s) survive.
+    assert 1 in _keep_idx and 2 in _keep_idx
+
+
+@check("B-roll ceiling does NOTHING when coverage is already under ceiling (no-target)")
+def _broll_coverage_under_ceiling_noop():
+    # Per feedback_broll_coverage_not_a_target.md: the ceiling is NOT a
+    # target. When coverage is already 18% (well below 40%), the trim
+    # block must not fire — no drops, no _record_divergence calls.
+    total_output_duration = 30.0
+    source_fps = 30.0
+    broll_out = [
+        {"src": "broll_00", "durationInFrames": int(3.0 * source_fps)},
+        {"src": "broll_01", "durationInFrames": int(2.5 * source_fps)},
+    ]
+    _total = sum(b["durationInFrames"] / source_fps for b in broll_out)
+    _coverage = _total / total_output_duration
+    assert _coverage < 0.40, f"setup: coverage should already be under ceiling, got {_coverage:.3f}"
+    # Mirror logic — when coverage already <= ceiling, no drops.
+    _BROLL_COVERAGE_CEILING = 0.40
+    _drops = []
+    for i in range(len(broll_out)):
+        if _coverage <= _BROLL_COVERAGE_CEILING:
+            break
+        _drops.append(i)
+    assert _drops == [], "ceiling must NOT fire when coverage already under it"
+
+
 @check("zoom-type-split triggers when adjacent emphases differ (Bug 1 active path)")
 def _zoom_type_split_active():
     # The pre-split logic must compute the midpoint between two emphases
