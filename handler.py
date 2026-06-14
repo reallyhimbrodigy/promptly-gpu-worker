@@ -3845,8 +3845,8 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
 
   "transitions": [
     {{
-      "after_word_index": int,                    // CUT BOUNDARIES (any type) or TIGHT BOUNDARIES (DipToBlack only)
-      "type": "CardSwipe" | "ZoomThrough" | "SlideOver" | "Stack" | "CrossfadeZoom" | "ShutterFlash" | "StepPush" | "NewspaperWipe" | "FilmStrip" | "SceneTitle" | "DipToBlack"
+      "after_word_index": int,                    // ALWAYS from the CUT BOUNDARIES list
+      "type": "CardSwipe" | "ZoomThrough" | "SlideOver" | "Stack" | "CrossfadeZoom" | "ShutterFlash" | "StepPush" | "NewspaperWipe" | "FilmStrip" | "SceneTitle"
       // ...transition-specific props per the TRANSITIONS section
     }}
   ],
@@ -5552,15 +5552,6 @@ def generate_edit_gemini(
         flush=True,
     )
 
-    # Boundary index sets, hoisted so the transition validator
-    # (handler.py:~6440) can check eligibility regardless of whether the
-    # prompt builder ran. Both are in SRC-word space — populated inside
-    # `if kept_words:` after the kept→src classifier (handler.py:~5690).
-    # CUT boundaries accept any transition that fits per natural-duration
-    # rule; TIGHT boundaries accept ONLY DipToBlack (additive slot).
-    _cut_boundary_indices_src: set = set()
-    _tight_boundary_indices_src: set = set()
-
     # Append the kept-only transcript to the post-cuts call's user content.
     # Indices are NEW (kept-only space [0..M-1]); timestamps are still source-time.
     post_user = post_user_base
@@ -5695,22 +5686,6 @@ def generate_edit_gemini(
         # function). Order preserved by index.
         _all_boundary_indices = sorted(set(_cut_boundary_indices) | set(_tight_boundary_indices))
 
-        # Translate boundary indices from kept-word space to src-word space
-        # for the transition validator below (it operates in src-word space
-        # after the kept→src translation pass). The transition validator
-        # uses these to drop transitions placed at disallowed boundaries:
-        #   • no boundary  → drop (was already invisible to Gemini)
-        #   • tight + non-DipToBlack → drop (TIGHT BOUNDARIES allows only the
-        #     additive 350ms dip; the themed types need handle)
-        _cut_boundary_indices_src = {
-            new_to_src[_ki] for _ki in _cut_boundary_indices
-            if 0 <= _ki < len(new_to_src)
-        }
-        _tight_boundary_indices_src = {
-            new_to_src[_ki] for _ki in _tight_boundary_indices
-            if 0 <= _ki < len(new_to_src)
-        }
-
         _shot_only_indices = sorted(
             _ni for _ni in _all_boundary_indices
             if _ni in _shot_boundary_set and _ni not in _dead_air_set
@@ -5775,32 +5750,27 @@ Indices below are the NEW kept-only space [0..{_kept_count - 1}]. Every word_ind
 
   {_cut_boundary_block}
 
-=== TIGHT BOUNDARIES (real cuts with no handle room — only DipToBlack fits here) ===
+=== TIGHT BOUNDARIES (real cuts with no handle room — these render as HARD CUTS; do NOT place transitions here. Listed so you know the cut exists: land a zoom on the first word after a tight cut to mask the jump, and never treat the video as one continuous clip) ===
 
   {_tight_boundary_block}
 
-These are real splices the viewer's eye will notice as jump-cuts. They have no handle for a wipe / push / card / shutter / leak (all of those need at least 2 × their natural duration in audio gap, which doesn't exist here). They DO accept exactly one transition type — **DipToBlack** — and only DipToBlack. The DipToBlack slot is 350ms inserted between A's last word and B's first word: A's last frame freezes and fades out, screen briefly black, B's first frame fades in. Audio cuts to silence under the dip; speech resumes cleanly when B opens. It works at any tight boundary because no handle is needed — the slot replaces a jump-cut with a clean blink. Use it where the cut would otherwise read as a hard jump (different angle, framing snap, mid-thought pivot). The OTHER way to mask a tight cut is to land a SmoothPush / SnapReframe / StepZoom on the first word after the cut — the eye reads the zoom as the event, not the splice. Don't stack both on the same tight boundary; pick the one whose character matches the moment.
-
 === TRANSITION NATURAL DURATIONS ===
 
-Each transition component renders at its natural duration — the cadence its ramp-in / hold / ramp-out was designed for. Shortened transitions look glitchy; the pipeline doesn't compress them. A transition fits at a CUT BOUNDARIES entry when its natural duration ≤ gap/2 (gap-sharing means each side of the boundary gets gap/2 of source room). DipToBlack at a TIGHT BOUNDARIES entry is the EXCEPTION — it does not need handle, the 350ms slot is inserted between cuts.
+Each transition component renders at its natural duration — the cadence its ramp-in / hold / ramp-out was designed for. Shortened transitions look glitchy; the pipeline doesn't compress them. A transition fits at a boundary when the boundary's audio gap is at least 2 × the type's natural duration (gap-sharing means each side of the boundary gets gap/2 of source room, and the animation needs a full natural duration per side).
 
 {_natural_dur_lines}
 
 === HOW TO PLACE TRANSITIONS ===
 
-**HARD RULE 1 — `after_word_index` must come from one of:**
-  • **CUT BOUNDARIES**: any transition type, must fit the gap per HARD RULE 2 below.
-  • **TIGHT BOUNDARIES**: type MUST be `DipToBlack`, no gap requirement (the 350ms slot is inserted).
-A transition at any other index — or a non-DipToBlack transition placed at a TIGHT BOUNDARIES entry — is dropped by the renderer.
+**HARD RULE 1 — `after_word_index` MUST come from the CUT BOUNDARIES list above (NOT TIGHT BOUNDARIES, NOT any other index).** A transition placed at any other index — including any TIGHT BOUNDARIES entry — has no valid cut to play across and the renderer will not produce it.
 
-**HARD RULE 2 — for CUT BOUNDARIES, the transition's natural duration must fit the boundary's gap.** Each CUT BOUNDARIES entry shows its available audio gap (`820ms gap`). A transition fits when its natural duration ≤ gap/2. If you want SceneTitle (1800ms natural) at a boundary annotated `2400ms gap`, that does NOT fit (need ≥ 3600ms gap). Match the transition's weight to both the dialogue's shift AND the available room — the long heavy transitions (SceneTitle, FilmStrip) are precisely the ones that earn the long pauses, so don't default to short safe transitions everywhere when a 4000ms-gap boundary is sitting right there asking for a chapter break. (HARD RULE 2 does NOT apply to DipToBlack at TIGHT BOUNDARIES — that's the one type that fits without handle.)
+**HARD RULE 2 — the transition's natural duration must fit the boundary's gap.** Each CUT BOUNDARIES entry shows its available audio gap (`820ms gap`). A transition fits when its natural duration ≤ gap/2. If you want SceneTitle (1800ms natural) at a boundary annotated `2400ms gap`, that does NOT fit (need ≥ 3600ms gap). Match the transition's weight to both the dialogue's shift AND the available room — the long heavy transitions (SceneTitle, FilmStrip) are precisely the ones that earn the long pauses, so don't default to short safe transitions everywhere when a 4000ms-gap boundary is sitting right there asking for a chapter break.
 
-**If no transition type fits a particular CUT BOUNDARIES entry, leave it alone.** The cut plays straight (hard cut). Better a clean hard cut than a compressed flicker.
+**If no transition type fits a particular boundary, leave it alone.** The cut plays straight (hard cut). That is the correct behavior — better a clean hard cut than a compressed flicker. Do NOT force a transition where it doesn't fit.
 
 **Place transitions where they fit and earn the moment.** Skip mid-sentence boundaries where the dialogue carries unbroken across the cut (same verb-subject continuing) — there a transition would seam the speaker mid-thought.
 
-For each chosen `after_word_index`, pick a transition `type` whose character matches the dialogue's shift at that boundary. At CUT BOUNDARIES: ZoomThrough, CardSwipe, ShutterFlash, SlideOver, CrossfadeZoom, SceneTitle, NewspaperWipe, FilmStrip, Stack, StepPush, DipToBlack. At TIGHT BOUNDARIES: DipToBlack only. Vary the type across emitted transitions — repeating the same type at adjacent boundaries reads as templating.
+For each chosen `after_word_index`, pick a transition `type` whose character matches the dialogue's shift at that boundary (ZoomThrough, CardSwipe, ShutterFlash, SlideOver, CrossfadeZoom, SceneTitle, NewspaperWipe, FilmStrip, Stack, StepPush). Vary the type across emitted transitions — repeating the same type at adjacent boundaries reads as templating.
 """
 
 
@@ -6450,12 +6420,6 @@ For each chosen `after_word_index`, pick a transition `type` whose character mat
         # Transitions = pack PascalCase names. VALID_TRANSITION_TYPES is the
         # canonical set; mirror it here so adding a type only edits one place.
         _valid_tr_types = set(VALID_TRANSITION_TYPES)
-        # Boundary eligibility — populated from the kept→src translation
-        # above. Empty sets disable the eligibility check (e.g. if the
-        # prompt builder didn't surface boundaries for some reason).
-        _have_boundary_eligibility = bool(
-            _cut_boundary_indices_src or _tight_boundary_indices_src
-        )
         # Build set of removed word indices so we can reject transitions that
         # target removed words (Gemini must pick kept words). Reuses the
         # canonical resolver so all three remove_words shapes collapse to
@@ -6499,52 +6463,6 @@ For each chosen `after_word_index`, pick a transition `type` whose character mat
                     flush=True,
                 )
                 continue
-            # ── Boundary eligibility ─────────────────────────────────────
-            # HARD RULE 1: after_word_index must come from either
-            #   • CUT BOUNDARIES (any type, must fit per HARD RULE 2 — the
-            #     slot-build loop caps slot to min(natural, trim_t, trim_h)
-            #     and skips zero-frame slots, so misfits are caught there).
-            #   • TIGHT BOUNDARIES (type must be DipToBlack — the only
-            #     transition whose slot is additive and needs no handle).
-            # Same drop-and-log pattern as the bounds / removed checks.
-            if _have_boundary_eligibility:
-                _at_cut = awi in _cut_boundary_indices_src
-                _at_tight = awi in _tight_boundary_indices_src
-                if not _at_cut and not _at_tight:
-                    print(
-                        f"[generate-edit] DROP transition '{tr_type}' [{_ti}]: "
-                        f"after_word_index={awi} is not a CUT BOUNDARIES nor "
-                        f"TIGHT BOUNDARIES entry. Render continues without it.",
-                        flush=True,
-                    )
-                    _record_divergence(
-                        "transition",
-                        {"type": tr_type, "after_word_index": awi},
-                        "drop_not_at_boundary",
-                        final=None,
-                        reason="awi_not_in_boundary_lists",
-                    )
-                    continue
-                if _at_tight and not _at_cut and tr_type != "DipToBlack":
-                    print(
-                        f"[generate-edit] DROP transition '{tr_type}' [{_ti}]: "
-                        f"after_word_index={awi} is a TIGHT BOUNDARIES entry "
-                        f"(only DipToBlack accepted there). Render continues "
-                        f"without it.",
-                        flush=True,
-                    )
-                    _record_divergence(
-                        "transition",
-                        {
-                            "type": tr_type,
-                            "after_word_index": awi,
-                            "boundary_kind": "tight",
-                        },
-                        "drop_themed_at_tight",
-                        final=None,
-                        reason="tight_boundary_accepts_only_diptoblack",
-                    )
-                    continue
             word_end = float(_dg_words[awi].get("end") or 0)
             # Build extras dict — copy through all component-specific props
             _extras = {
@@ -10262,21 +10180,18 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
     return output_wav
 
 
-def project_words_to_output(transcript, cuts, effective_durations, transition_duration=None, clip_time_maps=None, removed_word_indices=None, fps=60.0, trans_dur_after=None, trans_kind_after=None):
+def project_words_to_output(transcript, cuts, effective_durations, transition_duration=None, clip_time_maps=None, removed_word_indices=None, fps=60.0, trans_dur_after=None):
     """Project word timestamps from source to output timeline using canonical time maps.
 
     If removed_word_indices is provided, words at those indices are excluded.
     This is the SAME source of truth used by build_clips_from_words, so the
     caption projection cannot emit fragments of removed words.
 
-    Per-slot transition kind ("overlap" | "additive") mirrors the semantics
-    in get_output_clip_ranges:
-      - "overlap": cursor advances eff_dur then SUBTRACTS trans_dur; the
-        last trans_dur of this cut's output is the overlap with the next
-        cut's head (handle-frame slot), so words there are suppressed.
-      - "additive": cursor advances eff_dur then ADDS trans_dur; the slot
-        is INSERTED between cuts, no overlap, so the trans_tail suppression
-        does not apply (no words to project into an inserted blank gap).
+    Overlap (handle) model: every transition slot lives ON the overlap
+    between adjacent clips' output ranges. Cursor advances eff_dur and
+    subtracts trans_dur per transition; words in the trans_tail handle
+    (the overlap region) are suppressed so the next cut's head words
+    own that output-time range.
     """
     words = transcript.get("words") or []
     projected = []
@@ -10287,7 +10202,6 @@ def project_words_to_output(transcript, cuts, effective_durations, transition_du
         cuts, effective_durations,
         transition_duration=transition_duration,
         trans_dur_after=trans_dur_after,
-        trans_kind_after=trans_kind_after,
     )
     output_cursor = 0.0
     for i, cut in enumerate(cuts):
@@ -10296,11 +10210,6 @@ def project_words_to_output(transcript, cuts, effective_durations, transition_du
         tm = clip_time_maps[i] if clip_time_maps and i < len(clip_time_maps) else None
         _eff_i = effective_durations[i] if i < len(effective_durations) else (c_end - c_start)
         _trans_tail_i = float(trans_dur_after[i] or 0.0) if (trans_dur_after is not None and i < len(trans_dur_after)) else 0.0
-        _trans_kind_i = (
-            str(trans_kind_after[i])
-            if (trans_kind_after is not None and i < len(trans_kind_after))
-            else "overlap"
-        )
         for word_idx, w in enumerate(words):
             if word_idx in _removed:
                 continue
@@ -10324,16 +10233,13 @@ def project_words_to_output(transcript, cuts, effective_durations, transition_du
                 local_s = (clamped_s - c_start) / speed
                 local_e = (clamped_e - c_start) / speed
             # Suppress words that fall inside this cut's trans_tail handle
-            # ONLY for "overlap" slots — the next cut's head words own that
-            # overlap region. "additive" slots are inserted, not overlapped,
-            # so the cut's full local_s range is valid; nothing to suppress.
-            if _trans_kind_i == "overlap" and _trans_tail_i > 0 and local_s >= (_eff_i - _trans_tail_i):
+            # (the overlap region with the next cut's head). The next cut's
+            # head words own that output time range; rendering this cut's
+            # tail words there would produce simultaneous overlapping
+            # caption pages during every transition.
+            if _trans_tail_i > 0 and local_s >= (_eff_i - _trans_tail_i):
                 continue
             # Preserve sub-millisecond precision for caption tokens.
-            # Captions and audio share the same source-of-truth timestamps;
-            # rounding to ms here would put captions on a 1 ms grid while
-            # audio is sample-precise, introducing visible drift between
-            # caption highlight and spoken word over a long clip.
             projected.append({
                 "start": float(output_cursor + local_s),
                 "end":   float(output_cursor + local_e),
@@ -10344,68 +10250,33 @@ def project_words_to_output(transcript, cuts, effective_durations, transition_du
                 "_word_index": word_idx,
             })
         dur = effective_durations[i] if i < len(effective_durations) else (c_end - c_start)
-        # Cursor advance mirrors get_output_clip_ranges:
-        #   overlap  → cursor -= trans_dur (slot lives on the overlap)
-        #   additive → cursor += trans_dur (slot inserted between cuts;
-        #                                   matches the audio path which
-        #                                   inserts silence at the same
-        #                                   boundary)
         output_cursor += dur
         if trans_dur_after is not None and i < len(trans_dur_after):
-            _td = float(trans_dur_after[i] or 0.0)
-            if _trans_kind_i == "additive":
-                output_cursor += _td
-            else:
-                output_cursor -= _td
+            output_cursor -= float(trans_dur_after[i] or 0.0)
 
     projected = [w for w in projected if w["end"] > w["start"]]
     return projected
 
-def get_output_clip_ranges(cuts, effective_durations, transition_duration=None, trans_dur_after=None, trans_kind_after=None):
+def get_output_clip_ranges(cuts, effective_durations, transition_duration=None, trans_dur_after=None):
     """
     Return list of {"start": float, "end": float} for each clip's FULL
     output window (covering the cut's entire source range from c_start to
     c_end), used by all source-time → output-time projections (captions,
     SFX, B-roll, MGs).
 
-    Per-slot transition kind ("overlap" | "additive"):
+    Overlap (handle) model: source_end[A] is extended forward upstream by
+    trans_dur*speed at the handle-extension step, so eff_dur[A] grows by
+    trans_dur. Cursor advances by eff_dur and subtracts trans_dur per
+    transition. Adjacent clips overlap by trans_dur in this coordinate
+    system; the slot lives ON the overlap, reading from each clip's
+    handle frames. Total span = sum(eff_dur) - sum(trans_dur) =
+    sum(original_eff) + sum(trans_dur), matching the ffmpeg-concat
+    reality at ffmpeg_base.py:625 AND the audio path's contiguous
+    crossfaded transition_audio.
 
-      - "overlap" (default, handle-based and zero-handle WITH handle):
-          source_end[A] was extended forward by trans_dur*speed upstream,
-          so eff_dur[A] grew by trans_dur. Cursor advances eff_dur and
-          SUBTRACTS trans_dur. Adjacent clips overlap by trans_dur in this
-          coordinate system; the slot lives ON the overlap, reading from
-          each clip's handle. Total span = sum(eff_dur) - sum(trans_dur)
-          = sum(original_eff) + sum(trans_dur), which matches the
-          ffmpeg-concat reality at ffmpeg_base.py:625.
-
-      - "additive" (zero-handle at TIGHT cut — no handle available):
-          source ranges are NOT extended (no headroom). eff_dur stays at
-          original kept content. Cursor advances eff_dur and ADDS
-          trans_dur. Adjacent clips do not overlap; the slot is INSERTED
-          between A's last kept frame and B's first kept frame.
-          A's full kept speech is preserved (no truncation), then
-          trans_dur of inserted slot time, then B's full kept speech.
-
-      This mirrors the audio path at build_per_cut_audio:~10092 which
-      always inserts trans_dur of silence between cut_audio[A] and
-      cut_audio[B] for zero-handle types — the silent slot is additive
-      in audio length. Without "additive" in the video coordinate system,
-      caption/SFX/B-roll projections for clip B would land trans_dur
-      BEFORE B's audio plays (drift). With "additive", the video
-      coordinate system matches the audio concat exactly.
-
-    Args:
-      cuts: list of cut dicts with source_start/source_end/transition_out.
-      effective_durations: per-cut output duration in seconds (full eff_dur,
-        covering source_start..source_end at the cut's speed).
-      transition_duration: kept for API compatibility (unused here).
-      trans_dur_after: optional list. trans_dur_after[i] = transition
-        duration in seconds between cut i and cut i+1 (0 if no transition).
-        When None, defaults to all-zero (no transitions).
-      trans_kind_after: optional list parallel to trans_dur_after. Each
-        entry is "overlap" (default) or "additive". When None or shorter
-        than trans_dur_after, missing entries default to "overlap".
+    The 2026-06-14 zero-handle additive path was rolled back — it
+    rendered glitched frames at tight cuts and grew output duration
+    beyond audio.
     """
     _ = transition_duration  # API compat
     ranges = []
@@ -10417,16 +10288,7 @@ def get_output_clip_ranges(cuts, effective_durations, transition_duration=None, 
         ranges.append({"start": start, "end": end})
         cursor += dur
         if trans_dur_after is not None and i < len(trans_dur_after):
-            _td = float(trans_dur_after[i] or 0.0)
-            _tk = (
-                str(trans_kind_after[i])
-                if (trans_kind_after is not None and i < len(trans_kind_after))
-                else "overlap"
-            )
-            if _tk == "additive":
-                cursor += _td
-            else:
-                cursor -= _td
+            cursor -= float(trans_dur_after[i] or 0.0)
     return ranges
 
 
@@ -11175,53 +11037,26 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # duration. In the normal case (Gemini placed the transition only where
     # gap >= 2 × natural_duration, per the prompt rule) the slot equals the
     # natural duration; source-bounds clamps or Gemini-violations shrink it.
-    # ── Per-slot kind ("overlap" | "additive") ──────────────────────────────
-    # Zero-handle types at a TIGHT cut (where the boundary refinement / handle
-    # extension couldn't open enough handle for full natural duration) need
-    # ADDITIVE slot insertion to match the audio path. The audio path at
-    # build_per_cut_audio:~10092 already inserts trans_dur of silence between
-    # cut_audio[A] and cut_audio[B] for zero-handle types — additive in audio
-    # time. The video coordinate system must follow, or captions/SFX/B-roll
-    # for clip B project trans_dur BEFORE B's audio plays (drift).
-    #
-    # OPTION-A architecture decision: the video timeline matches the audio
-    # timeline. For additive slots we also override clipAStartFromFrames /
-    # clipAPlaybackRate below to FREEZE A's last visible frame across the
-    # slot — without that, the slot's source slice rewinds into A's last
-    # trans_dur of kept speech and replays it under the dip while audio is
-    # silent, producing a trans_dur lip-sync divergence at every tight cut.
+    # If the slot collapses to zero (tight cut, no handle available), the
+    # transition emission at the per-transition build below skips it — the
+    # boundary plays as a hard cut, which is the editorially-correct fallback
+    # when there's no handle room to play any animation. The 2026-06-14
+    # additive/freeze-frame path was rolled back: the freeze-frame trick
+    # (playbackRate≈0.048) rendered a glitched static frame in production
+    # and the additive insertion grew output duration ~1s beyond content.
+    # Zero-handle transitions at tight cuts are NOT supported in this model.
     _trans_dur_after = []
-    _trans_kind_after = []
     _trans_frames_after = 0
     for _i, _rc in enumerate(render_cuts):
         _has_out = _i < len(render_cuts) - 1 and _has_real_transition(_rc)
         if _has_out:
             _natural_here = _natural_trans_dur_for_cut(_rc)
-            _t_raw = str(_rc.get("transition_out") or "")
-            _have_full_handle = (
-                _trim_tail_dur[_i] >= _natural_here - 1e-4
-                and _trim_head_dur[_i + 1] >= _natural_here - 1e-4
-            )
-            if _t_raw in ZERO_HANDLE_TRANSITION_TYPES and not _have_full_handle:
-                # Tight cut + zero-handle type → additive insertion.
-                # Slot takes the full natural duration regardless of (missing)
-                # handle. clipAStartFromFrames / playbackRate get the
-                # freeze-frame override below at the per-transition build.
-                _slot = _natural_here
-                _kind = "additive"
-            else:
-                # Handle-based (or zero-handle WITH handle) → overlap model.
-                # Slot is capped by available handle; if Gemini violated
-                # the natural-duration fit rule, this shrinks the slot.
-                _slot = min(_natural_here, _trim_tail_dur[_i], _trim_head_dur[_i + 1])
-                _kind = "overlap"
+            _slot = min(_natural_here, _trim_tail_dur[_i], _trim_head_dur[_i + 1])
             _slot_frames = max(1, int(round(_slot * source_fps)))
             _trans_dur_after.append(_slot)
-            _trans_kind_after.append(_kind)
             _trans_frames_after += _slot_frames
         else:
             _trans_dur_after.append(0.0)
-            _trans_kind_after.append("overlap")
 
     # NOTE: source_end is NOT extended in the compression model. A's source
     # range stays [cs_A, ce_A]. Its last trans_dur of source is consumed by
@@ -11260,16 +11095,17 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # Output clip ranges — COMPRESSION model. Each cut's full output window
     # COVERS its trim_head handle (overlap with previous transition) and
     # trim_tail handle (overlap with next transition). Adjacent clips
-    # OVERLAP in output time by trans_dur (the transition slot is shared)
-    # for handle-based slots; ADDITIVE (slot inserted) for zero-handle at
-    # tight cuts. Per-slot kind in _trans_kind_after; the function honors
-    # both modes so projections (captions, SFX, B-roll) land on the same
-    # output coordinates the ffmpeg concat produces and the audio path inserts.
+    # OVERLAP in output time by trans_dur (the transition slot is shared).
+    # Cursor advances by eff_dur per cut, then subtracts trans_dur_after
+    # so the next clip starts trans_dur before this one's output_end —
+    # matching the visual where the transition plays A's tail and B's
+    # head over the overlap. The 2026-06-14 additive-kind branch (for
+    # zero-handle transitions at tight cuts) was rolled back; only
+    # overlap is supported now.
     _clip_ranges = get_output_clip_ranges(
         render_cuts, effective_durations,
         transition_duration=None,
         trans_dur_after=_trans_dur_after,
-        trans_kind_after=_trans_kind_after,
     )
 
     # Project Deepgram words onto output timeline (for captions + SFX + b-roll)
@@ -11279,7 +11115,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         transition_duration=None, clip_time_maps=_clip_time_maps,
         removed_word_indices=_removed_word_indices, fps=source_fps,
         trans_dur_after=_trans_dur_after,
-        trans_kind_after=_trans_kind_after,
     )
     edit_plan["_projected_words"] = _projected_words
     _pw_by_idx = {pw["_word_index"]: pw for pw in _projected_words if pw.get("_word_index") is not None}
@@ -11466,49 +11301,15 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _clipB_pbr = float(_clip_time_maps[i + 1].get("avg_speed") or 1.0)
         _clipA_src_end = float(render_cuts[i]["source_end"])
         _clipB_src_start = float(render_cuts[i + 1]["source_start"])
-        _kind_here = (
-            _trans_kind_after[i]
-            if i < len(_trans_kind_after) else "overlap"
-        )
-        if _kind_here == "additive":
-            # ADDITIVE slot at a tight cut: no handle source available, so
-            # we cannot let the slot read forward from c_end_A (that lands
-            # in B's source content) or backward from c_end_A (that replays
-            # A's last slot_dur of KEPT speech under a silent audio slot —
-            # the lip-sync divergence the OVERLAP→ADDITIVE migration is
-            # specifically designed to prevent).
-            #
-            # Solution: freeze A's LAST kept frame across the dip-out half
-            # and B's FIRST kept frame across the dip-in half. Achieved by
-            # pointing clipAStartFromFrames at end_frame_A and choosing a
-            # playbackRate small enough that source advances less than ONE
-            # source frame across the slot's output duration.
-            #   pbr_frozen = 1 / max(1, slot_output_frames)
-            # advances source by ≤1 frame over the entire slot — the
-            # OffthreadVideo decoder repeats the start frame for the
-            # remaining output frames. Visually a held still.
-            _clipA_start_from_frames = max(
-                0, int(round(_clipA_src_end * source_fps)) - 1
-            )
-            _clipB_start_from_frames = max(
-                0, int(round(_clipB_src_start * source_fps))
-            )
-            _frozen_pbr = round(1.0 / max(1, _slot_frames), 6)
-            _clipA_pbr_out = _frozen_pbr
-            _clipB_pbr_out = _frozen_pbr
-        else:
-            # OVERLAP — handle model: A's tail + B's head both read from
-            # their respective post/pre-utterance handle silence (not kept
-            # content). Source ranges for A's tail and B's head match the
-            # audio model exactly:
-            #   A_tail: [ce_A_extended − slot*speed_A, ce_A_extended]
-            #   B_head: [cs_B_extended,                cs_B_extended + slot*speed_B]
-            _clipA_start_from = max(0.0, _clipA_src_end - _slot_dur * _clipA_pbr)
-            _clipA_start_from_frames = int(round(_clipA_start_from * source_fps))
-            _clipB_start_from = max(0.0, _clipB_src_start)
-            _clipB_start_from_frames = int(round(_clipB_start_from * source_fps))
-            _clipA_pbr_out = round(_clipA_pbr, 6)
-            _clipB_pbr_out = round(_clipB_pbr, 6)
+        # Handle model — A's tail + B's head, both reading their respective
+        # post/pre-utterance handle silence (not kept content). Source ranges
+        # for A's tail and B's head match the audio model exactly:
+        #   A_tail: [ce_A_extended − slot*speed_A, ce_A_extended]
+        #   B_head: [cs_B_extended,                cs_B_extended + slot*speed_B]
+        _clipA_start_from = max(0.0, _clipA_src_end - _slot_dur * _clipA_pbr)
+        _clipA_start_from_frames = int(round(_clipA_start_from * source_fps))
+        _clipB_start_from = max(0.0, _clipB_src_start)
+        _clipB_start_from_frames = int(round(_clipB_start_from * source_fps))
         _trans_extras = render_cuts[i].get("_transition_extras") or {}
         transitions_out.append({
             "afterClipIndex": i,
@@ -11516,15 +11317,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             "durationInFrames": _slot_frames,
             "clipAStartFromFrames": _clipA_start_from_frames,
             "clipBStartFromFrames": _clipB_start_from_frames,
-            "clipAPlaybackRate": _clipA_pbr_out,
-            "clipBPlaybackRate": _clipB_pbr_out,
+            "clipAPlaybackRate": round(_clipA_pbr, 6),
+            "clipBPlaybackRate": round(_clipB_pbr, 6),
             **_trans_extras,
         })
-        print(
-            f"[transition] {_t_raw} after clip {i} — {_slot_frames}f "
-            f"(natural {int(get_transition_duration(_t_raw) * 1000)}ms, kind={_kind_here})",
-            flush=True,
-        )
+        print(f"[transition] {_t_raw} after clip {i} — {_slot_frames}f (natural {int(get_transition_duration(_t_raw) * 1000)}ms)", flush=True)
 
     # ── 3. SFX collection (projected onto output timeline) ──────────────────
     # Each SFX entry produces a ffmpeg input + filter that delays + scales it
@@ -12294,15 +12091,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     #      editorially weighted, so they drop first.
     _MIN_TRANSITION_SPACING_S = 3.0
     _TRANSITION_CAP_PER_30S = 4.0
-    # DipToBlack is the one transition whose slot inserts a beat of silence
-    # (350ms of np.zeros in the audio path, additive in the video timeline).
-    # A blink between cuts reads as deliberate punctuation; used >2× per
-    # video the inserted silence makes the edit feel stop-start and fights
-    # punchy pacing. Cap applies BEFORE the general per-video cap so the
-    # general cap doesn't reduce DipToBlacks below this ceiling first
-    # (DipToBlack at 350ms is the shortest natural duration and would
-    # otherwise drop first under "shortest-first" eviction).
-    _DIPTOBLACK_CAP_PER_VIDEO = 2
 
     if transitions_out:
         # ── Helper: transition's output frame range ──────────────────────
@@ -12421,73 +12209,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _kept_after_spacing.append(_t)
             _last_kept_cut_frame = _cut_frame_t
 
-        # ── #5b: DipToBlack-specific cap (max 2 per video) ───────────────
-        # DipToBlack inserts 350ms of silence per slot (np.zeros at
-        # build_per_cut_audio:~10174); each fire lengthens output by 350ms
-        # and adds a beat of dead air. One or two reads as deliberate
-        # punctuation at the strongest structural beats; more than that
-        # and the inserted silence stops feeling like a "blink between
-        # acts" and starts reading as the edit hitching. Cap independent
-        # of the general per-video cap so DipToBlack doesn't get
-        # under-allocated when the general cap fires.
-        #
-        # Drop priority — structural weight = (clip A duration + clip B
-        # duration) at the boundary. A DipToBlack between two SUBSTANTIAL
-        # clips marks a bigger structural shift than one between two
-        # short clips; keep the highest-weight DipToBlacks. Ties broken
-        # by earlier afterClipIndex (stable for reproducibility).
-        _diptoblack_indices_in_kept = [
-            _i for _i, _t in enumerate(_kept_after_spacing)
-            if str(_t.get("type", "")) == "DipToBlack"
-        ]
-        if len(_diptoblack_indices_in_kept) > _DIPTOBLACK_CAP_PER_VIDEO:
-            def _structural_weight(_kept_idx):
-                _ci = int(_kept_after_spacing[_kept_idx].get("afterClipIndex", -1))
-                if not (0 <= _ci < len(_clip_ranges) - 1):
-                    return 0.0
-                _a_dur = float(_clip_ranges[_ci]["end"]) - float(_clip_ranges[_ci]["start"])
-                _b_dur = float(_clip_ranges[_ci + 1]["end"]) - float(_clip_ranges[_ci + 1]["start"])
-                return _a_dur + _b_dur
-            # Sort DipToBlack-only indices by weight descending (keep
-            # highest-weight first), break ties by afterClipIndex ascending.
-            _diptoblack_indices_in_kept.sort(
-                key=lambda _ki: (
-                    -_structural_weight(_ki),
-                    int(_kept_after_spacing[_ki].get("afterClipIndex", -1)),
-                )
-            )
-            _keep_diptoblack_set = set(_diptoblack_indices_in_kept[:_DIPTOBLACK_CAP_PER_VIDEO])
-            _drop_diptoblack_set = set(_diptoblack_indices_in_kept[_DIPTOBLACK_CAP_PER_VIDEO:])
-            _filtered = []
-            for _ki, _t in enumerate(_kept_after_spacing):
-                if _ki in _drop_diptoblack_set:
-                    _w = _structural_weight(_ki)
-                    print(
-                        f"[transition] DROP 'DipToBlack' after clip "
-                        f"{_t.get('afterClipIndex','?')} — exceeds "
-                        f"{_DIPTOBLACK_CAP_PER_VIDEO}/video cap. "
-                        f"Structural weight={_w:.2f}s vs the "
-                        f"{_DIPTOBLACK_CAP_PER_VIDEO} kept DipToBlacks at "
-                        f"the strongest boundaries.",
-                        flush=True,
-                    )
-                    _record_divergence(
-                        "transition",
-                        {
-                            "type": "DipToBlack",
-                            "after_clip_index": _t.get("afterClipIndex", -1),
-                            "structural_weight_s": round(_w, 3),
-                            "cap": _DIPTOBLACK_CAP_PER_VIDEO,
-                        },
-                        "drop_diptoblack_over_cap",
-                        final=None,
-                        reason=f"diptoblack_cap_{_DIPTOBLACK_CAP_PER_VIDEO}",
-                    )
-                    continue
-                _filtered.append(_t)
-            _kept_after_spacing = _filtered
-
-        # ── #5c: Per-video cap ───────────────────────────────────────────
+        # ── #5b: Per-video cap ───────────────────────────────────────────
         # 4 transitions per 30s of output runtime, rounded up. Drop the
         # SHORTEST natural-duration transitions first (shorter = less
         # editorial weight). Stable sort: ties broken by afterClipIndex.
