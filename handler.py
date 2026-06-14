@@ -28,13 +28,15 @@ HANDLER_VERSION = "3.2.0"
 # Pro is worth it for consistent quality across every call.
 #
 # Google deprecated gemini-3-pro-preview on 2026-03-09 and replaced it with
-# gemini-3.1-pro-preview. 3.1 Pro has since gone GA — switched off the
-# preview SKU because preview models carry a shorter server-side
-# processing deadline (consistently ~135s on the 504s we hit), and the
-# GA SKU lifts that cap to the production SLA. Same model weights, same
-# quality, lower server-side timeout risk. Migrate forward as new SKUs ship.
-GEMINI_MODEL = "gemini-3.1-pro"
-GEMINI_EDITORIAL_MODEL = "gemini-3.1-pro"
+# gemini-3.1-pro-preview. There is no `gemini-3-pro` GA SKU (404). On
+# 2026-06-14 I tried switching to `gemini-3.1-pro` thinking it had gone
+# GA — also 404. Reverted to the preview SKU. Before the next attempt
+# to migrate off preview, RUN ListModels against the API key
+# (genai.models.list()) and pick the actual returned ID — do not guess
+# at GA naming conventions. The preview SKU works; switching to a name
+# the API doesn't recognize fails every render.
+GEMINI_MODEL = "gemini-3.1-pro-preview"
+GEMINI_EDITORIAL_MODEL = "gemini-3.1-pro-preview"
 # Bump when the edit_plan schema or render pipeline changes in a way that breaks
 # replay of older persisted plans. Returned in every job response so the server
 # can tag video_jobs.render_version and gate re-edit compatibility.
