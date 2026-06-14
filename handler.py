@@ -152,6 +152,33 @@ ZOOM_NATURAL_SCALE = {
     "StageZoom":     1.30,  # final stage scale; firstStage handled separately
     "DepthPull":     1.25,
 }
+# Per-type PERCEPTUAL PEAK reach time relative to event start.
+# Measured from each component's actual ease curve in
+# src/remotion/src/zoom/<type>/. This is the moment scale first hits its
+# target — what the viewer perceives as "the zoom landed."
+#
+# The prompt formula at handler.py:~3317 ("startMs = word_start_ms −
+# natural_duration") puts the *math endpoint* on the word, but for every
+# type the math endpoint is "ramp-out done" — scale is back at 1.0. The
+# perceptual peak lands HUNDREDS OF MILLISECONDS BEFORE the word, so
+# zooms read as misaligned ("late" via SnapReframe's trailing release;
+# "missed entirely" via SmoothPush returning to neutral on the word).
+#
+# Python overrides startMs at validation so:
+#   new_startMs = word_start_ms − ZOOM_PEAK_REACH_MS[type]
+# producing peak-on-word alignment. The prompt formula is now
+# informational only. Do NOT change the prompt to use these offsets —
+# Python is the source of truth, and a prompt-side change would
+# double-correct.
+ZOOM_PEAK_REACH_MS = {
+    "SmoothPush":     420,   # 35% × 1200ms (ramp-in end)
+    "SnapReframe":    171,   # spring 99% settling (damping=28, mass=0.6, stiffness=260)
+    "FocusWindow":    234,   # spring 99% settling (damping=24, mass=0.7, stiffness=180)
+    "StepZoom":         0,   # instant — peak at startMs
+    "LetterboxPush":  490,   # 35% × 1400ms (ramp-in end)
+    "StageZoom":     1170,   # 65% × 1800ms (second-stage peak)
+    "DepthPull":      770,   # 35% × 2200ms (ramp-in end)
+}
 _MG_TYPES = Literal[
     "AnnotationArrow", "ChatThread",
     "Notification", "ProgressBar", "QuoteCard", "RecordingFrame",
@@ -6893,15 +6920,68 @@ For each chosen `after_word_index`, pick a transition `type` whose character mat
             # for the beat; the renderer handles the look.
             _natural_dur = ZOOM_NATURAL_DURATION_MS.get(_zt, 1200)
             _natural_scale = ZOOM_NATURAL_SCALE.get(_zt, 1.22)
+            # Per-event PERCEPTUAL PEAK back-timing. Override Gemini's
+            # startMs so the visible peak lands on the anchor word, not
+            # the ramp-out endpoint. See ZOOM_PEAK_REACH_MS at the top
+            # of this file for the rationale and measured values.
+            _peak_reach_ms = ZOOM_PEAK_REACH_MS.get(_zt, 0)
+            _word_start_ms = int(round(t * 1000.0))
+            _new_start_ms_canonical = _word_start_ms - _peak_reach_ms
+            # Find the owning clip's source range to enforce the
+            # "startMs must live inside the owning clip's source range"
+            # hard constraint. The render-time projection already has
+            # its own clip-window clamp (handler.py:~10744), but we
+            # also clamp here so the recorded plan reflects the
+            # intended source-time and the divergence log is precise.
+            _owning_clip_for_em = None
+            for _ci_em, _clip_em in enumerate(validated_cuts):
+                _cs_em = float(_clip_em.get("source_start") or 0.0)
+                _ce_em = float(_clip_em.get("source_end") or 0.0)
+                if _cs_em <= t <= _ce_em:
+                    _owning_clip_for_em = (_ci_em, _cs_em, _ce_em)
+                    break
             _filled_events = []
             for _ev_raw in _raw_events:
                 if not isinstance(_ev_raw, dict):
                     continue
                 _ev = dict(_ev_raw)
+                _gemini_start_ms = _ev.get("startMs")
                 if _ev.get("durationMs") is None:
                     _ev["durationMs"] = _natural_dur
                 if _ev.get("scale") is None:
                     _ev["scale"] = _natural_scale
+                # Override startMs to put the perceptual peak on the
+                # anchor word. Clamp to the owning clip's source_start
+                # in ms (frame-0 blip protection). If no owning clip
+                # could be matched (rare — emphasis t outside all
+                # clips, which the existing "CLEAR emphasis_moments
+                # zoom_effect" pass at ~handler.py:7000 will catch
+                # and clear anyway), the canonical correction stands.
+                _corrected_start_ms = _new_start_ms_canonical
+                _clamp_reason = None
+                if _owning_clip_for_em is not None:
+                    _, _cs_em, _ce_em = _owning_clip_for_em
+                    _clip_start_ms = int(round(_cs_em * 1000.0))
+                    if _corrected_start_ms < _clip_start_ms:
+                        _corrected_start_ms = _clip_start_ms
+                        _clamp_reason = "clamped_to_clip_source_start"
+                _ev["startMs"] = _corrected_start_ms
+                _record_divergence(
+                    "zoom_startMs_corrected",
+                    {
+                        "type": _zt,
+                        "old_startMs": (
+                            int(_gemini_start_ms)
+                            if isinstance(_gemini_start_ms, (int, float))
+                            else None
+                        ),
+                        "word_start_ms": _word_start_ms,
+                        "peak_reach_ms": _peak_reach_ms,
+                    },
+                    "corrected" if _clamp_reason is None else _clamp_reason,
+                    final={"new_startMs": _corrected_start_ms},
+                    reason=(_clamp_reason or "align_perceptual_peak_to_word"),
+                )
                 _filled_events.append(_ev)
             _ze_out = {"type": _zt, "events": _filled_events}
             for _ek in ("firstStage", "secondStage", "windowScale", "borderWidth",

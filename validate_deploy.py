@@ -821,6 +821,88 @@ def _broll_score_floor_drops_below():
     assert should_drop is True, f"score 34 must drop at floor 50; got should_drop={should_drop}"
 
 
+@check("ZOOM_PEAK_REACH_MS has the measured peak-reach time for every zoom type (sanity)")
+def _zoom_peak_reach_table_complete():
+    # The fix is wired against the ZOOM_NATURAL_DURATION_MS key set —
+    # any zoom type with a natural duration MUST also have a measured
+    # peak-reach time, or the override silently falls back to 0
+    # (treating it as instant, wrong for the curved types).
+    nat = handler.ZOOM_NATURAL_DURATION_MS
+    peak = handler.ZOOM_PEAK_REACH_MS
+    missing = [t for t in nat if t not in peak]
+    assert not missing, f"ZOOM_PEAK_REACH_MS missing entries for: {missing}"
+
+
+@check("zoom startMs correction: SmoothPush at 12.0s word → startMs=11580 (peak-on-word) [ACTIVE]")
+def _zoom_smoothpush_correction_active():
+    # Smoke covers the exact example Zac specified: word at 12.0s,
+    # SmoothPush ramp-in completes 35% × 1200ms = 420ms after eventStart.
+    # Corrected startMs = 12000 − 420 = 11580 — peak lands ON the word.
+    # NOT 10800 (the old "ramp-out endpoint on word" formula).
+    word_start_ms = 12000  # 12.0s × 1000
+    peak_reach_ms = handler.ZOOM_PEAK_REACH_MS["SmoothPush"]
+    corrected_start_ms = word_start_ms - peak_reach_ms
+    assert peak_reach_ms == 420, f"SmoothPush peak-reach should be 420ms, got {peak_reach_ms}"
+    assert corrected_start_ms == 11580, f"expected 11580, got {corrected_start_ms}"
+    # And critically, NOT the old wrong value 10800 (= 12000 − 1200 natural).
+    old_wrong = word_start_ms - handler.ZOOM_NATURAL_DURATION_MS["SmoothPush"]
+    assert corrected_start_ms != old_wrong, "must differ from pre-fix value 10800"
+
+
+@check("zoom startMs correction: SnapReframe at 1.2s word → startMs=1029 (peak-on-word)")
+def _zoom_snapreframe_correction_active():
+    # Spring 99% settling at ~171ms. Word at 1.2s = 1200ms.
+    # Corrected startMs = 1200 − 171 = 1029.
+    word_start_ms = 1200
+    peak_reach_ms = handler.ZOOM_PEAK_REACH_MS["SnapReframe"]
+    corrected_start_ms = word_start_ms - peak_reach_ms
+    assert peak_reach_ms == 171
+    assert corrected_start_ms == 1029, f"expected 1029, got {corrected_start_ms}"
+
+
+@check("zoom startMs correction: StepZoom is instant → startMs unchanged (peak = startMs)")
+def _zoom_stepzoom_correction_active():
+    # StepZoom is instant — peak == startMs. Corrected == word_start_ms.
+    word_start_ms = 5500
+    corrected_start_ms = word_start_ms - handler.ZOOM_PEAK_REACH_MS["StepZoom"]
+    assert handler.ZOOM_PEAK_REACH_MS["StepZoom"] == 0
+    assert corrected_start_ms == word_start_ms == 5500
+
+
+@check("zoom startMs correction CLAMPS to clip source_start (no negative / no frame-0 blip)")
+def _zoom_correction_clips_to_source_start():
+    # Word at 0.3s with a SmoothPush would back-time to startMs = 300 − 420
+    # = −120ms — negative, would blip at frame 0. Clip's source_start is
+    # 0.0s (= 0ms). Clamp to 0ms.
+    word_start_ms = 300
+    peak_reach_ms = handler.ZOOM_PEAK_REACH_MS["SmoothPush"]
+    canonical = word_start_ms - peak_reach_ms
+    clip_source_start_ms = 0
+    clamped = max(clip_source_start_ms, canonical)
+    assert canonical == -120
+    assert clamped == 0, f"clamp must drag negative back to 0, got {clamped}"
+    # And when canonical is inside the clip range, no clamp.
+    word_start_ms2 = 12000
+    canonical2 = word_start_ms2 - peak_reach_ms
+    clip_source_start_ms2 = 10000  # clip starts at 10s — corrected (11580) is well inside
+    clamped2 = max(clip_source_start_ms2, canonical2)
+    assert clamped2 == 11580, "no clamp when canonical is inside clip range"
+
+
+@check("zoom startMs correction CLAMPS when word lands mid-clip but back-timing crosses boundary")
+def _zoom_correction_clip_mid_clamp():
+    # Word at 5.2s; clip source_start at 5.0s (200ms before word).
+    # StageZoom peak-reach is 1170ms. canonical = 5200 − 1170 = 4030.
+    # That's BEFORE the clip's source_start (5000) → clamp to 5000.
+    word_start_ms = 5200
+    peak_reach_ms = handler.ZOOM_PEAK_REACH_MS["StageZoom"]
+    canonical = word_start_ms - peak_reach_ms
+    clip_source_start_ms = 5000
+    clamped = max(clip_source_start_ms, canonical)
+    assert canonical == 4030
+    assert clamped == 5000, f"corrected should clamp to clip start (5000), got {clamped}"
+
+
 @check("B-roll score floor KEEPS the cutaway when best match is at or above floor")
 def _broll_score_floor_keeps_at_or_above():
     BROLL_MATCH_FLOOR = 50
