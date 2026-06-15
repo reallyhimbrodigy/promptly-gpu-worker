@@ -10045,7 +10045,20 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
     # range, so no 5ms splice fade is needed at either.
     all_clips: List[np.ndarray] = []
     is_splice_after: List[bool] = []
+    # Parallel to is_splice_after: True if there's a real source jump at the
+    # splice (Gemini removed content — A's last source sample and B's first
+    # source sample are not adjacent), False if source is contiguous (tight
+    # shot-change cuts where source_end[A] == source_start[B]). The fade
+    # loop below applies cos²/sin² ONLY where _splice_source_jump[i] is True.
+    # For contiguous splices a fade would force continuous audio to zero at
+    # the seam, producing a 10ms attenuated envelope and audible click —
+    # confirmed numerically 2026-06-14: 38% RMS drop in the seam window,
+    # sample-level zero at the join. The fix below skips both fade-out
+    # and fade-in for those splices so the underlying continuous audio
+    # plays through unmodified.
+    _splice_source_jump: List[bool] = []
     _n_transitions = 0
+    _SAMPLE_TOLERANCE_S = 1.0 / sample_rate  # contiguity = within 1 sample
     for ci, cut_audio in enumerate(cut_audios):
         all_clips.append(cut_audio)
         _t_after = 0.0
@@ -10053,9 +10066,14 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
             _t_after = float(trans_dur_after[ci] or 0.0)
         if _t_after <= 0 or ci + 1 >= len(cuts):
             # No transition. Boundary cut_audio[ci] → cut_audio[ci+1] is a
-            # SPLICE (different source ranges with removed content between).
+            # SPLICE — but only NEEDS a fade if source is non-contiguous.
             if ci + 1 < len(cut_audios):
                 is_splice_after.append(True)
+                _src_a_end = float(cuts[ci]["source_end"])
+                _src_b_start = float(cuts[ci + 1]["source_start"])
+                _splice_source_jump.append(
+                    (_src_b_start - _src_a_end) > _SAMPLE_TOLERANCE_S
+                )
             continue
         cut_a = cuts[ci]
         cut_b = cuts[ci + 1]
@@ -10082,12 +10100,15 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
         _trans_type = str(cut_a.get("transition_out") or "").strip()
         if _trans_type in ZERO_HANDLE_TRANSITION_TYPES:
             transition_audio = np.zeros(n_trans, dtype=np.float32)
-            # Mark both boundary edges as splices so the 5ms cos²/sin²
-            # fade pass below applies on each side of the silent slot.
+            # Speech → silence and silence → speech are by definition
+            # NON-contiguous (zero vs waveform); the fade is required at
+            # both edges to prevent click.
             is_splice_after.append(True)
+            _splice_source_jump.append(True)
             all_clips.append(transition_audio)
             if ci + 1 < len(cut_audios):
                 is_splice_after.append(True)
+                _splice_source_jump.append(True)
             _n_transitions += 1
             continue
 
@@ -10111,9 +10132,11 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
         transition_audio = (a_tail * _fade_out_curve + b_head * _fade_in_curve).astype(np.float32)
         # Both boundaries are contiguous (within-clip source continuations).
         is_splice_after.append(False)
+        _splice_source_jump.append(False)
         all_clips.append(transition_audio)
         if ci + 1 < len(cut_audios):
             is_splice_after.append(False)
+            _splice_source_jump.append(False)
         _n_transitions += 1
 
     if not all_clips:
@@ -10124,21 +10147,20 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
             wf.writeframes(b"\x00" * sample_rate * 2)
         return output_wav
 
-    # ── Splice fades: 5ms equal-power fade-out / fade-in on every splice ──
-    # Every SPLICE boundary in is_splice_after gets cos² fade-out on the
-    # tail of clip A and sin² fade-in on the head of clip B. 5ms is
-    # enough to prevent sample-level DC discontinuity (the click that
-    # would otherwise be audible at any abrupt waveform change).
-    #
-    # 5ms suffices because BOUNDARY REFINEMENT upstream already lands
-    # every splice in genuinely quiet audio — the cut moves at most
-    # ±50ms from the Deepgram-marked time to the sample with lowest
-    # local RMS energy, so each splice is between two true silences and
-    # phoneme-level content jumps no longer happen. Contiguous boundaries
-    # (no source jump) get NO fade. Sample count unchanged (in-place level
-    # shaping); A/V sync bit-identical.
+    # ── Splice fades: 5ms cos²/sin² ONLY on real source jumps ──
+    # For each splice in is_splice_after, the fade applies only when
+    # _splice_source_jump[i] is True — meaning there's a real source-time
+    # gap (Gemini-removed content between the two cuts, or a speech↔silence
+    # transition at a zero-handle slot edge). For contiguous splices (tight
+    # shot-change cuts where source_end[A] == source_start[B]) the
+    # underlying audio is continuous and the fade is SUPPRESSED: applying
+    # cos²→0 then 0→sin² to continuous audio produces a 10ms attenuated
+    # envelope with sample-level zero at the seam — confirmed 2026-06-14:
+    # 38% RMS drop, audible click. Suppressing the fade lets continuous
+    # audio play through unmodified.
     _fade_samples = int(round(0.005 * sample_rate))
     _n_splices = 0
+    _n_contiguous_suppressed = 0
     if _fade_samples > 0 and len(all_clips) >= 2:
         _fade_out = (np.cos(
             np.linspace(0.0, np.pi / 2.0, _fade_samples, dtype=np.float32)
@@ -10149,6 +10171,14 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
         for _i, _is_splice in enumerate(is_splice_after):
             if not _is_splice:
                 continue
+            _has_jump = (
+                _splice_source_jump[_i]
+                if _i < len(_splice_source_jump) else True
+            )
+            if not _has_jump:
+                # Contiguous source — skip both fade-out and fade-in.
+                _n_contiguous_suppressed += 1
+                continue
             _seg_a = all_clips[_i]
             _seg_b = all_clips[_i + 1]
             if len(_seg_a) >= _fade_samples:
@@ -10156,9 +10186,10 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
             if len(_seg_b) >= _fade_samples:
                 _seg_b[:_fade_samples] *= _fade_in
             _n_splices += 1
-        if _n_splices:
+        if _n_splices or _n_contiguous_suppressed:
             print(
-                f"[audio] splices: {_n_splices} (5ms equal-power fade-out/fade-in; refined boundaries)",
+                f"[audio] splices: {_n_splices} faded (5ms cos²/sin²), "
+                f"{_n_contiguous_suppressed} contiguous suppressed",
                 flush=True,
             )
 

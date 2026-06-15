@@ -1322,6 +1322,153 @@ def _overlap_slot_subtracts_time():
     )
 
 
+def _synthesize_source_wav(path, sample_rate=48000, duration_s=2.0, freq_hz=1000.0, amp=0.5):
+    """Write a continuous-cosine WAV — used by the splice-fade tests.
+
+    COSINE on purpose: at integer-second t with integer-Hz freq, cos(2π·f·t)=1
+    (peak), so the seam sample is at maximum amplitude. A SINE would be 0 at
+    every integer second (sin(2π·f·t)=0 for integer f, integer t) — making
+    "the seam sample is 0" ambiguous between fade-attenuation and natural
+    zero-crossing. Cosine eliminates that ambiguity."""
+    import wave, numpy as _np
+    n = int(round(duration_s * sample_rate))
+    t = _np.arange(n) / float(sample_rate)
+    samples = (amp * _np.cos(2 * _np.pi * freq_hz * t) * 32767).astype(_np.int16)
+    with wave.open(path, "wb") as _w:
+        _w.setnchannels(1)
+        _w.setsampwidth(2)
+        _w.setframerate(sample_rate)
+        _w.writeframes(samples.tobytes())
+
+
+@check("audio splice suppression: contiguous tight cut preserves seam (ACTIVE)")
+def _splice_contiguous_no_attenuation():
+    # The 2026-06-14 audio click fix. A tight shot-change cut at
+    # source_end[A] == source_start[B] reads continuous source on both
+    # sides. The pre-fix splice fade forced both seam samples to ZERO
+    # (cos²(π/2)=0, sin²(0)=0), creating a 10ms attenuated envelope
+    # and a 38% RMS dip — audible as a click. The fix at
+    # build_per_cut_audio:~10140 SUPPRESSES the fade when source is
+    # contiguous (_splice_source_jump[i] is False).
+    #
+    # This test calls build_per_cut_audio end-to-end with a synthetic
+    # continuous-sine source and a contiguous splice at t=1.0s, then
+    # reads the output WAV and asserts the seam window's RMS is at
+    # source level — not the 62% dip the pre-fix code produced.
+    import os, tempfile, wave
+    import numpy as _np
+    _SR = 48000
+    with tempfile.TemporaryDirectory() as _tmp:
+        _src = os.path.join(_tmp, "source.wav")
+        _synthesize_source_wav(_src, sample_rate=_SR, duration_s=2.0)
+        # Two cuts spliced at 1.0s. source_end[A] == source_start[B].
+        cuts = [
+            {"source_start": 0.0, "source_end": 1.0, "speed": 1.0,
+             "transition_out": "none"},
+            {"source_start": 1.0, "source_end": 2.0, "speed": 1.0,
+             "transition_out": "none"},
+        ]
+        eff_durs = [1.0, 1.0]
+        per_cut_render_dur_frames = [int(round(1.0 * 60)), int(round(1.0 * 60))]
+        out_path = handler.build_per_cut_audio(
+            source_path=_src,
+            cuts=cuts,
+            effective_durations=eff_durs,
+            work_dir=_tmp,
+            sample_rate=_SR,
+            trans_dur_after=[0.0, 0.0],
+            per_cut_render_dur_frames=per_cut_render_dur_frames,
+            source_fps=60.0,
+            trim_head_dur=[0.0, 0.0],
+            trim_tail_dur=[0.0, 0.0],
+        )
+        with wave.open(out_path, "rb") as _wf:
+            _raw = _wf.readframes(_wf.getnframes())
+        out = _np.frombuffer(_raw, dtype=_np.int16).astype(_np.float32)
+    _seam = _SR  # sample 48000 is A's last; sample 48001 is B's first
+    _fade_samples = int(round(0.005 * _SR))  # 240
+    # Window around the seam (5ms before A_end, 5ms after B_start).
+    _window = out[_seam - _fade_samples : _seam + _fade_samples]
+    _rms = float(_np.sqrt(_np.mean(_window ** 2)))
+    # Source RMS for a sine of amp 0.5 × 32767: 0.5 / √2 × 32767 ≈ 11585.
+    _source_rms_expected = 0.5 / _np.sqrt(2) * 32767
+    # Pre-fix produced ~62% of source RMS (38% dip). Post-fix should be
+    # >95% — essentially full source level, only frame quantization aside.
+    _ratio = _rms / _source_rms_expected
+    assert _ratio > 0.95, (
+        f"Contiguous splice was attenuated: seam RMS = {_rms:.1f} = "
+        f"{_ratio*100:.1f}% of source ({_source_rms_expected:.1f}). "
+        f"The splice fade was not suppressed for this contiguous boundary "
+        f"— continuous audio is being forced to zero at the seam, "
+        f"producing the audible click the 2026-06-14 fix targets."
+    )
+    # Sample-level: A's last sample and B's first sample MUST NOT be 0.
+    # (Pre-fix forced both to exactly 0 via cos²(π/2) and sin²(0).)
+    # Sine at 48kHz × 1kHz wraps every 48 samples; sample 47999 (A_last)
+    # and 48000 (B_first) are both in the same continuous waveform.
+    _A_last = float(out[_seam - 1])
+    _B_first = float(out[_seam])
+    assert abs(_A_last) > 100, (
+        f"A's last sample forced to {_A_last} — the fade-out was applied "
+        f"to a contiguous splice, defeating the fix."
+    )
+    assert abs(_B_first) > 100, (
+        f"B's first sample forced to {_B_first} — the fade-in was applied "
+        f"to a contiguous splice, defeating the fix."
+    )
+
+
+@check("audio splice fade: source-jump splice IS faded (regression guard, ACTIVE)")
+def _splice_with_source_jump_still_fades():
+    # Mirror test: a cut WITH a source jump (Gemini-removed content
+    # between A and B) STILL needs the fade — otherwise the concat
+    # boundary clicks. Source_start[B] is 0.3s past source_end[A]:
+    # 14400 samples of skipped source. The splice fade SHOULD apply.
+    import os, tempfile, wave
+    import numpy as _np
+    _SR = 48000
+    with tempfile.TemporaryDirectory() as _tmp:
+        _src = os.path.join(_tmp, "source.wav")
+        _synthesize_source_wav(_src, sample_rate=_SR, duration_s=2.0)
+        cuts = [
+            {"source_start": 0.0, "source_end": 1.0, "speed": 1.0,
+             "transition_out": "none"},
+            {"source_start": 1.3, "source_end": 2.0, "speed": 1.0,
+             "transition_out": "none"},  # 300ms gap = source jump
+        ]
+        eff_durs = [1.0, 0.7]
+        per_cut_render_dur_frames = [int(round(1.0 * 60)), int(round(0.7 * 60))]
+        out_path = handler.build_per_cut_audio(
+            source_path=_src,
+            cuts=cuts,
+            effective_durations=eff_durs,
+            work_dir=_tmp,
+            sample_rate=_SR,
+            trans_dur_after=[0.0, 0.0],
+            per_cut_render_dur_frames=per_cut_render_dur_frames,
+            source_fps=60.0,
+            trim_head_dur=[0.0, 0.0],
+            trim_tail_dur=[0.0, 0.0],
+        )
+        with wave.open(out_path, "rb") as _wf:
+            _raw = _wf.readframes(_wf.getnframes())
+        out = _np.frombuffer(_raw, dtype=_np.int16).astype(_np.float32)
+    # cut_audio[A] is 48000 samples (1.0s). Seam at sample 48000.
+    _seam = _SR
+    # A's last sample MUST be ~0 (fade-out cos²(π/2)=0).
+    _A_last = float(out[_seam - 1])
+    assert abs(_A_last) < 50, (
+        f"A's last sample at source-jump splice = {_A_last}, expected ~0. "
+        f"The splice fade was not applied — concat boundary would click "
+        f"at the source-time jump from cut[0].end to cut[1].start."
+    )
+    # B's first sample MUST be ~0 (fade-in sin²(0)=0).
+    _B_first = float(out[_seam])
+    assert abs(_B_first) < 50, (
+        f"B's first sample at source-jump splice = {_B_first}, expected ~0."
+    )
+
+
 @check("Zero-handle additive path is NOT wired (rollback guard, ACTIVE)")
 def _no_additive_path_in_slot_build():
     # Guard: after the 2026-06-14 production-render failure (freeze-frame
