@@ -8788,7 +8788,19 @@ def fetch_broll_clip(broll_entry, duration_needed, work_dir, dialogue_reason="",
         _all_vid_words = _vid_tags | _vid_url_words
         if _all_vid_words and _kw_match_words:
             _tag_matches = len(_kw_match_words & _all_vid_words)
-            score += _tag_matches * 10
+            # Tag-string-match is a USEFUL WEAK SIGNAL — kept positive so
+            # tag-aligned candidates rise above tag-mismatched ones — but
+            # weighted DOWN from *10 to *4 (2026-06-14). At *10 a bad
+            # keyword's lexical surface would dominate the pre-pick rank:
+            # "person typing text message" rocketed every texting-clip
+            # candidate to the top 5 because each clip's tags hit
+            # 4-5 of those words. The Gemini visual pick then had a
+            # candidate set already biased toward the wrong content.
+            # At *4 the duration/resolution/Pexels-rank signals stay
+            # comparable to tag-match magnitude, so the visual pick
+            # (which sees the actual thumbnails AND the dialogue line)
+            # has more authority over a string match.
+            score += _tag_matches * 4
         elif _kw_match_words:
             score -= 15
 
@@ -8879,9 +8891,16 @@ def fetch_broll_clip(broll_entry, duration_needed, work_dir, dialogue_reason="",
             _ctx_block = "\n" + "\n".join(_ctx_lines) + "\n"
             _instruction_base = (
                 "Which clip would feel most natural playing on screen while the viewer hears those exact words? "
-                "B-roll doesn't need to show the exact scene — it just needs to visually connect to what the speaker is actually saying. "
+                "Two different judgment rules apply depending on what the dialogue is doing. "
+                "(A) NARRATIVE / ABSTRACT dialogue — the speaker describes a feeling, scene, story beat, or approach with no specific on-screen referent. "
+                "Here B-roll doesn't need to show the exact scene; pick the clip whose character and mood visually connect to what's being said. "
+                "(B) APP-INPUT / DEMO dialogue — the dialogue names a specific app action the viewer must literally SEE: typing INTO an app, uploading, tapping, selecting, a result appearing on a screen "
+                "(\"type in the vibe,\" \"upload your video,\" \"tap the button,\" \"every edit shows up here\"). "
+                "Here the clip must show the SCREEN or APP doing that action — a screen recording, a phone UI close-up, the app interface itself. "
+                "A person at a keyboard, a person texting on a phone, or hands typing on a device shows the WRONG thing for app-input dialogue and should be rejected — those depict a human typing, not the app receiving input. "
+                "If no option shows the actual app/screen action the dialogue names, answer NONE — the speaker's face is the correct fallback for that window. "
                 "Pick the strongest match. Reply with ONLY the option number. "
-                "NONE if every option is unrelated to the actual words being spoken."
+                "NONE if every option is unrelated to the actual words being spoken OR if the dialogue is app-input and no option shows the app screen."
             )
             _instruction_strict = (
                 _instruction_base
