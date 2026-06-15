@@ -11863,45 +11863,34 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _out_end = float(_pw_end["end"])
         if _out_start >= total_output_duration or _out_end <= _out_start:
             continue
-        # ── Lead-audio timing offset ─────────────────────────────────
-        # Research finding (consistent across pro short-form sources):
-        # viewers process visuals ~0.2-0.5s BEFORE the audio context
-        # connects. A cutaway anchored dead-on the word reads as late.
-        # Shift the on-screen window ~0.4s earlier and extend ~0.2s
-        # past the phrase, then clamp the total on-screen duration to
-        # the 0.8-2.0s vertical-short-form band.
-        # Clamps:
-        #   - Start floor: the OUTPUT start of the clip containing
-        #     the start word (never cross the prior cut)
-        #   - End ceiling: total runtime (never overshoot end of video)
-        #   - Duration band: [0.8, 2.0]s (trim TAIL first when over MAX
-        #     so we preserve the entire lead-in — the whole point of
-        #     the offset)
-        _LEAD_OFFSET = 0.4
-        _TAIL_OFFSET = 0.2
-        _BROLL_MIN_DUR = 0.8
+        # ── Phrase-exact on-screen window ────────────────────────────
+        # The cutaway plays for the EXACT span of the phrase it
+        # illustrates — _pw_start.start (first word of phrase, output
+        # time) to _pw_end.end (last word of phrase, output time).
+        # Per user direction 2026-06-14: "on screen EXACTLY for the
+        # phrase, not a ms too long or too soon." No lead-audio shift,
+        # no tail extension, no min-duration padding. The previous
+        # 0.4s lead + 0.2s tail + 0.8s min floor were overriding the
+        # phrase boundary — a 1.76s phrase was being rendered as 2.0s
+        # starting 0.4s early. The clip is trimmed (or held) to fit
+        # the phrase duration, not the reverse.
+        #
+        # Only safety caps remain:
+        #   - MAX cap so a huge phrase doesn't drag the cutaway
+        #     absurdly long for the format
+        #   - Pexels-length cap further below (can't render more
+        #     frames than the file has)
+        #   - Runtime end cap further below (don't overshoot total)
         _BROLL_MAX_DUR = 2.0
         _word_span_eff = _out_end - _out_start
-        # Find the clip range containing _out_start so the lead-in
-        # never crosses a cut boundary into the prior clip.
-        _clip_floor_out_s = 0.0
-        for _cr in _clip_ranges:
-            if float(_cr.get("start", 0.0)) <= _out_start < float(_cr.get("end", 0.0)):
-                _clip_floor_out_s = float(_cr["start"])
-                break
         _orig_out_start = _out_start
         _orig_out_end = _out_end
-        _out_start = max(_clip_floor_out_s, _out_start - _LEAD_OFFSET)
-        _out_end = min(total_output_duration, _out_end + _TAIL_OFFSET)
         _eff = _out_end - _out_start
-        # Enforce duration band — trim TAIL when over MAX (preserve
-        # lead-in), extend tail when under MIN (don't add more lead).
+        # Trim the TAIL when phrase exceeds MAX so the cutaway starts
+        # on the first phrase word (never start before it).
         if _eff > _BROLL_MAX_DUR:
             _out_end = _out_start + _BROLL_MAX_DUR
             _eff = _BROLL_MAX_DUR
-        elif _eff < _BROLL_MIN_DUR:
-            _out_end = min(total_output_duration, _out_start + _BROLL_MIN_DUR)
-            _eff = _out_end - _out_start
         _record_divergence(
             "broll_timing",
             {
@@ -11909,13 +11898,13 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 "word_span_end_s": round(_orig_out_end, 3),
                 "word_span_dur_s": round(_word_span_eff, 3),
             },
-            "shifted_to_lead_audio",
+            "phrase_exact_window",
             final={
                 "onscreen_start_s": round(_out_start, 3),
                 "onscreen_end_s": round(_out_end, 3),
                 "onscreen_dur_s": round(_eff, 3),
             },
-            reason=f"lead_audio_{_LEAD_OFFSET}s",
+            reason="onscreen_equals_phrase_span",
         )
         _br_dur = get_video_duration(_local_path)
         # If the Pexels file is SHORTER than the word span, the

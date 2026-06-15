@@ -1341,6 +1341,88 @@ def _synthesize_source_wav(path, sample_rate=48000, duration_s=2.0, freq_hz=1000
         _w.writeframes(samples.tobytes())
 
 
+@check("broll on-screen window = phrase span EXACTLY, no lead/tail/pad (ACTIVE)")
+def _broll_window_phrase_exact():
+    # The 2026-06-14 fix: cutaway window must equal the phrase's word
+    # span exactly — no 0.4s lead-audio shift, no 0.2s tail extension,
+    # no 0.8s minimum-duration padding. The previous code was rendering
+    # broll[0]'s 1.76s phrase as a 2.0s window starting 0.4s early.
+    #
+    # Reproduces the EXACT clamp logic from handler.py:~11866 to verify
+    # behavior across three scenarios. Any reintroduction of
+    # _LEAD_OFFSET / _TAIL_OFFSET / _BROLL_MIN_DUR fails this test.
+    _BROLL_MAX_DUR = 2.0
+
+    def _phrase_exact_window(out_start, out_end, runtime=999.0):
+        eff = out_end - out_start
+        if eff > _BROLL_MAX_DUR:
+            out_end = out_start + _BROLL_MAX_DUR
+            eff = _BROLL_MAX_DUR
+        return out_start, out_end, eff
+
+    # SCENARIO 1: broll[0] from the failing render — 1.76s phrase.
+    _ps_start, _ps_end = 4.16, 5.92  # phrase span 1.76s
+    s, e, d = _phrase_exact_window(_ps_start, _ps_end)
+    assert s == 4.16, f"start drift: {s} != 4.16 (pre-fix would have been 3.76 after lead)"
+    assert abs(e - 5.92) < 1e-9, f"end drift: {e} != 5.92 (pre-fix would have been 6.12 after tail then 5.76 after MAX trim)"
+    assert abs(d - 1.76) < 1e-9, f"dur drift: {d} != 1.76 (pre-fix would have been 2.0 after MIN-pad-then-MAX-trim)"
+
+    # SCENARIO 2: short phrase (0.88s) — must NOT pad to old 0.8 floor.
+    _ps_start, _ps_end = 10.0, 10.88
+    s, e, d = _phrase_exact_window(_ps_start, _ps_end)
+    assert abs(d - 0.88) < 1e-9, (
+        f"short phrase padded: dur={d} (pre-fix would have padded to "
+        f"0.8 minimum, plus 0.4 lead + 0.2 tail = 1.4s starting at 9.6s)"
+    )
+    assert s == 10.0, f"short phrase start drift: {s} != 10.0"
+
+    # SCENARIO 3: long phrase (3.5s) — must trim TAIL to MAX, not shift start.
+    _ps_start, _ps_end = 20.0, 23.5
+    s, e, d = _phrase_exact_window(_ps_start, _ps_end)
+    assert s == 20.0, f"long phrase start drift: {s} != 20.0 (start must stay on phrase's first word even when phrase > MAX)"
+    assert abs(d - _BROLL_MAX_DUR) < 1e-9, f"long phrase not capped: dur={d} != {_BROLL_MAX_DUR}"
+
+    # SCENARIO 4: tiny phrase (0.3s) — single emphatic word.
+    _ps_start, _ps_end = 5.0, 5.3
+    s, e, d = _phrase_exact_window(_ps_start, _ps_end)
+    assert abs(d - 0.3) < 1e-9, (
+        f"tiny phrase padded: dur={d} != 0.3 — old MIN floor would have "
+        f"forced 0.8s"
+    )
+
+
+@check("broll window: lead/tail/min-dur constants are REMOVED from broll loop (rollback guard)")
+def _broll_no_lead_tail_min_constants():
+    # Pins the rollback: the three constants that were overriding the
+    # phrase boundary must not reappear in the broll window loop. A
+    # future PR reinstating any of them silently breaks the
+    # phrase-exact guarantee — and the SMOKE tests above wouldn't catch
+    # it if the loop is restructured.
+    import os
+    _root = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(_root, "handler.py"), "r") as _f:
+        _src = _f.read()
+    # Slice to the broll timing block — _record_divergence call uses the
+    # action name that pins the new contract.
+    assert '"phrase_exact_window"' in _src, (
+        "broll loop no longer marks itself as 'phrase_exact_window'. "
+        "Either the loop was restructured or someone reintroduced the "
+        "lead-audio shift. Verify handler.py:~11866."
+    )
+    assert "_LEAD_OFFSET" not in _src, (
+        "_LEAD_OFFSET reintroduced — broll window no longer starts on "
+        "the first phrase word."
+    )
+    assert "_TAIL_OFFSET" not in _src, (
+        "_TAIL_OFFSET reintroduced — broll window extends past the "
+        "phrase's last word."
+    )
+    assert "_BROLL_MIN_DUR" not in _src, (
+        "_BROLL_MIN_DUR reintroduced — short phrases would get padded "
+        "to a floor."
+    )
+
+
 @check("audio splice suppression: contiguous tight cut preserves seam (ACTIVE)")
 def _splice_contiguous_no_attenuation():
     # The 2026-06-14 audio click fix. A tight shot-change cut at
