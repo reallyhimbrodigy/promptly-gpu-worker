@@ -3,10 +3,14 @@
 Single source of truth for every component-type taxonomy used at the
 Python validation layer:
 
-  • VALID_CAPTION_STYLES   — caption components (13 + "none" sentinel)
-  • VALID_TRANSITION_TYPES — transition components
-  • VALID_ZOOM_TYPES       — zoom components
-  • VALID_MG_TYPES         — motion-graphic components
+  • VALID_CAPTION_STYLES     — caption components (13 + "none" sentinel)
+  • VALID_TRANSITION_TYPES   — transition components (handle-required, CUT BOUNDARIES)
+  • VALID_TIGHT_CUT_OVERLAYS — overlay-on-top-of-hard-cut decorations
+                               (TIGHT BOUNDARIES, no handle, no time inserted —
+                               render as a decoration layer over an unmodified
+                               hard cut at the cut frame, 180ms window)
+  • VALID_ZOOM_TYPES         — zoom components
+  • VALID_MG_TYPES           — motion-graphic components
 
 Both handler.py and render_schemas.py import from this module — Pydantic
 Literals in each derive via `Literal[tuple(sorted(VALID_*))]` so adding
@@ -39,6 +43,19 @@ VALID_TRANSITION_TYPES = frozenset({
     "CardSwipe", "ZoomThrough", "SlideOver", "Stack", "CrossfadeZoom",
     "ShutterFlash", "StepPush", "NewspaperWipe", "FilmStrip",
     "SceneTitle", "DipToBlack",
+})
+
+# Overlay-on-top-of-hard-cut decorations. Render path is DISTINCT from
+# transitions: no handle frames consumed, no clip-A/clip-B blending, no
+# time inserted into the timeline. The decoration sits ON TOP of an
+# unmodified hard cut for an 11-frame window (180ms at 60fps) centered
+# on the cut. Names overlap with the transition registry intentionally
+# (LightLeak, ShutterFlash both exist as full handle-required transitions
+# too) — the dispatch is by FIELD (`_tight_cut_overlay` vs
+# `transition_out`) and by BOUNDARY TYPE (TIGHT vs CUT), not by name.
+# Adding a third overlay means editing this set only.
+VALID_TIGHT_CUT_OVERLAYS = frozenset({
+    "LightLeak", "ShutterFlash", "NewspaperWipe", "SceneTitle",
 })
 
 VALID_ZOOM_TYPES = frozenset({

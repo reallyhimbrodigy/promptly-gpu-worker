@@ -2319,6 +2319,1236 @@ def _recipe_eval_tight_no_mask():
     assert "tight-no-mask" not in warn_ids2, f"masking zoom should clear the warning, got: {warn_ids2}"
 
 
+# ─── 5b1. MULTI-CLIP TIER GATE (PREMIUM CONCURRENCY) ──────────────────
+# Backend-side defense-in-depth for the premium multi-clip feature. The
+# frontend is the primary gate (UI refuses multi-upload for non-premium);
+# this worker-side check rejects curl-abuse where a non-premium user
+# bypasses the UI. FAIL-OPEN discipline means Supabase blips never block
+# paying users.
+print("\n[5b1/6] Multi-clip tier gate")
+
+
+@check("fetch_user_tier + check_concurrency_gate exist and fail open without Supabase")
+def _tier_gate_failopen():
+    # Without Supabase configured (the test environment), fetch_user_tier
+    # must return None and check_concurrency_gate must return None — never
+    # block a job because of infra trouble.
+    import handler
+    assert callable(getattr(handler, "fetch_user_tier", None)), (
+        "fetch_user_tier helper missing — the tier gate has no source of truth"
+    )
+    assert callable(getattr(handler, "check_concurrency_gate", None)), (
+        "check_concurrency_gate helper missing — the worker-entry gate has no enforcer"
+    )
+    # In the validate env Supabase is None — verify fail-open behavior.
+    assert handler.supabase is None, (
+        "this check assumes a no-Supabase environment; if Supabase is configured "
+        "for validate, the fail-open assertion below is invalid and must move "
+        "to a mocked-supabase test"
+    )
+    assert handler.fetch_user_tier("any-user-id") is None, (
+        "fetch_user_tier must return None when Supabase is None (fail open)"
+    )
+    gate = handler.check_concurrency_gate("any-user-id", "any-job-id")
+    assert gate is None, (
+        f"check_concurrency_gate must return None when tier+counts are unknown "
+        f"(fail open). Got: {gate}"
+    )
+
+
+@check("premium-values env override picks up custom tier names")
+def _tier_premium_values_override():
+    # The env-var contract is the public surface for matching whatever
+    # tier values the Supabase schema uses. Defaults plus an override
+    # must both work.
+    import importlib, os, handler
+    # Default set
+    default = handler._premium_values()
+    for required in ("premium", "pro", "paid", "plus"):
+        assert required in default, (
+            f"default premium-values set is missing {required!r}; tier matching "
+            f"will silently fail for users on that plan name"
+        )
+    # Custom override
+    old = os.environ.get("PROMPTLY_PREMIUM_VALUES")
+    try:
+        os.environ["PROMPTLY_PREMIUM_VALUES"] = "elite,vip"
+        # Reload helper — _premium_values reads env on every call so no
+        # module reimport needed.
+        custom = handler._premium_values()
+        assert custom == {"elite", "vip"}, (
+            f"PROMPTLY_PREMIUM_VALUES override not honored — got {custom}"
+        )
+    finally:
+        if old is None:
+            os.environ.pop("PROMPTLY_PREMIUM_VALUES", None)
+        else:
+            os.environ["PROMPTLY_PREMIUM_VALUES"] = old
+
+
+@check("handler entry rejects free-tier concurrent jobs (mocked Supabase)")
+def _tier_gate_rejects_free_concurrent():
+    # Mock supabase to simulate: tier='free' for user, 1 active job already
+    # running. The worker entry must return the tier_concurrency_limit
+    # response with a clear user_message — NOT proceed with the render.
+    import handler
+    class _MockResult:
+        def __init__(self, data):
+            self.data = data
+    class _MockBuilder:
+        def __init__(self, table):
+            self._table = table
+            self._user = None
+        def select(self, *_a, **_kw):
+            return self
+        def eq(self, col, val):
+            self._user = val
+            return self
+        def limit(self, _n):
+            return self
+        def execute(self):
+            if self._table == "user_profiles":
+                return _MockResult([{"tier": "free"}])
+            # jobs table — one running job by this user
+            return _MockResult([
+                {"id": "other-job-id", "status": "running"},
+                {"id": "current-job-id", "status": "queued"},  # ourselves; should be excluded
+            ])
+    class _MockSupabase:
+        def table(self, name):
+            return _MockBuilder(name)
+    _orig = handler.supabase
+    try:
+        handler.supabase = _MockSupabase()
+        gate = handler.check_concurrency_gate("user-abc", "current-job-id")
+        assert isinstance(gate, dict), (
+            f"check_concurrency_gate should reject free-tier with active job; got {gate}"
+        )
+        assert gate.get("error") == "tier_concurrency_limit", (
+            f"reject reason missing/wrong: {gate}"
+        )
+        assert "user_message" in gate and gate["user_message"], (
+            "tier-reject must carry a user_message for frontend display"
+        )
+        assert gate.get("active_jobs") == 1, (
+            f"active_jobs count should EXCLUDE the current job; got {gate}"
+        )
+    finally:
+        handler.supabase = _orig
+
+
+@check("handler entry allows premium with concurrent jobs (mocked Supabase)")
+def _tier_gate_allows_premium_concurrent():
+    import handler
+    class _MockResult:
+        def __init__(self, data):
+            self.data = data
+    class _MockBuilder:
+        def __init__(self, table):
+            self._table = table
+        def select(self, *_a, **_kw):
+            return self
+        def eq(self, *_a, **_kw):
+            return self
+        def limit(self, _n):
+            return self
+        def execute(self):
+            if self._table == "user_profiles":
+                return _MockResult([{"tier": "premium"}])
+            return _MockResult([
+                {"id": "j1", "status": "running"},
+                {"id": "j2", "status": "running"},
+                {"id": "j3", "status": "running"},
+            ])
+    class _MockSupabase:
+        def table(self, name):
+            return _MockBuilder(name)
+    _orig = handler.supabase
+    try:
+        handler.supabase = _MockSupabase()
+        gate = handler.check_concurrency_gate("premium-user", "current-job")
+        assert gate is None, (
+            f"premium user must be allowed even with concurrent jobs in flight; got {gate}"
+        )
+    finally:
+        handler.supabase = _orig
+
+
+# ─── 5b2. RE-EDIT TWEAK-MODE VOCABULARY ────────────────────────────────
+# Re-edit Layer 1 expanded `tweak` to handle ADD / REMOVE / REPLACE across
+# every component type, plus ordinal / temporal / word-based reference
+# syntax. These checks catch the regression where a future refactor strips
+# the documented examples — Gemini's behavior would silently degrade
+# without an active-path canary.
+print("\n[5b2/6] Re-edit tweak-mode vocabulary (Layer 1)")
+
+
+@check("generate_plan_diff prompt documents ADD for every component type")
+def _plan_diff_add_vocabulary():
+    # Source-string assertion: the prompt construction in handler.py's
+    # generate_plan_diff must contain canonical ADD examples for every
+    # supported component type. Catches the regression where someone
+    # refactors and drops the ADD section.
+    import inspect, handler
+    src = inspect.getsource(handler.generate_plan_diff)
+    required = [
+        "add a zoom on word",         # emphasis_moments add
+        "add a transition",           # transitions add
+        "add a tight_cut_overlay",    # tight_cut_overlays add
+        "add a B-roll",               # broll_clips add
+        "add an MG",                  # motion_graphics add
+        "add a text overlay",         # text_overlays add
+        "add an SFX",                 # sound_effects add
+    ]
+    missing = [phrase for phrase in required if phrase not in src]
+    assert not missing, (
+        f"generate_plan_diff is missing ADD examples for: {missing}. "
+        f"Layer 1 documented these to teach Gemini that ADD is a valid tweak "
+        f"operation across every component type. Restore them."
+    )
+
+
+@check("generate_plan_diff prompt documents ordinal + temporal + word-based references")
+def _plan_diff_reference_syntax():
+    import inspect, handler
+    src = inspect.getsource(handler.generate_plan_diff)
+    # The three reference modes are how Gemini resolves which component the
+    # user means when they say 'the 2nd zoom' / 'the zoom at 12.5s' / 'the
+    # zoom on the word "finally"'. Each MUST stay documented.
+    for marker in ("Ordinal:", "Temporal:", "Word-based:"):
+        assert marker in src, (
+            f"generate_plan_diff is missing the {marker!r} reference-syntax "
+            f"section. Layer 1 added this to handle 'remove the 2nd zoom' / "
+            f"'the zoom at 12.5s' / 'the zoom on the word X' user requests."
+        )
+    assert "needs_clarification" in src, (
+        "generate_plan_diff must document the ambiguity escape hatch "
+        "('needs_clarification') — without it the model would guess on ties."
+    )
+
+
+@check("generate_plan_diff prompt lists tight_cut_overlays in top-level field enum")
+def _plan_diff_tight_cut_overlays_visible():
+    import inspect, handler
+    src = inspect.getsource(handler.generate_plan_diff)
+    assert "tight_cut_overlays" in src, (
+        "generate_plan_diff does not mention `tight_cut_overlays` — the "
+        "re-edit prompt won't know the field exists, and Gemini cannot add "
+        "or remove an overlay on a re-edit. Restore the field listing."
+    )
+    # All 4 overlay names must be visible too, otherwise Gemini can't pick
+    # one by name on an ADD request.
+    for _name in ("LightLeak", "ShutterFlash", "NewspaperWipe", "SceneTitle"):
+        assert _name in src, (
+            f"generate_plan_diff is missing overlay name {_name!r}. The "
+            f"re-edit prompt needs all 4 visible so the user can request "
+            f"any of them by name."
+        )
+
+
+@check("generate_plan_diff does NOT truncate transcript to 300 words on tweak")
+def _plan_diff_full_transcript():
+    import inspect, handler
+    src = inspect.getsource(handler.generate_plan_diff)
+    # The old 300-word cap broke long-video re-edits: the model was blind to
+    # words past 300, so 'the zoom at 25s' on a 60s video became unresolvable.
+    # The cap was lifted; this check catches the regression where someone
+    # re-introduces a slice or a `[:N]` cap.
+    assert "words[:300]" not in src, (
+        "generate_plan_diff has `words[:300]` truncation — Layer 1 removed "
+        "this cap because long-video re-edits need every word visible to "
+        "resolve ordinal/temporal references. Do not re-introduce the cap."
+    )
+    assert "[:3000]" not in src, (
+        "generate_plan_diff has a `[:3000]` char cap on the transcript — "
+        "Layer 1 removed this. The full transcript fits in Gemini 3.1 Pro's "
+        "context with room to spare; the truncation broke real re-edits."
+    )
+
+
+@check("generate_plan_diff classifies add/remove/replace explicitly as tweak operations")
+def _plan_diff_classification_covers_ops():
+    import inspect, handler
+    src = inspect.getsource(handler.generate_plan_diff)
+    # The classification description was rewritten so 'tweak' explicitly
+    # spans add + remove + replace operations (not just removals). This
+    # check catches the regression where someone reverts to the
+    # "surgical change" framing that excluded ADDs.
+    for phrase in ("remove", "add", "replace"):
+        assert phrase in src.lower(), (
+            f"generate_plan_diff classification text does not mention "
+            f"{phrase!r} as a tweak operation. Layer 1 documented all "
+            f"three so the classifier treats ADDs as valid tweaks."
+        )
+
+
+# ─── 5b3. RE-EDIT GUIDED-REDRAFT MODE (LAYER 2) ─────────────────────────
+# Layer 2 of the re-edit improvements adds the `guided_redraft` mode: a
+# directional reshape that injects the prior plan as a soft default while
+# letting Gemini freely modify decisions the user's direction overrides.
+# Closes the gap between tweak (no adds, byte-identical echo) and
+# reinterpret (no carry-over, total recast).
+print("\n[5b3/6] Re-edit guided_redraft mode (Layer 2)")
+
+
+@check("generate_plan_diff classifier documents guided_redraft as a 4th option")
+def _plan_diff_guided_redraft_classification():
+    import inspect, handler
+    src = inspect.getsource(handler.generate_plan_diff)
+    assert "'guided_redraft'" in src or '"guided_redraft"' in src, (
+        "generate_plan_diff is missing the guided_redraft classification. "
+        "Layer 2 added this as the 4th option between tweak and reinterpret."
+    )
+    # The classifier guidance must cover when to pick guided_redraft.
+    assert "directional re-shape" in src or "directional reshape" in src or "guided_redraft" in src, (
+        "generate_plan_diff is missing the directional-reshape guidance — "
+        "the classifier won't know when to pick guided_redraft."
+    )
+    # The four-way split CLASSIFIER GUIDANCE block must exist.
+    assert "CLASSIFIER GUIDANCE" in src, (
+        "generate_plan_diff is missing the CLASSIFIER GUIDANCE four-way "
+        "split. Layer 2 added this to teach the model when each "
+        "classification fires."
+    )
+
+
+@check("generate_plan_diff response validator accepts guided_redraft classification")
+def _plan_diff_guided_redraft_accepted():
+    import inspect, handler
+    src = inspect.getsource(handler.generate_plan_diff)
+    # The validator at the response-parse step must accept guided_redraft
+    # as a legal classification. Regression catcher.
+    assert '"guided_redraft"' in src, (
+        "generate_plan_diff response validator does not list 'guided_redraft' — "
+        "Gemini emitting that classification would be rejected as invalid."
+    )
+
+
+@check("_build_post_cuts_prompt accepts prior_plan + prior_plan_change_request")
+def _build_post_cuts_prompt_prior_plan_params():
+    import inspect, handler
+    sig = inspect.signature(handler._build_post_cuts_prompt)
+    for name in ("prior_plan", "prior_plan_change_request"):
+        assert name in sig.parameters, (
+            f"_build_post_cuts_prompt is missing the {name!r} parameter — "
+            f"Layer 2 needs both to inject the GUIDED REDRAFT block."
+        )
+
+
+@check("_build_post_cuts_prompt injects GUIDED REDRAFT block when prior_plan is present")
+def _build_post_cuts_prompt_guided_block_active():
+    # Active-path check — build the prompt with a non-empty prior_plan and
+    # verify the GUIDED REDRAFT block is in the output. Without this, the
+    # parameter could be silently accepted but never used.
+    import handler
+    prior = {
+        "caption_style": "PaperII",
+        "broll_clips": [{"keyword": "anything", "start_word_index": 0, "end_word_index": 5}],
+    }
+    sys_prompt, user_content = handler._build_post_cuts_prompt(
+        vibe="punchy",
+        duration=30.0,
+        prior_plan=prior,
+        prior_plan_change_request="pace the middle faster",
+    )
+    assert "GUIDED REDRAFT" in user_content, (
+        "_build_post_cuts_prompt did not emit the GUIDED REDRAFT block when "
+        "prior_plan was set. The Layer 2 carry-over guidance is missing from "
+        "the prompt — Gemini won't see the prior plan."
+    )
+    assert "PaperII" in user_content, (
+        "Prior plan JSON not embedded in the GUIDED REDRAFT block. Gemini "
+        "needs the prior decisions visible to carry them over."
+    )
+    assert "pace the middle faster" in user_content, (
+        "User's change_request not embedded in the GUIDED REDRAFT block. "
+        "Gemini needs to know what the user directed."
+    )
+
+
+@check("_build_post_cuts_prompt does NOT emit GUIDED REDRAFT block when prior_plan is None")
+def _build_post_cuts_prompt_no_block_when_absent():
+    # Strictly-additive guarantee: a fresh ('full') edit must not get the
+    # guided-redraft block. Otherwise every render would be confused about
+    # whether it's a redraft.
+    import handler
+    sys_prompt, user_content = handler._build_post_cuts_prompt(
+        vibe="punchy", duration=30.0,
+    )
+    assert "GUIDED REDRAFT" not in user_content, (
+        "_build_post_cuts_prompt is emitting the GUIDED REDRAFT block even "
+        "when prior_plan is None — fresh renders should be untouched."
+    )
+
+
+@check("generate_edit_gemini accepts prior_plan + prior_plan_change_request")
+def _generate_edit_gemini_prior_plan_params():
+    import inspect, handler
+    sig = inspect.signature(handler.generate_edit_gemini)
+    for name in ("prior_plan", "prior_plan_change_request"):
+        assert name in sig.parameters, (
+            f"generate_edit_gemini is missing the {name!r} parameter — the "
+            f"Layer 2 dispatcher cannot route prior-plan context through."
+        )
+
+
+@check("handler mode validation accepts guided_redraft")
+def _handler_mode_validation_guided_redraft():
+    # Source-string assertion on handler.handler — the mode-resolution
+    # block must include guided_redraft in the allowed-modes tuple.
+    import inspect, handler
+    src = inspect.getsource(handler.handler)
+    assert '"guided_redraft"' in src, (
+        "handler.handler mode-resolution does not accept 'guided_redraft'. "
+        "Frontend submissions with mode=guided_redraft will be silently "
+        "downgraded to 'full' (fresh plan) instead of running the redraft."
+    )
+
+
+# ─── 5b4. RE-EDIT DIFF-CONFIRMATION SAFETY NET (LAYER 3) ───────────────
+# Layer 3 closes the last gap in re-edit: even when Gemini misinterprets a
+# tweak/redraft and changes things the user didn't ask for, the safety net
+# diffs against the prior plan and reverts out-of-scope drift. Phase 1
+# auto-reverts top-level SCALAR fields only (caption_style /
+# thumbnail_word_index / outro); array-level reverts wait for production
+# data tuning (Phase 2). Fail-OPEN end-to-end.
+print("\n[5b4/6] Re-edit diff-confirmation safety net (Layer 3)")
+
+
+@check("compute_plan_diff returns empty list when plans are identical")
+def _diff_identical_plans_empty():
+    import handler
+    plan = {"caption_style": "PaperII", "emphasis_moments": [{"word_indices": [3]}]}
+    diffs = handler.compute_plan_diff(plan, dict(plan))
+    assert diffs == [], (
+        f"identical plans must produce 0 diffs; got {diffs}"
+    )
+
+
+@check("compute_plan_diff catches top-level scalar changes")
+def _diff_scalar_change():
+    import handler
+    prior = {"caption_style": "PaperII", "outro": "none"}
+    new = {"caption_style": "Lumen", "outro": "none"}
+    diffs = handler.compute_plan_diff(prior, new)
+    cs_diffs = [d for d in diffs if d["path"] == "caption_style"]
+    assert len(cs_diffs) == 1, f"expected 1 caption_style diff, got: {diffs}"
+    d = cs_diffs[0]
+    assert d["op"] == "changed" and d["old"] == "PaperII" and d["new"] == "Lumen", d
+    # outro unchanged → must NOT diff
+    assert not [x for x in diffs if x["path"] == "outro"], (
+        f"outro unchanged shouldn't appear in diffs; got: {diffs}"
+    )
+
+
+@check("compute_plan_diff anchor-keys emphasis_moments by first word_index")
+def _diff_anchored_emphasis():
+    import handler
+    prior = {"emphasis_moments": [{"word_indices": [3]}, {"word_indices": [9]}]}
+    new = {"emphasis_moments": [{"word_indices": [3]}]}  # 9 removed
+    diffs = handler.compute_plan_diff(prior, new)
+    em_diffs = [d for d in diffs if d["list_key"] == "emphasis_moments"]
+    assert len(em_diffs) == 1, f"expected 1 emphasis_moments diff, got: {em_diffs}"
+    d = em_diffs[0]
+    assert d["op"] == "removed", d
+    # anchor should be the (9,) tuple — the first word_index of the
+    # removed emphasis_moment.
+    assert d["anchor"] == (9,), f"expected anchor=(9,); got {d['anchor']}"
+
+
+@check("compute_plan_diff catches added entries via anchor matching")
+def _diff_added_anchored_entry():
+    import handler
+    prior = {"transitions": [{"after_word_index": 5, "type": "CardSwipe"}]}
+    new = {"transitions": [
+        {"after_word_index": 5, "type": "CardSwipe"},
+        {"after_word_index": 12, "type": "NewspaperWipe"},
+    ]}
+    diffs = handler.compute_plan_diff(prior, new)
+    added = [d for d in diffs if d["op"] == "added"]
+    assert len(added) == 1, f"expected 1 added transition, got: {added}"
+    assert added[0]["anchor"] == 12, f"expected anchor=12; got {added[0]['anchor']}"
+
+
+@check("compute_plan_diff skips derived fields (caption_position_segments, thumbnail_timestamp)")
+def _diff_skip_derived():
+    import handler
+    # These fields differ between plans but must be SKIPPED — they're
+    # derived downstream and diffing them would create false alarms.
+    prior = {
+        "caption_position_changes": [{"word_index": 0, "position": "bottom"}],
+        "caption_position_segments": [{"fromFrame": 0, "toFrame": 100, "position": "bottom"}],
+        "thumbnail_word_index": 5,
+        "thumbnail_timestamp": 1.2,
+    }
+    new = {
+        "caption_position_changes": [{"word_index": 0, "position": "bottom"}],
+        "caption_position_segments": [{"fromFrame": 0, "toFrame": 200, "position": "bottom"}],  # differs
+        "thumbnail_word_index": 5,
+        "thumbnail_timestamp": 3.8,  # differs
+    }
+    diffs = handler.compute_plan_diff(prior, new)
+    # caption_position_segments + thumbnail_timestamp are derived → MUST be skipped.
+    bad_paths = [d["path"] for d in diffs if d["path"] in {"caption_position_segments", "thumbnail_timestamp"}]
+    assert not bad_paths, (
+        f"derived fields leaked into diff: {bad_paths}. Phase 1 must not "
+        f"trigger reverts on these — they're computed from canonical inputs."
+    )
+
+
+@check("apply_scalar_reverts is a no-op when no out-of-scope paths")
+def _revert_noop_when_clean():
+    import handler
+    new = {"caption_style": "Lumen", "emphasis_moments": []}
+    validation = {
+        "verdict": "all_in_scope",
+        "diffs": [{"path": "caption_style", "list_key": None, "anchor": None,
+                   "op": "changed", "old": "PaperII", "new": "Lumen"}],
+        "out_of_scope_paths": [],
+    }
+    out = handler.apply_scalar_reverts(
+        prior_plan={"caption_style": "PaperII"},
+        new_plan=new, validation=validation, mode="tweak",
+    )
+    assert out["caption_style"] == "Lumen", (
+        f"in-scope change must NOT be reverted; got: {out}"
+    )
+
+
+@check("apply_scalar_reverts reverts out-of-scope caption_style in tweak mode")
+def _revert_caption_style_tweak():
+    import handler
+    prior = {"caption_style": "PaperII"}
+    new = {"caption_style": "Lumen"}
+    validation = {
+        "verdict": "partial_out_of_scope",
+        "diffs": [{"path": "caption_style", "list_key": None, "anchor": None,
+                   "op": "changed", "old": "PaperII", "new": "Lumen"}],
+        "out_of_scope_paths": ["caption_style"],
+    }
+    out = handler.apply_scalar_reverts(prior, new, validation, mode="tweak")
+    assert out["caption_style"] == "PaperII", (
+        f"out-of-scope caption_style in tweak must revert to PaperII; got: {out}"
+    )
+
+
+@check("apply_scalar_reverts does NOT revert in guided_redraft mode (Phase 1)")
+def _revert_skips_guided_redraft():
+    import handler
+    prior = {"caption_style": "PaperII"}
+    new = {"caption_style": "Lumen"}
+    validation = {
+        "verdict": "partial_out_of_scope",
+        "diffs": [{"path": "caption_style", "list_key": None, "anchor": None,
+                   "op": "changed", "old": "PaperII", "new": "Lumen"}],
+        "out_of_scope_paths": ["caption_style"],
+    }
+    out = handler.apply_scalar_reverts(prior, new, validation, mode="guided_redraft")
+    assert out["caption_style"] == "Lumen", (
+        f"guided_redraft is LOG-ONLY in Phase 1 — must not revert; "
+        f"caption_style stays Lumen. Got: {out}"
+    )
+
+
+@check("apply_scalar_reverts does NOT revert array entries in Phase 1 (tweak)")
+def _revert_skips_arrays_phase1():
+    # The Phase-1 contract: array-anchored paths get LOGGED but not
+    # reverted. Phase 2 will turn this on after production tuning.
+    import handler
+    prior = {"emphasis_moments": [{"word_indices": [3], "zoom_effect": {"type": "StepZoom"}}]}
+    new = {"emphasis_moments": [{"word_indices": [3], "zoom_effect": {"type": "SmoothPush"}}]}  # type swapped
+    validation = {
+        "verdict": "partial_out_of_scope",
+        "diffs": [{
+            "path": "emphasis_moments[anchor=(3,)]",
+            "list_key": "emphasis_moments",
+            "anchor": (3,),
+            "op": "changed",
+            "old": {"word_indices": [3], "zoom_effect": {"type": "StepZoom"}},
+            "new": {"word_indices": [3], "zoom_effect": {"type": "SmoothPush"}},
+        }],
+        "out_of_scope_paths": ["emphasis_moments[anchor=(3,)]"],
+    }
+    out = handler.apply_scalar_reverts(prior, new, validation, mode="tweak")
+    # Even though out-of-scope and tweak mode, array changes are PHASE 2.
+    assert out["emphasis_moments"][0]["zoom_effect"]["type"] == "SmoothPush", (
+        f"Phase 1 must NOT revert array entries even in tweak mode; "
+        f"emphasis_moments stays as Gemini emitted. Got: {out}"
+    )
+
+
+@check("apply_scalar_reverts does NOT revert scalars outside the Phase-1 set")
+def _revert_skips_non_phase1_scalars():
+    # vibe and pacing aren't in _PHASE1_REVERTABLE_SCALARS — they should
+    # be LOGGED but not reverted. This protects against the safety net
+    # touching fields the renderer treats as semi-derived.
+    import handler
+    prior = {"pacing": "fast"}
+    new = {"pacing": "slow"}
+    validation = {
+        "verdict": "partial_out_of_scope",
+        "diffs": [{"path": "pacing", "list_key": None, "anchor": None,
+                   "op": "changed", "old": "fast", "new": "slow"}],
+        "out_of_scope_paths": ["pacing"],
+    }
+    out = handler.apply_scalar_reverts(prior, new, validation, mode="tweak")
+    assert out["pacing"] == "slow", (
+        f"pacing isn't in _PHASE1_REVERTABLE_SCALARS — Phase 1 must skip; "
+        f"got: {out}"
+    )
+
+
+@check("apply_scalar_reverts no-ops on verdict='error' (fail open)")
+def _revert_failopen_on_error():
+    import handler
+    prior = {"caption_style": "PaperII"}
+    new = {"caption_style": "Lumen"}
+    validation = {"verdict": "error", "diffs": [], "out_of_scope_paths": []}
+    out = handler.apply_scalar_reverts(prior, new, validation, mode="tweak")
+    assert out["caption_style"] == "Lumen", (
+        f"verdict='error' must fail open (no reverts); got: {out}"
+    )
+
+
+@check("compute_plan_diff handles empty / non-dict inputs without crashing")
+def _diff_robust_to_garbage():
+    import handler
+    # Real-world inputs may be None / "" / list / etc. The diff must not
+    # raise — return an empty list instead.
+    for prior, new in [
+        (None, None),
+        ({}, {}),
+        ({}, {"caption_style": "Lumen"}),
+        ([], {}),
+        ({"a": 1}, "not a dict"),
+    ]:
+        diffs = handler.compute_plan_diff(prior, new)
+        assert isinstance(diffs, list), (
+            f"compute_plan_diff must return list even on garbage input "
+            f"({type(prior).__name__}, {type(new).__name__}); got {diffs!r}"
+        )
+
+
+# ── Phase 2 (env-gated array reverts) ────────────────────────────────────
+# These checks toggle PROMPTLY_REEDIT_PHASE2_ARRAY_REVERTS on/off to
+# verify (a) the gate respects truthy values, (b) Phase-1 behavior is
+# preserved when gate is OFF, (c) array reverts apply correctly when ON,
+# (d) the mode gate (tweak vs guided_redraft) is independent of the phase
+# gate — guided_redraft stays log-only in BOTH phases.
+
+def _with_phase2_env(value):
+    """Context-manager-style helper: set/restore the Phase 2 env var.
+    Use via try/finally — Python contextmanager would work too but
+    keeping it explicit makes the validate_deploy pattern uniform."""
+    import os
+    old = os.environ.get("PROMPTLY_REEDIT_PHASE2_ARRAY_REVERTS")
+    if value is None:
+        os.environ.pop("PROMPTLY_REEDIT_PHASE2_ARRAY_REVERTS", None)
+    else:
+        os.environ["PROMPTLY_REEDIT_PHASE2_ARRAY_REVERTS"] = value
+    return old
+
+
+def _restore_phase2_env(old):
+    import os
+    if old is None:
+        os.environ.pop("PROMPTLY_REEDIT_PHASE2_ARRAY_REVERTS", None)
+    else:
+        os.environ["PROMPTLY_REEDIT_PHASE2_ARRAY_REVERTS"] = old
+
+
+@check("Phase 2 gate is OFF by default + respects truthy values")
+def _phase2_gate_truthy_values():
+    import handler
+    # Default (env unset) MUST be off — protects the ship-default behavior.
+    old = _with_phase2_env(None)
+    try:
+        assert handler._phase2_array_reverts_enabled() is False, (
+            "Phase 2 must default to OFF (env var unset) — otherwise shipping "
+            "without explicit opt-in would change re-edit behavior."
+        )
+        for truthy in ("1", "true", "True", "yes", "YES", "on", "ON"):
+            os = __import__("os")
+            os.environ["PROMPTLY_REEDIT_PHASE2_ARRAY_REVERTS"] = truthy
+            assert handler._phase2_array_reverts_enabled() is True, (
+                f"Phase 2 gate did not honor truthy value {truthy!r}"
+            )
+        for falsy in ("0", "false", "no", "off", ""):
+            os = __import__("os")
+            os.environ["PROMPTLY_REEDIT_PHASE2_ARRAY_REVERTS"] = falsy
+            assert handler._phase2_array_reverts_enabled() is False, (
+                f"Phase 2 gate falsely activated on value {falsy!r}"
+            )
+    finally:
+        _restore_phase2_env(old)
+
+
+@check("Phase 2 OFF: tweak mode array drift is LOGGED, identical to Phase 1")
+def _phase2_off_preserves_phase1():
+    import handler
+    old = _with_phase2_env(None)  # gate OFF
+    try:
+        prior = {"emphasis_moments": [{"word_indices": [3], "zoom_effect": {"type": "StepZoom"}}]}
+        new = {"emphasis_moments": [{"word_indices": [3], "zoom_effect": {"type": "SmoothPush"}}]}
+        validation = {
+            "verdict": "partial_out_of_scope",
+            "diffs": [{
+                "path": "emphasis_moments[anchor=(3,)]",
+                "list_key": "emphasis_moments",
+                "anchor": (3,),
+                "op": "changed",
+                "old": prior["emphasis_moments"][0],
+                "new": new["emphasis_moments"][0],
+            }],
+            "out_of_scope_paths": ["emphasis_moments[anchor=(3,)]"],
+        }
+        out = handler.apply_scalar_reverts(prior, new, validation, mode="tweak")
+        # Phase 1 behavior: array entry stays as Gemini emitted.
+        assert out["emphasis_moments"][0]["zoom_effect"]["type"] == "SmoothPush", (
+            f"Phase 2 OFF must preserve Phase 1 behavior — array drift stays. "
+            f"Got: {out}"
+        )
+    finally:
+        _restore_phase2_env(old)
+
+
+@check("Phase 2 ON: tweak mode array CHANGED reverts to prior entry")
+def _phase2_on_reverts_changed_array_entry():
+    import handler
+    old = _with_phase2_env("1")
+    try:
+        prior_entry = {"word_indices": [3], "zoom_effect": {"type": "StepZoom"}}
+        new_entry = {"word_indices": [3], "zoom_effect": {"type": "SmoothPush"}}
+        prior = {"emphasis_moments": [prior_entry]}
+        new = {"emphasis_moments": [new_entry]}
+        validation = {
+            "verdict": "partial_out_of_scope",
+            "diffs": [{
+                "path": "emphasis_moments[anchor=(3,)]",
+                "list_key": "emphasis_moments",
+                "anchor": (3,),
+                "op": "changed",
+                "old": prior_entry,
+                "new": new_entry,
+            }],
+            "out_of_scope_paths": ["emphasis_moments[anchor=(3,)]"],
+        }
+        out = handler.apply_scalar_reverts(prior, new, validation, mode="tweak")
+        assert out["emphasis_moments"][0]["zoom_effect"]["type"] == "StepZoom", (
+            f"Phase 2 ON: out-of-scope array CHANGED must revert to prior; "
+            f"got: {out}"
+        )
+        # Caller's prior plan must NOT be mutated.
+        assert prior["emphasis_moments"][0]["zoom_effect"]["type"] == "StepZoom"
+    finally:
+        _restore_phase2_env(old)
+
+
+@check("Phase 2 ON: tweak mode out-of-scope ADDED entry gets removed")
+def _phase2_on_removes_added_entry():
+    import handler
+    old = _with_phase2_env("1")
+    try:
+        prior = {"transitions": [{"after_word_index": 5, "type": "CardSwipe"}]}
+        new = {"transitions": [
+            {"after_word_index": 5, "type": "CardSwipe"},
+            {"after_word_index": 12, "type": "NewspaperWipe"},  # out-of-scope add
+        ]}
+        validation = {
+            "verdict": "partial_out_of_scope",
+            "diffs": [{
+                "path": "transitions[anchor=12]",
+                "list_key": "transitions",
+                "anchor": 12,
+                "op": "added",
+                "old": None,
+                "new": {"after_word_index": 12, "type": "NewspaperWipe"},
+            }],
+            "out_of_scope_paths": ["transitions[anchor=12]"],
+        }
+        out = handler.apply_scalar_reverts(prior, new, validation, mode="tweak")
+        anchors = [t.get("after_word_index") for t in out["transitions"]]
+        assert anchors == [5], (
+            f"Phase 2 ON: out-of-scope ADDED entry must be removed; "
+            f"got transitions={out['transitions']}"
+        )
+    finally:
+        _restore_phase2_env(old)
+
+
+@check("Phase 2 ON: tweak mode out-of-scope REMOVED entry gets added back")
+def _phase2_on_adds_back_removed_entry():
+    import handler
+    old = _with_phase2_env("1")
+    try:
+        prior = {"transitions": [
+            {"after_word_index": 5, "type": "CardSwipe"},
+            {"after_word_index": 12, "type": "NewspaperWipe"},
+        ]}
+        new = {"transitions": [
+            {"after_word_index": 5, "type": "CardSwipe"},  # Gemini dropped the 12-anchor
+        ]}
+        validation = {
+            "verdict": "partial_out_of_scope",
+            "diffs": [{
+                "path": "transitions[anchor=12]",
+                "list_key": "transitions",
+                "anchor": 12,
+                "op": "removed",
+                "old": {"after_word_index": 12, "type": "NewspaperWipe"},
+                "new": None,
+            }],
+            "out_of_scope_paths": ["transitions[anchor=12]"],
+        }
+        out = handler.apply_scalar_reverts(prior, new, validation, mode="tweak")
+        anchors = sorted(t.get("after_word_index") for t in out["transitions"])
+        assert anchors == [5, 12], (
+            f"Phase 2 ON: out-of-scope REMOVED entry must be re-added; "
+            f"got transitions={out['transitions']}"
+        )
+    finally:
+        _restore_phase2_env(old)
+
+
+@check("Phase 2 ON: guided_redraft is STILL log-only (mode gate independent of phase gate)")
+def _phase2_on_guided_redraft_still_log_only():
+    import handler
+    old = _with_phase2_env("1")
+    try:
+        prior = {"emphasis_moments": [{"word_indices": [3], "zoom_effect": {"type": "StepZoom"}}]}
+        new = {"emphasis_moments": [{"word_indices": [3], "zoom_effect": {"type": "SmoothPush"}}]}
+        validation = {
+            "verdict": "partial_out_of_scope",
+            "diffs": [{
+                "path": "emphasis_moments[anchor=(3,)]",
+                "list_key": "emphasis_moments",
+                "anchor": (3,),
+                "op": "changed",
+                "old": prior["emphasis_moments"][0],
+                "new": new["emphasis_moments"][0],
+            }],
+            "out_of_scope_paths": ["emphasis_moments[anchor=(3,)]"],
+        }
+        out = handler.apply_scalar_reverts(prior, new, validation, mode="guided_redraft")
+        # Mode gate is INDEPENDENT of the phase gate. guided_redraft's
+        # soft-carry-over contract still means log-only, even with
+        # Phase 2 array reverts enabled.
+        assert out["emphasis_moments"][0]["zoom_effect"]["type"] == "SmoothPush", (
+            f"guided_redraft must stay log-only even with Phase 2 ON; got: {out}"
+        )
+    finally:
+        _restore_phase2_env(old)
+
+
+@check("Phase 2 ON: scalar reverts still work alongside array reverts")
+def _phase2_on_scalar_plus_array_both_revert():
+    # Realistic case: Gemini drifts BOTH a scalar AND an array entry.
+    # Both must revert in the same pass, in tweak mode with Phase 2 ON.
+    import handler
+    old = _with_phase2_env("1")
+    try:
+        prior_em = {"word_indices": [3], "zoom_effect": {"type": "StepZoom"}}
+        new_em = {"word_indices": [3], "zoom_effect": {"type": "SmoothPush"}}
+        prior = {"caption_style": "PaperII", "emphasis_moments": [prior_em]}
+        new = {"caption_style": "Lumen", "emphasis_moments": [new_em]}
+        validation = {
+            "verdict": "partial_out_of_scope",
+            "diffs": [
+                {"path": "caption_style", "list_key": None, "anchor": None,
+                 "op": "changed", "old": "PaperII", "new": "Lumen"},
+                {"path": "emphasis_moments[anchor=(3,)]",
+                 "list_key": "emphasis_moments", "anchor": (3,),
+                 "op": "changed", "old": prior_em, "new": new_em},
+            ],
+            "out_of_scope_paths": ["caption_style", "emphasis_moments[anchor=(3,)]"],
+        }
+        out = handler.apply_scalar_reverts(prior, new, validation, mode="tweak")
+        assert out["caption_style"] == "PaperII", (
+            f"scalar revert failed in combined pass; got: {out}"
+        )
+        assert out["emphasis_moments"][0]["zoom_effect"]["type"] == "StepZoom", (
+            f"array revert failed in combined pass; got: {out}"
+        )
+    finally:
+        _restore_phase2_env(old)
+
+
+@check("Phase 2 ON: caller's prior_plan + new_plan are NOT mutated (defensive copy)")
+def _phase2_on_no_caller_mutation():
+    import handler
+    old = _with_phase2_env("1")
+    try:
+        prior_entry = {"word_indices": [3], "zoom_effect": {"type": "StepZoom"}}
+        new_entry = {"word_indices": [3], "zoom_effect": {"type": "SmoothPush"}}
+        prior_list = [prior_entry]
+        new_list = [new_entry]
+        prior = {"emphasis_moments": prior_list}
+        new = {"emphasis_moments": new_list}
+        validation = {
+            "verdict": "partial_out_of_scope",
+            "diffs": [{
+                "path": "emphasis_moments[anchor=(3,)]",
+                "list_key": "emphasis_moments", "anchor": (3,),
+                "op": "changed", "old": prior_entry, "new": new_entry,
+            }],
+            "out_of_scope_paths": ["emphasis_moments[anchor=(3,)]"],
+        }
+        out = handler.apply_scalar_reverts(prior, new, validation, mode="tweak")
+        # Caller's lists must be unchanged.
+        assert prior_list is prior["emphasis_moments"]
+        assert new_list is new["emphasis_moments"]
+        assert new_list[0]["zoom_effect"]["type"] == "SmoothPush", (
+            "caller's new_list was mutated — apply_scalar_reverts must "
+            "deep-copy mutated lists before reverting"
+        )
+        # But the returned dict's list IS the reverted one.
+        assert out["emphasis_moments"] is not new_list, (
+            "returned cleaned plan must use a distinct list, not the "
+            "caller's reference"
+        )
+        assert out["emphasis_moments"][0]["zoom_effect"]["type"] == "StepZoom"
+    finally:
+        _restore_phase2_env(old)
+
+
+# ─── 5c. TIGHT-CUT OVERLAY WIRING ────────────────────────────────────────
+# Step 2 of the overlay-on-top-of-hard-cut rollout: the canonical vocabulary
+# is registered, the Pydantic schema accepts the new field, the recipe_eval
+# rules fire at the right misuses, and the render path produces no output
+# when no overlay is requested (strictly additive — bit-identical default).
+print("\n[5c/6] Tight-cut overlay wiring (Step 2)")
+
+
+@check("VALID_TIGHT_CUT_OVERLAYS canonical set has exactly the 4 signed-off overlays")
+def _tco_registry_pair():
+    import type_registries
+    assert hasattr(type_registries, "VALID_TIGHT_CUT_OVERLAYS"), (
+        "VALID_TIGHT_CUT_OVERLAYS missing from type_registries"
+    )
+    expected = frozenset({"LightLeak", "ShutterFlash", "NewspaperWipe", "SceneTitle"})
+    assert type_registries.VALID_TIGHT_CUT_OVERLAYS == expected, (
+        f"VALID_TIGHT_CUT_OVERLAYS={type_registries.VALID_TIGHT_CUT_OVERLAYS} — "
+        f"expected exactly {expected}. Adding a fifth requires another isolation "
+        f"test + visual sign-off."
+    )
+
+
+@check("render_schemas.PromptlyRenderInput.tightCutOverlays accepts a valid spec")
+def _tco_schema_roundtrip():
+    # Active-path check: build a minimal PromptlyRenderInput with one
+    # TightCutOverlaySpec per registered type, plus a SceneTitle carrying
+    # the title/label extras. All must validate; the empty-default path
+    # must still recover the pre-overlay behavior.
+    import render_schemas
+    _minimal = {
+        "sourceUrl": "x.mp4",
+        "fps": 60.0,
+        "width": 1080,
+        "height": 1920,
+        "totalDurationInFrames": 600,
+        "clips": [],
+        "transitions": [],
+        "broll": [],
+        "caption": {
+            "style": "PaperII",
+            "pages": [],
+            "keywords": [],
+            "positionSegments": [],
+        },
+        "textOverlays": [],
+        "motionGraphics": [],
+        # Explicit tightCutOverlays list — one entry per registered type to
+        # exercise every literal in TightCutOverlayType, plus SceneTitle's
+        # title/label extras.
+        "tightCutOverlays": [
+            {"atFrame": 120, "type": "LightLeak", "durationInFrames": 11},
+            {"atFrame": 200, "type": "ShutterFlash", "durationInFrames": 11},
+            {"atFrame": 280, "type": "NewspaperWipe", "durationInFrames": 11},
+            {"atFrame": 380, "type": "SceneTitle", "durationInFrames": 72,
+             "title": "ACT TWO", "label": "CHAPTER"},
+        ],
+    }
+    parsed = render_schemas.PromptlyRenderInput.model_validate(_minimal)
+    assert len(parsed.tightCutOverlays) == 4
+    _types = [o.type for o in parsed.tightCutOverlays]
+    assert _types == ["LightLeak", "ShutterFlash", "NewspaperWipe", "SceneTitle"], (
+        f"types out of order: {_types}"
+    )
+    # SceneTitle entry must carry its title + label through the Pydantic layer.
+    _st = parsed.tightCutOverlays[3]
+    assert _st.title == "ACT TWO", f"SceneTitle title not preserved: {_st.title!r}"
+    assert _st.label == "CHAPTER", f"SceneTitle label not preserved: {_st.label!r}"
+    # SceneTitle must use the longer 72-frame duration.
+    assert _st.durationInFrames == 72, (
+        f"SceneTitle durationInFrames should be 72, got {_st.durationInFrames}"
+    )
+
+    # Default-empty path: the field must accept being absent and default
+    # to []. This is the strictly-additive guarantee — pre-overlay
+    # behavior is recoverable by emitting nothing.
+    _no_tco = {k: v for k, v in _minimal.items() if k != "tightCutOverlays"}
+    parsed_default = render_schemas.PromptlyRenderInput.model_validate(_no_tco)
+    assert parsed_default.tightCutOverlays == [], (
+        f"absent field must default to [], got {parsed_default.tightCutOverlays}"
+    )
+
+    # Reject an invalid type — this is the canonical-set guard. FilmStrip
+    # is a TRANSITION type, not an overlay type — must not validate here.
+    import pydantic
+    _bad = dict(_minimal)
+    _bad["tightCutOverlays"] = [{"atFrame": 120, "type": "FilmStrip", "durationInFrames": 11}]
+    try:
+        render_schemas.PromptlyRenderInput.model_validate(_bad)
+    except pydantic.ValidationError:
+        return
+    raise AssertionError("FilmStrip should not validate as a tightCutOverlay type")
+
+
+@check("recipe_eval flags SceneTitle tight_cut_overlay without a title")
+def _recipe_eval_tco_scenetitle_no_title():
+    # SceneTitle's typographic panel needs a title. Emitting it without one
+    # is the hard error the validator catches first; recipe_eval also
+    # surfaces it so operators see the problem in the eval report.
+    import recipe_eval
+    bad_plan = {
+        "video_plan": {
+            "arc_segments": [
+                {"start_word_index": 0, "end_word_index": 1, "position": "hook", "intensity": 0.9},
+                {"start_word_index": 2, "end_word_index": 5, "position": "build", "intensity": 0.4},
+                {"start_word_index": 6, "end_word_index": 7, "position": "payoff", "intensity": 1.0},
+            ],
+            "key_moments": [{"word_index": 1}, {"word_index": 7}],
+            "payoff_word_index": 7,
+            "close_word_index": 7,
+        },
+        "emphasis_moments": [
+            {"word_indices": [1], "zoom_effect": {"type": "SnapReframe", "events": [{"startMs": 0}]}},
+            {"word_indices": [7], "zoom_effect": {"type": "SmoothPush", "events": [{"startMs": 0}]}},
+        ],
+        "transitions": [],
+        "tight_cut_overlays": [
+            {"after_word_index": 3, "type": "SceneTitle"},  # missing title!
+        ],
+        "broll_clips": [], "motion_graphics": [],
+        "text_overlays": [], "sound_effects": [],
+    }
+    words = [{"word": str(i), "start": i * 0.5, "end": i * 0.5 + 0.4} for i in range(8)]
+    rep = recipe_eval.evaluate_recipe(
+        bad_plan, words, cut_boundaries=[], duration=4.0,
+        tight_boundaries=[3],
+    )
+    rule_ids = {r for (r, _) in rep.failures}
+    assert "tight-overlay-scenetitle-title" in rule_ids, (
+        f"expected tight-overlay-scenetitle-title failure, got: {rule_ids}"
+    )
+
+
+@check("recipe_eval flags non-SceneTitle tight_cut_overlay carrying title/label")
+def _recipe_eval_tco_extras_misuse():
+    # title/label are SceneTitle-only. Emitting them with LightLeak (or
+    # ShutterFlash / NewspaperWipe) is a hard error — the validator rejects
+    # it. recipe_eval mirrors this as the tight-overlay-extras-misuse rule.
+    import recipe_eval
+    bad_plan = {
+        "video_plan": {
+            "arc_segments": [
+                {"start_word_index": 0, "end_word_index": 1, "position": "hook", "intensity": 0.9},
+                {"start_word_index": 2, "end_word_index": 5, "position": "build", "intensity": 0.4},
+                {"start_word_index": 6, "end_word_index": 7, "position": "payoff", "intensity": 1.0},
+            ],
+            "key_moments": [{"word_index": 1}, {"word_index": 7}],
+            "payoff_word_index": 7,
+            "close_word_index": 7,
+        },
+        "emphasis_moments": [
+            {"word_indices": [1], "zoom_effect": {"type": "SnapReframe", "events": [{"startMs": 0}]}},
+            {"word_indices": [7], "zoom_effect": {"type": "SmoothPush", "events": [{"startMs": 0}]}},
+        ],
+        "transitions": [],
+        "tight_cut_overlays": [
+            {"after_word_index": 3, "type": "LightLeak", "title": "OOPS"},
+        ],
+        "broll_clips": [], "motion_graphics": [],
+        "text_overlays": [], "sound_effects": [],
+    }
+    words = [{"word": str(i), "start": i * 0.5, "end": i * 0.5 + 0.4} for i in range(8)]
+    rep = recipe_eval.evaluate_recipe(
+        bad_plan, words, cut_boundaries=[], duration=4.0,
+        tight_boundaries=[3],
+    )
+    rule_ids = {r for (r, _) in rep.failures}
+    assert "tight-overlay-extras-misuse" in rule_ids, (
+        f"expected tight-overlay-extras-misuse failure, got: {rule_ids}"
+    )
+
+
+@check("recipe_eval accepts SceneTitle with title (active passing path)")
+def _recipe_eval_tco_scenetitle_passes():
+    # A SceneTitle with a proper title at a TIGHT boundary should not fire
+    # any tight-overlay-* failure — the eval must NOT misfire on the
+    # active-path case (otherwise valid chapter breaks would all show as
+    # failures in the eval report).
+    import recipe_eval
+    good_plan = {
+        "video_plan": {
+            "arc_segments": [
+                {"start_word_index": 0, "end_word_index": 1, "position": "hook", "intensity": 0.9},
+                {"start_word_index": 2, "end_word_index": 5, "position": "build", "intensity": 0.4},
+                {"start_word_index": 6, "end_word_index": 7, "position": "payoff", "intensity": 1.0},
+            ],
+            "key_moments": [{"word_index": 1}, {"word_index": 4}, {"word_index": 7}],
+            "payoff_word_index": 7,
+            "close_word_index": 7,
+        },
+        "emphasis_moments": [
+            {"word_indices": [1], "zoom_effect": {"type": "SnapReframe", "events": [{"startMs": 0}]}},
+            {"word_indices": [4], "zoom_effect": {"type": "StepZoom", "events": [{"startMs": 0}]}},
+            {"word_indices": [7], "zoom_effect": {"type": "SmoothPush", "events": [{"startMs": 0}]}},
+        ],
+        "transitions": [],
+        "tight_cut_overlays": [
+            {"after_word_index": 3, "type": "SceneTitle", "title": "ACT TWO", "label": "CHAPTER"},
+            {"after_word_index": 5, "type": "NewspaperWipe"},
+        ],
+        "broll_clips": [], "motion_graphics": [],
+        "text_overlays": [], "sound_effects": [],
+    }
+    words = [{"word": str(i), "start": i * 0.5, "end": i * 0.5 + 0.4} for i in range(8)]
+    rep = recipe_eval.evaluate_recipe(
+        good_plan, words, cut_boundaries=[], duration=4.0,
+        tight_boundaries=[3, 5],
+    )
+    tco_rules = {
+        r for (r, _) in rep.failures
+        if r.startswith("tight-overlay-")
+    }
+    assert not tco_rules, (
+        f"valid SceneTitle + NewspaperWipe placement should not fail any "
+        f"tight-overlay-* rule, got: {tco_rules}"
+    )
+
+
+@check("recipe_eval flags tight_cut_overlay placed at a CUT BOUNDARY")
+def _recipe_eval_tco_wrong_boundary():
+    # Overlay anchored at a CUT BOUNDARY (where transitions live) — must fail.
+    # This is the "wrong boundary type" misuse the prompt warns against.
+    import recipe_eval
+    bad_plan = {
+        "video_plan": {
+            "arc_segments": [
+                {"start_word_index": 0, "end_word_index": 1, "position": "hook", "intensity": 0.9},
+                {"start_word_index": 2, "end_word_index": 5, "position": "build", "intensity": 0.4},
+                {"start_word_index": 6, "end_word_index": 7, "position": "payoff", "intensity": 1.0},
+            ],
+            "key_moments": [{"word_index": 1}, {"word_index": 7}],
+            "payoff_word_index": 7,
+            "close_word_index": 7,
+        },
+        "emphasis_moments": [
+            {"word_indices": [1], "zoom_effect": {"type": "SnapReframe", "events": [{"startMs": 0}]}},
+            {"word_indices": [7], "zoom_effect": {"type": "SmoothPush", "events": [{"startMs": 0}]}},
+        ],
+        "transitions": [],
+        "tight_cut_overlays": [
+            {"after_word_index": 5, "type": "LightLeak"},  # 5 is a CUT BOUNDARY, not TIGHT
+        ],
+        "broll_clips": [], "motion_graphics": [],
+        "text_overlays": [], "sound_effects": [],
+    }
+    words = [{"word": str(i), "start": i * 0.5, "end": i * 0.5 + 0.4} for i in range(8)]
+    rep = recipe_eval.evaluate_recipe(
+        bad_plan, words, cut_boundaries=[5], duration=4.0,
+        tight_boundaries=[3],
+    )
+    rule_ids = {r for (r, _) in rep.failures}
+    assert "tight-overlay-boundary" in rule_ids, (
+        f"expected tight-overlay-boundary failure, got: {rule_ids}"
+    )
+
+
+@check("recipe_eval flags 3+ tight_cut_overlays (per-video cap)")
+def _recipe_eval_tco_cap():
+    # The cap is 2 per video — sparing keeps the overlay editorial. 3 → FAIL.
+    import recipe_eval
+    bad_plan = {
+        "video_plan": {
+            "arc_segments": [
+                {"start_word_index": 0, "end_word_index": 1, "position": "hook", "intensity": 0.9},
+                {"start_word_index": 2, "end_word_index": 8, "position": "build", "intensity": 0.4},
+                {"start_word_index": 9, "end_word_index": 10, "position": "payoff", "intensity": 1.0},
+            ],
+            "key_moments": [{"word_index": 1}, {"word_index": 10}],
+            "payoff_word_index": 10,
+            "close_word_index": 10,
+        },
+        "emphasis_moments": [
+            {"word_indices": [1], "zoom_effect": {"type": "SnapReframe", "events": [{"startMs": 0}]}},
+            {"word_indices": [10], "zoom_effect": {"type": "SmoothPush", "events": [{"startMs": 0}]}},
+        ],
+        "transitions": [],
+        "tight_cut_overlays": [
+            {"after_word_index": 2, "type": "LightLeak"},
+            {"after_word_index": 4, "type": "ShutterFlash"},
+            {"after_word_index": 6, "type": "LightLeak"},
+        ],
+        "broll_clips": [], "motion_graphics": [],
+        "text_overlays": [], "sound_effects": [],
+    }
+    words = [{"word": str(i), "start": i * 0.5, "end": i * 0.5 + 0.4} for i in range(11)]
+    rep = recipe_eval.evaluate_recipe(
+        bad_plan, words, cut_boundaries=[], duration=5.5,
+        tight_boundaries=[2, 4, 6],
+    )
+    rule_ids = {r for (r, _) in rep.failures}
+    assert "tight-overlay-cap" in rule_ids, (
+        f"expected tight-overlay-cap failure, got: {rule_ids}"
+    )
+
+
+@check("recipe_eval accepts the valid 1-2 overlay case (active passing path)")
+def _recipe_eval_tco_passing():
+    # Two overlays at TIGHT boundaries, distinct types → no overlay-related
+    # failures. This is the bit-perfect "looks-correct" path the eval must
+    # NOT misfire on (otherwise good recipes would all fail the eval).
+    import recipe_eval
+    good_plan = {
+        "video_plan": {
+            "arc_segments": [
+                {"start_word_index": 0, "end_word_index": 1, "position": "hook", "intensity": 0.9},
+                {"start_word_index": 2, "end_word_index": 5, "position": "build", "intensity": 0.4},
+                {"start_word_index": 6, "end_word_index": 7, "position": "payoff", "intensity": 1.0},
+            ],
+            "key_moments": [{"word_index": 1}, {"word_index": 4}, {"word_index": 7}],
+            "payoff_word_index": 7,
+            "close_word_index": 7,
+        },
+        "emphasis_moments": [
+            {"word_indices": [1], "zoom_effect": {"type": "SnapReframe", "events": [{"startMs": 0}]}},
+            {"word_indices": [4], "zoom_effect": {"type": "StepZoom", "events": [{"startMs": 0}]}},
+            {"word_indices": [7], "zoom_effect": {"type": "SmoothPush", "events": [{"startMs": 0}]}},
+        ],
+        "transitions": [],
+        "tight_cut_overlays": [
+            {"after_word_index": 3, "type": "LightLeak"},
+            {"after_word_index": 5, "type": "ShutterFlash"},
+        ],
+        "broll_clips": [], "motion_graphics": [],
+        "text_overlays": [], "sound_effects": [],
+    }
+    words = [{"word": str(i), "start": i * 0.5, "end": i * 0.5 + 0.4} for i in range(8)]
+    rep = recipe_eval.evaluate_recipe(
+        good_plan, words, cut_boundaries=[], duration=4.0,
+        tight_boundaries=[3, 5],
+    )
+    tco_rules = {
+        r for (r, _) in rep.failures
+        if r.startswith("tight-overlay-")
+    }
+    assert not tco_rules, (
+        f"valid overlay placement should not fail any tight-overlay-* rule, got: {tco_rules}"
+    )
+
+
 # ─── 6. HANDLER ENTRY POINTS ───────────────────────────────────────────
 print("\n[6/6] Handler entry points")
 

@@ -12,3 +12,14 @@ src/remotion/.smoke-bundle/
 # without /usr/local/bin/chrome-headless-shell (production has it baked
 # into the Modal image).
 .remotion/
+# Isolation test render outputs from the OverlayCutTest composition —
+# large binary ProRes/h264 + frame extracts, regenerable from source.
+src/remotion/out_overlay_v*/
+src/remotion/out_step*/
+# Test fixtures used by the OverlayCutTest composition. Copied into
+# public/ locally by developers running isolation tests; NOT shipped
+# to production renderers (those receive the user's actual upload via
+# OffthreadVideo's URL). Excluded from VCS to keep the repo small and
+# to avoid committing third-party content.
+src/remotion/public/test_talking_head.mp4
+src/remotion/public/overlay-cut-test-audio.wav

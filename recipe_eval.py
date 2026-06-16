@@ -90,6 +90,7 @@ def evaluate_recipe(plan, words, cut_boundaries, duration, tight_boundaries=None
     key_moments = vp.get("key_moments") or []
     emphases = plan.get("emphasis_moments") or []
     transitions = plan.get("transitions") or []
+    tight_overlays = plan.get("tight_cut_overlays") or []
     brolls = plan.get("broll_clips") or []
     mgs = plan.get("motion_graphics") or []
     overlays = plan.get("text_overlays") or []
@@ -168,6 +169,88 @@ def evaluate_recipe(plan, words, cut_boundaries, duration, tight_boundaries=None
         prev_type = t["type"]
     for b in boundary_set - seen_boundaries:
         r.warn("transition-coverage", f"cut boundary at word {b} has no transition (valid only if mid-sentence flow or sub-800ms sandwich)")
+
+    # ─────────────────────────────────────────────── tight-cut overlay caps
+    # Overlay-on-top-of-hard-cut decoration for TIGHT BOUNDARIES. Hard rules
+    # (from the HOW TO PLACE TIGHT-CUT OVERLAYS section of the prompt):
+    #   • after_word_index must be a TIGHT boundary (the field is for tight
+    #     cuts; CUT boundaries already get full transitions)
+    #   • type must be "LightLeak" or "ShutterFlash" (no others wired)
+    #   • per-video cap of 2 — sparing keeps the overlay editorial, not
+    #     templated
+    #   • if 2 are emitted, prefer distinct types (warning, not failure —
+    #     same type twice can be right if the editorial character actually
+    #     matches)
+    if tight_overlays:
+        _VALID_TCO_TYPES = {"LightLeak", "ShutterFlash", "NewspaperWipe", "SceneTitle"}
+        _TCO_CAP = 2  # across ALL types combined — sparing is the whole point
+        if len(tight_overlays) > _TCO_CAP:
+            r.fail(
+                "tight-overlay-cap",
+                f"{len(tight_overlays)} tight_cut_overlays emitted (max {_TCO_CAP} per video "
+                f"across all types — sparing keeps the overlay editorial, not templated)",
+            )
+        _tco_types_seen = []
+        for tco in tight_overlays:
+            tco_type = (tco or {}).get("type")
+            tco_awi = (tco or {}).get("after_word_index")
+            tco_title = (tco or {}).get("title")
+            tco_label = (tco or {}).get("label")
+            if tco_type not in _VALID_TCO_TYPES:
+                r.fail(
+                    "tight-overlay-type",
+                    f"tight_cut_overlay type {tco_type!r} not in {sorted(_VALID_TCO_TYPES)}",
+                )
+            # SceneTitle requires a title; the other three forbid title/label.
+            # Mirrors the handler.py application-layer enforcement so
+            # misuses surface at eval time too (observability before the
+            # render rejects them).
+            if tco_type == "SceneTitle":
+                if not (isinstance(tco_title, str) and tco_title.strip()):
+                    r.fail(
+                        "tight-overlay-scenetitle-title",
+                        f"SceneTitle tight_cut_overlay at word {tco_awi} is missing "
+                        f"a `title` — the typographic panel requires 1-3 uppercase words.",
+                    )
+            elif tco_type in _VALID_TCO_TYPES:
+                # LightLeak / ShutterFlash / NewspaperWipe: extras forbidden.
+                _bad_extras = []
+                if tco_title not in (None, ""):
+                    _bad_extras.append("title")
+                if tco_label not in (None, ""):
+                    _bad_extras.append("label")
+                if _bad_extras:
+                    r.fail(
+                        "tight-overlay-extras-misuse",
+                        f"{tco_type} tight_cut_overlay at word {tco_awi} carries "
+                        f"{_bad_extras} — only SceneTitle uses title/label.",
+                    )
+            if tco_awi is None:
+                r.fail("tight-overlay-anchor", "tight_cut_overlay missing after_word_index")
+                continue
+            if tco_awi in boundary_set:
+                # Wrong boundary type — Gemini placed the overlay at a CUT
+                # boundary (which already gets a full transition).
+                r.fail(
+                    "tight-overlay-boundary",
+                    f"tight_cut_overlay {tco_type!r} at word {tco_awi} — that's a CUT "
+                    f"BOUNDARY (transitions live there). Move it to a TIGHT BOUNDARY.",
+                )
+            elif tco_awi not in tight_set:
+                r.fail(
+                    "tight-overlay-boundary",
+                    f"tight_cut_overlay {tco_type!r} at word {tco_awi} — not in TIGHT "
+                    f"BOUNDARIES {sorted(tight_set)}",
+                )
+            _tco_types_seen.append(tco_type)
+        if len(_tco_types_seen) == 2 and _tco_types_seen[0] == _tco_types_seen[1]:
+            r.warn(
+                "tight-overlay-variety",
+                f"both tight_cut_overlays use type {_tco_types_seen[0]!r} — prefer two "
+                f"different types unless both moments genuinely earn the same character "
+                f"(two SceneTitles in one video is almost always wrong — a video usually "
+                f"has at most one true chapter break worth labeling).",
+            )
 
     # ──────────────────────────────────────────────── tight-boundary masking
     # Prompt rule: "land a zoom on the first word after a tight cut to mask
@@ -348,6 +431,7 @@ def evaluate_recipe(plan, words, cut_boundaries, duration, tight_boundaries=None
         "events_per_window": round(len(events) / n_windows, 2),
         "zooms/transitions/broll/mgs/overlays/sfx":
             f"{len(emphases)}/{len(transitions)}/{len(brolls)}/{len(mgs)}/{len(overlays)}/{len(sfx)}",
+        "tight_cut_overlays": len(tight_overlays),
         "empty_windows": len(empty),
         "stacked_windows": len(stacked),
         "max_dead_gap_s": getattr(r, "stats_max_gap", 0.0),

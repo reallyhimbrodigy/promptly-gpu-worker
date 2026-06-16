@@ -97,6 +97,7 @@ from render_schemas import (
 from type_registries import (
     VALID_CAPTION_STYLES,
     VALID_MG_TYPES,
+    VALID_TIGHT_CUT_OVERLAYS,
     VALID_TRANSITION_TYPES,
     VALID_ZOOM_TYPES,
 )
@@ -983,6 +984,156 @@ def fetch_user_style_profile(user_id):
     except Exception as e:
         print(f"[user-style] Fetch failed: {e}", flush=True)
         return None
+
+
+# ─── User tier + multi-clip concurrency gate ─────────────────────────────────
+#
+# Backend defense-in-depth for the premium multi-clip feature. The frontend
+# is the primary gate (it refuses to let non-premium users select more than
+# one file at the picker). This worker-side check is the secondary gate:
+# if a non-premium user calls the API directly (curl, leaked token, broken
+# client build), the second concurrent job for the same user_id gets
+# rejected here with a clear upgrade message instead of running silently.
+#
+# Schema flexibility — the Supabase row holding the tier signal is read via
+# env vars so the contract can match the frontend's existing table:
+#   PROMPTLY_TIER_TABLE       (default: "user_profiles")
+#   PROMPTLY_TIER_USER_COLUMN (default: "user_id")  — column joining on user_id
+#   PROMPTLY_TIER_COLUMN      (default: "tier")     — column holding the tier value
+#   PROMPTLY_PREMIUM_VALUES   (default: "premium,pro,paid,plus")
+#                                                    — comma-separated values
+#                                                      that count as premium
+#
+# In-flight job count — read from the existing jobs table the worker already
+# writes progress to. Free tier == 1 concurrent job; premium == no worker-side
+# limit (Modal's natural concurrency handles capacity). The table/column for
+# this is also env-driven so we don't break if your existing job-status
+# schema doesn't match a guessed default:
+#   PROMPTLY_JOB_TABLE        (default: "jobs")
+#   PROMPTLY_JOB_USER_COLUMN  (default: "user_id")
+#   PROMPTLY_JOB_STATUS_COLUMN (default: "status")
+#   PROMPTLY_JOB_ACTIVE_STATUSES (default: "queued,running,processing")
+#                                                    — comma-separated statuses
+#                                                      that count as "in flight"
+
+def _premium_values():
+    raw = os.environ.get("PROMPTLY_PREMIUM_VALUES") or "premium,pro,paid,plus"
+    return {v.strip().lower() for v in raw.split(",") if v.strip()}
+
+
+def _active_statuses():
+    raw = os.environ.get("PROMPTLY_JOB_ACTIVE_STATUSES") or "queued,running,processing"
+    return {v.strip().lower() for v in raw.split(",") if v.strip()}
+
+
+def fetch_user_tier(user_id):
+    """Look up a user's tier from Supabase. Returns the raw tier string
+    (lowercased) or None if Supabase is unreachable / row missing.
+
+    Fail-OPEN: if the lookup fails for any reason (Supabase down, schema
+    mismatch, env vars wrong), we return None. The caller treats None as
+    "tier unknown — apply the most permissive policy that doesn't burn
+    the company" (currently: allow the job, log loudly). This avoids the
+    failure mode where a Supabase blip blocks paying users from rendering.
+    """
+    if supabase is None or not user_id:
+        return None
+    table = os.environ.get("PROMPTLY_TIER_TABLE") or "user_profiles"
+    user_col = os.environ.get("PROMPTLY_TIER_USER_COLUMN") or "user_id"
+    tier_col = os.environ.get("PROMPTLY_TIER_COLUMN") or "tier"
+    try:
+        result = supabase.table(table) \
+            .select(tier_col) \
+            .eq(user_col, user_id) \
+            .limit(1) \
+            .execute()
+        if result.data and len(result.data) > 0:
+            raw = result.data[0].get(tier_col)
+            tier = str(raw).strip().lower() if raw else None
+            print(
+                f"[tier] user={user_id[:8]}… tier={tier or '(none)'}",
+                flush=True,
+            )
+            return tier
+        print(
+            f"[tier] No row for user={user_id[:8]}… in {table}.{user_col} — "
+            f"treating as tier-unknown (fail open).",
+            flush=True,
+        )
+        return None
+    except Exception as e:
+        print(f"[tier] Fetch failed for user={user_id[:8]}…: {e} (fail open)", flush=True)
+        return None
+
+
+def count_user_active_jobs(user_id, current_job_id):
+    """Count this user's active (queued/running/processing) jobs in the jobs
+    table, EXCLUDING the current job_id (we don't want to count ourselves).
+
+    Returns 0 if Supabase is unreachable / table missing — same fail-OPEN
+    discipline as fetch_user_tier. The caller treats 0 as "unknown — allow."
+    """
+    if supabase is None or not user_id:
+        return 0
+    table = os.environ.get("PROMPTLY_JOB_TABLE") or "jobs"
+    user_col = os.environ.get("PROMPTLY_JOB_USER_COLUMN") or "user_id"
+    status_col = os.environ.get("PROMPTLY_JOB_STATUS_COLUMN") or "status"
+    try:
+        # Pull only the status + id columns — we filter in Python after the
+        # fetch since the Supabase Python SDK's .in_() helper has been
+        # inconsistent across versions.
+        result = supabase.table(table) \
+            .select(f"id,{status_col}") \
+            .eq(user_col, user_id) \
+            .execute()
+        active = _active_statuses()
+        count = 0
+        for row in (result.data or []):
+            if str(row.get("id") or "") == str(current_job_id):
+                continue  # don't count ourselves
+            if str(row.get(status_col) or "").strip().lower() in active:
+                count += 1
+        return count
+    except Exception as e:
+        print(
+            f"[tier] Active-job count failed for user={user_id[:8]}…: {e} (fail open)",
+            flush=True,
+        )
+        return 0
+
+
+def check_concurrency_gate(user_id, job_id):
+    """Apply the free-tier-single-job concurrency rule.
+
+    Returns:
+        None if the job should proceed.
+        A dict {"error": ..., "user_message": ..., "tier": ...} if the job
+        should be rejected with a tier-upgrade message.
+
+    Always FAIL OPEN on Supabase trouble — a paying user must never be
+    blocked from rendering by a transient infra blip. The fail-closed case
+    is reserved for the explicit "you're free tier with a job already
+    running" path.
+    """
+    tier = fetch_user_tier(user_id)
+    premium = tier in _premium_values() if tier else False
+    if premium:
+        return None  # premium has no worker-side concurrency cap
+    # Tier unknown or non-premium — count active jobs.
+    active_count = count_user_active_jobs(user_id, job_id)
+    if active_count <= 0:
+        return None  # zero or unknown — allow
+    # Non-premium with an in-flight job — reject this one.
+    return {
+        "error": "tier_concurrency_limit",
+        "user_message": (
+            "Your current plan renders one video at a time. Wait for your "
+            "in-progress render to finish, or upgrade to render multiple "
+            "videos simultaneously."
+        ),
+        "tier": tier or "unknown",
+        "active_jobs": active_count,
+    }
 
 
 def format_user_style_section(profile):
@@ -2697,6 +2848,7 @@ def _build_post_cuts_prompt(
     face_visibility=None, speaker_positions=None, off_center=False,
     shot_scale=None, user_style_profile=None,
     face_zone=None,
+    prior_plan=None, prior_plan_change_request=None,
 ):
     """Gemini prompt for the SECOND call — visual placement on a kept-only transcript.
 
@@ -2716,6 +2868,17 @@ def _build_post_cuts_prompt(
       - shot_scale         — median face bbox → wide / medium / close_up / extreme_close_up
       - user_style_profile — this user's preferred styles across their past videos
       - Trend style guide (Apify-scraped weekly)
+
+    Re-edit Layer 2 — `guided_redraft` mode injects two optional inputs:
+      - prior_plan                 — the previously-emitted edit_plan (JSON dict)
+      - prior_plan_change_request  — the user's directional ask for this redraft
+    When prior_plan is set, the post_user prompt gets a GUIDED REDRAFT block
+    that tells Gemini: "carry over every decision from the prior plan unless
+    the user's direction contradicts it." The model is free to modify any
+    decision, but is biased toward stability when the user didn't speak to
+    a given dimension. This is the structural fix for composite re-edit
+    asks ('rework the middle, keep the captions') that fell into the gap
+    between tweak (no adds) and reinterpret (no carry-over).
     """
     trend_block = ""
     if trend_context:
@@ -3862,6 +4025,16 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
     }}
   ],
 
+  "tight_cut_overlays": [
+    {{
+      "after_word_index": int,                            // ALWAYS from the TIGHT BOUNDARIES list
+      "type": "LightLeak" | "ShutterFlash" | "NewspaperWipe" | "SceneTitle",
+      "title": str | null,                                // REQUIRED ONLY when type == "SceneTitle" (1-3 uppercase words); MUST be null/omitted for other types
+      "label": str | null                                 // OPTIONAL ONLY when type == "SceneTitle" (uppercase kicker); MUST be null/omitted for other types
+      // see TIGHT-CUT OVERLAYS section — sparingly, max 1-2 per video across ALL types combined
+    }}
+  ],
+
   "motion_graphics": [
     {{
       "type": "AnnotationArrow" | "ChatThread" | "Notification" | "ProgressBar" | "QuoteCard" | "RecordingFrame" | "StatCard" | "StickyNotes" | "Toggle" | "TweetBubble" | "InstagramComment" | "IMessageBubble" | "TikTokComment",
@@ -3898,6 +4071,69 @@ Every anchor field references the kept-only index space [0..M-1] shown in the tr
         user_content_parts.append(_recent_styles_block.strip())
     if trend_block:
         user_content_parts.append(trend_block.strip())
+
+    # ── GUIDED REDRAFT — prior plan as soft default ──────────────────────
+    # When the dispatcher routes a re-edit through this function with
+    # prior_plan set, we inject the prior plan + the user's direction at
+    # the END of the user content (the strongest position in the prompt).
+    # Gemini treats the prior plan as the starting state and the
+    # change_request as the override: keep what wasn't addressed, modify
+    # what was. This is the structural fix for re-edits that aren't
+    # surgical (tweak) but aren't total recasts (reinterpret) either.
+    if isinstance(prior_plan, dict) and prior_plan:
+        # Strip internal-only fields (underscored) — Gemini doesn't need
+        # them and they bloat the token bill.
+        _sanitized_prior = {
+            k: v for k, v in prior_plan.items()
+            if not (isinstance(k, str) and k.startswith("_"))
+        }
+        _direction = str(prior_plan_change_request or "").strip()
+        _direction_line = (
+            f"USER'S DIRECTION FOR THIS REDRAFT: {_direction}\n\n"
+            if _direction else ""
+        )
+        guided_block = (
+            "════════════════════════════════════════════════════════════════════\n"
+            "GUIDED REDRAFT — RE-EDIT WITH PRIOR PLAN AS SOFT DEFAULT\n"
+            "════════════════════════════════════════════════════════════════════\n"
+            "This is a RE-EDIT. The user has already received one rendered version of "
+            "this video, and is asking for a directional reshape — broader than a "
+            "surgical tweak, more grounded than a total recast.\n\n"
+            f"{_direction_line}"
+            "RULES FOR THE REDRAFT:\n\n"
+            "1) The PRIOR EDIT PLAN below is your STARTING STATE, not a constraint. "
+            "Treat every prior decision as a soft default: keep it unless the user's "
+            "direction (above) gives you a reason to change it.\n\n"
+            "2) The user's direction is authoritative. Where it speaks to a category "
+            "(pacing of a section, energy of the captions, presence of B-roll, "
+            "character of the chapter break, etc.), let it OVERRIDE the prior plan in "
+            "that category. Where it's SILENT on a category, the prior plan wins by "
+            "default — do NOT redo decisions for novelty's sake. The user already "
+            "approved those choices; touching them without cause erodes their trust.\n\n"
+            "3) Carry-over is decision-level, not field-level. If the user says 'pace "
+            "the middle faster', that may mean: shift some cuts later, drop a "
+            "breather segment, change a zoom from SmoothPush to SnapReframe. Each of "
+            "those is a deliberate consequence of the direction — appropriate. What "
+            "would be WRONG: also changing the caption style, or swapping every "
+            "transition, because those weren't asked for. Stay disciplined.\n\n"
+            "4) The full editorial vocabulary from the rules above still applies. "
+            "Components you ADD must follow the same placement rules (zoom-on-key-"
+            "moments, transition-on-CUT-BOUNDARIES, tight_cut_overlay-on-TIGHT-"
+            "BOUNDARIES with the per-type duration / title-required for SceneTitle, "
+            "etc.). You can't bypass the rules by citing the prior plan; the prior "
+            "plan is a default, not a license.\n\n"
+            "5) The video's transcript / signals / face data below are FRESH — the "
+            "pipeline regenerated all of it from the source. Word indices in the "
+            "prior plan reference the OLD kept-only space; translate them to the "
+            "NEW kept-only space (you'll see the new kept-transcript below) by "
+            "matching on word text + approximate timestamp, NOT by raw index. The "
+            "prior plan exists to inform editorial intent, not to be index-merged "
+            "verbatim.\n\n"
+            f"PRIOR EDIT PLAN (JSON):\n{json.dumps(_sanitized_prior, separators=(',', ':'))}\n"
+            "════════════════════════════════════════════════════════════════════\n"
+        )
+        user_content_parts.append(guided_block)
+
     user_content = "\n\n".join(user_content_parts)
 
     return system_instruction, user_content
@@ -5150,6 +5386,21 @@ def _translate_post_cut_anchors_to_src(post_cut_plan, new_to_src):
         tr_out.append({**tr, "after_word_index": v})
     out["transitions"] = tr_out
 
+    # tight_cut_overlays — after_word_index (same shape as transitions, target
+    # space is TIGHT BOUNDARIES instead of CUT BOUNDARIES — checked at the
+    # application site in generate_edit_gemini, not here)
+    tco_in = out.get("tight_cut_overlays") or []
+    tco_out = []
+    for tco in tco_in:
+        if not isinstance(tco, dict):
+            continue
+        v = _xlate(tco.get("after_word_index"))
+        if v is None:
+            print(f"[two-pass] Dropping tight_cut_overlay: after_word_index out of kept-range", flush=True)
+            continue
+        tco_out.append({**tco, "after_word_index": v})
+    out["tight_cut_overlays"] = tco_out
+
     # motion_graphics — start_word_index, end_word_index
     mg_in = out.get("motion_graphics") or []
     mg_out = []
@@ -5437,6 +5688,7 @@ def generate_edit_gemini(
     face_positions=None, smoothed_face_trajectory=None,
     user_style_profile=None,
     gemini_file=None, cached_response=None, inline_video_bytes=None,
+    prior_plan=None, prior_plan_change_request=None,
 ):
     _pre_analysis = cached_response
 
@@ -5485,7 +5737,16 @@ def generate_edit_gemini(
         shot_scale=_shot_scale,
         user_style_profile=user_style_profile,
         face_zone=_face_zone,
+        prior_plan=prior_plan,
+        prior_plan_change_request=prior_plan_change_request,
     )
+    if prior_plan:
+        print(
+            f"[generate-edit] GUIDED REDRAFT — prior plan injected "
+            f"({len(json.dumps(prior_plan))} chars); user direction: "
+            f"{str(prior_plan_change_request or '')[:160]}",
+            flush=True,
+        )
 
     # Pre-analysis goes to the post-cuts call (visual decisions benefit from
     # richer scene context; cuts call doesn't need it).
@@ -5764,7 +6025,7 @@ Indices below are the NEW kept-only space [0..{_kept_count - 1}]. Every word_ind
 
   {_cut_boundary_block}
 
-=== TIGHT BOUNDARIES (real cuts with no handle room — these render as HARD CUTS; do NOT place transitions here. Listed so you know the cut exists: land a zoom on the first word after a tight cut to mask the jump, and never treat the video as one continuous clip) ===
+=== TIGHT BOUNDARIES (real cuts with no handle room — these render as HARD CUTS; do NOT place transitions here. Listed so you know the cut exists: land a zoom on the first word after a tight cut to mask the jump, and never treat the video as one continuous clip. SEPARATELY, the most editorially-significant 1-2 of these can carry a brief `tight_cut_overlay` — see HOW TO PLACE TIGHT-CUT OVERLAYS below) ===
 
   {_tight_boundary_block}
 
@@ -5785,6 +6046,36 @@ Each transition component renders at its natural duration — the cadence its ra
 **Place transitions where they fit and earn the moment.** Skip mid-sentence boundaries where the dialogue carries unbroken across the cut (same verb-subject continuing) — there a transition would seam the speaker mid-thought.
 
 For each chosen `after_word_index`, pick a transition `type` whose character matches the dialogue's shift at that boundary (ZoomThrough, CardSwipe, ShutterFlash, SlideOver, CrossfadeZoom, SceneTitle, NewspaperWipe, FilmStrip, Stack, StepPush). Vary the type across emitted transitions — repeating the same type at adjacent boundaries reads as templating.
+
+=== HOW TO PLACE TIGHT-CUT OVERLAYS ===
+
+A `tight_cut_overlay` is a brief decoration painted ON TOP of a hard cut at a TIGHT BOUNDARY. The cut underneath plays straight (no handle frames consumed, no audio touched, no time inserted) — the overlay sits ABOVE the cut and ramps in/out around it. Four types, two duration classes:
+
+PUNCTUATION CLASS (~180ms — quick, decorates the cut moment):
+  - **LightLeak** — warm bloom sweeping diagonally across the cut. Reads as "the moment widened" — a polished, cinematic punctuation. Use when the dialogue shifts to a more reflective / arrived-at register: a quiet realization, a takeaway landing, the close of a callback. Warm light = the speaker zooming in on the point, the viewer drawn closer.
+  - **ShutterFlash** — quick white camera-flash snap. Reads as "the moment hit" — an editorial punch. Use when the dialogue shifts to higher energy / surprise / a payoff hitting: the escalation beat after a setup, an unexpected pivot, the moment a stat or punchline lands.
+  - **NewspaperWipe** — torn paper slams up, covers, holds, rushes off. Reads as "the headline drops" — kinetic, almost breaking-news. Use when the dialogue delivers a reveal or named-thing handover: the answer arrives, the name lands, the surprise gets unwrapped. Distinct from ShutterFlash in feel — heavier, more deliberate, more "delivered" than "snapped."
+
+CHAPTER-BREAK CLASS (~1200ms — a typographic divider; the new section starts here):
+  - **SceneTitle** — large serif title on a panel that wipes in, holds long enough to read, wipes out. The ONLY overlay that carries text. Reads as "new chapter / new act begins" — distinct from the three punctuation overlays in both duration AND function. Use ONLY for genuine SECTION boundaries: the video has a clear act structure and the speaker is crossing from one act into the next. Do NOT use SceneTitle as decoration on a mere energy bump — it's a hard divider, not a flourish.
+    - `title` REQUIRED — 1 to 3 uppercase words, editorial. Examples: "ACT TWO", "THE PIVOT", "PART III", "WHAT NEXT", "THE FIX". The title should READ as the chapter heading.
+    - `label` OPTIONAL — uppercase kicker above the divider. Examples: "CHAPTER", "ACT", "PART II", "SECTION". Skip if the title already tells the viewer what kind of break this is.
+
+**HARD RULE 1 — `after_word_index` MUST come from the TIGHT BOUNDARIES list above (NOT CUT BOUNDARIES, NOT any other index).** Placing a tight_cut_overlay at a CUT boundary is wrong: those boundaries already get full transitions. Placing it at a non-boundary index has no cut to decorate and the renderer will not produce it.
+
+**HARD RULE 2 — at most 2 tight_cut_overlays per video, ACROSS ALL FOUR TYPES COMBINED.** Sparing is the whole point. A short video typically gets 0; a video with strong chapter structure gets 1; a video with both a hook callback AND a real chapter break can get 2 (commonly 1 SceneTitle + 1 punctuation overlay, but any combination). Three or more reads as a template effect, not editorial signal. The default for every tight boundary stays a clean hard cut — overlays are the rare exception, not the norm.
+
+**HARD RULE 3 — extras (`title`, `label`) belong to SceneTitle ONLY.** Emitting `title` or `label` with LightLeak / ShutterFlash / NewspaperWipe is a hard error — the validator rejects it. SceneTitle without a `title` is also a hard error (the panel has nothing to display).
+
+**Place overlays only where the cut carries real editorial weight.** Editorially-significant cuts include:
+  - **chapter shift** — the speaker pivots from one segment of the argument to the next (setup → reveal, problem → solution, "and then" → "but here's the thing"). A strong chapter shift earns SceneTitle (a literal title for the new section). A softer shift earns one of the punctuation overlays.
+  - **escalation beat** — the energy steps up across the cut (a stat, a punchline, a payoff lands right after) → ShutterFlash or NewspaperWipe.
+  - **hook / close callback** — the cut joins a callback back to the video's opening hook or closing point → LightLeak fits best (reflective warmth).
+  - **reveal / answer delivery** — the cut introduces the named thing the speaker was building toward → NewspaperWipe (headline drops).
+
+If a tight boundary is mid-thought, a same-take micro-trim, a filler-removal splice, or any non-editorial cut, leave it as a clean hard cut. The hard cut IS the right call there.
+
+**Variety across the cap.** If you emit two, prefer two different types unless the editorial character of both moments genuinely matches the same type. Two SceneTitles in one video is almost always wrong (a video usually has at most one true chapter break worth labeling); two of the same punctuation overlay reads as templating.
 """
 
 
@@ -5864,6 +6155,7 @@ For each chosen `after_word_index`, pick a transition `type` whose character mat
         f"text_overlays={len(edit_plan.get('text_overlays') or [])}, "
         f"sound_effects={len(edit_plan.get('sound_effects') or [])}, "
         f"transitions={len(edit_plan.get('transitions') or [])}, "
+        f"tight_cut_overlays={len(edit_plan.get('tight_cut_overlays') or [])}, "
         f"broll_clips={len(edit_plan.get('broll_clips') or [])}",
         flush=True,
     )
@@ -6511,6 +6803,155 @@ For each chosen `after_word_index`, pick a transition `type` whose character mat
                 )
 
     # Transition count/variety is Gemini's decision — the prompt teaches restraint.
+
+    # ── Tight-cut overlays (overlay-on-top-of-hard-cut, TIGHT BOUNDARIES) ────
+    # Strictly additive: an empty/absent list leaves the pipeline behaviorally
+    # identical to the pre-overlay path. When entries are present, validate
+    # type, validate after_word_index falls on a TIGHT BOUNDARY (translated
+    # to source space), enforce the 2-per-video cap, and stamp the clip with
+    # `_tight_cut_overlay` data — parallel to `transition_out` but on the
+    # tight-boundary side. The overlay value is DATA, not a transition; the
+    # render path dispatches via the OverlayCutEffect component (which sits
+    # ON TOP of the unmodified hard cut; no handle frames, no audio touched).
+    raw_tco = edit_plan.get("tight_cut_overlays") or []
+    if raw_tco and _dg_words:
+        _valid_tco_types = set(VALID_TIGHT_CUT_OVERLAYS)
+        # Tight-boundary indices were computed earlier in kept-only space;
+        # translate to source space so we can test the validated, source-
+        # space after_word_index values Gemini emits.
+        try:
+            _tight_src_set = {
+                new_to_src[_ki] for _ki in _tight_boundary_indices
+                if 0 <= _ki < len(new_to_src)
+            }
+        except NameError:
+            # _tight_boundary_indices wasn't built (no boundaries pass —
+            # likely an empty/degenerate transcript). With no tight set
+            # we cannot validate, so drop every overlay.
+            _tight_src_set = None
+
+        _TIGHT_CUT_OVERLAY_CAP = 2  # max per video — across ALL overlay types combined
+        _applied_tco_count = 0
+        for _toi, tco in enumerate(raw_tco):
+            if not isinstance(tco, dict):
+                raise ValueError(f"tight_cut_overlays[{_toi}] must be an object")
+            tco_type = str(tco.get("type") or "").strip()
+            if tco_type not in _valid_tco_types:
+                raise ValueError(
+                    f"tight_cut_overlays[{_toi}].type={tco_type!r} is not valid "
+                    f"(must be one of {sorted(_valid_tco_types)})"
+                )
+            # SceneTitle is the ONLY overlay that takes extras (title + label
+            # for the typographic panel). title is required; label is optional.
+            # The other three overlays reject extras — emitting a title with
+            # LightLeak/ShutterFlash/NewspaperWipe is a prompt-violation that
+            # the validator catches before the render.
+            tco_title_raw = tco.get("title")
+            tco_label_raw = tco.get("label")
+            tco_title = str(tco_title_raw).strip() if isinstance(tco_title_raw, str) else None
+            tco_label = str(tco_label_raw).strip() if isinstance(tco_label_raw, str) else None
+            if tco_type == "SceneTitle":
+                if not tco_title:
+                    raise ValueError(
+                        f"tight_cut_overlays[{_toi}] (SceneTitle) is missing "
+                        f"`title` — SceneTitle requires a 1-3 word uppercase "
+                        f"title for the typographic panel."
+                    )
+            else:
+                if tco_title is not None or tco_label is not None:
+                    raise ValueError(
+                        f"tight_cut_overlays[{_toi}] ({tco_type}) carries "
+                        f"title/label, but only SceneTitle uses them. "
+                        f"Strip them or change the type."
+                    )
+            awi_t = tco.get("after_word_index")
+            if awi_t is None or not isinstance(awi_t, (int, float)):
+                raise ValueError(
+                    f"tight_cut_overlays[{_toi}] ({tco_type}) missing numeric after_word_index"
+                )
+            awi_t = int(awi_t)
+            if awi_t < 0 or awi_t >= len(_dg_words):
+                print(
+                    f"[generate-edit] DROP tight_cut_overlay '{tco_type}' [{_toi}]: "
+                    f"after_word_index={awi_t} out of bounds (transcript has "
+                    f"{len(_dg_words)} words).",
+                    flush=True,
+                )
+                continue
+            if awi_t in _tr_removed:
+                print(
+                    f"[generate-edit] DROP tight_cut_overlay '{tco_type}' [{_toi}]: "
+                    f"after_word_index={awi_t} targets a removed word.",
+                    flush=True,
+                )
+                continue
+            if _tight_src_set is None or awi_t not in _tight_src_set:
+                # Wrong boundary type — Gemini emitted the overlay at a CUT
+                # boundary (transitions live there) or at a non-boundary
+                # index. The overlay path only fires at TIGHT BOUNDARIES.
+                print(
+                    f"[generate-edit] DROP tight_cut_overlay '{tco_type}' [{_toi}]: "
+                    f"after_word_index={awi_t} is not a TIGHT BOUNDARY — overlay "
+                    f"requires a tight cut to decorate.",
+                    flush=True,
+                )
+                continue
+            if _applied_tco_count >= _TIGHT_CUT_OVERLAY_CAP:
+                print(
+                    f"[generate-edit] DROP tight_cut_overlay '{tco_type}' [{_toi}]: "
+                    f"per-video cap of {_TIGHT_CUT_OVERLAY_CAP} already reached. "
+                    f"Sparing placement keeps the overlay editorial, not templated.",
+                    flush=True,
+                )
+                continue
+            word_end_t = float(_dg_words[awi_t].get("end") or 0)
+            # Find the clip that contains this word (50ms tolerance) and has
+            # a successor — same shape as the transitions block.
+            _applied_t = False
+            for ci, clip in enumerate(validated_cuts):
+                cs = float(clip["source_start"])
+                ce = float(clip["source_end"])
+                if cs - 0.05 <= word_end_t <= ce + 0.05 and ci < len(validated_cuts) - 1:
+                    # Reject if this clip already carries a real transition —
+                    # an overlay-on-top-of-handle-transition would double-
+                    # decorate the same boundary. (Should not happen if
+                    # boundary types are mutually exclusive; defensive.)
+                    if clip.get("transition_out") and clip["transition_out"] != "none":
+                        print(
+                            f"[generate-edit] DROP tight_cut_overlay '{tco_type}' [{_toi}]: "
+                            f"clip {ci} already has transition_out="
+                            f"{clip['transition_out']!r}.",
+                            flush=True,
+                        )
+                        break
+                    clip["_tight_cut_overlay"] = tco_type
+                    if tco_type == "SceneTitle":
+                        # title is guaranteed non-None for SceneTitle by the
+                        # validator above; label remains optional.
+                        clip["_tight_cut_overlay_extras"] = {
+                            "title": tco_title,
+                            **({"label": tco_label} if tco_label else {}),
+                        }
+                    _applied_tco_count += 1
+                    _extras_log = ""
+                    if tco_type == "SceneTitle":
+                        _extras_log = f" title={tco_title!r}"
+                        if tco_label:
+                            _extras_log += f" label={tco_label!r}"
+                    print(
+                        f"[generate-edit] tight_cut_overlay '{tco_type}' applied to "
+                        f"clip {ci} (after word {awi_t}){_extras_log}",
+                        flush=True,
+                    )
+                    _applied_t = True
+                    break
+            if not _applied_t:
+                print(
+                    f"[generate-edit] DROP tight_cut_overlay '{tco_type}' [{_toi}]: "
+                    f"after_word_index={awi_t} (t={word_end_t:.2f}s) does not land "
+                    f"in a clip with a successor.",
+                    flush=True,
+                )
 
     # caption_style, caption_keywords, caption_position_segments, text_overlays,
     # emphasis_moments, motion_graphics, audio_denoise, outro, aspect_ratio,
@@ -7839,6 +8280,15 @@ For each chosen `after_word_index`, pick a transition `type` whose character mat
             _new_cut["_transition_extras"] = clip_entry["_transition_extras"]
         if clip_entry.get("_zoom_effect"):
             _new_cut["_zoom_effect"] = clip_entry["_zoom_effect"]
+        # Tight-cut overlay (parallel to transition_out; only ever populated
+        # on TIGHT BOUNDARIES — mutually exclusive with transition_out by
+        # construction in the application block above). Extras carry the
+        # SceneTitle title/label through to the renderer; ignored for the
+        # other three overlay types (validator rejects extras on non-SceneTitle).
+        if clip_entry.get("_tight_cut_overlay"):
+            _new_cut["_tight_cut_overlay"] = clip_entry["_tight_cut_overlay"]
+            if clip_entry.get("_tight_cut_overlay_extras"):
+                _new_cut["_tight_cut_overlay_extras"] = clip_entry["_tight_cut_overlay_extras"]
         final_cuts.append(_new_cut)
 
     # Zoom and motion graphics are attached to each emphasis_moment explicitly
@@ -7905,20 +8355,34 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None)
     # Strip internal-only fields (underscored) — we only diff the sanitized plan.
     sanitized_old_plan = {k: v for k, v in old_plan.items() if not (isinstance(k, str) and k.startswith("_"))}
 
-    # Compact transcript preview so the diff model can resolve word_index references
-    # without being overwhelmed. Cap at ~3K chars; plan-diff doesn't need the full
-    # transcript, just enough to ground timing-ish language in the change_request.
+    # Full transcript with per-word indices — Gemini needs to resolve any word_index
+    # in the old plan AND any ordinal/temporal reference in the user's change request.
+    # The earlier 300-word cap broke long-video re-edits: the user could say "remove
+    # the zoom at 12.5s" and the model would be blind to the word that anchored it.
+    # Token cost is bounded by source video length (10-90s typical); the model is
+    # Gemini 3.1 Pro with a multi-million-token context — the transcript is rounding
+    # error against that.
     transcript_preview = ""
     if isinstance(transcript, dict):
         words = transcript.get("words") or []
         if words:
-            preview_words = [str(w.get("punctuated_word") or w.get("word") or "") for w in words[:300]]
-            transcript_preview = " ".join(preview_words)[:3000]
+            # Format as "[idx] word @ Ts" so the model can resolve any of the three
+            # reference modes (ordinal / temporal / word-based) without guessing.
+            _lines = []
+            for _wi, _w in enumerate(words):
+                _wt = str(_w.get("punctuated_word") or _w.get("word") or "")
+                _ws = float(_w.get("start") or 0.0)
+                _lines.append(f"[{_wi}] {_wt} @ {_ws:.2f}s")
+            transcript_preview = "\n".join(_lines)
 
     prompt_parts = [
         "You are editing a Promptly video-edit PLAN. The plan is a JSON document describing "
         "every decision that produced a rendered video. Top-level fields include: cuts, "
-        "transitions, caption_style, caption_position_changes (list of {word_index, position}), "
+        "transitions, tight_cut_overlays (overlay-on-top-of-hard-cut decorations at TIGHT "
+        "boundaries — 4 types: LightLeak, ShutterFlash, NewspaperWipe, SceneTitle; the first "
+        "three are 180ms punctuation flashes, SceneTitle is a 1200ms typographic chapter-break "
+        "panel with required `title` + optional `label`), caption_style, "
+        "caption_position_changes (list of {word_index, position}), "
         "caption_position_segments (DERIVED from caption_position_changes — do not edit directly), "
         "keywords, broll_clips, text_overlays (each has a variant "
         "discriminator: sticky_note|quote_card|caption_match), "
@@ -7946,6 +8410,8 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None)
         "      → set motion_graphics to [].\n"
         "  • 'remove text overlays' / 'no titles' / 'no labels'\n"
         "      → set text_overlays to [].\n"
+        "  • 'remove tight-cut overlays' / 'no overlays' / 'no chapter break'\n"
+        "      → set tight_cut_overlays to [].\n"
         "  • 'change caption style to X' / 'use Lumen captions'\n"
         "      → set caption_style to the named style; preserve everything else.\n"
         "  • 'change the SFX on word X to Y' / 'remove the whoosh at the start'\n"
@@ -7955,27 +8421,120 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None)
         "  • 'I don't like the X' followed by anything — they want it changed/removed; act on the\n"
         "    targeted field exclusively. If unclear what to replace it with, classify as\n"
         "    'needs_clarification' and ask a tight question.\n\n"
+        "ADDING NEW COMPONENTS is also a tweak — explicitly supported across every component type. "
+        "Same byte-identical-echo discipline applies: emit the new entry alongside everything the "
+        "user didn't touch. Examples:\n\n"
+        "  • 'add a zoom on word K' / 'add an emphasis on the word \"finally\"' / 'add a SmoothPush\n"
+        "    on the payoff word'\n"
+        "      → append a new emphasis_moment with word_indices=[K], a zoom_effect of the inferred\n"
+        "        type (default SmoothPush if unspecified, with the payoff matched to its arc role),\n"
+        "        and a matching key_moment in video_plan.\n"
+        "  • 'add a transition at the chapter break' / 'add a NewspaperWipe after the setup'\n"
+        "      → append a new transition with after_word_index from the CUT BOUNDARIES list and the\n"
+        "        named (or inferred-by-character) type.\n"
+        "  • 'add a tight_cut_overlay at K' / 'add a LightLeak at the pivot' / 'put a SceneTitle\n"
+        "    \"Act Two\" at the chapter break'\n"
+        "      → append a new tight_cut_overlays entry with after_word_index from the TIGHT\n"
+        "        BOUNDARIES list. For SceneTitle, `title` is REQUIRED (1-3 uppercase words) and\n"
+        "        `label` is optional. For LightLeak / ShutterFlash / NewspaperWipe, omit title/label\n"
+        "        entirely (those overlays have no text).\n"
+        "  • 'add a B-roll over words K-M of <subject>' / 'add a cutaway showing X'\n"
+        "      → append a new broll_clips entry with start_word_index=K, end_word_index=M, and a\n"
+        "        keyword + reason field. The picker will resolve the keyword to a real clip later.\n"
+        "  • 'add an MG over words K-M' / 'put a StatCard on the stat'\n"
+        "      → append a new motion_graphics entry with start_word_index=K, end_word_index=M, a\n"
+        "        named type, and an anchor (default upper_third_safe / lower_third_safe).\n"
+        "  • 'add a text overlay K-M saying X' / 'put a sticky note here'\n"
+        "      → append a new text_overlays entry with the right variant and start_word_index.\n"
+        "  • 'add an SFX on word K' / 'put a ching on the punchline'\n"
+        "      → append a new sound_effects entry with word_index=K and a matching sound style.\n\n"
+        "REPLACEMENTS are tweaks too — combine the targeted edit with the new state:\n\n"
+        "  • 'change the sticky_note on word K to caption_match' / 'swap the StatCard on word K\n"
+        "    for a Notification'\n"
+        "      → edit ONLY the targeted entry's variant / type field; preserve every other entry\n"
+        "        in that array byte-identical.\n"
+        "  • 'change the LightLeak to a ShutterFlash' / 'use a SceneTitle there instead'\n"
+        "      → edit ONLY the targeted tight_cut_overlays entry; carry over after_word_index.\n"
+        "        For a SceneTitle replacement, ALSO add `title` (and optional `label`); for a\n"
+        "        change AWAY from SceneTitle, STRIP title/label (those fields are SceneTitle-only).\n\n"
+        "REFERENCE SYNTAX — how to resolve which component the user means:\n\n"
+        "  • Ordinal: 'the 2nd zoom' / 'the first transition' / 'the last MG' / 'zooms 2 and 3'.\n"
+        "    Index into the prior plan's array (0-based internally; the user uses 1-based names).\n"
+        "    'The 2nd zoom' = emphasis_moments[1]. 'Zooms 2 and 3' = emphasis_moments[1] and [2].\n"
+        "  • Temporal: 'the zoom at 12.5s' / 'the transition around 8s'. Resolve via word_index\n"
+        "    timing — find the component whose anchor word's start (or end, for transitions) is\n"
+        "    closest to the named timestamp. Ignore differences under ~0.3s as tied; if ties\n"
+        "    cannot be broken, classify as 'needs_clarification'.\n"
+        "  • Word-based: 'the zoom on the word \"finally\"' / 'the B-roll over \"deadlift\"'.\n"
+        "    Resolve via word index — find the component whose anchor word matches.\n"
+        "  • Type+position composite: 'the second LightLeak' / 'the first NewspaperWipe' — index\n"
+        "    among entries OF THAT TYPE only.\n"
+        "  • Ambiguity: if the reference matches multiple candidates within the tolerance (two\n"
+        "    zooms 0.2s apart and the user said 'the zoom around 7.5s'), do NOT guess. Emit\n"
+        "    'needs_clarification' with a tight question naming both candidates.\n\n"
         "The empty-array case is real: if the user said 'no B-roll', emitting an empty broll_clips\n"
         "array IS the correct answer. Do not preserve the old clips because you think they were\n"
         "tasteful. Do not add a single 'minimal' clip as a compromise. Execute the literal request.\n\n"
+        "COMPOSITE REQUESTS — when a single user request spans multiple operations (e.g. 'remove\n"
+        "the 2nd zoom and add a LightLeak at the pivot'), execute ALL of them in the same tweak\n"
+        "emission. Each operation independently follows the rules above. Every field NEITHER\n"
+        "operation touches stays byte-identical.\n\n"
         "Your job:\n\n"
         "1) CLASSIFY the request as one of:\n"
-        "   - 'tweak': surgical change to specific fields (any of the cases above, or comparable "
-        "scoped edits). You MUST echo every other field byte-identical. Do NOT edit anything the user "
-        "didn't explicitly ask to change.\n"
-        "   - 'reinterpret': holistic re-direction (e.g. 'way more chaotic', 'darker vibe', "
-        "'completely different feel'). Emit a fused_vibe string that combines the prior vibe with "
-        "the new direction.\n"
-        "   - 'needs_clarification': request is too vague to map to fields (e.g. 'make it better', "
-        "'fix it'). Emit a clear, specific clarification_question — do NOT guess.\n\n"
-        "2) For 'tweak': produce new_plan with ONLY the explicitly-requested changes. Preserve "
-        "cuts, transitions, broll_clips (including pexels_video_id + pexels_file_url + "
-        "clip_in/out), sfx_placements, text_overlays, motion_graphics, "
-        "emphasis_moments, caption_position_changes (and the derived caption_position_segments) "
-        "— everything else — unchanged. Every timing decision references a word by index; never "
-        "invent or shift a raw timestamp. The pipeline derives timestamps from word_index fields. "
-        "When the request is a category removal (no captions, no B-roll, etc.), the targeted field "
-        "becomes empty / 'none' as listed above — that IS the explicit change.\n\n"
+        "   - 'tweak': scoped change to specific fields — ANY combination of remove / add / replace\n"
+        "     operations targeted at named (or referenced) components. The user CAN ask to add new\n"
+        "     things alongside removing or replacing existing ones; the operations co-exist in one\n"
+        "     tweak. You MUST echo every field the user did not address byte-identical — do NOT\n"
+        "     edit anything beyond the explicitly-targeted ops.\n"
+        "   - 'guided_redraft': directional re-shape with carry-over defaults. The user wants a\n"
+        "     section or aspect REWORKED (not surgically targeted, not totally re-vibed). Examples:\n"
+        "     'rework the middle section to feel more urgent', 'make the second half punchier',\n"
+        "     'pace the build section faster', 'change the energy of the payoff', 'redo the\n"
+        "     captions and emphasis but keep everything else', 'I want more chapter structure'.\n"
+        "     The user IS giving direction, but the direction is broader than named operations —\n"
+        "     a redraft of one OR MORE component categories is the right answer, with everything\n"
+        "     ELSE carrying over from the prior plan as soft default. The downstream renderer\n"
+        "     will pass the prior plan + your fused_vibe into a fresh edit generation with the\n"
+        "     prior decisions as starting context; it can choose to keep, modify, or replace any\n"
+        "     individual decision based on what fits the new direction. Pick this when 'tweak' is\n"
+        "     too rigid (the user named no specific operations) AND 'reinterpret' is too blunt\n"
+        "     (the user signalled a partial reshape, not a total recast).\n"
+        "   - 'reinterpret': total recast with no carry-over. The user explicitly wants a\n"
+        "     completely different feel ('throw it out and start over', 'completely different\n"
+        "     vibe', 'redo from scratch', 'I hate this — totally different direction'). The prior\n"
+        "     plan is irrelevant; emit a fused_vibe and the renderer generates a fresh plan with\n"
+        "     no prior-plan context. Reserve this for explicit start-over signals; default to\n"
+        "     'guided_redraft' when the user wants a reshape rather than a recast.\n"
+        "   - 'needs_clarification': request is too vague to map to fields (e.g. 'make it better',\n"
+        "     'fix it'), OR a reference is genuinely ambiguous (two components match the user's\n"
+        "     descriptor and the surrounding context doesn't disambiguate). Emit a tight,\n"
+        "     specific clarification_question — do NOT guess.\n\n"
+        "CLASSIFIER GUIDANCE — the four-way split:\n"
+        "  • Named ops with anchors → 'tweak'. e.g. 'remove the 2nd zoom and add a LightLeak\n"
+        "    at word 40' (specific operations targeting specific components).\n"
+        "  • Directional reshape without ops → 'guided_redraft'. e.g. 'pace the middle slower'\n"
+        "    (a direction, not an operation; ALL prior decisions are carry-over candidates).\n"
+        "  • Total recast → 'reinterpret'. e.g. 'redo this completely different' (explicit\n"
+        "    abandonment of prior decisions).\n"
+        "  • Vague / ambiguous → 'needs_clarification'. e.g. 'make it better' (no direction).\n"
+        "When in doubt between 'tweak' and 'guided_redraft', prefer 'guided_redraft' if the\n"
+        "user did not name specific components — tweak's byte-identical-echo rule punishes\n"
+        "vagueness with brittle outputs. When in doubt between 'guided_redraft' and\n"
+        "'reinterpret', prefer 'guided_redraft' unless the user explicitly waved away the\n"
+        "prior work — the prior plan is almost always useful context, not noise.\n\n"
+        "2) For 'tweak': produce new_plan with ONLY the user-requested operations applied. Every\n"
+        "   other field — cuts, transitions, tight_cut_overlays, broll_clips (including\n"
+        "   pexels_video_id + pexels_file_url + clip_in/out), sfx_placements, text_overlays,\n"
+        "   motion_graphics, emphasis_moments, caption_position_changes (and the derived\n"
+        "   caption_position_segments) — preserved byte-identical. Add operations append a new\n"
+        "   entry to the right array (or set the right scalar) in addition to the existing entries.\n"
+        "   Remove operations either empty the whole array (when the request is a category removal\n"
+        "   like 'no B-roll') or drop only the referenced entry (when the request names a specific\n"
+        "   one). Replace operations edit the referenced entry's fields without touching siblings.\n"
+        "   Every timing decision references a word by index; never invent or shift a raw timestamp.\n"
+        "   The pipeline derives timestamps from word_index fields. When the request is a category\n"
+        "   removal, the targeted field becomes empty / 'none' as listed above — that IS the\n"
+        "   explicit change.\n\n"
         "3) Emit changed_fields: dotted paths of what you changed (e.g. ['caption_style', "
         "'cuts[3].speed', 'caption_position_changes[1].position', 'text_overlays[2].variant']). "
         "Empty array for reinterpret or clarification.\n\n"
@@ -7986,16 +8545,21 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None)
         f"OLD PLAN (JSON):\n{json.dumps(sanitized_old_plan, separators=(',', ':'))}\n\n",
     ]
     if transcript_preview:
-        prompt_parts.append(f"TRANSCRIPT PREVIEW (first 300 words for word_index grounding):\n{transcript_preview}\n\n")
+        prompt_parts.append(
+            "TRANSCRIPT (every kept word, with its source word_index and start time — use this to "
+            "resolve ordinal, temporal, and word-based references in the user's change request, "
+            "AND to ground any new word_index anchor in an ADD operation):\n"
+            f"{transcript_preview}\n\n"
+        )
     prompt_parts.append(
         "Respond with a single JSON object matching this shape:\n"
         "{\n"
-        '  "classification": "tweak" | "reinterpret" | "needs_clarification",\n'
-        '  "clarification_question": string | null,\n'
-        '  "new_plan": <full edit plan object> | null,\n'
-        '  "fused_vibe": string | null,\n'
-        '  "changed_fields": [string],\n'
-        '  "human_summary": string\n'
+        '  "classification": "tweak" | "guided_redraft" | "reinterpret" | "needs_clarification",\n'
+        '  "clarification_question": string | null,                  // only for needs_clarification\n'
+        '  "new_plan": <full edit plan object> | null,               // only for tweak\n'
+        '  "fused_vibe": string | null,                              // for guided_redraft AND reinterpret\n'
+        '  "changed_fields": [string],                               // tweak only — paths you changed; empty array otherwise\n'
+        '  "human_summary": string                                   // always — one sentence the user reads\n'
         "}\n"
     )
 
@@ -8014,10 +8578,11 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None)
             max_output_tokens=16384,
             response_mime_type="application/json",
             # HIGH thinking so the model actually reasons about whether the
-            # request maps to a tweak / reinterpret / clarification and picks
-            # the right surgical edit. The prior LOW setting was Gemini's
-            # "shallow" mode — fine for trivial echoes, not enough for
-            # instructions like 'remove all SFX except the boom on word 66'.
+            # request maps to a tweak / guided_redraft / reinterpret /
+            # clarification and picks the right surgical edit. The prior
+            # LOW setting was Gemini's "shallow" mode — fine for trivial
+            # echoes, not enough for instructions like 'remove all SFX
+            # except the boom on word 66' or 'pace the middle slower'.
             thinking_config=genai_types.ThinkingConfig(thinking_level="HIGH"),
         ),
     )
@@ -8029,7 +8594,7 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None)
         raise RuntimeError("Plan-diff response is not a JSON object")
 
     classification = str(parsed.get("classification") or "").strip()
-    if classification not in ("tweak", "reinterpret", "needs_clarification"):
+    if classification not in ("tweak", "guided_redraft", "reinterpret", "needs_clarification"):
         raise RuntimeError(f"Invalid plan-diff classification: {classification!r}")
 
     if classification == "tweak":
@@ -8049,6 +8614,25 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None)
                     for _persist_key in ("pexels_video_id", "pexels_file_url", "width", "height", "duration"):
                         if _persist_key not in _new_br and _persist_key in _old_br:
                             _new_br[_persist_key] = _old_br[_persist_key]
+    elif classification in ("guided_redraft", "reinterpret"):
+        # Both shape Gemini's response the same way: emit a fused_vibe
+        # carrying the user's directional change_request. The downstream
+        # difference lives in the DISPATCHER:
+        #   reinterpret    → full pipeline, no prior-plan carry-over.
+        #   guided_redraft → full pipeline WITH prior plan injected as
+        #                    soft default + change_request as guidance.
+        fused = parsed.get("fused_vibe")
+        if not isinstance(fused, str) or not fused.strip():
+            # Fail soft — synthesize a fused vibe from the prior vibe +
+            # change request rather than failing the whole re-edit. The
+            # downstream pipeline will accept any non-empty vibe.
+            fused_synth = f"{old_vibe or ''} — {change_request}".strip(" —")
+            print(
+                f"[plan-diff] {classification} response missing fused_vibe — "
+                f"synthesizing from old_vibe + change_request: {fused_synth[:120]}",
+                flush=True,
+            )
+            parsed["fused_vibe"] = fused_synth
 
     print(f"[plan-diff] classification={classification} in {time.time()-_t0:.1f}s", flush=True)
     return {
@@ -8059,6 +8643,518 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None)
         "changed_fields": parsed.get("changed_fields") or [],
         "human_summary": str(parsed.get("human_summary") or "Updated your video."),
     }
+
+
+# ─── RE-EDIT LAYER 3: DIFF-CONFIRMATION SAFETY NET ─────────────────────────
+#
+# After the plan-diff classifier returns a new_plan (tweak) OR after
+# generate_edit_gemini emits a guided_redraft, we compute a structured diff
+# vs the prior_plan and ask a small Gemini call to classify each change as
+# in-scope (the user asked for it, explicitly or as a clear consequence) or
+# out-of-scope (Gemini drifted beyond the contract).
+#
+# Phase 1 (this commit) — observability everywhere + narrow auto-revert for
+# top-level SCALAR fields only (caption_style, thumbnail_word_index, outro).
+# Array-level reverts wait for production data to validate the classifier;
+# applying them now would risk turning ONE class of failure (Gemini drift)
+# into TWO (revert misclassifies a legit downstream consequence).
+#
+# Phase 2 (deferred — after we have a few hundred re-edits in production):
+# extend auto-revert to anchor-keyed array entries in tweak mode, using
+# the classifier confidence + production-tuned heuristics.
+#
+# Anchor functions per top-level list — for each entry we extract its
+# identity key from anchor fields (word_index, after_word_index, etc.).
+# A change is "to the entry with this anchor"; an added/removed entry is
+# "at this anchor that newly exists / no longer exists." This is more
+# stable than positional indexing across edits.
+
+_DIFF_LIST_ANCHORS = {
+    "emphasis_moments": lambda e: (
+        tuple(e.get("word_indices") or [])[:1] or None
+        if isinstance(e, dict) else None
+    ),
+    "transitions": lambda e: (
+        e.get("after_word_index")
+        if isinstance(e, dict) else None
+    ),
+    "tight_cut_overlays": lambda e: (
+        e.get("after_word_index")
+        if isinstance(e, dict) else None
+    ),
+    "broll_clips": lambda e: (
+        (e.get("start_word_index"), e.get("end_word_index"))
+        if isinstance(e, dict) else None
+    ),
+    "text_overlays": lambda e: (
+        e.get("start_word_index")
+        if isinstance(e, dict) else None
+    ),
+    "motion_graphics": lambda e: (
+        (e.get("start_word_index"), e.get("end_word_index"))
+        if isinstance(e, dict) else None
+    ),
+    "sound_effects": lambda e: (
+        e.get("word_index")
+        if isinstance(e, dict) else None
+    ),
+    "caption_position_changes": lambda e: (
+        e.get("word_index")
+        if isinstance(e, dict) else None
+    ),
+}
+
+# Top-level scalar fields safe to auto-revert in Phase 1. These are
+# leaf-level decisions with no downstream dependencies on each other,
+# so reverting one doesn't risk breaking another. Array-level reverts
+# (broll_clips entries, emphasis_moments, transitions) need production
+# data first — Phase 2.
+_PHASE1_REVERTABLE_SCALARS = frozenset({
+    "caption_style",
+    "thumbnail_word_index",
+    "outro",
+})
+
+# Fields we never diff against — derived downstream or pipeline-internal.
+_DIFF_SKIP_KEYS = frozenset({
+    "caption_position_segments",  # derived from caption_position_changes
+    "thumbnail_timestamp",         # derived from thumbnail_word_index
+    "analysis_data",               # cached intermediate, not user-facing
+})
+
+
+def compute_plan_diff(prior_plan, new_plan):
+    """Structured field+entry-level diff between two edit plans.
+
+    Returns a list of diff dicts:
+      {"path": "caption_style", "list_key": None, "anchor": None,
+       "op": "changed", "old": "PaperII", "new": "Lumen"}
+      {"path": "emphasis_moments[anchor=(5,)]", "list_key": "emphasis_moments",
+       "anchor": (5,), "op": "added", "new": {...}, "old": None}
+      {"path": "transitions[anchor=12]", "list_key": "transitions",
+       "anchor": 12, "op": "removed", "old": {...}, "new": None}
+
+    Anchor identity comes from each list's natural key (word_index family);
+    falls back to positional comparison when no anchor is available.
+    Returns [] when either plan is invalid or when there are no differences.
+    """
+    diffs = []
+    if not isinstance(prior_plan, dict) or not isinstance(new_plan, dict):
+        return diffs
+
+    # Collect keys present in either plan (excluding internals + derived).
+    all_keys = set()
+    for k in list(prior_plan.keys()) + list(new_plan.keys()):
+        if not isinstance(k, str):
+            continue
+        if k.startswith("_"):
+            continue
+        if k in _DIFF_SKIP_KEYS:
+            continue
+        all_keys.add(k)
+
+    for key in sorted(all_keys):
+        old = prior_plan.get(key)
+        new = new_plan.get(key)
+        if old is None and new is None:
+            continue
+
+        # Scalar comparison
+        if not isinstance(old, list) and not isinstance(new, list):
+            if old != new:
+                diffs.append({
+                    "path": key,
+                    "list_key": None,
+                    "anchor": None,
+                    "op": "changed",
+                    "old": old,
+                    "new": new,
+                })
+            continue
+
+        # List comparison
+        anchor_fn = _DIFF_LIST_ANCHORS.get(key)
+        old_list = old if isinstance(old, list) else []
+        new_list = new if isinstance(new, list) else []
+
+        if anchor_fn:
+            old_by_anchor = {}
+            for e in old_list:
+                a = anchor_fn(e)
+                if a is not None:
+                    old_by_anchor[a] = e
+            new_by_anchor = {}
+            for e in new_list:
+                a = anchor_fn(e)
+                if a is not None:
+                    new_by_anchor[a] = e
+
+            all_anchors = set(old_by_anchor) | set(new_by_anchor)
+            # Stable sort for deterministic ordering across runs.
+            for a in sorted(all_anchors, key=lambda x: (str(type(x).__name__), str(x))):
+                old_e = old_by_anchor.get(a)
+                new_e = new_by_anchor.get(a)
+                if old_e is None and new_e is not None:
+                    diffs.append({
+                        "path": f"{key}[anchor={a}]",
+                        "list_key": key,
+                        "anchor": a,
+                        "op": "added",
+                        "old": None,
+                        "new": new_e,
+                    })
+                elif old_e is not None and new_e is None:
+                    diffs.append({
+                        "path": f"{key}[anchor={a}]",
+                        "list_key": key,
+                        "anchor": a,
+                        "op": "removed",
+                        "old": old_e,
+                        "new": None,
+                    })
+                elif old_e != new_e:
+                    diffs.append({
+                        "path": f"{key}[anchor={a}]",
+                        "list_key": key,
+                        "anchor": a,
+                        "op": "changed",
+                        "old": old_e,
+                        "new": new_e,
+                    })
+        else:
+            # Unanchored list — just note length / content change at the
+            # list level (no per-entry resolution).
+            if old_list != new_list:
+                diffs.append({
+                    "path": key,
+                    "list_key": key,
+                    "anchor": None,
+                    "op": "changed",
+                    "old_count": len(old_list),
+                    "new_count": len(new_list),
+                })
+    return diffs
+
+
+def validate_reedit_changes(prior_plan, new_plan, change_request, mode):
+    """Call Gemini to classify each diff as in-scope or out-of-scope vs the
+    user's change_request. Returns:
+        {"verdict": "no_changes" | "all_in_scope" | "partial_out_of_scope" | "error",
+         "diffs": [...],
+         "out_of_scope_paths": [list of path strings],
+         "reasoning": "1-2 sentence model-supplied explanation"}
+
+    FAIL-OPEN — if the Gemini call errors or returns malformed JSON, verdict
+    is 'error' and the caller treats every diff as in-scope (no reverts).
+    A safety net that breaks the render on its own infra blip would be
+    worse than no safety net at all.
+    """
+    diffs = compute_plan_diff(prior_plan, new_plan)
+    if not diffs:
+        return {
+            "verdict": "no_changes",
+            "diffs": [],
+            "out_of_scope_paths": [],
+            "reasoning": "no fields changed",
+        }
+
+    # Build compact diff summaries for the prompt — full JSON would blow
+    # the context for plans with many edits. Each entry: path + op + brief.
+    diff_lines = []
+    for d in diffs:
+        path = d["path"]
+        op = d["op"]
+        if op == "changed" and "old" in d and "new" in d:
+            old_brief = json.dumps(d.get("old"), default=str)
+            new_brief = json.dumps(d.get("new"), default=str)
+            if len(old_brief) > 160:
+                old_brief = old_brief[:157] + "..."
+            if len(new_brief) > 160:
+                new_brief = new_brief[:157] + "..."
+            diff_lines.append(f"  • {path} CHANGED: {old_brief} → {new_brief}")
+        elif op == "added":
+            new_brief = json.dumps(d.get("new"), default=str)
+            if len(new_brief) > 220:
+                new_brief = new_brief[:217] + "..."
+            diff_lines.append(f"  • {path} ADDED: {new_brief}")
+        elif op == "removed":
+            old_brief = json.dumps(d.get("old"), default=str)
+            if len(old_brief) > 220:
+                old_brief = old_brief[:217] + "..."
+            diff_lines.append(f"  • {path} REMOVED: {old_brief}")
+        elif op == "changed":
+            # Unanchored list length change
+            diff_lines.append(
+                f"  • {path} list length {d.get('old_count')} → {d.get('new_count')}"
+            )
+
+    mode_rule = (
+        "TWEAK mode contract: byte-identical-echo for every field the user "
+        "did not address. Any non-derived change that isn't tied to the "
+        "user's request is OUT-OF-SCOPE — even if it might be 'better.'\n"
+        if mode == "tweak"
+        else
+        "GUIDED_REDRAFT mode contract: soft carry-over. Gemini may modify "
+        "any decision that doesn't fit the user's new direction. Changes "
+        "that PLAUSIBLY follow from the direction (even indirectly) are "
+        "IN-SCOPE; only changes with NO connection to the direction are "
+        "OUT-OF-SCOPE.\n"
+    )
+
+    prompt = (
+        "You are auditing a video-edit re-edit. The user asked for a change; "
+        "the system applied changes to the prior plan. Your job is to verify "
+        "each applied change is justified by the user's request.\n\n"
+        f"USER'S RE-EDIT REQUEST:\n{change_request}\n\n"
+        f"EDIT MODE: {mode}\n\n"
+        f"{mode_rule}\n"
+        "APPLIED CHANGES (path · operation · brief):\n"
+        + "\n".join(diff_lines)
+        + "\n\n"
+        "For each change, classify it. A 'clear consequence' counts as "
+        "IN-SCOPE — e.g. if the user asked to remove a B-roll and the "
+        "captions auto-shift position to fill the gap, that's a downstream "
+        "consequence the renderer needs.\n\n"
+        "Respond with a single JSON object:\n"
+        "{\n"
+        '  "paths_in_scope": [<exact path strings from the list above>],\n'
+        '  "paths_out_of_scope": [<exact path strings from the list above>],\n'
+        '  "reasoning": "1-2 sentences explaining the classification"\n'
+        "}\n"
+        "Use the EXACT path strings from the list above (including any "
+        "[anchor=...] brackets). If you can't classify a change, put it in "
+        "paths_in_scope (fail open — don't revert legit changes by mistake)."
+    )
+
+    try:
+        client = _get_genai_client()
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=[prompt],
+            config=genai_types.GenerateContentConfig(
+                temperature=0.1,
+                max_output_tokens=4096,
+                response_mime_type="application/json",
+            ),
+        )
+        text = str(getattr(response, "text", "") or "").strip()
+        if not text:
+            print("[reedit-validate] Empty Gemini response (fail open)", flush=True)
+            return {
+                "verdict": "error",
+                "diffs": diffs,
+                "out_of_scope_paths": [],
+                "reasoning": "validator returned empty response",
+            }
+        parsed = json.loads(text) if text.startswith("{") else extract_json(text)
+        if not isinstance(parsed, dict):
+            return {
+                "verdict": "error",
+                "diffs": diffs,
+                "out_of_scope_paths": [],
+                "reasoning": "validator response was not a JSON object",
+            }
+        oop_raw = parsed.get("paths_out_of_scope") or []
+        oop_paths = [
+            str(p) for p in oop_raw
+            if isinstance(p, str) and p.strip()
+        ]
+        # Validate every reported out-of-scope path corresponds to a real
+        # diff entry — Gemini sometimes hallucinates path strings.
+        valid_paths = {d["path"] for d in diffs}
+        oop_paths = [p for p in oop_paths if p in valid_paths]
+        return {
+            "verdict": "partial_out_of_scope" if oop_paths else "all_in_scope",
+            "diffs": diffs,
+            "out_of_scope_paths": oop_paths,
+            "reasoning": str(parsed.get("reasoning") or "").strip()[:500],
+        }
+    except Exception as e:
+        print(f"[reedit-validate] Gemini call failed: {e} (fail open)", flush=True)
+        return {
+            "verdict": "error",
+            "diffs": diffs,
+            "out_of_scope_paths": [],
+            "reasoning": f"validator error: {type(e).__name__}",
+        }
+
+
+def _phase2_array_reverts_enabled():
+    """Phase 2 array-level reverts are gated by env var so we can ship the
+    code path without changing default behavior. Flip the switch via
+    PROMPTLY_REEDIT_PHASE2_ARRAY_REVERTS=1 once production logs from
+    Phase 1 confirm the scope classifier is accurate enough to trust on
+    array entries (target: <2% misclassification rate on the
+    'out_of_scope' verdict).
+
+    Until then this returns False and apply_scalar_reverts is a pure
+    Phase-1 implementation — exact same behavior as the original ship.
+    """
+    raw = os.environ.get("PROMPTLY_REEDIT_PHASE2_ARRAY_REVERTS", "") or ""
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _revert_array_entry(prior_list, new_list, anchor_fn, target_anchor):
+    """Apply a single array-anchored revert in place on new_list.
+    Returns "replaced" / "added_back" / "removed" / "noop" so the caller
+    can log the exact action. Idempotent — calling twice produces the
+    same end state."""
+    if anchor_fn is None:
+        return "noop"
+    # Find old entry by anchor
+    old_entry = None
+    for e in prior_list:
+        if anchor_fn(e) == target_anchor:
+            old_entry = e
+            break
+    # Find new entry index by anchor
+    new_idx = None
+    for i, e in enumerate(new_list):
+        if anchor_fn(e) == target_anchor:
+            new_idx = i
+            break
+    if old_entry is not None and new_idx is not None:
+        # Both present → replace new with old (the "changed" revert path)
+        new_list[new_idx] = old_entry
+        return "replaced"
+    if old_entry is not None and new_idx is None:
+        # Old had it, new dropped it → append old back. The renderer
+        # iterates these arrays by anchor (word_index family), not by
+        # position, so trailing insertion is semantically equivalent
+        # to original placement for downstream consumers.
+        new_list.append(old_entry)
+        return "added_back"
+    if old_entry is None and new_idx is not None:
+        # Old didn't have it, new added it → drop the new entry.
+        new_list.pop(new_idx)
+        return "removed"
+    return "noop"
+
+
+def apply_scalar_reverts(prior_plan, new_plan, validation, mode):
+    """Auto-revert out-of-scope changes flagged by the validator.
+
+    Phase 1 (always on): top-level SCALAR fields in
+        _PHASE1_REVERTABLE_SCALARS, tweak mode only. Array-level changes
+        and guided_redraft changes are LOGGED but not reverted.
+
+    Phase 2 (gated by PROMPTLY_REEDIT_PHASE2_ARRAY_REVERTS env var):
+        Adds array-anchored reverts in tweak mode for any of the lists in
+        _DIFF_LIST_ANCHORS. Off by default — flip the env var once
+        production logs from Phase 1 show the scope classifier is
+        accurate enough on array entries to trust automatic reverts
+        (target: <2% misclassification rate).
+
+    Auto-revert is engaged in TWEAK mode only across BOTH phases —
+    guided_redraft's contract is soft carry-over (Gemini has documented
+    latitude to modify consequentially); reverting there over-corrects.
+
+    Returns the cleaned new_plan dict (shallow copy with reverts applied)
+    or the original new_plan when no revert applies.
+    """
+    if validation.get("verdict") not in ("partial_out_of_scope",):
+        return new_plan
+    if mode != "tweak":
+        # Log only — guided_redraft's soft-carry-over contract gives
+        # Gemini documented latitude. Reverting here over-corrects.
+        oop = validation.get("out_of_scope_paths") or []
+        if oop:
+            print(
+                f"[reedit-validate] guided_redraft out-of-scope (LOGGED, "
+                f"not reverted): {oop}",
+                flush=True,
+            )
+        return new_plan
+
+    phase2_on = _phase2_array_reverts_enabled()
+    # Deep-copy lists we're going to mutate so we don't damage the
+    # validator's reference data. Top-level scalars are reassigned by
+    # value so shallow copy is enough for the outer dict.
+    cleaned = dict(new_plan)
+    reverted_scalars = []
+    reverted_arrays = []
+    skipped = []
+    diff_by_path = {d["path"]: d for d in validation.get("diffs") or []}
+    # Mutate lists we touch in a fresh copy — same identity discipline
+    # the test suite relies on.
+    _mutated_lists = {}
+
+    for path in validation.get("out_of_scope_paths") or []:
+        diff = diff_by_path.get(path)
+        if not diff:
+            continue
+        # Scalar branch — handled in BOTH phases. Phase 1 and Phase 2 are
+        # additive; the scalar revert path is unchanged.
+        if diff.get("list_key") is None and diff.get("anchor") is None:
+            if path not in _PHASE1_REVERTABLE_SCALARS:
+                skipped.append(f"{path} (not in revertable scalars)")
+                continue
+            if path in prior_plan:
+                cleaned[path] = prior_plan[path]
+                reverted_scalars.append(path)
+            elif path in cleaned:
+                cleaned.pop(path)
+                reverted_scalars.append(path)
+            continue
+
+        # Array branch — Phase 2 gated.
+        list_key = diff.get("list_key")
+        anchor = diff.get("anchor")
+        # Unanchored list-level diff (length change with no anchor info) —
+        # Phase 2 can't surgically revert this; would require re-emitting
+        # the whole list. Log and skip in BOTH phases.
+        if not list_key or anchor is None:
+            skipped.append(f"{path} (unanchored list; cannot surgically revert)")
+            continue
+        # If Phase 2 is OFF, log + skip (preserves original Phase 1
+        # behavior bit-for-bit).
+        if not phase2_on:
+            skipped.append(f"{path} (Phase 2 disabled)")
+            continue
+        anchor_fn = _DIFF_LIST_ANCHORS.get(list_key)
+        if anchor_fn is None:
+            skipped.append(f"{path} (no anchor function registered for {list_key!r})")
+            continue
+        prior_list = prior_plan.get(list_key) or []
+        # Lazy deep-copy the list we're about to mutate. cleaned's outer
+        # dict is shallow, so without this we'd mutate the caller's list
+        # in place — bad citizenship + breaks test invariants.
+        if list_key not in _mutated_lists:
+            _mutated_lists[list_key] = [
+                dict(e) if isinstance(e, dict) else e
+                for e in (cleaned.get(list_key) or [])
+            ]
+            cleaned[list_key] = _mutated_lists[list_key]
+        action = _revert_array_entry(
+            prior_list=prior_list,
+            new_list=_mutated_lists[list_key],
+            anchor_fn=anchor_fn,
+            target_anchor=anchor,
+        )
+        if action != "noop":
+            reverted_arrays.append(f"{path} ({action})")
+        else:
+            skipped.append(f"{path} (no matching entry to revert)")
+
+    if reverted_scalars:
+        print(
+            f"[reedit-validate] REVERTED out-of-scope scalars in tweak mode: "
+            f"{reverted_scalars}. Reason: {validation.get('reasoning')!r}",
+            flush=True,
+        )
+    if reverted_arrays:
+        print(
+            f"[reedit-validate] REVERTED out-of-scope array entries in tweak "
+            f"mode (Phase 2): {reverted_arrays}. Reason: "
+            f"{validation.get('reasoning')!r}",
+            flush=True,
+        )
+    if skipped:
+        print(
+            f"[reedit-validate] SKIPPED (logged, not reverted): {skipped}",
+            flush=True,
+        )
+    return cleaned
 
 
 # ─── SFX HELPERS ─────────────────────────────────────────────────────────────
@@ -11387,6 +12483,86 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         })
         print(f"[transition] {_t_raw} after clip {i} — {_slot_frames}f (natural {int(get_transition_duration(_t_raw) * 1000)}ms)", flush=True)
 
+    # ── Tight-cut overlays — overlay-on-top-of-hard-cut decoration ──────────
+    # Walk render_cuts looking for `_tight_cut_overlay` data fields. Each
+    # entry produces a TightCutOverlaySpec with an atFrame derived from the
+    # OUTPUT timeline position of the cut (end of clip i in seconds × fps).
+    # No clipA/clipB ranges, no handle slot, no time inserted. Behavior is
+    # strictly additive: clips with NO overlay data produce ZERO entries, so
+    # the emitted list is `[]` and the overlay layer renders nothing —
+    # identical to the pre-overlay pipeline. Lives in PromptlyRenderInput
+    # (overlay_input), not PromptlyMicroSegments (no segment of video to bake).
+    #
+    # Per-type duration — all 4 overlays signed off at their natural
+    # durations from the isolation tests:
+    #   LightLeak / ShutterFlash / NewspaperWipe → 11 frames (180ms @ 60fps),
+    #     the punctuation-flash class — quick, masks a hard cut by camouflage.
+    #   SceneTitle                              → 72 frames (1200ms @ 60fps),
+    #     the chapter-break class — typographic panel that needs the longer
+    #     hold for the title text to be readable through the 0.32–0.68
+    #     progress hold window (~432ms of fully on-screen text).
+    # Adding a new overlay means a new entry here, NOT a hardcoded fallback.
+    _TIGHT_CUT_OVERLAY_FRAMES_BY_TYPE = {
+        "LightLeak":     11,
+        "ShutterFlash":  11,
+        "NewspaperWipe": 11,
+        "SceneTitle":    72,
+    }
+    tight_cut_overlays_out = []
+    for i in range(len(render_cuts) - 1):
+        _tco = str(render_cuts[i].get("_tight_cut_overlay") or "").strip()
+        if _tco not in VALID_TIGHT_CUT_OVERLAYS:
+            continue
+        # The cut between clip i and clip i+1 lives at output time
+        # _clip_ranges[i]["end"] (== _clip_ranges[i+1]["start"] for tight
+        # cuts since trans_dur_after[i] == 0 on these). Convert to a frame
+        # index using the composition fps (source_fps) — matches the same
+        # rounding policy the rest of the emit path uses.
+        if i >= len(_clip_ranges):
+            print(
+                f"[tight-cut-overlay] '{_tco}' after clip {i} — SKIPPED "
+                f"(no clip_ranges entry)",
+                flush=True,
+            )
+            continue
+        _cut_seconds = float(_clip_ranges[i]["end"])
+        _at_frame = int(round(_cut_seconds * source_fps))
+        _dur_frames = _TIGHT_CUT_OVERLAY_FRAMES_BY_TYPE.get(_tco)
+        if _dur_frames is None:
+            # An overlay type was registered in VALID_TIGHT_CUT_OVERLAYS but
+            # the duration table here didn't get the matching entry — adding
+            # a new overlay must update BOTH places. Fail loud (this is the
+            # same drift class type_registries.py was meant to prevent).
+            raise RuntimeError(
+                f"_TIGHT_CUT_OVERLAY_FRAMES_BY_TYPE has no entry for "
+                f"{_tco!r}. Add the per-type duration here when registering "
+                f"a new overlay name in VALID_TIGHT_CUT_OVERLAYS."
+            )
+        _tco_extras = render_cuts[i].get("_tight_cut_overlay_extras") or {}
+        _spec = {
+            "atFrame": _at_frame,
+            "type": _tco,
+            "durationInFrames": _dur_frames,
+        }
+        # SceneTitle extras (title required, label optional) — copied through
+        # to the Remotion side via TightCutOverlaySpec's optional fields. The
+        # other three overlays never carry extras (validated at application).
+        for _k in ("title", "label"):
+            _v = _tco_extras.get(_k)
+            if _v is not None:
+                _spec[_k] = _v
+        tight_cut_overlays_out.append(_spec)
+        _extras_suffix = ""
+        if _tco_extras:
+            _extras_suffix = " " + " ".join(
+                f"{k}={v!r}" for k, v in _tco_extras.items() if v is not None
+            )
+        print(
+            f"[tight-cut-overlay] {_tco} after clip {i} — atFrame={_at_frame} "
+            f"({_cut_seconds:.3f}s) durationInFrames={_dur_frames}{_extras_suffix}",
+            flush=True,
+        )
+
     # ── 3. SFX collection (projected onto output timeline) ──────────────────
     # Each SFX entry produces a ffmpeg input + filter that delays + scales it
     # to an absolute output-timeline timestamp. Exactly the same logic as the
@@ -12366,6 +13542,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         },
         "textOverlays": text_overlays_out,
         "motionGraphics": motion_graphics_out,
+        "tightCutOverlays": tight_cut_overlays_out,
         "outro": _outro,
     }
     overlay_input_path = os.path.join(_stage_dir, "overlay_input.json")
@@ -14492,6 +15669,23 @@ def handler(job):
 
         job_id    = input_data["job_id"]
         video_url = input_data["video_url"]
+
+        # ── Tier gate (multi-clip premium feature) ───────────────────────
+        # The frontend is the primary gate (only premium users can pick
+        # multiple files at the upload UI). This is the defense-in-depth
+        # check: a non-premium user calling the API directly with a second
+        # concurrent job gets rejected here before the render kicks off.
+        # Premium users have no worker-side concurrency cap.
+        # FAIL OPEN on Supabase trouble — see check_concurrency_gate doc.
+        _gate = check_concurrency_gate(input_data["user_id"], job_id)
+        if _gate is not None:
+            print(
+                f"[tier-gate] REJECTING job_id={job_id} user={input_data['user_id'][:8]}… "
+                f"tier={_gate['tier']} active_jobs={_gate['active_jobs']} — "
+                f"non-premium concurrent submission",
+                flush=True,
+            )
+            return _gate
         # Optional client-side low-res proxy. When the iOS client extracts
         # a 640x480 proxy on-device and uploads it ahead of the high-res
         # source, this URL points to the proxy file. The worker uses it
@@ -14506,10 +15700,16 @@ def handler(job):
 
         # ── Re-edit mode resolution ──────────────────────────────────────
         # mode: "full" (default — fresh plan), "render_only" (render supplied plan
-        # deterministically), "tweak" (plan-diff + render new plan), "reinterpret"
-        # (fuse old vibe + change_request, full pipeline with cached intermediates).
+        # deterministically), "tweak" (plan-diff + render new plan),
+        # "guided_redraft" (full pipeline WITH prior plan injected as soft
+        # default — Layer 2 of the re-edit improvements), "reinterpret"
+        # (fuse old vibe + change_request, full pipeline with NO prior plan).
+        # The frontend typically submits "tweak" or "reinterpret"; the
+        # classifier inside generate_plan_diff may downgrade or upgrade
+        # between tweak / guided_redraft / reinterpret based on what the
+        # change_request actually warrants.
         mode = str(input_data.get("mode") or "full").strip().lower()
-        if mode not in ("full", "render_only", "tweak", "reinterpret"):
+        if mode not in ("full", "render_only", "tweak", "guided_redraft", "reinterpret"):
             mode = "full"
         provided_plan = input_data.get("edit_plan") if isinstance(input_data.get("edit_plan"), dict) else None
         provided_transcript = input_data.get("transcript") if isinstance(input_data.get("transcript"), dict) else None
@@ -14524,6 +15724,8 @@ def handler(job):
             return {"error": "render_only mode requires edit_plan in input"}
         if mode == "tweak" and (not provided_plan or not change_request):
             return {"error": "tweak mode requires edit_plan + change_request in input"}
+        if mode == "guided_redraft" and (not provided_plan or not change_request):
+            return {"error": "guided_redraft mode requires edit_plan + change_request in input"}
         if mode == "reinterpret" and not change_request:
             return {"error": "reinterpret mode requires change_request in input"}
 
@@ -14627,7 +15829,7 @@ def handler(job):
             print(f"[metric] cache_race_lost kind=transcript job={job_id} key={_cache_key_str}", flush=True)
         elif _has_cached_transcript:
             print(f"[metric] prewarm_hit kind=transcript job={job_id}", flush=True)
-        elif not provided_transcript and mode in ("full", "reinterpret"):
+        elif not provided_transcript and mode in ("full", "reinterpret", "guided_redraft"):
             print(f"[metric] prewarm_miss kind=transcript job={job_id} hinted={_hint_transcript_cached}", flush=True)
 
         # Only emit the `download` token on a true cache miss — a cached copy
@@ -14674,7 +15876,7 @@ def handler(job):
 
         # Trend profile fetch — pure DB read, no file dependency. Skip in
         # render_only (uses snapshot) and when a snapshot was provided.
-        _can_parallel_trend = mode in ("full", "reinterpret") and not provided_trend
+        _can_parallel_trend = mode in ("full", "reinterpret", "guided_redraft") and not provided_trend
         future_early_trend = None
         if _can_parallel_trend:
             future_early_trend = _early_pool.submit(get_trend_context)
@@ -14842,11 +16044,61 @@ def handler(job):
                 change_summary = diff.get("human_summary")
                 mode = "render_only"
                 print(f"[plan-diff] Tweak accepted — rendering with new plan. Summary: {change_summary}", flush=True)
+                # ── Layer 3 safety net: diff the tweak's new_plan against the
+                # original prior plan + scope-classify each change. In
+                # tweak mode the contract is byte-identical-echo, so any
+                # out-of-scope drift is a contract violation. Phase 1 auto-
+                # reverts top-level SCALAR drift (caption_style /
+                # thumbnail_word_index / outro). Array-level drift is
+                # logged for production-data tuning before Phase 2 enables
+                # array reverts. Fail-OPEN end-to-end — validator
+                # infrastructure trouble never blocks a render.
+                try:
+                    _ORIG_PRIOR = input_data.get("edit_plan")
+                    if isinstance(_ORIG_PRIOR, dict):
+                        _validation = validate_reedit_changes(
+                            prior_plan=_ORIG_PRIOR,
+                            new_plan=provided_plan,
+                            change_request=change_request,
+                            mode="tweak",
+                        )
+                        print(
+                            f"[reedit-validate] tweak verdict={_validation.get('verdict')} "
+                            f"diffs={len(_validation.get('diffs') or [])} "
+                            f"out_of_scope={len(_validation.get('out_of_scope_paths') or [])}",
+                            flush=True,
+                        )
+                        provided_plan = apply_scalar_reverts(
+                            prior_plan=_ORIG_PRIOR,
+                            new_plan=provided_plan,
+                            validation=_validation,
+                            mode="tweak",
+                        )
+                except Exception as _val_err:
+                    print(f"[reedit-validate] safety net error (fail open): {_val_err}", flush=True)
+            elif classification == "guided_redraft":
+                # Layer 2: full pipeline with the PRIOR PLAN injected into
+                # generate_edit_gemini as soft default + the user's directional
+                # change_request as override. provided_plan stays populated for
+                # the call site to pick up (see generate_edit_gemini's prior_plan
+                # parameter wiring). change_request also stays populated.
+                vibe = diff.get("fused_vibe") or f"{old_vibe or vibe} — {change_request}".strip(" —")
+                change_summary = diff.get("human_summary")
+                mode = "guided_redraft"
+                print(
+                    f"[plan-diff] Guided redraft — prior plan kept as soft default; "
+                    f"direction: {change_request[:160]}",
+                    flush=True,
+                )
             else:
                 # reinterpret or fallback — fuse vibe and run full pipeline from source
+                # with NO prior-plan carry-over. Explicit total-recast path.
                 vibe = diff.get("fused_vibe") or f"{old_vibe or vibe} — {change_request}".strip(" —")
                 change_summary = diff.get("human_summary")
                 mode = "reinterpret"
+                # Drop the provided_plan so generate_edit_gemini doesn't
+                # accidentally pick it up via the guided-redraft branch.
+                provided_plan = None
                 print(f"[plan-diff] Reinterpret — fused vibe: {vibe[:200]}", flush=True)
 
         # Merge any provided resolved_broll entries back into provided_plan.broll_clips
@@ -15572,10 +16824,13 @@ def handler(job):
         # If cached_analysis is provided (pre-computed by content-studio), skip the
         # entire Gemini chain (proxy encode + upload + poll + API call = ~19s savings).
 
-        # Reinterpret mode reuses the prior Gemini visual analysis if we have one,
-        # saving another Gemini roundtrip. content-studio's cached_analysis (legacy)
-        # still wins if both are set.
-        _cached_analysis = input_data.get("cached_analysis") or (provided_analysis if mode == "reinterpret" else None)
+        # Reinterpret AND guided_redraft both re-plan with a fused vibe; both
+        # can reuse the prior Gemini visual analysis if the frontend sent it,
+        # saving a Gemini roundtrip on the re-edit. content-studio's
+        # cached_analysis (legacy) still wins if both are set.
+        _cached_analysis = input_data.get("cached_analysis") or (
+            provided_analysis if mode in ("reinterpret", "guided_redraft") else None
+        )
 
         # Mode-aware stage skipping — render_only is the fully-deterministic path
         # that uses provided_plan and provided_transcript verbatim; reinterpret
@@ -15876,6 +17131,14 @@ def handler(job):
                 duration_estimate_s=45.0,
             )
             try:
+                # GUIDED REDRAFT — when the plan-diff classifier routed this
+                # job as guided_redraft, the prior plan is injected as soft
+                # default + the user's directional change_request is the
+                # override. Both are None for fresh ("full") and pure
+                # reinterpret jobs; the prompt block is only built when
+                # prior_plan is a non-empty dict.
+                _gr_prior = provided_plan if mode == "guided_redraft" else None
+                _gr_dir = change_request if mode == "guided_redraft" else None
                 return generate_edit_gemini(
                     video_path=_raw_source,
                     vibe=vibe,
@@ -15890,6 +17153,8 @@ def handler(job):
                     user_style_profile=_user_profile,
                     inline_video_bytes=_proxy_bytes,
                     cached_response=_cached_analysis,
+                    prior_plan=_gr_prior,
+                    prior_plan_change_request=_gr_dir,
                 )
             finally:
                 _gemini_hb_stop.set()
@@ -15969,6 +17234,48 @@ def handler(job):
             edit_plan = _copy_mod.deepcopy(provided_plan)
             print("[pipeline] render_only mode — using provided edit_plan (skipped Gemini generate)", flush=True)
         print(f"[TIMING] edit_plan ready in {time.time() - _mega_t0:.1f}s (critical path)", flush=True)
+
+        # ── Layer 3 safety net for guided_redraft mode ───────────────────
+        # The freshly-generated edit_plan came from generate_edit_gemini
+        # with the prior plan injected as soft default. Diff it against
+        # the prior plan + scope-classify each change. Phase 1: log only
+        # for guided_redraft (no auto-revert — the soft-carry-over
+        # contract gives Gemini documented latitude to modify
+        # consequentially; reverting risks over-correction). The logs
+        # feed Phase 2 tuning.
+        # FAIL-OPEN end-to-end.
+        if mode == "guided_redraft":
+            _orig_prior_for_validation = input_data.get("edit_plan")
+            if isinstance(_orig_prior_for_validation, dict) and isinstance(edit_plan, dict):
+                try:
+                    _validation = validate_reedit_changes(
+                        prior_plan=_orig_prior_for_validation,
+                        new_plan=edit_plan,
+                        change_request=change_request,
+                        mode="guided_redraft",
+                    )
+                    print(
+                        f"[reedit-validate] guided_redraft verdict={_validation.get('verdict')} "
+                        f"diffs={len(_validation.get('diffs') or [])} "
+                        f"out_of_scope={len(_validation.get('out_of_scope_paths') or [])}",
+                        flush=True,
+                    )
+                    # apply_scalar_reverts is a no-op for guided_redraft
+                    # in Phase 1 (logs only); calling it explicitly so the
+                    # codepath is exercised + a single switch-flip turns
+                    # on Phase 2 reverts when we have production data.
+                    edit_plan = apply_scalar_reverts(
+                        prior_plan=_orig_prior_for_validation,
+                        new_plan=edit_plan,
+                        validation=_validation,
+                        mode="guided_redraft",
+                    )
+                except Exception as _val_err:
+                    print(
+                        f"[reedit-validate] guided_redraft safety net error "
+                        f"(fail open): {_val_err}",
+                        flush=True,
+                    )
 
         # Start B-roll fetch IMMEDIATELY while other futures may still be running
         _broll_fetch_pool = None

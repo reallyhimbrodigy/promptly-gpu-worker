@@ -391,6 +391,34 @@ image = (
         "PROMPTLY_BUILD_SHA": _BUILD_SHA,
         "PROMPTLY_BUILD_DIRTY": _BUILD_DIRTY,
         "PROMPTLY_BUILD_TS": _BUILD_TS,
+        # ── Supabase schema overrides for the tier + concurrency gate ──
+        # Multi-clip premium concurrency check (handler.py:check_concurrency_gate)
+        # reads from these tables. The defaults assumed `user_profiles.user_id`
+        # + `jobs`; the actual schema is `profiles.id` (= auth.users.id) +
+        # `video_jobs`. These overrides align the worker query to the live
+        # schema. PROMPTLY_TIER_COLUMN ("tier"), PROMPTLY_JOB_USER_COLUMN
+        # ("user_id"), and PROMPTLY_JOB_STATUS_COLUMN ("status") match the
+        # defaults and don't need overrides. Premium values reflect the
+        # actual tier vocabulary (no "paid"/"plus" in production — "teams"
+        # is the org plan).
+        "PROMPTLY_TIER_TABLE": "profiles",
+        "PROMPTLY_TIER_USER_COLUMN": "id",
+        "PROMPTLY_PREMIUM_VALUES": "pro,teams,premium",
+        "PROMPTLY_JOB_TABLE": "video_jobs",
+        "PROMPTLY_JOB_ACTIVE_STATUSES": "queued,processing",
+        # ── Re-edit Layer 3 Phase 2: array-level auto-revert ─────
+        # Phase 1 (always on) auto-reverts top-level scalar drift
+        # (caption_style / thumbnail_word_index / outro). Phase 2
+        # extends auto-revert to anchor-keyed array entries
+        # (emphasis_moments, transitions, tight_cut_overlays,
+        # broll_clips, text_overlays, motion_graphics,
+        # sound_effects, caption_position_changes).
+        # Tweak mode only — guided_redraft is log-only in both phases
+        # by design (its soft-carry-over contract gives Gemini
+        # documented latitude). ROLLBACK: flip to "0" and redeploy if
+        # the scope classifier misjudges a legit downstream
+        # consequence and reverts a needed change.
+        "PROMPTLY_REEDIT_PHASE2_ARRAY_REVERTS": "1",
     })
     .add_local_dir("src/assets/sounds", "/assets/sounds")
     .add_local_file("handler.py", "/handler.py")

@@ -112,6 +112,37 @@ export type TransitionType =
   | "SceneTitle"
   | "DipToBlack";
 
+// ── Tight-cut overlays ───────────────────────────────────────────────────────
+// Overlay-on-top-of-hard-cut decoration for TIGHT BOUNDARIES (cuts where the
+// audio gap is too small for a handle-required TransitionSpec). The overlay
+// renders ON TOP of the unmodified hard cut in PromptlyOverlay's transparent
+// canvas, in a window centered on atFrame. The cut itself plays straight
+// underneath — no time inserted, no audio touched, no clipA/clipB blending.
+//
+// Render path is DISTINCT from TransitionSpec — these never appear in
+// PromptlyMicroSegments and never participate in handle-frame math.
+export type TightCutOverlayType =
+  | "LightLeak"
+  | "ShutterFlash"
+  | "NewspaperWipe"
+  | "SceneTitle";
+
+export interface TightCutOverlaySpec {
+  /** OUTPUT-timeline frame the hard cut sits on. Overlay window is centered
+   *  on this frame: [atFrame - durationInFrames/2, atFrame + durationInFrames/2). */
+  atFrame: number;
+  type: TightCutOverlayType;
+  /** Window length in output frames. Per-type:
+   *  LightLeak / ShutterFlash / NewspaperWipe = 11 (~180ms @ 60fps),
+   *  SceneTitle = 72 (~1200ms @ 60fps — the typographic panel needs the
+   *  longer hold for the title text to be readable). */
+  durationInFrames: number;
+  /** SceneTitle only — required title text on the panel (1-3 uppercase words). */
+  title?: string;
+  /** SceneTitle only — optional kicker above the divider ("CHAPTER", "PART II"). */
+  label?: string;
+}
+
 // ── B-roll cutaway ───────────────────────────────────────────────────────────
 // Rendered by Remotion's BrollLayer inside PromptlyOverlay (alpha layer)
 // as a split-screen inset that slides up from below to occupy the bottom
@@ -247,6 +278,10 @@ export interface PromptlyRenderInput {
   caption: CaptionSpec;
   textOverlays: TextOverlaySpec[];
   motionGraphics: MotionGraphicSpec[];
+  /** Tight-cut overlay decorations. Empty by default — when Python emits no
+   *  tight-cut overlay (the common case), this is `[]` and PromptlyOverlay's
+   *  z-stack behaves identically to the pre-overlay pipeline. */
+  tightCutOverlays?: TightCutOverlaySpec[];
   outro?: "none" | "fade_black" | "fade_white";
 }
 

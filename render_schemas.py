@@ -27,6 +27,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from type_registries import (
     VALID_CAPTION_STYLES,
     VALID_MG_TYPES,
+    VALID_TIGHT_CUT_OVERLAYS,
     VALID_TRANSITION_TYPES,
     VALID_ZOOM_TYPES,
 )
@@ -50,6 +51,8 @@ MGAnchor = Literal[
 ZoomType = Literal[tuple(sorted(VALID_ZOOM_TYPES))]
 
 TransitionType = Literal[tuple(sorted(VALID_TRANSITION_TYPES))]
+
+TightCutOverlayType = Literal[tuple(sorted(VALID_TIGHT_CUT_OVERLAYS))]
 
 # Render-input never carries the renderer "none" sentinel — CaptionSpec is
 # only emitted when there's a real style — so subtract it before deriving.
@@ -132,6 +135,35 @@ class TransitionSpec(_RemotionModel):
     showGrid: Optional[bool] = None
     advanceFrames: Optional[int] = None
     flashColor: Optional[str] = None
+
+
+# Tight-cut overlay — overlay-on-top-of-hard-cut decoration. atFrame is
+# the OUTPUT frame the hard cut sits on. The overlay window is centered
+# on that frame (atFrame - durationInFrames/2 → atFrame + durationInFrames/2).
+# Outside the window the React component returns null — no time inserted,
+# no audio touched, no clip-A/clip-B blending. The underlying composite
+# (FFmpeg base + alpha overlay) plays its real frames including the hard
+# cut; this overlay sits ABOVE the alpha-overlay's transparent canvas
+# and only paints during its window.
+#
+# durationInFrames is PER-TYPE, set by the Python emit:
+#   LightLeak / ShutterFlash / NewspaperWipe → 11 frames (180ms @ 60fps)
+#   SceneTitle                               → 72 frames (1200ms @ 60fps)
+# SceneTitle's typographic panel needs the longer hold so the title text
+# is readable through the 0.32–0.68 progress hold window.
+#
+# title + label are SceneTitle-only — the typographic panel needs at minimum
+# the title string (one to three uppercase words like "ACT TWO" or "THE PIVOT").
+# label is the optional kicker above the divider ("CHAPTER", "PART II", etc.).
+# Both fields are ignored when type is anything other than SceneTitle.
+# Validated at the application layer (handler.py): SceneTitle without a title
+# is rejected; the other three reject title/label entirely.
+class TightCutOverlaySpec(_RemotionModel):
+    atFrame: int
+    type: TightCutOverlayType
+    durationInFrames: int
+    title: Optional[str] = None
+    label: Optional[str] = None
 
 
 # ── B-roll ─────────────────────────────────────────────────────────────────
@@ -231,6 +263,12 @@ class PromptlyRenderInput(_RemotionModel):
     caption: CaptionSpec
     textOverlays: List[TextOverlaySpec]
     motionGraphics: List[MotionGraphicSpec]
+    # Tight-cut overlays sit on TIGHT BOUNDARIES (hard cuts with no handle
+    # room). The PromptlyOverlay React tree iterates this list and renders
+    # the named overlay centered on each atFrame. Empty by default — the
+    # field is strictly additive, so an empty array means no behavior
+    # change vs the pre-overlay pipeline.
+    tightCutOverlays: List[TightCutOverlaySpec] = Field(default_factory=list)
     outro: Optional[OutroKind] = None
 
 

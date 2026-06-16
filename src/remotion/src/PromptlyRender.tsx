@@ -16,8 +16,31 @@ import type {
   CaptionSpec,
   MotionGraphicSpec,
   TextOverlaySpec,
+  TightCutOverlaySpec,
+  TightCutOverlayType,
   TikTokPageLike,
 } from "./types";
+
+// Tight-cut overlay dispatcher — renders OverlayCutEffect components
+// ON TOP of the alpha overlay's transparent canvas. Each entry is local
+// to its window (component returns null outside it). See
+// transitions/overlays/OverlayCutEffect.tsx for the window math.
+import {
+  OverlayCutEffect,
+  type OverlayCutEffectType,
+} from "./transitions/overlays/OverlayCutEffect";
+
+// PascalCase (canonical from Python / VALID_TIGHT_CUT_OVERLAYS) →
+// lowercase (OverlayCutEffect's internal dispatch key). The internal
+// component's type kept lowercase so the signed-off isolation test
+// composition (Root.tsx OverlayCutTest) and its captured render
+// commands continue to work unchanged.
+const OVERLAY_TYPE_MAP: Record<TightCutOverlayType, OverlayCutEffectType> = {
+  LightLeak: "lightleak",
+  ShutterFlash: "shutterflash",
+  NewspaperWipe: "newspaperwipe",
+  SceneTitle: "scenetitle",
+};
 
 // Caption styles. All render through PromptlyOverlay's transparent canvas
 // and composite onto the source via FFmpeg in a single final encode.
@@ -476,6 +499,37 @@ const BrollLayer: React.FC<{
   </>
 );
 
+// ─── Tight-cut overlay layer ───────────────────────────────────────────────
+// Iterates the tightCutOverlays list and renders one OverlayCutEffect per
+// entry. Each component reads useCurrentFrame() against the composition's
+// absolute timeline; outside its window it returns null. atFrame is the
+// COMPOSITION-time frame the hard cut sits on (Python emits this from
+// the OUTPUT clip range — get_output_clip_ranges[i]["end"] in seconds
+// times the composition fps).
+//
+// Strictly additive: an empty array produces zero DOM (the .map renders
+// nothing). The pre-overlay behavior is exactly recoverable by emitting
+// an empty list — pixel-identical, audio-identical baseline.
+const TightCutOverlayLayer: React.FC<{
+  overlays: TightCutOverlaySpec[];
+}> = ({ overlays }) => {
+  if (!overlays.length) return null;
+  return (
+    <>
+      {overlays.map((ov, i) => (
+        <OverlayCutEffect
+          key={`tco-${i}-${ov.atFrame}`}
+          type={OVERLAY_TYPE_MAP[ov.type]}
+          atFrame={ov.atFrame}
+          durationInFrames={ov.durationInFrames}
+          title={ov.title}
+          label={ov.label}
+        />
+      ))}
+    </>
+  );
+};
+
 // ─── PromptlyOverlay composition ───────────────────────────────────────────
 // Renders ONLY the text/graphic overlay layer on a TRANSPARENT canvas:
 // captions, motion graphics, text overlays. No video, no transitions, no
@@ -485,7 +539,7 @@ const BrollLayer: React.FC<{
 // Output is encoded with alpha (ProRes 4444) so FFmpeg can composite it
 // over the base in the final mux step.
 export const PromptlyOverlay: React.FC<PromptlyRenderProps> = ({ input }) => {
-  const { caption, motionGraphics, textOverlays, fps, broll } = input;
+  const { caption, motionGraphics, textOverlays, fps, broll, tightCutOverlays } = input;
 
   return (
     <AbsoluteFill style={{ background: "transparent" }}>
@@ -509,6 +563,11 @@ export const PromptlyOverlay: React.FC<PromptlyRenderProps> = ({ input }) => {
         fps={fps}
       />
       <MotionGraphicsLayer items={motionGraphics} fps={fps} />
+      {/* Tight-cut overlays render on TOP of every other layer. The flash /
+          warm leak briefly washes through captions + MGs at the cut frame,
+          masking the hard-cut discontinuity. Outside each 11-frame window
+          the components return null (no z-stack cost). */}
+      <TightCutOverlayLayer overlays={tightCutOverlays ?? []} />
     </AbsoluteFill>
   );
 };

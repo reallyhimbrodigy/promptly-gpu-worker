@@ -8,6 +8,7 @@ import type {
   PromptlyRenderInput,
   PromptlyMicroSegmentsInput,
 } from "./types";
+import { OverlayCutTest, type OverlayCutTestProps } from "./transitions/overlays/_OverlayCutTest";
 
 /**
  * Remotion root — two production compositions:
@@ -99,6 +100,26 @@ export const RemotionRoot: React.FC = () => {
         durationInFrames={DEFAULT_MICRO_INPUT.totalDurationInFrames}
         defaultProps={{ input: DEFAULT_MICRO_INPUT } as unknown as Record<string, unknown>}
         calculateMetadata={calculateMicroMetadata}
+      />
+      {/* OverlayCutTest — STANDALONE isolation test composition for the
+          overlay-on-top-of-hard-cut transition path. Not used in production
+          renders. Reachable via `npx remotion render OverlayCutTest --props='{...}'`
+          to verify: (1) underlying frames advance with no freeze, (2) overlay
+          renders ON TOP within its window, (3) total duration == 240 frames
+          (no growth), (4) audio waveform identical across overlay variants
+          (the overlay components have no audio outputs). */}
+      <Composition
+        id="OverlayCutTest"
+        component={OverlayCutTest as unknown as React.FC<Record<string, unknown>>}
+        width={1080}
+        height={1920}
+        fps={60}
+        durationInFrames={240}
+        defaultProps={{
+          overlayType: "none",
+          overlayDurationInFrames: 18,
+          withAudio: true,
+        } as unknown as Record<string, unknown> & OverlayCutTestProps}
       />
     </>
   );
