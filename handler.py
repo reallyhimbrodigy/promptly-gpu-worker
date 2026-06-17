@@ -5544,8 +5544,29 @@ def _get_or_create_gemini_system_cache(client, model_name: str, system_instructi
         return None
 
 
+class _StreamedGeminiResponse:
+    """Shim duck-typing an aggregated streamed response to the .text +
+    .usage_metadata interface expected by the post-cuts caller."""
+    __slots__ = ("text", "usage_metadata")
+
+    def __init__(self, text, usage_metadata):
+        self.text = text
+        self.usage_metadata = usage_metadata
+
+
 def _gemini_generate_with_cache(client, model_name, contents, base_config_kwargs, system_instruction):
-    """Run client.models.generate_content with explicit prompt caching.
+    """Run a Gemini call with explicit prompt caching, via the STREAMING
+    endpoint — `client.models.generate_content_stream`.
+
+    Streaming bypasses Google's blocking-response 504 DEADLINE_EXCEEDED:
+    the server-side per-response deadline applies to the whole completion
+    of `generate_content`, but to the inter-chunk gap on the streaming
+    variant. The post-cuts call routinely runs ~135s with 24K thinking +
+    65K output cap against a 200K+ system prompt, which sits right at the
+    blocking deadline cliff. Streaming + token-level JSON-schema
+    enforcement gives the same final response with no quality compromise.
+    Chunks are accumulated locally; the schema-validated JSON is parsed
+    once the stream closes.
 
     `base_config_kwargs` is the dict of keyword args for GenerateContentConfig
     EXCLUDING system_instruction / cached_content — those are added here based
@@ -5561,12 +5582,28 @@ def _gemini_generate_with_cache(client, model_name, contents, base_config_kwargs
             kwargs["system_instruction"] = system_instruction
         return genai_types.GenerateContentConfig(**kwargs)
 
-    try:
-        return client.models.generate_content(
+    def _stream_and_collect(config):
+        text_parts = []
+        final_usage = None
+        for chunk in client.models.generate_content_stream(
             model=model_name,
             contents=contents,
-            config=_build_config(use_cache=cache_name is not None),
+            config=config,
+        ):
+            chunk_text = getattr(chunk, "text", None)
+            if chunk_text:
+                text_parts.append(chunk_text)
+            # usage_metadata is cumulative on later chunks (Google sends it
+            # toward the stream's end); keep the most recent non-None value.
+            chunk_usage = getattr(chunk, "usage_metadata", None)
+            if chunk_usage is not None:
+                final_usage = chunk_usage
+        return _StreamedGeminiResponse(
+            text="".join(text_parts), usage_metadata=final_usage,
         )
+
+    try:
+        return _stream_and_collect(_build_config(use_cache=cache_name is not None))
     except Exception as e:
         if cache_name:
             _msg = str(e).lower()
@@ -5577,27 +5614,31 @@ def _gemini_generate_with_cache(client, model_name, contents, base_config_kwargs
                     flush=True,
                 )
                 _drop_gemini_cache(model_name, system_instruction)
-                return client.models.generate_content(
-                    model=model_name,
-                    contents=contents,
-                    config=_build_config(use_cache=False),
-                )
+                return _stream_and_collect(_build_config(use_cache=False))
         raise
 
 
 def _call_gemini_post_cuts(client, system_instruction, user_content, video_part, model_name):
     """Second Gemini call: visual placement on the kept-only transcript.
 
+    Routed through _gemini_generate_with_cache, which streams the response
+    via client.models.generate_content_stream — Google's blocking-response
+    504 DEADLINE_EXCEEDED applies to the whole completion of the blocking
+    endpoint; the streaming endpoint's deadline applies per-chunk instead.
+    With 24K thinking + 65K output cap and a 200K+ system prompt, blocking
+    calls were landing ~135s right at the deadline cliff; streaming gives
+    the same schema-validated JSON with no quality compromise.
+
     Bounded-deep thinking. thinking_budget capped at 24576 (down from -1 = no cap)
-    because runaway thinking on the now-large prompt (>200K chars) was tripping
-    Google's server-side 504 DEADLINE_EXCEEDED. 24K is still substantial — well
-    past the HIGH-thinking equivalent — but bounded so total wall-clock stays
-    under Google's deadline reliably. Quality impact: minimal; the model rarely
-    benefits from >24K thinking tokens on this task.
+    to bound total wall-clock + cost (was uncapped, routinely spent >40K thought
+    tokens). 24K is still substantial — well past the HIGH-thinking equivalent.
+    Quality impact: minimal; the model rarely benefits from >24K thinking tokens
+    on this task.
     """
     print(
-        f"[gemini-post] Calling {model_name} (thinking_budget=24576, PostCutPlan schema, "
-        f"system_instruction={len(system_instruction)} chars, user_content={len(user_content)} chars)...",
+        f"[gemini-post] Calling {model_name} (streaming, thinking_budget=24576, "
+        f"PostCutPlan schema, system_instruction={len(system_instruction)} chars, "
+        f"user_content={len(user_content)} chars)...",
         flush=True,
     )
     t0 = time.time()
