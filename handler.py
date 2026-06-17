@@ -3236,7 +3236,7 @@ Emit the JSON in exactly this order, finishing each stage's reasoning before ope
   • **key_moments** — 3-5 true peaks for a typical 30s video; a flat even-energy stretch may have only 2-3 — count the real peaks, never pad. Space peaks ≥2.0s apart in OUTPUT time — a peak landing within 2s of a higher-priority peak (payoff > mid_peak > other) gets silently dropped at validation, so plan the spacing in this list rather than emit closer ones to be cleaned up. Each: word_index, what_lands, why_emphasis, what_i_saw, viewer_feeling. **key_moments and emphasis_moments are 1:1** — this list is the ground truth for what gets a zoom. To add a zoom, expand this list first; only zoom peaks you can justify here.
   • **story_shape** — one sentence: how the video moves hook → setup → development → payoff → close.
   • **arc_segments** — THE SPINE. Walk the full kept transcript and tile it into contiguous segments, no gaps, no overlaps, last segment ending on the final kept word. Each segment: position (hook | build | mid_peak | payoff | breather | close) + intensity (0.0-1.0). Until this is complete, you do not pick components.
-  • **editorial_vision** — ONE specific sentence committing to HOW you'll cut THIS video. ("I'm leaning into the absurdity with MagazineCutout captions, pop SFX on every receipt detail, and a slow LetterboxPush when he opens the bag.") Every component below flows from this sentence.
+  • **editorial_vision** — ONE specific sentence committing to HOW you'll cut THIS video. ("I'm leaning into the absurdity with EditorialPop captions, pop SFX on every receipt detail, and a slow LetterboxPush when he opens the bag.") Every component below flows from this sentence.
 
 **Stage 3 — STRUCTURAL REGISTER.** Emit `caption_style`, `thumbnail_word_index`, `outro`, `aspect_ratio`.
 
@@ -3360,19 +3360,16 @@ THE 13 STYLES
 
 8. **Lumen** — Montserrat body; keywords swap to Playfair with amber glow (#D4A24C) and a gold underline sweep; optional "shine" flash. Keywords: USED. Signal: money moments, brand stamp. Fits: hustle, motivational, money/business/success content. Fights: understated or melancholic content; videos with no money-words (gold feels arbitrary).
 
-9. **MagazineCutout** — each word an individual paper cutout (cream bg, black ink, ±6° rotation, size variation), snapping into place; ransom-note collage, all caps. Keywords: IGNORED. Signal: hand-made craft. Fits: creative/DIY/zine, playful chaos. Fights: serious, premium, or corporate registers; readability-critical content.
-   Optional extraProps: {{ "maxRotation": 3 }} tight · {{ "maxRotation": 10 }} wild · default 6
+9. **Passage** — Cormorant Garamond, warm ivory (#F1EADB); keywords expand letter-spacing (-0.015em → 0.09em) and turn italic warm gold (#D4A76A). Keywords: USED. Signal: literature, passages from a book. Fits: prose-like storytelling, book quotes, essays, slow pacing. Fights: quick punchlines, modern social energy.
 
-10. **Passage** — Cormorant Garamond, warm ivory (#F1EADB); keywords expand letter-spacing (-0.015em → 0.09em) and turn italic warm gold (#D4A76A). Keywords: USED. Signal: literature, passages from a book. Fits: prose-like storytelling, book quotes, essays, slow pacing. Fights: quick punchlines, modern social energy.
+10. **Pulse** — words appear in synchronized PAIRS, one above one below, crisp opacity fades; keywords go cyan (#00BFFF). Keywords: USED. Signal: scored to the audio, beat-matched. Fits: music content, rapid dialogue, lyric-video energy. Fights: contemplative content needing per-word breath; adjacent words of very different length.
 
-11. **Pulse** — words appear in synchronized PAIRS, one above one below, crisp opacity fades; keywords go cyan (#00BFFF). Keywords: USED. Signal: scored to the audio, beat-matched. Fits: music content, rapid dialogue, lyric-video energy. Fights: contemplative content needing per-word breath; adjacent words of very different length.
-
-12. **Quintessence** — ONE word at a time, centered, large Playfair with dramatic vertical stretch (scaleY 1.6), gold (#E8D44D), spring in/out. Keywords: IGNORED. Signal: words demand individual attention; art-house. Fits: dramatic pauses, poetry, mantras, slow deliberate dialogue. Fights: dense or fast dialogue (spring becomes stutter).
+11. **Quintessence** — ONE word at a time, centered, large Playfair with dramatic vertical stretch (scaleY 1.6), gold (#E8D44D), spring in/out. Keywords: IGNORED. Signal: words demand individual attention; art-house. Fits: dramatic pauses, poetry, mantras, slow deliberate dialogue. Fights: dense or fast dialogue (spring becomes stutter).
     Optional extraProps: {{ "stretchY": 1.6 }} default · 2.0 extreme · 1.3 subtle
 
-13. **Serif** — DM Serif Display, warm cream (#F0EEE9), subtle spring scale-up; keywords scale 1.35x italic with blue accent (#5A9FD4). Keywords: USED. Signal: refined, calm, trusted brand campaign. Fits: premium editorial, interview quotes, news-style, calm narration. Fights: edgy, comedic, DIY energy; fast-cut hustle.
+12. **Serif** — DM Serif Display, warm cream (#F0EEE9), subtle spring scale-up; keywords scale 1.35x italic with blue accent (#5A9FD4). Keywords: USED. Signal: refined, calm, trusted brand campaign. Fits: premium editorial, interview quotes, news-style, calm narration. Fights: edgy, comedic, DIY energy; fast-cut hustle.
 
-Keyword styles: Prime, Cove, EditorialPop, Illuminate, Lumen, Passage, Pulse, Serif. Keyword-ignoring: PaperII, TypewriterReveal, CinematicLetterpress, MagazineCutout, Quintessence (still emit caption_keywords — they have narrative value — they just don't highlight).
+Keyword styles: Prime, Cove, EditorialPop, Illuminate, Lumen, Passage, Pulse, Serif. Keyword-ignoring: PaperII, TypewriterReveal, CinematicLetterpress, Quintessence (still emit caption_keywords — they have narrative value — they just don't highlight).
 
 ──────────────────────────────────────────
 CAPTION POSITION — collision procedure
@@ -3975,7 +3972,7 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
   }},
   "thumbnail_word_index": int,
 
-  "caption_style": "PaperII" | "Prime" | "TypewriterReveal" | "CinematicLetterpress" | "Cove" | "EditorialPop" | "Illuminate" | "Lumen" | "MagazineCutout" | "Passage" | "Pulse" | "Quintessence" | "Serif" | "none",  // "none" only when the user's vibe excluded captions
+  "caption_style": "PaperII" | "Prime" | "TypewriterReveal" | "CinematicLetterpress" | "Cove" | "EditorialPop" | "Illuminate" | "Lumen" | "Passage" | "Pulse" | "Quintessence" | "Serif" | "none",  // "none" only when the user's vibe excluded captions
   "caption_keywords": ["<word>", ...],   // lowercase, dictionary form
   "caption_position_changes": [
     {{"word_index": int, "position": "top" | "center" | "bottom"}}
@@ -7127,7 +7124,7 @@ If a tight boundary is mid-thought, a same-take micro-trim, a filler-removal spl
         "PaperII",
         "Prime", "TypewriterReveal", "CinematicLetterpress", "Cove",
         "EditorialPop", "Illuminate", "Lumen",
-        "MagazineCutout", "Passage", "Pulse", "Quintessence", "Serif",
+        "Passage", "Pulse", "Quintessence", "Serif",
         "none",  # user opted out — see renderer for skip logic
     }
     _valid_zoom_types = {
@@ -14769,9 +14766,9 @@ def _resolve_caption_extra_props(style, keywords, edit_plan):
     kw_list = list(keywords or [])
 
     # Style-specific default prop names for a simple string[] of keywords.
-    # PaperII / TypewriterReveal / CinematicLetterpress / MagazineCutout /
-    # Quintessence don't highlight specific words — their effect is
-    # style-driven (typewriter sweep, cutout collage, etc.) — so they're
+    # PaperII / TypewriterReveal / CinematicLetterpress / Quintessence
+    # don't highlight specific words — their effect is style-driven
+    # (typewriter sweep, spring per-word reveal, etc.) — so they're
     # omitted from this map.
     simple_keyword_prop = {
         "EditorialPop": "keywords",

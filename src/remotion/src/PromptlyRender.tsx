@@ -48,7 +48,7 @@ import {
   PaperII,
   Prime, TypewriterReveal, CinematicLetterpress, Cove,
   EditorialPop, Illuminate, Lumen,
-  MagazineCutout, Passage, Pulse, Quintessence, Serif,
+  Passage, Pulse, Quintessence, Serif,
 } from "./captions";
 
 // Transitions — all 12
@@ -77,7 +77,7 @@ const CAPTION_MAP: Record<string, React.FC<any>> = {
   PaperII,
   Prime, TypewriterReveal, CinematicLetterpress, Cove,
   EditorialPop, Illuminate, Lumen,
-  MagazineCutout, Passage, Pulse, Quintessence, Serif,
+  Passage, Pulse, Quintessence, Serif,
 };
 
 const TRANSITION_MAP: Record<string, React.FC<any>> = {

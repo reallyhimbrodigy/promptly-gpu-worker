@@ -184,7 +184,6 @@ export type CaptionStyle =
   | "EditorialPop"
   | "Illuminate"
   | "Lumen"
-  | "MagazineCutout"
   | "Passage"
   | "Pulse"
   | "Quintessence"

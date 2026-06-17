@@ -3,7 +3,7 @@
 Single source of truth for every component-type taxonomy used at the
 Python validation layer:
 
-  • VALID_CAPTION_STYLES     — caption components (13 + "none" sentinel)
+  • VALID_CAPTION_STYLES     — caption components (12 + "none" sentinel)
   • VALID_TRANSITION_TYPES   — transition components (handle-required, CUT BOUNDARIES)
   • VALID_TIGHT_CUT_OVERLAYS — overlay-on-top-of-hard-cut decorations
                                (TIGHT BOUNDARIES, no handle, no time inserted —
@@ -30,7 +30,7 @@ VALID_CAPTION_STYLES = frozenset({
     "PaperII",
     "Prime", "TypewriterReveal", "CinematicLetterpress", "Cove",
     "EditorialPop", "Illuminate", "Lumen",
-    "MagazineCutout", "Passage", "Pulse", "Quintessence", "Serif",
+    "Passage", "Pulse", "Quintessence", "Serif",
     # Renderer skips caption rendering entirely when style == "none"
     # (user explicit opt-out in vibe or re-edit). Kept here so the
     # Pydantic Literal accepts the sentinel; the TS-side CaptionStyle

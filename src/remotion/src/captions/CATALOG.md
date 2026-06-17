@@ -201,26 +201,7 @@ Montserrat body with keywords that switch to Playfair Display serif with an ambe
 
 ---
 
-### 9. MagazineCutout
-
-Words appear as individually cut-out paper pieces — each with a cream background, slight random rotation, and size variation. Like a ransom note or magazine collage but clean. Words snap into place timed to audio.
-
-**Best for:** Creative/art content, collage aesthetic, DIY/craft, zine-style, playful editorial.
-
-| Prop | Type | Default | Description |
-|------|------|---------|-------------|
-| `cutoutBg` | `string` | `"#FDF8F0"` | Background color for each cutout. |
-| `inkColor` | `string` | `"#0D0D0D"` | Text color. |
-| `maxRotation` | `number` | `6` | Max random rotation in degrees (±). |
-| `sizeVariation` | `number` | `10` | Font size variation in px (±). |
-| `cutoutPaddingX` | `number` | `14` | Horizontal padding per cutout. |
-| `cutoutPaddingY` | `number` | `8` | Vertical padding per cutout. |
-| `allCaps` | `boolean` | `true` | Uppercase text. |
-| `maxWordsPerLine` | `number` | `3` | Words per line. |
-
----
-
-### 10. Passage
+### 9. Passage
 
 Cormorant Garamond serif with keywords that expand their letter-spacing (tracking) as they're revealed — a subtle typographic emphasis. Keywords also switch to italic with a warm gold color. The tracking shift is the signature move: letters physically spread apart to draw the eye.
 
@@ -240,7 +221,7 @@ Cormorant Garamond serif with keywords that expand their letter-spacing (trackin
 
 ---
 
-### 11. Pulse
+### 10. Pulse
 
 Two-slot paired display — words appear in pairs (one on top, one below) that fade in together. Keywords get a cyan accent color. Simple, clean, rhythmic. No spring physics, just crisp opacity transitions.
 
@@ -255,7 +236,7 @@ Two-slot paired display — words appear in pairs (one on top, one below) that f
 
 ---
 
-### 12. Quintessence
+### 11. Quintessence
 
 Single word at a time, centered, in Playfair Display with dramatic vertical stretch (scaleY). Gold text on a spring entrance. Pure one-word-at-a-time impact — nothing else on screen.
 
@@ -268,7 +249,7 @@ Single word at a time, centered, in Playfair Display with dramatic vertical stre
 
 ---
 
-### 13. Serif
+### 12. Serif
 
 DM Serif Display body with keywords that scale up (1.35x) in italic with a distinct blue accent and tighter letter-spacing. Words enter with a subtle spring scale-up from 0.96. Clean editorial hierarchy.
 

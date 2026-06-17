@@ -20,9 +20,6 @@ export type { EditorialPopProps } from "./EditorialPop";
 export { Lumen } from "./Lumen";
 export type { LumenProps } from "./Lumen";
 
-export { MagazineCutout } from "./MagazineCutout";
-export type { MagazineCutoutProps } from "./MagazineCutout";
-
 export { Pulse } from "./Pulse";
 export type { PulseProps } from "./Pulse";
 
