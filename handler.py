@@ -10015,20 +10015,21 @@ def fetch_broll_clip(broll_entry, duration_needed, work_dir, dialogue_reason="",
             else:
                 _ctx_lines.append(f'Search context: "{keyword}"')
             if _note and _note.lower() != _spoken.lower():
-                _ctx_lines.append(f'Editor\'s note for this cutaway: "{_note}"')
+                _ctx_lines.append(f'Required content for this cutaway: "{_note}"')
             _ctx_block = "\n" + "\n".join(_ctx_lines) + "\n"
             _instruction_base = (
                 "Which clip would feel most natural playing on screen while the viewer hears those exact words? "
                 "Two different judgment rules apply depending on what the dialogue is doing. "
                 "(A) NARRATIVE / ABSTRACT dialogue — the speaker describes a feeling, scene, story beat, or approach with no specific on-screen referent. "
-                "Here B-roll doesn't need to show the exact scene; pick the clip whose character and mood visually connect to what's being said. "
+                "B-roll doesn't need to show the exact scene; pick the clip whose character and mood visually connect to what's being said. "
+                "BUT if the context above includes 'Required content for this cutaway', that note is a CONTENT REQUIREMENT — a clip that visually violates it ('must show X, not Y' and the clip shows Y) is the wrong pick regardless of mood fit. Mood-matching is only allowed AMONG candidates that satisfy the content requirement. "
                 "(B) APP-INPUT / DEMO dialogue — the dialogue names a specific app action the viewer must literally SEE: typing INTO an app, uploading, tapping, selecting, a result appearing on a screen "
                 "(\"type in the vibe,\" \"upload your video,\" \"tap the button,\" \"every edit shows up here\"). "
                 "Here the clip must show the SCREEN or APP doing that action — a screen recording, a phone UI close-up, the app interface itself. "
                 "A person at a keyboard, a person texting on a phone, or hands typing on a device shows the WRONG thing for app-input dialogue and should be rejected — those depict a human typing, not the app receiving input. "
                 "If no option shows the actual app/screen action the dialogue names, answer NONE — the speaker's face is the correct fallback for that window. "
                 "Pick the strongest match. Reply with ONLY the option number. "
-                "NONE if every option is unrelated to the actual words being spoken OR if the dialogue is app-input and no option shows the app screen."
+                "NONE if every option is unrelated to the actual words being spoken OR every option violates the content requirement OR (for app-input dialogue) no option shows the app screen."
             )
             _instruction_strict = (
                 _instruction_base
