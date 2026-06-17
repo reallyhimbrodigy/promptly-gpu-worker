@@ -6108,6 +6108,8 @@ CHAPTER-BREAK CLASS (~1200ms — a typographic divider; the new section starts h
 
 **HARD RULE 3 — extras (`title`, `label`) belong to SceneTitle ONLY.** Emitting `title` or `label` with LightLeak / ShutterFlash / NewspaperWipe is a hard error — the validator rejects it. SceneTitle without a `title` is also a hard error (the panel has nothing to display).
 
+Your `editorial_vision` and your `tight_cut_overlays` array must agree. If your vision commits to a tight-cut overlay type by name (e.g. 'tight ShutterFlash cuts'), emit at least one matching entry on the boundary that earns it. If on reflection no boundary earns one, that's fine — but then your vision should not claim the overlay. Vision and array tell the same story.
+
 **Place overlays only where the cut carries real editorial weight.** Editorially-significant cuts include:
   - **chapter shift** — the speaker pivots from one segment of the argument to the next (setup → reveal, problem → solution, "and then" → "but here's the thing"). A strong chapter shift earns SceneTitle (a literal title for the new section). A softer shift earns one of the punctuation overlays.
   - **escalation beat** — the energy steps up across the cut (a stat, a punchline, a payoff lands right after) → ShutterFlash or NewspaperWipe.
