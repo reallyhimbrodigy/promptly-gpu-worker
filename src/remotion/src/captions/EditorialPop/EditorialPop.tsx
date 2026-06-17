@@ -78,8 +78,6 @@ const EditorialPopPage: React.FC<{
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
-  if (frame < 0) return null;
-
   const line2Visible = lines.length > 1 && frame >= msToFrames(lineDelayMs, fps);
 
   return (

@@ -230,10 +230,22 @@ const CaptionSegmentRenderer: React.FC<{
     // localStart)` — keeps both branches consistent. The earlier formula
     // delayed tokens by up to (segStartMs − page.startMs) ms in the
     // straddling case, producing visible caption stacking and lag.
+    //
+    // Front-edge straddle (localStart < 0): clamp startMs to 0 AND
+    // shrink durationMs by |localStart|. Without the shrink, the
+    // clipped page renders for its full original durationMs from
+    // segment-local 0 — overstaying its true end by |localStart| ms
+    // and stacking with the next page in the same segment.
+    //
+    // Back-edge straddle (page extends past segEndMs) needs no mirror
+    // clamp: Remotion's parent Sequence bounds children's render
+    // lifetime, so the position-segment outer Sequence cuts the inner
+    // page at segEndMs. See remotion/Sequence.js:145-150.
     const tokenDelta = segStartMs;
     clippedPages.push({
       ...page,
       startMs: Math.max(0, localStart),
+      durationMs: page.durationMs + Math.min(0, localStart),
       tokens: page.tokens.map((t) => ({
         ...t,
         fromMs: t.fromMs - tokenDelta,

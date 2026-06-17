@@ -3549,6 +3549,56 @@ def _recipe_eval_tco_passing():
     )
 
 
+# ─── 5b5. CAPTION PAGE-BOUNDARY REGRESSION GUARDS ──────────────────────
+# When a caption page's window straddles a position-segment boundary
+# (one page rendering across a top↔bottom flip from a B-roll or MG
+# auto-flip override), CaptionSegmentRenderer's `clippedPages` logic in
+# PromptlyRender.tsx clamps the page's startMs to 0 inside the assigned
+# segment but must ALSO shrink durationMs by |localStart| so the clipped
+# page ends at its true absolute end. Without that, the page overstays
+# by |localStart| ms and stacks with the next page in the same segment.
+print("\n[5b5/6] Caption page-boundary regression guards")
+
+
+@check("CaptionSegmentRenderer clipped pages shrink durationMs on front-edge straddle")
+def _clipped_pages_shrinks_duration_on_straddle():
+    """The clippedPages logic in CaptionSegmentRenderer must clamp BOTH
+    startMs (to 0) AND durationMs (subtract |localStart|) when a page
+    straddles the segment's front edge (localStart < 0). Without the
+    durationMs adjustment, the clipped page renders for its full original
+    duration starting from segment-local 0 — visibly OVERSTAYING its true
+    end by |localStart| ms and stacking with the next page in the same
+    segment.
+
+    Static text check: confirm both Math.max(0, localStart) on startMs
+    AND Math.min(0, localStart) on durationMs are present in
+    PromptlyRender.tsx's CaptionSegmentRenderer body. Either-but-not-both
+    = regression of this bug class.
+    """
+    import os
+    import pathlib
+    import re
+    tsx = (
+        pathlib.Path(os.path.dirname(__file__))
+        / "src" / "remotion" / "src" / "PromptlyRender.tsx"
+    ).read_text()
+    m = re.search(r"const CaptionSegmentRenderer[\s\S]+?\n};\n", tsx)
+    assert m, "CaptionSegmentRenderer block not found in PromptlyRender.tsx"
+    body = m.group(0)
+    assert "Math.max(0, localStart)" in body, (
+        "CaptionSegmentRenderer must clamp `startMs: Math.max(0, localStart)`. "
+        "Without it, front-edge straddling pages render at negative segment-"
+        "local frames."
+    )
+    assert "Math.min(0, localStart)" in body, (
+        "CaptionSegmentRenderer must shrink `durationMs: page.durationMs + "
+        "Math.min(0, localStart)` for front-edge straddling pages. Without "
+        "it, the clipped page overstays its true end by |localStart| ms and "
+        "stacks with the next page in the same segment. See "
+        "PromptlyRender.tsx:212-250."
+    )
+
+
 # ─── 6. HANDLER ENTRY POINTS ───────────────────────────────────────────
 print("\n[6/6] Handler entry points")
 
