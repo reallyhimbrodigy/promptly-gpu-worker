@@ -5599,15 +5599,21 @@ def _gemini_generate_with_cache(client, model_name, contents, base_config_kwargs
 def _call_gemini_post_cuts(client, system_instruction, user_content, video_part, model_name):
     """Second Gemini call: visual placement on the kept-only transcript.
 
-    Bounded-deep thinking. thinking_budget capped at 24576 (down from -1 = no cap)
-    because runaway thinking on the now-large prompt (>200K chars) was tripping
-    Google's server-side 504 DEADLINE_EXCEEDED. 24K is still substantial — well
-    past the HIGH-thinking equivalent — but bounded so total wall-clock stays
-    under Google's deadline reliably. Quality impact: minimal; the model rarely
-    benefits from >24K thinking tokens on this task.
+    Deep-thinking budget. thinking_budget=60000 (raised back up from the
+    earlier 24576 cap, which was set as a 504 mitigation under the wrong-
+    cause assumption). The actual 504 driver was X-Server-Timeout=120s
+    from HttpOptions.timeout (now 300_000ms; see _get_genai_client). With
+    the deadline lifted, depth is recovered.
+
+    Note on the shared cap: max_output_tokens=65536 is the COMBINED ceiling
+    on thinking + actual JSON response. At 60K thinking, ~5K is left for
+    the JSON output. Typical PostCutPlan JSON is 2-4K; this fits but is
+    tighter than the prior 24K thinking + 40K output split. If JSON
+    truncation appears in production, raise max_output_tokens or lower
+    thinking_budget.
     """
     print(
-        f"[gemini-post] Calling {model_name} (thinking_budget=24576, PostCutPlan schema, "
+        f"[gemini-post] Calling {model_name} (thinking_budget=60000, PostCutPlan schema, "
         f"system_instruction={len(system_instruction)} chars, user_content={len(user_content)} chars)...",
         flush=True,
     )
@@ -5617,22 +5623,21 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
         contents=[video_part, user_content],
         base_config_kwargs=dict(
             temperature=1.0,
-            # 32K to accommodate Gemini Pro's deep thinking budget. The
-            # max_output_tokens cap is SHARED between thoughts and the
-            # actual JSON response. Deep thinking on Pro routinely consumes
-            # 4-6K thought tokens; the JSON itself is 2-4K with the new
-            # required fields (viewer_feeling on every component). 64K
-            # gives comfortable headroom. Unused tokens aren't billed.
+            # max_output_tokens cap is SHARED between thinking and the actual
+            # JSON response. With thinking_budget=60000 below, ~5K remains
+            # for the JSON output — typical PostCutPlan JSON is 2-4K, fits
+            # with margin. Raise this (and/or lower thinking_budget) if
+            # truncation appears.
             max_output_tokens=65536,
             response_mime_type="application/json",
             response_json_schema=PostCutPlan.model_json_schema(),
-            # 24K thinking budget — bounded but deep. Was -1 (dynamic,
-            # no cap); changed because uncapped thinking on the 212K-char
-            # prompt was triggering Google's 504 DEADLINE_EXCEEDED at the
-            # 135s mark. 24K thinking + 4-8K output completes reliably
-            # under the server deadline. The model rarely benefits from
-            # >24K thinking tokens on this task; uncapped was over-spending.
-            thinking_config=genai_types.ThinkingConfig(thinking_budget=24576),
+            # 60K thinking budget — raised back up from the 24576 cap that
+            # was set as a 504 mitigation under the wrong-cause assumption.
+            # Actual 504 driver was X-Server-Timeout=120s sent by the client
+            # (fixed in _get_genai_client to 300_000ms). With the deadline
+            # lifted, depth is recovered. The model can self-regulate below
+            # 60K based on prompt complexity; unused tokens aren't billed.
+            thinking_config=genai_types.ThinkingConfig(thinking_budget=60000),
             media_resolution="MEDIA_RESOLUTION_LOW",
         ),
         system_instruction=system_instruction,
