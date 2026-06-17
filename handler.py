@@ -12766,7 +12766,81 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # and picked an anchor that doesn't cover the speaker's face based on
     # the actual frames in the MG window.
     motion_graphics_out = []
-    for _mg in (edit_plan.get("motion_graphics") or []):
+
+    # ── Pre-compute boundary starts for MG floor extension cap ─────────────
+    # A sub-2.5s MG window can't complete its entrance animation; the MG
+    # glitches (entrance cut off, count-up never lands, label fade-in
+    # truncated). The per-MG floor below extends short windows up to 2.5s
+    # — but the extension MUST NOT push into a downstream component's
+    # window, or downstream collision rules would silently drop that
+    # component (B-roll, text-overlay, or other MG).
+    #
+    # `_boundary_starts_sec` lists the earliest occupied output time of
+    # every scheduled component EXCEPT MGs (other MGs handled separately
+    # with self-exclusion). Anchors map per component type:
+    #   - broll       : `_start_word_kept` → kept-word.start
+    #   - transition  : `after_word_index` → that word's END (the cut)
+    #   - tight_cut   : `after_word_index` → that word's END (the cut)
+    #   - text_overlay: `start_word_index` → that word's start
+    #   - emphasis MG : `_emphasis_moments[i].word_indices[0]` → start
+    _MG_MIN_DURATION_SECONDS = 2.5
+    _boundary_starts_sec: list = []
+
+    def _proj_word_start_sec(idx):
+        _pw = _pw_by_idx.get(idx) if idx is not None else None
+        return float(_pw["start"]) if _pw else None
+
+    def _proj_word_end_sec(idx):
+        _pw = _pw_by_idx.get(idx) if idx is not None else None
+        return float(_pw["end"]) if _pw else None
+
+    for _bc in (edit_plan.get("broll_clips") or []):
+        if not isinstance(_bc, dict):
+            continue
+        _t = _proj_word_start_sec(_bc.get("_start_word_kept"))
+        if _t is not None:
+            _boundary_starts_sec.append(_t)
+    for _tr in (edit_plan.get("transitions") or []):
+        if not isinstance(_tr, dict):
+            continue
+        _t = _proj_word_end_sec(_tr.get("after_word_index"))
+        if _t is not None:
+            _boundary_starts_sec.append(_t)
+    for _tco in (edit_plan.get("tight_cut_overlays") or []):
+        if not isinstance(_tco, dict):
+            continue
+        _t = _proj_word_end_sec(_tco.get("after_word_index"))
+        if _t is not None:
+            _boundary_starts_sec.append(_t)
+    for _to in (edit_plan.get("text_overlays") or []):
+        if not isinstance(_to, dict):
+            continue
+        _t = _proj_word_start_sec(_to.get("start_word_index"))
+        if _t is not None:
+            _boundary_starts_sec.append(_t)
+    for _em in (edit_plan.get("_emphasis_moments") or []):
+        if not isinstance(_em, dict):
+            continue
+        if not _em.get("motion_graphic"):
+            continue
+        _wis = _em.get("word_indices") or []
+        if not _wis:
+            continue
+        _t = _proj_word_start_sec(_wis[0])
+        if _t is not None:
+            _boundary_starts_sec.append(_t)
+
+    # Other-MG starts indexed by position so the per-MG check can exclude
+    # self (`mi != _i`) for the tie case (two MGs anchored on the same word).
+    _other_mg_starts_sec: list = []
+    for _mi, _mg_other in enumerate(edit_plan.get("motion_graphics") or []):
+        if not isinstance(_mg_other, dict):
+            continue
+        _t = _proj_word_start_sec(_mg_other.get("start_word_index"))
+        if _t is not None:
+            _other_mg_starts_sec.append((_t, _mi))
+
+    for _i, _mg in enumerate(edit_plan.get("motion_graphics") or []):
         # Project by WORD INDEX (start_word_index, end_word_index), not by
         # frozen source-time. _pw_by_idx contains every kept word's OUTPUT
         # position, computed against the REFINED clip ranges — so DSP
@@ -12801,6 +12875,27 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _dur_override = _mg.get("duration_seconds_override")
         if _dur_override is not None:
             _out_end = _out_start + float(_dur_override)
+
+        # ── Minimum-duration floor (collision-aware) ───────────────────────
+        # Extend short windows up to 2.5s so the MG's entrance animation
+        # completes and the content stays on screen long enough to read.
+        # 2.5s covers every existing MG's enter + readable hold + exit
+        # budget (StatCard ~733ms anim + ~1s readable hold; StickyNotes
+        # 3-note stagger ~1.5s entrance; ProgressBar/Notification similar).
+        # The extension is CAPPED at the earliest downstream component
+        # start so the floor can't silently push an MG into a B-roll or
+        # overlay's window — that would invoke downstream collision rules
+        # and drop the overlapped component invisibly.
+        _floor_end_sec = _out_start + _MG_MIN_DURATION_SECONDS
+        if _out_end < _floor_end_sec:
+            _caps = [s for s in _boundary_starts_sec if s > _out_start]
+            _caps += [s for s, mi in _other_mg_starts_sec if s > _out_start and mi != _i]
+            _next_sec = min(_caps) if _caps else None
+            if _next_sec is None:
+                _out_end = _floor_end_sec
+            else:
+                _out_end = min(_floor_end_sec, _next_sec)
+
         _from_frame = max(0, int(round(_out_start * source_fps)))
         _to_frame = min(total_output_frames, int(round(_out_end * source_fps)))
         if _to_frame <= _from_frame:
