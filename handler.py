@@ -590,7 +590,18 @@ def _log_available_gemini_models():
 _log_available_gemini_models()
 
 def _get_genai_client():
-    """Get or create the Gemini API client (lazy init with API key from env)."""
+    """Get or create the Gemini API client (lazy init with API key from env).
+
+    HttpOptions.timeout (milliseconds) drives BOTH the local httpx read
+    timeout AND a server-side X-Server-Timeout header that the genai SDK
+    sends to Google. Google honors the header — if the model's wall-clock
+    exceeds it, Google returns 504 DEADLINE_EXCEEDED. The post-cuts call
+    routinely runs 135-150s with 24K thinking + 65K output cap; at 120_000
+    we were explicitly telling Google to abort under our actual wall-clock,
+    which is exactly what was producing the 504s in production. Set to
+    300_000ms (5 min) — well above the model's natural completion time,
+    well under Modal's 600s function timeout (modal_app.py:468).
+    """
     global _genai_client
     if _genai_client is None:
         api_key = os.environ.get("GEMINI_API_KEY")
@@ -598,7 +609,7 @@ def _get_genai_client():
             raise RuntimeError("GEMINI_API_KEY not set")
         _genai_client = genai_client_mod.Client(
             api_key=api_key,
-            http_options=genai_types.HttpOptions(timeout=120_000),
+            http_options=genai_types.HttpOptions(timeout=300_000),
         )
     return _genai_client
 
@@ -3151,7 +3162,7 @@ What you believe, and how it shows in your work:
 WATCH THE VIDEO FIRST
 ═══════════════════════════════════════════════════════════════════════════
 
-The proxy attached to this call is the actual source video — 480p, 16fps, full audio. Watch it before you place anything. The transcript and signal annotations are supporting evidence, not substitutes. While you watch, read:
+The proxy attached to this call is the actual source video — 480p, 18fps, full audio. Watch it before you place anything. The transcript and signal annotations are supporting evidence, not substitutes. While you watch, read:
 
   • **Energy, moment by moment** — where the voice rises/drops/accelerates, where the eyes widen or lock onto camera, where the hands gesture or settle. The speaker's body is telling you where the peaks are.
   • **Micro-expressions** — the half-second face shift before a line lands (the setup), the smile breaking after a punchline (the release), the eyebrow raise on the surprise word (the punctuation). These are what you place treatments around.
@@ -5544,29 +5555,8 @@ def _get_or_create_gemini_system_cache(client, model_name: str, system_instructi
         return None
 
 
-class _StreamedGeminiResponse:
-    """Shim duck-typing an aggregated streamed response to the .text +
-    .usage_metadata interface expected by the post-cuts caller."""
-    __slots__ = ("text", "usage_metadata")
-
-    def __init__(self, text, usage_metadata):
-        self.text = text
-        self.usage_metadata = usage_metadata
-
-
 def _gemini_generate_with_cache(client, model_name, contents, base_config_kwargs, system_instruction):
-    """Run a Gemini call with explicit prompt caching, via the STREAMING
-    endpoint — `client.models.generate_content_stream`.
-
-    Streaming bypasses Google's blocking-response 504 DEADLINE_EXCEEDED:
-    the server-side per-response deadline applies to the whole completion
-    of `generate_content`, but to the inter-chunk gap on the streaming
-    variant. The post-cuts call routinely runs ~135s with 24K thinking +
-    65K output cap against a 200K+ system prompt, which sits right at the
-    blocking deadline cliff. Streaming + token-level JSON-schema
-    enforcement gives the same final response with no quality compromise.
-    Chunks are accumulated locally; the schema-validated JSON is parsed
-    once the stream closes.
+    """Run client.models.generate_content with explicit prompt caching.
 
     `base_config_kwargs` is the dict of keyword args for GenerateContentConfig
     EXCLUDING system_instruction / cached_content — those are added here based
@@ -5582,28 +5572,12 @@ def _gemini_generate_with_cache(client, model_name, contents, base_config_kwargs
             kwargs["system_instruction"] = system_instruction
         return genai_types.GenerateContentConfig(**kwargs)
 
-    def _stream_and_collect(config):
-        text_parts = []
-        final_usage = None
-        for chunk in client.models.generate_content_stream(
+    try:
+        return client.models.generate_content(
             model=model_name,
             contents=contents,
-            config=config,
-        ):
-            chunk_text = getattr(chunk, "text", None)
-            if chunk_text:
-                text_parts.append(chunk_text)
-            # usage_metadata is cumulative on later chunks (Google sends it
-            # toward the stream's end); keep the most recent non-None value.
-            chunk_usage = getattr(chunk, "usage_metadata", None)
-            if chunk_usage is not None:
-                final_usage = chunk_usage
-        return _StreamedGeminiResponse(
-            text="".join(text_parts), usage_metadata=final_usage,
+            config=_build_config(use_cache=cache_name is not None),
         )
-
-    try:
-        return _stream_and_collect(_build_config(use_cache=cache_name is not None))
     except Exception as e:
         if cache_name:
             _msg = str(e).lower()
@@ -5614,31 +5588,27 @@ def _gemini_generate_with_cache(client, model_name, contents, base_config_kwargs
                     flush=True,
                 )
                 _drop_gemini_cache(model_name, system_instruction)
-                return _stream_and_collect(_build_config(use_cache=False))
+                return client.models.generate_content(
+                    model=model_name,
+                    contents=contents,
+                    config=_build_config(use_cache=False),
+                )
         raise
 
 
 def _call_gemini_post_cuts(client, system_instruction, user_content, video_part, model_name):
     """Second Gemini call: visual placement on the kept-only transcript.
 
-    Routed through _gemini_generate_with_cache, which streams the response
-    via client.models.generate_content_stream — Google's blocking-response
-    504 DEADLINE_EXCEEDED applies to the whole completion of the blocking
-    endpoint; the streaming endpoint's deadline applies per-chunk instead.
-    With 24K thinking + 65K output cap and a 200K+ system prompt, blocking
-    calls were landing ~135s right at the deadline cliff; streaming gives
-    the same schema-validated JSON with no quality compromise.
-
     Bounded-deep thinking. thinking_budget capped at 24576 (down from -1 = no cap)
-    to bound total wall-clock + cost (was uncapped, routinely spent >40K thought
-    tokens). 24K is still substantial — well past the HIGH-thinking equivalent.
-    Quality impact: minimal; the model rarely benefits from >24K thinking tokens
-    on this task.
+    because runaway thinking on the now-large prompt (>200K chars) was tripping
+    Google's server-side 504 DEADLINE_EXCEEDED. 24K is still substantial — well
+    past the HIGH-thinking equivalent — but bounded so total wall-clock stays
+    under Google's deadline reliably. Quality impact: minimal; the model rarely
+    benefits from >24K thinking tokens on this task.
     """
     print(
-        f"[gemini-post] Calling {model_name} (streaming, thinking_budget=24576, "
-        f"PostCutPlan schema, system_instruction={len(system_instruction)} chars, "
-        f"user_content={len(user_content)} chars)...",
+        f"[gemini-post] Calling {model_name} (thinking_budget=24576, PostCutPlan schema, "
+        f"system_instruction={len(system_instruction)} chars, user_content={len(user_content)} chars)...",
         flush=True,
     )
     t0 = time.time()
@@ -5812,30 +5782,33 @@ def generate_edit_gemini(
         print("[generate-edit] No trend context available", flush=True)
 
     # Build video content part — shared across both calls (no re-upload).
-    # video_metadata.fps=16 tells Gemini to SAMPLE at 16fps. Without this,
+    # video_metadata.fps=18 tells Gemini to SAMPLE at 18fps. Without this,
     # the SDK defaults to ~1fps regardless of the source's encoded frame
     # rate, so bumping the proxy encoder alone is a no-op for perception.
     # 24 is the API's hard cap (validated 2026-06-13: server returns
     # INVALID_ARGUMENT "threshold must be less than or equal to 24" on any
-    # higher value). We sample at 16fps (down from 22fps on 2026-06-15) as
-    # the smallest editorial sacrifice we could find toward fewer Google
-    # 504s on preview-tier capacity. Talking-head expressions (laughs,
+    # higher value). We sample at 18fps. History: 22 → 16 on 2026-06-15
+    # was attempted as a 504 mitigation, then 16 → 18 on 2026-06-17 after
+    # the real 504 cause was identified as the 120s X-Server-Timeout we
+    # were sending (see _get_genai_client); 18 recovers half the visual-
+    # signal headroom lost at 16 without re-triggering 504s now that the
+    # server-deadline header is raised. Talking-head expressions (laughs,
     # smiles, eye-shifts) hold across 5-10 frames; gestures play over
-    # 100-200ms; 16fps captures all of them. Paired with the 480p@16fps
-    # proxy encode (see _do_gemini_proxy).
-    _video_fps_meta = genai_types.VideoMetadata(fps=16) if hasattr(genai_types, "VideoMetadata") else None
+    # 100-200ms; 18fps captures all of them with comfortable margin.
+    # Paired with the 480p@18fps proxy encode (see _do_gemini_proxy).
+    _video_fps_meta = genai_types.VideoMetadata(fps=18) if hasattr(genai_types, "VideoMetadata") else None
     if inline_video_bytes:
         _video_part = genai_types.Part(
             inline_data=genai_types.Blob(data=inline_video_bytes, mime_type="video/mp4"),
             video_metadata=_video_fps_meta,
         )
-        print(f"[generate-edit] Using inline video ({len(inline_video_bytes)/1024/1024:.1f}MB, no upload, sample_fps=16)", flush=True)
+        print(f"[generate-edit] Using inline video ({len(inline_video_bytes)/1024/1024:.1f}MB, no upload, sample_fps=18)", flush=True)
     elif gemini_file is not None:
         _video_part = genai_types.Part(
             file_data=genai_types.FileData(file_uri=gemini_file.uri, mime_type=getattr(gemini_file, "mime_type", "video/mp4")),
             video_metadata=_video_fps_meta,
         )
-        print(f"[generate-edit] Using pre-uploaded Gemini file: {gemini_file.uri} (sample_fps=16)", flush=True)
+        print(f"[generate-edit] Using pre-uploaded Gemini file: {gemini_file.uri} (sample_fps=18)", flush=True)
     else:
         raise RuntimeError("No video data provided — need either inline_video_bytes or gemini_file")
 
@@ -15303,7 +15276,7 @@ def prewarm_handler(job):
             except Exception as _ae:
                 print(f"[prewarm] audio extraction error: {_ae} — render will extract", flush=True)
 
-        # Gemini proxy encode — 480p @ 16fps, matches the render-time
+        # Gemini proxy encode — 480p @ 18fps, matches the render-time
         # _do_gemini_proxy spec exactly. Encoding here during prewarm (while
         # iOS upload is still completing or just after) hides the encode
         # cost behind upload latency, saving ~7-10s off the render's
@@ -15322,7 +15295,7 @@ def prewarm_handler(job):
                 _pr = subprocess.run(
                     ["ffmpeg", "-y", "-v", "error", "-threads", "0"] + _hw_dec + [
                      "-i", source_cache,
-                     "-vf", "scale=480:-2,fps=16"] + _proxy_venc + [
+                     "-vf", "scale=480:-2,fps=18"] + _proxy_venc + [
                      "-c:a", "libopus", "-b:a", "64k", "-ac", "1",
                      proxy_cache],
                     capture_output=True, text=True, timeout=60,
@@ -16325,19 +16298,20 @@ def handler(job):
 
             try:
                 _proxy_path = os.path.join(work_dir, "gemini_proxy.mp4")
-                # 480p @ 16fps proxy (bumped from 480p @ 10fps). Paired with
-                # video_metadata.fps=16 on the Gemini Part so Gemini SAMPLES
-                # at 16fps — without that metadata the SDK defaults to ~1fps
-                # and bumping the encoder is performative. 24 is the API's
-                # hard cap (validated 2026-06-13: fps>24 returns
-                # INVALID_ARGUMENT). At 16fps the model sees micro-expression
-                # transitions (the half-beat face shift before a line lands),
-                # gesture velocity (where the hand actually moves vs.
-                # settles), and eye-direction changes between blinks — the
-                # editorial signal that lives between frames at 10fps.
-                # Trade-off: ~2.4× video tokens per call and a longer
-                # time-to-first-token, accepted because arc-aware placement
-                # quality is the bottleneck, not API latency.
+                # 480p @ 18fps proxy. Paired with video_metadata.fps=18 on
+                # the Gemini Part so Gemini SAMPLES at 18fps — without that
+                # metadata the SDK defaults to ~1fps and bumping the encoder
+                # is performative. 24 is the API's hard cap (validated
+                # 2026-06-13: fps>24 returns INVALID_ARGUMENT). At 18fps the
+                # model sees micro-expression transitions (the half-beat
+                # face shift before a line lands), gesture velocity (where
+                # the hand actually moves vs. settles), and eye-direction
+                # changes between blinks — the editorial signal that lives
+                # between frames at 10fps. Trade-off: more video tokens per
+                # call than 16fps, accepted because arc-aware placement
+                # quality is the bottleneck, not API latency — and the
+                # primary 504 driver (X-Server-Timeout=120s) is now fixed
+                # at the client level (see _get_genai_client).
                 _proxy_venc = (["-c:v", "h264_nvenc", "-preset", "p1", "-rc", "vbr", "-cq", "32"]
                                if _HAS_NVENC else
                                ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "30"])
@@ -16350,7 +16324,7 @@ def handler(job):
                 # Opus into MP4 natively; Gemini's MP4 ingestion accepts it.
                 _proxy_cmd = subprocess.run(
                     ["ffmpeg", "-y", "-threads", "0"] + _hw_dec + ["-i", _raw_source,
-                     "-vf", "scale=480:-2,fps=16"] + _proxy_venc + [
+                     "-vf", "scale=480:-2,fps=18"] + _proxy_venc + [
                      "-c:a", "libopus", "-b:a", "64k", "-ac", "1",
                      _proxy_path],
                     capture_output=True, text=True, timeout=30,
