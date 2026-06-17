@@ -13108,13 +13108,21 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # starting 0.4s early. The clip is trimmed (or held) to fit
         # the phrase duration, not the reverse.
         #
+        # 2026-06-17 update: the MAX cap is a SANITY guard for
+        # absurdly-long phrases, NOT a normal-phrase cap. It was 2.0s,
+        # which was firing on routine 2-3s phrases (e.g. broll[0]
+        # words 14-23 = 2.24s) and visibly shortening cutaways below
+        # their planned phrase span. Raised to 6.0s so it only catches
+        # a runaway phrase span; normal phrases render at their full
+        # [first_word_start, last_word_end] duration with no clamp.
+        #
         # Only safety caps remain:
-        #   - MAX cap so a huge phrase doesn't drag the cutaway
-        #     absurdly long for the format
+        #   - MAX cap (6.0s) — runaway phrase guard only, never
+        #     touches a normal-length phrase
         #   - Pexels-length cap further below (can't render more
         #     frames than the file has)
         #   - Runtime end cap further below (don't overshoot total)
-        _BROLL_MAX_DUR = 2.0
+        _BROLL_MAX_DUR = 6.0
         _word_span_eff = _out_end - _out_start
         _orig_out_start = _out_start
         _orig_out_end = _out_end
