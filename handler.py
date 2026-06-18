@@ -10065,7 +10065,23 @@ def fetch_broll_clip(broll_entry, duration_needed, work_dir, dialogue_reason="",
                         config=genai_types.GenerateContentConfig(
                             temperature=0.2,
                             max_output_tokens=128,
-                            thinking_config=genai_types.ThinkingConfig(thinking_budget=32),
+                            # Raised 32 → 256: the Rule-A BUT clause requires
+                            # a 5-step structured filter (locate the Required-
+                            # content line → parse must-show-X-not-Y → check
+                            # each candidate's frames → disqualify violators
+                            # → mood-match among survivors), and 32 tokens
+                            # can't execute that. Model defaulted to first-
+                            # pass vibe match, picked content-violating clips
+                            # (e.g. "female editor posing on camera" for a
+                            # "must show editing software timeline" reason).
+                            # 256 is a diagnostic floor: if it resolves the
+                            # violations, the task needed only modest
+                            # reasoning headroom; if it doesn't, the signal
+                            # points beyond budget and we look elsewhere.
+                            # Cost: ~5 picks/video × ~256 thinking tokens =
+                            # ~1.3K extra per render — negligible against
+                            # the 60K editorial call.
+                            thinking_config=genai_types.ThinkingConfig(thinking_budget=256),
                         ),
                     )
                 except Exception as _e:
