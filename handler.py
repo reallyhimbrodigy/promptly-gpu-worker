@@ -95,6 +95,7 @@ from render_schemas import (
 # render_schemas.py's mirror derive automatically. See type_registries.py
 # for the rationale and the failure mode this structure prevents.
 from type_registries import (
+    TIGHT_CUT_OVERLAY_MECHANISM_PHRASES,
     VALID_CAPTION_STYLES,
     VALID_MG_TYPES,
     VALID_TIGHT_CUT_OVERLAYS,
@@ -5660,6 +5661,212 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
     return extract_json(response_text)
 
 
+def _reconcile_tight_cut_overlays(client, vision_text, tight_boundaries, kept_words):
+    """Focused second Gemini call to resolve a vision-claims-but-empty
+    tight_cut_overlays contradiction. Returns a list of 0 or 1 overlay
+    entries to merge into post_cut_plan["tight_cut_overlays"].
+
+    Fires from the recipe-eval site (handler.py:~6148+) only when the
+    detector found that editorial_vision committed to a tight-cut overlay
+    AND the emitted array is empty AND tight boundaries exist. Three
+    prior prose fixes (coherence rule + EFFECT/MECHANISM extension +
+    HARD RULE 2 tiebreaker) failed to prevent the contradiction in the
+    main 60K-token generation; the working theory is that a narrow
+    decision with reasoning room executes reliably where a buried self-
+    check loses to nearby restraint framing. Same lesson as the picker
+    thinking_budget=32 → 256 fix.
+
+    Inputs deliberately scoped tight:
+      - vision_text         — the editor's commitment (one sentence)
+      - tight_boundaries    — kept-word indices, the candidate set
+      - kept_words          — for the "after <word>" context per boundary
+
+    Bounded latency: thinking_budget=512 (narrow 6-boundary × 4-type
+    decision); 30s hard timeout via ThreadPoolExecutor. Caps emission
+    at 1 entry (the bug pattern is claims-but-empty, give the vision
+    one earned overlay). Fail-open to [] on any error / timeout / cap
+    violation / validation failure — never raises, never mutates inputs.
+    """
+    if not tight_boundaries or not vision_text:
+        return []
+
+    _boundary_lines = []
+    for _idx in tight_boundaries:
+        if 0 <= _idx < len(kept_words):
+            _w = (
+                kept_words[_idx].get("punctuated_word")
+                or kept_words[_idx].get("word")
+                or "?"
+            )
+            _boundary_lines.append(f'{_idx} (after "{_w}")')
+    if not _boundary_lines:
+        return []
+    _boundary_block = ", ".join(_boundary_lines)
+
+    _prompt = (
+        "RECONCILIATION TASK — your editorial_vision committed to a tight-cut "
+        "overlay, but the tight_cut_overlays array was emitted empty. Resolve "
+        "by picking the SINGLE tight boundary that most earns the overlay your "
+        "vision named, or return [] if no boundary genuinely earns one.\n\n"
+        f'YOUR EDITORIAL VISION: "{vision_text}"\n\n'
+        f"TIGHT BOUNDARIES (candidate set — kept-word indices, with the word "
+        f"that precedes the cut): {_boundary_block}\n\n"
+        "FOUR OVERLAY TYPES + when each fits:\n"
+        "  - LightLeak — warm bloom across the cut. Use for a reflective / "
+        "arrived-at register: quiet realization, takeaway landing, hook/close "
+        "callback.\n"
+        "  - ShutterFlash — quick white camera-flash snap. Use for higher-"
+        "energy / surprise / payoff hitting: escalation beat after a setup, "
+        "unexpected pivot, the moment a stat or punchline lands.\n"
+        "  - NewspaperWipe — torn paper slams up, covers, holds, rushes off. "
+        "Use for reveal / named-thing handover: the answer arrives, the name "
+        "lands, the surprise gets unwrapped.\n"
+        "  - SceneTitle — large serif title panel (~1200ms chapter break). "
+        "Use ONLY for genuine SECTION boundaries (one act → next act). "
+        "Requires `title` (1-3 uppercase words).\n\n"
+        "RULES:\n"
+        "  - `after_word_index` MUST come from the TIGHT BOUNDARIES candidate "
+        "set above.\n"
+        "  - Max 1 entry. Pick the SINGLE most-earning boundary.\n"
+        "  - SceneTitle requires `title` (1-3 uppercase words). LightLeak / "
+        "ShutterFlash / NewspaperWipe must NOT carry `title` or `label`.\n"
+        "  - If no boundary genuinely earns the overlay your vision named, "
+        "return []. Don't force one onto a weak beat.\n\n"
+        "Return a JSON array of 0 or 1 tight_cut_overlay entries."
+    )
+
+    _schema = {
+        "type": "array",
+        "maxItems": 1,
+        "items": {
+            "type": "object",
+            "properties": {
+                "after_word_index": {"type": "integer"},
+                "type": {"type": "string", "enum": sorted(VALID_TIGHT_CUT_OVERLAYS)},
+                "title": {"type": "string"},
+                "label": {"type": "string"},
+            },
+            "required": ["after_word_index", "type"],
+        },
+    }
+
+    def _do_call():
+        return client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=[_prompt],
+            config=genai_types.GenerateContentConfig(
+                temperature=0.2,
+                max_output_tokens=512,
+                response_mime_type="application/json",
+                response_schema=_schema,
+                thinking_config=genai_types.ThinkingConfig(thinking_budget=512),
+            ),
+        )
+
+    _t0 = time.time()
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _pool:
+            _fut = _pool.submit(_do_call)
+            _resp = _fut.result(timeout=30.0)
+    except concurrent.futures.TimeoutError:
+        print(
+            f"[reconcile-overlays] TIMEOUT (>30s, {time.time() - _t0:.1f}s elapsed) "
+            f"— failing open to []",
+            flush=True,
+        )
+        return []
+    except Exception as _e:
+        print(
+            f"[reconcile-overlays] error ({type(_e).__name__}: {_e}) "
+            f"in {time.time() - _t0:.1f}s — failing open to []",
+            flush=True,
+        )
+        return []
+
+    _elapsed = time.time() - _t0
+    _text = str(getattr(_resp, "text", "") or "").strip()
+    if not _text:
+        print(
+            f"[reconcile-overlays] empty response in {_elapsed:.1f}s — failing open to []",
+            flush=True,
+        )
+        return []
+    try:
+        _parsed = json.loads(_text)
+    except Exception:
+        print(
+            f"[reconcile-overlays] JSON parse failed in {_elapsed:.1f}s "
+            f"(raw: {_text[:120]!r}) — failing open to []",
+            flush=True,
+        )
+        return []
+    if not isinstance(_parsed, list):
+        print(
+            f"[reconcile-overlays] non-list response in {_elapsed:.1f}s "
+            f"(got {type(_parsed).__name__}) — failing open to []",
+            flush=True,
+        )
+        return []
+    if len(_parsed) == 0:
+        print(
+            f"[reconcile-overlays] re-ask returned [] in {_elapsed:.1f}s "
+            f"(model judged no boundary earns the overlay) — keeping empty",
+            flush=True,
+        )
+        return []
+    if len(_parsed) > 1:
+        print(
+            f"[reconcile-overlays] re-ask returned {len(_parsed)} entries in "
+            f"{_elapsed:.1f}s (helper cap=1) — failing open to []",
+            flush=True,
+        )
+        return []
+    _entry = _parsed[0]
+    if not isinstance(_entry, dict):
+        print(
+            f"[reconcile-overlays] entry is not a dict — failing open to []",
+            flush=True,
+        )
+        return []
+    _awi = _entry.get("after_word_index")
+    _typ = _entry.get("type")
+    _tight_set = set(tight_boundaries)
+    if not isinstance(_awi, int) or _awi not in _tight_set:
+        print(
+            f"[reconcile-overlays] after_word_index {_awi!r} not in TIGHT "
+            f"BOUNDARIES {sorted(_tight_set)} — failing open to []",
+            flush=True,
+        )
+        return []
+    if _typ not in VALID_TIGHT_CUT_OVERLAYS:
+        print(
+            f"[reconcile-overlays] type {_typ!r} not in "
+            f"{sorted(VALID_TIGHT_CUT_OVERLAYS)} — failing open to []",
+            flush=True,
+        )
+        return []
+    if _typ == "SceneTitle":
+        _title = _entry.get("title")
+        if not (isinstance(_title, str) and _title.strip()):
+            print(
+                f"[reconcile-overlays] SceneTitle at word {_awi} missing required "
+                f"title — failing open to []",
+                flush=True,
+            )
+            return []
+    else:
+        # Strip title/label from non-SceneTitle entries to match HARD RULE 3.
+        _entry.pop("title", None)
+        _entry.pop("label", None)
+    print(
+        f"[reconcile-overlays] vision-claims-empty contradiction RESOLVED in "
+        f"{_elapsed:.1f}s: type={_typ} after_word_index={_awi}"
+        + (f" title={_entry.get('title')!r}" if _typ == "SceneTitle" else ""),
+        flush=True,
+    )
+    return [_entry]
+
+
 def _record_divergence(component, original, action, *, final=None, reason=""):
     """Single grep-stable log line for any post-Gemini drop / coerce / clamp /
     withhold / override.
@@ -6023,6 +6230,15 @@ def generate_edit_gemini(
             )
         )
 
+        # Coherence-rule example phrases — interpolated below so this single
+        # source of truth (type_registries.py) feeds BOTH the prompt prose AND
+        # the recipe-eval re-ask detector. Hand-maintaining parallel phrase
+        # lists in the two consumers would drift the detector from what the
+        # prompt taught Gemini to recognize.
+        _tco_mechanism_examples = ", ".join(
+            f"'{_p}'" for _p in TIGHT_CUT_OVERLAY_MECHANISM_PHRASES
+        )
+
         post_user += f"""
 
 === KEPT-ONLY TRANSCRIPT ({_kept_count} words, renumbered [0..{_kept_count - 1}]) ===
@@ -6083,7 +6299,7 @@ CHAPTER-BREAK CLASS (~1200ms — a typographic divider; the new section starts h
 
 **HARD RULE 3 — extras (`title`, `label`) belong to SceneTitle ONLY.** Emitting `title` or `label` with LightLeak / ShutterFlash / NewspaperWipe is a hard error — the validator rejects it. SceneTitle without a `title` is also a hard error (the panel has nothing to display).
 
-Your `editorial_vision` and your `tight_cut_overlays` array must agree. If your vision commits to tight-cut overlays — either by naming a specific TYPE ('tight ShutterFlash cuts') OR by naming the EFFECT/MECHANISM ('decorate tight cuts,' 'punctuate the hard cuts,' 'kinetic decoration at the cuts') — emit at least one matching entry on the boundary that earns it. If on reflection no boundary earns one, that's fine — but then your vision should not claim the overlay or its effect. Vision and array tell the same story.
+Your `editorial_vision` and your `tight_cut_overlays` array must agree. If your vision commits to tight-cut overlays — either by naming a specific TYPE ('tight ShutterFlash cuts') OR by naming the EFFECT/MECHANISM ({_tco_mechanism_examples}) — emit at least one matching entry on the boundary that earns it. If on reflection no boundary earns one, that's fine — but then your vision should not claim the overlay or its effect. Vision and array tell the same story.
 
 **Place overlays only where the cut carries real editorial weight.** Editorially-significant cuts include:
   - **chapter shift** — the speaker pivots from one segment of the argument to the next (setup → reveal, problem → solution, "and then" → "but here's the thing"). A strong chapter shift earns SceneTitle (a literal title for the new section). A softer shift earns one of the punctuation overlays.
@@ -6149,6 +6365,51 @@ If a tight boundary is mid-thought, a same-take micro-trim, a filler-removal spl
         except Exception as _eval_err:
             # Eval errors must never block the render — log and continue.
             print(f"[recipe-eval] error: {_eval_err} (non-blocking)", flush=True)
+
+    # ── Vision↔array reconciliation for tight_cut_overlays ────────────────
+    # Detects the "vision claims a tight-cut overlay, array came back empty"
+    # contradiction that three prose fixes (coherence rule c1a, EFFECT/
+    # MECHANISM extension 7b9069c, HARD RULE 2 tiebreaker c109e55) failed
+    # to prevent in the main 60K-token generation. The detector and the
+    # coherence rule both consume TIGHT_CUT_OVERLAY_MECHANISM_PHRASES from
+    # type_registries — single source of truth so the reconciler fires on
+    # exactly what the prompt taught Gemini to recognize as a commitment.
+    #
+    # Runs ONLY when: tight boundaries exist AND vision text claims an
+    # overlay (TYPE name or MECHANISM phrase) AND emitted array is empty.
+    # No-op for the common case (vision silent on overlays → default 0
+    # framing stays correctly applied; no re-ask, no wall-clock cost).
+    if isinstance(post_cut_plan, dict) and _eval_tight:
+        try:
+            _vp = post_cut_plan.get("video_plan") or {}
+            _vision_raw = str(_vp.get("editorial_vision") or "").strip()
+            _vision_lower = _vision_raw.lower()
+            _types_lower = {_t.lower() for _t in VALID_TIGHT_CUT_OVERLAYS}
+            _vision_claims_overlay = (
+                any(_t in _vision_lower for _t in _types_lower)
+                or any(_p in _vision_lower for _p in TIGHT_CUT_OVERLAY_MECHANISM_PHRASES)
+            )
+            _emitted_overlays = post_cut_plan.get("tight_cut_overlays") or []
+            if _vision_claims_overlay and not _emitted_overlays:
+                print(
+                    f"[reconcile-overlays] DETECTED vision-claims-empty: "
+                    f"vision={_vision_raw[:100]!r} tight_boundaries="
+                    f"{sorted(_eval_tight)} — re-asking",
+                    flush=True,
+                )
+                _reconciled = _reconcile_tight_cut_overlays(
+                    client, _vision_raw, _eval_tight, kept_words,
+                )
+                if _reconciled:
+                    post_cut_plan["tight_cut_overlays"] = _reconciled
+        except Exception as _rec_err:
+            # Reconciliation must never block the render — log and continue.
+            # The array stays whatever Gemini's original pass produced.
+            print(
+                f"[reconcile-overlays] outer error: {_rec_err} (non-blocking, "
+                f"keeping original empty array)",
+                flush=True,
+            )
 
     # ── Translate anchors: new index space → source index space ─────────────
     post_cut_plan = _translate_post_cut_anchors_to_src(post_cut_plan, new_to_src)

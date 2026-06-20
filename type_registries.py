@@ -58,6 +58,31 @@ VALID_TIGHT_CUT_OVERLAYS = frozenset({
     "LightLeak", "ShutterFlash", "NewspaperWipe", "SceneTitle",
 })
 
+# Mechanism / effect phrases that count as a tight-cut-overlay COMMITMENT in
+# editorial_vision (separate from naming a specific TYPE — those are matched
+# via VALID_TIGHT_CUT_OVERLAYS lowercased substring). Single source of truth
+# for two consumers:
+#   1. The HOW TO PLACE TIGHT-CUT OVERLAYS prompt section embeds these as the
+#      coherence-rule's EFFECT/MECHANISM examples — Gemini sees them as the
+#      patterns its vision text should/should-not include depending on whether
+#      it intends to emit an overlay.
+#   2. The recipe-eval reconciliation pass (_reconcile_tight_cut_overlays in
+#      handler.py) substring-matches vision text against these to detect the
+#      "vision claims an overlay but the array is empty" contradiction and
+#      trigger a focused re-ask.
+# Both consumers MUST read from this constant — hand-maintaining parallel
+# phrase lists would drift the detector away from what the prompt taught
+# Gemini to recognize, defeating the re-ask's purpose.
+#
+# Tuple (not frozenset) so the order matches what gets rendered into the
+# prompt prose. Sorted iteration would be fine for detection but would
+# cosmetically shift the coherence rule's example order on every refactor.
+TIGHT_CUT_OVERLAY_MECHANISM_PHRASES = (
+    "decorate tight cuts",
+    "punctuate the hard cuts",
+    "kinetic decoration at the cuts",
+)
+
 VALID_ZOOM_TYPES = frozenset({
     "SmoothPush", "SnapReframe", "FocusWindow", "StepZoom", "LetterboxPush",
     "StageZoom", "DepthPull",
