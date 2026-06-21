@@ -596,12 +596,17 @@ def _get_genai_client():
     HttpOptions.timeout (milliseconds) drives BOTH the local httpx read
     timeout AND a server-side X-Server-Timeout header that the genai SDK
     sends to Google. Google honors the header — if the model's wall-clock
-    exceeds it, Google returns 504 DEADLINE_EXCEEDED. The post-cuts call
-    routinely runs 135-150s with 24K thinking + 65K output cap; at 120_000
-    we were explicitly telling Google to abort under our actual wall-clock,
-    which is exactly what was producing the 504s in production. Set to
-    300_000ms (5 min) — well above the model's natural completion time,
-    well under Modal's 600s function timeout (modal_app.py:468).
+    exceeds it, Google returns 504 DEADLINE_EXCEEDED.
+
+    Sized for the post-cuts call's structural wall-clock at thinking_budget=
+    60000: ~135s baseline at thinking_budget=24576 scales roughly linearly,
+    so ~337s worst-case at 60K. Original 120_000ms (2 min) clipped reliably;
+    300_000ms (5 min) clipped on complex prompts (job 2026-06-21 hit 316s
+    execution before 504 at the 300s mark). Raised to 480_000ms (8 min) for
+    comfortable headroom on every prompt thinking_budget=60K can consume,
+    while keeping room under Modal's function timeout (modal_app.py:468 =
+    900s = 15 min after this fix) for the non-Gemini pipeline work
+    (download / fps-normalize / render / composite / upload).
     """
     global _genai_client
     if _genai_client is None:
@@ -610,7 +615,7 @@ def _get_genai_client():
             raise RuntimeError("GEMINI_API_KEY not set")
         _genai_client = genai_client_mod.Client(
             api_key=api_key,
-            http_options=genai_types.HttpOptions(timeout=300_000),
+            http_options=genai_types.HttpOptions(timeout=480_000),
         )
     return _genai_client
 

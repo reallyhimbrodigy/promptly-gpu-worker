@@ -465,7 +465,7 @@ prewarm_volume = modal.Volume.from_name("promptly-prewarm-cache", create_if_miss
 
 # ── Web endpoint ───────────────────────────────────────────────────────────────
 @app.cls(
-    timeout=600,          # 10 min — orchestrator runs init + audio + remotion + composite + upload
+    timeout=900,          # 15 min — orchestrator runs init + audio + remotion + composite + upload. Raised from 600 (2026-06-21) to keep ~420s of buffer for non-Gemini work after the Gemini client timeout was raised to 480s (handler.py:_get_genai_client) to accommodate thinking_budget=60000's worst-case wall-clock (~337s). If Gemini took 480s and Modal capped at 600s, only 120s remained for download/render/composite/upload — render alone routinely needs 30-90s. 900s gives comfortable margin; jobs that don't hit Gemini's cap (the typical case) cost the same as before since billing is per-active-second, not per-cap.
     scaledown_window=30,  # tear down fast — at $8.27/hr full spec, idle scaledown was costing ~$0.69 per render (83% of total bill). 30s window catches back-to-back jobs without paying for long idle.
     gpu="H100",           # H100 retained for RIFE frame interpolation + general
                           # rendering speed. ASR no longer needs it (Whisper + wav2vec2
