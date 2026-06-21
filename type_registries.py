@@ -81,6 +81,18 @@ TIGHT_CUT_OVERLAY_MECHANISM_PHRASES = (
     "decorate tight cuts",
     "punctuate the hard cuts",
     "kinetic decoration at the cuts",
+    # Job b89287c4 (2026-06-20) emitted editorial_vision text "tight-cut
+    # punctuation overlays to drive the pace" — a textbook vision-claims-
+    # but-array-empty contradiction that the re-ask should have caught
+    # but didn't, because none of the original three phrases substring-
+    # matched. The phrases below are how Gemini actually writes overlay
+    # commitments in production; without them in this constant, the
+    # detector ran no-op on the exact failure case it was built for.
+    "tight-cut overlay",
+    "tight-cut overlays",
+    "tight cut overlay",
+    "tight cut overlays",
+    "tight-cut punctuation",
 )
 
 VALID_ZOOM_TYPES = frozenset({
