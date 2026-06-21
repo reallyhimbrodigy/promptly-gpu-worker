@@ -6257,7 +6257,7 @@ Indices below are the NEW kept-only space [0..{_kept_count - 1}]. Every word_ind
 
   {_cut_boundary_block}
 
-=== TIGHT BOUNDARIES (real cuts with no handle room — these render as HARD CUTS; do NOT place transitions here. Listed so you know the cut exists: land a zoom on the first word after a tight cut to mask the jump, and never treat the video as one continuous clip. SEPARATELY, the most editorially-significant 1-2 of these can carry a brief `tight_cut_overlay` — see HOW TO PLACE TIGHT-CUT OVERLAYS below) ===
+=== TIGHT BOUNDARIES (real cuts with no audio handle — crossfade transitions cannot fit here, but ZERO-HANDLE transitions (LightLeak / ShutterFlash / NewspaperWipe / SceneTitle / DipToBlack) can, and `tight_cut_overlay` decorations can. Listed so you know the cut exists: at minimum land a zoom on the first word after to mask the jump. The most editorially-significant 1-2 of these may carry a tight_cut_overlay (light ~180ms decoration) OR a zero-handle transition (heavy 700-1800ms moment) — never both on the same cut. See HOW TO PLACE TRANSITIONS and HOW TO PLACE TIGHT-CUT OVERLAYS below for the editorial distinction.) ===
 
   {_tight_boundary_block}
 
@@ -6269,7 +6269,7 @@ Each transition component renders at its natural duration — the cadence its ra
 
 === HOW TO PLACE TRANSITIONS ===
 
-**HARD RULE 1 — `after_word_index` MUST come from the CUT BOUNDARIES list above (NOT TIGHT BOUNDARIES, NOT any other index).** A transition placed at any other index — including any TIGHT BOUNDARIES entry — has no valid cut to play across and the renderer will not produce it.
+**HARD RULE 1 — `after_word_index` MUST come from CUT BOUNDARIES or TIGHT BOUNDARIES.** Standard crossfade transitions (Stack, CardSwipe, ZoomThrough, SlideOver, CrossfadeZoom, StepPush, FilmStrip) MUST anchor on CUT BOUNDARIES — they consume audio handle for the equal-power crossfade and would audio-mush continuous speech on a tight cut. Zero-handle transitions (LightLeak, ShutterFlash, NewspaperWipe, SceneTitle, DipToBlack) MAY anchor on EITHER list — their renderers substitute silence for the audio mix at peak and don't need handle frames. A transition at any non-boundary index has no cut to play across and the renderer will not produce it. The validator hard-rejects a crossfade type on a tight boundary.
 
 **HARD RULE 2 — the transition's natural duration must fit the boundary's gap.** Each CUT BOUNDARIES entry shows its available audio gap (`820ms gap`). A transition fits when its natural duration ≤ gap/2. If you want SceneTitle (1800ms natural) at a boundary annotated `2400ms gap`, that does NOT fit (need ≥ 3600ms gap). Match the transition's weight to both the dialogue's shift AND the available room — the long heavy transitions (SceneTitle, FilmStrip) are precisely the ones that earn the long pauses, so don't default to short safe transitions everywhere when a 4000ms-gap boundary is sitting right there asking for a chapter break.
 
@@ -6278,6 +6278,8 @@ Each transition component renders at its natural duration — the cadence its ra
 **Place transitions where they fit and earn the moment.** Skip mid-sentence boundaries where the dialogue carries unbroken across the cut (same verb-subject continuing) — there a transition would seam the speaker mid-thought.
 
 For each chosen `after_word_index`, pick a transition `type` whose character matches the dialogue's shift at that boundary (ZoomThrough, CardSwipe, ShutterFlash, SlideOver, CrossfadeZoom, SceneTitle, NewspaperWipe, FilmStrip, Stack, StepPush). Vary the type across emitted transitions — repeating the same type at adjacent boundaries reads as templating.
+
+**Zero-handle transition vs `tight_cut_overlay` — same effect family, different editorial weight, one per boundary.** Same 4 type names (LightLeak / ShutterFlash / NewspaperWipe / SceneTitle) are available both as zero-handle TRANSITIONS on tight boundaries AND as `tight_cut_overlay` decorations on tight boundaries. They are NOT interchangeable: a `tight_cut_overlay` is LIGHT (~180ms; SceneTitle 1200ms), audio plays through unaltered, video plays through unaltered, decoration paints on top. A zero-handle transition is HEAVY (700-1800ms), audio goes silent under the transition window, video animation dominates the cut. A zero-handle transition on a tight cut is a RARE choice — reserve it for a genuine act/chapter break OR the single biggest moment of the video where you want the cut itself to be the editorial event. Most tight cuts get either a light overlay or nothing; reaching for the heavy transition by default would read as dramatic templating. **Never emit both a transition AND a tight_cut_overlay on the same boundary — the validator will reject the recipe.**
 
 === HOW TO PLACE TIGHT-CUT OVERLAYS ===
 
@@ -6310,6 +6312,8 @@ Your `editorial_vision` and your `tight_cut_overlays` array must agree. If your 
 If a tight boundary is mid-thought, a same-take micro-trim, a filler-removal splice, or any non-editorial cut, leave it as a clean hard cut. The hard cut IS the right call there.
 
 **Variety across the cap.** If you emit two, prefer two different types unless the editorial character of both moments genuinely matches the same type. Two SceneTitles in one video is almost always wrong (a video usually has at most one true chapter break worth labeling); two of the same punctuation overlay reads as templating.
+
+**For heavier editorial weight, see the zero-handle transition path in HOW TO PLACE TRANSITIONS.** The same 4 type names (LightLeak / ShutterFlash / NewspaperWipe / SceneTitle) are also available as full zero-handle transitions on tight boundaries — 700-1800ms with audio silence and dominant video animation. Overlays are the LIGHT default for tight cuts; the heavy transition is the RARE exception reserved for genuine act/chapter breaks or the single biggest moment. Never emit both decorations on the same boundary — the validator will reject the recipe.
 """
 
 
@@ -7016,6 +7020,22 @@ If a tight boundary is mid-thought, a same-take micro-trim, a filler-removal spl
         edit_plan.get("remove_words") or [], _dg_words,
     )
 
+    # Tight-boundary set in SOURCE space — read by BOTH validators after
+    # Option B lands (2026-06-21): transitions validator rejects crossfade
+    # types whose after_word_index falls on a tight boundary, and the
+    # tight_cut_overlays validator rejects overlays whose after_word_index
+    # doesn't. Same kept→source translation pattern used by the overlay
+    # validator before the lift; defended against NameError on degenerate
+    # transcripts where _tight_boundary_indices was never built (the
+    # boundary block at handler.py:~6155 skips on empty kept_words).
+    try:
+        _tight_src_set = {
+            new_to_src[_ki] for _ki in _tight_boundary_indices
+            if 0 <= _ki < len(new_to_src)
+        }
+    except NameError:
+        _tight_src_set = set()
+
     raw_transitions = edit_plan.get("transitions") or []
     if raw_transitions and _dg_words:
         # Transitions = pack PascalCase names. VALID_TRANSITION_TYPES is the
@@ -7057,6 +7077,26 @@ If a tight boundary is mid-thought, a same-take micro-trim, a filler-removal spl
                     flush=True,
                 )
                 continue
+            # Type-eligibility per boundary class: crossfade transitions need
+            # CUT BOUNDARIES (audio handle for the equal-power crossfade at
+            # handler.py:11540-11557); zero-handle types work on either CUT or
+            # TIGHT BOUNDARIES (audio-hard-cut branch at handler.py:11512-11538
+            # substitutes silence + click-prevention fades, no handle needed).
+            # On TIGHT BOUNDARIES, anything outside ZERO_HANDLE_TRANSITION_TYPES
+            # would audio-mush the speaker's continuous speech across the cut.
+            # HOW TO PLACE TRANSITIONS HARD RULE 1 in the prompt teaches the
+            # same rule; this validator is the structural backstop.
+            if awi in _tight_src_set and tr_type not in ZERO_HANDLE_TRANSITION_TYPES:
+                raise ValueError(
+                    f"transitions[{_ti}].type={tr_type!r} at after_word_index={awi} "
+                    f"is a TIGHT BOUNDARY (no audio handle). Only zero-handle "
+                    f"transition types {sorted(ZERO_HANDLE_TRANSITION_TYPES)} are "
+                    f"valid on tight boundaries — crossfade types would audio-mush "
+                    f"continuous speech across the cut. Either move this transition "
+                    f"to a CUT BOUNDARY, change its type to a zero-handle one, or "
+                    f"replace it with a `tight_cut_overlay` for lighter editorial "
+                    f"weight."
+                )
             word_end = float(_dg_words[awi].get("end") or 0)
             # Build extras dict — copy through all component-specific props
             _extras = {
@@ -7104,19 +7144,9 @@ If a tight boundary is mid-thought, a same-take micro-trim, a filler-removal spl
     raw_tco = edit_plan.get("tight_cut_overlays") or []
     if raw_tco and _dg_words:
         _valid_tco_types = set(VALID_TIGHT_CUT_OVERLAYS)
-        # Tight-boundary indices were computed earlier in kept-only space;
-        # translate to source space so we can test the validated, source-
-        # space after_word_index values Gemini emits.
-        try:
-            _tight_src_set = {
-                new_to_src[_ki] for _ki in _tight_boundary_indices
-                if 0 <= _ki < len(new_to_src)
-            }
-        except NameError:
-            # _tight_boundary_indices wasn't built (no boundaries pass —
-            # likely an empty/degenerate transcript). With no tight set
-            # we cannot validate, so drop every overlay.
-            _tight_src_set = None
+        # _tight_src_set is lifted to a higher scope (above the transitions
+        # validator) so both validators read one derivation. Empty set ≡ no
+        # tight boundaries pass — every overlay correctly rejected below.
 
         _TIGHT_CUT_OVERLAY_CAP = 2  # max per video — across ALL overlay types combined
         _applied_tco_count = 0
@@ -7173,10 +7203,14 @@ If a tight boundary is mid-thought, a same-take micro-trim, a filler-removal spl
                     flush=True,
                 )
                 continue
-            if _tight_src_set is None or awi_t not in _tight_src_set:
+            if awi_t not in _tight_src_set:
                 # Wrong boundary type — Gemini emitted the overlay at a CUT
                 # boundary (transitions live there) or at a non-boundary
                 # index. The overlay path only fires at TIGHT BOUNDARIES.
+                # (Empty _tight_src_set ≡ no tight boundaries pass at all,
+                # so every overlay is correctly rejected here — same
+                # outcome as the previous `is None` branch, now collapsed
+                # into one path since the lifted derivation never None's.)
                 print(
                     f"[generate-edit] DROP tight_cut_overlay '{tco_type}' [{_toi}]: "
                     f"after_word_index={awi_t} is not a TIGHT BOUNDARY — overlay "
@@ -7239,6 +7273,57 @@ If a tight boundary is mid-thought, a same-take micro-trim, a filler-removal spl
                     f"after_word_index={awi_t} (t={word_end_t:.2f}s) does not land "
                     f"in a clip with a successor.",
                     flush=True,
+                )
+
+    # ── Tight-decoration collision check ──────────────────────────────
+    # A single tight boundary may NOT carry BOTH a zero-handle transition
+    # AND a tight_cut_overlay — same effect family, different editorial
+    # weight; the HOW TO PLACE TRANSITIONS section teaches "pick one,
+    # never both." This is the structural backstop: detect collisions
+    # AFTER both validators have stamped their entries on validated_cuts
+    # (transition_out + _tight_cut_overlay live on the same clip dict).
+    #
+    # Behavior is gated by _TIGHT_DECORATION_COLLISION (module-level
+    # constant near ZERO_HANDLE_TRANSITION_TYPES) for a one-constant
+    # flip between development-strict and production-safe behavior:
+    #   "strict"            → raise ValueError, render aborts. Loud
+    #                         drift detection during the prompt rollout.
+    #   "soft_overlay_wins" → drop the overlay (keep the transition
+    #                         since it's the heavier, more deliberate
+    #                         choice), log a divergence line, continue.
+    for _ci, _clip in enumerate(validated_cuts):
+        _tr_out = str(_clip.get("transition_out") or "").strip()
+        _ov_out = str(_clip.get("_tight_cut_overlay") or "").strip()
+        if _tr_out and _tr_out != "none" and _ov_out:
+            # Both decorations on the same clip's outgoing cut.
+            if _TIGHT_DECORATION_COLLISION == "strict":
+                raise ValueError(
+                    f"validated_cuts[{_ci}] has BOTH transition_out={_tr_out!r} AND "
+                    f"_tight_cut_overlay={_ov_out!r} on the same boundary. The two "
+                    f"are competing decorations for one cut — pick the transition "
+                    f"for heavier editorial weight (700-1800ms, audio silent, video "
+                    f"animation dominates) OR the overlay for lighter punctuation "
+                    f"(~180ms, audio continues, decoration paints on top). The HOW "
+                    f"TO PLACE TRANSITIONS section teaches this — your prompt-side "
+                    f"emission violated it. Remove one of the two."
+                )
+            elif _TIGHT_DECORATION_COLLISION == "soft_overlay_wins":
+                _record_divergence(
+                    "tight_decoration_collision",
+                    {
+                        "clip_index": _ci,
+                        "transition_out": _tr_out,
+                        "tight_cut_overlay_dropped": _ov_out,
+                    },
+                    "drop_overlay_keep_transition",
+                    reason="both_on_one_boundary",
+                )
+                _clip.pop("_tight_cut_overlay", None)
+                _clip.pop("_tight_cut_overlay_extras", None)
+            else:
+                raise RuntimeError(
+                    f"_TIGHT_DECORATION_COLLISION = {_TIGHT_DECORATION_COLLISION!r} "
+                    f"is not a recognized mode. Valid: 'strict', 'soft_overlay_wins'."
                 )
 
     # caption_style, caption_keywords, caption_position_segments, text_overlays,
@@ -10799,15 +10884,16 @@ TRANSITION_NATURAL_DURATION_MS = {
 # generated overlay at peak (ShutterFlash). These technically don't
 # need handle frames — they work even when the audio gap is 0ms.
 #
-# Architecture note (2026-06-14): the four documented zero-handle-viable
-# types are listed here so the audio-hard-cut path in build_per_cut_audio
-# is reachable. They are NOT YET enabled at the CUT BOUNDARIES filter
-# (handler.py:~5697) — that filter still requires the standard 2 × min
-# natural-duration handle for ALL types, so today no zero-handle
-# transition can reach a tight boundary via Gemini's recipe. The set is
-# the readiness layer for when a clean-default zero-handle transition
-# (e.g. DipToBlack) ships and the boundary filter is relaxed for the
-# zero-handle class.
+# 2026-06-21: ENABLED on tight boundaries. The boundary classifier at
+# handler.py:6146-6162 still produces two mutually-exclusive lists
+# (CUT vs TIGHT) for the prompt, but the transition validator now
+# accepts after_word_index from EITHER list when type is in this set
+# (handler.py:~7050 — the type-conditional reject). HOW TO PLACE
+# TRANSITIONS HARD RULE 1 in the prompt teaches the same rule:
+# crossfade types need CUT boundaries; zero-handle types fit either.
+# Audio-hard-cut path in build_per_cut_audio (handler.py:11512-11538)
+# is what makes this work — the audit-#4 silence-with-splice-fade
+# substitution from 2026-06-14 finally has its routing.
 ZERO_HANDLE_TRANSITION_TYPES = {
     "ShutterFlash",
     "NewspaperWipe",
@@ -10815,6 +10901,26 @@ ZERO_HANDLE_TRANSITION_TYPES = {
     "SceneTitle",
     "DipToBlack",
 }
+
+# ── Tight-decoration collision behavior ───────────────────────────────
+# When Gemini emits BOTH a zero-handle transition AND a tight_cut_overlay
+# anchored at the same tight boundary, the validator at handler.py:~7244
+# decides what to do. Two modes:
+#
+#   "strict"            → raise ValueError, render aborts. Surfaces
+#                         Gemini drift loudly during development so the
+#                         HOW TO PLACE TRANSITIONS "never both" rule's
+#                         compliance is visible.
+#   "soft_overlay_wins" → drop the overlay, keep the transition, log a
+#                         divergence line, render proceeds. Production-
+#                         safe — a single Gemini hiccup doesn't abort
+#                         the render.
+#
+# Set to "strict" now (per user direction 2026-06-21) for development
+# visibility. Once a few real renders confirm the prompt prevents the
+# collision in practice, flip to "soft_overlay_wins" — that's the
+# intended production setting. One-constant flip; no logic change.
+_TIGHT_DECORATION_COLLISION = "strict"
 
 # Shortest natural transition — used as the CUT BOUNDARIES filter floor.
 # A boundary with audio gap below 2 × this value cannot fit ANY transition
