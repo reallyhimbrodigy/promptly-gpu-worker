@@ -7000,18 +7000,27 @@ If a tight boundary is mid-thought, a same-take micro-trim, a filler-removal spl
     # with no subsequent clip), DROP that single transition and continue —
     # same auto-handle pattern as caption z-order: Python OWNS the cross-
     # field consistency, the rest of the plan still renders.
+    # Removed-word set is referenced by BOTH the transitions validator below
+    # AND the tight_cut_overlays validator further down (each drops entries
+    # whose after_word_index targets a word the cuts pass removed). Derive
+    # once here, before either branch, so the overlay path works on jobs
+    # that emit overlays without transitions — single-clip footage with all
+    # visual cuts in TIGHT BOUNDARIES (the audio gate's zero-handle gap
+    # produces this shape; see the audio-gap-vs-visual-cut investigation).
+    # Previously this assignment lived inside `if raw_transitions and
+    # _dg_words:` and the overlay read at the validator below hit
+    # UnboundLocalError on the no-transitions-emitted path. The resolver
+    # is safe on every input — empty set on empty remove_words OR empty
+    # deepgram_words (handler.py:5227-5228, 5231).
+    _tr_removed = _remove_words_to_src_indices(
+        edit_plan.get("remove_words") or [], _dg_words,
+    )
+
     raw_transitions = edit_plan.get("transitions") or []
     if raw_transitions and _dg_words:
         # Transitions = pack PascalCase names. VALID_TRANSITION_TYPES is the
         # canonical set; mirror it here so adding a type only edits one place.
         _valid_tr_types = set(VALID_TRANSITION_TYPES)
-        # Build set of removed word indices so we can reject transitions that
-        # target removed words (Gemini must pick kept words). Reuses the
-        # canonical resolver so all three remove_words shapes collapse to
-        # the same removed-set the splicer will use.
-        _tr_removed = _remove_words_to_src_indices(
-            edit_plan.get("remove_words") or [], _dg_words,
-        )
         for _ti, tr in enumerate(raw_transitions):
             if not isinstance(tr, dict):
                 raise ValueError(f"transitions[{_ti}] must be an object")
