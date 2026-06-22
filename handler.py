@@ -2001,7 +2001,7 @@ def cluster_shot_changes(shot_changes, min_gap=0.5):
     return clustered
 
 
-def shot_change_word_boundaries(shot_changes, kept_words, snap_tolerance=0.60):
+def shot_change_word_boundaries(shot_changes, kept_words, snap_tolerance=0.60, shot_scores=None, out_scores=None):
     """Map each clustered shot change to a kept-word boundary (in kept-word
     index space) and its corresponding split-time (source seconds).
 
@@ -2061,6 +2061,12 @@ def shot_change_word_boundaries(shot_changes, kept_words, snap_tolerance=0.60):
         ):
             out.append((_best_idx, _best_we))
             seen_indices.add(_best_idx)
+            # Carry the scdet confidence score for this boundary out via the
+            # side-channel dict (keyed by kept-word index). `_sc` is the
+            # clustered detection time; shot_scores is keyed by round(t, 3).
+            # Used only by the scene-change floor's confidence gate.
+            if out_scores is not None and shot_scores is not None:
+                out_scores[_best_idx] = shot_scores.get(round(float(_sc), 3))
         else:
             # Detection didn't snap. Could not place a boundary — log so
             # the silent drop becomes visible. The pre-Gemini boundary
@@ -2166,7 +2172,7 @@ def _parse_scdet_output(stdout, stderr):
 _SCDET_SWEEP_THRESHOLD = 1.0
 
 
-def detect_shot_changes(source_path, threshold=7.0):
+def detect_shot_changes(source_path, threshold=7.0, out_scores=None):
     """Detect hard shot changes in the source video via ffmpeg's `scdet`
     (scene change detect) filter.
 
@@ -2246,8 +2252,19 @@ def detect_shot_changes(source_path, threshold=7.0):
         proc_legacy = subprocess.run(cmd_legacy, capture_output=True, text=True, timeout=60)
         legacy_detections = _parse_scdet_output(proc_legacy.stdout, proc_legacy.stderr)
         changes = sorted({t for t, _ in legacy_detections})
+        # Legacy path recovered no usable scores → leave out_scores empty so
+        # the scene-change floor fails OPEN (decorates) rather than skipping.
     else:
         changes = sorted({t for t, s in detections if s >= threshold})
+        if out_scores is not None:
+            # Map flagged timestamp → score so the scene-change floor can gate
+            # its automatic backfill on confidence. Keyed by round(t, 3) to
+            # match the boundary snapper's lookup; keeps the MAX per timestamp.
+            for _t, _s in detections:
+                if _s >= threshold:
+                    _k = round(float(_t), 3)
+                    if _s > out_scores.get(_k, 0.0):
+                        out_scores[_k] = float(_s)
 
     print(
         f"[shot-changes] Detected {len(changes)} cuts "
@@ -5673,6 +5690,18 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
     return extract_json(response_text)
 
 
+# Confidence floor for the AUTOMATIC scene-change backfill only. scdet scores
+# real camera cuts high (observed production cuts: 7.75–14.7); PiP / embedded-
+# insert overlay edges — which scdet reports identically — tend to score lower.
+# The floor auto-decorates a bare shot boundary ONLY when its scdet score
+# clears this bar, so low-confidence / fluttering edges are skipped. Gemini's
+# OWN discretionary overlays are NOT gated by this (it has vision judgment the
+# deterministic floor lacks). Tunable in one place. A boundary with NO known
+# score (legacy no-score scdet path) fails OPEN — decorate — since a missing
+# score must not silently disable the floor.
+SCENE_FLOOR_MIN_SCDET_SCORE = 8.0
+
+
 def _scene_floor_rotation(current_types):
     """Deterministic variety fill for the scene-change decoration floor.
 
@@ -5951,7 +5980,7 @@ def _record_divergence(component, original, action, *, final=None, reason=""):
 
 def generate_edit_gemini(
     video_path, vibe, duration, trend_context=None, deepgram_words=None,
-    shot_changes=None, vocal_emphasis=None, source_loudness=None,
+    shot_changes=None, shot_change_scores=None, vocal_emphasis=None, source_loudness=None,
     face_positions=None, smoothed_face_trajectory=None,
     user_style_profile=None,
     gemini_file=None, cached_response=None, inline_video_bytes=None,
@@ -5960,6 +5989,7 @@ def generate_edit_gemini(
     _pre_analysis = cached_response
 
     _shots = list(shot_changes or [])
+    _shot_score_map = dict(shot_change_scores or {})  # scdet time(round 3)→score
     _vocal = list(vocal_emphasis or [])
     _loudness = dict(source_loudness or {})
     _face_positions = list(face_positions or [])
@@ -6165,7 +6195,11 @@ def generate_edit_gemini(
                 # renderer's actual cuts.
                 _dead_air_boundary_indices.append(new_idx)
         # Shot-change-derived boundaries (kept-word indices)
-        _shot_boundaries = shot_change_word_boundaries(_shots, kept_words)
+        _shot_boundary_scores = {}  # kept-word index → scdet confidence score
+        _shot_boundaries = shot_change_word_boundaries(
+            _shots, kept_words,
+            shot_scores=_shot_score_map, out_scores=_shot_boundary_scores,
+        )
         _shot_boundary_set = {_ni for (_ni, _) in _shot_boundaries}
         _dead_air_set = set(_dead_air_boundary_indices)
 
@@ -7095,10 +7129,21 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
             new_to_src[_ki] for _ki in _tight_boundary_indices
             if _ki in _shot_boundary_set and 0 <= _ki < len(new_to_src)
         }
+        # Source-index → scdet confidence score, for the floor's confidence gate.
+        _shot_src_score = {
+            new_to_src[_ki]: _shot_boundary_scores.get(_ki)
+            for _ki in _tight_boundary_indices
+            if _ki in _shot_boundary_set and 0 <= _ki < len(new_to_src)
+        }
     except NameError:
         _tight_src_set = set()
         _shot_src_set = set()
+        _shot_src_score = {}
 
+    # Boundaries (source after_word_index) carrying a real transition → type.
+    # Overlays and the scene-change floor read this to skip double-decorating a
+    # boundary that already has a transition (transition wins — heavier).
+    _transition_type_by_awi = {}
     raw_transitions = edit_plan.get("transitions") or []
     if raw_transitions and _dg_words:
         # Transitions = pack PascalCase names. VALID_TRANSITION_TYPES is the
@@ -7176,6 +7221,7 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                 ce = float(clip["source_end"])
                 if cs - 0.05 <= word_end <= ce + 0.05 and ci < len(validated_cuts) - 1:
                     clip["transition_out"] = tr_type
+                    _transition_type_by_awi[awi] = tr_type
                     if _extras:
                         clip["_transition_extras"] = _extras
                     print(f"[generate-edit] Transition '{tr_type}' applied to clip {ci} (after word {awi})", flush=True)
@@ -7195,23 +7241,27 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
 
     # Transition count/variety is Gemini's decision — the prompt teaches restraint.
 
-    # ── Tight-cut overlays (overlay-on-top-of-hard-cut, TIGHT BOUNDARIES) ────
-    # Strictly additive: an empty/absent list leaves the pipeline behaviorally
-    # identical to the pre-overlay path. When entries are present, validate
-    # type, validate after_word_index falls on a TIGHT BOUNDARY (translated
-    # to source space), enforce the 2-per-video cap, and stamp the clip with
-    # `_tight_cut_overlay` data — parallel to `transition_out` but on the
-    # tight-boundary side. The overlay value is DATA, not a transition; the
-    # render path dispatches via the OverlayCutEffect component (which sits
-    # ON TOP of the unmodified hard cut; no handle frames, no audio touched).
+    # ── Tight-cut overlays (paint-on-top decorations at TIGHT BOUNDARIES) ────
+    # Overlays attach to a FRAME POSITION (the boundary word's projected output
+    # frame), NOT a clip-pair. OverlayCutEffect paints on top of continuously-
+    # playing video and needs only atFrame (no clipA/clipB) — so an overlay is
+    # valid on ANY tight boundary, including one sitting MID-CLIP (no sub-clip
+    # split). Resolved overlays are collected here as a flat, boundary-keyed
+    # list; the render projects each after_word_index to an output frame via
+    # _projected_words. (Previously overlays required a clip WITH A SUCCESSOR,
+    # which silently dropped every overlay on a no-removal / no-transition video
+    # where the whole take is one clip — the attachment bug behind the session's
+    # overlay failures.)
+    #
+    # _resolved_overlays: [{after_word_index (source), type, title?, label?}].
+    _resolved_overlays = []
+    _overlay_awis = set()  # boundaries already carrying an overlay
     raw_tco = edit_plan.get("tight_cut_overlays") or []
     if raw_tco and _dg_words:
         _valid_tco_types = set(VALID_TIGHT_CUT_OVERLAYS)
-        # _tight_src_set is lifted to a higher scope (above the transitions
-        # validator) so both validators read one derivation. Empty set ≡ no
-        # tight boundaries pass — every overlay correctly rejected below.
-
-        _TIGHT_CUT_OVERLAY_CAP = 2  # max per video — across ALL overlay types combined
+        # The ≤2 cap governs Gemini's DISCRETIONARY emissions only; the
+        # scene-change floor below backfills uncapped (a separate goal).
+        _TIGHT_CUT_OVERLAY_CAP = 2
         _applied_tco_count = 0
         for _toi, tco in enumerate(raw_tco):
             if not isinstance(tco, dict):
@@ -7222,11 +7272,8 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                     f"tight_cut_overlays[{_toi}].type={tco_type!r} is not valid "
                     f"(must be one of {sorted(_valid_tco_types)})"
                 )
-            # SceneTitle is the ONLY overlay that takes extras (title + label
-            # for the typographic panel). title is required; label is optional.
-            # The other three overlays reject extras — emitting a title with
-            # LightLeak/ShutterFlash/NewspaperWipe is a prompt-violation that
-            # the validator catches before the render.
+            # SceneTitle is the ONLY overlay that takes extras (title + label).
+            # title required; label optional. The other three reject extras.
             tco_title_raw = tco.get("title")
             tco_label_raw = tco.get("label")
             tco_title = str(tco_title_raw).strip() if isinstance(tco_title_raw, str) else None
@@ -7267,17 +7314,30 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                 )
                 continue
             if awi_t not in _tight_src_set:
-                # Wrong boundary type — Gemini emitted the overlay at a CUT
-                # boundary (transitions live there) or at a non-boundary
-                # index. The overlay path only fires at TIGHT BOUNDARIES.
-                # (Empty _tight_src_set ≡ no tight boundaries pass at all,
-                # so every overlay is correctly rejected here — same
-                # outcome as the previous `is None` branch, now collapsed
-                # into one path since the lifted derivation never None's.)
+                # Overlay at a CUT boundary (transitions live there) or a
+                # non-boundary index. The overlay path only fires at TIGHT
+                # boundaries. (Empty _tight_src_set ≡ no tight boundaries pass.)
                 print(
                     f"[generate-edit] DROP tight_cut_overlay '{tco_type}' [{_toi}]: "
                     f"after_word_index={awi_t} is not a TIGHT BOUNDARY — overlay "
                     f"requires a tight cut to decorate.",
+                    flush=True,
+                )
+                continue
+            if awi_t in _transition_type_by_awi:
+                # Collision: this boundary already carries a transition (the
+                # heavier decoration wins). One decoration per boundary.
+                print(
+                    f"[generate-edit] DROP tight_cut_overlay '{tco_type}' [{_toi}]: "
+                    f"after_word_index={awi_t} already has transition "
+                    f"{_transition_type_by_awi[awi_t]!r}.",
+                    flush=True,
+                )
+                continue
+            if awi_t in _overlay_awis:
+                print(
+                    f"[generate-edit] DROP tight_cut_overlay '{tco_type}' [{_toi}]: "
+                    f"after_word_index={awi_t} already has an overlay (duplicate).",
                     flush=True,
                 )
                 continue
@@ -7289,180 +7349,151 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                     flush=True,
                 )
                 continue
-            word_end_t = float(_dg_words[awi_t].get("end") or 0)
-            # Find the clip that contains this word (50ms tolerance) and has
-            # a successor — same shape as the transitions block.
-            _applied_t = False
-            for ci, clip in enumerate(validated_cuts):
-                cs = float(clip["source_start"])
-                ce = float(clip["source_end"])
-                if cs - 0.05 <= word_end_t <= ce + 0.05 and ci < len(validated_cuts) - 1:
-                    # Reject if this clip already carries a real transition —
-                    # an overlay-on-top-of-handle-transition would double-
-                    # decorate the same boundary. (Should not happen if
-                    # boundary types are mutually exclusive; defensive.)
-                    if clip.get("transition_out") and clip["transition_out"] != "none":
-                        print(
-                            f"[generate-edit] DROP tight_cut_overlay '{tco_type}' [{_toi}]: "
-                            f"clip {ci} already has transition_out="
-                            f"{clip['transition_out']!r}.",
-                            flush=True,
-                        )
-                        break
-                    clip["_tight_cut_overlay"] = tco_type
-                    if tco_type == "SceneTitle":
-                        # title is guaranteed non-None for SceneTitle by the
-                        # validator above; label remains optional.
-                        clip["_tight_cut_overlay_extras"] = {
-                            "title": tco_title,
-                            **({"label": tco_label} if tco_label else {}),
-                        }
-                    _applied_tco_count += 1
-                    _extras_log = ""
-                    if tco_type == "SceneTitle":
-                        _extras_log = f" title={tco_title!r}"
-                        if tco_label:
-                            _extras_log += f" label={tco_label!r}"
-                    print(
-                        f"[generate-edit] tight_cut_overlay '{tco_type}' applied to "
-                        f"clip {ci} (after word {awi_t}){_extras_log}",
-                        flush=True,
-                    )
-                    _applied_t = True
-                    break
-            if not _applied_t:
-                print(
-                    f"[generate-edit] DROP tight_cut_overlay '{tco_type}' [{_toi}]: "
-                    f"after_word_index={awi_t} (t={word_end_t:.2f}s) does not land "
-                    f"in a clip with a successor.",
-                    flush=True,
-                )
+            _spec = {"after_word_index": awi_t, "type": tco_type}
+            if tco_type == "SceneTitle":
+                _spec["title"] = tco_title
+                if tco_label:
+                    _spec["label"] = tco_label
+            _resolved_overlays.append(_spec)
+            _overlay_awis.add(awi_t)
+            _applied_tco_count += 1
+            _extras_log = ""
+            if tco_type == "SceneTitle":
+                _extras_log = f" title={tco_title!r}"
+                if tco_label:
+                    _extras_log += f" label={tco_label!r}"
+            print(
+                f"[generate-edit] tight_cut_overlay '{tco_type}' resolved at "
+                f"after_word_index={awi_t}{_extras_log}",
+                flush=True,
+            )
 
     # ── Scene-change decoration FLOOR (deterministic backfill) ─────────
-    # Every shot-change tight boundary (a real scdet-flagged visual cut, not
-    # a silence-only pause) MUST carry a decoration. Gemini's transitions +
-    # overlays are applied above; any shot-change boundary still BARE of both
-    # gets one here. This is the only mechanism that cannot under-emit — the
-    # floor does not depend on the model. Pause (dead_air-only) tight
-    # boundaries are NOT backfilled; they stay Gemini's discretion.
+    # Every shot-change tight boundary (a real scdet-flagged visual cut, not a
+    # silence-only pause) MUST carry a decoration. Gemini's transitions +
+    # overlays are resolved above; any shot-change boundary still BARE of both
+    # gets a varied overlay here. The floor cannot under-emit — it does not
+    # depend on the model. Pause (dead_air-only) boundaries are NOT backfilled.
     #
-    # Cap scoping (Option A): this pass stamps clip["_tight_cut_overlay"]
-    # directly and never touches _applied_tco_count, so it is UNCAPPED by
-    # construction. The ≤2 cap keeps governing Gemini's discretionary
-    # overlay emissions exactly as before.
+    # Frame-position attach (no clip-pair needed) means EVERY shot boundary is
+    # decorable, including the mid-clip ones the old clip-successor model
+    # silently dropped.
     #
-    # Variety: backfilled types rotate across the 3 light punctuation overlays
-    # — SceneTitle (would need invented title text) and DipToBlack (heavy,
-    # act-break weight) are held out. Deterministic left-to-right fill: lock
-    # Gemini's existing picks, then fill bare boundaries with
-    # ROTATION[(i+k)%3] skipping the prev/next resolved type so no two
-    # adjacent scene-change decorations share a type. Pure function of
-    # (ordered boundaries, Gemini's picks) — no RNG, fully testable.
+    # Confidence gate (false-positive guardrail): the floor auto-decorates only
+    # boundaries whose scdet score clears SCENE_FLOOR_MIN_SCDET_SCORE — real
+    # camera cuts score high; PiP/insert edges (which the old split-gate
+    # filtered for free via Gemini's vision judgment) score lower and are
+    # skipped. Unknown score ⇒ fail OPEN (decorate). Gemini's OWN overlays above
+    # are NOT score-gated.
     #
-    # Runs BEFORE the collision check below, and stamps only boundaries bare
-    # of BOTH transition_out and _tight_cut_overlay, so it never creates a
-    # both-on-one-boundary collision.
+    # Cap scoping (Option A): backfill appends straight to _resolved_overlays
+    # and never touches _applied_tco_count, so it is UNCAPPED by construction;
+    # the ≤2 cap still governs Gemini's discretionary emissions.
+    #
+    # Variety: types rotate across the 3 light punctuation overlays (SceneTitle
+    # and DipToBlack held out) so no two adjacent scene decorations share a type.
+    _scene_n_shot = 0
+    _scene_n_lowconf = 0
+    _scene_n_gemini = 0
+    _scene_backfilled = 0
     if _shot_src_set:
-        # Ordered shot-change boundaries → [clip_index, clip, current_type].
-        # current_type prefers transition_out (it wins any collision) then the
-        # overlay; None = bare. Only boundaries landing in a clip WITH a
-        # successor are decorable (same rule transitions/overlays use); a
-        # boundary on the last clip has no outgoing cut to dress and is
-        # skipped (it cannot be rendered anyway).
-        _scene_clips = []
-        _scene_seen = set()
+        # Ordered shot-change boundaries (temporal, by source word index). Each:
+        # current decoration type (transition or Gemini overlay → locked;
+        # None = bare) and scdet confidence score. Low-confidence BARE
+        # boundaries are dropped from the sequence (skipped, not decorated).
+        _floor_seq = []  # in-scope: [(awi_src, current_type_or_None)]
         for _si in sorted(_shot_src_set):
             if _si < 0 or _si >= len(_dg_words):
                 continue
-            _w_end = float(_dg_words[_si].get("end") or 0)
-            for _ci, _clip in enumerate(validated_cuts):
-                _cs = float(_clip["source_start"])
-                _ce = float(_clip["source_end"])
-                if _cs - 0.05 <= _w_end <= _ce + 0.05 and _ci < len(validated_cuts) - 1:
-                    if _ci in _scene_seen:
-                        break
-                    _scene_seen.add(_ci)
-                    _tr = str(_clip.get("transition_out") or "").strip()
-                    _ov = str(_clip.get("_tight_cut_overlay") or "").strip()
-                    _cur = _tr if (_tr and _tr != "none") else (_ov or None)
-                    _scene_clips.append([_ci, _clip, _cur])
-                    break
-        _scene_clips.sort(key=lambda _e: _e[0])  # temporal order
-        # Deterministic variety fill (pure helper, unit-tested in
-        # validate_deploy): locks Gemini's picks, rotates the 3 light overlays
-        # across the bare boundaries so no two adjacent share a type.
-        _resolved_types = _scene_floor_rotation([_e[2] for _e in _scene_clips])
-        _n_scene = len(_resolved_types)
-        _scene_backfilled = 0
-        for _i in range(_n_scene):
-            if _scene_clips[_i][2] is not None:
-                continue  # Gemini already dressed this boundary — keep its pick
-            _scene_clips[_i][1]["_tight_cut_overlay"] = _resolved_types[_i]
+            _scene_n_shot += 1
+            _cur = _transition_type_by_awi.get(_si)
+            if _cur is None and _si in _overlay_awis:
+                # Locked by a Gemini overlay — recover its type for adjacency.
+                _cur = next(
+                    (str(_o["type"]) for _o in _resolved_overlays
+                     if _o["after_word_index"] == _si),
+                    "overlay",
+                )
+            if _cur is not None:
+                _scene_n_gemini += 1
+                _floor_seq.append((_si, _cur))
+                continue
+            _score = _shot_src_score.get(_si)
+            if _score is not None and _score < SCENE_FLOOR_MIN_SCDET_SCORE:
+                _scene_n_lowconf += 1
+                continue  # likely PiP/insert edge — floor skips it
+            _floor_seq.append((_si, None))
+        # Deterministic variety fill over the in-scope sequence.
+        _resolved_floor_types = _scene_floor_rotation([_t for (_si, _t) in _floor_seq])
+        for _idx, (_si, _cur) in enumerate(_floor_seq):
+            if _cur is not None:
+                continue  # already decorated (Gemini) — keep its pick
+            _ftype = _resolved_floor_types[_idx]
+            _resolved_overlays.append({"after_word_index": _si, "type": _ftype})
+            _overlay_awis.add(_si)
             _scene_backfilled += 1
             print(
-                f"[scene-floor] backfill tight_cut_overlay "
-                f"'{_resolved_types[_i]}' on clip {_scene_clips[_i][0]} "
+                f"[scene-floor] backfill '{_ftype}' at after_word_index={_si} "
                 f"(bare scene-change boundary)",
                 flush=True,
             )
-        if _n_scene:
-            print(
-                f"[scene-floor] {_scene_backfilled}/{_n_scene} scene-change "
-                f"boundary(ies) backfilled; final decoration types in order: "
-                f"{_resolved_types}",
-                flush=True,
-            )
+    # Unconditional summary — fires even at 0 so "ran but found nothing
+    # attachable" never again looks like "never ran".
+    print(
+        f"[scene-floor] shot_boundaries={_scene_n_shot} "
+        f"(gemini_decorated={_scene_n_gemini}, "
+        f"low_confidence_skipped={_scene_n_lowconf}, "
+        f"backfilled={_scene_backfilled}); "
+        f"min_score={SCENE_FLOOR_MIN_SCDET_SCORE}; final overlay types in order: "
+        f"{[_o['type'] for _o in sorted(_resolved_overlays, key=lambda _o: _o['after_word_index'])]}",
+        flush=True,
+    )
 
-    # ── Tight-decoration collision check ──────────────────────────────
-    # A single tight boundary may NOT carry BOTH a zero-handle transition
-    # AND a tight_cut_overlay — same effect family, different editorial
-    # weight; the HOW TO PLACE TRANSITIONS section teaches "pick one,
-    # never both." This is the structural backstop: detect collisions
-    # AFTER both validators have stamped their entries on validated_cuts
-    # (transition_out + _tight_cut_overlay live on the same clip dict).
-    #
-    # Behavior is gated by _TIGHT_DECORATION_COLLISION (module-level
-    # constant near ZERO_HANDLE_TRANSITION_TYPES) for a one-constant
-    # flip between development-strict and production-safe behavior:
-    #   "strict"            → raise ValueError, render aborts. Loud
-    #                         drift detection during the prompt rollout.
-    #   "soft_overlay_wins" → drop the overlay (keep the transition
-    #                         since it's the heavier, more deliberate
-    #                         choice), log a divergence line, continue.
-    for _ci, _clip in enumerate(validated_cuts):
-        _tr_out = str(_clip.get("transition_out") or "").strip()
-        _ov_out = str(_clip.get("_tight_cut_overlay") or "").strip()
-        if _tr_out and _tr_out != "none" and _ov_out:
-            # Both decorations on the same clip's outgoing cut.
-            if _TIGHT_DECORATION_COLLISION == "strict":
-                raise ValueError(
-                    f"validated_cuts[{_ci}] has BOTH transition_out={_tr_out!r} AND "
-                    f"_tight_cut_overlay={_ov_out!r} on the same boundary. The two "
-                    f"are competing decorations for one cut — pick the transition "
-                    f"for heavier editorial weight (700-1800ms, audio silent, video "
-                    f"animation dominates) OR the overlay for lighter punctuation "
-                    f"(~180ms, audio continues, decoration paints on top). The HOW "
-                    f"TO PLACE TRANSITIONS section teaches this — your prompt-side "
-                    f"emission violated it. Remove one of the two."
-                )
-            elif _TIGHT_DECORATION_COLLISION == "soft_overlay_wins":
+    # ── Tight-decoration collision backstop ────────────────────────────
+    # One decoration per boundary: no boundary may carry BOTH a transition and
+    # an overlay. Prevented at append time (overlays skip boundaries already
+    # holding a transition; backfill skips locked boundaries) — this is the
+    # structural backstop. Gated by _TIGHT_DECORATION_COLLISION: "strict"
+    # raises; "soft_overlay_wins" drops the overlay (the heavier transition
+    # stays).
+    _collisions = [
+        _o for _o in _resolved_overlays
+        if _o["after_word_index"] in _transition_type_by_awi
+    ]
+    if _collisions:
+        if _TIGHT_DECORATION_COLLISION == "strict":
+            _c = _collisions[0]
+            raise ValueError(
+                f"after_word_index={_c['after_word_index']} has BOTH a transition "
+                f"({_transition_type_by_awi[_c['after_word_index']]!r}) AND an overlay "
+                f"({_c['type']!r}) — competing decorations for one cut. Pick one."
+            )
+        elif _TIGHT_DECORATION_COLLISION == "soft_overlay_wins":
+            for _c in _collisions:
                 _record_divergence(
                     "tight_decoration_collision",
                     {
-                        "clip_index": _ci,
-                        "transition_out": _tr_out,
-                        "tight_cut_overlay_dropped": _ov_out,
+                        "after_word_index": _c["after_word_index"],
+                        "transition_out": _transition_type_by_awi[_c["after_word_index"]],
+                        "tight_cut_overlay_dropped": _c["type"],
                     },
                     "drop_overlay_keep_transition",
                     reason="both_on_one_boundary",
                 )
-                _clip.pop("_tight_cut_overlay", None)
-                _clip.pop("_tight_cut_overlay_extras", None)
-            else:
-                raise RuntimeError(
-                    f"_TIGHT_DECORATION_COLLISION = {_TIGHT_DECORATION_COLLISION!r} "
-                    f"is not a recognized mode. Valid: 'strict', 'soft_overlay_wins'."
-                )
+            _resolved_overlays = [
+                _o for _o in _resolved_overlays
+                if _o["after_word_index"] not in _transition_type_by_awi
+            ]
+        else:
+            raise RuntimeError(
+                f"_TIGHT_DECORATION_COLLISION = {_TIGHT_DECORATION_COLLISION!r} "
+                f"is not a recognized mode. Valid: 'strict', 'soft_overlay_wins'."
+            )
+
+    # Stash the resolved overlays on the plan for the render emit, which projects
+    # each after_word_index to an output frame via _projected_words. Boundary-
+    # keyed and clip-agnostic — works for mid-clip boundaries with no split.
+    edit_plan["_resolved_tight_cut_overlays"] = _resolved_overlays
 
     # caption_style, caption_keywords, caption_position_segments, text_overlays,
     # emphasis_moments, motion_graphics, audio_denoise, outro, aspect_ratio,
@@ -8791,15 +8822,11 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
             _new_cut["_transition_extras"] = clip_entry["_transition_extras"]
         if clip_entry.get("_zoom_effect"):
             _new_cut["_zoom_effect"] = clip_entry["_zoom_effect"]
-        # Tight-cut overlay (parallel to transition_out; only ever populated
-        # on TIGHT BOUNDARIES — mutually exclusive with transition_out by
-        # construction in the application block above). Extras carry the
-        # SceneTitle title/label through to the renderer; ignored for the
-        # other three overlay types (validator rejects extras on non-SceneTitle).
-        if clip_entry.get("_tight_cut_overlay"):
-            _new_cut["_tight_cut_overlay"] = clip_entry["_tight_cut_overlay"]
-            if clip_entry.get("_tight_cut_overlay_extras"):
-                _new_cut["_tight_cut_overlay_extras"] = clip_entry["_tight_cut_overlay_extras"]
+        # NOTE: tight-cut overlays no longer travel on clips. They are resolved
+        # as a boundary-keyed list (edit_plan["_resolved_tight_cut_overlays"])
+        # and projected to output frames at render — see the emit loop. This
+        # decouples them from clip-pair structure so mid-clip boundaries (no
+        # split) are decorable.
         final_cuts.append(_new_cut)
 
     # Zoom and motion graphics are attached to each emphasis_moment explicitly
@@ -13033,24 +13060,19 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         print(f"[transition] {_t_raw} after clip {i} — {_slot_frames}f (natural {int(get_transition_duration(_t_raw) * 1000)}ms)", flush=True)
 
     # ── Tight-cut overlays — overlay-on-top-of-hard-cut decoration ──────────
-    # Walk render_cuts looking for `_tight_cut_overlay` data fields. Each
-    # entry produces a TightCutOverlaySpec with an atFrame derived from the
-    # OUTPUT timeline position of the cut (end of clip i in seconds × fps).
-    # No clipA/clipB ranges, no handle slot, no time inserted. Behavior is
-    # strictly additive: clips with NO overlay data produce ZERO entries, so
-    # the emitted list is `[]` and the overlay layer renders nothing —
-    # identical to the pre-overlay pipeline. Lives in PromptlyRenderInput
-    # (overlay_input), not PromptlyMicroSegments (no segment of video to bake).
+    # Build tight-cut overlay specs from the boundary-keyed resolved list
+    # (edit_plan["_resolved_tight_cut_overlays"], populated in generate_edit_
+    # gemini). Each overlay attaches to a FRAME POSITION — the boundary word's
+    # projected OUTPUT frame via _pw_by_idx — NOT a clip-pair. OverlayCutEffect
+    # paints ON TOP of continuously-playing video; the cut underneath (baked
+    # into the source) plays straight. Works for mid-clip boundaries with no
+    # sub-clip split — the attachment fix. Empty/absent list ⇒ zero entries
+    # (pre-overlay-identical).
     #
-    # Per-type duration — all 4 overlays signed off at their natural
-    # durations from the isolation tests:
-    #   LightLeak / ShutterFlash / NewspaperWipe → 11 frames (180ms @ 60fps),
-    #     the punctuation-flash class — quick, masks a hard cut by camouflage.
-    #   SceneTitle                              → 72 frames (1200ms @ 60fps),
-    #     the chapter-break class — typographic panel that needs the longer
-    #     hold for the title text to be readable through the 0.32–0.68
-    #     progress hold window (~432ms of fully on-screen text).
-    # Adding a new overlay means a new entry here, NOT a hardcoded fallback.
+    # Per-type duration — signed off at natural durations from the isolation
+    # tests: LightLeak / ShutterFlash / NewspaperWipe → 11 frames (180ms@60fps,
+    # punctuation-flash), SceneTitle → 72 frames (1200ms@60fps, hold long enough
+    # to read the title). Adding a new overlay means a new entry here.
     _TIGHT_CUT_OVERLAY_FRAMES_BY_TYPE = {
         "LightLeak":     11,
         "ShutterFlash":  11,
@@ -13058,57 +13080,56 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         "SceneTitle":    72,
     }
     tight_cut_overlays_out = []
-    for i in range(len(render_cuts) - 1):
-        _tco = str(render_cuts[i].get("_tight_cut_overlay") or "").strip()
+    for _ov in (edit_plan.get("_resolved_tight_cut_overlays") or []):
+        _tco = str(_ov.get("type") or "").strip()
         if _tco not in VALID_TIGHT_CUT_OVERLAYS:
             continue
-        # The cut between clip i and clip i+1 lives at output time
-        # _clip_ranges[i]["end"] (== _clip_ranges[i+1]["start"] for tight
-        # cuts since trans_dur_after[i] == 0 on these). Convert to a frame
-        # index using the composition fps (source_fps) — matches the same
-        # rounding policy the rest of the emit path uses.
-        if i >= len(_clip_ranges):
+        _awi = _ov.get("after_word_index")
+        # Project the boundary word to its OUTPUT frame. _pw_by_idx is keyed by
+        # SOURCE word index (the space after_word_index lives in); ["end"] is
+        # the word's output-timeline end in seconds = where the cut sits. This
+        # resolves ANY boundary, including mid-clip ones with no split.
+        _pw = _pw_by_idx.get(_awi)
+        if _pw is None:
             print(
-                f"[tight-cut-overlay] '{_tco}' after clip {i} — SKIPPED "
-                f"(no clip_ranges entry)",
+                f"[tight-cut-overlay] '{_tco}' after_word_index={_awi} — SKIPPED "
+                f"(word not on output timeline — removed or off-clip)",
                 flush=True,
             )
             continue
-        _cut_seconds = float(_clip_ranges[i]["end"])
+        _cut_seconds = float(_pw.get("end") or 0.0)
         _at_frame = int(round(_cut_seconds * source_fps))
         _dur_frames = _TIGHT_CUT_OVERLAY_FRAMES_BY_TYPE.get(_tco)
         if _dur_frames is None:
-            # An overlay type was registered in VALID_TIGHT_CUT_OVERLAYS but
-            # the duration table here didn't get the matching entry — adding
-            # a new overlay must update BOTH places. Fail loud (this is the
-            # same drift class type_registries.py was meant to prevent).
+            # Registered in VALID_TIGHT_CUT_OVERLAYS but missing a duration —
+            # adding an overlay must update BOTH places. Fail loud.
             raise RuntimeError(
                 f"_TIGHT_CUT_OVERLAY_FRAMES_BY_TYPE has no entry for "
                 f"{_tco!r}. Add the per-type duration here when registering "
                 f"a new overlay name in VALID_TIGHT_CUT_OVERLAYS."
             )
-        _tco_extras = render_cuts[i].get("_tight_cut_overlay_extras") or {}
         _spec = {
             "atFrame": _at_frame,
             "type": _tco,
             "durationInFrames": _dur_frames,
         }
-        # SceneTitle extras (title required, label optional) — copied through
-        # to the Remotion side via TightCutOverlaySpec's optional fields. The
-        # other three overlays never carry extras (validated at application).
+        # SceneTitle extras (title required, label optional); other types none.
         for _k in ("title", "label"):
-            _v = _tco_extras.get(_k)
+            _v = _ov.get(_k)
             if _v is not None:
                 _spec[_k] = _v
         tight_cut_overlays_out.append(_spec)
-        _extras_suffix = ""
-        if _tco_extras:
-            _extras_suffix = " " + " ".join(
-                f"{k}={v!r}" for k, v in _tco_extras.items() if v is not None
-            )
+        _extras_present = {
+            _k: _ov.get(_k) for _k in ("title", "label") if _ov.get(_k) is not None
+        }
+        _extras_suffix = (
+            " " + " ".join(f"{k}={v!r}" for k, v in _extras_present.items())
+            if _extras_present else ""
+        )
         print(
-            f"[tight-cut-overlay] {_tco} after clip {i} — atFrame={_at_frame} "
-            f"({_cut_seconds:.3f}s) durationInFrames={_dur_frames}{_extras_suffix}",
+            f"[tight-cut-overlay] {_tco} at after_word_index={_awi} — "
+            f"atFrame={_at_frame} ({_cut_seconds:.3f}s) "
+            f"durationInFrames={_dur_frames}{_extras_suffix}",
             flush=True,
         )
 
@@ -16970,9 +16991,14 @@ def handler(job):
         def _do_loudness():
             return measure_source_loudness(_raw_source)
 
+        # Side-channel for scdet confidence scores (filled in the pool thread;
+        # consumed by the scene-change floor's confidence gate). Kept OFF the
+        # future's return value so both future_shot_changes.result() consumers
+        # stay unchanged — return shape is still a plain list of times.
+        _shot_change_scores = {}
         def _do_shot_changes():
             send_progress(job_id, "shots", 18, "Detecting shot changes", app_url)
-            return detect_shot_changes(_raw_source)
+            return detect_shot_changes(_raw_source, out_scores=_shot_change_scores)
 
         def _do_vocal_emphasis():
             return detect_vocal_emphasis(_raw_source)
@@ -17799,6 +17825,7 @@ def handler(job):
                     trend_context=_trend,
                     deepgram_words=_dg_words,
                     shot_changes=_shots,
+                    shot_change_scores=_shot_change_scores,
                     vocal_emphasis=_vocal,
                     source_loudness=_loudness,
                     face_positions=_face_positions,

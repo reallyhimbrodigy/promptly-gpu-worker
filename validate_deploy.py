@@ -570,6 +570,35 @@ def _shot_change_snap_expanded_tolerance():
     assert out[0][0] == 1
 
 
+@check("shot_change_word_boundaries carries scdet scores via side-channel (confidence-gate active path)")
+def _shot_change_scores_side_channel():
+    # ACTIVE path feeding the scene-floor confidence gate: scdet scores reach
+    # each boundary via the out_scores side-channel (return shape unchanged).
+    kept_words = [
+        {"start": 0.0, "end": 1.0, "punctuated_word": "A"},
+        {"start": 1.0, "end": 2.0, "punctuated_word": "B"},  # word 1 ends 2.0
+        {"start": 2.1, "end": 3.5, "punctuated_word": "C"},  # word 2 ends 3.5
+        {"start": 3.6, "end": 4.5, "punctuated_word": "D"},
+        {"start": 4.6, "end": 5.5, "punctuated_word": "E"},  # last (excluded)
+    ]
+    shot_scores = {2.0: 12.5, 3.5: 4.1}  # keyed by round(t, 3)
+    out_scores = {}
+    out = handler.shot_change_word_boundaries(
+        [2.0, 3.5], kept_words, shot_scores=shot_scores, out_scores=out_scores,
+    )
+    assert out_scores.get(1) == 12.5, f"word-1 boundary score, got {out_scores}"
+    assert out_scores.get(2) == 4.1, f"word-2 boundary score, got {out_scores}"
+    # The gate keeps high-confidence (>= floor), skips low-confidence bare ones.
+    assert handler.SCENE_FLOOR_MIN_SCDET_SCORE == 8.0
+    assert 12.5 >= handler.SCENE_FLOOR_MIN_SCDET_SCORE
+    assert 4.1 < handler.SCENE_FLOOR_MIN_SCDET_SCORE
+    # Back-compat: 2-arg call returns plain (idx, time) tuples, no side-channel.
+    plain = handler.shot_change_word_boundaries([2.0], kept_words)
+    assert plain and plain[0][0] == 1 and len(plain[0]) == 2, (
+        f"2-arg call must still return 2-tuples, got {plain}"
+    )
+
+
 @check("boundary union catches consecutive-anchor dead_air ranges (Bug 3c active path)")
 def _consecutive_anchor_dead_air_catches_boundary():
     # ACTIVE path: a mechanical-cuts dead_air range like
