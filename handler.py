@@ -5602,64 +5602,71 @@ def _gemini_generate_with_cache(client, model_name, contents, base_config_kwargs
 def _call_gemini_post_cuts(client, system_instruction, user_content, video_part, model_name):
     """Second Gemini call: visual placement on the kept-only transcript.
 
-    Deep-thinking budget. thinking_budget=60000 (raised back up from the
-    earlier 24576 cap, which was set as a 504 mitigation under the wrong-
-    cause assumption). The actual 504 driver was X-Server-Timeout=120s
-    from HttpOptions.timeout (now 300_000ms; see _get_genai_client). With
-    the deadline lifted, depth is recovered.
+    Deep-thinking budget. thinking_budget=24576 (lowered from a 60000 cap).
+    60K bought no quality — every good recipe this session ran at ≤24576 —
+    and it drove the model to spiral past its output budget into an empty
+    response (output=None after thoughts≈9770 on a 421.9s call, with the
+    timeout already extended). Thinking LESS is the fix; more time made it
+    fail harder, not succeed (see _get_genai_client — the timeout is not
+    the driver and is deliberately left alone).
 
     Note on the shared cap: max_output_tokens=65536 is the COMBINED ceiling
-    on thinking + actual JSON response. At 60K thinking, ~5K is left for
-    the JSON output. Typical PostCutPlan JSON is 2-4K; this fits but is
-    tighter than the prior 24K thinking + 40K output split. If JSON
-    truncation appears in production, raise max_output_tokens or lower
-    thinking_budget.
+    on thinking + actual JSON response. At 24K thinking, ~40K is left for
+    the JSON output — typical PostCutPlan JSON is 2-4K, comfortable margin.
     """
     print(
-        f"[gemini-post] Calling {model_name} (thinking_budget=60000, PostCutPlan schema, "
+        f"[gemini-post] Calling {model_name} (thinking_budget=24576, PostCutPlan schema, "
         f"system_instruction={len(system_instruction)} chars, user_content={len(user_content)} chars)...",
         flush=True,
     )
-    t0 = time.time()
-    response = _gemini_generate_with_cache(
-        client, model_name,
-        contents=[video_part, user_content],
-        base_config_kwargs=dict(
-            temperature=1.0,
-            # max_output_tokens cap is SHARED between thinking and the actual
-            # JSON response. With thinking_budget=60000 below, ~5K remains
-            # for the JSON output — typical PostCutPlan JSON is 2-4K, fits
-            # with margin. Raise this (and/or lower thinking_budget) if
-            # truncation appears.
-            max_output_tokens=65536,
-            response_mime_type="application/json",
-            response_json_schema=PostCutPlan.model_json_schema(),
-            # 60K thinking budget — raised back up from the 24576 cap that
-            # was set as a 504 mitigation under the wrong-cause assumption.
-            # Actual 504 driver was X-Server-Timeout=120s sent by the client
-            # (fixed in _get_genai_client to 300_000ms). With the deadline
-            # lifted, depth is recovered. The model can self-regulate below
-            # 60K based on prompt complexity; unused tokens aren't billed.
-            thinking_config=genai_types.ThinkingConfig(thinking_budget=60000),
-            media_resolution="MEDIA_RESOLUTION_LOW",
-        ),
-        system_instruction=system_instruction,
-    )
-    dt = time.time() - t0
-    print(f"[gemini-post] Complete in {dt:.1f}s", flush=True)
-    try:
-        usage = getattr(response, "usage_metadata", None)
-        if usage is not None:
-            print(
-                f"[gemini-post] Tokens — prompt={getattr(usage,'prompt_token_count',None)} "
-                f"cached={getattr(usage,'cached_content_token_count',None)} "
-                f"thoughts={getattr(usage,'thoughts_token_count',None)} "
-                f"output={getattr(usage,'candidates_token_count',None)}",
-                flush=True,
-            )
-    except Exception:
-        pass
-    response_text = str(getattr(response, "text", "") or "").strip()
+    # An empty/None response is a transient model hiccup, not a permanent
+    # failure — a fresh call usually succeeds. Try the call up to twice (one
+    # automatic retry) before raising. No other retry wraps this path:
+    # _gemini_generate_with_cache only retries on cache-miss errors, and the
+    # caller at the recipe site does not re-invoke on empty.
+    response_text = ""
+    for _attempt in (1, 2):
+        t0 = time.time()
+        response = _gemini_generate_with_cache(
+            client, model_name,
+            contents=[video_part, user_content],
+            base_config_kwargs=dict(
+                temperature=1.0,
+                # max_output_tokens cap is SHARED between thinking and the
+                # actual JSON response. With thinking_budget=24576 below,
+                # ~40K remains for the JSON output — typical PostCutPlan JSON
+                # is 2-4K, comfortable margin.
+                max_output_tokens=65536,
+                response_mime_type="application/json",
+                response_json_schema=PostCutPlan.model_json_schema(),
+                # 24576 thinking budget — lowered from 60000. 60K bought no
+                # quality (every good recipe this session ran at ≤24576) and
+                # drove the model to spiral past its output budget into an
+                # empty response. Thinking LESS is the fix, not more time.
+                thinking_config=genai_types.ThinkingConfig(thinking_budget=24576),
+                media_resolution="MEDIA_RESOLUTION_LOW",
+            ),
+            system_instruction=system_instruction,
+        )
+        dt = time.time() - t0
+        print(f"[gemini-post] Complete in {dt:.1f}s", flush=True)
+        try:
+            usage = getattr(response, "usage_metadata", None)
+            if usage is not None:
+                print(
+                    f"[gemini-post] Tokens — prompt={getattr(usage,'prompt_token_count',None)} "
+                    f"cached={getattr(usage,'cached_content_token_count',None)} "
+                    f"thoughts={getattr(usage,'thoughts_token_count',None)} "
+                    f"output={getattr(usage,'candidates_token_count',None)}",
+                    flush=True,
+                )
+        except Exception:
+            pass
+        response_text = str(getattr(response, "text", "") or "").strip()
+        if response_text:
+            break
+        if _attempt == 1:
+            print("[gemini-post] Empty/None response — retrying once before failing", flush=True)
     if not response_text:
         raise RuntimeError("Empty Gemini post-cuts-call response")
     print(f"[gemini-post] RAW:\n{response_text}\n[gemini-post] END", flush=True)
