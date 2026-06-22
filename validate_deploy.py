@@ -3549,6 +3549,50 @@ def _recipe_eval_tco_passing():
     )
 
 
+@check("scene-floor rotation: bare scene changes fill varied, no two adjacent same type (ACTIVE)")
+def _scene_floor_rotation_active():
+    import handler
+    rot = handler._scene_floor_rotation
+
+    # 6 bare scene changes → even SF/LL/NW cycle, no adjacency (the §A
+    # worked example). This is the ACTIVE variety path, not a no-op default.
+    six_bare = rot([None] * 6)
+    assert six_bare == [
+        "ShutterFlash", "LightLeak", "NewspaperWipe",
+        "ShutterFlash", "LightLeak", "NewspaperWipe",
+    ], f"6-bare rotation should cycle SF/LL/NW evenly, got {six_bare}"
+
+    # The b89287c4 case: Gemini already placed a ShutterFlash on boundary 1.
+    # Backfill must PRESERVE it and rotate around it (no adjacent SF).
+    gemini_pick = rot([None, "ShutterFlash", None, None, None, None])
+    assert gemini_pick == [
+        "LightLeak", "ShutterFlash", "NewspaperWipe",
+        "ShutterFlash", "LightLeak", "NewspaperWipe",
+    ], f"backfill must rotate around Gemini's locked pick, got {gemini_pick}"
+
+    # Universal invariants across sizes incl. 7+ (spaced repeats, never adjacent).
+    for n in range(1, 12):
+        out = rot([None] * n)
+        assert all(out[i] != out[i - 1] for i in range(1, n)), (
+            f"n={n}: adjacent duplicate decoration in {out}"
+        )
+        assert all(
+            t in ("ShutterFlash", "LightLeak", "NewspaperWipe") for t in out
+        ), f"n={n}: non-rotation type emitted in {out}"
+
+    # Deterministic: same input → same output (no RNG).
+    assert rot([None, "LightLeak", None]) == rot([None, "LightLeak", None]), (
+        "rotation must be deterministic"
+    )
+
+    # A boundary Gemini dressed with a held-out type (SceneTitle) is locked;
+    # neighbours rotate normally and never collide with it.
+    with_scenetitle = rot([None, "SceneTitle", None])
+    assert with_scenetitle[1] == "SceneTitle", "non-rotation pick must be preserved"
+    assert with_scenetitle[0] in ("ShutterFlash", "LightLeak", "NewspaperWipe")
+    assert with_scenetitle[2] in ("ShutterFlash", "LightLeak", "NewspaperWipe")
+
+
 # ─── 5b5. CAPTION PAGE-BOUNDARY REGRESSION GUARDS ──────────────────────
 # When a caption page's window straddles a position-segment boundary
 # (one page rendering across a top↔bottom flip from a B-roll or MG

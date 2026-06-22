@@ -5673,6 +5673,41 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
     return extract_json(response_text)
 
 
+def _scene_floor_rotation(current_types):
+    """Deterministic variety fill for the scene-change decoration floor.
+
+    `current_types` is the ordered (temporal) list of existing decoration
+    types on each shot-change tight boundary — a type string for a boundary
+    Gemini already dressed, or None for a bare boundary. Returns a list of the
+    same length where every None is replaced by a rotated light punctuation
+    overlay such that no two ADJACENT entries share a type.
+
+    Rotation set: ShutterFlash / LightLeak / NewspaperWipe. SceneTitle (would
+    need invented title text) and DipToBlack (heavy, act-break weight) are
+    held out. Pure function — no RNG, same input → same output. Gemini's picks
+    are locked; bare boundaries fill left-to-right with ROTATION[(i+k)%3],
+    skipping the previous (already-resolved) and next (fixed pick, if any)
+    type. With 3 types and at most 2 forbidden neighbours a valid pick always
+    exists, so the defensive `else` branch is unreachable in practice.
+    """
+    rotation = ["ShutterFlash", "LightLeak", "NewspaperWipe"]
+    resolved = list(current_types)
+    n = len(resolved)
+    for i in range(n):
+        if resolved[i] is not None:
+            continue
+        prev_t = resolved[i - 1] if i > 0 else None
+        next_t = resolved[i + 1] if i + 1 < n else None
+        for k in range(3):
+            cand = rotation[(i + k) % 3]
+            if cand != prev_t and cand != next_t:
+                resolved[i] = cand
+                break
+        else:
+            resolved[i] = rotation[i % 3]  # unreachable; defensive
+    return resolved
+
+
 def _reconcile_tight_cut_overlays(client, vision_text, tight_boundaries, kept_words):
     """Focused second Gemini call to resolve a vision-claims-but-empty
     tight_cut_overlays contradiction. Returns a list of 0 or 1 overlay
@@ -6229,7 +6264,14 @@ def generate_edit_gemini(
                 else:
                     _w = "?"
                 _gap_ms = int(round(_audio_gap_at_boundary(_ni) * 1000))
-                _parts.append(f'{_ni} (after "{_w}", {_gap_ms}ms gap)')
+                # Source tag so Gemini can tell a real visual cut (scdet-
+                # flagged shot change) from a silence-only pause. Scene
+                # changes are ALWAYS dressed (the pipeline guarantees a varied
+                # decoration beneath the model's choices); pauses default to a
+                # clean hard cut. A boundary that is both a gap AND a shot
+                # change is a scene change — the camera moved.
+                _src = "SCENE CHANGE" if _ni in _shot_boundary_set else "pause"
+                _parts.append(f'{_ni} (after "{_w}", {_gap_ms}ms gap, {_src})')
             return ", ".join(_parts)
 
         _cut_boundary_block = _fmt_boundary_list(_cut_boundary_indices)
@@ -6269,7 +6311,7 @@ Indices below are the NEW kept-only space [0..{_kept_count - 1}]. Every word_ind
 
   {_cut_boundary_block}
 
-=== TIGHT BOUNDARIES (real cuts with no audio handle — crossfade transitions cannot fit here, but ZERO-HANDLE transitions (LightLeak / ShutterFlash / NewspaperWipe / SceneTitle / DipToBlack) can, and `tight_cut_overlay` decorations can. Listed so you know the cut exists: at minimum land a zoom on the first word after to mask the jump. The most editorially-significant 1-2 of these may carry a tight_cut_overlay (light ~180ms decoration) OR a zero-handle transition (heavy 700-1800ms moment) — never both on the same cut. See HOW TO PLACE TRANSITIONS and HOW TO PLACE TIGHT-CUT OVERLAYS below for the editorial distinction.) ===
+=== TIGHT BOUNDARIES (real cuts with no audio handle — crossfade transitions cannot fit here, but ZERO-HANDLE transitions (LightLeak / ShutterFlash / NewspaperWipe / SceneTitle / DipToBlack) can, and `tight_cut_overlay` decorations can. Each is tagged SCENE CHANGE (a real visual cut — the shot actually changed) or pause (a silence-only splice, no visual change). EVERY scene change carries exactly ONE decoration — a zero-handle transition OR a tight_cut_overlay, never both — and you should vary the type across adjacent scene changes so it reads as editing vocabulary, not one effect on loop. Pause boundaries are discretionary and default to a clean hard cut. At minimum land a zoom on the first word after any tight cut to mask the jump. See HOW TO PLACE TRANSITIONS and HOW TO PLACE TIGHT-CUT OVERLAYS below for the editorial distinction.) ===
 
   {_tight_boundary_block}
 
@@ -6291,7 +6333,7 @@ Each transition component renders at its natural duration — the cadence its ra
 
 For each chosen `after_word_index`, pick a transition `type` whose character matches the dialogue's shift at that boundary (ZoomThrough, CardSwipe, ShutterFlash, SlideOver, CrossfadeZoom, SceneTitle, NewspaperWipe, FilmStrip, Stack, StepPush). Vary the type across emitted transitions — repeating the same type at adjacent boundaries reads as templating.
 
-**Zero-handle transition vs `tight_cut_overlay` — same effect family, different editorial weight, one per boundary.** Same 4 type names (LightLeak / ShutterFlash / NewspaperWipe / SceneTitle) are available both as zero-handle TRANSITIONS on tight boundaries AND as `tight_cut_overlay` decorations on tight boundaries. They are NOT interchangeable: a `tight_cut_overlay` is LIGHT (~180ms; SceneTitle 1200ms), audio plays through unaltered, video plays through unaltered, decoration paints on top. A zero-handle transition is HEAVY (700-1800ms), audio goes silent under the transition window, video animation dominates the cut. A zero-handle transition on a tight cut is a RARE choice — reserve it for a genuine act/chapter break OR the single biggest moment of the video where you want the cut itself to be the editorial event. Most tight cuts get either a light overlay or nothing; reaching for the heavy transition by default would read as dramatic templating. **Never emit both a transition AND a tight_cut_overlay on the same boundary — the validator will reject the recipe.**
+**Zero-handle transition vs `tight_cut_overlay` — same effect family, different editorial weight, one per boundary.** Same 4 type names (LightLeak / ShutterFlash / NewspaperWipe / SceneTitle) are available both as zero-handle TRANSITIONS on tight boundaries AND as `tight_cut_overlay` decorations on tight boundaries. They are NOT interchangeable: a `tight_cut_overlay` is LIGHT (~180ms; SceneTitle 1200ms), audio plays through unaltered, video plays through unaltered, decoration paints on top. A zero-handle transition is HEAVY (700-1800ms), audio goes silent under the transition window, video animation dominates the cut. A zero-handle transition on a tight cut is a RARE choice — reserve it for a genuine act/chapter break OR the single biggest moment of the video where you want the cut itself to be the editorial event. A SCENE-CHANGE cut takes a light overlay by default (the floor) or a heavy transition when it genuinely earns one; a PAUSE takes a light overlay only when it earns it, or nothing. Reaching for the heavy transition by default would read as dramatic templating. **Never emit both a transition AND a tight_cut_overlay on the same boundary — the validator will reject the recipe.**
 
 === HOW TO PLACE TIGHT-CUT OVERLAYS ===
 
@@ -6309,7 +6351,7 @@ CHAPTER-BREAK CLASS (~1200ms — a typographic divider; the new section starts h
 
 **HARD RULE 1 — `after_word_index` MUST come from the TIGHT BOUNDARIES list above (NOT CUT BOUNDARIES, NOT any other index).** Placing a tight_cut_overlay at a CUT boundary is wrong: those boundaries already get full transitions. Placing it at a non-boundary index has no cut to decorate and the renderer will not produce it.
 
-**HARD RULE 2 — at most 2 tight_cut_overlays per video, ACROSS ALL FOUR TYPES COMBINED.** Sparing is the whole point. A short video typically gets 0; a video with strong chapter structure gets 1; a video with both a hook callback AND a real chapter break can get 2 (commonly 1 SceneTitle + 1 punctuation overlay, but any combination). Three or more reads as a template effect, not editorial signal. The default for every tight boundary stays a clean hard cut — overlays are the rare exception, not the norm. One thing is NOT optional, though: your array must not contradict your own `editorial_vision`. If your vision named a tight-cut overlay (by type or effect), resolve it one of two ways — emit that overlay on the single tight boundary that most earns it, OR, only if you genuinely find no boundary earns it, that's a signal your vision overclaimed and you must not leave the claim standing. You may not both name an overlay in your vision and emit an empty array. When vision and array disagree, that is an error you fix here — by emitting the earned overlay, or by having not claimed it. Emit a second overlay only if a DISTINCT second boundary independently earns one under the criteria below.
+**HARD RULE 2 — every SCENE CHANGE is dressed; PAUSES stay sparing.** The TIGHT BOUNDARIES list tags each cut `SCENE CHANGE` (a real visual cut) or `pause` (a silence-only splice, no visual change). Decorate EVERY scene change — a transition or a tight_cut_overlay — and vary the type so adjacent scene changes don't repeat; the pipeline guarantees this floor beneath your choices, so place them with intent rather than leaving them bare. PAUSES are the sparing case: at most 2 discretionary overlays across the whole video (a short video gets 0, a strong chapter structure 1, a hook callback + a real chapter break 2 — commonly 1 SceneTitle + 1 punctuation overlay), and a pause's default is a clean hard cut. The 2-overlay cap and "rare exception" framing govern PAUSES only — on scene changes, varied decoration IS the vocabulary, not a templated overuse. One thing is NOT optional, though: your array must not contradict your own `editorial_vision`. If your vision named a tight-cut overlay (by type or effect), resolve it one of two ways — emit that overlay on the single tight boundary that most earns it, OR, only if you genuinely find no boundary earns it, that's a signal your vision overclaimed and you must not leave the claim standing. You may not both name an overlay in your vision and emit an empty array. When vision and array disagree, that is an error you fix here — by emitting the earned overlay, or by having not claimed it. Emit a second overlay only if a DISTINCT second boundary independently earns one under the criteria below.
 
 **HARD RULE 3 — extras (`title`, `label`) belong to SceneTitle ONLY.** Emitting `title` or `label` with LightLeak / ShutterFlash / NewspaperWipe is a hard error — the validator rejects it. SceneTitle without a `title` is also a hard error (the panel has nothing to display).
 
@@ -6321,9 +6363,9 @@ Your `editorial_vision` and your `tight_cut_overlays` array must agree. If your 
   - **hook / close callback** — the cut joins a callback back to the video's opening hook or closing point → LightLeak fits best (reflective warmth).
   - **reveal / answer delivery** — the cut introduces the named thing the speaker was building toward → NewspaperWipe (headline drops).
 
-If a tight boundary is mid-thought, a same-take micro-trim, a filler-removal splice, or any non-editorial cut, leave it as a clean hard cut. The hard cut IS the right call there.
+If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a filler-removal splice, or any cut with no visual change — leaving it a clean hard cut is the right call there. (Scene changes are never bare; see HARD RULE 2.)
 
-**Variety across the cap.** If you emit two, prefer two different types unless the editorial character of both moments genuinely matches the same type. Two SceneTitles in one video is almost always wrong (a video usually has at most one true chapter break worth labeling); two of the same punctuation overlay reads as templating.
+**Variety.** Across all decorations — scene-change and discretionary alike — don't repeat a type on adjacent boundaries. Two SceneTitles in one video is almost always wrong (a video usually has at most one true chapter break worth labeling); the same punctuation overlay back-to-back reads as templating. (The pipeline's scene-change floor already rotates types so adjacent backfills differ; match that intent in your own picks.)
 
 **For heavier editorial weight, see the zero-handle transition path in HOW TO PLACE TRANSITIONS.** The same 4 type names (LightLeak / ShutterFlash / NewspaperWipe / SceneTitle) are also available as full zero-handle transitions on tight boundaries — 700-1800ms with audio silence and dominant video animation. Overlays are the LIGHT default for tight cuts; the heavy transition is the RARE exception reserved for genuine act/chapter breaks or the single biggest moment. Never emit both decorations on the same boundary — the validator will reject the recipe.
 """
@@ -7045,8 +7087,17 @@ If a tight boundary is mid-thought, a same-take micro-trim, a filler-removal spl
             new_to_src[_ki] for _ki in _tight_boundary_indices
             if 0 <= _ki < len(new_to_src)
         }
+        # Shot-change subset of the tight boundaries, in source space — the
+        # scene-change decoration FLOOR (below) backfills any of these left
+        # bare by Gemini. Same kept→source translation; a "both" boundary
+        # (audio gap AND shot change) is a real scene change, so it's included.
+        _shot_src_set = {
+            new_to_src[_ki] for _ki in _tight_boundary_indices
+            if _ki in _shot_boundary_set and 0 <= _ki < len(new_to_src)
+        }
     except NameError:
         _tight_src_set = set()
+        _shot_src_set = set()
 
     raw_transitions = edit_plan.get("transitions") or []
     if raw_transitions and _dg_words:
@@ -7286,6 +7337,81 @@ If a tight boundary is mid-thought, a same-take micro-trim, a filler-removal spl
                     f"in a clip with a successor.",
                     flush=True,
                 )
+
+    # ── Scene-change decoration FLOOR (deterministic backfill) ─────────
+    # Every shot-change tight boundary (a real scdet-flagged visual cut, not
+    # a silence-only pause) MUST carry a decoration. Gemini's transitions +
+    # overlays are applied above; any shot-change boundary still BARE of both
+    # gets one here. This is the only mechanism that cannot under-emit — the
+    # floor does not depend on the model. Pause (dead_air-only) tight
+    # boundaries are NOT backfilled; they stay Gemini's discretion.
+    #
+    # Cap scoping (Option A): this pass stamps clip["_tight_cut_overlay"]
+    # directly and never touches _applied_tco_count, so it is UNCAPPED by
+    # construction. The ≤2 cap keeps governing Gemini's discretionary
+    # overlay emissions exactly as before.
+    #
+    # Variety: backfilled types rotate across the 3 light punctuation overlays
+    # — SceneTitle (would need invented title text) and DipToBlack (heavy,
+    # act-break weight) are held out. Deterministic left-to-right fill: lock
+    # Gemini's existing picks, then fill bare boundaries with
+    # ROTATION[(i+k)%3] skipping the prev/next resolved type so no two
+    # adjacent scene-change decorations share a type. Pure function of
+    # (ordered boundaries, Gemini's picks) — no RNG, fully testable.
+    #
+    # Runs BEFORE the collision check below, and stamps only boundaries bare
+    # of BOTH transition_out and _tight_cut_overlay, so it never creates a
+    # both-on-one-boundary collision.
+    if _shot_src_set:
+        # Ordered shot-change boundaries → [clip_index, clip, current_type].
+        # current_type prefers transition_out (it wins any collision) then the
+        # overlay; None = bare. Only boundaries landing in a clip WITH a
+        # successor are decorable (same rule transitions/overlays use); a
+        # boundary on the last clip has no outgoing cut to dress and is
+        # skipped (it cannot be rendered anyway).
+        _scene_clips = []
+        _scene_seen = set()
+        for _si in sorted(_shot_src_set):
+            if _si < 0 or _si >= len(_dg_words):
+                continue
+            _w_end = float(_dg_words[_si].get("end") or 0)
+            for _ci, _clip in enumerate(validated_cuts):
+                _cs = float(_clip["source_start"])
+                _ce = float(_clip["source_end"])
+                if _cs - 0.05 <= _w_end <= _ce + 0.05 and _ci < len(validated_cuts) - 1:
+                    if _ci in _scene_seen:
+                        break
+                    _scene_seen.add(_ci)
+                    _tr = str(_clip.get("transition_out") or "").strip()
+                    _ov = str(_clip.get("_tight_cut_overlay") or "").strip()
+                    _cur = _tr if (_tr and _tr != "none") else (_ov or None)
+                    _scene_clips.append([_ci, _clip, _cur])
+                    break
+        _scene_clips.sort(key=lambda _e: _e[0])  # temporal order
+        # Deterministic variety fill (pure helper, unit-tested in
+        # validate_deploy): locks Gemini's picks, rotates the 3 light overlays
+        # across the bare boundaries so no two adjacent share a type.
+        _resolved_types = _scene_floor_rotation([_e[2] for _e in _scene_clips])
+        _n_scene = len(_resolved_types)
+        _scene_backfilled = 0
+        for _i in range(_n_scene):
+            if _scene_clips[_i][2] is not None:
+                continue  # Gemini already dressed this boundary — keep its pick
+            _scene_clips[_i][1]["_tight_cut_overlay"] = _resolved_types[_i]
+            _scene_backfilled += 1
+            print(
+                f"[scene-floor] backfill tight_cut_overlay "
+                f"'{_resolved_types[_i]}' on clip {_scene_clips[_i][0]} "
+                f"(bare scene-change boundary)",
+                flush=True,
+            )
+        if _n_scene:
+            print(
+                f"[scene-floor] {_scene_backfilled}/{_n_scene} scene-change "
+                f"boundary(ies) backfilled; final decoration types in order: "
+                f"{_resolved_types}",
+                flush=True,
+            )
 
     # ── Tight-decoration collision check ──────────────────────────────
     # A single tight boundary may NOT carry BOTH a zero-handle transition
