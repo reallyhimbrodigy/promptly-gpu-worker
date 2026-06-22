@@ -2,6 +2,7 @@ import React from "react";
 import { AbsoluteFill, Easing, interpolate } from "remotion";
 import { loadFont as loadInter } from "@remotion/google-fonts/Inter";
 import { loadFont as loadDMSerifDisplay } from "@remotion/google-fonts/DMSerifDisplay";
+import { TIKTOK_SAFE_RIGHT } from "../../shared/safeZone";
 
 const inter = loadInter();
 const dmSerifDisplay = loadDMSerifDisplay();
@@ -192,7 +193,11 @@ export const SceneTitleOverlay: React.FC<SceneTitleOverlayProps> = ({
           flexDirection: "column",
           alignItems: "center",
           justifyContent: "center",
-          padding: "0 80px",
+          // CARVE-OUT: the panel (wash) covers the full frame by design, but
+          // the TITLE TEXT must stay clear of the TikTok action rail — pad
+          // both sides by the rail width so the centered title wraps inside
+          // the safe rect while the wash behind it still fills the frame.
+          padding: `0 ${TIKTOK_SAFE_RIGHT}px`,
           boxSizing: "border-box",
           pointerEvents: "none",
         }}

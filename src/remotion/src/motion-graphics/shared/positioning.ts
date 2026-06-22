@@ -1,4 +1,11 @@
 import type React from "react";
+import {
+  SAFE_RECT,
+  TIKTOK_SAFE_TOP,
+  TIKTOK_SAFE_RIGHT,
+  TIKTOK_SAFE_BOTTOM,
+  TIKTOK_SAFE_SIDE,
+} from "../../shared/safeZone";
 
 // ---------------------------------------------------------------------------
 // Shared positioning / scale API for motion-graphic components.
@@ -70,15 +77,61 @@ export interface ResolvedPositioning {
   wrapperStyle: React.CSSProperties;
 }
 
-// Auto-inset values keep edge-anchored components off the very edge of the
-// 1080×1920 canvas. The "safe" in `left_safe` / `right_safe` (semantic anchor
-// names from the recipe) is honored here: when an MG is anchored to a side,
-// it gets pushed ~80px inward so the content doesn't render flush against the
-// edge or clip on letter-spacing / text-shadow. Top / bottom get a smaller
-// vertical inset for the same reason — components like StatCard have rules
-// and labels below the number that need a few px of breathing room.
-const SAFE_INSET_X = 80;
-const SAFE_INSET_Y = 60;
+// TikTok-safe positioning. The flex container's padding IS the platform-safe
+// rect (single source of truth in src/shared/safeZone.ts): every anchor —
+// edges AND center — resolves INSIDE x∈[80,880], y∈[270,1500] on the
+// 1080×1920 canvas, clear of the top header, the right action rail, and the
+// bottom caption/nav drawer. This replaces the old cosmetic ~60/80px edge
+// insets, which assumed the whole frame was usable and let content bleed
+// under the platform UI.
+//
+// Gemini controls only the anchor + offsets + scale. We make it impossible
+// for any of those to place content into an unsafe zone:
+//   (1) padding box → the anchor itself is always inside the safe rect;
+//   (2) offset clamp → a supplied offset cannot drag content back across a
+//       safe boundary (component-author default offsets land inside the rect
+//       already, so they pass through untouched);
+//   (3) max-width/height + scale≤1 → a large or enlarged component cannot
+//       overflow the rect even when correctly anchored.
+
+const clampNum = (v: number, lo: number, hi: number): number =>
+  Math.max(lo, Math.min(hi, v));
+
+// Clamp an effective offset into the safe-travel range for its anchor. The
+// anchored reference point is kept within the central band of the safe rect
+// (half the safe extent in any direction), which both blocks a Gemini offset
+// from crossing a boundary AND leaves the component's body room to extend
+// toward the opposite edge without bleeding out. Author default offsets
+// (e.g. the SpeechBubble family's offsetY 720–820) sit inside this range and
+// are unaffected.
+function clampOffsetForAnchor(
+  anchor: MGAnchor,
+  dx: number,
+  dy: number,
+): { dx: number; dy: number } {
+  const halfW = SAFE_RECT.width / 2;
+  const halfH = SAFE_RECT.height / 2;
+  const isTop =
+    anchor === "top" || anchor === "top-left" || anchor === "top-right";
+  const isBottom =
+    anchor === "bottom" ||
+    anchor === "bottom-left" ||
+    anchor === "bottom-right";
+  const isLeft =
+    anchor === "left" || anchor === "top-left" || anchor === "bottom-left";
+  const isRight =
+    anchor === "right" || anchor === "top-right" || anchor === "bottom-right";
+
+  if (isTop) dy = clampNum(dy, 0, halfH);
+  else if (isBottom) dy = clampNum(dy, -halfH, 0);
+  else dy = clampNum(dy, -halfH, halfH);
+
+  if (isLeft) dx = clampNum(dx, 0, halfW);
+  else if (isRight) dx = clampNum(dx, -halfW, 0);
+  else dx = clampNum(dx, -halfW, halfW);
+
+  return { dx, dy };
+}
 
 // Resolve the user-provided position props into container + wrapper styles.
 // `defaults` lets each component pick its own sensible default anchor/offset.
@@ -87,26 +140,19 @@ export function resolveMGPosition(
   defaults: { anchor?: MGAnchor; offsetX?: number; offsetY?: number } = {},
 ): ResolvedPositioning {
   const anchor = props?.anchor ?? defaults.anchor ?? "center";
-  const userOffsetX = props?.offsetX ?? defaults.offsetX ?? 0;
-  const userOffsetY = props?.offsetY ?? defaults.offsetY ?? 0;
-  const scale = props?.scale ?? 1;
+  const rawOffsetX = props?.offsetX ?? defaults.offsetX ?? 0;
+  const rawOffsetY = props?.offsetY ?? defaults.offsetY ?? 0;
+  // Scale may shrink (toward fitting the rect) but never enlarge past the
+  // bounded box — an enlarging scale is the one way a correctly-anchored
+  // component could still grow into a platform-UI zone.
+  const scale = clampNum(props?.scale ?? 1, 0.1, 1);
 
-  // Apply edge insets. Direction matters: positive offsetX pushes RIGHT,
-  // so left-anchored components inset with +X, right-anchored with -X.
-  let anchorInsetX = 0;
-  let anchorInsetY = 0;
-  if (anchor === "left" || anchor === "top-left" || anchor === "bottom-left") {
-    anchorInsetX = SAFE_INSET_X;
-  } else if (anchor === "right" || anchor === "top-right" || anchor === "bottom-right") {
-    anchorInsetX = -SAFE_INSET_X;
-  }
-  if (anchor === "top" || anchor === "top-left" || anchor === "top-right") {
-    anchorInsetY = SAFE_INSET_Y;
-  } else if (anchor === "bottom" || anchor === "bottom-left" || anchor === "bottom-right") {
-    anchorInsetY = -SAFE_INSET_Y;
-  }
-  const offsetX = userOffsetX + anchorInsetX;
-  const offsetY = userOffsetY + anchorInsetY;
+  // (2) Clamp the offset so it cannot push content across a safe boundary.
+  const { dx: offsetX, dy: offsetY } = clampOffsetForAnchor(
+    anchor,
+    rawOffsetX,
+    rawOffsetY,
+  );
 
   const flex = ANCHOR_FLEX[anchor];
   const transformOrigin = ANCHOR_ORIGIN[anchor];
@@ -120,8 +166,23 @@ export function resolveMGPosition(
       flexDirection: "row",
       alignItems: flex.alignItems,
       justifyContent: flex.justifyContent,
+      // (1) The padded content box IS the TikTok-safe rect. box-sizing keeps
+      // the padding inside the 1080×1920 AbsoluteFill, so flex alignment —
+      // including center — places the component within x∈[80,880],
+      // y∈[270,1500]. Deliberately NO overflow:hidden: it would clip the
+      // components' slide-in / slide-out animations, which legitimately
+      // travel from off-rect.
+      boxSizing: "border-box",
+      paddingTop: TIKTOK_SAFE_TOP,
+      paddingRight: TIKTOK_SAFE_RIGHT,
+      paddingBottom: TIKTOK_SAFE_BOTTOM,
+      paddingLeft: TIKTOK_SAFE_SIDE,
     },
     wrapperStyle: {
+      // (3) Bound the component to the safe rect so a wide or tall card
+      // cannot overflow even when correctly anchored.
+      maxWidth: SAFE_RECT.width,
+      maxHeight: SAFE_RECT.height,
       transform: `translate(${offsetX}px, ${offsetY}px) scale(${scale})`,
       transformOrigin,
     },
