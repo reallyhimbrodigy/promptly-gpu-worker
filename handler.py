@@ -13188,8 +13188,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # prefetch_and_verify_broll before invoking us; only entries with a
     # downloaded + ffprobed asset survived). The block further below projects
     # each entry's word-anchored window to output time and appends a
-    # BrollSpec to broll_out. PromptlyOverlay and PromptlyMicroSegments
-    # ignore the broll field; only the FFmpeg composite filtergraph reads it.
+    # BrollSpec to broll_out. broll_out is passed to PromptlyOverlay, whose
+    # BrollLayer renders each cutaway full-canvas at the BOTTOM of the overlay
+    # z-stack — UNDER captions/MGs (see PromptlyRender.tsx:565 + the BrollLayer
+    # z-order note). The FFmpeg composite filtergraph does NOT composite B-roll
+    # directly (see ffmpeg_base.py build_final_filtergraph: "B-roll is rendered
+    # into the alpha overlay … this filtergraph does not composite B-roll").
     broll_out: List[dict] = []
 
     # ── 4b. Text overlays — variant dispatch ────────────────────────────────

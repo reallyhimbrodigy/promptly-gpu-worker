@@ -31,6 +31,7 @@ export const TikTokComment: React.FC<TikTokCommentProps> = ({
   const { containerStyle, wrapperStyle } = resolveMGPosition(
     { anchor, offsetX, offsetY, scale },
     { anchor: "top", offsetY: 820 },
+    "TikTokComment",
   );
   const { fps } = useVideoConfig();
   const { visible, localFrame, exitProgress } = useMGPhase(

@@ -33,6 +33,7 @@ export const IMessageBubble: React.FC<IMessageBubbleProps> = ({
   const { containerStyle, wrapperStyle } = resolveMGPosition(
     { anchor, offsetX, offsetY, scale },
     { anchor: "top", offsetY: 820 },
+    "IMessageBubble",
   );
   const { fps } = useVideoConfig();
   const { visible, localFrame, exitProgress } = useMGPhase(

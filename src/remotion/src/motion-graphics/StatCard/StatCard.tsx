@@ -40,12 +40,11 @@ export const StatCard: React.FC<StatCardProps> = ({
   offsetY,
   scale,
 }) => {
-  const { containerStyle, wrapperStyle } = resolveMGPosition({
-    anchor,
-    offsetX,
-    offsetY,
-    scale,
-  });
+  const { containerStyle, wrapperStyle } = resolveMGPosition(
+    { anchor, offsetX, offsetY, scale },
+    undefined,
+    "StatCard",
+  );
   const { visible, localFrame, exitProgress } = useMGPhase(
     { startMs, durationMs, enterFrames, exitFrames },
     { defaultEnterFrames: 32, defaultExitFrames: 12 },

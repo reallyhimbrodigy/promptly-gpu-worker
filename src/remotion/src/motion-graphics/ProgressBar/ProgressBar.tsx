@@ -39,12 +39,11 @@ export const ProgressBar: React.FC<ProgressBarProps> = (props) => {
     offsetY,
     scale,
   } = props;
-  const { containerStyle, wrapperStyle } = resolveMGPosition({
-    anchor,
-    offsetX,
-    offsetY,
-    scale,
-  });
+  const { containerStyle, wrapperStyle } = resolveMGPosition(
+    { anchor, offsetX, offsetY, scale },
+    undefined,
+    "ProgressBar",
+  );
   const { fps } = useVideoConfig();
   const { visible, localFrame, exitProgress } = useMGPhase(
     { startMs, durationMs, enterFrames, exitFrames },

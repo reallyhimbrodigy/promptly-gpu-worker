@@ -1,6 +1,7 @@
 import type React from "react";
 import {
   SAFE_RECT,
+  CANVAS_WIDTH,
   TIKTOK_SAFE_TOP,
   TIKTOK_SAFE_RIGHT,
   TIKTOK_SAFE_BOTTOM,
@@ -133,12 +134,50 @@ function clampOffsetForAnchor(
   return { dx, dy };
 }
 
+// ---------------------------------------------------------------------------
+// Per-type positioning policy — SINGLE SOURCE OF TRUTH.
+// ---------------------------------------------------------------------------
+//   centerColumn: ignore the anchor's horizontal component — force the MG into
+//     the center column. Text/number/UI cards must never side-anchor.
+//   topExempt:    render at the TRUE top like a real OS notification — opt out
+//     of the safe-zone top + bottom padding AND the centering rule; full-width
+//     minus the action rail. (Notification intentionally overlaps TikTok's own
+//     clock — that's the notification-mimic look, not a bug.)
+//
+// Types ABSENT here keep default behavior (anchor honored, inside the safe
+// rect). StickyNotes + Toggle self-center (left:50% + translateX(-50%)) and
+// never route through resolveMGPosition; AnnotationArrow (points at a target)
+// and RecordingFrame (full-frame border) are intentionally free-positioned.
+export interface MGPositionConfig {
+  centerColumn?: boolean;
+  topExempt?: boolean;
+}
+
+export const MG_POSITION_CONFIG: Record<string, MGPositionConfig> = {
+  StatCard: { centerColumn: true },
+  QuoteCard: { centerColumn: true },
+  ChatThread: { centerColumn: true },
+  ProgressBar: { centerColumn: true },
+  TweetBubble: { centerColumn: true },
+  InstagramComment: { centerColumn: true },
+  IMessageBubble: { centerColumn: true },
+  TikTokComment: { centerColumn: true },
+  Notification: { topExempt: true },
+};
+
+// Notification's container top inset is 0 — the component supplies its own
+// small top offset (platform topOffset ≈ 24) so the banner lands at ~y=24.
+const NOTIFICATION_TOP_INSET = 0;
+
 // Resolve the user-provided position props into container + wrapper styles.
 // `defaults` lets each component pick its own sensible default anchor/offset.
+// `mgType` (optional) selects the per-type policy above.
 export function resolveMGPosition(
   props: MGPositionProps | undefined,
   defaults: { anchor?: MGAnchor; offsetX?: number; offsetY?: number } = {},
+  mgType?: string,
 ): ResolvedPositioning {
+  const cfg = (mgType && MG_POSITION_CONFIG[mgType]) || {};
   const anchor = props?.anchor ?? defaults.anchor ?? "center";
   const rawOffsetX = props?.offsetX ?? defaults.offsetX ?? 0;
   const rawOffsetY = props?.offsetY ?? defaults.offsetY ?? 0;
@@ -148,14 +187,30 @@ export function resolveMGPosition(
   const scale = clampNum(props?.scale ?? 1, 0.1, 1);
 
   // (2) Clamp the offset so it cannot push content across a safe boundary.
-  const { dx: offsetX, dy: offsetY } = clampOffsetForAnchor(
+  const { dx: clampedX, dy: clampedY } = clampOffsetForAnchor(
     anchor,
     rawOffsetX,
     rawOffsetY,
   );
+  // Item 1: center-column types ignore any horizontal offset (forced center).
+  const offsetX = cfg.centerColumn ? 0 : clampedX;
+  const offsetY = clampedY;
 
   const flex = ANCHOR_FLEX[anchor];
   const transformOrigin = ANCHOR_ORIGIN[anchor];
+
+  // Item 1: force horizontal center regardless of the anchor's horizontal part.
+  const justifyContent = cfg.centerColumn ? "center" : flex.justifyContent;
+  // Item 3 (topExempt): pin to the true top, full-width minus the rail, and
+  // drop the top + bottom safe padding. Right-rail padding stays so a wide
+  // banner can't run under the action buttons.
+  const alignItems = cfg.topExempt ? "flex-start" : flex.alignItems;
+  const paddingTop = cfg.topExempt ? NOTIFICATION_TOP_INSET : TIKTOK_SAFE_TOP;
+  const paddingBottom = cfg.topExempt ? 0 : TIKTOK_SAFE_BOTTOM;
+  const paddingLeft = cfg.topExempt ? 0 : TIKTOK_SAFE_SIDE;
+  const maxWidth = cfg.topExempt
+    ? CANVAS_WIDTH - TIKTOK_SAFE_RIGHT
+    : SAFE_RECT.width;
 
   return {
     containerStyle: {
@@ -164,24 +219,22 @@ export function resolveMGPosition(
       // swap the meaning of alignItems/justifyContent. Row keeps the mental
       // model simple: justifyContent = horizontal, alignItems = vertical.
       flexDirection: "row",
-      alignItems: flex.alignItems,
-      justifyContent: flex.justifyContent,
-      // (1) The padded content box IS the TikTok-safe rect. box-sizing keeps
-      // the padding inside the 1080×1920 AbsoluteFill, so flex alignment —
-      // including center — places the component within x∈[80,880],
-      // y∈[270,1500]. Deliberately NO overflow:hidden: it would clip the
-      // components' slide-in / slide-out animations, which legitimately
-      // travel from off-rect.
+      alignItems,
+      justifyContent,
+      // (1) The padded content box IS the TikTok-safe rect (topExempt types
+      // override top/bottom/left to sit at the true top, full-width). box-
+      // sizing keeps the padding inside the 1080×1920 AbsoluteFill. No
+      // overflow:hidden — it would clip slide-in/out animations.
       boxSizing: "border-box",
-      paddingTop: TIKTOK_SAFE_TOP,
+      paddingTop,
       paddingRight: TIKTOK_SAFE_RIGHT,
-      paddingBottom: TIKTOK_SAFE_BOTTOM,
-      paddingLeft: TIKTOK_SAFE_SIDE,
+      paddingBottom,
+      paddingLeft,
     },
     wrapperStyle: {
-      // (3) Bound the component to the safe rect so a wide or tall card
-      // cannot overflow even when correctly anchored.
-      maxWidth: SAFE_RECT.width,
+      // (3) Bound the component so a wide or tall card cannot overflow even
+      // when correctly anchored.
+      maxWidth,
       maxHeight: SAFE_RECT.height,
       transform: `translate(${offsetX}px, ${offsetY}px) scale(${scale})`,
       transformOrigin,

@@ -54,6 +54,7 @@ export const TweetBubble: React.FC<TweetBubbleProps> = ({
   const { containerStyle, wrapperStyle } = resolveMGPosition(
     { anchor, offsetX, offsetY, scale },
     { anchor: "top", offsetY: 720 },
+    "TweetBubble",
   );
   const { fps } = useVideoConfig();
   const { visible, localFrame, exitProgress } = useMGPhase(

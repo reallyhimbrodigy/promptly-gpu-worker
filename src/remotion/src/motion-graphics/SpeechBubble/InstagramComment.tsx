@@ -32,6 +32,7 @@ export const InstagramComment: React.FC<InstagramCommentProps> = ({
   const { containerStyle, wrapperStyle } = resolveMGPosition(
     { anchor, offsetX, offsetY, scale },
     { anchor: "top", offsetY: 820 },
+    "InstagramComment",
   );
   const { fps } = useVideoConfig();
   const { visible, localFrame, exitProgress } = useMGPhase(

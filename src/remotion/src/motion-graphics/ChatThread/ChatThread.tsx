@@ -471,12 +471,11 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
     },
   );
 
-  const { containerStyle, wrapperStyle } = resolveMGPosition({
-    anchor,
-    offsetX,
-    offsetY,
-    scale,
-  });
+  const { containerStyle, wrapperStyle } = resolveMGPosition(
+    { anchor, offsetX, offsetY, scale },
+    undefined,
+    "ChatThread",
+  );
 
   if (!visible) return null;
 

@@ -59,12 +59,11 @@ export const QuoteCard: React.FC<QuoteCardProps> = ({
   const resolvedQuoteColor = quoteColor ?? palette.quoteColor;
   const resolvedAttributionColor = attributionColor ?? palette.attributionColor;
   const resolvedAccentColor = accentColor ?? palette.defaultAccent;
-  const { containerStyle, wrapperStyle } = resolveMGPosition({
-    anchor,
-    offsetX,
-    offsetY,
-    scale,
-  });
+  const { containerStyle, wrapperStyle } = resolveMGPosition(
+    { anchor, offsetX, offsetY, scale },
+    undefined,
+    "QuoteCard",
+  );
   const { fps } = useVideoConfig();
   const { visible, localFrame, exitProgress } = useMGPhase(
     { startMs, durationMs, enterFrames, exitFrames },

@@ -209,6 +209,8 @@ export const Notification: React.FC<NotificationProps> = ({
   const platformTopOffset = STYLES[platform].topOffset;
   const { containerStyle, wrapperStyle } = resolveMGPosition(
     { anchor: "top", offsetY: platformTopOffset, scale },
+    undefined,
+    "Notification",
   );
   const { fps } = useVideoConfig();
   const { visible, localFrame, exitProgress, phase } = useMGPhase(
