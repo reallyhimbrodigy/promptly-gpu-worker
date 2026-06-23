@@ -4397,8 +4397,6 @@ def _force_caption_position_around_overlays(
             if int(s["fromFrame"]) <= a < int(s["toFrame"]):
                 orig_pos = s["position"]
                 break
-        if orig_pos is None:
-            continue
 
         # Inside a B-roll window?
         in_broll = any(_ff <= a and _tf >= b for _ff, _tf in broll_windows)
@@ -4426,7 +4424,18 @@ def _force_caption_position_around_overlays(
             forced = "top"
             reason = "mg_at_bottom"
 
+        # A forced (B-roll / MG-zone) position ALWAYS wins — even when the
+        # projected input segments left a gap here (orig_pos is None). This is
+        # the suppression fix: the old early `if orig_pos is None: continue`
+        # skipped a B-roll window with no covering input segment BEFORE this
+        # decision, dropping captions over the cutaway entirely. `forced` is
+        # now computed first. For a genuine NON-forced gap, fall back to the
+        # previous segment's position (or the "bottom" default) so a caption
+        # page can never land in a hole and render nowhere. Bit-identical on
+        # renders whose segments tile (orig_pos never None → branch never fires).
         pos = forced if forced is not None else orig_pos
+        if pos is None:
+            pos = out[-1]["position"] if out else "bottom"
 
         if forced is not None and forced != orig_pos:
             _record_divergence(
@@ -8435,6 +8444,41 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
             for _ev in (_em_zoom.get("events") or []):
                 _merged_events.append(_ev)
         _merged_events.sort(key=lambda e: float(e.get("startMs") or 0))
+
+        # Item C instrumentation (no behavior change): the StepZoom double-
+        # step-out staircase only appears when ≥2 events render under ONE
+        # StepZoom type with OVERLAPPING windows (or mixed scales) — StepZoom's
+        # first-covering-event-wins then exposes a lower event's scale as an
+        # intermediate on the way out. Both captured renders had a ~3s GAP, so
+        # the bug never reproduced. Log loudly when an overlap / mixed-scale
+        # merge DOES happen so the next staircase render surfaces the exact
+        # events (scale, startMs, durMs) the max-covering fix needs.
+        if _dominant_type == "StepZoom" and len(_merged_events) > 1:
+            _ev_sd = [
+                (
+                    float(_e.get("scale") or 0.0),
+                    float(_e.get("startMs") or 0.0),
+                    float(_e.get("durationMs") or 0.0),
+                )
+                for _e in _merged_events
+            ]
+            _zm_overlap = any(
+                _ev_sd[_k + 1][1] < _ev_sd[_k][1] + _ev_sd[_k][2]
+                for _k in range(len(_ev_sd) - 1)
+            )
+            _zm_mixed = len({round(_s, 3) for _s, _, _ in _ev_sd}) > 1
+            if _zm_overlap or _zm_mixed:
+                _zm_tags = " ".join(
+                    _t for _t, _on in (("OVERLAP", _zm_overlap), ("MIXED_SCALE", _zm_mixed))
+                    if _on
+                )
+                print(
+                    f"[zoom-merge-overlap] StepZoom clip={_clip_idx} "
+                    f"events={[(round(_s, 3), int(_st), int(_d)) for _s, _st, _d in _ev_sd]} "
+                    f"{_zm_tags} detected — staircase arrangement (StepZoom "
+                    f"first-covering renders an intermediate scale on step-out)",
+                    flush=True,
+                )
 
         # Carry over non-events / non-type fields from the dominant emphasis's
         # zoom_effect (firstStage, windowScale, borderColor, etc. — these are
