@@ -5584,6 +5584,53 @@ def _get_or_create_gemini_system_cache(client, model_name: str, system_instructi
         return None
 
 
+def _gemini_is_retriable_error(msg):
+    """Classify a Gemini error as retriable: shared-quota rate limit (429 /
+    RESOURCE_EXHAUSTED), model overload (503 / UNAVAILABLE / overloaded), other
+    5xx, or transient network/deadline. NOT retriable: bad request, cache-miss,
+    auth, schema errors — those re-fail identically and must surface."""
+    m = str(msg).lower()
+    return (
+        "429" in m or "resource_exhausted" in m or "rate limit" in m or
+        "quota" in m or "500" in m or "502" in m or "503" in m or "504" in m or
+        "unavailable" in m or "overloaded" in m or "deadline" in m or
+        "timeout" in m or "connection" in m or "temporarily" in m
+    )
+
+
+def _gemini_generate_with_backoff(generate_fn, label="gemini", attempts=4, base=4.0):
+    """Run a Gemini generate_content call with exponential backoff + JITTER on
+    retriable errors (shared-quota 429 / overload / 5xx / network).
+
+    Concurrent renders all draw from ONE Gemini account quota (TPM/RPM), so a
+    burst of simultaneous jobs can transiently trip the shared limit. Backoff
+    lets each render ride out a transient limit instead of failing — this is
+    what keeps an INDIVIDUAL render sound while OTHER renders run at the same
+    time (the per-job-isolation goal). Jitter spreads retries so N jobs don't
+    re-hit the limit on the same tick (thundering herd). Mirrors Deepgram's
+    backoff (_deepgram_is_retriable_error). NOTE: backoff absorbs BURSTS;
+    SUSTAINED load above quota is a quota problem (raise the Gemini tier), not
+    a retry problem — retries only add latency once the pool is truly saturated."""
+    import random
+    last_err = None
+    for attempt in range(attempts):
+        try:
+            return generate_fn()
+        except Exception as e:
+            last_err = e
+            if attempt < attempts - 1 and _gemini_is_retriable_error(e):
+                wait = min(45.0, base * (2 ** attempt)) + random.uniform(0.0, 1.5)
+                print(
+                    f"[gemini-backoff] {label} attempt {attempt + 1}/{attempts} "
+                    f"retriable ({type(e).__name__}: {str(e)[:120]}) — retry in {wait:.1f}s",
+                    flush=True,
+                )
+                time.sleep(wait)
+                continue
+            raise
+    raise last_err  # defensive — the loop returns or raises on every path
+
+
 def _gemini_generate_with_cache(client, model_name, contents, base_config_kwargs, system_instruction):
     """Run client.models.generate_content with explicit prompt caching.
 
@@ -5602,10 +5649,13 @@ def _gemini_generate_with_cache(client, model_name, contents, base_config_kwargs
         return genai_types.GenerateContentConfig(**kwargs)
 
     try:
-        return client.models.generate_content(
-            model=model_name,
-            contents=contents,
-            config=_build_config(use_cache=cache_name is not None),
+        return _gemini_generate_with_backoff(
+            lambda: client.models.generate_content(
+                model=model_name,
+                contents=contents,
+                config=_build_config(use_cache=cache_name is not None),
+            ),
+            label="generate(cache)",
         )
     except Exception as e:
         if cache_name:
@@ -5617,10 +5667,13 @@ def _gemini_generate_with_cache(client, model_name, contents, base_config_kwargs
                     flush=True,
                 )
                 _drop_gemini_cache(model_name, system_instruction)
-                return client.models.generate_content(
-                    model=model_name,
-                    contents=contents,
-                    config=_build_config(use_cache=False),
+                return _gemini_generate_with_backoff(
+                    lambda: client.models.generate_content(
+                        model=model_name,
+                        contents=contents,
+                        config=_build_config(use_cache=False),
+                    ),
+                    label="generate(no-cache)",
                 )
         raise
 
