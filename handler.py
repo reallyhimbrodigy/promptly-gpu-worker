@@ -13426,6 +13426,44 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _sfx_extra_idx = 0
     _speech_segs = speech_segments or (edit_plan.get("analysis_data") or {}).get("speech", {}).get("segments") or []
 
+    # ── Cut-partner re-anchor map ───────────────────────────────────────────
+    # An SFX is anchored to its trigger WORD's start; a tight-cut overlay /
+    # transition is anchored to the CUT BOUNDARY (the before-cut word's output
+    # END — _pw_by_idx[awi]["end"], the same value the overlay uses for atFrame
+    # above). When an SFX sits on the boundary word (after_word_index) or the
+    # first post-cut word (after_word_index+1), those two anchors drift apart by
+    # ~the word's duration — the sound fires EARLY of the flash. Re-anchor those
+    # — and ONLY those (exact boundary-word membership, never proximity) — to the
+    # cut-boundary frame (atFrame) so the audible transient lands on the cut.
+    # We target atFrame for EVERY type, NOT each overlay's measured visual-peak
+    # frame: the per-type peaks differ from atFrame by at most ~1 frame
+    # (ShutterFlash 0, LightLeak +9ms, NewspaperWipe -21ms), which is below
+    # AV-sync perception and not worth coupling SFX timing to the overlay opacity
+    # curves (they'd silently desync if the animations change). after_word_index
+    # is read from the RESOLVED plan lists (the render lists drop it); it and
+    # _sfx_wi are both source word indices in the SAME _pw_by_idx space. +1 lands
+    # on the first post-cut word, whose start already ≈ the boundary, so re-
+    # anchoring it is a near-no-op (harmless if +1 is removed/out-of-range — no
+    # surviving SFX targets such a word). The boundary is the before-cut word's
+    # end = a real hard cut even when a transition is render-skipped.
+    _sfx_cut_anchor_t = {}  # source word_index -> re-anchored output time (seconds)
+
+    def _register_cut_partner(_awi):
+        if not isinstance(_awi, int):
+            return
+        _bpw = _pw_by_idx.get(_awi)
+        if not _bpw:  # before-cut word not in output (shouldn't happen for a real cut)
+            return
+        _bf = int(round(float(_bpw.get("end") or 0.0) * source_fps))
+        _bt = max(0.0, _bf / float(source_fps))
+        _sfx_cut_anchor_t[_awi] = _bt          # SFX on the before-cut word
+        _sfx_cut_anchor_t[_awi + 1] = _bt      # SFX on the first post-cut word
+
+    for _ov in (edit_plan.get("_resolved_tight_cut_overlays") or []):
+        _register_cut_partner(_ov.get("after_word_index"))
+    for _tr in (edit_plan.get("transitions") or []):
+        _register_cut_partner(_tr.get("after_word_index"))
+
     # Word-indexed SFX — exact timing from projected words
     parsed_sfx = edit_plan.get("_parsed_sound_effects", [])
     for _i, _sfx in enumerate(parsed_sfx):
@@ -13441,6 +13479,19 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _pw = _pw_by_idx.get(_sfx_wi)
             if _pw:
                 _projected_t = float(_pw["start"])
+                # Cut-partnered SFX re-anchor: from the word START to the cut
+                # boundary's visual-peak frame, so the transient lands on the
+                # flash instead of ~one word-duration early. Exact membership
+                # only — non-boundary SFX fall through unchanged.
+                if _sfx_wi in _sfx_cut_anchor_t:
+                    _reanchor_t = _sfx_cut_anchor_t[_sfx_wi]
+                    print(
+                        f"[sfx] re-anchor {_sound_style} word {_sfx_wi}: "
+                        f"word-start {_projected_t:.3f}s → cut-boundary "
+                        f"{_reanchor_t:.3f}s (cut-partnered)",
+                        flush=True,
+                    )
+                    _projected_t = _reanchor_t
             else:
                 _sfx_word = _sfx.get("word", "")
                 print(f"[sfx] Skipping {_sound_style} on '{_sfx_word}' — word removed from output", flush=True)
