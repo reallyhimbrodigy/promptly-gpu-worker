@@ -532,7 +532,7 @@ class PromptlyWorker:
         return result
 
     @modal.fastapi_endpoint(method="POST")
-    def warmup(self, body: dict | None = None):
+    def warmup(self, body: dict):
         """Provision the render container the moment iOS upload BEGINS, so the
         real run_job ~10-90s later hits a WARM container instead of paying the
         cold start (handler import + A100 alloc + CUDA driver setup, ~15-30s on
