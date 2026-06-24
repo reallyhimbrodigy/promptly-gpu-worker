@@ -466,7 +466,12 @@ prewarm_volume = modal.Volume.from_name("promptly-prewarm-cache", create_if_miss
 # ── Web endpoint ───────────────────────────────────────────────────────────────
 @app.cls(
     timeout=900,          # 15 min — orchestrator runs init + audio + remotion + composite + upload. Raised from 600 (2026-06-21) to keep ~420s of buffer for non-Gemini work after the Gemini client timeout was raised to 480s (handler.py:_get_genai_client) to accommodate thinking_budget=60000's worst-case wall-clock (~337s). If Gemini took 480s and Modal capped at 600s, only 120s remained for download/render/composite/upload — render alone routinely needs 30-90s. 900s gives comfortable margin; jobs that don't hit Gemini's cap (the typical case) cost the same as before since billing is per-active-second, not per-cap.
-    scaledown_window=30,  # tear down fast — at $8.27/hr full spec, idle scaledown was costing ~$0.69 per render (83% of total bill). 30s window catches back-to-back jobs without paying for long idle.
+    scaledown_window=180, # 3 min — covers the warmup() (fired at upload-start) →
+                          # run_job gap so the FIRST render after idle hits a warm
+                          # container (no cold start), plus back-to-back jobs. At
+                          # A100 rates (~$2.78/hr, down from H100's $8.27) the
+                          # extra idle warmth is ~$0.12/render — cheap vs paying a
+                          # 15-30s cold start on the user's critical path.
     gpu="A100",           # A100-40GB, NOT H100. The orchestrator does NO GPU
                           # VIDEO work: NVENC + CUDA decode are hardcoded off
                           # (_HAS_NVENC/_HAS_HWACCEL=False → encode is CPU libx264,
@@ -525,6 +530,25 @@ class PromptlyWorker:
             pass
         result = self._handler({"input": body})
         return result
+
+    @modal.fastapi_endpoint(method="POST")
+    def warmup(self, body: dict | None = None):
+        """Provision the render container the moment iOS upload BEGINS, so the
+        real run_job ~10-90s later hits a WARM container instead of paying the
+        cold start (handler import + A100 alloc + CUDA driver setup, ~15-30s on
+        the critical path). @modal.enter() already ran on spin-up (the heavy
+        import + CUDA driver fix); this endpoint just forces a container to
+        exist and keeps it warm for scaledown_window. Fire-and-forget from the
+        app server at upload-start — mirrors PromptlyPrewarmWorker hiding the
+        CPU prework behind the upload, but for the GPU render container.
+        Idempotent and ~free; the value is the side effect of a warm container."""
+        cuda = False
+        try:
+            import torch
+            cuda = bool(torch.cuda.is_available())
+        except Exception:
+            pass
+        return {"ok": True, "warm": True, "cuda": cuda}
 
 
 # ── Prewarm CPU worker (split off from the GPU render worker) ─────────────────
