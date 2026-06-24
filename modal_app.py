@@ -467,10 +467,22 @@ prewarm_volume = modal.Volume.from_name("promptly-prewarm-cache", create_if_miss
 @app.cls(
     timeout=900,          # 15 min — orchestrator runs init + audio + remotion + composite + upload. Raised from 600 (2026-06-21) to keep ~420s of buffer for non-Gemini work after the Gemini client timeout was raised to 480s (handler.py:_get_genai_client) to accommodate thinking_budget=60000's worst-case wall-clock (~337s). If Gemini took 480s and Modal capped at 600s, only 120s remained for download/render/composite/upload — render alone routinely needs 30-90s. 900s gives comfortable margin; jobs that don't hit Gemini's cap (the typical case) cost the same as before since billing is per-active-second, not per-cap.
     scaledown_window=30,  # tear down fast — at $8.27/hr full spec, idle scaledown was costing ~$0.69 per render (83% of total bill). 30s window catches back-to-back jobs without paying for long idle.
-    gpu="H100",           # H100 retained for RIFE frame interpolation + general
-                          # rendering speed. ASR no longer needs it (Whisper + wav2vec2
-                          # were ripped out 2026-05-23 in favor of Deepgram-only ASR).
-                          # Could downgrade to a smaller GPU if RIFE budget allows.
+    gpu="A100",           # A100-40GB, NOT H100. The orchestrator does NO GPU
+                          # VIDEO work: NVENC + CUDA decode are hardcoded off
+                          # (_HAS_NVENC/_HAS_HWACCEL=False → encode is CPU libx264,
+                          # decode is CPU, fps is CPU minterpolate), the Remotion
+                          # render is Chromium-on-CPU, and rife_normalize_remote
+                          # is DEAD CODE (never called — RIFE is not in the path).
+                          # The ONLY GPU consumer is pyannote diarization. H100 is
+                          # the single most-contested GPU on Modal, so requesting
+                          # it made every render queue for a free H100 — the 5-min
+                          # start stalls (sometimes never allocated → "never
+                          # starts"), and a 2nd simultaneous render waiting on a
+                          # 2nd scarce H100 (the concurrency bug). A100-40GB is far
+                          # more available (allocates in seconds, no queue), keeps
+                          # the 64-CPU/128GB host the parallel Chromium render
+                          # needs, keeps pyannote on GPU, and costs ~half. Fixes
+                          # the start-stall AND simultaneous renders together.
     cpu=64,
     memory=131072,        # 128GB — Remotion overlay + Remotion micro-segments run in parallel here, plus per-cut numpy audio resampler, plus the big single-pass ffmpeg composite
     region=["us-west", "us-east"],  # prefer us-west colocated with Supabase,
