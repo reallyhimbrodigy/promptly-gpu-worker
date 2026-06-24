@@ -5650,7 +5650,12 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
     # automatic retry) before raising. No other retry wraps this path:
     # _gemini_generate_with_cache only retries on cache-miss errors, and the
     # caller at the recipe site does not re-invoke on empty.
+    # Typical PostCutPlan JSON is 2-4K output tokens; >16K means the model
+    # spiraled into a repetition loop (the prod failure hit output=58,968).
+    # Tunable in one place.
+    _POST_CUTS_DEGEN_OUTPUT_TOKENS = 16000
     response_text = ""
+    _degen = None
     for _attempt in (1, 2):
         t0 = time.time()
         response = _gemini_generate_with_cache(
@@ -5659,10 +5664,14 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
             base_config_kwargs=dict(
                 temperature=1.0,
                 # max_output_tokens cap is SHARED between thinking and the
-                # actual JSON response. With thinking_budget=24576 below,
-                # ~40K remains for the JSON output — typical PostCutPlan JSON
-                # is 2-4K, comfortable margin.
-                max_output_tokens=65536,
+                # actual JSON response. Typical PostCutPlan JSON is 2-4K tokens
+                # and thinking_budget is 24576, so ~28-29K is the legit ceiling.
+                # Capped at 40000 (was 65536) to bound the blast radius of a
+                # repetition-loop degeneration — a spiral can't run to 64K
+                # tokens / 430s anymore. The degeneration GUARD below (re-roll
+                # on oversized/unparseable output) is what recovers the job;
+                # this cap just limits a single bad roll's wall-clock.
+                max_output_tokens=40000,
                 response_mime_type="application/json",
                 response_json_schema=PostCutPlan.model_json_schema(),
                 # 24576 thinking budget — lowered from 60000. 60K bought no
@@ -5676,27 +5685,55 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
         )
         dt = time.time() - t0
         print(f"[gemini-post] Complete in {dt:.1f}s", flush=True)
+        _out_tokens = None
         try:
             usage = getattr(response, "usage_metadata", None)
             if usage is not None:
+                _out_tokens = getattr(usage, "candidates_token_count", None)
                 print(
                     f"[gemini-post] Tokens — prompt={getattr(usage,'prompt_token_count',None)} "
                     f"cached={getattr(usage,'cached_content_token_count',None)} "
                     f"thoughts={getattr(usage,'thoughts_token_count',None)} "
-                    f"output={getattr(usage,'candidates_token_count',None)}",
+                    f"output={_out_tokens}",
                     flush=True,
                 )
         except Exception:
             pass
         response_text = str(getattr(response, "text", "") or "").strip()
-        if response_text:
-            break
-        if _attempt == 1:
-            print("[gemini-post] Empty/None response — retrying once before failing", flush=True)
-    if not response_text:
-        raise RuntimeError("Empty Gemini post-cuts-call response")
-    print(f"[gemini-post] RAW:\n{response_text}\n[gemini-post] END", flush=True)
-    return extract_json(response_text)
+
+        # ── Degeneration guard ───────────────────────────────────────────────
+        # A repetition loop (the model echoing the prompt's cadence) runs the
+        # output to the token cap and TRUNCATES the JSON mid-string → extract_json
+        # fails → the job errors. The old "if response_text: break" only caught an
+        # EMPTY response; a non-empty degenerate blob sailed through to the failing
+        # parse. Re-roll on three signals — empty, oversized output (typical plan
+        # is 2-4K tok; >16K is a spiral), or unparseable JSON — and only return on
+        # a clean parse. A fresh call almost always returns clean; this completes
+        # the empty-response retry, it does not paper over a fixable root cause
+        # (the ≤50-word notes instruction is already present and was ignored).
+        _degen = None
+        _parsed = None
+        if not response_text:
+            _degen = "empty/None response"
+        elif isinstance(_out_tokens, int) and _out_tokens > _POST_CUTS_DEGEN_OUTPUT_TOKENS:
+            _degen = (f"output {_out_tokens} tok > {_POST_CUTS_DEGEN_OUTPUT_TOKENS} "
+                      f"— repetition-loop degeneration")
+        else:
+            try:
+                _parsed = extract_json(response_text)
+            except Exception as _pe:
+                _degen = f"unparseable JSON ({type(_pe).__name__}: {str(_pe)[:140]})"
+        if _degen is None:
+            print(f"[gemini-post] RAW:\n{response_text}\n[gemini-post] END", flush=True)
+            return _parsed
+        # Degenerate. Log a BOUNDED snippet (never the full 64K spiral) + re-roll.
+        print(
+            f"[gemini-post] Degenerate response ({_degen}) — "
+            f"{'retrying once' if _attempt == 1 else 'no attempts left'}. "
+            f"head: {response_text[:600]!r}",
+            flush=True,
+        )
+    raise RuntimeError(f"Gemini post-cuts-call degenerate after retry: {_degen}")
 
 
 # Confidence floor for the AUTOMATIC scene-change backfill only. scdet scores
