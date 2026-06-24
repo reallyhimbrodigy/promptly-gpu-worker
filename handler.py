@@ -8533,6 +8533,53 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                     flush=True,
                 )
 
+    # Item 3 instrumentation (no behavior change): the single-event StepZoom
+    # staircase is suspected to come from a zoom-type-split SEAM — a StepZoom
+    # event whose window lands at a sub-clip boundary next to a different-zoom
+    # sub-clip. A binary StepZoom event provably can't make three scale levels
+    # on its own, and no merge-overlap fired, so log the seam arrangement here.
+    # The next staircase render then reveals whether it's a cross-seam render or
+    # an adjacent-zoom ramp at the boundary. Pure logging — fires only when a
+    # StepZoom event reaches within ~0.30s of a zoom-type-split boundary.
+    if _zoom_type_split_times:
+        _seam_tol_s = 0.30  # ~18 frames @ 60fps, ~9 @ 30fps
+        _split_set = sorted(set(_zoom_type_split_times))
+        for _ci, _clip in enumerate(validated_cuts):
+            _z = _clip.get("_zoom_effect")
+            if not isinstance(_z, dict) or _z.get("type") != "StepZoom":
+                continue
+            _cs = float(_clip["source_start"])
+            _ce = float(_clip["source_end"])
+            _edge_split = [
+                round(_st, 3) for _st in _split_set
+                if abs(_st - _cs) <= _seam_tol_s or abs(_st - _ce) <= _seam_tol_s
+            ]
+            if not _edge_split:
+                continue
+            for _ev in (_z.get("events") or []):
+                _evs = float(_ev.get("startMs") or 0.0) / 1000.0
+                _eve = _evs + float(_ev.get("durationMs") or 0.0) / 1000.0
+                _at_start = _evs <= _cs + _seam_tol_s
+                _at_end = _eve >= _ce - _seam_tol_s
+                if not (_at_start or _at_end):
+                    continue
+                _nb_idx = _ci + 1 if _at_end else _ci - 1
+                _nb = validated_cuts[_nb_idx] if 0 <= _nb_idx < len(validated_cuts) else None
+                _nb_z = _nb.get("_zoom_effect") if isinstance(_nb, dict) else None
+                _nb_type = _nb_z.get("type") if isinstance(_nb_z, dict) else None
+                _nb_win = (
+                    [round(float(_nb["source_start"]), 3), round(float(_nb["source_end"]), 3)]
+                    if _nb is not None else None
+                )
+                print(
+                    f"[zoom-seam] clip={_ci} StepZoom "
+                    f"ev=[{round(_evs, 3)},{round(_eve, 3)}]s "
+                    f"clip_src=[{round(_cs, 3)},{round(_ce, 3)}]s "
+                    f"split_at={_edge_split} "
+                    f"neighbor_type={_nb_type} neighbor_window={_nb_win}",
+                    flush=True,
+                )
+
     for em in emphasis_moments:
         _layers = []
         if em["zoom_effect"]: _layers.append(f"zoom={em['zoom_effect']['type']}")
@@ -10592,8 +10639,8 @@ def fetch_broll_clip(broll_entry, duration_needed, work_dir, dialogue_reason="",
                 "Here the clip must show the SCREEN or APP doing that action — a screen recording, a phone UI close-up, the app interface itself. "
                 "A person at a keyboard, a person texting on a phone, or hands typing on a device shows the WRONG thing for app-input dialogue and should be rejected — those depict a human typing, not the app receiving input. "
                 "If no option shows the actual app/screen action the dialogue names, answer NONE — the speaker's face is the correct fallback for that window. "
-                "Pick the strongest match. Reply with ONLY the option number. "
-                "NONE if every option is unrelated to the actual words being spoken OR every option violates the content requirement OR (for app-input dialogue) no option shows the app screen."
+                "Apply the editorial test to the strongest candidate: would a real editor place THIS clip for this exact moment, or does it just happen to CONTAIN a noun from the search (a hand, a desk, a screen) while being about something unrelated to what the speaker is actually discussing? A clip that shares a surface object with the words but doesn't fit the SUBJECT of the moment (e.g. a tattooed hand on an antique occult book when the speaker is pitching an AI video editor) is a coincidental noun-match, NOT a fit — answer NONE. A relevant ABSENCE (the speaker's face) always beats a nonsense cutaway. Reply with ONLY the option number. "
+                "NONE if every option is unrelated to the actual words being spoken OR only surface-matches a noun without fitting the subject of the moment OR every option violates the content requirement OR (for app-input dialogue) no option shows the app screen."
             )
             _instruction_strict = (
                 _instruction_base
@@ -10655,7 +10702,10 @@ def fetch_broll_clip(broll_entry, duration_needed, work_dir, dialogue_reason="",
                 return (_status, _num_or_none, _text, time.time() - _t0)
 
             # First attempt — standard instruction.
-            _status1, _num1, _raw1, _elapsed1 = _attempt_pick(_instruction_base)
+            # Part C: the FIRST call uses the strict bare-digit/NONE format too,
+            # so a malformed first response (e.g. the word "OPTION" with no
+            # digit) isn't a near-miss that wastes a re-ask round-trip.
+            _status1, _num1, _raw1, _elapsed1 = _attempt_pick(_instruction_strict)
             _pick_text = _raw1  # preserve for downstream log compatibility
 
             if _status1 == "NONE":
@@ -10753,7 +10803,16 @@ def fetch_broll_clip(broll_entry, duration_needed, work_dir, dialogue_reason="",
     # keyword as constructed doesn't have a matching stock asset in
     # Pexels. Drop the cutaway — the face is a fine default for that
     # window. A weak/wrong cutaway is strictly worse than no cutaway.
-    _BROLL_MATCH_FLOOR = 50
+    #
+    # NOTE: a Gemini-picked winner already carries a flat +50 bonus (added
+    # above), so best_score = raw_text_match + 50. A floor of 50 could never
+    # reject a pick (always ≥50); 60 requires a real text-match of ≥10 ON TOP
+    # of the bonus, dropping near-zero-relevance picks. This is only a
+    # structural backstop — the REAL relevance gate is the picker's NONE
+    # judgment (the editorial surface-match test in the instruction above),
+    # because raw text-match can't tell an editorially-apt "hand on desk" from
+    # a nonsense one. Kept modest (60) to avoid over-rejecting.
+    _BROLL_MATCH_FLOOR = 60
     if best_score < _BROLL_MATCH_FLOOR:
         print(
             f"[broll] DROP '{keyword}': best score {best_score} < floor "

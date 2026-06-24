@@ -207,10 +207,23 @@ export function resolveMGPosition(
   const alignItems = cfg.topExempt ? "flex-start" : flex.alignItems;
   const paddingTop = cfg.topExempt ? NOTIFICATION_TOP_INSET : TIKTOK_SAFE_TOP;
   const paddingBottom = cfg.topExempt ? 0 : TIKTOK_SAFE_BOTTOM;
-  const paddingLeft = cfg.topExempt ? 0 : TIKTOK_SAFE_SIDE;
+  // Item 1: centerColumn types use SYMMETRIC horizontal padding so the flex
+  // center lands on the TRUE frame center (540), not the asymmetric safe-box
+  // center (480 = midpoint of [80,880]). paddingLeft = paddingRight =
+  // TIKTOK_SAFE_RIGHT (200) → box [200,880], midpoint 540, still clears the
+  // right rail; maxWidth shrinks to the symmetric box width (680) so a wide
+  // card can't overflow. Scoped to centerColumn only — other types keep the
+  // 80/200 asymmetric padding + 800 maxWidth.
+  const paddingLeft = cfg.topExempt
+    ? 0
+    : cfg.centerColumn
+      ? TIKTOK_SAFE_RIGHT
+      : TIKTOK_SAFE_SIDE;
   const maxWidth = cfg.topExempt
     ? CANVAS_WIDTH - TIKTOK_SAFE_RIGHT
-    : SAFE_RECT.width;
+    : cfg.centerColumn
+      ? CANVAS_WIDTH - 2 * TIKTOK_SAFE_RIGHT
+      : SAFE_RECT.width;
 
   return {
     containerStyle: {
