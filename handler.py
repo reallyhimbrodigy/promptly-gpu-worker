@@ -8027,6 +8027,63 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                     final={"new_startMs": _corrected_start_ms},
                     reason=(_clamp_reason or "align_perceptual_peak_to_word"),
                 )
+                # ── Shot-change boundary clamp ────────────────────────────
+                # A zoom window must not straddle a tight SHOT-CHANGE boundary:
+                # the footage cuts to a new shot mid-window and the held/moving
+                # zoom carries the old shot's framing (+ the frozen face-lock
+                # origin) into the new shot — the StepZoom "staircase", a framing
+                # pop on the moving types. End the window at or before the first
+                # shot-change boundary strictly inside it. _shot_src_set holds
+                # SHOT-CHANGE tights as SOURCE WORD INDICES (NOT times); the cut
+                # time is that word's `.end` (s)×1000 = source ms, matching
+                # startMs (source ms). dead_air tights are excluded — they don't
+                # cut footage.
+                _zc_start = _ev.get("startMs")
+                _zc_dur = _ev.get("durationMs")
+                if (
+                    isinstance(_zc_start, (int, float))
+                    and isinstance(_zc_dur, (int, float))
+                    and _zc_dur > 0
+                    and _shot_src_set
+                ):
+                    _zc_end = _zc_start + _zc_dur
+                    _cut_ms = None
+                    for _tsi in _shot_src_set:
+                        if not (0 <= _tsi < len(_dg_words)):
+                            continue
+                        _tms = float(_dg_words[_tsi].get("end") or 0.0) * 1000.0
+                        if _zc_start < _tms < _zc_end:
+                            _cut_ms = _tms if _cut_ms is None else min(_cut_ms, _tms)
+                    if _cut_ms is not None:
+                        _clamped_dur = int(round(_cut_ms - _zc_start))
+                        # Floor: never clamp to a stub. 200ms ≈ 12 frames @ 60fps,
+                        # ≥ SnapReframe's ~171ms spring settle, so a clamped zoom
+                        # still completes its move. Below the floor we leave the
+                        # window UNCHANGED (rare — the straddle persists for that
+                        # one event rather than rendering a stub; safest default).
+                        _ZOOM_CLAMP_FLOOR_MS = 200
+                        if _ZOOM_CLAMP_FLOOR_MS <= _clamped_dur < _zc_dur:
+                            _record_divergence(
+                                "zoom_window",
+                                {
+                                    "type": _zt,
+                                    "startMs": int(_zc_start),
+                                    "durationMs": int(_zc_dur),
+                                    "shot_change_ms": int(round(_cut_ms)),
+                                },
+                                "clamp_to_shot_change",
+                                final={"durationMs": _clamped_dur},
+                                reason="zoom_window_straddled_tight_shot_change",
+                            )
+                            print(
+                                f"[zoom-clamp] {_zt} window "
+                                f"[{int(_zc_start)},{int(_zc_end)}]ms straddles "
+                                f"shot-change at {int(round(_cut_ms))}ms — "
+                                f"durationMs {int(_zc_dur)}→{_clamped_dur} "
+                                f"(release on shot A)",
+                                flush=True,
+                            )
+                            _ev["durationMs"] = _clamped_dur
                 _filled_events.append(_ev)
             _ze_out = {"type": _zt, "events": _filled_events}
             for _ek in ("firstStage", "secondStage", "windowScale", "borderWidth",
