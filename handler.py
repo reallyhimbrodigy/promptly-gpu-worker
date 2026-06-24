@@ -5585,16 +5585,24 @@ def _get_or_create_gemini_system_cache(client, model_name: str, system_instructi
 
 
 def _gemini_is_retriable_error(msg):
-    """Classify a Gemini error as retriable: shared-quota rate limit (429 /
-    RESOURCE_EXHAUSTED), model overload (503 / UNAVAILABLE / overloaded), other
-    5xx, or transient network/deadline. NOT retriable: bad request, cache-miss,
-    auth, schema errors — those re-fail identically and must surface."""
+    """Classify a Gemini error as retriable: ONLY fast-fail transient capacity
+    errors — shared-quota rate limit (429 / RESOURCE_EXHAUSTED / quota), model
+    overload (503 / UNAVAILABLE / overloaded), other quick 5xx (500/502), or a
+    transient connection drop. These reject immediately, so a short backoff +
+    re-try is cheap.
+
+    NOT retriable — and deliberately so: 504 / DEADLINE_EXCEEDED / timeout. The
+    edit-recipe (post-cuts) call legitimately runs 135-337s with a 480s server
+    deadline; a deadline error means the call itself was too slow, so re-running
+    it just burns another ~300-480s — up to 4× compounds into a ~20-min hang
+    that trips Modal's 900s timeout and looks like a STUCK job. Fail fast and
+    surface instead. (Also not retriable: bad request, cache-miss, auth, schema.)"""
     m = str(msg).lower()
     return (
         "429" in m or "resource_exhausted" in m or "rate limit" in m or
-        "quota" in m or "500" in m or "502" in m or "503" in m or "504" in m or
-        "unavailable" in m or "overloaded" in m or "deadline" in m or
-        "timeout" in m or "connection" in m or "temporarily" in m
+        "quota" in m or "500" in m or "502" in m or "503" in m or
+        "unavailable" in m or "overloaded" in m or
+        "connection" in m or "temporarily" in m
     )
 
 
@@ -12497,6 +12505,30 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0):
             "last_word": word_group[-1]["_text"],
             "word_count": len(word_group),
         })
+
+    # ── Step 4: tail-pad the FINAL clip ───────────────────────────────────
+    # Every clip ends at its last word's Deepgram word-END, which marks the
+    # phoneme boundary and runs early on a final / elongated word — so the
+    # VIDEO's last word loses ~0.3-0.5s of audible release ("cuts off the
+    # last word"). Interior clip-ends sit at removed / dead-air boundaries and
+    # must NOT be padded (they'd bleed the cut audio back in), so pad ONLY the
+    # last clip, ONLY when nothing was removed after its final word (else the
+    # trailing cut is intentional), and never past the true video end (_vd).
+    _FINAL_TAIL_PAD_S = 0.5
+    if raw_clips and clips:
+        _last_src_idx = clips[-1][-1]["_word_index"]
+        _trailing_removed = any(idx > _last_src_idx for idx in removed_indices)
+        if not _trailing_removed:
+            _cur_end = raw_clips[-1]["padded_end"]
+            _cap = _vd if _vd > 0 else (_cur_end + _FINAL_TAIL_PAD_S)
+            _new_end = min(_cur_end + _FINAL_TAIL_PAD_S, _cap)
+            if _new_end > _cur_end:
+                print(
+                    f"[clips] tail-pad final clip {_cur_end:.3f}→{_new_end:.3f}s "
+                    f"(last word '{raw_clips[-1]['last_word']}' release; _vd={_vd:.3f})",
+                    flush=True,
+                )
+                raw_clips[-1]["padded_end"] = _new_end
 
     # ── Step 5: Non-overlap invariant ─────────────────────────────────────
     # Clips are derived from sorted word groups with strictly non-overlapping
