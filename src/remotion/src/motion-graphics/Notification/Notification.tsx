@@ -4,6 +4,7 @@ import { MG_FONTS } from "../shared/fonts";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
 import { APP_ICONS } from "./icons";
+import { CANVAS_WIDTH, TIKTOK_SAFE_RIGHT } from "../../shared/safeZone";
 import type { NotificationItem, NotificationProps } from "./types";
 
 
@@ -235,7 +236,14 @@ export const Notification: React.FC<NotificationProps> = ({
     extrapolateRight: "clamp",
   });
 
-  const stackWidth = 1080 - style.sideInset * 2;
+  // [fix-3] Fit the resolved non-rail box, not the full 1080 canvas. topExempt
+  // centers this stack in the content box [0, CANVAS_WIDTH - TIKTOK_SAFE_RIGHT]
+  // = [0,880] (paddingRight reserves the action rail). The old 1080-based 1032
+  // exceeded that box and, centered, overflowed ~76px off the LEFT edge (and
+  // into the right rail). Deriving width from the non-rail box keeps the banner
+  // near-full-width like an iOS top banner but fully on-canvas, clear of both
+  // the left edge and the action rail. iOS: (880 - 48) = 832 → centered [24,856].
+  const stackWidth = CANVAS_WIDTH - TIKTOK_SAFE_RIGHT - style.sideInset * 2;
 
   return (
     <AbsoluteFill style={containerStyle}>

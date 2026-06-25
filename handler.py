@@ -3623,7 +3623,7 @@ An SFX puts a tactile peak under a moment the viewer is ALREADY watching land. W
 
 Three checks, all required:
   1. **Visual partner** — what does the viewer SEE happen on this exact word?
-  2. **Verbs over nouns** — the trigger is the word where a listener with eyes closed would expect that sound. "She *called* me" earns a ding on `called`; "your wife's on the *phone*" doesn't earn one on `phone`.
+  2. **Verbs over nouns, content over function** — the trigger is the word where a listener with eyes closed would expect that sound. "She *called* me" earns a ding on `called`; "your wife's on the *phone*" doesn't earn one on `phone`. That word is almost always one the speaker leans on — a verb, a name, a number, the stressed noun. It is almost never a function word the voice skates over (`a`, `the`, `to`, `of`, `is`, `and`, `it`): those carry no beat of their own, so a sound on one fires a half-step off the moment even when a visual is nearby. When the beat you want sits next to such a word, the trigger is the stressed word the visual actually lands on, not the little word beside it.
   3. **Tonal match** — even when the word literally matches, the register must carry the sound's character. sad_trombone over a real failure in a serious story is wrong; silence honors it.
 
 SFX count is downstream of the visual track: roughly one SFX per visual event with the right character, which for a windowed 30s video lands around 8-12. SFX never land on breather words. Pick flavor by the partner's arc position: hook events → gripping (whoosh, hit, pop) · build events → ambient (transition_smooth, pop, click, typing, ding) · mid_peak events → punctuating (hit, pop, ding, ching) · the payoff event → committing (boom, or a build-up climaxing on the word — the one moment to lean heavier) · close → echo the hook's SFX at lower intensity, or nothing.
@@ -5786,6 +5786,34 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
                 _degen = f"unparseable JSON ({type(_pe).__name__}: {str(_pe)[:140]})"
         if _degen is None:
             print(f"[gemini-post] RAW:\n{response_text}\n[gemini-post] END", flush=True)
+            # [fix-4] notes soft-cap. notes is the LAST, decorative PostCutPlan
+            # field (Optional[str]); its only downstream reader is the burned-
+            # caption keyword scan in infer_has_burned_captions. The prompt asks
+            # for ≤50 words but a bloated-yet-parseable notes (under the 16K-token
+            # re-roll threshold above) otherwise renders unguarded. Truncate IN
+            # PLACE rather than re-roll: the EDIT is valid and expensive to
+            # regenerate, and the field is decorative. Cap 80 words / 600 chars
+            # (whichever trips first) — generous headroom over ≤50 words so a
+            # compliant notes is never touched and the burned-in/existing-caption
+            # keywords (which lead any rationale) always survive the trim. Never
+            # touches any edit field; only fires when notes is a str over the cap.
+            _NOTES_WORD_CAP = 80
+            _NOTES_CHAR_CAP = 600
+            _notes = _parsed.get("notes") if isinstance(_parsed, dict) else None
+            if isinstance(_notes, str):
+                _nwords = _notes.split()
+                if len(_nwords) > _NOTES_WORD_CAP or len(_notes) > _NOTES_CHAR_CAP:
+                    _capped = " ".join(_nwords[:_NOTES_WORD_CAP])
+                    if len(_capped) > _NOTES_CHAR_CAP:
+                        _capped = _capped[:_NOTES_CHAR_CAP].rstrip()
+                    _capped = _capped.rstrip() + " …"
+                    _parsed["notes"] = _capped
+                    print(
+                        f"[fix-4] notes over cap — trimmed {len(_nwords)} words / "
+                        f"{len(_notes)} chars → {len(_capped.split())} words / "
+                        f"{len(_capped)} chars (cap {_NOTES_WORD_CAP}w/{_NOTES_CHAR_CAP}c)",
+                        flush=True,
+                    )
             return _parsed
         # Degenerate. Log a BOUNDED snippet (never the full 64K spiral) + re-roll.
         print(
@@ -13464,57 +13492,18 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     for _tr in (edit_plan.get("transitions") or []):
         _register_cut_partner(_tr.get("after_word_index"))
 
-    # Word-indexed SFX — exact timing from projected words
-    parsed_sfx = edit_plan.get("_parsed_sound_effects", [])
-    for _i, _sfx in enumerate(parsed_sfx):
-        _sound_style = normalize_sfx_style(_sfx.get("sound") or "none")
-        if _sound_style == "none":
-            continue
-        _sound_path = get_sfx_path(_sound_style)
-        if not _sound_path:
-            continue
-        _sfx_wi = _sfx.get("_word_idx")
-        _projected_t = None
-        if _sfx_wi is not None:
-            _pw = _pw_by_idx.get(_sfx_wi)
-            if _pw:
-                _projected_t = float(_pw["start"])
-                # Cut-partnered SFX re-anchor: from the word START to the cut
-                # boundary's visual-peak frame, so the transient lands on the
-                # flash instead of ~one word-duration early. Exact membership
-                # only — non-boundary SFX fall through unchanged.
-                if _sfx_wi in _sfx_cut_anchor_t:
-                    _reanchor_t = _sfx_cut_anchor_t[_sfx_wi]
-                    print(
-                        f"[sfx] re-anchor {_sound_style} word {_sfx_wi}: "
-                        f"word-start {_projected_t:.3f}s → cut-boundary "
-                        f"{_reanchor_t:.3f}s (cut-partnered)",
-                        flush=True,
-                    )
-                    _projected_t = _reanchor_t
-            else:
-                _sfx_word = _sfx.get("word", "")
-                print(f"[sfx] Skipping {_sound_style} on '{_sfx_word}' — word removed from output", flush=True)
-                continue
-        else:
-            _source_t = float(_sfx.get("t") or 0.0)
-            _projected_t = project_source_time_to_output(
-                _source_t, render_cuts, _clip_ranges,
-                clip_time_maps=_clip_time_maps,
-            )
-        if _projected_t is None:
-            continue
-        _onset = _SFX_ONSET_OFFSETS.get(_sound_style, 0.0)
-        _ts = max(0.0, _projected_t - _onset)
-        _offset_ms = round(_ts * 1000)
-        _vol = get_sfx_volume(_sound_style, _ts, _speech_segs, is_text_overlay=False)
-        sfx_input_args += ["-i", _sound_path]
-        sfx_audio_labels.append(f"[timesfx{_i}]")
-        sfx_filter_strs.append(f"[{_sfx_extra_idx + 1}:a]volume={_vol:.3f},adelay={_offset_ms}|{_offset_ms}[timesfx{_i}]")
-        sfx_timestamps.append(_ts)
-        _sfx_src_t = float(_sfx.get("t") or 0.0)
-        print(f"[sfx] sound_effect: {_sound_style} vol={_vol:.3f} source={_sfx_src_t:.3f}s → output={_projected_t:.3f}s → onset_comp(-{_onset:.3f}s)={_ts:.3f}s", flush=True)
-        _sfx_extra_idx += 1
+    # ── [fix-1] SFX coverage + commit REORDERED to after visual resolution ──
+    # The SFX coverage set and the per-SFX commit loop were MOVED out of here to
+    # run AFTER the full visual track is resolved — after B-roll cutaway
+    # projection and the coverage-ceiling + overlay-separation trims below.
+    # Binding here committed a sound while two STOCHASTIC render-time B-roll
+    # drops were still pending, so a sound bound to a cutaway those trims later
+    # deleted ended up on an unchanged frame. The init lists above
+    # (sfx_input_args/…) and the cut-partner map (_sfx_cut_anchor_t) are computed
+    # here from plan-time data and persist; the moved loop appends to those lists
+    # and the ffmpeg audio assembly reads them further below. See the
+    # "[fix-1] SFX bind — post visual-track resolution" block after the B-roll
+    # trims. NOTE: no circular dependency — no visual resolver reads SFX.
 
     # ── 4. B-roll cutaways on output timeline ───────────────────────────────
     # broll_clips arrive here already verified (handler.handler() ran
@@ -14158,6 +14147,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             "seekFromSeconds": float(_seek_seconds),
             "brollFps": float(_br_fps),
             "playbackRate": 1.0,
+            # [fix-1] carry the source word span so the (reordered) SFX coverage
+            # set can read the POST-TRIM survivors: broll_out is filtered in
+            # lockstep by the coverage-ceiling + overlay-separation trims below,
+            # so these fields survive exactly the cutaways that actually render.
+            "_start_word_kept": _br_sw,
+            "_end_word_kept": _br_ew,
         })
         edit_plan.setdefault("_broll_output_ranges", []).append((_out_start, _out_end))
         _kw = _bc.get("keyword", "")
@@ -14312,6 +14307,126 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 f"conflicts; {len(broll_out)} kept",
                 flush=True,
             )
+
+    # ── [fix-1] SFX bind — post visual-track resolution ─────────────────────
+    # Reordered to HERE — the first point after the visual track is CLOSED: all
+    # B-roll cutaway projection plus the coverage-ceiling and overlay-separation
+    # trims above have run, and zoom/MG/text-overlay/transition word indices are
+    # stable (their render-time projection RAISES on a removed word, it never
+    # silently drops). Coverage is built from the ACTUALLY-surviving events, so a
+    # committed SFX can only sit on a visual that will render — the orphan that
+    # used to form between the early SFX commit and the B-roll trims is now
+    # IMPOSSIBLE to form. B-roll is read from the POST-TRIM broll_out (it carries
+    # _start_word_kept/_end_word_kept, filtered in lockstep by both trims), NOT
+    # the pre-trim edit_plan["broll_clips"]. All indices are SOURCE words in the
+    # same _pw_by_idx space as _sfx_wi. The init lists + _sfx_cut_anchor_t map
+    # were built above (plan-time) and persist to here. No circular dependency —
+    # no visual resolver reads SFX.
+    _sfx_covered_words = set(_sfx_cut_anchor_t.keys())  # transitions + tight-cut overlays
+    for _em in (edit_plan.get("_emphasis_moments") or edit_plan.get("emphasis_moments") or []):
+        if isinstance(_em, dict) and (_em.get("zoom_effect") or _em.get("motion_graphic")):
+            for _wi in (_em.get("word_indices") or []):
+                if isinstance(_wi, int):
+                    _sfx_covered_words.add(_wi)
+    for _mg in (edit_plan.get("motion_graphics") or []):
+        if not isinstance(_mg, dict):
+            continue
+        _ms, _me = _mg.get("start_word_index"), _mg.get("end_word_index")
+        if isinstance(_ms, int) and isinstance(_me, int) and _me >= _ms:
+            _sfx_covered_words.update(range(_ms, _me + 1))
+    for _to in (edit_plan.get("text_overlays") or []):
+        if isinstance(_to, dict) and isinstance(_to.get("start_word_index"), int):
+            _sfx_covered_words.add(_to["start_word_index"])
+    for _b in (broll_out or []):  # FINAL survivors — post coverage-ceiling + overlay-separation trims
+        if not isinstance(_b, dict):
+            continue
+        _bs, _be = _b.get("_start_word_kept"), _b.get("_end_word_kept")
+        if isinstance(_bs, int) and isinstance(_be, int) and _be >= _bs:
+            _sfx_covered_words.update(range(_bs, _be + 1))
+
+    # [fix-2] observability only (never a drop/gate): a surviving SFX (it HAS a
+    # visual) that still sits on a function/filler word the voice skates over —
+    # the placement the content-over-function prompt steer discourages.
+    _SFX_FUNCTION_WORDS = {"a", "an", "the", "to", "of", "in", "on", "at", "is",
+                           "it", "and", "or", "but", "for", "as", "so", "that"}
+
+    # Word-indexed SFX — exact timing from projected words
+    parsed_sfx = edit_plan.get("_parsed_sound_effects", [])
+    for _i, _sfx in enumerate(parsed_sfx):
+        _sound_style = normalize_sfx_style(_sfx.get("sound") or "none")
+        if _sound_style == "none":
+            continue
+        _sound_path = get_sfx_path(_sound_style)
+        if not _sound_path:
+            continue
+        _sfx_wi = _sfx.get("_word_idx")
+        # [fix-1] Coherence check (NOT a drop). With the bind running after the
+        # visual track is closed, a committed SFX sits on a confirmed-surviving
+        # visual. If — only in a genuine zero-visual case the production data has
+        # never actually shown — the trigger word has NO surviving visual of any
+        # type, we do NOT drop the sound (the no-drop contract): KEEP it and emit
+        # a loud upstream-placement WARN. The real fix is the post-cuts prompt —
+        # Gemini must never bind a sound to a word whose only visual is a
+        # stochastic B-roll (educate-Gemini-not-validate).
+        if _sfx_wi is not None and _sfx_wi not in _sfx_covered_words:
+            print(
+                f"[fix-1] WARN sfx {_sound_style} word {_sfx_wi} "
+                f"('{_sfx.get('word', '')}'): zero surviving visuals on its "
+                f"trigger word after full visual resolution — KEPT (no drop); "
+                f"fix the placement in the PostCutPlan prompt",
+                flush=True,
+            )
+        # [fix-2] advisory (NOT a drop): this SFX has a visual partner but its
+        # trigger is a function/filler word — the placement the content-over-
+        # function prompt steer discourages. Surfaced for verification only.
+        if _sfx_wi is not None and _sfx.get("word", "") in _SFX_FUNCTION_WORDS:
+            print(
+                f"[fix-2] sfx {_sound_style} on function-word "
+                f"'{_sfx.get('word', '')}' word {_sfx_wi} (kept — has a visual "
+                f"partner; prefer a stressed content word)",
+                flush=True,
+            )
+        _projected_t = None
+        if _sfx_wi is not None:
+            _pw = _pw_by_idx.get(_sfx_wi)
+            if _pw:
+                _projected_t = float(_pw["start"])
+                # Cut-partnered SFX re-anchor: from the word START to the cut
+                # boundary's visual-peak frame, so the transient lands on the
+                # flash instead of ~one word-duration early. Exact membership
+                # only — non-boundary SFX fall through unchanged.
+                if _sfx_wi in _sfx_cut_anchor_t:
+                    _reanchor_t = _sfx_cut_anchor_t[_sfx_wi]
+                    print(
+                        f"[sfx] re-anchor {_sound_style} word {_sfx_wi}: "
+                        f"word-start {_projected_t:.3f}s → cut-boundary "
+                        f"{_reanchor_t:.3f}s (cut-partnered)",
+                        flush=True,
+                    )
+                    _projected_t = _reanchor_t
+            else:
+                _sfx_word = _sfx.get("word", "")
+                print(f"[sfx] Skipping {_sound_style} on '{_sfx_word}' — word removed from output", flush=True)
+                continue
+        else:
+            _source_t = float(_sfx.get("t") or 0.0)
+            _projected_t = project_source_time_to_output(
+                _source_t, render_cuts, _clip_ranges,
+                clip_time_maps=_clip_time_maps,
+            )
+        if _projected_t is None:
+            continue
+        _onset = _SFX_ONSET_OFFSETS.get(_sound_style, 0.0)
+        _ts = max(0.0, _projected_t - _onset)
+        _offset_ms = round(_ts * 1000)
+        _vol = get_sfx_volume(_sound_style, _ts, _speech_segs, is_text_overlay=False)
+        sfx_input_args += ["-i", _sound_path]
+        sfx_audio_labels.append(f"[timesfx{_i}]")
+        sfx_filter_strs.append(f"[{_sfx_extra_idx + 1}:a]volume={_vol:.3f},adelay={_offset_ms}|{_offset_ms}[timesfx{_i}]")
+        sfx_timestamps.append(_ts)
+        _sfx_src_t = float(_sfx.get("t") or 0.0)
+        print(f"[sfx] sound_effect: {_sound_style} vol={_vol:.3f} source={_sfx_src_t:.3f}s → output={_projected_t:.3f}s → onset_comp(-{_onset:.3f}s)={_ts:.3f}s", flush=True)
+        _sfx_extra_idx += 1
 
     # ── Transition pro-grade safeguards (#3 + #5 from the 2026-06-14 audit) ──
     # Three checks applied to transitions_out AFTER overlay lists (broll_out,
