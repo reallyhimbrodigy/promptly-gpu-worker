@@ -159,28 +159,6 @@ Animated progress bar with count-up value display. Two modes: value/total (e.g. 
 
 ---
 
-### 9. QuoteCard
-
-Floating quote card with oversized decorative quotation mark, serif quote text, and em-dash attribution. Dark or light theme with spring-animated entrance. Clean editorial feel.
-
-**Best for:** Testimonials, pull quotes, book excerpts, inspirational quotes, endorsements.
-
-**Supports:** MGTimingProps + MGPositionProps
-
-| Prop | Type | Default | Description |
-|------|------|---------|-------------|
-| `quote` | `string` | — | **Required.** Quote text. |
-| `attribution` | `string` | — | **Required.** Attribution (e.g. "Steve Jobs, 2005"). |
-| `theme` | `"dark" \| "light"` | `"dark"` | Card color theme. |
-| `cardColor` | `string` | — | Solid card color override (disables theme gradient). |
-| `quoteColor` | `string` | — | Quote text color override. |
-| `attributionColor` | `string` | — | Attribution text color override. |
-| `accentColor` | `string` | — | Decorative quote mark color. |
-| `quoteFont` | `string` | `playfairDisplay` | Quote font family. |
-| `quoteFontSize` | `number` | `64` | Quote font size. |
-| `width` | `number` | `918` | Card width in px. |
-
----
 
 ### 10. RecordingFrame
 

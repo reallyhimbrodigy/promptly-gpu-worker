@@ -229,12 +229,6 @@ class StickyNoteOverlay(_TextOverlayBase):
     notes: List[_StickyNoteEntry]
 
 
-class QuoteCardOverlay(_TextOverlayBase):
-    variant: Literal["quote_card"]
-    quote: str
-    attribution: str
-
-
 class CaptionMatchOverlay(_TextOverlayBase):
     variant: Literal["caption_match"]
     text: str
@@ -242,7 +236,7 @@ class CaptionMatchOverlay(_TextOverlayBase):
 
 
 TextOverlaySpec = Annotated[
-    Union[StickyNoteOverlay, QuoteCardOverlay, CaptionMatchOverlay],
+    Union[StickyNoteOverlay, CaptionMatchOverlay],
     Field(discriminator="variant"),
 ]
 

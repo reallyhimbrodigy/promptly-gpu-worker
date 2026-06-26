@@ -102,7 +102,7 @@ VALID_ZOOM_TYPES = frozenset({
 
 VALID_MG_TYPES = frozenset({
     "AnnotationArrow", "ChatThread",
-    "Notification", "ProgressBar", "QuoteCard", "RecordingFrame",
+    "Notification", "ProgressBar", "RecordingFrame",
     "StatCard", "StickyNotes", "Toggle",
     "TweetBubble", "InstagramComment", "IMessageBubble", "TikTokComment",
 })

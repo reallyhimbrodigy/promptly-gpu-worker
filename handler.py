@@ -194,7 +194,7 @@ _SEMANTIC_ANCHOR = Literal[
     "upper_third_safe", "center", "lower_third_safe", "left_safe", "right_safe",
 ]
 _TEXT_OVERLAY_VARIANTS = Literal[
-    "sticky_note", "quote_card", "caption_match",
+    "sticky_note", "caption_match",
 ]
 _SFX_SOUNDS = Literal[
     "boom", "hit", "drum_roll", "reverse", "ching", "ding", "click",
@@ -3035,8 +3035,8 @@ FACE VISIBILITY (source-seconds ranges; yes = face detected in 0.5s bucket)
 
   Use this to choose overlays that make sense with what's on screen. When
   `visible=NO` for a window, the viewer is looking at b-roll, a product
-  shot, text, or scenery — lean into that (e.g., use a QuoteCard over
-  scenery, StatCard over a product shot).
+  shot, text, or scenery — lean into that (e.g., use a StatCard over a
+  product shot).
 
 FACE VERTICAL ZONE (where the speaker's HEAD sits in the frame, by source-seconds)
   {_fz_display}
@@ -3074,7 +3074,7 @@ FACE VERTICAL ZONE (where the speaker's HEAD sits in the frame, by source-second
                     (`left_safe`/`right_safe`) or `lower_third_safe`
                     with captions flipped to top usually reads cleanly.
 
-    - face=center → `center` and `QuoteCard` land directly on the face.
+    - face=center → `center` lands directly on the face.
                     A face reading `center` likely also encroaches on
                     the upper third, so `upper_third_safe` is risky too.
                     `lower_third_safe` or a side anchor is the safer
@@ -3402,7 +3402,7 @@ caption_position_changes entries: {{"word_index": int, "position": "top" | "cent
 
 **The pipeline owns caption position during MG and B-roll windows** — it force-flips captions away from any motion graphic's zone and to the top during B-roll, frame-precisely. Do NOT emit caption_position_changes for those windows; your emits there would fight the override. You emit manual changes for exactly TWO cases:
 
-1. **text_overlay windows.** The pipeline does not auto-resolve text_overlay/caption collisions. sticky_note occupies the upper third, quote_card the center, caption_match its position prop. Captions default to bottom, so most overlay placements need no change — but if anything has moved captions to top or center, return them to bottom for the overlay's word range, or place the overlay at a different time.
+1. **text_overlay windows.** The pipeline does not auto-resolve text_overlay/caption collisions. sticky_note occupies the upper third, caption_match its position prop. Captions default to bottom, so most overlay placements need no change — but if anything has moved captions to top or center, return them to bottom for the overlay's word range, or place the overlay at a different time.
 2. **Face-position windows.** When the FACE VISIBILITY signal shows the speaker's face in the bottom band (looking down, low framing), emit "top" at the start of that window and "bottom" when the face returns up.
 
 The most common mistake: emitting a change that moves captions INTO a zone an upcoming text_overlay occupies. Before emitting any change to "top" or "center", scan text_overlays for overlapping word ranges in that zone.
@@ -3419,7 +3419,7 @@ Geometry: captions sit at bottom, the face sits in the upper-middle band, so the
 
 Entry shape:
   {{
-    "variant": "sticky_note" | "quote_card" | "caption_match",
+    "variant": "sticky_note" | "caption_match",
     "start_word_index": int,
     "duration_seconds": float,        # 1.5-4.0s typical
     ...variant-specific props
@@ -3439,12 +3439,6 @@ Required props:
     {{"text": "FIX LATER",   "color": "#A8E6CF", "rotation": 4}}
   ]
 }}
-
-────────────────────────────────────
-quote_card — always renders at CENTER
-────────────────────────────────────
-Floating card, decorative " mark, serif quote (Playfair ~64pt), em-dash attribution, ~918px wide. Springs in, holds, fades.
-Use for a NAMED third party's actual words — a literary citation, a famous quote, a testimonial read aloud. Needs a real attributed source; the print-media gravity is the point. Because center is where the face sits, this is a SPECIALTY variant — only when the speaker is off-camera for the card's full window (B-roll cutaway), the face is confirmed in the lower band (FACE VERTICAL ZONE signal), or the section is intentionally non-talking-head. Otherwise use caption_match at position "top" for the same editorial job without covering the face. Once per video maximum.
 
 Required props:
 {{
@@ -3470,7 +3464,7 @@ Required props:
 
 An MG shows the viewer the thing the speaker is REFERRING to off-camera — a number, a notification event, a text message, someone else's words. The placement test is one question: **what specifically is the speaker referencing?** If you can name the referent in a sentence ("her phone showed a Venmo from Sarah for $200"), match it to the component that renders that kind of evidence. If the moment is a feeling, theme, or abstraction, there is no MG in it — forcing one fights the captions and the speaker for attention. And MGs are never transcript repetition: if the MG's rendered text echoes what captions show at the same moment, skip it or rephrase as framing.
 
-Arc placement: **build** is where informational MGs live (StatCard, ProgressBar, StickyNotes, Toggle, Notification, AnnotationArrow). **mid_peak** can take a reaction MG (Notification, TweetBubble, IMessageBubble, social comments) if the peak references a real off-camera reaction. **payoff** takes at most THE reveal MG (QuoteCard for a quote-driven payoff, StatCard for a number-driven one) — anchored clear of the face, where it COMPOSES with the payoff zoom rather than competing: the camera commits to the face while the number lands above it. An MG that would cover the face on the payoff is the violation, not the MG itself. **hook** almost never (the face earns the watch). **breather** never. **close** only as a callback to a hook MG (same component, evolved content).
+Arc placement: **build** is where informational MGs live (StatCard, ProgressBar, StickyNotes, Toggle, Notification, AnnotationArrow). **mid_peak** can take a reaction MG (Notification, TweetBubble, IMessageBubble, social comments) if the peak references a real off-camera reaction. **payoff** takes at most THE reveal MG (StatCard for a number-driven payoff) — anchored clear of the face, where it COMPOSES with the payoff zoom rather than competing: the camera commits to the face while the number lands above it. An MG that would cover the face on the payoff is the violation, not the MG itself. **hook** almost never (the face earns the watch). **breather** never. **close** only as a callback to a hook MG (same component, evolved content).
 
 Entry shape:
   {{
@@ -3490,7 +3484,7 @@ The goal every time: the viewer sees the speaker and the MG simultaneously. The 
 
 Component sizes:
   • TOP-PINNED — Notification, StickyNotes: ALWAYS render in the top band regardless of anchor (the metaphor depends on it). Emit anchor "upper_third_safe" so your spec matches reality.
-  • LARGE — IMessageBubble, ChatThread, QuoteCard, RecordingFrame: ≥half canvas height. If the face is visible, the upper third can't contain them — time them to a B-roll window where the face is gone, or pick a smaller variant.
+  • LARGE — IMessageBubble, ChatThread, RecordingFrame: ≥half canvas height. If the face is visible, the upper third can't contain them — time them to a B-roll window where the face is gone, or pick a smaller variant.
   • MEDIUM — TweetBubble, InstagramComment, TikTokComment, StatCard: 25-40% canvas height. upper_third_safe works when the face is clearly center-or-lower; if the card would touch the face from above, use a side anchor opposite the speaker, lower_third_safe with captions flipped to top, or a B-roll window.
   • SMALL — AnnotationArrow, ProgressBar, Toggle: <20% canvas. Any anchor; upper_third_safe is safe by construction.
 
@@ -3512,9 +3506,6 @@ Props: {{ "notifications": [{{"app": "apple-pay" | "venmo" | "stripe" | "imessag
 **ProgressBar** (SMALL) — horizontal bar, gray track, white fill, optional gold eyebrow label (#D4A12A); fill expands 0 → target with the number counting up; milestone ticks light as crossed. Claim: "Here is the quantitative ARC — watch it advance." Use when the dialogue gives a current value, a target, and motion between them ($47K of $100K). Static numbers → StatCard; binary states → Toggle.
 Props (value mode): {{ "value": 47000, "total": 100000, "label"?: "FUNDRAISING GOAL", "fillColor"?: "#hex", "accentColor"?: "#hex" }}
 Props (percentage mode): {{ "percentage": 73, "label"?: "COMPLETE", "fillColor"?: "#hex", "accentColor"?: "#hex" }}
-
-**QuoteCard** (LARGE, center) — floating card, decorative quote mark, serif body, em-dash attribution. Claim: "Someone else's words, attributed, like a magazine pull-quote." Use for a named third party's actual words the speaker invokes — needs a real source. Once per video maximum; center placement means it follows the quote_card face rules in TEXT OVERLAYS.
-Props: {{ "quote": "A cut should be invisible.", "attribution": "Walter Murch, In the Blink of an Eye", "theme"?: "dark" | "light", "accentColor"?: "#hex" }}
 
 **RecordingFrame** (LARGE) — thin red inset border (~6-8px, default #C5432E), optional live corner annotations (timestamp, word count, WPM), optional slow scan-line. Claim: "This is RAW — caught, unfiltered." Specialty: only for content explicitly invoking raw-take energy — BTS, surveillance framing, leaked-footage aesthetic. On clean produced talking-head it reads as costume. Most videos don't earn it.
 Props: {{ "accentColor"?: "#hex", "showScanLine"?: bool, "scanLineColor"?: "#hex", "annotations"?: [{{"label": "REC", "value": "timestamp", "corner": "top-left"}}, {{"label": "WPM", "value": "wpm", "corner": "bottom-right"}}] }}
@@ -3656,7 +3647,7 @@ CINEMATIC IMPACT WITH BUILD — short build (~0.4-0.7s), auto-scheduled so the c
 
 BUILD-UP — long anticipation tail (1.3-1.7s) climaxing AT the trigger word:
 
-**drum_roll** — snare roll (~1.65s) into a payoff crash. Slightly comedic by design — announcements, award beats, "and the answer is…" in playful/game-show registers. REQUIRES a major visual reveal at the climax word (StatCard count-up, QuoteCard slam, Notification drop, StepZoom lock); a drum roll into nothing sells anticipation and delivers nothing. Once per video.
+**drum_roll** — snare roll (~1.65s) into a payoff crash. Slightly comedic by design — announcements, award beats, "and the answer is…" in playful/game-show registers. REQUIRES a major visual reveal at the climax word (StatCard count-up, Notification drop, StepZoom lock); a drum roll into nothing sells anticipation and delivers nothing. Once per video.
 
 **reverse** — continuous riser (~1.37s) climaxing at the end; pure anticipation. Reserve for priming the single most-committed visual moment of the video — a transition peak, a LetterboxPush locking, an MG slamming. Without a hard visual climax on the trigger word, the build feels unfinished. Once per video, maximum.
 
@@ -4029,7 +4020,7 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
 
   "text_overlays": [
     {{
-      "variant": "sticky_note" | "quote_card" | "caption_match",
+      "variant": "sticky_note" | "caption_match",
       "start_word_index": int,
       "duration_seconds": float
       // ...variant-specific required props per the TEXT OVERLAYS section
@@ -4072,7 +4063,7 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
 
   "motion_graphics": [
     {{
-      "type": "AnnotationArrow" | "ChatThread" | "Notification" | "ProgressBar" | "QuoteCard" | "RecordingFrame" | "StatCard" | "StickyNotes" | "Toggle" | "TweetBubble" | "InstagramComment" | "IMessageBubble" | "TikTokComment",
+      "type": "AnnotationArrow" | "ChatThread" | "Notification" | "ProgressBar" | "RecordingFrame" | "StatCard" | "StickyNotes" | "Toggle" | "TweetBubble" | "InstagramComment" | "IMessageBubble" | "TikTokComment",
       "start_word_index": int,
       "end_word_index": int,
       "duration_seconds": float | null,
@@ -7806,7 +7797,7 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
     }
     _valid_mg_types = {
         "AnnotationArrow", "ChatThread",
-        "Notification", "ProgressBar", "QuoteCard", "RecordingFrame",
+        "Notification", "ProgressBar", "RecordingFrame",
         "StatCard", "StickyNotes", "Toggle",
         "TweetBubble", "InstagramComment", "IMessageBubble", "TikTokComment",
     }
@@ -7820,7 +7811,7 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
         "upper_third_safe", "center", "lower_third_safe", "left_safe", "right_safe",
     }
     _valid_text_overlay_variants = {
-        "sticky_note", "quote_card", "caption_match",
+        "sticky_note", "caption_match",
     }
 
     # caption_style — must be exactly one of the 21 valid styles
@@ -8857,11 +8848,6 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                     "color": str(_nn.get("color") or "#FFEB3B"),
                     "rotation": float(_nn.get("rotation") or 0),
                 })
-        elif _var == "quote_card":
-            for _p in ("quote", "attribution"):
-                if not isinstance(_ov.get(_p), str) or not _ov[_p].strip():
-                    raise ValueError(f"text_overlays[{_i}](quote_card) missing required prop {_p!r}")
-                _entry[_p] = _EMOJI_RE.sub("", str(_ov[_p])).strip()
         elif _var == "caption_match":
             if not isinstance(_ov.get("text"), str) or not _ov["text"].strip():
                 raise ValueError(f"text_overlays[{_i}](caption_match) missing required prop 'text'")
@@ -8885,12 +8871,11 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
     #
     # Per-variant rendered zone for text_overlays — used for collision
     # detection only. Each variant's component pins to a fixed zone by
-    # design: sticky_note = upper third pin, quote_card = center floating
-    # card. `caption_match` is dynamic from its `position` prop. Motion
-    # graphics carry their zone explicitly via the `anchor` field.
+    # design: sticky_note = upper third pin. `caption_match` is dynamic from
+    # its `position` prop. Motion graphics carry their zone explicitly via
+    # the `anchor` field.
     _TEXT_OVERLAY_ZONE = {
         "sticky_note":   "upper_third_safe",
-        "quote_card":    "center",
         # "caption_match" resolved below
     }
     _CAPTION_POS_TO_ZONE = {
@@ -9211,7 +9196,7 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None)
         "caption_position_changes (list of {word_index, position}), "
         "caption_position_segments (DERIVED from caption_position_changes — do not edit directly), "
         "keywords, broll_clips, text_overlays (each has a variant "
-        "discriminator: sticky_note|quote_card|caption_match), "
+        "discriminator: sticky_note|caption_match), "
         "motion_graphics (with semantic anchor), emphasis_moments (each binds explicit "
         "zoom_effect / motion_graphic), sfx_placements, thumbnail_word_index "
         "(thumbnail_timestamp derived), per-clip `speed` (constant 0.7–1.4 per cut), outro. "

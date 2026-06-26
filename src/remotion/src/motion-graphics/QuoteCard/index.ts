@@ -1,2 +1,0 @@
-export { QuoteCard } from "./QuoteCard";
-export type { QuoteCardProps } from "./types";

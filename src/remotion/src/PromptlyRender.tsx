@@ -64,9 +64,9 @@ import {
   StageZoom, DepthPull,
 } from "./zoom";
 
-// Motion graphics — 14 components total (10 standalone + 4 SpeechBubble variants).
+// Motion graphics — 13 components total (9 standalone + 4 SpeechBubble variants).
 import {
-  AnnotationArrow, QuoteCard, StatCard,
+  AnnotationArrow, StatCard,
   Notification, ProgressBar, ChatThread,
   StickyNotes, Toggle, RecordingFrame,
   TweetBubble, InstagramComment, IMessageBubble, TikTokComment,
@@ -92,7 +92,7 @@ const ZOOM_MAP: Record<string, React.FC<any>> = {
 };
 
 const MG_MAP: Record<string, React.FC<any>> = {
-  AnnotationArrow, QuoteCard, StatCard,
+  AnnotationArrow, StatCard,
   Notification, ProgressBar, ChatThread,
   StickyNotes, Toggle, RecordingFrame,
   TweetBubble, InstagramComment, IMessageBubble, TikTokComment,
@@ -338,18 +338,6 @@ const TextOverlayRenderer: React.FC<{
           startMs={0}
           durationMs={ovDurMs}
           notes={overlay.notes}
-        />
-      </AbsoluteFill>
-    );
-  }
-  if (overlay.variant === "quote_card") {
-    return (
-      <AbsoluteFill style={{ pointerEvents: "none" }}>
-        <QuoteCard
-          startMs={0}
-          durationMs={Math.round((overlay.durationInFrames / fps) * 1000)}
-          quote={overlay.quote}
-          attribution={overlay.attribution}
         />
       </AbsoluteFill>
     );

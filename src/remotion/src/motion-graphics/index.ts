@@ -3,8 +3,6 @@ export type { MGTimingProps, MGPhaseState, MGPhase, MGPositionProps, MGAnchor } 
 
 export { AnnotationArrow } from "./AnnotationArrow";
 export type { AnnotationArrowProps } from "./AnnotationArrow";
-export { QuoteCard } from "./QuoteCard";
-export type { QuoteCardProps } from "./QuoteCard";
 export { StatCard } from "./StatCard";
 export type { StatCardProps } from "./StatCard";
 export { Notification } from "./Notification";

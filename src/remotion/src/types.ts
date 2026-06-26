@@ -210,7 +210,6 @@ export type MotionGraphicType =
   | "ChatThread"
   | "Notification"
   | "ProgressBar"
-  | "QuoteCard"
   | "RecordingFrame"
   | "StatCard"
   | "StickyNotes"
@@ -233,7 +232,6 @@ export interface MotionGraphicSpec {
 // ── Text overlays (discriminated by variant) ─────────────────────────────────
 export type TextOverlayVariant =
   | "sticky_note"
-  | "quote_card"
   | "caption_match";
 
 interface TextOverlayBase {
@@ -246,12 +244,6 @@ export interface StickyNoteOverlay extends TextOverlayBase {
   notes: Array<{ text: string; color: string; rotation: number }>;
 }
 
-export interface QuoteCardOverlay extends TextOverlayBase {
-  variant: "quote_card";
-  quote: string;
-  attribution: string;
-}
-
 export interface CaptionMatchOverlay extends TextOverlayBase {
   variant: "caption_match";
   text: string;
@@ -260,7 +252,6 @@ export interface CaptionMatchOverlay extends TextOverlayBase {
 
 export type TextOverlaySpec =
   | StickyNoteOverlay
-  | QuoteCardOverlay
   | CaptionMatchOverlay;
 
 // ── Top-level composition input ──────────────────────────────────────────────

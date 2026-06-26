@@ -155,7 +155,6 @@ export interface MGPositionConfig {
 
 export const MG_POSITION_CONFIG: Record<string, MGPositionConfig> = {
   StatCard: { centerColumn: true },
-  QuoteCard: { centerColumn: true },
   ChatThread: { centerColumn: true },
   ProgressBar: { centerColumn: true },
   TweetBubble: { centerColumn: true },
