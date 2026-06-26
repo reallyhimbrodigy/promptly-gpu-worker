@@ -14657,6 +14657,17 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     )
 
 
+    # [fix-1] Strip the internal scratch keys the SFX coverage set already
+    # consumed above (14350-14355) before broll_out enters the render contract.
+    # _start_word_kept/_end_word_kept are underscore-prefixed PLAN-TIME fields,
+    # not part of PromptlyOverlay's schema (extra="forbid" → they crashed
+    # validation), and have NO reader past the coverage check — persistence reads
+    # them off edit_plan["broll_clips"] (a SEPARATE list), never this broll_out.
+    for _b in broll_out:
+        if isinstance(_b, dict):
+            _b.pop("_start_word_kept", None)
+            _b.pop("_end_word_kept", None)
+
     # PromptlyOverlay input — captions/MG/text on a transparent canvas. The
     # FFmpeg composite step lays this onto the source in a single encode.
     overlay_input = {
