@@ -3690,7 +3690,7 @@ Entry shape:
 
 **The `reason` field is a CONTENT REQUIREMENT for the picker, not prose.** A second Gemini call sees the candidate clips' thumbnails plus the dialogue line AND this `reason` as the required content for the cutaway, and rejects any clip that visually violates it — even a clip that vibe-matches the dialogue. Write it as a direction TO that picker: one short sentence naming the specific visual the clip MUST SHOW (or MUST NOT show) for this cutaway to land. Example for a physical-action beat: "must show real hands working with hand-tools in a cluttered home workshop, not a polished cinematic shop interior." Example for a savings beat: "must show coins or savings physically — a piggy bank, jar, or cash — not an abstract money graphic." Generic prose ("visual of the speaker's point") wastes a wire that already exists. The keyword fishes the candidate pool; the reason tells the picker how to choose within it — and disqualifies the clips that don't fit.
 
-**Keyword construction.** Decide which KIND of moment the dialogue is — the three modes below want different keywords.
+**Keyword construction.** Decide which KIND of moment the dialogue is — the four modes below want different keywords; two of them deliberately emit NOTHING (a held window on the speaker). FIRST apply the Opening gate in Placement rules — a beat inside the first ~3s or the hook never generates an entry, whatever mode it is.
 
 **(1) CONCRETE / PRODUCT.** The speaker names a specific physical action, object, or place the viewer must literally SEE to follow the point ("I built it in my garage," "the package arrived at the door," "stepping onto the stage," "every receipt detail tells a story"). Depict THAT LITERAL THING — the real workshop, the real package, the real stage, the real object. An evocative stand-in fails: for "I built it in my garage," a polished modern workshop without the hand-built character misses the moment; a stock search matches surface noun to the wrong scene. Name the real thing. (App-input / app-screen beats — typing, uploading, tapping, results-on-screen — are the EXCEPTION; see mode (2) below.)
 
@@ -3698,12 +3698,16 @@ Entry shape:
 
 **(3) NARRATIVE / ABSTRACT.** The dialogue describes a feeling, scene, approach, or story beat with no specific object the viewer must see ("the office she walked into," "the frustration of it all"). EVOKE the approach — anchor on a filmable subject that carries the feeling: "The secretary came into my office" → "anxious woman walking down corporate office hallway dim lighting late evening" (the approach itself), rather than noun-recreation like "modern office secretary typing on computer" (the viewer gains nothing from a literal recreation of the noun). Abstract emotions ("feeling of dread") produce generic stock — always anchor on something filmable.
 
-**All three modes share these rules.** 13-18 words. Start from the VERB; add subject and setting (concrete noun + motion + mood); one subject doing one thing; context words only to disambiguate ("cinematic lighting" to filter cartoons). Each B-roll visually distinct from the others. **One-result specificity:** the keyword is pinned tightly enough that the single top stock result can only be the thing the speaker meant — and for concrete/demo dialogue, "the thing the speaker meant" is the literal action or object, not a vibe that rhymes with it. If you can name two other dialogues that would fit the same keyword, sharpen one more detail until you can't.
+**(4) ABSTRACT ATTRIBUTE / UNFILMABLE — also defaults to the SPEAKER'S FACE.** When the dialogue's subject is a quality, property, or adjective ABOUT a thing rather than the thing itself — "the quality of your videos," "makes it so easy," "it's that simple," "the value you get," "how powerful it is," "it just works," "next-level results" — there is no real-world referent a camera could point at. "Quality" is not a filmable subject; it is a judgment about one. The trap is forcing the beat into mode (1) and grabbing the literal object the WORD rhymes with — "quality" → a camera lens, "value" → a stack of cash, "powerful" → a roaring engine, "results" → a finish-line tape — none of which is what the speaker meant; each is noun-rhyme clutter. **Do NOT emit a `broll_clips` entry for abstract-attribute beats.** The speaker delivering the claim IS the visual — the claim lives in the words, not in any object on screen.
+
+**The line between (1) and (4) — this test decides, and it OUTRANKS the "adjective" wording above.** Ask: is there a real, specific thing the camera could literally point at and film? If yes, request it (mode 1) — even if the dialogue phrases it as a property or names a sound. You CAN point the camera at a hundred-dollar bill ("$100"), the actual workshop ("I built it in my garage"), the real package at the door ("the package arrived"), the stage ("stepping onto the stage"), the receipt close-up ("every receipt detail"), the second-hand sweeping ("a stopwatch ticking") — all mode (1), all REQUESTED; "detail" and "ticking" do not demote a real object to the hold path. Only when the sole thing the lens could frame is a metaphor for the word — "easy," "simple," "value," "quality-of," "works," "results" — do you hold (mode 4). When in doubt, name the shot out loud: if you can describe the literal frame ("a hundred-dollar bill on a table," "a stopwatch's second hand sweeping"), it is mode (1) and you request it; if the only frame you can name is a stand-in for the adjective, it is mode (4) and you hold on the speaker.
+
+**The modes that DO emit — (1) and (3) — share these rules.** 13-18 words. Start from the VERB; add subject and setting (concrete noun + motion + mood); one subject doing one thing; context words only to disambiguate ("cinematic lighting" to filter cartoons). Each B-roll visually distinct from the others. **One-result specificity:** the keyword is pinned tightly enough that the single top stock result can only be the thing the speaker meant — and for concrete/demo dialogue, "the thing the speaker meant" is the literal action or object, not a vibe that rhymes with it. If you can name two other dialogues that would fit the same keyword, sharpen one more detail until you can't.
 
 **Window:** the cutaway runs exactly the phrase's word span — first word to last word. One word if the referent is one verb, a full sentence if it's a scene. The dialogue at those indices should describe what's in the cutaway. The window matches the phrase: not surrounding context, not a clipped fragment.
 
 **Placement rules:**
-  • The OPENING belongs to the speaker. Viewers form "whose story is this" judgments in the first 2 seconds and need a face to anchor on. No B-roll starts within the first ~3 seconds of output or anywhere inside the hook segment — whichever extends later. (This is about the viewer's first seconds, not about clip index: a long first clip can absolutely carry B-roll in its later build words.)
+  • Opening gate (check BEFORE you construct any keyword): do NOT GENERATE a `broll_clips` entry whose window opens in the first ~3 seconds of output, or anywhere inside the hook segment — whichever extends later. The OPENING belongs to the speaker; viewers form "whose story is this" judgments in the first 2 seconds and need a face to anchor on. This is a gate on what you emit, not a filter applied afterward — if a beat you'd otherwise cut lands in that window, the entry simply does not exist. (Not about clip index: a long first clip can still carry B-roll in its later build words; and the hook IS the exception only when the hook itself is a visual claim — then the B-roll is the hook.)
   • B-roll and overlays never share screen time. The pipeline drops a B-roll whose frames overlap any motion_graphic or text_overlay (overlays win — they're word-anchored and scarce; B-roll has 2-3s of flex). Plan B-roll before or after your overlays.
   • Face moments are off-limits. Any word inside an emphasis_moments[].word_indices with a non-null zoom is a face moment by your own declaration — keep B-roll windows clear. When dialogue both describes an action AND is the moment of recognition, the face wins; no B-roll there.
   • Arc placement: **build** is where B-roll lives — the concrete nouns named during build are your cutaway candidates, and most of the video's B-roll belongs there. **breather** allows at most one quiet, perfectly-matched cutaway (most breathers want none). **hook** — no (unless the hook IS a visual claim, in which case the B-roll is the hook). **mid_peak** — not on the peak word; resume right after. **payoff** — NEVER on the payoff word. **close** — only as a deliberate callback to a hook-era cutaway.
@@ -10841,6 +10845,18 @@ def fetch_broll_clip(broll_entry, duration_needed, work_dir, dialogue_reason="",
                   + ", ".join(f"'{i}'" for i in range(1, len(_poster_idx_map) + 1))
                   + ", or 'NONE'. No words, no labels, no explanation, no formatting. Just the digit or 'NONE'."
             )
+            # Retry instruction — meaningfully different from the first attempt so
+            # the re-ask isn't a deterministic re-fail. The observed MALFORMED was
+            # an instruction ECHO ("ADHERE STRICTLY"), which repeats at temp 0.2;
+            # this adds an explicit anti-echo directive (paired with a higher temp
+            # at the call site) to break out of the format-echo attractor.
+            _instruction_retry = (
+                _instruction_strict
+                + " Your previous reply was rejected: it was NOT in the required format."
+                  " Do NOT restate, acknowledge, or comment on these instructions."
+                  " Output EXACTLY one token — a single digit (the option number) or"
+                  " the word NONE — with nothing before or after it."
+            )
 
             def _parse_pick(text):
                 """Returns one of ('NONE', None) / ('PICKED', valid_num) /
@@ -10856,7 +10872,7 @@ def fetch_broll_clip(broll_entry, duration_needed, work_dir, dialogue_reason="",
                         return ("MALFORMED", None)
                 return ("MALFORMED", None)
 
-            def _attempt_pick(instruction):
+            def _attempt_pick(instruction, temperature=0.2):
                 """Single Gemini call + parse. Returns
                 (status, num, raw_text_or_error, elapsed_s).
                 On API exception returns ('ERROR', None, str(err), elapsed)."""
@@ -10867,7 +10883,7 @@ def fetch_broll_clip(broll_entry, duration_needed, work_dir, dialogue_reason="",
                         model=GEMINI_MODEL,
                         contents=_parts,
                         config=genai_types.GenerateContentConfig(
-                            temperature=0.2,
+                            temperature=temperature,
                             max_output_tokens=128,
                             # Raised 32 → 256: the Rule-A BUT clause requires
                             # a 5-step structured filter (locate the Required-
@@ -10924,10 +10940,10 @@ def fetch_broll_clip(broll_entry, duration_needed, work_dir, dialogue_reason="",
                 _why1 = "MALFORMED" if _status1 == "MALFORMED" else f"ERROR ({_raw1})"
                 print(
                     f"[broll] Gemini visual pick: {_why1} response='{_raw1[:80]}' "
-                    f"in {_elapsed1:.1f}s for '{keyword}' — re-issuing with strict format",
+                    f"in {_elapsed1:.1f}s for '{keyword}' — re-asking at temp 0.7 with reinforced anti-echo format",
                     flush=True,
                 )
-                _status2, _num2, _raw2, _elapsed2 = _attempt_pick(_instruction_strict)
+                _status2, _num2, _raw2, _elapsed2 = _attempt_pick(_instruction_retry, temperature=0.7)
 
                 if _status2 == "NONE":
                     print(
