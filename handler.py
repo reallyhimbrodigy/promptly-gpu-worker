@@ -5836,43 +5836,6 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
 # score must not silently disable the floor.
 SCENE_FLOOR_MIN_SCDET_SCORE = 8.0
 
-# [fix-removal-mask] A filler/false_start/stutter word-removal creates a SPLICE
-# in otherwise-continuous footage. Unlike a scdet shot-change it has no
-# confidence score (scdet measures ADJACENT frames; the splice joins NON-adjacent
-# frames). We measure the visual jump directly — the mean absolute frame delta
-# (0-255) between the last source frame before the deleted run and the first
-# after it — and the floor masks the splice only when that exceeds this bar. A
-# continuous-camera removal scores low and stays bare (like dead_air silence);
-# only a real jump gets a masking overlay. Tunable in one place; the
-# [fix-removal-mask] log prints the measured disc on EVERY word-removal splice
-# (masked AND left-bare) so the threshold can be calibrated from real renders.
-WORD_REMOVAL_MASK_MIN_DISCONT = 18.0
-
-
-def _splice_seam_discontinuity(cap, t_before, t_after):
-    """[fix-removal-mask] Mean absolute frame delta (0-255) across a removal
-    splice — the visible jump between the last source frame before the deleted
-    run (t_before, seconds) and the first frame after it (t_after). `cap` is a
-    shared cv2.VideoCapture opened once per floor pass.
-
-    FAIL-OPEN by design: any unreadable / missing / mismatched-shape frame or
-    decode error returns inf, so an UNMEASURABLE splice is treated as a jump and
-    MASKED — never silently left bare. (Mirrors the scene-floor 'missing score ⇒
-    decorate' policy.)"""
-    import cv2
-    try:
-        cap.set(cv2.CAP_PROP_POS_MSEC, float(t_before) * 1000.0)
-        _ok_a, _fa = cap.read()
-        cap.set(cv2.CAP_PROP_POS_MSEC, float(t_after) * 1000.0)
-        _ok_b, _fb = cap.read()
-        if not (_ok_a and _ok_b) or _fa is None or _fb is None:
-            return float("inf")           # unreadable ⇒ fail OPEN ⇒ mask
-        if _fa.shape != _fb.shape:
-            return float("inf")           # shape mismatch ⇒ fail OPEN ⇒ mask
-        return float(cv2.absdiff(_fa, _fb).mean())
-    except Exception:
-        return float("inf")               # any decode error ⇒ fail OPEN ⇒ mask
-
 
 def _scene_floor_rotation(current_types):
     """Deterministic variety fill for the scene-change decoration floor.
@@ -7317,30 +7280,10 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
             for _ki in _tight_boundary_indices
             if _ki in _shot_boundary_set and 0 <= _ki < len(new_to_src)
         }
-        # [fix-removal-mask] Word-removal splices in source space — the floor
-        # reads this the same way it reads _shot_src_set. dead_air silence is
-        # intentionally NOT here (those stay bare — visually continuous), so the
-        # exclusion is BY CONSTRUCTION, not by threshold. _wr_seam_times carries
-        # the two SOURCE frame times (the kept word's end, the next kept word's
-        # start) that bracket the deleted run, so the floor can measure the jump.
-        _word_removal_src_set = {
-            new_to_src[_ki] for _ki in _tight_boundary_indices
-            if _ki in _word_removal_set and 0 <= _ki < len(new_to_src)
-        }
-        _wr_seam_times = {}
-        for _ki in _tight_boundary_indices:
-            if (_ki in _word_removal_set and 0 <= _ki < len(new_to_src)
-                    and (_ki + 1) < len(kept_words)):
-                _wr_seam_times[new_to_src[_ki]] = (
-                    float(kept_words[_ki].get("end") or 0.0),
-                    float(kept_words[_ki + 1].get("start") or 0.0),
-                )
     except NameError:
         _tight_src_set = set()
         _shot_src_set = set()
         _shot_src_score = {}
-        _word_removal_src_set = set()
-        _wr_seam_times = {}
 
     # Boundaries (source after_word_index) carrying a real transition → type.
     # Overlays and the scene-change floor read this to skip double-decorating a
@@ -7598,36 +7541,16 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
     _scene_n_lowconf = 0
     _scene_n_gemini = 0
     _scene_backfilled = 0
-    # [fix-removal-mask] word-removal masking counters + per-splice disc map.
-    _scene_n_wr = 0             # word-removal splices considered
-    _scene_n_wr_continuous = 0  # left bare (disc below threshold — visually continuous)
-    _scene_n_wr_masked = 0      # masked (disc >= threshold, or unmeasurable → fail-open)
-    _wr_disc_by_si = {}         # source after_word_index → measured disc (masked slots only)
-    if _shot_src_set or _word_removal_src_set:
-        # [fix-removal-mask] One shared cv2.VideoCapture for the whole floor pass
-        # (seek+read per word-removal splice), opened only if there are splices to
-        # measure and released after. video_path is generate_edit_gemini's source.
-        _wr_cap = None
-        if _word_removal_src_set:
-            try:
-                import cv2 as _cv2_wr
-                _wr_cap = _cv2_wr.VideoCapture(video_path)
-                if not _wr_cap.isOpened():
-                    _wr_cap = None
-            except Exception:
-                _wr_cap = None
-        # Ordered boundaries (temporal, by source word index): shot-change AND
-        # word-removal splices interleaved, so _scene_floor_rotation's no-two-
-        # adjacent-same property holds across BOTH kinds (it keys off list-index
-        # adjacency, not boundary kind). Each entry: current decoration type
-        # (transition or Gemini overlay → locked; None = bare).
+    if _shot_src_set:
+        # Ordered shot-change boundaries (temporal, by source word index). Each:
+        # current decoration type (transition or Gemini overlay → locked;
+        # None = bare) and scdet confidence score. Low-confidence BARE
+        # boundaries are dropped from the sequence (skipped, not decorated).
         _floor_seq = []  # in-scope: [(awi_src, current_type_or_None)]
-        for _si in sorted(_shot_src_set | _word_removal_src_set):
+        for _si in sorted(_shot_src_set):
             if _si < 0 or _si >= len(_dg_words):
                 continue
-            _is_shot = _si in _shot_src_set
-            if _is_shot:
-                _scene_n_shot += 1
+            _scene_n_shot += 1
             _cur = _transition_type_by_awi.get(_si)
             if _cur is None and _si in _overlay_awis:
                 # Locked by a Gemini overlay — recover its type for adjacency.
@@ -7637,51 +7560,15 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                     "overlay",
                 )
             if _cur is not None:
-                if _is_shot:
-                    _scene_n_gemini += 1
+                _scene_n_gemini += 1
                 _floor_seq.append((_si, _cur))
                 continue
-            if _is_shot:
-                # scdet confidence gate — shot-changes ONLY (a word-removal splice
-                # has no scdet score; its gate is the frame-diff below). A boundary
-                # that is BOTH a shot-change and a word-removal takes this path
-                # (scdet priority) — a rare coincidence, flagged as a known edge.
-                _score = _shot_src_score.get(_si)
-                if _score is not None and _score < SCENE_FLOOR_MIN_SCDET_SCORE:
-                    _scene_n_lowconf += 1
-                    continue  # likely PiP/insert edge — floor skips it
-            else:
-                # [fix-removal-mask] pure word-removal splice: mask ONLY if the
-                # footage visibly jumps across the seam. Measure the frame-diff;
-                # FAIL-OPEN (no seam times / no capture / unreadable ⇒ inf ⇒ mask
-                # — an unmeasurable splice is NEVER left bare). disc is logged on
-                # BOTH the masked and left-bare branches to calibrate the bar.
-                _scene_n_wr += 1
-                _tb, _ta = _wr_seam_times.get(_si, (None, None))
-                if _tb is None or _wr_cap is None:
-                    _disc = float("inf")  # fail OPEN ⇒ mask
-                else:
-                    _disc = _splice_seam_discontinuity(_wr_cap, _tb, _ta)
-                if _disc < WORD_REMOVAL_MASK_MIN_DISCONT:
-                    _scene_n_wr_continuous += 1
-                    print(
-                        f"[fix-removal-mask] word_removal splice "
-                        f"after_word_index={_si} disc={_disc:.1f} < "
-                        f"{WORD_REMOVAL_MASK_MIN_DISCONT} — visually continuous, "
-                        f"left BARE (no mask)",
-                        flush=True,
-                    )
-                    continue
-                _scene_n_wr_masked += 1
-                _wr_disc_by_si[_si] = _disc  # type logged in the append loop (post-rotation)
+            _score = _shot_src_score.get(_si)
+            if _score is not None and _score < SCENE_FLOOR_MIN_SCDET_SCORE:
+                _scene_n_lowconf += 1
+                continue  # likely PiP/insert edge — floor skips it
             _floor_seq.append((_si, None))
-        if _wr_cap is not None:
-            try:
-                _wr_cap.release()
-            except Exception:
-                pass
-        # Deterministic variety fill over the mixed (shot + word-removal) sequence;
-        # no two ADJACENT floor masks share a type.
+        # Deterministic variety fill over the in-scope sequence.
         _resolved_floor_types = _scene_floor_rotation([_t for (_si, _t) in _floor_seq])
         for _idx, (_si, _cur) in enumerate(_floor_seq):
             if _cur is not None:
@@ -7690,20 +7577,11 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
             _resolved_overlays.append({"after_word_index": _si, "type": _ftype})
             _overlay_awis.add(_si)
             _scene_backfilled += 1
-            if _si in _wr_disc_by_si:
-                print(
-                    f"[fix-removal-mask] word_removal splice "
-                    f"after_word_index={_si} disc={_wr_disc_by_si[_si]:.1f} >= "
-                    f"{WORD_REMOVAL_MASK_MIN_DISCONT} — masked with '{_ftype}' "
-                    f"(varied-rotation backfill, lands on splice seam)",
-                    flush=True,
-                )
-            else:
-                print(
-                    f"[scene-floor] backfill '{_ftype}' at after_word_index={_si} "
-                    f"(bare scene-change boundary)",
-                    flush=True,
-                )
+            print(
+                f"[scene-floor] backfill '{_ftype}' at after_word_index={_si} "
+                f"(bare scene-change boundary)",
+                flush=True,
+            )
     # Unconditional summary — fires even at 0 so "ran but found nothing
     # attachable" never again looks like "never ran".
     print(
@@ -7713,13 +7591,6 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
         f"backfilled={_scene_backfilled}); "
         f"min_score={SCENE_FLOOR_MIN_SCDET_SCORE}; final overlay types in order: "
         f"{[_o['type'] for _o in sorted(_resolved_overlays, key=lambda _o: _o['after_word_index'])]}",
-        flush=True,
-    )
-    # [fix-removal-mask] word-removal masking summary (fires even at 0).
-    print(
-        f"[fix-removal-mask] word_removal_splices={_scene_n_wr} "
-        f"(masked={_scene_n_wr_masked}, continuous_bare={_scene_n_wr_continuous}; "
-        f"min_disc={WORD_REMOVAL_MASK_MIN_DISCONT})",
         flush=True,
     )
 
