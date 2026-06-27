@@ -8894,31 +8894,54 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
             "duration_seconds": _du,
         }
         if _var == "sticky_note":
+            # notes is variant-required but schema-OPTIONAL (Optional[List]=None),
+            # so Vertex omits it when empty. A sticky_note with no notes has no
+            # content → DROP it (render continues), never crash. >3 notes → keep
+            # the first 3; a note without text is skipped.
             _notes = _ov.get("notes")
-            if not isinstance(_notes, list) or not _notes or len(_notes) > 3:
-                raise ValueError(f"text_overlays[{_i}](sticky_note) needs notes array of 1-3 items")
+            if not isinstance(_notes, list) or not _notes:
+                print(
+                    f"[generate-edit] DROP text_overlay 'sticky_note' [{_i}]: "
+                    f"no notes content. Render continues without this overlay.",
+                    flush=True,
+                )
+                continue
             _entry["notes"] = []
-            for _ni, _nn in enumerate(_notes):
-                if not isinstance(_nn, dict) or not isinstance(_nn.get("text"), str):
-                    raise ValueError(f"text_overlays[{_i}].notes[{_ni}] needs text")
+            for _nn in _notes[:3]:
+                if (not isinstance(_nn, dict)
+                        or not isinstance(_nn.get("text"), str)
+                        or not _nn["text"].strip()):
+                    continue
                 _entry["notes"].append({
                     "text": _EMOJI_RE.sub("", str(_nn["text"])).strip(),
                     "color": str(_nn.get("color") or "#FFEB3B"),
                     "rotation": float(_nn.get("rotation") or 0),
                 })
-        elif _var == "caption_match":
-            if not isinstance(_ov.get("text"), str) or not _ov["text"].strip():
-                raise ValueError(f"text_overlays[{_i}](caption_match) missing required prop 'text'")
-            _entry["text"] = _EMOJI_RE.sub("", str(_ov["text"])).strip()
-            _pos = str(_ov.get("position") or "").strip()
-            # caption_match owns the upper half (top/center). Captions own
-            # the lower half. "bottom" would collide with the running
-            # caption track — reject it at validation time.
-            if _pos not in ("top", "center"):
-                raise ValueError(
-                    f"text_overlays[{_i}](caption_match).position must be 'top'|'center' "
-                    f"(captions own the bottom zone)"
+            if not _entry["notes"]:
+                print(
+                    f"[generate-edit] DROP text_overlay 'sticky_note' [{_i}]: "
+                    f"no note carried text. Render continues without this overlay.",
+                    flush=True,
                 )
+                continue
+        elif _var == "caption_match":
+            # text + position are variant-required but schema-OPTIONAL, so Vertex
+            # omits them. No text → no content → DROP (render continues). position
+            # defaults to the upper zone ('top') when unspecified — the schema
+            # Literal is top|center, so a PRESENT value is always valid; an absent
+            # one lands on 'top' (never the bottom caption zone). Never a crash.
+            _ct = _ov.get("text")
+            if not isinstance(_ct, str) or not _ct.strip():
+                print(
+                    f"[generate-edit] DROP text_overlay 'caption_match' [{_i}]: "
+                    f"missing text content. Render continues without this overlay.",
+                    flush=True,
+                )
+                continue
+            _entry["text"] = _EMOJI_RE.sub("", str(_ct)).strip()
+            _pos = str(_ov.get("position") or "").strip().lower()
+            if _pos not in ("top", "center"):
+                _pos = "top"
             _entry["position"] = _pos
         _to_validated.append(_entry)
     edit_plan["text_overlays"] = _to_validated
