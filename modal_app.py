@@ -472,22 +472,22 @@ prewarm_volume = modal.Volume.from_name("promptly-prewarm-cache", create_if_miss
                           # A100 rates (~$2.78/hr, down from H100's $8.27) the
                           # extra idle warmth is ~$0.12/render — cheap vs paying a
                           # 15-30s cold start on the user's critical path.
-    gpu="A100",           # A100-40GB, NOT H100. The orchestrator does NO GPU
-                          # VIDEO work: NVENC + CUDA decode are hardcoded off
-                          # (_HAS_NVENC/_HAS_HWACCEL=False → encode is CPU libx264,
-                          # decode is CPU, fps is CPU minterpolate), the Remotion
-                          # render is Chromium-on-CPU, and rife_normalize_remote
-                          # is DEAD CODE (never called — RIFE is not in the path).
-                          # The ONLY GPU consumer is pyannote diarization. H100 is
-                          # the single most-contested GPU on Modal, so requesting
-                          # it made every render queue for a free H100 — the 5-min
-                          # start stalls (sometimes never allocated → "never
-                          # starts"), and a 2nd simultaneous render waiting on a
-                          # 2nd scarce H100 (the concurrency bug). A100-40GB is far
-                          # more available (allocates in seconds, no queue), keeps
-                          # the 64-CPU/128GB host the parallel Chromium render
-                          # needs, keeps pyannote on GPU, and costs ~half. Fixes
-                          # the start-stall AND simultaneous renders together.
+    # NO GPU — the orchestrator does NO GPU work on the critical path. NVENC +
+    # CUDA decode are hardcoded off (_HAS_NVENC/_HAS_HWACCEL=False → CPU libx264
+    # encode, CPU decode, CPU minterpolate); the Remotion render is Chromium-on-
+    # CPU; Deepgram transcription is a CLOUD call; rife_normalize_remote is DEAD
+    # CODE. The ONLY local GPU consumer was pyannote diarization — and it runs
+    # ONLY when Deepgram detects >=2 speakers (handler.py ~18147), a minority of
+    # short-form talking-head jobs. So an A100/H100 was held for the FULL render
+    # on 100% of jobs but used on a fraction, capping parallelism at the account's
+    # scarce concurrent-GPU quota (renders QUEUED waiting for a free GPU — the
+    # recurring "not running in parallel" bug, unfixed by H100->A100 because A100
+    # is still GPU-quota-limited). CPU-only removes that ceiling entirely: renders
+    # provision from abundant CPU capacity and parallelize freely. Multi-speaker
+    # pyannote falls back to CPU on this 64-core host via its existing path
+    # (_load_pyannote: .to("cuda") fails with no GPU -> runs on CPU). If CPU
+    # diarization proves too slow for multi-speaker jobs, split pyannote into a
+    # short-lived small-GPU function (so the long CPU render never holds a GPU).
     cpu=64,
     memory=131072,        # 128GB — Remotion overlay + Remotion micro-segments run in parallel here, plus per-cut numpy audio resampler, plus the big single-pass ffmpeg composite
     region=["us-west", "us-east"],  # prefer us-west colocated with Supabase,
@@ -504,17 +504,18 @@ class PromptlyWorker:
         of Python import overhead (opencv, numpy, google-genai, deepgram, etc.)
         that was being paid on EVERY request even on warm containers.
 
-        CUDA driver-mount fix runs BEFORE handler import. Without this,
-        Modal's libcuda.so SONAME stubs intercept dlopen, torch.cuda.is_available()
-        returns False, and Whisper + wav2vec2 silently fall to CPU+int8 (52s
-        instead of 5s per transcribe, AND less acoustic precision — int8 misreads
-        weak isolated speech). The setup is idempotent and ~50ms when already
-        applied, so it's safe to call on every container startup. Same fix
-        `rife_normalize_remote` uses for the GPU function it owns."""
+        This worker is CPU-ONLY (no GPU — see the @app.cls note). The CUDA
+        driver-mount fix is therefore unnecessary; it's kept GUARDED only so a
+        no-GPU startup can never break (the helper is already defensive — it
+        logs 'nvidia-smi failed' and continues when no GPU is present). pyannote
+        diarization (multi-speaker jobs only) runs on CPU here."""
         import sys
         sys.path.insert(0, "/")
-        from cuda_driver_setup import setup_cuda_driver_mount
-        setup_cuda_driver_mount()
+        try:
+            from cuda_driver_setup import setup_cuda_driver_mount
+            setup_cuda_driver_mount()
+        except Exception as _cuda_e:
+            print(f"[startup] CUDA setup skipped (CPU-only worker): {_cuda_e}", flush=True)
         from handler import handler as _h
         self._handler = _h
         self._prewarm_volume = prewarm_volume
