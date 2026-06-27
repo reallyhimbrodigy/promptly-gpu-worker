@@ -13645,17 +13645,18 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         caption_pages = []
         print("[captions] caption_style='none' — user opted out; skipping caption pages", flush=True)
     else:
-        # [caption-2-line-cap] Prime is the ONLY style that flushes a "special"
-        # keyword onto its OWN line (Prime.tsx:133-154), so a 3-word page can
-        # render up to 3 lines. Cap Prime at 2 words/page → it can never exceed
-        # 2 lines, and the words RE-PAGINATE (more pages) rather than clip. Every
-        # other line-breaking style chunks uniformly (i += maxWordsPerLine, ≥2),
-        # so a 3-word page is at most 2 lines — audited: Serif/Cove/PaperII/
-        # Lumen/Passage/EditorialPop/CinematicLetterpress/Illuminate. They stay
-        # at 3. (maxWordsPerLine=2 alone does NOT cap Prime — a special word gets
-        # its own line regardless of that prop; the words-per-page cap is what
-        # bounds the line count.)
-        _max_words_per_page = 2 if str(_caption_style) == "Prime" else 3
+        # [caption-2-line-cap] Cap EVERY caption style at 2 LINES per page by
+        # limiting each page to 2 words. (This was Prime-only before, on the
+        # mistaken belief other styles couldn't exceed 2 lines — the component
+        # audit disproved that: Serif / Cove / PaperII / Lumen / Passage /
+        # Illuminate / CinematicLetterpress / Prime render ALL line-chunks via
+        # `lines.map`, and Cove / Lumen / Passage / CinematicLetterpress / Pulse
+        # also width-WRAP, so any of them could stack 3-4 lines. Only EditorialPop
+        # self-caps at 2.) A 2-word page renders AT MOST 2 visual lines for ANY
+        # style, because each word span is unbreakable (whiteSpace:nowrap) — the
+        # two words sit on one line if they fit, else one per line, never more.
+        # Words RE-PAGINATE across more pages; nothing is clipped.
+        _max_words_per_page = 2
         caption_pages = _build_tiktok_pages_from_projected(
             _projected_words,
             max_words_per_page=_max_words_per_page,
