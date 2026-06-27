@@ -13627,14 +13627,19 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _swi = _ov.get("start_word_index")
         _pw = _pw_by_idx.get(_swi) if _swi is not None else None
         if _pw is None:
-            # Word is not in the projected-words map. Validator already
-            # screens removed words — if we hit this it means the upstream
-            # data is malformed.
-            raise RuntimeError(
-                f"text_overlays[{_ov.get('variant')}] start_word_index="
-                f"{_swi} not in projected words. Validator should have "
-                f"caught this — investigate validator/projector divergence."
+            # Anchor word survived remove_words (validator screens that) but did
+            # not project onto the output timeline — it landed in a transition
+            # overlap tail (project_words_to_output suppresses those to avoid
+            # cross-fade caption overlap) or a DSP-refined boundary moved past it.
+            # Valid edge, not malformed data: DROP this overlay (same as a removed
+            # anchor, and as SFX/B-roll already do), render continues.
+            print(
+                f"[generate-edit] DROP text_overlay '{_ov.get('variant')}': "
+                f"start_word_index={_swi} not on the output timeline "
+                f"(transition-tail/refinement). Render continues without it.",
+                flush=True,
             )
+            continue
         _out_start = float(_pw["start"])
         _entry = {
             "variant": _ov["variant"],
@@ -13836,15 +13841,18 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _pw_start = _pw_by_idx.get(_swi) if _swi is not None else None
         _pw_end = _pw_by_idx.get(_ewi) if _ewi is not None else None
         if _pw_start is None or _pw_end is None:
-            # Anchor word is not in the projected-words map. Validator
-            # already screens removed words upstream — if we hit this it
-            # means the upstream data is malformed.
-            raise RuntimeError(
-                f"motion_graphic {_mg['type']} word indices "
-                f"start={_swi} end={_ewi} not in projected words. "
-                f"Validator should have caught this — investigate "
-                f"validator/projector divergence."
+            # Anchor word survived remove_words (validator screens that) but did
+            # not project onto the output timeline — transition-tail suppression
+            # or a DSP-refined boundary moved past it. Valid edge, not malformed
+            # data: DROP this MG (same as a removed anchor / SFX / B-roll), render
+            # continues.
+            print(
+                f"[generate-edit] DROP motion_graphic '{_mg.get('type')}' "
+                f"[{_i}]: word indices start={_swi} end={_ewi} not on the output "
+                f"timeline (transition-tail/refinement). Render continues without it.",
+                flush=True,
             )
+            continue
         _out_start = float(_pw_start["start"])
         _out_end = float(_pw_end["end"])
         # Preserve _sw_source / _ew_source for the diagnostics print at the
@@ -13880,15 +13888,23 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _from_frame = max(0, int(round(_out_start * source_fps)))
         _to_frame = min(total_output_frames, int(round(_out_end * source_fps)))
         if _to_frame <= _from_frame:
-            raise RuntimeError(
-                f"motion_graphic {_mg['type']} window projects to 0 frames "
-                f"(out_start={_out_start:.2f}s, out_end={_out_end:.2f}s, "
-                f"total_output_frames={total_output_frames})"
+            # Window collapsed to zero output frames (anchor at the very tail of
+            # the timeline, or the min-duration floor capped to nothing by a
+            # downstream component). Nothing to render — DROP it, render continues.
+            print(
+                f"[generate-edit] DROP motion_graphic '{_mg.get('type')}' "
+                f"[{_i}]: window projects to 0 frames "
+                f"(out=[{_out_start:.2f}..{_out_end:.2f}]s). Render continues without it.",
+                flush=True,
             )
-        _mg_anchor = SEMANTIC_TO_MG_ANCHOR.get(_mg["anchor"], "center")
-        _mg_props = {**_mg["props"], "anchor": _mg_anchor}
+            continue
+        # .get() on anchor/props/type so a render_only plan (which skips the
+        # generate_edit_gemini normalization) with a missing/None field can't
+        # crash the spread — {**None} would raise. Validated plans are unchanged.
+        _mg_anchor = SEMANTIC_TO_MG_ANCHOR.get(_mg.get("anchor"), "center")
+        _mg_props = {**(_mg.get("props") or {}), "anchor": _mg_anchor}
         motion_graphics_out.append({
-            "type": _mg["type"],
+            "type": _mg.get("type"),
             "fromFrame": _from_frame,
             "durationInFrames": _to_frame - _from_frame,
             "props": _mg_props,
@@ -13911,11 +13927,17 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _em_first_wi = _em_word_indices[0] if _em_word_indices else None
         _em_pw = _pw_by_idx.get(_em_first_wi) if _em_first_wi is not None else None
         if _em_pw is None:
-            raise RuntimeError(
-                f"Emphasis moment word_indices[0]={_em_first_wi} not in "
-                f"projected words. Validator should have caught this — "
-                f"investigate validator/projector divergence."
+            # word_indices[0] survived cuts but didn't project (transition-tail
+            # suppression / DSP boundary refinement). The emphasis ZOOM is already
+            # attached to its clip upstream; only the emphasis MG is handled in
+            # this loop, so DROP just this MG and continue — render proceeds.
+            print(
+                f"[generate-edit] DROP emphasis motion_graphic: word_indices[0]="
+                f"{_em_first_wi} not on the output timeline "
+                f"(transition-tail/refinement). Render continues without it.",
+                flush=True,
             )
+            continue
         _em_t_out = float(_em_pw["start"])
         _em_t_frame = int(round(_em_t_out * source_fps))
 
