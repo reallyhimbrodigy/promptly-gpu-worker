@@ -2721,6 +2721,57 @@ def _generate_edit_gemini_prior_plan_params():
         )
 
 
+@check("recipe schema: omittable-field contract frozen (Vertex optional-omission guard)")
+def _recipe_omittable_field_contract():
+    # Every recipe-model field NOT in its response_schema required[] list is a
+    # field Gemini/Vertex can OMIT — Vertex drops optional fields it leaves empty
+    # (AI Studio used to emit explicit nulls). Each MUST be tolerated by the
+    # manual validators in generate_edit_gemini: defaulted, or the component
+    # dropped (render continues) — NEVER required-present, which hard-raises and
+    # kills the whole render. This contract froze after three production crashes
+    # (emphasis motion_graphic/zoom_effect; motion_graphic props; text_overlay
+    # notes/text/position). If this check fails, the recipe schema changed — a
+    # field became optional or a new optional field was added. BEFORE updating
+    # EXPECTED below, confirm the matching validator does NOT raise when that
+    # field is absent (default it or drop the component).
+    import handler as H
+    EXPECTED = {
+        "PostCutPlan": {"notes"},
+        "_EmphasisMoment": {"motion_graphic", "zoom_effect"},
+        "_EmphasisMotionGraphic": {"props"},
+        "_ZoomEffect": {"events"},
+        "_ZoomEvent": {"durationMs", "originX", "originY", "scale"},
+        "_TextOverlay": {"attribution", "bottomText", "notes", "position",
+                         "quote", "text", "topText"},
+        "_MotionGraphic": {"duration_seconds", "props"},
+        "_Transition": {"accentColor", "direction", "flashColor", "intensity",
+                        "label", "labelColor", "palette", "showDivider",
+                        "theme", "title", "titleColor", "variant"},
+    }
+    models = [H.PostCutPlan, H._EmphasisMoment, H._EmphasisMotionGraphic,
+              H._ZoomEffect, H._ZoomEvent, H._TextOverlay, H._TextOverlayNote,
+              H._MotionGraphic, H._SoundEffect, H._BrollClip, H._Transition,
+              H._CaptionPositionChange, H._VideoPlan, H._ArcSegment,
+              H._VideoPlanMoment]
+    actual = {}
+    for _m in models:
+        _s = _m.model_json_schema()
+        _opt = set(_s.get("properties", {})) - set(_s.get("required", []))
+        if _opt:
+            actual[_m.__name__] = _opt
+    _keys = set(actual) | set(EXPECTED)
+    _added = {k: sorted(actual.get(k, set()) - EXPECTED.get(k, set()))
+              for k in _keys if actual.get(k, set()) - EXPECTED.get(k, set())}
+    _removed = {k: sorted(EXPECTED.get(k, set()) - actual.get(k, set()))
+                for k in _keys if EXPECTED.get(k, set()) - actual.get(k, set())}
+    assert actual == EXPECTED, (
+        f"Recipe omittable-field contract drifted. NEW omittable (Vertex WILL "
+        f"drop these when empty — make the validator default/drop them, never "
+        f"require-present): {_added}. REMOVED: {_removed}. After confirming "
+        f"generate_edit_gemini tolerates the change, update EXPECTED here."
+    )
+
+
 @check("handler mode validation accepts guided_redraft")
 def _handler_mode_validation_guided_redraft():
     # Source-string assertion on handler.handler — the mode-resolution
