@@ -450,6 +450,11 @@ secrets = [
     # with a warning.
     modal.Secret.from_name("promptly-secrets"),
     modal.Secret.from_name("promptly-cloudfront"),
+    # Vertex AI creds — GCP_SERVICE_ACCOUNT_JSON + GOOGLE_CLOUD_PROJECT +
+    # GOOGLE_CLOUD_LOCATION. When present, _get_genai_client routes the editorial
+    # Gemini call through Vertex (scalable per-project quota) instead of the
+    # single AI Studio key. Falls back to GEMINI_API_KEY when these are absent.
+    modal.Secret.from_name("gemini-vertex"),
 ]
 
 # ── App ────────────────────────────────────────────────────────────────────────

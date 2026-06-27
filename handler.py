@@ -612,13 +612,46 @@ def _get_genai_client():
     """
     global _genai_client
     if _genai_client is None:
-        api_key = os.environ.get("GEMINI_API_KEY")
-        if not api_key:
-            raise RuntimeError("GEMINI_API_KEY not set")
-        _genai_client = genai_client_mod.Client(
-            api_key=api_key,
-            http_options=genai_types.HttpOptions(timeout=480_000),
-        )
+        # Vertex AI path (production — scalable per-project quota): when the
+        # gemini-vertex secret is present (GCP_SERVICE_ACCOUNT_JSON + project +
+        # location), authenticate with the service account and route to the
+        # project's Vertex endpoint. Falls back to the AI Studio api_key (the
+        # prototype tier — one low-quota key that serialized concurrent edit
+        # recipes) only when the Vertex env vars are absent, so the swap is
+        # risk-free until the secret is wired and reversible by removing it.
+        _sa_json = os.environ.get("GCP_SERVICE_ACCOUNT_JSON")
+        _gcp_project = os.environ.get("GOOGLE_CLOUD_PROJECT")
+        if _sa_json and _gcp_project:
+            import json as _json_sa
+            from google.oauth2 import service_account as _sa_mod
+            _location = os.environ.get("GOOGLE_CLOUD_LOCATION") or "global"
+            _creds = _sa_mod.Credentials.from_service_account_info(
+                _json_sa.loads(_sa_json),
+                scopes=["https://www.googleapis.com/auth/cloud-platform"],
+            )
+            _genai_client = genai_client_mod.Client(
+                vertexai=True,
+                project=_gcp_project,
+                location=_location,
+                credentials=_creds,
+                http_options=genai_types.HttpOptions(timeout=480_000),
+            )
+            print(
+                f"[gemini] client=vertex project={_gcp_project} location={_location}",
+                flush=True,
+            )
+        else:
+            api_key = os.environ.get("GEMINI_API_KEY")
+            if not api_key:
+                raise RuntimeError(
+                    "Neither Vertex creds (GCP_SERVICE_ACCOUNT_JSON) nor "
+                    "GEMINI_API_KEY (AI Studio) is set"
+                )
+            _genai_client = genai_client_mod.Client(
+                api_key=api_key,
+                http_options=genai_types.HttpOptions(timeout=480_000),
+            )
+            print("[gemini] client=ai_studio (api_key)", flush=True)
     return _genai_client
 
 supabase = None
