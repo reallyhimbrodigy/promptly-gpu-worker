@@ -8110,11 +8110,13 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                 f"emphasis_moments[{_ei}].type must be one of {sorted(_valid_em_types)}"
             )
         _em_duration = float(em.get("duration") or 2.0)
-        # Visual layer bindings — both fields are required (value or null).
-        if "zoom_effect" not in em:
-            raise ValueError(f"emphasis_moments[{_ei}] missing zoom_effect (emit null if no zoom)")
-        if "motion_graphic" not in em:
-            raise ValueError(f"emphasis_moments[{_ei}] missing motion_graphic (emit null if none)")
+        # Visual layer bindings — optional. A MISSING zoom_effect / motion_graphic
+        # is treated as null (= no zoom / no MG), identical to an explicit null.
+        # Gemini's Vertex structured output OMITS optional fields it leaves empty
+        # (AI Studio happened to emit explicit nulls), so requiring the key to be
+        # present was over-strict. setdefault makes every downstream read see null.
+        em.setdefault("zoom_effect", None)
+        em.setdefault("motion_graphic", None)
         _ze_raw = em.get("zoom_effect")
         _ze_out = None
         if _ze_raw is not None:
