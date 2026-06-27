@@ -24,7 +24,6 @@ export const Toggle: React.FC<ToggleProps> = ({
   labelColor = "#FFFFFF",
   knobColor = "#FFFFFF",
   top = "12%",
-  left = "50%",
 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
@@ -80,7 +79,9 @@ export const Toggle: React.FC<ToggleProps> = ({
       style={{
         position: "absolute",
         top,
-        left,
+        // [horizontal-center] structural — hardcoded 50% + translateX(-50%) so
+        // Toggle can NEVER render off-center, regardless of any passed prop.
+        left: "50%",
         transform: "translateX(-50%)",
         display: "flex",
         alignItems: "center",

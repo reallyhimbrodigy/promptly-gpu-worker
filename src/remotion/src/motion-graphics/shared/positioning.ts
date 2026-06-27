@@ -137,30 +137,34 @@ function clampOffsetForAnchor(
 // ---------------------------------------------------------------------------
 // Per-type positioning policy — SINGLE SOURCE OF TRUTH.
 // ---------------------------------------------------------------------------
-//   centerColumn: ignore the anchor's horizontal component — force the MG into
-//     the center column. Text/number/UI cards must never side-anchor.
+//   DEFAULT (no flag): horizontal center is FORCED — the anchor's horizontal
+//     component is ignored and the MG renders in the center column. This is the
+//     STRUCTURAL rule: any type routed through resolveMGPosition CANNOT render
+//     horizontally off-center unless it explicitly opts out via freeHorizontal.
+//     A future MG type added with no config entry therefore centers by default,
+//     not off-center-capable-by-omission.
+//   freeHorizontal: opt OUT of the forced center — honor the anchor's horizontal
+//     component (off-center allowed). ONLY for types that legitimately aim off-
+//     center. No current resolver type sets this.
 //   topExempt:    render at the TRUE top like a real OS notification — opt out
-//     of the safe-zone top + bottom padding AND the centering rule; full-width
-//     minus the action rail. (Notification intentionally overlaps TikTok's own
-//     clock — that's the notification-mimic look, not a bug.)
+//     of the safe-zone top + bottom padding; full-width minus the action rail.
+//     (Notification intentionally overlaps TikTok's own clock — the mimic look.)
 //
-// Types ABSENT here keep default behavior (anchor honored, inside the safe
-// rect). StickyNotes + Toggle self-center (left:50% + translateX(-50%)) and
-// never route through resolveMGPosition; AnnotationArrow (points at a target)
-// and RecordingFrame (full-frame border) are intentionally free-positioned.
+// StickyNotes + Toggle hardcode left:50% + translateX(-50%) and never route
+// through resolveMGPosition; AnnotationArrow (points at a target) and
+// RecordingFrame (full-frame border) are intentionally free-positioned via
+// their OWN absolute positioning, outside this resolver. Vertical anchoring
+// (upper/center/lower) is unaffected by any of this — horizontal-axis only.
 export interface MGPositionConfig {
-  centerColumn?: boolean;
+  freeHorizontal?: boolean;
   topExempt?: boolean;
 }
 
 export const MG_POSITION_CONFIG: Record<string, MGPositionConfig> = {
-  StatCard: { centerColumn: true },
-  ChatThread: { centerColumn: true },
-  ProgressBar: { centerColumn: true },
-  TweetBubble: { centerColumn: true },
-  InstagramComment: { centerColumn: true },
-  IMessageBubble: { centerColumn: true },
-  TikTokComment: { centerColumn: true },
+  // Horizontal center is the DEFAULT for every resolver type (see above), so the
+  // text/number/UI cards (StatCard, ChatThread, ProgressBar, TweetBubble,
+  // InstagramComment, IMessageBubble, TikTokComment) need no entry. Only the
+  // exceptions are listed.
   Notification: { topExempt: true },
 };
 
@@ -191,38 +195,40 @@ export function resolveMGPosition(
     rawOffsetX,
     rawOffsetY,
   );
-  // Item 1: center-column types ignore any horizontal offset (forced center).
-  const offsetX = cfg.centerColumn ? 0 : clampedX;
+  // Horizontal center is the DEFAULT (forced) — the anchor's horizontal offset
+  // is ignored unless the type explicitly opts out via freeHorizontal.
+  const offsetX = cfg.freeHorizontal ? clampedX : 0;
   const offsetY = clampedY;
 
   const flex = ANCHOR_FLEX[anchor];
   const transformOrigin = ANCHOR_ORIGIN[anchor];
 
-  // Item 1: force horizontal center regardless of the anchor's horizontal part.
-  const justifyContent = cfg.centerColumn ? "center" : flex.justifyContent;
+  // Force horizontal center regardless of the anchor's horizontal part — only a
+  // freeHorizontal type honors it. A type with no config entry centers here.
+  const justifyContent = cfg.freeHorizontal ? flex.justifyContent : "center";
   // Item 3 (topExempt): pin to the true top, full-width minus the rail, and
   // drop the top + bottom safe padding. Right-rail padding stays so a wide
   // banner can't run under the action buttons.
   const alignItems = cfg.topExempt ? "flex-start" : flex.alignItems;
   const paddingTop = cfg.topExempt ? NOTIFICATION_TOP_INSET : TIKTOK_SAFE_TOP;
   const paddingBottom = cfg.topExempt ? 0 : TIKTOK_SAFE_BOTTOM;
-  // Item 1: centerColumn types use SYMMETRIC horizontal padding so the flex
+  // Centered (default) types use SYMMETRIC horizontal padding so the flex
   // center lands on the TRUE frame center (540), not the asymmetric safe-box
   // center (480 = midpoint of [80,880]). paddingLeft = paddingRight =
   // TIKTOK_SAFE_RIGHT (200) → box [200,880], midpoint 540, still clears the
   // right rail; maxWidth shrinks to the symmetric box width (680) so a wide
-  // card can't overflow. Scoped to centerColumn only — other types keep the
-  // 80/200 asymmetric padding + 800 maxWidth.
+  // card can't overflow. Only a freeHorizontal type keeps the 80/200
+  // asymmetric padding + 800 maxWidth.
   const paddingLeft = cfg.topExempt
     ? 0
-    : cfg.centerColumn
-      ? TIKTOK_SAFE_RIGHT
-      : TIKTOK_SAFE_SIDE;
+    : cfg.freeHorizontal
+      ? TIKTOK_SAFE_SIDE
+      : TIKTOK_SAFE_RIGHT;
   const maxWidth = cfg.topExempt
     ? CANVAS_WIDTH - TIKTOK_SAFE_RIGHT
-    : cfg.centerColumn
-      ? CANVAS_WIDTH - 2 * TIKTOK_SAFE_RIGHT
-      : SAFE_RECT.width;
+    : cfg.freeHorizontal
+      ? SAFE_RECT.width
+      : CANVAS_WIDTH - 2 * TIKTOK_SAFE_RIGHT;
 
   return {
     containerStyle: {

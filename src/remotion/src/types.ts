@@ -9,11 +9,11 @@
  */
 
 // ── MG anchor vocabulary (matches the pack's MGAnchor type) ──────────────────
-// Python maps its safe-zone anchors (upper_third_safe, center, lower_third_safe,
-// left_safe, right_safe) into this vocabulary before emitting the spec, and
-// merges the mapped value into `props.anchor`. Face-relative anchoring is not
-// supported by the motion-graphics pack — each component uses its own
-// canvas-scale resolveMGPosition.
+// Python maps its safe-zone anchors (upper_third_safe, center, lower_third_safe)
+// into this vocabulary before emitting the spec, and merges the mapped value
+// into `props.anchor`. Side anchors (left/right) were removed — MGs always
+// render horizontally centered. Face-relative anchoring is not supported by the
+// motion-graphics pack — each component uses its own canvas-scale resolveMGPosition.
 export type MGAnchor =
   | "center"
   | "top"

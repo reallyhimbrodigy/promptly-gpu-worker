@@ -55,8 +55,10 @@ SEMANTIC_TO_MG_ANCHOR = {
     "upper_third_safe": "top",
     "center":           "center",
     "lower_third_safe": "bottom",
-    "left_safe":        "left",
-    "right_safe":       "right",
+    # left_safe/right_safe were REMOVED — MGs always render horizontally centered
+    # now (resolveMGPosition forces center). The lookups below use .get(…,
+    # "center") so a stray off-center anchor (model inertia / cached recipe)
+    # coerces to center instead of raising KeyError.
 }
 
 # ── Pydantic EditPlan schema ─────────────────────────────────────────────────
@@ -191,7 +193,7 @@ ZOOM_PEAK_REACH_MS = {
 }
 _MG_TYPES = Literal[tuple(sorted(VALID_MG_TYPES))]
 _SEMANTIC_ANCHOR = Literal[
-    "upper_third_safe", "center", "lower_third_safe", "left_safe", "right_safe",
+    "upper_third_safe", "center", "lower_third_safe",
 ]
 _TEXT_OVERLAY_VARIANTS = Literal[
     "sticky_note", "caption_match",
@@ -2962,13 +2964,11 @@ def _build_post_cuts_prompt(
     if off_center:
         _off_center_line = (
             "OFF-CENTER SPEAKER: global median face cx is >100px from canvas-center. "
-            "Use this signal as a tiebreaker — `upper_third_safe` / `lower_third_safe` "
-            "are still the preferred MG anchors, picked opposite the captions. Only "
-            "reach for the side anchor OPPOSITE the speaker (`left_safe` if speaker "
-            "is on the right, `right_safe` if speaker is on the left) when the MG is "
-            "narrow enough to sit beside the speaker without crowding and an upper/"
-            "lower placement would cover the face. Zoom origin is centered by the "
-            "pipeline; you don't need to compensate for off-center framing in zoom events.\n"
+            "MGs always render horizontally CENTERED (there are no side anchors), so "
+            "this is only a VERTICAL tiebreaker — pick the `upper_third_safe` / "
+            "`lower_third_safe` anchor OPPOSITE the face so the centered card clears "
+            "it. Zoom origin is centered by the pipeline; you don't need to "
+            "compensate for off-center framing in zoom events.\n"
         )
 
     # Shot-scale block — tells Gemini how tight the framing is so zoom choices
@@ -3070,14 +3070,13 @@ FACE VERTICAL ZONE (where the speaker's HEAD sits in the frame, by source-second
     - face=upper  → an upper-third anchor (`upper_third_safe`, `top`,
                     `upper_third`, `Notification`) lands the component
                     directly on top of the face. The viewer loses both
-                    the face and the component at once. A side anchor
-                    (`left_safe`/`right_safe`) or `lower_third_safe`
+                    the face and the component at once. `lower_third_safe`
                     with captions flipped to top usually reads cleanly.
 
     - face=center → `center` lands directly on the face.
                     A face reading `center` likely also encroaches on
                     the upper third, so `upper_third_safe` is risky too.
-                    `lower_third_safe` or a side anchor is the safer
+                    `lower_third_safe` is the safer
                     place; flipping captions to top makes the
                     `lower_third_safe` room when needed.
 
@@ -3143,15 +3142,13 @@ FACE VERTICAL ZONE (where the speaker's HEAD sits in the frame, by source-second
 SPEAKER POSITIONS (where each speaker sits in frame, by diarization + face detect)
   {_sp_display}
 
-  Use to place side overlays OPPOSITE the speaker:
-    - spk on `left`   → `right_safe` for overlays during their words
-    - spk on `right`  → `left_safe` for overlays during their words
-    - spk on `center` → `upper_third_safe` / `lower_third_safe`
-
-  **This signal is for OVERLAY placement only.** You do not need to use
-  it for zoom origin. The pipeline detects face position at the exact
-  frame of each zoom event and aligns the origin precisely — emit zoom
-  events WITHOUT originX/originY for face-targeted zooms.
+  Informational only. MGs always render horizontally CENTERED (there are no
+  side anchors), so do NOT place a card to one side based on the speaker's
+  left/right position — keep it off the face with VERTICAL clearance instead
+  (`upper_third_safe` / `lower_third_safe`, opposite the face). You also do not
+  need this for zoom origin: the pipeline detects face position at the exact
+  frame of each zoom event and aligns the origin precisely — emit zoom events
+  WITHOUT originX/originY for face-targeted zooms.
   {_off_center_line}{_shot_scale_block}"""
 
     # SYSTEM INSTRUCTION — stable content. No per-video interpolation (vibe,
@@ -3330,7 +3327,7 @@ HOW THE SCHEMA WORKS — the contract between you and the pipeline
 
 **Two duration fields measure different things.** `duration_seconds` (text_overlays, emphasis_moments) = output-time seconds the element stays on screen, typically 1.5-4.0s. `durationMs` (inside zoom events) = milliseconds the camera motion takes — but you OMIT it by default (see EMPHASIS).
 
-**Positions are semantic zones.** upper_third_safe / center / lower_third_safe / left_safe / right_safe. No pixel coordinates. All zones pre-compute inside the body zone (x ∈ [60,1020], y ∈ [108,1812] on the 1080×1920 canvas), clear of the platform UI: y<108 status bar, y>1600 caption drawer + like/share rail, x>960 engagement rail.
+**Positions are semantic zones.** upper_third_safe / center / lower_third_safe. No pixel coordinates. All zones pre-compute inside the body zone (x ∈ [60,1020], y ∈ [108,1812] on the 1080×1920 canvas), clear of the platform UI: y<108 status bar, y>1600 caption drawer + like/share rail, x>960 engagement rail.
 
 **Caption position is mostly pipeline-owned.** During any MG or B-roll window, the pipeline force-moves captions to the collision-free zone, frame-precisely — never emit caption_position_changes for those windows. Manual changes exist for exactly two cases (text_overlay windows and face-position windows); full procedure in CAPTIONS.
 
@@ -3485,10 +3482,10 @@ The goal every time: the viewer sees the speaker and the MG simultaneously. The 
 Component sizes:
   • TOP-PINNED — Notification, StickyNotes: ALWAYS render in the top band regardless of anchor (the metaphor depends on it). Emit anchor "upper_third_safe" so your spec matches reality.
   • LARGE — IMessageBubble, ChatThread, RecordingFrame: ≥half canvas height. If the face is visible, the upper third can't contain them — time them to a B-roll window where the face is gone, or pick a smaller variant.
-  • MEDIUM — TweetBubble, InstagramComment, TikTokComment, StatCard: 25-40% canvas height. upper_third_safe works when the face is clearly center-or-lower; if the card would touch the face from above, use a side anchor opposite the speaker, lower_third_safe with captions flipped to top, or a B-roll window.
+  • MEDIUM — TweetBubble, InstagramComment, TikTokComment, StatCard: 25-40% canvas height. upper_third_safe works when the face is clearly center-or-lower; if the card would touch the face from above, use lower_third_safe with captions flipped to top, or a B-roll window.
   • SMALL — AnnotationArrow, ProgressBar, Toggle: <20% canvas. Any anchor; upper_third_safe is safe by construction.
 
-Anchor preference: 1) upper_third_safe (default — above the face, clear of bottom captions) · 2) lower_third_safe (requires captions moved to top for the window; good for footer-like content) · 3) center (ONLY when the speaker is off-camera or the face is confirmed in the lower band — on a visible talking-head, center lands on the face) · 4) left_safe/right_safe (last resort; place OPPOSITE the speaker). When no anchor cleanly clears the face, pick a smaller variant, retime to a B-roll window, or skip — a clean speaker shot beats a covered one.
+Anchor preference: 1) upper_third_safe (default — above the face, clear of bottom captions) · 2) lower_third_safe (requires captions moved to top for the window; good for footer-like content) · 3) center (ONLY when the speaker is off-camera or the face is confirmed in the lower band — on a visible talking-head, center lands on the face). MGs always render horizontally centered; there are no side anchors. When no anchor cleanly clears the face, pick a smaller variant, retime to a B-roll window, or skip — a clean speaker shot beats a covered one.
 
 ──────────────────────────────────────────
 THE 13 COMPONENTS
@@ -4067,7 +4064,7 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
       "start_word_index": int,
       "end_word_index": int,
       "duration_seconds": float | null,
-      "anchor": "upper_third_safe" | "center" | "lower_third_safe" | "left_safe" | "right_safe",
+      "anchor": "upper_third_safe" | "center" | "lower_third_safe",
       "props": {{...}}
     }}
   ]
@@ -7808,7 +7805,7 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
     # operates against the full canvas, so face-relative anchoring has no honest
     # render path. Use absolute safe zones only.
     _valid_semantic_anchors = {
-        "upper_third_safe", "center", "lower_third_safe", "left_safe", "right_safe",
+        "upper_third_safe", "center", "lower_third_safe",
     }
     _valid_text_overlay_variants = {
         "sticky_note", "caption_match",
@@ -7915,10 +7912,19 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
             continue
         _anchor = str(_mg.get("anchor") or "").strip()
         if _anchor not in _valid_semantic_anchors:
-            raise ValueError(
-                f"motion_graphics[{_i}].anchor must be a semantic zone "
-                f"{sorted(_valid_semantic_anchors)}, got {_anchor!r}"
+            # left_safe/right_safe were removed from the MG anchor vocabulary
+            # (MGs always center horizontally now). A stray/unknown anchor — from
+            # model inertia, a cached prompt, or a re-edited recipe — COERCES to
+            # center instead of rejecting the render. center is on-canvas and
+            # satisfies the always-horizontally-centered rule.
+            print(
+                f"[generate-edit] motion_graphics[{_i}].anchor {_anchor!r} not a "
+                f"valid semantic zone {sorted(_valid_semantic_anchors)} — "
+                f"coercing to 'center'",
+                flush=True,
             )
+            _anchor = "center"
+        _mg["anchor"] = _anchor
 
         _props = _mg.get("props")
         if not isinstance(_props, dict):
@@ -8234,10 +8240,16 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                 )
             _anc = str(_mg_raw.get("anchor") or "").strip()
             if _anc not in _valid_semantic_anchors:
-                raise ValueError(
-                    f"emphasis_moments[{_ei}].motion_graphic.anchor must be one of "
-                    f"{sorted(_valid_semantic_anchors)}, got {_anc!r}"
+                # See motion_graphics anchor coercion above — stray/removed
+                # off-center anchors land on center, never reject the render.
+                print(
+                    f"[generate-edit] emphasis_moments[{_ei}].motion_graphic.anchor "
+                    f"{_anc!r} not a valid semantic zone "
+                    f"{sorted(_valid_semantic_anchors)} — coercing to 'center'",
+                    flush=True,
                 )
+                _anc = "center"
+            _mg_raw["anchor"] = _anc
             _mg_props = _mg_raw.get("props")
             if not isinstance(_mg_props, dict):
                 raise ValueError(f"emphasis_moments[{_ei}].motion_graphic.props must be object")
@@ -13633,9 +13645,20 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         caption_pages = []
         print("[captions] caption_style='none' — user opted out; skipping caption pages", flush=True)
     else:
+        # [caption-2-line-cap] Prime is the ONLY style that flushes a "special"
+        # keyword onto its OWN line (Prime.tsx:133-154), so a 3-word page can
+        # render up to 3 lines. Cap Prime at 2 words/page → it can never exceed
+        # 2 lines, and the words RE-PAGINATE (more pages) rather than clip. Every
+        # other line-breaking style chunks uniformly (i += maxWordsPerLine, ≥2),
+        # so a 3-word page is at most 2 lines — audited: Serif/Cove/PaperII/
+        # Lumen/Passage/EditorialPop/CinematicLetterpress/Illuminate. They stay
+        # at 3. (maxWordsPerLine=2 alone does NOT cap Prime — a special word gets
+        # its own line regardless of that prop; the words-per-page cap is what
+        # bounds the line count.)
+        _max_words_per_page = 2 if str(_caption_style) == "Prime" else 3
         caption_pages = _build_tiktok_pages_from_projected(
             _projected_words,
-            max_words_per_page=3,
+            max_words_per_page=_max_words_per_page,
             position_boundaries_sec=sorted(set(_position_boundaries_out_sec)),
             clip_boundaries_sec=sorted(set(_clip_boundaries_out_sec)),
         )
@@ -13792,7 +13815,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 f"(out_start={_out_start:.2f}s, out_end={_out_end:.2f}s, "
                 f"total_output_frames={total_output_frames})"
             )
-        _mg_anchor = SEMANTIC_TO_MG_ANCHOR[_mg["anchor"]]
+        _mg_anchor = SEMANTIC_TO_MG_ANCHOR.get(_mg["anchor"], "center")
         _mg_props = {**_mg["props"], "anchor": _mg_anchor}
         motion_graphics_out.append({
             "type": _mg["type"],
@@ -13840,7 +13863,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _em_dur = float(em["duration"])
             _mg_from_frame = max(0, _em_t_frame - int(round(_em_dur * source_fps * 0.25)))
             _mg_dur_frames = int(round(_em_dur * source_fps))
-            _em_mg_anchor = SEMANTIC_TO_MG_ANCHOR[em["motion_graphic"]["anchor"]]
+            _em_mg_anchor = SEMANTIC_TO_MG_ANCHOR.get(em["motion_graphic"]["anchor"], "center")
             _em_mg_props = {**em["motion_graphic"]["props"], "anchor": _em_mg_anchor}
             motion_graphics_out.append({
                 "type": em["motion_graphic"]["type"],
