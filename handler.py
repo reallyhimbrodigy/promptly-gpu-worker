@@ -7959,7 +7959,13 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
             _anchor = "center"
         _mg["anchor"] = _anchor
 
+        # props has default_factory=dict in the schema → it is NOT a required
+        # field, so Gemini/Vertex OMITS it whenever the component uses default
+        # props. A missing/null props means {} (the schema default), not an
+        # error; only a PRESENT non-dict is a real malformation.
         _props = _mg.get("props")
+        if _props is None:
+            _props = {}
         if not isinstance(_props, dict):
             raise ValueError(f"motion_graphics[{_i}].props must be an object")
         # Optional duration override; validator only enforces range.
@@ -8285,7 +8291,12 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                 )
                 _anc = "center"
             _mg_raw["anchor"] = _anc
+            # props has default_factory=dict → NOT required. Vertex omits it when
+            # the component uses default props; missing/null means {} (the schema
+            # default), only a PRESENT non-dict is a malformation.
             _mg_props = _mg_raw.get("props")
+            if _mg_props is None:
+                _mg_props = {}
             if not isinstance(_mg_props, dict):
                 raise ValueError(f"emphasis_moments[{_ei}].motion_graphic.props must be object")
             _mg_out = {"type": _mgt, "anchor": _anc, "props": _mg_props}
