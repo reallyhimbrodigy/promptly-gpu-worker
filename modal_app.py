@@ -422,6 +422,10 @@ image = (
     })
     .add_local_dir("src/assets/sounds", "/assets/sounds")
     .add_local_file("handler.py", "/handler.py")
+    # EditPolicy spine (Phase 2). handler.py lazy-imports `edit_policy` only when
+    # the per-job/env flag is on; without this entry the flag-on path would hit
+    # ModuleNotFoundError (caught + disabled per-job, but the feature wouldn't run).
+    .add_local_file("edit_policy.py", "/edit_policy.py")
     .add_local_file("ffmpeg_base.py", "/ffmpeg_base.py")
     .add_local_file("rife_normalize.py", "/rife_normalize.py")
     .add_local_file("render_schemas.py", "/render_schemas.py")
