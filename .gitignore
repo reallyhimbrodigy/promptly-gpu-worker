@@ -23,3 +23,11 @@ src/remotion/out_step*/
 # to avoid committing third-party content.
 src/remotion/public/test_talking_head.mp4
 src/remotion/public/overlay-cut-test-audio.wav
+# Isolation/test render outputs from the EditorialPop test composition — large
+# binary .mov + frame extracts (incl. 300MB+ files that exceed GitHub's 100MB
+# limit), regenerable from source. Never commit.
+src/remotion/out_editorialpop_test/
+# Resolved system-prompt dumps — derived from handler.py's f-string for local
+# inspection only (regenerate via the extraction script); not source.
+post_cuts_system_prompt.txt
+promptly_gemini_system_prompt.txt
