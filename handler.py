@@ -5765,7 +5765,11 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
                 # drove the model to spiral past its output budget into an
                 # empty response. Thinking LESS is the fix, not more time.
                 thinking_config=genai_types.ThinkingConfig(thinking_budget=24576),
-                media_resolution="MEDIA_RESOLUTION_LOW",
+                # MEDIUM (was LOW) — shipped as a production A/B. Measured
+                # token-identical to LOW on the 480p proxy (a no-op on the
+                # synthetic probe), so any real-footage output change is the
+                # signal this swap is testing for.
+                media_resolution="MEDIA_RESOLUTION_MEDIUM",
             ),
             system_instruction=system_instruction,
         )
