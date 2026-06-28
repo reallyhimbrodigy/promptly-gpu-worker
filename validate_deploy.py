@@ -2060,6 +2060,16 @@ def _full_plan_constructs():
                     "intensity": 1.0,
                 }
             ],
+            "movements": [
+                {
+                    "start_word_index": 0,
+                    "end_word_index": 9,
+                    "job": "grip and drive",
+                    "energy": "hot",
+                    "lead_instrument": "kinetic_captions",
+                    "captions": "run",
+                }
+            ],
             "editorial_vision": "test creative vision for the video",
         },
         "caption_style": "PaperII",
@@ -2752,7 +2762,7 @@ def _recipe_omittable_field_contract():
               H._ZoomEffect, H._ZoomEvent, H._TextOverlay, H._TextOverlayNote,
               H._MotionGraphic, H._SoundEffect, H._BrollClip, H._Transition,
               H._CaptionPositionChange, H._VideoPlan, H._ArcSegment,
-              H._VideoPlanMoment]
+              H._VideoPlanMoment, H._Movement]
     actual = {}
     for _m in models:
         _s = _m.model_json_schema()

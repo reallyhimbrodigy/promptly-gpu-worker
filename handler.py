@@ -393,6 +393,30 @@ class _ArcSegment(BaseModel):
     intensity: float
 
 
+class _Movement(BaseModel):
+    """One movement — a coarse span of the video doing one job at one energy.
+    The model commits 2-4 of these (tiling the kept transcript end to end) BEFORE
+    placing components, so each component takes its job from the movement it sits
+    in. Reasoning scaffolding ONLY — like video_identity / what_i_saw it shapes
+    the model's density + instrument choices but is NOT consumed by the renderer
+    (stays out of the PostCutPlan -> EditPlan path). See the MOVEMENTS block in
+    the post-cuts prompt for the doctrine."""
+    start_word_index: int
+    end_word_index: int
+    # One phrase for what this stretch is doing ("grip and pattern-interrupt",
+    # "drive the argument", "teach the three-part method", "land it and send off").
+    job: str
+    # Pace at which one dominant element hands off to the next: hot = fast
+    # succession, deep = a single graphic holds and builds, calm = the frame
+    # rests so a line can breathe.
+    energy: Literal["hot", "deep", "calm"]
+    # The one thing that carries this movement.
+    lead_instrument: Literal["kinetic_captions", "annotation", "takeover_graphic", "clean_frame"]
+    # Captions run, or rest. They rest only under a takeover graphic that has
+    # become the text (see "When a graphic becomes the text").
+    captions: Literal["run", "rest"]
+
+
 class _VideoPlan(BaseModel):
     """Gemini's editorial plan for the video, written BEFORE component
     placement. Forces moment-first reasoning: identify the dramatic shape and
@@ -436,6 +460,12 @@ class _VideoPlan(BaseModel):
     # AFTER hook/payoff/close/key_moments are committed but BEFORE any
     # other field is touched.
     arc_segments: List[_ArcSegment]
+    # The movements — 2-4 coarse spans tiling the kept transcript, each doing one
+    # job at one energy (hot/deep/calm). Reasoning scaffolding like what_i_saw:
+    # shapes the model's density + instrument choices, NOT consumed by the
+    # renderer. Filled AFTER arc_segments (the movements fall out of the arc) and
+    # BEFORE editorial_vision (the vision speaks to the movements).
+    movements: List[_Movement]
     # THE EDITORIAL VISION — one specific sentence committing to HOW this
     # video will be cut. Not what the video IS (that's video_identity).
     # Not what HAPPENS (that's what_happens). Not the SHAPE (that's
@@ -3195,11 +3225,13 @@ Two failure modes define bad editing in this format, and they are the same mista
   • THIN — stretches of runtime where nothing visual lands. The viewer's eye goes flat; they scroll.
   • STACKED — multiple effects fighting for the same beat. None of them register; the edit reads anxious.
 
-The cure for both is one discipline: ONE visual event per ~2-second window, every event chosen for what THAT specific moment is doing. The full doctrine is below; everything else in this prompt serves it.
+The cure for both is one discipline: one dominant visual event owns each ~2-second window — that's the baseline cadence, and each movement sets how fast it runs — every event chosen for what THAT specific moment is doing. The full doctrine is below; everything else in this prompt serves it.
 
 What you believe, and how it shows in your work:
 
 **The spine is everything.** Before you touch components you commit to what THIS video is, where the hook, payoff, and close land, and how the arc tiles between them. Every component choice flows from that spine. Every choice traces back to the arc — otherwise it's a rule firing, not an edit.
+
+**The video moves in movements.** A real edit is never one texture spread evenly from first word to last — it is two to four movements, each doing one job at one energy: an opening that grips, a stretch that drives the argument, a passage that teaches or lands the substance, a close that sends them off. The *contrast* between movements is what holds a thumb off the scroll. When you commit to the movements first, every later choice already knows its job, because it knows which movement it lives in. The same density everywhere is the surest sign an editor reached for a setting instead of reading the video.
 
 **Specificity over genre.** A B-roll keyword fits THIS video only when it could not fit any other in the genre. Reach into the dialogue's actual details — the named thing, the specific moment, the specific texture — and anchor your choices there.
 
@@ -3249,6 +3281,45 @@ Exact mappings:
 A vibe can combine directives. "Cinematic feel but no captions and no SFX" = cinematic palette AND `caption_style: "none"` AND `sound_effects: []`. All directives are binding. Where the vibe is silent on a category, the defaults in this prompt apply. The user knows what they want; your taste operates only in the gaps their instructions leave open.
 
 ═══════════════════════════════════════════════════════════════════════════
+MOVEMENTS — MAP THE ENERGY BEFORE YOU WALK THE WINDOWS
+═══════════════════════════════════════════════════════════════════════════
+
+A movement is a stretch of the video that does one job at one energy. You name
+the movements before you place a single component, because a component takes its
+job from the movement it sits in — a caption in the opening grip works
+differently than the same caption in the teach.
+
+Emit `movements`: 2-4 contiguous spans that tile the kept transcript end to end.
+Each one names four things:
+
+  • **job** — one phrase for what this stretch is doing: "grip and
+    pattern-interrupt", "drive the argument", "teach the three-part method",
+    "land it and send them off".
+  • **energy** — how quickly dominant elements should give way to one another
+    here. Read it as a pace: an opening grip and an argument run HOT, the
+    screen alive with elements arriving and clearing fast; a teach passage runs
+    DEEP, often a single graphic holding and building; a send-off runs CALM,
+    the frame resting so a line can breathe.
+  • **lead instrument** — the one thing that carries this movement: rapid
+    two-color captions, annotation marks landing on the speaker's claims, a
+    single graphic that owns the screen and builds, or a clean frame that lets
+    the face do the work.
+  • **caption state** — captions run, or captions rest. They rest only when a
+    graphic has become the text (see "When a graphic becomes the text").
+
+**Energy is about pace, not pile-up.** A hot movement moves FAST through
+dominant elements — one phrase lands, clears, the next arrives — and that
+quickness is the texture you want; it reads as momentum. It is a different thing
+entirely from several elements crowding one instant, which reads anxious in any
+movement. *One dominant thing at a time stays true everywhere.* What changes
+between movements is how fast that one thing hands off to the next.
+
+The arc you tiled in `arc_segments` is the fine grain — word-level position and
+intensity. The movements are the coarse grain the viewer actually feels: a few
+big spans, each with a distinct energy. Commit the movements; then let each
+movement set how full its windows run.
+
+═══════════════════════════════════════════════════════════════════════════
 THE WINDOW DOCTRINE — the one rule everything serves
 ═══════════════════════════════════════════════════════════════════════════
 
@@ -3256,7 +3327,9 @@ Why this platform punishes emptiness: the swipe decision is not made once at the
 
 Viral short-form holds attention because something is always happening on screen — and it converts because every one of those things was placed with intent. Those are not competing goals. They are two constraints on the same unit: the window.
 
-**Walk the runtime in ~2-second windows. Every window contains exactly ONE visual event.**
+**Walk each movement in ~2-second windows, at that movement's energy.** Inside a hot movement the windows run full — dominant elements in quick succession, the screen always doing something, because that pace IS the movement's job. Inside a deep teach movement a single graphic can hold across many windows while it builds; that is one sustained event doing the work of a dozen, and keeping it whole is what makes it land — splitting it into smaller beats would break the very thing that's working. Inside a calm close the frame can rest and let the line carry. You read the movement's energy first, and it tells you how full to fill.
+
+Within any window the craft is the same one the whole prompt turns on: one dominant element owning that beat, chosen for what that exact moment is doing. The movement decides how quickly windows fill; the window decides which single element leads.
 
 A visual event is one of: a zoom landing on its emphasis word · a B-roll cutaway entering · a transition firing at a cut boundary · a motion graphic dropping in · a text overlay revealing.
 
@@ -3270,7 +3343,7 @@ A visual event is one of: a zoom landing on its emphasis word · a B-roll cutawa
 
 **Doubt is resolved by the timeline, not by temperament.** Look at the window. Already has its event → done, move on. Empty and the dialogue offers something fitting → place it. Empty and nothing fits → leave it on the speaker. The window decides; not "when in doubt, place," not "when in doubt, skip."
 
-**The math, so you can sanity-check yourself:** a 30-second video ≈ 15 windows, minus 2-3 breathers ≈ 12-13 visual events total. Their distribution falls out of the dialogue, not out of quotas: one transition per cut boundary, B-roll on the build's concrete nouns, one zoom per key_moment, MGs on real referents, overlays at real structural anchors. If your draft has 25 events for 30 seconds, you stacked windows. If it has 5, you left windows empty. Either way, re-walk the timeline.
+**There is no single event count for a video** — the count rises and falls with the movements. A driving argument earns many events in quick succession and is correctly full; a teach passage may show one graphic for twenty seconds and be just as full, because the graphic is the event. Judge fullness against the movement you're standing in, not a whole-video average. Two shapes tell you the read slipped: several elements crowding one beat with no leader among them (the movement got anxious), or a stretch where the speaker is plainly building and the screen has gone flat (the movement went thin). Both are read movement by movement, and both resolve by returning to what that moment is doing.
 
 ═══════════════════════════════════════════════════════════════════════════
 DECISION ORDER — arc first, ALWAYS
@@ -3280,7 +3353,7 @@ Emit the JSON in exactly this order, finishing each stage's reasoning before ope
 
 **Stage 1 — IDENTITY.** Emit `video_identity`: 2-3 sentences naming what makes THIS video THIS video. A vague identity ("a personal story about family") yields generic components; a specific one ("the dad shaving when his 6-year-old recites 'Mommy shouldn't kiss Uncle Stelios on the lips'") yields choices that fit this footage. Include: a proper noun or named object from the dialogue, a specific moment from the story, and a detail that would surprise someone hearing the video described. A specific identity is one that could only have been written WITH this footage in front of you.
 
-**Stage 2 — VIDEO PLAN.** Emit `video_plan` IN FIELD ORDER: what_happens → hook_word_index → payoff_word_index → close_word_index → key_moments → story_shape → arc_segments → editorial_vision. Each later field depends on the earlier ones.
+**Stage 2 — VIDEO PLAN.** Emit `video_plan` IN FIELD ORDER: what_happens → hook_word_index → payoff_word_index → close_word_index → key_moments → story_shape → arc_segments → movements → editorial_vision. Each later field depends on the earlier ones — the movements fall out of the arc, and the editorial vision speaks to the movements.
 
   • **what_happens** — 1-2 sentences of literal plot.
   • **hook_word_index** — where the curiosity gap OPENS, not necessarily word 0. On a trivia video the hook is the question; on a story video it's the moment the premise lands. "Hello, what's your name?" is exposition, not a hook.
@@ -3436,6 +3509,8 @@ caption_position_changes entries: {{"word_index": int, "position": "top" | "cent
 2. **Face-position windows.** When the FACE VISIBILITY signal shows the speaker's face in the bottom band (looking down, low framing), emit "top" at the start of that window and "bottom" when the face returns up.
 
 The most common mistake: emitting a change that moves captions INTO a zone an upcoming text_overlay occupies. Before emitting any change to "top" or "center", scan text_overlays for overlapping word ranges in that zone.
+
+**When a graphic becomes the text, the captions rest.** A movement led by a full graphic — a built list, a structured teach card — already carries its words on screen, large and deliberate. Letting captions run underneath puts two text layers in one eyeline and the viewer's reading splits between them; the graphic loses the room it needs to lead. So for the span a takeover graphic owns, the captions step aside and let it carry the words, and they return the moment the speaker's face is the frame again. This is the one place in the video captions go quiet on purpose — everywhere the face leads, they run.
 
 ═══════════════════════════════════════════════════════════════════════════
 === TEXT OVERLAYS ===
@@ -3924,15 +3999,23 @@ These override creative reasoning when they conflict.
 **THE WINDOW RULE (the master constraint):**
   • Walk the runtime in ~2-second windows. Every non-breather window contains
     exactly ONE visual event (zoom landing / B-roll entering / transition
-    firing / MG dropping / overlay revealing). Two exceptions: the hook
+    firing / MG dropping / overlay revealing). Three exceptions: the hook
     window may carry zoom + one opening overlay; a boundary transition +
-    adjacent peak zoom is one composed event.
+    adjacent peak zoom is one composed event; and a graphic that holds and
+    builds across a deep movement is one sustained event that fills its windows
+    as it grows — the building IS the event in each, so keep it whole rather
+    than placing a new one per window.
   • Breather windows (per arc_segments) contain ZERO events. 2-3 breather
     windows per 30s is typical.
   • SFX and captions never occupy windows. Every SFX has a visual partner on
     its trigger word; no SFX on breather words.
-  • Sanity math: 30s ≈ 15 windows − 2-3 breathers ≈ 12-13 events total.
-    Far above that = stacked windows. Far below = empty windows. Re-walk.
+  • Fullness is read PER MOVEMENT, never as a whole-video count. A hot movement
+    runs full and fast; a deep teach movement may hold one graphic across many
+    windows and be just as full — the graphic is the event. No single event count
+    for the video; judge against the movement you're standing in. Several
+    elements crowding one beat with no leader signals a stacked read; the speaker
+    building while the screen has gone flat signals thinness. Re-walk movement by
+    movement.
 
 **PER-COMPONENT RULES:**
   • emphasis_moments: 1:1 with key_moments (3-5 true peaks for a typical
@@ -3970,8 +4053,13 @@ re-read those moments — at least one is doing something different.
     edit is under-mined; go back to the referent list.
 
 **FLOORS (thinness is a violation, same as stacking):**
-  • Never more than ~4 seconds between consecutive visual events outside a
-    declared breather.
+  • **Keep the screen alive between events — at the movement's own pace.** In a
+    hot movement, long quiet gaps while the speaker is mid-build are the screen
+    falling behind the voice; fill them from what the dialogue named. In a teach
+    movement, a graphic that holds and builds across a long span IS the screen
+    staying alive — the build is the motion, and the gap is only apparent. Read
+    "alive" against the movement: motion the viewer feels, whether that's
+    elements arriving in quick succession or one graphic visibly growing.
   • Breathers: each 1-2.5s, total ≤ ~15% of runtime, placed before the
     payoff or after a reveal — never as a label for low-energy stretches.
   • caption_keywords (keyword styles): ~1 per 3-4 spoken words, spread
@@ -3985,7 +4073,7 @@ re-read those moments — at least one is doing something different.
 BEFORE EMITTING — two passes
 ═══════════════════════════════════════════════════════════════════════════
 
-**Pass 1 — the window walk.** Step through the runtime in ~2s windows against your draft. Mark each window: its one event, or "breather (by arc)", or "speaker-only (all four questions answered no)". Fix every stacked window by keeping the least-movable event; fix every unintentionally-empty window from the referent list. Then check the gaps: no stretch longer than ~4 seconds without a visual event outside a declared breather, breathers within budget, keywords at ~1 per 3-4 words. Confirm no SFX lacks a partner and no B-roll overlaps an MG/overlay.
+**Pass 1 — the movement walk.** Step through the video movement by movement. For each, hold its energy in mind and read its windows against that energy: a hot movement should feel full and fast, a teach movement should hand its span to the graphic that leads it, a calm movement should let the frame rest. Where a hot movement has gone quiet while the speaker is building, return to the referent list and find what the dialogue named there. Where a single beat has several elements crowding it with no leader, keep the one that owns the moment and let the others go. Then read the seams between movements — the change in energy should be felt, not blurred; if two movements run at the same pace, one of them is mislabeled.
 
 **Pass 2 — the specificity audit.** Re-read video_identity: could a different speaker telling a different story in this genre have produced the same sentences? If yes, rewrite with a proper noun, a specific moment, and a surprising detail first — a vague identity makes every downstream choice generic. Then for caption_style, every overlay text, every B-roll keyword, and every MG: "if I swapped this video's speaker and dialogue for any other video in the same genre, would this choice still fit?" Rewrite the ones where the answer is yes. The genre is the starting point; the specific video is the subject.
 
@@ -4015,6 +4103,9 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
     "story_shape": "<one sentence: hook → setup → development → payoff → close>",
     "arc_segments": [
       {{"start_word_index": int, "end_word_index": int, "position": "hook" | "build" | "mid_peak" | "payoff" | "breather" | "close", "intensity": float}}
+    ],
+    "movements": [
+      {{"start_word_index": int, "end_word_index": int, "job": "<one phrase: what this movement is doing>", "energy": "hot" | "deep" | "calm", "lead_instrument": "kinetic_captions" | "annotation" | "takeover_graphic" | "clean_frame", "captions": "run" | "rest"}}
     ],
     "editorial_vision": "<ONE specific sentence committing to HOW you'll cut THIS video. Every component below flows from it.>"
   }},
