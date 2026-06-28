@@ -18587,6 +18587,30 @@ def handler(job):
         # Face detection runs directly on raw source (no normalize dependency)
         future_faces = mega_pool.submit(_do_face_detect_overlapped)
 
+        # ── EditPolicy resolve (Phase 2 · Step 1: flag-gated, NO consumer yet) ──
+        # Flag is per-job (input_data["edit_policy_enabled"]) OR global env
+        # (EDIT_POLICY_ENABLED); BOTH default OFF. Flag off ⇒ resolve_edit_policy
+        # is never called ⇒ default-mode output stays byte-identical. The resolve
+        # runs in this pool, parallel with transcription/Gemini; Steps 2-4 will
+        # await `future_policy` before any consumer (compute_mechanical_cuts /
+        # the enforcement pass / vidstab). Import is lazy + guarded so a missing
+        # module or any error disables the feature for this job, never the render.
+        _edit_policy_on = bool(input_data.get("edit_policy_enabled")) or (
+            os.environ.get("EDIT_POLICY_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
+        )
+        future_policy = None
+        if _edit_policy_on:
+            try:
+                import edit_policy as _edit_policy_mod
+                future_policy = mega_pool.submit(_edit_policy_mod.resolve_edit_policy, vibe)
+            except Exception as _ep_imp_err:
+                print(
+                    f"[edit-policy] import/submit failed "
+                    f"({type(_ep_imp_err).__name__}: {str(_ep_imp_err)[:120]}) — disabled this job",
+                    flush=True,
+                )
+                future_policy = None
+
         # Collect results — get edit_plan FIRST so we can start B-roll fetch early
         _mega_t0 = time.time()
         if future_edit is not None:
@@ -18598,6 +18622,29 @@ def handler(job):
             edit_plan = _copy_mod.deepcopy(provided_plan)
             print("[pipeline] render_only mode — using provided edit_plan (skipped Gemini generate)", flush=True)
         print(f"[TIMING] edit_plan ready in {time.time() - _mega_t0:.1f}s (critical path)", flush=True)
+
+        # ── EditPolicy resolve · Step 1: await + log ONLY (no consumer) ──
+        # resolve_edit_policy catches every error internally → default, so
+        # .result() never raises and never blocks the render. `resolved_policy`
+        # is threaded here for the Step 2-4 consumers to read; nothing reads it
+        # yet, so this is observable-but-inert: flag-on changes logs, not output.
+        resolved_policy = None
+        if future_policy is not None:
+            try:
+                resolved_policy = future_policy.result()
+                print(
+                    f"[edit-policy] STEP1 resolved (no consumer): mode={resolved_policy.mode} "
+                    f"off={resolved_policy.off_features()} intensity={resolved_policy.intensity} "
+                    f"lang={resolved_policy.language_hint}",
+                    flush=True,
+                )
+            except Exception as _ep_res_err:
+                print(
+                    f"[edit-policy] STEP1 future error "
+                    f"({type(_ep_res_err).__name__}: {str(_ep_res_err)[:120]}) — default, render unaffected",
+                    flush=True,
+                )
+                resolved_policy = None
 
         # ── Layer 3 safety net for guided_redraft mode ───────────────────
         # The freshly-generated edit_plan came from generate_edit_gemini
