@@ -17095,6 +17095,28 @@ def handler(job):
                     f"base pipeline as superset, no premium stages yet (Phase 1)",
                     flush=True,
                 )
+            # ── Model telemetry (Flare=base, Lumen=premium) ──
+            # is_premium is derived ONLY from the server-side tier lookup
+            # (resolved_tier, handler.py:17053) — never from anything the client
+            # sends — so route_premium (is_premium AND the request) is the
+            # authority. A client that requested Lumen but isn't premium tier is
+            # a DOWNGRADE: the server-side enforcement working. Logged on every
+            # job (a print, not output — the no-consumer inertness holds).
+            _client_lumen = _premium_mod.client_requested_premium(input_data)
+            if _client_lumen and not is_premium:
+                print(
+                    f"[model] requested=lumen ran=flare job={job_id} "
+                    f"tier={resolved_tier or '(none)'} — non-premium account requested "
+                    f"Lumen, DOWNGRADED to Flare (server-side tier enforcement)",
+                    flush=True,
+                )
+            else:
+                print(
+                    f"[model] ran={_premium_mod.model_label(route_premium)} job={job_id} "
+                    f"tier={resolved_tier or '(none)'} premium={is_premium} "
+                    f"client_lumen={_client_lumen}",
+                    flush=True,
+                )
         except Exception as _pm_err:
             print(
                 f"[premium] scaffold unavailable ({type(_pm_err).__name__}: "

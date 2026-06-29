@@ -36,18 +36,45 @@ INSERTION_POINTS = {
 }
 
 
-def premium_pipeline_enabled(input_data) -> bool:
-    """Master routing flag — per-job override OR global env, both default OFF.
-    Mirrors the EditPolicy flag. A premium-tier user changes nothing until this
-    is on (and even then Phase 1's scaffold is empty)."""
+MODEL_FLARE = "flare"   # the base/free model — today's pipeline
+MODEL_LUMEN = "lumen"   # the premium model — base + premium stages (filled in Phases E/F)
+
+
+def client_requested_premium(input_data) -> bool:
+    """Did the CLIENT pick the premium model (Lumen)? Reads ONLY the request
+    payload — the per-job `premium_pipeline_enabled` boolean OR an explicit
+    `model: "lumen"`. It does NOT consult the env override or the user's tier.
+
+    This is a REQUEST, never an AUTHORIZATION: the caller ANDs the routing with
+    the server-resolved tier (is_premium), so a forged flag from a free account
+    can never grant premium. Used here for telemetry — upgrade demand and
+    client-gate-leak / downgrade detection."""
     try:
-        if bool((input_data or {}).get("premium_pipeline_enabled")):
+        d = input_data or {}
+        if bool(d.get("premium_pipeline_enabled")):
+            return True
+        if str(d.get("model") or "").strip().lower() == MODEL_LUMEN:
             return True
     except Exception:
         pass
+    return False
+
+
+def premium_pipeline_enabled(input_data) -> bool:
+    """Master routing REQUEST — the client's Lumen pick (per-job boolean OR
+    model="lumen") OR the global env override (PREMIUM_PIPELINE_ENABLED), both
+    default OFF. NOT an authorization: the caller ANDs this with the
+    server-resolved tier (is_premium), so the flag alone cannot grant premium."""
+    if client_requested_premium(input_data):
+        return True
     return os.environ.get("PREMIUM_PIPELINE_ENABLED", "").strip().lower() in (
         "1", "true", "yes", "on",
     )
+
+
+def model_label(route_premium: bool) -> str:
+    """The model a job actually RAN as, given the resolved routing."""
+    return MODEL_LUMEN if route_premium else MODEL_FLARE
 
 
 class CostMeter:
