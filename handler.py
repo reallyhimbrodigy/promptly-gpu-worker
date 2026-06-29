@@ -1184,8 +1184,12 @@ def count_user_active_jobs(user_id, current_job_id):
         return 0
 
 
-def check_concurrency_gate(user_id, job_id):
+def check_concurrency_gate(user_id, job_id, tier=None):
     """Apply the free-tier-single-job concurrency rule.
+
+    `tier` may be passed in by a caller that already resolved it (the handler
+    does, to reuse it for is_premium without a second Supabase round-trip);
+    when None it is fetched here exactly as before — fully back-compatible.
 
     Returns:
         None if the job should proceed.
@@ -1197,7 +1201,8 @@ def check_concurrency_gate(user_id, job_id):
     is reserved for the explicit "you're free tier with a job already
     running" path.
     """
-    tier = fetch_user_tier(user_id)
+    if tier is None:
+        tier = fetch_user_tier(user_id)
     premium = tier in _premium_values() if tier else False
     if premium:
         return None  # premium has no worker-side concurrency cap
@@ -17024,6 +17029,9 @@ def _quick_face_check(source_path, max_samples=8):
 def handler(job):
     input_data = job["input"]
     work_dir = None
+    premium_ctx = None       # Phase 1 premium scaffold (assigned at the tier fork; torn down in finally)
+    _cost_meter = None
+    route_premium = False
     try:
         app_url = os.environ.get("APP_URL", "").rstrip("/")
 
@@ -17042,7 +17050,8 @@ def handler(job):
         # concurrent job gets rejected here before the render kicks off.
         # Premium users have no worker-side concurrency cap.
         # FAIL OPEN on Supabase trouble — see check_concurrency_gate doc.
-        _gate = check_concurrency_gate(input_data["user_id"], job_id)
+        resolved_tier = fetch_user_tier(input_data["user_id"])
+        _gate = check_concurrency_gate(input_data["user_id"], job_id, tier=resolved_tier)
         if _gate is not None:
             print(
                 f"[tier-gate] REJECTING job_id={job_id} user={input_data['user_id'][:8]}… "
@@ -17062,6 +17071,39 @@ def handler(job):
         vibe      = input_data["vibe"]
         upload_url = input_data["upload_url"]
         user_id   = input_data["user_id"]
+
+        # ── Premium tier fork (Phase 1: structural base/premium split, scaffold EMPTY) ──
+        # is_premium reuses the tier already resolved for the concurrency gate
+        # (no second Supabase call). route_premium ALSO requires the master flag
+        # (per-job premium_pipeline_enabled OR env PREMIUM_PIPELINE_ENABLED, both
+        # default OFF) — so making a user premium changes NOTHING until the flag
+        # is on, and even then Phase 1 attaches no premium stage, so the premium
+        # path is byte-identical to base. Later phases attach at premium.INSERTION_POINTS.
+        # Lazy + guarded import: a missing/broken scaffold falls back to the base path.
+        # The pool is NOT created here (lazy, Phase E); base/free jobs spawn no threads.
+        is_premium = bool(resolved_tier) and (resolved_tier in _premium_values())
+        try:
+            import premium as _premium_mod
+            route_premium = is_premium and _premium_mod.premium_pipeline_enabled(input_data)
+            _cost_meter = _premium_mod.CostMeter(job_id)
+            premium_ctx = _premium_mod.PremiumContext(
+                is_premium=is_premium, route_premium=route_premium, cost_meter=_cost_meter,
+            )
+            if route_premium:
+                print(
+                    f"[premium] scaffold active job={job_id} tier={resolved_tier} — "
+                    f"base pipeline as superset, no premium stages yet (Phase 1)",
+                    flush=True,
+                )
+        except Exception as _pm_err:
+            print(
+                f"[premium] scaffold unavailable ({type(_pm_err).__name__}: "
+                f"{str(_pm_err)[:120]}) — base path",
+                flush=True,
+            )
+            premium_ctx = None
+            _cost_meter = None
+            route_premium = False
 
         # ── Re-edit mode resolution ──────────────────────────────────────
         # mode: "full" (default — fresh plan), "render_only" (render supplied plan
@@ -19457,6 +19499,13 @@ def handler(job):
         }
 
     finally:
+        # Premium scaffold teardown (Phase 1): log the cost meter only on the
+        # premium-routed path so base/free jobs emit ZERO new lines, and shut
+        # down the asset pool if a (future) stage created it (no-op in Phase 1).
+        if _cost_meter is not None and route_premium:
+            _cost_meter.log()
+        if premium_ctx is not None:
+            premium_ctx.shutdown()
         if work_dir:
             shutil.rmtree(work_dir, ignore_errors=True)
 

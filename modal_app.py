@@ -426,6 +426,10 @@ image = (
     # the per-job/env flag is on; without this entry the flag-on path would hit
     # ModuleNotFoundError (caught + disabled per-job, but the feature wouldn't run).
     .add_local_file("edit_policy.py", "/edit_policy.py")
+    # Premium-tier scaffold (Phase 1). handler.py lazy-imports `premium` at the
+    # tier fork; mounted so the flag-on premium path can import it (guarded —
+    # absence falls back to the base path, never a crash).
+    .add_local_file("premium.py", "/premium.py")
     .add_local_file("ffmpeg_base.py", "/ffmpeg_base.py")
     .add_local_file("rife_normalize.py", "/rife_normalize.py")
     .add_local_file("render_schemas.py", "/render_schemas.py")
