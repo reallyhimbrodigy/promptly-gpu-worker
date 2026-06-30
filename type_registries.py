@@ -31,6 +31,8 @@ VALID_CAPTION_STYLES = frozenset({
     "Prime", "TypewriterReveal", "CinematicLetterpress", "Cove",
     "EditorialPop", "Illuminate", "Lumen",
     "Passage", "Pulse", "Quintessence", "Serif",
+    # Batch 2 — 4 net-new styles (both tiers).
+    "TwoTone", "NeonStripe", "Spectrum", "CleanCut",
     # Renderer skips caption rendering entirely when style == "none"
     # (user explicit opt-out in vibe or re-edit). Kept here so the
     # Pydantic Literal accepts the sentinel; the TS-side CaptionStyle
@@ -105,6 +107,14 @@ VALID_MG_TYPES = frozenset({
     "Notification", "ProgressBar", "RecordingFrame",
     "StatCard", "StickyNotes",
     "TweetBubble", "InstagramComment", "IMessageBubble", "TikTokComment",
+    # Batch 2 — 17 net-new motion graphics (both tiers). MGs carry a generic
+    # `props` dict, so adding the type here is the whole schema seam: the
+    # Pydantic + render Literals derive from this frozenset; render_schemas /
+    # PostCutPlan / EditPlan accept the new types automatically.
+    "NumberTicker", "Timeline", "Reticle", "IconLabel", "RankedList",
+    "PullQuote", "PillCluster", "Stamp", "BarRace", "SectionDivider",
+    "EditorialQuote", "StepDivider", "DropBanner", "DropCard", "PillMarquee",
+    "TimelineRoadmap", "MouseDrag",
 })
 
 # ── Generated scenes (Phase E · composed premium graphics) ──────────────────

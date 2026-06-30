@@ -233,7 +233,11 @@ export type CaptionStyle =
   | "Passage"
   | "Pulse"
   | "Quintessence"
-  | "Serif";
+  | "Serif"
+  | "TwoTone"
+  | "NeonStripe"
+  | "Spectrum"
+  | "CleanCut";
 
 export interface CaptionPositionSegment {
   fromFrame: number;
@@ -262,7 +266,24 @@ export type MotionGraphicType =
   | "TweetBubble"
   | "InstagramComment"
   | "IMessageBubble"
-  | "TikTokComment";
+  | "TikTokComment"
+  | "NumberTicker"
+  | "Timeline"
+  | "Reticle"
+  | "IconLabel"
+  | "RankedList"
+  | "PullQuote"
+  | "PillCluster"
+  | "Stamp"
+  | "BarRace"
+  | "SectionDivider"
+  | "EditorialQuote"
+  | "StepDivider"
+  | "DropBanner"
+  | "DropCard"
+  | "PillMarquee"
+  | "TimelineRoadmap"
+  | "MouseDrag";
 
 export interface MotionGraphicSpec {
   type: MotionGraphicType;
