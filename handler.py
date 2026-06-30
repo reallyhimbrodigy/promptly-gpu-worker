@@ -99,6 +99,9 @@ from render_schemas import (
 from type_registries import (
     TIGHT_CUT_OVERLAY_MECHANISM_PHRASES,
     VALID_CAPTION_STYLES,
+    VALID_GENSCENE_BACKGROUNDS,
+    VALID_GENSCENE_EASINGS,
+    VALID_GENSCENE_ENTRANCES,
     VALID_MG_TYPES,
     VALID_TIGHT_CUT_OVERLAYS,
     VALID_TRANSITION_TYPES,
@@ -192,6 +195,9 @@ ZOOM_PEAK_REACH_MS = {
     "DepthPull":      770,   # 35% × 2200ms (ramp-in end)
 }
 _MG_TYPES = Literal[tuple(sorted(VALID_MG_TYPES))]
+_GENSCENE_BG_KINDS = Literal[tuple(sorted(VALID_GENSCENE_BACKGROUNDS))]
+_GENSCENE_ENTRANCES = Literal[tuple(sorted(VALID_GENSCENE_ENTRANCES))]
+_GENSCENE_EASINGS = Literal[tuple(sorted(VALID_GENSCENE_EASINGS))]
 _SEMANTIC_ANCHOR = Literal[
     "upper_third_safe", "center", "lower_third_safe",
 ]
@@ -307,6 +313,63 @@ class _BrollClip(BaseModel):
     start_word_index: int
     end_word_index: int
     reason: str
+
+# ── GeneratedScene (Phase E · composed premium graphic) ──────────────────────
+# A GeneratedScene is NOT a flat image dropped in like b-roll — it's a SCENE
+# SPEC the renderer composites: a generated subject over a branded background
+# world, with kinetic type on top and smooth motion. Background / subject /
+# text / motion are SEPARATE layers on one element so Remotion can animate the
+# object over the gradient with text above it (the way the reference graphics
+# are built), instead of baking one still. SUB-STEP 2: defined but INERT — the
+# model is NOT told this type exists, so no recipe emits one. Generation wiring
+# is Sub-step 3; the QA judge is Sub-step 4; model-driven choice is Sub-step 5.
+class _GenSceneBackground(BaseModel):
+    # gradient | solid | generated. gradient/solid paint from the palette;
+    # "generated" additionally renders a background from generation_prompt.
+    kind: _GENSCENE_BG_KINDS
+    # Inherits the video's COMMITTED palette (unified-visual-identity) — the
+    # scene is born on-palette, not styled in isolation.
+    palette_ref: Optional[str] = None
+    # Consulted only when kind == "generated".
+    generation_prompt: Optional[str] = None
+    # Explicit color override (rare; normally derived from palette_ref).
+    colors: Optional[List[str]] = None
+
+class _GenSceneSubject(BaseModel):
+    # The bespoke object/subject. The still is generated (Sub-step 3) from this
+    # prompt, conditioned on ref_image_keys (brand/user references the ask-back
+    # loop collects).
+    generation_prompt: str
+    ref_image_keys: List[str] = Field(default_factory=list)
+    anchor: _SEMANTIC_ANCHOR
+    scale: Optional[float] = None
+
+class _GenSceneTextLayer(BaseModel):
+    # CONTRACT: `content` may ONLY come from a KNOWN INPUT — the transcript or a
+    # user-provided string — NEVER model-invented text. Model-invented words put
+    # wrong numbers / garbled text on screen. Enforced at emission in Sub-step
+    # 5; the contract is documented here at the schema seam.
+    content: str
+    # Inherits the video's committed type voice (unified visual identity).
+    style_ref: Optional[str] = None
+    anchor: _SEMANTIC_ANCHOR
+
+class _GenSceneMotion(BaseModel):
+    # Smoothness levers: spring easing + motion blur at 60fps is the "looks like
+    # 240fps" feel (see @remotion/motion-blur), NOT a higher frame rate.
+    entrance: _GENSCENE_ENTRANCES
+    easing: _GENSCENE_EASINGS = "spring"
+    motion_blur: bool = True
+
+class _GeneratedScene(BaseModel):
+    background: _GenSceneBackground
+    subject: _GenSceneSubject
+    text_layers: List[_GenSceneTextLayer] = Field(default_factory=list)
+    motion: _GenSceneMotion
+    start_word_index: int
+    end_word_index: int
+    anchor: _SEMANTIC_ANCHOR
+    duration_seconds: Optional[float] = None  # override; null = use word span
 
 class _Transition(BaseModel):
     after_word_index: int
@@ -508,6 +571,10 @@ class PostCutPlan(BaseModel):
     motion_graphics: List[_MotionGraphic]
     text_overlays: List[_TextOverlay]
     broll_clips: List[_BrollClip]
+    # GeneratedScene composed graphics (Phase E). Default-[] / additive: inert
+    # until Sub-step 3 (the model isn't told the type exists → Vertex omits →
+    # []). Vertex acceptance of this nested-optional shape was proven first.
+    generated_scenes: List[_GeneratedScene] = Field(default_factory=list)
     caption_position_changes: List[_CaptionPositionChange]
     thumbnail_word_index: int
     audio_denoise: bool
@@ -543,6 +610,10 @@ class EditPlan(BaseModel):
     motion_graphics: List[_MotionGraphic]
     text_overlays: List[_TextOverlay]
     broll_clips: List[_BrollClip]
+    # GeneratedScene composed graphics (Phase E). Default-[] / additive: inert
+    # until Sub-step 3 (the model isn't told the type exists → Vertex omits →
+    # []). Vertex acceptance of this nested-optional shape was proven first.
+    generated_scenes: List[_GeneratedScene] = Field(default_factory=list)
     caption_position_changes: List[_CaptionPositionChange]
     thumbnail_word_index: int
     audio_denoise: bool
@@ -5626,6 +5697,22 @@ def _translate_post_cut_anchors_to_src(post_cut_plan, new_to_src):
         bc_out.append({**bc, "start_word_index": s, "end_word_index": e})
     out["broll_clips"] = bc_out
 
+    # generated_scenes — start_word_index, end_word_index (Phase E). Empty until
+    # Sub-step 3 (inert), so this is a no-op today; wired now so the translate
+    # seam is complete for when scenes are actually emitted.
+    gs_in = out.get("generated_scenes") or []
+    gs_out = []
+    for gs in gs_in:
+        if not isinstance(gs, dict):
+            continue
+        s = _xlate(gs.get("start_word_index"))
+        e = _xlate(gs.get("end_word_index"))
+        if s is None or e is None:
+            print(f"[two-pass] Dropping generated_scene: index out of kept-range", flush=True)
+            continue
+        gs_out.append({**gs, "start_word_index": s, "end_word_index": e})
+    out["generated_scenes"] = gs_out
+
     # video_plan — hook/payoff/close word_index + each key_moment.word_index.
     # The plan is for Gemini's reasoning scaffold, not consumed directly by
     # the renderer — but translating to source-space makes the plan readable
@@ -6974,7 +7061,8 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
         f"sound_effects={len(edit_plan.get('sound_effects') or [])}, "
         f"transitions={len(edit_plan.get('transitions') or [])}, "
         f"tight_cut_overlays={len(edit_plan.get('tight_cut_overlays') or [])}, "
-        f"broll_clips={len(edit_plan.get('broll_clips') or [])}",
+        f"broll_clips={len(edit_plan.get('broll_clips') or [])}, "
+        f"generated_scenes={len(edit_plan.get('generated_scenes') or [])}",
         flush=True,
     )
 
@@ -15220,6 +15308,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         "clips": clips_out,
         "transitions": transitions_out,
         "broll": broll_out,
+        # Generated scenes (Phase E). [] until Sub-step 3 wires the recipe→render
+        # converter (word-index→frame projection + generated-still staging);
+        # generated_scenes is always [] today (inert), so [] is the correct
+        # mapping and keeps the overlay render byte-identical.
+        "generatedScenes": [],
         "caption": {
             "style": _caption_style,
             "pages": caption_pages,

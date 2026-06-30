@@ -26,6 +26,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from type_registries import (
     VALID_CAPTION_STYLES,
+    VALID_GENSCENE_BACKGROUNDS,
+    VALID_GENSCENE_EASINGS,
+    VALID_GENSCENE_ENTRANCES,
     VALID_MG_TYPES,
     VALID_TIGHT_CUT_OVERLAYS,
     VALID_TRANSITION_TYPES,
@@ -59,6 +62,11 @@ TightCutOverlayType = Literal[tuple(sorted(VALID_TIGHT_CUT_OVERLAYS))]
 CaptionStyle = Literal[tuple(sorted(VALID_CAPTION_STYLES - {"none"}))]
 
 MotionGraphicType = Literal[tuple(sorted(VALID_MG_TYPES))]
+
+GenSceneBackgroundKind = Literal[tuple(sorted(VALID_GENSCENE_BACKGROUNDS))]
+GenSceneEntrance = Literal[tuple(sorted(VALID_GENSCENE_ENTRANCES))]
+GenSceneEasing = Literal[tuple(sorted(VALID_GENSCENE_EASINGS))]
+GenSceneAnchor = Literal["upper_third_safe", "center", "lower_third_safe"]
 
 CaptionPosition = Literal["top", "center", "bottom"]
 
@@ -176,6 +184,49 @@ class BrollSpec(_RemotionModel):
     playbackRate: float
 
 
+# ── Generated scenes (Phase E · composed premium graphics) ──────────────────
+# A GeneratedScene is composited from separate layers (background world →
+# subject still → text → motion), NOT a flat image. Mirrors handler.py's
+# _GeneratedScene. extra="forbid" → every field must be registered here.
+class GenSceneBackgroundSpec(_RemotionModel):
+    kind: GenSceneBackgroundKind
+    paletteRef: Optional[str] = None
+    generationPrompt: Optional[str] = None
+    colors: Optional[List[str]] = None
+
+
+class GenSceneSubjectSpec(_RemotionModel):
+    # imageUrl is the GENERATED still (filled in Sub-step 3 by _generate_image +
+    # staging). None until then; the layer draws a placeholder box when absent.
+    imageUrl: Optional[str] = None
+    generationPrompt: str
+    anchor: GenSceneAnchor
+    scale: Optional[float] = None
+
+
+class GenSceneTextLayerSpec(_RemotionModel):
+    # content is FROM-KNOWN-INPUTS-ONLY (transcript / user string) — never
+    # model-invented. Enforced at emission in Sub-step 5.
+    content: str
+    styleRef: Optional[str] = None
+    anchor: GenSceneAnchor
+
+
+class GenSceneMotionSpec(_RemotionModel):
+    entrance: GenSceneEntrance
+    easing: GenSceneEasing = "spring"
+    motionBlur: bool = True
+
+
+class GeneratedSceneSpec(_RemotionModel):
+    fromFrame: int
+    durationInFrames: int
+    background: GenSceneBackgroundSpec
+    subject: GenSceneSubjectSpec
+    textLayers: List[GenSceneTextLayerSpec] = Field(default_factory=list)
+    motion: GenSceneMotionSpec
+
+
 # ── Captions ───────────────────────────────────────────────────────────────
 class TikTokToken(_RemotionModel):
     text: str
@@ -254,6 +305,10 @@ class PromptlyRenderInput(_RemotionModel):
     clips: List[ClipSpec]
     transitions: List[TransitionSpec]
     broll: List[BrollSpec]
+    # Generated composed scenes (Phase E). Default-[] / additive — an empty
+    # array is no behavior change vs the pre-GeneratedScene pipeline (mirrors
+    # tightCutOverlays). Inert until Sub-step 3 fills it.
+    generatedScenes: List[GeneratedSceneSpec] = Field(default_factory=list)
     caption: CaptionSpec
     textOverlays: List[TextOverlaySpec]
     motionGraphics: List[MotionGraphicSpec]
