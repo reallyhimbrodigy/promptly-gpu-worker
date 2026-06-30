@@ -2782,6 +2782,35 @@ def _recipe_omittable_field_contract():
     )
 
 
+@check("generated-scene projection uses KEPT-space word index → output frame")
+def _generated_scene_projection_kept_space():
+    # The model emits KEPT-space scene indices; _translate_post_cut_anchors_to_src
+    # remaps start_word_index → src for parity but PRESERVES _start_word_kept.
+    # The render's _pw_by_idx is KEPT-keyed, so _project_scene_to_frames must
+    # project from the KEPT indices. A scene anchored to kept words 5..7 must land
+    # at word 5's output time — NOT be misprojected via the src index (which would
+    # put the graphic on the wrong line). This is the deliberate guard for that
+    # bug-class (Phase E Sub-step 5).
+    import handler as H
+    _pw = {5: {"start": 2.0, "end": 2.5}, 7: {"start": 3.0, "end": 3.4}}
+    # src indices (99/123) are DELIBERATELY wrong — present so a regression that
+    # reads start_word_index instead of _start_word_kept fails this check.
+    _scene = {"_start_word_kept": 5, "_end_word_kept": 7,
+              "start_word_index": 99, "end_word_index": 123}
+    _proj = H._project_scene_to_frames(_scene, _pw, 60.0)
+    assert _proj is not None, "projection returned None for a valid kept-space scene"
+    _from, _dur = _proj
+    assert _from == 120, (
+        f"fromFrame {_from} != 120 (kept word 5 @2.0s × 60fps) — projection read "
+        f"the WRONG index space (src instead of kept)"
+    )
+    assert _dur == 84, f"durationInFrames {_dur} != 84 ((3.4-2.0)s × 60fps)"
+    # A scene whose only indices are src (absent from the kept map) must fall back
+    # to duration_seconds, never silently mis-resolve to a wrong frame.
+    _bad = {"start_word_index": 99, "end_word_index": 123, "duration_seconds": 2.0}
+    assert H._project_scene_to_frames(_bad, _pw, 60.0) == (0, 120), "duration fallback wrong"
+
+
 @check("handler mode validation accepts guided_redraft")
 def _handler_mode_validation_guided_redraft():
     # Source-string assertion on handler.handler — the mode-resolution

@@ -3047,6 +3047,7 @@ def _build_post_cuts_prompt(
     shot_scale=None, user_style_profile=None,
     face_zone=None,
     prior_plan=None, prior_plan_change_request=None,
+    premium=False,
 ):
     """Gemini prompt for the SECOND call — visual placement on a kept-only transcript.
 
@@ -4395,6 +4396,71 @@ Every anchor field references the kept-only index space [0..M-1] shown in the tr
 
     user_content = "\n\n".join(user_content_parts)
 
+    # ── PREMIUM art-directive: generated scenes (Phase E · Sub-step 5) ────────
+    # Appended ONLY on the Lumen/premium path → free/Flare never sees it → the
+    # model never emits a GeneratedScene on the base path → byte-identical. This
+    # is a NEW INSTRUMENT in the SAME art-directed system, not a new doctrine: it
+    # answers to the same taste tests as every layer above — extend-not-restate
+    # and source-is-its-own-evidence (the B-roll principles), the inevitable-
+    # choice / component-quality bias, and the ONE committed palette from
+    # editorial_vision. Threaded, not restated; used RARELY.
+    if premium:
+        system_instruction += """
+
+GENERATED SCENES (premium) — a bespoke graphic, COMPOSED not pulled.
+You may emit `generated_scenes`: full-frame composed takeover beats where a
+custom-made graphic serves the moment better than stock B-roll or a templated
+motion-graphic. A generated scene is a background WORLD (a gradient in the
+video's committed palette) with a bespoke rendered SUBJECT in it, kinetic type,
+and smooth motion — a padlock that builds for "restrictions," a folder that
+opens for "secrets," the product the speaker is holding rendered clean. It is
+the inevitable-choice version of a cutaway.
+
+WHEN it earns its place (ALL of these, or don't emit it):
+  • The beat names a CONCEPT or OBJECT a custom render would nail — a metaphor
+    the dialogue hands you (a lock, a key, a folder, a graph), a product/app the
+    speaker references, a number the dialogue states.
+  • A bespoke graphic EXTENDS the moment — it does not restate the words or echo
+    what's already on camera. Source is its own evidence; the scene adds a beat
+    the footage can't show, it doesn't caption the footage.
+  • Stock B-roll or a templated MG would be the WEAKER choice. If a Pexels clip
+    or a StatCard already nails it, use that. A generated scene is only for when
+    a made-for-this graphic is the inevitable choice.
+
+RARITY — generated scenes are high-impact and expensive to the eye. ONE per
+MAJOR concept beat, never stacked, never one-per-line. A 30s clip earns at most
+1–2; most beats are still captions + the occasional stock cutaway. Like the
+density doctrine's loudest instrument: it lands on the beat that most earns it,
+then yields. More than one every ~15s means you're decorating, not directing.
+
+BORN ON-PALETTE — the scene inherits the ONE committed color world from your
+editorial_vision. Set `background.palette_ref` to that world and
+`text_layers[].style_ref` to the video's type voice; the subject is rendered to
+SIT in that palette, not styled in isolation. A generated scene that fights the
+video's color identity is a worse cut than no scene at all.
+
+FILL THE FIELDS:
+  • background: { kind: "gradient" (a palette world the subject floats over) |
+    "generated" (the subject render IS the full frame, its own world) | "solid";
+    palette_ref: the editorial_vision color world }.
+  • subject: { generation_prompt: WHAT to render, in a clean bespoke 3D-render
+    style; ref_image_keys: [] (the style anchor + brand refs attach downstream);
+    anchor; scale }.
+  • text_layers: ONLY when text must live INSIDE the graphic. `content` is FROM
+    KNOWN INPUTS ONLY — a phrase from the transcript or a user-provided string.
+    NEVER invent on-screen text: no made-up numbers, stats, product names, or
+    labels. A WRONG NUMBER on a beautiful graphic is the worst failure in the
+    whole video. When in doubt, put the words in a Remotion type layer (a
+    text_overlay) OVER the scene, not baked into the image — most words should
+    be type layers, not rendered text.
+  • motion: { entrance: slide|scale|float|fade|rise; easing: "spring";
+    motion_blur: true } — buttery, not static.
+
+word indices: anchor `start_word_index`/`end_word_index` to the kept words the
+scene plays over, exactly like a B-roll cutaway. The scene HOLDS the beat the
+way a takeover graphic does — captions step aside for its span (the rule you
+already follow) and return when the face leads again."""
+
     return system_instruction, user_content
 
 
@@ -5697,20 +5763,26 @@ def _translate_post_cut_anchors_to_src(post_cut_plan, new_to_src):
         bc_out.append({**bc, "start_word_index": s, "end_word_index": e})
     out["broll_clips"] = bc_out
 
-    # generated_scenes — start_word_index, end_word_index (Phase E). Empty until
-    # Sub-step 3 (inert), so this is a no-op today; wired now so the translate
-    # seam is complete for when scenes are actually emitted.
+    # generated_scenes — start_word_index, end_word_index (Phase E). The model
+    # emits KEPT-space indices (this call sees the kept-only transcript). We
+    # remap them to src for parity with the other lists, BUT preserve the
+    # original kept indices as _start_word_kept/_end_word_kept — the render
+    # projects scene timing via _pw_by_idx, which is KEPT-keyed (exactly like
+    # B-roll's _start_word_kept@~8168). Using src indices there would land the
+    # scene on the wrong line. See _project_scene_to_frames + its deploy test.
     gs_in = out.get("generated_scenes") or []
     gs_out = []
     for gs in gs_in:
         if not isinstance(gs, dict):
             continue
-        s = _xlate(gs.get("start_word_index"))
-        e = _xlate(gs.get("end_word_index"))
+        _sk, _ek = gs.get("start_word_index"), gs.get("end_word_index")
+        s = _xlate(_sk)
+        e = _xlate(_ek)
         if s is None or e is None:
             print(f"[two-pass] Dropping generated_scene: index out of kept-range", flush=True)
             continue
-        gs_out.append({**gs, "start_word_index": s, "end_word_index": e})
+        gs_out.append({**gs, "start_word_index": s, "end_word_index": e,
+                       "_start_word_kept": _sk, "_end_word_kept": _ek})
     out["generated_scenes"] = gs_out
 
     # video_plan — hook/payoff/close word_index + each key_moment.word_index.
@@ -6018,12 +6090,41 @@ def _generate_test_images(out_dir, prompts=None):
     return _paths
 
 
+def _project_scene_to_frames(scene, pw_by_idx, fps):
+    """Project a GeneratedScene's word window to (fromFrame, durationInFrames)
+    using the KEPT-space projected-word map (_pw_by_idx), exactly like B-roll.
+
+    The model emits kept-space indices; _translate_post_cut_anchors_to_src remaps
+    start_word_index → src for parity but PRESERVES the kept ones as
+    _start_word_kept/_end_word_kept. The render's _pw_by_idx is KEPT-keyed, so we
+    project from the kept indices — using src here would land the scene on the
+    wrong line (the bug-class this guards). Falls back to start_word_index
+    (test/duration-injected scenes) then duration_seconds. Returns
+    (fromFrame, durationInFrames), or None if the scene can't be timed.
+    """
+    _sk = scene.get("_start_word_kept", scene.get("start_word_index"))
+    _ek = scene.get("_end_word_kept", scene.get("end_word_index"))
+    _ps = pw_by_idx.get(_sk)
+    _pe = pw_by_idx.get(_ek)
+    if _ps and _pe:
+        _from = int(round(float(_ps["start"]) * fps))
+        _dur = max(1, int(round((float(_pe["end"]) - float(_ps["start"])) * fps)))
+        return _from, _dur
+    _ds = scene.get("duration_seconds")
+    if _ds:
+        return 0, max(1, int(round(float(_ds) * fps)))
+    return None
+
+
 # ── Generated-scene SUBJECT generation (Phase E · Sub-step 3) ────────────────
 # PREMIUM-only. Generates a GeneratedScene's subject still via Nano Banana (the
 # Sub-step-1 _generate_image), conditioned on reference images, with the
 # transparency matte run ONLY when the scene composits the subject as a cutout
 # over a SEPARATE background. The free path NEVER reaches any of this.
 _PREMIUM_ASSET_BUDGET_USD = 2.0  # soft per-job cap on generated-asset spend
+_RERENDER_HEADROOM_S = 240.0     # a QA recovery re-render ≈ render time; above
+                                 # this projected render time there's no room to
+                                 # QA-and-recover under the 900s job timeout.
 
 
 def _resolve_scene_ref_paths(ref_image_keys, work_dir):
@@ -6798,6 +6899,7 @@ def generate_edit_gemini(
         face_zone=_face_zone,
         prior_plan=prior_plan,
         prior_plan_change_request=prior_plan_change_request,
+        premium=premium,
     )
     if prior_plan:
         print(
@@ -7182,6 +7284,31 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
     # component-placement rules is materially better than Flash. The cost/
     # latency premium is concentrated on this single call.
     post_cut_plan = _call_gemini_post_cuts(client, post_sys, post_user, _video_part, GEMINI_EDITORIAL_MODEL)
+
+    # ── From-known-inputs enforcement at EMISSION (Phase E · Sub-step 5) ──────
+    # Belt #2 of three: the art-directive prompt instructs it (belt #1), the QA
+    # text_correct score backstops it (suspenders). Strip any generated-scene
+    # text_layer whose content is NOT traceable to a known input (the transcript)
+    # — the model must NEVER put an invented number/label on screen (a wrong
+    # number on a beautiful graphic is the worst failure in the video). PREMIUM
+    # by construction (free emits no generated_scenes); no-op when there are none.
+    if isinstance(post_cut_plan, dict) and post_cut_plan.get("generated_scenes"):
+        _known_lc = " ".join(str((w or {}).get("word") or "") for w in (deepgram_words or [])).lower()
+        for _gs in post_cut_plan["generated_scenes"]:
+            if not isinstance(_gs, dict):
+                continue
+            _kept_tl = []
+            for _tl in (_gs.get("text_layers") or []):
+                _c = str((_tl or {}).get("content") or "").strip()
+                if _c and _c.lower() in _known_lc:
+                    _kept_tl.append(_tl)
+                elif _c:
+                    print(
+                        f"[gen-asset] emission: stripped invented text_layer "
+                        f"{_c[:40]!r} (not traceable to the transcript)",
+                        flush=True,
+                    )
+            _gs["text_layers"] = _kept_tl
 
     # ── Recipe eval — log report against the window doctrine + hard rules ──
     # Run BEFORE anchor translation: the evaluator operates on the kept-only
@@ -15550,17 +15677,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         for _gsi, _scene in enumerate(edit_plan.get("generated_scenes") or []):
             if not isinstance(_scene, dict):
                 continue
-            _pw_s = _pw_by_idx.get(_scene.get("start_word_index"))
-            _pw_e = _pw_by_idx.get(_scene.get("end_word_index"))
-            if _pw_s and _pw_e:
-                _gs_from = int(round(float(_pw_s["start"]) * source_fps))
-                _gs_dur = max(1, int(round((float(_pw_e["end"]) - float(_pw_s["start"])) * source_fps)))
-            elif _scene.get("duration_seconds"):
-                _gs_from = 0
-                _gs_dur = max(1, int(round(float(_scene["duration_seconds"]) * source_fps)))
-            else:
+            _proj = _project_scene_to_frames(_scene, _pw_by_idx, source_fps)
+            if _proj is None:
                 print(f"[gen-asset] scene={_gsi} unresolvable timing — skipped", flush=True)
                 continue
+            _gs_from, _gs_dur = _proj
             _subj_path = _gen_subjects.get(_gsi)
             _subj_url = None
             if _subj_path and os.path.isfile(_subj_path):
@@ -19866,18 +19987,40 @@ def handler(job):
         # local PNG is stashed on edit_plan for render_multi_clip to stage.
         _gen_scenes = (edit_plan.get("generated_scenes") or []) if isinstance(edit_plan, dict) else []
         if route_premium and premium_ctx is not None and _gen_scenes:
+            # ── Generation-time headroom pre-check (Phase E · Sub-step 5) ──────
+            # Don't generate a scene unless there's headroom to QA-AND-RECOVER it.
+            # A recovery re-render ≈ render time, and even DEGRADING (dropping a
+            # baked-in scene) costs one re-render. So if the PROJECTED render
+            # leaves no re-render headroom under the 900s timeout, skip generation
+            # and hold the non-generated beat — strictly better than generating
+            # something we couldn't afford to verify (an unjudged generated scene
+            # is exactly the garbled-graphic-in-front-of-a-user risk). Same
+            # render-time proxy the QA gate uses (the _render_est formula).
+            if float(source_duration) * 3.0 > _RERENDER_HEADROOM_S:
+                print(
+                    f"[gen-asset] generation SKIPPED — projected render "
+                    f"{float(source_duration) * 3.0:.0f}s > {_RERENDER_HEADROOM_S:.0f}s "
+                    f"leaves no QA-recovery headroom; holding {len(_gen_scenes)} "
+                    f"non-generated beat(s)",
+                    flush=True,
+                )
+                _gen_scenes = []
+        if route_premium and premium_ctx is not None and _gen_scenes:
+            _scene_cycle_cost = 6.0 * _IMAGE_COST_USD_EST  # gen + ≤2 regens, worst case
             _known_text = " ".join(
                 str(w.get("word") or "") for w in (_get_resolved_transcript().get("words") or [])
             ).strip()
             _asset_pool = premium_ctx.asset_pool(max_workers=min(4, len(_gen_scenes)))
             _gen_futs = {}
             for _si, _scene in enumerate(_gen_scenes):
-                # Soft per-job cost cap: stop submitting once we'd exceed the
-                # budget; remaining scenes degrade to non-generated beats.
-                if _cost_meter is not None and _cost_meter.total_usd() >= _PREMIUM_ASSET_BUDGET_USD:
+                # Full-cycle COST headroom: only generate if we can ALSO afford to
+                # judge + recover this scene — never generate something we can't
+                # afford to verify (hold the non-generated beat instead).
+                if _cost_meter is not None and (_cost_meter.total_usd() + _scene_cycle_cost) > _PREMIUM_ASSET_BUDGET_USD:
                     print(
-                        f"[gen-asset] budget cap ${_PREMIUM_ASSET_BUDGET_USD:.2f} reached — "
-                        f"scene={_si}+ degrade to non-generated",
+                        f"[gen-asset] cost headroom exhausted (spent "
+                        f"${_cost_meter.total_usd():.2f} + ${_scene_cycle_cost:.2f} QA cycle "
+                        f"> ${_PREMIUM_ASSET_BUDGET_USD:.2f}) — scene={_si}+ hold non-generated",
                         flush=True,
                     )
                     break
@@ -20174,7 +20317,8 @@ def handler(job):
                 # A recovery re-render costs ≈ render_elapsed. We gate on that so a
                 # slow render can't blow the 900s function timeout (judge itself is
                 # a cheap ~5-15s vision call; the re-render is the expensive part).
-                _RERENDER_HEADROOM_S = 240.0
+                # Uses the module-level _RERENDER_HEADROOM_S (shared with the S3
+                # generation-time pre-check).
                 _attempt = 0
                 while True:
                     _scores = _qa_judge_generated_scenes(
