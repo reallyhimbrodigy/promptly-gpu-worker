@@ -1736,6 +1736,7 @@ def detect_face_positions_dense(video_path, every_n_frames=5, target_w=None, tar
 
         found = False
         best_cx, best_cy = center_x, center_y
+        best_w, best_h = 0, 0
         best_conf = 0.0
         best_area = 0
 
@@ -1754,6 +1755,8 @@ def detect_face_positions_dense(video_path, every_n_frames=5, target_w=None, tar
                 best_area = area
                 best_cx = (x1 + x2) // 2
                 best_cy = (y1 + y2) // 2
+                best_w = x2 - x1
+                best_h = y2 - y1
                 found = True
 
         if found:
@@ -1765,6 +1768,13 @@ def detect_face_positions_dense(video_path, every_n_frames=5, target_w=None, tar
             "cy": float(best_cy if found else last_cy),
             "found": found,
             "confidence": round(best_conf, 4) if found else 0.0,
+            # Face bbox dimensions (target-canvas px). These enable real
+            # shot_scale (wide/medium/close) in _build_face_signals — the
+            # detector previously dropped them, so the median bbox width was
+            # always 0 and the label collapsed to a constant. 0 when no face
+            # this frame. Premium-gated consumer; the free path ignores these.
+            "w": float(best_w) if found else 0.0,
+            "h": float(best_h) if found else 0.0,
         })
 
     # Cleanup extracted frames
@@ -2736,7 +2746,7 @@ def extract_json(text):
     raise ValueError("Could not extract valid JSON from Gemini response")
 
 
-def _build_face_signals(face_positions, deepgram_words, duration):
+def _build_face_signals(face_positions, deepgram_words, duration, premium=False):
     """Turn raw face detections + speaker-tagged words into signals Gemini consumes.
 
     Returns (face_visibility, speaker_positions, off_center, shot_scale, face_zone):
@@ -2859,19 +2869,29 @@ def _build_face_signals(face_positions, deepgram_words, duration):
     #   >500px         → extreme close-up (head dominates frame)
     shot_scale = {"median_w": 0.0, "median_h": 0.0, "label": "unknown"}
     if _found:
-        _ws = sorted(float(p.get("w") or 0) for p in _found)
-        _hs = sorted(float(p.get("h") or 0) for p in _found)
-        _mw = _ws[len(_ws) // 2]
-        _mh = _hs[len(_hs) // 2]
-        if _mw < 180:
-            _label = "wide"
-        elif _mw < 320:
-            _label = "medium"
-        elif _mw < 500:
-            _label = "close_up"
+        if premium:
+            # PREMIUM: the detector now stores real face bbox w/h, so the median
+            # width resolves a true wide/medium/close label that gates zoom.
+            _ws = sorted(float(p.get("w") or 0) for p in _found)
+            _hs = sorted(float(p.get("h") or 0) for p in _found)
+            _mw = _ws[len(_ws) // 2]
+            _mh = _hs[len(_hs) // 2]
+            if _mw < 180:
+                _label = "wide"
+            elif _mw < 320:
+                _label = "medium"
+            elif _mw < 500:
+                _label = "close_up"
+            else:
+                _label = "extreme_close_up"
+            shot_scale = {"median_w": round(_mw, 1), "median_h": round(_mh, 1), "label": _label}
         else:
-            _label = "extreme_close_up"
-        shot_scale = {"median_w": round(_mw, 1), "median_h": round(_mh, 1), "label": _label}
+            # FREE/FLARE byte-identical: before the detector stored bbox w/h, the
+            # median width was always 0 → the label collapsed to "wide" for any
+            # clip with a detected face ("unknown" only with no face). Reproduce
+            # that exactly — do NOT read the new w/h keys on the free path, so the
+            # Gemini prompt's SHOT SCALE block is unchanged for Flare.
+            shot_scale = {"median_w": 0.0, "median_h": 0.0, "label": "wide"}
 
     # Face VERTICAL zone over time. Face detection is sparse (typically
     # ~1 sample every 6s — far sparser than our 0.5s buckets), so directly
@@ -2912,7 +2932,10 @@ def _build_face_signals(face_positions, deepgram_words, duration):
                 return "unknown"
             _best = min(_candidates, key=lambda p: abs(float(p.get("t") or 0) - t_sec))
             _cy = float(_best.get("cy") or 960)
-            _h = float(_best.get("h") or 400)
+            # FREE/FLARE byte-identical: legacy face dicts had no "h", so this
+            # always defaulted to 400. Only premium reads the real bbox height
+            # (a better face-top estimate → more accurate vertical zone).
+            _h = (float(_best.get("h") or 400.0) if premium else 400.0)
             _face_top_norm = max(0.0, (_cy - 0.35 * _h) / 1920.0)
             if _face_top_norm < 0.33:
                 return "upper"
@@ -6258,6 +6281,7 @@ def generate_edit_gemini(
     user_style_profile=None,
     gemini_file=None, cached_response=None, inline_video_bytes=None,
     prior_plan=None, prior_plan_change_request=None,
+    premium=False,
 ):
     _pre_analysis = cached_response
 
@@ -6280,7 +6304,12 @@ def generate_edit_gemini(
         _off_center,
         _shot_scale,
         _face_zone,
-    ) = _build_face_signals(_face_positions, deepgram_words or [], duration)
+    ) = _build_face_signals(_face_positions, deepgram_words or [], duration, premium=premium)
+    print(
+        f"[shot-scale] resolved={_shot_scale.get('label')} "
+        f"(median_w={_shot_scale.get('median_w')}px premium={premium})",
+        flush=True,
+    )
 
     client = _get_genai_client()
 
@@ -11718,6 +11747,154 @@ def _probe_shake_intensity(file_path: str, sample_count: int = 12) -> float:
         return float(_np.mean(magnitudes))
     finally:
         cap.release()
+
+
+def _probe_exposure(file_path: str, sample_count: int = 12) -> dict:
+    """Sample N frames and return aggregate exposure / sharpness stats.
+
+    Reuses the thumbnail picker's brightness + Laplacian-variance math
+    (mean luminance for exposure, Laplacian variance for focus) but
+    aggregated across the clip instead of per-candidate. Feeds the
+    input-quality pass so a dark or soft source can be (a) silently lifted
+    on the premium path and (b) turned into an OPTIONAL, forward-framed
+    enrichment offer — never a judgement about the user's footage.
+
+    Returns a neutral struct (mean_lum=128, dark_frac=0, sharpness=0) when
+    the source is unreadable — fail-open: an unreadable probe must never
+    make the pipeline treat good footage as poor.
+    """
+    import cv2 as _cv2
+    import numpy as _np
+
+    _neutral = {"mean_lum": 128.0, "dark_frac": 0.0, "bright_frac": 0.0,
+                "sharpness": 0.0, "samples": 0}
+    cap = _cv2.VideoCapture(file_path)
+    try:
+        if not cap.isOpened():
+            return dict(_neutral)
+        total_frames = int(cap.get(_cv2.CAP_PROP_FRAME_COUNT) or 0)
+        src_w = int(cap.get(_cv2.CAP_PROP_FRAME_WIDTH) or 0)
+        if total_frames < 1 or src_w <= 0:
+            return dict(_neutral)
+
+        # Same sampling as the shake probe: even spread, skip leader/trailer.
+        stride = max(1, int(total_frames * 0.9 // sample_count))
+        start = max(0, int(total_frames * 0.05))
+
+        # 240p is plenty for a luminance mean + Laplacian variance and ~16×
+        # cheaper than full-res.
+        probe_h = 240
+        probe_w = max(1, int(probe_h * src_w / max(1, int(cap.get(_cv2.CAP_PROP_FRAME_HEIGHT) or 1))))
+
+        lums: list[float] = []
+        sharps: list[float] = []
+        for i in range(sample_count):
+            frame_idx = start + i * stride
+            if frame_idx >= total_frames:
+                break
+            cap.set(_cv2.CAP_PROP_POS_FRAMES, float(frame_idx))
+            ok, frame = cap.read()
+            if not ok or frame is None:
+                continue
+            small = _cv2.resize(frame, (probe_w, probe_h), interpolation=_cv2.INTER_AREA)
+            gray = _cv2.cvtColor(small, _cv2.COLOR_BGR2GRAY)
+            lums.append(float(gray.mean()))
+            sharps.append(float(_cv2.Laplacian(gray, _cv2.CV_64F).var()))
+
+        if not lums:
+            return dict(_neutral)
+
+        n = len(lums)
+        # "dark" / "bright" thresholds align with the thumbnail picker's
+        # brightness curve (0 below 40, ramps to full by 110, falls off past 160).
+        dark_frac = sum(1 for _l in lums if _l < 60.0) / n
+        bright_frac = sum(1 for _l in lums if _l > 220.0) / n
+        return {
+            "mean_lum": float(_np.mean(lums)),
+            "dark_frac": float(dark_frac),
+            "bright_frac": float(bright_frac),
+            "sharpness": float(_np.mean(sharps)),
+            "samples": n,
+        }
+    finally:
+        cap.release()
+
+
+def _assemble_input_quality(loudness, shake_score, exposure, face_ratio, face_samples,
+                            width, height, fps, duration):
+    """Assemble the per-job input-quality sub-scores into one descriptive struct.
+
+    This is PURE DESCRIPTION — never a verdict, never used to reject or
+    downgrade. It drives (a) silent premium remediation (deshake / denoise /
+    grade) and (b) OPTIONAL, forward-framed enrichment offers. Every field is a
+    measured signal that already exists in the pipeline; this just collects them
+    in one place so the premium path can act and so we can log for calibration.
+    """
+    _loud = dict(loudness or {})
+    _rms = float(_loud.get("rms_db", -18.0))
+    _nf = float(_loud.get("noise_floor_db", -45.0))
+    _snr = _rms - _nf  # dB of speech above the noise floor; higher = cleaner
+    _exp = dict(exposure or {})
+    return {
+        "snr_db": round(_snr, 1),
+        "noise_floor_db": round(_nf, 1),
+        "shake": round(float(shake_score or 0.0), 2),
+        "mean_lum": round(float(_exp.get("mean_lum", 128.0)), 1),
+        "dark_frac": round(float(_exp.get("dark_frac", 0.0)), 2),
+        "bright_frac": round(float(_exp.get("bright_frac", 0.0)), 2),
+        "sharpness": round(float(_exp.get("sharpness", 0.0)), 1),
+        "face_ratio": round(float(face_ratio or 0.0), 2),
+        "face_samples": int(face_samples or 0),
+        "width": int(width or 0),
+        "height": int(height or 0),
+        "fps": round(float(fps or 0.0), 2),
+    }
+
+
+# Enrichment-offer thresholds. An offer is always OPTIONAL upside, so a false
+# offer just goes unsurfaced — but we keep them specific enough to feel premium
+# (a precise ask), not like a generic form.
+_ENRICH_DARK_FRAC = 0.5       # half+ the sampled frames sit below the dark line
+_ENRICH_DARK_LUM = 75.0       # or the clip averages quite dim overall
+_ENRICH_FACE_RATIO = 0.30     # speaker rarely facing camera
+_ENRICH_FACE_MIN_SAMPLES = 8  # enough face samples to trust the ratio
+
+
+def _enrichment_opportunities(iq):
+    """Turn input-quality sub-scores into OPTIONAL, forward-framed enrichment
+    offers (the "Lumen could do more with a little more" asks).
+
+    NON-NEGOTIABLE framing: every offer is phrased as upside ("make it even
+    better"), NEVER as a deficiency in the user's footage — no "too dark", no
+    "low quality", no soft negatives. Skipping any offer still yields a full
+    premium edit with no asterisk. Returns [] when nothing is actionable — in
+    particular, unimprovable/noisy audio emits NOTHING (there's no ask the user
+    could act on, and the premium path already denoises silently).
+
+    This phase EMITS + LOGS only; the actual ask-back surfacing lands in Phases
+    C/D, where these weak-footage offers share one surface with the gap-analysis
+    missing-context asks.
+    """
+    opps = []
+    # Low light → offer a brighter clip to cut to OR a deliberate moody look.
+    # Framed as a creative choice the user gets to make, never a complaint.
+    if iq.get("dark_frac", 0.0) >= _ENRICH_DARK_FRAC or iq.get("mean_lum", 128.0) < _ENRICH_DARK_LUM:
+        opps.append({
+            "kind": "low_light",
+            "offer": "Want to add a brighter clip to cut to, or lean into a moody, "
+                     "cinematic treatment for this one?",
+        })
+    # Weak lead subject → offer a facing-camera hero shot to open on.
+    if (iq.get("face_samples", 0) >= _ENRICH_FACE_MIN_SAMPLES
+            and iq.get("face_ratio", 1.0) < _ENRICH_FACE_RATIO):
+        opps.append({
+            "kind": "no_lead_face",
+            "offer": "Is there a shot of you facing the camera you'd want to open on? "
+                     "I can lead with it.",
+        })
+    # DELIBERATELY emit nothing for low SNR / noisy audio: there's no upside ask
+    # the user can act on, and remediation already cleans it silently.
+    return opps
 
 
 def probe_duration(file_path):
@@ -17890,6 +18067,28 @@ def handler(job):
         def _do_vocal_emphasis():
             return detect_vocal_emphasis(_raw_source)
 
+        # Shake probe lifted to its own ingest future so the input-quality pass
+        # can read the handheld-shake sub-score BEFORE the recipe runs, without
+        # waiting for the full normalize/encode _do_fps_normalize performs.
+        # Cached under a lock so the probe runs exactly once: whichever of the
+        # shake future or _do_fps_normalize reaches it first computes the score,
+        # the other reuses it. _do_fps_normalize's deshake decision therefore
+        # reads the identical value it computed inline before → byte-identical.
+        _shake_lock = threading.Lock()
+        _shake_cache = {}
+
+        def _do_shake_probe():
+            with _shake_lock:
+                if "score" not in _shake_cache:
+                    _shake_cache["score"] = _probe_shake_intensity(_raw_source)
+            return _shake_cache["score"]
+
+        def _do_exposure_probe():
+            # Exposure/sharpness stats for the input-quality pass. Pure read of
+            # the raw source — never alters output; informs silent grade lift
+            # (premium) and forward-framed enrichment offers.
+            return _probe_exposure(_raw_source)
+
         def _do_fps_normalize():
             """Canonicalize source to 1080×1920 yuv420p CFR at SOURCE fps.
 
@@ -17982,7 +18181,7 @@ def handler(job):
             # stable tripod/stabilizer footage scores below 0.2 and skips
             # the cost.
             _shake_t0 = time.time()
-            _shake_score = _probe_shake_intensity(_raw_source)
+            _shake_score = _do_shake_probe()
             _SHAKE_STABILIZE_THRESHOLD = 0.35
             _needs_deshake = _shake_score >= _SHAKE_STABILIZE_THRESHOLD
             print(
@@ -17991,6 +18190,53 @@ def handler(job):
                 f"in {time.time() - _shake_t0:.1f}s",
                 flush=True,
             )
+
+            # ── PREMIUM silent remediation (Phase G-lite) ────────────────
+            # EditPolicy-respecting and invisible to the user — the edit is
+            # just cleaner, never a message. Flare (route_premium False) never
+            # enters these branches → byte-identical. Fail-open with timeouts:
+            # any error/slow future leaves the original (free-path) decision.
+            _premium_grade = False
+            if route_premium:
+                # (1) Stabilize gate — if a Lumen user asked for no
+                # stabilization, skip deshake even on shaky footage.
+                if _needs_deshake:
+                    try:
+                        _pol = future_policy.result(timeout=20) if future_policy is not None else None
+                        if _pol is not None and getattr(_pol.features, "stabilize", "on") == "off":
+                            _needs_deshake = False
+                            print(
+                                "[remediation] vidstab skipped — EditPolicy "
+                                "stabilize=off (premium, silent)",
+                                flush=True,
+                            )
+                    except Exception as _rem_err:
+                        print(
+                            f"[remediation] stabilize-policy check skipped "
+                            f"({type(_rem_err).__name__}) — deshake unchanged",
+                            flush=True,
+                        )
+                # (2) Low-light grade lift — clearly-dark footage gets a gentle
+                # shadow/mid lift so the premium edit isn't built on a murky
+                # clip. Forces a re-encode (can't grade a passthrough symlink).
+                # Skipped for HDR (the tone-map already sets brightness). The
+                # visual result is verified in the premium flag-on render.
+                try:
+                    _exp = dict((future_exposure.result(timeout=20) if future_exposure is not None else {}) or {})
+                    if (not _is_hdr) and ((_exp.get("dark_frac", 0.0) >= 0.5) or (_exp.get("mean_lum", 128.0) < 70.0)):
+                        _premium_grade = True
+                        print(
+                            f"[remediation] grade=lift — low light "
+                            f"(mean_lum={_exp.get('mean_lum')}, dark_frac={_exp.get('dark_frac')}) "
+                            f"(premium, silent; forces re-encode)",
+                            flush=True,
+                        )
+                except Exception as _grd_err:
+                    print(
+                        f"[remediation] grade check skipped "
+                        f"({type(_grd_err).__name__}) — no lift",
+                        flush=True,
+                    )
 
             # Target 60fps output. iPhone 30fps source frame-doubles into
             # 60fps source_canonical via ffmpeg's fps filter — each source
@@ -18023,6 +18269,7 @@ def handler(job):
                 and not _normalize_vf
                 and not _needs_deshake
                 and not _is_hdr  # HDR always needs the tone-map re-encode
+                and not _premium_grade  # premium low-light grade needs a re-encode
                 # CFR sanity: avg and r_rate should agree within ~2%, and
                 # source rate must be close to target (within ~2%) so that
                 # passthrough doesn't accidentally ship a 60fps file when
@@ -18188,6 +18435,12 @@ def handler(job):
                     # reads as natural rather than as a stabilization artifact.
                     f":crop=keep:interpol=bicubic"
                 )
+            if _premium_grade:
+                # Gentle premium low-light lift — gamma-led so highlights are
+                # preserved (a flat brightness= would clip them); a tiny
+                # saturation bump counters the slight wash from lifting shadows.
+                # Premium-only; gated on the dark-footage check above.
+                _vf_parts.append("eq=gamma=1.2:brightness=0.03:saturation=1.03")
             _vf_parts.append(f"fps={_target_fps:.6f}")
             if _normalize_vf:
                 _vf_parts.append(_normalize_vf)
@@ -18722,6 +18975,7 @@ def handler(job):
                     cached_response=_cached_analysis,
                     prior_plan=_gr_prior,
                     prior_plan_change_request=_gr_dir,
+                    premium=route_premium,
                 )
             finally:
                 _gemini_hb_stop.set()
@@ -18778,6 +19032,10 @@ def handler(job):
         future_loudness = mega_pool.submit(_do_loudness)
         future_shot_changes = mega_pool.submit(_do_shot_changes)
         future_vocal_emphasis = mega_pool.submit(_do_vocal_emphasis)
+        # Shake probe runs early (own future) so the input-quality pass can read
+        # it pre-recipe; _do_fps_normalize reuses the same cached score.
+        future_shake = mega_pool.submit(_do_shake_probe)
+        future_exposure = mega_pool.submit(_do_exposure_probe)
         future_fps_normalize = mega_pool.submit(_do_fps_normalize)
         # Per-user style profile — fetched in parallel with everything else; read
         # inside _do_edit_recipe_overlapped so it arrives before Gemini is called.
@@ -18884,6 +19142,94 @@ def handler(job):
                     flush=True,
                 )
                 resolved_policy = None
+
+        # ── Input-quality sub-scores (Phase G-lite) ──────────────────────
+        # Assemble the existing ingest signals (loudness/SNR, shake, exposure,
+        # face presence, resolution/fps) into ONE descriptive struct. This is
+        # NEVER a verdict and NEVER gates or downgrades: it drives silent
+        # premium remediation (deshake/denoise/grade) and OPTIONAL, forward-
+        # framed enrichment offers (surfaced later in Phases C/D). Computed +
+        # logged for every job for calibration; on Flare it changes logs, not
+        # output. Fail-open: any error leaves the render completely untouched.
+        input_quality = None
+        try:
+            _iq_shape = future_normalize.result() if future_normalize is not None else {}
+            if future_faces is not None:
+                _iq_fp, _ = future_faces.result()
+            else:
+                _iq_fp = []
+            _iq_samples = len(_iq_fp or [])
+            _iq_hits = sum(
+                1 for _p in (_iq_fp or [])
+                if isinstance(_p, dict) and _p.get("found")
+            )
+            _iq_face_ratio = (_iq_hits / _iq_samples) if _iq_samples > 0 else 0.0
+            input_quality = _assemble_input_quality(
+                loudness=future_loudness.result() if future_loudness is not None else {},
+                shake_score=future_shake.result() if future_shake is not None else 0.0,
+                exposure=future_exposure.result() if future_exposure is not None else {},
+                face_ratio=_iq_face_ratio,
+                face_samples=_iq_samples,
+                width=int((_iq_shape or {}).get("width") or 0),
+                height=int((_iq_shape or {}).get("height") or 0),
+                fps=float((_iq_shape or {}).get("fps") or 0.0),
+                duration=source_duration,
+            )
+            print(
+                f"[input-quality] snr={input_quality['snr_db']}dB "
+                f"shake={input_quality['shake']} "
+                f"exposure=mean_lum:{input_quality['mean_lum']}/dark:{input_quality['dark_frac']} "
+                f"sharp={input_quality['sharpness']} "
+                f"face={input_quality['face_ratio']}({input_quality['face_samples']}) "
+                f"res={input_quality['width']}x{input_quality['height']}@{input_quality['fps']} "
+                f"premium={route_premium}",
+                flush=True,
+            )
+            _enrich = _enrichment_opportunities(input_quality)
+            print(
+                f"[enrichment] opportunities={[_o['kind'] for _o in _enrich]} "
+                f"premium={route_premium} (emit/log-only — surfaced in Phases C/D)",
+                flush=True,
+            )
+            for _o in _enrich:
+                print(f"[enrichment]   {_o['kind']}: {_o['offer']}", flush=True)
+        except Exception as _iq_err:
+            print(
+                f"[input-quality] skipped "
+                f"({type(_iq_err).__name__}: {str(_iq_err)[:120]}) — render unaffected",
+                flush=True,
+            )
+            input_quality = None
+
+        # ── Silent remediation · audio (Phase G-lite · PREMIUM only) ─────
+        # Respect EditPolicy and clean up noise invisibly. Flare never enters
+        # this block → byte-identical. (Deshake + the low-light grade are
+        # applied earlier, inside _do_fps_normalize.) Fail-open: defaults to
+        # the recipe's own audio_denoise choice if anything is unavailable.
+        if route_premium and isinstance(edit_plan, dict):
+            _ad_feat = getattr(getattr(resolved_policy, "features", None), "audio_denoise", "on")
+            if _ad_feat == "off":
+                # User asked to leave the audio raw — honor it even if the
+                # recipe (or the noise heuristic) turned denoise on.
+                if edit_plan.get("audio_denoise"):
+                    edit_plan["audio_denoise"] = False
+                    print(
+                        "[remediation] denoise forced off — EditPolicy "
+                        "audio_denoise=off (premium, silent)",
+                        flush=True,
+                    )
+            else:
+                # Policy permits denoise: guarantee it's on for a genuinely
+                # noisy source (noise_floor > -40 dB — the same bar the recipe
+                # uses), even if the recipe didn't set it.
+                _nf = (input_quality or {}).get("noise_floor_db", -70.0)
+                if _nf > -40.0 and not edit_plan.get("audio_denoise"):
+                    edit_plan["audio_denoise"] = True
+                    print(
+                        f"[remediation] denoise ensured on — noisy source "
+                        f"(noise_floor={_nf}dB, premium, silent)",
+                        flush=True,
+                    )
 
         # ── Layer 3 safety net for guided_redraft mode ───────────────────
         # The freshly-generated edit_plan came from generate_edit_gemini
