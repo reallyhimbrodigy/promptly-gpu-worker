@@ -18793,7 +18793,15 @@ def handler(job):
         # await `future_policy` before any consumer (compute_mechanical_cuts /
         # the enforcement pass / vidstab). Import is lazy + guarded so a missing
         # module or any error disables the feature for this job, never the render.
-        _edit_policy_on = bool(input_data.get("edit_policy_enabled")) or (
+        # EditPolicy turns on when ANY of: the per-job flag, the env override, OR
+        # the job is Lumen (route_premium). Folding it under Lumen makes premium
+        # "follow-any-instruction" editing part of the model AND makes the Step-1
+        # log test triggerable through the picker. The per-job flag + env stay
+        # independent controls (still work without Lumen). Flare (route_premium
+        # False, flag/env off) leaves it off → base path byte-identical. EditPolicy
+        # is still Step 1 (resolve+log, NO consumer), so a Lumen job resolves +
+        # logs the policy with output unchanged — this is the log test, not enforcement.
+        _edit_policy_on = bool(input_data.get("edit_policy_enabled")) or route_premium or (
             os.environ.get("EDIT_POLICY_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
         )
         future_policy = None
