@@ -106,3 +106,12 @@ VALID_MG_TYPES = frozenset({
     "StatCard", "StickyNotes",
     "TweetBubble", "InstagramComment", "IMessageBubble", "TikTokComment",
 })
+
+# ── Generated scenes (Phase E · composed premium graphics) ──────────────────
+# The enumerated dimensions of a GeneratedScene element (background world,
+# entrance motion, easing). Pydantic/TS Literals derive from these the same way
+# the component types above do — single source of truth. Registered in Sub-step
+# 2 INERT (no recipe emits a GeneratedScene yet).
+VALID_GENSCENE_BACKGROUNDS = frozenset({"gradient", "solid", "generated"})
+VALID_GENSCENE_ENTRANCES = frozenset({"slide", "scale", "float", "fade", "rise"})
+VALID_GENSCENE_EASINGS = frozenset({"spring", "ease", "linear"})

@@ -3,14 +3,19 @@ import {
   AbsoluteFill,
   Sequence,
   OffthreadVideo,
+  Img,
   staticFile,
   useCurrentFrame,
   interpolate,
+  spring,
 } from "remotion";
+import { CameraMotionBlur } from "@remotion/motion-blur";
 import type {
   PromptlyRenderProps,
   PromptlyMicroSegmentsProps,
   BrollSpec,
+  GeneratedSceneSpec,
+  GenSceneTextLayerSpec,
   ClipSpec,
   TransitionSpec,
   CaptionSpec,
@@ -499,6 +504,175 @@ const BrollLayer: React.FC<{
   </>
 );
 
+// ─── Generated scene layer (Phase E · composed premium graphics) ───────────
+// A GeneratedScene composites SEPARATE layers: a background world (CSS
+// gradient/solid, or the subject's own generated frame), the generated subject
+// still (anchored + scaled), and kinetic text — wrapped in a motion entrance
+// (spring) optionally run through CameraMotionBlur for the "buttery" feel at
+// 60fps. INERT until Sub-step 3 fills subject.imageUrl and Sub-step 5 makes the
+// model emit scenes; `generatedScenes` is [] today so this renders nothing.
+const genSceneAnchorTop = (anchor: string): string =>
+  anchor === "upper_third_safe"
+    ? "24%"
+    : anchor === "lower_third_safe"
+      ? "74%"
+      : "50%";
+
+const GenSceneText: React.FC<{
+  layer: GenSceneTextLayerSpec;
+  progress: number;
+}> = ({ layer, progress }) => (
+  <div
+    style={{
+      position: "absolute",
+      top: genSceneAnchorTop(layer.anchor),
+      left: 0,
+      right: 0,
+      transform: "translateY(-50%)",
+      padding: "0 72px",
+      textAlign: "center",
+      color: "#ffffff",
+      fontSize: 68,
+      fontWeight: 800,
+      lineHeight: 1.04,
+      letterSpacing: "-0.02em",
+      textShadow: "0 6px 28px rgba(0,0,0,0.4)",
+      opacity: progress,
+    }}
+  >
+    {layer.content}
+  </div>
+);
+
+const GeneratedScene: React.FC<{ spec: GeneratedSceneSpec; fps: number }> = ({
+  spec,
+  fps,
+}) => {
+  const frame = useCurrentFrame();
+  const { background, subject, textLayers, motion } = spec;
+
+  // Entrance progress 0→1. Spring for the buttery default; linear fallback.
+  const entranceDur = Math.max(1, Math.round(fps * 0.5));
+  const progress =
+    motion.easing === "spring"
+      ? spring({ frame, fps, config: { damping: 18, stiffness: 120, mass: 0.9 } })
+      : interpolate(frame, [0, entranceDur], [0, 1], {
+          extrapolateLeft: "clamp",
+          extrapolateRight: "clamp",
+        });
+
+  // Boundary fade-out at the tail (matches B-roll's ~67ms out).
+  const fadeFrames = Math.max(1, Math.round(fps * 0.067));
+  const fadeOut = interpolate(
+    frame,
+    [spec.durationInFrames - fadeFrames, spec.durationInFrames],
+    [1, 0],
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
+  );
+
+  // Entrance transform by type.
+  let tx = 0;
+  let ty = 0;
+  let sc = 1;
+  let entranceOpacity = 1;
+  if (motion.entrance === "slide") tx = (1 - progress) * 140;
+  else if (motion.entrance === "rise") ty = (1 - progress) * 140;
+  else if (motion.entrance === "float") ty = (1 - progress) * 70;
+  else if (motion.entrance === "scale") sc = 0.86 + 0.14 * progress;
+  else if (motion.entrance === "fade") entranceOpacity = progress;
+
+  // Background: "generated" = the subject image IS its own full-frame world
+  // (no separate bg). gradient/solid paint a CSS background under a cutout.
+  const fullFrame = background.kind === "generated";
+  const colors =
+    background.colors && background.colors.length >= 2
+      ? background.colors
+      : ["#2a2a33", "#141419"];
+  const bgStyle =
+    background.kind === "solid"
+      ? colors[0] || "#141419"
+      : `linear-gradient(155deg, ${colors[0]} 0%, ${colors[colors.length - 1]} 100%)`;
+
+  const subjectScale = (subject.scale || 1) * sc;
+
+  const subjectInner = subject.imageUrl ? (
+    <Img
+      src={resolveSrc(subject.imageUrl)}
+      style={
+        fullFrame
+          ? { width: "100%", height: "100%", objectFit: "cover" }
+          : {
+              maxWidth: "82%",
+              maxHeight: "64%",
+              objectFit: "contain",
+              filter: "drop-shadow(0 28px 64px rgba(0,0,0,0.5))",
+            }
+      }
+    />
+  ) : (
+    // Placeholder until Sub-step 3 fills the generated still.
+    <div
+      style={{
+        width: "58%",
+        height: "38%",
+        border: "3px dashed rgba(255,255,255,0.45)",
+        borderRadius: 28,
+      }}
+    />
+  );
+
+  const subjectWrapped = (
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        transform: `translate(${tx}px, ${ty}px) scale(${subjectScale})`,
+        opacity: entranceOpacity,
+      }}
+    >
+      {subjectInner}
+    </div>
+  );
+
+  const subjectMaybeBlurred = motion.motionBlur ? (
+    <CameraMotionBlur samples={6} shutterAngle={180}>
+      {subjectWrapped}
+    </CameraMotionBlur>
+  ) : (
+    subjectWrapped
+  );
+
+  return (
+    <AbsoluteFill style={{ pointerEvents: "none", opacity: fadeOut }}>
+      {!fullFrame ? <AbsoluteFill style={{ background: bgStyle }} /> : null}
+      {subjectMaybeBlurred}
+      {textLayers.map((t, i) => (
+        <GenSceneText key={`gst-${i}`} layer={t} progress={progress} />
+      ))}
+    </AbsoluteFill>
+  );
+};
+
+const GeneratedSceneLayer: React.FC<{
+  items: GeneratedSceneSpec[];
+  fps: number;
+}> = ({ items, fps }) => (
+  <>
+    {items.map((scn, i) => (
+      <Sequence
+        key={`genscene-${i}`}
+        from={scn.fromFrame}
+        durationInFrames={scn.durationInFrames}
+      >
+        <GeneratedScene spec={scn} fps={fps} />
+      </Sequence>
+    ))}
+  </>
+);
+
 // ─── Tight-cut overlay layer ───────────────────────────────────────────────
 // Iterates the tightCutOverlays list and renders one OverlayCutEffect per
 // entry. Each component reads useCurrentFrame() against the composition's
@@ -539,7 +713,7 @@ const TightCutOverlayLayer: React.FC<{
 // Output is encoded with alpha (ProRes 4444) so FFmpeg can composite it
 // over the base in the final mux step.
 export const PromptlyOverlay: React.FC<PromptlyRenderProps> = ({ input }) => {
-  const { caption, motionGraphics, textOverlays, fps, broll, tightCutOverlays } = input;
+  const { caption, motionGraphics, textOverlays, fps, broll, tightCutOverlays, generatedScenes } = input;
 
   return (
     <AbsoluteFill style={{ background: "transparent" }}>
@@ -551,6 +725,11 @@ export const PromptlyOverlay: React.FC<PromptlyRenderProps> = ({ input }) => {
           of every B-roll window. Captions auto-flip to "top" during B-roll
           windows so they remain readable over the cutaway content. */}
       <BrollLayer items={broll ?? []} fps={fps} />
+      {/* Generated scenes — full-frame composed takeovers (gradient world +
+          generated subject + kinetic text + motion). Same z-tier as B-roll
+          (bottom of the overlay stack); captions/MGs render on top. Empty by
+          default → zero DOM, identical to the pre-GeneratedScene pipeline. */}
+      <GeneratedSceneLayer items={generatedScenes ?? []} fps={fps} />
       {/* Captions on top — readable over speaker, B-roll, and any
           text-overlay/MG underneath. Universal text-stroke ensures contrast
           against arbitrary backgrounds (see captions/*.tsx). */}

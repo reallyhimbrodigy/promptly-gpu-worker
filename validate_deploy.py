@@ -2746,7 +2746,7 @@ def _recipe_omittable_field_contract():
     # field is absent (default it or drop the component).
     import handler as H
     EXPECTED = {
-        "PostCutPlan": {"notes"},
+        "PostCutPlan": {"generated_scenes", "notes"},
         "_EmphasisMoment": {"motion_graphic", "zoom_effect"},
         "_EmphasisMotionGraphic": {"props"},
         "_ZoomEffect": {"events"},

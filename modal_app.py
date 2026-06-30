@@ -941,3 +941,74 @@ def gen_test_images(n: int = 3):
     for u in urls:
         print(u)
     print("=== END ===\n")
+
+
+# ── Sub-step 2: GeneratedScene schema → Vertex acceptance regression (INERT) ─
+# Confirms Vertex ACCEPTS the nested-optional GeneratedScene schema
+# (response_json_schema). Proven before folding generated_scenes into
+# PostCutPlan; kept as a permanent regression check on the real schema. Not
+# called by any job.
+@app.function(cpu=2, memory=4096, timeout=300)
+def validate_genscene_schema_remote():
+    import sys
+    import json
+    import time
+
+    if "/" not in sys.path:
+        sys.path.insert(0, "/")
+    import handler
+
+    schema = handler.PostCutPlan.model_json_schema()
+    has_field = "generated_scenes" in (schema.get("properties") or {})
+    n_defs = len(schema.get("$defs") or {})
+    print(f"[genscene-probe] schema built: generated_scenes={has_field} $defs={n_defs}", flush=True)
+
+    client = handler._get_genai_client()
+    types = handler.genai_types
+    report = {"schema_has_field": has_field, "defs": n_defs}
+    t0 = time.time()
+    try:
+        resp = client.models.generate_content(
+            model=handler.GEMINI_EDITORIAL_MODEL,
+            contents=[
+                "Return a minimal but schema-valid edit plan: fill required scalar "
+                "fields with neutral placeholders and use empty arrays for every "
+                "list (including generated_scenes). Keep it tiny."
+            ],
+            config=types.GenerateContentConfig(
+                temperature=1.0,
+                max_output_tokens=8000,
+                response_mime_type="application/json",
+                response_json_schema=schema,
+            ),
+        )
+        try:
+            txt = resp.text or ""
+        except Exception:
+            txt = ""
+        report["accepted"] = True
+        report["elapsed_s"] = round(time.time() - t0, 1)
+        report["resp_len"] = len(txt)
+        try:
+            parsed = json.loads(txt) if txt else {}
+            report["parsed_ok"] = True
+            report["generated_scenes_in_output"] = "generated_scenes" in parsed
+        except Exception as pe:
+            report["parsed_ok"] = False
+            report["parse_err"] = str(pe)[:200]
+        print(f"[genscene-probe] VERTEX ACCEPTED the schema OK {report}", flush=True)
+    except Exception as e:
+        report["accepted"] = False
+        report["error_type"] = type(e).__name__
+        report["error"] = str(e)[:700]
+        print(f"[genscene-probe] VERTEX REJECTED {type(e).__name__}: {str(e)[:700]}", flush=True)
+    return report
+
+
+@app.local_entrypoint()
+def validate_genscene_schema():
+    """modal run modal_app.py::validate_genscene_schema"""
+    r = validate_genscene_schema_remote.remote()
+    print("\n=== GENSCENE SCHEMA / VERTEX ACCEPTANCE ===")
+    print(r)
+    print("=== END ===\n")
