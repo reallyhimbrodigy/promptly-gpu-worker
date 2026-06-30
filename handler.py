@@ -5796,6 +5796,141 @@ def _gemini_generate_with_backoff(generate_fn, label="gemini", attempts=4, base=
     raise last_err  # defensive — the loop returns or raises on every path
 
 
+# ════════════════════════════════════════════════════════════════════════════
+# Generated-asset image model (Phase E · Nano Banana Pro / gemini-3-pro-image)
+# ════════════════════════════════════════════════════════════════════════════
+# Bespoke generated graphics that replace generic stock on the PREMIUM path.
+# SUB-STEP 1 is the client ONLY: _generate_image is a standalone callable with
+# NO pipeline caller (grep-provable — nothing in the job path references it).
+# Wiring into the b-roll fork lands in Sub-step 3, behind route_premium; the QA
+# judge that makes it reliable lands in Sub-step 4. Free/Flare never reach here.
+_IMAGE_MODEL = "gemini-3-pro-image"
+# Rough per-image cost estimate (Nano Banana Pro) for the test logs + the
+# per-job cost meter added in Sub-step 4. Tune to the confirmed Vertex rate.
+_IMAGE_COST_USD_EST = 0.14
+
+
+def _generate_image(prompt, ref_images=None, out_path=None):
+    """Generate ONE image via the Vertex image model and write it to disk.
+
+    Mirrors _get_genai_client + _gemini_generate_with_backoff. `ref_images` is
+    an optional list of local file paths used as visual references (style /
+    palette / a product photo to render onto). Returns the output file path.
+
+    SUB-STEP 1: standalone — NOT wired into any job. The premium b-roll fork
+    that calls this (and the text-only-from-known-inputs prompt rule) lands in
+    Sub-step 3.
+    """
+    import tempfile as _tempfile
+    import uuid as _uuid
+
+    if genai_client_mod is None or genai_types is None:
+        raise RuntimeError("google-genai SDK unavailable — cannot generate images")
+    client = _get_genai_client()
+
+    # Contents: the text prompt followed by any reference images as inline Parts.
+    _contents = [prompt]
+    for _ref in (ref_images or []):
+        with open(_ref, "rb") as _rf:
+            _rb = _rf.read()
+        _mime = "image/png" if str(_ref).lower().endswith(".png") else "image/jpeg"
+        _contents.append(genai_types.Part.from_bytes(data=_rb, mime_type=_mime))
+
+    if out_path is None:
+        out_path = os.path.join(_tempfile.gettempdir(), f"genasset_{_uuid.uuid4().hex}.png")
+
+    def _call(_modalities):
+        return _gemini_generate_with_backoff(
+            lambda: client.models.generate_content(
+                model=_IMAGE_MODEL,
+                contents=_contents,
+                config=genai_types.GenerateContentConfig(response_modalities=_modalities),
+            ),
+            label="image-gen",
+        )
+
+    _t0 = time.time()
+    # Image-out models vary on whether they accept IMAGE-only or require
+    # TEXT+IMAGE response modalities; try the clean path, fall back once.
+    try:
+        _resp = _call(["IMAGE"])
+    except Exception as _e1:
+        _msg = str(_e1).lower()
+        if "modal" in _msg or "invalid" in _msg or "response_modalities" in _msg:
+            print(
+                f"[image-gen] ['IMAGE'] rejected ({type(_e1).__name__}) — retry TEXT+IMAGE",
+                flush=True,
+            )
+            _resp = _call(["TEXT", "IMAGE"])
+        else:
+            raise
+
+    # Pull the first inline image part out of the response.
+    _img_bytes = None
+    for _c in (getattr(_resp, "candidates", None) or []):
+        _content = getattr(_c, "content", None)
+        for _part in (getattr(_content, "parts", None) or []):
+            _inline = getattr(_part, "inline_data", None)
+            if _inline is not None and getattr(_inline, "data", None):
+                _img_bytes = _inline.data
+                break
+        if _img_bytes:
+            break
+    if not _img_bytes:
+        raise RuntimeError(f"[image-gen] no image part in response for prompt {prompt[:80]!r}")
+    if isinstance(_img_bytes, str):
+        import base64 as _b64
+        _img_bytes = _b64.b64decode(_img_bytes)
+
+    with open(out_path, "wb") as _of:
+        _of.write(_img_bytes)
+
+    _um = getattr(_resp, "usage_metadata", None)
+    _toks = getattr(_um, "total_token_count", None) if _um is not None else None
+    print(
+        f"[image-gen] wrote {out_path} ({len(_img_bytes)} bytes) model={_IMAGE_MODEL} "
+        f"tokens={_toks} cost~${_IMAGE_COST_USD_EST:.3f} in {time.time() - _t0:.1f}s",
+        flush=True,
+    )
+    return out_path
+
+
+# Sample prompts for the Sub-step 1 quality gate. Each says "no text" — putting
+# model-invented words on a graphic is how you get garbled fake text on a
+# render (the text-only-from-known-inputs rule is enforced for real assets in
+# Sub-step 3); these are pure-visual probes of raw generation quality.
+_TEST_IMAGE_PROMPTS = [
+    "A photorealistic studio product render of a sleek matte-black wireless "
+    "earbud charging case on a soft warm gradient background, premium "
+    "e-commerce lighting, shallow depth of field, 9:16 vertical, no text.",
+    "A clean modern mobile app UI mockup of a fitness dashboard shown on a "
+    "phone screen, tasteful vibrant accents, realistic device render, 9:16 "
+    "vertical, UI shapes and icons only, no text or labels.",
+    "A bold branded title-card graphic with abstract geometric shapes in a "
+    "warm orange-and-cream palette, premium and minimal, soft grain, 9:16 "
+    "vertical, no text.",
+]
+
+
+def _generate_test_images(out_dir, prompts=None):
+    """SUB-STEP 1 test harness: generate a few sample images to `out_dir` and
+    log cost. NOT part of any job path — invoked only by the modal_app test
+    entrypoint so Zac can eyeball raw generation quality (the aesthetic gate)."""
+    os.makedirs(out_dir, exist_ok=True)
+    _prompts = prompts or _TEST_IMAGE_PROMPTS
+    _paths = []
+    for _i, _p in enumerate(_prompts):
+        _op = os.path.join(out_dir, f"test_{_i:02d}.png")
+        _generate_image(_p, out_path=_op)
+        _paths.append(_op)
+    print(
+        f"[image-gen] test batch: {len(_paths)} images, est cost "
+        f"${len(_paths) * _IMAGE_COST_USD_EST:.2f}",
+        flush=True,
+    )
+    return _paths
+
+
 def _gemini_generate_with_cache(client, model_name, contents, base_config_kwargs, system_instruction):
     """Run client.models.generate_content with explicit prompt caching.
 

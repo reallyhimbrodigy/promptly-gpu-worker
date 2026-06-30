@@ -887,3 +887,57 @@ def prewarm_janitor():
         flush=True,
     )
     return {"deleted": deleted_count, "bytes_freed": bytes_freed, "errors": errors}
+
+
+# ── Sub-step 1 test entry: generated-image quality gate (INERT) ─────────────
+# Standalone harness so Zac can eyeball raw Nano Banana Pro output BEFORE any
+# pipeline wiring. NOT called by any job — it exists only to render the
+# aesthetic gate. Generates N sample images, uploads them to S3 under
+# test-gen/, and returns presigned GET URLs (24h) so they're viewable.
+# Gets app-level secrets (gemini-vertex, AWS) automatically.
+@app.function(cpu=2, memory=4096, timeout=600)
+def generate_test_images_remote(prompts=None, n=3):
+    import os
+    import sys
+    import uuid
+    import tempfile
+
+    if "/" not in sys.path:
+        sys.path.insert(0, "/")
+    import handler
+
+    _prompts = prompts or handler._TEST_IMAGE_PROMPTS[:n]
+    _s3 = handler._aws_s3_client
+    if _s3 is None:
+        raise RuntimeError("AWS S3 client not configured in handler — cannot publish test images")
+    _bucket = (
+        os.environ.get("S3_BUCKET_NAME")
+        or os.environ.get("SUPABASE_S3_BUCKET")
+        or "promptly-video-storage"
+    )
+
+    urls = []
+    with tempfile.TemporaryDirectory(prefix="gentest-") as work:
+        paths = handler._generate_test_images(work, prompts=_prompts)
+        for p in paths:
+            key = "test-gen/" + uuid.uuid4().hex + ".png"
+            _s3.upload_file(p, _bucket, key, ExtraArgs={"ContentType": "image/png"})
+            url = _s3.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": _bucket, "Key": key},
+                ExpiresIn=86400,
+            )
+            urls.append(url)
+            print(f"[image-gen] uploaded s3://{_bucket}/{key} -> presigned (24h)", flush=True)
+    return urls
+
+
+@app.local_entrypoint()
+def gen_test_images(n: int = 3):
+    """Invoke with:  modal run modal_app.py::gen_test_images
+    Prints presigned URLs for the generated sample images (the aesthetic gate)."""
+    urls = generate_test_images_remote.remote(n=n)
+    print("\n=== GENERATED TEST IMAGE URLs (valid 24h) ===")
+    for u in urls:
+        print(u)
+    print("=== END ===\n")
