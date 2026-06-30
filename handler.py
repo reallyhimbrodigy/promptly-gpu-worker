@@ -3574,7 +3574,7 @@ Required props:
 
 An MG shows the viewer the thing the speaker is REFERRING to off-camera — a number, a notification event, a text message, someone else's words. The placement test is one question: **what specifically is the speaker referencing?** If you can name the referent in a sentence ("her phone showed a Venmo from Sarah for $200"), match it to the component that renders that kind of evidence. If the moment is a feeling, theme, or abstraction, there is no MG in it — forcing one fights the captions and the speaker for attention. And MGs are never transcript repetition: if the MG's rendered text echoes what captions show at the same moment, skip it or rephrase as framing.
 
-Arc placement: **build** is where informational MGs live (StatCard, ProgressBar, StickyNotes, Toggle, Notification, AnnotationArrow). **mid_peak** can take a reaction MG (Notification, TweetBubble, IMessageBubble, social comments) if the peak references a real off-camera reaction. **payoff** takes at most THE reveal MG (StatCard for a number-driven payoff) — anchored clear of the face, where it COMPOSES with the payoff zoom rather than competing: the camera commits to the face while the number lands above it. An MG that would cover the face on the payoff is the violation, not the MG itself. **hook** almost never (the face earns the watch). **breather** never. **close** only as a callback to a hook MG (same component, evolved content).
+Arc placement: **build** is where informational MGs live (StatCard, ProgressBar, StickyNotes, Notification, AnnotationArrow). **mid_peak** can take a reaction MG (Notification, TweetBubble, IMessageBubble, social comments) if the peak references a real off-camera reaction. **payoff** takes at most THE reveal MG (StatCard for a number-driven payoff) — anchored clear of the face, where it COMPOSES with the payoff zoom rather than competing: the camera commits to the face while the number lands above it. An MG that would cover the face on the payoff is the violation, not the MG itself. **hook** almost never (the face earns the watch). **breather** never. **close** only as a callback to a hook MG (same component, evolved content).
 
 Entry shape:
   {{
@@ -3596,15 +3596,15 @@ Component sizes:
   • TOP-PINNED — Notification, StickyNotes: ALWAYS render in the top band regardless of anchor (the metaphor depends on it). Emit anchor "upper_third_safe" so your spec matches reality.
   • LARGE — IMessageBubble, ChatThread, RecordingFrame: ≥half canvas height. If the face is visible, the upper third can't contain them — time them to a B-roll window where the face is gone, or pick a smaller variant.
   • MEDIUM — TweetBubble, InstagramComment, TikTokComment, StatCard: 25-40% canvas height. upper_third_safe works when the face is clearly center-or-lower; if the card would touch the face from above, use lower_third_safe with captions flipped to top, or a B-roll window.
-  • SMALL — AnnotationArrow, ProgressBar, Toggle: <20% canvas. Any anchor; upper_third_safe is safe by construction.
+  • SMALL — AnnotationArrow, ProgressBar: <20% canvas. Any anchor; upper_third_safe is safe by construction.
 
 Anchor preference: 1) upper_third_safe (default — above the face, clear of bottom captions) · 2) lower_third_safe (requires captions moved to top for the window; good for footer-like content) · 3) center (ONLY when the speaker is off-camera or the face is confirmed in the lower band — on a visible talking-head, center lands on the face). MGs always render horizontally centered; there are no side anchors. When no anchor cleanly clears the face, pick a smaller variant, retime to a B-roll window, or skip — a clean speaker shot beats a covered one.
 
 ──────────────────────────────────────────
-THE 13 COMPONENTS
+THE 11 COMPONENTS
 ──────────────────────────────────────────
 
-**Author every word of on-screen text in the speaker's own voice.** When you place a component that carries text — a SceneTitle, a sticky note, a Toggle label, a StatCard's caps line, a notification body, a quoted bubble — the words it shows are part of the edit, and they read best when they land on exactly what the speaker is saying at that beat, in the speaker's own framing. Listen to the line under your placement and lift the framing from it: the title for a section is the name the speaker gives it, a Toggle's label is the thing the speaker names switching, a card's caps line is the noun the speaker stresses. When the text echoes the speaker's wording, the viewer reads screen and voice as one thing and the moment lands twice; when it drifts into a paraphrase or a generic stock label, screen and voice split and the viewer feels the seam. Where a number is the moment, give its caps label the clearest reading of what that number means in the speaker's terms — a price of $0 reads most plainly as the cost being nothing, so a $0 StatCard labels the cost: prefix "$", value 0, label "COST" (or the speaker's exact word "FREE", carried as the label with the number left bare). Pick that reading once and word it the same way every time, so the same moment renders identically on every pass — one chosen label, held steady, reads as an editor's decision; a label that changes run to run reads as the screen second-guessing itself.
+**Author every word of on-screen text in the speaker's own voice.** When you place a component that carries text — a SceneTitle, a sticky note, a StatCard's caps line, a notification body, a quoted bubble — the words it shows are part of the edit, and they read best when they land on exactly what the speaker is saying at that beat, in the speaker's own framing. Listen to the line under your placement and lift the framing from it: the title for a section is the name the speaker gives it, a card's caps line is the noun the speaker stresses. When the text echoes the speaker's wording, the viewer reads screen and voice as one thing and the moment lands twice; when it drifts into a paraphrase or a generic stock label, screen and voice split and the viewer feels the seam. Where a number is the moment, give its caps label the clearest reading of what that number means in the speaker's terms — a price of $0 reads most plainly as the cost being nothing, so a $0 StatCard labels the cost: prefix "$", value 0, label "COST" (or the speaker's exact word "FREE", carried as the label with the number left bare). Pick that reading once and word it the same way every time, so the same moment renders identically on every pass — one chosen label, held steady, reads as an editor's decision; a label that changes run to run reads as the screen second-guessing itself.
 
 **AnnotationArrow** (SMALL) — hand-drawn marker arrow (chevron head, jitter, default #C8551F) drawing on like a live pen, retracting on exit. Claim: "Look at THIS thing on screen." Use when the speaker directs the eye to a specific visible element — a UI control in a walkthrough, a feature in a demo. The moment must contain the on-screen coordinate. One arrow per shot.
 Props: {{ "start": {{"x": 0.0-1.0, "y": 0.0-1.0}}, "end": {{"x": 0.0-1.0, "y": 0.0-1.0}}, "pathType"?: "straight" | "curved-arc" | "j-shape" | "custom", "customPath"?: "M ...", "color"?: "#hex", "strokeWidth"?: number }}
@@ -3615,7 +3615,7 @@ Props: {{ "messages": [{{"sender": "me" | "them", "text": "...", "typingMs"?: in
 **Notification** (TOP-PINNED) — platform banner drops from the top with spring bounce; up to 3 stack, staggered ~400ms. Claim: "This phone event actually happened — here's the banner." Trigger is an action VERB on the timeline: called, texted, paid, pinged, buzzed. The body text matches what the speaker described (the actual message, not "New Message"). One per video — the banner is most powerful as the moment off-screen reality breaks in.
 Props: {{ "notifications": [{{"app": "apple-pay" | "venmo" | "stripe" | "imessage" | "instagram" | "email" | "bank", "appName": "Venmo", "title": "Sarah Lee paid you", "body": "$200 — for dinner", "timestamp"?: "now"}}, ...], "platform"?: "ios" | "android" }}
 
-**ProgressBar** (SMALL) — horizontal bar, gray track, white fill, optional gold eyebrow label (#D4A12A); fill expands 0 → target with the number counting up; milestone ticks light as crossed. Claim: "Here is the quantitative ARC — watch it advance." Use when the dialogue gives a current value, a target, and motion between them ($47K of $100K). Static numbers → StatCard; binary states → Toggle.
+**ProgressBar** (SMALL) — horizontal bar, gray track, white fill, optional gold eyebrow label (#D4A12A); fill expands 0 → target with the number counting up; milestone ticks light as crossed. Claim: "Here is the quantitative ARC — watch it advance." Use when the dialogue gives a current value, a target, and motion between them ($47K of $100K). Static numbers → StatCard.
 Props (value mode): {{ "value": 47000, "total": 100000, "label"?: "FUNDRAISING GOAL", "fillColor"?: "#hex", "accentColor"?: "#hex" }}
 Props (percentage mode): {{ "percentage": 73, "label"?: "COMPLETE", "fillColor"?: "#hex", "accentColor"?: "#hex" }}
 
@@ -3640,9 +3640,6 @@ Props: {{ "value": 100000, "label": "SUBSCRIBERS", "prefix"?: "$", "suffix"?: "%
 
 **StickyNotes** (TOP-PINNED) — same component as the sticky_note text overlay: three notes slamming into the upper third. Claim: "Three parallel items worth pinning." Use when the dialogue enumerates three standalone sibling thoughts (≤4 words each). Mid-sentence fragments are one thought, not three.
 Props: {{ "notes": [{{"text": "MOVE FAST", "color": "#FFE066", "rotation": -3}}, {{"text": "BREAK STUFF", "color": "#FFB3C1", "rotation": 1}}, {{"text": "FIX LATER", "color": "#A8E6CF", "rotation": 4}}] }}
-
-**Toggle** (SMALL) — iOS toggle: label left, pill right; knob slides as track animates gray → blue. One state change. Claim: "A binary state just flipped ON." Use for a literal switch event in the dialogue ("turn this setting on", "I just enabled X") — tutorial/walkthrough/app-demo framing. The label is the thing that just came ON. This switch reads as a single truth: whatever name sits beside the pill is what the speaker just turned active — the knob slides gray → blue and lands ON, every time. So it is at its sharpest when the dialogue itself narrates a capability switching on ("turn auto-editing on", "I just enabled captions", "and now it's live"): set `text` to that named feature and time `activateAtMs` so the knob lands ON exactly as the affirming word hits, and the switch enacts the claim. When the speaker's point is the reverse — that something is finished, dropped, or replaced ("manual editing is gone", "you skip that step entirely") — the Toggle earns its place when the dialogue also names the replacement switching on in the same breath ("...so it's all automated now"): then `text` is that replacement and its switch flips ON, carrying what the line affirms. When the whole weight of the moment is that something is finished with nothing switching on to take its place, a different instrument carries it cleaner — an AnnotationArrow striking through the named control, or a StickyNote pinning the new rule — while the Toggle stays reserved for the switch-ON the dialogue actually narrates.
-Props: {{ "text": "Dark Mode", "activateAtMs"?: int, "onColor"?: "#hex" }}
 
 ═══════════════════════════════════════════════════════════════════════════
 === EMPHASIS MOMENTS + ZOOM ===
@@ -3751,7 +3748,7 @@ IMPACT — instant transient on the trigger word:
 
 **camera_shutter** — mechanical DSLR snap. Strictly literal: a photo being taken in the story (*took a picture, snapped, screenshot*). Pairs with a B-roll of the photo/phone/camera or a freeze-frame beat. Rare — most videos don't earn it.
 
-**click** — soft, almost subliminal UI click. A literal interaction (*tap, press, enable, checked*) — trigger is the interaction verb, not the destination noun. Pairs with a Toggle flipping, a finger-press B-roll, an arrow at the click target. Tutorial/demo content.
+**click** — soft, almost subliminal UI click. A literal interaction (*tap, press, enable, checked*) — trigger is the interaction verb, not the destination noun. Pairs with a finger-press B-roll, an arrow at the click target. Tutorial/demo content.
 
 CINEMATIC IMPACT WITH BUILD — short build (~0.4-0.7s), auto-scheduled so the climax lands on the trigger word:
 
@@ -4197,7 +4194,7 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
 
   "motion_graphics": [
     {{
-      "type": "AnnotationArrow" | "ChatThread" | "Notification" | "ProgressBar" | "RecordingFrame" | "StatCard" | "StickyNotes" | "Toggle" | "TweetBubble" | "InstagramComment" | "IMessageBubble" | "TikTokComment",
+      "type": "AnnotationArrow" | "ChatThread" | "Notification" | "ProgressBar" | "RecordingFrame" | "StatCard" | "StickyNotes" | "TweetBubble" | "InstagramComment" | "IMessageBubble" | "TikTokComment",
       "start_word_index": int,
       "end_word_index": int,
       "duration_seconds": float | null,
@@ -7936,7 +7933,7 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
     _valid_mg_types = {
         "AnnotationArrow", "ChatThread",
         "Notification", "ProgressBar", "RecordingFrame",
-        "StatCard", "StickyNotes", "Toggle",
+        "StatCard", "StickyNotes",
         "TweetBubble", "InstagramComment", "IMessageBubble", "TikTokComment",
     }
     # Motion graphics use semantic safe-zone anchors that map to the MG pack's
@@ -18831,6 +18828,31 @@ def handler(job):
             edit_plan = _copy_mod.deepcopy(provided_plan)
             print("[pipeline] render_only mode — using provided edit_plan (skipped Gemini generate)", flush=True)
         print(f"[TIMING] edit_plan ready in {time.time() - _mega_t0:.1f}s (critical path)", flush=True)
+
+        # ── Defensive: strip motion_graphics the renderer no longer knows ──
+        # A re-edit (render_only/tweak) replaying an OLD saved plan can carry a
+        # since-removed component type (e.g. Toggle). The render schema is
+        # extra='forbid', so an unknown type would crash the render at the
+        # _validate_and_write_render_input boundary — drop it instead, gracefully.
+        # No-op for fresh jobs (the Gemini schema can no longer emit one).
+        if isinstance(edit_plan, dict) and isinstance(edit_plan.get("motion_graphics"), list):
+            _mg_all = edit_plan["motion_graphics"]
+            _mg_keep = [
+                _m for _m in _mg_all
+                if isinstance(_m, dict) and str(_m.get("type") or "") in VALID_MG_TYPES
+            ]
+            if len(_mg_keep) != len(_mg_all):
+                _mg_dropped = sorted({
+                    str(_m.get("type")) for _m in _mg_all
+                    if isinstance(_m, dict) and str(_m.get("type") or "") not in VALID_MG_TYPES
+                })
+                print(
+                    f"[mg] dropped {len(_mg_all) - len(_mg_keep)} motion_graphic(s) with "
+                    f"now-unknown type(s) {_mg_dropped} — re-edit of a plan predating a "
+                    f"component removal; degrading gracefully instead of crashing",
+                    flush=True,
+                )
+                edit_plan["motion_graphics"] = _mg_keep
 
         # ── EditPolicy resolve · Step 1: await + log ONLY (no consumer) ──
         # resolve_edit_policy catches every error internally → default, so

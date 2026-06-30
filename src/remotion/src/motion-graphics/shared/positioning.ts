@@ -150,7 +150,7 @@ function clampOffsetForAnchor(
 //     of the safe-zone top + bottom padding; full-width minus the action rail.
 //     (Notification intentionally overlaps TikTok's own clock — the mimic look.)
 //
-// StickyNotes + Toggle hardcode left:50% + translateX(-50%) and never route
+// StickyNotes hardcodes left:50% + translateX(-50%) and never routes
 // through resolveMGPosition; AnnotationArrow (points at a target) and
 // RecordingFrame (full-frame border) are intentionally free-positioned via
 // their OWN absolute positioning, outside this resolver. Vertical anchoring

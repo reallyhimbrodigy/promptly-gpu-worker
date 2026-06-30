@@ -68,7 +68,7 @@ import {
 import {
   AnnotationArrow, StatCard,
   Notification, ProgressBar, ChatThread,
-  StickyNotes, Toggle, RecordingFrame,
+  StickyNotes, RecordingFrame,
   TweetBubble, InstagramComment, IMessageBubble, TikTokComment,
 } from "./motion-graphics";
 
@@ -94,7 +94,7 @@ const ZOOM_MAP: Record<string, React.FC<any>> = {
 const MG_MAP: Record<string, React.FC<any>> = {
   AnnotationArrow, StatCard,
   Notification, ProgressBar, ChatThread,
-  StickyNotes, Toggle, RecordingFrame,
+  StickyNotes, RecordingFrame,
   TweetBubble, InstagramComment, IMessageBubble, TikTokComment,
 };
 
