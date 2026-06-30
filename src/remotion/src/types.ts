@@ -161,6 +161,52 @@ export interface BrollSpec {
   playbackRate: number;
 }
 
+// ── Generated scenes (Phase E · composed premium graphics) ──────────────────
+// A GeneratedScene is composited from separate layers (background world →
+// subject still → text → motion), NOT a flat image. Mirrors render_schemas.py.
+export type GenSceneBackgroundKind = "generated" | "gradient" | "solid";
+export type GenSceneEntrance = "fade" | "float" | "rise" | "scale" | "slide";
+export type GenSceneEasing = "ease" | "linear" | "spring";
+export type GenSceneAnchor = "upper_third_safe" | "center" | "lower_third_safe";
+
+export interface GenSceneBackgroundSpec {
+  kind: GenSceneBackgroundKind;
+  paletteRef?: string | null;
+  generationPrompt?: string | null;
+  colors?: string[] | null;
+}
+
+export interface GenSceneSubjectSpec {
+  /** Generated still URL (filled in Sub-step 3 by _generate_image + staging).
+   *  Null until then; the layer draws a placeholder box when absent. */
+  imageUrl?: string | null;
+  generationPrompt: string;
+  anchor: GenSceneAnchor;
+  scale?: number | null;
+}
+
+export interface GenSceneTextLayerSpec {
+  /** FROM-KNOWN-INPUTS-ONLY (transcript / user string) — never model-invented. */
+  content: string;
+  styleRef?: string | null;
+  anchor: GenSceneAnchor;
+}
+
+export interface GenSceneMotionSpec {
+  entrance: GenSceneEntrance;
+  easing: GenSceneEasing;
+  motionBlur: boolean;
+}
+
+export interface GeneratedSceneSpec {
+  fromFrame: number;
+  durationInFrames: number;
+  background: GenSceneBackgroundSpec;
+  subject: GenSceneSubjectSpec;
+  textLayers: GenSceneTextLayerSpec[];
+  motion: GenSceneMotionSpec;
+}
+
 // ── Captions ─────────────────────────────────────────────────────────────────
 export interface TikTokTokenLike {
   text: string;
@@ -264,6 +310,9 @@ export interface PromptlyRenderInput {
   clips: ClipSpec[];
   transitions: TransitionSpec[];
   broll: BrollSpec[];
+  /** Generated composed scenes (Phase E). Empty by default — `[]` means no
+   *  behavior change vs the pre-GeneratedScene pipeline (mirrors tightCutOverlays). */
+  generatedScenes?: GeneratedSceneSpec[];
   caption: CaptionSpec;
   textOverlays: TextOverlaySpec[];
   motionGraphics: MotionGraphicSpec[];
