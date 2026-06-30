@@ -6132,6 +6132,130 @@ def _generate_scene_subject(scene, idx, work_dir, known_text=""):
             "refs": len(_refs), "prompt_chars": len(_prompt), "ms": _ms}
 
 
+# ── QA judge + recovery for generated scenes (Phase E · Sub-step 4 / Phase F) ─
+# PREMIUM reliability net: a generator without a judge is a liability. Judges
+# ONLY the generated scenes (scoped cost), and recovery PERTURBS the plan
+# (patch_list) + regenerates + re-renders rather than blindly re-rendering a
+# deterministic plan. Free + no-scene jobs never reach any of this.
+_QA_PASS_THRESHOLD = 0.6  # min of the four sub-scores to pass
+
+
+class _SceneQAScore(BaseModel):
+    scene_index: int
+    coherence: float       # clean/sharp, not garbled/uncanny
+    text_correct: float    # on-image text legible AND matches the brief (1.0 if none)
+    on_palette: float      # sits in the video's committed colors
+    integration: float     # reads as designed, not pasted-on
+    verdict: Literal["pass", "fail"]
+    reason: str = ""
+
+
+class _SceneQAReport(BaseModel):
+    scenes: List[_SceneQAScore]
+
+
+def _extract_frame_at(video_path, t_sec, out_path):
+    """Pull one JPEG frame at t_sec — the scoped sample the scene judge reads."""
+    _r = subprocess.run(
+        ["ffmpeg", "-y", "-v", "error", "-ss", f"{max(0.0, t_sec):.3f}",
+         "-i", video_path, "-frames:v", "1", "-q:v", "3", out_path],
+        capture_output=True, text=True, timeout=30,
+    )
+    return out_path if (_r.returncode == 0 and os.path.exists(out_path)) else None
+
+
+def _qa_judge_generated_scenes(output_path, gs_specs, fps, work_dir, palette_hint="", known_text=""):
+    """Vision-judge each rendered generated scene against the rubric. ONE Gemini
+    call with one representative frame per scene — scoped to the scenes, not the
+    whole video. Returns a list of _SceneQAScore ([] ⇒ nothing to judge / judge
+    failed ⇒ treated as pass, fail-open: QA must never block the job)."""
+    if genai_client_mod is None or genai_types is None or not gs_specs:
+        return []
+    _contents = []
+    for _i, _gs in enumerate(gs_specs):
+        _mid = (float(_gs.get("fromFrame", 0)) + float(_gs.get("durationInFrames", 1)) / 2.0) / max(1.0, float(fps))
+        _fp = _extract_frame_at(output_path, _mid, os.path.join(work_dir, f"qa_scene_{_i:02d}.jpg"))
+        if not _fp:
+            continue
+        with open(_fp, "rb") as _f:
+            _contents.append(genai_types.Part.from_bytes(data=_f.read(), mime_type="image/jpeg"))
+        _txt = " / ".join(str((_t or {}).get("content") or "") for _t in (_gs.get("textLayers") or []))
+        _contents.append(
+            f"SCENE {_i}: intended on-image text (must match EXACTLY + be legible): "
+            f"{_txt or '(none)'}. Intended palette: {palette_hint or 'the committed video palette'}."
+        )
+    if not _contents:
+        return []
+    _sys = (
+        "You are a strict art director QA-checking AI-generated graphic scenes "
+        "composited into a premium short-form video. For EACH scene image score "
+        "0.0-1.0 on: coherence (clean/sharp, not garbled/uncanny/melted); "
+        "text_correct (any on-image text is legible AND matches the intended text "
+        "exactly — 1.0 if there is no text); on_palette (sits in the intended "
+        "color world); integration (reads as a designed part of the piece, not "
+        "pasted-on clipart). verdict='fail' if the scene looks broken, has "
+        "wrong/garbled text, or is clearly off-palette/uncanny; else 'pass'. Be "
+        "strict — a luxury edit ships NOTHING broken."
+    )
+    try:
+        _client = _get_genai_client()
+        _resp = _gemini_generate_with_backoff(
+            lambda: _client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=_contents,
+                config=genai_types.GenerateContentConfig(
+                    temperature=0.2,
+                    response_mime_type="application/json",
+                    response_json_schema=_SceneQAReport.model_json_schema(),
+                    system_instruction=_sys,
+                ),
+            ),
+            label="qa-judge",
+        )
+        return _SceneQAReport.model_validate(json.loads(_resp.text or "{}")).scenes
+    except Exception as _je:
+        print(
+            f"[qa-judge] judge call failed ({type(_je).__name__}: {str(_je)[:120]}) "
+            f"— treat as pass (fail-open)",
+            flush=True,
+        )
+        return []
+
+
+def _perturb_scene_prompt(scene, qa_reason, attempt):
+    """Re-ask Gemini for a DIFFERENT subject generation_prompt — the recovery
+    perturbation. Wires recipe_eval.Report.patch_list() (previously no caller):
+    the QA failure is formatted as a repair note fed back to the model. Returns a
+    new prompt string, or None to keep the old."""
+    _cur = str(((scene or {}).get("subject") or {}).get("generation_prompt") or "")
+    if not _cur:
+        return None
+    try:
+        import recipe_eval as _re_mod
+        _rep = _re_mod.Report()
+        _rep.fail("generated_scene_qa", f"attempt {attempt}: {qa_reason or 'failed art-director QA'}")
+        _client = _get_genai_client()
+        _resp = _gemini_generate_with_backoff(
+            lambda: _client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=[
+                    "You are repairing a prompt for an AI image generator. The "
+                    "previous render FAILED art-director QA. Rewrite the prompt to "
+                    "fix it: cleaner, sharper, simpler composition; legible text "
+                    "ONLY from the brief; on-palette; less uncanny. Return ONLY the "
+                    "new prompt text, no preamble.\n\n"
+                    f"PREVIOUS PROMPT:\n{_cur}\n\n{_rep.patch_list()}"
+                ],
+                config=genai_types.GenerateContentConfig(temperature=0.7),
+            ),
+            label="qa-perturb",
+        )
+        _new = (getattr(_resp, "text", "") or "").strip()
+        return _new or None
+    except Exception:
+        return None
+
+
 def _gemini_generate_with_cache(client, model_name, contents, base_config_kwargs, system_instruction):
     """Run client.models.generate_content with explicit prompt caching.
 
@@ -15487,6 +15611,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             })
         if _gs_out:
             print(f"[gen-asset] render: composited {len(_gs_out)} generated scene(s)", flush=True)
+    # Stash the rendered specs + fps so the Sub-step-4 QA judge can sample each
+    # scene's window from the output. Absent/[] for free/no-scene jobs.
+    if isinstance(edit_plan, dict):
+        edit_plan["_rendered_generated_scenes"] = _gs_out
+        edit_plan["_render_fps"] = source_fps
 
     # PromptlyOverlay input — captions/MG/text on a transparent canvas. The
     # FFmpeg composite step lays this onto the source in a single encode.
@@ -20027,6 +20156,109 @@ def handler(job):
         if not validate_output(output_path, "final"):
             raise RuntimeError(f"Final output is invalid: {output_path}")
         output_size_mb = os.path.getsize(output_path) / (1024*1024)
+
+        # ── QA judge + recovery for generated scenes (Phase E · Sub-step 4) ──
+        # PREMIUM + has-rendered-scene only → free/no-scene jobs skip entirely
+        # (byte-identical). Judge the generated scenes; on failure PERTURB the
+        # plan (patch_list) + regenerate + re-render, bounded by attempts (≤2) AND
+        # a re-render-time headroom check; DEGRADE (drop the scene, re-render
+        # without it) if it can't be fixed in budget. NEVER ships a judged-bad
+        # asset; fail-open — any error ships the already-validated output.
+        _qa_scenes = (edit_plan.get("_rendered_generated_scenes") or []) if isinstance(edit_plan, dict) else []
+        if route_premium and premium_ctx is not None and _qa_scenes:
+            try:
+                _qa_fps = float(edit_plan.get("_render_fps") or 60.0)
+                _palette_hint = str(edit_plan.get("video_identity") or "")[:120]
+                _known_text = " ".join(str(w.get("word") or "") for w in (transcript.get("words") or [])).strip()
+                _MAX_QA_ATTEMPTS = 2
+                # A recovery re-render costs ≈ render_elapsed. We gate on that so a
+                # slow render can't blow the 900s function timeout (judge itself is
+                # a cheap ~5-15s vision call; the re-render is the expensive part).
+                _RERENDER_HEADROOM_S = 240.0
+                _attempt = 0
+                while True:
+                    _scores = _qa_judge_generated_scenes(
+                        output_path, _qa_scenes, _qa_fps, work_dir, _palette_hint, _known_text
+                    )
+                    _fail = [
+                        s for s in _scores
+                        if s.verdict == "fail"
+                        or min(s.coherence, s.text_correct, s.on_palette, s.integration) < _QA_PASS_THRESHOLD
+                    ]
+                    for s in _scores:
+                        print(
+                            f"[qa-judge] scene={s.scene_index} "
+                            f"scores={{coh:{s.coherence:.2f},txt:{s.text_correct:.2f},"
+                            f"pal:{s.on_palette:.2f},int:{s.integration:.2f}}} verdict={s.verdict} "
+                            f"attempt={_attempt} "
+                            f"cost=${(_cost_meter.total_usd() if _cost_meter is not None else 0.0):.3f}",
+                            flush=True,
+                        )
+                    if not _fail:
+                        if _scores:
+                            print(f"[qa-judge] {len(_scores)} scene(s) pass — ship", flush=True)
+                        break
+                    _fail_idx = {s.scene_index for s in _fail}
+                    _over_budget = _cost_meter is not None and _cost_meter.total_usd() >= _PREMIUM_ASSET_BUDGET_USD
+                    _no_headroom = render_elapsed > _RERENDER_HEADROOM_S
+                    if _attempt >= _MAX_QA_ATTEMPTS or _over_budget or _no_headroom:
+                        # DEGRADE — drop the unfixable scenes, one final re-render.
+                        print(
+                            f"[qa-judge] verdict=degrade dropping {sorted(_fail_idx)} "
+                            f"(attempt={_attempt} over_budget={_over_budget} no_headroom={_no_headroom}) "
+                            f"— re-render without them",
+                            flush=True,
+                        )
+                        edit_plan["generated_scenes"] = [
+                            g for i, g in enumerate(edit_plan.get("generated_scenes") or []) if i not in _fail_idx
+                        ]
+                        edit_plan["_generated_subjects"] = {
+                            i: p for i, p in (edit_plan.get("_generated_subjects") or {}).items() if i not in _fail_idx
+                        }
+                        edit_plan.pop("_rendered_generated_scenes", None)
+                        _reout = output_path + ".qa.mp4"
+                        render_multi_clip(
+                            source_path, edit_plan["cuts"], edit_plan, _reout, transcript, work_dir,
+                            broll_clips=broll_clips,
+                        )
+                        if validate_output(_reout, "qa-degrade"):
+                            os.replace(_reout, output_path)
+                            output_size_mb = os.path.getsize(output_path) / (1024 * 1024)
+                        break
+                    # RETRY — perturb failing scenes' prompts, regenerate, re-render.
+                    print(f"[qa-judge] verdict=retry scenes={sorted(_fail_idx)} attempt={_attempt + 1}", flush=True)
+                    _reasons = {s.scene_index: s.reason for s in _fail}
+                    _scene_list = edit_plan.get("generated_scenes") or []
+                    for _i in _fail_idx:
+                        if not (0 <= _i < len(_scene_list)) or not isinstance(_scene_list[_i], dict):
+                            continue
+                        _scene = _scene_list[_i]
+                        _newp = _perturb_scene_prompt(_scene, _reasons.get(_i, ""), _attempt + 1)
+                        if _newp:
+                            _scene.setdefault("subject", {})["generation_prompt"] = _newp
+                        _res = _generate_scene_subject(_scene, _i, work_dir, _known_text)
+                        if _res and _res.get("path"):
+                            edit_plan.setdefault("_generated_subjects", {})[_i] = _res["path"]
+                            if _cost_meter is not None:
+                                _cost_meter.add("generated_asset_regen", count=1, usd=float(_res.get("cost") or 0.0))
+                    edit_plan.pop("_rendered_generated_scenes", None)
+                    _reout = output_path + ".qa.mp4"
+                    render_multi_clip(
+                        source_path, edit_plan["cuts"], edit_plan, _reout, transcript, work_dir,
+                        broll_clips=broll_clips,
+                    )
+                    if validate_output(_reout, "qa-retry"):
+                        os.replace(_reout, output_path)
+                        output_size_mb = os.path.getsize(output_path) / (1024 * 1024)
+                    _qa_scenes = (edit_plan.get("_rendered_generated_scenes") or [])
+                    _attempt += 1
+            except Exception as _qa_err:
+                print(
+                    f"[qa-judge] recovery error ({type(_qa_err).__name__}: {str(_qa_err)[:140]}) "
+                    f"— shipping the validated output",
+                    flush=True,
+                )
+
         send_progress(job_id, "thumbnail", 92, "Picking your cover frame", app_url)
         send_progress(job_id, "upload", 96, "Publishing to your library", app_url)
         print(f"[pipeline] output: {output_size_mb:.1f}MB, {final_dur:.1f}s — parallel upload + cover frame", flush=True)
