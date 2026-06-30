@@ -213,7 +213,6 @@ export type MotionGraphicType =
   | "RecordingFrame"
   | "StatCard"
   | "StickyNotes"
-  | "Toggle"
   | "TweetBubble"
   | "InstagramComment"
   | "IMessageBubble"

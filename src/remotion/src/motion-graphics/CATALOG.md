@@ -276,30 +276,7 @@ Animated count-up number with label and accent divider line. Counts from `fromVa
 
 ---
 
-### 14. Toggle
-
-iOS-style toggle switch that flips from off to on at a configurable time. Label text sits to the left of the switch. Simple, clean, one animation.
-
-**Best for:** Feature toggles, on/off reveals, settings demonstrations, binary choices.
-
-**Supports:** MGTimingProps
-
-| Prop | Type | Default | Description |
-|------|------|---------|-------------|
-| `text` | `string` | — | **Required.** Label text. |
-| `activateAtMs` | `number` | `400` | Ms from component start when toggle flips on. |
-| `fontSize` | `number` | `72` | Label font size. |
-| `toggleScale` | `number` | `1.5` | Switch size multiplier. |
-| `offColor` | `string` | `"#D1D5DB"` | Off-state track color. |
-| `onColor` | `string` | `"#3B82F6"` | On-state track color. |
-| `labelColor` | `string` | `"#FFFFFF"` | Label text color. |
-| `knobColor` | `string` | `"#FFFFFF"` | Knob (thumb) color. |
-| `top` | `string` | `"12%"` | CSS top position. |
-| `left` | `string` | `"50%"` | CSS left position (centered by default). |
-
----
-
-### 15. TornPaper
+### 14. TornPaper
 
 Two torn paper strips that slam in from opposite sides with stop-motion impact. Each strip has a colored shadow block behind it for depth. Subtle idle jitter after landing. Bold, physical, tactile.
 
