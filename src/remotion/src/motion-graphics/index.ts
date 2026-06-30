@@ -41,3 +41,22 @@ export type {
   RecordingFrameProps,
   RecordingFrameAnnotation,
 } from "./RecordingFrame";
+
+// ── Batch 2 — 17 net-new motion graphics (additive; same shared/ interface) ──
+export { NumberTicker } from "./NumberTicker";
+export { Timeline } from "./Timeline";
+export { Reticle } from "./Reticle";
+export { IconLabel } from "./IconLabel";
+export { RankedList } from "./RankedList";
+export { PullQuote } from "./PullQuote";
+export { PillCluster } from "./PillCluster";
+export { Stamp } from "./Stamp";
+export { BarRace } from "./BarRace";
+export { SectionDivider } from "./SectionDivider";
+export { EditorialQuote } from "./EditorialQuote";
+export { StepDivider } from "./StepDivider";
+export { DropBanner } from "./DropBanner";
+export { DropCard } from "./DropCard";
+export { PillMarquee } from "./PillMarquee";
+export { TimelineRoadmap } from "./TimelineRoadmap";
+export { MouseDrag } from "./MouseDrag";

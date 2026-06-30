@@ -54,6 +54,8 @@ import {
   Prime, TypewriterReveal, CinematicLetterpress, Cove,
   EditorialPop, Illuminate, Lumen,
   Passage, Pulse, Quintessence, Serif,
+  // Batch 2 (4 net-new caption styles)
+  TwoTone, NeonStripe, Spectrum, CleanCut,
 } from "./captions";
 
 // Transitions — all 12
@@ -69,12 +71,18 @@ import {
   StageZoom, DepthPull,
 } from "./zoom";
 
-// Motion graphics — 13 components total (9 standalone + 4 SpeechBubble variants).
+// Motion graphics — 30 components total (13 batch 1 + 17 batch 2). All share the
+// MGTimingProps/MGPositionProps + useMGPhase interface; the renderer feeds each
+// startMs=0 + window-derived durationMs + spread props (see MotionGraphicRenderer).
 import {
   AnnotationArrow, StatCard,
   Notification, ProgressBar, ChatThread,
   StickyNotes, RecordingFrame,
   TweetBubble, InstagramComment, IMessageBubble, TikTokComment,
+  // Batch 2 (17 net-new)
+  NumberTicker, Timeline, Reticle, IconLabel, RankedList, PullQuote,
+  PillCluster, Stamp, BarRace, SectionDivider, EditorialQuote, StepDivider,
+  DropBanner, DropCard, PillMarquee, TimelineRoadmap, MouseDrag,
 } from "./motion-graphics";
 
 // ─── Component maps ────────────────────────────────────────────────────────
@@ -83,6 +91,8 @@ const CAPTION_MAP: Record<string, React.FC<any>> = {
   Prime, TypewriterReveal, CinematicLetterpress, Cove,
   EditorialPop, Illuminate, Lumen,
   Passage, Pulse, Quintessence, Serif,
+  // Batch 2 (4 net-new)
+  TwoTone, NeonStripe, Spectrum, CleanCut,
 };
 
 const TRANSITION_MAP: Record<string, React.FC<any>> = {
@@ -101,6 +111,10 @@ const MG_MAP: Record<string, React.FC<any>> = {
   Notification, ProgressBar, ChatThread,
   StickyNotes, RecordingFrame,
   TweetBubble, InstagramComment, IMessageBubble, TikTokComment,
+  // Batch 2 (17 net-new) — canonical type names = export names.
+  NumberTicker, Timeline, Reticle, IconLabel, RankedList, PullQuote,
+  PillCluster, Stamp, BarRace, SectionDivider, EditorialQuote, StepDivider,
+  DropBanner, DropCard, PillMarquee, TimelineRoadmap, MouseDrag,
 };
 
 // ─── Per-clip renderer ─────────────────────────────────────────────────────

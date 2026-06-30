@@ -37,3 +37,9 @@ export type { IlluminateProps } from "./Illuminate";
 
 export { Passage } from "./Passage";
 export type { PassageProps } from "./Passage";
+
+// ── Batch 2 — 4 net-new caption styles (additive; same shared/ interface) ──
+export { TwoTone } from "./TwoTone";
+export { NeonStripe } from "./NeonStripe";
+export { Spectrum } from "./Spectrum";
+export { CleanCut } from "./CleanCut";
