@@ -406,6 +406,11 @@ image = (
         "PROMPTLY_PREMIUM_VALUES": "pro,teams,premium",
         "PROMPTLY_JOB_TABLE": "video_jobs",
         "PROMPTLY_JOB_ACTIVE_STATUSES": "queued,processing",
+        # Durable job-status writes (the progress backbone). Default OFF: flip to
+        # "1" ONLY after the video_jobs migration runs (migrations/
+        # video_jobs_status.sql) and status ownership is coordinated with the JS
+        # server. Off => the worker writes nothing to video_jobs (byte-identical).
+        "JOB_STATUS_WRITES_ENABLED": "0",
         # ── Re-edit Layer 3 Phase 2: array-level auto-revert ─────
         # Phase 1 (always on) auto-reverts top-level scalar drift
         # (caption_style / thumbnail_word_index / outro). Phase 2

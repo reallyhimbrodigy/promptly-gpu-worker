@@ -16339,11 +16339,131 @@ def classify_error(e):
     )
 
 
+# ── Durable job-status layer — writes pipeline progress to the video_jobs row ──
+# Flag-gated (env JOB_STATUS_WRITES_ENABLED, default OFF) because it (a) needs new
+# video_jobs columns that a SQL migration must add (PostgREST silently DROPS writes
+# to unknown columns, so without the migration the writes no-op invisibly) and
+# (b) writes video_jobs.status, which the JS server also owns — flip it on only
+# after the migration runs and status ownership is coordinated. Fail-open
+# throughout: a status-write failure only logs, never raises into the render.
+# Monotonic: progress never regresses for a job — one container handles one job,
+# so a process-local high-water mark is authoritative; the supabase update runs
+# UNDER the lock so the decision and the write are atomic (ordered, no race).
+_JOB_STATUS_LOCK = threading.Lock()
+_JOB_PROGRESS_HW = {}  # job_id -> highest progress written this process
+
+# Weighted re-map: (lo, hi, live_lo, live_hi). Render is ~66% of wall-clock so it
+# gets the widest band (30->92); a naive uniform bar races then stalls at 35 for
+# minutes. Point events have lo==hi (a milestone); render/upload/plan interpolate
+# the live heartbeat pct into their weighted band. Cumulative: download~1,
+# analyze~28, render~66, upload~5.
+_STEP_BANDS = {
+    "queued": (0, 0, 0, 0), "download": (1, 1, 5, 5), "analyze": (3, 3, 7, 7),
+    "transcribe": (8, 8, 10, 10), "face_detect": (12, 12, 14, 14),
+    "shots": (16, 16, 18, 18), "trend": (20, 20, 22, 22),
+    "plan_diff": (24, 24, 10, 10), "plan": (24, 28, 38, 50),
+    "broll_search": (29, 29, 52, 52), "render": (30, 92, 65, 90),
+    "thumbnail": (93, 93, 92, 92), "upload": (94, 99, 96, 99),
+    "complete": (100, 100, 100, 100), "needs_clarification": (100, 100, 100, 100),
+}
+
+
+def _durable_progress(step, live_pct):
+    """Map a (step, live send_progress pct) to the weighted durable progress."""
+    band = _STEP_BANDS.get(step)
+    if band is None:
+        return None
+    lo, hi, olo, ohi = band
+    if hi <= lo or ohi <= olo:
+        return lo
+    try:
+        frac = (float(live_pct) - olo) / (ohi - olo)
+    except Exception:
+        return lo
+    frac = max(0.0, min(1.0, frac))
+    return int(round(lo + frac * (hi - lo)))
+
+
+def _job_status_enabled():
+    return os.environ.get("JOB_STATUS_WRITES_ENABLED", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
+def write_job_status(job_id, *, status=None, phase=None, progress=None, result=None):
+    """Patch the durable video_jobs row. SYNCHRONOUS, fail-open, monotonic. No-op
+    unless the flag is on. Terminal statuses (complete/failed/canceled/needs_input)
+    always write; intermediate progress never regresses."""
+    if supabase is None or not job_id or not _job_status_enabled():
+        return
+    _terminal = status in ("complete", "failed", "canceled", "needs_input")
+    table = os.environ.get("PROMPTLY_JOB_TABLE") or "jobs"
+    status_col = os.environ.get("PROMPTLY_JOB_STATUS_COLUMN") or "status"
+    if progress is not None:
+        try:
+            progress = int(progress)  # coerce up front so no int() can raise below
+        except (TypeError, ValueError):
+            progress = None
+    with _JOB_STATUS_LOCK:
+        if progress is not None:
+            hw = _JOB_PROGRESS_HW.get(job_id, -1)
+            if not _terminal and progress <= hw:
+                progress = None  # monotonic: skip the regressing progress, keep other fields
+            else:
+                _JOB_PROGRESS_HW[job_id] = max(hw, progress)
+        patch = {"updated_at": datetime.utcnow().isoformat()}
+        if status is not None:
+            patch[status_col] = status
+        if phase is not None:
+            patch["phase"] = phase
+        if progress is not None:
+            patch["progress"] = progress
+        if result is not None:
+            patch["result"] = result
+        try:
+            supabase.table(table).update(patch).eq("id", job_id).execute()
+        except Exception as e:
+            print(f"[job-status] write failed job={job_id}: {e} (fail open)", flush=True)
+        if _terminal:
+            _JOB_PROGRESS_HW.pop(job_id, None)  # free the high-water entry — warm containers reuse the process
+
+
+def _async_job_status(job_id, **kw):
+    """Fire write_job_status on a daemon thread — never blocks the pipeline. For
+    the frequent intermediate ticks; terminal writes call write_job_status
+    directly so they land before the handler returns."""
+    if supabase is None or not job_id or not _job_status_enabled():
+        return
+    threading.Thread(target=lambda: write_job_status(job_id, **kw), daemon=True).start()
+
+
+def read_job_status(job_id):
+    """Read the durable status row by id — the poll contract. Fail-open to
+    {'status': 'unknown'}. (Recommended path: the frontend polls Supabase
+    video_jobs directly; this exists if a worker-side read is ever preferred.)"""
+    if supabase is None or not job_id:
+        return {"status": "unknown"}
+    table = os.environ.get("PROMPTLY_JOB_TABLE") or "jobs"
+    try:
+        r = (supabase.table(table)
+             .select("status,phase,progress,result,updated_at")
+             .eq("id", job_id).limit(1).execute())
+        return r.data[0] if r.data else {"status": "unknown"}
+    except Exception as e:
+        print(f"[job-status] read failed job={job_id}: {e} (fail open)", flush=True)
+        return {"status": "unknown"}
+
+
 def send_progress(job_id, step, pct, message, app_url):
     """
     POST progress update to the JS server. Fire-and-forget in background thread.
     Never blocks the main pipeline — progress updates are best-effort only.
     """
+    # Durable persistence (flag-gated, fail-open, async) — independent of the
+    # JS-server POST below so progress survives reconnect even when app_url is
+    # unset. No-op when JOB_STATUS_WRITES_ENABLED is off (byte-identical).
+    _async_job_status(job_id, status="processing", phase=message,
+                      progress=_durable_progress(step, pct))
     if not app_url:
         return
     import threading
@@ -17463,6 +17583,12 @@ def handler(job):
             classification = diff.get("classification")
             if classification == "needs_clarification":
                 send_progress(job_id, "needs_clarification", 100, "Need a bit more info...", app_url)
+                # Durable TERMINAL write: needs_input (reserved status; Phase D
+                # ask-back will reuse it to pause->ask->resume).
+                write_job_status(
+                    job_id, status="needs_input", phase="Need a bit more info",
+                    result={"clarification_question": diff.get("clarification_question")},
+                )
                 return {
                     "status": "needs_clarification",
                     "job_id": job_id,
@@ -18695,6 +18821,9 @@ def handler(job):
         _mega_t0 = time.time()
         if future_edit is not None:
             edit_plan = future_edit.result()  # critical path — longest wait (Gemini)
+            # Durable boundary: analyze complete / recipe ready (deterministic —
+            # authoritative band-end regardless of which racing in-thread events fired).
+            _async_job_status(job_id, status="processing", phase="Planning the edit", progress=29)
         else:
             # render_only: use the provided plan. Deep-copy so downstream mutations
             # (private _foo fields, thumbnail projection, etc.) don't pollute caller state.
@@ -18965,6 +19094,9 @@ def handler(job):
         # Validate render output — single ffprobe for file check + duration extraction
         if not os.path.exists(output_path) or os.path.getsize(output_path) < 100000:
             raise RuntimeError(f"Main render produced invalid output: {output_path}")
+        # Durable boundary: render complete (closes the heartbeat-only 90->92 gap
+        # so a reconnect mid-finalize resumes correctly).
+        _async_job_status(job_id, status="processing", phase="Finalizing", progress=95)
         _rv, _ra = 0.0, 0.0
         _v_start, _a_start = 0.0, 0.0
         try:
@@ -19346,6 +19478,9 @@ def handler(job):
                 f_upload.result()
                 cover_bytes, _ = f_cover.result()
                 f_hls.result()
+                # Durable boundary: upload+HLS complete (closes the documented
+                # "worst stuck-bar gap" so a reconnect mid-HLS resumes correctly).
+                _async_job_status(job_id, status="processing", phase="Finalizing", progress=99)
         finally:
             _upload_hb_stop.set()
 
@@ -19507,6 +19642,14 @@ def handler(job):
             result_payload["cover_frame_mime"] = "image/jpeg"
         if exported_formats:
             result_payload["exported_formats"] = exported_formats
+        # Durable TERMINAL write (synchronous so it lands before return): complete.
+        write_job_status(
+            job_id, status="complete", phase="Done", progress=100,
+            result={
+                "video_url": result_payload.get("video_url"),
+                "hls_manifest_url": result_payload.get("hls_manifest_url"),
+            },
+        )
         return result_payload
 
     except Exception as e:
@@ -19518,6 +19661,16 @@ def handler(job):
         # any existing JS consumer; new clients should read the structured
         # fields instead.
         classified = classify_error(e)
+        # Durable TERMINAL write (synchronous): failed — so the bar shows a real
+        # error state and the client stops polling, instead of freezing.
+        write_job_status(
+            input_data.get("job_id"), status="failed", phase="Something went wrong",
+            result={
+                "error_code": classified.get("error_code"),
+                "user_message": classified.get("user_message"),
+                "retryable": classified.get("retryable"),
+            },
+        )
         return {
             "error": classified["user_message"],     # legacy: human text
             "error_code": classified["error_code"],   # NEW: machine code
