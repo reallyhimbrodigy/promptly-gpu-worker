@@ -6018,6 +6018,120 @@ def _generate_test_images(out_dir, prompts=None):
     return _paths
 
 
+# ── Generated-scene SUBJECT generation (Phase E · Sub-step 3) ────────────────
+# PREMIUM-only. Generates a GeneratedScene's subject still via Nano Banana (the
+# Sub-step-1 _generate_image), conditioned on reference images, with the
+# transparency matte run ONLY when the scene composits the subject as a cutout
+# over a SEPARATE background. The free path NEVER reaches any of this.
+_PREMIUM_ASSET_BUDGET_USD = 2.0  # soft per-job cap on generated-asset spend
+
+
+def _resolve_scene_ref_paths(ref_image_keys, work_dir):
+    """Resolve subject.ref_image_keys → up to 14 local image paths Nano Banana
+    can condition on (its reference-input ceiling). A key may be an absolute
+    path, a basename under work_dir, or work_dir/refs/<key>. Unknown keys are
+    skipped (never fatal). The ask-back-collected brand refs wire in with Phase
+    D; this is the accept-and-pass plumbing + the style-anchor pass-through."""
+    out = []
+    for _k in (ref_image_keys or []):
+        if not isinstance(_k, str) or not _k:
+            continue
+        for _c in (_k, os.path.join(work_dir, _k), os.path.join(work_dir, "refs", _k)):
+            if os.path.isfile(_c):
+                out.append(_c)
+                break
+        if len(out) >= 14:
+            break
+    return out
+
+
+def _recover_alpha_from_white_black(white_path, black_path, out_path):
+    """Triangulation matte: the SAME subject rendered on white and on black lets
+    us recover true alpha. For opacity a and foreground F:
+        white_px = F*a + 255*(1-a) ;  black_px = F*a
+      ⇒ a = 1 - (white_px - black_px)/255 ;  F = black_px / a
+    Writes an RGBA PNG. Returns out_path, or None if the inputs don't load."""
+    import numpy as _np
+    import cv2 as _cv2
+    _w = _cv2.imread(white_path, _cv2.IMREAD_COLOR)
+    _b = _cv2.imread(black_path, _cv2.IMREAD_COLOR)
+    if _w is None or _b is None:
+        return None
+    if _w.shape != _b.shape:
+        _b = _cv2.resize(_b, (_w.shape[1], _w.shape[0]), interpolation=_cv2.INTER_AREA)
+    _wf = _w.astype(_np.float32)
+    _bf = _b.astype(_np.float32)
+    _alpha = 1.0 - _np.clip((_wf - _bf).mean(axis=2) / 255.0, 0.0, 1.0)
+    _a3 = _np.dstack([_alpha, _alpha, _alpha])
+    _fg = _np.where(_a3 > 1e-3, _bf / _np.maximum(_a3, 1e-3), 0.0)
+    _fg = _np.clip(_fg, 0.0, 255.0).astype(_np.uint8)
+    _rgba = _cv2.cvtColor(_fg, _cv2.COLOR_BGR2BGRA)
+    _rgba[:, :, 3] = (_alpha * 255.0).astype(_np.uint8)
+    _cv2.imwrite(out_path, _rgba)
+    return out_path
+
+
+def _generate_scene_subject(scene, idx, work_dir, known_text=""):
+    """Generate the subject still for ONE GeneratedScene. Returns a small report
+    dict (path/cost/transparency/refs/...) or None on ANY failure — a failed
+    subject becomes a placeholder/dropped beat downstream, NEVER a crash.
+    PREMIUM-only; the caller gates on route_premium. `known_text` is the job's
+    transcript (for the from-known-inputs rule)."""
+    import time as _time
+    _t0 = _time.time()
+    _subj = dict((scene or {}).get("subject") or {})
+    _prompt = str(_subj.get("generation_prompt") or "").strip()
+    if not _prompt:
+        return None
+    _refs = _resolve_scene_ref_paths(_subj.get("ref_image_keys"), work_dir)
+    _bg_kind = str(((scene or {}).get("background") or {}).get("kind") or "generated")
+    # TRANSPARENCY ONLY WHEN NEEDED: a full-frame takeover (the subject IS its
+    # own world, background.kind == "generated") needs NO alpha. The ~2×-cost
+    # matte runs only when the subject floats as a cutout over a SEPARATE
+    # gradient/solid background.
+    _needs_alpha = _bg_kind != "generated"
+    _out = os.path.join(work_dir, f"genscene_{idx:02d}.png")
+    _cost = 0.0
+    try:
+        if _needs_alpha:
+            _white = os.path.join(work_dir, f"genscene_{idx:02d}_white.png")
+            _black = os.path.join(work_dir, f"genscene_{idx:02d}_black.png")
+            _generate_image(
+                _prompt + " The subject is centered on a pure white seamless "
+                "background, studio product lighting, no cast shadow on the floor.",
+                ref_images=_refs, out_path=_white,
+            )
+            # Edit the SAME render onto black (pass the white render as the first
+            # reference so the subject stays pixel-aligned for the matte).
+            _generate_image(
+                "Recreate this exact image with the background replaced by pure "
+                "solid black (#000000). Keep the subject pixel-identical — same "
+                "pose, position, scale, and lighting.",
+                ref_images=([_white] + _refs[:13]), out_path=_black,
+            )
+            _cost = 2.0 * _IMAGE_COST_USD_EST
+            if _recover_alpha_from_white_black(_white, _black, _out) is None:
+                _out = _white  # alpha recovery failed → use the white render
+        else:
+            _generate_image(_prompt, ref_images=_refs, out_path=_out)
+            _cost = _IMAGE_COST_USD_EST
+    except Exception as _ge:
+        print(
+            f"[gen-asset] scene={idx} generation FAILED "
+            f"({type(_ge).__name__}: {str(_ge)[:120]}) — degrade to non-generated beat",
+            flush=True,
+        )
+        return None
+    _ms = int((_time.time() - _t0) * 1000)
+    print(
+        f"[gen-asset] scene={idx} prompt_chars={len(_prompt)} refs={len(_refs)} "
+        f"transparency={_needs_alpha} cost=${_cost:.3f} ms={_ms}",
+        flush=True,
+    )
+    return {"path": _out, "cost": _cost, "transparency": _needs_alpha,
+            "refs": len(_refs), "prompt_chars": len(_prompt), "ms": _ms}
+
+
 def _gemini_generate_with_cache(client, model_name, contents, base_config_kwargs, system_instruction):
     """Run client.models.generate_content with explicit prompt caching.
 
@@ -15297,6 +15411,83 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _b.pop("_start_word_kept", None)
             _b.pop("_end_word_kept", None)
 
+    # ── Generated-scene → render converter (Phase E · Sub-step 3) ────────────
+    # One GeneratedSceneSpec per scene that has a generated subject. The subject
+    # still was generated PREMIUM-side in the asset pool and stashed on
+    # edit_plan["_generated_subjects"]; here we stage it + project the scene's
+    # word window to output frames (via _pw_by_idx, like B-roll). STRICTLY
+    # ADDITIVE: generated_scenes is [] for every free/no-scene job → _gs_out ==
+    # [] → byte-identical to the prior empty default. Defensive: a scene that
+    # can't be timed is skipped (degrade, never crash).
+    _gs_out = []
+    _gen_subjects = (edit_plan.get("_generated_subjects") or {}) if isinstance(edit_plan, dict) else {}
+    if isinstance(edit_plan, dict) and (edit_plan.get("generated_scenes") or []):
+        _known_lc = " ".join(str(pw.get("word") or "") for pw in _projected_words).lower()
+        for _gsi, _scene in enumerate(edit_plan.get("generated_scenes") or []):
+            if not isinstance(_scene, dict):
+                continue
+            _pw_s = _pw_by_idx.get(_scene.get("start_word_index"))
+            _pw_e = _pw_by_idx.get(_scene.get("end_word_index"))
+            if _pw_s and _pw_e:
+                _gs_from = int(round(float(_pw_s["start"]) * source_fps))
+                _gs_dur = max(1, int(round((float(_pw_e["end"]) - float(_pw_s["start"])) * source_fps)))
+            elif _scene.get("duration_seconds"):
+                _gs_from = 0
+                _gs_dur = max(1, int(round(float(_scene["duration_seconds"]) * source_fps)))
+            else:
+                print(f"[gen-asset] scene={_gsi} unresolvable timing — skipped", flush=True)
+                continue
+            _subj_path = _gen_subjects.get(_gsi)
+            _subj_url = None
+            if _subj_path and os.path.isfile(_subj_path):
+                _subj_url = _stage_file(
+                    _subj_path, dest_basename=f"genscene_{_gsi:02d}_{os.path.basename(_subj_path)}"
+                )
+            # TEXT-FROM-KNOWN-INPUTS: keep only text layers whose content traces
+            # to the transcript; drop invented text (belt; QA judge is suspenders).
+            _text_layers = []
+            for _tl in (_scene.get("text_layers") or []):
+                _content = str((_tl or {}).get("content") or "").strip()
+                if _content and _content.lower() in _known_lc:
+                    _text_layers.append({
+                        "content": _content,
+                        "styleRef": (_tl or {}).get("style_ref"),
+                        "anchor": (_tl or {}).get("anchor") or "center",
+                    })
+                elif _content:
+                    print(
+                        f"[gen-asset] scene={_gsi} dropped text_layer not traceable "
+                        f"to a known input: {_content[:40]!r}",
+                        flush=True,
+                    )
+            _bg = dict(_scene.get("background") or {})
+            _mo = dict(_scene.get("motion") or {})
+            _subj = dict(_scene.get("subject") or {})
+            _gs_out.append({
+                "fromFrame": _gs_from,
+                "durationInFrames": _gs_dur,
+                "background": {
+                    "kind": _bg.get("kind") or "generated",
+                    "paletteRef": _bg.get("palette_ref"),
+                    "generationPrompt": _bg.get("generation_prompt"),
+                    "colors": _bg.get("colors"),
+                },
+                "subject": {
+                    "imageUrl": _subj_url,
+                    "generationPrompt": str(_subj.get("generation_prompt") or ""),
+                    "anchor": _subj.get("anchor") or "center",
+                    "scale": _subj.get("scale"),
+                },
+                "textLayers": _text_layers,
+                "motion": {
+                    "entrance": _mo.get("entrance") or "rise",
+                    "easing": _mo.get("easing") or "spring",
+                    "motionBlur": bool(_mo.get("motion_blur", True)),
+                },
+            })
+        if _gs_out:
+            print(f"[gen-asset] render: composited {len(_gs_out)} generated scene(s)", flush=True)
+
     # PromptlyOverlay input — captions/MG/text on a transparent canvas. The
     # FFmpeg composite step lays this onto the source in a single encode.
     overlay_input = {
@@ -15308,11 +15499,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         "clips": clips_out,
         "transitions": transitions_out,
         "broll": broll_out,
-        # Generated scenes (Phase E). [] until Sub-step 3 wires the recipe→render
-        # converter (word-index→frame projection + generated-still staging);
-        # generated_scenes is always [] today (inert), so [] is the correct
-        # mapping and keeps the overlay render byte-identical.
-        "generatedScenes": [],
+        # Generated scenes (Phase E · Sub-step 3). _gs_out is [] for every
+        # free/no-scene job (generated_scenes is []), so this is byte-identical
+        # to the prior empty default; only premium jobs with injected scenes
+        # (until Sub-step 5) build specs.
+        "generatedScenes": _gs_out,
         "caption": {
             "style": _caption_style,
             "pages": caption_pages,
@@ -19534,6 +19725,54 @@ def handler(job):
                     dialogue_text=_dlg_text,
                 )
                 _broll_fetch_futures[_fut] = _bi
+
+        # ── Premium generated-scene SUBJECT generation (Phase E · Sub-step 3) ──
+        # FORK off the asset-fetch path: where free pulls Pexels stock, premium
+        # can GENERATE. Runs in the dedicated premium asset pool
+        # (premium_ctx.asset_pool — OFF the saturated mega_pool, parallel like
+        # the b-roll fetch above), so it's off the critical path. The free path
+        # NEVER enters here (route_premium gate). generated_scenes is [] until
+        # Sub-step 5, so today this fires only on flag-injected scenes → premium
+        # without a scene, and ALL free jobs, are byte-identical. Each subject's
+        # local PNG is stashed on edit_plan for render_multi_clip to stage.
+        _gen_scenes = (edit_plan.get("generated_scenes") or []) if isinstance(edit_plan, dict) else []
+        if route_premium and premium_ctx is not None and _gen_scenes:
+            _known_text = " ".join(
+                str(w.get("word") or "") for w in (_get_resolved_transcript().get("words") or [])
+            ).strip()
+            _asset_pool = premium_ctx.asset_pool(max_workers=min(4, len(_gen_scenes)))
+            _gen_futs = {}
+            for _si, _scene in enumerate(_gen_scenes):
+                # Soft per-job cost cap: stop submitting once we'd exceed the
+                # budget; remaining scenes degrade to non-generated beats.
+                if _cost_meter is not None and _cost_meter.total_usd() >= _PREMIUM_ASSET_BUDGET_USD:
+                    print(
+                        f"[gen-asset] budget cap ${_PREMIUM_ASSET_BUDGET_USD:.2f} reached — "
+                        f"scene={_si}+ degrade to non-generated",
+                        flush=True,
+                    )
+                    break
+                _gen_futs[_asset_pool.submit(
+                    _generate_scene_subject, _scene, _si, work_dir, _known_text
+                )] = _si
+            _generated_subjects = {}
+            for _gf in concurrent.futures.as_completed(_gen_futs):
+                try:
+                    _res = _gf.result()
+                except Exception:
+                    _res = None
+                if _res and _res.get("path"):
+                    _generated_subjects[_gen_futs[_gf]] = _res["path"]
+                    if _cost_meter is not None:
+                        _cost_meter.add("generated_asset", count=1, usd=float(_res.get("cost") or 0.0))
+            if _generated_subjects:
+                edit_plan["_generated_subjects"] = _generated_subjects
+                print(
+                    f"[gen-asset] generated {len(_generated_subjects)}/{len(_gen_scenes)} "
+                    f"subject(s); premium asset spend="
+                    f"${(_cost_meter.total_usd() if _cost_meter is not None else 0.0):.3f}",
+                    flush=True,
+                )
 
         # Collect fast futures (all should be done already — they finish before Gemini).
         # Face detection is collected LATER inside render_multi_clip so Remotion can
