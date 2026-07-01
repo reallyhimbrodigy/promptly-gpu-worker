@@ -17299,10 +17299,16 @@ def _job_status_enabled():
     )
 
 
-def write_job_status(job_id, *, status=None, phase=None, progress=None, result=None):
+def write_job_status(job_id, *, status=None, phase=None, progress=None, result=None,
+                     partial_state=None):
     """Patch the durable video_jobs row. SYNCHRONOUS, fail-open, monotonic. No-op
     unless the flag is on. Terminal statuses (complete/failed/canceled/needs_input)
-    always write; intermediate progress never regresses."""
+    always write; intermediate progress never regresses.
+
+    `partial_state` (Phase D ask-back): the everything-computed-so-far blob
+    (recipe/transcript/quality signals) persisted alongside a needs_input write
+    so a resume can pick up WITHOUT recomputing. Written to the reserved
+    partial_state column; jsonb, so it holds the plan + transcript."""
     if supabase is None or not job_id or not _job_status_enabled():
         return
     _terminal = status in ("complete", "failed", "canceled", "needs_input")
@@ -17329,6 +17335,8 @@ def write_job_status(job_id, *, status=None, phase=None, progress=None, result=N
             patch["progress"] = progress
         if result is not None:
             patch["result"] = result
+        if partial_state is not None:
+            patch["partial_state"] = partial_state
         try:
             supabase.table(table).update(patch).eq("id", job_id).execute()
         except Exception as e:
@@ -17355,12 +17363,135 @@ def read_job_status(job_id):
     table = os.environ.get("PROMPTLY_JOB_TABLE") or "jobs"
     try:
         r = (supabase.table(table)
-             .select("status,phase,progress,result,updated_at")
+             .select("status,phase,progress,result,partial_state,updated_at")
              .eq("id", job_id).limit(1).execute())
         return r.data[0] if r.data else {"status": "unknown"}
     except Exception as e:
         print(f"[job-status] read failed job={job_id}: {e} (fail open)", flush=True)
         return {"status": "unknown"}
+
+
+# ── Ask-back loop (Phase D · worker side) ────────────────────────────────────
+# Lumen can ask the user mid-job (a screenshot, brand refs, context) and use the
+# answer — pause durably → surface → resume, statelessly. Mirrors the
+# needs_clarification envelope: write the row + RETURN (no held slot); resume is
+# a fresh mode=resume_ask invocation. PREMIUM only; flag-gated OFF until the
+# frontend half lands; byte-identical when no ask fires.
+#
+# ── FRONTEND CONTRACT (the paired directive implements the other half) ──────
+# 1. WORKER PARKS: on a fresh Lumen job, if ASK_BACK_ENABLED and a high-impact
+#    ask is available, the worker writes the row:
+#       status        = "needs_input"
+#       result        = { "ask": { ask_id, prompt, answer_kinds:[text|image|clip|choice|skip],
+#                                  optional: true, context } }
+#       partial_state = { ask_id, edit_plan, transcript, input_quality }   (jsonb)
+#    …then RETURNS { status:"needs_input", job_id, ask } and the function exits
+#    (NO worker slot held — the parked job is just a row).
+# 2. FRONTEND READS the row (existing poll), shows `result.ask.prompt` in chat,
+#    collects an answer of one of `answer_kinds`. Uploaded images go to the SAME
+#    storage the pipeline reads (presigned/S3); the answer carries their keys.
+# 3. FRONTEND RESUBMITS on the re-edit rail with the normal required fields
+#    (job_id/video_url/vibe/user_id/upload_url — echoed) PLUS:
+#       mode       = "resume_ask"
+#       ask_answer = { kind:"image"|"clip"|"text"|"choice"|"skip",
+#                      image_keys:[...] | text:"..." | choice:"..." | skip:true }
+# 4. WORKER RESUMES: reads partial_state from the row, folds the answer (image/
+#    clip → a generation ref on the saved plan; typed context → augments the
+#    vibe + re-runs the recipe; skip → saved plan untouched), and completes the
+#    pipeline from the saved state (no recompute of the recipe/transcript).
+# SKIP is always valid → full premium edit, no asterisk. TIMEOUT never strands:
+# the worker already returned (no hung slot), and a timeout is just a
+# `resume_ask` with `skip:true` (triggered by the dispatcher timeout, or a
+# scheduled sweep over stale needs_input rows) → resumes + completes.
+_ASK_BACK_MAX_PER_JOB = 1  # cap so Lumen never interrogates
+
+
+def _ask_back_enabled(input_data):
+    """ON when the per-job flag OR the env master flag is set. Default OFF, so
+    even Lumen never asks until it's flipped on (ships wired-but-dormant)."""
+    if isinstance(input_data, dict) and input_data.get("ask_back_enabled"):
+        return True
+    return os.environ.get("ASK_BACK_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _build_ask_from_enrichment(enrich_opps, input_quality):
+    """Turn the single highest-impact enrichment opportunity into an ask envelope
+    (or None). HIGH-IMPACT ONLY — an answer that materially improves the edit (a
+    facing-camera shot to lead on, a brighter clip to cut to), never a marginal
+    gain. NEVER-NEGATIVE copy (reuses the forward-framed enrichment offer).
+    Always OPTIONAL — skip is a valid answer. Caps at one ask per job."""
+    if not enrich_opps:
+        return None
+    _priority = {"no_lead_face": 0, "low_light": 1}
+    _top = sorted(enrich_opps, key=lambda o: _priority.get(o.get("kind"), 9))[0]
+    _kind = str(_top.get("kind") or "")
+    _offer = str(_top.get("offer") or "").strip()
+    if not _offer:
+        return None
+    _kinds = {
+        "no_lead_face": ["image", "clip", "skip"],
+        "low_light": ["image", "clip", "choice", "skip"],
+    }.get(_kind, ["text", "image", "skip"])
+    _ctx = {"reason": _kind}
+    if _kind == "low_light":
+        _ctx["choices"] = ["add a brighter clip", "lean into a moody treatment"]
+    return {
+        "ask_id": f"ask_{_kind}",
+        "prompt": _offer,          # forward-framed; never "your input is insufficient"
+        "answer_kinds": _kinds,
+        "optional": True,          # skipping always yields a full edit, no asterisk
+        "context": _ctx,
+    }
+
+
+def _emit_ask_and_suspend(job_id, ask, partial_state, app_url=None):
+    """Park the job for an ask-back: durable needs_input write with the ask
+    envelope + partial_state, then RETURN a suspend dict. NO slot is held — the
+    worker function COMPLETES; the job lives as a needs_input row until a fresh
+    mode=resume_ask invocation resumes it (or a timeout skip-resume completes it).
+    Mirrors the needs_clarification return-to-suspend precedent."""
+    try:
+        write_job_status(
+            job_id, status="needs_input",
+            phase="One quick thing could make this even better",
+            result={"ask": ask}, partial_state=partial_state,
+        )
+    except Exception as _e:
+        print(f"[ask-back] status write failed job={job_id}: {_e} (fail open)", flush=True)
+    print(
+        f"[ask-back] parked job={job_id} ask_id={ask.get('ask_id')} "
+        f"kinds={ask.get('answer_kinds')} optional={ask.get('optional')} — suspended (no slot held)",
+        flush=True,
+    )
+    return {"status": "needs_input", "job_id": job_id, "ask": ask}
+
+
+def _fold_ask_answer(answer, edit_plan, vibe):
+    """Fold a returned answer into a resumed job. Returns (vibe, provided_plan,
+    rerun_recipe): an image/clip becomes a ref the render can use (keep the saved
+    plan → render); typed context augments the vibe (re-run the recipe); skip or
+    no-answer keeps the saved plan untouched. NEVER raises — a bad answer just
+    resumes with what we had (an ask can never strand a job)."""
+    _rerun = False
+    _plan = edit_plan
+    try:
+        _a = answer if isinstance(answer, dict) else {}
+        _kind = str(_a.get("kind") or "").lower()
+        if _kind == "skip" or _a.get("skip"):
+            return vibe, _plan, False
+        _keys = _a.get("image_keys") or ([_a.get("image_key")] if _a.get("image_key") else [])
+        if _keys and isinstance(_plan, dict):
+            _plan = dict(_plan)
+            _refs = list(_plan.get("_ask_ref_image_keys") or [])
+            _refs.extend([k for k in _keys if isinstance(k, str) and k])
+            _plan["_ask_ref_image_keys"] = _refs
+        _text = str(_a.get("text") or "").strip()
+        if _text:
+            vibe = f"{vibe} — {_text}".strip(" —")
+            _rerun = True
+    except Exception as _fe:
+        print(f"[ask-back] fold error ({type(_fe).__name__}) — resuming with what we had", flush=True)
+    return vibe, _plan, _rerun
 
 
 def send_progress(job_id, step, pct, message, app_url):
@@ -18167,7 +18298,7 @@ def handler(job):
         # between tweak / guided_redraft / reinterpret based on what the
         # change_request actually warrants.
         mode = str(input_data.get("mode") or "full").strip().lower()
-        if mode not in ("full", "render_only", "tweak", "guided_redraft", "reinterpret"):
+        if mode not in ("full", "render_only", "tweak", "guided_redraft", "reinterpret", "resume_ask"):
             mode = "full"
         provided_plan = input_data.get("edit_plan") if isinstance(input_data.get("edit_plan"), dict) else None
         provided_transcript = input_data.get("transcript") if isinstance(input_data.get("transcript"), dict) else None
@@ -18176,6 +18307,42 @@ def handler(job):
         provided_trend = input_data.get("trend_snapshot") if isinstance(input_data.get("trend_snapshot"), dict) else None
         change_request = str(input_data.get("change_request") or "").strip()
         old_vibe = str(input_data.get("old_vibe") or "").strip()
+
+        # ── Ask-back RESUME (Phase D · worker side) ──────────────────────────
+        # A resubmit carrying {mode:"resume_ask", ask_answer:{...}} lands here.
+        # Restore the saved plan + transcript from the parked job's partial_state
+        # (resume WITHOUT recomputing the recipe/Deepgram), fold the answer, then
+        # delegate to the normal rails: typed context re-runs the recipe (full);
+        # an image/clip or skip renders the saved plan (render_only). Fail-open —
+        # if partial_state can't be read, degrade to a fresh full run (never
+        # strand the job).
+        if mode == "resume_ask":
+            _ask_answer = input_data.get("ask_answer") if isinstance(input_data.get("ask_answer"), dict) else {}
+            _ps = {}
+            try:
+                _ps = (read_job_status(job_id) or {}).get("partial_state") or {}
+            except Exception as _pse:
+                print(f"[ask-back] resume: partial_state read failed ({type(_pse).__name__}) — fresh run", flush=True)
+            _saved_plan = _ps.get("edit_plan") if isinstance(_ps.get("edit_plan"), dict) else None
+            _saved_tx = _ps.get("transcript") if isinstance(_ps.get("transcript"), dict) else None
+            vibe, _saved_plan, _rerun = _fold_ask_answer(_ask_answer, _saved_plan, vibe)
+            provided_transcript = _saved_tx or provided_transcript
+            if _rerun or _saved_plan is None:
+                # Typed context (or no saved plan) → re-run the recipe with the
+                # augmented vibe; the saved transcript still skips Deepgram.
+                mode = "full"
+                provided_plan = None
+            else:
+                # Image/clip/skip → render the saved plan (folded refs ride on the
+                # plan for the premium asset path); skip the recipe entirely.
+                mode = "render_only"
+                provided_plan = _saved_plan
+            print(
+                f"[ask-back] resumed job={job_id} ask_id={_ps.get('ask_id')} "
+                f"answer_kind={str(_ask_answer.get('kind') or 'skip')} -> mode={mode} "
+                f"(saved_plan={_saved_plan is not None}, saved_transcript={_saved_tx is not None})",
+                flush=True,
+            )
 
         # Validate re-edit mode inputs up front — fail fast with a clear message.
         if mode == "render_only" and not provided_plan:
@@ -19879,6 +20046,7 @@ def handler(job):
         # logged for every job for calibration; on Flare it changes logs, not
         # output. Fail-open: any error leaves the render completely untouched.
         input_quality = None
+        _enrich = []
         try:
             _iq_shape = future_normalize.result() if future_normalize is not None else {}
             if future_faces is not None:
@@ -19927,6 +20095,35 @@ def handler(job):
                 flush=True,
             )
             input_quality = None
+
+        # ── Ask-back decision (Phase D · worker side · PREMIUM only) ─────────
+        # If the flag is on and a genuinely edit-improving ask is available, PARK
+        # the job (needs_input + ask envelope + partial_state) and SUSPEND
+        # (return) — no slot held. The frontend surfaces it; a mode=resume_ask
+        # invocation resumes from partial_state. Flag OFF (default) → never asks →
+        # byte-identical. Free never reaches here (route_premium). ONLY fresh jobs
+        # ask (mode == "full"), never a resume/re-edit — so an ask can't re-fire
+        # on its own answer. Fail-open: any trouble skips the ask and continues.
+        if route_premium and mode == "full" and _ask_back_enabled(input_data):
+            try:
+                _ask = _build_ask_from_enrichment(_enrich, input_quality)
+                if _ask is not None:
+                    _partial = {
+                        "ask_id": _ask["ask_id"],
+                        "edit_plan": edit_plan,
+                        "input_quality": input_quality,
+                    }
+                    try:
+                        _partial["transcript"] = _get_resolved_transcript()
+                    except Exception:
+                        pass  # resume recomputes the transcript if it wasn't saved
+                    return _emit_ask_and_suspend(job_id, _ask, _partial, app_url)
+            except Exception as _ab_err:
+                print(
+                    f"[ask-back] decision skipped "
+                    f"({type(_ab_err).__name__}: {str(_ab_err)[:120]}) — continuing",
+                    flush=True,
+                )
 
         # ── Silent remediation · audio (Phase G-lite · PREMIUM only) ─────
         # Respect EditPolicy and clean up noise invisibly. Flare never enters
