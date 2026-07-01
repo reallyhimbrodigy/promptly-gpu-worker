@@ -17383,18 +17383,21 @@ def read_job_status(job_id):
 #    ask is available, the worker writes the row:
 #       status        = "needs_input"
 #       result        = { "ask": { ask_id, prompt, answer_kinds:[text|image|clip|choice|skip],
-#                                  optional: true, context } }
+#                                  optional: true, context, choices? } }
 #       partial_state = { ask_id, edit_plan, transcript, input_quality }   (jsonb)
 #    …then RETURNS { status:"needs_input", job_id, ask } and the function exits
 #    (NO worker slot held — the parked job is just a row).
 # 2. FRONTEND READS the row (existing poll), shows `result.ask.prompt` in chat,
-#    collects an answer of one of `answer_kinds`. Uploaded images go to the SAME
-#    storage the pipeline reads (presigned/S3); the answer carries their keys.
+#    collects an answer of one of `answer_kinds`. Uploaded images/clips go to the
+#    SAME storage the pipeline reads (presigned/S3); the answer carries their keys.
 # 3. FRONTEND RESUBMITS on the re-edit rail with the normal required fields
-#    (job_id/video_url/vibe/user_id/upload_url — echoed) PLUS:
-#       mode       = "resume_ask"
-#       ask_answer = { kind:"image"|"clip"|"text"|"choice"|"skip",
-#                      image_keys:[...] | text:"..." | choice:"..." | skip:true }
+#    (job_id/video_url/vibe/user_id/upload_url — echoed) PLUS these FLAT fields:
+#       mode              = "resume_ask"
+#       ask_id            = <the ask's id>
+#       answer            = <typed text>          OR   skip = true
+#       answer_image_key? = <uploaded image storage key>
+#       answer_clip_key?  = <uploaded clip storage key>
+#       answer_choice?    = <the chosen option from ask.choices>
 # 4. WORKER RESUMES: reads partial_state from the row, folds the answer (image/
 #    clip → a generation ref on the saved plan; typed context → augments the
 #    vibe + re-runs the recipe; skip → saved plan untouched), and completes the
@@ -17407,11 +17410,17 @@ _ASK_BACK_MAX_PER_JOB = 1  # cap so Lumen never interrogates
 
 
 def _ask_back_enabled(input_data):
-    """ON when the per-job flag OR the env master flag is set. Default OFF, so
-    even Lumen never asks until it's flipped on (ships wired-but-dormant)."""
-    if isinstance(input_data, dict) and input_data.get("ask_back_enabled"):
-        return True
-    return os.environ.get("ASK_BACK_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
+    """ON when the per-job flag OR env master flag is set AND durable job-status
+    writes are on. The job-status requirement is a FOOTGUN GUARD: an ask is only
+    useful if it can be written to the row for the frontend to surface — without
+    it, the worker would park (return needs_input) but the row write would be a
+    no-op and the job would strand invisibly. So the ask can't fire unless it can
+    actually be persisted. Default OFF — even Lumen never asks until flipped on
+    (ships wired-but-dormant)."""
+    _flag = (isinstance(input_data, dict) and bool(input_data.get("ask_back_enabled"))) or (
+        os.environ.get("ASK_BACK_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
+    )
+    return _flag and _job_status_enabled()
 
 
 def _build_ask_from_enrichment(enrich_opps, input_quality):
@@ -17432,16 +17441,18 @@ def _build_ask_from_enrichment(enrich_opps, input_quality):
         "no_lead_face": ["image", "clip", "skip"],
         "low_light": ["image", "clip", "choice", "skip"],
     }.get(_kind, ["text", "image", "skip"])
-    _ctx = {"reason": _kind}
-    if _kind == "low_light":
-        _ctx["choices"] = ["add a brighter clip", "lean into a moody treatment"]
-    return {
+    _ask = {
         "ask_id": f"ask_{_kind}",
         "prompt": _offer,          # forward-framed; never "your input is insufficient"
         "answer_kinds": _kinds,
         "optional": True,          # skipping always yields a full edit, no asterisk
-        "context": _ctx,
+        "context": {"reason": _kind},
     }
+    if _kind == "low_light":
+        # `choices` at the ask TOP LEVEL (matches the frontend contract). A
+        # "choice" answer comes back as answer_choice.
+        _ask["choices"] = ["add a brighter clip", "lean into a moody treatment"]
+    return _ask
 
 
 def _emit_ask_and_suspend(job_id, ask, partial_state, app_url=None):
@@ -17467,27 +17478,32 @@ def _emit_ask_and_suspend(job_id, ask, partial_state, app_url=None):
 
 
 def _fold_ask_answer(answer, edit_plan, vibe):
-    """Fold a returned answer into a resumed job. Returns (vibe, provided_plan,
-    rerun_recipe): an image/clip becomes a ref the render can use (keep the saved
-    plan → render); typed context augments the vibe (re-run the recipe); skip or
-    no-answer keeps the saved plan untouched. NEVER raises — a bad answer just
+    """Fold a returned answer — the FRONTEND's FLAT re-edit-rail shape — into a
+    resumed job. Reads: skip | answer (typed text) | answer_image_key |
+    answer_clip_key | answer_choice. Returns (vibe, provided_plan, rerun_recipe):
+    an image/clip becomes a generation ref on the saved plan (keep it → render);
+    typed context or a chosen option augments the vibe (re-run the recipe); skip
+    or no-answer keeps the saved plan untouched. NEVER raises — a bad answer just
     resumes with what we had (an ask can never strand a job)."""
     _rerun = False
     _plan = edit_plan
     try:
         _a = answer if isinstance(answer, dict) else {}
-        _kind = str(_a.get("kind") or "").lower()
-        if _kind == "skip" or _a.get("skip"):
+        if _a.get("skip") or str(_a.get("answer") or "").strip().lower() == "skip":
             return vibe, _plan, False
-        _keys = _a.get("image_keys") or ([_a.get("image_key")] if _a.get("image_key") else [])
+        # image / clip uploads → generation refs the premium asset path reads.
+        _keys = [k for k in (_a.get("answer_image_key"), _a.get("answer_clip_key"))
+                 if isinstance(k, str) and k]
         if _keys and isinstance(_plan, dict):
             _plan = dict(_plan)
             _refs = list(_plan.get("_ask_ref_image_keys") or [])
-            _refs.extend([k for k in _keys if isinstance(k, str) and k])
+            _refs.extend(_keys)
             _plan["_ask_ref_image_keys"] = _refs
-        _text = str(_a.get("text") or "").strip()
-        if _text:
-            vibe = f"{vibe} — {_text}".strip(" —")
+        # typed context OR a chosen option → augment the vibe + re-run the recipe
+        # so the added framing actually shapes the edit.
+        _aug = str(_a.get("answer") or "").strip() or str(_a.get("answer_choice") or "").strip()
+        if _aug and _aug.lower() != "skip":
+            vibe = f"{vibe} — {_aug}".strip(" —")
             _rerun = True
     except Exception as _fe:
         print(f"[ask-back] fold error ({type(_fe).__name__}) — resuming with what we had", flush=True)
@@ -18309,15 +18325,15 @@ def handler(job):
         old_vibe = str(input_data.get("old_vibe") or "").strip()
 
         # ── Ask-back RESUME (Phase D · worker side) ──────────────────────────
-        # A resubmit carrying {mode:"resume_ask", ask_answer:{...}} lands here.
-        # Restore the saved plan + transcript from the parked job's partial_state
-        # (resume WITHOUT recomputing the recipe/Deepgram), fold the answer, then
-        # delegate to the normal rails: typed context re-runs the recipe (full);
-        # an image/clip or skip renders the saved plan (render_only). Fail-open —
-        # if partial_state can't be read, degrade to a fresh full run (never
-        # strand the job).
+        # A resubmit carrying the FLAT frontend shape lands here: {mode:
+        # "resume_ask", ask_id, answer|skip, answer_image_key?, answer_clip_key?,
+        # answer_choice?}. Restore the saved plan + transcript from the parked
+        # job's partial_state (resume WITHOUT recomputing the recipe/Deepgram),
+        # fold the answer, then delegate to the normal rails: typed context/choice
+        # re-runs the recipe (full); an image/clip or skip renders the saved plan
+        # (render_only). Fail-open — if partial_state can't be read, degrade to a
+        # fresh full run (never strand the job).
         if mode == "resume_ask":
-            _ask_answer = input_data.get("ask_answer") if isinstance(input_data.get("ask_answer"), dict) else {}
             _ps = {}
             try:
                 _ps = (read_job_status(job_id) or {}).get("partial_state") or {}
@@ -18325,11 +18341,12 @@ def handler(job):
                 print(f"[ask-back] resume: partial_state read failed ({type(_pse).__name__}) — fresh run", flush=True)
             _saved_plan = _ps.get("edit_plan") if isinstance(_ps.get("edit_plan"), dict) else None
             _saved_tx = _ps.get("transcript") if isinstance(_ps.get("transcript"), dict) else None
-            vibe, _saved_plan, _rerun = _fold_ask_answer(_ask_answer, _saved_plan, vibe)
+            # Fold the FLAT frontend answer fields straight off input_data.
+            vibe, _saved_plan, _rerun = _fold_ask_answer(input_data, _saved_plan, vibe)
             provided_transcript = _saved_tx or provided_transcript
             if _rerun or _saved_plan is None:
-                # Typed context (or no saved plan) → re-run the recipe with the
-                # augmented vibe; the saved transcript still skips Deepgram.
+                # Typed context/choice (or no saved plan) → re-run the recipe with
+                # the augmented vibe; the saved transcript still skips Deepgram.
                 mode = "full"
                 provided_plan = None
             else:
@@ -18337,9 +18354,19 @@ def handler(job):
                 # plan for the premium asset path); skip the recipe entirely.
                 mode = "render_only"
                 provided_plan = _saved_plan
+            _ans_kind = (
+                "skip" if (input_data.get("skip") or not any(
+                    input_data.get(_k) for _k in
+                    ("answer", "answer_image_key", "answer_clip_key", "answer_choice")))
+                else "text" if input_data.get("answer")
+                else "image" if input_data.get("answer_image_key")
+                else "clip" if input_data.get("answer_clip_key")
+                else "choice"
+            )
             print(
-                f"[ask-back] resumed job={job_id} ask_id={_ps.get('ask_id')} "
-                f"answer_kind={str(_ask_answer.get('kind') or 'skip')} -> mode={mode} "
+                f"[ask-back] resumed job={job_id} "
+                f"ask_id={input_data.get('ask_id') or _ps.get('ask_id')} "
+                f"answer_kind={_ans_kind} -> mode={mode} "
                 f"(saved_plan={_saved_plan is not None}, saved_transcript={_saved_tx is not None})",
                 flush=True,
             )
