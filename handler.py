@@ -12876,6 +12876,88 @@ def run_ffmpeg(args):
     return result
 
 
+def _download_and_concat_sources(source_urls, dest_path, work_dir):
+    """Phase B (multi-input, PREMIUM): download every source S3 object and, in
+    order, concatenate them into ONE uniform file at dest_path.
+
+    WHY concat-to-one-file: the entire downstream pipeline (transcribe / faces /
+    quality / mechanical cuts / the kept↔src word-index discipline / render)
+    already operates on a single continuous source. Concatenating first means it
+    keeps doing exactly that — word indices and cut boundaries stay coherent
+    across clip joins BY CONSTRUCTION (one physical file → one continuous
+    transcript with continuous timestamps), with none of the per-clip re-indexing
+    or per-source audio-offset bookkeeping a "thread N sources through every
+    stage" model would need. A clip join is a real hard cut, which scdet flags as
+    a shot boundary like any other. This is the "stitch my clips into one edit"
+    (sequential-concatenation) model.
+
+    Uniform re-encode via the concat FILTER (scale+pad to 1080x1920, CFR 30,
+    yuv420p, aac 48k stereo) makes heterogeneous inputs joinable AND yields clean
+    continuous A/V: each source's own mic-latency offset is realigned inside the
+    re-encode, so the concatenated file reads as offset-0 and no per-source
+    audio_stream_offset survives into the pipeline. (Part 1 assumes every source
+    carries an audio stream — the talking-head premise; a source without audio
+    would need a fallback, noted for later.)
+
+    Returns the list of per-source durations (seconds). N==1 is a straight copy
+    (no concat) so a single-element list is byte-identical to the single path."""
+    import shutil as _sh
+    if _aws_s3_client is None:
+        raise RuntimeError("AWS S3 client not initialized — cannot fetch multi-input sources")
+    _locals = []
+    for _i, _u in enumerate(source_urls):
+        _b, _k = _parse_aws_s3_url(_u)
+        if not _b or not _k:
+            raise RuntimeError(f"multi-input source[{_i}] is not a valid AWS S3 URL: {_u!r}")
+        _lp = os.path.join(work_dir, f"src_in_{_i:02d}.mp4")
+        _aws_s3_client.download_file(_b, _k, _lp, Config=_S3_TRANSFER_CONFIG)
+        print(
+            f"[multi-input] source[{_i}] downloaded "
+            f"({os.path.getsize(_lp) // (1024 * 1024)}MB) key={_k}",
+            flush=True,
+        )
+        _locals.append(_lp)
+    _durs = [float(probe_duration(_p) or 0.0) for _p in _locals]
+    if len(_locals) == 1:
+        _sh.copy(_locals[0], dest_path)   # single = list-of-one → no concat, unchanged bytes
+        return _durs
+    # concat-filter graph: normalize each input, then join. force_original_
+    # aspect_ratio=decrease + pad keeps portrait AND landscape sources whole
+    # (letterboxed) instead of distorted; async audio resample absorbs any
+    # per-source A/V drift so the join is seamless.
+    _args = []
+    for _p in _locals:
+        _args += ["-i", _p]
+    _n = len(_locals)
+    _chains = []
+    _labels = []
+    for _i in range(_n):
+        _chains.append(
+            f"[{_i}:v]scale=1080:1920:force_original_aspect_ratio=decrease,"
+            f"pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30,format=yuv420p[v{_i}]"
+        )
+        _chains.append(
+            f"[{_i}:a]aresample=async=1:first_pts=0,"
+            f"aformat=sample_rates=48000:channel_layouts=stereo[a{_i}]"
+        )
+        _labels.append(f"[v{_i}][a{_i}]")
+    _filter = ";".join(_chains) + ";" + "".join(_labels) + f"concat=n={_n}:v=1:a=1[v][a]"
+    _args += [
+        "-filter_complex", _filter,
+        "-map", "[v]", "-map", "[a]",
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        "-c:a", "aac", "-b:a", "192k",
+        "-movflags", "+faststart", "-y", dest_path,
+    ]
+    print(
+        f"[multi-input] concatenating {_n} sources → one file "
+        f"(durations={[round(d, 1) for d in _durs]}s, total~{round(sum(_durs), 1)}s)",
+        flush=True,
+    )
+    run_ffmpeg(_args)
+    return _durs
+
+
 def analyze_source_video(source_path):
     """Analyze source video and return metadata + scale/crop filter for the main render.
 
@@ -18634,6 +18716,33 @@ def handler(job):
         source_path = os.path.join(work_dir, "source.mp4")
         output_path = os.path.join(work_dir, "output.mp4")
 
+        # ── Phase B (multi-input · PREMIUM): plural video_urls contract ──────
+        # A Lumen job MAY carry `video_urls` (ordered list) alongside the
+        # singular `video_url`. Multi-input is ACTIVE only when the job is premium
+        # (route_premium) AND the flag is on (per-job multi_input_enabled OR env
+        # MULTI_INPUT_ENABLED) AND ≥2 non-empty urls are present. Otherwise SINGLE
+        # stays the default path (_mi_urls = [video_url], N=1 → the concat helper
+        # straight-copies → byte-identical). Flare never sends plural and the flag
+        # defaults off, so a Flare/flag-off multi-upload is ignored down to single
+        # (defense-in-depth). video_url is pinned to the first source so the
+        # existing single-source parse / prewarm-key / presigned code stays valid;
+        # multi-input bypasses the prewarm cache below and overrides the download
+        # with the ordered concat.
+        _mi_flag = bool(input_data.get("multi_input_enabled")) or (
+            os.environ.get("MULTI_INPUT_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
+        )
+        _mi_urls_raw = input_data.get("video_urls")
+        _mi_urls = (
+            [str(u).strip() for u in _mi_urls_raw if str(u or "").strip()]
+            if isinstance(_mi_urls_raw, list) else []
+        )
+        _multi_active = bool(route_premium and _mi_flag and len(_mi_urls) > 1)
+        if _multi_active:
+            video_url = _mi_urls[0]   # pin first source; download overridden below
+            print(f"[multi-input] ACTIVE — {len(_mi_urls)} ordered sources (premium, flag on)", flush=True)
+        else:
+            _mi_urls = [video_url]    # single = list-of-one → byte-identical path
+
         print(f"\n{'='*80}", flush=True)
         print(f"JOB {job_id}: \"{vibe}\"", flush=True)
         # Build identification — answers "which build ran this render?" with
@@ -18687,9 +18796,14 @@ def handler(job):
 
         _cached_source_path = _prewarm_cached_source_path(_dl_bucket, _dl_key)
         _cached_transcript_path = _prewarm_cached_transcript_path(_dl_bucket, _dl_key)
-        _has_cached_source = os.path.exists(_cached_source_path) and os.path.getsize(_cached_source_path) > 1024
+        # Multi-input (Phase B) bypasses the single-key prewarm cache entirely —
+        # the concat is job-specific, so a cached single-source copy OR transcript
+        # keyed on the first url would be wrong. Forces a fresh download+concat
+        # and a fresh transcription of the concatenated file below.
+        _has_cached_source = (not _multi_active) and os.path.exists(_cached_source_path) and os.path.getsize(_cached_source_path) > 1024
         _has_cached_transcript = (
-            not provided_transcript
+            (not _multi_active)
+            and not provided_transcript
             and os.path.exists(_cached_transcript_path)
             and os.path.getsize(_cached_transcript_path) > 2
         )
@@ -18699,7 +18813,7 @@ def handler(job):
         # may just not have propagated yet. Try ONE explicit reload + recheck
         # with a short delay — most "races" resolve in under a second. If it
         # still isn't there after retry, we fall through to the slow path.
-        if (_hint_source_cached and not _has_cached_source) or (_hint_transcript_cached and not _has_cached_transcript):
+        if (not _multi_active) and ((_hint_source_cached and not _has_cached_source) or (_hint_transcript_cached and not _has_cached_transcript)):
             print("[pipeline] hint/reality mismatch — volume reload + retry", flush=True)
             try:
                 # Import lazily since it's only needed on the retry path
@@ -18784,7 +18898,15 @@ def handler(job):
 
         # Move source bytes into the job's work_dir — cache hit = ~100ms copy,
         # miss = real S3 download (still fast after boto3[crt] + same-region).
-        if _has_cached_source:
+        if _multi_active:
+            # Phase B: download all ordered sources + concat into source_path.
+            # source_path is now ONE continuous file; the entire pipeline below
+            # runs on it unchanged (single-source-equivalent). _has_cached_source
+            # / _has_cached_transcript were forced False above, so we neither read
+            # a stale cache nor suppress the transcribe stage.
+            _mi_durs = _download_and_concat_sources(_mi_urls, source_path, work_dir)
+            _dl_method = f"multi-concat({len(_mi_urls)})"
+        elif _has_cached_source:
             import shutil as _sh
             _sh.copy(_cached_source_path, source_path)
             _dl_method = "prewarm-cache"

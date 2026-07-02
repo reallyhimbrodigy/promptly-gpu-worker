@@ -1240,3 +1240,95 @@ def partial_state_probe():
     for k, v in (r or {}).items():
         print(f"{k}: {v}")
     print("=== END ===\n")
+
+
+# ── Phase B Part 1 isolation proof: multi-source download+concat (INERT) ─────
+# Generates TWO heterogeneous synthetic clips (different resolution + fps),
+# uploads them to S3, runs the REAL handler._download_and_concat_sources, and
+# verifies the join is ONE continuous uniform file (duration≈sum, 1080x1920,
+# single continuous audio). Also verifies the N==1 straight-copy path. Proves the
+# concat that the single-input pipeline then treats as one source. Not called by
+# any job.
+@app.function(cpu=2, memory=4096, timeout=600)
+def probe_multi_concat():
+    import os, sys, uuid, tempfile, subprocess, json
+    if "/" not in sys.path:
+        sys.path.insert(0, "/")
+    import handler
+
+    _s3 = handler._aws_s3_client
+    if _s3 is None:
+        raise RuntimeError("AWS S3 client not configured")
+    _bucket = (os.environ.get("S3_BUCKET_NAME") or os.environ.get("SUPABASE_S3_BUCKET")
+               or "promptly-video-storage")
+
+    def _probe(path):
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-print_format", "json", "-show_format", "-show_streams", path],
+            capture_output=True, text=True,
+        )
+        d = json.loads(out.stdout or "{}")
+        v = next((s for s in d.get("streams", []) if s.get("codec_type") == "video"), {})
+        a = next((s for s in d.get("streams", []) if s.get("codec_type") == "audio"), {})
+        return {
+            "duration": round(float(d.get("format", {}).get("duration") or 0.0), 2),
+            "w": v.get("width"), "h": v.get("height"),
+            "vcodec": v.get("codec_name"), "acodec": a.get("codec_name"),
+            "asr": a.get("sample_rate"), "ach": a.get("channels"),
+        }
+
+    report = {}
+    with tempfile.TemporaryDirectory(prefix="multiconcat-") as work:
+        # Two DIFFERENT-shape clips: landscape 1280x720@30 (3s) + portrait 1080x1920@24 (2s).
+        a_path = os.path.join(work, "a.mp4"); b_path = os.path.join(work, "b.mp4")
+        subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=duration=3:size=1280x720:rate=30",
+                        "-f", "lavfi", "-i", "sine=frequency=440:duration=3",
+                        "-c:v", "libx264", "-c:a", "aac", "-shortest", a_path], check=True, capture_output=True)
+        subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=duration=2:size=1080x1920:rate=24",
+                        "-f", "lavfi", "-i", "sine=frequency=880:duration=2",
+                        "-c:v", "libx264", "-c:a", "aac", "-shortest", b_path], check=True, capture_output=True)
+        report["clip_a"] = _probe(a_path)
+        report["clip_b"] = _probe(b_path)
+
+        keys, urls = [], []
+        for p in (a_path, b_path):
+            k = "test-gen/multi/" + uuid.uuid4().hex + ".mp4"
+            _s3.upload_file(p, _bucket, k, ExtraArgs={"ContentType": "video/mp4"})
+            keys.append(k)
+            urls.append(f"https://{_bucket}.s3.amazonaws.com/{k}")
+
+        # N==2 concat (the real helper)
+        dest2 = os.path.join(work, "concat.mp4")
+        durs = handler._download_and_concat_sources(urls, dest2, work)
+        report["per_source_durations"] = [round(d, 2) for d in durs]
+        report["concat"] = _probe(dest2)
+        _exp = round(sum(durs), 2)
+        _got = report["concat"]["duration"]
+        report["duration_sum_ok"] = abs(_got - _exp) <= 0.6   # small container/keyframe slack
+        report["is_1080x1920"] = (report["concat"]["w"] == 1080 and report["concat"]["h"] == 1920)
+        report["has_continuous_audio"] = (report["concat"]["acodec"] == "aac" and str(report["concat"]["asr"]) == "48000")
+
+        # N==1 straight-copy path (single == list-of-one, byte-identical intent)
+        dest1 = os.path.join(work, "single.mp4")
+        d1 = handler._download_and_concat_sources([urls[0]], dest1, work)
+        report["single_copy_duration"] = _probe(dest1)["duration"]
+        report["single_is_copy"] = (os.path.getsize(dest1) == os.path.getsize(a_path))
+
+        # cleanup uploaded test objects
+        for k in keys:
+            try: _s3.delete_object(Bucket=_bucket, Key=k)
+            except Exception: pass
+
+    report["PASS"] = bool(report.get("duration_sum_ok") and report.get("is_1080x1920")
+                          and report.get("has_continuous_audio") and report.get("single_is_copy"))
+    print(f"[multi-concat-probe] {report}", flush=True)
+    return report
+
+
+@app.local_entrypoint()
+def multi_concat_probe():
+    r = probe_multi_concat.remote()
+    print("\n=== MULTI-INPUT CONCAT ISOLATION PROOF ===")
+    for k, v in (r or {}).items():
+        print(f"{k}: {v}")
+    print("=== END ===\n")
