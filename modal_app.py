@@ -406,11 +406,17 @@ image = (
         "PROMPTLY_PREMIUM_VALUES": "pro,teams,premium",
         "PROMPTLY_JOB_TABLE": "video_jobs",
         "PROMPTLY_JOB_ACTIVE_STATUSES": "queued,processing",
-        # Durable job-status writes (the progress backbone). Default OFF: flip to
-        # "1" ONLY after the video_jobs migration runs (migrations/
-        # video_jobs_status.sql) and status ownership is coordinated with the JS
-        # server. Off => the worker writes nothing to video_jobs (byte-identical).
-        "JOB_STATUS_WRITES_ENABLED": "0",
+        # Durable job-status writes (the progress backbone). ON as of directive
+        # #6 (2026-07-02): the never-fails promise is always-deliver OR
+        # always-tell, and a job that can do neither (1a72b344 hung a user's
+        # screen) is the failure this kills. Writes are FAIL-OPEN: if the
+        # video_jobs migration (migrations/video_jobs_status.sql) hasn't run
+        # or PostgREST drops a column, the write logs and the job proceeds —
+        # never fatal. JS-server status ownership: worker owns
+        # processing/needs_input/complete/failed transitions after accept;
+        # the app server owns queued/canceled (hand-off note in the PR).
+        # ROLLBACK: flip to "0" and redeploy.
+        "JOB_STATUS_WRITES_ENABLED": "1",
         # ── Re-edit Layer 3 Phase 2: array-level auto-revert ─────
         # Phase 1 (always on) auto-reverts top-level scalar drift
         # (caption_style / thumbnail_word_index / outro). Phase 2

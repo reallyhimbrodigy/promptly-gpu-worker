@@ -19528,6 +19528,15 @@ def handler(job):
         required = ["job_id","video_url","vibe","user_id","upload_url"]
         missing = [f for f in required if not input_data.get(f)]
         if missing:
+            # Terminal write even on this earliest reject (job_id may itself be
+            # the missing field — write_job_status no-ops on a falsy id).
+            write_job_status(
+                input_data.get("job_id"), status="failed",
+                phase="Something went wrong",
+                result={"error_code": "MISSING_FIELDS",
+                        "user_message": "This job was submitted without required fields — please try again.",
+                        "retryable": True},
+            )
             return {"error": f"Missing required input fields: {', '.join(missing)}"}
 
         job_id    = input_data["job_id"]
@@ -19548,6 +19557,13 @@ def handler(job):
                 f"tier={_gate['tier']} active_jobs={_gate['active_jobs']} — "
                 f"non-premium concurrent submission",
                 flush=True,
+            )
+            # Terminal write: the poller must see a real end state, not a spin.
+            write_job_status(
+                job_id, status="failed", phase="One render at a time",
+                result={"error_code": "TIER_CONCURRENCY",
+                        "user_message": _gate.get("user_message"),
+                        "retryable": True},
             )
             return _gate
         # Optional client-side low-res proxy. When the iOS client extracts
@@ -19685,15 +19701,25 @@ def handler(job):
                 flush=True,
             )
 
-        # Validate re-edit mode inputs up front — fail fast with a clear message.
+        # Validate re-edit mode inputs up front — fail fast with a clear message,
+        # and a terminal status write so the poller sees the end state (P2).
+        _mode_input_error = None
         if mode == "render_only" and not provided_plan:
-            return {"error": "render_only mode requires edit_plan in input"}
-        if mode == "tweak" and (not provided_plan or not change_request):
-            return {"error": "tweak mode requires edit_plan + change_request in input"}
-        if mode == "guided_redraft" and (not provided_plan or not change_request):
-            return {"error": "guided_redraft mode requires edit_plan + change_request in input"}
-        if mode == "reinterpret" and not change_request:
-            return {"error": "reinterpret mode requires change_request in input"}
+            _mode_input_error = "render_only mode requires edit_plan in input"
+        elif mode == "tweak" and (not provided_plan or not change_request):
+            _mode_input_error = "tweak mode requires edit_plan + change_request in input"
+        elif mode == "guided_redraft" and (not provided_plan or not change_request):
+            _mode_input_error = "guided_redraft mode requires edit_plan + change_request in input"
+        elif mode == "reinterpret" and not change_request:
+            _mode_input_error = "reinterpret mode requires change_request in input"
+        if _mode_input_error:
+            write_job_status(
+                job_id, status="failed", phase="Something went wrong",
+                result={"error_code": "MISSING_FIELDS",
+                        "user_message": "This edit request was missing its plan or change details — please try again.",
+                        "retryable": True},
+            )
+            return {"error": _mode_input_error}
 
         work_dir    = tempfile.mkdtemp(prefix=f"promptly-{job_id}-")
         source_path = os.path.join(work_dir, "source.mp4")

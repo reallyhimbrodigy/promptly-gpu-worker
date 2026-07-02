@@ -395,10 +395,12 @@ def evaluate_recipe(plan, words, cut_boundaries, duration, tight_boundaries=None
 
     for i, evs in stacked:
         r.fail("window-stacked", f"window {i} ({i*2}-{i*2+2}s) has {len(evs)} events: {evs}")
-    if len(empty) > max(1, n_windows // 4):
-        r.fail("window-empty", f"{len(empty)}/{n_windows} non-breather windows empty: {empty} — under-mined")
-    elif empty:
-        r.warn("window-empty", f"{len(empty)} non-breather windows empty: {empty}")
+    # Recalibrated to the hard-cut doctrine (directive #6 R1): empty windows
+    # are LEGAL when the mine is honest — density is not a target, and a lean
+    # recipe FAILing here made the eval disagree with the doctrine it
+    # instruments. Soft signal only; the count stays in stats.
+    if empty:
+        r.warn("window-empty", f"{len(empty)}/{n_windows} non-breather windows empty: {empty}")
 
     # max dead gap between consecutive visual events (thinness killer metric)
     ev_times = sorted([t for t, _, _ in events]) + [end_t]
@@ -408,8 +410,13 @@ def evaluate_recipe(plan, words, cut_boundaries, duration, tight_boundaries=None
             max_gap, gap_at = t - prev_t, prev_t
         prev_t = t
     r.stats_max_gap = round(max_gap, 1)
-    if max_gap > 4.0:
+    # Recalibrated (directive #6 R1): hard cuts ARE the rhythm and aren't in
+    # the event list, so several seconds without a DECORATION is on-doctrine.
+    # FAIL only at a genuinely dead bar; the old 4s bar stays as a soft signal.
+    if max_gap > 10.0:
         r.fail("dead-zone", f"{max_gap:.1f}s with no visual event starting at {gap_at:.1f}s — the swipe happens here")
+    elif max_gap > 4.0:
+        r.warn("dead-zone", f"{max_gap:.1f}s with no visual event starting at {gap_at:.1f}s")
 
     # breather budget: each ≤3.0s, total ≤20% of runtime
     breather_total = 0.0
@@ -428,9 +435,12 @@ def evaluate_recipe(plan, words, cut_boundaries, duration, tight_boundaries=None
     KEYWORD_STYLES = {"Prime", "Cove", "EditorialPop", "Illuminate", "Lumen", "Passage", "Pulse", "Serif"}
     if plan.get("caption_style") in KEYWORD_STYLES:
         kw = len(plan.get("caption_keywords") or [])
-        floor = n_words // 5  # hard floor: 1 per 5 words (target 1 per 3-4)
+        floor = n_words // 5  # advisory floor: 1 per 5 words (target 1 per 3-4)
+        # Recalibrated (directive #6 R1): style-conditional ADVICE, not a
+        # failure — sparse keywords on a keyword style are a taste signal,
+        # not a doctrine violation.
         if kw < floor:
-            r.fail("keyword-density", f"{kw} keywords for {n_words} words on keyword style '{plan['caption_style']}' — floor is {floor} (target ~{n_words//4}-{n_words//3})")
+            r.warn("keyword-density", f"{kw} keywords for {n_words} words on keyword style '{plan['caption_style']}' — floor is {floor} (target ~{n_words//4}-{n_words//3})")
 
     r.stats = {
         "runtime_windows": n_windows,

@@ -2360,13 +2360,21 @@ def _recipe_eval_dead_zone():
         "transitions": [], "broll_clips": [], "motion_graphics": [],
         "text_overlays": [], "sound_effects": [],
     }
-    # 21 words spaced 0.5s apart → ~10s total. Two zooms at word 1 (0.5s)
-    # and word 20 (10s) leave a ~9.5s gap in between — well over the 4s
-    # floor.
-    words = [{"word": str(i), "start": i * 0.5, "end": i * 0.5 + 0.4} for i in range(21)]
-    rep = recipe_eval.evaluate_recipe(bad_plan, words, [], 10.5)
+    # Recalibrated (directive #6 R1): hard cuts are the rhythm, so a
+    # several-second stretch without a DECORATION is on-doctrine. The FAIL
+    # bar is now >10s (genuinely dead); 4-10s is a soft warn. 21 words
+    # spaced 0.7s apart → ~15s total; zooms at word 1 (0.7s) and word 20
+    # (14s) leave a ~13s gap — over the new bar.
+    words = [{"word": str(i), "start": i * 0.7, "end": i * 0.7 + 0.5} for i in range(21)]
+    rep = recipe_eval.evaluate_recipe(bad_plan, words, [], 15.0)
     rule_ids = {r for (r, _) in rep.failures}
     assert "dead-zone" in rule_ids, f"expected dead-zone failure, got: {rule_ids}"
+    # And the old v1 bar must now be SOFT: a ~6s gap warns, not fails.
+    words_soft = [{"word": str(i), "start": i * 0.33, "end": i * 0.33 + 0.25} for i in range(21)]
+    rep_soft = recipe_eval.evaluate_recipe(bad_plan, words_soft, [], 7.0)
+    soft_fails = {r for (r, _) in rep_soft.failures}
+    assert "dead-zone" not in soft_fails, f"6s gap must be a warn under R1, got FAIL"
+    assert "dead-zone" in {r for (r, _) in rep_soft.warnings}, "6s gap lost its soft signal"
 
 
 @check("recipe_eval flags oversized breather (v2.1 breather-budget rule)")
