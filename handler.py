@@ -8139,10 +8139,11 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                     # Re-derive the kept-words list at this scope (matches the pre-
                     # Gemini computation since the same _dg_words + _removed_word_indices
                     # determine kept-only ordering).
-                    _post_kept = [
-                        _w for _i, _w in enumerate(_dg_words)
+                    _post_kept_src = [
+                        _i for _i, _w in enumerate(_dg_words)
                         if _i not in (_removed_word_indices or set())
                     ]
+                    _post_kept = [_dg_words[_i] for _i in _post_kept_src]
                     _shot_split_pairs = shot_change_word_boundaries(_shots, _post_kept)
                     # Filter to boundaries where Gemini emitted a transition.
                     _emitted_trans_indices = {
@@ -8152,10 +8153,34 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                         and _t.get("after_word_index") is not None
                         and str(_t.get("type") or "none") != "none"
                     }
-                    _gated_pairs = [
-                        (_ni, _st) for (_ni, _st) in _shot_split_pairs
-                        if _ni in _emitted_trans_indices
-                    ]
+                    # _shot_split_pairs indices are KEPT-space (positions in
+                    # _post_kept); after_word_index is SOURCE-space (translated
+                    # by _translate_post_cut_anchors_to_src before the merge).
+                    # Translate kept->src via _post_kept_src so the gate compares
+                    # like with like. (new_to_src is NOT safe here: it maps the
+                    # RAW-mechanical kept space, while _shot_split_pairs lives in
+                    # the post-guard/post-normalizer kept space.) The gate used
+                    # to compare kept to source directly, so whenever words were
+                    # removed before a boundary it silently missed — divergence
+                    # logs fire exactly where the fixed comparison differs from
+                    # the old one, making the blast radius visible per boundary.
+                    _gated_pairs = []
+                    for (_ni, _st) in _shot_split_pairs:
+                        _src_ni = _post_kept_src[_ni] if 0 <= _ni < len(_post_kept_src) else None
+                        _now = _src_ni is not None and _src_ni in _emitted_trans_indices
+                        _was = _ni in _emitted_trans_indices  # the buggy kept-vs-src test
+                        if _now:
+                            _gated_pairs.append((_ni, _st))
+                        if _now != _was:
+                            _record_divergence(
+                                "cut_boundary",
+                                {"kept_word_index": _ni, "src_word_index": _src_ni,
+                                 "split_time": _st},
+                                "shot_split_gate_corrected",
+                                final={"split_gated_in": _now},
+                                reason="kept-vs-source index-space fix changed "
+                                       "this boundary's gate outcome",
+                            )
                     _skipped = len(_shot_split_pairs) - len(_gated_pairs)
                     if _skipped > 0:
                         print(
