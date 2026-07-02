@@ -8394,6 +8394,15 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                     new_to_src[_ki] for _ki in _tight_boundary_indices
                     if 0 <= _ki < len(new_to_src)
                 }
+                # CUT counterpart in SOURCE space — the transitions loop's
+                # membership check validates every after_word_index against
+                # the full detector candidate union: crossfade types must
+                # anchor on a CUT boundary, zero-handle types on CUT u TIGHT.
+                # Same kept->source translation, same NameError guard below.
+                _cut_src_set = {
+                    new_to_src[_ki] for _ki in _cut_boundary_indices
+                    if 0 <= _ki < len(new_to_src)
+                }
                 # Shot-change subset of the tight boundaries, in source space — the
                 # scene-change decoration FLOOR (below) backfills any of these left
                 # bare by Gemini. Same kept→source translation; a "both" boundary
@@ -8410,8 +8419,56 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                 }
             except NameError:
                 _tight_src_set = set()
+                _cut_src_set = set()
                 _shot_src_set = set()
                 _shot_src_score = {}
+
+            # ── Boundary-coverage telemetry (observability ONLY) ────────────
+            # Every inter-clip splice in validated_cuts should map back to a
+            # boundary in the detector candidate union (CUT u TIGHT) — that
+            # union is the only space the transition/overlay validators check
+            # against, so a splice in NEITHER list is a cut no placement rule
+            # can see. If [boundary-coverage] missing lines are frequent in
+            # prod, the classifier has a coverage bug and that becomes its own
+            # directive. Same nearest-kept-word mapping as the clip-split
+            # cross-check guard (0.10s tolerance); try/except so telemetry can
+            # never break the render. gap = next clip's source_start - this
+            # clip's source_end: the source-time span REMOVED at the splice.
+            try:
+                _n_cov_cut = _n_cov_tight = _n_cov_miss = 0
+                for _bi in range(len(validated_cuts) - 1):
+                    _end_t = float(validated_cuts[_bi].get("source_end") or 0.0)
+                    _next_t = float(validated_cuts[_bi + 1].get("source_start") or 0.0)
+                    _best_ni, _best_dist = None, 0.10
+                    for _cni, _cw in enumerate(kept_words):
+                        _cdist = abs(float(_cw.get("end") or 0.0) - _end_t)
+                        if _cdist <= _best_dist:
+                            _best_dist, _best_ni = _cdist, _cni
+                    _cov_awi = (
+                        new_to_src[_best_ni]
+                        if _best_ni is not None and 0 <= _best_ni < len(new_to_src)
+                        else None
+                    )
+                    if _cov_awi is not None and _cov_awi in _cut_src_set:
+                        _n_cov_cut += 1
+                    elif _cov_awi is not None and _cov_awi in _tight_src_set:
+                        _n_cov_tight += 1
+                    else:
+                        _n_cov_miss += 1
+                        print(
+                            f"[boundary-coverage] missing awi={_cov_awi} "
+                            f"splice_end={_end_t:.3f}s "
+                            f"gap={max(0.0, _next_t - _end_t):.3f}s "
+                            f"(in NEITHER detector list)",
+                            flush=True,
+                        )
+                print(
+                    f"[boundary-coverage] splices={len(validated_cuts) - 1} "
+                    f"cut={_n_cov_cut} tight={_n_cov_tight} missing={_n_cov_miss}",
+                    flush=True,
+                )
+            except Exception as _cov_err:
+                print(f"[boundary-coverage] skipped ({type(_cov_err).__name__})", flush=True)
 
             # Boundaries (source after_word_index) carrying a real transition → type.
             # Overlays and the scene-change floor read this to skip double-decorating a
@@ -8492,6 +8549,35 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                     # repair loop rarely sees this class as a result; it nets the rest.
                     if awi in _tight_src_set and tr_type not in ZERO_HANDLE_TRANSITION_TYPES:
                         _demoted_tight_transitions.append((awi, tr_type, "demote"))
+                        continue
+                    # Membership enforcement: every transition must anchor on
+                    # the detector candidate union — crossfade types on a CUT
+                    # boundary (the only class with handle room), zero-handle
+                    # types on CUT u TIGHT. An awi outside both lists has no
+                    # detected cut to play across; the containment attach below
+                    # would silently glue it to whatever splice ends the
+                    # containing clip (4 of the exhibit's 7 transitions rode
+                    # through exactly this hole, playing deleted-word
+                    # fragments). DEMOTE-ONLY, never raise — the lists are not
+                    # yet trusted to be exhaustive over real boundaries; the
+                    # [boundary-coverage] telemetry below measures that.
+                    # Ordered AFTER the tight check so a crossfade at a LISTED
+                    # tight boundary keeps action="demote".
+                    if tr_type in ZERO_HANDLE_TRANSITION_TYPES:
+                        _is_member = awi in _cut_src_set or awi in _tight_src_set
+                    else:
+                        _is_member = awi in _cut_src_set
+                    if not _is_member:
+                        print(
+                            f"[generate-edit] transition '{tr_type}' at "
+                            f"after_word_index={awi} is outside the "
+                            f"{'CUT/TIGHT lists' if tr_type in ZERO_HANDLE_TRANSITION_TYPES else 'CUT list'} "
+                            f"— demoting (nonmember).",
+                            flush=True,
+                        )
+                        _demoted_tight_transitions.append(
+                            (awi, tr_type, "demote_nonmember")
+                        )
                         continue
                     # Heavy full-card FIT enforcement (SceneTitle, FilmStrip
                     # only): HARD RULE 2 teaches natural <= gap/2 but nothing
