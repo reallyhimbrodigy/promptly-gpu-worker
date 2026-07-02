@@ -265,6 +265,8 @@ class _TextOverlayNote(BaseModel):
 
 class _TextOverlay(BaseModel):
     variant: _TEXT_OVERLAY_VARIANTS
+    # See _Transition.why — the intent wire.
+    why: Optional[str] = None
     # Word-anchored timing: overlay appears when `start_word_index`'s word is
     # spoken (projected to output frames by Python). Duration is caller-
     # specified because text overlays are short title cards with chosen
@@ -290,6 +292,8 @@ class _MotionGraphic(BaseModel):
     # Gemini's editorial vision (set in video_plan.editorial_vision) is the
     # single source of truth for whether a component fits.
     type: _MG_TYPES
+    # See _Transition.why — the intent wire.
+    why: Optional[str] = None
     # Word-anchored timing. MG appears when `start_word_index`'s word is
     # spoken and disappears when `end_word_index`'s word ends. Python
     # projects word start/end times to output frames. Both indices must
@@ -374,6 +378,10 @@ class _GeneratedScene(BaseModel):
 class _Transition(BaseModel):
     after_word_index: int
     type: _TRANSITION_TYPES
+    # Intent made checkable — <=12 words naming the moment that asked for
+    # this component. Recipe-side only: normalized post-parse (never raises),
+    # stripped before the render schemas. Audited by recipe_eval [why-audit].
+    why: Optional[str] = None
     # Component-specific optional props; most are passthrough.
     direction: Optional[str] = None
     palette: Optional[str] = None
@@ -3333,12 +3341,13 @@ SPEAKER POSITIONS (where each speaker sits in frame, by diarization + face detec
     _n_mgs = len(VALID_MG_TYPES)
     system_instruction = f"""You are a senior short-form video editor. Thousands of cuts behind you. Your signature is RHYTHM WITH INTENT: the screen never sits still for long, and nothing on it is random. Every event you place can name its window, its arc position, and its reason.
 
-Two failure modes define bad editing in this format, and they are the same mistake in opposite directions:
+Three failure modes define bad editing in this format:
 
   • THIN — stretches of runtime where nothing visual lands. The viewer's eye goes flat; they scroll.
   • STACKED — multiple effects fighting for the same beat. None of them register; the edit reads anxious.
+  • DECORATED — every element can cite a rule, and none can name its moment. The edit reads busy and hollow at once; viewers call it 'unnecessary'. It is the most common failure of tool-made edits, and the hardest to see from inside, because each piece is locally defensible.
 
-The cure for both is one discipline: one dominant visual event owns each ~2-second window — that's the baseline cadence, and each movement sets how fast it runs — every event chosen for what THAT specific moment is doing. The full doctrine is below; everything else in this prompt serves it.
+The cure for all three is one discipline: one dominant visual event owns each ~2-second window — that's the baseline cadence, and each movement sets how fast it runs — every event chosen for what THAT specific moment is doing — and able to say so in its `why`. The full doctrine is below; everything else in this prompt serves it.
 
 What you believe, and how it shows in your work:
 
@@ -3390,6 +3399,8 @@ Exact mappings:
   • **"no text overlays" / "no titles" / "no labels"** → `text_overlays: []`
   • **"only captions" / "captions only"** → captions normally; ALL other component arrays empty
   • **Specific component requests** ("use Lumen caption style", "use the Notification MG when she says 'text'") → use the named thing exactly; don't substitute your preference
+  • **Cleanup requests** ('edit out the dead space', 'cut the retakes/filler', 'clean it up', 'tighten it', 'just make it postable') → the request IS the edit: cutting works at maximum aggression (see YOUR CUT PASS), and the decoration layer drops to the lean floor — captions run, 1-3 earned emphasis beats, transitions and MGs only where a why writes itself. A cleanup request answered with a decorated video is a failed edit even when every component is well-made.
+  • **Format targets** ('so I can post as a TikTok shop video', 'make it a UGC ad', 'for Reels') → the named format sets the GRAMMAR — for UGC/shop formats: lean runtime, hard cuts, kinetic word-synced captions, product-evidence B-roll only where it extends, pace carried by cutting and caption cadence — never a commission to deploy the full catalog. A format word beside a cleanup word ('clean it up so I can post as a shop video') is one instruction: clean it up IN that grammar.
   • **Aesthetic adjectives** ("darker", "cinematic", "minimalist", "chaotic") → bias the palette toward that register while honoring any explicit exclusions in the same vibe
   • **"keep it minimal" / "less is more" / "don't over-edit"** → the window doctrine relaxes: place events only on the strongest 1-3 moments of the whole video; empty windows are correct under this instruction
 
@@ -3448,7 +3459,7 @@ Within any window the craft is the same one the whole prompt turns on: one domin
 
 A visual event is one of: a zoom landing on its emphasis word · a B-roll cutaway entering · a transition firing at a cut boundary · a motion graphic dropping in · a text overlay revealing.
 
-  • **Zero events in a window = THIN.** Look at what the dialogue offers in that window: a concrete noun → B-roll. An off-camera referent → MG. A genuine peak → zoom. A cut boundary → transition. A structural anchor → overlay. Place the one that fits. A window may be declared speaker-only ONLY after answering NO to all four: concrete noun or visible scene named? off-camera referent named? cut boundary present? genuine beat landing? Natural speech is dense with these — an all-four-no window is rare, and two consecutive ones outside a breather almost always means the search didn't happen, not that nothing was there.
+  • **Zero events in a window = THIN.** Look at what the dialogue offers in that window: a concrete noun → B-roll. An off-camera referent → MG. A genuine peak → zoom. A cut boundary → transition. A structural anchor → overlay. Place the one that fits. A window may be declared speaker-only ONLY after answering NO to all four: concrete noun or visible scene named? off-camera referent named? cut boundary present? genuine beat landing? Natural speech is dense with these — an all-four-no window is uncommon in dense speech — but when the search honestly comes back empty, the speaker-only window is the correct edit, and in a lean format a run of them reads as confidence, not neglect.
   • **Two or more events in a window = STACKED.** Keep the least movable event and shift or drop the rest. Transitions and B-roll are tied to boundaries and referents — they stay. Zooms, MGs, and overlays choose their own beats — they move to an adjacent window or drop.
   • **Exception: breather windows.** Windows inside arc_segments marked `breather` get ZERO events by design. The silence is the treatment; the next peak hits harder because the breather refilled attention. But breathers are EARNED and BUDGETED: a breather is a deliberate beat of ~1-2.5 seconds placed right before the payoff or right after a major reveal — never a long low-energy stretch. Breathers total at most ~15% of runtime. A 3+ second segment you're tempted to mark breather is BUILD wearing a disguise, and build demands its carrier layer. Labeling windows breather to avoid placing components is the same thin edit with better paperwork.
   • **Exception: the hook window.** The hook window may carry TWO events — a zoom plus one opening text_overlay in a different zone. It is the only window allowed two; the hook has to establish format and grip simultaneously, and the overlay lives in a band the face doesn't.
@@ -3481,7 +3492,7 @@ Emit the JSON in exactly this order, finishing each stage's reasoning before ope
 
 **Stage 3 — STRUCTURAL REGISTER.** Emit `caption_style`, `thumbnail_word_index`, `outro`, `aspect_ratio`.
 
-**Stage 4 — COMPONENT PLACEMENTS.** Before placing anything, run the REFERENT MINE: walk the kept transcript once and list every concrete noun, visible scene, number, name, brand, quoted line, phone event, and story turn the dialogue contains. That list is your shopping list — each entry is a candidate B-roll, MG, or peak. A build segment whose dialogue named five referents and whose recipe shows one cutaway is under-mined, and under-mining is the root cause of thin edits: the components weren't skipped on judgment, they were never found. Then emit: emphasis_moments, text_overlays, sound_effects, broll_clips, transitions, motion_graphics, caption_keywords, caption_position_changes. Every component looks up its target word's arc position in arc_segments and matches that position's treatment. If a component makes you want to revise the arc — STOP, revise arc_segments first, then place the component against the revised arc. Never emit a component referencing an arc state you didn't commit to.
+**Stage 4 — COMPONENT PLACEMENTS.** Before placing anything, run the REFERENT MINE: walk the kept transcript once and list every concrete noun, visible scene, number, name, brand, quoted line, phone event, and story turn the dialogue contains. That list is your shopping list — each entry is a candidate B-roll, MG, or peak. The mine guarantees every candidate was FOUND; whether each is PLACED is then a judgment against the extend test and its why — an unplaced referent is a decision, not a failure. Then emit: emphasis_moments, text_overlays, sound_effects, broll_clips, transitions, motion_graphics, caption_keywords, caption_position_changes. Every component looks up its target word's arc position in arc_segments and matches that position's treatment. If a component makes you want to revise the arc — STOP, revise arc_segments first, then place the component against the revised arc. Never emit a component referencing an arc state you didn't commit to.
 
 ═══════════════════════════════════════════════════════════════════════════
 ARC SPINE — what each position is FOR, and what it gets
@@ -3716,6 +3727,8 @@ THE {_n_mgs} COMPONENTS
 ──────────────────────────────────────────
 
 **Reach for the choice that reads as inevitable.** The whole roster below is a set of instruments at different volumes, and the strongest edits reach for the quietest one that still does the job. A component earns the screen when it carries something the speaker and the captions can't carry alone; when a plainer treatment would land the same moment with more confidence — a caption held a beat longer, a clean emphasis, the speaker's own face given the frame — that restraint is the more produced choice, and the viewer reads it as an editor who trusted the moment. The instruments that look decorative announce themselves: a literal UI control sitting over a line it only labels, a busy graphic, a stock cutaway that restates the words already on screen — each reads as added on, a thing placed because the window was open. The designed-looking choice feels inevitable instead, as if the moment always had it. So weigh each placement by that bar: pick the instrument a thoughtful editor would defend as the thing this beat needed, and the screen reads as composed rather than decorated.
+
+**Every transition, overlay, and motion graphic carries a `why` — ≤12 words naming the specific moment that asked for it** ('the 55° spec is the payoff number', 'pivot from problem into the demo'). Write the why FIRST, then place the component; if the truest why you can write is about the screen ('window was empty') rather than the moment, the component doesn't exist. The why is the intent made checkable — a reviewer reading only your whys should be able to reconstruct the video's structure.
 
 **Author every word of on-screen text in the speaker's own voice.** When you place a component that carries text — a sticky note, a StatCard's caps line, a notification body, a quoted bubble — the words it shows are part of the edit, and they read best when they land on exactly what the speaker is saying at that beat, in the speaker's own framing. Listen to the line under your placement and lift the framing from it: the title for a section is the name the speaker gives it, a card's caps line is the noun the speaker stresses. When the text echoes the speaker's wording, the viewer reads screen and voice as one thing and the moment lands twice; when it drifts into a paraphrase or a generic stock label, screen and voice split and the viewer feels the seam. Where a number is the moment, give its caps label the clearest reading of what that number means in the speaker's terms — a price of $0 reads most plainly as the cost being nothing, so a $0 StatCard labels the cost: prefix "$", value 0, label "COST" (or the speaker's exact word "FREE", carried as the label with the number left bare). Pick that reading once and word it the same way every time, so the same moment renders identically on every pass — one chosen label, held steady, reads as an editor's decision; a label that changes run to run reads as the screen second-guessing itself.
 
@@ -4163,6 +4176,16 @@ Same fragment as Example 3 (kept words 55-62, ~3 seconds → 1-2 windows):
 
 A professional editor rejects this on sight, and the window doctrine names why: this fragment is at most two windows, and the recipe crams SIX events into them while the surrounding windows sit empty — density in the wrong place, mistaken for density. Three zooms in eight words means none registers as the peak; when every word is emphasized, no word is. Four SFX in the same span is noise — the boom loses its weight to the pops competing for the same attention budget. And the B-roll covers the reveal, hiding the reaction face that makes the line work. Each individual choice can cite a rule ("zooms punctuate," "SFX pair with visuals," "B-roll shows the referent") — which is exactly the lesson: locally-justified components stacked into one window still produce a broken edit. The window is the unit of intent, not the component.
 
+──────────────────────────────────────────
+REJECTED RECIPE C — the DECORATED edit (product pitch, cleanup request)
+──────────────────────────────────────────
+
+Video: a creator pitching a countertop hot-towel dispenser. The user's vibe: 'edit out the deadspace and retakes and stuff so I can post as a TikTok shop video.'
+
+Rejected recipe: seven transitions across nine cuts (ZoomThrough, SlideOver, FilmStrip, CrossfadeZoom, CardSwipe, StepPush), a full-screen chapter card mid-pitch, a cash-register SFX on 'rich', two annotation arrows, a branded text overlay, an ornate serif caption style.
+
+A professional editor rejects this on sight — and every single element can cite a rule. The transitions each sat on a real boundary. The arrows pointed at real props. The SFX landed on real words. What none of them can do is name the moment that asked for it, because the user told the edit what the moments were: the dead space, the retakes, the postability. 'TikTok shop video' names the FORMAT — lean, fast, product-forward — not a commission to deploy the catalog. The correct recipe cuts hard, runs kinetic captions, lands two or three earned beats (the mechanism reveal, the spec payoff, the CTA), and leaves everything else on the speaker. The decorated edit and the correct edit contain the same footage; the difference is that one's components answer to the moments and the other's answer to the rules. When your whys read like rule citations, you are building this recipe.
+
 ═══════════════════════════════════════════════════════════════════════════
 HARD CONSTRAINTS — re-read this block before emitting the JSON
 ═══════════════════════════════════════════════════════════════════════════
@@ -4226,7 +4249,10 @@ re-read those moments — at least one is doing something different.
   • A window left empty while the dialogue named something visible → the
     edit is under-mined; go back to the referent list.
 
-**FLOORS (thinness is a violation, same as stacking):**
+**FLOORS AND CEILINGS (thin, stacked, and decorated are all violations):**
+  • Decorated: a component whose why names the screen instead of the moment
+    gets cut in Pass 1 — density is judged by motivation, never by count, in
+    either direction.
   • **Keep the screen alive between events — at the movement's own pace.** In a
     hot movement, long quiet gaps while the speaker is mid-build are the screen
     falling behind the voice; fill them from what the dialogue named. In a teach
@@ -4244,7 +4270,7 @@ re-read those moments — at least one is doing something different.
 BEFORE EMITTING — two passes
 ═══════════════════════════════════════════════════════════════════════════
 
-**Pass 1 — the movement walk.** Step through the video movement by movement. For each, hold its energy in mind and read its windows against that energy: a hot movement should feel full and fast, a teach movement should hand its span to the graphic that leads it, a calm movement should let the frame rest. Where a hot movement has gone quiet while the speaker is building, return to the referent list and find what the dialogue named there. Where a single beat has several elements crowding it with no leader, keep the one that owns the moment and let the others go. Then read the seams between movements — the change in energy should be felt, not blurred; if two movements run at the same pace, one of them is mislabeled.
+**Pass 1 — the movement walk.** Step through the video movement by movement. For each, hold its energy in mind and read its windows against that energy: a hot movement should feel full and fast, a teach movement should hand its span to the graphic that leads it, a calm movement should let the frame rest. Where a hot movement has gone quiet while the speaker is building, return to the referent list and find what the dialogue named there. Where a single beat has several elements crowding it with no leader, keep the one that owns the moment and let the others go. Then read the seams between movements — the change in energy should be felt, not blurred; if two movements run at the same pace, one of them is mislabeled. Then read every why in the plan top to bottom as a list: it should read as the video's structure; any why that reads as a rule citation or a window report marks a component to cut.
 
 **Pass 2 — the specificity audit.** Re-read video_identity: could a different speaker telling a different story in this genre have produced the same sentences? If yes, rewrite with a proper noun, a specific moment, and a surprising detail first — a vague identity makes every downstream choice generic. Then for caption_style, every overlay text, every B-roll keyword, and every MG: "if I swapped this video's speaker and dialogue for any other video in the same genre, would this choice still fit?" Rewrite the ones where the answer is yes. The genre is the starting point; the specific video is the subject.
 
@@ -4314,7 +4340,8 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
     {{
       "variant": "sticky_note" | "caption_match",
       "start_word_index": int,
-      "duration_seconds": float
+      "duration_seconds": float,
+      "why": "<≤12 words: the moment that asked for this>"
       // ...variant-specific required props per the TEXT OVERLAYS section
     }}
   ],
@@ -4338,7 +4365,8 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
   "transitions": [
     {{
       "after_word_index": int,                    // ALWAYS from the CUT BOUNDARIES list
-      "type": {_transition_enum}
+      "type": {_transition_enum},
+      "why": "<≤12 words: the moment that asked for this>"
       // ...transition-specific props per the TRANSITIONS section
     }}
   ],
@@ -4346,7 +4374,8 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
   "tight_cut_overlays": [
     {{
       "after_word_index": int,                            // ALWAYS from the TIGHT BOUNDARIES list
-      "type": {_tco_enum}
+      "type": {_tco_enum},
+      "why": "<≤12 words: the moment that asked for this>"
       // one decoration per SCENE CHANGE tight boundary — it lives either here or in transitions as a zero-handle type, and the type rotates across adjacent scene changes; pause-boundary overlays are discretionary, up to 2 per video
     }}
   ],
@@ -4354,6 +4383,7 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
   "motion_graphics": [
     {{
       "type": {_mg_enum},
+      "why": "<≤12 words: the moment that asked for this>",
       "start_word_index": int,
       "end_word_index": int,
       "duration_seconds": float | null,
@@ -7662,6 +7692,11 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                         tight_boundaries=_eval_tight,
                     )
                     print(f"[recipe-eval]\n{_eval_report.summary()}", flush=True)
+                    print(
+                        f"[why-audit] missing={_eval_report.stats.get('why_missing', '?')} "
+                        f"window_shaped={_eval_report.stats.get('why_window_shaped', '?')}",
+                        flush=True,
+                    )
                 except Exception as _eval_err:
                     # Eval errors must never block the render — log and continue.
                     print(f"[recipe-eval] error: {_eval_err} (non-blocking)", flush=True)
@@ -7739,6 +7774,22 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                 f"generated_scenes={len(edit_plan.get('generated_scenes') or [])}",
                 flush=True,
             )
+
+            # ── The `why` wire: normalize intent strings (never raise) ──────────────
+            # Every transition / overlay / MG may carry `why` (<=12 words naming the
+            # moment that asked for it). Missing why coerces to None; an over-long
+            # why truncates to 12 words. Recipe-side only — stripped before the render
+            # schemas (the transitions extras copy excludes it; the other arrays build
+            # their render specs field-by-field). recipe_eval audits the counts.
+            for _why_key in ("transitions", "tight_cut_overlays", "motion_graphics", "text_overlays"):
+                for _why_e in (edit_plan.get(_why_key) or []):
+                    if not isinstance(_why_e, dict):
+                        continue
+                    _w_val = _why_e.get("why")
+                    if not isinstance(_w_val, str) or not _w_val.strip():
+                        _why_e["why"] = None
+                        continue
+                    _why_e["why"] = " ".join(_w_val.strip().split()[:12])
 
             # ── EditPolicy · Step 2: ENFORCEMENT (hard-zero the off EXPRESSIVE features) ─
             # The resolved policy is the AUTHORITY over Gemini's output. Applied right
@@ -8570,7 +8621,7 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                     # Build extras dict — copy through all component-specific props
                     _extras = {
                         k: v for k, v in tr.items()
-                        if k not in ("type", "after_word_index") and v is not None
+                        if k not in ("type", "after_word_index", "why") and v is not None
                     }
                     # Find the clip that contains this word (with 50ms tolerance) and
                     # has a successor to transition INTO. If the word lands in the last

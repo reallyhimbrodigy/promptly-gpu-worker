@@ -2824,11 +2824,13 @@ def _recipe_omittable_field_contract():
         "_ZoomEffect": {"events"},
         "_ZoomEvent": {"durationMs", "originX", "originY", "scale"},
         "_TextOverlay": {"attribution", "bottomText", "notes", "position",
-                         "quote", "text", "topText"},
-        "_MotionGraphic": {"duration_seconds", "props"},
+                         "quote", "text", "topText", "why"},
+        "_MotionGraphic": {"duration_seconds", "props", "why"},
+        # why: the intent wire — omission-tolerant BY DESIGN (the post-merge
+        # normalizer coerces missing why to None; proven in-pipeline).
         "_Transition": {"accentColor", "direction", "flashColor", "intensity",
                         "label", "labelColor", "palette", "showDivider",
-                        "theme", "title", "titleColor", "variant"},
+                        "theme", "title", "titleColor", "variant", "why"},
     }
     models = [H.PostCutPlan, H._EmphasisMoment, H._EmphasisMotionGraphic,
               H._ZoomEffect, H._ZoomEvent, H._TextOverlay, H._TextOverlayNote,

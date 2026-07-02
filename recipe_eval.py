@@ -100,6 +100,22 @@ def evaluate_recipe(plan, words, cut_boundaries, duration, tight_boundaries=None
     sfx = plan.get("sound_effects") or []
     n_words = len(words)
 
+    # ------------------------------------------------------------ why audit
+    # The intent wire: transitions/overlays/MGs carry `why` (<=12 words naming
+    # the moment). Missing whys and window-shaped whys ("the window was
+    # empty") are decoration confessing — counted here, logged by the caller
+    # as [why-audit]. Observability only, never a failure.
+    _why_missing = 0
+    _why_window_shaped = 0
+    _WINDOW_WORDS = ("window", "empty", "screen", "fill")
+    for _arr in (transitions, tight_overlays, mgs, overlays):
+        for _e in _arr:
+            _w = (_e or {}).get("why")
+            if not (isinstance(_w, str) and _w.strip()):
+                _why_missing += 1
+            elif any(_t in _w.lower() for _t in _WINDOW_WORDS):
+                _why_window_shaped += 1
+
     # ---------------------------------------------------------------- arc spine
     if not arc:
         r.fail("arc_segments", "missing or empty — nothing downstream is groundable")
@@ -426,6 +442,10 @@ def evaluate_recipe(plan, words, cut_boundaries, duration, tight_boundaries=None
         "empty_windows": len(empty),
         "stacked_windows": len(stacked),
         "max_dead_gap_s": getattr(r, "stats_max_gap", 0.0),
+        # the why audit (computed near the top; this dict assignment replaces
+        # r.stats wholesale, so the counts are carried into it here)
+        "why_missing": _why_missing,
+        "why_window_shaped": _why_window_shaped,
     }
     return r
 
