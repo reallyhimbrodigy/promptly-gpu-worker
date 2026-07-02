@@ -8436,6 +8436,19 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                             f"transitions[{_ti}].type={tr_type!r} is not a valid transition "
                             f"(must be one of {sorted(_valid_tr_types)})"
                         )
+                    # SceneTitle draws a full-card chapter panel whose ONLY
+                    # content is its title — the tight_cut_overlay twin has
+                    # required this all along (title-required check in the TCO
+                    # loop below) but the TRANSITION variant never did, so a
+                    # title-less SceneTitle rendered ~1.8s of bare near-black
+                    # card (the exhibit's "black hole"). Shape-class -> RAISE;
+                    # the repair net converts it into a corrective re-ask.
+                    if tr_type == "SceneTitle" and not str(tr.get("title") or "").strip():
+                        raise ValueError(
+                            f"transitions[{_ti}] SceneTitle requires a title — "
+                            f"supply one (1-3 uppercase words) or choose a "
+                            f"lighter type."
+                        )
                     awi = tr.get("after_word_index")
                     if awi is None or not isinstance(awi, (int, float)):
                         raise ValueError(
@@ -8478,8 +8491,30 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                     # layer below — the doctrine's own default for tight cuts. The A2
                     # repair loop rarely sees this class as a result; it nets the rest.
                     if awi in _tight_src_set and tr_type not in ZERO_HANDLE_TRANSITION_TYPES:
-                        _demoted_tight_transitions.append((awi, tr_type))
+                        _demoted_tight_transitions.append((awi, tr_type, "demote"))
                         continue
+                    # Heavy full-card FIT enforcement (SceneTitle, FilmStrip
+                    # only): HARD RULE 2 teaches natural <= gap/2 but nothing
+                    # enforced it — the render-side slot clamp silently
+                    # shortens or skips, which is where half-rendered chapter
+                    # cards came from. Where the boundary's source gap (next
+                    # kept word's start - this word's end, the classifier's
+                    # own metric) can't fit 2x the natural duration, DEMOTE to
+                    # the light overlay treatment. Placement-class -> never a
+                    # raise. General fit enforcement for all types stays
+                    # ledgered (distribution risk too broad this sprint).
+                    if tr_type in ("SceneTitle", "FilmStrip"):
+                        _nk = awi + 1
+                        while _nk < len(_dg_words) and _nk in _tr_removed:
+                            _nk += 1
+                        if _nk < len(_dg_words):
+                            _hv_gap = max(0.0, float(_dg_words[_nk].get("start") or 0.0)
+                                          - float(_dg_words[awi].get("end") or 0.0))
+                            if _hv_gap < 2.0 * get_transition_duration(tr_type):
+                                _demoted_tight_transitions.append(
+                                    (awi, tr_type, "demote_heavy_unfit")
+                                )
+                                continue
                     word_end = float(_dg_words[awi].get("end") or 0)
                     # Build extras dict — copy through all component-specific props
                     _extras = {
@@ -8681,20 +8716,32 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
             # _transition_type_by_awi for a demoted one).
             if _demoted_tight_transitions:
                 _demote_apply = []
-                for _d_awi, _d_orig in sorted(_demoted_tight_transitions):
+                for _d_awi, _d_orig, _d_action in sorted(_demoted_tight_transitions):
                     if _d_awi in _overlay_awis or _d_awi in _transition_type_by_awi:
                         # Boundary already carries its one decoration — plain drop.
                         print(
                             f"[generate-edit] DROP transition '{_d_orig}' at "
-                            f"after_word_index={_d_awi}: crossfade type on a TIGHT "
-                            f"boundary and the boundary already carries a decoration. "
+                            f"after_word_index={_d_awi} ({_d_action}): the boundary "
+                            f"already carries a decoration. "
                             f"Render continues without it.",
                             flush=True,
                         )
                         continue
-                    _demote_apply.append((_d_awi, _d_orig))
+                    _demote_apply.append((_d_awi, _d_orig, _d_action))
                 _demote_types = _scene_floor_rotation([None] * len(_demote_apply))
-                for _d_i, (_d_awi, _d_orig) in enumerate(_demote_apply):
+                _DEMOTE_REASONS = {
+                    "demote": "crossfade-family type on a TIGHT boundary (no audio "
+                              "handle) — demoted to the light overlay default for "
+                              "tight cuts instead of failing the job",
+                    "demote_heavy_unfit": "heavy full-card transition does not fit "
+                              "the boundary's gap (gap < 2x natural duration) — "
+                              "demoted to the light overlay default instead of a "
+                              "half-rendered chapter card",
+                    "demote_nonmember": "after_word_index outside the detector "
+                              "candidate union (CUT/TIGHT lists) — no detected cut "
+                              "to play across; demoted to the light overlay default",
+                }
+                for _d_i, (_d_awi, _d_orig, _d_action) in enumerate(_demote_apply):
                     _resolved_overlays.append(
                         {"after_word_index": _d_awi, "type": _demote_types[_d_i]}
                     )
@@ -8702,12 +8749,10 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                     _record_divergence(
                         "transitions",
                         {"type": _d_orig, "after_word_index": _d_awi},
-                        "demote",
+                        _d_action,
                         final={"tight_cut_overlay": _demote_types[_d_i],
                                "after_word_index": _d_awi},
-                        reason="crossfade-family type on a TIGHT boundary (no audio "
-                               "handle) — demoted to the light overlay default for "
-                               "tight cuts instead of failing the job",
+                        reason=_DEMOTE_REASONS.get(_d_action, _DEMOTE_REASONS["demote"]),
                     )
 
             # Variety: types rotate across the 3 light punctuation overlays (SceneTitle
