@@ -1,9 +1,12 @@
 import type { MGTimingProps } from "../shared/types";
 
 export interface AnnotationArrowProps extends MGTimingProps {
-  // Start point of the arrow in pixel coordinates relative to the 1080x1920 frame.
+  // Start point of the arrow as NORMALIZED fractions of the frame:
+  // x, y ∈ [0, 1] with (0,0) = top-left, (1,1) = bottom-right. The component
+  // converts to canvas pixels and clamps each endpoint into the TikTok-safe
+  // rect (see resolveEndpoints.ts) — the same rect other MGs are padded into.
   start: { x: number; y: number };
-  // End point (the arrow tip) in pixel coordinates.
+  // End point (the arrow tip), normalized 0-1 like `start`.
   end: { x: number; y: number };
   // Preset shape. "custom" requires `customPath`.
   pathType?: "straight" | "curved-arc" | "j-shape" | "custom";

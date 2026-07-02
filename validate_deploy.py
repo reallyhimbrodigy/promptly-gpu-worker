@@ -3855,6 +3855,50 @@ def _repair_demotion_path():
     assert "action=demote" in _buf.getvalue(), "demote divergence line missing"
 
 
+@check("AnnotationArrow: normalized 0-1 endpoints resolve to safe-rect pixels (path ≥ 200px)")
+def _annotation_arrow_normalized_endpoints():
+    # AnnotationArrow's start/end are NORMALIZED 0-1 fractions (the prompt
+    # teaches {"x": 0.0-1.0}); resolveEndpoints.ts is the single seam where
+    # they become canvas pixels, clamped into the same TikTok-safe rect
+    # resolveMGPosition pads every other MG into. Before that seam existed the
+    # component consumed the fractions AS pixels — every arrow ever emitted
+    # drew a sub-pixel path and rendered invisible while logging success.
+    # Mirrors the pure function's math in Python against constants parsed from
+    # safeZone.ts (the SSOT) so a drift in either file fails the deploy.
+    import math
+    import re as _re
+    _root = os.path.dirname(os.path.abspath(__file__))
+    _sz = open(os.path.join(_root, "src", "remotion", "src", "shared", "safeZone.ts")).read()
+    def _const(name):
+        return float(_re.search(rf"export const {name} = (\d+)", _sz).group(1))
+    _W, _H = _const("CANVAS_WIDTH"), _const("CANVAS_HEIGHT")
+    _sx = _const("TIKTOK_SAFE_SIDE"); _sy = _const("TIKTOK_SAFE_TOP")
+    _sw = _W - _sx - _const("TIKTOK_SAFE_RIGHT"); _sh = _H - _sy - _const("TIKTOK_SAFE_BOTTOM")
+    # (1) wiring: the component routes through the seam, not raw props
+    _aa = open(os.path.join(_root, "src", "remotion", "src", "motion-graphics",
+                            "AnnotationArrow", "AnnotationArrow.tsx")).read()
+    assert "resolveArrowEndpoint(start, width, height)" in _aa
+    assert "resolveArrowEndpoint(end, width, height)" in _aa
+    assert "buildBezier(startPx, endPx" in _aa
+    assert "buildBezier(start, end," not in _aa, "raw-props call site resurfaced"
+    _re_ts = open(os.path.join(_root, "src", "remotion", "src", "motion-graphics",
+                               "AnnotationArrow", "resolveEndpoints.ts")).read()
+    assert "clamp(pt.x, 0, 1) * width" in _re_ts, "defensive [0,1] clamp missing"
+    assert "SAFE_RECT.x, SAFE_RECT.x + SAFE_RECT.width" in _re_ts, "safe-rect clamp missing"
+    # (2) mirror the math: standard normalized spec draws a real path
+    def _resolve(x, y):
+        _px = min(max(x, 0.0), 1.0) * _W; _py = min(max(y, 0.0), 1.0) * _H
+        return (min(max(_px, _sx), _sx + _sw), min(max(_py, _sy), _sy + _sh))
+    _s = _resolve(0.3, 0.35); _e = _resolve(0.7, 0.6)
+    _chord = math.hypot(_e[0] - _s[0], _e[1] - _s[1])
+    # a cubic bezier through two endpoints is never shorter than their chord
+    assert _chord >= 200.0, f"standard arrow chord only {_chord:.1f}px"
+    # (3) the documented pre-fix failure: fractions consumed AS pixels
+    assert math.hypot(0.7 - 0.3, 0.6 - 0.35) < 1.0
+    # (4) defensive clamp: stray pixel-space input lands on the safe-rect edge
+    assert _resolve(540.0, 960.0) == (_sx + _sw, _sy + _sh)
+
+
 @check("RecipeInvalidError classifies RECIPE_INVALID ahead of greedy absorbers")
 def _repair_classification_entry():
     # The sentinel must win even when the message contains every substring the

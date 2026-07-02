@@ -67,8 +67,8 @@ Hand-drawn SVG arrow with arrowhead, animated along a bezier path. Supports stra
 
 | Prop | Type | Default | Description |
 |------|------|---------|-------------|
-| `start` | `{ x, y }` | — | **Required.** Arrow start point in pixel coordinates. |
-| `end` | `{ x, y }` | — | **Required.** Arrow tip in pixel coordinates. |
+| `start` | `{ x, y }` | — | **Required.** Arrow start point, normalized 0-1 fractions of the frame (converted to pixels + safe-rect clamped at render). |
+| `end` | `{ x, y }` | — | **Required.** Arrow tip, normalized 0-1 fractions of the frame (converted to pixels + safe-rect clamped at render). |
 | `pathType` | `"straight" \| "curved-arc" \| "j-shape" \| "custom"` | `"curved-arc"` | Arrow shape preset. |
 | `customPath` | `string` | — | SVG `d` attribute (required when pathType is `"custom"`). |
 | `color` | `string` | `"#C8551F"` | Stroke color. |

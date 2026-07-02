@@ -7,6 +7,7 @@ import {
 } from "remotion";
 import { SPRING_SNAPPY } from "../shared/springs";
 import { useMGPhase } from "../shared/useMGPhase";
+import { resolveArrowEndpoint } from "./resolveEndpoints";
 import type { AnnotationArrowProps } from "./types";
 
 
@@ -166,9 +167,16 @@ export const AnnotationArrow: React.FC<AnnotationArrowProps> = ({
 
   const isCustom = pathType === "custom";
 
+  // `start`/`end` arrive NORMALIZED (0-1 fractions of the frame — see
+  // types.ts). This is the one seam where they become canvas pixels,
+  // clamped into the TikTok-safe rect; everything below — bezier, custom-
+  // path tangent, arrowhead tip — is pixel-space.
+  const startPx = resolveArrowEndpoint(start, width, height);
+  const endPx = resolveArrowEndpoint(end, width, height);
+
   const bezier: BezierShape | null = isCustom
     ? null
-    : buildBezier(start, end, pathType, seed);
+    : buildBezier(startPx, endPx, pathType, seed);
 
   const pathD = isCustom ? customPath ?? "" : bezier!.d;
   const pathLength = isCustom ? customLength ?? 0 : bezier!.length;
@@ -176,8 +184,8 @@ export const AnnotationArrow: React.FC<AnnotationArrowProps> = ({
   let tangentX: number;
   let tangentY: number;
   if (isCustom) {
-    tangentX = end.x - start.x;
-    tangentY = end.y - start.y;
+    tangentX = endPx.x - startPx.x;
+    tangentY = endPx.y - startPx.y;
   } else {
     tangentX = bezier!.p3.x - bezier!.p2.x;
     tangentY = bezier!.p3.y - bezier!.p2.y;
@@ -194,8 +202,8 @@ export const AnnotationArrow: React.FC<AnnotationArrowProps> = ({
   });
   const armA = rot(-ux, -uy, halfAngle);
   const armB = rot(-ux, -uy, -halfAngle);
-  const tipX = end.x;
-  const tipY = end.y;
+  const tipX = endPx.x;
+  const tipY = endPx.y;
   const armAEnd = {
     x: tipX + armA.x * arrowheadSize,
     y: tipY + armA.y * arrowheadSize,
