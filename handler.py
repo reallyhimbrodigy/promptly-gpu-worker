@@ -13482,7 +13482,7 @@ def _refine_boundary_to_low_energy(
     return refined_sample / sample_rate
 
 
-def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample_rate=48000, trans_dur_after=None, per_cut_render_dur_frames=None, source_fps=60.0, trim_head_dur=None, trim_tail_dur=None, audio_stream_offset=0.0):
+def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample_rate=48000, trans_dur_after=None, per_cut_render_dur_frames=None, source_fps=60.0, trim_head_dur=None, trim_tail_dur=None, audio_stream_offset=0.0, removed_word_spans=None):
     """Build the per-cut audio track — COMPRESSION (overlap) transition model.
 
     Each cut's RENDER range is source[start + trim_head*speed, end - trim_tail*speed]
@@ -13728,6 +13728,50 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
                 _splice_source_jump.append(True)
             _n_transitions += 1
             continue
+
+        # ── Ghost-retake guard: handle span overlaps a removed WORD ────────
+        # The HANDLE EXTENSION clamps (render_multi_clip gap-sharing block)
+        # stop at the NEIGHBOR cut's boundary, not at removed-word edges.
+        # When the gap between kept words exists because filler/stutter/
+        # false-start WORDS were deleted (not silence), the handle spans
+        # below contain fragments of those deleted words and the crossfade
+        # replays them ("ghost retakes"). Substitute silence into the slot —
+        # the same mechanism as the zero-handle branch above (silence + 5ms
+        # splice fades via _splice_source_jump=True). Dead-air-only handles
+        # never match (detect_dead_air removes zero words, so
+        # removed_word_spans holds only word-detector removals) — they keep
+        # the real-audio crossfade: that pause is exactly what the handle
+        # model wants to play.
+        if removed_word_spans:
+            _a_hs = c_a_end - _t_after * speed_a    # A-tail handle start (file-time)
+            _b_he = c_b_start + _t_after * speed_b  # B-head handle end (file-time)
+            _ghost_ovl = 0.0
+            for _ws, _we in removed_word_spans:
+                _ovl_a = min(_we, c_a_end) - max(_ws, _a_hs)
+                _ovl_b = min(_we, _b_he) - max(_ws, c_b_start)
+                _ghost_ovl = max(_ghost_ovl, _ovl_a, _ovl_b)
+            if _ghost_ovl > _SAMPLE_TOLERANCE_S:
+                _record_divergence(
+                    "transition_audio",
+                    {
+                        "boundary_after_cut": ci,
+                        "a_span": [round(_a_hs, 4), round(c_a_end, 4)],
+                        "b_span": [round(c_b_start, 4), round(_b_he, 4)],
+                        "removed_word_overlap_s": round(_ghost_ovl, 4),
+                    },
+                    "handle_silence_substitution",
+                    final={"transition_audio": "silence", "n_samples": n_trans},
+                    reason="handle_overlaps_removed_word",
+                )
+                transition_audio = np.zeros(n_trans, dtype=np.float32)
+                is_splice_after.append(True)
+                _splice_source_jump.append(True)
+                all_clips.append(transition_audio)
+                if ci + 1 < len(cut_audios):
+                    is_splice_after.append(True)
+                    _splice_source_jump.append(True)
+                _n_transitions += 1
+                continue
 
         # A's tail audio: source[end_A − trans_dur*speed_A, end_A]
         a_tail = _resample_range(
@@ -16607,6 +16651,18 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _audio_stream_offset_for_render = float(
         edit_plan.get("_audio_stream_offset") or 0.0
     )
+    # Removed-WORD source spans (file-time — same timeline as the cuts) for
+    # the ghost-retake guard in build_per_cut_audio's crossfade branch.
+    # _removed_word_indices (local from the word-projection step above) only
+    # ever contains word-detector removals — detect_dead_air removes zero
+    # words — so these spans are exactly the deleted-word audio a crossfade
+    # handle must never replay.
+    _removed_set_for_audio = set(_removed_word_indices or [])
+    _removed_word_spans_for_audio = [
+        (float(_w.get("start") or 0.0), float(_w.get("end") or 0.0))
+        for _wi, _w in enumerate(transcript.get("words") or [])
+        if _wi in _removed_set_for_audio
+    ]
     _speed_audio_future = _audio_pool.submit(
         build_per_cut_audio, source_path, render_cuts,
         effective_durations, work_dir,
@@ -16615,6 +16671,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         source_fps=source_fps,
         trim_head_dur=_trim_head_dur, trim_tail_dur=_trim_tail_dur,
         audio_stream_offset=_audio_stream_offset_for_render,
+        removed_word_spans=_removed_word_spans_for_audio,
     )
 
     # ── 10. Spawn Remotion renders in parallel (overlay chunks + micro) ────

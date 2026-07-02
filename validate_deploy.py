@@ -1580,6 +1580,83 @@ def _splice_with_source_jump_still_fades():
     )
 
 
+@check("ghost-retake guard: removed-word handle → silence substituted (ACTIVE)")
+def _handle_silence_on_removed_word():
+    # A crossfade handle that overlaps a REMOVED word's source span must play
+    # silence (the zero-handle mechanism + 5ms click fades), not fragments of
+    # the deleted word. Boundary at 1.25s with a 0.25s ZoomThrough: A-tail
+    # handle = [1.0, 1.25], overlapping the removed word span (1.05, 1.20).
+    import contextlib as _ctx, io as _io, os, tempfile, wave
+    import numpy as _np
+    _SR = 48000
+    with tempfile.TemporaryDirectory() as _tmp:
+        _src = os.path.join(_tmp, "source.wav")
+        _synthesize_source_wav(_src, sample_rate=_SR, duration_s=3.0)
+        cuts = [
+            {"source_start": 0.0, "source_end": 1.25, "speed": 1.0,
+             "transition_out": "ZoomThrough"},
+            {"source_start": 1.25, "source_end": 2.8, "speed": 1.0,
+             "transition_out": "none"},
+        ]
+        _buf = _io.StringIO()
+        with _ctx.redirect_stdout(_buf):
+            out_path = handler.build_per_cut_audio(
+                source_path=_src, cuts=cuts,
+                effective_durations=[1.25, 1.55], work_dir=_tmp, sample_rate=_SR,
+                trans_dur_after=[0.25, 0.0],
+                per_cut_render_dur_frames=[60, 78],  # eff - trims: 1.0s, 1.3s
+                source_fps=60.0, trim_head_dur=[0.0, 0.25],
+                trim_tail_dur=[0.25, 0.0], audio_stream_offset=0.0,
+                removed_word_spans=[(1.05, 1.20)],
+            )
+        with wave.open(out_path, "rb") as _w:
+            _out = _np.frombuffer(_w.readframes(_w.getnframes()), dtype=_np.int16)
+        # transition slot = samples after cut A's rendered content (1.0s @48k)
+        _slot = _out[int(1.0 * _SR):int(1.0 * _SR) + int(0.25 * _SR)]
+        _slot_rms = float(_np.sqrt(_np.mean(_slot.astype(_np.float64) ** 2)))
+        assert _slot_rms < 200, f"transition slot RMS {_slot_rms:.0f} — expected silence"
+        assert "action=handle_silence_substitution" in _buf.getvalue(), (
+            "divergence line missing for the silence substitution")
+
+
+@check("ghost-retake guard: dead-air-only + no-transition handles untouched (ACTIVE)")
+def _handle_realaudio_when_no_removed_word():
+    # Same geometry, but the removed spans do NOT overlap the handle (a
+    # dead-air-only boundary presents NO removed-word spans at the handle) —
+    # the real-audio equal-power crossfade must play (non-silent slot), and
+    # the no-transition splice after cut B stays on the untouched path.
+    import contextlib as _ctx, io as _io, os, tempfile, wave
+    import numpy as _np
+    _SR = 48000
+    with tempfile.TemporaryDirectory() as _tmp:
+        _src = os.path.join(_tmp, "source.wav")
+        _synthesize_source_wav(_src, sample_rate=_SR, duration_s=3.0)
+        cuts = [
+            {"source_start": 0.0, "source_end": 1.25, "speed": 1.0,
+             "transition_out": "ZoomThrough"},
+            {"source_start": 1.25, "source_end": 2.8, "speed": 1.0,
+             "transition_out": "none"},
+        ]
+        _buf = _io.StringIO()
+        with _ctx.redirect_stdout(_buf):
+            out_path = handler.build_per_cut_audio(
+                source_path=_src, cuts=cuts,
+                effective_durations=[1.25, 1.55], work_dir=_tmp, sample_rate=_SR,
+                trans_dur_after=[0.25, 0.0],
+                per_cut_render_dur_frames=[60, 78],  # eff - trims: 1.0s, 1.3s
+                source_fps=60.0, trim_head_dur=[0.0, 0.25],
+                trim_tail_dur=[0.25, 0.0], audio_stream_offset=0.0,
+                removed_word_spans=[(2.9, 2.95)],  # far from any handle
+            )
+        with wave.open(out_path, "rb") as _w:
+            _out = _np.frombuffer(_w.readframes(_w.getnframes()), dtype=_np.int16)
+        _slot = _out[int(1.0 * _SR):int(1.0 * _SR) + int(0.25 * _SR)]
+        _slot_rms = float(_np.sqrt(_np.mean(_slot.astype(_np.float64) ** 2)))
+        assert _slot_rms > 2000, f"crossfade slot RMS {_slot_rms:.0f} — real audio expected"
+        assert "handle_silence_substitution" not in _buf.getvalue(), (
+            "guard fired on a non-overlapping boundary")
+
+
 @check("Zero-handle additive path is NOT wired (rollback guard, ACTIVE)")
 def _no_additive_path_in_slot_build():
     # Guard: after the 2026-06-14 production-render failure (freeze-frame
