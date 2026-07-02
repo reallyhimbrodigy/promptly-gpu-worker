@@ -6297,6 +6297,11 @@ _PREMIUM_ASSET_BUDGET_USD = 2.0  # soft per-job cap on generated-asset spend
 _RERENDER_HEADROOM_S = 240.0     # a QA recovery re-render ≈ render time; above
                                  # this projected render time there's no room to
                                  # QA-and-recover under the 900s job timeout.
+_REPAIR_MIN_HEADROOM_S = 180.0   # recipe repair re-ask allowance: a corrective
+                                 # Gemini re-draw needs this much slack in the
+                                 # 900s job budget after the projected render
+                                 # time (same projection clock as the
+                                 # _RERENDER_HEADROOM_S pre-check: duration*3).
 
 
 def _resolve_scene_ref_paths(ref_image_keys, work_dir):
@@ -7565,568 +7570,2172 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
 """
 
 
-    # ── Call 2: visual placement on the kept-only transcript ────────────────
-    # Uses GEMINI_EDITORIAL_MODEL (Pro) — instruction-following on the detailed
-    # component-placement rules is materially better than Flash. The cost/
-    # latency premium is concentrated on this single call.
-    post_cut_plan = _call_gemini_post_cuts(client, post_sys, post_user, _video_part, GEMINI_EDITORIAL_MODEL)
-
-    # ── From-known-inputs enforcement at EMISSION (Phase E · Sub-step 5) ──────
-    # Belt #2 of three: the art-directive prompt instructs it (belt #1), the QA
-    # text_correct score backstops it (suspenders). Strip any generated-scene
-    # text_layer whose content is NOT traceable to a known input (the transcript)
-    # — the model must NEVER put an invented number/label on screen (a wrong
-    # number on a beautiful graphic is the worst failure in the video). PREMIUM
-    # by construction (free emits no generated_scenes); no-op when there are none.
-    if isinstance(post_cut_plan, dict) and post_cut_plan.get("generated_scenes"):
-        _known_lc = " ".join(str((w or {}).get("word") or "") for w in (deepgram_words or [])).lower()
-        for _gs in post_cut_plan["generated_scenes"]:
-            if not isinstance(_gs, dict):
-                continue
-            _kept_tl = []
-            for _tl in (_gs.get("text_layers") or []):
-                _c = str((_tl or {}).get("content") or "").strip()
-                if _c and _c.lower() in _known_lc:
-                    _kept_tl.append(_tl)
-                elif _c:
-                    print(
-                        f"[gen-asset] emission: stripped invented text_layer "
-                        f"{_c[:40]!r} (not traceable to the transcript)",
-                        flush=True,
-                    )
-            _gs["text_layers"] = _kept_tl
-
-    # ── Recipe eval — log report against the window doctrine + hard rules ──
-    # Run BEFORE anchor translation: the evaluator operates on the kept-only
-    # index space (same space Gemini was working in), and after
-    # _translate_post_cut_anchors_to_src() the indices reference source-space
-    # so the boundary checks and window walk would be meaningless.
-    #
-    # Non-blocking by design — failures are logged but don't abort the
-    # render. The point is observability: when an arc/window violation
-    # appears repeatedly across renders we can decide whether to enforce
-    # in Python or tighten the prompt. The patch_list() output is the
-    # raw material for a future repair-pass loop if we want one.
-    if isinstance(post_cut_plan, dict):
+    # ── Recipe REPAIR LOOP (one corrective re-ask nets the validation family) ──
+    # Diagnosis: the ~40 post-parse raise sites between the Gemini call and
+    # `return edit_plan` were terminal — at temperature 1.0 every strict
+    # validator carried a permanent probabilistic job-kill rate. Mechanics:
+    # the Gemini call runs INSIDE the loop but OUTSIDE the try, so transport
+    # failures keep _gemini_generate_with_backoff's own retry path untouched
+    # (no double-wrapping); the try nets validation raises only. On a
+    # validation raise with budget remaining: re-ask with a per-attempt COPY
+    # of post_user carrying the verbatim validator message — the messages
+    # were written as model-actionable instructions; now a model reads them.
+    # The failed plan itself is deliberately NOT included: fresh draw with
+    # the warning appended is the house pattern (see the QA perturb loop).
+    # Temperature reduction on retry is ledgered as a future option, not
+    # built. On exhaustion: RecipeInvalidError (RECIPE_INVALID class)
+    # wrapping the final error as __cause__. Re-entry is clean by
+    # construction — edit_plan and validated_cuts rebuild fresh from stable
+    # pre-call state each pass; span side effects are logs/divergence only.
+    # The crossfade-on-tight DEMOTION above means that class rarely reaches
+    # this net; the net exists for the other raise sites. A couple of sites
+    # reflect input conditions a re-ask cannot fix (e.g. empty transcript) —
+    # one wasted re-ask on an already-doomed job is accepted; uniformity
+    # beats per-site routing. RECIPE_REPAIR_MAX_ATTEMPTS env: default "1";
+    # "0" disables the net entirely (kill switch) — validation failures then
+    # classify RECIPE_INVALID immediately (the A1 demotion stays always-on).
+    try:
+        _repair_max = max(0, int(os.environ.get("RECIPE_REPAIR_MAX_ATTEMPTS", "1").strip() or "1"))
+    except ValueError:
+        _repair_max = 1
+    # Same projection clock as the _RERENDER_HEADROOM_S pre-check: a re-ask
+    # is affordable only when the projected render time (duration * 3) leaves
+    # at least _REPAIR_MIN_HEADROOM_S of slack in the 900s job budget.
+    _repair_budget_ok = (float(duration or 0.0) * 3.0 + _REPAIR_MIN_HEADROOM_S) <= 900.0
+    _post_user_attempt = post_user
+    for _repair_attempt in range(_repair_max + 1):
+        # ── Call 2: visual placement on the kept-only transcript ────────────────
+        # Uses GEMINI_EDITORIAL_MODEL (Pro) — instruction-following on the detailed
+        # component-placement rules is materially better than Flash. The cost/
+        # latency premium is concentrated on this single call.
+        post_cut_plan = _call_gemini_post_cuts(client, post_sys, _post_user_attempt, _video_part, GEMINI_EDITORIAL_MODEL)
         try:
-            from recipe_eval import evaluate_recipe as _eval_recipe
-            _eval_words = [
-                {
-                    "word": str(_w.get("word") or ""),
-                    "start": float(_w.get("start") or 0.0),
-                    "end": float(_w.get("end") or 0.0),
-                }
-                for _w in kept_words
-            ]
-            # cut_boundaries = SLOTS ONLY (the list Gemini was actually
-            # allowed to place transitions at). Passing the union here
-            # would wrongly mask "transition placed at tight cut" failures
-            # — same wires-disagreeing bug class one layer down.
-            # tight_boundaries enables the transition-tight-boundary fail
-            # and the tight-no-mask warning in recipe_eval.
-            try:
-                _eval_slots = list(_cut_boundary_indices or [])
-                _eval_tight = list(_tight_boundary_indices or [])
-            except NameError:
-                # kept_words was empty — boundary block never ran.
-                _eval_slots = []
-                _eval_tight = []
-            _eval_report = _eval_recipe(
-                post_cut_plan,
-                _eval_words,
-                _eval_slots,
-                float(_eval_words[-1]["end"] if _eval_words else 0.0),
-                tight_boundaries=_eval_tight,
-            )
-            print(f"[recipe-eval]\n{_eval_report.summary()}", flush=True)
-        except Exception as _eval_err:
-            # Eval errors must never block the render — log and continue.
-            print(f"[recipe-eval] error: {_eval_err} (non-blocking)", flush=True)
 
-    # ── Vision↔array reconciliation for tight_cut_overlays ────────────────
-    # Detects the "vision claims a tight-cut overlay, array came back empty"
-    # contradiction that three prose fixes (coherence rule c1a, EFFECT/
-    # MECHANISM extension 7b9069c, HARD RULE 2 tiebreaker c109e55) failed
-    # to prevent in the main 60K-token generation. The detector and the
-    # coherence rule both consume TIGHT_CUT_OVERLAY_MECHANISM_PHRASES from
-    # type_registries — single source of truth so the reconciler fires on
-    # exactly what the prompt taught Gemini to recognize as a commitment.
-    #
-    # Runs ONLY when: tight boundaries exist AND vision text claims an
-    # overlay (TYPE name or MECHANISM phrase) AND emitted array is empty.
-    # No-op for the common case (vision silent on overlays → default 0
-    # framing stays correctly applied; no re-ask, no wall-clock cost).
-    if isinstance(post_cut_plan, dict) and _eval_tight:
-        try:
-            _vp = post_cut_plan.get("video_plan") or {}
-            _vision_raw = str(_vp.get("editorial_vision") or "").strip()
-            _vision_lower = _vision_raw.lower()
-            _types_lower = {_t.lower() for _t in VALID_TIGHT_CUT_OVERLAYS}
-            _vision_claims_overlay = (
-                any(_t in _vision_lower for _t in _types_lower)
-                or any(_p in _vision_lower for _p in TIGHT_CUT_OVERLAY_MECHANISM_PHRASES)
-            )
-            _emitted_overlays = post_cut_plan.get("tight_cut_overlays") or []
-            if _vision_claims_overlay and not _emitted_overlays:
-                print(
-                    f"[reconcile-overlays] DETECTED vision-claims-empty: "
-                    f"vision={_vision_raw[:100]!r} tight_boundaries="
-                    f"{sorted(_eval_tight)} — re-asking",
-                    flush=True,
-                )
-                _reconciled = _reconcile_tight_cut_overlays(
-                    client, _vision_raw, _eval_tight, kept_words,
-                )
-                if _reconciled:
-                    post_cut_plan["tight_cut_overlays"] = _reconciled
-        except Exception as _rec_err:
-            # Reconciliation must never block the render — log and continue.
-            # The array stays whatever Gemini's original pass produced.
-            print(
-                f"[reconcile-overlays] outer error: {_rec_err} (non-blocking, "
-                f"keeping original empty array)",
-                flush=True,
-            )
-
-    # ── Translate anchors: new index space → source index space ─────────────
-    post_cut_plan = _translate_post_cut_anchors_to_src(post_cut_plan, new_to_src)
-
-    # ── Merge: mechanical cuts + translated PostCutPlan → edit_plan ─────────
-    # Mechanical cuts own notes, remove_words, pacing. PostCutPlan owns every
-    # other field. The merged dict has the same shape downstream expects.
-    edit_plan = {
-        "notes": cut_plan.get("notes", "") or "",
-        "remove_words": raw_cut_remove_words,
-        "pacing": cut_plan.get("pacing", "fast") or "fast",
-    }
-    if isinstance(post_cut_plan, dict):
-        for k, v in post_cut_plan.items():
-            edit_plan[k] = v
-
-    print(
-        f"[two-pass] Merged plan — notes={len(edit_plan['notes'])} chars, "
-        f"remove_words={len(edit_plan['remove_words'])}, "
-        f"emphasis_moments={len(edit_plan.get('emphasis_moments') or [])}, "
-        f"motion_graphics={len(edit_plan.get('motion_graphics') or [])}, "
-        f"text_overlays={len(edit_plan.get('text_overlays') or [])}, "
-        f"sound_effects={len(edit_plan.get('sound_effects') or [])}, "
-        f"transitions={len(edit_plan.get('transitions') or [])}, "
-        f"tight_cut_overlays={len(edit_plan.get('tight_cut_overlays') or [])}, "
-        f"broll_clips={len(edit_plan.get('broll_clips') or [])}, "
-        f"generated_scenes={len(edit_plan.get('generated_scenes') or [])}",
-        flush=True,
-    )
-
-    # ── EditPolicy · Step 2: ENFORCEMENT (hard-zero the off EXPRESSIVE features) ─
-    # The resolved policy is the AUTHORITY over Gemini's output. Applied right
-    # after the merge — BEFORE any projection consumes these arrays (zoom→clip
-    # at ~9519, the scene-floor overlay backfill at ~8455) — so even a feature
-    # Gemini emitted anyway is deterministically removed when the user turned it
-    # off. This is the hard guarantee behind "follow any instruction to a tee";
-    # the Step-4 prompt rule is the belt (Gemini avoids it up front), this is the
-    # suspenders. _ep_off is EMPTY when the feature is off / the policy is default
-    # (bias-to-on) / resolution failed → this whole block is a no-op → identical.
-    if _ep_off:
-        _ep_removed, _ep_kept = _enforce_off_expressive_features(edit_plan, _ep_off)
-        print(
-            f"[edit-policy-enforce] removed=[{','.join(_ep_removed)}] "
-            f"kept=[{','.join(_ep_kept)}] mode={getattr(resolved_policy, 'mode', '?')}",
-            flush=True,
-        )
-
-    # Surface video_plan — Gemini's editorial scaffold — in the render log
-    # so it's auditable. If Gemini's component placements diverge from the
-    # plan it wrote, the log shows where the disagreement is.
-    _vp = edit_plan.get("video_plan") if isinstance(edit_plan, dict) else None
-    if isinstance(_vp, dict):
-        _moments = _vp.get("key_moments") or []
-        print(
-            f"[video-plan] {_vp.get('what_happens', '')}",
-            flush=True,
-        )
-        print(
-            f"[video-plan] shape: {_vp.get('story_shape', '')}",
-            flush=True,
-        )
-        print(
-            f"[video-plan] hook=word[{_vp.get('hook_word_index')}] "
-            f"payoff=word[{_vp.get('payoff_word_index')}] "
-            f"close=word[{_vp.get('close_word_index')}] "
-            f"moments={len(_moments)}",
-            flush=True,
-        )
-        for _m in _moments[:6]:
-            if isinstance(_m, dict):
-                print(
-                    f"[video-plan]   moment word[{_m.get('word_index')}]: "
-                    f"{_m.get('what_lands', '')!r}",
-                    flush=True,
-                )
-
-    # ── Derivation pass: word_index → float timestamps for downstream code ──
-    # Every downstream consumer (render_multi_clip, projection helpers,
-    # thumbnail selection) expects float-time fields
-    # (caption_position_segments, peak_at_seconds, source_start/source_end,
-    # thumbnail_timestamp). Gemini emits word-anchored
-    # inputs; Python synthesizes the float fields from word timings here.
-    _dg = deepgram_words or []
-
-    # No rounding: callers feed the result through project_source_time_to_output
-    # against clip source bounds that ARE raw floats; rounding here loses
-    # sub-millisecond precision and breaks boundary checks.
-    def _word_start(src_idx):
-        if src_idx is None or not (0 <= int(src_idx) < len(_dg)):
-            return None
-        return float(_dg[int(src_idx)].get("start") or 0)
-
-    def _word_end(src_idx):
-        if src_idx is None or not (0 <= int(src_idx) < len(_dg)):
-            return None
-        return float(_dg[int(src_idx)].get("end") or 0)
-
-    # caption_position_segments (synthesized from caption_position_changes)
-    _changes = edit_plan.get("caption_position_changes") or []
-    _changes_clean = [
-        c for c in _changes
-        if isinstance(c, dict) and c.get("word_index") is not None
-        and c.get("position") in ("top", "center", "bottom")
-    ]
-    _changes_clean.sort(key=lambda c: int(c["word_index"]))
-    _segments = []
-    _cur_pos = "bottom"  # default start position
-    _cur_t = 0.0
-    # No rounding: from/to_seconds get projected through clip source bounds
-    # at render time; rounding here can land the value outside its own clip
-    # due to sub-millisecond drift.
-    for _ch in _changes_clean:
-        _ch_t = _word_start(_ch["word_index"])
-        if _ch_t is None:
-            continue
-        if _ch_t > _cur_t:
-            _segments.append({
-                "from_seconds": _cur_t,
-                "to_seconds": _ch_t,
-                "position": _cur_pos,
-            })
-        _cur_pos = _ch["position"]
-        _cur_t = _ch_t
-    # Final segment to video duration
-    if duration > _cur_t:
-        _segments.append({
-            "from_seconds": _cur_t,
-            "to_seconds": float(duration),
-            "position": _cur_pos,
-        })
-    # Fallback: if no changes emitted, cover the whole video with default
-    if not _segments and duration > 0:
-        _segments = [{
-            "from_seconds": 0.0,
-            "to_seconds": float(duration),
-            "position": "bottom",
-        }]
-    _segments = _coalesce_caption_position_segments(_segments)
-    edit_plan["caption_position_segments"] = _segments
-
-    # thumbnail_timestamp from thumbnail_word_index
-    _twi = edit_plan.get("thumbnail_word_index")
-    _tts = _word_start(_twi)
-    if _tts is not None:
-        edit_plan["thumbnail_timestamp"] = _tts
-
-    print(
-        f"[generate-edit] Derived float timestamps: "
-        f"caption_segments={len(_segments)}, "
-        f"thumbnail={edit_plan.get('thumbnail_timestamp')}",
-        flush=True,
-    )
-
-    # Post-processing
-    edit_plan["_deepgram_words"] = list(deepgram_words or [])
-    # Preserve signals for downstream (render_multi_clip projects peak_at_seconds
-    # to output frames using the same logic as SFX/captions/b-roll). Underscored
-    # so the sanitized recipe strips them from persistence.
-    edit_plan["_shot_changes"] = list(_shots)
-    edit_plan["_vocal_emphasis"] = list(_vocal)
-    edit_plan["_source_loudness_signal"] = dict(_loudness)
-    # Face detections are consumed exactly once — to build the prompt signals
-    # above. Once _build_post_cuts_prompt has returned, the raw face data has
-    # no downstream reader (the Remotion composition renders motion_graphics
-    # against the canvas via resolveMGPosition; no face lookup happens at
-    # render time). Do NOT stash onto edit_plan — it would be dead weight.
-    analysis = build_analysis_from_gemini_recipe(edit_plan, duration=duration)
-    has_burned_captions = infer_has_burned_captions(edit_plan, analysis, log_prefix="[generate-edit]")
-
-    video_duration = float(analysis.get("duration") or 0)
-    _dg_words = edit_plan.get("_deepgram_words", [])
-    raw_remove_words = edit_plan.get("remove_words") or []
-
-    # ── Guard: drop Gemini range cuts covering an ANCHORED word ──────────────
-    # Anchor integrity is the absolute invariant — if Gemini tried to
-    # range-cut a word it also anchored to (rare; ranges are reserved for
-    # narrative skips of unrelated tangents), the anchor wins and the range
-    # is dropped. Compute the anchor-referenced set by walking every field
-    # that carries a word index. Translation to source indices has already
-    # happened above, so everything is in source space here.
-    _anchored_src_indices = set()
-    for _em in (edit_plan.get("emphasis_moments") or []):
-        if isinstance(_em, dict):
-            for _wi in (_em.get("word_indices") or []):
-                if isinstance(_wi, int):
-                    _anchored_src_indices.add(_wi)
-    for _ov in (edit_plan.get("text_overlays") or []):
-        if isinstance(_ov, dict) and isinstance(_ov.get("start_word_index"), int):
-            _anchored_src_indices.add(_ov["start_word_index"])
-    for _mg in (edit_plan.get("motion_graphics") or []):
-        if isinstance(_mg, dict):
-            for _k in ("start_word_index", "end_word_index"):
-                if isinstance(_mg.get(_k), int):
-                    _anchored_src_indices.add(_mg[_k])
-    for _sfx in (edit_plan.get("sound_effects") or []):
-        if isinstance(_sfx, dict) and isinstance(_sfx.get("word_index"), int):
-            _anchored_src_indices.add(_sfx["word_index"])
-    for _tr in (edit_plan.get("transitions") or []):
-        if isinstance(_tr, dict) and isinstance(_tr.get("after_word_index"), int):
-            _anchored_src_indices.add(_tr["after_word_index"])
-    for _bc in (edit_plan.get("broll_clips") or []):
-        if isinstance(_bc, dict):
-            for _k in ("start_word_index", "end_word_index"):
-                if isinstance(_bc.get(_k), int):
-                    _anchored_src_indices.add(_bc[_k])
-
-    if raw_remove_words and _anchored_src_indices and _dg_words:
-        _anchored_times = []
-        for _pi in _anchored_src_indices:
-            if 0 <= _pi < len(_dg_words):
-                _w = _dg_words[_pi]
-                _anchored_times.append((
-                    float(_w.get("start") or 0),
-                    float(_w.get("end") or 0),
-                    _pi,
-                ))
-        _filtered = []
-        for _rw in raw_remove_words:
-            if not isinstance(_rw, dict):
-                continue
-            # Index-based range: covers the open interval (after, before).
-            # An anchored word i with after < i < before is "covered."
-            if (
-                _rw.get("after_word_index") is not None
-                and _rw.get("before_word_index") is not None
-                and _rw.get("word_index") is None
-            ):
-                try:
-                    _aw = int(_rw["after_word_index"])
-                    _bw = int(_rw["before_word_index"])
-                except (TypeError, ValueError):
-                    continue
-                _covers_anchor = next(
-                    (_pi for _pi in _anchored_src_indices if _aw < _pi < _bw),
-                    None,
-                )
-                if _covers_anchor is not None:
-                    _pword = _dg_words[_covers_anchor]
-                    _pw_text = str(_pword.get("punctuated_word") or _pword.get("word") or "").strip()
-                    print(
-                        f"[generate-edit] Dropping Gemini range cut "
-                        f"after_word={_aw}/before_word={_bw} "
-                        f"— covers ANCHORED word [{_covers_anchor}] '{_pw_text}' "
-                        f"(anchor-integrity guard)",
-                        flush=True,
-                    )
-                    continue
-            # Legacy float range: open-interval overlap with anchored word's
-            # [start, end]. Kept for cached plans and silence-tighten micro-
-            # cuts (Python-internal, not Gemini-emitted).
-            elif "start" in _rw and "end" in _rw and "word_index" not in _rw:
-                try:
-                    _rs = float(_rw["start"])
-                    _re = float(_rw["end"])
-                except (TypeError, ValueError):
-                    continue
-                _covers_anchor = None
-                for (_pws, _pwe, _pi) in _anchored_times:
-                    if _rs < _pwe and _re > _pws:
-                        _covers_anchor = _pi
-                        break
-                if _covers_anchor is not None:
-                    _pword = _dg_words[_covers_anchor]
-                    _pw_text = str(_pword.get("punctuated_word") or _pword.get("word") or "").strip()
-                    print(
-                        f"[generate-edit] Dropping Gemini range cut {_rs:.2f}-{_re:.2f}s "
-                        f"— covers ANCHORED word [{_covers_anchor}] '{_pw_text}' "
-                        f"(anchor-integrity guard)",
-                        flush=True,
-                    )
-                    continue
-            _filtered.append(_rw)
-        raw_remove_words = _filtered
-
-    # Gemini's remove_words is the authoritative cut list — every filler,
-    # stutter, restart, dead-air range, breath, and tangent. No injection,
-    # no merging from upstream passes (those have been removed from the
-    # pipeline entirely).
-
-    validated_cuts = []
-    if not _dg_words:
-        raise ValueError(
-            "No speech detected in source (Deepgram returned 0 words). This pipeline "
-            "is a talking-head editor and requires spoken audio to produce an edit plan."
-        )
-    if isinstance(raw_remove_words, list):
-        print(f"[DIAG] Full transcript ({len(_dg_words)} words):", flush=True)
-        for i, w in enumerate(_dg_words):
-            spk = w.get('speaker', '?')
-            print(
-                f"[DIAG]   [{i}] {float(w.get('start') or 0):.3f}-{float(w.get('end') or 0):.3f} "
-                f"(spk{spk}): {w.get('punctuated_word') or w.get('word')}",
-                flush=True,
-            )
-        normalized_remove_words = []
-        for item in raw_remove_words:
-            if not isinstance(item, dict):
-                continue
-            if "word_index" in item and item.get("word_index") is not None:
-                try:
-                    idx = int(item["word_index"])
-                except Exception:
-                    continue
-                if 0 <= idx < len(_dg_words):
-                    normalized_remove_words.append({
-                        "word_index": idx,
-                        "reason": str(item.get("reason") or "remove"),
-                    })
-                    w = _dg_words[idx]
-                    word_text = w.get("punctuated_word") or w.get("word") or ""
-                    print(
-                        f"[remove] Removing word [{idx}] '{word_text}' ({item.get('reason', 'unknown')})",
-                        flush=True,
-                    )
-                else:
-                    print(
-                        f"[remove] WARNING: word_index {idx} out of bounds (max {len(_dg_words)-1})",
-                        flush=True,
-                    )
-            elif (
-                item.get("after_word_index") is not None
-                and item.get("before_word_index") is not None
-            ):
-                # Index-based range form: drop the silence between word[aw]
-                # and word[bw], plus any words strictly between them.
-                # build_clips_from_words consumes this shape directly — it
-                # forces a clip split at every accepted dead_air boundary
-                # (including the consecutive-anchor case (N, N+1) where no
-                # words sit between the anchors but the silence still gets
-                # cut). The previous normalizer dropped these entries
-                # silently; Gemini's dead_air decisions never reached
-                # build_clips_from_words and the gaps played through.
-                try:
-                    aw = int(item["after_word_index"])
-                    bw = int(item["before_word_index"])
-                except Exception:
-                    continue
-                if bw <= aw:
-                    print(
-                        f"[remove] WARNING: range word[{aw}]→word[{bw}] has bw<=aw, dropped",
-                        flush=True,
-                    )
-                    continue
-                if not (0 <= aw < len(_dg_words) and 0 <= bw < len(_dg_words)):
-                    print(
-                        f"[remove] WARNING: range anchors word[{aw}]→word[{bw}] out of bounds "
-                        f"(transcript has {len(_dg_words)} words)",
-                        flush=True,
-                    )
-                    continue
-                normalized_remove_words.append({
-                    "after_word_index": aw,
-                    "before_word_index": bw,
-                    "reason": str(item.get("reason") or "range_remove"),
-                })
-                print(
-                    f"[remove] Removing range word[{aw}]→word[{bw}] "
-                    f"({item.get('reason', 'unknown')})",
-                    flush=True,
-                )
-            elif "start" in item and "end" in item:
-                try:
-                    rw_s = max(0.0, float(item["start"]))
-                    rw_e = max(0.0, float(item["end"]))
-                except Exception:
-                    continue
-                if rw_e > rw_s:
-                    if video_duration > 0:
-                        rw_e = min(rw_e, video_duration)
-                    if rw_e <= rw_s:
+            # ── From-known-inputs enforcement at EMISSION (Phase E · Sub-step 5) ──────
+            # Belt #2 of three: the art-directive prompt instructs it (belt #1), the QA
+            # text_correct score backstops it (suspenders). Strip any generated-scene
+            # text_layer whose content is NOT traceable to a known input (the transcript)
+            # — the model must NEVER put an invented number/label on screen (a wrong
+            # number on a beautiful graphic is the worst failure in the video). PREMIUM
+            # by construction (free emits no generated_scenes); no-op when there are none.
+            if isinstance(post_cut_plan, dict) and post_cut_plan.get("generated_scenes"):
+                _known_lc = " ".join(str((w or {}).get("word") or "") for w in (deepgram_words or [])).lower()
+                for _gs in post_cut_plan["generated_scenes"]:
+                    if not isinstance(_gs, dict):
                         continue
-                    normalized_remove_words.append({
-                        "start": round(rw_s, 3),
-                        "end": round(rw_e, 3),
-                        "reason": str(item.get("reason") or "remove"),
-                    })
+                    _kept_tl = []
+                    for _tl in (_gs.get("text_layers") or []):
+                        _c = str((_tl or {}).get("content") or "").strip()
+                        if _c and _c.lower() in _known_lc:
+                            _kept_tl.append(_tl)
+                        elif _c:
+                            print(
+                                f"[gen-asset] emission: stripped invented text_layer "
+                                f"{_c[:40]!r} (not traceable to the transcript)",
+                                flush=True,
+                            )
+                    _gs["text_layers"] = _kept_tl
+
+            # ── Recipe eval — log report against the window doctrine + hard rules ──
+            # Run BEFORE anchor translation: the evaluator operates on the kept-only
+            # index space (same space Gemini was working in), and after
+            # _translate_post_cut_anchors_to_src() the indices reference source-space
+            # so the boundary checks and window walk would be meaningless.
+            #
+            # Non-blocking by design — failures are logged but don't abort the
+            # render. The point is observability: when an arc/window violation
+            # appears repeatedly across renders we can decide whether to enforce
+            # in Python or tighten the prompt. The patch_list() output is the
+            # raw material for a future repair-pass loop if we want one.
+            if isinstance(post_cut_plan, dict):
+                try:
+                    from recipe_eval import evaluate_recipe as _eval_recipe
+                    _eval_words = [
+                        {
+                            "word": str(_w.get("word") or ""),
+                            "start": float(_w.get("start") or 0.0),
+                            "end": float(_w.get("end") or 0.0),
+                        }
+                        for _w in kept_words
+                    ]
+                    # cut_boundaries = SLOTS ONLY (the list Gemini was actually
+                    # allowed to place transitions at). Passing the union here
+                    # would wrongly mask "transition placed at tight cut" failures
+                    # — same wires-disagreeing bug class one layer down.
+                    # tight_boundaries enables the transition-tight-boundary fail
+                    # and the tight-no-mask warning in recipe_eval.
+                    try:
+                        _eval_slots = list(_cut_boundary_indices or [])
+                        _eval_tight = list(_tight_boundary_indices or [])
+                    except NameError:
+                        # kept_words was empty — boundary block never ran.
+                        _eval_slots = []
+                        _eval_tight = []
+                    _eval_report = _eval_recipe(
+                        post_cut_plan,
+                        _eval_words,
+                        _eval_slots,
+                        float(_eval_words[-1]["end"] if _eval_words else 0.0),
+                        tight_boundaries=_eval_tight,
+                    )
+                    print(f"[recipe-eval]\n{_eval_report.summary()}", flush=True)
+                except Exception as _eval_err:
+                    # Eval errors must never block the render — log and continue.
+                    print(f"[recipe-eval] error: {_eval_err} (non-blocking)", flush=True)
+
+            # ── Vision↔array reconciliation for tight_cut_overlays ────────────────
+            # Detects the "vision claims a tight-cut overlay, array came back empty"
+            # contradiction that three prose fixes (coherence rule c1a, EFFECT/
+            # MECHANISM extension 7b9069c, HARD RULE 2 tiebreaker c109e55) failed
+            # to prevent in the main 60K-token generation. The detector and the
+            # coherence rule both consume TIGHT_CUT_OVERLAY_MECHANISM_PHRASES from
+            # type_registries — single source of truth so the reconciler fires on
+            # exactly what the prompt taught Gemini to recognize as a commitment.
+            #
+            # Runs ONLY when: tight boundaries exist AND vision text claims an
+            # overlay (TYPE name or MECHANISM phrase) AND emitted array is empty.
+            # No-op for the common case (vision silent on overlays → default 0
+            # framing stays correctly applied; no re-ask, no wall-clock cost).
+            if isinstance(post_cut_plan, dict) and _eval_tight:
+                try:
+                    _vp = post_cut_plan.get("video_plan") or {}
+                    _vision_raw = str(_vp.get("editorial_vision") or "").strip()
+                    _vision_lower = _vision_raw.lower()
+                    _types_lower = {_t.lower() for _t in VALID_TIGHT_CUT_OVERLAYS}
+                    _vision_claims_overlay = (
+                        any(_t in _vision_lower for _t in _types_lower)
+                        or any(_p in _vision_lower for _p in TIGHT_CUT_OVERLAY_MECHANISM_PHRASES)
+                    )
+                    _emitted_overlays = post_cut_plan.get("tight_cut_overlays") or []
+                    if _vision_claims_overlay and not _emitted_overlays:
+                        print(
+                            f"[reconcile-overlays] DETECTED vision-claims-empty: "
+                            f"vision={_vision_raw[:100]!r} tight_boundaries="
+                            f"{sorted(_eval_tight)} — re-asking",
+                            flush=True,
+                        )
+                        _reconciled = _reconcile_tight_cut_overlays(
+                            client, _vision_raw, _eval_tight, kept_words,
+                        )
+                        if _reconciled:
+                            post_cut_plan["tight_cut_overlays"] = _reconciled
+                except Exception as _rec_err:
+                    # Reconciliation must never block the render — log and continue.
+                    # The array stays whatever Gemini's original pass produced.
                     print(
-                        f"[remove] Removing range {rw_s:.2f}-{rw_e:.2f} ({item.get('reason', 'unknown')})",
+                        f"[reconcile-overlays] outer error: {_rec_err} (non-blocking, "
+                        f"keeping original empty array)",
                         flush=True,
                     )
 
-        edit_plan["remove_words"] = normalized_remove_words
-        print(
-            f"[generate-edit] Building clips: {len(_dg_words)} words, "
-            f"{len(normalized_remove_words)} Gemini removals",
-            flush=True,
-        )
-        validated_cuts, _removed_word_indices = build_clips_from_words(_dg_words, normalized_remove_words, video_duration=video_duration)
-        edit_plan["_removed_word_indices"] = _removed_word_indices
+            # ── Translate anchors: new index space → source index space ─────────────
+            post_cut_plan = _translate_post_cut_anchors_to_src(post_cut_plan, new_to_src)
 
-        # ── Shot-change-based clip splitting ────────────────────────────────
-        # Each entry in _shot_boundaries (computed pre-Gemini using the same
-        # cluster_shot_changes + shot_change_word_boundaries logic) is a
-        # (new_idx, source_time) pair. Split validated_cuts only at boundaries
-        # where Gemini ACTUALLY placed a transition. Reason: scdet fires on
-        # graphical overlay edges (PiP, embedded-video insert appearing or
-        # disappearing) as well as real camera cuts — those overlay edges show
-        # up in shot_change_word_boundaries identically. Splitting at every
-        # detected shot change forces sub-clips around overlay edges; Gemini
-        # is taught (per the OVERLAY rule in CRAFT TECHNIQUES) NOT to place
-        # transitions at overlay edges. Gating the split on transition
-        # presence makes the pipeline structurally inert to the false
-        # positives — no sub-clip created where no transition will play.
-        if _shots and validated_cuts:
-            # Re-derive the kept-words list at this scope (matches the pre-
-            # Gemini computation since the same _dg_words + _removed_word_indices
-            # determine kept-only ordering).
-            _post_kept = [
-                _w for _i, _w in enumerate(_dg_words)
-                if _i not in (_removed_word_indices or set())
-            ]
-            _shot_split_pairs = shot_change_word_boundaries(_shots, _post_kept)
-            # Filter to boundaries where Gemini emitted a transition.
-            _emitted_trans_indices = {
-                int(_t["after_word_index"])
-                for _t in (edit_plan.get("transitions") or [])
-                if isinstance(_t, dict)
-                and _t.get("after_word_index") is not None
-                and str(_t.get("type") or "none") != "none"
+            # ── Merge: mechanical cuts + translated PostCutPlan → edit_plan ─────────
+            # Mechanical cuts own notes, remove_words, pacing. PostCutPlan owns every
+            # other field. The merged dict has the same shape downstream expects.
+            edit_plan = {
+                "notes": cut_plan.get("notes", "") or "",
+                "remove_words": raw_cut_remove_words,
+                "pacing": cut_plan.get("pacing", "fast") or "fast",
             }
-            _gated_pairs = [
-                (_ni, _st) for (_ni, _st) in _shot_split_pairs
-                if _ni in _emitted_trans_indices
-            ]
-            _skipped = len(_shot_split_pairs) - len(_gated_pairs)
-            if _skipped > 0:
+            if isinstance(post_cut_plan, dict):
+                for k, v in post_cut_plan.items():
+                    edit_plan[k] = v
+
+            print(
+                f"[two-pass] Merged plan — notes={len(edit_plan['notes'])} chars, "
+                f"remove_words={len(edit_plan['remove_words'])}, "
+                f"emphasis_moments={len(edit_plan.get('emphasis_moments') or [])}, "
+                f"motion_graphics={len(edit_plan.get('motion_graphics') or [])}, "
+                f"text_overlays={len(edit_plan.get('text_overlays') or [])}, "
+                f"sound_effects={len(edit_plan.get('sound_effects') or [])}, "
+                f"transitions={len(edit_plan.get('transitions') or [])}, "
+                f"tight_cut_overlays={len(edit_plan.get('tight_cut_overlays') or [])}, "
+                f"broll_clips={len(edit_plan.get('broll_clips') or [])}, "
+                f"generated_scenes={len(edit_plan.get('generated_scenes') or [])}",
+                flush=True,
+            )
+
+            # ── EditPolicy · Step 2: ENFORCEMENT (hard-zero the off EXPRESSIVE features) ─
+            # The resolved policy is the AUTHORITY over Gemini's output. Applied right
+            # after the merge — BEFORE any projection consumes these arrays (zoom→clip
+            # at ~9519, the scene-floor overlay backfill at ~8455) — so even a feature
+            # Gemini emitted anyway is deterministically removed when the user turned it
+            # off. This is the hard guarantee behind "follow any instruction to a tee";
+            # the Step-4 prompt rule is the belt (Gemini avoids it up front), this is the
+            # suspenders. _ep_off is EMPTY when the feature is off / the policy is default
+            # (bias-to-on) / resolution failed → this whole block is a no-op → identical.
+            if _ep_off:
+                _ep_removed, _ep_kept = _enforce_off_expressive_features(edit_plan, _ep_off)
                 print(
-                    f"[shot-split] Gated by emitted transitions: "
-                    f"{_skipped} shot-change boundary(ies) had no transition "
-                    f"(overlay edge or Gemini skip) → no sub-clip split",
+                    f"[edit-policy-enforce] removed=[{','.join(_ep_removed)}] "
+                    f"kept=[{','.join(_ep_kept)}] mode={getattr(resolved_policy, 'mode', '?')}",
                     flush=True,
                 )
-            _split_times = sorted({_st for (_, _st) in _gated_pairs})
-            if _split_times:
+
+            # Surface video_plan — Gemini's editorial scaffold — in the render log
+            # so it's auditable. If Gemini's component placements diverge from the
+            # plan it wrote, the log shows where the disagreement is.
+            _vp = edit_plan.get("video_plan") if isinstance(edit_plan, dict) else None
+            if isinstance(_vp, dict):
+                _moments = _vp.get("key_moments") or []
+                print(
+                    f"[video-plan] {_vp.get('what_happens', '')}",
+                    flush=True,
+                )
+                print(
+                    f"[video-plan] shape: {_vp.get('story_shape', '')}",
+                    flush=True,
+                )
+                print(
+                    f"[video-plan] hook=word[{_vp.get('hook_word_index')}] "
+                    f"payoff=word[{_vp.get('payoff_word_index')}] "
+                    f"close=word[{_vp.get('close_word_index')}] "
+                    f"moments={len(_moments)}",
+                    flush=True,
+                )
+                for _m in _moments[:6]:
+                    if isinstance(_m, dict):
+                        print(
+                            f"[video-plan]   moment word[{_m.get('word_index')}]: "
+                            f"{_m.get('what_lands', '')!r}",
+                            flush=True,
+                        )
+
+            # ── Derivation pass: word_index → float timestamps for downstream code ──
+            # Every downstream consumer (render_multi_clip, projection helpers,
+            # thumbnail selection) expects float-time fields
+            # (caption_position_segments, peak_at_seconds, source_start/source_end,
+            # thumbnail_timestamp). Gemini emits word-anchored
+            # inputs; Python synthesizes the float fields from word timings here.
+            _dg = deepgram_words or []
+
+            # No rounding: callers feed the result through project_source_time_to_output
+            # against clip source bounds that ARE raw floats; rounding here loses
+            # sub-millisecond precision and breaks boundary checks.
+            def _word_start(src_idx):
+                if src_idx is None or not (0 <= int(src_idx) < len(_dg)):
+                    return None
+                return float(_dg[int(src_idx)].get("start") or 0)
+
+            def _word_end(src_idx):
+                if src_idx is None or not (0 <= int(src_idx) < len(_dg)):
+                    return None
+                return float(_dg[int(src_idx)].get("end") or 0)
+
+            # caption_position_segments (synthesized from caption_position_changes)
+            _changes = edit_plan.get("caption_position_changes") or []
+            _changes_clean = [
+                c for c in _changes
+                if isinstance(c, dict) and c.get("word_index") is not None
+                and c.get("position") in ("top", "center", "bottom")
+            ]
+            _changes_clean.sort(key=lambda c: int(c["word_index"]))
+            _segments = []
+            _cur_pos = "bottom"  # default start position
+            _cur_t = 0.0
+            # No rounding: from/to_seconds get projected through clip source bounds
+            # at render time; rounding here can land the value outside its own clip
+            # due to sub-millisecond drift.
+            for _ch in _changes_clean:
+                _ch_t = _word_start(_ch["word_index"])
+                if _ch_t is None:
+                    continue
+                if _ch_t > _cur_t:
+                    _segments.append({
+                        "from_seconds": _cur_t,
+                        "to_seconds": _ch_t,
+                        "position": _cur_pos,
+                    })
+                _cur_pos = _ch["position"]
+                _cur_t = _ch_t
+            # Final segment to video duration
+            if duration > _cur_t:
+                _segments.append({
+                    "from_seconds": _cur_t,
+                    "to_seconds": float(duration),
+                    "position": _cur_pos,
+                })
+            # Fallback: if no changes emitted, cover the whole video with default
+            if not _segments and duration > 0:
+                _segments = [{
+                    "from_seconds": 0.0,
+                    "to_seconds": float(duration),
+                    "position": "bottom",
+                }]
+            _segments = _coalesce_caption_position_segments(_segments)
+            edit_plan["caption_position_segments"] = _segments
+
+            # thumbnail_timestamp from thumbnail_word_index
+            _twi = edit_plan.get("thumbnail_word_index")
+            _tts = _word_start(_twi)
+            if _tts is not None:
+                edit_plan["thumbnail_timestamp"] = _tts
+
+            print(
+                f"[generate-edit] Derived float timestamps: "
+                f"caption_segments={len(_segments)}, "
+                f"thumbnail={edit_plan.get('thumbnail_timestamp')}",
+                flush=True,
+            )
+
+            # Post-processing
+            edit_plan["_deepgram_words"] = list(deepgram_words or [])
+            # Preserve signals for downstream (render_multi_clip projects peak_at_seconds
+            # to output frames using the same logic as SFX/captions/b-roll). Underscored
+            # so the sanitized recipe strips them from persistence.
+            edit_plan["_shot_changes"] = list(_shots)
+            edit_plan["_vocal_emphasis"] = list(_vocal)
+            edit_plan["_source_loudness_signal"] = dict(_loudness)
+            # Face detections are consumed exactly once — to build the prompt signals
+            # above. Once _build_post_cuts_prompt has returned, the raw face data has
+            # no downstream reader (the Remotion composition renders motion_graphics
+            # against the canvas via resolveMGPosition; no face lookup happens at
+            # render time). Do NOT stash onto edit_plan — it would be dead weight.
+            analysis = build_analysis_from_gemini_recipe(edit_plan, duration=duration)
+            has_burned_captions = infer_has_burned_captions(edit_plan, analysis, log_prefix="[generate-edit]")
+
+            video_duration = float(analysis.get("duration") or 0)
+            _dg_words = edit_plan.get("_deepgram_words", [])
+            raw_remove_words = edit_plan.get("remove_words") or []
+
+            # ── Guard: drop Gemini range cuts covering an ANCHORED word ──────────────
+            # Anchor integrity is the absolute invariant — if Gemini tried to
+            # range-cut a word it also anchored to (rare; ranges are reserved for
+            # narrative skips of unrelated tangents), the anchor wins and the range
+            # is dropped. Compute the anchor-referenced set by walking every field
+            # that carries a word index. Translation to source indices has already
+            # happened above, so everything is in source space here.
+            _anchored_src_indices = set()
+            for _em in (edit_plan.get("emphasis_moments") or []):
+                if isinstance(_em, dict):
+                    for _wi in (_em.get("word_indices") or []):
+                        if isinstance(_wi, int):
+                            _anchored_src_indices.add(_wi)
+            for _ov in (edit_plan.get("text_overlays") or []):
+                if isinstance(_ov, dict) and isinstance(_ov.get("start_word_index"), int):
+                    _anchored_src_indices.add(_ov["start_word_index"])
+            for _mg in (edit_plan.get("motion_graphics") or []):
+                if isinstance(_mg, dict):
+                    for _k in ("start_word_index", "end_word_index"):
+                        if isinstance(_mg.get(_k), int):
+                            _anchored_src_indices.add(_mg[_k])
+            for _sfx in (edit_plan.get("sound_effects") or []):
+                if isinstance(_sfx, dict) and isinstance(_sfx.get("word_index"), int):
+                    _anchored_src_indices.add(_sfx["word_index"])
+            for _tr in (edit_plan.get("transitions") or []):
+                if isinstance(_tr, dict) and isinstance(_tr.get("after_word_index"), int):
+                    _anchored_src_indices.add(_tr["after_word_index"])
+            for _bc in (edit_plan.get("broll_clips") or []):
+                if isinstance(_bc, dict):
+                    for _k in ("start_word_index", "end_word_index"):
+                        if isinstance(_bc.get(_k), int):
+                            _anchored_src_indices.add(_bc[_k])
+
+            if raw_remove_words and _anchored_src_indices and _dg_words:
+                _anchored_times = []
+                for _pi in _anchored_src_indices:
+                    if 0 <= _pi < len(_dg_words):
+                        _w = _dg_words[_pi]
+                        _anchored_times.append((
+                            float(_w.get("start") or 0),
+                            float(_w.get("end") or 0),
+                            _pi,
+                        ))
+                _filtered = []
+                for _rw in raw_remove_words:
+                    if not isinstance(_rw, dict):
+                        continue
+                    # Index-based range: covers the open interval (after, before).
+                    # An anchored word i with after < i < before is "covered."
+                    if (
+                        _rw.get("after_word_index") is not None
+                        and _rw.get("before_word_index") is not None
+                        and _rw.get("word_index") is None
+                    ):
+                        try:
+                            _aw = int(_rw["after_word_index"])
+                            _bw = int(_rw["before_word_index"])
+                        except (TypeError, ValueError):
+                            continue
+                        _covers_anchor = next(
+                            (_pi for _pi in _anchored_src_indices if _aw < _pi < _bw),
+                            None,
+                        )
+                        if _covers_anchor is not None:
+                            _pword = _dg_words[_covers_anchor]
+                            _pw_text = str(_pword.get("punctuated_word") or _pword.get("word") or "").strip()
+                            print(
+                                f"[generate-edit] Dropping Gemini range cut "
+                                f"after_word={_aw}/before_word={_bw} "
+                                f"— covers ANCHORED word [{_covers_anchor}] '{_pw_text}' "
+                                f"(anchor-integrity guard)",
+                                flush=True,
+                            )
+                            continue
+                    # Legacy float range: open-interval overlap with anchored word's
+                    # [start, end]. Kept for cached plans and silence-tighten micro-
+                    # cuts (Python-internal, not Gemini-emitted).
+                    elif "start" in _rw and "end" in _rw and "word_index" not in _rw:
+                        try:
+                            _rs = float(_rw["start"])
+                            _re = float(_rw["end"])
+                        except (TypeError, ValueError):
+                            continue
+                        _covers_anchor = None
+                        for (_pws, _pwe, _pi) in _anchored_times:
+                            if _rs < _pwe and _re > _pws:
+                                _covers_anchor = _pi
+                                break
+                        if _covers_anchor is not None:
+                            _pword = _dg_words[_covers_anchor]
+                            _pw_text = str(_pword.get("punctuated_word") or _pword.get("word") or "").strip()
+                            print(
+                                f"[generate-edit] Dropping Gemini range cut {_rs:.2f}-{_re:.2f}s "
+                                f"— covers ANCHORED word [{_covers_anchor}] '{_pw_text}' "
+                                f"(anchor-integrity guard)",
+                                flush=True,
+                            )
+                            continue
+                    _filtered.append(_rw)
+                raw_remove_words = _filtered
+
+            # Gemini's remove_words is the authoritative cut list — every filler,
+            # stutter, restart, dead-air range, breath, and tangent. No injection,
+            # no merging from upstream passes (those have been removed from the
+            # pipeline entirely).
+
+            validated_cuts = []
+            if not _dg_words:
+                raise ValueError(
+                    "No speech detected in source (Deepgram returned 0 words). This pipeline "
+                    "is a talking-head editor and requires spoken audio to produce an edit plan."
+                )
+            if isinstance(raw_remove_words, list):
+                print(f"[DIAG] Full transcript ({len(_dg_words)} words):", flush=True)
+                for i, w in enumerate(_dg_words):
+                    spk = w.get('speaker', '?')
+                    print(
+                        f"[DIAG]   [{i}] {float(w.get('start') or 0):.3f}-{float(w.get('end') or 0):.3f} "
+                        f"(spk{spk}): {w.get('punctuated_word') or w.get('word')}",
+                        flush=True,
+                    )
+                normalized_remove_words = []
+                for item in raw_remove_words:
+                    if not isinstance(item, dict):
+                        continue
+                    if "word_index" in item and item.get("word_index") is not None:
+                        try:
+                            idx = int(item["word_index"])
+                        except Exception:
+                            continue
+                        if 0 <= idx < len(_dg_words):
+                            normalized_remove_words.append({
+                                "word_index": idx,
+                                "reason": str(item.get("reason") or "remove"),
+                            })
+                            w = _dg_words[idx]
+                            word_text = w.get("punctuated_word") or w.get("word") or ""
+                            print(
+                                f"[remove] Removing word [{idx}] '{word_text}' ({item.get('reason', 'unknown')})",
+                                flush=True,
+                            )
+                        else:
+                            print(
+                                f"[remove] WARNING: word_index {idx} out of bounds (max {len(_dg_words)-1})",
+                                flush=True,
+                            )
+                    elif (
+                        item.get("after_word_index") is not None
+                        and item.get("before_word_index") is not None
+                    ):
+                        # Index-based range form: drop the silence between word[aw]
+                        # and word[bw], plus any words strictly between them.
+                        # build_clips_from_words consumes this shape directly — it
+                        # forces a clip split at every accepted dead_air boundary
+                        # (including the consecutive-anchor case (N, N+1) where no
+                        # words sit between the anchors but the silence still gets
+                        # cut). The previous normalizer dropped these entries
+                        # silently; Gemini's dead_air decisions never reached
+                        # build_clips_from_words and the gaps played through.
+                        try:
+                            aw = int(item["after_word_index"])
+                            bw = int(item["before_word_index"])
+                        except Exception:
+                            continue
+                        if bw <= aw:
+                            print(
+                                f"[remove] WARNING: range word[{aw}]→word[{bw}] has bw<=aw, dropped",
+                                flush=True,
+                            )
+                            continue
+                        if not (0 <= aw < len(_dg_words) and 0 <= bw < len(_dg_words)):
+                            print(
+                                f"[remove] WARNING: range anchors word[{aw}]→word[{bw}] out of bounds "
+                                f"(transcript has {len(_dg_words)} words)",
+                                flush=True,
+                            )
+                            continue
+                        normalized_remove_words.append({
+                            "after_word_index": aw,
+                            "before_word_index": bw,
+                            "reason": str(item.get("reason") or "range_remove"),
+                        })
+                        print(
+                            f"[remove] Removing range word[{aw}]→word[{bw}] "
+                            f"({item.get('reason', 'unknown')})",
+                            flush=True,
+                        )
+                    elif "start" in item and "end" in item:
+                        try:
+                            rw_s = max(0.0, float(item["start"]))
+                            rw_e = max(0.0, float(item["end"]))
+                        except Exception:
+                            continue
+                        if rw_e > rw_s:
+                            if video_duration > 0:
+                                rw_e = min(rw_e, video_duration)
+                            if rw_e <= rw_s:
+                                continue
+                            normalized_remove_words.append({
+                                "start": round(rw_s, 3),
+                                "end": round(rw_e, 3),
+                                "reason": str(item.get("reason") or "remove"),
+                            })
+                            print(
+                                f"[remove] Removing range {rw_s:.2f}-{rw_e:.2f} ({item.get('reason', 'unknown')})",
+                                flush=True,
+                            )
+
+                edit_plan["remove_words"] = normalized_remove_words
+                print(
+                    f"[generate-edit] Building clips: {len(_dg_words)} words, "
+                    f"{len(normalized_remove_words)} Gemini removals",
+                    flush=True,
+                )
+                validated_cuts, _removed_word_indices = build_clips_from_words(_dg_words, normalized_remove_words, video_duration=video_duration)
+                edit_plan["_removed_word_indices"] = _removed_word_indices
+
+                # ── Shot-change-based clip splitting ────────────────────────────────
+                # Each entry in _shot_boundaries (computed pre-Gemini using the same
+                # cluster_shot_changes + shot_change_word_boundaries logic) is a
+                # (new_idx, source_time) pair. Split validated_cuts only at boundaries
+                # where Gemini ACTUALLY placed a transition. Reason: scdet fires on
+                # graphical overlay edges (PiP, embedded-video insert appearing or
+                # disappearing) as well as real camera cuts — those overlay edges show
+                # up in shot_change_word_boundaries identically. Splitting at every
+                # detected shot change forces sub-clips around overlay edges; Gemini
+                # is taught (per the OVERLAY rule in CRAFT TECHNIQUES) NOT to place
+                # transitions at overlay edges. Gating the split on transition
+                # presence makes the pipeline structurally inert to the false
+                # positives — no sub-clip created where no transition will play.
+                if _shots and validated_cuts:
+                    # Re-derive the kept-words list at this scope (matches the pre-
+                    # Gemini computation since the same _dg_words + _removed_word_indices
+                    # determine kept-only ordering).
+                    _post_kept = [
+                        _w for _i, _w in enumerate(_dg_words)
+                        if _i not in (_removed_word_indices or set())
+                    ]
+                    _shot_split_pairs = shot_change_word_boundaries(_shots, _post_kept)
+                    # Filter to boundaries where Gemini emitted a transition.
+                    _emitted_trans_indices = {
+                        int(_t["after_word_index"])
+                        for _t in (edit_plan.get("transitions") or [])
+                        if isinstance(_t, dict)
+                        and _t.get("after_word_index") is not None
+                        and str(_t.get("type") or "none") != "none"
+                    }
+                    _gated_pairs = [
+                        (_ni, _st) for (_ni, _st) in _shot_split_pairs
+                        if _ni in _emitted_trans_indices
+                    ]
+                    _skipped = len(_shot_split_pairs) - len(_gated_pairs)
+                    if _skipped > 0:
+                        print(
+                            f"[shot-split] Gated by emitted transitions: "
+                            f"{_skipped} shot-change boundary(ies) had no transition "
+                            f"(overlay edge or Gemini skip) → no sub-clip split",
+                            flush=True,
+                        )
+                    _split_times = sorted({_st for (_, _st) in _gated_pairs})
+                    if _split_times:
+                        _new_cuts = []
+                        _total_splits = 0
+                        for _clip in validated_cuts:
+                            _cs = float(_clip["source_start"])
+                            _ce = float(_clip["source_end"])
+                            _internal = [_st for _st in _split_times if _cs + 0.05 < _st < _ce - 0.05]
+                            if not _internal:
+                                _new_cuts.append(_clip)
+                                continue
+                            _boundaries = [_cs] + _internal + [_ce]
+                            for _bi in range(len(_boundaries) - 1):
+                                _sub_start = _boundaries[_bi]
+                                _sub_end = _boundaries[_bi + 1]
+                                if _sub_end - _sub_start <= 0:
+                                    continue
+                                _sub = {**_clip, "source_start": _sub_start, "source_end": _sub_end}
+                                if _bi != len(_boundaries) - 2:
+                                    _sub["transition_out"] = "none"
+                                _new_cuts.append(_sub)
+                            _total_splits += len(_internal)
+                        if _total_splits > 0:
+                            print(
+                                f"[shot-split] Validated cuts: {len(validated_cuts)} → "
+                                f"{len(_new_cuts)} clips ({_total_splits} internal "
+                                f"shot-change split(s) applied)",
+                                flush=True,
+                            )
+                            validated_cuts = _new_cuts
+
+                # ── Cross-check guard: every clip-split boundary must be a known cut ─
+                # The original transitions bug was two boundary sources that never
+                # agreed — the list shown to Gemini (CUT BOUNDARIES + TIGHT BOUNDARIES
+                # union) and the clip-split path inside build_clips_from_words. If the
+                # renderer splits a clip at a kept-word index that's in NEITHER list,
+                # that's a new instance of the same bug class and means a third
+                # boundary source has appeared (or a code path drifted). Loud log
+                # rather than silent jump-cut.
+                try:
+                    if validated_cuts and len(validated_cuts) > 1 and kept_words:
+                        try:
+                            _known = set(_all_boundary_indices)
+                        except NameError:
+                            # kept_words was empty so the boundary block never ran.
+                            # No known boundaries — every split is unknown by definition.
+                            _known = set()
+                        _split_boundaries = set()
+                        for _ci in range(len(validated_cuts) - 1):
+                            _end_t = float(validated_cuts[_ci].get("source_end") or 0.0)
+                            # Find the kept-word whose .end is closest to _end_t within tolerance.
+                            _best_ni = None
+                            _best_dist = 0.10
+                            for _ni, _w in enumerate(kept_words):
+                                _dist = abs(float(_w.get("end") or 0.0) - _end_t)
+                                if _dist <= _best_dist:
+                                    _best_dist = _dist
+                                    _best_ni = _ni
+                            if _best_ni is not None:
+                                _split_boundaries.add(_best_ni)
+                        for _b in sorted(_split_boundaries - _known):
+                            _record_divergence(
+                                "cut_boundary",
+                                {"kept_word_index": _b},
+                                "clip_split_without_known_boundary",
+                                reason="renderer_split_at_boundary_gemini_never_saw",
+                            )
+                except Exception as _xc_err:
+                    # The guard is observability only — must never break the render.
+                    print(f"[divergence] cross-check guard error: {_xc_err}", flush=True)
+
+                # Drop caption_position_changes anchored to removed words and
+                # re-derive caption_position_segments. If Gemini happens to anchor
+                # a position change to the same word it also lists in remove_words,
+                # the change references a word that doesn't appear on screen —
+                # would render as a 0.5s caption flicker at the removed-word
+                # position. Re-synthesize from the filtered list.
+                _removed_set = set(_removed_word_indices) if _removed_word_indices else set()
+                if _removed_set:
+                    _raw_changes = edit_plan.get("caption_position_changes") or []
+                    _filtered_changes = [
+                        _ch for _ch in _raw_changes
+                        if isinstance(_ch, dict) and _ch.get("word_index") is not None
+                        and int(_ch["word_index"]) not in _removed_set
+                    ]
+                    if len(_filtered_changes) != len(_raw_changes):
+                        _dropped = len(_raw_changes) - len(_filtered_changes)
+                        edit_plan["caption_position_changes"] = _filtered_changes
+                        # Re-synthesize caption_position_segments from filtered changes.
+                        # Same logic as the derivation block above (~line 3735).
+                        _filtered_changes_clean = [
+                            c for c in _filtered_changes
+                            if isinstance(c, dict) and c.get("word_index") is not None
+                            and c.get("position") in ("top", "center", "bottom")
+                        ]
+                        _filtered_changes_clean.sort(key=lambda c: int(c["word_index"]))
+                        _resynth_segments = []
+                        _cur_pos = "bottom"
+                        _cur_t = 0.0
+                        # No rounding: from/to_seconds get projected through clip
+                        # source bounds at render time; any rounding here can land
+                        # the value outside its own clip due to sub-millisecond drift.
+                        for _ch in _filtered_changes_clean:
+                            _wi = int(_ch["word_index"])
+                            if _wi < 0 or _wi >= len(_dg_words):
+                                continue
+                            _ch_t = float(_dg_words[_wi].get("start") or 0)
+                            if _ch_t > _cur_t:
+                                _resynth_segments.append({
+                                    "from_seconds": _cur_t,
+                                    "to_seconds": _ch_t,
+                                    "position": _cur_pos,
+                                })
+                            _cur_pos = _ch["position"]
+                            _cur_t = _ch_t
+                        if video_duration > _cur_t:
+                            _resynth_segments.append({
+                                "from_seconds": _cur_t,
+                                "to_seconds": float(video_duration),
+                                "position": _cur_pos,
+                            })
+                        if not _resynth_segments and video_duration > 0:
+                            _resynth_segments = [{
+                                "from_seconds": 0.0,
+                                "to_seconds": float(video_duration),
+                                "position": "bottom",
+                            }]
+                        _resynth_segments = _coalesce_caption_position_segments(_resynth_segments)
+                        edit_plan["caption_position_segments"] = _resynth_segments
+                        print(
+                            f"[generate-edit] Dropped {_dropped} caption_position_change(s) "
+                            f"anchored to removed words; re-synthesized "
+                            f"{len(_resynth_segments)} segment(s)",
+                            flush=True,
+                        )
+                for i, clip in enumerate(validated_cuts):
+                    clip_start = float(clip["source_start"])
+                    clip_end = float(clip["source_end"])
+                    # Find words inside this clip using padded boundaries
+                    clip_words = []
+                    for w in _dg_words:
+                        ws = float(w.get("start") or 0)
+                        we = float(w.get("end") or 0)
+                        if ws >= clip_start - 0.02 and we <= clip_end + 0.02:
+                            clip_words.append(w.get("punctuated_word") or w.get("word") or "")
+                    first_word = clip_words[0] if clip_words else ""
+                    last_word = clip_words[-1] if clip_words else ""
+                    print(
+                        f"[clips] Clip {i}: {clip_start:.3f}-{clip_end:.3f} "
+                        f"({len(clip_words)} words) '{first_word}' ... '{last_word}'",
+                        flush=True,
+                    )
+                if not validated_cuts:
+                    raise ValueError("Gemini response removed all words — no clips remain")
+            else:
+                raise ValueError(
+                    "Gemini response missing remove_words — the edit plan must include a "
+                    "remove_words list (empty array is allowed to keep every word, but the "
+                    "key itself is required)."
+                )
+
+            # Verify no large gaps in output (monitoring only — not auto-removing)
+            for _gi in range(1, len(validated_cuts)):
+                _prev_end = float(validated_cuts[_gi - 1].get("source_end", 0))
+                _curr_start = float(validated_cuts[_gi].get("source_start", 0))
+                _gap = _curr_start - _prev_end
+                if _gap > 0.5:
+                    print(f"[gap-check] WARNING: {_gap:.2f}s gap between clip {_gi-1} and clip {_gi} (source {_prev_end:.2f}s-{_curr_start:.2f}s)", flush=True)
+
+            # Apply transitions from Gemini's transitions array onto clips.
+            # Each transition has after_word_index — find the clip whose source range
+            # contains that word's timestamp and set transition_out on it. If the
+            # transition can't land (word fell in a cut, or it's in the last clip
+            # with no subsequent clip), DROP that single transition and continue —
+            # same auto-handle pattern as caption z-order: Python OWNS the cross-
+            # field consistency, the rest of the plan still renders.
+            # Removed-word set is referenced by BOTH the transitions validator below
+            # AND the tight_cut_overlays validator further down (each drops entries
+            # whose after_word_index targets a word the cuts pass removed). Derive
+            # once here, before either branch, so the overlay path works on jobs
+            # that emit overlays without transitions — single-clip footage with all
+            # visual cuts in TIGHT BOUNDARIES (the audio gate's zero-handle gap
+            # produces this shape; see the audio-gap-vs-visual-cut investigation).
+            # Previously this assignment lived inside `if raw_transitions and
+            # _dg_words:` and the overlay read at the validator below hit
+            # UnboundLocalError on the no-transitions-emitted path. The resolver
+            # is safe on every input — empty set on empty remove_words OR empty
+            # deepgram_words (handler.py:5227-5228, 5231).
+            _tr_removed = _remove_words_to_src_indices(
+                edit_plan.get("remove_words") or [], _dg_words,
+            )
+
+            # Tight-boundary set in SOURCE space — read by BOTH validators after
+            # Option B lands (2026-06-21): transitions validator rejects crossfade
+            # types whose after_word_index falls on a tight boundary, and the
+            # tight_cut_overlays validator rejects overlays whose after_word_index
+            # doesn't. Same kept→source translation pattern used by the overlay
+            # validator before the lift; defended against NameError on degenerate
+            # transcripts where _tight_boundary_indices was never built (the
+            # boundary block at handler.py:~6155 skips on empty kept_words).
+            try:
+                _tight_src_set = {
+                    new_to_src[_ki] for _ki in _tight_boundary_indices
+                    if 0 <= _ki < len(new_to_src)
+                }
+                # Shot-change subset of the tight boundaries, in source space — the
+                # scene-change decoration FLOOR (below) backfills any of these left
+                # bare by Gemini. Same kept→source translation; a "both" boundary
+                # (audio gap AND shot change) is a real scene change, so it's included.
+                _shot_src_set = {
+                    new_to_src[_ki] for _ki in _tight_boundary_indices
+                    if _ki in _shot_boundary_set and 0 <= _ki < len(new_to_src)
+                }
+                # Source-index → scdet confidence score, for the floor's confidence gate.
+                _shot_src_score = {
+                    new_to_src[_ki]: _shot_boundary_scores.get(_ki)
+                    for _ki in _tight_boundary_indices
+                    if _ki in _shot_boundary_set and 0 <= _ki < len(new_to_src)
+                }
+            except NameError:
+                _tight_src_set = set()
+                _shot_src_set = set()
+                _shot_src_score = {}
+
+            # Boundaries (source after_word_index) carrying a real transition → type.
+            # Overlays and the scene-change floor read this to skip double-decorating a
+            # boundary that already has a transition (transition wins — heavier).
+            _transition_type_by_awi = {}
+            # Crossfade-family transitions Gemini placed on TIGHT boundaries, collected
+            # during the loop below and DEMOTED to light tight_cut_overlays at the
+            # resolved layer (after the TCO pass defines _resolved_overlays /
+            # _overlay_awis — they don't exist yet at this point). (awi, original_type).
+            _demoted_tight_transitions = []
+            raw_transitions = edit_plan.get("transitions") or []
+            if raw_transitions and _dg_words:
+                # Transitions = pack PascalCase names. VALID_TRANSITION_TYPES is the
+                # canonical set; mirror it here so adding a type only edits one place.
+                _valid_tr_types = set(VALID_TRANSITION_TYPES)
+                for _ti, tr in enumerate(raw_transitions):
+                    if not isinstance(tr, dict):
+                        raise ValueError(f"transitions[{_ti}] must be an object")
+                    tr_type = str(tr.get("type") or "").strip()
+                    if tr_type not in _valid_tr_types:
+                        raise ValueError(
+                            f"transitions[{_ti}].type={tr_type!r} is not a valid transition "
+                            f"(must be one of {sorted(_valid_tr_types)})"
+                        )
+                    awi = tr.get("after_word_index")
+                    if awi is None or not isinstance(awi, (int, float)):
+                        raise ValueError(
+                            f"transitions[{_ti}] ({tr_type}) missing numeric after_word_index"
+                        )
+                    awi = int(awi)
+                    if awi < 0 or awi >= len(_dg_words):
+                        # Out-of-bounds index — drop this transition; render proceeds
+                        # without it. Logged loudly so the operator notices.
+                        print(
+                            f"[generate-edit] DROP transition '{tr_type}' [{_ti}]: "
+                            f"after_word_index={awi} out of bounds (transcript has "
+                            f"{len(_dg_words)} words). Render continues without this "
+                            f"transition.",
+                            flush=True,
+                        )
+                        continue
+                    if awi in _tr_removed:
+                        # The transition word got cut by a downstream pass. Drop the
+                        # transition; the rest of the plan still renders.
+                        print(
+                            f"[generate-edit] DROP transition '{tr_type}' [{_ti}]: "
+                            f"after_word_index={awi} targets a removed word. Render "
+                            f"continues without this transition.",
+                            flush=True,
+                        )
+                        continue
+                    # Type-eligibility per boundary class: crossfade transitions need
+                    # CUT BOUNDARIES (audio handle for the equal-power crossfade in
+                    # build_per_cut_audio's crossfade branch); zero-handle types work on
+                    # either CUT or TIGHT BOUNDARIES (the hard-cut branch substitutes
+                    # silence + click-prevention fades, no handle needed). On TIGHT
+                    # BOUNDARIES, anything outside ZERO_HANDLE_TRANSITION_TYPES would
+                    # audio-mush the speaker's continuous speech across the cut.
+                    # HOW TO PLACE TRANSITIONS HARD RULE 1 in the prompt teaches the
+                    # same rule; this backstop used to RAISE here — the placement-class
+                    # anomaly that killed jobs at temperature 1.0 (every sibling
+                    # placement conflict DROPS). Now it DEMOTES: skip the transition and
+                    # queue the boundary for a light tight_cut_overlay at the resolved
+                    # layer below — the doctrine's own default for tight cuts. The A2
+                    # repair loop rarely sees this class as a result; it nets the rest.
+                    if awi in _tight_src_set and tr_type not in ZERO_HANDLE_TRANSITION_TYPES:
+                        _demoted_tight_transitions.append((awi, tr_type))
+                        continue
+                    word_end = float(_dg_words[awi].get("end") or 0)
+                    # Build extras dict — copy through all component-specific props
+                    _extras = {
+                        k: v for k, v in tr.items()
+                        if k not in ("type", "after_word_index") and v is not None
+                    }
+                    # Find the clip that contains this word (with 50ms tolerance) and
+                    # has a successor to transition INTO. If the word lands in the last
+                    # clip (or isn't found), no clip-pair exists for this transition;
+                    # drop it and continue.
+                    _applied = False
+                    for ci, clip in enumerate(validated_cuts):
+                        cs = float(clip["source_start"])
+                        ce = float(clip["source_end"])
+                        if cs - 0.05 <= word_end <= ce + 0.05 and ci < len(validated_cuts) - 1:
+                            clip["transition_out"] = tr_type
+                            _transition_type_by_awi[awi] = tr_type
+                            if _extras:
+                                clip["_transition_extras"] = _extras
+                            print(f"[generate-edit] Transition '{tr_type}' applied to clip {ci} (after word {awi})", flush=True)
+                            _applied = True
+                            break
+                    if not _applied:
+                        # Lands in the last clip OR doesn't fall in any clip range
+                        # (rare edge case: dead-air gap exactly straddling word_end).
+                        # Drop the transition; render proceeds with the rest of the plan.
+                        print(
+                            f"[generate-edit] DROP transition '{tr_type}' [{_ti}]: "
+                            f"after_word_index={awi} (t={word_end:.2f}s) lands in the "
+                            f"last clip or no clip-pair exists. Render continues "
+                            f"without this transition.",
+                            flush=True,
+                        )
+
+            # Transition count/variety is Gemini's decision — the prompt teaches restraint.
+
+            # ── Tight-cut overlays (paint-on-top decorations at TIGHT BOUNDARIES) ────
+            # Overlays attach to a FRAME POSITION (the boundary word's projected output
+            # frame), NOT a clip-pair. OverlayCutEffect paints on top of continuously-
+            # playing video and needs only atFrame (no clipA/clipB) — so an overlay is
+            # valid on ANY tight boundary, including one sitting MID-CLIP (no sub-clip
+            # split). Resolved overlays are collected here as a flat, boundary-keyed
+            # list; the render projects each after_word_index to an output frame via
+            # _projected_words. (Previously overlays required a clip WITH A SUCCESSOR,
+            # which silently dropped every overlay on a no-removal / no-transition video
+            # where the whole take is one clip — the attachment bug behind the session's
+            # overlay failures.)
+            #
+            # _resolved_overlays: [{after_word_index (source), type, title?, label?}].
+            _resolved_overlays = []
+            _overlay_awis = set()  # boundaries already carrying an overlay
+            raw_tco = edit_plan.get("tight_cut_overlays") or []
+            if raw_tco and _dg_words:
+                _valid_tco_types = set(VALID_TIGHT_CUT_OVERLAYS)
+                # The ≤2 cap governs Gemini's DISCRETIONARY emissions only; the
+                # scene-change floor below backfills uncapped (a separate goal).
+                _TIGHT_CUT_OVERLAY_CAP = 2
+                _applied_tco_count = 0
+                for _toi, tco in enumerate(raw_tco):
+                    if not isinstance(tco, dict):
+                        raise ValueError(f"tight_cut_overlays[{_toi}] must be an object")
+                    tco_type = str(tco.get("type") or "").strip()
+                    if tco_type not in _valid_tco_types:
+                        raise ValueError(
+                            f"tight_cut_overlays[{_toi}].type={tco_type!r} is not valid "
+                            f"(must be one of {sorted(_valid_tco_types)})"
+                        )
+                    # SceneTitle is the ONLY overlay that takes extras (title + label).
+                    # title required; label optional. The other three reject extras.
+                    tco_title_raw = tco.get("title")
+                    tco_label_raw = tco.get("label")
+                    tco_title = str(tco_title_raw).strip() if isinstance(tco_title_raw, str) else None
+                    tco_label = str(tco_label_raw).strip() if isinstance(tco_label_raw, str) else None
+                    if tco_type == "SceneTitle":
+                        if not tco_title:
+                            raise ValueError(
+                                f"tight_cut_overlays[{_toi}] (SceneTitle) is missing "
+                                f"`title` — SceneTitle requires a 1-3 word uppercase "
+                                f"title for the typographic panel."
+                            )
+                    else:
+                        if tco_title is not None or tco_label is not None:
+                            raise ValueError(
+                                f"tight_cut_overlays[{_toi}] ({tco_type}) carries "
+                                f"title/label, but only SceneTitle uses them. "
+                                f"Strip them or change the type."
+                            )
+                    awi_t = tco.get("after_word_index")
+                    if awi_t is None or not isinstance(awi_t, (int, float)):
+                        raise ValueError(
+                            f"tight_cut_overlays[{_toi}] ({tco_type}) missing numeric after_word_index"
+                        )
+                    awi_t = int(awi_t)
+                    if awi_t < 0 or awi_t >= len(_dg_words):
+                        print(
+                            f"[generate-edit] DROP tight_cut_overlay '{tco_type}' [{_toi}]: "
+                            f"after_word_index={awi_t} out of bounds (transcript has "
+                            f"{len(_dg_words)} words).",
+                            flush=True,
+                        )
+                        continue
+                    if awi_t in _tr_removed:
+                        print(
+                            f"[generate-edit] DROP tight_cut_overlay '{tco_type}' [{_toi}]: "
+                            f"after_word_index={awi_t} targets a removed word.",
+                            flush=True,
+                        )
+                        continue
+                    if awi_t not in _tight_src_set:
+                        # Overlay at a CUT boundary (transitions live there) or a
+                        # non-boundary index. The overlay path only fires at TIGHT
+                        # boundaries. (Empty _tight_src_set ≡ no tight boundaries pass.)
+                        print(
+                            f"[generate-edit] DROP tight_cut_overlay '{tco_type}' [{_toi}]: "
+                            f"after_word_index={awi_t} is not a TIGHT BOUNDARY — overlay "
+                            f"requires a tight cut to decorate.",
+                            flush=True,
+                        )
+                        continue
+                    if awi_t in _transition_type_by_awi:
+                        # Collision: this boundary already carries a transition (the
+                        # heavier decoration wins). One decoration per boundary.
+                        print(
+                            f"[generate-edit] DROP tight_cut_overlay '{tco_type}' [{_toi}]: "
+                            f"after_word_index={awi_t} already has transition "
+                            f"{_transition_type_by_awi[awi_t]!r}.",
+                            flush=True,
+                        )
+                        continue
+                    if awi_t in _overlay_awis:
+                        print(
+                            f"[generate-edit] DROP tight_cut_overlay '{tco_type}' [{_toi}]: "
+                            f"after_word_index={awi_t} already has an overlay (duplicate).",
+                            flush=True,
+                        )
+                        continue
+                    if _applied_tco_count >= _TIGHT_CUT_OVERLAY_CAP:
+                        print(
+                            f"[generate-edit] DROP tight_cut_overlay '{tco_type}' [{_toi}]: "
+                            f"per-video cap of {_TIGHT_CUT_OVERLAY_CAP} already reached. "
+                            f"Sparing placement keeps the overlay editorial, not templated.",
+                            flush=True,
+                        )
+                        continue
+                    _spec = {"after_word_index": awi_t, "type": tco_type}
+                    if tco_type == "SceneTitle":
+                        _spec["title"] = tco_title
+                        if tco_label:
+                            _spec["label"] = tco_label
+                    _resolved_overlays.append(_spec)
+                    _overlay_awis.add(awi_t)
+                    _applied_tco_count += 1
+                    _extras_log = ""
+                    if tco_type == "SceneTitle":
+                        _extras_log = f" title={tco_title!r}"
+                        if tco_label:
+                            _extras_log += f" label={tco_label!r}"
+                    print(
+                        f"[generate-edit] tight_cut_overlay '{tco_type}' resolved at "
+                        f"after_word_index={awi_t}{_extras_log}",
+                        flush=True,
+                    )
+
+            # ── Scene-change decoration FLOOR (deterministic backfill) ─────────
+            # Every shot-change tight boundary (a real scdet-flagged visual cut, not a
+            # silence-only pause) MUST carry a decoration. Gemini's transitions +
+            # overlays are resolved above; any shot-change boundary still BARE of both
+            # gets a varied overlay here. The floor cannot under-emit — it does not
+            # depend on the model. Pause (dead_air-only) boundaries are NOT backfilled.
+            #
+            # Frame-position attach (no clip-pair needed) means EVERY shot boundary is
+            # decorable, including the mid-clip ones the old clip-successor model
+            # silently dropped.
+            #
+            # Confidence gate (false-positive guardrail): the floor auto-decorates only
+            # boundaries whose scdet score clears SCENE_FLOOR_MIN_SCDET_SCORE — real
+            # camera cuts score high; PiP/insert edges (which the old split-gate
+            # filtered for free via Gemini's vision judgment) score lower and are
+            # skipped. Unknown score ⇒ fail OPEN (decorate). Gemini's OWN overlays above
+            # are NOT score-gated.
+            #
+            # Cap scoping (Option A): backfill appends straight to _resolved_overlays
+            # and never touches _applied_tco_count, so it is UNCAPPED by construction;
+            # the ≤2 cap still governs Gemini's discretionary emissions.
+            #
+            # ── Crossfade-on-tight DEMOTIONS → light overlays (resolved layer) ──────
+            # Transitions the loop above collected instead of raising: each demotes to
+            # ONE light punctuation overlay via the scene-floor house pattern — append
+            # straight to _resolved_overlays + _overlay_awis, UNCAPPED by construction
+            # (_applied_tco_count untouched), types picked by the floor's own rotation
+            # (SceneTitle and DipToBlack held out). Runs AFTER the Gemini TCO pass (so
+            # a boundary Gemini already decorated guards to a plain drop) and BEFORE
+            # the scene-change floor (so the floor sees these boundaries as taken).
+            # Known-benign residue: the shot-split pass gated on the transition's
+            # PRESENCE and may already have split the clip — the boundary renders as a
+            # hard cut plus a light overlay, exactly the doctrine default for tight
+            # cuts; the split-boundary cross-check stays silent (known index) and the
+            # collision backstop sees no transition at the boundary (we never wrote
+            # _transition_type_by_awi for a demoted one).
+            if _demoted_tight_transitions:
+                _demote_apply = []
+                for _d_awi, _d_orig in sorted(_demoted_tight_transitions):
+                    if _d_awi in _overlay_awis or _d_awi in _transition_type_by_awi:
+                        # Boundary already carries its one decoration — plain drop.
+                        print(
+                            f"[generate-edit] DROP transition '{_d_orig}' at "
+                            f"after_word_index={_d_awi}: crossfade type on a TIGHT "
+                            f"boundary and the boundary already carries a decoration. "
+                            f"Render continues without it.",
+                            flush=True,
+                        )
+                        continue
+                    _demote_apply.append((_d_awi, _d_orig))
+                _demote_types = _scene_floor_rotation([None] * len(_demote_apply))
+                for _d_i, (_d_awi, _d_orig) in enumerate(_demote_apply):
+                    _resolved_overlays.append(
+                        {"after_word_index": _d_awi, "type": _demote_types[_d_i]}
+                    )
+                    _overlay_awis.add(_d_awi)
+                    _record_divergence(
+                        "transitions",
+                        {"type": _d_orig, "after_word_index": _d_awi},
+                        "demote",
+                        final={"tight_cut_overlay": _demote_types[_d_i],
+                               "after_word_index": _d_awi},
+                        reason="crossfade-family type on a TIGHT boundary (no audio "
+                               "handle) — demoted to the light overlay default for "
+                               "tight cuts instead of failing the job",
+                    )
+
+            # Variety: types rotate across the 3 light punctuation overlays (SceneTitle
+            # and DipToBlack held out) so no two adjacent scene decorations share a type.
+            _scene_n_shot = 0
+            _scene_n_lowconf = 0
+            _scene_n_gemini = 0
+            _scene_backfilled = 0
+            if _transitions_off and _shot_src_set:
+                # "no transitions" (EditPolicy) suppresses the always-on scene-floor
+                # overlay backfill too — a cut-boundary punctuation overlay IS a
+                # transition effect. The recipe transitions + tight_cut_overlays were
+                # already cleared in the Step-2 enforcement pass; this closes the
+                # always-on path so a shot boundary stays bare.
+                print(
+                    "[edit-policy-enforce] scene-floor overlay backfill skipped — "
+                    "transitions=off (EditPolicy)",
+                    flush=True,
+                )
+            if _shot_src_set and not _transitions_off:
+                # Ordered shot-change boundaries (temporal, by source word index). Each:
+                # current decoration type (transition or Gemini overlay → locked;
+                # None = bare) and scdet confidence score. Low-confidence BARE
+                # boundaries are dropped from the sequence (skipped, not decorated).
+                _floor_seq = []  # in-scope: [(awi_src, current_type_or_None)]
+                for _si in sorted(_shot_src_set):
+                    if _si < 0 or _si >= len(_dg_words):
+                        continue
+                    _scene_n_shot += 1
+                    _cur = _transition_type_by_awi.get(_si)
+                    if _cur is None and _si in _overlay_awis:
+                        # Locked by a Gemini overlay — recover its type for adjacency.
+                        _cur = next(
+                            (str(_o["type"]) for _o in _resolved_overlays
+                             if _o["after_word_index"] == _si),
+                            "overlay",
+                        )
+                    if _cur is not None:
+                        _scene_n_gemini += 1
+                        _floor_seq.append((_si, _cur))
+                        continue
+                    _score = _shot_src_score.get(_si)
+                    if _score is not None and _score < SCENE_FLOOR_MIN_SCDET_SCORE:
+                        _scene_n_lowconf += 1
+                        continue  # likely PiP/insert edge — floor skips it
+                    _floor_seq.append((_si, None))
+                # Deterministic variety fill over the in-scope sequence.
+                _resolved_floor_types = _scene_floor_rotation([_t for (_si, _t) in _floor_seq])
+                for _idx, (_si, _cur) in enumerate(_floor_seq):
+                    if _cur is not None:
+                        continue  # already decorated (Gemini) — keep its pick
+                    _ftype = _resolved_floor_types[_idx]
+                    _resolved_overlays.append({"after_word_index": _si, "type": _ftype})
+                    _overlay_awis.add(_si)
+                    _scene_backfilled += 1
+                    print(
+                        f"[scene-floor] backfill '{_ftype}' at after_word_index={_si} "
+                        f"(bare scene-change boundary)",
+                        flush=True,
+                    )
+            # Unconditional summary — fires even at 0 so "ran but found nothing
+            # attachable" never again looks like "never ran".
+            print(
+                f"[scene-floor] shot_boundaries={_scene_n_shot} "
+                f"(gemini_decorated={_scene_n_gemini}, "
+                f"low_confidence_skipped={_scene_n_lowconf}, "
+                f"backfilled={_scene_backfilled}); "
+                f"min_score={SCENE_FLOOR_MIN_SCDET_SCORE}; final overlay types in order: "
+                f"{[_o['type'] for _o in sorted(_resolved_overlays, key=lambda _o: _o['after_word_index'])]}",
+                flush=True,
+            )
+
+            # ── Tight-decoration collision backstop ────────────────────────────
+            # One decoration per boundary: no boundary may carry BOTH a transition and
+            # an overlay. Prevented at append time (overlays skip boundaries already
+            # holding a transition; backfill skips locked boundaries) — this is the
+            # structural backstop. Gated by _TIGHT_DECORATION_COLLISION: "strict"
+            # raises; "soft_overlay_wins" drops the overlay (the heavier transition
+            # stays).
+            _collisions = [
+                _o for _o in _resolved_overlays
+                if _o["after_word_index"] in _transition_type_by_awi
+            ]
+            if _collisions:
+                if _TIGHT_DECORATION_COLLISION == "strict":
+                    _c = _collisions[0]
+                    raise ValueError(
+                        f"after_word_index={_c['after_word_index']} has BOTH a transition "
+                        f"({_transition_type_by_awi[_c['after_word_index']]!r}) AND an overlay "
+                        f"({_c['type']!r}) — competing decorations for one cut. Pick one."
+                    )
+                elif _TIGHT_DECORATION_COLLISION == "soft_overlay_wins":
+                    for _c in _collisions:
+                        _record_divergence(
+                            "tight_decoration_collision",
+                            {
+                                "after_word_index": _c["after_word_index"],
+                                "transition_out": _transition_type_by_awi[_c["after_word_index"]],
+                                "tight_cut_overlay_dropped": _c["type"],
+                            },
+                            "drop_overlay_keep_transition",
+                            reason="both_on_one_boundary",
+                        )
+                    _resolved_overlays = [
+                        _o for _o in _resolved_overlays
+                        if _o["after_word_index"] not in _transition_type_by_awi
+                    ]
+                else:
+                    raise RuntimeError(
+                        f"_TIGHT_DECORATION_COLLISION = {_TIGHT_DECORATION_COLLISION!r} "
+                        f"is not a recognized mode. Valid: 'strict', 'soft_overlay_wins'."
+                    )
+
+            # Stash the resolved overlays on the plan for the render emit, which projects
+            # each after_word_index to an output frame via _projected_words. Boundary-
+            # keyed and clip-agnostic — works for mid-clip boundaries with no split.
+            edit_plan["_resolved_tight_cut_overlays"] = _resolved_overlays
+
+            # caption_style, caption_keywords, caption_position_segments, text_overlays,
+            # emphasis_moments, motion_graphics, audio_denoise, outro, aspect_ratio,
+            # sound_effects — ALL required. No presence defaults. Gemini must emit every
+            # field explicitly or the plan is rejected.
+            for _req in ("audio_denoise", "outro", "aspect_ratio", "sound_effects"):
+                if _req not in edit_plan:
+                    raise ValueError(
+                        f"edit_plan missing required field {_req!r}. Every plan MUST emit "
+                        f"audio_denoise (bool), outro ('none'|'fade_black'|'fade_white'), "
+                        f"aspect_ratio ('9:16'), and sound_effects (array, empty if none)."
+                    )
+            if not isinstance(edit_plan.get("sound_effects"), list):
+                raise ValueError("sound_effects must be an array (empty is fine)")
+            if str(edit_plan.get("outro")) not in ("none", "fade_black", "fade_white"):
+                raise ValueError(
+                    f"outro must be 'none'|'fade_black'|'fade_white', got {edit_plan.get('outro')!r}"
+                )
+            # aspect_ratio is informational — the pipeline always outputs 1080x1920
+            # regardless of this field. Pydantic's Literal["9:16"] in EditPlan
+            # constrains Gemini's structured-output normally, but Gemini occasionally
+            # bypasses its own schema and emits e.g. "1080x1920" or "vertical".
+            # Both convey the same intent (portrait 9:16). Normalize to "9:16" so
+            # the persisted plan is canonical; don't hard-fail on a dead field.
+            if str(edit_plan.get("aspect_ratio")) != "9:16":
+                edit_plan["aspect_ratio"] = "9:16"
+
+            # ── B-roll clips validation ───────────────────────────────────────────
+            # Type/sanity checks only — no value clamps. Gemini owns every creative
+            # decision (duration, count, placement). We only filter entries that
+            # would crash the renderer or are physically impossible (negative time,
+            # zero duration, NaN, past end of video, malformed JSON types).
+            raw_broll = edit_plan.get("broll_clips") or []
+            validated_broll = []
+            _broll_dg_words = edit_plan.get("_deepgram_words") or []
+            _broll_removed = edit_plan.get("_removed_word_indices") or set()
+            for _br in raw_broll:
+                if not isinstance(_br, dict):
+                    continue
+                _br_kw = str(_br.get("keyword") or "").strip()
+                if not _br_kw:
+                    continue
+                # Word-index timing — compute exact start/end from KEPT Deepgram words.
+                # Gemini may select a range that includes removed words. We find the
+                # first kept word for the start and last kept word for the end so the
+                # timestamps are guaranteed to exist in a clip.
+                try:
+                    _sw = int(_br["start_word_index"])
+                    _ew = int(_br["end_word_index"])
+                except (TypeError, ValueError, KeyError):
+                    continue
+                if _sw < 0 or _ew < _sw or _sw >= len(_broll_dg_words):
+                    continue
+                _ew = min(_ew, len(_broll_dg_words) - 1)
+                # Find first KEPT word from start
+                _sw_kept = _sw
+                while _sw_kept <= _ew and _sw_kept in _broll_removed:
+                    _sw_kept += 1
+                # Find last KEPT word from end
+                _ew_kept = _ew
+                while _ew_kept >= _sw_kept and _ew_kept in _broll_removed:
+                    _ew_kept -= 1
+                if _sw_kept > _ew_kept:
+                    print(f"[broll] All words [{_sw}]-[{_ew}] removed — skipping '{_br_kw}'", flush=True)
+                    continue
+                _br_ts = float(_broll_dg_words[_sw_kept].get("start") or 0)
+                _br_end = float(_broll_dg_words[_ew_kept].get("end") or 0)
+                # SOURCE-TIME span between the two words — INCLUDES any
+                # mechanically-removed silence/filler. Computed but no longer
+                # surfaced as the recipe `duration` field, because downstream
+                # consumers (Pexels fetch filter, recipe log, debugging) all
+                # want OUTPUT-time speech duration, not raw source span.
+                _src_span = _br_end - _br_ts
+                if _src_span <= 0:
+                    continue
+
+                # OUTPUT-time SPEECH duration of just the kept words in the
+                # range. Equals sum of each kept word's natural duration; ignores
+                # inter-word silences (those vanish in mechanical removal anyway).
+                # For 5 consecutive kept words at normal speech, ~2-3s — which
+                # is what a 5-word cutaway should actually be on screen.
+                _speech_dur = 0.0
+                for _wi in range(_sw_kept, _ew_kept + 1):
+                    if _wi in _broll_removed:
+                        continue
+                    _w = _broll_dg_words[_wi]
+                    _ws = float(_w.get("start") or 0)
+                    _we = float(_w.get("end") or 0)
+                    if _we > _ws:
+                        _speech_dur += (_we - _ws)
+                if _speech_dur <= 0:
+                    # Defensive — kept-word filter should leave at least one
+                    # word with positive duration. Skip the entry rather than
+                    # ship an obviously-broken zero-duration cutaway.
+                    continue
+
+                # The recipe `duration` field now carries OUTPUT-time speech
+                # duration. Downstream Pexels fetch sizing (handler.py:~15075)
+                # gets a sensible request length (~2-3s for a 5-word phrase, NOT
+                # the inflated source span). Render-time bounding uses the
+                # output-projected word span via _pw_by_idx, unchanged.
+                if not (math.isfinite(_br_ts) and math.isfinite(_speech_dur)):
+                    continue
+                if _br_ts < 0 or _speech_dur <= 0:
+                    continue
+                if video_duration > 0 and _br_ts >= video_duration:
+                    continue
+
+                # Emit the divergence whenever source-span and output-speech
+                # diverge by > 2x — that's the misleading-recipe symptom the
+                # user reported and would have made invisible without this log.
+                if _src_span > _speech_dur * 2.0:
+                    _record_divergence(
+                        "broll",
+                        {
+                            "keyword": _br_kw,
+                            "start_word_src": _sw_kept,
+                            "end_word_src": _ew_kept,
+                            "src_span_s": round(_src_span, 3),
+                        },
+                        "duration_recomputed_to_speech",
+                        final={"duration_s": round(_speech_dur, 3)},
+                        reason="src_span_inflated_by_mechanical_removals_between_words",
+                    )
+
+                print(
+                    f"[broll] Word-index timing: [{_sw_kept}]-[{_ew_kept}] → "
+                    f"{_br_ts:.3f}s+{_speech_dur:.2f}s speech "
+                    f"(src span {_src_span:.2f}s)",
+                    flush=True,
+                )
+                validated_broll.append({
+                    "keyword": _br_kw,
+                    "timestamp": _br_ts,
+                    "duration": _speech_dur,
+                    "reason": str(_br.get("reason") or "").strip(),
+                    "_start_word_kept": _sw_kept,
+                    "_end_word_kept": _ew_kept,
+                })
+            edit_plan["broll_clips"] = validated_broll
+            if validated_broll:
+                print(f"[broll] Gemini requested {len(validated_broll)} B-roll clip(s)", flush=True)
+                for _vb in validated_broll:
+                    _r = _vb.get("reason") or "(no reason given)"
+                    print(f"[broll]   → '{_vb['keyword']}' @ {_vb['timestamp']:.2f}s for {_vb['duration']:.2f}s — {_r}", flush=True)
+
+            # ── Strict validation of new schema (no defaults, no repair) ───────────
+            # The philosophy: Gemini emits a complete, valid plan. Everything below
+            # raises on error — we do not substitute defaults or silently drop entries.
+
+            # DERIVED from type_registries (the SAME source of truth the schema Literals
+            # read) so newly-added components can never drift out of these runtime gates
+            # again. These were hardcoded copies: the batch-2 additions (17 MG types + 4
+            # caption styles) were added to the schema/roster/render but not here, so the
+            # moment the roster told Gemini they existed, Gemini emitted them and this
+            # gate raised ValueError → every such video failed. VALID_CAPTION_STYLES
+            # already contains "none" (the user opt-out).
+            _valid_caption_styles = set(VALID_CAPTION_STYLES)
+            _valid_zoom_types = set(VALID_ZOOM_TYPES)
+            _valid_mg_types = set(VALID_MG_TYPES)
+            # Motion graphics use semantic safe-zone anchors that map to the MG pack's
+            # MGAnchor vocabulary (top/center/bottom/left/right) via SEMANTIC_TO_MG_ANCHOR
+            # at render time. Face-relative anchors are NOT valid for motion graphics —
+            # the pack components don't accept a face prop, and their own resolveMGPosition
+            # operates against the full canvas, so face-relative anchoring has no honest
+            # render path. Use absolute safe zones only.
+            _valid_semantic_anchors = {
+                "upper_third_safe", "center", "lower_third_safe",
+            }
+            _valid_text_overlay_variants = {
+                "sticky_note", "caption_match",
+            }
+
+            # caption_style — must be exactly one of the registry's valid styles
+            _cs_raw = str(edit_plan.get("caption_style") or "").strip()
+            if _cs_raw not in _valid_caption_styles:
+                raise ValueError(
+                    f"Invalid caption_style: {_cs_raw!r}. Must be one of {sorted(_valid_caption_styles)}"
+                )
+            edit_plan["caption_style"] = _cs_raw
+
+            # caption_keywords — required array of strings
+            _ck_raw = edit_plan.get("caption_keywords")
+            if not isinstance(_ck_raw, list):
+                raise ValueError(f"caption_keywords must be an array, got {type(_ck_raw).__name__}")
+            edit_plan["caption_keywords"] = [str(k).strip().lower() for k in _ck_raw if str(k).strip()]
+
+            # caption_position_segments — SYNTHESIZED by the derivation pass above
+            # from Gemini's caption_position_changes (word-index-based). Every
+            # boundary is by construction a real word start timestamp; no exact-match
+            # validation needed because mismatch is architecturally impossible.
+            _cps = edit_plan.get("caption_position_segments") or []
+            if _cps:
+                print(
+                    f"[caption-segments] {len(_cps)} segment(s) synthesized from changes: "
+                    + ", ".join(f"[{s['from_seconds']:.2f}-{s['to_seconds']:.2f}]={s['position']}" for s in _cps),
+                    flush=True,
+                )
+
+            # color_effect was removed from the pipeline. There's no place a global
+            # color grade fits without reintroducing the full-canvas mixBlendMode paint
+            # cost that drove the 140s renders. Keep the field forced-null so any stale
+            # callers don't break.
+            edit_plan["color_effect"] = None
+
+            # motion_graphics — array. Each entry validated strictly.
+            # motion_graphics — word-anchored (start_word_index + end_word_index, with
+            # optional duration_seconds override for fixed-duration pins). Python
+            # derives the output-time window from the kept-word timestamps. Gemini
+            # CANNOT emit a time that doesn't map to a real spoken moment.
+            raw_mg = edit_plan.get("motion_graphics")
+            if raw_mg is None:
+                raw_mg = []
+            if not isinstance(raw_mg, list):
+                raise ValueError("motion_graphics must be an array")
+            # Build kept-word set for the anchor-on-kept-word check below. This check
+            # is belt-and-suspenders: re-indexing + index translation in the main-call
+            # flow guarantees every emitted anchor lands on a kept word. Retained as
+            # a regression guard in case a future refactor accidentally loosens that
+            # invariant.
+            _mg_kept_set = (
+                set(range(len(_dg_words))) - set(_removed_word_indices or set())
+            )
+            validated_mg = []
+            for _i, _mg in enumerate(raw_mg):
+                if not isinstance(_mg, dict):
+                    raise ValueError(f"motion_graphics[{_i}] must be an object")
+                _mg_type = str(_mg.get("type") or "").strip()
+                if _mg_type not in _valid_mg_types:
+                    raise ValueError(
+                        f"motion_graphics[{_i}].type must be one of {sorted(_valid_mg_types)}, got {_mg_type!r}"
+                    )
+                try:
+                    _sw = int(_mg["start_word_index"])
+                    _ew = int(_mg["end_word_index"])
+                except (KeyError, TypeError, ValueError):
+                    raise ValueError(
+                        f"motion_graphics[{_i}] needs integer start_word_index and end_word_index"
+                    )
+                if _sw < 0 or _sw >= len(_dg_words):
+                    raise ValueError(
+                        f"motion_graphics[{_i}].start_word_index={_sw} out of range "
+                        f"[0, {len(_dg_words)-1}]"
+                    )
+                if _ew < 0 or _ew >= len(_dg_words):
+                    raise ValueError(
+                        f"motion_graphics[{_i}].end_word_index={_ew} out of range "
+                        f"[0, {len(_dg_words)-1}]"
+                    )
+                if _ew < _sw:
+                    raise ValueError(
+                        f"motion_graphics[{_i}].end_word_index ({_ew}) must be >= "
+                        f"start_word_index ({_sw})"
+                    )
+                if _sw not in _mg_kept_set:
+                    _wt = str(_dg_words[_sw].get("punctuated_word") or _dg_words[_sw].get("word") or "").strip()
+                    print(
+                        f"[generate-edit] DROP motion_graphics '{_mg_type}' [{_i}]: "
+                        f"start_word_index={_sw} ({_wt!r}) targets a REMOVED word. "
+                        f"Render continues without this motion graphic.",
+                        flush=True,
+                    )
+                    continue
+                if _ew not in _mg_kept_set:
+                    _wt = str(_dg_words[_ew].get("punctuated_word") or _dg_words[_ew].get("word") or "").strip()
+                    print(
+                        f"[generate-edit] DROP motion_graphics '{_mg_type}' [{_i}]: "
+                        f"end_word_index={_ew} ({_wt!r}) targets a REMOVED word. "
+                        f"Render continues without this motion graphic.",
+                        flush=True,
+                    )
+                    continue
+                _anchor = str(_mg.get("anchor") or "").strip()
+                if _anchor not in _valid_semantic_anchors:
+                    # left_safe/right_safe were removed from the MG anchor vocabulary
+                    # (MGs always center horizontally now). A stray/unknown anchor — from
+                    # model inertia, a cached prompt, or a re-edited recipe — COERCES to
+                    # center instead of rejecting the render. center is on-canvas and
+                    # satisfies the always-horizontally-centered rule.
+                    print(
+                        f"[generate-edit] motion_graphics[{_i}].anchor {_anchor!r} not a "
+                        f"valid semantic zone {sorted(_valid_semantic_anchors)} — "
+                        f"coercing to 'center'",
+                        flush=True,
+                    )
+                    _anchor = "center"
+                _mg["anchor"] = _anchor
+
+                # props has default_factory=dict in the schema → it is NOT a required
+                # field, so Gemini/Vertex OMITS it whenever the component uses default
+                # props. A missing/null props means {} (the schema default), not an
+                # error; only a PRESENT non-dict is a real malformation.
+                _props = _mg.get("props")
+                if _props is None:
+                    _props = {}
+                if not isinstance(_props, dict):
+                    raise ValueError(f"motion_graphics[{_i}].props must be an object")
+                # Optional duration override; validator only enforces range.
+                _dur_override = _mg.get("duration_seconds")
+                if _dur_override is not None:
+                    try:
+                        _dur_override = float(_dur_override)
+                    except (TypeError, ValueError):
+                        raise ValueError(
+                            f"motion_graphics[{_i}].duration_seconds must be a number if present"
+                        )
+                    if _dur_override < 0.3 or _dur_override > 20.0:
+                        raise ValueError(
+                            f"motion_graphics[{_i}].duration_seconds={_dur_override} "
+                            f"outside [0.3, 20.0]"
+                        )
+                # Derive the source-time window from the anchor words. No rounding:
+                # clip source ranges in build_clips_from_words are stored as raw
+                # floats from word._start / word._end, so anchor source times
+                # MUST be raw too. Rounding here to 3 decimals lost a sub-millisecond
+                # difference between this stored value and the clip boundary,
+                # causing project_source_time_to_output to return None at render
+                # time — same precision bug class as the emphasis-moment one.
+                _sw_start = float(_dg_words[_sw].get("start") or 0)
+                _ew_end = float(_dg_words[_ew].get("end") or 0)
+                validated_mg.append({
+                    "type": _mg_type,
+                    "start_word_index": _sw,
+                    "end_word_index": _ew,
+                    # Source-time timestamps carried forward for render_multi_clip to
+                    # project through the output timeline (same pattern as everything
+                    # else that's word-anchored).
+                    "_source_start": _sw_start,
+                    "_source_end": _ew_end,
+                    "duration_seconds_override": _dur_override,
+                    "anchor": _anchor,
+                    "props": _props,
+                })
+            edit_plan["motion_graphics"] = validated_mg
+            if validated_mg:
+                print(f"[mg] Gemini requested {len(validated_mg)} motion graphic(s)", flush=True)
+
+            # B-roll vs overlay (motion_graphic / text_overlay) deconfliction has
+            # MOVED to render_multi_clip — see "Strict separation" block right after
+            # the B-roll output projection. Doing it on actual output frame ranges
+            # (instead of word indices here) catches MGs/text-overlays whose
+            # duration_seconds extends past their anchor word and would otherwise
+            # slip past a word-index check.
+
+            # Defensive: in case any legacy upstream caller still hands us a
+            # `speed_curve` field on the plan (it's no longer in the schema), drop
+            # it silently. Pacing is now expressed exclusively via per-clip `speed`.
+            edit_plan.pop("speed_curve", None)
+            edit_plan.pop("_parsed_speed_curve", None)
+
+            thumbnail_timestamp = None
+            try:
+                if edit_plan.get("thumbnail_timestamp") is not None:
+                    thumbnail_timestamp = max(0.0, float(edit_plan.get("thumbnail_timestamp")))
+                    if video_duration > 0:
+                        thumbnail_timestamp = min(thumbnail_timestamp, video_duration)
+            except Exception:
+                thumbnail_timestamp = None
+            edit_plan["thumbnail_timestamp"] = thumbnail_timestamp
+
+            # Defensive: drop any legacy hook_clip field a stale caller might pass.
+            # Auto-hook (climax replay at start) was removed because it duplicates
+            # source content in the timeline — no production NLE does this. Cold-
+            # open / strongest-moment range cuts were also removed: the cuts prompt
+            # now requires chronological order. The opening of the kept transcript
+            # is whatever survives standard filler trimming at word [0].
+            edit_plan.pop("hook_clip", None)
+            edit_plan["cuts"] = list(validated_cuts)
+
+            # ── Parse emphasis moments — strict, with explicit visual-layer bindings ─
+            raw_emphasis = edit_plan.get("emphasis_moments")
+            if raw_emphasis is None:
+                raw_emphasis = []
+            if not isinstance(raw_emphasis, list):
+                raise ValueError("emphasis_moments must be an array")
+            _valid_em_types = {"punchline", "statement", "question", "reaction", "transition", "revelation"}
+            emphasis_moments = []
+            # Pre-compute the kept-word set for the anchor-on-kept-word checks below
+            # (emphasis, text_overlays, transitions, sfx, broll). These checks are
+            # belt-and-suspenders: re-indexing + index translation in the main-call
+            # flow guarantees every emitted anchor lands on a kept word. Retained
+            # as a regression guard against future refactors.
+            _kept_word_indices = (
+                set(range(len(_dg_words))) - set(_removed_word_indices or set())
+            )
+            for _ei, em in enumerate(raw_emphasis):
+                if not isinstance(em, dict):
+                    raise ValueError(f"emphasis_moments[{_ei}] must be an object")
+                _wi_raw = em.get("word_indices")
+                if not isinstance(_wi_raw, list) or not _wi_raw:
+                    raise ValueError(f"emphasis_moments[{_ei}].word_indices must be a non-empty array")
+                _wis = [int(i) for i in _wi_raw if isinstance(i, (int, float))]
+                if not _wis:
+                    raise ValueError(f"emphasis_moments[{_ei}].word_indices contained no integers")
+                # Every word_indices entry MUST be a word that survives remove_words.
+                # If any anchor word was removed, drop the entire emphasis_moment and
+                # continue — render proceeds without this single moment rather than
+                # hard-failing the whole plan.
+                _drop_em = False
+                for _k, _wi_val in enumerate(_wis):
+                    if _wi_val < 0 or _wi_val >= len(_dg_words):
+                        raise ValueError(
+                            f"emphasis_moments[{_ei}].word_indices[{_k}]={_wi_val} is out "
+                            f"of range [0, {len(_dg_words)-1}]."
+                        )
+                    if _wi_val not in _kept_word_indices:
+                        _w = _dg_words[_wi_val]
+                        _wt = str(_w.get("punctuated_word") or _w.get("word") or "").strip()
+                        print(
+                            f"[generate-edit] DROP emphasis_moment [{_ei}]: "
+                            f"word_indices[{_k}]={_wi_val} ({_wt!r}) targets a "
+                            f"REMOVED word. Render continues without this emphasis.",
+                            flush=True,
+                        )
+                        _drop_em = True
+                        break
+                if _drop_em:
+                    continue
+                # Derive t from word_indices[0].start — Gemini no longer emits `t`
+                # (schema-level constraint from v34: the two could disagree so we
+                # removed the degree of freedom). Because word_indices[0] is a kept
+                # word, the derived t is guaranteed to land inside a kept clip's
+                # source range.
+                #
+                # No rounding: clip source ranges are built from these same word
+                # timestamps without rounding, so the anchor t will hit the clip
+                # boundary exactly. Any rounding here only loses precision and
+                # introduces boundary mismatches like the v34→df1b62e bug where
+                # round(12.871, 2) = 12.87 fell below clip.source_start = 12.871.
+                _anchor_word = _dg_words[_wis[0]]
+                t = float(_anchor_word.get("start") or 0)
+                if t < 0 or (video_duration > 0 and t > video_duration + 0.5):
+                    raise ValueError(
+                        f"emphasis_moments[{_ei}] derived t={t:.3f}s (from word_indices[0]="
+                        f"{_wis[0]}) is outside video duration [0, {video_duration:.3f}]."
+                    )
+                intensity = str(em.get("intensity") or "").lower()
+                if intensity not in ("high", "medium"):
+                    raise ValueError(f"emphasis_moments[{_ei}].intensity must be 'high'|'medium'")
+                em_type = str(em.get("type") or "").lower()
+                if em_type not in _valid_em_types:
+                    raise ValueError(
+                        f"emphasis_moments[{_ei}].type must be one of {sorted(_valid_em_types)}"
+                    )
+                _em_duration = float(em.get("duration") or 2.0)
+                # Visual layer bindings — optional. A MISSING zoom_effect / motion_graphic
+                # is treated as null (= no zoom / no MG), identical to an explicit null.
+                # Gemini's Vertex structured output OMITS optional fields it leaves empty
+                # (AI Studio happened to emit explicit nulls), so requiring the key to be
+                # present was over-strict. setdefault makes every downstream read see null.
+                em.setdefault("zoom_effect", None)
+                em.setdefault("motion_graphic", None)
+                _ze_raw = em.get("zoom_effect")
+                _ze_out = None
+                if _ze_raw is not None:
+                    if not isinstance(_ze_raw, dict):
+                        raise ValueError(f"emphasis_moments[{_ei}].zoom_effect must be object or null")
+                    _zt = str(_ze_raw.get("type") or "").strip()
+                    if _zt not in _valid_zoom_types:
+                        raise ValueError(
+                            f"emphasis_moments[{_ei}].zoom_effect.type must be one of "
+                            f"{sorted(_valid_zoom_types)}, got {_zt!r}"
+                        )
+                    _raw_events = _ze_raw.get("events") or []
+                    # Fill in natural durationMs and scale per zoom type when Gemini
+                    # omits them. This locks the look of each zoom to its designed
+                    # motion shape regardless of what Gemini chose for the moment —
+                    # picking SmoothPush gets a 1200ms cubic ease at 1.22 unless
+                    # explicitly overridden. Gemini's job is picking the right TYPE
+                    # for the beat; the renderer handles the look.
+                    _natural_dur = ZOOM_NATURAL_DURATION_MS.get(_zt, 1200)
+                    _natural_scale = ZOOM_NATURAL_SCALE.get(_zt, 1.22)
+                    # Per-event PERCEPTUAL PEAK back-timing. Override Gemini's
+                    # startMs so the visible peak lands on the anchor word, not
+                    # the ramp-out endpoint. See ZOOM_PEAK_REACH_MS at the top
+                    # of this file for the rationale and measured values.
+                    _peak_reach_ms = ZOOM_PEAK_REACH_MS.get(_zt, 0)
+                    _word_start_ms = int(round(t * 1000.0))
+                    _new_start_ms_canonical = _word_start_ms - _peak_reach_ms
+                    # Find the owning clip's source range to enforce the
+                    # "startMs must live inside the owning clip's source range"
+                    # hard constraint. The render-time projection already has
+                    # its own clip-window clamp (handler.py:~10744), but we
+                    # also clamp here so the recorded plan reflects the
+                    # intended source-time and the divergence log is precise.
+                    _owning_clip_for_em = None
+                    for _ci_em, _clip_em in enumerate(validated_cuts):
+                        _cs_em = float(_clip_em.get("source_start") or 0.0)
+                        _ce_em = float(_clip_em.get("source_end") or 0.0)
+                        if _cs_em <= t <= _ce_em:
+                            _owning_clip_for_em = (_ci_em, _cs_em, _ce_em)
+                            break
+                    _filled_events = []
+                    for _ev_raw in _raw_events:
+                        if not isinstance(_ev_raw, dict):
+                            continue
+                        _ev = dict(_ev_raw)
+                        _gemini_start_ms = _ev.get("startMs")
+                        if _ev.get("durationMs") is None:
+                            _ev["durationMs"] = _natural_dur
+                        if _ev.get("scale") is None:
+                            _ev["scale"] = _natural_scale
+                        # Override startMs to put the perceptual peak on the
+                        # anchor word. Clamp to the owning clip's source_start
+                        # in ms (frame-0 blip protection). If no owning clip
+                        # could be matched (rare — emphasis t outside all
+                        # clips, which the existing "CLEAR emphasis_moments
+                        # zoom_effect" pass at ~handler.py:7000 will catch
+                        # and clear anyway), the canonical correction stands.
+                        _corrected_start_ms = _new_start_ms_canonical
+                        _clamp_reason = None
+                        if _owning_clip_for_em is not None:
+                            _, _cs_em, _ce_em = _owning_clip_for_em
+                            _clip_start_ms = int(round(_cs_em * 1000.0))
+                            if _corrected_start_ms < _clip_start_ms:
+                                _corrected_start_ms = _clip_start_ms
+                                _clamp_reason = "clamped_to_clip_source_start"
+                        _ev["startMs"] = _corrected_start_ms
+                        _record_divergence(
+                            "zoom_startMs_corrected",
+                            {
+                                "type": _zt,
+                                "old_startMs": (
+                                    int(_gemini_start_ms)
+                                    if isinstance(_gemini_start_ms, (int, float))
+                                    else None
+                                ),
+                                "word_start_ms": _word_start_ms,
+                                "peak_reach_ms": _peak_reach_ms,
+                            },
+                            "corrected" if _clamp_reason is None else _clamp_reason,
+                            final={"new_startMs": _corrected_start_ms},
+                            reason=(_clamp_reason or "align_perceptual_peak_to_word"),
+                        )
+                        # ── Shot-change boundary clamp ────────────────────────────
+                        # A zoom window must not straddle a tight SHOT-CHANGE boundary:
+                        # the footage cuts to a new shot mid-window and the held/moving
+                        # zoom carries the old shot's framing (+ the frozen face-lock
+                        # origin) into the new shot — the StepZoom "staircase", a framing
+                        # pop on the moving types. End the window at or before the first
+                        # shot-change boundary strictly inside it. _shot_src_set holds
+                        # SHOT-CHANGE tights as SOURCE WORD INDICES (NOT times); the cut
+                        # time is that word's `.end` (s)×1000 = source ms, matching
+                        # startMs (source ms). dead_air tights are excluded — they don't
+                        # cut footage.
+                        _zc_start = _ev.get("startMs")
+                        _zc_dur = _ev.get("durationMs")
+                        if (
+                            isinstance(_zc_start, (int, float))
+                            and isinstance(_zc_dur, (int, float))
+                            and _zc_dur > 0
+                            and _shot_src_set
+                        ):
+                            _zc_end = _zc_start + _zc_dur
+                            _cut_ms = None
+                            for _tsi in _shot_src_set:
+                                if not (0 <= _tsi < len(_dg_words)):
+                                    continue
+                                _tms = float(_dg_words[_tsi].get("end") or 0.0) * 1000.0
+                                if _zc_start < _tms < _zc_end:
+                                    _cut_ms = _tms if _cut_ms is None else min(_cut_ms, _tms)
+                            if _cut_ms is not None:
+                                _clamped_dur = int(round(_cut_ms - _zc_start))
+                                # Floor: never clamp to a stub. 200ms ≈ 12 frames @ 60fps,
+                                # ≥ SnapReframe's ~171ms spring settle, so a clamped zoom
+                                # still completes its move. Below the floor we leave the
+                                # window UNCHANGED (rare — the straddle persists for that
+                                # one event rather than rendering a stub; safest default).
+                                _ZOOM_CLAMP_FLOOR_MS = 200
+                                if _ZOOM_CLAMP_FLOOR_MS <= _clamped_dur < _zc_dur:
+                                    _record_divergence(
+                                        "zoom_window",
+                                        {
+                                            "type": _zt,
+                                            "startMs": int(_zc_start),
+                                            "durationMs": int(_zc_dur),
+                                            "shot_change_ms": int(round(_cut_ms)),
+                                        },
+                                        "clamp_to_shot_change",
+                                        final={"durationMs": _clamped_dur},
+                                        reason="zoom_window_straddled_tight_shot_change",
+                                    )
+                                    print(
+                                        f"[zoom-clamp] {_zt} window "
+                                        f"[{int(_zc_start)},{int(_zc_end)}]ms straddles "
+                                        f"shot-change at {int(round(_cut_ms))}ms — "
+                                        f"durationMs {int(_zc_dur)}→{_clamped_dur} "
+                                        f"(release on shot A)",
+                                        flush=True,
+                                    )
+                                    _ev["durationMs"] = _clamped_dur
+                        _filled_events.append(_ev)
+                    _ze_out = {"type": _zt, "events": _filled_events}
+                    for _ek in ("firstStage", "secondStage", "windowScale", "borderWidth",
+                                "borderColor", "bgScale", "edgeBlur", "frameLines", "maxBarHeight"):
+                        if _ek in _ze_raw:
+                            _ze_out[_ek] = _ze_raw[_ek]
+                _mg_raw = em.get("motion_graphic")
+                _mg_out = None
+                if _mg_raw is not None:
+                    if not isinstance(_mg_raw, dict):
+                        raise ValueError(f"emphasis_moments[{_ei}].motion_graphic must be object or null")
+                    _mgt = str(_mg_raw.get("type") or "").strip()
+                    if _mgt not in _valid_mg_types:
+                        raise ValueError(
+                            f"emphasis_moments[{_ei}].motion_graphic.type must be one of "
+                            f"{sorted(_valid_mg_types)}, got {_mgt!r}"
+                        )
+                    _anc = str(_mg_raw.get("anchor") or "").strip()
+                    if _anc not in _valid_semantic_anchors:
+                        # See motion_graphics anchor coercion above — stray/removed
+                        # off-center anchors land on center, never reject the render.
+                        print(
+                            f"[generate-edit] emphasis_moments[{_ei}].motion_graphic.anchor "
+                            f"{_anc!r} not a valid semantic zone "
+                            f"{sorted(_valid_semantic_anchors)} — coercing to 'center'",
+                            flush=True,
+                        )
+                        _anc = "center"
+                    _mg_raw["anchor"] = _anc
+                    # props has default_factory=dict → NOT required. Vertex omits it when
+                    # the component uses default props; missing/null means {} (the schema
+                    # default), only a PRESENT non-dict is a malformation.
+                    _mg_props = _mg_raw.get("props")
+                    if _mg_props is None:
+                        _mg_props = {}
+                    if not isinstance(_mg_props, dict):
+                        raise ValueError(f"emphasis_moments[{_ei}].motion_graphic.props must be object")
+                    _mg_out = {"type": _mgt, "anchor": _anc, "props": _mg_props}
+                _em_word_parts = []
+                for idx in _wis:
+                    if _dg_words and 0 <= idx < len(_dg_words):
+                        w = str(_dg_words[idx].get("punctuated_word") or _dg_words[idx].get("word") or "").strip()
+                        if w:
+                            _em_word_parts.append(w)
+                _em_word = " ".join(_em_word_parts)
+                emphasis_moments.append({
+                    "t": t,
+                    "word_indices": _wis,
+                    "type": em_type,
+                    "intensity": intensity,
+                    "word": _em_word,
+                    "duration": _em_duration,
+                    "zoom_effect": _ze_out,
+                    "motion_graphic": _mg_out,
+                })
+            emphasis_moments.sort(key=lambda x: x["t"])
+
+            # ── Payoff-tail protection + min zoom spacing ─────────────────────────
+            # Mirrors the transition-spacing safeguards shipped in commit a95cfb2.
+            # Two passes applied to emphasis_moments AFTER sort-by-t and BEFORE the
+            # zoom-type clip-split pre-pass:
+            #
+            #   PASS 1 — Payoff-tail protection: drop any emphasis whose first zoom
+            #     event starts within [payoff_zoom_start, payoff_zoom_end + 1.5s].
+            #     The payoff is the final committed move; nothing zooms on its
+            #     heels through the close. The close still gets captions/SFX/MGs,
+            #     just not a competing zoom.
+            #
+            #   PASS 2 — Minimum spacing: drop any emphasis whose zoom peak is
+            #     within _MIN_ZOOM_SPACING_S of a previously-kept peak. Priority:
+            #     payoff (3) > mid_peak (2) > anything else (1). Lower priority
+            #     drops; ties go to the EARLIER emphasis (first emitted wins).
+            #
+            # Both passes log via _record_divergence so grep [divergence]
+            # component=emphasis surfaces every drop with the reason.
+            _MIN_ZOOM_SPACING_S = 2.0
+            _PAYOFF_TAIL_PROTECTION_S = 1.5
+
+            _arc_segments_for_priority = []
+            if isinstance(_vp, dict):
+                _arc_segments_for_priority = _vp.get("arc_segments") or []
+
+            def _arc_position_at_word(word_index):
+                """Look up arc position (hook/build/mid_peak/payoff/breather/close)
+                for a given src word_index. Returns '' if no segment matches."""
+                if not isinstance(word_index, int):
+                    return ""
+                for _seg in _arc_segments_for_priority:
+                    if not isinstance(_seg, dict):
+                        continue
+                    try:
+                        _ss = int(_seg.get("start_word_index"))
+                        _se = int(_seg.get("end_word_index"))
+                    except (TypeError, ValueError):
+                        continue
+                    if _ss <= word_index <= _se:
+                        return str(_seg.get("position") or "")
+                return ""
+
+            _ZOOM_PRIORITY = {"payoff": 3, "mid_peak": 2}
+
+            def _emphasis_priority(em):
+                _wis = em.get("word_indices") or []
+                _wi0 = _wis[0] if _wis else None
+                _pos = _arc_position_at_word(_wi0)
+                return _ZOOM_PRIORITY.get(_pos, 1)
+
+            def _first_event_window_s(em):
+                """Returns (start_s, end_s, peak_s) for the emphasis's first zoom
+                event, or None if no zoom event exists. All times in source-seconds.
+                Peak time uses ZOOM_PEAK_REACH_MS per type — same source of truth
+                as the Fix B1 startMs correction (handler.py:~6900)."""
+                _ze = em.get("zoom_effect")
+                if not isinstance(_ze, dict):
+                    return None
+                _events = _ze.get("events") or []
+                if not _events or not isinstance(_events[0], dict):
+                    return None
+                _ev = _events[0]
+                try:
+                    _start_ms = float(_ev.get("startMs") or 0)
+                    _dur_ms = float(_ev.get("durationMs") or 0)
+                except (TypeError, ValueError):
+                    return None
+                _zoom_type = str(_ze.get("type") or "")
+                _peak_ms = _start_ms + float(ZOOM_PEAK_REACH_MS.get(_zoom_type, 0))
+                return (_start_ms / 1000.0, (_start_ms + _dur_ms) / 1000.0, _peak_ms / 1000.0)
+
+            # PASS 1 — Payoff-tail protection.
+            _payoff_wi = (
+                _vp.get("payoff_word_index") if isinstance(_vp, dict) else None
+            )
+            _payoff_em = None
+            _payoff_protected_window = None
+            if isinstance(_payoff_wi, int):
+                for _em_search in emphasis_moments:
+                    _em_wis = _em_search.get("word_indices") or []
+                    if _em_wis and _em_wis[0] == _payoff_wi:
+                        _payoff_em = _em_search
+                        _win = _first_event_window_s(_em_search)
+                        if _win is not None:
+                            _payoff_protected_window = (
+                                _win[0],
+                                _win[1] + _PAYOFF_TAIL_PROTECTION_S,
+                            )
+                        break
+
+            _kept_after_payoff = []
+            for _em in emphasis_moments:
+                if _em is _payoff_em or _payoff_protected_window is None:
+                    _kept_after_payoff.append(_em)
+                    continue
+                _win = _first_event_window_s(_em)
+                if _win is None:
+                    _kept_after_payoff.append(_em)
+                    continue
+                _start_s, _end_s, _peak_s = _win
+                # Drop if the emphasis's zoom STARTS inside the protected window.
+                # Half-open: an emphasis starting EXACTLY at payoff_zoom_end + 1.5s
+                # is the close callback the prompt allows.
+                if _payoff_protected_window[0] <= _start_s < _payoff_protected_window[1]:
+                    _wi0 = (_em.get("word_indices") or [None])[0]
+                    _zt = (_em.get("zoom_effect") or {}).get("type", "")
+                    print(
+                        f"[emphasis] DROP {_zt} on word {_wi0} "
+                        f"(zoom_start={_start_s:.2f}s) — falls inside payoff "
+                        f"tail-protection window "
+                        f"[{_payoff_protected_window[0]:.2f}..{_payoff_protected_window[1]:.2f}]s.",
+                        flush=True,
+                    )
+                    _record_divergence(
+                        "emphasis",
+                        {
+                            "type": _em.get("type", ""),
+                            "zoom_type": _zt,
+                            "word_index": _wi0,
+                            "zoom_start_s": round(_start_s, 3),
+                            "payoff_window_s": [
+                                round(_payoff_protected_window[0], 3),
+                                round(_payoff_protected_window[1], 3),
+                            ],
+                            "payoff_word_index": _payoff_wi,
+                        },
+                        "drop_post_payoff",
+                        final=None,
+                        reason="protects_payoff_commitment",
+                    )
+                    continue
+                _kept_after_payoff.append(_em)
+
+            # PASS 2 — Minimum spacing between zoom peaks.
+            _kept_after_spacing = []
+            for _em in _kept_after_payoff:
+                _win = _first_event_window_s(_em)
+                if _win is None:
+                    _kept_after_spacing.append(_em)
+                    continue
+                _start_s, _end_s, _peak_s = _win
+                _prio = _emphasis_priority(_em)
+
+                if _kept_after_spacing:
+                    # Find the most recently kept emphasis that HAS a zoom event
+                    # (skip text-only emphases that have no peak).
+                    _last_idx = None
+                    for _i in range(len(_kept_after_spacing) - 1, -1, -1):
+                        _last_win = _first_event_window_s(_kept_after_spacing[_i])
+                        if _last_win is not None:
+                            _last_idx = _i
+                            break
+                    if _last_idx is not None:
+                        _last_em = _kept_after_spacing[_last_idx]
+                        _last_win = _first_event_window_s(_last_em)
+                        _last_peak_s = _last_win[2]
+                        _last_prio = _emphasis_priority(_last_em)
+                        _gap = abs(_peak_s - _last_peak_s)
+                        if _gap < _MIN_ZOOM_SPACING_S:
+                            if _prio > _last_prio:
+                                # Current outranks previous — drop previous, keep current.
+                                _wi0_prev = (_last_em.get("word_indices") or [None])[0]
+                                _zt_prev = (_last_em.get("zoom_effect") or {}).get("type", "")
+                                print(
+                                    f"[emphasis] DROP {_zt_prev} on word {_wi0_prev} "
+                                    f"(peak={_last_peak_s:.2f}s, prio={_last_prio}) — "
+                                    f"within {_MIN_ZOOM_SPACING_S}s of higher-priority "
+                                    f"peak at {_peak_s:.2f}s (prio={_prio}).",
+                                    flush=True,
+                                )
+                                _record_divergence(
+                                    "emphasis",
+                                    {
+                                        "type": _last_em.get("type", ""),
+                                        "zoom_type": _zt_prev,
+                                        "word_index": _wi0_prev,
+                                        "peak_s": round(_last_peak_s, 3),
+                                        "priority": _last_prio,
+                                        "winning_peak_s": round(_peak_s, 3),
+                                        "winning_priority": _prio,
+                                        "gap_s": round(_gap, 3),
+                                    },
+                                    "drop_too_close",
+                                    final=None,
+                                    reason="min_zoom_spacing",
+                                )
+                                del _kept_after_spacing[_last_idx]
+                                _kept_after_spacing.append(_em)
+                            else:
+                                # Current is lower-or-equal priority — current drops
+                                # (ties go to the earlier kept emphasis).
+                                _wi0 = (_em.get("word_indices") or [None])[0]
+                                _zt = (_em.get("zoom_effect") or {}).get("type", "")
+                                print(
+                                    f"[emphasis] DROP {_zt} on word {_wi0} "
+                                    f"(peak={_peak_s:.2f}s, prio={_prio}) — "
+                                    f"within {_MIN_ZOOM_SPACING_S}s of kept peak at "
+                                    f"{_last_peak_s:.2f}s (prio={_last_prio}).",
+                                    flush=True,
+                                )
+                                _record_divergence(
+                                    "emphasis",
+                                    {
+                                        "type": _em.get("type", ""),
+                                        "zoom_type": _zt,
+                                        "word_index": _wi0,
+                                        "peak_s": round(_peak_s, 3),
+                                        "priority": _prio,
+                                        "kept_peak_s": round(_last_peak_s, 3),
+                                        "kept_priority": _last_prio,
+                                        "gap_s": round(_gap, 3),
+                                    },
+                                    "drop_too_close",
+                                    final=None,
+                                    reason="min_zoom_spacing",
+                                )
+                            continue
+                _kept_after_spacing.append(_em)
+
+            if len(_kept_after_spacing) != len(emphasis_moments):
+                print(
+                    f"[emphasis] safeguards: {len(emphasis_moments)} → "
+                    f"{len(_kept_after_spacing)} (payoff-tail + min spacing drops)",
+                    flush=True,
+                )
+                emphasis_moments = _kept_after_spacing
+
+            # ── PRE-PASS: split clips at zoom-type boundaries ─────────────────────
+            # Multiple emphasis_moments can target the same clip; the Remotion
+            # ClipRenderer at src/remotion/src/PromptlyRender.tsx:89-100 picks ONE
+            # zoom component per clip by `zoomEffect.type`. To preserve Gemini's
+            # per-event zoom variety (instead of coercing every event on a clip
+            # to one type), split the clip at the midpoint between adjacent
+            # emphases that differ in zoom type. Each resulting sub-clip then
+            # naturally has emphases of a single type — the existing grouping
+            # loop below sees one type per clip and no coercion is needed.
+            #
+            # Reuses the validated-cuts split pattern from the post-Gemini shot-
+            # split block above. Internal sub-clip boundaries get
+            # transition_out="none" (hard cut between same-take sub-clips).
+            _zoom_type_split_times: List[float] = []
+            _zoom_em_by_clip: Dict[int, List[int]] = {}
+            for _ei, em in enumerate(emphasis_moments):
+                if not em.get("zoom_effect"):
+                    continue
+                for _ci, _clip in enumerate(validated_cuts):
+                    _cs = float(_clip["source_start"])
+                    _ce = float(_clip["source_end"])
+                    if _cs <= em["t"] <= _ce:
+                        _zoom_em_by_clip.setdefault(_ci, []).append(_ei)
+                        break
+
+            for _ci, _ei_list in _zoom_em_by_clip.items():
+                _ei_sorted = sorted(_ei_list, key=lambda i: emphasis_moments[i]["t"])
+                _types_in_order = [
+                    str(emphasis_moments[i]["zoom_effect"]["type"]) for i in _ei_sorted
+                ]
+                if len(set(_types_in_order)) <= 1:
+                    continue  # single type on this clip — no split needed
+                for _k in range(1, len(_ei_sorted)):
+                    if _types_in_order[_k] == _types_in_order[_k - 1]:
+                        continue
+                    _t_prev = float(emphasis_moments[_ei_sorted[_k - 1]]["t"])
+                    _t_curr = float(emphasis_moments[_ei_sorted[_k]]["t"])
+                    if _t_curr <= _t_prev:
+                        continue
+                    _split_t = (_t_prev + _t_curr) / 2.0
+                    _zoom_type_split_times.append(_split_t)
+                    _record_divergence(
+                        "zoom_type_split",
+                        {
+                            "owning_clip_idx": _ci,
+                            "type_a": _types_in_order[_k - 1],
+                            "type_b": _types_in_order[_k],
+                            "em_idx_a": _ei_sorted[_k - 1],
+                            "em_idx_b": _ei_sorted[_k],
+                            "split_at_source_s": round(_split_t, 3),
+                        },
+                        "clip_split_to_preserve_zoom_variety",
+                        reason="adjacent_emphases_on_same_clip_have_different_zoom_types",
+                    )
+
+            if _zoom_type_split_times:
+                _split_times_sorted = sorted(set(_zoom_type_split_times))
                 _new_cuts = []
                 _total_splits = 0
                 for _clip in validated_cuts:
                     _cs = float(_clip["source_start"])
                     _ce = float(_clip["source_end"])
-                    _internal = [_st for _st in _split_times if _cs + 0.05 < _st < _ce - 0.05]
+                    _internal = [
+                        _st for _st in _split_times_sorted
+                        if _cs + 0.05 < _st < _ce - 0.05
+                    ]
                     if not _internal:
                         _new_cuts.append(_clip)
                         continue
@@ -8137,2125 +9746,622 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                         if _sub_end - _sub_start <= 0:
                             continue
                         _sub = {**_clip, "source_start": _sub_start, "source_end": _sub_end}
+                        # Internal sub-clip boundary → no transition (hard cut
+                        # between same-take takes; matches shot-split convention).
                         if _bi != len(_boundaries) - 2:
                             _sub["transition_out"] = "none"
                         _new_cuts.append(_sub)
                     _total_splits += len(_internal)
                 if _total_splits > 0:
                     print(
-                        f"[shot-split] Validated cuts: {len(validated_cuts)} → "
-                        f"{len(_new_cuts)} clips ({_total_splits} internal "
-                        f"shot-change split(s) applied)",
+                        f"[zoom-type-split] Validated cuts: {len(validated_cuts)} → "
+                        f"{len(_new_cuts)} clips ({_total_splits} zoom-variety split(s) "
+                        f"applied)",
                         flush=True,
                     )
                     validated_cuts = _new_cuts
 
-        # ── Cross-check guard: every clip-split boundary must be a known cut ─
-        # The original transitions bug was two boundary sources that never
-        # agreed — the list shown to Gemini (CUT BOUNDARIES + TIGHT BOUNDARIES
-        # union) and the clip-split path inside build_clips_from_words. If the
-        # renderer splits a clip at a kept-word index that's in NEITHER list,
-        # that's a new instance of the same bug class and means a third
-        # boundary source has appeared (or a code path drifted). Loud log
-        # rather than silent jump-cut.
-        try:
-            if validated_cuts and len(validated_cuts) > 1 and kept_words:
-                try:
-                    _known = set(_all_boundary_indices)
-                except NameError:
-                    # kept_words was empty so the boundary block never ran.
-                    # No known boundaries — every split is unknown by definition.
-                    _known = set()
-                _split_boundaries = set()
-                for _ci in range(len(validated_cuts) - 1):
-                    _end_t = float(validated_cuts[_ci].get("source_end") or 0.0)
-                    # Find the kept-word whose .end is closest to _end_t within tolerance.
-                    _best_ni = None
-                    _best_dist = 0.10
-                    for _ni, _w in enumerate(kept_words):
-                        _dist = abs(float(_w.get("end") or 0.0) - _end_t)
-                        if _dist <= _best_dist:
-                            _best_dist = _dist
-                            _best_ni = _ni
-                    if _best_ni is not None:
-                        _split_boundaries.add(_best_ni)
-                for _b in sorted(_split_boundaries - _known):
-                    _record_divergence(
-                        "cut_boundary",
-                        {"kept_word_index": _b},
-                        "clip_split_without_known_boundary",
-                        reason="renderer_split_at_boundary_gemini_never_saw",
-                    )
-        except Exception as _xc_err:
-            # The guard is observability only — must never break the render.
-            print(f"[divergence] cross-check guard error: {_xc_err}", flush=True)
-
-        # Drop caption_position_changes anchored to removed words and
-        # re-derive caption_position_segments. If Gemini happens to anchor
-        # a position change to the same word it also lists in remove_words,
-        # the change references a word that doesn't appear on screen —
-        # would render as a 0.5s caption flicker at the removed-word
-        # position. Re-synthesize from the filtered list.
-        _removed_set = set(_removed_word_indices) if _removed_word_indices else set()
-        if _removed_set:
-            _raw_changes = edit_plan.get("caption_position_changes") or []
-            _filtered_changes = [
-                _ch for _ch in _raw_changes
-                if isinstance(_ch, dict) and _ch.get("word_index") is not None
-                and int(_ch["word_index"]) not in _removed_set
-            ]
-            if len(_filtered_changes) != len(_raw_changes):
-                _dropped = len(_raw_changes) - len(_filtered_changes)
-                edit_plan["caption_position_changes"] = _filtered_changes
-                # Re-synthesize caption_position_segments from filtered changes.
-                # Same logic as the derivation block above (~line 3735).
-                _filtered_changes_clean = [
-                    c for c in _filtered_changes
-                    if isinstance(c, dict) and c.get("word_index") is not None
-                    and c.get("position") in ("top", "center", "bottom")
-                ]
-                _filtered_changes_clean.sort(key=lambda c: int(c["word_index"]))
-                _resynth_segments = []
-                _cur_pos = "bottom"
-                _cur_t = 0.0
-                # No rounding: from/to_seconds get projected through clip
-                # source bounds at render time; any rounding here can land
-                # the value outside its own clip due to sub-millisecond drift.
-                for _ch in _filtered_changes_clean:
-                    _wi = int(_ch["word_index"])
-                    if _wi < 0 or _wi >= len(_dg_words):
-                        continue
-                    _ch_t = float(_dg_words[_wi].get("start") or 0)
-                    if _ch_t > _cur_t:
-                        _resynth_segments.append({
-                            "from_seconds": _cur_t,
-                            "to_seconds": _ch_t,
-                            "position": _cur_pos,
-                        })
-                    _cur_pos = _ch["position"]
-                    _cur_t = _ch_t
-                if video_duration > _cur_t:
-                    _resynth_segments.append({
-                        "from_seconds": _cur_t,
-                        "to_seconds": float(video_duration),
-                        "position": _cur_pos,
-                    })
-                if not _resynth_segments and video_duration > 0:
-                    _resynth_segments = [{
-                        "from_seconds": 0.0,
-                        "to_seconds": float(video_duration),
-                        "position": "bottom",
-                    }]
-                _resynth_segments = _coalesce_caption_position_segments(_resynth_segments)
-                edit_plan["caption_position_segments"] = _resynth_segments
-                print(
-                    f"[generate-edit] Dropped {_dropped} caption_position_change(s) "
-                    f"anchored to removed words; re-synthesized "
-                    f"{len(_resynth_segments)} segment(s)",
-                    flush=True,
-                )
-        for i, clip in enumerate(validated_cuts):
-            clip_start = float(clip["source_start"])
-            clip_end = float(clip["source_end"])
-            # Find words inside this clip using padded boundaries
-            clip_words = []
-            for w in _dg_words:
-                ws = float(w.get("start") or 0)
-                we = float(w.get("end") or 0)
-                if ws >= clip_start - 0.02 and we <= clip_end + 0.02:
-                    clip_words.append(w.get("punctuated_word") or w.get("word") or "")
-            first_word = clip_words[0] if clip_words else ""
-            last_word = clip_words[-1] if clip_words else ""
-            print(
-                f"[clips] Clip {i}: {clip_start:.3f}-{clip_end:.3f} "
-                f"({len(clip_words)} words) '{first_word}' ... '{last_word}'",
-                flush=True,
-            )
-        if not validated_cuts:
-            raise ValueError("Gemini response removed all words — no clips remain")
-    else:
-        raise ValueError(
-            "Gemini response missing remove_words — the edit plan must include a "
-            "remove_words list (empty array is allowed to keep every word, but the "
-            "key itself is required)."
-        )
-
-    # Verify no large gaps in output (monitoring only — not auto-removing)
-    for _gi in range(1, len(validated_cuts)):
-        _prev_end = float(validated_cuts[_gi - 1].get("source_end", 0))
-        _curr_start = float(validated_cuts[_gi].get("source_start", 0))
-        _gap = _curr_start - _prev_end
-        if _gap > 0.5:
-            print(f"[gap-check] WARNING: {_gap:.2f}s gap between clip {_gi-1} and clip {_gi} (source {_prev_end:.2f}s-{_curr_start:.2f}s)", flush=True)
-
-    # Apply transitions from Gemini's transitions array onto clips.
-    # Each transition has after_word_index — find the clip whose source range
-    # contains that word's timestamp and set transition_out on it. If the
-    # transition can't land (word fell in a cut, or it's in the last clip
-    # with no subsequent clip), DROP that single transition and continue —
-    # same auto-handle pattern as caption z-order: Python OWNS the cross-
-    # field consistency, the rest of the plan still renders.
-    # Removed-word set is referenced by BOTH the transitions validator below
-    # AND the tight_cut_overlays validator further down (each drops entries
-    # whose after_word_index targets a word the cuts pass removed). Derive
-    # once here, before either branch, so the overlay path works on jobs
-    # that emit overlays without transitions — single-clip footage with all
-    # visual cuts in TIGHT BOUNDARIES (the audio gate's zero-handle gap
-    # produces this shape; see the audio-gap-vs-visual-cut investigation).
-    # Previously this assignment lived inside `if raw_transitions and
-    # _dg_words:` and the overlay read at the validator below hit
-    # UnboundLocalError on the no-transitions-emitted path. The resolver
-    # is safe on every input — empty set on empty remove_words OR empty
-    # deepgram_words (handler.py:5227-5228, 5231).
-    _tr_removed = _remove_words_to_src_indices(
-        edit_plan.get("remove_words") or [], _dg_words,
-    )
-
-    # Tight-boundary set in SOURCE space — read by BOTH validators after
-    # Option B lands (2026-06-21): transitions validator rejects crossfade
-    # types whose after_word_index falls on a tight boundary, and the
-    # tight_cut_overlays validator rejects overlays whose after_word_index
-    # doesn't. Same kept→source translation pattern used by the overlay
-    # validator before the lift; defended against NameError on degenerate
-    # transcripts where _tight_boundary_indices was never built (the
-    # boundary block at handler.py:~6155 skips on empty kept_words).
-    try:
-        _tight_src_set = {
-            new_to_src[_ki] for _ki in _tight_boundary_indices
-            if 0 <= _ki < len(new_to_src)
-        }
-        # Shot-change subset of the tight boundaries, in source space — the
-        # scene-change decoration FLOOR (below) backfills any of these left
-        # bare by Gemini. Same kept→source translation; a "both" boundary
-        # (audio gap AND shot change) is a real scene change, so it's included.
-        _shot_src_set = {
-            new_to_src[_ki] for _ki in _tight_boundary_indices
-            if _ki in _shot_boundary_set and 0 <= _ki < len(new_to_src)
-        }
-        # Source-index → scdet confidence score, for the floor's confidence gate.
-        _shot_src_score = {
-            new_to_src[_ki]: _shot_boundary_scores.get(_ki)
-            for _ki in _tight_boundary_indices
-            if _ki in _shot_boundary_set and 0 <= _ki < len(new_to_src)
-        }
-    except NameError:
-        _tight_src_set = set()
-        _shot_src_set = set()
-        _shot_src_score = {}
-
-    # Boundaries (source after_word_index) carrying a real transition → type.
-    # Overlays and the scene-change floor read this to skip double-decorating a
-    # boundary that already has a transition (transition wins — heavier).
-    _transition_type_by_awi = {}
-    raw_transitions = edit_plan.get("transitions") or []
-    if raw_transitions and _dg_words:
-        # Transitions = pack PascalCase names. VALID_TRANSITION_TYPES is the
-        # canonical set; mirror it here so adding a type only edits one place.
-        _valid_tr_types = set(VALID_TRANSITION_TYPES)
-        for _ti, tr in enumerate(raw_transitions):
-            if not isinstance(tr, dict):
-                raise ValueError(f"transitions[{_ti}] must be an object")
-            tr_type = str(tr.get("type") or "").strip()
-            if tr_type not in _valid_tr_types:
-                raise ValueError(
-                    f"transitions[{_ti}].type={tr_type!r} is not a valid transition "
-                    f"(must be one of {sorted(_valid_tr_types)})"
-                )
-            awi = tr.get("after_word_index")
-            if awi is None or not isinstance(awi, (int, float)):
-                raise ValueError(
-                    f"transitions[{_ti}] ({tr_type}) missing numeric after_word_index"
-                )
-            awi = int(awi)
-            if awi < 0 or awi >= len(_dg_words):
-                # Out-of-bounds index — drop this transition; render proceeds
-                # without it. Logged loudly so the operator notices.
-                print(
-                    f"[generate-edit] DROP transition '{tr_type}' [{_ti}]: "
-                    f"after_word_index={awi} out of bounds (transcript has "
-                    f"{len(_dg_words)} words). Render continues without this "
-                    f"transition.",
-                    flush=True,
-                )
-                continue
-            if awi in _tr_removed:
-                # The transition word got cut by a downstream pass. Drop the
-                # transition; the rest of the plan still renders.
-                print(
-                    f"[generate-edit] DROP transition '{tr_type}' [{_ti}]: "
-                    f"after_word_index={awi} targets a removed word. Render "
-                    f"continues without this transition.",
-                    flush=True,
-                )
-                continue
-            # Type-eligibility per boundary class: crossfade transitions need
-            # CUT BOUNDARIES (audio handle for the equal-power crossfade at
-            # handler.py:11540-11557); zero-handle types work on either CUT or
-            # TIGHT BOUNDARIES (audio-hard-cut branch at handler.py:11512-11538
-            # substitutes silence + click-prevention fades, no handle needed).
-            # On TIGHT BOUNDARIES, anything outside ZERO_HANDLE_TRANSITION_TYPES
-            # would audio-mush the speaker's continuous speech across the cut.
-            # HOW TO PLACE TRANSITIONS HARD RULE 1 in the prompt teaches the
-            # same rule; this validator is the structural backstop.
-            if awi in _tight_src_set and tr_type not in ZERO_HANDLE_TRANSITION_TYPES:
-                raise ValueError(
-                    f"transitions[{_ti}].type={tr_type!r} at after_word_index={awi} "
-                    f"is a TIGHT BOUNDARY (no audio handle). Only zero-handle "
-                    f"transition types {sorted(ZERO_HANDLE_TRANSITION_TYPES)} are "
-                    f"valid on tight boundaries — crossfade types would audio-mush "
-                    f"continuous speech across the cut. Either move this transition "
-                    f"to a CUT BOUNDARY, change its type to a zero-handle one, or "
-                    f"replace it with a `tight_cut_overlay` for lighter editorial "
-                    f"weight."
-                )
-            word_end = float(_dg_words[awi].get("end") or 0)
-            # Build extras dict — copy through all component-specific props
-            _extras = {
-                k: v for k, v in tr.items()
-                if k not in ("type", "after_word_index") and v is not None
-            }
-            # Find the clip that contains this word (with 50ms tolerance) and
-            # has a successor to transition INTO. If the word lands in the last
-            # clip (or isn't found), no clip-pair exists for this transition;
-            # drop it and continue.
-            _applied = False
-            for ci, clip in enumerate(validated_cuts):
-                cs = float(clip["source_start"])
-                ce = float(clip["source_end"])
-                if cs - 0.05 <= word_end <= ce + 0.05 and ci < len(validated_cuts) - 1:
-                    clip["transition_out"] = tr_type
-                    _transition_type_by_awi[awi] = tr_type
-                    if _extras:
-                        clip["_transition_extras"] = _extras
-                    print(f"[generate-edit] Transition '{tr_type}' applied to clip {ci} (after word {awi})", flush=True)
-                    _applied = True
-                    break
-            if not _applied:
-                # Lands in the last clip OR doesn't fall in any clip range
-                # (rare edge case: dead-air gap exactly straddling word_end).
-                # Drop the transition; render proceeds with the rest of the plan.
-                print(
-                    f"[generate-edit] DROP transition '{tr_type}' [{_ti}]: "
-                    f"after_word_index={awi} (t={word_end:.2f}s) lands in the "
-                    f"last clip or no clip-pair exists. Render continues "
-                    f"without this transition.",
-                    flush=True,
-                )
-
-    # Transition count/variety is Gemini's decision — the prompt teaches restraint.
-
-    # ── Tight-cut overlays (paint-on-top decorations at TIGHT BOUNDARIES) ────
-    # Overlays attach to a FRAME POSITION (the boundary word's projected output
-    # frame), NOT a clip-pair. OverlayCutEffect paints on top of continuously-
-    # playing video and needs only atFrame (no clipA/clipB) — so an overlay is
-    # valid on ANY tight boundary, including one sitting MID-CLIP (no sub-clip
-    # split). Resolved overlays are collected here as a flat, boundary-keyed
-    # list; the render projects each after_word_index to an output frame via
-    # _projected_words. (Previously overlays required a clip WITH A SUCCESSOR,
-    # which silently dropped every overlay on a no-removal / no-transition video
-    # where the whole take is one clip — the attachment bug behind the session's
-    # overlay failures.)
-    #
-    # _resolved_overlays: [{after_word_index (source), type, title?, label?}].
-    _resolved_overlays = []
-    _overlay_awis = set()  # boundaries already carrying an overlay
-    raw_tco = edit_plan.get("tight_cut_overlays") or []
-    if raw_tco and _dg_words:
-        _valid_tco_types = set(VALID_TIGHT_CUT_OVERLAYS)
-        # The ≤2 cap governs Gemini's DISCRETIONARY emissions only; the
-        # scene-change floor below backfills uncapped (a separate goal).
-        _TIGHT_CUT_OVERLAY_CAP = 2
-        _applied_tco_count = 0
-        for _toi, tco in enumerate(raw_tco):
-            if not isinstance(tco, dict):
-                raise ValueError(f"tight_cut_overlays[{_toi}] must be an object")
-            tco_type = str(tco.get("type") or "").strip()
-            if tco_type not in _valid_tco_types:
-                raise ValueError(
-                    f"tight_cut_overlays[{_toi}].type={tco_type!r} is not valid "
-                    f"(must be one of {sorted(_valid_tco_types)})"
-                )
-            # SceneTitle is the ONLY overlay that takes extras (title + label).
-            # title required; label optional. The other three reject extras.
-            tco_title_raw = tco.get("title")
-            tco_label_raw = tco.get("label")
-            tco_title = str(tco_title_raw).strip() if isinstance(tco_title_raw, str) else None
-            tco_label = str(tco_label_raw).strip() if isinstance(tco_label_raw, str) else None
-            if tco_type == "SceneTitle":
-                if not tco_title:
-                    raise ValueError(
-                        f"tight_cut_overlays[{_toi}] (SceneTitle) is missing "
-                        f"`title` — SceneTitle requires a 1-3 word uppercase "
-                        f"title for the typographic panel."
-                    )
-            else:
-                if tco_title is not None or tco_label is not None:
-                    raise ValueError(
-                        f"tight_cut_overlays[{_toi}] ({tco_type}) carries "
-                        f"title/label, but only SceneTitle uses them. "
-                        f"Strip them or change the type."
-                    )
-            awi_t = tco.get("after_word_index")
-            if awi_t is None or not isinstance(awi_t, (int, float)):
-                raise ValueError(
-                    f"tight_cut_overlays[{_toi}] ({tco_type}) missing numeric after_word_index"
-                )
-            awi_t = int(awi_t)
-            if awi_t < 0 or awi_t >= len(_dg_words):
-                print(
-                    f"[generate-edit] DROP tight_cut_overlay '{tco_type}' [{_toi}]: "
-                    f"after_word_index={awi_t} out of bounds (transcript has "
-                    f"{len(_dg_words)} words).",
-                    flush=True,
-                )
-                continue
-            if awi_t in _tr_removed:
-                print(
-                    f"[generate-edit] DROP tight_cut_overlay '{tco_type}' [{_toi}]: "
-                    f"after_word_index={awi_t} targets a removed word.",
-                    flush=True,
-                )
-                continue
-            if awi_t not in _tight_src_set:
-                # Overlay at a CUT boundary (transitions live there) or a
-                # non-boundary index. The overlay path only fires at TIGHT
-                # boundaries. (Empty _tight_src_set ≡ no tight boundaries pass.)
-                print(
-                    f"[generate-edit] DROP tight_cut_overlay '{tco_type}' [{_toi}]: "
-                    f"after_word_index={awi_t} is not a TIGHT BOUNDARY — overlay "
-                    f"requires a tight cut to decorate.",
-                    flush=True,
-                )
-                continue
-            if awi_t in _transition_type_by_awi:
-                # Collision: this boundary already carries a transition (the
-                # heavier decoration wins). One decoration per boundary.
-                print(
-                    f"[generate-edit] DROP tight_cut_overlay '{tco_type}' [{_toi}]: "
-                    f"after_word_index={awi_t} already has transition "
-                    f"{_transition_type_by_awi[awi_t]!r}.",
-                    flush=True,
-                )
-                continue
-            if awi_t in _overlay_awis:
-                print(
-                    f"[generate-edit] DROP tight_cut_overlay '{tco_type}' [{_toi}]: "
-                    f"after_word_index={awi_t} already has an overlay (duplicate).",
-                    flush=True,
-                )
-                continue
-            if _applied_tco_count >= _TIGHT_CUT_OVERLAY_CAP:
-                print(
-                    f"[generate-edit] DROP tight_cut_overlay '{tco_type}' [{_toi}]: "
-                    f"per-video cap of {_TIGHT_CUT_OVERLAY_CAP} already reached. "
-                    f"Sparing placement keeps the overlay editorial, not templated.",
-                    flush=True,
-                )
-                continue
-            _spec = {"after_word_index": awi_t, "type": tco_type}
-            if tco_type == "SceneTitle":
-                _spec["title"] = tco_title
-                if tco_label:
-                    _spec["label"] = tco_label
-            _resolved_overlays.append(_spec)
-            _overlay_awis.add(awi_t)
-            _applied_tco_count += 1
-            _extras_log = ""
-            if tco_type == "SceneTitle":
-                _extras_log = f" title={tco_title!r}"
-                if tco_label:
-                    _extras_log += f" label={tco_label!r}"
-            print(
-                f"[generate-edit] tight_cut_overlay '{tco_type}' resolved at "
-                f"after_word_index={awi_t}{_extras_log}",
-                flush=True,
-            )
-
-    # ── Scene-change decoration FLOOR (deterministic backfill) ─────────
-    # Every shot-change tight boundary (a real scdet-flagged visual cut, not a
-    # silence-only pause) MUST carry a decoration. Gemini's transitions +
-    # overlays are resolved above; any shot-change boundary still BARE of both
-    # gets a varied overlay here. The floor cannot under-emit — it does not
-    # depend on the model. Pause (dead_air-only) boundaries are NOT backfilled.
-    #
-    # Frame-position attach (no clip-pair needed) means EVERY shot boundary is
-    # decorable, including the mid-clip ones the old clip-successor model
-    # silently dropped.
-    #
-    # Confidence gate (false-positive guardrail): the floor auto-decorates only
-    # boundaries whose scdet score clears SCENE_FLOOR_MIN_SCDET_SCORE — real
-    # camera cuts score high; PiP/insert edges (which the old split-gate
-    # filtered for free via Gemini's vision judgment) score lower and are
-    # skipped. Unknown score ⇒ fail OPEN (decorate). Gemini's OWN overlays above
-    # are NOT score-gated.
-    #
-    # Cap scoping (Option A): backfill appends straight to _resolved_overlays
-    # and never touches _applied_tco_count, so it is UNCAPPED by construction;
-    # the ≤2 cap still governs Gemini's discretionary emissions.
-    #
-    # Variety: types rotate across the 3 light punctuation overlays (SceneTitle
-    # and DipToBlack held out) so no two adjacent scene decorations share a type.
-    _scene_n_shot = 0
-    _scene_n_lowconf = 0
-    _scene_n_gemini = 0
-    _scene_backfilled = 0
-    if _transitions_off and _shot_src_set:
-        # "no transitions" (EditPolicy) suppresses the always-on scene-floor
-        # overlay backfill too — a cut-boundary punctuation overlay IS a
-        # transition effect. The recipe transitions + tight_cut_overlays were
-        # already cleared in the Step-2 enforcement pass; this closes the
-        # always-on path so a shot boundary stays bare.
-        print(
-            "[edit-policy-enforce] scene-floor overlay backfill skipped — "
-            "transitions=off (EditPolicy)",
-            flush=True,
-        )
-    if _shot_src_set and not _transitions_off:
-        # Ordered shot-change boundaries (temporal, by source word index). Each:
-        # current decoration type (transition or Gemini overlay → locked;
-        # None = bare) and scdet confidence score. Low-confidence BARE
-        # boundaries are dropped from the sequence (skipped, not decorated).
-        _floor_seq = []  # in-scope: [(awi_src, current_type_or_None)]
-        for _si in sorted(_shot_src_set):
-            if _si < 0 or _si >= len(_dg_words):
-                continue
-            _scene_n_shot += 1
-            _cur = _transition_type_by_awi.get(_si)
-            if _cur is None and _si in _overlay_awis:
-                # Locked by a Gemini overlay — recover its type for adjacency.
-                _cur = next(
-                    (str(_o["type"]) for _o in _resolved_overlays
-                     if _o["after_word_index"] == _si),
-                    "overlay",
-                )
-            if _cur is not None:
-                _scene_n_gemini += 1
-                _floor_seq.append((_si, _cur))
-                continue
-            _score = _shot_src_score.get(_si)
-            if _score is not None and _score < SCENE_FLOOR_MIN_SCDET_SCORE:
-                _scene_n_lowconf += 1
-                continue  # likely PiP/insert edge — floor skips it
-            _floor_seq.append((_si, None))
-        # Deterministic variety fill over the in-scope sequence.
-        _resolved_floor_types = _scene_floor_rotation([_t for (_si, _t) in _floor_seq])
-        for _idx, (_si, _cur) in enumerate(_floor_seq):
-            if _cur is not None:
-                continue  # already decorated (Gemini) — keep its pick
-            _ftype = _resolved_floor_types[_idx]
-            _resolved_overlays.append({"after_word_index": _si, "type": _ftype})
-            _overlay_awis.add(_si)
-            _scene_backfilled += 1
-            print(
-                f"[scene-floor] backfill '{_ftype}' at after_word_index={_si} "
-                f"(bare scene-change boundary)",
-                flush=True,
-            )
-    # Unconditional summary — fires even at 0 so "ran but found nothing
-    # attachable" never again looks like "never ran".
-    print(
-        f"[scene-floor] shot_boundaries={_scene_n_shot} "
-        f"(gemini_decorated={_scene_n_gemini}, "
-        f"low_confidence_skipped={_scene_n_lowconf}, "
-        f"backfilled={_scene_backfilled}); "
-        f"min_score={SCENE_FLOOR_MIN_SCDET_SCORE}; final overlay types in order: "
-        f"{[_o['type'] for _o in sorted(_resolved_overlays, key=lambda _o: _o['after_word_index'])]}",
-        flush=True,
-    )
-
-    # ── Tight-decoration collision backstop ────────────────────────────
-    # One decoration per boundary: no boundary may carry BOTH a transition and
-    # an overlay. Prevented at append time (overlays skip boundaries already
-    # holding a transition; backfill skips locked boundaries) — this is the
-    # structural backstop. Gated by _TIGHT_DECORATION_COLLISION: "strict"
-    # raises; "soft_overlay_wins" drops the overlay (the heavier transition
-    # stays).
-    _collisions = [
-        _o for _o in _resolved_overlays
-        if _o["after_word_index"] in _transition_type_by_awi
-    ]
-    if _collisions:
-        if _TIGHT_DECORATION_COLLISION == "strict":
-            _c = _collisions[0]
-            raise ValueError(
-                f"after_word_index={_c['after_word_index']} has BOTH a transition "
-                f"({_transition_type_by_awi[_c['after_word_index']]!r}) AND an overlay "
-                f"({_c['type']!r}) — competing decorations for one cut. Pick one."
-            )
-        elif _TIGHT_DECORATION_COLLISION == "soft_overlay_wins":
-            for _c in _collisions:
-                _record_divergence(
-                    "tight_decoration_collision",
-                    {
-                        "after_word_index": _c["after_word_index"],
-                        "transition_out": _transition_type_by_awi[_c["after_word_index"]],
-                        "tight_cut_overlay_dropped": _c["type"],
-                    },
-                    "drop_overlay_keep_transition",
-                    reason="both_on_one_boundary",
-                )
-            _resolved_overlays = [
-                _o for _o in _resolved_overlays
-                if _o["after_word_index"] not in _transition_type_by_awi
-            ]
-        else:
-            raise RuntimeError(
-                f"_TIGHT_DECORATION_COLLISION = {_TIGHT_DECORATION_COLLISION!r} "
-                f"is not a recognized mode. Valid: 'strict', 'soft_overlay_wins'."
-            )
-
-    # Stash the resolved overlays on the plan for the render emit, which projects
-    # each after_word_index to an output frame via _projected_words. Boundary-
-    # keyed and clip-agnostic — works for mid-clip boundaries with no split.
-    edit_plan["_resolved_tight_cut_overlays"] = _resolved_overlays
-
-    # caption_style, caption_keywords, caption_position_segments, text_overlays,
-    # emphasis_moments, motion_graphics, audio_denoise, outro, aspect_ratio,
-    # sound_effects — ALL required. No presence defaults. Gemini must emit every
-    # field explicitly or the plan is rejected.
-    for _req in ("audio_denoise", "outro", "aspect_ratio", "sound_effects"):
-        if _req not in edit_plan:
-            raise ValueError(
-                f"edit_plan missing required field {_req!r}. Every plan MUST emit "
-                f"audio_denoise (bool), outro ('none'|'fade_black'|'fade_white'), "
-                f"aspect_ratio ('9:16'), and sound_effects (array, empty if none)."
-            )
-    if not isinstance(edit_plan.get("sound_effects"), list):
-        raise ValueError("sound_effects must be an array (empty is fine)")
-    if str(edit_plan.get("outro")) not in ("none", "fade_black", "fade_white"):
-        raise ValueError(
-            f"outro must be 'none'|'fade_black'|'fade_white', got {edit_plan.get('outro')!r}"
-        )
-    # aspect_ratio is informational — the pipeline always outputs 1080x1920
-    # regardless of this field. Pydantic's Literal["9:16"] in EditPlan
-    # constrains Gemini's structured-output normally, but Gemini occasionally
-    # bypasses its own schema and emits e.g. "1080x1920" or "vertical".
-    # Both convey the same intent (portrait 9:16). Normalize to "9:16" so
-    # the persisted plan is canonical; don't hard-fail on a dead field.
-    if str(edit_plan.get("aspect_ratio")) != "9:16":
-        edit_plan["aspect_ratio"] = "9:16"
-
-    # ── B-roll clips validation ───────────────────────────────────────────
-    # Type/sanity checks only — no value clamps. Gemini owns every creative
-    # decision (duration, count, placement). We only filter entries that
-    # would crash the renderer or are physically impossible (negative time,
-    # zero duration, NaN, past end of video, malformed JSON types).
-    raw_broll = edit_plan.get("broll_clips") or []
-    validated_broll = []
-    _broll_dg_words = edit_plan.get("_deepgram_words") or []
-    _broll_removed = edit_plan.get("_removed_word_indices") or set()
-    for _br in raw_broll:
-        if not isinstance(_br, dict):
-            continue
-        _br_kw = str(_br.get("keyword") or "").strip()
-        if not _br_kw:
-            continue
-        # Word-index timing — compute exact start/end from KEPT Deepgram words.
-        # Gemini may select a range that includes removed words. We find the
-        # first kept word for the start and last kept word for the end so the
-        # timestamps are guaranteed to exist in a clip.
-        try:
-            _sw = int(_br["start_word_index"])
-            _ew = int(_br["end_word_index"])
-        except (TypeError, ValueError, KeyError):
-            continue
-        if _sw < 0 or _ew < _sw or _sw >= len(_broll_dg_words):
-            continue
-        _ew = min(_ew, len(_broll_dg_words) - 1)
-        # Find first KEPT word from start
-        _sw_kept = _sw
-        while _sw_kept <= _ew and _sw_kept in _broll_removed:
-            _sw_kept += 1
-        # Find last KEPT word from end
-        _ew_kept = _ew
-        while _ew_kept >= _sw_kept and _ew_kept in _broll_removed:
-            _ew_kept -= 1
-        if _sw_kept > _ew_kept:
-            print(f"[broll] All words [{_sw}]-[{_ew}] removed — skipping '{_br_kw}'", flush=True)
-            continue
-        _br_ts = float(_broll_dg_words[_sw_kept].get("start") or 0)
-        _br_end = float(_broll_dg_words[_ew_kept].get("end") or 0)
-        # SOURCE-TIME span between the two words — INCLUDES any
-        # mechanically-removed silence/filler. Computed but no longer
-        # surfaced as the recipe `duration` field, because downstream
-        # consumers (Pexels fetch filter, recipe log, debugging) all
-        # want OUTPUT-time speech duration, not raw source span.
-        _src_span = _br_end - _br_ts
-        if _src_span <= 0:
-            continue
-
-        # OUTPUT-time SPEECH duration of just the kept words in the
-        # range. Equals sum of each kept word's natural duration; ignores
-        # inter-word silences (those vanish in mechanical removal anyway).
-        # For 5 consecutive kept words at normal speech, ~2-3s — which
-        # is what a 5-word cutaway should actually be on screen.
-        _speech_dur = 0.0
-        for _wi in range(_sw_kept, _ew_kept + 1):
-            if _wi in _broll_removed:
-                continue
-            _w = _broll_dg_words[_wi]
-            _ws = float(_w.get("start") or 0)
-            _we = float(_w.get("end") or 0)
-            if _we > _ws:
-                _speech_dur += (_we - _ws)
-        if _speech_dur <= 0:
-            # Defensive — kept-word filter should leave at least one
-            # word with positive duration. Skip the entry rather than
-            # ship an obviously-broken zero-duration cutaway.
-            continue
-
-        # The recipe `duration` field now carries OUTPUT-time speech
-        # duration. Downstream Pexels fetch sizing (handler.py:~15075)
-        # gets a sensible request length (~2-3s for a 5-word phrase, NOT
-        # the inflated source span). Render-time bounding uses the
-        # output-projected word span via _pw_by_idx, unchanged.
-        if not (math.isfinite(_br_ts) and math.isfinite(_speech_dur)):
-            continue
-        if _br_ts < 0 or _speech_dur <= 0:
-            continue
-        if video_duration > 0 and _br_ts >= video_duration:
-            continue
-
-        # Emit the divergence whenever source-span and output-speech
-        # diverge by > 2x — that's the misleading-recipe symptom the
-        # user reported and would have made invisible without this log.
-        if _src_span > _speech_dur * 2.0:
-            _record_divergence(
-                "broll",
-                {
-                    "keyword": _br_kw,
-                    "start_word_src": _sw_kept,
-                    "end_word_src": _ew_kept,
-                    "src_span_s": round(_src_span, 3),
-                },
-                "duration_recomputed_to_speech",
-                final={"duration_s": round(_speech_dur, 3)},
-                reason="src_span_inflated_by_mechanical_removals_between_words",
-            )
-
-        print(
-            f"[broll] Word-index timing: [{_sw_kept}]-[{_ew_kept}] → "
-            f"{_br_ts:.3f}s+{_speech_dur:.2f}s speech "
-            f"(src span {_src_span:.2f}s)",
-            flush=True,
-        )
-        validated_broll.append({
-            "keyword": _br_kw,
-            "timestamp": _br_ts,
-            "duration": _speech_dur,
-            "reason": str(_br.get("reason") or "").strip(),
-            "_start_word_kept": _sw_kept,
-            "_end_word_kept": _ew_kept,
-        })
-    edit_plan["broll_clips"] = validated_broll
-    if validated_broll:
-        print(f"[broll] Gemini requested {len(validated_broll)} B-roll clip(s)", flush=True)
-        for _vb in validated_broll:
-            _r = _vb.get("reason") or "(no reason given)"
-            print(f"[broll]   → '{_vb['keyword']}' @ {_vb['timestamp']:.2f}s for {_vb['duration']:.2f}s — {_r}", flush=True)
-
-    # ── Strict validation of new schema (no defaults, no repair) ───────────
-    # The philosophy: Gemini emits a complete, valid plan. Everything below
-    # raises on error — we do not substitute defaults or silently drop entries.
-
-    # DERIVED from type_registries (the SAME source of truth the schema Literals
-    # read) so newly-added components can never drift out of these runtime gates
-    # again. These were hardcoded copies: the batch-2 additions (17 MG types + 4
-    # caption styles) were added to the schema/roster/render but not here, so the
-    # moment the roster told Gemini they existed, Gemini emitted them and this
-    # gate raised ValueError → every such video failed. VALID_CAPTION_STYLES
-    # already contains "none" (the user opt-out).
-    _valid_caption_styles = set(VALID_CAPTION_STYLES)
-    _valid_zoom_types = set(VALID_ZOOM_TYPES)
-    _valid_mg_types = set(VALID_MG_TYPES)
-    # Motion graphics use semantic safe-zone anchors that map to the MG pack's
-    # MGAnchor vocabulary (top/center/bottom/left/right) via SEMANTIC_TO_MG_ANCHOR
-    # at render time. Face-relative anchors are NOT valid for motion graphics —
-    # the pack components don't accept a face prop, and their own resolveMGPosition
-    # operates against the full canvas, so face-relative anchoring has no honest
-    # render path. Use absolute safe zones only.
-    _valid_semantic_anchors = {
-        "upper_third_safe", "center", "lower_third_safe",
-    }
-    _valid_text_overlay_variants = {
-        "sticky_note", "caption_match",
-    }
-
-    # caption_style — must be exactly one of the registry's valid styles
-    _cs_raw = str(edit_plan.get("caption_style") or "").strip()
-    if _cs_raw not in _valid_caption_styles:
-        raise ValueError(
-            f"Invalid caption_style: {_cs_raw!r}. Must be one of {sorted(_valid_caption_styles)}"
-        )
-    edit_plan["caption_style"] = _cs_raw
-
-    # caption_keywords — required array of strings
-    _ck_raw = edit_plan.get("caption_keywords")
-    if not isinstance(_ck_raw, list):
-        raise ValueError(f"caption_keywords must be an array, got {type(_ck_raw).__name__}")
-    edit_plan["caption_keywords"] = [str(k).strip().lower() for k in _ck_raw if str(k).strip()]
-
-    # caption_position_segments — SYNTHESIZED by the derivation pass above
-    # from Gemini's caption_position_changes (word-index-based). Every
-    # boundary is by construction a real word start timestamp; no exact-match
-    # validation needed because mismatch is architecturally impossible.
-    _cps = edit_plan.get("caption_position_segments") or []
-    if _cps:
-        print(
-            f"[caption-segments] {len(_cps)} segment(s) synthesized from changes: "
-            + ", ".join(f"[{s['from_seconds']:.2f}-{s['to_seconds']:.2f}]={s['position']}" for s in _cps),
-            flush=True,
-        )
-
-    # color_effect was removed from the pipeline. There's no place a global
-    # color grade fits without reintroducing the full-canvas mixBlendMode paint
-    # cost that drove the 140s renders. Keep the field forced-null so any stale
-    # callers don't break.
-    edit_plan["color_effect"] = None
-
-    # motion_graphics — array. Each entry validated strictly.
-    # motion_graphics — word-anchored (start_word_index + end_word_index, with
-    # optional duration_seconds override for fixed-duration pins). Python
-    # derives the output-time window from the kept-word timestamps. Gemini
-    # CANNOT emit a time that doesn't map to a real spoken moment.
-    raw_mg = edit_plan.get("motion_graphics")
-    if raw_mg is None:
-        raw_mg = []
-    if not isinstance(raw_mg, list):
-        raise ValueError("motion_graphics must be an array")
-    # Build kept-word set for the anchor-on-kept-word check below. This check
-    # is belt-and-suspenders: re-indexing + index translation in the main-call
-    # flow guarantees every emitted anchor lands on a kept word. Retained as
-    # a regression guard in case a future refactor accidentally loosens that
-    # invariant.
-    _mg_kept_set = (
-        set(range(len(_dg_words))) - set(_removed_word_indices or set())
-    )
-    validated_mg = []
-    for _i, _mg in enumerate(raw_mg):
-        if not isinstance(_mg, dict):
-            raise ValueError(f"motion_graphics[{_i}] must be an object")
-        _mg_type = str(_mg.get("type") or "").strip()
-        if _mg_type not in _valid_mg_types:
-            raise ValueError(
-                f"motion_graphics[{_i}].type must be one of {sorted(_valid_mg_types)}, got {_mg_type!r}"
-            )
-        try:
-            _sw = int(_mg["start_word_index"])
-            _ew = int(_mg["end_word_index"])
-        except (KeyError, TypeError, ValueError):
-            raise ValueError(
-                f"motion_graphics[{_i}] needs integer start_word_index and end_word_index"
-            )
-        if _sw < 0 or _sw >= len(_dg_words):
-            raise ValueError(
-                f"motion_graphics[{_i}].start_word_index={_sw} out of range "
-                f"[0, {len(_dg_words)-1}]"
-            )
-        if _ew < 0 or _ew >= len(_dg_words):
-            raise ValueError(
-                f"motion_graphics[{_i}].end_word_index={_ew} out of range "
-                f"[0, {len(_dg_words)-1}]"
-            )
-        if _ew < _sw:
-            raise ValueError(
-                f"motion_graphics[{_i}].end_word_index ({_ew}) must be >= "
-                f"start_word_index ({_sw})"
-            )
-        if _sw not in _mg_kept_set:
-            _wt = str(_dg_words[_sw].get("punctuated_word") or _dg_words[_sw].get("word") or "").strip()
-            print(
-                f"[generate-edit] DROP motion_graphics '{_mg_type}' [{_i}]: "
-                f"start_word_index={_sw} ({_wt!r}) targets a REMOVED word. "
-                f"Render continues without this motion graphic.",
-                flush=True,
-            )
-            continue
-        if _ew not in _mg_kept_set:
-            _wt = str(_dg_words[_ew].get("punctuated_word") or _dg_words[_ew].get("word") or "").strip()
-            print(
-                f"[generate-edit] DROP motion_graphics '{_mg_type}' [{_i}]: "
-                f"end_word_index={_ew} ({_wt!r}) targets a REMOVED word. "
-                f"Render continues without this motion graphic.",
-                flush=True,
-            )
-            continue
-        _anchor = str(_mg.get("anchor") or "").strip()
-        if _anchor not in _valid_semantic_anchors:
-            # left_safe/right_safe were removed from the MG anchor vocabulary
-            # (MGs always center horizontally now). A stray/unknown anchor — from
-            # model inertia, a cached prompt, or a re-edited recipe — COERCES to
-            # center instead of rejecting the render. center is on-canvas and
-            # satisfies the always-horizontally-centered rule.
-            print(
-                f"[generate-edit] motion_graphics[{_i}].anchor {_anchor!r} not a "
-                f"valid semantic zone {sorted(_valid_semantic_anchors)} — "
-                f"coercing to 'center'",
-                flush=True,
-            )
-            _anchor = "center"
-        _mg["anchor"] = _anchor
-
-        # props has default_factory=dict in the schema → it is NOT a required
-        # field, so Gemini/Vertex OMITS it whenever the component uses default
-        # props. A missing/null props means {} (the schema default), not an
-        # error; only a PRESENT non-dict is a real malformation.
-        _props = _mg.get("props")
-        if _props is None:
-            _props = {}
-        if not isinstance(_props, dict):
-            raise ValueError(f"motion_graphics[{_i}].props must be an object")
-        # Optional duration override; validator only enforces range.
-        _dur_override = _mg.get("duration_seconds")
-        if _dur_override is not None:
-            try:
-                _dur_override = float(_dur_override)
-            except (TypeError, ValueError):
-                raise ValueError(
-                    f"motion_graphics[{_i}].duration_seconds must be a number if present"
-                )
-            if _dur_override < 0.3 or _dur_override > 20.0:
-                raise ValueError(
-                    f"motion_graphics[{_i}].duration_seconds={_dur_override} "
-                    f"outside [0.3, 20.0]"
-                )
-        # Derive the source-time window from the anchor words. No rounding:
-        # clip source ranges in build_clips_from_words are stored as raw
-        # floats from word._start / word._end, so anchor source times
-        # MUST be raw too. Rounding here to 3 decimals lost a sub-millisecond
-        # difference between this stored value and the clip boundary,
-        # causing project_source_time_to_output to return None at render
-        # time — same precision bug class as the emphasis-moment one.
-        _sw_start = float(_dg_words[_sw].get("start") or 0)
-        _ew_end = float(_dg_words[_ew].get("end") or 0)
-        validated_mg.append({
-            "type": _mg_type,
-            "start_word_index": _sw,
-            "end_word_index": _ew,
-            # Source-time timestamps carried forward for render_multi_clip to
-            # project through the output timeline (same pattern as everything
-            # else that's word-anchored).
-            "_source_start": _sw_start,
-            "_source_end": _ew_end,
-            "duration_seconds_override": _dur_override,
-            "anchor": _anchor,
-            "props": _props,
-        })
-    edit_plan["motion_graphics"] = validated_mg
-    if validated_mg:
-        print(f"[mg] Gemini requested {len(validated_mg)} motion graphic(s)", flush=True)
-
-    # B-roll vs overlay (motion_graphic / text_overlay) deconfliction has
-    # MOVED to render_multi_clip — see "Strict separation" block right after
-    # the B-roll output projection. Doing it on actual output frame ranges
-    # (instead of word indices here) catches MGs/text-overlays whose
-    # duration_seconds extends past their anchor word and would otherwise
-    # slip past a word-index check.
-
-    # Defensive: in case any legacy upstream caller still hands us a
-    # `speed_curve` field on the plan (it's no longer in the schema), drop
-    # it silently. Pacing is now expressed exclusively via per-clip `speed`.
-    edit_plan.pop("speed_curve", None)
-    edit_plan.pop("_parsed_speed_curve", None)
-
-    thumbnail_timestamp = None
-    try:
-        if edit_plan.get("thumbnail_timestamp") is not None:
-            thumbnail_timestamp = max(0.0, float(edit_plan.get("thumbnail_timestamp")))
-            if video_duration > 0:
-                thumbnail_timestamp = min(thumbnail_timestamp, video_duration)
-    except Exception:
-        thumbnail_timestamp = None
-    edit_plan["thumbnail_timestamp"] = thumbnail_timestamp
-
-    # Defensive: drop any legacy hook_clip field a stale caller might pass.
-    # Auto-hook (climax replay at start) was removed because it duplicates
-    # source content in the timeline — no production NLE does this. Cold-
-    # open / strongest-moment range cuts were also removed: the cuts prompt
-    # now requires chronological order. The opening of the kept transcript
-    # is whatever survives standard filler trimming at word [0].
-    edit_plan.pop("hook_clip", None)
-    edit_plan["cuts"] = list(validated_cuts)
-
-    # ── Parse emphasis moments — strict, with explicit visual-layer bindings ─
-    raw_emphasis = edit_plan.get("emphasis_moments")
-    if raw_emphasis is None:
-        raw_emphasis = []
-    if not isinstance(raw_emphasis, list):
-        raise ValueError("emphasis_moments must be an array")
-    _valid_em_types = {"punchline", "statement", "question", "reaction", "transition", "revelation"}
-    emphasis_moments = []
-    # Pre-compute the kept-word set for the anchor-on-kept-word checks below
-    # (emphasis, text_overlays, transitions, sfx, broll). These checks are
-    # belt-and-suspenders: re-indexing + index translation in the main-call
-    # flow guarantees every emitted anchor lands on a kept word. Retained
-    # as a regression guard against future refactors.
-    _kept_word_indices = (
-        set(range(len(_dg_words))) - set(_removed_word_indices or set())
-    )
-    for _ei, em in enumerate(raw_emphasis):
-        if not isinstance(em, dict):
-            raise ValueError(f"emphasis_moments[{_ei}] must be an object")
-        _wi_raw = em.get("word_indices")
-        if not isinstance(_wi_raw, list) or not _wi_raw:
-            raise ValueError(f"emphasis_moments[{_ei}].word_indices must be a non-empty array")
-        _wis = [int(i) for i in _wi_raw if isinstance(i, (int, float))]
-        if not _wis:
-            raise ValueError(f"emphasis_moments[{_ei}].word_indices contained no integers")
-        # Every word_indices entry MUST be a word that survives remove_words.
-        # If any anchor word was removed, drop the entire emphasis_moment and
-        # continue — render proceeds without this single moment rather than
-        # hard-failing the whole plan.
-        _drop_em = False
-        for _k, _wi_val in enumerate(_wis):
-            if _wi_val < 0 or _wi_val >= len(_dg_words):
-                raise ValueError(
-                    f"emphasis_moments[{_ei}].word_indices[{_k}]={_wi_val} is out "
-                    f"of range [0, {len(_dg_words)-1}]."
-                )
-            if _wi_val not in _kept_word_indices:
-                _w = _dg_words[_wi_val]
-                _wt = str(_w.get("punctuated_word") or _w.get("word") or "").strip()
-                print(
-                    f"[generate-edit] DROP emphasis_moment [{_ei}]: "
-                    f"word_indices[{_k}]={_wi_val} ({_wt!r}) targets a "
-                    f"REMOVED word. Render continues without this emphasis.",
-                    flush=True,
-                )
-                _drop_em = True
-                break
-        if _drop_em:
-            continue
-        # Derive t from word_indices[0].start — Gemini no longer emits `t`
-        # (schema-level constraint from v34: the two could disagree so we
-        # removed the degree of freedom). Because word_indices[0] is a kept
-        # word, the derived t is guaranteed to land inside a kept clip's
-        # source range.
-        #
-        # No rounding: clip source ranges are built from these same word
-        # timestamps without rounding, so the anchor t will hit the clip
-        # boundary exactly. Any rounding here only loses precision and
-        # introduces boundary mismatches like the v34→df1b62e bug where
-        # round(12.871, 2) = 12.87 fell below clip.source_start = 12.871.
-        _anchor_word = _dg_words[_wis[0]]
-        t = float(_anchor_word.get("start") or 0)
-        if t < 0 or (video_duration > 0 and t > video_duration + 0.5):
-            raise ValueError(
-                f"emphasis_moments[{_ei}] derived t={t:.3f}s (from word_indices[0]="
-                f"{_wis[0]}) is outside video duration [0, {video_duration:.3f}]."
-            )
-        intensity = str(em.get("intensity") or "").lower()
-        if intensity not in ("high", "medium"):
-            raise ValueError(f"emphasis_moments[{_ei}].intensity must be 'high'|'medium'")
-        em_type = str(em.get("type") or "").lower()
-        if em_type not in _valid_em_types:
-            raise ValueError(
-                f"emphasis_moments[{_ei}].type must be one of {sorted(_valid_em_types)}"
-            )
-        _em_duration = float(em.get("duration") or 2.0)
-        # Visual layer bindings — optional. A MISSING zoom_effect / motion_graphic
-        # is treated as null (= no zoom / no MG), identical to an explicit null.
-        # Gemini's Vertex structured output OMITS optional fields it leaves empty
-        # (AI Studio happened to emit explicit nulls), so requiring the key to be
-        # present was over-strict. setdefault makes every downstream read see null.
-        em.setdefault("zoom_effect", None)
-        em.setdefault("motion_graphic", None)
-        _ze_raw = em.get("zoom_effect")
-        _ze_out = None
-        if _ze_raw is not None:
-            if not isinstance(_ze_raw, dict):
-                raise ValueError(f"emphasis_moments[{_ei}].zoom_effect must be object or null")
-            _zt = str(_ze_raw.get("type") or "").strip()
-            if _zt not in _valid_zoom_types:
-                raise ValueError(
-                    f"emphasis_moments[{_ei}].zoom_effect.type must be one of "
-                    f"{sorted(_valid_zoom_types)}, got {_zt!r}"
-                )
-            _raw_events = _ze_raw.get("events") or []
-            # Fill in natural durationMs and scale per zoom type when Gemini
-            # omits them. This locks the look of each zoom to its designed
-            # motion shape regardless of what Gemini chose for the moment —
-            # picking SmoothPush gets a 1200ms cubic ease at 1.22 unless
-            # explicitly overridden. Gemini's job is picking the right TYPE
-            # for the beat; the renderer handles the look.
-            _natural_dur = ZOOM_NATURAL_DURATION_MS.get(_zt, 1200)
-            _natural_scale = ZOOM_NATURAL_SCALE.get(_zt, 1.22)
-            # Per-event PERCEPTUAL PEAK back-timing. Override Gemini's
-            # startMs so the visible peak lands on the anchor word, not
-            # the ramp-out endpoint. See ZOOM_PEAK_REACH_MS at the top
-            # of this file for the rationale and measured values.
-            _peak_reach_ms = ZOOM_PEAK_REACH_MS.get(_zt, 0)
-            _word_start_ms = int(round(t * 1000.0))
-            _new_start_ms_canonical = _word_start_ms - _peak_reach_ms
-            # Find the owning clip's source range to enforce the
-            # "startMs must live inside the owning clip's source range"
-            # hard constraint. The render-time projection already has
-            # its own clip-window clamp (handler.py:~10744), but we
-            # also clamp here so the recorded plan reflects the
-            # intended source-time and the divergence log is precise.
-            _owning_clip_for_em = None
-            for _ci_em, _clip_em in enumerate(validated_cuts):
-                _cs_em = float(_clip_em.get("source_start") or 0.0)
-                _ce_em = float(_clip_em.get("source_end") or 0.0)
-                if _cs_em <= t <= _ce_em:
-                    _owning_clip_for_em = (_ci_em, _cs_em, _ce_em)
-                    break
-            _filled_events = []
-            for _ev_raw in _raw_events:
-                if not isinstance(_ev_raw, dict):
+            # Multiple emphasis_moments can target the same clip — each gets a zoom
+            # EVENT, all merged into the clip's single zoomEffect spec. The spec carries
+            # one `type` (SmoothPush / StepZoom / etc.) but can hold multiple `events`
+            # spaced across the clip's render window. After the zoom-type-split pass
+            # above, each sub-clip naturally has emphases of a single type, so the
+            # coercion path is effectively dead on the happy path. It is preserved
+            # here as a defensive fallback in case the split fails to apply (e.g.,
+            # an emphasis whose t falls in the 0.05s edge zone of a clip boundary).
+            # When coercion DOES fire, _record_divergence makes it visible.
+            _INTENSITY_RANK = {"high": 3, "medium": 2, "low": 1}
+            _clip_zoom_emphasis: dict = {}  # clip_idx -> list of emphasis_moment indices
+            for _ei, em in enumerate(emphasis_moments):
+                if not em["zoom_effect"]:
                     continue
-                _ev = dict(_ev_raw)
-                _gemini_start_ms = _ev.get("startMs")
-                if _ev.get("durationMs") is None:
-                    _ev["durationMs"] = _natural_dur
-                if _ev.get("scale") is None:
-                    _ev["scale"] = _natural_scale
-                # Override startMs to put the perceptual peak on the
-                # anchor word. Clamp to the owning clip's source_start
-                # in ms (frame-0 blip protection). If no owning clip
-                # could be matched (rare — emphasis t outside all
-                # clips, which the existing "CLEAR emphasis_moments
-                # zoom_effect" pass at ~handler.py:7000 will catch
-                # and clear anyway), the canonical correction stands.
-                _corrected_start_ms = _new_start_ms_canonical
-                _clamp_reason = None
-                if _owning_clip_for_em is not None:
-                    _, _cs_em, _ce_em = _owning_clip_for_em
-                    _clip_start_ms = int(round(_cs_em * 1000.0))
-                    if _corrected_start_ms < _clip_start_ms:
-                        _corrected_start_ms = _clip_start_ms
-                        _clamp_reason = "clamped_to_clip_source_start"
-                _ev["startMs"] = _corrected_start_ms
-                _record_divergence(
-                    "zoom_startMs_corrected",
-                    {
-                        "type": _zt,
-                        "old_startMs": (
-                            int(_gemini_start_ms)
-                            if isinstance(_gemini_start_ms, (int, float))
-                            else None
-                        ),
-                        "word_start_ms": _word_start_ms,
-                        "peak_reach_ms": _peak_reach_ms,
-                    },
-                    "corrected" if _clamp_reason is None else _clamp_reason,
-                    final={"new_startMs": _corrected_start_ms},
-                    reason=(_clamp_reason or "align_perceptual_peak_to_word"),
+                _owning_clip = None
+                for _ci, _clip in enumerate(validated_cuts):
+                    _cs = float(_clip["source_start"])
+                    _ce = float(_clip["source_end"])
+                    if _cs <= em["t"] <= _ce:
+                        _owning_clip = _ci
+                        break
+                if _owning_clip is None:
+                    print(
+                        f"[generate-edit] CLEAR emphasis_moments[{_ei}].zoom_effect: "
+                        f"t={em['t']:.2f}s falls outside every validated clip. "
+                        f"Render continues with the emphasis but no zoom.",
+                        flush=True,
+                    )
+                    em["zoom_effect"] = None
+                    continue
+                _clip_zoom_emphasis.setdefault(_owning_clip, []).append(_ei)
+
+            for _clip_idx, _ei_list in _clip_zoom_emphasis.items():
+                # Pick the dominant emphasis on this clip: highest intensity, tiebreak
+                # by lowest emphasis index (earliest moment in the video).
+                _ei_sorted = sorted(
+                    _ei_list,
+                    key=lambda i: (-_INTENSITY_RANK.get(emphasis_moments[i]["intensity"], 0), i),
                 )
-                # ── Shot-change boundary clamp ────────────────────────────
-                # A zoom window must not straddle a tight SHOT-CHANGE boundary:
-                # the footage cuts to a new shot mid-window and the held/moving
-                # zoom carries the old shot's framing (+ the frozen face-lock
-                # origin) into the new shot — the StepZoom "staircase", a framing
-                # pop on the moving types. End the window at or before the first
-                # shot-change boundary strictly inside it. _shot_src_set holds
-                # SHOT-CHANGE tights as SOURCE WORD INDICES (NOT times); the cut
-                # time is that word's `.end` (s)×1000 = source ms, matching
-                # startMs (source ms). dead_air tights are excluded — they don't
-                # cut footage.
-                _zc_start = _ev.get("startMs")
-                _zc_dur = _ev.get("durationMs")
-                if (
-                    isinstance(_zc_start, (int, float))
-                    and isinstance(_zc_dur, (int, float))
-                    and _zc_dur > 0
-                    and _shot_src_set
-                ):
-                    _zc_end = _zc_start + _zc_dur
-                    _cut_ms = None
-                    for _tsi in _shot_src_set:
-                        if not (0 <= _tsi < len(_dg_words)):
-                            continue
-                        _tms = float(_dg_words[_tsi].get("end") or 0.0) * 1000.0
-                        if _zc_start < _tms < _zc_end:
-                            _cut_ms = _tms if _cut_ms is None else min(_cut_ms, _tms)
-                    if _cut_ms is not None:
-                        _clamped_dur = int(round(_cut_ms - _zc_start))
-                        # Floor: never clamp to a stub. 200ms ≈ 12 frames @ 60fps,
-                        # ≥ SnapReframe's ~171ms spring settle, so a clamped zoom
-                        # still completes its move. Below the floor we leave the
-                        # window UNCHANGED (rare — the straddle persists for that
-                        # one event rather than rendering a stub; safest default).
-                        _ZOOM_CLAMP_FLOOR_MS = 200
-                        if _ZOOM_CLAMP_FLOOR_MS <= _clamped_dur < _zc_dur:
+                _dominant_ei = _ei_sorted[0]
+                _dominant_zoom = emphasis_moments[_dominant_ei]["zoom_effect"]
+                _dominant_type = _dominant_zoom["type"]
+
+                # Collect events from every emphasis on this clip, in startMs order.
+                _merged_events = []
+                _coerced_types = []
+                for _ei in _ei_list:
+                    _em_zoom = emphasis_moments[_ei]["zoom_effect"]
+                    if _em_zoom["type"] != _dominant_type:
+                        _coerced_types.append((_ei, _em_zoom["type"]))
+                    for _ev in (_em_zoom.get("events") or []):
+                        _merged_events.append(_ev)
+                _merged_events.sort(key=lambda e: float(e.get("startMs") or 0))
+
+                # Item C instrumentation (no behavior change): the StepZoom double-
+                # step-out staircase only appears when ≥2 events render under ONE
+                # StepZoom type with OVERLAPPING windows (or mixed scales) — StepZoom's
+                # first-covering-event-wins then exposes a lower event's scale as an
+                # intermediate on the way out. Both captured renders had a ~3s GAP, so
+                # the bug never reproduced. Log loudly when an overlap / mixed-scale
+                # merge DOES happen so the next staircase render surfaces the exact
+                # events (scale, startMs, durMs) the max-covering fix needs.
+                if _dominant_type == "StepZoom" and len(_merged_events) > 1:
+                    _ev_sd = [
+                        (
+                            float(_e.get("scale") or 0.0),
+                            float(_e.get("startMs") or 0.0),
+                            float(_e.get("durationMs") or 0.0),
+                        )
+                        for _e in _merged_events
+                    ]
+                    _zm_overlap = any(
+                        _ev_sd[_k + 1][1] < _ev_sd[_k][1] + _ev_sd[_k][2]
+                        for _k in range(len(_ev_sd) - 1)
+                    )
+                    _zm_mixed = len({round(_s, 3) for _s, _, _ in _ev_sd}) > 1
+                    if _zm_overlap or _zm_mixed:
+                        _zm_tags = " ".join(
+                            _t for _t, _on in (("OVERLAP", _zm_overlap), ("MIXED_SCALE", _zm_mixed))
+                            if _on
+                        )
+                        print(
+                            f"[zoom-merge-overlap] StepZoom clip={_clip_idx} "
+                            f"events={[(round(_s, 3), int(_st), int(_d)) for _s, _st, _d in _ev_sd]} "
+                            f"{_zm_tags} detected — staircase arrangement (StepZoom "
+                            f"first-covering renders an intermediate scale on step-out)",
+                            flush=True,
+                        )
+
+                # Carry over non-events / non-type fields from the dominant emphasis's
+                # zoom_effect (firstStage, windowScale, borderColor, etc. — these are
+                # type-specific config that only the dominant type knows what to do with).
+                _merged_zoom = {
+                    "type": _dominant_type,
+                    "events": _merged_events,
+                    **{
+                        k: v for k, v in _dominant_zoom.items()
+                        if k not in ("type", "events") and v is not None
+                    },
+                }
+                validated_cuts[_clip_idx]["_zoom_effect"] = _merged_zoom
+
+                # Mirror the merged zoom back onto every contributing emphasis_moment
+                # so the [emphasis] log line below reflects what actually renders.
+                for _ei in _ei_list:
+                    emphasis_moments[_ei]["zoom_effect"] = _merged_zoom
+
+                if len(_ei_list) > 1:
+                    if _coerced_types:
+                        _coerce_str = ", ".join(f"em[{_i}]={_t}" for _i, _t in _coerced_types)
+                        print(
+                            f"[generate-edit] Clip {_clip_idx}: merged {len(_ei_list)} "
+                            f"zoom emphasis moments into one zoomEffect "
+                            f"(type={_dominant_type} from dominant em[{_dominant_ei}], "
+                            f"coerced: {_coerce_str}).",
+                            flush=True,
+                        )
+                        # If the zoom-type pre-split missed a transition (e.g., an
+                        # emphasis whose t fell in the edge zone of a clip boundary
+                        # and got grouped here despite differing types), the
+                        # divergence log surfaces it so we can audit why the split
+                        # didn't apply.
+                        for _coerced_ei, _orig_type in _coerced_types:
                             _record_divergence(
-                                "zoom_window",
+                                "zoom_type_coerced",
                                 {
-                                    "type": _zt,
-                                    "startMs": int(_zc_start),
-                                    "durationMs": int(_zc_dur),
-                                    "shot_change_ms": int(round(_cut_ms)),
+                                    "clip_idx": _clip_idx,
+                                    "em_idx": _coerced_ei,
+                                    "original_type": _orig_type,
+                                    "em_t": round(float(emphasis_moments[_coerced_ei]["t"]), 3),
                                 },
-                                "clamp_to_shot_change",
-                                final={"durationMs": _clamped_dur},
-                                reason="zoom_window_straddled_tight_shot_change",
+                                "coerced_to_dominant",
+                                final={"type": _dominant_type},
+                                reason="zoom_type_pre_split_missed_this_emphasis",
                             )
-                            print(
-                                f"[zoom-clamp] {_zt} window "
-                                f"[{int(_zc_start)},{int(_zc_end)}]ms straddles "
-                                f"shot-change at {int(round(_cut_ms))}ms — "
-                                f"durationMs {int(_zc_dur)}→{_clamped_dur} "
-                                f"(release on shot A)",
-                                flush=True,
-                            )
-                            _ev["durationMs"] = _clamped_dur
-                _filled_events.append(_ev)
-            _ze_out = {"type": _zt, "events": _filled_events}
-            for _ek in ("firstStage", "secondStage", "windowScale", "borderWidth",
-                        "borderColor", "bgScale", "edgeBlur", "frameLines", "maxBarHeight"):
-                if _ek in _ze_raw:
-                    _ze_out[_ek] = _ze_raw[_ek]
-        _mg_raw = em.get("motion_graphic")
-        _mg_out = None
-        if _mg_raw is not None:
-            if not isinstance(_mg_raw, dict):
-                raise ValueError(f"emphasis_moments[{_ei}].motion_graphic must be object or null")
-            _mgt = str(_mg_raw.get("type") or "").strip()
-            if _mgt not in _valid_mg_types:
-                raise ValueError(
-                    f"emphasis_moments[{_ei}].motion_graphic.type must be one of "
-                    f"{sorted(_valid_mg_types)}, got {_mgt!r}"
-                )
-            _anc = str(_mg_raw.get("anchor") or "").strip()
-            if _anc not in _valid_semantic_anchors:
-                # See motion_graphics anchor coercion above — stray/removed
-                # off-center anchors land on center, never reject the render.
-                print(
-                    f"[generate-edit] emphasis_moments[{_ei}].motion_graphic.anchor "
-                    f"{_anc!r} not a valid semantic zone "
-                    f"{sorted(_valid_semantic_anchors)} — coercing to 'center'",
-                    flush=True,
-                )
-                _anc = "center"
-            _mg_raw["anchor"] = _anc
-            # props has default_factory=dict → NOT required. Vertex omits it when
-            # the component uses default props; missing/null means {} (the schema
-            # default), only a PRESENT non-dict is a malformation.
-            _mg_props = _mg_raw.get("props")
-            if _mg_props is None:
-                _mg_props = {}
-            if not isinstance(_mg_props, dict):
-                raise ValueError(f"emphasis_moments[{_ei}].motion_graphic.props must be object")
-            _mg_out = {"type": _mgt, "anchor": _anc, "props": _mg_props}
-        _em_word_parts = []
-        for idx in _wis:
-            if _dg_words and 0 <= idx < len(_dg_words):
-                w = str(_dg_words[idx].get("punctuated_word") or _dg_words[idx].get("word") or "").strip()
-                if w:
-                    _em_word_parts.append(w)
-        _em_word = " ".join(_em_word_parts)
-        emphasis_moments.append({
-            "t": t,
-            "word_indices": _wis,
-            "type": em_type,
-            "intensity": intensity,
-            "word": _em_word,
-            "duration": _em_duration,
-            "zoom_effect": _ze_out,
-            "motion_graphic": _mg_out,
-        })
-    emphasis_moments.sort(key=lambda x: x["t"])
-
-    # ── Payoff-tail protection + min zoom spacing ─────────────────────────
-    # Mirrors the transition-spacing safeguards shipped in commit a95cfb2.
-    # Two passes applied to emphasis_moments AFTER sort-by-t and BEFORE the
-    # zoom-type clip-split pre-pass:
-    #
-    #   PASS 1 — Payoff-tail protection: drop any emphasis whose first zoom
-    #     event starts within [payoff_zoom_start, payoff_zoom_end + 1.5s].
-    #     The payoff is the final committed move; nothing zooms on its
-    #     heels through the close. The close still gets captions/SFX/MGs,
-    #     just not a competing zoom.
-    #
-    #   PASS 2 — Minimum spacing: drop any emphasis whose zoom peak is
-    #     within _MIN_ZOOM_SPACING_S of a previously-kept peak. Priority:
-    #     payoff (3) > mid_peak (2) > anything else (1). Lower priority
-    #     drops; ties go to the EARLIER emphasis (first emitted wins).
-    #
-    # Both passes log via _record_divergence so grep [divergence]
-    # component=emphasis surfaces every drop with the reason.
-    _MIN_ZOOM_SPACING_S = 2.0
-    _PAYOFF_TAIL_PROTECTION_S = 1.5
-
-    _arc_segments_for_priority = []
-    if isinstance(_vp, dict):
-        _arc_segments_for_priority = _vp.get("arc_segments") or []
-
-    def _arc_position_at_word(word_index):
-        """Look up arc position (hook/build/mid_peak/payoff/breather/close)
-        for a given src word_index. Returns '' if no segment matches."""
-        if not isinstance(word_index, int):
-            return ""
-        for _seg in _arc_segments_for_priority:
-            if not isinstance(_seg, dict):
-                continue
-            try:
-                _ss = int(_seg.get("start_word_index"))
-                _se = int(_seg.get("end_word_index"))
-            except (TypeError, ValueError):
-                continue
-            if _ss <= word_index <= _se:
-                return str(_seg.get("position") or "")
-        return ""
-
-    _ZOOM_PRIORITY = {"payoff": 3, "mid_peak": 2}
-
-    def _emphasis_priority(em):
-        _wis = em.get("word_indices") or []
-        _wi0 = _wis[0] if _wis else None
-        _pos = _arc_position_at_word(_wi0)
-        return _ZOOM_PRIORITY.get(_pos, 1)
-
-    def _first_event_window_s(em):
-        """Returns (start_s, end_s, peak_s) for the emphasis's first zoom
-        event, or None if no zoom event exists. All times in source-seconds.
-        Peak time uses ZOOM_PEAK_REACH_MS per type — same source of truth
-        as the Fix B1 startMs correction (handler.py:~6900)."""
-        _ze = em.get("zoom_effect")
-        if not isinstance(_ze, dict):
-            return None
-        _events = _ze.get("events") or []
-        if not _events or not isinstance(_events[0], dict):
-            return None
-        _ev = _events[0]
-        try:
-            _start_ms = float(_ev.get("startMs") or 0)
-            _dur_ms = float(_ev.get("durationMs") or 0)
-        except (TypeError, ValueError):
-            return None
-        _zoom_type = str(_ze.get("type") or "")
-        _peak_ms = _start_ms + float(ZOOM_PEAK_REACH_MS.get(_zoom_type, 0))
-        return (_start_ms / 1000.0, (_start_ms + _dur_ms) / 1000.0, _peak_ms / 1000.0)
-
-    # PASS 1 — Payoff-tail protection.
-    _payoff_wi = (
-        _vp.get("payoff_word_index") if isinstance(_vp, dict) else None
-    )
-    _payoff_em = None
-    _payoff_protected_window = None
-    if isinstance(_payoff_wi, int):
-        for _em_search in emphasis_moments:
-            _em_wis = _em_search.get("word_indices") or []
-            if _em_wis and _em_wis[0] == _payoff_wi:
-                _payoff_em = _em_search
-                _win = _first_event_window_s(_em_search)
-                if _win is not None:
-                    _payoff_protected_window = (
-                        _win[0],
-                        _win[1] + _PAYOFF_TAIL_PROTECTION_S,
-                    )
-                break
-
-    _kept_after_payoff = []
-    for _em in emphasis_moments:
-        if _em is _payoff_em or _payoff_protected_window is None:
-            _kept_after_payoff.append(_em)
-            continue
-        _win = _first_event_window_s(_em)
-        if _win is None:
-            _kept_after_payoff.append(_em)
-            continue
-        _start_s, _end_s, _peak_s = _win
-        # Drop if the emphasis's zoom STARTS inside the protected window.
-        # Half-open: an emphasis starting EXACTLY at payoff_zoom_end + 1.5s
-        # is the close callback the prompt allows.
-        if _payoff_protected_window[0] <= _start_s < _payoff_protected_window[1]:
-            _wi0 = (_em.get("word_indices") or [None])[0]
-            _zt = (_em.get("zoom_effect") or {}).get("type", "")
-            print(
-                f"[emphasis] DROP {_zt} on word {_wi0} "
-                f"(zoom_start={_start_s:.2f}s) — falls inside payoff "
-                f"tail-protection window "
-                f"[{_payoff_protected_window[0]:.2f}..{_payoff_protected_window[1]:.2f}]s.",
-                flush=True,
-            )
-            _record_divergence(
-                "emphasis",
-                {
-                    "type": _em.get("type", ""),
-                    "zoom_type": _zt,
-                    "word_index": _wi0,
-                    "zoom_start_s": round(_start_s, 3),
-                    "payoff_window_s": [
-                        round(_payoff_protected_window[0], 3),
-                        round(_payoff_protected_window[1], 3),
-                    ],
-                    "payoff_word_index": _payoff_wi,
-                },
-                "drop_post_payoff",
-                final=None,
-                reason="protects_payoff_commitment",
-            )
-            continue
-        _kept_after_payoff.append(_em)
-
-    # PASS 2 — Minimum spacing between zoom peaks.
-    _kept_after_spacing = []
-    for _em in _kept_after_payoff:
-        _win = _first_event_window_s(_em)
-        if _win is None:
-            _kept_after_spacing.append(_em)
-            continue
-        _start_s, _end_s, _peak_s = _win
-        _prio = _emphasis_priority(_em)
-
-        if _kept_after_spacing:
-            # Find the most recently kept emphasis that HAS a zoom event
-            # (skip text-only emphases that have no peak).
-            _last_idx = None
-            for _i in range(len(_kept_after_spacing) - 1, -1, -1):
-                _last_win = _first_event_window_s(_kept_after_spacing[_i])
-                if _last_win is not None:
-                    _last_idx = _i
-                    break
-            if _last_idx is not None:
-                _last_em = _kept_after_spacing[_last_idx]
-                _last_win = _first_event_window_s(_last_em)
-                _last_peak_s = _last_win[2]
-                _last_prio = _emphasis_priority(_last_em)
-                _gap = abs(_peak_s - _last_peak_s)
-                if _gap < _MIN_ZOOM_SPACING_S:
-                    if _prio > _last_prio:
-                        # Current outranks previous — drop previous, keep current.
-                        _wi0_prev = (_last_em.get("word_indices") or [None])[0]
-                        _zt_prev = (_last_em.get("zoom_effect") or {}).get("type", "")
-                        print(
-                            f"[emphasis] DROP {_zt_prev} on word {_wi0_prev} "
-                            f"(peak={_last_peak_s:.2f}s, prio={_last_prio}) — "
-                            f"within {_MIN_ZOOM_SPACING_S}s of higher-priority "
-                            f"peak at {_peak_s:.2f}s (prio={_prio}).",
-                            flush=True,
-                        )
-                        _record_divergence(
-                            "emphasis",
-                            {
-                                "type": _last_em.get("type", ""),
-                                "zoom_type": _zt_prev,
-                                "word_index": _wi0_prev,
-                                "peak_s": round(_last_peak_s, 3),
-                                "priority": _last_prio,
-                                "winning_peak_s": round(_peak_s, 3),
-                                "winning_priority": _prio,
-                                "gap_s": round(_gap, 3),
-                            },
-                            "drop_too_close",
-                            final=None,
-                            reason="min_zoom_spacing",
-                        )
-                        del _kept_after_spacing[_last_idx]
-                        _kept_after_spacing.append(_em)
                     else:
-                        # Current is lower-or-equal priority — current drops
-                        # (ties go to the earlier kept emphasis).
-                        _wi0 = (_em.get("word_indices") or [None])[0]
-                        _zt = (_em.get("zoom_effect") or {}).get("type", "")
                         print(
-                            f"[emphasis] DROP {_zt} on word {_wi0} "
-                            f"(peak={_peak_s:.2f}s, prio={_prio}) — "
-                            f"within {_MIN_ZOOM_SPACING_S}s of kept peak at "
-                            f"{_last_peak_s:.2f}s (prio={_last_prio}).",
+                            f"[generate-edit] Clip {_clip_idx}: merged {len(_ei_list)} "
+                            f"zoom emphasis moments into one zoomEffect type={_dominant_type}.",
                             flush=True,
                         )
-                        _record_divergence(
-                            "emphasis",
-                            {
-                                "type": _em.get("type", ""),
-                                "zoom_type": _zt,
-                                "word_index": _wi0,
-                                "peak_s": round(_peak_s, 3),
-                                "priority": _prio,
-                                "kept_peak_s": round(_last_peak_s, 3),
-                                "kept_priority": _last_prio,
-                                "gap_s": round(_gap, 3),
-                            },
-                            "drop_too_close",
-                            final=None,
-                            reason="min_zoom_spacing",
+
+            # Item 3 instrumentation (no behavior change): the single-event StepZoom
+            # staircase is suspected to come from a zoom-type-split SEAM — a StepZoom
+            # event whose window lands at a sub-clip boundary next to a different-zoom
+            # sub-clip. A binary StepZoom event provably can't make three scale levels
+            # on its own, and no merge-overlap fired, so log the seam arrangement here.
+            # The next staircase render then reveals whether it's a cross-seam render or
+            # an adjacent-zoom ramp at the boundary. Pure logging — fires only when a
+            # StepZoom event reaches within ~0.30s of a zoom-type-split boundary.
+            if _zoom_type_split_times:
+                _seam_tol_s = 0.30  # ~18 frames @ 60fps, ~9 @ 30fps
+                _split_set = sorted(set(_zoom_type_split_times))
+                for _ci, _clip in enumerate(validated_cuts):
+                    _z = _clip.get("_zoom_effect")
+                    if not isinstance(_z, dict) or _z.get("type") != "StepZoom":
+                        continue
+                    _cs = float(_clip["source_start"])
+                    _ce = float(_clip["source_end"])
+                    _edge_split = [
+                        round(_st, 3) for _st in _split_set
+                        if abs(_st - _cs) <= _seam_tol_s or abs(_st - _ce) <= _seam_tol_s
+                    ]
+                    if not _edge_split:
+                        continue
+                    for _ev in (_z.get("events") or []):
+                        _evs = float(_ev.get("startMs") or 0.0) / 1000.0
+                        _eve = _evs + float(_ev.get("durationMs") or 0.0) / 1000.0
+                        _at_start = _evs <= _cs + _seam_tol_s
+                        _at_end = _eve >= _ce - _seam_tol_s
+                        if not (_at_start or _at_end):
+                            continue
+                        _nb_idx = _ci + 1 if _at_end else _ci - 1
+                        _nb = validated_cuts[_nb_idx] if 0 <= _nb_idx < len(validated_cuts) else None
+                        _nb_z = _nb.get("_zoom_effect") if isinstance(_nb, dict) else None
+                        _nb_type = _nb_z.get("type") if isinstance(_nb_z, dict) else None
+                        _nb_win = (
+                            [round(float(_nb["source_start"]), 3), round(float(_nb["source_end"]), 3)]
+                            if _nb is not None else None
                         )
-                    continue
-        _kept_after_spacing.append(_em)
+                        print(
+                            f"[zoom-seam] clip={_ci} StepZoom "
+                            f"ev=[{round(_evs, 3)},{round(_eve, 3)}]s "
+                            f"clip_src=[{round(_cs, 3)},{round(_ce, 3)}]s "
+                            f"split_at={_edge_split} "
+                            f"neighbor_type={_nb_type} neighbor_window={_nb_win}",
+                            flush=True,
+                        )
 
-    if len(_kept_after_spacing) != len(emphasis_moments):
-        print(
-            f"[emphasis] safeguards: {len(emphasis_moments)} → "
-            f"{len(_kept_after_spacing)} (payoff-tail + min spacing drops)",
-            flush=True,
-        )
-        emphasis_moments = _kept_after_spacing
-
-    # ── PRE-PASS: split clips at zoom-type boundaries ─────────────────────
-    # Multiple emphasis_moments can target the same clip; the Remotion
-    # ClipRenderer at src/remotion/src/PromptlyRender.tsx:89-100 picks ONE
-    # zoom component per clip by `zoomEffect.type`. To preserve Gemini's
-    # per-event zoom variety (instead of coercing every event on a clip
-    # to one type), split the clip at the midpoint between adjacent
-    # emphases that differ in zoom type. Each resulting sub-clip then
-    # naturally has emphases of a single type — the existing grouping
-    # loop below sees one type per clip and no coercion is needed.
-    #
-    # Reuses the validated-cuts split pattern from the post-Gemini shot-
-    # split block above. Internal sub-clip boundaries get
-    # transition_out="none" (hard cut between same-take sub-clips).
-    _zoom_type_split_times: List[float] = []
-    _zoom_em_by_clip: Dict[int, List[int]] = {}
-    for _ei, em in enumerate(emphasis_moments):
-        if not em.get("zoom_effect"):
-            continue
-        for _ci, _clip in enumerate(validated_cuts):
-            _cs = float(_clip["source_start"])
-            _ce = float(_clip["source_end"])
-            if _cs <= em["t"] <= _ce:
-                _zoom_em_by_clip.setdefault(_ci, []).append(_ei)
-                break
-
-    for _ci, _ei_list in _zoom_em_by_clip.items():
-        _ei_sorted = sorted(_ei_list, key=lambda i: emphasis_moments[i]["t"])
-        _types_in_order = [
-            str(emphasis_moments[i]["zoom_effect"]["type"]) for i in _ei_sorted
-        ]
-        if len(set(_types_in_order)) <= 1:
-            continue  # single type on this clip — no split needed
-        for _k in range(1, len(_ei_sorted)):
-            if _types_in_order[_k] == _types_in_order[_k - 1]:
-                continue
-            _t_prev = float(emphasis_moments[_ei_sorted[_k - 1]]["t"])
-            _t_curr = float(emphasis_moments[_ei_sorted[_k]]["t"])
-            if _t_curr <= _t_prev:
-                continue
-            _split_t = (_t_prev + _t_curr) / 2.0
-            _zoom_type_split_times.append(_split_t)
-            _record_divergence(
-                "zoom_type_split",
-                {
-                    "owning_clip_idx": _ci,
-                    "type_a": _types_in_order[_k - 1],
-                    "type_b": _types_in_order[_k],
-                    "em_idx_a": _ei_sorted[_k - 1],
-                    "em_idx_b": _ei_sorted[_k],
-                    "split_at_source_s": round(_split_t, 3),
-                },
-                "clip_split_to_preserve_zoom_variety",
-                reason="adjacent_emphases_on_same_clip_have_different_zoom_types",
-            )
-
-    if _zoom_type_split_times:
-        _split_times_sorted = sorted(set(_zoom_type_split_times))
-        _new_cuts = []
-        _total_splits = 0
-        for _clip in validated_cuts:
-            _cs = float(_clip["source_start"])
-            _ce = float(_clip["source_end"])
-            _internal = [
-                _st for _st in _split_times_sorted
-                if _cs + 0.05 < _st < _ce - 0.05
-            ]
-            if not _internal:
-                _new_cuts.append(_clip)
-                continue
-            _boundaries = [_cs] + _internal + [_ce]
-            for _bi in range(len(_boundaries) - 1):
-                _sub_start = _boundaries[_bi]
-                _sub_end = _boundaries[_bi + 1]
-                if _sub_end - _sub_start <= 0:
-                    continue
-                _sub = {**_clip, "source_start": _sub_start, "source_end": _sub_end}
-                # Internal sub-clip boundary → no transition (hard cut
-                # between same-take takes; matches shot-split convention).
-                if _bi != len(_boundaries) - 2:
-                    _sub["transition_out"] = "none"
-                _new_cuts.append(_sub)
-            _total_splits += len(_internal)
-        if _total_splits > 0:
-            print(
-                f"[zoom-type-split] Validated cuts: {len(validated_cuts)} → "
-                f"{len(_new_cuts)} clips ({_total_splits} zoom-variety split(s) "
-                f"applied)",
-                flush=True,
-            )
-            validated_cuts = _new_cuts
-
-    # Multiple emphasis_moments can target the same clip — each gets a zoom
-    # EVENT, all merged into the clip's single zoomEffect spec. The spec carries
-    # one `type` (SmoothPush / StepZoom / etc.) but can hold multiple `events`
-    # spaced across the clip's render window. After the zoom-type-split pass
-    # above, each sub-clip naturally has emphases of a single type, so the
-    # coercion path is effectively dead on the happy path. It is preserved
-    # here as a defensive fallback in case the split fails to apply (e.g.,
-    # an emphasis whose t falls in the 0.05s edge zone of a clip boundary).
-    # When coercion DOES fire, _record_divergence makes it visible.
-    _INTENSITY_RANK = {"high": 3, "medium": 2, "low": 1}
-    _clip_zoom_emphasis: dict = {}  # clip_idx -> list of emphasis_moment indices
-    for _ei, em in enumerate(emphasis_moments):
-        if not em["zoom_effect"]:
-            continue
-        _owning_clip = None
-        for _ci, _clip in enumerate(validated_cuts):
-            _cs = float(_clip["source_start"])
-            _ce = float(_clip["source_end"])
-            if _cs <= em["t"] <= _ce:
-                _owning_clip = _ci
-                break
-        if _owning_clip is None:
-            print(
-                f"[generate-edit] CLEAR emphasis_moments[{_ei}].zoom_effect: "
-                f"t={em['t']:.2f}s falls outside every validated clip. "
-                f"Render continues with the emphasis but no zoom.",
-                flush=True,
-            )
-            em["zoom_effect"] = None
-            continue
-        _clip_zoom_emphasis.setdefault(_owning_clip, []).append(_ei)
-
-    for _clip_idx, _ei_list in _clip_zoom_emphasis.items():
-        # Pick the dominant emphasis on this clip: highest intensity, tiebreak
-        # by lowest emphasis index (earliest moment in the video).
-        _ei_sorted = sorted(
-            _ei_list,
-            key=lambda i: (-_INTENSITY_RANK.get(emphasis_moments[i]["intensity"], 0), i),
-        )
-        _dominant_ei = _ei_sorted[0]
-        _dominant_zoom = emphasis_moments[_dominant_ei]["zoom_effect"]
-        _dominant_type = _dominant_zoom["type"]
-
-        # Collect events from every emphasis on this clip, in startMs order.
-        _merged_events = []
-        _coerced_types = []
-        for _ei in _ei_list:
-            _em_zoom = emphasis_moments[_ei]["zoom_effect"]
-            if _em_zoom["type"] != _dominant_type:
-                _coerced_types.append((_ei, _em_zoom["type"]))
-            for _ev in (_em_zoom.get("events") or []):
-                _merged_events.append(_ev)
-        _merged_events.sort(key=lambda e: float(e.get("startMs") or 0))
-
-        # Item C instrumentation (no behavior change): the StepZoom double-
-        # step-out staircase only appears when ≥2 events render under ONE
-        # StepZoom type with OVERLAPPING windows (or mixed scales) — StepZoom's
-        # first-covering-event-wins then exposes a lower event's scale as an
-        # intermediate on the way out. Both captured renders had a ~3s GAP, so
-        # the bug never reproduced. Log loudly when an overlap / mixed-scale
-        # merge DOES happen so the next staircase render surfaces the exact
-        # events (scale, startMs, durMs) the max-covering fix needs.
-        if _dominant_type == "StepZoom" and len(_merged_events) > 1:
-            _ev_sd = [
-                (
-                    float(_e.get("scale") or 0.0),
-                    float(_e.get("startMs") or 0.0),
-                    float(_e.get("durationMs") or 0.0),
-                )
-                for _e in _merged_events
-            ]
-            _zm_overlap = any(
-                _ev_sd[_k + 1][1] < _ev_sd[_k][1] + _ev_sd[_k][2]
-                for _k in range(len(_ev_sd) - 1)
-            )
-            _zm_mixed = len({round(_s, 3) for _s, _, _ in _ev_sd}) > 1
-            if _zm_overlap or _zm_mixed:
-                _zm_tags = " ".join(
-                    _t for _t, _on in (("OVERLAP", _zm_overlap), ("MIXED_SCALE", _zm_mixed))
-                    if _on
-                )
+            for em in emphasis_moments:
+                _layers = []
+                if em["zoom_effect"]: _layers.append(f"zoom={em['zoom_effect']['type']}")
+                if em["motion_graphic"]: _layers.append(f"mg={em['motion_graphic']['type']}@{em['motion_graphic']['anchor']}")
                 print(
-                    f"[zoom-merge-overlap] StepZoom clip={_clip_idx} "
-                    f"events={[(round(_s, 3), int(_st), int(_d)) for _s, _st, _d in _ev_sd]} "
-                    f"{_zm_tags} detected — staircase arrangement (StepZoom "
-                    f"first-covering renders an intermediate scale on step-out)",
+                    f"[emphasis] {em['t']:.1f}s {em['type']}({em['intensity']}) "
+                    f"layers=[{','.join(_layers) if _layers else 'none'}]",
                     flush=True,
                 )
+            edit_plan["_emphasis_moments"] = emphasis_moments
 
-        # Carry over non-events / non-type fields from the dominant emphasis's
-        # zoom_effect (firstStage, windowScale, borderColor, etc. — these are
-        # type-specific config that only the dominant type knows what to do with).
-        _merged_zoom = {
-            "type": _dominant_type,
-            "events": _merged_events,
-            **{
-                k: v for k, v in _dominant_zoom.items()
-                if k not in ("type", "events") and v is not None
-            },
-        }
-        validated_cuts[_clip_idx]["_zoom_effect"] = _merged_zoom
-
-        # Mirror the merged zoom back onto every contributing emphasis_moment
-        # so the [emphasis] log line below reflects what actually renders.
-        for _ei in _ei_list:
-            emphasis_moments[_ei]["zoom_effect"] = _merged_zoom
-
-        if len(_ei_list) > 1:
-            if _coerced_types:
-                _coerce_str = ", ".join(f"em[{_i}]={_t}" for _i, _t in _coerced_types)
-                print(
-                    f"[generate-edit] Clip {_clip_idx}: merged {len(_ei_list)} "
-                    f"zoom emphasis moments into one zoomEffect "
-                    f"(type={_dominant_type} from dominant em[{_dominant_ei}], "
-                    f"coerced: {_coerce_str}).",
-                    flush=True,
-                )
-                # If the zoom-type pre-split missed a transition (e.g., an
-                # emphasis whose t fell in the edge zone of a clip boundary
-                # and got grouped here despite differing types), the
-                # divergence log surfaces it so we can audit why the split
-                # didn't apply.
-                for _coerced_ei, _orig_type in _coerced_types:
-                    _record_divergence(
-                        "zoom_type_coerced",
-                        {
-                            "clip_idx": _clip_idx,
-                            "em_idx": _coerced_ei,
-                            "original_type": _orig_type,
-                            "em_t": round(float(emphasis_moments[_coerced_ei]["t"]), 3),
-                        },
-                        "coerced_to_dominant",
-                        final={"type": _dominant_type},
-                        reason="zoom_type_pre_split_missed_this_emphasis",
+            # text_overlays — variant-dispatched, required props per variant.
+            # Word-anchored: Gemini emits start_word_index (must be a kept word) and
+            # duration_seconds. Python derives the output-time window from the word's
+            # start timestamp projected through cuts.
+            _to_raw = edit_plan.get("text_overlays")
+            if _to_raw is None:
+                _to_raw = []
+            if not isinstance(_to_raw, list):
+                raise ValueError("text_overlays must be an array")
+            _to_validated = []
+            for _i, _ov in enumerate(_to_raw):
+                if not isinstance(_ov, dict):
+                    raise ValueError(f"text_overlays[{_i}] must be an object")
+                _var = str(_ov.get("variant") or "").strip()
+                if _var not in _valid_text_overlay_variants:
+                    raise ValueError(
+                        f"text_overlays[{_i}].variant must be one of {sorted(_valid_text_overlay_variants)}, got {_var!r}"
                     )
+                try:
+                    _swi = int(_ov["start_word_index"])
+                except (KeyError, TypeError, ValueError):
+                    raise ValueError(
+                        f"text_overlays[{_i}] needs integer start_word_index"
+                    )
+                if _swi < 0 or _swi >= len(_dg_words):
+                    raise ValueError(
+                        f"text_overlays[{_i}].start_word_index={_swi} out of range "
+                        f"[0, {len(_dg_words)-1}]"
+                    )
+                if _swi not in _kept_word_indices:
+                    _wt = str(_dg_words[_swi].get("punctuated_word") or _dg_words[_swi].get("word") or "").strip()
+                    print(
+                        f"[generate-edit] DROP text_overlay '{_var}' [{_i}]: "
+                        f"start_word_index={_swi} ({_wt!r}) targets a REMOVED word. "
+                        f"Render continues without this overlay.",
+                        flush=True,
+                    )
+                    continue
+                try:
+                    _du = float(_ov["duration_seconds"])
+                except (KeyError, TypeError, ValueError):
+                    raise ValueError(
+                        f"text_overlays[{_i}] needs numeric duration_seconds"
+                    )
+                if _du < 0.3 or _du > 10.0:
+                    raise ValueError(f"text_overlays[{_i}].duration_seconds out of range 0.3..10.0")
+                # No rounding — match clip source bounds exactly. See the same
+                # comment on motion_graphics _sw_start above for the precision-bug
+                # class this avoids.
+                _source_start = float(_dg_words[_swi].get("start") or 0)
+                _entry = {
+                    "variant": _var,
+                    "start_word_index": _swi,
+                    "_source_start": _source_start,
+                    "duration_seconds": _du,
+                }
+                if _var == "sticky_note":
+                    # notes is variant-required but schema-OPTIONAL (Optional[List]=None),
+                    # so Vertex omits it when empty. A sticky_note with no notes has no
+                    # content → DROP it (render continues), never crash. >3 notes → keep
+                    # the first 3; a note without text is skipped.
+                    _notes = _ov.get("notes")
+                    if not isinstance(_notes, list) or not _notes:
+                        print(
+                            f"[generate-edit] DROP text_overlay 'sticky_note' [{_i}]: "
+                            f"no notes content. Render continues without this overlay.",
+                            flush=True,
+                        )
+                        continue
+                    _entry["notes"] = []
+                    for _nn in _notes[:3]:
+                        if (not isinstance(_nn, dict)
+                                or not isinstance(_nn.get("text"), str)
+                                or not _nn["text"].strip()):
+                            continue
+                        _entry["notes"].append({
+                            "text": _EMOJI_RE.sub("", str(_nn["text"])).strip(),
+                            "color": str(_nn.get("color") or "#FFEB3B"),
+                            "rotation": float(_nn.get("rotation") or 0),
+                        })
+                    if not _entry["notes"]:
+                        print(
+                            f"[generate-edit] DROP text_overlay 'sticky_note' [{_i}]: "
+                            f"no note carried text. Render continues without this overlay.",
+                            flush=True,
+                        )
+                        continue
+                elif _var == "caption_match":
+                    # text + position are variant-required but schema-OPTIONAL, so Vertex
+                    # omits them. No text → no content → DROP (render continues). position
+                    # defaults to the upper zone ('top') when unspecified — the schema
+                    # Literal is top|center, so a PRESENT value is always valid; an absent
+                    # one lands on 'top' (never the bottom caption zone). Never a crash.
+                    _ct = _ov.get("text")
+                    if not isinstance(_ct, str) or not _ct.strip():
+                        print(
+                            f"[generate-edit] DROP text_overlay 'caption_match' [{_i}]: "
+                            f"missing text content. Render continues without this overlay.",
+                            flush=True,
+                        )
+                        continue
+                    _entry["text"] = _EMOJI_RE.sub("", str(_ct)).strip()
+                    _pos = str(_ov.get("position") or "").strip().lower()
+                    if _pos not in ("top", "center"):
+                        _pos = "top"
+                    _entry["position"] = _pos
+                _to_validated.append(_entry)
+            edit_plan["text_overlays"] = _to_validated
+
+            # ── Zone-aware overlap validation ────────────────────────────────────────
+            # Two overlays may share a time window IF they live in different visual
+            # zones. Only same-zone + overlapping-time is a real collision.
+            #
+            # Per-variant rendered zone for text_overlays — used for collision
+            # detection only. Each variant's component pins to a fixed zone by
+            # design: sticky_note = upper third pin. `caption_match` is dynamic from
+            # its `position` prop. Motion graphics carry their zone explicitly via
+            # the `anchor` field.
+            _TEXT_OVERLAY_ZONE = {
+                "sticky_note":   "upper_third_safe",
+                # "caption_match" resolved below
+            }
+            _CAPTION_POS_TO_ZONE = {
+                "top":    "upper_third_safe",
+                "center": "center",
+                "bottom": "lower_third_safe",
+            }
+
+            def _text_overlay_zone(ov):
+                if ov.get("variant") == "caption_match":
+                    return _CAPTION_POS_TO_ZONE.get(ov.get("position") or "bottom", "lower_third_safe")
+                return _TEXT_OVERLAY_ZONE.get(ov.get("variant"), "center")
+
+            # text_overlay vs text_overlay: same-zone + time-overlap = collision.
+            # Drop the second (later) overlay; the first wins. Render continues.
+            _to_drop_indices = set()
+            for _i in range(len(_to_validated)):
+                if _i in _to_drop_indices:
+                    continue
+                _a = _to_validated[_i]
+                _a_start = _a["_source_start"]
+                _a_end = _a_start + _a["duration_seconds"]
+                _a_zone = _text_overlay_zone(_a)
+                for _j in range(_i + 1, len(_to_validated)):
+                    if _j in _to_drop_indices:
+                        continue
+                    _b = _to_validated[_j]
+                    _b_start = _b["_source_start"]
+                    _b_end = _b_start + _b["duration_seconds"]
+                    _b_zone = _text_overlay_zone(_b)
+                    if _a_zone != _b_zone:
+                        continue  # different zones — coexistence is fine
+                    if _a_start < _b_end and _b_start < _a_end:
+                        print(
+                            f"[generate-edit] DROP text_overlay '{_b['variant']}' "
+                            f"[{_j}]: collides with [{_i}] ('{_a['variant']}') in zone "
+                            f"'{_a_zone}' ({_a_start:.2f}-{_a_end:.2f}s vs "
+                            f"{_b_start:.2f}-{_b_end:.2f}s). Render continues without "
+                            f"the colliding overlay.",
+                            flush=True,
+                        )
+                        _to_drop_indices.add(_j)
+
+            # text_overlay vs emphasis motion_graphic: same-zone + time-overlap = collision.
+            # Emphasis MG windows center slightly before the moment's t (25% pre-roll).
+            # MG zone = its explicit `anchor` field. Drop the text_overlay (the
+            # emphasis MG carries narrative weight); render continues.
+            for _to_idx, _to in enumerate(_to_validated):
+                if _to_idx in _to_drop_indices:
+                    continue
+                _to_start = _to["_source_start"]
+                _to_end = _to_start + _to["duration_seconds"]
+                _to_zone = _text_overlay_zone(_to)
+                for _em in emphasis_moments:
+                    if not _em["motion_graphic"]:
+                        continue
+                    _em_zone = str(_em["motion_graphic"].get("anchor") or "center")
+                    if _to_zone != _em_zone:
+                        continue  # different zones — fine
+                    _em_dur = float(_em["duration"])
+                    _em_mg_start = max(0.0, _em["t"] - _em_dur * 0.25)
+                    _em_mg_end = _em_mg_start + _em_dur
+                    if _to_start < _em_mg_end and _em_mg_start < _to_end:
+                        print(
+                            f"[generate-edit] DROP text_overlay '{_to['variant']}' "
+                            f"[{_to_idx}]: collides with emphasis motion_graphic "
+                            f"'{_em['motion_graphic']['type']}' in zone '{_to_zone}' "
+                            f"({_to_start:.2f}-{_to_end:.2f}s vs "
+                            f"{_em_mg_start:.2f}-{_em_mg_end:.2f}s at emphasis t="
+                            f"{_em['t']:.2f}s). Render continues without the overlay.",
+                            flush=True,
+                        )
+                        _to_drop_indices.add(_to_idx)
+                        break
+
+            # Apply the accumulated overlay drops in one pass (preserves index
+            # references inside the loops above).
+            if _to_drop_indices:
+                _to_validated = [t for _i, t in enumerate(_to_validated) if _i not in _to_drop_indices]
+                edit_plan["text_overlays"] = _to_validated
+
+            if _to_validated:
+                print(
+                    f"[text-overlays] {len(_to_validated)} overlay(s): "
+                    + ", ".join(f"{o['variant']}@{o['_source_start']:.1f}s" for o in _to_validated),
+                    flush=True,
+                )
+
+            # caption_keywords is Gemini's explicit decision — no auto-derivation.
+
+            # ── Parse sound effects ──────────────────────────────────────────────
+            raw_sfx = edit_plan.get("sound_effects", [])
+            sound_effects = []
+            valid_sounds = set(_SFX_CATEGORIES.keys())
+            _sfx_dg_words = edit_plan.get("_deepgram_words") or []
+            for _si, sfx in enumerate(raw_sfx):
+                if not isinstance(sfx, dict):
+                    raise ValueError(f"sound_effects[{_si}] must be an object")
+                if "word_index" not in sfx or "sound" not in sfx:
+                    raise ValueError(
+                        f"sound_effects[{_si}] missing required keys 'word_index' and 'sound'"
+                    )
+                try:
+                    _wi = int(sfx["word_index"])
+                except (TypeError, ValueError):
+                    raise ValueError(
+                        f"sound_effects[{_si}].word_index must be an integer, got "
+                        f"{sfx.get('word_index')!r}"
+                    )
+                if _wi < 0 or _wi >= len(_sfx_dg_words):
+                    raise ValueError(
+                        f"sound_effects[{_si}].word_index={_wi} is out of range "
+                        f"[0, {len(_sfx_dg_words)-1}]."
+                    )
+                if _wi not in _kept_word_indices:
+                    _wt = str(_sfx_dg_words[_wi].get("punctuated_word") or _sfx_dg_words[_wi].get("word") or "").strip()
+                    print(
+                        f"[generate-edit] DROP sound_effect '{sfx.get('sound')}' [{_si}]: "
+                        f"word_index={_wi} ({_wt!r}) targets a REMOVED word — viewer "
+                        f"would never hear the trigger. Render continues without this "
+                        f"SFX.",
+                        flush=True,
+                    )
+                    continue
+                sound = str(sfx["sound"]).strip().lower()
+                if sound not in valid_sounds:
+                    raise ValueError(
+                        f"sound_effects[{_si}].sound={sound!r} is not a canonical name. "
+                        f"Must be one of {sorted(valid_sounds)} — pick the exact "
+                        f"canonical name documented in the SFX section of the prompt."
+                    )
+                # Derive t + word text from the word_index. Python is the single source
+                # of truth for timing — Gemini can't emit a mismatched timestamp.
+                _trigger_w = _sfx_dg_words[_wi]
+                t = float(_trigger_w.get("start") or 0.0)
+                word = str(_trigger_w.get("word") or _trigger_w.get("punctuated_word") or "").strip().lower().rstrip(".,!?;:'\"")
+                # No in-clip pre-roll check — SFX audio plays on the GLOBAL output
+                # timeline via FFmpeg's adelay + amix (see render_multi_clip). The
+                # build-up phase plays over whatever precedes the trigger word in the
+                # output, with no respect for source clip boundaries. The only physical
+                # limit is the output-timeline start (t=0); if the projected trigger
+                # time is within the onset duration of that, adelay clamps to 0 and
+                # the crack lands a couple hundred ms late on the first few words of
+                # the video. No audio is truncated.
+                sound_effects.append({"t": t, "sound": sound, "word": word, "_word_idx": _wi})
+
+            # Sound effects are taken EXACTLY as Gemini provided them. No caps,
+            # no spacing filter, no auto-placement, no dedup. The Gemini prompt is
+            # the single source of truth for SFX placement rules — if a placement
+            # is wrong, the fix is the prompt.
+            if sound_effects:
+                sound_effects.sort(key=lambda x: x["t"])
+                print(f"[generate-edit] Sound effects: {len(sound_effects)} placements", flush=True)
+                for sfx in sound_effects:
+                    print(f"[generate-edit]   {sfx['t']:.1f}s: {sfx['sound']}", flush=True)
+            edit_plan["sound_effects"] = sound_effects
+            edit_plan["_parsed_sound_effects"] = sound_effects
+
+            # Only one remaining boolean: audio_denoise (drives afftdn filter).
+            _ad = edit_plan.get("audio_denoise")
+            if isinstance(_ad, str):
+                edit_plan["audio_denoise"] = _ad.strip().lower() in ("true", "1", "yes")
             else:
+                edit_plan["audio_denoise"] = bool(_ad)
+
+            # Transitions — mirror VALID_TRANSITION_TYPES so adding a type only
+            # edits ONE place (rather than re-syncing several duplicated sets,
+            # which is what caused the DipToBlack derivation-bug crash). "none"
+            # kept as a valid sentinel for no transition.
+            valid_transitions = set(VALID_TRANSITION_TYPES) | {"none"}
+
+            final_cuts = []
+            for _ci, clip_entry in enumerate(validated_cuts):
+                # transition_out is only set by the earlier validated-transition
+                # application block, which rejects unknown types. Any invalid value
+                # reaching here is a derivation bug — fail hard instead of silently
+                # coercing to "none".
+                transition = str(clip_entry.get("transition_out") or "none").strip()
+                if transition not in valid_transitions:
+                    raise RuntimeError(
+                        f"validated_cuts[{_ci}] has transition_out={transition!r} which "
+                        f"is not in {sorted(valid_transitions)}. This is a derivation "
+                        f"bug — transition_out should only ever be set by the upstream "
+                        f"validated-transition block."
+                    )
+                # Speed is Gemini's creative decision — a constant playback rate per
+                # clip. Range 0.7–1.4 covers the entire viral-pacing band. Anything
+                # below 0.7 produces audible audio artifacts; anything above 1.4
+                # reads as fast-forward, not pacing. Reject out-of-range instead of
+                # silently clamping so the prompt's stated range is enforced.
+                _raw_speed = clip_entry.get("speed")
+                if _raw_speed is None:
+                    speed = 1.0
+                else:
+                    try:
+                        speed = float(_raw_speed)
+                    except (TypeError, ValueError):
+                        raise ValueError(
+                            f"validated_cuts[{_ci}].speed={_raw_speed!r} is not a number."
+                        )
+                    if not (0.7 <= speed <= 1.4):
+                        raise ValueError(
+                            f"validated_cuts[{_ci}].speed={speed} is outside the "
+                            f"documented range 0.7–1.4. Set the clip's speed inside "
+                            f"this band or omit the field for default 1.0."
+                        )
+                _new_cut = {
+                    "source_start": clip_entry["source_start"],
+                    "source_end": clip_entry["source_end"],
+                    "transition_out": transition,
+                    "speed": speed,
+                }
+                # Preserve the full PackTransitionExtras dict + zoom effect so the
+                # renderer can forward component-specific props (direction, palette,
+                # title, etc.).
+                if clip_entry.get("_transition_extras"):
+                    _new_cut["_transition_extras"] = clip_entry["_transition_extras"]
+                if clip_entry.get("_zoom_effect"):
+                    _new_cut["_zoom_effect"] = clip_entry["_zoom_effect"]
+                # NOTE: tight-cut overlays no longer travel on clips. They are resolved
+                # as a boundary-keyed list (edit_plan["_resolved_tight_cut_overlays"])
+                # and projected to output frames at render — see the emit loop. This
+                # decouples them from clip-pair structure so mid-clip boundaries (no
+                # split) are decorable.
+                final_cuts.append(_new_cut)
+
+            # Zoom and motion graphics are attached to each emphasis_moment explicitly
+            # by Gemini (emphasis_moments[i].zoom_effect / motion_graphic). No
+            # auto-zoom. If Gemini didn't emit a
+            # zoom_effect on a moment, no zoom fires — that's an intentional decision,
+            # not an omission to repair.
+
+            # Strip legacy fields that older Gemini outputs (or re-edit plans) may
+            # carry. The Remotion-primary pipeline doesn't consume them.
+            edit_plan["cuts"] = final_cuts
+            for _legacy_field in (
+                "teal_orange", "beat_sync", "video_profile", "frame_layout",
+                "vignette", "sharpening", "grain", "denoise", "cinematic_bars",
+                "shadow_lift", "highlight_rolloff", "vibrance", "visual_effects",
+                "remove_words", "target_duration", "clips",
+            ):
+                edit_plan.pop(_legacy_field, None)
+
+            total_clip_duration = sum(max(0, c["source_end"] - c["source_start"]) for c in final_cuts)
+            if video_duration > 0 and total_clip_duration / video_duration < 0.3:
                 print(
-                    f"[generate-edit] Clip {_clip_idx}: merged {len(_ei_list)} "
-                    f"zoom emphasis moments into one zoomEffect type={_dominant_type}.",
+                    f"[generate-edit] WARNING: Gemini's clips only cover {(total_clip_duration / video_duration)*100:.0f}% "
+                    f"of the video ({total_clip_duration:.1f}s of {video_duration:.1f}s)",
                     flush=True,
                 )
 
-    # Item 3 instrumentation (no behavior change): the single-event StepZoom
-    # staircase is suspected to come from a zoom-type-split SEAM — a StepZoom
-    # event whose window lands at a sub-clip boundary next to a different-zoom
-    # sub-clip. A binary StepZoom event provably can't make three scale levels
-    # on its own, and no merge-overlap fired, so log the seam arrangement here.
-    # The next staircase render then reveals whether it's a cross-seam render or
-    # an adjacent-zoom ramp at the boundary. Pure logging — fires only when a
-    # StepZoom event reaches within ~0.30s of a zoom-type-split boundary.
-    if _zoom_type_split_times:
-        _seam_tol_s = 0.30  # ~18 frames @ 60fps, ~9 @ 30fps
-        _split_set = sorted(set(_zoom_type_split_times))
-        for _ci, _clip in enumerate(validated_cuts):
-            _z = _clip.get("_zoom_effect")
-            if not isinstance(_z, dict) or _z.get("type") != "StepZoom":
-                continue
-            _cs = float(_clip["source_start"])
-            _ce = float(_clip["source_end"])
-            _edge_split = [
-                round(_st, 3) for _st in _split_set
-                if abs(_st - _cs) <= _seam_tol_s or abs(_st - _ce) <= _seam_tol_s
-            ]
-            if not _edge_split:
-                continue
-            for _ev in (_z.get("events") or []):
-                _evs = float(_ev.get("startMs") or 0.0) / 1000.0
-                _eve = _evs + float(_ev.get("durationMs") or 0.0) / 1000.0
-                _at_start = _evs <= _cs + _seam_tol_s
-                _at_end = _eve >= _ce - _seam_tol_s
-                if not (_at_start or _at_end):
-                    continue
-                _nb_idx = _ci + 1 if _at_end else _ci - 1
-                _nb = validated_cuts[_nb_idx] if 0 <= _nb_idx < len(validated_cuts) else None
-                _nb_z = _nb.get("_zoom_effect") if isinstance(_nb, dict) else None
-                _nb_type = _nb_z.get("type") if isinstance(_nb_z, dict) else None
-                _nb_win = (
-                    [round(float(_nb["source_start"]), 3), round(float(_nb["source_end"]), 3)]
-                    if _nb is not None else None
-                )
-                print(
-                    f"[zoom-seam] clip={_ci} StepZoom "
-                    f"ev=[{round(_evs, 3)},{round(_eve, 3)}]s "
-                    f"clip_src=[{round(_cs, 3)},{round(_ce, 3)}]s "
-                    f"split_at={_edge_split} "
-                    f"neighbor_type={_nb_type} neighbor_window={_nb_win}",
-                    flush=True,
-                )
+            edit_plan["analysis_data"] = analysis
 
-    for em in emphasis_moments:
-        _layers = []
-        if em["zoom_effect"]: _layers.append(f"zoom={em['zoom_effect']['type']}")
-        if em["motion_graphic"]: _layers.append(f"mg={em['motion_graphic']['type']}@{em['motion_graphic']['anchor']}")
-        print(
-            f"[emphasis] {em['t']:.1f}s {em['type']}({em['intensity']}) "
-            f"layers=[{','.join(_layers) if _layers else 'none'}]",
-            flush=True,
-        )
-    edit_plan["_emphasis_moments"] = emphasis_moments
-
-    # text_overlays — variant-dispatched, required props per variant.
-    # Word-anchored: Gemini emits start_word_index (must be a kept word) and
-    # duration_seconds. Python derives the output-time window from the word's
-    # start timestamp projected through cuts.
-    _to_raw = edit_plan.get("text_overlays")
-    if _to_raw is None:
-        _to_raw = []
-    if not isinstance(_to_raw, list):
-        raise ValueError("text_overlays must be an array")
-    _to_validated = []
-    for _i, _ov in enumerate(_to_raw):
-        if not isinstance(_ov, dict):
-            raise ValueError(f"text_overlays[{_i}] must be an object")
-        _var = str(_ov.get("variant") or "").strip()
-        if _var not in _valid_text_overlay_variants:
-            raise ValueError(
-                f"text_overlays[{_i}].variant must be one of {sorted(_valid_text_overlay_variants)}, got {_var!r}"
-            )
-        try:
-            _swi = int(_ov["start_word_index"])
-        except (KeyError, TypeError, ValueError):
-            raise ValueError(
-                f"text_overlays[{_i}] needs integer start_word_index"
-            )
-        if _swi < 0 or _swi >= len(_dg_words):
-            raise ValueError(
-                f"text_overlays[{_i}].start_word_index={_swi} out of range "
-                f"[0, {len(_dg_words)-1}]"
-            )
-        if _swi not in _kept_word_indices:
-            _wt = str(_dg_words[_swi].get("punctuated_word") or _dg_words[_swi].get("word") or "").strip()
             print(
-                f"[generate-edit] DROP text_overlay '{_var}' [{_i}]: "
-                f"start_word_index={_swi} ({_wt!r}) targets a REMOVED word. "
-                f"Render continues without this overlay.",
+                f"[generate-edit] Recipe: {len(final_cuts)} clips, "
+                f"{len(edit_plan.get('sound_effects', []))} sfx, "
+                f"intent={edit_plan.get('color_intent', 'none')}, "
+                f"captions={edit_plan.get('caption_style', 'none')}",
                 flush=True,
             )
-            continue
-        try:
-            _du = float(_ov["duration_seconds"])
-        except (KeyError, TypeError, ValueError):
-            raise ValueError(
-                f"text_overlays[{_i}] needs numeric duration_seconds"
-            )
-        if _du < 0.3 or _du > 10.0:
-            raise ValueError(f"text_overlays[{_i}].duration_seconds out of range 0.3..10.0")
-        # No rounding — match clip source bounds exactly. See the same
-        # comment on motion_graphics _sw_start above for the precision-bug
-        # class this avoids.
-        _source_start = float(_dg_words[_swi].get("start") or 0)
-        _entry = {
-            "variant": _var,
-            "start_word_index": _swi,
-            "_source_start": _source_start,
-            "duration_seconds": _du,
-        }
-        if _var == "sticky_note":
-            # notes is variant-required but schema-OPTIONAL (Optional[List]=None),
-            # so Vertex omits it when empty. A sticky_note with no notes has no
-            # content → DROP it (render continues), never crash. >3 notes → keep
-            # the first 3; a note without text is skipped.
-            _notes = _ov.get("notes")
-            if not isinstance(_notes, list) or not _notes:
-                print(
-                    f"[generate-edit] DROP text_overlay 'sticky_note' [{_i}]: "
-                    f"no notes content. Render continues without this overlay.",
-                    flush=True,
-                )
-                continue
-            _entry["notes"] = []
-            for _nn in _notes[:3]:
-                if (not isinstance(_nn, dict)
-                        or not isinstance(_nn.get("text"), str)
-                        or not _nn["text"].strip()):
-                    continue
-                _entry["notes"].append({
-                    "text": _EMOJI_RE.sub("", str(_nn["text"])).strip(),
-                    "color": str(_nn.get("color") or "#FFEB3B"),
-                    "rotation": float(_nn.get("rotation") or 0),
-                })
-            if not _entry["notes"]:
-                print(
-                    f"[generate-edit] DROP text_overlay 'sticky_note' [{_i}]: "
-                    f"no note carried text. Render continues without this overlay.",
-                    flush=True,
-                )
-                continue
-        elif _var == "caption_match":
-            # text + position are variant-required but schema-OPTIONAL, so Vertex
-            # omits them. No text → no content → DROP (render continues). position
-            # defaults to the upper zone ('top') when unspecified — the schema
-            # Literal is top|center, so a PRESENT value is always valid; an absent
-            # one lands on 'top' (never the bottom caption zone). Never a crash.
-            _ct = _ov.get("text")
-            if not isinstance(_ct, str) or not _ct.strip():
-                print(
-                    f"[generate-edit] DROP text_overlay 'caption_match' [{_i}]: "
-                    f"missing text content. Render continues without this overlay.",
-                    flush=True,
-                )
-                continue
-            _entry["text"] = _EMOJI_RE.sub("", str(_ct)).strip()
-            _pos = str(_ov.get("position") or "").strip().lower()
-            if _pos not in ("top", "center"):
-                _pos = "top"
-            _entry["position"] = _pos
-        _to_validated.append(_entry)
-    edit_plan["text_overlays"] = _to_validated
 
-    # ── Zone-aware overlap validation ────────────────────────────────────────
-    # Two overlays may share a time window IF they live in different visual
-    # zones. Only same-zone + overlapping-time is a real collision.
-    #
-    # Per-variant rendered zone for text_overlays — used for collision
-    # detection only. Each variant's component pins to a fixed zone by
-    # design: sticky_note = upper third pin. `caption_match` is dynamic from
-    # its `position` prop. Motion graphics carry their zone explicitly via
-    # the `anchor` field.
-    _TEXT_OVERLAY_ZONE = {
-        "sticky_note":   "upper_third_safe",
-        # "caption_match" resolved below
-    }
-    _CAPTION_POS_TO_ZONE = {
-        "top":    "upper_third_safe",
-        "center": "center",
-        "bottom": "lower_third_safe",
-    }
-
-    def _text_overlay_zone(ov):
-        if ov.get("variant") == "caption_match":
-            return _CAPTION_POS_TO_ZONE.get(ov.get("position") or "bottom", "lower_third_safe")
-        return _TEXT_OVERLAY_ZONE.get(ov.get("variant"), "center")
-
-    # text_overlay vs text_overlay: same-zone + time-overlap = collision.
-    # Drop the second (later) overlay; the first wins. Render continues.
-    _to_drop_indices = set()
-    for _i in range(len(_to_validated)):
-        if _i in _to_drop_indices:
-            continue
-        _a = _to_validated[_i]
-        _a_start = _a["_source_start"]
-        _a_end = _a_start + _a["duration_seconds"]
-        _a_zone = _text_overlay_zone(_a)
-        for _j in range(_i + 1, len(_to_validated)):
-            if _j in _to_drop_indices:
-                continue
-            _b = _to_validated[_j]
-            _b_start = _b["_source_start"]
-            _b_end = _b_start + _b["duration_seconds"]
-            _b_zone = _text_overlay_zone(_b)
-            if _a_zone != _b_zone:
-                continue  # different zones — coexistence is fine
-            if _a_start < _b_end and _b_start < _a_end:
-                print(
-                    f"[generate-edit] DROP text_overlay '{_b['variant']}' "
-                    f"[{_j}]: collides with [{_i}] ('{_a['variant']}') in zone "
-                    f"'{_a_zone}' ({_a_start:.2f}-{_a_end:.2f}s vs "
-                    f"{_b_start:.2f}-{_b_end:.2f}s). Render continues without "
-                    f"the colliding overlay.",
-                    flush=True,
-                )
-                _to_drop_indices.add(_j)
-
-    # text_overlay vs emphasis motion_graphic: same-zone + time-overlap = collision.
-    # Emphasis MG windows center slightly before the moment's t (25% pre-roll).
-    # MG zone = its explicit `anchor` field. Drop the text_overlay (the
-    # emphasis MG carries narrative weight); render continues.
-    for _to_idx, _to in enumerate(_to_validated):
-        if _to_idx in _to_drop_indices:
-            continue
-        _to_start = _to["_source_start"]
-        _to_end = _to_start + _to["duration_seconds"]
-        _to_zone = _text_overlay_zone(_to)
-        for _em in emphasis_moments:
-            if not _em["motion_graphic"]:
-                continue
-            _em_zone = str(_em["motion_graphic"].get("anchor") or "center")
-            if _to_zone != _em_zone:
-                continue  # different zones — fine
-            _em_dur = float(_em["duration"])
-            _em_mg_start = max(0.0, _em["t"] - _em_dur * 0.25)
-            _em_mg_end = _em_mg_start + _em_dur
-            if _to_start < _em_mg_end and _em_mg_start < _to_end:
-                print(
-                    f"[generate-edit] DROP text_overlay '{_to['variant']}' "
-                    f"[{_to_idx}]: collides with emphasis motion_graphic "
-                    f"'{_em['motion_graphic']['type']}' in zone '{_to_zone}' "
-                    f"({_to_start:.2f}-{_to_end:.2f}s vs "
-                    f"{_em_mg_start:.2f}-{_em_mg_end:.2f}s at emphasis t="
-                    f"{_em['t']:.2f}s). Render continues without the overlay.",
-                    flush=True,
-                )
-                _to_drop_indices.add(_to_idx)
-                break
-
-    # Apply the accumulated overlay drops in one pass (preserves index
-    # references inside the loops above).
-    if _to_drop_indices:
-        _to_validated = [t for _i, t in enumerate(_to_validated) if _i not in _to_drop_indices]
-        edit_plan["text_overlays"] = _to_validated
-
-    if _to_validated:
-        print(
-            f"[text-overlays] {len(_to_validated)} overlay(s): "
-            + ", ".join(f"{o['variant']}@{o['_source_start']:.1f}s" for o in _to_validated),
-            flush=True,
-        )
-
-    # caption_keywords is Gemini's explicit decision — no auto-derivation.
-
-    # ── Parse sound effects ──────────────────────────────────────────────
-    raw_sfx = edit_plan.get("sound_effects", [])
-    sound_effects = []
-    valid_sounds = set(_SFX_CATEGORIES.keys())
-    _sfx_dg_words = edit_plan.get("_deepgram_words") or []
-    for _si, sfx in enumerate(raw_sfx):
-        if not isinstance(sfx, dict):
-            raise ValueError(f"sound_effects[{_si}] must be an object")
-        if "word_index" not in sfx or "sound" not in sfx:
-            raise ValueError(
-                f"sound_effects[{_si}] missing required keys 'word_index' and 'sound'"
-            )
-        try:
-            _wi = int(sfx["word_index"])
-        except (TypeError, ValueError):
-            raise ValueError(
-                f"sound_effects[{_si}].word_index must be an integer, got "
-                f"{sfx.get('word_index')!r}"
-            )
-        if _wi < 0 or _wi >= len(_sfx_dg_words):
-            raise ValueError(
-                f"sound_effects[{_si}].word_index={_wi} is out of range "
-                f"[0, {len(_sfx_dg_words)-1}]."
-            )
-        if _wi not in _kept_word_indices:
-            _wt = str(_sfx_dg_words[_wi].get("punctuated_word") or _sfx_dg_words[_wi].get("word") or "").strip()
+            return edit_plan
+        except (ValueError, RuntimeError) as _repair_err:
+            # Post-parse validation failure — transport/API errors never land
+            # here (the Gemini call sits outside this try).
+            if isinstance(_repair_err, RecipeInvalidError):
+                raise  # defensive: nothing in the span raises it today
+            if _repair_attempt >= _repair_max or not _repair_budget_ok:
+                raise RecipeInvalidError(
+                    f"RECIPE_INVALID after {_repair_attempt + 1} attempt(s): {_repair_err}"
+                ) from _repair_err
             print(
-                f"[generate-edit] DROP sound_effect '{sfx.get('sound')}' [{_si}]: "
-                f"word_index={_wi} ({_wt!r}) targets a REMOVED word — viewer "
-                f"would never hear the trigger. Render continues without this "
-                f"SFX.",
+                f"[recipe-repair] attempt={_repair_attempt + 1} "
+                f"reason={str(_repair_err)[:200]}",
                 flush=True,
             )
-            continue
-        sound = str(sfx["sound"]).strip().lower()
-        if sound not in valid_sounds:
-            raise ValueError(
-                f"sound_effects[{_si}].sound={sound!r} is not a canonical name. "
-                f"Must be one of {sorted(valid_sounds)} — pick the exact "
-                f"canonical name documented in the SFX section of the prompt."
+            _post_user_attempt = post_user + (
+                "\n\nThe validator rejected one element of the previous plan. "
+                "Re-emit the complete recipe JSON with this corrected:\n"
+                f"{_repair_err}"
             )
-        # Derive t + word text from the word_index. Python is the single source
-        # of truth for timing — Gemini can't emit a mismatched timestamp.
-        _trigger_w = _sfx_dg_words[_wi]
-        t = float(_trigger_w.get("start") or 0.0)
-        word = str(_trigger_w.get("word") or _trigger_w.get("punctuated_word") or "").strip().lower().rstrip(".,!?;:'\"")
-        # No in-clip pre-roll check — SFX audio plays on the GLOBAL output
-        # timeline via FFmpeg's adelay + amix (see render_multi_clip). The
-        # build-up phase plays over whatever precedes the trigger word in the
-        # output, with no respect for source clip boundaries. The only physical
-        # limit is the output-timeline start (t=0); if the projected trigger
-        # time is within the onset duration of that, adelay clamps to 0 and
-        # the crack lands a couple hundred ms late on the first few words of
-        # the video. No audio is truncated.
-        sound_effects.append({"t": t, "sound": sound, "word": word, "_word_idx": _wi})
-
-    # Sound effects are taken EXACTLY as Gemini provided them. No caps,
-    # no spacing filter, no auto-placement, no dedup. The Gemini prompt is
-    # the single source of truth for SFX placement rules — if a placement
-    # is wrong, the fix is the prompt.
-    if sound_effects:
-        sound_effects.sort(key=lambda x: x["t"])
-        print(f"[generate-edit] Sound effects: {len(sound_effects)} placements", flush=True)
-        for sfx in sound_effects:
-            print(f"[generate-edit]   {sfx['t']:.1f}s: {sfx['sound']}", flush=True)
-    edit_plan["sound_effects"] = sound_effects
-    edit_plan["_parsed_sound_effects"] = sound_effects
-
-    # Only one remaining boolean: audio_denoise (drives afftdn filter).
-    _ad = edit_plan.get("audio_denoise")
-    if isinstance(_ad, str):
-        edit_plan["audio_denoise"] = _ad.strip().lower() in ("true", "1", "yes")
-    else:
-        edit_plan["audio_denoise"] = bool(_ad)
-
-    # Transitions — mirror VALID_TRANSITION_TYPES so adding a type only
-    # edits ONE place (rather than re-syncing several duplicated sets,
-    # which is what caused the DipToBlack derivation-bug crash). "none"
-    # kept as a valid sentinel for no transition.
-    valid_transitions = set(VALID_TRANSITION_TYPES) | {"none"}
-
-    final_cuts = []
-    for _ci, clip_entry in enumerate(validated_cuts):
-        # transition_out is only set by the earlier validated-transition
-        # application block, which rejects unknown types. Any invalid value
-        # reaching here is a derivation bug — fail hard instead of silently
-        # coercing to "none".
-        transition = str(clip_entry.get("transition_out") or "none").strip()
-        if transition not in valid_transitions:
-            raise RuntimeError(
-                f"validated_cuts[{_ci}] has transition_out={transition!r} which "
-                f"is not in {sorted(valid_transitions)}. This is a derivation "
-                f"bug — transition_out should only ever be set by the upstream "
-                f"validated-transition block."
-            )
-        # Speed is Gemini's creative decision — a constant playback rate per
-        # clip. Range 0.7–1.4 covers the entire viral-pacing band. Anything
-        # below 0.7 produces audible audio artifacts; anything above 1.4
-        # reads as fast-forward, not pacing. Reject out-of-range instead of
-        # silently clamping so the prompt's stated range is enforced.
-        _raw_speed = clip_entry.get("speed")
-        if _raw_speed is None:
-            speed = 1.0
-        else:
-            try:
-                speed = float(_raw_speed)
-            except (TypeError, ValueError):
-                raise ValueError(
-                    f"validated_cuts[{_ci}].speed={_raw_speed!r} is not a number."
-                )
-            if not (0.7 <= speed <= 1.4):
-                raise ValueError(
-                    f"validated_cuts[{_ci}].speed={speed} is outside the "
-                    f"documented range 0.7–1.4. Set the clip's speed inside "
-                    f"this band or omit the field for default 1.0."
-                )
-        _new_cut = {
-            "source_start": clip_entry["source_start"],
-            "source_end": clip_entry["source_end"],
-            "transition_out": transition,
-            "speed": speed,
-        }
-        # Preserve the full PackTransitionExtras dict + zoom effect so the
-        # renderer can forward component-specific props (direction, palette,
-        # title, etc.).
-        if clip_entry.get("_transition_extras"):
-            _new_cut["_transition_extras"] = clip_entry["_transition_extras"]
-        if clip_entry.get("_zoom_effect"):
-            _new_cut["_zoom_effect"] = clip_entry["_zoom_effect"]
-        # NOTE: tight-cut overlays no longer travel on clips. They are resolved
-        # as a boundary-keyed list (edit_plan["_resolved_tight_cut_overlays"])
-        # and projected to output frames at render — see the emit loop. This
-        # decouples them from clip-pair structure so mid-clip boundaries (no
-        # split) are decorable.
-        final_cuts.append(_new_cut)
-
-    # Zoom and motion graphics are attached to each emphasis_moment explicitly
-    # by Gemini (emphasis_moments[i].zoom_effect / motion_graphic). No
-    # auto-zoom. If Gemini didn't emit a
-    # zoom_effect on a moment, no zoom fires — that's an intentional decision,
-    # not an omission to repair.
-
-    # Strip legacy fields that older Gemini outputs (or re-edit plans) may
-    # carry. The Remotion-primary pipeline doesn't consume them.
-    edit_plan["cuts"] = final_cuts
-    for _legacy_field in (
-        "teal_orange", "beat_sync", "video_profile", "frame_layout",
-        "vignette", "sharpening", "grain", "denoise", "cinematic_bars",
-        "shadow_lift", "highlight_rolloff", "vibrance", "visual_effects",
-        "remove_words", "target_duration", "clips",
-    ):
-        edit_plan.pop(_legacy_field, None)
-
-    total_clip_duration = sum(max(0, c["source_end"] - c["source_start"]) for c in final_cuts)
-    if video_duration > 0 and total_clip_duration / video_duration < 0.3:
-        print(
-            f"[generate-edit] WARNING: Gemini's clips only cover {(total_clip_duration / video_duration)*100:.0f}% "
-            f"of the video ({total_clip_duration:.1f}s of {video_duration:.1f}s)",
-            flush=True,
-        )
-
-    edit_plan["analysis_data"] = analysis
-
-    print(
-        f"[generate-edit] Recipe: {len(final_cuts)} clips, "
-        f"{len(edit_plan.get('sound_effects', []))} sfx, "
-        f"intent={edit_plan.get('color_intent', 'none')}, "
-        f"captions={edit_plan.get('caption_style', 'none')}",
-        flush=True,
-    )
-
-    return edit_plan
 
 
 # ─── PLAN-DIFF (RE-EDIT) ─────────────────────────────────────────────────────
@@ -17384,6 +17490,16 @@ def _resolve_caption_extra_props(style, keywords, edit_plan):
 
 # ─── MAIN HANDLER ─────────────────────────────────────────────────────────────
 
+class RecipeInvalidError(ValueError):
+    """A Gemini-emitted plan failed post-parse validation and the repair loop
+    exhausted its attempts (or was disabled). Wraps the final validation error
+    as __cause__. Carries the RECIPE_INVALID sentinel in its message so
+    classify_error routes it to its own class instead of the UNKNOWN
+    [error-fallback] bucket (or a greedy substring absorption like
+    "Gemini" → EDITOR_GENERIC). Raised only by the recipe repair loop in
+    generate_edit_gemini."""
+
+
 def classify_error(e):
     """
     Convert a pipeline exception into structured error data for the iOS app.
@@ -17421,6 +17537,20 @@ def classify_error(e):
             "requires_new_video": new_video,
             "requires_vibe_change": vibe,
         }
+
+    # ── Plan validation (recipe repair loop exhausted) ────────────────
+    # ORDERED FIRST — the validator messages routinely contain substrings
+    # the greedier classes below absorb ("Gemini" → EDITOR_GENERIC,
+    # "broll" → BROLL, "removed all words" → EMPTY_EDIT), so this sentinel
+    # must match before any of them. PLAN_VALIDATION (below) stays owned by
+    # pydantic-shaped render-input errors; RECIPE_INVALID is the
+    # post-parse recipe-validation class.
+    if "RECIPE_INVALID" in msg:
+        return _e(
+            "RECIPE_INVALID",
+            "The edit plan didn't pass validation after a retry — please run the job again.",
+            retryable=True,
+        )
 
     # ── Input validation ──────────────────────────────────────────────
     if "NOT_TALKING_HEAD" in msg:

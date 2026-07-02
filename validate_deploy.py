@@ -3810,6 +3810,63 @@ def _handler_error_shape():
     assert "error" in res
 
 
+@check("crossfade-on-tight DEMOTES to a light overlay instead of raising")
+def _repair_demotion_path():
+    # Stubbed run of the REAL generate_edit_gemini: 12 synthetic words, word 5
+    # mechanically removed → the splice after src word 4 has a 0.45s gap
+    # (< 0.70s) → TIGHT. A ZoomThrough there used to raise ValueError and kill
+    # the job; it must now demote to one light tight_cut_overlay at that
+    # boundary with a divergence log, and the plan must come back whole.
+    import contextlib as _ctx
+    import copy as _copy
+    import io as _io
+    _words = [
+        {"word": f"w{i}", "punctuated_word": f"w{i}", "start": round(i * 0.4, 2),
+         "end": round(i * 0.4 + 0.35, 2), "confidence": 0.99, "speaker": 0}
+        for i in range(12)
+    ]
+    _plan = {
+        "caption_style": "Prime", "caption_keywords": [],
+        "transitions": [{"type": "ZoomThrough", "after_word_index": 4}],
+        "tight_cut_overlays": [], "motion_graphics": [], "emphasis_moments": [],
+        "text_overlays": [], "broll_clips": [], "sound_effects": [],
+        "audio_denoise": False, "outro": "none", "aspect_ratio": "9:16",
+    }
+    _saved = (handler.compute_mechanical_cuts, handler._call_gemini_post_cuts,
+              handler._get_genai_client)
+    try:
+        handler.compute_mechanical_cuts = lambda w, source_path=None: {
+            "remove_words": [{"word_index": 5}], "notes": "stub", "pacing": "fast"}
+        handler._call_gemini_post_cuts = lambda *a, **k: _copy.deepcopy(_plan)
+        handler._get_genai_client = lambda: None
+        _buf = _io.StringIO()
+        with _ctx.redirect_stdout(_buf):
+            _out = handler.generate_edit_gemini(
+                video_path="/nonexistent.mp4", vibe="t", duration=4.8,
+                deepgram_words=_copy.deepcopy(_words), inline_video_bytes=b"x",
+            )
+    finally:
+        (handler.compute_mechanical_cuts, handler._call_gemini_post_cuts,
+         handler._get_genai_client) = _saved
+    _ovl = [o for o in (_out.get("_resolved_tight_cut_overlays") or [])
+            if o.get("after_word_index") == 4]
+    assert len(_ovl) == 1, f"expected 1 demoted overlay at awi=4, got {_ovl}"
+    assert _ovl[0]["type"] in ("ShutterFlash", "LightLeak", "NewspaperWipe")
+    assert "action=demote" in _buf.getvalue(), "demote divergence line missing"
+
+
+@check("RecipeInvalidError classifies RECIPE_INVALID ahead of greedy absorbers")
+def _repair_classification_entry():
+    # The sentinel must win even when the message contains every substring the
+    # greedier classes match ("Gemini" → EDITOR_GENERIC, "broll" → BROLL,
+    # "removed all words" → EMPTY_EDIT).
+    _err = handler.RecipeInvalidError(
+        "RECIPE_INVALID after 1 attempt(s): Gemini broll plan removed all words")
+    _cls = handler.classify_error(_err)
+    assert _cls.get("error_code") == "RECIPE_INVALID", _cls
+    assert _cls.get("retryable") is True
+
+
 # ─── REPORT ────────────────────────────────────────────────────────────
 print(f"\n{'=' * 64}")
 print(f"RESULTS: {len(_passed)} passed, {len(_failures)} failed")
