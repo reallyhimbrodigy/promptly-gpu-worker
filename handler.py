@@ -7295,6 +7295,7 @@ def generate_edit_gemini(
     gemini_file=None, cached_response=None, inline_video_bytes=None,
     prior_plan=None, prior_plan_change_request=None,
     premium=False, resolved_policy=None,
+    force_safe_reason=None,
 ):
     _pre_analysis = cached_response
 
@@ -7817,6 +7818,14 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
     ).strip().lower() not in ("0", "false", "no", "off")
     _use_safe = False
     _safe_reason = ""
+    # Outermost-rung re-entry (P1a): the rescue re-run forces the recipe
+    # stage straight down the deterministic safe path — no Gemini call, no
+    # repair loop, the exact span every recipe flows through. Honors the
+    # same kill switch; with empty kept_words the normal path proceeds (and
+    # fails honestly — that job class is deny-listed at the rescue gate).
+    if force_safe_reason and _safe_edit_on and kept_words:
+        _use_safe = True
+        _safe_reason = str(force_safe_reason)
     for _repair_attempt in range(_repair_max + 2):
         if _repair_attempt > _repair_max and not _use_safe:
             break  # the extra slot is safe-mode only
@@ -18536,6 +18545,125 @@ def _async_job_status(job_id, **kw):
     threading.Thread(target=lambda: write_job_status(job_id, **kw), daemon=True).start()
 
 
+# ─── ENHANCEMENT FAIL-OPEN (zero-fatal ladder · P1b) ─────────────────────────
+def _enhancement_guard(subsystem, err):
+    """An enhancement may never outrank the video: one grep-stable line +
+    divergence when a whole enhancement subsystem is dropped because its
+    orchestration glue raised. The job proceeds with the remaining plan.
+
+    Ordering within the ladder: these wrappers catch CLOSEST (best outcome —
+    the real plan minus one subsystem); the outermost rescue (P1a, below) is
+    the universal net beneath them; the render degrade ladder covers failures
+    inside the render callable itself. MG/SFX/TCO resolution is NOT wrapped
+    here — it lives inside the recipe span (repair net) and render_multi_clip
+    (degrade ladder), which already own those failures.
+    """
+    print(
+        f"[enhancement-guard] dropped={subsystem} "
+        f"err={type(err).__name__}: {str(err)[:120]}",
+        flush=True,
+    )
+    _record_divergence(
+        "enhancement", {"subsystem": subsystem}, "drop_enhancement",
+        reason="an enhancement may never outrank the video",
+    )
+
+
+# ─── THE OUTERMOST RUNG (zero-fatal ladder · P1a) ────────────────────────────
+# Error classes for which a safe-edit re-run is pointless or wrong. Everything
+# NOT in this set — including error codes that don't exist yet — is eligible:
+# that's the property that converts FUTURE orchestration bugs into delivered
+# videos instead of dead jobs. Two families:
+#   input rejects   — honest "change your input" answers; re-running can't fix
+#                     the input (and must not blur the honest message).
+#   irreducible     — the inner nets already exhausted (RENDER_FATAL = the
+#                     degrade ladder's stripped rung failed; RECIPE_INVALID =
+#                     the safe recipe itself failed validation), or the source/
+#                     transcript never materialized to build a safe edit from.
+_OUTER_RESCUE_DENY = frozenset({
+    "NO_SPEECH", "NOT_TALKING_HEAD", "INVALID_SOURCE_URL", "INVALID_FORMAT",
+    "WRONG_ORIENTATION", "EMPTY_UPLOAD",
+    "UPLOAD_NEVER_STARTED", "UPLOAD_STALLED", "UPLOAD_TIMEOUT",
+    "S3_ACCESS", "S3_GENERIC", "TRANSCRIPTION",
+    "RENDER_FATAL", "RECIPE_INVALID",
+})
+_RESCUE_REPREP_S = 90.0   # projected re-download + re-transcribe + re-probe
+_RESCUE_MARGIN_S = 60.0   # slack under the 900s job budget after the render
+
+
+def _outer_safe_rescue(job, input_data, classified, state, run_fn=None):
+    """Convert an eligible pipeline failure into a delivered video via ONE
+    guarded re-run of the whole handler with the safe-edit marker set.
+
+    The marker (input_data["_safe_edit_rescue"]) does two jobs: it forces the
+    recipe stage down the deterministic build_safe_recipe path (no Gemini),
+    and it is the RE-ENTRY GUARD — a failure inside the rescue run sees the
+    marker already present, skips this rung, and exits through its own error
+    path; this caller then falls through to the ORIGINAL error envelope.
+    Recursion depth is structurally ≤ 2.
+
+    Returns the inner run's success payload, or None → caller proceeds down
+    the original error path. NEVER raises (a bug in the rescue must not mask
+    the original error).
+    """
+    try:
+        if os.environ.get("SAFE_EDIT_FALLBACK_ENABLED", "1").strip().lower() in (
+            "0", "false", "no", "off"
+        ):
+            return None
+        if not isinstance(input_data, dict) or input_data.get("_safe_edit_rescue"):
+            return None  # re-entry guard — one attempt per job
+        code = str((classified or {}).get("error_code") or "UNKNOWN")
+        if code in _OUTER_RESCUE_DENY:
+            return None
+        state = state if isinstance(state, dict) else {}
+        if str(state.get("mode") or "") != "full":
+            # Re-edit jobs (tweak/render_only/redraft) keep their existing
+            # delivered video; replacing it with a bare safe edit is a
+            # downgrade, not a save.
+            return None
+        if not state.get("ready"):
+            return None  # transcript + prepared source never materialized
+        _elapsed = max(0.0, time.time() - float(state.get("t0") or 0.0))
+        _dur = float(state.get("dur") or 0.0)
+        _projected = (
+            _RESCUE_REPREP_S
+            + max(60.0, min(240.0, (_dur if _dur > 0 else 80.0) * 3.0))
+            + _RESCUE_MARGIN_S
+        )
+        if _elapsed + _projected > 900.0:
+            print(
+                f"[safe-edit] outer rescue skipped — budget "
+                f"(elapsed={_elapsed:.0f}s projected={_projected:.0f}s)",
+                flush=True,
+            )
+            return None
+        print(f"[safe-edit] engaged reason=outer:{code}", flush=True)
+        _record_divergence(
+            "outer", {"error_code": code}, "safe_edit_rescue",
+            reason="orchestration failure outside the inner nets — "
+                   "one guarded safe-edit re-run through the normal path",
+        )
+        input_data["_safe_edit_rescue"] = f"outer:{code}"
+        _inner = (run_fn or handler)(job)
+        if isinstance(_inner, dict) and _inner.get("status") == "success":
+            return _inner
+        print(
+            "[safe-edit] outer rescue did not produce a video — "
+            "original error stands",
+            flush=True,
+        )
+        return None
+    except Exception as _resc_err:
+        print(
+            f"[safe-edit] outer rescue itself failed "
+            f"({type(_resc_err).__name__}: {str(_resc_err)[:120]}) — "
+            f"original error stands",
+            flush=True,
+        )
+        return None
+
+
 def read_job_status(job_id):
     """Read the durable status row by id — the poll contract. Fail-open to
     {'status': 'unknown'}. (Recommended path: the frontend polls Supabase
@@ -19390,6 +19518,10 @@ def handler(job):
     premium_ctx = None       # Phase 1 premium scaffold (assigned at the tier fork; torn down in finally)
     _cost_meter = None
     route_premium = False
+    # Outermost-rung eligibility state (P1a) — pre-initialized so the outer
+    # except can ALWAYS read it. "ready" flips once transcript + prepared
+    # source are both established in this scope; mode/dur recorded there too.
+    _rescue_state = {"ready": False, "mode": "", "dur": 0.0, "t0": time.time()}
     try:
         app_url = os.environ.get("APP_URL", "").rstrip("/")
 
@@ -21148,6 +21280,9 @@ def handler(job):
                     prior_plan_change_request=_gr_dir,
                     premium=route_premium,
                     resolved_policy=_recipe_policy,
+                    force_safe_reason=(
+                        str(input_data.get("_safe_edit_rescue") or "").strip() or None
+                    ),
                 )
             finally:
                 _gemini_hb_stop.set()
@@ -21447,30 +21582,33 @@ def handler(job):
         # this block → byte-identical. (Deshake + the low-light grade are
         # applied earlier, inside _do_fps_normalize.) Fail-open: defaults to
         # the recipe's own audio_denoise choice if anything is unavailable.
-        if route_premium and isinstance(edit_plan, dict):
-            _ad_feat = getattr(getattr(resolved_policy, "features", None), "audio_denoise", "on")
-            if _ad_feat == "off":
-                # User asked to leave the audio raw — honor it even if the
-                # recipe (or the noise heuristic) turned denoise on.
-                if edit_plan.get("audio_denoise"):
-                    edit_plan["audio_denoise"] = False
-                    print(
-                        "[remediation] denoise forced off — EditPolicy "
-                        "audio_denoise=off (premium, silent)",
-                        flush=True,
-                    )
-            else:
-                # Policy permits denoise: guarantee it's on for a genuinely
-                # noisy source (noise_floor > -40 dB — the same bar the recipe
-                # uses), even if the recipe didn't set it.
-                _nf = (input_quality or {}).get("noise_floor_db", -70.0)
-                if _nf > -40.0 and not edit_plan.get("audio_denoise"):
-                    edit_plan["audio_denoise"] = True
-                    print(
-                        f"[remediation] denoise ensured on — noisy source "
-                        f"(noise_floor={_nf}dB, premium, silent)",
-                        flush=True,
-                    )
+        try:  # P1b fail-open: recipe's own denoise choice stands
+            if route_premium and isinstance(edit_plan, dict):
+                _ad_feat = getattr(getattr(resolved_policy, "features", None), "audio_denoise", "on")
+                if _ad_feat == "off":
+                    # User asked to leave the audio raw — honor it even if the
+                    # recipe (or the noise heuristic) turned denoise on.
+                    if edit_plan.get("audio_denoise"):
+                        edit_plan["audio_denoise"] = False
+                        print(
+                            "[remediation] denoise forced off — EditPolicy "
+                            "audio_denoise=off (premium, silent)",
+                            flush=True,
+                        )
+                else:
+                    # Policy permits denoise: guarantee it's on for a genuinely
+                    # noisy source (noise_floor > -40 dB — the same bar the recipe
+                    # uses), even if the recipe didn't set it.
+                    _nf = (input_quality or {}).get("noise_floor_db", -70.0)
+                    if _nf > -40.0 and not edit_plan.get("audio_denoise"):
+                        edit_plan["audio_denoise"] = True
+                        print(
+                            f"[remediation] denoise ensured on — noisy source "
+                            f"(noise_floor={_nf}dB, premium, silent)",
+                            flush=True,
+                        )
+        except Exception as _eg_err:
+            _enhancement_guard('audio_denoise_remediation', _eg_err)
 
         # ── Layer 3 safety net for guided_redraft mode ───────────────────
         # The freshly-generated edit_plan came from generate_edit_gemini
@@ -21518,30 +21656,40 @@ def handler(job):
         _broll_fetch_pool = None
         _broll_fetch_futures = {}
         broll_clips = edit_plan.get("broll_clips") or []
-        if broll_clips:
-            send_progress(job_id, "broll_search", 52, "Sourcing B-roll cutaways", app_url)
-            print(f"[broll] Starting parallel fetch of {len(broll_clips)} B-roll clip(s) (overlapping with face detect)...", flush=True)
-            # Resolve transcript (cached) so we can pass the actual spoken words at the
-            # cutaway window into the visual-pick step. broll_clip indices were already
-            # _xlate'd to deepgram-word space upstream.
-            _broll_tx_words = (_get_resolved_transcript().get("words") or [])
-            _broll_fetch_pool = concurrent.futures.ThreadPoolExecutor(max_workers=min(5, len(broll_clips)))
-            for _bi, _bc in enumerate(broll_clips):
-                # Per-entry, never-raises, no cross-iteration state (the old
-                # inline version leaked _sw/_ew across iterations AND died
-                # unbound when the first entry's indices didn't parse).
-                _dlg_text, _mid_s = _broll_window_context(_bc, _broll_tx_words)
-                _fut = _broll_fetch_pool.submit(
-                    fetch_broll_clip,
-                    _bc,  # pass whole entry — fetch_broll_clip mutates it with resolved Pexels metadata
-                    float(_bc.get("duration") or 2.0),
-                    work_dir,
-                    dialogue_reason=str(_bc.get("reason") or ""),
-                    dialogue_text=_dlg_text,
-                    source_path=_raw_source,
-                    source_mid_s=_mid_s,
-                )
-                _broll_fetch_futures[_fut] = _bi
+        try:  # P1b fail-open: b-roll submission (job 1a72b344's crash site)
+            if broll_clips:
+                send_progress(job_id, "broll_search", 52, "Sourcing B-roll cutaways", app_url)
+                print(f"[broll] Starting parallel fetch of {len(broll_clips)} B-roll clip(s) (overlapping with face detect)...", flush=True)
+                # Resolve transcript (cached) so we can pass the actual spoken words at the
+                # cutaway window into the visual-pick step. broll_clip indices were already
+                # _xlate'd to deepgram-word space upstream.
+                _broll_tx_words = (_get_resolved_transcript().get("words") or [])
+                _broll_fetch_pool = concurrent.futures.ThreadPoolExecutor(max_workers=min(5, len(broll_clips)))
+                for _bi, _bc in enumerate(broll_clips):
+                    # Per-entry, never-raises, no cross-iteration state (the old
+                    # inline version leaked _sw/_ew across iterations AND died
+                    # unbound when the first entry's indices didn't parse).
+                    _dlg_text, _mid_s = _broll_window_context(_bc, _broll_tx_words)
+                    _fut = _broll_fetch_pool.submit(
+                        fetch_broll_clip,
+                        _bc,  # pass whole entry — fetch_broll_clip mutates it with resolved Pexels metadata
+                        float(_bc.get("duration") or 2.0),
+                        work_dir,
+                        dialogue_reason=str(_bc.get("reason") or ""),
+                        dialogue_text=_dlg_text,
+                        source_path=_raw_source,
+                        source_mid_s=_mid_s,
+                    )
+                    _broll_fetch_futures[_fut] = _bi
+        except Exception as _eg_err:
+            _enhancement_guard('broll', _eg_err)
+            _broll_fetch_futures = {}
+            broll_clips = []
+            if isinstance(edit_plan, dict):
+                edit_plan["broll_clips"] = []
+            if _broll_fetch_pool:
+                _broll_fetch_pool.shutdown(wait=False)
+            _broll_fetch_pool = None
 
         # ── Premium generated-scene SUBJECT generation (Phase E · Sub-step 3) ──
         # FORK off the asset-fetch path: where free pulls Pexels stock, premium
@@ -21552,66 +21700,72 @@ def handler(job):
         # Sub-step 5, so today this fires only on flag-injected scenes → premium
         # without a scene, and ALL free jobs, are byte-identical. Each subject's
         # local PNG is stashed on edit_plan for render_multi_clip to stage.
-        _gen_scenes = (edit_plan.get("generated_scenes") or []) if isinstance(edit_plan, dict) else []
-        if route_premium and premium_ctx is not None and _gen_scenes:
-            # ── Generation-time headroom pre-check (Phase E · Sub-step 5) ──────
-            # Don't generate a scene unless there's headroom to QA-AND-RECOVER it.
-            # A recovery re-render ≈ render time, and even DEGRADING (dropping a
-            # baked-in scene) costs one re-render. So if the PROJECTED render
-            # leaves no re-render headroom under the 900s timeout, skip generation
-            # and hold the non-generated beat — strictly better than generating
-            # something we couldn't afford to verify (an unjudged generated scene
-            # is exactly the garbled-graphic-in-front-of-a-user risk). Same
-            # render-time proxy the QA gate uses (the _render_est formula).
-            if float(source_duration) * 3.0 > _RERENDER_HEADROOM_S:
-                print(
-                    f"[gen-asset] generation SKIPPED — projected render "
-                    f"{float(source_duration) * 3.0:.0f}s > {_RERENDER_HEADROOM_S:.0f}s "
-                    f"leaves no QA-recovery headroom; holding {len(_gen_scenes)} "
-                    f"non-generated beat(s)",
-                    flush=True,
-                )
-                _gen_scenes = []
-        if route_premium and premium_ctx is not None and _gen_scenes:
-            _scene_cycle_cost = 6.0 * _IMAGE_COST_USD_EST  # gen + ≤2 regens, worst case
-            _known_text = " ".join(
-                str(w.get("word") or "") for w in (_get_resolved_transcript().get("words") or [])
-            ).strip()
-            _asset_pool = premium_ctx.asset_pool(max_workers=min(4, len(_gen_scenes)))
-            _gen_futs = {}
-            for _si, _scene in enumerate(_gen_scenes):
-                # Full-cycle COST headroom: only generate if we can ALSO afford to
-                # judge + recover this scene — never generate something we can't
-                # afford to verify (hold the non-generated beat instead).
-                if _cost_meter is not None and (_cost_meter.total_usd() + _scene_cycle_cost) > _PREMIUM_ASSET_BUDGET_USD:
+        try:  # P1b fail-open: premium scenes
+            _gen_scenes = (edit_plan.get("generated_scenes") or []) if isinstance(edit_plan, dict) else []
+            if route_premium and premium_ctx is not None and _gen_scenes:
+                # ── Generation-time headroom pre-check (Phase E · Sub-step 5) ──────
+                # Don't generate a scene unless there's headroom to QA-AND-RECOVER it.
+                # A recovery re-render ≈ render time, and even DEGRADING (dropping a
+                # baked-in scene) costs one re-render. So if the PROJECTED render
+                # leaves no re-render headroom under the 900s timeout, skip generation
+                # and hold the non-generated beat — strictly better than generating
+                # something we couldn't afford to verify (an unjudged generated scene
+                # is exactly the garbled-graphic-in-front-of-a-user risk). Same
+                # render-time proxy the QA gate uses (the _render_est formula).
+                if float(source_duration) * 3.0 > _RERENDER_HEADROOM_S:
                     print(
-                        f"[gen-asset] cost headroom exhausted (spent "
-                        f"${_cost_meter.total_usd():.2f} + ${_scene_cycle_cost:.2f} QA cycle "
-                        f"> ${_PREMIUM_ASSET_BUDGET_USD:.2f}) — scene={_si}+ hold non-generated",
+                        f"[gen-asset] generation SKIPPED — projected render "
+                        f"{float(source_duration) * 3.0:.0f}s > {_RERENDER_HEADROOM_S:.0f}s "
+                        f"leaves no QA-recovery headroom; holding {len(_gen_scenes)} "
+                        f"non-generated beat(s)",
                         flush=True,
                     )
-                    break
-                _gen_futs[_asset_pool.submit(
-                    _generate_scene_subject, _scene, _si, work_dir, _known_text
-                )] = _si
-            _generated_subjects = {}
-            for _gf in concurrent.futures.as_completed(_gen_futs):
-                try:
-                    _res = _gf.result()
-                except Exception:
-                    _res = None
-                if _res and _res.get("path"):
-                    _generated_subjects[_gen_futs[_gf]] = _res["path"]
-                    if _cost_meter is not None:
-                        _cost_meter.add("generated_asset", count=1, usd=float(_res.get("cost") or 0.0))
-            if _generated_subjects:
-                edit_plan["_generated_subjects"] = _generated_subjects
-                print(
-                    f"[gen-asset] generated {len(_generated_subjects)}/{len(_gen_scenes)} "
-                    f"subject(s); premium asset spend="
-                    f"${(_cost_meter.total_usd() if _cost_meter is not None else 0.0):.3f}",
-                    flush=True,
-                )
+                    _gen_scenes = []
+            if route_premium and premium_ctx is not None and _gen_scenes:
+                _scene_cycle_cost = 6.0 * _IMAGE_COST_USD_EST  # gen + ≤2 regens, worst case
+                _known_text = " ".join(
+                    str(w.get("word") or "") for w in (_get_resolved_transcript().get("words") or [])
+                ).strip()
+                _asset_pool = premium_ctx.asset_pool(max_workers=min(4, len(_gen_scenes)))
+                _gen_futs = {}
+                for _si, _scene in enumerate(_gen_scenes):
+                    # Full-cycle COST headroom: only generate if we can ALSO afford to
+                    # judge + recover this scene — never generate something we can't
+                    # afford to verify (hold the non-generated beat instead).
+                    if _cost_meter is not None and (_cost_meter.total_usd() + _scene_cycle_cost) > _PREMIUM_ASSET_BUDGET_USD:
+                        print(
+                            f"[gen-asset] cost headroom exhausted (spent "
+                            f"${_cost_meter.total_usd():.2f} + ${_scene_cycle_cost:.2f} QA cycle "
+                            f"> ${_PREMIUM_ASSET_BUDGET_USD:.2f}) — scene={_si}+ hold non-generated",
+                            flush=True,
+                        )
+                        break
+                    _gen_futs[_asset_pool.submit(
+                        _generate_scene_subject, _scene, _si, work_dir, _known_text
+                    )] = _si
+                _generated_subjects = {}
+                for _gf in concurrent.futures.as_completed(_gen_futs):
+                    try:
+                        _res = _gf.result()
+                    except Exception:
+                        _res = None
+                    if _res and _res.get("path"):
+                        _generated_subjects[_gen_futs[_gf]] = _res["path"]
+                        if _cost_meter is not None:
+                            _cost_meter.add("generated_asset", count=1, usd=float(_res.get("cost") or 0.0))
+                if _generated_subjects:
+                    edit_plan["_generated_subjects"] = _generated_subjects
+                    print(
+                        f"[gen-asset] generated {len(_generated_subjects)}/{len(_gen_scenes)} "
+                        f"subject(s); premium asset spend="
+                        f"${(_cost_meter.total_usd() if _cost_meter is not None else 0.0):.3f}",
+                        flush=True,
+                    )
+        except Exception as _eg_err:
+            _enhancement_guard('generated_scenes', _eg_err)
+            if isinstance(edit_plan, dict):
+                edit_plan["generated_scenes"] = []
+                edit_plan.pop("_generated_subjects", None)
 
         # Collect fast futures (all should be done already — they finish before Gemini).
         # Face detection is collected LATER inside render_multi_clip so Remotion can
@@ -21628,6 +21782,11 @@ def handler(job):
         transcript = _get_resolved_transcript()
         if not (future_url_transcript is not None or future_transcribe is not None):
             print(f"[pipeline] Using provided transcript ({len(transcript.get('words') or [])} words) — skipped Deepgram", flush=True)
+        # Outermost-rung eligibility (P1a): transcript + prepared source are
+        # now both real in this scope — any failure from here on is rescuable.
+        _rescue_state["ready"] = bool(transcript.get("words"))
+        _rescue_state["mode"] = mode
+        _rescue_state["dur"] = float(source_duration or 0.0)
         # Attach the offset to the edit_plan so render_multi_clip can pass
         # it down to build_per_cut_audio (which converts file-time slice
         # positions back to audio-data-time for WAV indexing).
@@ -21731,32 +21890,44 @@ def handler(job):
         # first, then the b-roll fetch WAITS (skip the await entirely).
         # Never sheds captions or cuts. Inert when there is slack (the
         # common case): both branches below are no-ops.
-        _shed_elapsed = time.time() - _pipeline_start
-        _shed_projected = max(60.0, float(source_duration) * 3.0)
-        _shed_slack = 900.0 - _shed_elapsed - _shed_projected
-        _shed_dropped = []
-        if _shed_slack < 90.0 and (edit_plan.get("generated_scenes")
-                                    or edit_plan.get("_generated_subjects")):
-            edit_plan["generated_scenes"] = []
-            edit_plan.pop("_generated_subjects", None)
-            _shed_dropped.append("generated_scenes")
-        if _shed_slack < 45.0 and _broll_fetch_futures:
+        try:  # P1b fail-open: proceed unshed
+            _shed_elapsed = time.time() - _pipeline_start
+            _shed_projected = max(60.0, float(source_duration) * 3.0)
+            _shed_slack = 900.0 - _shed_elapsed - _shed_projected
+            _shed_dropped = []
+            if _shed_slack < 90.0 and (edit_plan.get("generated_scenes")
+                                        or edit_plan.get("_generated_subjects")):
+                edit_plan["generated_scenes"] = []
+                edit_plan.pop("_generated_subjects", None)
+                _shed_dropped.append("generated_scenes")
+            if _shed_slack < 45.0 and _broll_fetch_futures:
+                _broll_fetch_futures = {}
+                broll_clips = []
+                edit_plan["broll_clips"] = []
+                _shed_dropped.append("broll_fetch_waits")
+            if _shed_dropped:
+                print(
+                    f"[budget-shed] dropped={_shed_dropped} "
+                    f"(elapsed={_shed_elapsed:.0f}s projected_render={_shed_projected:.0f}s "
+                    f"slack={_shed_slack:.0f}s)",
+                    flush=True,
+                )
+        except Exception as _eg_err:
+            _enhancement_guard('budget_shed', _eg_err)
+        try:  # P1b fail-open: b-roll collection
+            if _broll_fetch_futures:
+                broll_clips = prefetch_and_verify_broll(broll_clips, _broll_fetch_futures)
+                edit_plan["broll_clips"] = broll_clips
+            if _broll_fetch_pool:
+                _broll_fetch_pool.shutdown(wait=False)
+        except Exception as _eg_err:
+            _enhancement_guard('broll', _eg_err)
             _broll_fetch_futures = {}
             broll_clips = []
-            edit_plan["broll_clips"] = []
-            _shed_dropped.append("broll_fetch_waits")
-        if _shed_dropped:
-            print(
-                f"[budget-shed] dropped={_shed_dropped} "
-                f"(elapsed={_shed_elapsed:.0f}s projected_render={_shed_projected:.0f}s "
-                f"slack={_shed_slack:.0f}s)",
-                flush=True,
-            )
-        if _broll_fetch_futures:
-            broll_clips = prefetch_and_verify_broll(broll_clips, _broll_fetch_futures)
-            edit_plan["broll_clips"] = broll_clips
-        if _broll_fetch_pool:
-            _broll_fetch_pool.shutdown(wait=False)
+            if isinstance(edit_plan, dict):
+                edit_plan["broll_clips"] = []
+            if _broll_fetch_pool:
+                _broll_fetch_pool.shutdown(wait=False)
 
         print("[pipeline] step=parallel_render", flush=True)
         send_progress(job_id, "render", 65, "Rendering your edit", app_url)
@@ -22080,8 +22251,10 @@ def handler(job):
                         flush=True,
                     )
                     break
-            # AI-scored thumbnail selection. No fallback — if the scorer fails,
-            # the whole job fails so the underlying bug gets fixed at root.
+            # AI-scored thumbnail selection. A scorer failure re-raises here
+            # and is absorbed at the f_cover collection point (P1b enhancement
+            # guard) — the video still ships, the drop is logged loudly for
+            # root-causing. It no longer costs the job.
             data, mime = select_best_thumbnail_frame(
                 output_path, _thumb_seed, work_dir,
             )
@@ -22289,11 +22462,15 @@ def handler(job):
                 f_upload = post_executor.submit(_upload_main)
                 f_cover  = post_executor.submit(_extract_and_upload_cover)
                 f_hls    = post_executor.submit(_upload_hls)
-                # Surface every failure — any one of these missing means the
-                # render is incomplete. The .result() calls re-raise whatever
-                # was caught inside the thread.
+                # upload/HLS ARE the video — their .result() calls re-raise.
+                # The cover frame is an ENHANCEMENT (P1b): its loss may not
+                # cost the uploaded video.
                 f_upload.result()
-                cover_bytes, _ = f_cover.result()
+                try:
+                    cover_bytes, _ = f_cover.result()
+                except Exception as _eg_err:
+                    _enhancement_guard("cover_frame", _eg_err)
+                    cover_bytes = None
                 f_hls.result()
                 # Durable boundary: upload+HLS complete (closes the documented
                 # "worst stuck-bar gap" so a reconnect mid-HLS resumes correctly).
@@ -22428,8 +22605,13 @@ def handler(job):
         # Per-user style learning: record this render's choices into the user's
         # rolling style profile. Skipped in render_only mode (plan was already
         # persisted and the user had no fresh creative input this round).
+        # ENHANCEMENT (P1b): a profile-write failure may not cost a video
+        # that is already rendered and uploaded.
         if not _skip_edit_gen:
-            update_user_style_profile(user_id, edit_plan, vibe, source_duration)
+            try:
+                update_user_style_profile(user_id, edit_plan, vibe, source_duration)
+            except Exception as _eg_err:
+                _enhancement_guard("user_style_profile", _eg_err)
 
         result_payload = {
             "status": "success",
@@ -22478,6 +22660,14 @@ def handler(job):
         # any existing JS consumer; new clients should read the structured
         # fields instead.
         classified = classify_error(e)
+        # THE OUTERMOST RUNG (P1a): before telling the user we failed, try to
+        # DELIVER — one guarded safe-edit re-run for any class that isn't an
+        # honest input reject or an already-exhausted inner net. Success
+        # returns the inner run's full payload (its own terminal status write
+        # included); None falls through to the ORIGINAL error envelope.
+        _rescued = _outer_safe_rescue(job, input_data, classified, _rescue_state)
+        if _rescued is not None:
+            return _rescued
         # Durable TERMINAL write (synchronous): failed — so the bar shows a real
         # error state and the client stops polling, instead of freezing.
         write_job_status(

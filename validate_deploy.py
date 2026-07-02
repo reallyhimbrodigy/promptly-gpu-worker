@@ -3972,6 +3972,36 @@ def _safe_recipe_round_trip():
     assert _out.get("caption_style") == "CleanCut"
 
 
+@check("outermost rung (P1a): wired in the except block, marker threads to force_safe")
+def _outer_rescue_wiring():
+    # Behavioral coverage lives in test_outer_rescue.py; this pins the WIRING
+    # a refactor could silently break: (1) the outer except runs classify →
+    # rescue → failed-write in that order, (2) the rescue marker read at the
+    # recipe call site feeds force_safe_reason, (3) the rescue helper itself
+    # can never raise (whole body inside try/except-return-None).
+    _src = open("handler.py").read()
+    _exc = _src.find("classified = classify_error(e)")
+    assert _exc != -1, "outer classify site missing"
+    _resc = _src.find("_outer_safe_rescue(job, input_data, classified, _rescue_state)", _exc)
+    assert _resc != -1, "rescue rung not called after classify_error"
+    _failw = _src.find("write_job_status(", _resc)
+    assert _failw != -1, "failed-path terminal write must FOLLOW the rescue rung"
+    assert 'input_data.get("_safe_edit_rescue")' in _src, "marker read missing"
+    _callsite = _src.find("force_safe_reason=(")
+    assert _callsite != -1 and "_safe_edit_rescue" in _src[_callsite:_callsite + 200], \
+        "recipe call site does not thread the rescue marker"
+    import inspect as _insp
+    _body = _insp.getsource(handler._outer_safe_rescue)
+    _lines = [l.strip() for l in _body.splitlines() if l.strip() and not l.strip().startswith(("#", '"""', "'"))]
+    _after_doc = _lines[_lines.index("try:"):] if "try:" in _lines else []
+    assert _after_doc and "except Exception as _resc_err:" in _lines, \
+        "rescue helper must be fully try-wrapped (never raises)"
+    assert "SOME_FUTURE_CODE" not in handler._OUTER_RESCUE_DENY  # deny is a closed set
+    for _code in ("NO_SPEECH", "NOT_TALKING_HEAD", "INVALID_SOURCE_URL",
+                  "INVALID_FORMAT", "RENDER_FATAL", "RECIPE_INVALID"):
+        assert _code in handler._OUTER_RESCUE_DENY, f"deny set lost {_code}"
+
+
 @check("RESPONSE FORMAT enums derive from type_registries (stale-enum class dead)")
 def _response_format_enums_derive():
     # The prompt's output-shape enum lines were hand-written copies that
