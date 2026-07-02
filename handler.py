@@ -3047,7 +3047,7 @@ def _build_post_cuts_prompt(
     shot_scale=None, user_style_profile=None,
     face_zone=None,
     prior_plan=None, prior_plan_change_request=None,
-    premium=False,
+    premium=False, resolved_policy=None,
 ):
     """Gemini prompt for the SECOND call — visual placement on a kept-only transcript.
 
@@ -4518,6 +4518,39 @@ word indices: anchor `start_word_index`/`end_word_index` to the kept words the
 scene plays over, exactly like a B-roll cutaway. The scene HOLDS the beat the
 way a takeover graphic does — captions step aside for its span (the rule you
 already follow) and return when the face leads again."""
+
+    # ── EditPolicy · Step 4: the editor's constraints, UP FRONT ──────────────
+    # When the resolved policy turned expressive features off, tell Gemini so it
+    # spends generation on what REMAINS (redistributing the storytelling) rather
+    # than emitting treatments the Step-2 enforcement would strip. Belt (this
+    # prompt) + suspenders (enforcement guarantees it). Instructory voice — every
+    # line describes the target edit positively. Empty when the policy is default
+    # / off / absent → the prompt is byte-identical to the pre-EditPolicy build.
+    if resolved_policy is not None:
+        try:
+            _pol_off = set(resolved_policy.off_features())
+        except Exception:
+            _pol_off = set()
+        _EP_RULE = {
+            "captions": "Keep this edit caption-free — let the speaker and the footage carry every line; set caption_style to \"none\" and leave caption_keywords empty.",
+            "zoom": "Hold every shot at a steady, locked framing — let the performance and the cutting carry the emphasis; leave each emphasis_moment's zoom_effect empty.",
+            "broll": "Keep this edit entirely on-camera and b-roll-free — carry every moment with the speaker, the captions, and emphasis; emit an empty broll_clips array.",
+            "motion_graphics": "Keep this edit free of motion graphics — deliver information through the speaker and the captions; emit an empty motion_graphics array and leave every emphasis_moment's motion_graphic empty.",
+            "sfx": "Let the natural production audio carry the edit — emit an empty sound_effects array.",
+            "transitions": "Let every cut land clean and direct, each shot meeting the next on a straight cut — emit empty transitions and tight_cut_overlays arrays.",
+            "text_overlays": "Carry supporting words through the captions rather than overlay cards — emit an empty text_overlays array.",
+        }
+        _EP_EXPR_ORDER = ["broll", "zoom", "motion_graphics", "sfx", "transitions", "text_overlays", "captions"]
+        _ep_lines = [_EP_RULE[f] for f in _EP_EXPR_ORDER if f in _pol_off]
+        if _ep_lines:
+            system_instruction += (
+                "\n\n=== EDITOR'S CONSTRAINTS (honor EXACTLY — these override the "
+                "general palette above for THIS video) ===\n"
+                "The editor scoped this edit to specific treatments. Treat each line "
+                "below as a hard rule, and redistribute the storytelling into the "
+                "treatments that remain so the result reads as intentional, never as "
+                "missing something:\n- " + "\n- ".join(_ep_lines)
+            )
 
     return system_instruction, user_content
 
@@ -6991,6 +7024,69 @@ def _record_divergence(component, original, action, *, final=None, reason=""):
     )
 
 
+# EXPRESSIVE features, in the order they read in the enforcement log.
+_EP_EXPRESSIVE = ("captions", "zoom", "broll", "motion_graphics", "sfx", "transitions", "text_overlays")
+
+
+def _enforce_off_expressive_features(edit_plan, off_features):
+    """EditPolicy Step 2: deterministically strip the OFF expressive features
+    from a freshly-merged edit_plan (mutates in place). Runs BEFORE any
+    projection consumes these arrays (zoom→clip, scene-floor overlay backfill),
+    so a feature Gemini emitted is removed when the user turned it off — the hard
+    guarantee behind "follow any instruction to a tee".
+
+    off_features: the policy's off-set. Only EXPRESSIVE names act here; baseline
+    features (filler_trim/stabilize/audio_denoise) gate at their own application
+    points. An empty/None off-set is a no-op → byte-identical.
+
+    transitions=off clears BOTH the transitions array and the tight-cut
+    punctuation overlays; the always-on scene-floor overlay backfill is gated
+    separately at its application point (it runs after this, unconditionally).
+
+    Returns (removed, kept) — lists of expressive feature names, for the caller's
+    log line. Pure except for the in-place mutation; unit-tested across the full
+    matrix (see test_edit_policy_enforcement)."""
+    _off = set(off_features or [])
+    removed = []
+    if not _off:
+        return removed, list(_EP_EXPRESSIVE)
+    if "captions" in _off:
+        edit_plan["caption_style"] = "none"   # renderer skips caption pages on "none"
+        edit_plan["caption_keywords"] = []
+        edit_plan["caption_position_changes"] = []
+        removed.append("captions")
+    if "broll" in _off:
+        edit_plan["broll_clips"] = []
+        removed.append("broll")
+    if "sfx" in _off:
+        edit_plan["sound_effects"] = []
+        removed.append("sfx")
+    if "text_overlays" in _off:
+        edit_plan["text_overlays"] = []
+        removed.append("text_overlays")
+    if "motion_graphics" in _off:
+        edit_plan["motion_graphics"] = []
+        for _em in (edit_plan.get("emphasis_moments") or []):
+            if isinstance(_em, dict):
+                _em["motion_graphic"] = None
+        removed.append("motion_graphics")
+    if "zoom" in _off:
+        # Null the zoom on every emphasis; the moment itself survives (it may
+        # still time an SFX or read as a beat) but carries no camera move.
+        for _em in (edit_plan.get("emphasis_moments") or []):
+            if isinstance(_em, dict):
+                _em["zoom_effect"] = None
+        removed.append("zoom")
+    if "transitions" in _off:
+        edit_plan["transitions"] = []
+        edit_plan["tight_cut_overlays"] = []
+        removed.append("transitions")
+    kept = [f for f in _EP_EXPRESSIVE if f not in _off]
+    # Preserve the log's expressive-order for `removed` too.
+    removed = [f for f in _EP_EXPRESSIVE if f in set(removed)]
+    return removed, kept
+
+
 def generate_edit_gemini(
     video_path, vibe, duration, trend_context=None, deepgram_words=None,
     shot_changes=None, shot_change_scores=None, vocal_emphasis=None, source_loudness=None,
@@ -6998,9 +7094,30 @@ def generate_edit_gemini(
     user_style_profile=None,
     gemini_file=None, cached_response=None, inline_video_bytes=None,
     prior_plan=None, prior_plan_change_request=None,
-    premium=False,
+    premium=False, resolved_policy=None,
 ):
     _pre_analysis = cached_response
+
+    # ── EditPolicy enforcement scope (Phase 2 · Steps 2-4) ───────────────────
+    # resolved_policy is the flag-gated EditPolicy for this job (None when the
+    # feature is off → EMPTY off-set → NOTHING is enforced → byte-identical to
+    # the pre-EditPolicy path). off_features() lists the features the user
+    # explicitly turned off; a `default`-mode policy (the bias-to-on case) lists
+    # none, so a generic vibe changes nothing. Fail-safe: any trouble reading the
+    # policy leaves the off-set empty (bias to the full edit — never over-strip).
+    _ep_off = set()
+    if resolved_policy is not None:
+        try:
+            _ep_off = set(resolved_policy.off_features())
+        except Exception as _ep_off_err:
+            print(
+                f"[edit-policy-enforce] off-set read failed "
+                f"({type(_ep_off_err).__name__}) — enforcing nothing (full edit)",
+                flush=True,
+            )
+            _ep_off = set()
+    _filler_off = "filler_trim" in _ep_off        # Step 3: gates compute_mechanical_cuts
+    _transitions_off = "transitions" in _ep_off    # Step 2 + scene-floor backfill gate
 
     _shots = list(shot_changes or [])
     _shot_score_map = dict(shot_change_scores or {})  # scdet time(round 3)→score
@@ -7056,6 +7173,7 @@ def generate_edit_gemini(
         prior_plan=prior_plan,
         prior_plan_change_request=prior_plan_change_request,
         premium=premium,
+        resolved_policy=resolved_policy,
     )
     if prior_plan:
         print(
@@ -7125,9 +7243,21 @@ def generate_edit_gemini(
     # other three are transcript-pattern detectors. video_path is the
     # source file VAD reads audio from — Silero handles ffmpeg-decodable
     # formats natively via torchaudio.
-    cut_plan = compute_mechanical_cuts(
-        deepgram_words or [], source_path=video_path,
-    )
+    # Step 3 (baseline gate): filler_trim is ON unless the user EXPLICITLY
+    # excluded it ("keep every pause", "raw pacing", "don't cut anything"). When
+    # off, skip mechanical trimming entirely — the kept transcript stays the full
+    # transcript, so the original pacing (every silence/breath) is preserved.
+    if _filler_off:
+        cut_plan = {"remove_words": [], "notes": "filler_trim=off (EditPolicy)", "pacing": "as-recorded"}
+        print(
+            "[edit-policy-enforce] filler_trim=off — compute_mechanical_cuts skipped "
+            "(original pacing preserved, no words removed)",
+            flush=True,
+        )
+    else:
+        cut_plan = compute_mechanical_cuts(
+            deepgram_words or [], source_path=video_path,
+        )
     raw_cut_remove_words = cut_plan.get("remove_words") or []
     print(
         f"[cuts-mechanical] {cut_plan.get('notes', '')} "
@@ -7586,6 +7716,23 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
         f"generated_scenes={len(edit_plan.get('generated_scenes') or [])}",
         flush=True,
     )
+
+    # ── EditPolicy · Step 2: ENFORCEMENT (hard-zero the off EXPRESSIVE features) ─
+    # The resolved policy is the AUTHORITY over Gemini's output. Applied right
+    # after the merge — BEFORE any projection consumes these arrays (zoom→clip
+    # at ~9519, the scene-floor overlay backfill at ~8455) — so even a feature
+    # Gemini emitted anyway is deterministically removed when the user turned it
+    # off. This is the hard guarantee behind "follow any instruction to a tee";
+    # the Step-4 prompt rule is the belt (Gemini avoids it up front), this is the
+    # suspenders. _ep_off is EMPTY when the feature is off / the policy is default
+    # (bias-to-on) / resolution failed → this whole block is a no-op → identical.
+    if _ep_off:
+        _ep_removed, _ep_kept = _enforce_off_expressive_features(edit_plan, _ep_off)
+        print(
+            f"[edit-policy-enforce] removed=[{','.join(_ep_removed)}] "
+            f"kept=[{','.join(_ep_kept)}] mode={getattr(resolved_policy, 'mode', '?')}",
+            flush=True,
+        )
 
     # Surface video_plan — Gemini's editorial scaffold — in the render log
     # so it's auditable. If Gemini's component placements diverge from the
@@ -8452,7 +8599,18 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
     _scene_n_lowconf = 0
     _scene_n_gemini = 0
     _scene_backfilled = 0
-    if _shot_src_set:
+    if _transitions_off and _shot_src_set:
+        # "no transitions" (EditPolicy) suppresses the always-on scene-floor
+        # overlay backfill too — a cut-boundary punctuation overlay IS a
+        # transition effect. The recipe transitions + tight_cut_overlays were
+        # already cleared in the Step-2 enforcement pass; this closes the
+        # always-on path so a shot boundary stays bare.
+        print(
+            "[edit-policy-enforce] scene-floor overlay backfill skipped — "
+            "transitions=off (EditPolicy)",
+            flush=True,
+        )
+    if _shot_src_set and not _transitions_off:
         # Ordered shot-change boundaries (temporal, by source word index). Each:
         # current decoration type (transition or Gemini overlay → locked;
         # None = bare) and scdet confidence score. Low-confidence BARE
@@ -19970,6 +20128,25 @@ def handler(job):
                 # prior_plan is a non-empty dict.
                 _gr_prior = provided_plan if mode == "guided_redraft" else None
                 _gr_dir = change_request if mode == "guided_redraft" else None
+                # EditPolicy (flag-gated): await the fast Haiku resolve so the
+                # recipe carries the user's constraints UP FRONT (Step 4 prompt
+                # rule) and mechanical trimming respects filler_trim (Step 3).
+                # future_policy is None when the flag is off → _recipe_policy None
+                # → no prompt rule, no gate, no enforcement → byte-identical. The
+                # resolve runs in parallel with transcription and finishes long
+                # before this point, so awaiting it adds ~0 to the critical path.
+                # Fail-safe: any error → None → the full edit (never over-strip).
+                _recipe_policy = None
+                try:
+                    if future_policy is not None:
+                        _recipe_policy = future_policy.result(timeout=20)
+                except Exception as _rp_err:
+                    print(
+                        f"[edit-policy] recipe-time resolve unavailable "
+                        f"({type(_rp_err).__name__}) — full edit",
+                        flush=True,
+                    )
+                    _recipe_policy = None
                 return generate_edit_gemini(
                     video_path=_raw_source,
                     vibe=vibe,
@@ -19988,6 +20165,7 @@ def handler(job):
                     prior_plan=_gr_prior,
                     prior_plan_change_request=_gr_dir,
                     premium=route_premium,
+                    resolved_policy=_recipe_policy,
                 )
             finally:
                 _gemini_hb_stop.set()
