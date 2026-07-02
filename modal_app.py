@@ -943,6 +943,122 @@ def gen_test_images(n: int = 3):
     print("=== END ===\n")
 
 
+# ── Craft-floor A/B battery: FLOOR (_IMAGE_SYSTEM_PROMPT) vs RAW pass-through ─
+# Renders LEAN per-scene briefs — the minimal phrasing Gemini might write — each
+# TWICE: once with system_instruction=None (the standing craft floor) and once
+# with system_instruction="" (raw, the old pass-through). The delta between the
+# two columns IS what the floor contributes. Lean-on-purpose: fully art-directed
+# prompts would already contain the craft and hide the floor's effect. Zac
+# eyeballs floor-vs-raw side by side and tunes _IMAGE_SYSTEM_PROMPT across a few
+# rounds. NOT called by any job.
+_COMPARE_BRIEFS = [
+    {
+        "slug": "product",
+        "brief": "A wireless earbud charging case, lid closed.",
+    },
+    {
+        "slug": "padlock-concept",
+        "brief": "A closed padlock — the 'restrictions' beat.\n\nPalette "
+                 "(the video's committed color world): deep indigo night — "
+                 "anchor colors #10132b, #2b3f8c, #e8c15a. Build the whole "
+                 "image within it.",
+    },
+    {
+        "slug": "app-ui",
+        "brief": "A fitness tracking app dashboard on a phone.",
+    },
+    {
+        "slug": "branded-title",
+        "brief": "A title card for a video about morning routines.\n\nPalette "
+                 "(the video's committed color world): warm sunrise cream — "
+                 "anchor colors #f7efe1, #e8a24c, #3a2f26. Build the whole "
+                 "image within it.",
+    },
+]
+
+
+@app.function(cpu=2, memory=4096, timeout=900)
+def gen_floor_compare_remote(briefs=None):
+    import os
+    import sys
+    import uuid
+    import tempfile
+
+    if "/" not in sys.path:
+        sys.path.insert(0, "/")
+    import handler
+
+    _briefs = briefs or _COMPARE_BRIEFS
+    _s3 = handler._aws_s3_client
+    if _s3 is None:
+        raise RuntimeError("AWS S3 client not configured in handler — cannot publish compare images")
+    _bucket = (
+        os.environ.get("S3_BUCKET_NAME")
+        or os.environ.get("SUPABASE_S3_BUCKET")
+        or "promptly-video-storage"
+    )
+
+    def _publish(path):
+        key = "test-gen/floor-compare/" + uuid.uuid4().hex + ".png"
+        _s3.upload_file(path, _bucket, key, ExtraArgs={"ContentType": "image/png"})
+        return _s3.generate_presigned_url(
+            "get_object", Params={"Bucket": _bucket, "Key": key}, ExpiresIn=86400,
+        )
+
+    results = []
+    with tempfile.TemporaryDirectory(prefix="floorcmp-") as work:
+        for _b in _briefs:
+            slug = _b["slug"]
+            brief = _b["brief"]
+            row = {"slug": slug, "brief": brief}
+            # FLOOR: system_instruction=None → the standing _IMAGE_SYSTEM_PROMPT.
+            try:
+                fp = os.path.join(work, f"{slug}_floor.png")
+                handler._generate_image(brief, out_path=fp)  # None default = floor
+                row["floor_url"] = _publish(fp)
+                row["floor_ok"] = True
+            except Exception as e:
+                row["floor_ok"] = False
+                row["floor_err"] = f"{type(e).__name__}: {str(e)[:300]}"
+                print(f"[floor-compare] {slug} FLOOR failed: {row['floor_err']}", flush=True)
+            # RAW: system_instruction="" → no floor (the old pass-through).
+            try:
+                rp = os.path.join(work, f"{slug}_raw.png")
+                handler._generate_image(brief, out_path=rp, system_instruction="")
+                row["raw_url"] = _publish(rp)
+                row["raw_ok"] = True
+            except Exception as e:
+                row["raw_ok"] = False
+                row["raw_err"] = f"{type(e).__name__}: {str(e)[:300]}"
+                print(f"[floor-compare] {slug} RAW failed: {row['raw_err']}", flush=True)
+            results.append(row)
+            print(f"[floor-compare] {slug}: floor_ok={row.get('floor_ok')} raw_ok={row.get('raw_ok')}", flush=True)
+    return results
+
+
+@app.local_entrypoint()
+def gen_floor_compare(only: str = ""):
+    """modal run modal_app.py::gen_floor_compare [--only <slug>]
+    Renders each lean brief FLOOR vs RAW and prints paired presigned URLs (24h).
+    --only <slug> renders just that brief (e.g. re-run one after a transient 429).
+    This ALSO proves system_instruction is honored by gemini-3-pro-image: the
+    floor column returning valid images that differ from raw is the proof."""
+    _briefs = None
+    if only:
+        _briefs = [b for b in _COMPARE_BRIEFS if b["slug"] == only]
+        if not _briefs:
+            raise SystemExit(f"no brief with slug={only!r}; have "
+                             + ", ".join(b["slug"] for b in _COMPARE_BRIEFS))
+    rows = gen_floor_compare_remote.remote(briefs=_briefs)
+    print("\n=== CRAFT-FLOOR A/B  (FLOOR = _IMAGE_SYSTEM_PROMPT · RAW = old pass-through) ===")
+    for r in rows:
+        print(f"\n--- {r['slug']} ---")
+        print(f"  brief: {r['brief'][:120]!r}")
+        print(f"  FLOOR: {r.get('floor_url') or ('FAILED ' + str(r.get('floor_err')))}")
+        print(f"  RAW  : {r.get('raw_url') or ('FAILED ' + str(r.get('raw_err')))}")
+    print("\n=== END (URLs valid 24h) ===\n")
+
+
 # ── Sub-step 2: GeneratedScene schema → Vertex acceptance regression (INERT) ─
 # Confirms Vertex ACCEPTS the nested-optional GeneratedScene schema
 # (response_json_schema). Proven before folding generated_scenes into
@@ -1011,4 +1127,116 @@ def validate_genscene_schema():
     r = validate_genscene_schema_remote.remote()
     print("\n=== GENSCENE SCHEMA / VERTEX ACCEPTANCE ===")
     print(r)
+    print("=== END ===\n")
+
+
+# ── Phase i2v pre-build confirm: Veo 3.1 reachability on Vertex (INERT) ──────
+# CHEAP reachability probe — lists models + metadata-`get`s candidate Veo strings.
+# Does NOT generate a video (that costs $0.50-1.20). Not called by any job.
+@app.function(cpu=2, memory=4096, timeout=300)
+def probe_veo_reachable():
+    import sys
+    if "/" not in sys.path:
+        sys.path.insert(0, "/")
+    import handler
+    report = {}
+    try:
+        client = handler._get_genai_client()
+        report["has_generate_videos"] = hasattr(client.models, "generate_videos")
+        veo_listed = []
+        try:
+            for _m in client.models.list():
+                _nm = str(getattr(_m, "name", "") or "")
+                if "veo" in _nm.lower():
+                    veo_listed.append(_nm)
+        except Exception as _le:
+            report["list_error"] = f"{type(_le).__name__}: {str(_le)[:100]}"
+        report["veo_listed"] = veo_listed
+        candidates = [
+            "veo-3.1-generate-preview", "veo-3.1-fast-generate-preview",
+            "veo-3.1-generate-001", "veo-3.0-generate-001", "veo-3.0-fast-generate-001",
+            "veo-3.0-generate-preview", "veo-2.0-generate-001", "veo-001",
+            "publishers/google/models/veo-3.1-generate-preview",
+            "publishers/google/models/veo-3.0-generate-001",
+        ]
+        reachable = {}
+        for _c in candidates:
+            try:
+                _info = client.models.get(model=_c)
+                reachable[_c] = "OK:" + str(getattr(_info, "name", _c))
+            except Exception as _ge:
+                reachable[_c] = f"{type(_ge).__name__}: {str(_ge)[:70]}"
+        report["candidates"] = reachable
+        print(f"[veo-probe] {report}", flush=True)
+    except Exception as e:
+        report["error"] = f"{type(e).__name__}: {str(e)[:300]}"
+        print(f"[veo-probe] ERROR {report['error']}", flush=True)
+    return report
+
+
+@app.local_entrypoint()
+def veo_probe():
+    r = probe_veo_reachable.remote()
+    print("\n=== VEO 3.1 REACHABILITY (Vertex) ===")
+    for k, v in (r or {}).items():
+        print(f"{k}: {v}")
+    print("=== END ===\n")
+
+
+# ── Phase D verify: partial_state column exists + round-trips (INERT) ────────
+# Confirms the reserved partial_state jsonb column is APPLIED on the jobs table
+# (PostgREST silently drops writes to missing columns → ask-back would resume
+# from nothing). Existence probe is non-mutating; the round-trip uses a throwaway
+# test row it deletes. Not called by any job.
+@app.function(cpu=2, memory=2048, timeout=120)
+def probe_partial_state():
+    import sys
+    import os
+    if "/" not in sys.path:
+        sys.path.insert(0, "/")
+    import handler
+    sb = handler.supabase
+    table = os.environ.get("PROMPTLY_JOB_TABLE") or "jobs"
+    report = {"table": table}
+    if sb is None:
+        report["error"] = "supabase client not configured on worker"
+        print(f"[partial-state-probe] {report}", flush=True)
+        return report
+    try:
+        sb.table(table).select("partial_state,id").limit(1).execute()
+        report["column_exists"] = True
+    except Exception as e:
+        report["column_exists"] = False
+        report["existence_error"] = str(e)[:200]
+        print(f"[partial-state-probe] COLUMN MISSING — apply migrations/video_jobs_status.sql. {report}", flush=True)
+        return report
+    # Genuine round-trip on an EXISTING row (non-destructive: partial_state is a
+    # brand-new unused column; we restore the original value after).
+    _val = {"probe": True, "n": 42, "nested": {"plan": "ok"}}
+    try:
+        _row = sb.table(table).select("id,partial_state").limit(1).execute()
+        if not _row.data:
+            report["roundtrip_note"] = "no rows to round-trip on — existence probe is authoritative"
+        else:
+            _rid = _row.data[0]["id"]
+            _orig = _row.data[0].get("partial_state")
+            sb.table(table).update({"partial_state": _val}).eq("id", _rid).execute()
+            _r2 = sb.table(table).select("partial_state").eq("id", _rid).limit(1).execute()
+            _read = _r2.data[0].get("partial_state") if _r2.data else None
+            report["roundtrip_value_survived"] = (_read == _val)
+            report["roundtrip_read"] = _read
+            sb.table(table).update({"partial_state": _orig}).eq("id", _rid).execute()
+            report["restored_original"] = True
+    except Exception as e:
+        report["roundtrip_error"] = f"{type(e).__name__}: {str(e)[:150]}"
+    print(f"[partial-state-probe] {report}", flush=True)
+    return report
+
+
+@app.local_entrypoint()
+def partial_state_probe():
+    r = probe_partial_state.remote()
+    print("\n=== partial_state COLUMN VERIFY ===")
+    for k, v in (r or {}).items():
+        print(f"{k}: {v}")
     print("=== END ===\n")

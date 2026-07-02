@@ -6027,8 +6027,83 @@ _IMAGE_MODEL = "gemini-3-pro-image"
 _IMAGE_COST_USD_EST = 0.14
 
 
-def _generate_image(prompt, ref_images=None, out_path=None):
+# ── The generation-side CRAFT FLOOR (Phase E follow-up) ──────────────────────
+# Every generated asset carries this as system_instruction so quality + style are
+# consistent regardless of the per-scene generation_prompt Gemini wrote. It
+# threads the SAME art-direction the recipe ships — component-quality /
+# inevitable-choice, the ONE committed palette, from-known-inputs text, aesthetic
+# motivation — down to the image layer: one system extended, never a competing
+# doctrine. The per-scene brief (subject + palette) rides ON TOP as the content.
+# Positive-instructory throughout; this is TUNED against real generations (the
+# compare battery: gen_test_compare), not perfected on paper.
+_IMAGE_SYSTEM_PROMPT = (
+    "You render bespoke graphics for a premium short-form video — the caliber of "
+    "a product-render or motion-graphics studio, made for one specific beat. The "
+    "house look is a designed object floating in a branded gradient world, lit "
+    "cinematically and rendered clean. The lines below are the craft floor every "
+    "image meets; the brief that follows supplies the subject and the palette.\n\n"
+    "CALIBER. Render a designed object with the polish of studio work, the "
+    "surface reading as photographed material down to the micro-detail — fine "
+    "anisotropic brushing on metal catching a single warm key light, genuine "
+    "refraction in glass, a matte tooth or grain on plastic, machined chamfers "
+    "where edges meet, and the faint honest wear real objects carry. Keep edges "
+    "crisp, give forms real volume and depth, and render the named subject as "
+    "unmistakably itself, complete with the defining features it has in the real "
+    "world — a padlock's keyhole, shackle bow, and body seam; a case's seam, "
+    "hinge, and status light. Compose the whole frame the way a designer would, "
+    "every choice deliberate.\n\n"
+    "PALETTE. Build the entire image inside the committed color world named in "
+    "the brief. Keep every surface, light, and background gradient within that "
+    "one palette, so the graphic belongs to the video as a single designed piece. "
+    "When the brief names specific colors, anchor the frame's dominant midtones "
+    "to those exact values and keep the brightest and darkest points near the "
+    "light and dark ends of that same palette, so the cast stays faithful to the "
+    "spec. Let the palette carry the mood — a warm confessional world glows amber "
+    "and low; a clean product world runs bright and cool — and hold it across the "
+    "whole frame.\n\n"
+    "LIGHT & DEPTH. Light the subject with intention: a clear directional key and "
+    "a soft ambient fill. Seat every floating subject on a grounded contact "
+    "shadow directly beneath its lowest point — tightest and darkest where the "
+    "object comes nearest the ground plane, softening as it spreads — so it "
+    "carries real weight. Let every highlight and reflection trace to the scene's "
+    "own key or rim light, kept as a tight, controlled specular anchored to that "
+    "source, with a believable environment reflection across the surface. Add "
+    "atmosphere with a gentle gradient falloff so the frame carries dimension and "
+    "sits in real space.\n\n"
+    "COMPOSITION. Compose the 9:16 vertical frame like a poster: one clear focal "
+    "subject with generous breathing room, placed to leave the upper or lower "
+    "third open for the kinetic type the video layers on top. Let the subject sit "
+    "in its world with intention — centered or thoughtfully offset, comfortably "
+    "clear of the edges.\n\n"
+    "TEXT. Render the visual and leave the words to land on top in the video's "
+    "own type — the subject is the image, the caption is a separate layer. "
+    "Include lettering in the image only when it is genuinely part of the object, "
+    "and then reproduce the exact words the brief supplies verbatim, word-for-"
+    "word and correctly spelled, rendered sharp, level, and legible. Where a "
+    "surface would carry a maker's mark or logo, render it as clean unbranded "
+    "geometry — a plain emblem, a blank badge — and keep any real brand name for "
+    "the brief to supply. When the subject is itself made of text — a screen, "
+    "dashboard, chart, or title card — and the brief leaves the exact words "
+    "unspecified, render those surfaces as clean shapes, icons, bars, rings, and "
+    "graph forms, holding numeric readouts as abstract meters, and let every "
+    "real word and number arrive in the video's type layer.\n\n"
+    "REFERENCES. When reference images accompany the brief, treat them as the "
+    "authority on style, material, and brand — match their world so the result "
+    "reads as the work of the same designer.\n\n"
+    "CLEAN-FIELD MODE. When the brief asks for a clean seamless background for "
+    "compositing, center the subject on a pure white seamless field under the "
+    "same studio key-and-fill lighting with a clean floor — the subject keeps "
+    "its palette-true materials and finish, and only the surrounding world drops "
+    "to white, so it lifts cleanly for the composite."
+)
+
+
+def _generate_image(prompt, ref_images=None, out_path=None, system_instruction=None):
     """Generate ONE image via the Vertex image model and write it to disk.
+
+    system_instruction: None → the standing craft floor (_IMAGE_SYSTEM_PROMPT);
+    "" → raw generation (no floor; used by the compare battery + the mechanical
+    black-bg matte edit); a non-empty string → that override replaces the floor.
 
     Mirrors _get_genai_client + _gemini_generate_with_backoff. `ref_images` is
     an optional list of local file paths used as visual references (style /
@@ -6056,12 +6131,18 @@ def _generate_image(prompt, ref_images=None, out_path=None):
     if out_path is None:
         out_path = os.path.join(_tempfile.gettempdir(), f"genasset_{_uuid.uuid4().hex}.png")
 
+    # Craft floor by default; "" generates raw; a non-empty override replaces it.
+    _sys = _IMAGE_SYSTEM_PROMPT if system_instruction is None else (system_instruction or None)
+
     def _call(_modalities):
         return _gemini_generate_with_backoff(
             lambda: client.models.generate_content(
                 model=_IMAGE_MODEL,
                 contents=_contents,
-                config=genai_types.GenerateContentConfig(response_modalities=_modalities),
+                config=genai_types.GenerateContentConfig(
+                    response_modalities=_modalities,
+                    system_instruction=_sys,
+                ),
             ),
             label="image-gen",
         )
@@ -6244,6 +6325,20 @@ def _generate_scene_subject(scene, idx, work_dir, known_text=""):
         return None
     _refs = _resolve_scene_ref_paths(_subj.get("ref_image_keys"), work_dir)
     _bg_kind = str(((scene or {}).get("background") or {}).get("kind") or "generated")
+    # PALETTE THREADING (audit fix): the committed color world reaches the
+    # generation as usable direction — the palette_ref slug + any explicit colors
+    # ride on the content prompt, so the floor's PALETTE clause has an actual
+    # world to build within (palette_ref was previously dropped before the call).
+    _bg = dict((scene or {}).get("background") or {})
+    _palette_ref = str(_bg.get("palette_ref") or "").strip()
+    _colors = [c for c in (_bg.get("colors") or []) if isinstance(c, str) and c]
+    _palette_line = ""
+    if _palette_ref or _colors:
+        _palette_line = "\n\nPalette (the video's committed color world): " + (_palette_ref or "as given")
+        if _colors:
+            _palette_line += " — anchor colors " + ", ".join(_colors[:6])
+        _palette_line += ". Build the whole image within it."
+    _content = _prompt + _palette_line
     # TRANSPARENCY ONLY WHEN NEEDED: a full-frame takeover (the subject IS its
     # own world, background.kind == "generated") needs NO alpha. The ~2×-cost
     # matte runs only when the subject floats as a cutout over a SEPARATE
@@ -6255,24 +6350,27 @@ def _generate_scene_subject(scene, idx, work_dir, known_text=""):
         if _needs_alpha:
             _white = os.path.join(work_dir, f"genscene_{idx:02d}_white.png")
             _black = os.path.join(work_dir, f"genscene_{idx:02d}_black.png")
+            # White render carries the floor — its CLEAN-FIELD clause supplies the
+            # seamless-field + studio-light craft; the content just requests it.
             _generate_image(
-                _prompt + " The subject is centered on a pure white seamless "
-                "background, studio product lighting, no cast shadow on the floor.",
+                _content + "\n\nRender on a clean white seamless field for compositing.",
                 ref_images=_refs, out_path=_white,
             )
-            # Edit the SAME render onto black (pass the white render as the first
-            # reference so the subject stays pixel-aligned for the matte).
+            # Edit the SAME render onto black — a MECHANICAL recreate, so it runs
+            # RAW (system_instruction="") without the fresh-render craft floor,
+            # which would fight the "keep it pixel-identical" instruction.
             _generate_image(
                 "Recreate this exact image with the background replaced by pure "
                 "solid black (#000000). Keep the subject pixel-identical — same "
                 "pose, position, scale, and lighting.",
                 ref_images=([_white] + _refs[:13]), out_path=_black,
+                system_instruction="",
             )
             _cost = 2.0 * _IMAGE_COST_USD_EST
             if _recover_alpha_from_white_black(_white, _black, _out) is None:
                 _out = _white  # alpha recovery failed → use the white render
         else:
-            _generate_image(_prompt, ref_images=_refs, out_path=_out)
+            _generate_image(_content, ref_images=_refs, out_path=_out)
             _cost = _IMAGE_COST_USD_EST
     except Exception as _ge:
         print(
