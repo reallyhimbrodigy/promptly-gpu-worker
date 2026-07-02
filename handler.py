@@ -3488,7 +3488,7 @@ Every component decision is judged against: "does this produce the feeling this 
 
   • **close** (last 1-5 words, intensity 0.6-0.9) — the viewer is deciding whether to rewatch; the platform auto-loops. Feeling: the loop CLOSING. Treatment: callback. Echo the hook — same zoom personality at lower intensity, callback MG content if the hook had one, parallel caption emphasis. If the hook was a SnapReframe, the close mirrors with a SnapReframe. The callback IS the satisfaction that earns the replay. End on the close beat so the platform's loop lands clean — the rendered loop carries the moment, no fade-out.
 
-Transitions between positions take their flavor from the shift: build → mid_peak accelerates (ZoomThrough, CardSwipe) · mid_peak → build descends (SlideOver, CrossfadeZoom) · build → build chapter shifts are structured (SlideOver, StepPush, SceneTitle) · peak → peak is sharp (ShutterFlash, CardSwipe) · build → payoff accelerates HARD (ZoomThrough — the most committed transition in the video) · payoff → close is calm (CrossfadeZoom or none) · breather → anything is minimal or none. When register and arc-position suggest different answers, arc-position wins — that's the spine talking.
+Transitions between positions take their flavor from the shift: build → mid_peak accelerates (ZoomThrough, CardSwipe) · mid_peak → build descends (SlideOver, CrossfadeZoom) · build → build chapter shifts are structured (SlideOver, StepPush, SceneTitle) · peak → peak is sharp (ShutterFlash, CardSwipe) · build → payoff accelerates HARD (on a cut boundary: ZoomThrough, the most committed transition in the video; on a tight boundary the same acceleration lands as a ShutterFlash overlay plus a zoom punch on the first word) · payoff → close is calm (CrossfadeZoom or none) · breather → anything is minimal or none. When register and arc-position suggest different answers, arc-position wins — that's the spine talking. Every type named in this map plays by the boundary lists — the arc shift picks the energy, and the boundary class picks whether that energy arrives as the named transition or as its overlay-plus-zoom equivalent.
 
 EXAMPLE arc_segments for a 30-second video with 2 mid-peaks:
 
@@ -4349,7 +4349,7 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
       "type": "LightLeak" | "ShutterFlash" | "NewspaperWipe" | "SceneTitle",
       "title": str | null,                                // REQUIRED ONLY when type == "SceneTitle" (1-3 uppercase words); MUST be null/omitted for other types
       "label": str | null                                 // OPTIONAL ONLY when type == "SceneTitle" (uppercase kicker); MUST be null/omitted for other types
-      // see TIGHT-CUT OVERLAYS section — sparingly, max 1-2 per video across ALL types combined
+      // one decoration per SCENE CHANGE tight boundary — it lives either here or in transitions as a zero-handle type, and the type rotates across adjacent scene changes; pause-boundary overlays are discretionary, up to 2 per video
     }}
   ],
 
@@ -7481,6 +7481,11 @@ def generate_edit_gemini(
             for _name, _ms in sorted(
                 TRANSITION_NATURAL_DURATION_MS.items(), key=lambda kv: kv[1]
             )
+            # Only emittable transitions: the duration table still carries
+            # LightLeak for its overlay life, but the transitions schema enum
+            # derives from VALID_TRANSITION_TYPES — advertising a type the
+            # model cannot emit is prompt noise (PR B hygiene).
+            if _name in VALID_TRANSITION_TYPES
         )
 
         # Coherence-rule example phrases — interpolated below so this single
@@ -7510,7 +7515,7 @@ Indices below are the NEW kept-only space [0..{_kept_count - 1}]. Every word_ind
 
   {_cut_boundary_block}
 
-=== TIGHT BOUNDARIES (real cuts with no audio handle — crossfade transitions cannot fit here, but ZERO-HANDLE transitions (LightLeak / ShutterFlash / NewspaperWipe / SceneTitle / DipToBlack) can, and `tight_cut_overlay` decorations can. Each is tagged SCENE CHANGE (a real visual cut — the shot actually changed) or pause (a silence-only splice, no visual change). EVERY scene change carries exactly ONE decoration — a zero-handle transition OR a tight_cut_overlay, never both — and you should vary the type across adjacent scene changes so it reads as editing vocabulary, not one effect on loop. Pause boundaries are discretionary and default to a clean hard cut. At minimum land a zoom on the first word after any tight cut to mask the jump. See HOW TO PLACE TRANSITIONS and HOW TO PLACE TIGHT-CUT OVERLAYS below for the editorial distinction.) ===
+=== TIGHT BOUNDARIES (real cuts with no audio handle — crossfade transitions cannot fit here, but ZERO-HANDLE transitions (ShutterFlash / NewspaperWipe / SceneTitle / DipToBlack) can, and `tight_cut_overlay` decorations can. Each is tagged SCENE CHANGE (a real visual cut — the shot actually changed) or pause (a silence-only splice, no visual change). EVERY scene change carries exactly ONE decoration — a zero-handle transition OR a tight_cut_overlay, never both — and you should vary the type across adjacent scene changes so it reads as editing vocabulary, not one effect on loop. Pause boundaries are discretionary and default to a clean hard cut. At minimum land a zoom on the first word after any tight cut to mask the jump. See HOW TO PLACE TRANSITIONS and HOW TO PLACE TIGHT-CUT OVERLAYS below for the editorial distinction.) ===
 
   {_tight_boundary_block}
 
@@ -7522,7 +7527,7 @@ Each transition component renders at its natural duration — the cadence its ra
 
 === HOW TO PLACE TRANSITIONS ===
 
-**HARD RULE 1 — `after_word_index` MUST come from CUT BOUNDARIES or TIGHT BOUNDARIES.** Standard crossfade transitions (Stack, CardSwipe, ZoomThrough, SlideOver, CrossfadeZoom, StepPush, FilmStrip) MUST anchor on CUT BOUNDARIES — they consume audio handle for the equal-power crossfade and would audio-mush continuous speech on a tight cut. Zero-handle transitions (LightLeak, ShutterFlash, NewspaperWipe, SceneTitle, DipToBlack) MAY anchor on EITHER list — their renderers substitute silence for the audio mix at peak and don't need handle frames. A transition at any non-boundary index has no cut to play across and the renderer will not produce it. The validator hard-rejects a crossfade type on a tight boundary.
+**HARD RULE 1 — `after_word_index` MUST come from CUT BOUNDARIES or TIGHT BOUNDARIES.** Standard crossfade transitions (Stack, CardSwipe, ZoomThrough, SlideOver, CrossfadeZoom, StepPush, FilmStrip) MUST anchor on CUT BOUNDARIES — they consume audio handle for the equal-power crossfade and would audio-mush continuous speech on a tight cut. Zero-handle transitions (ShutterFlash, NewspaperWipe, SceneTitle, DipToBlack) MAY anchor on EITHER list — their renderers substitute silence for the audio mix at peak and don't need handle frames. A transition at any non-boundary index has no cut to play across and the renderer will not produce it. The validator hard-rejects a crossfade type on a tight boundary.
 
 **HARD RULE 2 — the transition's natural duration must fit the boundary's gap.** Each CUT BOUNDARIES entry shows its available audio gap (`820ms gap`). A transition fits when its natural duration ≤ gap/2. If you want SceneTitle (1800ms natural) at a boundary annotated `2400ms gap`, that does NOT fit (need ≥ 3600ms gap). Match the transition's weight to both the dialogue's shift AND the available room — the long heavy transitions (SceneTitle, FilmStrip) are precisely the ones that earn the long pauses, so don't default to short safe transitions everywhere when a 4000ms-gap boundary is sitting right there asking for a chapter break.
 
