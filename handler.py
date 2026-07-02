@@ -8700,23 +8700,16 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
     # The philosophy: Gemini emits a complete, valid plan. Everything below
     # raises on error — we do not substitute defaults or silently drop entries.
 
-    _valid_caption_styles = {
-        "PaperII",
-        "Prime", "TypewriterReveal", "CinematicLetterpress", "Cove",
-        "EditorialPop", "Illuminate", "Lumen",
-        "Passage", "Pulse", "Quintessence", "Serif",
-        "none",  # user opted out — see renderer for skip logic
-    }
-    _valid_zoom_types = {
-        "SmoothPush", "SnapReframe", "FocusWindow", "StepZoom", "LetterboxPush",
-        "StageZoom", "DepthPull",
-    }
-    _valid_mg_types = {
-        "AnnotationArrow", "ChatThread",
-        "Notification", "ProgressBar", "RecordingFrame",
-        "StatCard", "StickyNotes",
-        "TweetBubble", "InstagramComment", "IMessageBubble", "TikTokComment",
-    }
+    # DERIVED from type_registries (the SAME source of truth the schema Literals
+    # read) so newly-added components can never drift out of these runtime gates
+    # again. These were hardcoded copies: the batch-2 additions (17 MG types + 4
+    # caption styles) were added to the schema/roster/render but not here, so the
+    # moment the roster told Gemini they existed, Gemini emitted them and this
+    # gate raised ValueError → every such video failed. VALID_CAPTION_STYLES
+    # already contains "none" (the user opt-out).
+    _valid_caption_styles = set(VALID_CAPTION_STYLES)
+    _valid_zoom_types = set(VALID_ZOOM_TYPES)
+    _valid_mg_types = set(VALID_MG_TYPES)
     # Motion graphics use semantic safe-zone anchors that map to the MG pack's
     # MGAnchor vocabulary (top/center/bottom/left/right) via SEMANTIC_TO_MG_ANCHOR
     # at render time. Face-relative anchors are NOT valid for motion graphics —
@@ -8730,7 +8723,7 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
         "sticky_note", "caption_match",
     }
 
-    # caption_style — must be exactly one of the 21 valid styles
+    # caption_style — must be exactly one of the registry's valid styles
     _cs_raw = str(edit_plan.get("caption_style") or "").strip()
     if _cs_raw not in _valid_caption_styles:
         raise ValueError(

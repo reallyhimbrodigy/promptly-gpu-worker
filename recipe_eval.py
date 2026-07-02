@@ -17,12 +17,15 @@ Inputs:
     duration       — float, output duration in seconds (post-cut runtime is fine; window
                      math uses word timestamps, duration is only for the summary line)
 
-No deps beyond stdlib. Every check maps to a named rule in the prompt so when
-quality drifts you know WHICH rule drifted.
+No third-party deps. Shares the type_registries source of truth (a local module)
+so component whitelists can't drift out of the eval. Every check maps to a named
+rule in the prompt so when quality drifts you know WHICH rule drifted.
 """
 
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
+
+from type_registries import VALID_TIGHT_CUT_OVERLAYS
 
 WINDOW_S = 2.0
 ZOOM_NATURAL_MS = {
@@ -182,7 +185,7 @@ def evaluate_recipe(plan, words, cut_boundaries, duration, tight_boundaries=None
     #     same type twice can be right if the editorial character actually
     #     matches)
     if tight_overlays:
-        _VALID_TCO_TYPES = {"LightLeak", "ShutterFlash", "NewspaperWipe", "SceneTitle"}
+        _VALID_TCO_TYPES = set(VALID_TIGHT_CUT_OVERLAYS)  # derive; no hardcoded copy
         _TCO_CAP = 2  # across ALL types combined — sparing is the whole point
         if len(tight_overlays) > _TCO_CAP:
             r.fail(
