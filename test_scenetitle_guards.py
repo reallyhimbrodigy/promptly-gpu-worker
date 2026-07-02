@@ -1,11 +1,11 @@
-"""SceneTitle guards — offline behavioral tests (3-stub harness).
+"""Heavy-transition guards + deleted-type repair — offline (3-stub harness).
 
 Fixture: 20 words, word i spans [i*0.4, i*0.4+0.35].
 - remove word 5           -> tight boundary  (gap 0.45s) at src awi 4
 - remove words 8,9        -> CUT boundary    (gap 0.85s) at src awi 7  (>=0.70)
 - remove words 12..16     -> CUT boundary    (gap 2.05s) at src awi 11
 - (for the wide-fit case a separate cut plan removes 10 words -> 4.05s gap)
-FilmStrip natural 1.2s needs gap >= 2.4s; SceneTitle 1.8s needs >= 3.6s.
+FilmStrip natural 1.2s needs gap >= 2.4s.
 """
 import contextlib
 import copy
@@ -68,16 +68,24 @@ CUTS = {"remove_words": [{"word_index": 5}, {"word_index": 8}, {"word_index": 9}
         "notes": "stub", "pacing": "fast"}
 # kept-space: src4->kept4 (tight), src7->kept6 (0.85s cut), src11->kept9 (2.05s cut)
 
-print("=== T1: title-less SceneTitle transition -> RAISE -> repair net re-asks ===")
+print("=== T1: SceneTitle (deleted type) as transition -> registry RAISE -> net repairs ===")
 plan, err, out, calls = run_gen(
     [clean_plan(transitions=[{"type": "SceneTitle", "after_word_index": 9}]),
      clean_plan()],
     CUTS)
 check("net repaired (second pass returns)", err is None and isinstance(plan, dict), repr(err))
-check("[recipe-repair] fired with the title message",
-      "[recipe-repair] attempt=1" in out and "SceneTitle requires a title" in out)
+check("[recipe-repair] fired with the not-a-valid-transition message",
+      "[recipe-repair] attempt=1" in out and "not a valid transition" in out)
 check("re-ask carries the verbatim error",
-      len(calls) == 2 and "SceneTitle requires a title" in calls[1])
+      len(calls) == 2 and "not a valid transition" in calls[1])
+
+print("\n=== T1b: SceneTitle as tight_cut_overlay -> registry RAISE -> net repairs ===")
+plan, err, out, calls = run_gen(
+    [clean_plan(tight_cut_overlays=[{"type": "SceneTitle", "after_word_index": 4}]),
+     clean_plan()],
+    CUTS)
+check("net repaired (TCO path)", err is None and isinstance(plan, dict), repr(err))
+check("registry rejection in the re-ask", len(calls) == 2 and "is not valid" in calls[1])
 
 print("\n=== T2: unfit FilmStrip (0.85s gap < 2.4s) -> demote_heavy_unfit, job lives ===")
 plan, err, out, calls = run_gen(
@@ -91,15 +99,14 @@ _ovl = [o for o in (plan or {}).get("_resolved_tight_cut_overlays") or []
 check("light overlay appended at the boundary (src awi 7)", len(_ovl) == 1, str(_ovl))
 check("FilmStrip not applied", "Transition 'FilmStrip' applied" not in out)
 
-print("\n=== T3: fit SceneTitle (4.05s gap >= 3.6s) with title -> passes untouched ===")
+print("\n=== T3: fit FilmStrip (4.05s gap >= 2.4s) -> passes untouched ===")
 WIDE = {"remove_words": [{"word_index": i} for i in range(5, 15)],
         "notes": "stub", "pacing": "fast"}   # gap = w15.start - w4.end = 6.0-1.95 = 4.05s
 plan, err, out, calls = run_gen(
-    [clean_plan(transitions=[{"type": "SceneTitle", "after_word_index": 4,
-                               "title": "CHAPTER TWO"}])],
+    [clean_plan(transitions=[{"type": "FilmStrip", "after_word_index": 4}])],
     WIDE)
 check("no raise", err is None, repr(err))
-check("SceneTitle applied untouched", "Transition 'SceneTitle' applied" in out)
+check("FilmStrip applied untouched", "Transition 'FilmStrip' applied" in out)
 check("no demotion fired", "demote_heavy_unfit" not in out and "action=demote" not in out)
 
 print("\n=== T4: crossfade on LISTED tight boundary keeps action=demote (precedence) ===")

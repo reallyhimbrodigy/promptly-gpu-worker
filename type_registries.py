@@ -44,7 +44,7 @@ VALID_CAPTION_STYLES = frozenset({
 VALID_TRANSITION_TYPES = frozenset({
     "CardSwipe", "ZoomThrough", "SlideOver", "Stack", "CrossfadeZoom",
     "ShutterFlash", "StepPush", "NewspaperWipe", "FilmStrip",
-    "SceneTitle", "DipToBlack",
+    "DipToBlack",
 })
 
 # Overlay-on-top-of-hard-cut decorations. Render path is DISTINCT from
@@ -57,7 +57,7 @@ VALID_TRANSITION_TYPES = frozenset({
 # `transition_out`) and by BOUNDARY TYPE (TIGHT vs CUT), not by name.
 # Adding a third overlay means editing this set only.
 VALID_TIGHT_CUT_OVERLAYS = frozenset({
-    "LightLeak", "ShutterFlash", "NewspaperWipe", "SceneTitle",
+    "LightLeak", "ShutterFlash", "NewspaperWipe",
 })
 
 # Mechanism / effect phrases that count as a tight-cut-overlay COMMITMENT in

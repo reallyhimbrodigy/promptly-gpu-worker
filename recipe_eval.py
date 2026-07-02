@@ -204,19 +204,9 @@ def evaluate_recipe(plan, words, cut_boundaries, duration, tight_boundaries=None
                     "tight-overlay-type",
                     f"tight_cut_overlay type {tco_type!r} not in {sorted(_VALID_TCO_TYPES)}",
                 )
-            # SceneTitle requires a title; the other three forbid title/label.
-            # Mirrors the handler.py application-layer enforcement so
-            # misuses surface at eval time too (observability before the
-            # render rejects them).
-            if tco_type == "SceneTitle":
-                if not (isinstance(tco_title, str) and tco_title.strip()):
-                    r.fail(
-                        "tight-overlay-scenetitle-title",
-                        f"SceneTitle tight_cut_overlay at word {tco_awi} is missing "
-                        f"a `title` — the typographic panel requires 1-3 uppercase words.",
-                    )
-            elif tco_type in _VALID_TCO_TYPES:
-                # LightLeak / ShutterFlash / NewspaperWipe: extras forbidden.
+            # Overlays carry no extra fields — mirror the handler.py
+            # application-layer enforcement so misuse surfaces at eval time.
+            if tco_type in _VALID_TCO_TYPES:
                 _bad_extras = []
                 if tco_title not in (None, ""):
                     _bad_extras.append("title")
@@ -226,7 +216,7 @@ def evaluate_recipe(plan, words, cut_boundaries, duration, tight_boundaries=None
                     r.fail(
                         "tight-overlay-extras-misuse",
                         f"{tco_type} tight_cut_overlay at word {tco_awi} carries "
-                        f"{_bad_extras} — only SceneTitle uses title/label.",
+                        f"{_bad_extras} — overlays take no extra fields.",
                     )
             if tco_awi is None:
                 r.fail("tight-overlay-anchor", "tight_cut_overlay missing after_word_index")
@@ -250,9 +240,7 @@ def evaluate_recipe(plan, words, cut_boundaries, duration, tight_boundaries=None
             r.warn(
                 "tight-overlay-variety",
                 f"both tight_cut_overlays use type {_tco_types_seen[0]!r} — prefer two "
-                f"different types unless both moments genuinely earn the same character "
-                f"(two SceneTitles in one video is almost always wrong — a video usually "
-                f"has at most one true chapter break worth labeling).",
+                f"different types unless both moments genuinely earn the same character.",
             )
 
     # ──────────────────────────────────────────────── tight-boundary masking

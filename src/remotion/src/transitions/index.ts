@@ -10,7 +10,6 @@ export type {
   StepPushProps,
   NewspaperWipeProps,
   FilmStripProps,
-  SceneTitleProps,
   DipToBlackProps,
 } from "./types";
 
@@ -24,5 +23,4 @@ export { LightLeak, LIGHT_LEAK_PEAK_PROGRESS } from "./LightLeak";
 export { StepPush, STEP_PUSH_PEAK_PROGRESS } from "./StepPush";
 export { NewspaperWipe, NEWSPAPER_WIPE_PEAK_PROGRESS } from "./NewspaperWipe";
 export { FilmStrip, FILM_STRIP_PEAK_PROGRESS } from "./FilmStrip";
-export { SceneTitle, SCENE_TITLE_PEAK_PROGRESS } from "./SceneTitle";
 export { DipToBlack, DIP_TO_BLACK_PEAK_PROGRESS } from "./DipToBlack";

@@ -24,10 +24,6 @@ export interface OverlayCutTestProps {
   /** Source video's encoded fps — OffthreadVideo's startFrom is in source
    *  frames. The reference video used in this isolation test is 23.976fps. */
   sourceFps?: number;
-  /** SceneTitle isolation only — title text on the panel. */
-  sceneTitle?: string;
-  /** SceneTitle isolation only — optional kicker above the divider. */
-  sceneLabel?: string;
 }
 
 /**
@@ -62,8 +58,6 @@ export const OverlayCutTest: React.FC<OverlayCutTestProps> = ({
   clipAStartSec = 3,
   clipBStartSec = 11,
   sourceFps = 23.976,
-  sceneTitle,
-  sceneLabel,
 }) => {
   const frame = useCurrentFrame();
   const { durationInFrames } = useVideoConfig();
@@ -155,8 +149,6 @@ export const OverlayCutTest: React.FC<OverlayCutTestProps> = ({
           type={overlayType}
           atFrame={cutFrame}
           durationInFrames={overlayDurationInFrames}
-          title={sceneTitle}
-          label={sceneLabel}
         />
       )}
 

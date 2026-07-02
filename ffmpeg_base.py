@@ -17,7 +17,7 @@ filtergraph that does the same work natively:
   - Audio mux (stream-copied from the parallel audio pipeline)
 
 Composite-effect zooms (FocusWindow / LetterboxPush / DepthPull) and ALL
-transitions (CardSwipe / FilmStrip / SceneTitle / NewspaperWipe / LightLeak
+transitions (CardSwipe / FilmStrip / NewspaperWipe / LightLeak
 / SlideOver / Stack / CrossfadeZoom / ShutterFlash / StepPush / ZoomThrough)
 stay in Remotion via PromptlyMicroSegments — those carry multi-layer
 visual identity (bokeh orbs, blur masks, custom typography, etc.) that has

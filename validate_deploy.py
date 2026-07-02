@@ -120,8 +120,12 @@ def _system_instruction_format():
     end = src.find('"""', start + 30)
     prompt = src[start + len('system_instruction = f"""'):end]
     # The .format() check catches unescaped { in JSON examples
-    # (today's f-string bug pattern).
-    prompt.format()
+    # (today's f-string bug pattern). The registry-derived interpolations
+    # (enum lines + roster counts) are supplied as kwargs.
+    prompt.format(
+        _caption_enum="X", _mg_enum="X", _transition_enum="X", _tco_enum="X",
+        _n_styles=0, _n_transitions=0, _n_mgs=0,
+    )
 
 
 @check("no JSON-literal { patterns in any f-string (catches unescaped braces)")
@@ -1100,14 +1104,14 @@ def _emphasis_spaced_pair_both_kept():
 @check("ZERO_HANDLE_TRANSITION_TYPES contains the audit-verified types + DipToBlack (sanity)")
 def _zero_handle_set_present():
     # Audit (2026-06-14) verified ShutterFlash/NewspaperWipe/LightLeak/
-    # SceneTitle render correctly without handle frames; DipToBlack was
+    # the zero-handle types render without handle frames; DipToBlack was
     # added 2026-06-14 (Option A wiring) as the clean default for TIGHT
     # boundaries. The set drives the audio silent-slot branch in
     # build_per_cut_audio AND the video additive-slot branch at the
     # render slot-build loop. Anyone removing from this set must also
     # restore the audio crossfade + the overlap cursor model for that type
     # or risk speech smear (audio) and projection drift (video).
-    expected = {"ShutterFlash", "NewspaperWipe", "LightLeak", "SceneTitle", "DipToBlack"}
+    expected = {"ShutterFlash", "NewspaperWipe", "DipToBlack"}
     assert hasattr(handler, "ZERO_HANDLE_TRANSITION_TYPES"), "constant missing"
     assert handler.ZERO_HANDLE_TRANSITION_TYPES == expected, (
         f"unexpected ZERO_HANDLE_TRANSITION_TYPES: "
@@ -1171,21 +1175,12 @@ def _no_hardcoded_transition_set_drift():
     # be in VALID_TRANSITION_TYPES (no hallucinated names in the prompt).
     # The reverse is not required — prompts can offer a subset.
     import re
-    _schema_line_match = re.search(
-        r'"transitions":\s*\[\s*\{\{[^}]*"type":\s*((?:"[^"]+"\s*\|\s*)*"[^"]+")',
-        _src,
-    )
-    assert _schema_line_match, (
-        "Prompt schema example for transitions/type at handler.py:~3854 "
-        "could not be parsed. The 'type' line shape may have changed."
-    )
-    _prompt_types = set(re.findall(r'"([^"]+)"', _schema_line_match.group(1)))
-    _canonical = set(handler.VALID_TRANSITION_TYPES)
-    _hallucinated = _prompt_types - _canonical
-    assert not _hallucinated, (
-        f"Prompt schema example lists types not in VALID_TRANSITION_TYPES: "
-        f"{sorted(_hallucinated)}. These would fail Pydantic validation "
-        f"if Gemini emitted them."
+    # The prompt's transitions enum line now DERIVES from the registry
+    # ({_transition_enum} interpolation) — hallucinated names are
+    # structurally impossible. Pin the derivation site instead.
+    assert '"type": {_transition_enum}' in _src, (
+        "Prompt schema transitions enum no longer derives from the "
+        "registry — the stale-enum class returns if this is hand-written."
     )
 
     # The Pydantic render-input schema at render_schemas.py:~38 used to
@@ -1770,7 +1765,7 @@ def _transition_cap_drops_shortest_first():
         {"type": "ZoomThrough",   "afterClipIndex": 0},  # 500ms — shortest
         {"type": "CrossfadeZoom", "afterClipIndex": 1},  # 800ms
         {"type": "CardSwipe",     "afterClipIndex": 2},  # 600ms
-        {"type": "SceneTitle",    "afterClipIndex": 3},  # 1800ms — longest
+        {"type": "SlideOver",     "afterClipIndex": 3},  # 700ms
         {"type": "Stack",         "afterClipIndex": 4},  # 1000ms
         {"type": "StepPush",      "afterClipIndex": 5},  # 600ms
         {"type": "FilmStrip",     "afterClipIndex": 6},  # 1200ms
@@ -1795,8 +1790,8 @@ def _transition_cap_drops_shortest_first():
         f"expected ZoomThrough + CardSwipe (shortest two), got {dropped_types}"
     )
 
-    # SceneTitle (1800ms, idx 3) is the longest → must be kept.
-    assert 3 not in drop_indices, "longest natural duration must NEVER drop"
+    # FilmStrip (1200ms, idx 6) is the longest → must be kept.
+    assert 6 not in drop_indices, "longest natural duration must NEVER drop"
 
 
 @check("transition cap is a NOOP when count <= cap (no-target principle)")
@@ -2654,7 +2649,7 @@ def _plan_diff_tight_cut_overlays_visible():
     )
     # All 4 overlay names must be visible too, otherwise Gemini can't pick
     # one by name on an ADD request.
-    for _name in ("LightLeak", "ShutterFlash", "NewspaperWipe", "SceneTitle"):
+    for _name in ("LightLeak", "ShutterFlash", "NewspaperWipe"):
         assert _name in src, (
             f"generate_plan_diff is missing overlay name {_name!r}. The "
             f"re-edit prompt needs all 4 visible so the user can request "
@@ -3415,13 +3410,13 @@ def _phase2_on_no_caller_mutation():
 print("\n[5c/6] Tight-cut overlay wiring (Step 2)")
 
 
-@check("VALID_TIGHT_CUT_OVERLAYS canonical set has exactly the 4 signed-off overlays")
+@check("VALID_TIGHT_CUT_OVERLAYS canonical set has exactly the 3 signed-off overlays")
 def _tco_registry_pair():
     import type_registries
     assert hasattr(type_registries, "VALID_TIGHT_CUT_OVERLAYS"), (
         "VALID_TIGHT_CUT_OVERLAYS missing from type_registries"
     )
-    expected = frozenset({"LightLeak", "ShutterFlash", "NewspaperWipe", "SceneTitle"})
+    expected = frozenset({"LightLeak", "ShutterFlash", "NewspaperWipe"})
     assert type_registries.VALID_TIGHT_CUT_OVERLAYS == expected, (
         f"VALID_TIGHT_CUT_OVERLAYS={type_registries.VALID_TIGHT_CUT_OVERLAYS} — "
         f"expected exactly {expected}. Adding a fifth requires another isolation "
@@ -3432,9 +3427,8 @@ def _tco_registry_pair():
 @check("render_schemas.PromptlyRenderInput.tightCutOverlays accepts a valid spec")
 def _tco_schema_roundtrip():
     # Active-path check: build a minimal PromptlyRenderInput with one
-    # TightCutOverlaySpec per registered type, plus a SceneTitle carrying
-    # the title/label extras. All must validate; the empty-default path
-    # must still recover the pre-overlay behavior.
+    # TightCutOverlaySpec per registered type. All must validate; the
+    # empty-default path must still recover the pre-overlay behavior.
     import render_schemas
     _minimal = {
         "sourceUrl": "x.mp4",
@@ -3454,29 +3448,18 @@ def _tco_schema_roundtrip():
         "textOverlays": [],
         "motionGraphics": [],
         # Explicit tightCutOverlays list — one entry per registered type to
-        # exercise every literal in TightCutOverlayType, plus SceneTitle's
-        # title/label extras.
+        # exercise every literal in TightCutOverlayType.
         "tightCutOverlays": [
             {"atFrame": 120, "type": "LightLeak", "durationInFrames": 11},
             {"atFrame": 200, "type": "ShutterFlash", "durationInFrames": 11},
             {"atFrame": 280, "type": "NewspaperWipe", "durationInFrames": 11},
-            {"atFrame": 380, "type": "SceneTitle", "durationInFrames": 72,
-             "title": "ACT TWO", "label": "CHAPTER"},
         ],
     }
     parsed = render_schemas.PromptlyRenderInput.model_validate(_minimal)
-    assert len(parsed.tightCutOverlays) == 4
+    assert len(parsed.tightCutOverlays) == 3
     _types = [o.type for o in parsed.tightCutOverlays]
-    assert _types == ["LightLeak", "ShutterFlash", "NewspaperWipe", "SceneTitle"], (
+    assert _types == ["LightLeak", "ShutterFlash", "NewspaperWipe"], (
         f"types out of order: {_types}"
-    )
-    # SceneTitle entry must carry its title + label through the Pydantic layer.
-    _st = parsed.tightCutOverlays[3]
-    assert _st.title == "ACT TWO", f"SceneTitle title not preserved: {_st.title!r}"
-    assert _st.label == "CHAPTER", f"SceneTitle label not preserved: {_st.label!r}"
-    # SceneTitle must use the longer 72-frame duration.
-    assert _st.durationInFrames == 72, (
-        f"SceneTitle durationInFrames should be 72, got {_st.durationInFrames}"
     )
 
     # Default-empty path: the field must accept being absent and default
@@ -3500,48 +3483,9 @@ def _tco_schema_roundtrip():
     raise AssertionError("FilmStrip should not validate as a tightCutOverlay type")
 
 
-@check("recipe_eval flags SceneTitle tight_cut_overlay without a title")
-def _recipe_eval_tco_scenetitle_no_title():
-    # SceneTitle's typographic panel needs a title. Emitting it without one
-    # is the hard error the validator catches first; recipe_eval also
-    # surfaces it so operators see the problem in the eval report.
-    import recipe_eval
-    bad_plan = {
-        "video_plan": {
-            "arc_segments": [
-                {"start_word_index": 0, "end_word_index": 1, "position": "hook", "intensity": 0.9},
-                {"start_word_index": 2, "end_word_index": 5, "position": "build", "intensity": 0.4},
-                {"start_word_index": 6, "end_word_index": 7, "position": "payoff", "intensity": 1.0},
-            ],
-            "key_moments": [{"word_index": 1}, {"word_index": 7}],
-            "payoff_word_index": 7,
-            "close_word_index": 7,
-        },
-        "emphasis_moments": [
-            {"word_indices": [1], "zoom_effect": {"type": "SnapReframe", "events": [{"startMs": 0}]}},
-            {"word_indices": [7], "zoom_effect": {"type": "SmoothPush", "events": [{"startMs": 0}]}},
-        ],
-        "transitions": [],
-        "tight_cut_overlays": [
-            {"after_word_index": 3, "type": "SceneTitle"},  # missing title!
-        ],
-        "broll_clips": [], "motion_graphics": [],
-        "text_overlays": [], "sound_effects": [],
-    }
-    words = [{"word": str(i), "start": i * 0.5, "end": i * 0.5 + 0.4} for i in range(8)]
-    rep = recipe_eval.evaluate_recipe(
-        bad_plan, words, cut_boundaries=[], duration=4.0,
-        tight_boundaries=[3],
-    )
-    rule_ids = {r for (r, _) in rep.failures}
-    assert "tight-overlay-scenetitle-title" in rule_ids, (
-        f"expected tight-overlay-scenetitle-title failure, got: {rule_ids}"
-    )
-
-
-@check("recipe_eval flags non-SceneTitle tight_cut_overlay carrying title/label")
+@check("recipe_eval flags tight_cut_overlay carrying title/label extras")
 def _recipe_eval_tco_extras_misuse():
-    # title/label are SceneTitle-only. Emitting them with LightLeak (or
+    # Overlays carry no extra fields — extras on any type must fail.
     # ShutterFlash / NewspaperWipe) is a hard error — the validator rejects
     # it. recipe_eval mirrors this as the tight-overlay-extras-misuse rule.
     import recipe_eval
@@ -3578,12 +3522,11 @@ def _recipe_eval_tco_extras_misuse():
     )
 
 
-@check("recipe_eval accepts SceneTitle with title (active passing path)")
-def _recipe_eval_tco_scenetitle_passes():
-    # A SceneTitle with a proper title at a TIGHT boundary should not fire
-    # any tight-overlay-* failure — the eval must NOT misfire on the
-    # active-path case (otherwise valid chapter breaks would all show as
-    # failures in the eval report).
+@check("recipe_eval accepts valid overlays (active passing path)")
+def _recipe_eval_tco_valid_passes():
+    # Valid overlays at TIGHT boundaries should not fire any
+    # tight-overlay-* failure — the eval must NOT misfire on the
+    # active-path case.
     import recipe_eval
     good_plan = {
         "video_plan": {
@@ -3603,7 +3546,7 @@ def _recipe_eval_tco_scenetitle_passes():
         ],
         "transitions": [],
         "tight_cut_overlays": [
-            {"after_word_index": 3, "type": "SceneTitle", "title": "ACT TWO", "label": "CHAPTER"},
+            {"after_word_index": 3, "type": "ShutterFlash"},
             {"after_word_index": 5, "type": "NewspaperWipe"},
         ],
         "broll_clips": [], "motion_graphics": [],
@@ -3619,7 +3562,7 @@ def _recipe_eval_tco_scenetitle_passes():
         if r.startswith("tight-overlay-")
     }
     assert not tco_rules, (
-        f"valid SceneTitle + NewspaperWipe placement should not fail any "
+        f"valid ShutterFlash + NewspaperWipe placement should not fail any "
         f"tight-overlay-* rule, got: {tco_rules}"
     )
 
@@ -3781,12 +3724,12 @@ def _scene_floor_rotation_active():
         "rotation must be deterministic"
     )
 
-    # A boundary Gemini dressed with a held-out type (SceneTitle) is locked;
-    # neighbours rotate normally and never collide with it.
-    with_scenetitle = rot([None, "SceneTitle", None])
-    assert with_scenetitle[1] == "SceneTitle", "non-rotation pick must be preserved"
-    assert with_scenetitle[0] in ("ShutterFlash", "LightLeak", "NewspaperWipe")
-    assert with_scenetitle[2] in ("ShutterFlash", "LightLeak", "NewspaperWipe")
+    # A boundary Gemini dressed with a non-rotation type (DipToBlack, the
+    # held-out heavy transition) is locked; neighbours rotate normally.
+    with_locked = rot([None, "DipToBlack", None])
+    assert with_locked[1] == "DipToBlack", "non-rotation pick must be preserved"
+    assert with_locked[0] in ("ShutterFlash", "LightLeak", "NewspaperWipe")
+    assert with_locked[2] in ("ShutterFlash", "LightLeak", "NewspaperWipe")
 
 
 # ─── 5b5. CAPTION PAGE-BOUNDARY REGRESSION GUARDS ──────────────────────
@@ -3930,6 +3873,42 @@ def _repair_demotion_path():
     assert len(_ovl) == 1, f"expected 1 demoted overlay at awi=4, got {_ovl}"
     assert _ovl[0]["type"] in ("ShutterFlash", "LightLeak", "NewspaperWipe")
     assert "action=demote" in _buf.getvalue(), "demote divergence line missing"
+
+
+@check("RESPONSE FORMAT enums derive from type_registries (stale-enum class dead)")
+def _response_format_enums_derive():
+    # The prompt's output-shape enum lines were hand-written copies that
+    # silently excluded the 17 batch-2 MGs and 4 caption styles. They now
+    # DERIVE at f-string build time; this pins the derivation sites AND
+    # renders the prompt to prove the registry members actually appear.
+    _src = open("handler.py").read()
+    for _needle in ('"caption_style": {_caption_enum}',
+                    '"type": {_mg_enum}',
+                    '"type": {_transition_enum}',
+                    '"type": {_tco_enum}',
+                    "THE {_n_styles} STYLES",
+                    "THE {_n_transitions} TRANSITIONS",
+                    "THE {_n_mgs} COMPONENTS"):
+        assert _needle in _src, f"derivation site missing: {_needle}"
+    _sys, _user = handler._build_post_cuts_prompt(vibe="t", duration=10.0)
+    import type_registries as _tr
+    for _n in sorted(_tr.VALID_MG_TYPES):
+        assert f'"{_n}"' in _sys, f"MG {_n} missing from rendered enum"
+    for _n in sorted(_tr.VALID_CAPTION_STYLES):
+        assert f'"{_n}"' in _sys, f"caption style {_n} missing from rendered enum"
+    for _n in sorted(_tr.VALID_TRANSITION_TYPES):
+        assert f'"{_n}"' in _sys, f"transition {_n} missing from rendered enum"
+    assert f"THE {len(_tr.VALID_CAPTION_STYLES) - 1} STYLES" in _sys
+
+
+@check("system prompt renders byte-identical across consecutive calls (caching preserved)")
+def _system_prompt_render_identity():
+    # The registry-derived interpolations are runtime constants — two
+    # consecutive renders must produce the same bytes or implicit prompt
+    # caching breaks (and per-call nondeterminism has crept in).
+    _a, _ = handler._build_post_cuts_prompt(vibe="t", duration=10.0)
+    _b, _ = handler._build_post_cuts_prompt(vibe="t", duration=10.0)
+    assert _a == _b, "system prompt renders differ across consecutive calls"
 
 
 @check("AnnotationArrow: normalized 0-1 endpoints resolve to safe-rect pixels (path ≥ 200px)")

@@ -44,7 +44,6 @@ const OVERLAY_TYPE_MAP: Record<TightCutOverlayType, OverlayCutEffectType> = {
   LightLeak: "lightleak",
   ShutterFlash: "shutterflash",
   NewspaperWipe: "newspaperwipe",
-  SceneTitle: "scenetitle",
 };
 
 // Caption styles. All render through PromptlyOverlay's transparent canvas
@@ -61,7 +60,7 @@ import {
 // Transitions — all 12
 import {
   CardSwipe, ZoomThrough, SlideOver, Stack, CrossfadeZoom,
-  ShutterFlash, LightLeak, StepPush, NewspaperWipe, FilmStrip, SceneTitle,
+  ShutterFlash, LightLeak, StepPush, NewspaperWipe, FilmStrip,
   DipToBlack,
 } from "./transitions";
 
@@ -97,7 +96,7 @@ const CAPTION_MAP: Record<string, React.FC<any>> = {
 
 const TRANSITION_MAP: Record<string, React.FC<any>> = {
   CardSwipe, ZoomThrough, SlideOver, Stack, CrossfadeZoom,
-  ShutterFlash, LightLeak, StepPush, NewspaperWipe, FilmStrip, SceneTitle,
+  ShutterFlash, LightLeak, StepPush, NewspaperWipe, FilmStrip,
   DipToBlack,
 };
 
@@ -710,8 +709,6 @@ const TightCutOverlayLayer: React.FC<{
           type={OVERLAY_TYPE_MAP[ov.type]}
           atFrame={ov.atFrame}
           durationInFrames={ov.durationInFrames}
-          title={ov.title}
-          label={ov.label}
         />
       ))}
     </>
@@ -767,7 +764,7 @@ export const PromptlyOverlay: React.FC<PromptlyRenderProps> = ({ input }) => {
 
 // ─── PromptlyMicroSegments composition ─────────────────────────────────────
 // Renders ONLY the windows that FFmpeg can't replicate without visual drift:
-//   - Every transition (CardSwipe, FilmStrip, SceneTitle, NewspaperWipe,
+//   - Every transition (CardSwipe, FilmStrip, NewspaperWipe,
 //     LightLeak, etc. — all 11 use bespoke React/CSS that has no faithful
 //     FFmpeg analog).
 //   - Composite-effect zoom clips (FocusWindow, LetterboxPush, DepthPull —

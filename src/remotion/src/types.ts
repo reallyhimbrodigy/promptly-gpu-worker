@@ -109,7 +109,6 @@ export type TransitionType =
   | "StepPush"
   | "NewspaperWipe"
   | "FilmStrip"
-  | "SceneTitle"
   | "DipToBlack";
 
 // ── Tight-cut overlays ───────────────────────────────────────────────────────
@@ -124,8 +123,7 @@ export type TransitionType =
 export type TightCutOverlayType =
   | "LightLeak"
   | "ShutterFlash"
-  | "NewspaperWipe"
-  | "SceneTitle";
+  | "NewspaperWipe";
 
 export interface TightCutOverlaySpec {
   /** OUTPUT-timeline frame the hard cut sits on. Overlay window is centered
@@ -134,13 +132,8 @@ export interface TightCutOverlaySpec {
   type: TightCutOverlayType;
   /** Window length in output frames. Per-type:
    *  LightLeak / ShutterFlash / NewspaperWipe = 11 (~180ms @ 60fps),
-   *  SceneTitle = 72 (~1200ms @ 60fps — the typographic panel needs the
    *  longer hold for the title text to be readable). */
   durationInFrames: number;
-  /** SceneTitle only — required title text on the panel (1-3 uppercase words). */
-  title?: string;
-  /** SceneTitle only — optional kicker above the divider ("CHAPTER", "PART II"). */
-  label?: string;
 }
 
 // ── B-roll cutaway ───────────────────────────────────────────────────────────

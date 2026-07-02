@@ -67,14 +67,3 @@ export interface FilmStripProps extends TransitionProps {
 }
 
 export interface DipToBlackProps extends TransitionProps {}
-
-export interface SceneTitleProps extends TransitionProps {
-  title: string;
-  label?: string;
-  variant?: "full" | "half-top" | "half-bottom";
-  theme?: "dark" | "light";
-  accentColor?: string;
-  titleColor?: string;
-  labelColor?: string;
-  showDivider?: boolean;
-}

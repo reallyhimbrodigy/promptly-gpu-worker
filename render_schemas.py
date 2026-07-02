@@ -128,14 +128,6 @@ class TransitionSpec(_RemotionModel):
     palette: Optional[Literal["warm", "gold", "cool", "magenta"]] = None
     intensity: Optional[float] = None
     separatorShadow: Optional[bool] = None
-    title: Optional[str] = None
-    label: Optional[str] = None
-    variant: Optional[Literal["full", "half-top", "half-bottom"]] = None
-    theme: Optional[Literal["dark", "light"]] = None
-    accentColor: Optional[str] = None
-    titleColor: Optional[str] = None
-    labelColor: Optional[str] = None
-    showDivider: Optional[bool] = None
     assetPath: Optional[str] = None
     frameBackground: Optional[str] = None
     caption: Optional[str] = None
@@ -156,22 +148,11 @@ class TransitionSpec(_RemotionModel):
 #
 # durationInFrames is PER-TYPE, set by the Python emit:
 #   LightLeak / ShutterFlash / NewspaperWipe → 11 frames (180ms @ 60fps)
-#   SceneTitle                               → 72 frames (1200ms @ 60fps)
-# SceneTitle's typographic panel needs the longer hold so the title text
-# is readable through the 0.32–0.68 progress hold window.
-#
-# title + label are SceneTitle-only — the typographic panel needs at minimum
-# the title string (one to three uppercase words like "ACT TWO" or "THE PIVOT").
-# label is the optional kicker above the divider ("CHAPTER", "PART II", etc.).
-# Both fields are ignored when type is anything other than SceneTitle.
-# Validated at the application layer (handler.py): SceneTitle without a title
-# is rejected; the other three reject title/label entirely.
+# Overlays carry no extra fields.
 class TightCutOverlaySpec(_RemotionModel):
     atFrame: int
     type: TightCutOverlayType
     durationInFrames: int
-    title: Optional[str] = None
-    label: Optional[str] = None
 
 
 # ── B-roll ─────────────────────────────────────────────────────────────────

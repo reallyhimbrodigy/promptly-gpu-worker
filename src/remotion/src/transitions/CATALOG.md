@@ -192,34 +192,12 @@ Device-frame film-reel transition. Clip A morphs from full viewport into a round
 
 ---
 
-### SceneTitle
-
-Chapter-break transition. A typographic title panel wipes across the frame, holds long enough to read, then wipes back out to reveal clip B. The A→B cut is hidden behind the panel at peak coverage. Uses Inter (label) and DM Serif Display (title) via Google Fonts.
-
-**Best for:** Chapter breaks, act titles, documentary section headers.
-
-**Exports:** `SCENE_TITLE_PEAK_PROGRESS` (0.5)
-
-| Prop | Type | Default | Description |
-|------|------|---------|-------------|
-| `title` | `string` | — | **Required.** Main title text. Use `\n` to split onto multiple lines. |
-| `label` | `string` | — | Optional small uppercase section label (e.g. "PART 01"). |
-| `variant` | `"full" \| "half-top" \| "half-bottom"` | `"full"` | Panel coverage area. |
-| `theme` | `"dark" \| "light"` | `"dark"` | "dark" = ink-black panel / cream type. "light" = cream panel / ink type. |
-| `accentColor` | `string` | `"#C8551F"` | Accent divider color. |
-| `titleColor` | `string` | theme default | Title color override. |
-| `labelColor` | `string` | theme default | Label color override. |
-| `showDivider` | `boolean` | `true` | Show the thin horizontal divider (only visible when label is present). |
-
----
-
 ## Shared Dependencies
 
 Zero external dependencies beyond Remotion core:
 
 **Peer dependencies:**
 - `remotion` (AbsoluteFill, interpolate, Easing, OffthreadVideo, Img, useVideoConfig, staticFile)
-- `@remotion/google-fonts` (Inter, DMSerifDisplay — used only by SceneTitle)
 
 **Static assets:**
 - `torn-newspaper.png` — required by NewspaperWipe (place in `/public`)
