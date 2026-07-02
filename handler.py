@@ -3352,7 +3352,7 @@ What you believe, and how it shows in your work:
 
 **The camera's moves are emotional vocabulary.** Different moments make different emotional moves, so they get different zooms: grip on the hook, punctuation on mid-peaks, slow commitment on the payoff, echo on the close. Same zoom on every emphasis means you weren't reading the moments.
 
-**Every cut boundary is a beat.** A visible splice without a transition reads as broken editing on this platform. The default is a transition whose character matches that specific shift; skipping one is the exception.
+**The hard cut is this format's native grammar.** Viewers read clean jump cuts as pace — the edit breathing at talking speed — and a bare splice mid-thought is exactly what the best UGC does dozens of times per video. A transition is a spent resource: it slows the cut it sits on and spends the viewer's attention, so it appears only where the video genuinely turns — a movement boundary, an act shift, the walk into the payoff — and its character names that turn. One to three transitions is the natural budget of a lean edit; most boundaries play straight, and that IS the polish.
 
 **Sound rides under visuals, never alone.** Every SFX pairs with a discrete visual event the viewer sees happen on that word. SFX without visual partners read as random audio.
 
@@ -3501,7 +3501,7 @@ Every component decision is judged against: "does this produce the feeling this 
 
   • **close** (last 1-5 words, intensity 0.6-0.9) — the viewer is deciding whether to rewatch; the platform auto-loops. Feeling: the loop CLOSING. Treatment: callback. Echo the hook — same zoom personality at lower intensity, callback MG content if the hook had one, parallel caption emphasis. If the hook was a SnapReframe, the close mirrors with a SnapReframe. The callback IS the satisfaction that earns the replay. End on the close beat so the platform's loop lands clean — the rendered loop carries the moment, no fade-out.
 
-Transitions between positions take their flavor from the shift: build → mid_peak accelerates (ZoomThrough, CardSwipe) · mid_peak → build descends (SlideOver, CrossfadeZoom) · build → build chapter shifts are structured (SlideOver, StepPush) · peak → peak is sharp (ShutterFlash, CardSwipe) · build → payoff accelerates HARD (on a cut boundary: ZoomThrough, the most committed transition in the video; on a tight boundary the same acceleration lands as a ShutterFlash overlay plus a zoom punch on the first word) · payoff → close is calm (CrossfadeZoom or none) · breather → anything is minimal or none. When register and arc-position suggest different answers, arc-position wins — that's the spine talking. Every type named in this map plays by the boundary lists — the arc shift picks the energy, and the boundary class picks whether that energy arrives as the named transition or as its overlay-plus-zoom equivalent.
+The map names the character IF a turn earns a transition at that shift — it never obliges one. Transitions between positions take their flavor from the shift: build → mid_peak accelerates (ZoomThrough, CardSwipe) · mid_peak → build descends (SlideOver, CrossfadeZoom) · build → build chapter shifts are structured (SlideOver, StepPush) · peak → peak is sharp (ShutterFlash, CardSwipe) · build → payoff accelerates HARD (on a cut boundary: ZoomThrough, the most committed transition in the video; on a tight boundary the same acceleration lands as a ShutterFlash overlay plus a zoom punch on the first word) · payoff → close is calm (CrossfadeZoom or none) · breather → anything is minimal or none. When register and arc-position suggest different answers, arc-position wins — that's the spine talking. Every type named in this map plays by the boundary lists — the arc shift picks the energy, and the boundary class picks whether that energy arrives as the named transition or as its overlay-plus-zoom equivalent.
 
 EXAMPLE arc_segments for a 30-second video with 2 mid-peaks:
 
@@ -3995,13 +3995,9 @@ Register tunes the cutaway's CHARACTER, not whether it exists: vulnerable/interv
 
 A transition is the visual treatment ON a cut. Every entry in the CUT BOUNDARIES list is a visible splice in the rendered output — dead air removed, or a shot change already in the source. The viewer's eye experiences a jump there; your job is making it intentional.
 
-**DEFAULT: one transition per entry in the CUT BOUNDARIES list.** That list is authoritative and exhaustive: every transition's `after_word_index` must come from it (a transition at any other index has no cut to play across and won't render), and don't infer boundaries from timestamp gaps — natural pauses look like cuts but aren't. `after_word_index` = the LAST word of the outgoing clip. If the kept transcript shows [31] "Hatikva?" / [32] "Shakespeare." and CUT BOUNDARIES contains 31, the transition goes at after_word_index 31; an entry at 32 is inside the next clip and does nothing.
+**DEFAULT: the cut plays straight.** Every entry in the CUT BOUNDARIES list is a legitimate slot, and most of them stay bare — that's the lean grammar working. Place a transition only where the dialogue genuinely turns: a movement boundary from your own `movements`, an act shift, the acceleration into the payoff. Each one you emit should be defensible in a sentence naming the turn it marks (that sentence is its `why`). One to three per video is the natural range for lean UGC; every `after_word_index` still comes from the CUT BOUNDARIES list, and never infer boundaries from timestamp gaps.
 
-**Only two skip cases:**
-  • Mid-sentence flow — the same sentence continues across the cut (same verb-subject, no delivery pause): "I went to the store…" [cut] "…and bought milk."
-  • The weaker side of a sub-800ms sandwich (below).
-
-**Duration mechanics:** each transition consumes 400ms of source from the outgoing tail and 400ms from the incoming head. A clip between two transitions loses 800ms to crossfades. Decision tree by clip length: <800ms → only ONE transition fits; keep the stronger shift. 800-1500ms with both shifts strong → place both (a tight middle is the better trade than skipping a real shift). 800-1500ms with one weak shift → drop the weak side. >1500ms → place at every shift without hesitation.
+**Duration mechanics:** each transition consumes 400ms of source from the outgoing tail and 400ms from the incoming head. A clip between two transitions loses 800ms to crossfades. Decision tree by clip length: <800ms → only ONE transition fits; keep the stronger shift. 800-1500ms with both shifts strong → place both (a tight middle is the better trade than skipping a real shift). 800-1500ms with one weak shift → drop the weak side. >1500ms → room for a transition at each shift that genuinely turns (the default is still the straight cut).
 
 **Type selection:** match the character of THIS shift (arc-transition flavors in ARC SPINE), then sanity-check against the register — a Stack on a confession reads costume; a NewspaperWipe on trauma reads tabloid; a FilmStrip on a 20-second clip is too much weight. Never the same type twice in a row.
 
@@ -4200,9 +4196,10 @@ These override creative reasoning when they conflict.
     peaks, never pad). At least 2 distinct zoom types across
     them. Never on build or breather words. Payoff = SmoothPush or
     LetterboxPush, never StepZoom. Events emit startMs only.
-  • transitions: one per CUT BOUNDARIES entry, except mid-sentence flow and
-    the weaker side of a sub-800ms sandwich. after_word_index always from the
-    CUT BOUNDARIES list. No type repeated back-to-back.
+  • transitions: straight cut is the default; emit only at genuine turns
+    (movement boundary, act shift, payoff walk-in), each with its `why`,
+    after_word_index always from the CUT BOUNDARIES list, no type repeated
+    back-to-back.
   • broll_clips: build (and sparingly breather) only. Never starting in the
     first ~3s of output or inside the hook segment, never on mid-peak/payoff
     words, never on the close word itself (callback B-roll earlier in the
@@ -4242,9 +4239,6 @@ re-read those moments — at least one is doing something different.
   • caption_keywords (keyword styles): ~1 per 3-4 spoken words, spread
     across the whole transcript — for 80 kept words that is ~20-25 keywords,
     not 10.
-  • Transition skips must cite their exception (mid-sentence flow or
-    sub-800ms sandwich) — "the raw vibe" is not an exception; a new sentence
-    after the cut is never mid-sentence flow.
 
 ═══════════════════════════════════════════════════════════════════════════
 BEFORE EMITTING — two passes
@@ -7504,7 +7498,7 @@ Indices below are the NEW kept-only space [0..{_kept_count - 1}]. Every word_ind
 
   {_cut_boundary_block}
 
-=== TIGHT BOUNDARIES (real cuts with no audio handle — crossfade transitions cannot fit here, but ZERO-HANDLE transitions (ShutterFlash / NewspaperWipe / DipToBlack) can, and `tight_cut_overlay` decorations can. Each is tagged SCENE CHANGE (a real visual cut — the shot actually changed) or pause (a silence-only splice, no visual change). EVERY scene change carries exactly ONE decoration — a zero-handle transition OR a tight_cut_overlay, never both — and you should vary the type across adjacent scene changes so it reads as editing vocabulary, not one effect on loop. Pause boundaries are discretionary and default to a clean hard cut. At minimum land a zoom on the first word after any tight cut to mask the jump. See HOW TO PLACE TRANSITIONS and HOW TO PLACE TIGHT-CUT OVERLAYS below for the editorial distinction.) ===
+=== TIGHT BOUNDARIES (real cuts with no audio handle — crossfade transitions cannot fit here, but zero-handle transitions (ShutterFlash / NewspaperWipe / DipToBlack) can, and `tight_cut_overlay` decorations can. Each is tagged SCENE CHANGE (the shot actually changed) or pause (a silence-only splice). Both classes default to a clean hard cut. Decorate a boundary only when the moment it lands on earns punctuation — a reveal, an escalation, a callback — and land a zoom on the first word after any tight cut to mask the jump. Vary types across the decorations you do place. See HOW TO PLACE TRANSITIONS and HOW TO PLACE TIGHT-CUT OVERLAYS below.) ===
 
   {_tight_boundary_block}
 
@@ -7541,7 +7535,7 @@ CHAPTER-BREAK CLASS (~1200ms — a typographic divider; the new section starts h
 
 **HARD RULE 1 — `after_word_index` MUST come from the TIGHT BOUNDARIES list above (NOT CUT BOUNDARIES, NOT any other index).** Placing a tight_cut_overlay at a CUT boundary is wrong: those boundaries already get full transitions. Placing it at a non-boundary index has no cut to decorate and the renderer will not produce it.
 
-**HARD RULE 2 — every SCENE CHANGE is dressed; PAUSES stay sparing.** The TIGHT BOUNDARIES list tags each cut `SCENE CHANGE` (a real visual cut) or `pause` (a silence-only splice, no visual change). Decorate EVERY scene change — a transition or a tight_cut_overlay — and vary the type so adjacent scene changes don't repeat; the pipeline guarantees this floor beneath your choices, so place them with intent rather than leaving them bare. PAUSES are the sparing case: at most 2 discretionary overlays across the whole video (a short video gets 0, a strong chapter structure 1, a hook callback + a real chapter break 2), and a pause's default is a clean hard cut. The 2-overlay cap and "rare exception" framing govern PAUSES only — on scene changes, varied decoration IS the vocabulary, not a templated overuse. One thing is NOT optional, though: your array must not contradict your own `editorial_vision`. If your vision named a tight-cut overlay (by type or effect), resolve it one of two ways — emit that overlay on the single tight boundary that most earns it, OR, only if you genuinely find no boundary earns it, that's a signal your vision overclaimed and you must not leave the claim standing. You may not both name an overlay in your vision and emit an empty array. When vision and array disagree, that is an error you fix here — by emitting the earned overlay, or by having not claimed it. Emit a second overlay only if a DISTINCT second boundary independently earns one under the criteria below.
+**HARD RULE 2 — decoration is discretionary everywhere; ≤2 per video.** Both boundary classes (SCENE CHANGE and pause) default to a clean hard cut. Place an overlay only where the moment itself earns punctuation — a reveal landing, an escalation snapping, a callback closing — at most 2 across the whole video, and vary the type when you place two. One thing is NOT optional, though: your array must not contradict your own `editorial_vision`. If your vision named a tight-cut overlay (by type or effect), resolve it one of two ways — emit that overlay on the single tight boundary that most earns it, OR, only if you genuinely find no boundary earns it, that's a signal your vision overclaimed and you must not leave the claim standing. You may not both name an overlay in your vision and emit an empty array. When vision and array disagree, that is an error you fix here — by emitting the earned overlay, or by having not claimed it.
 
 Your `editorial_vision` and your `tight_cut_overlays` array must agree. If your vision commits to tight-cut overlays — either by naming a specific TYPE ('tight ShutterFlash cuts') OR by naming the EFFECT/MECHANISM ({_tco_mechanism_examples}) — emit at least one matching entry on the boundary that earns it. If on reflection no boundary earns one, that's fine — but then your vision should not claim the overlay or its effect. Vision and array tell the same story.
 
@@ -8835,20 +8829,32 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                         _scene_n_lowconf += 1
                         continue  # likely PiP/insert edge — floor skips it
                     _floor_seq.append((_si, None))
-                # Deterministic variety fill over the in-scope sequence.
-                _resolved_floor_types = _scene_floor_rotation([_t for (_si, _t) in _floor_seq])
-                for _idx, (_si, _cur) in enumerate(_floor_seq):
-                    if _cur is not None:
-                        continue  # already decorated (Gemini) — keep its pick
-                    _ftype = _resolved_floor_types[_idx]
-                    _resolved_overlays.append({"after_word_index": _si, "type": _ftype})
-                    _overlay_awis.add(_si)
-                    _scene_backfilled += 1
-                    print(
-                        f"[scene-floor] backfill '{_ftype}' at after_word_index={_si} "
-                        f"(bare scene-change boundary)",
-                        flush=True,
-                    )
+                # ── RETIRED MANDATE (UGC overhaul): the unconditional
+                # backfill manufactured decoration on every scene change —
+                # the "unnecessary engine". Retired behind a one-flag
+                # rollback rather than deleted: SCENE_FLOOR_BACKFILL_ENABLED
+                # env, default OFF. The counting above and the summary below
+                # keep firing (backfilled=0) so the retirement is visible in
+                # every job's logs. The demotion machinery still uses
+                # _scene_floor_rotation, which stays.
+                _floor_backfill_on = os.environ.get(
+                    "SCENE_FLOOR_BACKFILL_ENABLED", ""
+                ).strip().lower() in ("1", "true", "yes", "on")
+                if _floor_backfill_on:
+                    # Deterministic variety fill over the in-scope sequence.
+                    _resolved_floor_types = _scene_floor_rotation([_t for (_si, _t) in _floor_seq])
+                    for _idx, (_si, _cur) in enumerate(_floor_seq):
+                        if _cur is not None:
+                            continue  # already decorated (Gemini) — keep its pick
+                        _ftype = _resolved_floor_types[_idx]
+                        _resolved_overlays.append({"after_word_index": _si, "type": _ftype})
+                        _overlay_awis.add(_si)
+                        _scene_backfilled += 1
+                        print(
+                            f"[scene-floor] backfill '{_ftype}' at after_word_index={_si} "
+                            f"(bare scene-change boundary)",
+                            flush=True,
+                        )
             # Unconditional summary — fires even at 0 so "ran but found nothing
             # attachable" never again looks like "never ran".
             print(
