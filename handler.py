@@ -7150,6 +7150,141 @@ def _enforce_off_expressive_features(edit_plan, off_features):
     return removed, kept
 
 
+def build_safe_recipe(kept_words, vocal_emphasis=None, ep_off=None):
+    """THE SAFE EDIT — deterministic terminal fallback recipe (zero model
+    calls), built only from pre-recipe pipeline data. Engaged when the recipe
+    stage is unrecoverable (repair-net exhaustion, transport exhaustion): the
+    user still receives a rendered edit — mechanical cuts, CleanCut captions,
+    0-3 zooms on the strongest measured vocal peaks — instead of a failure.
+
+    Every field is valid BY CONSTRUCTION against the current registries and
+    the full post-parse validation span (validate_deploy pins this with a
+    model_validate + span round-trip). Indices are KEPT-space (the plan flows
+    through _translate_post_cut_anchors_to_src like any Gemini plan).
+    EditPolicy is honored twice: zoom-off zeroes the peak zooms here (belt),
+    and the in-span Step-2 enforcement zeroes whatever the policy names
+    (suspenders); filler_trim-off is already reflected in the mechanical cut
+    plan computed upstream. Returns a PostCutPlan-shaped dict."""
+    _off = set(ep_off or [])
+    _m = len(kept_words)
+    if _m <= 0:
+        raise ValueError("build_safe_recipe requires a non-empty kept transcript")
+    _last = _m - 1
+
+    # 0-3 deterministic zooms on the strongest vocal peaks (score-thresholded,
+    # >=2.5s apart, alternating types). Peaks are source-time {"t", "score"};
+    # each maps to the nearest kept word by midpoint distance.
+    _zoom_words = []
+    if "zoom" not in _off:
+        _peaks = sorted(
+            (p for p in (vocal_emphasis or [])
+             if isinstance(p, dict) and float(p.get("score") or 0.0) >= 0.5),
+            key=lambda p: -float(p.get("score") or 0.0),
+        )
+        _mids = [
+            (float(w.get("start") or 0.0) + float(w.get("end") or 0.0)) / 2.0
+            for w in kept_words
+        ]
+        _picked_ts = []
+        for _p in _peaks:
+            if len(_zoom_words) >= 3:
+                break
+            _pt = float(_p.get("t") or 0.0)
+            if any(abs(_pt - _q) < 2.5 for _q in _picked_ts):
+                continue
+            _ki = min(range(_m), key=lambda i: abs(_mids[i] - _pt))
+            if _ki in _zoom_words:
+                continue
+            _zoom_words.append(_ki)
+            _picked_ts.append(_pt)
+        _zoom_words.sort()
+
+    _zoom_types = ["SnapReframe", "StepZoom"]
+    _emphasis = [
+        {
+            "word_indices": [_ki],
+            "type": "statement",
+            "intensity": "medium",
+            "duration": 2.0,
+            "viewer_feeling": "the strongest measured beat lands",
+            "zoom_effect": {"type": _zoom_types[_zi % 2],
+                            "events": [{"startMs": 0}]},
+            "motion_graphic": None,
+        }
+        for _zi, _ki in enumerate(_zoom_words)
+    ]
+
+    # Thumbnail + payoff: highest peak word, else the mid-video kept word.
+    _payoff = _zoom_words[0] if _zoom_words else _m // 2
+    # Contiguous arc spine covering [0.._last] with exactly one payoff.
+    _h_end = min(2, _last)
+    _p_start = max(_h_end + 1, min(_payoff, _last))
+    _p_end = min(_p_start + 1, _last)
+    _arc = [{"start_word_index": 0, "end_word_index": _h_end,
+             "position": "hook", "intensity": 0.7}]
+    if _p_start > _h_end + 1:
+        _arc.append({"start_word_index": _h_end + 1, "end_word_index": _p_start - 1,
+                     "position": "build", "intensity": 0.4})
+    if _p_start > _h_end:
+        _arc.append({"start_word_index": _p_start, "end_word_index": _p_end,
+                     "position": "payoff", "intensity": 1.0})
+        if _p_end < _last:
+            _arc.append({"start_word_index": _p_end + 1, "end_word_index": _last,
+                         "position": "close", "intensity": 0.3})
+    else:
+        # degenerate tiny transcript: hook already covers everything — retag
+        # the single segment as payoff so exactly one payoff exists.
+        _arc[0]["position"] = "payoff"
+        _arc[0]["intensity"] = 1.0
+
+    _moment = lambda k: {
+        "word_index": k, "what_lands": "measured vocal peak",
+        "why_emphasis": "strongest energy in the recording",
+        "what_i_saw": "the speaker leaning into the line",
+        "viewer_feeling": "this is the moment",
+    }
+    return {
+        "video_identity": (
+            "Safe-edit fallback: a talking-head video delivered with clean "
+            "mechanical cuts, legible captions, and the speaker's own energy."
+        ),
+        "video_plan": {
+            "what_happens": "The speaker talks through their piece; the edit "
+                             "keeps it clean and paced.",
+            "hook_word_index": 0,
+            "payoff_word_index": _p_start if _p_start > _h_end else 0,
+            "close_word_index": _last,
+            "key_moments": [_moment(k) for k in _zoom_words],
+            "story_shape": "single take, cleaned",
+            "editorial_vision": "lean and legible — cuts and captions carry it",
+            "movements": [{
+                "start_word_index": 0, "end_word_index": _last,
+                "job": "carry the piece cleanly",
+                "energy": "calm", "lead_instrument": "kinetic_captions",
+                "captions": "run",
+            }],
+            "arc_segments": _arc,
+        },
+        "caption_style": "none" if "captions" in _off else "CleanCut",
+        "caption_keywords": [],
+        "emphasis_moments": _emphasis,
+        "transitions": [],
+        "tight_cut_overlays": [],
+        "sound_effects": [],
+        "motion_graphics": [],
+        "text_overlays": [],
+        "broll_clips": [],
+        "generated_scenes": [],
+        "cut_refinements": [],
+        "caption_position_changes": [],
+        "thumbnail_word_index": _payoff,
+        "audio_denoise": False,
+        "outro": "none",
+        "aspect_ratio": "9:16",
+        "notes": "safe-edit fallback",
+    }
+
+
 def generate_edit_gemini(
     video_path, vibe, duration, trend_context=None, deepgram_words=None,
     shot_changes=None, shot_change_scores=None, vocal_emphasis=None, source_loudness=None,
@@ -7661,12 +7796,51 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
     # at least _REPAIR_MIN_HEADROOM_S of slack in the 900s job budget.
     _repair_budget_ok = (float(duration or 0.0) * 3.0 + _REPAIR_MIN_HEADROOM_S) <= 900.0
     _post_user_attempt = post_user
-    for _repair_attempt in range(_repair_max + 1):
+    # THE SAFE EDIT (zero-fatal ladder): when the recipe stage is
+    # unrecoverable — repair-net exhaustion or transport exhaustion — engage
+    # build_safe_recipe() instead of failing the job. Default ON;
+    # SAFE_EDIT_FALLBACK_ENABLED=0 is the kill switch (restores the terminal
+    # raise). The +1 loop slot below is reachable ONLY in safe mode.
+    _safe_edit_on = os.environ.get(
+        "SAFE_EDIT_FALLBACK_ENABLED", "1"
+    ).strip().lower() not in ("0", "false", "no", "off")
+    _use_safe = False
+    _safe_reason = ""
+    for _repair_attempt in range(_repair_max + 2):
+        if _repair_attempt > _repair_max and not _use_safe:
+            break  # the extra slot is safe-mode only
         # ── Call 2: visual placement on the kept-only transcript ────────────────
         # Uses GEMINI_EDITORIAL_MODEL (Pro) — instruction-following on the detailed
         # component-placement rules is materially better than Flash. The cost/
         # latency premium is concentrated on this single call.
-        post_cut_plan = _call_gemini_post_cuts(client, post_sys, _post_user_attempt, _video_part, GEMINI_EDITORIAL_MODEL)
+        if _use_safe:
+            print(f"[safe-edit] engaged reason={_safe_reason}", flush=True)
+            _record_divergence(
+                "recipe", {"reason": _safe_reason},
+                "safe_edit_fallback",
+                reason="recipe stage unrecoverable — deterministic safe edit "
+                       "proceeds down the normal render path",
+            )
+            post_cut_plan = build_safe_recipe(
+                kept_words, vocal_emphasis=_vocal, ep_off=_ep_off,
+            )
+        else:
+            try:
+                post_cut_plan = _call_gemini_post_cuts(client, post_sys, _post_user_attempt, _video_part, GEMINI_EDITORIAL_MODEL)
+            except Exception as _tx_err:
+                # Transport exhaustion (backoff spent / terminal degenerate
+                # response). Retries already happened inside the call; the
+                # ladder's next rung is the safe edit.
+                if _safe_edit_on and kept_words:
+                    print(
+                        f"[safe-edit] recipe transport exhausted "
+                        f"({type(_tx_err).__name__}: {str(_tx_err)[:120]})",
+                        flush=True,
+                    )
+                    _use_safe = True
+                    _safe_reason = f"recipe_transport:{type(_tx_err).__name__}"
+                    continue
+                raise
         try:
 
             # ── From-known-inputs enforcement at EMISSION (Phase E · Sub-step 5) ──────
@@ -10656,7 +10830,18 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
             # here (the Gemini call sits outside this try).
             if isinstance(_repair_err, RecipeInvalidError):
                 raise  # defensive: nothing in the span raises it today
+            if _use_safe:
+                # The safe recipe failed the validation span — a construction
+                # bug, not a model failure. Surface it loudly (validate_deploy
+                # pins the round-trip so this should never fire in prod).
+                raise RecipeInvalidError(
+                    f"RECIPE_INVALID: safe-edit recipe failed validation: {_repair_err}"
+                ) from _repair_err
             if _repair_attempt >= _repair_max or not _repair_budget_ok:
+                if _safe_edit_on and kept_words:
+                    _use_safe = True
+                    _safe_reason = f"RECIPE_INVALID:{str(_repair_err)[:80]}"
+                    continue
                 raise RecipeInvalidError(
                     f"RECIPE_INVALID after {_repair_attempt + 1} attempt(s): {_repair_err}"
                 ) from _repair_err
@@ -17880,6 +18065,77 @@ def _resolve_caption_extra_props(style, keywords, edit_plan):
 
 # ─── MAIN HANDLER ─────────────────────────────────────────────────────────────
 
+def _render_degrade_ladder(render_once, edit_plan, broll_clips, output_path):
+    """RENDER DEGRADE LADDER (zero-fatal): rung 0 = full render; a crash
+    retries the IDENTICAL spec once (rung 1, transient class); a second crash
+    strips decorations (MGs, overlays, transitions, TCOs, b-roll, generated
+    scenes — cuts + captions + zooms kept) and renders once more (rung 2);
+    only a third failure raises, classified RENDER_FATAL. The post-mux
+    |v-a|>30ms guard raises INSIDE the render callable, so it routes into
+    this ladder (a deterministic drift re-fails through the rungs and
+    surfaces as RENDER_FATAL — honest, no longer UNKNOWN). Inert on success:
+    rung 0 passing leaves zero ladder lines.
+
+    render_once(cuts, broll_clips) performs one full render attempt into
+    output_path. edit_plan is mutated for re-entry exactly as documented.
+    """
+    import copy as _copy_rl
+    _pristine_cuts = _copy_rl.deepcopy(edit_plan["cuts"])
+    _rung = 0
+    while True:
+        try:
+            if _rung >= 1:
+                # clean re-entry: restore pristine cuts, drop staging keys
+                # the render mutates/derives, remove any partial output.
+                edit_plan["cuts"] = _copy_rl.deepcopy(_pristine_cuts)
+                for _rk in ("_render_cuts", "_render_effective_durations",
+                            "_render_clip_time_maps", "_projected_words",
+                            "_broll_output_ranges",
+                            "_rendered_generated_scenes", "_render_fps"):
+                    edit_plan.pop(_rk, None)
+                try:
+                    os.remove(output_path)
+                except OSError:
+                    pass
+            if _rung == 2:
+                _stripped = ["motion_graphics", "text_overlays", "transitions",
+                             "tight_cut_overlays", "broll", "generated_scenes"]
+                edit_plan["motion_graphics"] = []
+                edit_plan["text_overlays"] = []
+                edit_plan["transitions"] = []
+                edit_plan["tight_cut_overlays"] = []
+                edit_plan["_resolved_tight_cut_overlays"] = []
+                edit_plan["broll_clips"] = []
+                broll_clips = []
+                edit_plan["generated_scenes"] = []
+                edit_plan.pop("_generated_subjects", None)
+                for _em_rl in (edit_plan.get("_emphasis_moments") or []):
+                    if isinstance(_em_rl, dict):
+                        _em_rl["motion_graphic"] = None
+                print(f"[render-degrade] stripped={_stripped}", flush=True)
+                _record_divergence(
+                    "render", {"rung": 2}, "render_stripped",
+                    reason="two render crashes — decorations stripped, "
+                           "cuts+captions+zooms kept",
+                )
+            render_once(edit_plan["cuts"], broll_clips)
+            return
+        except Exception as _render_err:
+            if _rung >= 2:
+                raise RuntimeError(
+                    f"RENDER_FATAL after full + retry + stripped renders: "
+                    f"{type(_render_err).__name__}: {str(_render_err)[:300]}"
+                ) from _render_err
+            _rung += 1
+            print(
+                f"[render-degrade] rung={_rung} "
+                f"({'identical retry' if _rung == 1 else 'stripped re-render'}) "
+                f"after {type(_render_err).__name__}: {str(_render_err)[:200]}",
+                flush=True,
+            )
+
+
+
 class RecipeInvalidError(ValueError):
     """A Gemini-emitted plan failed post-parse validation and the repair loop
     exhausted its attempts (or was disabled). Wraps the final validation error
@@ -17940,6 +18196,35 @@ def classify_error(e):
             "RECIPE_INVALID",
             "The edit plan didn't pass validation after a retry — please run the job again.",
             retryable=True,
+        )
+
+    # ── Render ladder exhaustion (ordered before the greedy ffmpeg/render
+    # matches — the wrapped cause text often contains those substrings) ──
+    if "RENDER_FATAL" in msg:
+        return _e(
+            "RENDER_FATAL",
+            "Rendering failed even after a simplified retry — please run the job again.",
+            retryable=True,
+        )
+
+    # ── Fast input rejections (honest, requires a different input) ──
+    if "NO_SPEECH" in msg:
+        return _e(
+            "NO_SPEECH",
+            "We couldn't hear any speech in this video. Promptly edits talking videos — please upload a clip of someone speaking.",
+            retryable=False, new_video=True,
+        )
+    if "Not a valid AWS S3 URL" in msg:
+        return _e(
+            "INVALID_SOURCE_URL",
+            "The video reference this job carried was malformed — please try uploading again.",
+            retryable=False, new_video=True,
+        )
+    if "Gemini proxy encode failed" in msg:
+        return _e(
+            "INVALID_FORMAT",
+            "We couldn't read this video file — it may be corrupt or in an unsupported format. Please re-export and upload again.",
+            retryable=False, new_video=True,
         )
 
     # ── Input validation ──────────────────────────────────────────────
@@ -20724,7 +21009,16 @@ def handler(job):
             # ─── END TALKING-HEAD GATE ──────────────────────────────────
 
             if len(_dg_words) == 0:
-                print("[pipeline] WARNING: Deepgram returned 0 words — proceeding without speech (no captions, time-based cuts only)", flush=True)
+                # FAST INPUT REJECT (zero-fatal ladder): a 0-word transcript
+                # used to proceed here, burn two Gemini editorial calls, and
+                # die downstream as a retryable RECIPE_INVALID ("removed all
+                # words"). The speech-anchored pipeline cannot edit silence —
+                # reject BEFORE recipe spend with the honest class.
+                raise RuntimeError(
+                    "NO_SPEECH: Deepgram returned 0 words for this source. "
+                    "Every edit decision is speech-anchored — please upload "
+                    "a video of someone speaking."
+                )
             send_progress(job_id, "plan", 38, "Writing your edit recipe", app_url)
             print(
                 f"[pipeline] Gemini edit starting (words: {len(_dg_words)}, "
@@ -21400,6 +21694,32 @@ def handler(job):
         # from edit_plan["broll_clips"] — they never enter the render spec, so
         # the persisted plan equals what was actually rendered. By construction
         # there is no "render asked for X but skipped X" gap to fall through.
+        # ── BUDGET SHED (zero-fatal ladder): when elapsed + projected render
+        # would crowd the 900s job budget, shed in order — generated_scenes
+        # first, then the b-roll fetch WAITS (skip the await entirely).
+        # Never sheds captions or cuts. Inert when there is slack (the
+        # common case): both branches below are no-ops.
+        _shed_elapsed = time.time() - _pipeline_start
+        _shed_projected = max(60.0, float(source_duration) * 3.0)
+        _shed_slack = 900.0 - _shed_elapsed - _shed_projected
+        _shed_dropped = []
+        if _shed_slack < 90.0 and (edit_plan.get("generated_scenes")
+                                    or edit_plan.get("_generated_subjects")):
+            edit_plan["generated_scenes"] = []
+            edit_plan.pop("_generated_subjects", None)
+            _shed_dropped.append("generated_scenes")
+        if _shed_slack < 45.0 and _broll_fetch_futures:
+            _broll_fetch_futures = {}
+            broll_clips = []
+            edit_plan["broll_clips"] = []
+            _shed_dropped.append("broll_fetch_waits")
+        if _shed_dropped:
+            print(
+                f"[budget-shed] dropped={_shed_dropped} "
+                f"(elapsed={_shed_elapsed:.0f}s projected_render={_shed_projected:.0f}s "
+                f"slack={_shed_slack:.0f}s)",
+                flush=True,
+            )
         if _broll_fetch_futures:
             broll_clips = prefetch_and_verify_broll(broll_clips, _broll_fetch_futures)
             edit_plan["broll_clips"] = broll_clips
@@ -21430,10 +21750,15 @@ def handler(job):
             duration_estimate_s=_render_est,
         )
         t = time.time()
+        # Degrade ladder — see _render_degrade_ladder (module level, tested
+        # behaviorally in test_render_ladder.py).
         try:
-            render_multi_clip(
-                source_path, edit_plan["cuts"], edit_plan, output_path, transcript, work_dir,
-                broll_clips=broll_clips,
+            _render_degrade_ladder(
+                lambda _cuts, _bc: render_multi_clip(
+                    source_path, _cuts, edit_plan, output_path, transcript,
+                    work_dir, broll_clips=_bc,
+                ),
+                edit_plan, broll_clips, output_path,
             )
         finally:
             _render_hb_stop.set()

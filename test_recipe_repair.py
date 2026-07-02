@@ -53,7 +53,10 @@ class Stub:
         return copy.deepcopy(self.plans.pop(0))
 
 
-def run_gen(plans, env_attempts=None):
+def run_gen(plans, env_attempts=None, safe_edit="0"):
+    # exhaustion tests assert the TERMINAL raise, which since the zero-fatal
+    # ladder exists only with the safe-edit kill switch set; the default-ON
+    # fallback path is covered by test_safe_edit.py.
     stub = Stub(plans)
     saved = {
         "compute_mechanical_cuts": H.compute_mechanical_cuts,
@@ -61,6 +64,9 @@ def run_gen(plans, env_attempts=None):
         "_get_genai_client": H._get_genai_client,
     }
     env_saved = os.environ.pop("RECIPE_REPAIR_MAX_ATTEMPTS", None)
+    safe_saved = os.environ.pop("SAFE_EDIT_FALLBACK_ENABLED", None)
+    if safe_edit is not None:
+        os.environ["SAFE_EDIT_FALLBACK_ENABLED"] = safe_edit
     if env_attempts is not None:
         os.environ["RECIPE_REPAIR_MAX_ATTEMPTS"] = env_attempts
     H.compute_mechanical_cuts = lambda words, source_path=None: copy.deepcopy(CUT_PLAN)
@@ -86,6 +92,9 @@ def run_gen(plans, env_attempts=None):
             os.environ.pop("RECIPE_REPAIR_MAX_ATTEMPTS", None)
         if env_saved is not None:
             os.environ["RECIPE_REPAIR_MAX_ATTEMPTS"] = env_saved
+        os.environ.pop("SAFE_EDIT_FALLBACK_ENABLED", None)
+        if safe_saved is not None:
+            os.environ["SAFE_EDIT_FALLBACK_ENABLED"] = safe_saved
     return plan, err, buf.getvalue(), stub
 
 

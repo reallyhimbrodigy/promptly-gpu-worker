@@ -3879,6 +3879,44 @@ def _repair_demotion_path():
     assert "action=demote" in _buf.getvalue(), "demote divergence line missing"
 
 
+@check("safe-edit recipe: valid by construction, passes the full validation span")
+def _safe_recipe_round_trip():
+    # THE SAFE EDIT (zero-fatal ladder): build_safe_recipe() must (1) pass
+    # PostCutPlan.model_validate untouched and (2) flow through the REAL
+    # post-parse validation span with zero raises and zero repair/demote
+    # lines — it is the terminal fallback, so it must never need the net.
+    import contextlib as _ctx
+    import copy as _copy
+    import io as _io
+    _words = [{"word": f"w{i}", "punctuated_word": f"w{i}",
+               "start": round(i * 0.4, 2), "end": round(i * 0.4 + 0.35, 2),
+               "confidence": 0.99, "speaker": 0} for i in range(20)]
+    _peaks = [{"t": 3.1, "score": 0.9}, {"t": 6.2, "score": 0.7}]
+    _sp = handler.build_safe_recipe(_words, vocal_emphasis=_peaks)
+    handler.PostCutPlan.model_validate(_sp)
+    _saved = (handler.compute_mechanical_cuts, handler._call_gemini_post_cuts,
+              handler._get_genai_client)
+    try:
+        handler.compute_mechanical_cuts = lambda w, source_path=None: {
+            "remove_words": [{"word_index": 5}], "notes": "stub", "pacing": "fast"}
+        handler._call_gemini_post_cuts = lambda *a, **k: _copy.deepcopy(_sp)
+        handler._get_genai_client = lambda: None
+        _buf = _io.StringIO()
+        with _ctx.redirect_stdout(_buf):
+            _out = handler.generate_edit_gemini(
+                video_path="/x.mp4", vibe="t", duration=8.0,
+                deepgram_words=_copy.deepcopy(_words), vocal_emphasis=_peaks,
+                inline_video_bytes=b"x")
+    finally:
+        (handler.compute_mechanical_cuts, handler._call_gemini_post_cuts,
+         handler._get_genai_client) = _saved
+    _o = _buf.getvalue()
+    assert isinstance(_out, dict) and _out.get("notes") == "safe-edit fallback"
+    assert "[recipe-repair]" not in _o, "safe recipe needed the net"
+    assert "action=demote" not in _o, "safe recipe triggered a demotion"
+    assert _out.get("caption_style") == "CleanCut"
+
+
 @check("RESPONSE FORMAT enums derive from type_registries (stale-enum class dead)")
 def _response_format_enums_derive():
     # The prompt's output-shape enum lines were hand-written copies that
