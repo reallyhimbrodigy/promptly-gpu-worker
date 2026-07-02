@@ -12097,7 +12097,7 @@ def select_best_thumbnail_frame(video_path, seed_ts, work_dir):
     return _data, "image/jpeg"
 
 
-def fetch_broll_clip(broll_entry, duration_needed, work_dir, dialogue_reason="", dialogue_text=""):
+def fetch_broll_clip(broll_entry, duration_needed, work_dir, dialogue_reason="", dialogue_text="", source_path=None, source_mid_s=None):
     """Resolve a B-roll clip entry to a local file path.
 
     broll_entry is the dict from edit_plan.broll_clips[]. If it already carries
@@ -12315,6 +12315,31 @@ def fetch_broll_clip(broll_entry, duration_needed, work_dir, dialogue_reason="",
             _spoken = (dialogue_text or "").strip()
             _note = (dialogue_reason or "").strip()
             _content_parts = []
+            # THE PICKER GETS EYES (grade-matching becomes decidable): one
+            # keyframe from the SOURCE at the cutaway window's midpoint,
+            # prepended so every candidate is judged against the footage it
+            # must sit beside. Fail-open — extraction trouble reverts to
+            # today's call (logged), never blocks the pick.
+            if source_path and source_mid_s is not None:
+                try:
+                    _sf = subprocess.run(
+                        ["ffmpeg", "-v", "error", "-ss", f"{max(0.0, float(source_mid_s)):.3f}",
+                         "-i", source_path, "-frames:v", "1", "-vf", "scale=540:-2",
+                         "-f", "image2", "-c:v", "mjpeg", "pipe:1"],
+                        capture_output=True, timeout=20,
+                    )
+                    if _sf.returncode == 0 and _sf.stdout:
+                        _content_parts.append(
+                            "The speaker's footage this cutaway must sit beside:")
+                        _content_parts.append(genai_types.Part.from_bytes(
+                            data=_sf.stdout, mime_type="image/jpeg"))
+                    else:
+                        print("[broll] source-frame extract failed (empty) — "
+                              "pick proceeds without the LOOK reference", flush=True)
+                except Exception as _sf_err:
+                    print(f"[broll] source-frame extract failed "
+                          f"({type(_sf_err).__name__}) — pick proceeds without "
+                          f"the LOOK reference", flush=True)
             _poster_idx_map = {}
             _num = 1
             for _ci in sorted(_candidate_frames.keys()):
@@ -12347,6 +12372,7 @@ def fetch_broll_clip(broll_entry, duration_needed, work_dir, dialogue_reason="",
                 "Here the clip must show the SCREEN or APP doing that action — a screen recording, a phone UI close-up, the app interface itself. "
                 "A person at a keyboard, a person texting on a phone, or hands typing on a device shows the WRONG thing for app-input dialogue and should be rejected — those depict a human typing, not the app receiving input. "
                 "If no option shows the actual app/screen action the dialogue names, answer NONE — the speaker's face is the correct fallback for that window. "
+                "(C) LOOK: prefer the candidate whose light, warmth, and grade sit closest to the speaker's frame above; a clip from a clashing color world is the wrong pick when a closer-world alternative exists. "
                 "Apply the editorial test to the strongest candidate: would a real editor place THIS clip for this exact moment, or does it just happen to CONTAIN a noun from the search (a hand, a desk, a screen) while being about something unrelated to what the speaker is actually discussing? A clip that shares a surface object with the words but doesn't fit the SUBJECT of the moment (e.g. a tattooed hand on an antique occult book when the speaker is pitching an AI video editor) is a coincidental noun-match, NOT a fit — answer NONE. A relevant ABSENCE (the speaker's face) always beats a nonsense cutaway. Reply with ONLY the option number. "
                 "NONE if every option is unrelated to the actual words being spoken OR only surface-matches a noun without fitting the subject of the moment OR every option violates the content requirement OR (for app-input dialogue) no option shows the app screen."
             )
@@ -15953,7 +15979,16 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             continue
         _seek_seconds = 0.0
         if _br_dur > _eff + 1.0:
-            _seek_seconds = min(_br_dur * 0.25, max(0.0, _br_dur - _eff - 0.5))
+            # CENTER-seek: the rendered segment brackets the MIDDLE preview
+            # frame the picker judged (judged-frames == played-frames). The
+            # old 25% formula seeked past the frames the pick was based on.
+            _seek_old = min(_br_dur * 0.25, max(0.0, _br_dur - _eff - 0.5))
+            _seek_seconds = max(0.0, min((_br_dur - _eff) / 2.0, _br_dur - _eff - 0.5))
+            print(
+                f"[broll] center-seek {_seek_seconds:.2f}s "
+                f"(old 25% formula: {_seek_old:.2f}s, dur={_br_dur:.1f}s eff={_eff:.1f}s)",
+                flush=True,
+            )
         _from_frame = int(round(_out_start * source_fps))
         _dur_frames = max(1, int(round(_eff * source_fps)))
         _br_probe = _probe_full(_local_path)
@@ -21163,6 +21198,13 @@ def handler(job):
                         ).strip()
                 except (TypeError, ValueError):
                     pass
+                _mid_s = None
+                try:
+                    if 0 <= _sw <= _ew < len(_broll_tx_words):
+                        _mid_s = (float(_broll_tx_words[_sw].get("start") or 0.0)
+                                  + float(_broll_tx_words[_ew].get("end") or 0.0)) / 2.0
+                except (TypeError, ValueError):
+                    _mid_s = None
                 _fut = _broll_fetch_pool.submit(
                     fetch_broll_clip,
                     _bc,  # pass whole entry — fetch_broll_clip mutates it with resolved Pexels metadata
@@ -21170,6 +21212,8 @@ def handler(job):
                     work_dir,
                     dialogue_reason=str(_bc.get("reason") or ""),
                     dialogue_text=_dlg_text,
+                    source_path=_raw_source,
+                    source_mid_s=_mid_s,
                 )
                 _broll_fetch_futures[_fut] = _bi
 
