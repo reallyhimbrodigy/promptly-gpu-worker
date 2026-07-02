@@ -1654,6 +1654,8 @@ def detect_face_positions(video_path, sample_timestamps):
     CAFFEMODEL = "/models/face_detector/res10_300x300_ssd_iter_140000.caffemodel"
     use_dnn = os.path.exists(PROTOTXT) and os.path.exists(CAFFEMODEL)
 
+    net = None
+    face_cascade = None
     if use_dnn:
         net = cv2.dnn.readNetFromCaffe(PROTOTXT, CAFFEMODEL)
         print("[reframe] Using DNN face detector (ResNet SSD)", flush=True)
@@ -7478,6 +7480,15 @@ def generate_edit_gemini(
     # Append the kept-only transcript to the post-cuts call's user content.
     # Indices are NEW (kept-only space [0..M-1]); timestamps are still source-time.
     post_user = post_user_base
+    # Boundary names pre-initialized: the block below skips entirely on empty
+    # kept_words, and every downstream reader used to self-defend with
+    # `except NameError`. Unconditional empties make boundness a LOCAL
+    # invariant (and keep the used-before-assignment deploy gate at zero).
+    _cut_boundary_indices = []
+    _tight_boundary_indices = []
+    _all_boundary_indices = []
+    _shot_boundary_set = set()
+    _shot_boundary_scores = {}
     if kept_words:
         kept_readable = " ".join(
             (_w.get("punctuated_word") or _w.get("word") or "")
@@ -7879,6 +7890,11 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
             # appears repeatedly across renders we can decide whether to enforce
             # in Python or tighten the prompt. The patch_list() output is the
             # raw material for a future repair-pass loop if we want one.
+            # _eval_tight leaks to the vision-reconciliation gate below; if the
+            # eval try dies before binding it (import failure, bad word data),
+            # the read after the broad except was an UnboundLocalError — the
+            # same class that killed job 1a72b344. Empty = reconciler skips.
+            _eval_tight = []
             if isinstance(post_cut_plan, dict):
                 try:
                     from recipe_eval import evaluate_recipe as _eval_recipe
@@ -12280,6 +12296,35 @@ def select_best_thumbnail_frame(video_path, seed_ts, work_dir):
                 )
 
     return _data, "image/jpeg"
+
+
+def _broll_window_context(bc, tx_words):
+    """(dialogue_text, source_mid_s) for a b-roll entry's word window.
+
+    Context glue for the picker — NEVER raises. Entries reach this from
+    validated recipes on the main path but from STORED plans on the
+    render_only/re-edit paths, so the index shape is untrusted: any
+    non-coercible, missing, or out-of-range window degrades to ("", None)
+    and the fetch proceeds without picker context (job 1a72b344 died here
+    on an unbound comparison when the first entry's indices didn't parse).
+    """
+    dlg_text, mid_s = "", None
+    try:
+        sw = int(bc.get("start_word_index"))
+        ew = int(bc.get("end_word_index"))
+    except (TypeError, ValueError, AttributeError):
+        return dlg_text, mid_s
+    if 0 <= sw <= ew < len(tx_words):
+        try:
+            dlg_text = " ".join(
+                str(tx_words[i].get("word") or "").strip()
+                for i in range(sw, ew + 1)
+            ).strip()
+            mid_s = (float(tx_words[sw].get("start") or 0.0)
+                     + float(tx_words[ew].get("end") or 0.0)) / 2.0
+        except (TypeError, ValueError, AttributeError):
+            mid_s = None
+    return dlg_text, mid_s
 
 
 def fetch_broll_clip(broll_entry, duration_needed, work_dir, dialogue_reason="", dialogue_text="", source_path=None, source_mid_s=None):
@@ -17167,6 +17212,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     micro_cmds: list = []
     micro_chunk_paths: list = []
     _micro_chunked = False
+    _MICRO_CONCURRENCY = _PER_CHUNK_CONCURRENCY  # re-bound below when chunked
     if micro_input is not None:
         _MICRO_CHUNK_THRESHOLD = 200
         _micro_total_frames = int(micro_input.get("totalDurationInFrames") or 0)
@@ -21481,24 +21527,10 @@ def handler(job):
             _broll_tx_words = (_get_resolved_transcript().get("words") or [])
             _broll_fetch_pool = concurrent.futures.ThreadPoolExecutor(max_workers=min(5, len(broll_clips)))
             for _bi, _bc in enumerate(broll_clips):
-                _dlg_text = ""
-                try:
-                    _sw = int(_bc.get("start_word_index"))
-                    _ew = int(_bc.get("end_word_index"))
-                    if 0 <= _sw <= _ew < len(_broll_tx_words):
-                        _dlg_text = " ".join(
-                            str(_broll_tx_words[_i].get("word") or "").strip()
-                            for _i in range(_sw, _ew + 1)
-                        ).strip()
-                except (TypeError, ValueError):
-                    pass
-                _mid_s = None
-                try:
-                    if 0 <= _sw <= _ew < len(_broll_tx_words):
-                        _mid_s = (float(_broll_tx_words[_sw].get("start") or 0.0)
-                                  + float(_broll_tx_words[_ew].get("end") or 0.0)) / 2.0
-                except (TypeError, ValueError):
-                    _mid_s = None
+                # Per-entry, never-raises, no cross-iteration state (the old
+                # inline version leaked _sw/_ew across iterations AND died
+                # unbound when the first entry's indices didn't parse).
+                _dlg_text, _mid_s = _broll_window_context(_bc, _broll_tx_words)
                 _fut = _broll_fetch_pool.submit(
                     fetch_broll_clip,
                     _bc,  # pass whole entry — fetch_broll_clip mutates it with resolved Pexels metadata

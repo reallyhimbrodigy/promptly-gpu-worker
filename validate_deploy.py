@@ -108,6 +108,61 @@ def _pyflakes_check():
         print("    (pyflakes not installed locally — skipped)")
 
 
+@check("used-before-assignment gate: mypy possibly-undefined == 0 (job 1a72b344 class)")
+def _possibly_undefined_gate():
+    # pyflakes (above) has no flow analysis and missed the bug that killed
+    # job 1a72b344: a name bound inside a try whose except swallows the
+    # binding failure, then read after the block (UnboundLocalError on the
+    # first loop iteration, stale value on later ones). mypy's
+    # possibly-undefined error code catches that class — but ONLY with
+    # --check-untyped-defs (the repo is untyped; without it mypy skips
+    # every function body and reports a vacuous zero). This gate is HARD:
+    # mypy missing fails the deploy, because the soft-skip pattern is how
+    # the last gap survived. Tree was cleaned to zero findings when this
+    # landed — any finding is a NEW instance of the class.
+    import subprocess
+    import tempfile
+    _files = ["handler.py", "modal_app.py", "edit_policy.py",
+              "type_registries.py", "render_schemas.py", "recipe_eval.py"]
+    _args = [sys.executable, "-m", "mypy", "--check-untyped-defs",
+             "--enable-error-code=possibly-undefined", "--ignore-missing-imports"]
+    with tempfile.TemporaryDirectory() as _td:
+        _cache = ["--cache-dir", os.path.join(_td, "mypy_cache")]
+        # Liveness self-test FIRST: the exact pattern that killed 1a72b344
+        # must be flagged, or the gate is misconfigured/toothless.
+        _canary = os.path.join(_td, "uba_canary.py")
+        with open(_canary, "w") as _f:
+            _f.write(
+                "def f(items, words):\n"
+                "    for bc in items:\n"
+                "        try:\n"
+                "            sw = int(bc.get('s'))\n"
+                "        except (TypeError, ValueError):\n"
+                "            pass\n"
+                "        if 0 <= sw < len(words):\n"
+                "            return sw\n"
+                "    return None\n"
+            )
+        _probe = subprocess.run(_args + _cache + [_canary],
+                                capture_output=True, text=True, timeout=300)
+        if "No module named mypy" in (_probe.stderr or ""):
+            raise AssertionError(
+                "mypy is not installed — this gate is REQUIRED "
+                "(pip3 install --user --break-system-packages mypy)"
+            )
+        assert "possibly-undefined" in _probe.stdout, (
+            "gate liveness failed: mypy did not flag the known-bad canary "
+            f"pattern (stdout: {_probe.stdout[:200]!r})"
+        )
+        _res = subprocess.run(_args + _cache + _files,
+                              capture_output=True, text=True, timeout=300)
+        _hits = [l for l in _res.stdout.splitlines() if "possibly-undefined" in l]
+        assert not _hits, (
+            f"{len(_hits)} possibly-undefined finding(s):\n    "
+            + "\n    ".join(_hits[:10])
+        )
+
+
 # ─── 2. F-STRINGS ──────────────────────────────────────────────────────
 print("\n[2/6] F-string format integrity")
 

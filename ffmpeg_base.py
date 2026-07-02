@@ -640,6 +640,7 @@ def build_final_filtergraph(
     if outro and outro != "none":
         fade_color = "black" if outro == "fade_black" else "white"
         fade_dur_seconds = 1.0
+        fade_start_seconds = 0.0  # re-bound on every apply_fade=True path
         if chunk_global_start_frame is None:
             total_seconds = total_output_frames / source_fps
             fade_start_seconds = max(0.0, total_seconds - fade_dur_seconds)
