@@ -742,8 +742,10 @@ export const PromptlyOverlay: React.FC<PromptlyRenderProps> = ({ input }) => {
           default → zero DOM, identical to the pre-GeneratedScene pipeline. */}
       <GeneratedSceneLayer items={generatedScenes ?? []} fps={fps} />
       {/* Captions on top — readable over speaker, B-roll, and any
-          text-overlay/MG underneath. Universal text-stroke ensures contrast
-          against arbitrary backgrounds (see captions/*.tsx). */}
+          text-overlay/MG underneath. Every style meets the legibility
+          floor — a solid box/scrim, a ≥2px dark contour, or the tight
+          anchor shadow from captions/shared/legibility.ts — so text keeps
+          contrast against arbitrary backgrounds. */}
       <CaptionsLayer caption={caption} fps={fps} />
       <TextOverlaysLayer
         overlays={textOverlays ?? []}

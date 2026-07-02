@@ -11,6 +11,7 @@ import type { CinematicLetterpressProps } from "./types";
 import { CAPTION_FONTS } from "../shared/fonts";
 import { msToFrames } from "../shared/timing";
 import { CAPTION_PADDING } from "../shared/captionPosition";
+import { withLegibilityAnchor } from "../shared/legibility";
 
 // ── LetterpressWord ───────────────────────────────────────────────────────
 // Each word does a blur-to-sharp "focus pull" when it activates.
@@ -241,7 +242,7 @@ export const CinematicLetterpress: React.FC<CinematicLetterpressProps> = ({
   blurDurationMs = 200,
   enableScale = true,
   scaleFrom = 0.95,
-  textShadow = "0 0 40px rgba(0,0,0,0.3), 0 0 80px rgba(0,0,0,0.15)",
+  textShadow = withLegibilityAnchor("0 0 40px rgba(0,0,0,0.3), 0 0 80px rgba(0,0,0,0.15)"),
   maxWordsPerLine = 3,
   lineGap = 12,
   exitDurationMs = 250,

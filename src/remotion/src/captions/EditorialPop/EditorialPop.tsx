@@ -10,10 +10,12 @@ import { msToFrames } from "../shared/timing";
 import { CAPTION_FONTS } from "../shared/fonts";
 import { getCaptionPositionStyle } from "../shared/captionPosition";
 import { buildKeywordSet, isKeyword } from "../shared/keywords";
+import { LEGIBILITY_ANCHOR_LAYERS } from "../shared/legibility";
 
 /* ─── Constants ─── */
 
 const SHADOW = [
+  ...LEGIBILITY_ANCHOR_LAYERS,
   "0 0 12px rgba(0,0,0,0.7)",
   "0 0 30px rgba(0,0,0,0.4)",
   "0 0 50px rgba(0,0,0,0.2)",

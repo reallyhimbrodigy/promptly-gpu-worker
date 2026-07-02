@@ -21,7 +21,7 @@ export interface SerifProps extends CaptionStyleProps {
   letterSpacing?: string;
   /** Letter spacing for keywords. Default: "-0.02em" */
   keywordLetterSpacing?: string;
-  /** Text shadow. Default: "0 2px 12px rgba(0,0,0,0.6)" */
+  /** Text shadow. Default: legibility anchor + "0 2px 12px rgba(0,0,0,0.6)" */
   textShadow?: string;
   /** Scale entrance start value. Default: 0.96 */
   scaleFrom?: number;

@@ -10,6 +10,7 @@ import { msToFrames } from "../shared/timing";
 import { CAPTION_FONTS } from "../shared/fonts";
 import { getCaptionPositionStyle } from "../shared/captionPosition";
 import { buildKeywordSet, isKeyword } from "../shared/keywords";
+import { LEGIBILITY_ANCHOR_LAYERS } from "../shared/legibility";
 
 /* ─── Single line renderer ─── */
 
@@ -49,6 +50,8 @@ const PulseLine: React.FC<{
               textTransform: "none",
               letterSpacing: "-0.02em",
               textShadow: [
+                // Shared legibility floor — tight near-glyph anchor.
+                ...LEGIBILITY_ANCHOR_LAYERS,
                 // Diffused background shadow (all directions)
                 "0 0 12px rgba(0,0,0,0.7)",
                 "0 0 30px rgba(0,0,0,0.4)",

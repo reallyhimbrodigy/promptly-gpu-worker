@@ -14,6 +14,7 @@ import { msToFrames } from "../shared/timing";
 import { CAPTION_FONTS } from "../shared/fonts";
 import { getCaptionPositionStyle } from "../shared/captionPosition";
 import { buildKeywordSet, isKeyword } from "../shared/keywords";
+import { withLegibilityAnchor } from "../shared/legibility";
 
 // Smooth deceleration, zero bounce — editorial feel
 const SPRING_EDITORIAL: SpringConfig = {
@@ -207,7 +208,7 @@ export const Serif: React.FC<SerifProps> = ({
   wordGap = 16,
   letterSpacing = "0.01em",
   keywordLetterSpacing = "-0.02em",
-  textShadow = "0 2px 12px rgba(0,0,0,0.6)",
+  textShadow = withLegibilityAnchor("0 2px 12px rgba(0,0,0,0.6)"),
   scaleFrom = 0.96,
 }) => {
   const { fps, width } = useVideoConfig();

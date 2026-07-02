@@ -29,6 +29,6 @@ export interface PassageProps extends CaptionStyleProps {
   bodyTracking?: number;
   /** Line-height. Default: 1.12 */
   lineHeight?: number;
-  /** Text shadow for readability over footage. Default: "0 2px 18px rgba(0,0,0,0.55)" */
+  /** Text shadow for readability over footage. Default: legibility anchor + "0 2px 18px rgba(0,0,0,0.55)" */
   textShadow?: string;
 }

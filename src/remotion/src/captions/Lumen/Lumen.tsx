@@ -13,6 +13,7 @@ import { msToFrames } from "../shared/timing";
 import { CAPTION_FONTS } from "../shared/fonts";
 import { getCaptionPositionStyle } from "../shared/captionPosition";
 import { buildKeywordSet, isKeyword } from "../shared/keywords";
+import { LEGIBILITY_ANCHOR_LAYERS } from "../shared/legibility";
 
 /* ─── Word Component ─── */
 
@@ -81,8 +82,11 @@ const LumenWord: React.FC<{
   const showSweep = hasShine && hasAppeared && p > -w - skew && p < 100 + w + skew;
   const polyClip = `polygon(${p - w}% ${-skew}%, ${p + w}% ${-skew - 10}%, ${p + w + skew}% ${100 + 10}%, ${p - w + skew}% ${100 + skew}%)`;
 
-  // Diffused shadow for legibility — no outlines needed
+  // Diffused shadow for legibility — the shared floor anchor (tight
+  // near-glyph layers) first, then Lumen's own wide diffusion. Still no
+  // outlines — the anchor is the shadow equivalent of a soft 1px edge.
   const diffusedShadow = [
+    ...LEGIBILITY_ANCHOR_LAYERS,
     "0 0 12px rgba(0,0,0,0.7)",
     "0 0 30px rgba(0,0,0,0.4)",
     "0 0 50px rgba(0,0,0,0.2)",

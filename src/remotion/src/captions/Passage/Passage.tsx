@@ -12,6 +12,7 @@ import { msToFrames } from "../shared/timing";
 import { CAPTION_FONTS } from "../shared/fonts";
 import { getCaptionPositionStyle } from "../shared/captionPosition";
 import { buildKeywordSet, isKeyword } from "../shared/keywords";
+import { withLegibilityAnchor } from "../shared/legibility";
 
 /* ─── Word ─── */
 
@@ -217,7 +218,7 @@ export const Passage: React.FC<PassageProps> = ({
   keywordTrackingTo = 0.09,
   bodyTracking = -0.005,
   lineHeight = 1.12,
-  textShadow = "0 2px 18px rgba(0,0,0,0.55)",
+  textShadow = withLegibilityAnchor("0 2px 18px rgba(0,0,0,0.55)"),
 }) => {
   const { fps, width } = useVideoConfig();
   const kwSet = useMemo(() => buildKeywordSet(keywords), [keywords]);

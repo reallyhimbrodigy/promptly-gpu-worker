@@ -3953,6 +3953,49 @@ def _system_prompt_render_identity():
     assert _a == _b, "system prompt renders differ across consecutive calls"
 
 
+@check("caption legibility floor: numbers pinned + every style importer-or-exempt")
+def _caption_legibility_floor():
+    # The floor (captions/shared/legibility.ts) guarantees every caption style
+    # carries a minimum contrast treatment over bright footage: a box/scrim, a
+    # >=2px dark contour, or the tight anchor shadow. Pins: (1) the exact
+    # anchor numbers; (2) EXHAUSTIVE classification — every style directory is
+    # either an importer of the floor or exempt-by-own-treatment, so a future
+    # 17th style cannot silently skip it; (3) the once-false "universal
+    # text-stroke" comment stays truthful.
+    _root = os.path.dirname(os.path.abspath(__file__))
+    _cap = os.path.join(_root, "src", "remotion", "src", "captions")
+    _leg = open(os.path.join(_cap, "shared", "legibility.ts")).read()
+    assert '"0 0 2px rgba(0,0,0,0.75)"' in _leg, "anchor layer 1 drifted"
+    assert '"0 2px 6px rgba(0,0,0,0.85)"' in _leg, "anchor layer 2 drifted"
+    assert "withLegibilityAnchor" in _leg
+    _importers = {"Lumen", "Pulse", "EditorialPop", "Illuminate",
+                  "Serif", "Passage", "CinematicLetterpress"}
+    _exempt = {  # own treatment already meets the floor (box/scrim/contour/anchor)
+        "PaperII": "solid paper strip", "Prime": "tight anchor shadow",
+        "TypewriterReveal": "strongest tight stack in pack",
+        "Cove": "word-shaped scrim", "Quintessence": "blurred word-copy scrim",
+        "TwoTone": "3px contour", "NeonStripe": "4.2px contour",
+        "Spectrum": "tight anchor shadow", "CleanCut": "tight anchor shadow",
+    }
+    _dirs = sorted(
+        d for d in os.listdir(_cap)
+        if os.path.isdir(os.path.join(_cap, d)) and d != "shared"
+    )
+    for _d in _dirs:
+        assert _d in _importers or _d in _exempt, (
+            f"caption style {_d!r} is neither a legibility-floor importer nor "
+            f"classified exempt — classify it before shipping")
+        if _d in _importers:
+            _tsx = open(os.path.join(_cap, _d, f"{_d}.tsx")).read()
+            assert ("LEGIBILITY_ANCHOR_LAYERS" in _tsx
+                    or "withLegibilityAnchor" in _tsx), (
+                f"{_d} classified as importer but does not import the floor")
+    _pr = open(os.path.join(_root, "src", "remotion", "src", "PromptlyRender.tsx")).read()
+    assert "Universal text-stroke ensures" not in _pr, (
+        "the false 'universal text-stroke' comment is back")
+    assert "legibility.ts" in _pr, "caption z-stack comment no longer cites the floor"
+
+
 @check("AnnotationArrow: normalized 0-1 endpoints resolve to safe-rect pixels (path ≥ 200px)")
 def _annotation_arrow_normalized_endpoints():
     # AnnotationArrow's start/end are NORMALIZED 0-1 fractions (the prompt

@@ -13,7 +13,7 @@ export interface CinematicLetterpressProps extends CaptionStyleProps {
   enableScale?: boolean;
   /** Starting scale for word entry. Default: 0.95 */
   scaleFrom?: number;
-  /** Text shadow for ambient readability. Default: wide diffuse */
+  /** Text shadow for ambient readability. Default: legibility anchor + wide diffuse. */
   textShadow?: string;
   /** Max words per line before wrapping. Default: 3 */
   maxWordsPerLine?: number;
