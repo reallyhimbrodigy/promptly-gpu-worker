@@ -2818,7 +2818,9 @@ def _recipe_omittable_field_contract():
     # field is absent (default it or drop the component).
     import handler as H
     EXPECTED = {
-        "PostCutPlan": {"generated_scenes", "notes"},
+        # cut_refinements: YOUR CUT PASS — omission-tolerant BY DESIGN (the
+        # merge reads .get() with [] default; proven by the kill test).
+        "PostCutPlan": {"cut_refinements", "generated_scenes", "notes"},
         "_EmphasisMoment": {"motion_graphic", "zoom_effect"},
         "_EmphasisMotionGraphic": {"props"},
         "_ZoomEffect": {"events"},

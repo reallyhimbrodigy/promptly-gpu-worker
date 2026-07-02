@@ -210,6 +210,19 @@ _SFX_SOUNDS = Literal[
     "transition_smooth", "thunder", "pop",
 ]
 
+class _CutRefinement(BaseModel):
+    # Gemini's word-level cut pass (YOUR CUT PASS in the prompt): a KEPT-space
+    # inclusive word range to remove — phrasal restarts, retakes, filler the
+    # detectors' punctuation rules missed, drags. Single word via start==end.
+    # Projected kept->src at the merge and unioned into remove_words, so the
+    # existing normalization / anchor guards / clip rebuild treat it exactly
+    # like a mechanical cut. Guardrails: 25% cap, protected indices
+    # (hook/payoff/close/key_moments), malformed entries raise (net repairs).
+    start_word_index: int
+    end_word_index: int
+    reason: str
+
+
 class _CaptionPositionChange(BaseModel):
     # Position-change event at a specific kept word. Python synthesizes the
     # actual caption_position_segments (with from_seconds/to_seconds/position)
@@ -583,6 +596,8 @@ class PostCutPlan(BaseModel):
     # until Sub-step 3 (the model isn't told the type exists → Vertex omits →
     # []). Vertex acceptance of this nested-optional shape was proven first.
     generated_scenes: List[_GeneratedScene] = Field(default_factory=list)
+    # YOUR CUT PASS — default [] (omission-tolerant: Vertex drops empty lists).
+    cut_refinements: List[_CutRefinement] = Field(default_factory=list)
     caption_position_changes: List[_CaptionPositionChange]
     thumbnail_word_index: int
     audio_denoise: bool
@@ -3472,12 +3487,25 @@ A visual event is one of: a zoom landing on its emphasis word · a B-roll cutawa
 **There is no single event count for a video** — the count rises and falls with the movements. A driving argument earns many events in quick succession and is correctly full; a teach passage may show one graphic for twenty seconds and be just as full, because the graphic is the event. Judge fullness against the movement you're standing in, not a whole-video average. Two shapes tell you the read slipped: several elements crowding one beat with no leader among them (the movement got anxious), or a stretch where the speaker is plainly building and the screen has gone flat (the movement went thin). Both are read movement by movement, and both resolve by returning to what that moment is doing.
 
 ═══════════════════════════════════════════════════════════════════════════
+=== YOUR CUT PASS (cut_refinements) ===
+
+You watched the footage — cut what a lean edit cuts. Emit `cut_refinements`: KEPT-space inclusive word ranges to remove, each with a `reason` (≤10 words naming what's cut — 'abandoned start', 'weaker first take of the price line'):
+
+  (a) **Phrasal restarts and abandoned starts** — 'so I was— I was going': keep the completed take, cut the abandoned words.
+  (b) **Retakes** — when the speaker delivers the same line twice, keep the stronger delivery and name which in `reason`.
+  (c) **Filler and dead weight** the detectors' punctuation rules missed — a 'like' or 'you know' the commas hid.
+  (d) **Drags** — a stretch that adds no information and no charisma.
+
+Rules: ranges are KEPT indices from the transcript below. Protected words (hook / payoff / close / key_moments) are never cut. Under a cleanup-request vibe this pass works HARDEST; under 'keep every pause / don't cut anything' emit []. When unsure whether a pause is dead or dramatic, keep it — the mechanical pass already took the measured silence.
+
+═══════════════════════════════════════════════════════════════════════════
+
 DECISION ORDER — arc first, ALWAYS
 ═══════════════════════════════════════════════════════════════════════════
 
 Emit the JSON in exactly this order, finishing each stage's reasoning before opening the next. Out-of-order thinking — picking a zoom before naming the arc — produces decisions that don't reference the spine.
 
-**Stage 1 — IDENTITY.** Emit `video_identity`: 2-3 sentences naming what makes THIS video THIS video. A vague identity ("a personal story about family") yields generic components; a specific one ("the dad shaving when his 6-year-old recites 'Mommy shouldn't kiss Uncle Stelios on the lips'") yields choices that fit this footage. Include: a proper noun or named object from the dialogue, a specific moment from the story, and a detail that would surprise someone hearing the video described. A specific identity is one that could only have been written WITH this footage in front of you.
+**Stage 1 — IDENTITY.** Decide what the video ISN'T before deciding what it is — run YOUR CUT PASS first, so every later judgment reads the footage that will actually render. Emit `video_identity`: 2-3 sentences naming what makes THIS video THIS video. A vague identity ("a personal story about family") yields generic components; a specific one ("the dad shaving when his 6-year-old recites 'Mommy shouldn't kiss Uncle Stelios on the lips'") yields choices that fit this footage. Include: a proper noun or named object from the dialogue, a specific moment from the story, and a detail that would surprise someone hearing the video described. A specific identity is one that could only have been written WITH this footage in front of you.
 
 **Stage 2 — VIDEO PLAN.** Emit `video_plan` IN FIELD ORDER: what_happens → hook_word_index → payoff_word_index → close_word_index → key_moments → story_shape → arc_segments → movements → editorial_vision. Each later field depends on the earlier ones — the movements fall out of the arc, and the editorial vision speaks to the movements.
 
@@ -3555,7 +3583,7 @@ CRAFT MOVES — what senior editors reach for when composing a moment
 HOW THE SCHEMA WORKS — the contract between you and the pipeline
 ═══════════════════════════════════════════════════════════════════════════
 
-**All timing is word-anchored.** You never emit raw float timestamps. Every time-based decision points at a word via its index (start_word_index, end_word_index, word_index, word_indices, after_word_index, thumbnail_word_index). The transcript below is the KEPT-ONLY transcript, renumbered contiguously [0..M-1]; every index you emit references this space, and Python translates to source-time at render. The cuts have already been decided by an earlier pass — your job is composing the visual layer, not removing words.
+**All timing is word-anchored.** You never emit raw float timestamps. Every time-based decision points at a word via its index (start_word_index, end_word_index, word_index, word_indices, after_word_index, thumbnail_word_index). The transcript below is the KEPT-ONLY transcript, renumbered contiguously [0..M-1]; every index you emit references this space, and Python translates to source-time at render. The mechanical cuts are decided; your `cut_refinements` are the final word-level pass — after it, your job is composing the visual layer.
 
 **Two duration fields measure different things.** `duration_seconds` (text_overlays, emphasis_moments) = output-time seconds the element stays on screen, typically 1.5-4.0s. `durationMs` (inside zoom events) = milliseconds the camera motion takes — but you OMIT it by default (see EMPHASIS).
 
@@ -4310,6 +4338,14 @@ Output ONLY a JSON object — no commentary, no markdown fences, no prose.
 
   "caption_style": {_caption_enum},  // "none" only when the user's vibe excluded captions
   "caption_keywords": ["<word>", ...],   // lowercase, dictionary form
+  "cut_refinements": [
+    {{
+      "start_word_index": int,                  // KEPT-space, inclusive range (single word: start == end)
+      "end_word_index": int,
+      "reason": "<≤10 words naming what's cut>"
+    }}
+  ],
+
   "caption_position_changes": [
     {{"word_index": int, "position": "top" | "center" | "bottom"}}
   ],
@@ -5403,6 +5439,15 @@ def detect_dead_air(
         f"≥150ms in source audio",
         flush=True,
     )
+    # Silent-failure visibility (the mode behind "seconds of silence left
+    # in"): zero regions on a source of any real length means dead-air
+    # cutting is INACTIVE this job — loud warning instead of a quiet zero.
+    if not silence_regions and kept and float(kept[-1].get("end") or 0.0) > 10.0:
+        print(
+            "[dead-air] WARNING: VAD produced zero regions — dead-air "
+            "cutting inactive this job",
+            flush=True,
+        )
 
     # VAD path: cut each kept-word gap whose VAD-confirmed silence overlap
     # exceeds the gap's threshold. Three tiers, keyed off the punctuation
@@ -7514,7 +7559,7 @@ def generate_edit_gemini(
 
 === KEPT-ONLY TRANSCRIPT ({_kept_count} words, renumbered [0..{_kept_count - 1}]) ===
 
-This transcript is the dialogue exactly as the viewer will hear it. Filler, stutters, restarts, and dead-air gaps are gone — every word here lands in the rendered video. Read it once before placing any visual element.
+This transcript is the dialogue after the MECHANICAL cut pass — hesitations (um/uh), tagged false-start fragments, tight stutters, and measured dead-air gaps are gone. What the machines cannot hear is yours: phrasal restarts ('so I was— I was going'), re-recorded takes, filler the punctuation hid, and any stretch that drags against the video's pace. Every word below currently lands in the rendered video UNLESS you remove it in `cut_refinements`.
 
 {kept_readable}
 
@@ -7754,12 +7799,107 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
             # other field. The merged dict has the same shape downstream expects.
             edit_plan = {
                 "notes": cut_plan.get("notes", "") or "",
-                "remove_words": raw_cut_remove_words,
+                # fresh copy per attempt — cut_refinements append to this list,
+                # and raw_cut_remove_words is pre-loop state shared across
+                # repair attempts (a shared reference would double-append).
+                "remove_words": list(raw_cut_remove_words),
                 "pacing": cut_plan.get("pacing", "fast") or "fast",
             }
             if isinstance(post_cut_plan, dict):
                 for k, v in post_cut_plan.items():
                     edit_plan[k] = v
+
+            # ── YOUR CUT PASS: union Gemini's cut_refinements into the ONE
+            # removal set (PR-4). KEPT-space inclusive ranges → src indices via
+            # new_to_src → single {"word_index"} entries unioned into
+            # remove_words BEFORE the normalization pass, so the anchor guard,
+            # per-component removed-word validators, clip rebuild, captions,
+            # and boundary-coverage telemetry all recompute from the union —
+            # refinements are indistinguishable from mechanical cuts
+            # downstream. (The pre-call CUT/TIGHT lists keep the pre-refinement
+            # contract: transitions were placed against the lists Gemini SAW;
+            # a component anchored on a word its own refinement removed is
+            # dropped by the existing kept-word validators.) Malformed entries
+            # RAISE (shape-class — the repair net corrects); over-cap and
+            # protected-word violations DROP with divergence. EditPolicy
+            # filler_trim=off zeroes the channel (the as-recorded contract).
+            _refs_raw = edit_plan.get("cut_refinements") or []
+            edit_plan["cut_refinements"] = []   # consumed here; not a render field
+            if _refs_raw and _filler_off:
+                print(
+                    "[cut-refine] EditPolicy filler_trim=off — "
+                    f"{len(_refs_raw)} cut_refinement(s) zeroed (as-recorded)",
+                    flush=True,
+                )
+                _refs_raw = []
+            if _refs_raw:
+                _n_kept_words = len(kept_words)
+                _protected = set()
+                _vp_cr = edit_plan.get("video_plan") or {}
+                for _pk in ("hook_word_index", "payoff_word_index", "close_word_index"):
+                    _pv = _vp_cr.get(_pk)
+                    if isinstance(_pv, (int, float)):
+                        _protected.add(int(_pv))
+                for _km in (_vp_cr.get("key_moments") or []):
+                    _kv = (_km or {}).get("word_index")
+                    if isinstance(_kv, (int, float)):
+                        _protected.add(int(_kv))
+                _ranges = []
+                for _ri, _rf in enumerate(_refs_raw):
+                    if not isinstance(_rf, dict):
+                        raise ValueError(f"cut_refinements[{_ri}] must be an object")
+                    try:
+                        _ra = int(_rf["start_word_index"]); _rb = int(_rf["end_word_index"])
+                    except (KeyError, TypeError, ValueError):
+                        raise ValueError(
+                            f"cut_refinements[{_ri}] needs integer start_word_index "
+                            f"and end_word_index (KEPT-space, inclusive)"
+                        )
+                    if _rb < _ra or _ra < 0 or _rb >= _n_kept_words:
+                        raise ValueError(
+                            f"cut_refinements[{_ri}] range [{_ra}-{_rb}] invalid for "
+                            f"the kept transcript [0-{_n_kept_words - 1}]"
+                        )
+                    _rr = str(_rf.get("reason") or "").strip()[:80]
+                    # video_plan anchors were already translated kept->src by
+                    # _translate_post_cut_anchors_to_src, so compare in SRC
+                    # space: map the kept range through new_to_src first.
+                    _range_src = {
+                        int(new_to_src[_ki]) for _ki in range(_ra, _rb + 1)
+                        if 0 <= _ki < len(new_to_src)
+                    }
+                    _hit = sorted(_protected & _range_src)
+                    if _hit:
+                        _record_divergence(
+                            "cut_refinements", {"kept_range": [_ra, _rb], "reason": _rr},
+                            "drop_protected",
+                            reason=f"range touches protected word(s) {_hit} "
+                                   f"(hook/payoff/close/key_moments are never cut)",
+                        )
+                        continue
+                    _ranges.append((_ra, _rb, _rr))
+                # 25% cap: drop LARGEST ranges first
+                _cap = int(0.25 * _n_kept_words)
+                _total = sum(_rb - _ra + 1 for _ra, _rb, _ in _ranges)
+                if _total > _cap:
+                    _ranges.sort(key=lambda t: (t[1] - t[0]), reverse=True)
+                    while _ranges and _total > _cap:
+                        _ra, _rb, _rr = _ranges.pop(0)
+                        _total -= (_rb - _ra + 1)
+                        _record_divergence(
+                            "cut_refinements", {"kept_range": [_ra, _rb], "reason": _rr},
+                            "over_cap",
+                            reason=f"total refinement removal exceeded 25% of kept "
+                                   f"words ({_cap}) — largest ranges dropped first",
+                        )
+                for _ra, _rb, _rr in _ranges:
+                    for _ki in range(_ra, _rb + 1):
+                        if 0 <= _ki < len(new_to_src):
+                            edit_plan["remove_words"].append(
+                                {"word_index": int(new_to_src[_ki]),
+                                 "reason": "gemini_cut"}
+                            )
+                    print(f"[cut-refine] kept=[{_ra}-{_rb}] reason={_rr}", flush=True)
 
             print(
                 f"[two-pass] Merged plan — notes={len(edit_plan['notes'])} chars, "
