@@ -120,6 +120,22 @@ on = clips_with("1")
 check("flag-off: single clip (gap kept)", len(off) == 1 and len(off2) == 1,
       str((len(off), len(off2))))
 check("flag-on: gap split into two clips", len(on) == 2, str(len(on)))
+def gap_compress_label():
+    saved = os.environ.pop("GAP_COMPRESSION_ENABLED", None)
+    os.environ["GAP_COMPRESSION_ENABLED"] = "1"
+    try:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            H.build_clips_from_words(copy.deepcopy(ws), [], video_duration=30.0)
+        return buf.getvalue()
+    finally:
+        os.environ.pop("GAP_COMPRESSION_ENABLED", None)
+        if saved is not None:
+            os.environ["GAP_COMPRESSION_ENABLED"] = saved
+_o = gap_compress_label()
+check("compressed boundary logs action=gap_compress (attributable)",
+      "action=gap_compress" in _o and "action=cut_pad" not in _o.split("first_clip_head")[0].replace("action=gap_compress", ""),
+      _o[-300:])
 if len(on) == 2:
     kept_gap = on[1]["source_start"] - on[0]["source_end"]
     removed = (ws[3]["start"] - ws[2]["end"]) - (H._GAP_COMPRESS_FLOOR_S)

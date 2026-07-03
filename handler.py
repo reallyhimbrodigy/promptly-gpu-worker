@@ -14798,7 +14798,8 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0):
         else:
             _mid = _E + _gap / 2.0
         _rel_cap, _head_cap = _RELEASE_PAD_S, _HEAD_PAD_S
-        if (_a, _b) in _gap_compress_pairs:
+        _is_compress = (_a, _b) in _gap_compress_pairs
+        if _is_compress:
             # compressed pause: keep the floor around the splice (0.18/0.12)
             _rel_cap = _GAP_COMPRESS_FLOOR_S * 0.6
             _head_cap = _GAP_COMPRESS_FLOOR_S * 0.4
@@ -14813,7 +14814,9 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0):
                 "cut_boundary",
                 {"boundary": _bi, "gap_s": round(_gap, 3),
                  "removed_words": len(_rm)},
-                "cut_pad",
+                # gap_compress gets its own label so a rhythm change in a
+                # listen is attributable to the compressor, not the pads.
+                "gap_compress" if _is_compress else "cut_pad",
                 reason=(f"applied_release={_applied_release:.3f} "
                         f"applied_head={_applied_head:.3f}"),
             )

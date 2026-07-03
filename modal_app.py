@@ -422,6 +422,10 @@ image = (
         # the app server owns queued/canceled (hand-off note in the PR).
         # ROLLBACK: flip to "0" and redeploy.
         "JOB_STATUS_WRITES_ENABLED": "1",
+        # Gap compression (directive #11 B6, Zac-authorized ON in the #11
+        # review): kept inter-word pauses above 0.45s compress to 0.30s at
+        # the clip-build layer. ROLLBACK: flip to "0" and redeploy.
+        "GAP_COMPRESSION_ENABLED": "1",
         # ── Re-edit Layer 3 Phase 2: array-level auto-revert ─────
         # Phase 1 (always on) auto-reverts top-level scalar drift
         # (caption_style / thumbnail_word_index / outro). Phase 2
