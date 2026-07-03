@@ -28,8 +28,6 @@ export type { TypewriterRevealProps, TypewriterColorScheme } from "./TypewriterR
 
 // ── Batch 2 — 4 net-new caption styles (additive; same shared/ interface) ──
 export { TwoTone } from "./TwoTone";
-export { NeonStripe } from "./NeonStripe";
-export { Spectrum } from "./Spectrum";
 export { CleanCut } from "./CleanCut";
 
 // Directive #12 promotions (ABE archive)

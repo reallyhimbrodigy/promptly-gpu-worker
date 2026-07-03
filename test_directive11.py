@@ -182,6 +182,14 @@ ns2 = {"_record_divergence": H._record_divergence, "print": print,
 with contextlib.redirect_stdout(io.StringIO()):
     exec(compile(block2, "<successors>", "exec"), ns2)
 check("EmojiPop -> HormoziPopIn", ns2["_caption_style"] == "HormoziPopIn")
+for _retired, _succ in (("Spectrum", "TwoTone"), ("NeonStripe", "HormoziPopIn")):
+    ep3 = {"transitions": [], "tight_cut_overlays": [], "_resolved_tight_cut_overlays": [],
+           "caption_style": _retired}
+    ns3 = {"_record_divergence": H._record_divergence, "print": print,
+           "edit_plan": ep3, "_caption_style": _retired, "isinstance": isinstance, "dict": dict}
+    with contextlib.redirect_stdout(io.StringIO()):
+        exec(compile(block2, "<successors>", "exec"), ns3)
+    check(f"{_retired} -> {_succ}", ns3["_caption_style"] == _succ, str(ns3["_caption_style"]))
 
 print(f"\n=== RESULT: {len(PASS)} passed, {len(FAIL)} failed ===")
 if FAIL:

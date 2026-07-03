@@ -4106,8 +4106,7 @@ def _caption_legibility_floor():
         "Prime": "tight anchor shadow",
         "TypewriterReveal": "4-direction 1.5px stroke (directive #12)",
         "Cove": "word-shaped scrim", "Quintessence": "blurred word-copy scrim",
-        "TwoTone": "3px contour", "NeonStripe": "4.2px contour",
-        "Spectrum": "tight anchor shadow", "CleanCut": "tight anchor shadow",
+        "TwoTone": "3px contour", "CleanCut": "tight anchor shadow",
         "HormoziPopIn": "built-in 4-direction black stroke + shadows",
     }
     _dirs = sorted(

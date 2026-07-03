@@ -3721,7 +3721,7 @@ Captions render every spoken word and run the entire video, continuous from firs
 
 The footage's surfaces pick the palette's contrast: keyword colors that sit near the scene's dominant tones read as texture, and the strong choice separates from what the frame is made of.
 
-**Keywords:** 8 of 12 styles highlight words in `caption_keywords` with their signature treatment; 4 ignore keywords (the animation IS the effect). For keyword styles, density carries the identity — roughly 1 keyword every 3-4 spoken words (≈18-25 for a 30s video, 35-50 for 60s), spread across the WHOLE transcript (a back half with no keywords goes flat exactly when the viewer decides whether to rewatch). Earns a keyword: concrete nouns, emotional verbs, vivid adjectives, names, places, brands, numbers, prices, punchline and reveal words. Keyword status goes to content words — the nouns, verbs, and numbers that carry the beat; articles, prepositions, conjunctions, auxiliaries, and pronouns stay plain (a pronoun that IS the punchline earns the exception). Lowercase, dictionary form, letters only.
+**Keywords:** 6 of 10 styles highlight words in `caption_keywords` with their signature treatment; 4 ignore keywords (the animation IS the effect). For keyword styles, density carries the identity — roughly 1 keyword every 3-4 spoken words (≈18-25 for a 30s video, 35-50 for 60s), spread across the WHOLE transcript (a back half with no keywords goes flat exactly when the viewer decides whether to rewatch). Earns a keyword: concrete nouns, emotional verbs, vivid adjectives, names, places, brands, numbers, prices, punchline and reveal words. Keyword status goes to content words — the nouns, verbs, and numbers that carry the beat; articles, prepositions, conjunctions, auxiliaries, and pronouns stay plain (a pronoun that IS the punchline earns the exception). Lowercase, dictionary form, letters only.
 
 ──────────────────────────────────────────
 THE {_n_styles} STYLES
@@ -3733,13 +3733,9 @@ THE {_n_styles} STYLES
 2. **TypewriterReveal** — Space Mono, character-by-character reveal with blinking cursor; schemes: classic (white), terminal (green CRT), amber (phosphor). Keywords: IGNORED. Signal: typed in real time. Fits: tech/coding, documentary narration, hacker or retro-CRT aesthetics, slow pacing. Fights: high-energy content; speech faster than the typing animation.
    Optional extraProps: {{ "scheme": "classic" | "terminal" | "amber" }}
 
-
 3. **Cove** — bold Montserrat body; keywords swap to ~2x oversized italic Playfair with warm ethereal glow. Keywords: USED. Signal: keywords held up with reverence. Fits: premium/luxury, brand storytelling, wellness, slow delivery. Fights: aggressive hustle content, casual delivery.
 
-
-
 4. **Lumen** — Montserrat body; keywords swap to Playfair with amber glow (#D4A24C) and a gold underline sweep; optional "shine" flash. Keywords: USED. Signal: money moments, brand stamp. Fits: hustle, motivational, money/business/success content. Fights: understated or melancholic content; videos with no money-words (gold feels arbitrary).
-
 
 5. **Pulse** — words appear in synchronized PAIRS, one above one below, crisp opacity fades; keywords go cyan (#00BFFF). Keywords: USED. Signal: scored to the audio, beat-matched. Fits: music content, rapid dialogue, lyric-video energy. Fights: contemplative content needing per-word breath; adjacent words of very different length.
 
@@ -3747,15 +3743,13 @@ THE {_n_styles} STYLES
     Optional extraProps: {{ "stretchY": 1.6 }} default · 2.0 extreme · 1.3 subtle
 
 7. **TwoTone** — big stacked all-caps words two lines deep: a white top line over an accent-color bottom line, each word a chunky 3D "sticker" block (thick dark contour + downward extrude) that slams in oversized and settles; the page splits across the two lines automatically. Keywords: IGNORED. Signal: two words, two colors, maximum punch. Fits: short shouted two-part hooks over high-energy talking-head or hype B-roll — "STOP / SCROLLING", "THIS CHANGES / EVERYTHING". Fights: long sentences, calm or contemplative pacing, warm serif registers.
-8. **NeonStripe** — large all-caps words built like lit glass tubes: a striped neon fill, a crisp rim, a contained outer bloom, and an authentic power-on flicker; keyword words keep buzzing with a recurring stutter and a hotter glow. Keywords: USED. Signal: lit-sign energy — this word is glowing. Fits: punchy hype lines over darker footage where a club/arcade neon look fits — "EASY EDITING", "CREATE CONTENT FAST". Fights: soft warm candlelit content, understated/melancholic tone, bright airy footage (the bloom needs dark to read).
-9. **Spectrum** — each word sits at a different hue along an iridescent ramp and the whole phrase slowly cycles, like flowing holographic foil; keyword words race through the spectrum faster and glow hotter. Keywords: USED. Signal: every word a different color of the rainbow. Fits: vibey, premium, aesthetic content where a flowing multicolor wash suits the tone — lifestyle, music, design. Fights: serious/informational dialogue, corporate register, fast technical content (the cycle distracts).
-10. **CleanCut** — one plain crisp word on screen at a time, centered, with a subtle rise-and-settle and a soft legibility shadow. No color, no flair — the deliberate no-style style; long words wrap and stay inside the safe margins. Keywords: IGNORED. Signal: just the words, nothing else. Fits: fast-cut B-roll, cinematic or serious sections, any stretch where the footage should lead and the caption stays out of the way. Fights: moments wanting decoration or a keyword accent, hype/energy hooks (reads flat where punch is wanted).
+8. **CleanCut** — one plain crisp word on screen at a time, centered, with a subtle rise-and-settle and a soft legibility shadow. No color, no flair — the deliberate no-style style; long words wrap and stay inside the safe margins. Keywords: IGNORED. Signal: just the words, nothing else. Fits: fast-cut B-roll, cinematic or serious sections, any stretch where the footage should lead and the caption stays out of the way. Fights: moments wanting decoration or a keyword accent, hype/energy hooks (reads flat where punch is wanted).
 
-11. **HormoziPopIn** — Montserrat 900 all-caps with a thick black stroke and shadow baked in; each word spring-pops on one at a time, highlight words scale ~1.45x in a hot accent color. Keywords: USED. Signal: maximum-conviction delivery — every word thrown. Fits: high-energy talking-head, motivational, business advice, podcast highlights — the format's native register. Fights: calm, literary, or understated content; slow contemplative pacing.
+9. **HormoziPopIn** — Montserrat 900 all-caps with a thick black stroke and shadow baked in; each word spring-pops on one at a time, highlight words scale ~1.45x in a hot accent color. Keywords: USED. Signal: maximum-conviction delivery — every word thrown. Fits: high-energy talking-head, motivational, business advice, podcast highlights — the format's native register. Fights: calm, literary, or understated content; slow contemplative pacing.
 
-12. **Gadzhi** — Montserrat 700 uppercase, left-aligned tight two-word lines; words slide up from below with a smooth ease-out, settling gray → white with keywords landing in gold (#F5C518). Keywords: USED. Signal: confident money talk — agency energy. Fits: business/hustle, SMMA-style delivery, product pitches with named numbers. Fights: warm serif registers, playful or soft content.
+10. **Gadzhi** — Montserrat 700 uppercase, left-aligned tight two-word lines; words slide up from below with a smooth ease-out, settling gray → white with keywords landing in gold (#F5C518). Keywords: USED. Signal: confident money talk — agency energy. Fits: business/hustle, SMMA-style delivery, product pitches with named numbers. Fights: warm serif registers, playful or soft content.
 
-Keyword styles: Prime, Cove, Lumen, Pulse, NeonStripe, Spectrum, HormoziPopIn, Gadzhi. Keyword-ignoring: TypewriterReveal, Quintessence, TwoTone, CleanCut (still emit caption_keywords — they have narrative value — they just don't highlight).
+Keyword styles: Prime, Cove, Lumen, Pulse, HormoziPopIn, Gadzhi. Keyword-ignoring: TypewriterReveal, Quintessence, TwoTone, CleanCut (still emit caption_keywords — they have narrative value — they just don't highlight).
 
 ──────────────────────────────────────────
 CAPTION POSITION — collision procedure
@@ -4236,7 +4230,7 @@ Read the WHY on each — that's the principle you carry to videos you haven't se
 EXAMPLE 1 — hook, street-interview trivia
 ──────────────────────────────────────────
 
-Caption style: Spectrum — rapid-fire quiz energy wants multicolor keyword pops. The question word gets a SnapReframe with camera_shutter riding the freeze ("the question locks the frame"). The hard cut into the answer wears a ShutterFlash overlay ("the answer lands like a flash going off"), and a caption_match text overlay pins "Q1" top. The mine surfaced a StatCard referent on the score; it stayed unplaced — mid-hook, the person is the star and the why wouldn't write.
+Caption style: HormoziPopIn — rapid-fire quiz energy wants the classic pop: bold, stroked, one word at a time. The question word gets a SnapReframe with camera_shutter riding the freeze ("the question locks the frame"). The hard cut into the answer wears a ShutterFlash overlay ("the answer lands like a flash going off"), and a caption_match text overlay pins "Q1" top. The mine surfaced a StatCard referent on the score; it stayed unplaced — mid-hook, the person is the star and the why wouldn't write.
 
 ──────────────────────────────────────────
 EXAMPLE 2 — mid-arc teach-down, three-point listicle
@@ -4254,9 +4248,9 @@ Caption style: Quintessence — a slow-burn confession earns an elegant, quiet f
 EXAMPLE 4 — product-pitch UGC
 ──────────────────────────────────────────
 
-Caption style: NeonStripe — hustle energy with a signature stripe keeps the pitch premium. A PillCluster renders the three features as the speaker lists them ("the trio on screen as the trio is spoken"), the demo walk-in earns the video's one transition — ZoomThrough on a 1.4s CUT boundary ("setup into payoff, the most committed move, and the gap gives it handle") with whoosh_slow — and a DropCard lands the price with ching ("the number arrives like a product drop"). Two windows in the build stayed bare; the pace was the polish.
+Caption style: Gadzhi — hustle energy in left-aligned gold keeps the pitch confident and premium. A PillCluster renders the three features as the speaker lists them ("the trio on screen as the trio is spoken"), the demo walk-in earns the video's one transition — ZoomThrough on a 1.4s CUT boundary ("setup into payoff, the most committed move, and the gap gives it handle") with whoosh_slow — and a DropCard lands the price with ching ("the number arrives like a product drop"). Two windows in the build stayed bare; the pace was the polish.
 
-These four rotate the palette on purpose — twelve caption styles, twenty-eight graphics, ten transitions, three overlays, the full sound rack. The registry is the palette; the moment picks the instrument; the strongest sign you read the footage fresh is reaching for instruments these examples never wore.
+These four rotate the palette on purpose — ten caption styles, twenty-eight graphics, ten transitions, three overlays, the full sound rack. The registry is the palette; the moment picks the instrument; the strongest sign you read the footage fresh is reaching for instruments these examples never wore.
 
 ──────────────────────────────────────────
 REJECTED RECIPE A — the THIN edit (app pitch, 19 seconds)
@@ -15897,6 +15891,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         "CinematicLetterpress": "Quintessence",
         # Directive #14 kills:
         "MagazineCutout": "Quintessence", "EmojiPop": "HormoziPopIn",
+        # Directive #15 kills (loud registers -> professional equivalents):
+        "Spectrum": "TwoTone", "NeonStripe": "HormoziPopIn",
     }
     if _caption_style in _CAPTION_SUCCESSORS:
         _succ = _CAPTION_SUCCESSORS[_caption_style]

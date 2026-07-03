@@ -29,7 +29,7 @@ Frozensets, not sets — these are vocabularies, not mutable collections.
 VALID_CAPTION_STYLES = frozenset({
     "Prime", "TypewriterReveal", "Cove", "Lumen", "Pulse", "Quintessence",
     # Batch 2 — 4 net-new styles (both tiers).
-    "TwoTone", "NeonStripe", "Spectrum", "CleanCut",
+    "TwoTone", "CleanCut",
     # Directive #12 promotions (from the ABE archive):
     "HormoziPopIn", "Gadzhi",
     # Renderer skips caption rendering entirely when style == "none"

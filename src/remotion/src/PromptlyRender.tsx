@@ -52,7 +52,7 @@ import {
   Lumen,
   Pulse, Quintessence,
   // Batch 2 (4 net-new caption styles)
-  TwoTone, NeonStripe, Spectrum, CleanCut,
+  TwoTone, CleanCut,
   // Directive #12 promotions (ABE archive)
   HormoziPopIn, Gadzhi,
 } from "./captions";
@@ -88,7 +88,7 @@ import {
 const CAPTION_MAP: Record<string, React.FC<any>> = {
   Prime, TypewriterReveal, Cove, Lumen, Pulse, Quintessence,
   // Batch 2 (4 net-new)
-  TwoTone, NeonStripe, Spectrum, CleanCut,
+  TwoTone, CleanCut,
   // Directive #12 promotions (ABE archive)
   HormoziPopIn, Gadzhi,
 };
