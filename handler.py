@@ -103,6 +103,54 @@ SEMANTIC_TO_MG_ANCHOR = {
     # coerces to center instead of raising KeyError.
 }
 
+
+def _face_clear_anchor(band, sw_s, ew_s, face_traj, component=""):
+    """Face-cover validator (PR-γ · directive #9): test the anchor BAND's rect
+    against the interpolated face rect across the component's source window;
+    when the face is covered beyond threshold, coerce to the alternative band
+    with lesser overlap. This is the validator behind the prompt's face-cover
+    rules — the render now KEEPS the person visible, so the rules can teach
+    craft instead of policing. Bands (1080x1920 canvas): top y=[120,640] ·
+    center y=[640,1280] · bottom y=[1280,1800]; face rect ≈ 600px tall centered
+    on the smoothed trajectory point (MGs render full-width, so vertical
+    coverage is the measure). Fail-open: absent face data, unknown band, or
+    any error → unchanged. Never raises; [divergence] action=face_clear_coerce.
+    """
+    try:
+        _BANDS = {"top": (120.0, 640.0), "center": (640.0, 1280.0),
+                  "bottom": (1280.0, 1800.0)}
+        if band not in _BANDS or not face_traj:
+            return band, False
+        _pts = [p for p in face_traj
+                if isinstance(p, dict) and p.get("found")
+                and (sw_s - 0.5) <= float(p.get("t") or 0.0) <= (ew_s + 0.5)]
+        if not _pts:
+            return band, False
+        _FH = 600.0
+        def _overlap(_b):
+            _y0, _y1 = _BANDS[_b]
+            _cov = 0.0
+            for _p in _pts:
+                _fy0 = float(_p.get("cy") or 960.0) - _FH / 2.0
+                _fy1 = _fy0 + _FH
+                _cov += max(0.0, min(_y1, _fy1) - max(_y0, _fy0)) / _FH
+            return _cov / len(_pts)
+        _cur = _overlap(band)
+        if _cur <= 0.35:
+            return band, False
+        _best_ov, _best = sorted((_overlap(_b), _b) for _b in _BANDS if _b != band)[0]
+        if _best_ov >= _cur:
+            return band, False
+        _record_divergence(
+            "anchor", {"component": component, "band": band,
+                       "face_overlap": round(_cur, 2)},
+            "face_clear_coerce",
+            reason=f"face {_cur:.0%} covered -> {_best} ({_best_ov:.0%})",
+        )
+        return _best, True
+    except Exception:
+        return band, False
+
 # ── Pydantic EditPlan schema ─────────────────────────────────────────────────
 # Gemini's response_json_schema enforces this at token-generation time — the
 # model cannot emit missing fields, wrong types, or out-of-enum values. Python
@@ -15774,6 +15822,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             if _k in ("variant", "start_word_index", "_source_start", "duration_seconds"):
                 continue
             _entry[_k] = _v
+        if _entry.get("position") in ("top", "center", "bottom"):
+            _src_t_fc = float(_pw.get("_source_start") or 0.0)
+            _entry["position"], _ = _face_clear_anchor(
+                _entry["position"], _src_t_fc, _src_t_fc + _du,
+                _face_trajectory, component=f"text_overlay:{_ov.get('variant')}")
         text_overlays_out.append(_entry)
         _src_t = float(_pw.get("_source_start") or 0.0)
         print(
@@ -16026,6 +16079,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # generate_edit_gemini normalization) with a missing/None field can't
         # crash the spread — {**None} would raise. Validated plans are unchanged.
         _mg_anchor = SEMANTIC_TO_MG_ANCHOR.get(_mg.get("anchor"), "center")
+        _mg_anchor, _ = _face_clear_anchor(
+            _mg_anchor, _sw_source, _ew_source, _face_trajectory,
+            component=f"mg:{_mg.get('type')}")
         _mg_props = {**(_mg.get("props") or {}), "anchor": _mg_anchor}
         motion_graphics_out.append({
             "type": _mg.get("type"),
@@ -16080,6 +16136,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _mg_from_frame = max(0, _em_t_frame - int(round(_em_dur * source_fps * 0.25)))
             _mg_dur_frames = int(round(_em_dur * source_fps))
             _em_mg_anchor = SEMANTIC_TO_MG_ANCHOR.get(em["motion_graphic"]["anchor"], "center")
+            _em_mg_anchor, _ = _face_clear_anchor(
+                _em_mg_anchor, float(em["t"]), float(em["t"]) + _em_dur,
+                _face_trajectory, component=f"emphasis-mg:{em['motion_graphic'].get('type')}")
             _em_mg_props = {**em["motion_graphic"]["props"], "anchor": _em_mg_anchor}
             motion_graphics_out.append({
                 "type": em["motion_graphic"]["type"],
