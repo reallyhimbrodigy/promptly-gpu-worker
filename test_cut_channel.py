@@ -60,8 +60,8 @@ print("=== T1: refinement removes words -> clips rebuilt from the union ===")
 out, err, o = run(plan(refs=[{"start_word_index": 2, "end_word_index": 3, "reason": "abandoned start"}]))
 check("no raise", err is None, repr(err))
 check("[cut-refine] applied", "[cut-refine] kept=[2-3] reason=abandoned start" in o)
-check("clip boundary lands at the excision (src 1.55->1.6 splice)",
-      any(abs(float(c.get("source_end", 0)) - 0.75) < 0.05 for c in out["cuts"]), str(out["cuts"][:3]))
+check("clip boundary lands at the excision + release pad (src splice, PR-delta)",
+      any(abs(float(c.get("source_end", 0)) - (0.75 + H._RELEASE_PAD_S)) < 0.05 for c in out["cuts"]), str(out["cuts"][:3]))
 
 print("\n=== T2: protected words (payoff) -> range dropped with divergence ===")
 out, err, o = run(plan(refs=[{"start_word_index": 14, "end_word_index": 16, "reason": "drag"}]))

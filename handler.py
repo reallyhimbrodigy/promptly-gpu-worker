@@ -6459,6 +6459,16 @@ _REPAIR_MIN_HEADROOM_S = 180.0   # recipe repair re-ask allowance: a corrective
                                  # 900s job budget after the projected render
                                  # time (same projection clock as the
                                  # _RERENDER_HEADROOM_S pre-check: duration*3).
+_RELEASE_PAD_S = 0.12            # word-boundary release pad (PR-delta): source
+                                 # kept past the OUTGOING word's Deepgram end at
+                                 # every interior splice, so plosive/fricative
+                                 # release tails survive the cut. Ear-tunable.
+_HEAD_PAD_S = 0.05               # head pad before the INCOMING word's Deepgram
+                                 # start (and before the first clip's first
+                                 # word). Ear-tunable. Both pads clamp so they
+                                 # never reveal a removed word's core (half the
+                                 # removed span per side) and never cross into
+                                 # a kept word.
 
 
 def _resolve_scene_ref_paths(ref_image_keys, work_dir):
@@ -8702,13 +8712,17 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                         _split_boundaries = set()
                         for _ci in range(len(validated_cuts) - 1):
                             _end_t = float(validated_cuts[_ci].get("source_end") or 0.0)
-                            # Find the kept-word whose .end is closest to _end_t within tolerance.
+                            # Find the kept-word whose .end is closest BELOW _end_t.
+                            # One-sided window: the clip end sits AT or ABOVE the
+                            # word end by the boundary's applied release pad
+                            # (PR-delta, <= _RELEASE_PAD_S), so match within
+                            # [-0.02, _RELEASE_PAD_S + 0.10].
                             _best_ni = None
-                            _best_dist = 0.10
+                            _best_dist = _RELEASE_PAD_S + 0.10
                             for _ni, _w in enumerate(kept_words):
-                                _dist = abs(float(_w.get("end") or 0.0) - _end_t)
-                                if _dist <= _best_dist:
-                                    _best_dist = _dist
+                                _delta = _end_t - float(_w.get("end") or 0.0)
+                                if -0.02 <= _delta <= _best_dist:
+                                    _best_dist = abs(_delta)
                                     _best_ni = _ni
                             if _best_ni is not None:
                                 _split_boundaries.add(_best_ni)
@@ -8902,11 +8916,11 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                 for _bi in range(len(validated_cuts) - 1):
                     _end_t = float(validated_cuts[_bi].get("source_end") or 0.0)
                     _next_t = float(validated_cuts[_bi + 1].get("source_start") or 0.0)
-                    _best_ni, _best_dist = None, 0.10
+                    _best_ni, _best_dist = None, _RELEASE_PAD_S + 0.10
                     for _cni, _cw in enumerate(kept_words):
-                        _cdist = abs(float(_cw.get("end") or 0.0) - _end_t)
-                        if _cdist <= _best_dist:
-                            _best_dist, _best_ni = _cdist, _cni
+                        _cdelta = _end_t - float(_cw.get("end") or 0.0)
+                        if -0.02 <= _cdelta <= _best_dist:
+                            _best_dist, _best_ni = abs(_cdelta), _cni
                     _cov_awi = (
                         new_to_src[_best_ni]
                         if _best_ni is not None and 0 <= _best_ni < len(new_to_src)
@@ -14506,7 +14520,10 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0):
     on top of Gemini's calls. If a render is too loose or too choppy, the
     fix is the prompt — not adding judgment layers in this function.
 
-    Cut times are Deepgram word boundaries. The audio cut path uses
+    Cut times are Deepgram word boundaries plus a release/head pad at
+    every interior splice (Step 3b: _RELEASE_PAD_S past the outgoing word,
+    _HEAD_PAD_S before the incoming word, clamped to the boundary's room)
+    so word releases survive the cut. The audio cut path uses
     round(t * sample_rate) for indexing, so the rendered splice lands
     at the exact sample. Every audio splice gets a 5 ms equal-power
     cos²/sin² crossfade in build_per_cut_audio.
@@ -14692,9 +14709,9 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0):
     # ── Step 3: Build raw clips at exact word boundaries ──────────────────
     # Word timestamps come directly from Deepgram Nova-3 (single ASR source
     # of truth as of 2026-05-23). Nova-3's word boundaries have ±50-150ms
-    # natural variance; cutting at exact boundaries is safe given the 5ms
-    # equal-power audio crossfade applied at each splice. The render
-    # pipeline is sample-accurate end-to-end.
+    # natural variance — which is exactly why Step 3b pads every interior
+    # boundary: an end-time that under-runs the audible release used to clip
+    # the word. The render pipeline is sample-accurate end-to-end.
     raw_clips = []
     for word_group in clips:
         first_start = word_group[0]["_start"]
@@ -14707,7 +14724,66 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0):
             "first_word": word_group[0]["_text"],
             "last_word": word_group[-1]["_text"],
             "word_count": len(word_group),
+            "_first_wi": word_group[0]["_word_index"],
+            "_last_wi": word_group[-1]["_word_index"],
         })
+
+    # ── Step 3b: interior-boundary release/head pads (PR-delta) ───────────
+    # Every interior splice previously cut at RAW Deepgram word times, and
+    # Deepgram end-times routinely under-run the audible release of a final
+    # plosive/fricative — the "clipped word" class. Each boundary now keeps
+    # _RELEASE_PAD_S of source past the outgoing word and starts _HEAD_PAD_S
+    # before the incoming word, clamped (in order): never past the divider
+    # between the clips (so pads can't overlap), never past half the removed
+    # word span per side (a pad may reveal the removed word's breath, never
+    # its core), and implicitly never into a kept word (the divider sits
+    # between the boundary words). Dead-air boundaries split the silent gap
+    # at its midpoint — the pad breathes into VAD-confirmed silence. The 5ms
+    # equal-power splice fade stays beneath these pads.
+    _words_by_idx = {w["_word_index"]: w for w in sorted_words}
+    for _bi in range(len(raw_clips) - 1):
+        _out_c, _in_c = raw_clips[_bi], raw_clips[_bi + 1]
+        _E = float(_out_c["padded_end"])
+        _S = float(_in_c["padded_start"])
+        _gap = _S - _E
+        if _gap <= 0:
+            continue
+        _a = _out_c["_last_wi"]
+        _b = _in_c["_first_wi"]
+        _rm = [_words_by_idx[_k] for _k in range(_a + 1, _b)
+               if _k in removed_indices and _k in _words_by_idx]
+        if _rm:
+            _rs = min(_w["_start"] for _w in _rm)
+            _re = max(_w["_end"] for _w in _rm)
+            _mid = min(max(_rs + (_re - _rs) / 2.0, _E), _S)
+        else:
+            _mid = _E + _gap / 2.0
+        _applied_release = max(0.0, min(_RELEASE_PAD_S, _mid - _E))
+        _applied_head = max(0.0, min(_HEAD_PAD_S, _S - _mid))
+        if _applied_release > 0:
+            _out_c["padded_end"] = _E + _applied_release
+        if _applied_head > 0:
+            _in_c["padded_start"] = _S - _applied_head
+        if _applied_release > 0 or _applied_head > 0:
+            _record_divergence(
+                "cut_boundary",
+                {"boundary": _bi, "gap_s": round(_gap, 3),
+                 "removed_words": len(_rm)},
+                "cut_pad",
+                reason=(f"applied_release={_applied_release:.3f} "
+                        f"applied_head={_applied_head:.3f}"),
+            )
+    # First clip gains the head pad (attack protection at the video open).
+    if raw_clips:
+        _first_s = float(raw_clips[0]["padded_start"])
+        _fc_head = min(_HEAD_PAD_S, _first_s)
+        if _fc_head > 0:
+            raw_clips[0]["padded_start"] = _first_s - _fc_head
+            _record_divergence(
+                "cut_boundary", {"boundary": "first_clip_head"},
+                "cut_pad",
+                reason=f"applied_release=0.000 applied_head={_fc_head:.3f}",
+            )
 
     # ── Step 4: tail-pad the FINAL clip ───────────────────────────────────
     # Every clip ends at its last word's Deepgram word-END, which marks the
