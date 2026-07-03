@@ -134,8 +134,13 @@ def evaluate_recipe(plan, words, cut_boundaries, duration, tight_boundaries=None
     # ----------------------------------------------- 1:1 zooms <-> key_moments
     km_indices = {km["word_index"] for km in key_moments}
     emp_anchors = [e["word_indices"][0] for e in emphases if e.get("word_indices")]
+    _tight_set_z = set(tight_boundaries or [])
     for a in emp_anchors:
         if a not in km_indices:
+            # γ rider R3: MASK zooms (first word after a tight boundary) serve
+            # the boundary and live OUTSIDE the key_moments ledger — exempt.
+            if (a - 1) in _tight_set_z:
+                continue
             r.fail("zoom-1to1", f"emphasis at word {a} has no matching key_moment")
     for k in km_indices:
         if k not in emp_anchors:
@@ -336,7 +341,9 @@ def evaluate_recipe(plan, words, cut_boundaries, duration, tight_boundaries=None
     sounds = [s["sound"] for s in sfx]
     if sounds:
         if len(set(sounds)) < 3 and len(sounds) >= 4:
-            r.fail("variety-sfx", f"only {len(set(sounds))} distinct sounds across {len(sounds)} SFX (need ≥3)")
+            # Recalibrated (γ rider R2): advice, not failure — the count
+            # follows the beats; a lean two-sound edit is a legitimate read.
+            r.warn("variety-sfx", f"only {len(set(sounds))} distinct sounds across {len(sounds)} SFX (rack rotation reads fresher)")
         for once_only in ("boom", "drum_roll", "reverse"):
             if sounds.count(once_only) > 1:
                 r.fail("sfx-once", f"'{once_only}' used {sounds.count(once_only)}× (max once)")
