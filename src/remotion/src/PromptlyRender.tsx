@@ -54,7 +54,7 @@ import {
   // Batch 2 (4 net-new caption styles)
   TwoTone, NeonStripe, Spectrum, CleanCut,
   // Directive #12 promotions (ABE archive)
-  HormoziPopIn, Gadzhi, MagazineCutout, EmojiPop,
+  HormoziPopIn, Gadzhi,
 } from "./captions";
 
 // Transitions — all 12
@@ -90,7 +90,7 @@ const CAPTION_MAP: Record<string, React.FC<any>> = {
   // Batch 2 (4 net-new)
   TwoTone, NeonStripe, Spectrum, CleanCut,
   // Directive #12 promotions (ABE archive)
-  HormoziPopIn, Gadzhi, MagazineCutout, EmojiPop,
+  HormoziPopIn, Gadzhi,
 };
 
 const TRANSITION_MAP: Record<string, React.FC<any>> = {

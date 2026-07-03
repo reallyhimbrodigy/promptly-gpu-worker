@@ -3721,7 +3721,7 @@ Captions render every spoken word and run the entire video, continuous from firs
 
 The footage's surfaces pick the palette's contrast: keyword colors that sit near the scene's dominant tones read as texture, and the strong choice separates from what the frame is made of.
 
-**Keywords:** 9 of 14 styles highlight words in `caption_keywords` with their signature treatment; 5 ignore keywords (the animation IS the effect). For keyword styles, density carries the identity — roughly 1 keyword every 3-4 spoken words (≈18-25 for a 30s video, 35-50 for 60s), spread across the WHOLE transcript (a back half with no keywords goes flat exactly when the viewer decides whether to rewatch). Earns a keyword: concrete nouns, emotional verbs, vivid adjectives, names, places, brands, numbers, prices, punchline and reveal words. Keyword status goes to content words — the nouns, verbs, and numbers that carry the beat; articles, prepositions, conjunctions, auxiliaries, and pronouns stay plain (a pronoun that IS the punchline earns the exception). Lowercase, dictionary form, letters only.
+**Keywords:** 8 of 12 styles highlight words in `caption_keywords` with their signature treatment; 4 ignore keywords (the animation IS the effect). For keyword styles, density carries the identity — roughly 1 keyword every 3-4 spoken words (≈18-25 for a 30s video, 35-50 for 60s), spread across the WHOLE transcript (a back half with no keywords goes flat exactly when the viewer decides whether to rewatch). Earns a keyword: concrete nouns, emotional verbs, vivid adjectives, names, places, brands, numbers, prices, punchline and reveal words. Keyword status goes to content words — the nouns, verbs, and numbers that carry the beat; articles, prepositions, conjunctions, auxiliaries, and pronouns stay plain (a pronoun that IS the punchline earns the exception). Lowercase, dictionary form, letters only.
 
 ──────────────────────────────────────────
 THE {_n_styles} STYLES
@@ -3755,11 +3755,7 @@ THE {_n_styles} STYLES
 
 12. **Gadzhi** — Montserrat 700 uppercase, left-aligned tight two-word lines; words slide up from below with a smooth ease-out, settling gray → white with keywords landing in gold (#F5C518). Keywords: USED. Signal: confident money talk — agency energy. Fits: business/hustle, SMMA-style delivery, product pitches with named numbers. Fights: warm serif registers, playful or soft content.
 
-13. **MagazineCutout** — Playfair Display 900 uppercase on individually cut paper scraps (cream tiles, slight random rotation and size, ink #0D0D0D); words snap into place timed to the audio, the active word's paper lifting. Keywords: IGNORED (every word is its own cutout). Signal: collage editorial — hand-made and deliberate. Fits: creative/art content, DIY/craft, zine-style playful editorial. Fights: corporate polish, serious informational register, very dense fast dialogue.
-
-14. **EmojiPop** — Montserrat 900; words pop in with automatic Lottie emoji animations riding alongside (48 built-in emojis mapped to common words — fire, money, brain, alarm); the active word and keywords hold a hot red (#FF0000). Keywords: USED. Signal: fun, reactive, alive — the screen is playing along. Fits: fun/casual content, storytelling, social clips, younger audiences. Fights: serious or premium registers, corporate polish, understated delivery.
-
-Keyword styles: Prime, Cove, Lumen, Pulse, NeonStripe, Spectrum, HormoziPopIn, Gadzhi, EmojiPop. Keyword-ignoring: TypewriterReveal, Quintessence, TwoTone, CleanCut, MagazineCutout (still emit caption_keywords — they have narrative value — they just don't highlight).
+Keyword styles: Prime, Cove, Lumen, Pulse, NeonStripe, Spectrum, HormoziPopIn, Gadzhi. Keyword-ignoring: TypewriterReveal, Quintessence, TwoTone, CleanCut (still emit caption_keywords — they have narrative value — they just don't highlight).
 
 ──────────────────────────────────────────
 CAPTION POSITION — collision procedure
@@ -4260,7 +4256,7 @@ EXAMPLE 4 — product-pitch UGC
 
 Caption style: NeonStripe — hustle energy with a signature stripe keeps the pitch premium. A PillCluster renders the three features as the speaker lists them ("the trio on screen as the trio is spoken"), the demo walk-in earns the video's one transition — ZoomThrough on a 1.4s CUT boundary ("setup into payoff, the most committed move, and the gap gives it handle") with whoosh_slow — and a DropCard lands the price with ching ("the number arrives like a product drop"). Two windows in the build stayed bare; the pace was the polish.
 
-These four rotate the palette on purpose — fourteen caption styles, twenty-eight graphics, ten transitions, three overlays, the full sound rack. The registry is the palette; the moment picks the instrument; the strongest sign you read the footage fresh is reaching for instruments these examples never wore.
+These four rotate the palette on purpose — twelve caption styles, twenty-eight graphics, ten transitions, three overlays, the full sound rack. The registry is the palette; the moment picks the instrument; the strongest sign you read the footage fresh is reaching for instruments these examples never wore.
 
 ──────────────────────────────────────────
 REJECTED RECIPE A — the THIN edit (app pitch, 19 seconds)
@@ -15899,6 +15895,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         "Illuminate": "Lumen", "Passage": "Lumen", "Serif": "Prime",
         "EditorialPop": "Cove", "PaperII": "CleanCut",
         "CinematicLetterpress": "Quintessence",
+        # Directive #14 kills:
+        "MagazineCutout": "Quintessence", "EmojiPop": "HormoziPopIn",
     }
     if _caption_style in _CAPTION_SUCCESSORS:
         _succ = _CAPTION_SUCCESSORS[_caption_style]
@@ -18412,7 +18410,6 @@ def _resolve_caption_extra_props(style, keywords, edit_plan):
         "Lumen": "keywords",
         "Pulse": "keywords",
         "Gadzhi": "keywords",
-        "EmojiPop": "keywords",
         "Prime": "specialWords",
         "Cove": "boxedWords",
     }

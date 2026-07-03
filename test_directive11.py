@@ -155,6 +155,34 @@ lum = open("src/remotion/src/captions/Lumen/Lumen.tsx").read()
 check("Lumen permanent floor + step-up wired",
       "KEYWORD_CONTRAST_LAYERS" in lum and "keywordContrastShadow(keywordColor, bandLuma)" in lum)
 
+print("\n=== D14: retired-style successor coercion (real block, exec'd) ===")
+lines2 = open("handler.py").read().split("\n")
+s2 = next(i for i, l in enumerate(lines2) if "# Directive #13: NewspaperWipe retired" in l)
+e2 = next(i for i, l in enumerate(lines2) if "_caption_extra_props = _resolve_caption_extra_props" in l)
+block2 = textwrap.dedent("\n".join(lines2[s2:e2]))
+ep = {"transitions": [{"type": "NewspaperWipe", "after_word_index": 4}],
+      "tight_cut_overlays": [{"type": "NewspaperWipe", "after_word_index": 7}],
+      "_resolved_tight_cut_overlays": [],
+      "caption_style": "MagazineCutout"}
+ns = {"_record_divergence": H._record_divergence, "print": print,
+      "edit_plan": ep, "_caption_style": ep["caption_style"], "isinstance": isinstance, "dict": dict}
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    exec(compile(block2, "<successors>", "exec"), ns)
+o = buf.getvalue()
+check("NewspaperWipe transition coerced", ep["transitions"][0]["type"] == "ShutterFlash")
+check("NewspaperWipe TCO coerced", ep["tight_cut_overlays"][0]["type"] == "ShutterFlash")
+check("MagazineCutout -> Quintessence", ns["_caption_style"] == "Quintessence"
+      and ep["caption_style"] == "Quintessence", str(ns["_caption_style"]))
+check("divergences logged", o.count("retired_style_coerced") >= 3, o[-200:])
+ep2 = {"transitions": [], "tight_cut_overlays": [], "_resolved_tight_cut_overlays": [],
+       "caption_style": "EmojiPop"}
+ns2 = {"_record_divergence": H._record_divergence, "print": print,
+       "edit_plan": ep2, "_caption_style": "EmojiPop", "isinstance": isinstance, "dict": dict}
+with contextlib.redirect_stdout(io.StringIO()):
+    exec(compile(block2, "<successors>", "exec"), ns2)
+check("EmojiPop -> HormoziPopIn", ns2["_caption_style"] == "HormoziPopIn")
+
 print(f"\n=== RESULT: {len(PASS)} passed, {len(FAIL)} failed ===")
 if FAIL:
     print("FAILURES:", FAIL); sys.exit(1)

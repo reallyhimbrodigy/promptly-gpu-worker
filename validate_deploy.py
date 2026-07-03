@@ -4101,7 +4101,7 @@ def _caption_legibility_floor():
     # Directive #12 roster: 6 retired (Illuminate/Passage/Serif/EditorialPop/
     # PaperII/CinematicLetterpress), 3 promoted from the ABE archive.
     _importers = {"Lumen", "Pulse",
-                  "Gadzhi", "EmojiPop"}  # both: ABE shadow diffuse-only; anchor prepended
+                  "Gadzhi"}  # Gadzhi: ABE shadow diffuse-only; anchor prepended
     _exempt = {  # own treatment already meets the floor (box/scrim/contour/anchor)
         "Prime": "tight anchor shadow",
         "TypewriterReveal": "4-direction 1.5px stroke (directive #12)",
@@ -4109,7 +4109,6 @@ def _caption_legibility_floor():
         "TwoTone": "3px contour", "NeonStripe": "4.2px contour",
         "Spectrum": "tight anchor shadow", "CleanCut": "tight anchor shadow",
         "HormoziPopIn": "built-in 4-direction black stroke + shadows",
-        "MagazineCutout": "self-backgrounded paper tiles",
     }
     _dirs = sorted(
         d for d in os.listdir(_cap)

@@ -37,7 +37,3 @@ export { HormoziPopIn } from "./HormoziPopIn";
 export type { HormoziPopInProps } from "./HormoziPopIn";
 export { Gadzhi } from "./Gadzhi";
 export type { GadzhiProps } from "./Gadzhi";
-export { MagazineCutout } from "./MagazineCutout";
-export type { MagazineCutoutProps } from "./MagazineCutout";
-export { EmojiPop } from "./EmojiPop";
-export type { EmojiPopProps } from "./EmojiPop";

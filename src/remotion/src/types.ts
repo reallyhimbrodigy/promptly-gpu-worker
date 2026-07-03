@@ -225,8 +225,6 @@ export type CaptionStyle =
   | "Spectrum"
   | "HormoziPopIn"
   | "Gadzhi"
-  | "MagazineCutout"
-  | "EmojiPop"
   | "CleanCut";
 
 export interface CaptionPositionSegment {
