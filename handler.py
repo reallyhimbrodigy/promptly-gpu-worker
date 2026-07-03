@@ -18904,9 +18904,18 @@ def send_progress(job_id, step, pct, message, app_url):
     import threading
     def _fire():
         try:
+            # Authenticate the callback so the app server can reject forged
+            # progress/completion events. Sent only when configured; the server
+            # enforces it only when its own MODAL_CALLBACK_SECRET is set, so the
+            # two can be rolled out independently.
+            headers = {}
+            _secret = os.environ.get("MODAL_CALLBACK_SECRET", "")
+            if _secret:
+                headers["X-Modal-Secret"] = _secret
             requests.post(
                 f"{app_url}/api/modal-progress",
                 json={"job_id": job_id, "step": step, "pct": pct, "message": message},
+                headers=headers,
                 timeout=3,
             )
         except Exception:
