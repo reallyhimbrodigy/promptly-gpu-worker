@@ -13,7 +13,11 @@ import { msToFrames } from "../shared/timing";
 import { CAPTION_FONTS } from "../shared/fonts";
 import { getCaptionPositionStyle } from "../shared/captionPosition";
 import { buildKeywordSet, isKeyword } from "../shared/keywords";
-import { LEGIBILITY_ANCHOR_LAYERS } from "../shared/legibility";
+import {
+  LEGIBILITY_ANCHOR_LAYERS,
+  KEYWORD_CONTRAST_LAYERS,
+  keywordContrastShadow,
+} from "../shared/legibility";
 
 /* ─── Word Component ─── */
 
@@ -26,6 +30,7 @@ const LumenWord: React.FC<{
   textColor: string;
   keywordColor: string;
   sweepDuration: number;
+  bandLuma?: number;
 }> = ({
   token,
   pageStartMs,
@@ -35,6 +40,7 @@ const LumenWord: React.FC<{
   textColor,
   keywordColor,
   sweepDuration,
+  bandLuma,
 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
@@ -93,6 +99,14 @@ const LumenWord: React.FC<{
     "1px 2px 5px rgba(0,0,0,0.4)",
   ];
 
+  // B3 (directive #11): Lumen's amber carries a PERMANENT dark stroke floor —
+  // D3 measured the bare amber at 1.22–1.32:1 against warm surfaces — plus the
+  // shared auto step-up when the measured band luma converges with the amber.
+  const kwContrast = [
+    ...KEYWORD_CONTRAST_LAYERS,
+    ...keywordContrastShadow(keywordColor, bandLuma),
+  ];
+
   const kwGlow = [
     "0 0 20px rgba(212,162,76,0.5)",
     "0 0 40px rgba(212,162,76,0.3)",
@@ -110,7 +124,7 @@ const LumenWord: React.FC<{
         transformOrigin: "center bottom",
         textShadow: hasAppeared
           ? isKw
-            ? [...diffusedShadow, ...kwGlow].join(", ")
+            ? [...kwContrast, ...diffusedShadow, ...kwGlow].join(", ")
             : diffusedShadow.join(", ")
           : "none",
       }}
@@ -152,6 +166,7 @@ export const Lumen: React.FC<LumenProps> = ({
   textColor = "#FFFFFF",
   keywordColor = "#D4A24C",
   sweepDuration = 15,
+  bandLuma = undefined,
 }) => {
   const { fps, width } = useVideoConfig();
   const maxWidth = width * 0.85;
@@ -217,6 +232,7 @@ export const Lumen: React.FC<LumenProps> = ({
                         textColor={textColor}
                         keywordColor={keywordColor}
                         sweepDuration={sweepDuration}
+                        bandLuma={bandLuma}
                       />
                     ))}
                   </div>

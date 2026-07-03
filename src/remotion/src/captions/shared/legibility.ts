@@ -29,3 +29,41 @@ export const LEGIBILITY_ANCHOR = LEGIBILITY_ANCHOR_LAYERS.join(", ");
 /** Prepend the floor anchor to a style's own diffusion stack. */
 export const withLegibilityAnchor = (diffusion: string): string =>
   diffusion ? `${LEGIBILITY_ANCHOR}, ${diffusion}` : LEGIBILITY_ANCHOR;
+
+// ── Emphasis-keyword contrast floor (B3 · directive #11) ────────────────────
+// D3 numbers (render C, Lumen amber #D4A24C over warm granite): keyword-vs-
+// band contrast measured 1.22–1.32:1 — Δluma only +15..+20 of 255. Warm
+// keyword fills over warm surfaces read as texture. The step-up triggers when
+// the keyword color's luma sits within KEYWORD_CONTRAST_TRIGGER of the
+// measured caption-band luma (delivered per-video as extraProps.bandLuma).
+export const KEYWORD_CONTRAST_TRIGGER = 40; // 0-255 luma units
+export const KEYWORD_CONTRAST_LAYERS = [
+  "0 0 1px rgba(20,12,4,0.95)",
+  "0 0 3px rgba(20,12,4,0.9)",
+  "0 2px 5px rgba(0,0,0,0.9)",
+] as const;
+// Stronger second step for a triggered convergence (auto step-up).
+export const KEYWORD_CONTRAST_STEPUP_LAYERS = [
+  "0 0 2px rgba(10,6,2,0.95)",
+  "0 0 5px rgba(10,6,2,0.9)",
+  "0 3px 7px rgba(0,0,0,0.95)",
+] as const;
+
+export const lumaOf = (hex: string): number => {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return 128;
+  const v = parseInt(m[1], 16);
+  const r = (v >> 16) & 255, g = (v >> 8) & 255, b = v & 255;
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+};
+
+/** Auto step-up: extra dark layers when keyword color converges with the
+ * measured band luma. Empty when band luma is unknown (fail-open). */
+export const keywordContrastShadow = (
+  keywordColor: string,
+  bandLuma?: number,
+): string[] =>
+  bandLuma !== undefined &&
+  Math.abs(lumaOf(keywordColor) - bandLuma) < KEYWORD_CONTRAST_TRIGGER
+    ? [...KEYWORD_CONTRAST_STEPUP_LAYERS]
+    : [];

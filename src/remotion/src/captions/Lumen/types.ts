@@ -17,4 +17,6 @@ export interface LumenProps extends CaptionStyleProps {
   keywordColor?: string;
   /** Duration of brightness flash on keywords in frames. Default: 15 */
   sweepDuration?: number;
+  /** Measured caption-band luma (0-255) — B3 auto contrast step-up. */
+  bandLuma?: number;
 }

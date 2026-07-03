@@ -415,6 +415,9 @@ class _SoundEffect(BaseModel):
     # Gemini emits word_index only; Python derives t + word text from transcript.
     word_index: int
     sound: _SFX_SOUNDS
+    # B4 (directive #11): the intent wire, same contract as the other
+    # component families — normalized post-parse, recipe-side only.
+    why: Optional[str] = None
 
 class _BrollClip(BaseModel):
     keyword: str
@@ -3511,8 +3514,8 @@ Exact mappings:
   • **"no text overlays" / "no titles" / "no labels"** → `text_overlays: []`
   • **"only captions" / "captions only"** → captions normally; ALL other component arrays empty
   • **Specific component requests** ("use Lumen caption style", "use the Notification MG when she says 'text'") → use the named thing exactly; don't substitute your preference
-  • **Cleanup requests** ('edit out the dead space', 'cut the retakes/filler', 'clean it up', 'tighten it', 'just make it postable') → the request IS the edit: cutting works at maximum aggression (see YOUR CUT PASS), and the decoration layer drops to the lean floor — captions run, 1-3 earned emphasis beats, transitions and MGs only where a why writes itself. A cleanup request answered with a decorated video is a failed edit even when every component is well-made.
-  • **Format targets** ('so I can post as a TikTok shop video', 'make it a UGC ad', 'for Reels') → the named format sets the GRAMMAR — for UGC/shop formats: lean runtime, hard cuts, kinetic word-synced captions, product-evidence B-roll only where it extends, pace carried by cutting and caption cadence — never a commission to deploy the full catalog. A format word beside a cleanup word ('clean it up so I can post as a shop video') is one instruction: clean it up IN that grammar.
+  • **Cleanup requests** ('edit out the dead space', 'cut the retakes/filler', 'clean it up', 'tighten it', 'just make it postable') → the request IS the edit: cutting works at maximum aggression (see YOUR CUT PASS), and the decoration layer drops to the lean floor — captions run, 1-3 earned emphasis beats, transitions and MGs only where a why writes itself. A cleanup request answered with a decorated video is a failed edit even when every component is well-made. Cleaning is done with the knife, and the money moments still get dressed: a payoff number, a price, a named product, a step list each earn their one graphic even in the leanest cut — the cleanup removes what has no moment and protects what does.
+  • **Format targets** ('so I can post as a TikTok shop video', 'make it a UGC ad', 'for Reels') → the named format sets the GRAMMAR — for UGC/shop formats: lean runtime, hard cuts, kinetic word-synced captions, product-evidence B-roll only where it extends, pace carried by cutting and caption cadence — never a commission to deploy the full catalog; product-evidence graphics are shop grammar — the spec, the price, and the name earn their cards. A format word beside a cleanup word ('clean it up so I can post as a shop video') is one instruction: clean it up IN that grammar.
   • **Aesthetic adjectives** ("darker", "cinematic", "minimalist", "chaotic") → bias the palette toward that register while honoring any explicit exclusions in the same vibe
   • **"keep it minimal" / "less is more" / "don't over-edit"** → the window doctrine relaxes: place events only on the strongest 1-3 moments of the whole video; empty windows are correct under this instruction
 
@@ -4035,7 +4038,7 @@ Three checks, all required:
   2. **Verbs over nouns, content over function** — the trigger is the word where a listener with eyes closed would expect that sound. "She *called* me" earns a ding on `called`; "your wife's on the *phone*" doesn't earn one on `phone`. That word is almost always one the speaker leans on — a verb, a name, a number, the stressed noun. The trigger word is a stressed content word the voice leans on — function words the voice skates over (`a`, `the`, `to`, `of`, `is`, `and`, `it`) lack a beat of their own, so a sound there fires a half-step off the moment even with a visual nearby. When the beat you want sits next to such a word, the trigger is the stressed word the visual actually lands on, not the little word beside it.
   3. **Tonal match** — even when the word literally matches, the register must carry the sound's character. A real failure in a serious story is honored by silence — sad_trombone belongs to comic beats that invite the joke.
 
-SFX count is downstream of the visual track: roughly one SFX per visual event with the right character — the count falls out of the visual track you actually placed, not a quota. SFX land on event words — breather words keep their quiet; the pause is the point. Pick flavor by the partner's arc position: hook events → gripping (whoosh, hit, pop) · build events → ambient (transition_smooth, pop, click, typing, ding) · mid_peak events → punctuating (hit, pop, ding, ching) · the payoff event → committing (boom, or a build-up climaxing on the word — the one moment to lean heavier) · close → echo the hook's SFX at lower intensity, or nothing.
+Every sound is the audio face of a visual beat — its why names the beat. A sound whose why names no moment stays in the rack. SFX count is downstream of the visual track: roughly one SFX per visual event with the right character — the count falls out of the visual track you actually placed, not a quota. SFX land on event words — breather words keep their quiet; the pause is the point. Pick flavor by the partner's arc position: hook events → gripping (whoosh, hit, pop) · build events → ambient (transition_smooth, pop, click, typing, ding) · mid_peak events → punctuating (hit, pop, ding, ching) · the payoff event → committing (boom, or a build-up climaxing on the word — the one moment to lean heavier) · close → echo the hook's SFX at lower intensity, or nothing.
 
 Entry shape: {{ "word_index": int, "sound": <name> }}. Timing derives from the word; build-up sounds are auto-scheduled to climax ON the trigger word — no offsets to compute.
 
@@ -4448,7 +4451,8 @@ Output is a bare JSON object — the response is JSON-parsed and the parser is t
   "sound_effects": [
     {{
       "word_index": int,
-      "sound": "boom" | "hit" | "drum_roll" | "reverse" | "ching" | "ding" | "click" | "camera_shutter" | "sad_trombone" | "typing" | "whoosh_slow" | "transition_smooth" | "thunder" | "pop"
+      "sound": "boom" | "hit" | "drum_roll" | "reverse" | "ching" | "ding" | "click" | "camera_shutter" | "sad_trombone" | "typing" | "whoosh_slow" | "transition_smooth" | "thunder" | "pop",
+      "why": "<≤10 words: the beat this sound is the audio face of>"
     }}
   ],
 
@@ -6435,6 +6439,15 @@ _RELEASE_PAD_S = 0.12            # word-boundary release pad (PR-delta): source
                                  # kept past the OUTGOING word's Deepgram end at
                                  # every interior splice, so plosive/fricative
                                  # release tails survive the cut. Ear-tunable.
+_GAP_COMPRESS_CEILING_S = 0.45   # B6 (directive #11, FLAG-OFF): kept inter-word
+_GAP_COMPRESS_FLOOR_S = 0.30     # gaps above the ceiling compress to the floor
+                                 # (release 0.18 + head 0.12) instead of binary
+                                 # keep/remove. GAP_COMPRESSION_ENABLED=1 to A/B.
+_SFX_REANCHOR_TOLERANCE_S = 0.120  # B1 (directive #11): an SFX serves its WORD.
+                                 # Boundary re-anchoring applies only when the
+                                 # boundary sits within this of the word's
+                                 # output start — a partner that would drag the
+                                 # sound further stays a visual-only partner.
 _HEAD_PAD_S = 0.05               # head pad before the INCOMING word's Deepgram
                                  # start (and before the first clip's first
                                  # word). Ear-tunable. Both pads clamp so they
@@ -7771,7 +7784,7 @@ def generate_edit_gemini(
 
 === KEPT-ONLY TRANSCRIPT ({_kept_count} words, renumbered [0..{_kept_count - 1}]) ===
 
-This transcript is the dialogue after the MECHANICAL cut pass — hesitations (um/uh), tagged false-start fragments, tight stutters, and measured dead-air gaps are gone. What the machines cannot hear is yours: phrasal restarts ('so I was— I was going'), re-recorded takes, filler the punctuation hid, and any stretch that drags against the video's pace. Every word below currently lands in the rendered video UNLESS you remove it in `cut_refinements`.
+This transcript is the dialogue after the MECHANICAL cut pass — hesitations (um/uh), tagged false-start fragments, tight stutters, and measured dead-air gaps are gone. What the machines cannot hear is yours: phrasal restarts ('so I was— I was going'), re-recorded takes, filler the punctuation hid, and any stretch that drags against the video's pace. Audible breaths and held pauses the mechanical pass classified as speech are yours: when the pace wants them gone, cut them like any drag — the mechanical thresholds only measure silence, and a breath is not silence. Every word below currently lands in the rendered video UNLESS you remove it in `cut_refinements`.
 
 {kept_readable}
 
@@ -8198,7 +8211,7 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
             # why truncates to 12 words. Recipe-side only — stripped before the render
             # schemas (the transitions extras copy excludes it; the other arrays build
             # their render specs field-by-field). recipe_eval audits the counts.
-            for _why_key in ("transitions", "tight_cut_overlays", "motion_graphics", "text_overlays"):
+            for _why_key in ("transitions", "tight_cut_overlays", "motion_graphics", "text_overlays", "sound_effects"):
                 for _why_e in (edit_plan.get(_why_key) or []):
                     if not isinstance(_why_e, dict):
                         continue
@@ -10814,7 +10827,12 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                 # time is within the onset duration of that, adelay clamps to 0 and
                 # the crack lands a couple hundred ms late on the first few words of
                 # the video. No audio is truncated.
-                sound_effects.append({"t": t, "sound": sound, "word": word, "_word_idx": _wi})
+                _sfx_entry = {"t": t, "sound": sound, "word": word, "_word_idx": _wi}
+                # B4 (directive #11): the intent wire survives derivation —
+                # the persisted recipe keeps each sound's why.
+                if isinstance(sfx.get("why"), str) and sfx.get("why"):
+                    _sfx_entry["why"] = sfx["why"]
+                sound_effects.append(_sfx_entry)
 
             # Sound effects are taken EXACTLY as Gemini provided them. No caps,
             # no spacing filter, no auto-placement, no dedup. The Gemini prompt is
@@ -14638,6 +14656,11 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0):
     # this function executes.
     kept_words = [w for w in sorted_words if w["_word_index"] not in removed_indices]
 
+    _gap_compress_on = os.environ.get(
+        "GAP_COMPRESSION_ENABLED", "0"
+    ).strip().lower() in ("1", "true", "yes", "on")
+    _gap_compress_pairs = set()
+
     if not kept_words:
         return []
 
@@ -14670,7 +14693,18 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0):
             for (_aw, _bw) in _dead_air_split_pairs
         )
 
-        if removed_between or dead_air_split:
+        # Gap compression (B6, FLAG-OFF): a kept gap above the ceiling
+        # splits here and Step 3b keeps only the floor around the splice
+        # (release+head), shortening the pause instead of keep/remove.
+        gap_compress = (
+            _gap_compress_on
+            and not (removed_between or dead_air_split)
+            and (curr["_start"] - prev["_end"]) > _GAP_COMPRESS_CEILING_S
+        )
+        if gap_compress:
+            _gap_compress_pairs.add((prev["_word_index"], curr["_word_index"]))
+
+        if removed_between or dead_air_split or gap_compress:
             clips.append(current_words)
             current_words = [curr]
         else:
@@ -14731,8 +14765,13 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0):
             _mid = min(max(_rs + (_re - _rs) / 2.0, _E), _S)
         else:
             _mid = _E + _gap / 2.0
-        _applied_release = max(0.0, min(_RELEASE_PAD_S, _mid - _E))
-        _applied_head = max(0.0, min(_HEAD_PAD_S, _S - _mid))
+        _rel_cap, _head_cap = _RELEASE_PAD_S, _HEAD_PAD_S
+        if (_a, _b) in _gap_compress_pairs:
+            # compressed pause: keep the floor around the splice (0.18/0.12)
+            _rel_cap = _GAP_COMPRESS_FLOOR_S * 0.6
+            _head_cap = _GAP_COMPRESS_FLOOR_S * 0.4
+        _applied_release = max(0.0, min(_rel_cap, _mid - _E))
+        _applied_head = max(0.0, min(_head_cap, _S - _mid))
         if _applied_release > 0:
             _out_c["padded_end"] = _E + _applied_release
         if _applied_head > 0:
@@ -15809,6 +15848,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # Force caption_pages empty downstream + keep style as "none" so the Remotion
     # caption renderer becomes a no-op for this video.
     _captions_disabled = str(_caption_style).strip().lower() == "none"
+    if isinstance(edit_plan, dict) and "_caption_band_luma" not in edit_plan:
+        edit_plan["_caption_band_luma"] = _measure_caption_band_luma(
+            source_path, probe_duration(source_path) or 0.0)
+        if edit_plan["_caption_band_luma"] is not None:
+            print(f"[captions] band luma measured: {edit_plan['_caption_band_luma']}", flush=True)
     _caption_extra_props = _resolve_caption_extra_props(_caption_style, _caption_keywords, edit_plan)
     # Each segment's from/to is in SOURCE seconds (pre-remove_words timeline).
     # Project each endpoint to OUTPUT seconds using the same canonical time
@@ -16673,19 +16717,35 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _pw = _pw_by_idx.get(_sfx_wi)
             if _pw:
                 _projected_t = float(_pw["start"])
-                # Cut-partnered SFX re-anchor: from the word START to the cut
-                # boundary's visual-peak frame, so the transient lands on the
-                # flash instead of ~one word-duration early. Exact membership
-                # only — non-boundary SFX fall through unchanged.
+                # Cut-partnered SFX re-anchor (B1, directive #11): an SFX
+                # commits at its anchor word's output start; the boundary
+                # pulls it ONLY when the boundary sits within
+                # _SFX_REANCHOR_TOLERANCE_S of that start (exact boundary-word
+                # membership AND proximity). A partner that would drag the
+                # sound further stays a visual-only partner — render C's ching
+                # was dragged +557ms to the splice and read as ~1s late by
+                # ear. Pads are excluded from this arithmetic by construction:
+                # the map targets the word's projected END, never the padded
+                # splice frame.
                 if _sfx_wi in _sfx_cut_anchor_t:
                     _reanchor_t = _sfx_cut_anchor_t[_sfx_wi]
-                    print(
-                        f"[sfx] re-anchor {_sound_style} word {_sfx_wi}: "
-                        f"word-start {_projected_t:.3f}s → cut-boundary "
-                        f"{_reanchor_t:.3f}s (cut-partnered)",
-                        flush=True,
-                    )
-                    _projected_t = _reanchor_t
+                    if abs(_reanchor_t - _projected_t) <= _SFX_REANCHOR_TOLERANCE_S:
+                        print(
+                            f"[sfx] re-anchor {_sound_style} word {_sfx_wi}: "
+                            f"word-start {_projected_t:.3f}s → cut-boundary "
+                            f"{_reanchor_t:.3f}s (cut-partnered)",
+                            flush=True,
+                        )
+                        _projected_t = _reanchor_t
+                    else:
+                        _record_divergence(
+                            "sfx", {"sound": _sound_style, "word_index": _sfx_wi,
+                                    "word_start": round(_projected_t, 3),
+                                    "boundary": round(_reanchor_t, 3)},
+                            "sfx_reanchor_declined",
+                            reason=f"boundary {abs(_reanchor_t - _projected_t)*1000:.0f}ms "
+                                   f"from the word — the sound serves its word",
+                        )
             else:
                 _sfx_word = _sfx.get("word", "")
                 print(f"[sfx] Skipping {_sound_style} on '{_sfx_word}' — word removed from output", flush=True)
@@ -18238,6 +18298,36 @@ def _build_tiktok_pages_from_projected(projected_words, max_words_per_page=3, po
     return pages
 
 
+def _measure_caption_band_luma(source_path, duration_s):
+    """Mean luma (0-255) of the caption band (lower third) across 5 sampled
+    frames — the B3 contrast-floor signal. The render delivers it to caption
+    components as extraProps.bandLuma; styles step their keyword stroke up
+    when their keyword color's luma converges with it. Fail-open: None on any
+    trouble (components then apply only their permanent floors)."""
+    try:
+        import subprocess as _sp
+        from PIL import Image as _Img
+        import io as _io
+        _d = max(1.0, float(duration_s or 0.0))
+        _vals = []
+        for _frac in (0.1, 0.3, 0.5, 0.7, 0.9):
+            _r = _sp.run(
+                ["ffmpeg", "-v", "error", "-ss", f"{_d * _frac:.2f}",
+                 "-i", source_path, "-frames:v", "1", "-vf", "scale=270:480",
+                 "-f", "image2pipe", "-vcodec", "png", "-"],
+                capture_output=True, timeout=20,
+            )
+            if not _r.stdout:
+                continue
+            _im = _Img.open(_io.BytesIO(_r.stdout)).convert("L")
+            _px = list(_im.crop((0, 300, 270, 430)).getdata())  # lower band
+            if _px:
+                _vals.append(sum(_px) / len(_px))
+        return round(sum(_vals) / len(_vals), 1) if _vals else None
+    except Exception:
+        return None
+
+
 def _resolve_caption_extra_props(style, keywords, edit_plan):
     """Emit the correct keyword prop name for each caption style.
 
@@ -18250,6 +18340,11 @@ def _resolve_caption_extra_props(style, keywords, edit_plan):
     explicit = edit_plan.get("caption_style_props")
     if isinstance(explicit, dict):
         out.update(explicit)
+    # B3: the measured caption-band luma rides extraProps into every style;
+    # adopters (Lumen first) step their keyword stroke up on convergence.
+    _bl = edit_plan.get("_caption_band_luma")
+    if isinstance(_bl, (int, float)):
+        out["bandLuma"] = float(_bl)
     kw_list = list(keywords or [])
 
     # Style-specific default prop names for a simple string[] of keywords.

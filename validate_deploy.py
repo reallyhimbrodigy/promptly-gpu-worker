@@ -2902,6 +2902,8 @@ def _recipe_omittable_field_contract():
                         "theme", "title", "titleColor", "variant", "why"},
         # why: normalized to None when absent (same wire as the other arrays).
         "_TightCutOverlay": {"why"},
+        # B4 (directive #11): SFX join the intent wire — same normalization.
+        "_SoundEffect": {"why"},
     }
     models = [H.PostCutPlan, H._EmphasisMoment, H._EmphasisMotionGraphic,
               H._ZoomEffect, H._ZoomEvent, H._TextOverlay, H._TextOverlayNote,

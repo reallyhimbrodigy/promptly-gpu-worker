@@ -108,7 +108,7 @@ def evaluate_recipe(plan, words, cut_boundaries, duration, tight_boundaries=None
     _why_missing = 0
     _why_window_shaped = 0
     _WINDOW_WORDS = ("window", "empty", "screen", "fill")
-    for _arr in (transitions, tight_overlays, mgs, overlays):
+    for _arr in (transitions, tight_overlays, mgs, overlays, sfx):
         for _e in _arr:
             _w = (_e or {}).get("why")
             if not (isinstance(_w, str) and _w.strip()):
