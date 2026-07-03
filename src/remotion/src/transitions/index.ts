@@ -8,7 +8,6 @@ export type {
   ShutterFlashProps,
   LightLeakProps,
   StepPushProps,
-  NewspaperWipeProps,
   FilmStripProps,
   DipToBlackProps,
 } from "./types";
@@ -21,6 +20,5 @@ export { CrossfadeZoom } from "./CrossfadeZoom";
 export { ShutterFlash, SHUTTER_FLASH_PEAK_PROGRESS } from "./ShutterFlash";
 export { LightLeak, LIGHT_LEAK_PEAK_PROGRESS } from "./LightLeak";
 export { StepPush, STEP_PUSH_PEAK_PROGRESS } from "./StepPush";
-export { NewspaperWipe, NEWSPAPER_WIPE_PEAK_PROGRESS } from "./NewspaperWipe";
 export { FilmStrip, FILM_STRIP_PEAK_PROGRESS } from "./FilmStrip";
 export { DipToBlack, DIP_TO_BLACK_PEAK_PROGRESS } from "./DipToBlack";

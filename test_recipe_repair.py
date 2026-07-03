@@ -113,7 +113,7 @@ _ovl = (plan or {}).get("_resolved_tight_cut_overlays") or []
 _demoted = [o for o in _ovl if o.get("after_word_index") == 4]
 check("overlay appended at the demoted boundary", len(_demoted) == 1, str(_ovl))
 check("demoted type is a light rotation type",
-      _demoted and _demoted[0]["type"] in ("ShutterFlash", "LightLeak", "NewspaperWipe"),
+      _demoted and _demoted[0]["type"] in ("ShutterFlash", "LightLeak"),
       str(_demoted))
 check("divergence action=demote logged", "action=demote" in out)
 check("no transition applied at that boundary", "Transition 'ZoomThrough' applied" not in out)

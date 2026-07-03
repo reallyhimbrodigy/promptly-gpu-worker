@@ -449,7 +449,7 @@ def evaluate_recipe(plan, words, cut_boundaries, duration, tight_boundaries=None
     # Directive #12 roster: the keyword-USED survivors + promotions (NeonStripe/
     # Spectrum were always keyword styles — the old set predated batch 2).
     KEYWORD_STYLES = {"Prime", "Cove", "Lumen", "Pulse", "NeonStripe", "Spectrum",
-                      "HormoziPopIn", "Gadzhi"}
+                      "HormoziPopIn", "Gadzhi", "EmojiPop"}
     if plan.get("caption_style") in KEYWORD_STYLES:
         kw = len(plan.get("caption_keywords") or [])
         floor = n_words // 5  # advisory floor: 1 per 5 words (target 1 per 3-4)

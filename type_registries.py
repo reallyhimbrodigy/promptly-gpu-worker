@@ -31,7 +31,7 @@ VALID_CAPTION_STYLES = frozenset({
     # Batch 2 — 4 net-new styles (both tiers).
     "TwoTone", "NeonStripe", "Spectrum", "CleanCut",
     # Directive #12 promotions (from the ABE archive):
-    "HormoziPopIn", "Gadzhi", "MagazineCutout",
+    "HormoziPopIn", "Gadzhi", "MagazineCutout", "EmojiPop",
     # Renderer skips caption rendering entirely when style == "none"
     # (user explicit opt-out in vibe or re-edit). Kept here so the
     # Pydantic Literal accepts the sentinel; the TS-side CaptionStyle
@@ -42,7 +42,7 @@ VALID_CAPTION_STYLES = frozenset({
 
 VALID_TRANSITION_TYPES = frozenset({
     "CardSwipe", "ZoomThrough", "SlideOver", "Stack", "CrossfadeZoom",
-    "ShutterFlash", "StepPush", "NewspaperWipe", "FilmStrip",
+    "ShutterFlash", "StepPush", "FilmStrip",
     "DipToBlack",
 })
 
@@ -56,7 +56,7 @@ VALID_TRANSITION_TYPES = frozenset({
 # `transition_out`) and by BOUNDARY TYPE (TIGHT vs CUT), not by name.
 # Adding a third overlay means editing this set only.
 VALID_TIGHT_CUT_OVERLAYS = frozenset({
-    "LightLeak", "ShutterFlash", "NewspaperWipe",
+    "LightLeak", "ShutterFlash",
 })
 
 # Mechanism / effect phrases that count as a tight-cut-overlay COMMITMENT in

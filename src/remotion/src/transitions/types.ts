@@ -54,9 +54,6 @@ export interface StepPushProps extends TransitionProps {
   separatorShadow?: boolean;
 }
 
-export interface NewspaperWipeProps extends TransitionProps {
-  assetPath?: string;
-}
 
 export interface FilmStripProps extends TransitionProps {
   frameBackground?: string;

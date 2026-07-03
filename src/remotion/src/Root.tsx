@@ -39,7 +39,7 @@ const DEFAULT_RENDER_INPUT: PromptlyRenderInput = {
   transitions: [],
   broll: [],
   caption: {
-    style: "PaperII",
+    style: "CleanCut",
     pages: [],
     keywords: [],
     positionSegments: [{ fromFrame: 0, toFrame: 600, position: "bottom" }],

@@ -107,7 +107,6 @@ export type TransitionType =
   | "CrossfadeZoom"
   | "ShutterFlash"
   | "StepPush"
-  | "NewspaperWipe"
   | "FilmStrip"
   | "DipToBlack";
 
@@ -123,7 +122,7 @@ export type TransitionType =
 export type TightCutOverlayType =
   | "LightLeak"
   | "ShutterFlash"
-  | "NewspaperWipe";
+ ;
 
 export interface TightCutOverlaySpec {
   /** OUTPUT-timeline frame the hard cut sits on. Overlay window is centered
@@ -131,7 +130,7 @@ export interface TightCutOverlaySpec {
   atFrame: number;
   type: TightCutOverlayType;
   /** Window length in output frames. Per-type:
-   *  LightLeak / ShutterFlash / NewspaperWipe = 11 (~180ms @ 60fps),
+   *  LightLeak / ShutterFlash = 11 (~180ms @ 60fps),
    *  longer hold for the title text to be readable). */
   durationInFrames: number;
 }
@@ -227,6 +226,7 @@ export type CaptionStyle =
   | "HormoziPopIn"
   | "Gadzhi"
   | "MagazineCutout"
+  | "EmojiPop"
   | "CleanCut";
 
 export interface CaptionPositionSegment {

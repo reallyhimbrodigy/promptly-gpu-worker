@@ -102,8 +102,8 @@ check("absent == []", json.dumps(out_a, sort_keys=True, default=str)
 print("\n=== T3: discretionary cap (2) unchanged — third drops with divergence log ===")
 out, err, o = run(plan(tcos=[
     {"after_word_index": 2, "type": "ShutterFlash", "why": None},
-    {"after_word_index": 4, "type": "NewspaperWipe", "why": None},
-    {"after_word_index": 6, "type": "LightLeak", "why": None},
+    {"after_word_index": 4, "type": "LightLeak", "why": None},
+    {"after_word_index": 6, "type": "ShutterFlash", "why": None},
 ]), removes=(3, 6, 9))
 check("no raise", err is None, repr(err))
 _res = (out or {}).get("_resolved_tight_cut_overlays") or []

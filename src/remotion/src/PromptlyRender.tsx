@@ -43,7 +43,6 @@ import {
 const OVERLAY_TYPE_MAP: Record<TightCutOverlayType, OverlayCutEffectType> = {
   LightLeak: "lightleak",
   ShutterFlash: "shutterflash",
-  NewspaperWipe: "newspaperwipe",
 };
 
 // Caption styles. All render through PromptlyOverlay's transparent canvas
@@ -55,13 +54,13 @@ import {
   // Batch 2 (4 net-new caption styles)
   TwoTone, NeonStripe, Spectrum, CleanCut,
   // Directive #12 promotions (ABE archive)
-  HormoziPopIn, Gadzhi, MagazineCutout,
+  HormoziPopIn, Gadzhi, MagazineCutout, EmojiPop,
 } from "./captions";
 
 // Transitions — all 12
 import {
   CardSwipe, ZoomThrough, SlideOver, Stack, CrossfadeZoom,
-  ShutterFlash, LightLeak, StepPush, NewspaperWipe, FilmStrip,
+  ShutterFlash, LightLeak, StepPush, FilmStrip,
   DipToBlack,
 } from "./transitions";
 
@@ -91,12 +90,12 @@ const CAPTION_MAP: Record<string, React.FC<any>> = {
   // Batch 2 (4 net-new)
   TwoTone, NeonStripe, Spectrum, CleanCut,
   // Directive #12 promotions (ABE archive)
-  HormoziPopIn, Gadzhi, MagazineCutout,
+  HormoziPopIn, Gadzhi, MagazineCutout, EmojiPop,
 };
 
 const TRANSITION_MAP: Record<string, React.FC<any>> = {
   CardSwipe, ZoomThrough, SlideOver, Stack, CrossfadeZoom,
-  ShutterFlash, LightLeak, StepPush, NewspaperWipe, FilmStrip,
+  ShutterFlash, LightLeak, StepPush, FilmStrip,
   DipToBlack,
 };
 
@@ -766,7 +765,7 @@ export const PromptlyOverlay: React.FC<PromptlyRenderProps> = ({ input }) => {
 
 // ─── PromptlyMicroSegments composition ─────────────────────────────────────
 // Renders ONLY the windows that FFmpeg can't replicate without visual drift:
-//   - Every transition (CardSwipe, FilmStrip, NewspaperWipe,
+//   - Every transition (CardSwipe, FilmStrip,
 //     LightLeak, etc. — all 11 use bespoke React/CSS that has no faithful
 //     FFmpeg analog).
 //   - Composite-effect zoom clips (FocusWindow, LetterboxPush, DepthPull —

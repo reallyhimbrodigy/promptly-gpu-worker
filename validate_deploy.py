@@ -1158,7 +1158,7 @@ def _emphasis_spaced_pair_both_kept():
 
 @check("ZERO_HANDLE_TRANSITION_TYPES contains the audit-verified types + DipToBlack (sanity)")
 def _zero_handle_set_present():
-    # Audit (2026-06-14) verified ShutterFlash/NewspaperWipe/LightLeak/
+    # Audit (2026-06-14) verified ShutterFlash/LightLeak/
     # the zero-handle types render without handle frames; DipToBlack was
     # added 2026-06-14 (Option A wiring) as the clean default for TIGHT
     # boundaries. The set drives the audio silent-slot branch in
@@ -1166,7 +1166,7 @@ def _zero_handle_set_present():
     # render slot-build loop. Anyone removing from this set must also
     # restore the audio crossfade + the overlap cursor model for that type
     # or risk speech smear (audio) and projection drift (video).
-    expected = {"ShutterFlash", "NewspaperWipe", "DipToBlack"}
+    expected = {"ShutterFlash", "DipToBlack"}  # NewspaperWipe retired (directive #13)
     assert hasattr(handler, "ZERO_HANDLE_TRANSITION_TYPES"), "constant missing"
     assert handler.ZERO_HANDLE_TRANSITION_TYPES == expected, (
         f"unexpected ZERO_HANDLE_TRANSITION_TYPES: "
@@ -2712,10 +2712,10 @@ def _plan_diff_tight_cut_overlays_visible():
     )
     # All 4 overlay names must be visible too, otherwise Gemini can't pick
     # one by name on an ADD request.
-    for _name in ("LightLeak", "ShutterFlash", "NewspaperWipe"):
+    for _name in ("LightLeak", "ShutterFlash"):
         assert _name in src, (
             f"generate_plan_diff is missing overlay name {_name!r}. The "
-            f"re-edit prompt needs all 4 visible so the user can request "
+            f"re-edit prompt needs every overlay visible so the user can request "
             f"any of them by name."
         )
 
@@ -3029,7 +3029,7 @@ def _diff_added_anchored_entry():
     prior = {"transitions": [{"after_word_index": 5, "type": "CardSwipe"}]}
     new = {"transitions": [
         {"after_word_index": 5, "type": "CardSwipe"},
-        {"after_word_index": 12, "type": "NewspaperWipe"},
+        {"after_word_index": 12, "type": "LightLeak"},
     ]}
     diffs = handler.compute_plan_diff(prior, new)
     added = [d for d in diffs if d["op"] == "added"]
@@ -3319,7 +3319,7 @@ def _phase2_on_removes_added_entry():
         prior = {"transitions": [{"after_word_index": 5, "type": "CardSwipe"}]}
         new = {"transitions": [
             {"after_word_index": 5, "type": "CardSwipe"},
-            {"after_word_index": 12, "type": "NewspaperWipe"},  # out-of-scope add
+            {"after_word_index": 12, "type": "LightLeak"},  # out-of-scope add
         ]}
         validation = {
             "verdict": "partial_out_of_scope",
@@ -3329,7 +3329,7 @@ def _phase2_on_removes_added_entry():
                 "anchor": 12,
                 "op": "added",
                 "old": None,
-                "new": {"after_word_index": 12, "type": "NewspaperWipe"},
+                "new": {"after_word_index": 12, "type": "LightLeak"},
             }],
             "out_of_scope_paths": ["transitions[anchor=12]"],
         }
@@ -3350,7 +3350,7 @@ def _phase2_on_adds_back_removed_entry():
     try:
         prior = {"transitions": [
             {"after_word_index": 5, "type": "CardSwipe"},
-            {"after_word_index": 12, "type": "NewspaperWipe"},
+            {"after_word_index": 12, "type": "LightLeak"},
         ]}
         new = {"transitions": [
             {"after_word_index": 5, "type": "CardSwipe"},  # Gemini dropped the 12-anchor
@@ -3362,7 +3362,7 @@ def _phase2_on_adds_back_removed_entry():
                 "list_key": "transitions",
                 "anchor": 12,
                 "op": "removed",
-                "old": {"after_word_index": 12, "type": "NewspaperWipe"},
+                "old": {"after_word_index": 12, "type": "LightLeak"},
                 "new": None,
             }],
             "out_of_scope_paths": ["transitions[anchor=12]"],
@@ -3486,13 +3486,13 @@ def _phase2_on_no_caller_mutation():
 print("\n[5c/6] Tight-cut overlay wiring (Step 2)")
 
 
-@check("VALID_TIGHT_CUT_OVERLAYS canonical set has exactly the 3 signed-off overlays")
+@check("VALID_TIGHT_CUT_OVERLAYS canonical set has exactly the 2 signed-off overlays")
 def _tco_registry_pair():
     import type_registries
     assert hasattr(type_registries, "VALID_TIGHT_CUT_OVERLAYS"), (
         "VALID_TIGHT_CUT_OVERLAYS missing from type_registries"
     )
-    expected = frozenset({"LightLeak", "ShutterFlash", "NewspaperWipe"})
+    expected = frozenset({"LightLeak", "ShutterFlash"})  # NewspaperWipe retired (directive #13)
     assert type_registries.VALID_TIGHT_CUT_OVERLAYS == expected, (
         f"VALID_TIGHT_CUT_OVERLAYS={type_registries.VALID_TIGHT_CUT_OVERLAYS} — "
         f"expected exactly {expected}. Adding a fifth requires another isolation "
@@ -3528,13 +3528,13 @@ def _tco_schema_roundtrip():
         "tightCutOverlays": [
             {"atFrame": 120, "type": "LightLeak", "durationInFrames": 11},
             {"atFrame": 200, "type": "ShutterFlash", "durationInFrames": 11},
-            {"atFrame": 280, "type": "NewspaperWipe", "durationInFrames": 11},
+            {"atFrame": 280, "type": "LightLeak", "durationInFrames": 11},
         ],
     }
     parsed = render_schemas.PromptlyRenderInput.model_validate(_minimal)
     assert len(parsed.tightCutOverlays) == 3
     _types = [o.type for o in parsed.tightCutOverlays]
-    assert _types == ["LightLeak", "ShutterFlash", "NewspaperWipe"], (
+    assert _types == ["LightLeak", "ShutterFlash", "LightLeak"], (
         f"types out of order: {_types}"
     )
 
@@ -3562,7 +3562,7 @@ def _tco_schema_roundtrip():
 @check("recipe_eval flags tight_cut_overlay carrying title/label extras")
 def _recipe_eval_tco_extras_misuse():
     # Overlays carry no extra fields — extras on any type must fail.
-    # ShutterFlash / NewspaperWipe) is a hard error — the validator rejects
+    # ShutterFlash) is a hard error — the validator rejects
     # it. recipe_eval mirrors this as the tight-overlay-extras-misuse rule.
     import recipe_eval
     bad_plan = {
@@ -3623,7 +3623,7 @@ def _recipe_eval_tco_valid_passes():
         "transitions": [],
         "tight_cut_overlays": [
             {"after_word_index": 3, "type": "ShutterFlash"},
-            {"after_word_index": 5, "type": "NewspaperWipe"},
+            {"after_word_index": 5, "type": "LightLeak"},
         ],
         "broll_clips": [], "motion_graphics": [],
         "text_overlays": [], "sound_effects": [],
@@ -3638,7 +3638,7 @@ def _recipe_eval_tco_valid_passes():
         if r.startswith("tight-overlay-")
     }
     assert not tco_rules, (
-        f"valid ShutterFlash + NewspaperWipe placement should not fail any "
+        f"valid ShutterFlash + LightLeak placement should not fail any "
         f"tight-overlay-* rule, got: {tco_rules}"
     )
 
@@ -3773,17 +3773,17 @@ def _scene_floor_rotation_active():
     # worked example). This is the ACTIVE variety path, not a no-op default.
     six_bare = rot([None] * 6)
     assert six_bare == [
-        "ShutterFlash", "LightLeak", "NewspaperWipe",
-        "ShutterFlash", "LightLeak", "NewspaperWipe",
-    ], f"6-bare rotation should cycle SF/LL/NW evenly, got {six_bare}"
+        "ShutterFlash", "LightLeak",
+        "ShutterFlash", "LightLeak",
+        "ShutterFlash", "LightLeak",
+    ], f"6-bare rotation should cycle SF/LL evenly, got {six_bare}"
 
     # The b89287c4 case: Gemini already placed a ShutterFlash on boundary 1.
     # Backfill must PRESERVE it and rotate around it (no adjacent SF).
     gemini_pick = rot([None, "ShutterFlash", None, None, None, None])
-    assert gemini_pick == [
-        "LightLeak", "ShutterFlash", "NewspaperWipe",
-        "ShutterFlash", "LightLeak", "NewspaperWipe",
-    ], f"backfill must rotate around Gemini's locked pick, got {gemini_pick}"
+    assert gemini_pick[1] == "ShutterFlash", "locked pick must be preserved"
+    assert all(gemini_pick[i] != gemini_pick[i - 1] for i in range(1, 6)), (
+        f"backfill must rotate around Gemini's locked pick, got {gemini_pick}")
 
     # Universal invariants across sizes incl. 7+ (spaced repeats, never adjacent).
     for n in range(1, 12):
@@ -3792,7 +3792,7 @@ def _scene_floor_rotation_active():
             f"n={n}: adjacent duplicate decoration in {out}"
         )
         assert all(
-            t in ("ShutterFlash", "LightLeak", "NewspaperWipe") for t in out
+            t in ("ShutterFlash", "LightLeak") for t in out
         ), f"n={n}: non-rotation type emitted in {out}"
 
     # Deterministic: same input → same output (no RNG).
@@ -3804,8 +3804,8 @@ def _scene_floor_rotation_active():
     # held-out heavy transition) is locked; neighbours rotate normally.
     with_locked = rot([None, "DipToBlack", None])
     assert with_locked[1] == "DipToBlack", "non-rotation pick must be preserved"
-    assert with_locked[0] in ("ShutterFlash", "LightLeak", "NewspaperWipe")
-    assert with_locked[2] in ("ShutterFlash", "LightLeak", "NewspaperWipe")
+    assert with_locked[0] in ("ShutterFlash", "LightLeak")
+    assert with_locked[2] in ("ShutterFlash", "LightLeak")
 
 
 # ─── 5b5. CAPTION PAGE-BOUNDARY REGRESSION GUARDS ──────────────────────
@@ -3947,7 +3947,7 @@ def _repair_demotion_path():
     _ovl = [o for o in (_out.get("_resolved_tight_cut_overlays") or [])
             if o.get("after_word_index") == 4]
     assert len(_ovl) == 1, f"expected 1 demoted overlay at awi=4, got {_ovl}"
-    assert _ovl[0]["type"] in ("ShutterFlash", "LightLeak", "NewspaperWipe")
+    assert _ovl[0]["type"] in ("ShutterFlash", "LightLeak")
     assert "action=demote" in _buf.getvalue(), "demote divergence line missing"
 
 
@@ -4101,7 +4101,7 @@ def _caption_legibility_floor():
     # Directive #12 roster: 6 retired (Illuminate/Passage/Serif/EditorialPop/
     # PaperII/CinematicLetterpress), 3 promoted from the ABE archive.
     _importers = {"Lumen", "Pulse",
-                  "Gadzhi"}  # Gadzhi: ABE shadow was diffuse-only; anchor prepended
+                  "Gadzhi", "EmojiPop"}  # both: ABE shadow diffuse-only; anchor prepended
     _exempt = {  # own treatment already meets the floor (box/scrim/contour/anchor)
         "Prime": "tight anchor shadow",
         "TypewriterReveal": "4-direction 1.5px stroke (directive #12)",

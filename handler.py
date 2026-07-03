@@ -3721,7 +3721,7 @@ Captions render every spoken word and run the entire video, continuous from firs
 
 The footage's surfaces pick the palette's contrast: keyword colors that sit near the scene's dominant tones read as texture, and the strong choice separates from what the frame is made of.
 
-**Keywords:** 8 of 13 styles highlight words in `caption_keywords` with their signature treatment; 5 ignore keywords (the animation IS the effect). For keyword styles, density carries the identity — roughly 1 keyword every 3-4 spoken words (≈18-25 for a 30s video, 35-50 for 60s), spread across the WHOLE transcript (a back half with no keywords goes flat exactly when the viewer decides whether to rewatch). Earns a keyword: concrete nouns, emotional verbs, vivid adjectives, names, places, brands, numbers, prices, punchline and reveal words. Keyword status goes to content words — the nouns, verbs, and numbers that carry the beat; articles, prepositions, conjunctions, auxiliaries, and pronouns stay plain (a pronoun that IS the punchline earns the exception). Lowercase, dictionary form, letters only.
+**Keywords:** 9 of 14 styles highlight words in `caption_keywords` with their signature treatment; 5 ignore keywords (the animation IS the effect). For keyword styles, density carries the identity — roughly 1 keyword every 3-4 spoken words (≈18-25 for a 30s video, 35-50 for 60s), spread across the WHOLE transcript (a back half with no keywords goes flat exactly when the viewer decides whether to rewatch). Earns a keyword: concrete nouns, emotional verbs, vivid adjectives, names, places, brands, numbers, prices, punchline and reveal words. Keyword status goes to content words — the nouns, verbs, and numbers that carry the beat; articles, prepositions, conjunctions, auxiliaries, and pronouns stay plain (a pronoun that IS the punchline earns the exception). Lowercase, dictionary form, letters only.
 
 ──────────────────────────────────────────
 THE {_n_styles} STYLES
@@ -3757,7 +3757,9 @@ THE {_n_styles} STYLES
 
 13. **MagazineCutout** — Playfair Display 900 uppercase on individually cut paper scraps (cream tiles, slight random rotation and size, ink #0D0D0D); words snap into place timed to the audio, the active word's paper lifting. Keywords: IGNORED (every word is its own cutout). Signal: collage editorial — hand-made and deliberate. Fits: creative/art content, DIY/craft, zine-style playful editorial. Fights: corporate polish, serious informational register, very dense fast dialogue.
 
-Keyword styles: Prime, Cove, Lumen, Pulse, NeonStripe, Spectrum, HormoziPopIn, Gadzhi. Keyword-ignoring: TypewriterReveal, Quintessence, TwoTone, CleanCut, MagazineCutout (still emit caption_keywords — they have narrative value — they just don't highlight).
+14. **EmojiPop** — Montserrat 900; words pop in with automatic Lottie emoji animations riding alongside (48 built-in emojis mapped to common words — fire, money, brain, alarm); the active word and keywords hold a hot red (#FF0000). Keywords: USED. Signal: fun, reactive, alive — the screen is playing along. Fits: fun/casual content, storytelling, social clips, younger audiences. Fights: serious or premium registers, corporate polish, understated delivery.
+
+Keyword styles: Prime, Cove, Lumen, Pulse, NeonStripe, Spectrum, HormoziPopIn, Gadzhi, EmojiPop. Keyword-ignoring: TypewriterReveal, Quintessence, TwoTone, CleanCut, MagazineCutout (still emit caption_keywords — they have narrative value — they just don't highlight).
 
 ──────────────────────────────────────────
 CAPTION POSITION — collision procedure
@@ -4170,11 +4172,11 @@ Register tunes the cutaway's CHARACTER (the extend test still decides whether ea
 
 A transition is the visual treatment ON a cut. Every entry in the CUT BOUNDARIES list is a visible splice in the rendered output — dead air removed, or a shot change already in the source. The viewer's eye experiences a jump there; in this genre the clean jump cut already reads as pace — punctuate the few that mark genuine turns.
 
-**DEFAULT: the cut plays straight.** Every entry in the CUT BOUNDARIES list is a legitimate slot, and most of them stay bare — that's the lean grammar working. Place a transition only where the dialogue genuinely turns: a movement boundary from your own `movements`, an act shift, the acceleration into the payoff. Each one you emit should be defensible in a sentence naming the turn it marks (that sentence is its `why`). One to three per video is the natural range for lean UGC. Crossfade-family types anchor on CUT BOUNDARIES entries (the audio gap is their handle); zero-handle types (ShutterFlash, NewspaperWipe, DipToBlack) sit on either boundary list. Both lists are detector output — boundaries inferred from timestamp gaps don't exist in the render.
+**DEFAULT: the cut plays straight.** Every entry in the CUT BOUNDARIES list is a legitimate slot, and most of them stay bare — that's the lean grammar working. Place a transition only where the dialogue genuinely turns: a movement boundary from your own `movements`, an act shift, the acceleration into the payoff. Each one you emit should be defensible in a sentence naming the turn it marks (that sentence is its `why`). One to three per video is the natural range for lean UGC. Crossfade-family types anchor on CUT BOUNDARIES entries (the audio gap is their handle); zero-handle types (ShutterFlash, DipToBlack) sit on either boundary list. Both lists are detector output — boundaries inferred from timestamp gaps don't exist in the render.
 
 **Duration mechanics:** each transition consumes half its NATURAL DURATION of source from the outgoing tail and half from the incoming head (per-type durations are in the user message's TRANSITION NATURAL DURATIONS table; a boundary fits a type when its gap ≥ 2x that duration). A clip between two transitions loses both handles to crossfades. Decision tree by clip length: <800ms → only ONE transition fits; keep the stronger shift. 800-1500ms with both shifts strong → place both (a tight middle is the better trade than skipping a real shift). 800-1500ms with one weak shift → drop the weak side. >1500ms → room for a transition at each shift that genuinely turns (the default is still the straight cut).
 
-**Type selection:** match the character of THIS shift (arc-transition flavors in ARC SPINE), then sanity-check against the register — a Stack on a confession reads costume; a NewspaperWipe on trauma reads tabloid; a FilmStrip on a 20-second clip is too much weight. Fresh type each time — adjacent repeats read as a stuck effect rack.
+**Type selection:** match the character of THIS shift (arc-transition flavors in ARC SPINE), then sanity-check against the register — a Stack on a confession reads costume; a FilmStrip on a 20-second clip is too much weight. Fresh type each time — adjacent repeats read as a stuck effect rack.
 
 ──────────────────────────────────────────
 THE {_n_transitions} TRANSITIONS
@@ -4194,20 +4196,17 @@ THE {_n_transitions} TRANSITIONS
 
 **StepPush** — Keynote-style slide push, both panels traveling together, cubic ease. ~0.4s, presentation grammar. Structured panels — how-to, business, training. Props: {{ "direction": "left" | "right" | "up" | "down", "separatorShadow": bool }}
 
-**NewspaperWipe** — torn newspaper slams up, covers the frame (cut swaps behind it), rushes off the top. ~1.2s, broadcast/tabloid energy. The "BREAKING" beat — news intros, gossip, exposé framing. Props: {{ "assetPath": "torn-newspaper.png" }}
-
 **FilmStrip** — A morphs into a small tile; a film strip scrolls one position to reveal B; B expands to full. ~0.4-0.6s, gallery feel. "Next item in the curated collection" — portfolios, "5 things I made". Props: {{ "caption": "Project 1", "showBookmark": bool, "showGrid": bool, "advanceFrames": 1 }}
 
 **DipToBlack** (~700ms) — the frame breathes to black and returns. The heaviest pause in the vocabulary: an act ending, a held beat before the turn, the inhale ahead of the payoff. Zero-handle — it sits on cut or tight boundaries alike, trading darkness for handle. One per video is usually all its weight can earn.
 
 ═══════════════════════════════════════════════════════════════════════════
-=== THE 3 TIGHT-CUT OVERLAYS ===
+=== THE 2 TIGHT-CUT OVERLAYS ===
 ═══════════════════════════════════════════════════════════════════════════
 
 A tight-cut overlay is punctuation ON a hard splice — it plays across the cut, substituting a flash of its own energy for the audio handle the boundary lacks.
 **LightLeak** — a warm bloom washing over the cut, ~180ms. The reflective register: a quiet realization landing, a takeaway arriving, a hook-to-close callback. Reads like memory.
 **ShutterFlash** — a white camera-flash snap. The high-energy register: the escalation after a setup, a surprise pivot, the exact frame a stat or punchline lands on.
-**NewspaperWipe** — torn paper slams up, holds a beat, rushes off. The reveal register: the answer arrives, the name drops, the thing gets unwrapped.
 Each carries a why naming its moment; rotating types across the ones you place keeps them reading as vocabulary.
 
 ═══════════════════════════════════════════════════════════════════════════
@@ -4241,7 +4240,7 @@ Read the WHY on each — that's the principle you carry to videos you haven't se
 EXAMPLE 1 — hook, street-interview trivia
 ──────────────────────────────────────────
 
-Caption style: Spectrum — rapid-fire quiz energy wants multicolor keyword pops. The question word gets a SnapReframe with camera_shutter riding the freeze ("the question locks the frame"). The hard cut into the answer wears a NewspaperWipe overlay ("the answer gets unwrapped"), and a caption_match text overlay pins "Q1" top. The mine surfaced a StatCard referent on the score; it stayed unplaced — mid-hook, the person is the star and the why wouldn't write.
+Caption style: Spectrum — rapid-fire quiz energy wants multicolor keyword pops. The question word gets a SnapReframe with camera_shutter riding the freeze ("the question locks the frame"). The hard cut into the answer wears a ShutterFlash overlay ("the answer lands like a flash going off"), and a caption_match text overlay pins "Q1" top. The mine surfaced a StatCard referent on the score; it stayed unplaced — mid-hook, the person is the star and the why wouldn't write.
 
 ──────────────────────────────────────────
 EXAMPLE 2 — mid-arc teach-down, three-point listicle
@@ -4261,7 +4260,7 @@ EXAMPLE 4 — product-pitch UGC
 
 Caption style: NeonStripe — hustle energy with a signature stripe keeps the pitch premium. A PillCluster renders the three features as the speaker lists them ("the trio on screen as the trio is spoken"), the demo walk-in earns the video's one transition — ZoomThrough on a 1.4s CUT boundary ("setup into payoff, the most committed move, and the gap gives it handle") with whoosh_slow — and a DropCard lands the price with ching ("the number arrives like a product drop"). Two windows in the build stayed bare; the pace was the polish.
 
-These four rotate the palette on purpose — thirteen caption styles, twenty-eight graphics, ten transitions, three overlays, the full sound rack. The registry is the palette; the moment picks the instrument; the strongest sign you read the footage fresh is reaching for instruments these examples never wore.
+These four rotate the palette on purpose — fourteen caption styles, twenty-eight graphics, ten transitions, three overlays, the full sound rack. The registry is the palette; the moment picks the instrument; the strongest sign you read the footage fresh is reaching for instruments these examples never wore.
 
 ──────────────────────────────────────────
 REJECTED RECIPE A — the THIN edit (app pitch, 19 seconds)
@@ -4353,7 +4352,7 @@ These override creative reasoning when they conflict.
     turn — a movement boundary, an act shift, the walk into the payoff — and
     carries its why. Crossfade-family types anchor on CUT-boundary entries,
     where the audio gap gives them handle to breathe; zero-handle types
-    (ShutterFlash, NewspaperWipe, DipToBlack) sit on either list, substituting
+    (ShutterFlash, DipToBlack) sit on either list, substituting
     their own beat for the missing handle. Fresh type each turn.
   • broll_clips: build (and sparingly breather) only. Windows open after the first ~3s of output and after the hook segment; mid-peak and payoff words stay on the face; the close word holds on the speaker (callback B-roll earlier in the close segment fits); the pipeline drops any B-roll overlapping an MG or overlay window, so clear windows are the ones that ship.
     Each keyword concrete + distinct.
@@ -6946,14 +6945,16 @@ def _scene_floor_rotation(current_types):
     same length where every None is replaced by a rotated light punctuation
     overlay such that no two ADJACENT entries share a type.
 
-    Rotation set: ShutterFlash / LightLeak / NewspaperWipe. DipToBlack
+    Rotation set: ShutterFlash / LightLeak. DipToBlack
     (heavy, act-break weight) is held out. Pure function — no RNG, same input → same output. Gemini's picks
     are locked; bare boundaries fill left-to-right with ROTATION[(i+k)%3],
     skipping the previous (already-resolved) and next (fixed pick, if any)
-    type. With 3 types and at most 2 forbidden neighbours a valid pick always
-    exists, so the defensive `else` branch is unreachable in practice.
+    type. With two types (NewspaperWipe retired, directive #13) a gap pinched
+    between two DIFFERENT locked neighbours has no both-sides-clean pick; the
+    defensive branch keeps the no-adjacent-with-PREVIOUS invariant.
     """
-    rotation = ["ShutterFlash", "LightLeak", "NewspaperWipe"]
+    rotation = ["ShutterFlash", "LightLeak"]
+    m = len(rotation)
     resolved = list(current_types)
     n = len(resolved)
     for i in range(n):
@@ -6961,13 +6962,14 @@ def _scene_floor_rotation(current_types):
             continue
         prev_t = resolved[i - 1] if i > 0 else None
         next_t = resolved[i + 1] if i + 1 < n else None
-        for k in range(3):
-            cand = rotation[(i + k) % 3]
+        for k in range(m):
+            cand = rotation[(i + k) % m]
             if cand != prev_t and cand != next_t:
                 resolved[i] = cand
                 break
         else:
-            resolved[i] = rotation[i % 3]  # unreachable; defensive
+            _base = rotation[i % m]
+            resolved[i] = rotation[(i + 1) % m] if _base == prev_t else _base
     return resolved
 
 
@@ -7021,17 +7023,13 @@ def _reconcile_tight_cut_overlays(client, vision_text, tight_boundaries, kept_wo
         f'YOUR EDITORIAL VISION: "{vision_text}"\n\n'
         f"TIGHT BOUNDARIES (candidate set — kept-word indices, with the word "
         f"that precedes the cut): {_boundary_block}\n\n"
-        "THREE OVERLAY TYPES + when each fits:\n"
+        "TWO OVERLAY TYPES + when each fits:\n"
         "  - LightLeak — warm bloom across the cut. Use for a reflective / "
         "arrived-at register: quiet realization, takeaway landing, hook/close "
         "callback.\n"
         "  - ShutterFlash — quick white camera-flash snap. Use for higher-"
         "energy / surprise / payoff hitting: escalation beat after a setup, "
         "unexpected pivot, the moment a stat or punchline lands.\n"
-        "  - NewspaperWipe — torn paper slams up, covers, holds, rushes off. "
-        "Use for reveal / named-thing handover: the answer arrives, the name "
-        "lands, the surprise gets unwrapped.\n"
-        "RULES:\n"
         "  - `after_word_index` MUST come from the TIGHT BOUNDARIES candidate "
         "set above.\n"
         "  - Max 1 entry. Pick the SINGLE most-earning boundary.\n"
@@ -7830,7 +7828,7 @@ Indices below are the NEW kept-only space [0..{_kept_count - 1}]. Every word_ind
 
   {_cut_boundary_block}
 
-=== TIGHT BOUNDARIES (real cuts with no audio handle — crossfade transitions cannot fit here, but zero-handle transitions (ShutterFlash / NewspaperWipe / DipToBlack) can, and `tight_cut_overlay` decorations can. Each is tagged SCENE CHANGE (the shot actually changed) or pause (a silence-only splice). Both classes default to a clean hard cut. Decorate a boundary only when the moment it lands on earns punctuation — a reveal, an escalation, a callback — and a small MASK zoom (SnapReframe or StepZoom scale, under a second) on the first word after a tight cut carries the eye across the jump — mask zooms serve the boundary and live outside the key_moments ledger. Vary types across the decorations you do place. See HOW TO PLACE TRANSITIONS and HOW TO PLACE TIGHT-CUT OVERLAYS below.) ===
+=== TIGHT BOUNDARIES (real cuts with no audio handle — crossfade transitions cannot fit here, but zero-handle transitions (ShutterFlash / DipToBlack) can, and `tight_cut_overlay` decorations can. Each is tagged SCENE CHANGE (the shot actually changed) or pause (a silence-only splice). Both classes default to a clean hard cut. Decorate a boundary only when the moment it lands on earns punctuation — a reveal, an escalation, a callback — and a small MASK zoom (SnapReframe or StepZoom scale, under a second) on the first word after a tight cut carries the eye across the jump — mask zooms serve the boundary and live outside the key_moments ledger. Vary types across the decorations you do place. See HOW TO PLACE TRANSITIONS and HOW TO PLACE TIGHT-CUT OVERLAYS below.) ===
 
   {_tight_boundary_block}
 
@@ -7842,7 +7840,7 @@ Each transition component renders at its natural duration — the cadence its ra
 
 === HOW TO PLACE TRANSITIONS ===
 
-**HARD RULE 1 — `after_word_index` MUST come from CUT BOUNDARIES or TIGHT BOUNDARIES.** Standard crossfade transitions (Stack, CardSwipe, ZoomThrough, SlideOver, CrossfadeZoom, StepPush, FilmStrip) MUST anchor on CUT BOUNDARIES — they consume audio handle for the equal-power crossfade and would audio-mush continuous speech on a tight cut. Zero-handle transitions (ShutterFlash, NewspaperWipe, DipToBlack) MAY anchor on EITHER list — their renderers substitute silence for the audio mix at peak and don't need handle frames. A transition at any non-boundary index has no cut to play across and the renderer will not produce it. The validator hard-rejects a crossfade type on a tight boundary.
+**HARD RULE 1 — `after_word_index` MUST come from CUT BOUNDARIES or TIGHT BOUNDARIES.** Standard crossfade transitions (Stack, CardSwipe, ZoomThrough, SlideOver, CrossfadeZoom, StepPush, FilmStrip) MUST anchor on CUT BOUNDARIES — they consume audio handle for the equal-power crossfade and would audio-mush continuous speech on a tight cut. Zero-handle transitions (ShutterFlash, DipToBlack) MAY anchor on EITHER list — their renderers substitute silence for the audio mix at peak and don't need handle frames. A transition at any non-boundary index has no cut to play across and the renderer will not produce it. The validator hard-rejects a crossfade type on a tight boundary.
 
 **HARD RULE 2 — the transition's natural duration must fit the boundary's gap.** Each CUT BOUNDARIES entry shows its available audio gap (`820ms gap`). A transition fits when its natural duration ≤ gap/2. If you want FilmStrip (1200ms natural) at a boundary annotated `1600ms gap`, that does NOT fit (need ≥ 2400ms gap). Match the transition's weight to both the dialogue's shift AND the available room — the moment earns the transition, the gap only sets which weights fit; the long heavy types (FilmStrip, Stack) are the ones a genuine chapter turn with a long pause can carry.
 
@@ -7850,9 +7848,9 @@ Each transition component renders at its natural duration — the cadence its ra
 
 **Place transitions where they fit and earn the moment.** Transitions land where a thought completes — mid-sentence boundaries where the dialogue carries unbroken across the cut (same verb-subject continuing) stay bare, letting the speaker finish the thought clean.
 
-For each chosen `after_word_index`, pick a transition `type` whose character matches the dialogue's shift at that boundary (ZoomThrough, CardSwipe, ShutterFlash, SlideOver, CrossfadeZoom, NewspaperWipe, FilmStrip, Stack, StepPush). Vary the type across emitted transitions — repeating the same type at adjacent boundaries reads as templating.
+For each chosen `after_word_index`, pick a transition `type` whose character matches the dialogue's shift at that boundary (ZoomThrough, CardSwipe, ShutterFlash, SlideOver, CrossfadeZoom, FilmStrip, Stack, StepPush). Vary the type across emitted transitions — repeating the same type at adjacent boundaries reads as templating.
 
-**Zero-handle transition vs `tight_cut_overlay` — same effect family, different editorial weight, one per boundary.** ShutterFlash and NewspaperWipe exist both as zero-handle TRANSITIONS on tight boundaries AND as `tight_cut_overlay` decorations (LightLeak exists only as an overlay; DipToBlack only as a transition). They are NOT interchangeable: a `tight_cut_overlay` is LIGHT (~180ms), audio plays through unaltered, video plays through unaltered, decoration paints on top. A zero-handle transition is HEAVY (350-1200ms), audio goes silent under the transition window, video animation dominates the cut. A zero-handle transition on a tight cut is a RARE choice — reserve it for the single biggest moment of the video where you want the cut itself to be the editorial event. Reaching for the heavy transition by default would read as dramatic templating. **Each boundary takes one decoration — a transition or a tight_cut_overlay; the validator holds the one-per-boundary line, so the single pick is the recipe that ships.**
+**Zero-handle transition vs `tight_cut_overlay` — same effect family, different editorial weight, one per boundary.** ShutterFlash exists both as a zero-handle TRANSITION on tight boundaries AND as a `tight_cut_overlay` decoration (LightLeak exists only as an overlay; DipToBlack only as a transition). They are NOT interchangeable: a `tight_cut_overlay` is LIGHT (~180ms), audio plays through unaltered, video plays through unaltered, decoration paints on top. A zero-handle transition is HEAVY (350-1200ms), audio goes silent under the transition window, video animation dominates the cut. A zero-handle transition on a tight cut is a RARE choice — reserve it for the single biggest moment of the video where you want the cut itself to be the editorial event. Reaching for the heavy transition by default would read as dramatic templating. **Each boundary takes one decoration — a transition or a tight_cut_overlay; the validator holds the one-per-boundary line, so the single pick is the recipe that ships.**
 
 === HOW TO PLACE TIGHT-CUT OVERLAYS ===
 
@@ -7861,7 +7859,6 @@ A `tight_cut_overlay` is a brief decoration painted ON TOP of a hard cut at a TI
 PUNCTUATION CLASS (~180ms — quick, decorates the cut moment):
   - **LightLeak** — warm bloom sweeping diagonally across the cut. Reads as "the moment widened" — a polished, cinematic punctuation. Use when the dialogue shifts to a more reflective / arrived-at register: a quiet realization, a takeaway landing, the close of a callback. Warm light = the speaker zooming in on the point, the viewer drawn closer.
   - **ShutterFlash** — quick white camera-flash snap. Reads as "the moment hit" — an editorial punch. Use when the dialogue shifts to higher energy / surprise / a payoff hitting: the escalation beat after a setup, an unexpected pivot, the moment a stat or punchline lands.
-  - **NewspaperWipe** — torn paper slams up, covers, holds, rushes off. Reads as "the headline drops" — kinetic, almost breaking-news. Use when the dialogue delivers a reveal or named-thing handover: the answer arrives, the name lands, the surprise gets unwrapped. Distinct from ShutterFlash in feel — heavier, more deliberate, more "delivered" than "snapped."
 
 
 **HARD RULE 1 — `after_word_index` comes from the TIGHT BOUNDARIES list above; the validator checks membership against exactly that list, and tight boundaries are the only splices these decorate.** tight_cut_overlays decorate tight boundaries — CUT boundaries already get full transitions, and only an actual splice gives the overlay something to decorate: the renderer produces it there and there alone.
@@ -7872,15 +7869,14 @@ Your `editorial_vision` and your `tight_cut_overlays` array must agree. If your 
 
 **Place overlays only where the cut carries real editorial weight.** Editorially-significant cuts include:
   - **chapter shift** — the speaker pivots from one segment of the argument to the next (setup → reveal, problem → solution, "and then" → "but here's the thing"). A chapter shift earns one of the punctuation overlays — the divider IS the cut; the overlay marks it.
-  - **escalation beat** — the energy steps up across the cut (a stat, a punchline, a payoff lands right after) → ShutterFlash or NewspaperWipe.
+  - **escalation beat** — the energy steps up across the cut (a stat, a punchline, a payoff lands right after) → ShutterFlash.
   - **hook / close callback** — the cut joins a callback back to the video's opening hook or closing point → LightLeak fits best (reflective warmth).
-  - **reveal / answer delivery** — the cut introduces the named thing the speaker was building toward → NewspaperWipe (headline drops).
 
 If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a filler-removal splice, or any cut with no visual change — leaving it a clean hard cut is the right call there. (A scene change is a candidate for punctuation when its moment earns it; a clean hard cut is the confident default.)
 
 **Variety.** Adjacent boundaries wearing the same punctuation type read as templating — rotate types across the ones you place.
 
-**For heavier editorial weight, see the zero-handle transition path in HOW TO PLACE TRANSITIONS.** ShutterFlash and NewspaperWipe are also available as full zero-handle transitions on tight boundaries (DipToBlack as well) — 350-1200ms with audio silence and dominant video animation. Overlays are the LIGHT default for tight cuts; the heavy transition is the RARE exception reserved for the single biggest moment. One decoration per boundary — the validator holds that line, so the single choice is the one that renders.
+**For heavier editorial weight, see the zero-handle transition path in HOW TO PLACE TRANSITIONS.** ShutterFlash is also available as a full zero-handle transition on tight boundaries (DipToBlack as well) — 350-1200ms with audio silence and dominant video animation. Overlays are the LIGHT default for tight cuts; the heavy transition is the RARE exception reserved for the single biggest moment. One decoration per boundary — the validator holds that line, so the single choice is the one that renders.
 """
 
 
@@ -11071,7 +11067,7 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None)
         "You are editing a Promptly video-edit PLAN. The plan is a JSON document describing "
         "every decision that produced a rendered video. Top-level fields include: cuts, "
         "transitions, tight_cut_overlays (overlay-on-top-of-hard-cut decorations at TIGHT "
-        "boundaries — 3 types: LightLeak, ShutterFlash, NewspaperWipe; all are "
+        "boundaries — 2 types: LightLeak, ShutterFlash; both are "
         "180ms punctuation flashes with no extra fields), caption_style, "
         "caption_position_changes (list of {word_index, position}), "
         "caption_position_segments (DERIVED from caption_position_changes — do not edit directly), "
@@ -11120,7 +11116,7 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None)
         "      → append a new emphasis_moment with word_indices=[K], a zoom_effect of the inferred\n"
         "        type (default SmoothPush if unspecified, with the payoff matched to its arc role),\n"
         "        and a matching key_moment in video_plan.\n"
-        "  • 'add a transition at the chapter break' / 'add a NewspaperWipe after the setup'\n"
+        "  • 'add a transition at the chapter break' / 'add a DipToBlack after the setup'\n"
         "      → append a new transition with after_word_index from the CUT BOUNDARIES list and the\n"
         "        named (or inferred-by-character) type.\n"
         "  • 'add a tight_cut_overlay at K' / 'add a LightLeak at the pivot'\n"
@@ -11153,7 +11149,7 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None)
         "    cannot be broken, classify as 'needs_clarification'.\n"
         "  • Word-based: 'the zoom on the word \"finally\"' / 'the B-roll over \"deadlift\"'.\n"
         "    Resolve via word index — find the component whose anchor word matches.\n"
-        "  • Type+position composite: 'the second LightLeak' / 'the first NewspaperWipe' — index\n"
+        "  • Type+position composite: 'the second LightLeak' / 'the first ShutterFlash' — index\n"
         "    among entries OF THAT TYPE only.\n"
         "  • Ambiguity: if the reference matches multiple candidates within the tolerance (two\n"
         "    zooms 0.2s apart and the user said 'the zoom around 7.5s'), do NOT guess. Emit\n"
@@ -13264,13 +13260,12 @@ TRANSITION_NATURAL_DURATION_MS = {
     "CrossfadeZoom": 800,
     "LightLeak":     800,
     "Stack":        1000,
-    "NewspaperWipe":1200,
     "FilmStrip":    1200,
 }
 
 # ── Zero-handle transition class ──────────────────────────────────────
 # Transitions whose renderers either (a) render ONE clip at a time and
-# swap at peak under a cover graphic (NewspaperWipe, LightLeak,
+# swap at peak under a cover graphic (LightLeak,
 # FilmStrip) or (b) squash both clips into invisibility under a
 # generated overlay at peak (ShutterFlash). These technically don't
 # need handle frames — they work even when the audio gap is 0ms.
@@ -13287,7 +13282,6 @@ TRANSITION_NATURAL_DURATION_MS = {
 # substitution from 2026-06-14 finally has its routing.
 ZERO_HANDLE_TRANSITION_TYPES = {
     "ShutterFlash",
-    "NewspaperWipe",
     "DipToBlack",
 }
 
@@ -15678,13 +15672,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # (pre-overlay-identical).
     #
     # Per-type duration — signed off at natural durations from the isolation
-    # tests: LightLeak / ShutterFlash / NewspaperWipe → 11 frames (180ms@60fps,
+    # tests: LightLeak / ShutterFlash → 11 frames (180ms@60fps,
     # punctuation-flash — all three overlay types
     # to read the title). Adding a new overlay means a new entry here.
     _TIGHT_CUT_OVERLAY_FRAMES_BY_TYPE = {
         "LightLeak":     11,
         "ShutterFlash":  11,
-        "NewspaperWipe": 11,
     }
     tight_cut_overlays_out = []
     for _ov in (edit_plan.get("_resolved_tight_cut_overlays") or []):
@@ -15762,7 +15755,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # cut-boundary frame (atFrame) so the audible transient lands on the cut.
     # We target atFrame for EVERY type, NOT each overlay's measured visual-peak
     # frame: the per-type peaks differ from atFrame by at most ~1 frame
-    # (ShutterFlash 0, LightLeak +9ms, NewspaperWipe -21ms), which is below
+    # (ShutterFlash 0, LightLeak +9ms), which is below
     # AV-sync perception and not worth coupling SFX timing to the overlay opacity
     # curves (they'd silently desync if the animations change). after_word_index
     # is read from the RESOLVED plan lists (the render lists drop it); it and
@@ -15890,6 +15883,18 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             print(f"[captions] band luma measured: {edit_plan['_caption_band_luma']}", flush=True)
     # Directive #12: retired styles in stored/re-edit plans coerce to their
     # successors (Toggle precedent — degrade gracefully, never captionless).
+    # Directive #13: NewspaperWipe retired — stored plans coerce to
+    # ShutterFlash (same register, same zero-handle/overlay duality).
+    for _rw_key in ("transitions", "tight_cut_overlays", "_resolved_tight_cut_overlays"):
+        for _rw_e in (edit_plan.get(_rw_key) or []) if isinstance(edit_plan, dict) else []:
+            if isinstance(_rw_e, dict) and _rw_e.get("type") == "NewspaperWipe":
+                _record_divergence(
+                    "transition" if _rw_key == "transitions" else "overlay",
+                    {"type": "NewspaperWipe"}, "retired_style_coerced",
+                    final="ShutterFlash",
+                    reason="directive #13 kill — successor renders",
+                )
+                _rw_e["type"] = "ShutterFlash"
     _CAPTION_SUCCESSORS = {
         "Illuminate": "Lumen", "Passage": "Lumen", "Serif": "Prime",
         "EditorialPop": "Cove", "PaperII": "CleanCut",
@@ -18407,6 +18412,7 @@ def _resolve_caption_extra_props(style, keywords, edit_plan):
         "Lumen": "keywords",
         "Pulse": "keywords",
         "Gadzhi": "keywords",
+        "EmojiPop": "keywords",
         "Prime": "specialWords",
         "Cove": "boxedWords",
     }

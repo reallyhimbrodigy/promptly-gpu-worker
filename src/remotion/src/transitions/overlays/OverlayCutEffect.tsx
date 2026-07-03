@@ -2,12 +2,11 @@ import React from "react";
 import { AbsoluteFill, useCurrentFrame } from "remotion";
 import { LightLeakOverlay } from "./LightLeakOverlay";
 import { ShutterFlashOverlay } from "./ShutterFlashOverlay";
-import { NewspaperWipeOverlay } from "./NewspaperWipeOverlay";
 
 export type OverlayCutEffectType =
   | "lightleak"
   | "shutterflash"
-  | "newspaperwipe";
+ ;
 
 export interface OverlayCutEffectProps {
   /** Component to render as the overlay. No clipA/clipB inputs by design. */
@@ -70,13 +69,6 @@ export const OverlayCutEffect: React.FC<OverlayCutEffectProps> = ({
     return (
       <AbsoluteFill style={{ pointerEvents: "none" }}>
         <ShutterFlashOverlay progress={progress} flashColor="#ffffff" />
-      </AbsoluteFill>
-    );
-  }
-  if (type === "newspaperwipe") {
-    return (
-      <AbsoluteFill style={{ pointerEvents: "none" }}>
-        <NewspaperWipeOverlay progress={progress} />
       </AbsoluteFill>
     );
   }
