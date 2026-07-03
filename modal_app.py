@@ -23,6 +23,10 @@ def _git(*args):
 _BUILD_SHA = _git("rev-parse", "HEAD") or "unknown"
 _BUILD_DIRTY = "1" if _git("status", "--porcelain") else "0"
 _BUILD_TS = str(int(time.time()))
+# Single-deployer protocol (directive #10): every deploy names its operator.
+# deploy.sh exports PROMPTLY_DEPLOYER (claude-code / codex / zac-manual);
+# a phantom deploy then identifies itself in the first line of every job.
+_DEPLOYER = os.environ.get("PROMPTLY_DEPLOYER", "unknown")
 
 # rebuild trigger v65 — RIFE 4.18 on H100 GPU for source-level frame interpolation, properly verified this time.
 #
@@ -391,6 +395,7 @@ image = (
         "PROMPTLY_BUILD_SHA": _BUILD_SHA,
         "PROMPTLY_BUILD_DIRTY": _BUILD_DIRTY,
         "PROMPTLY_BUILD_TS": _BUILD_TS,
+        "PROMPTLY_DEPLOYER": _DEPLOYER,
         # ── Supabase schema overrides for the tier + concurrency gate ──
         # Multi-clip premium concurrency check (handler.py:check_concurrency_gate)
         # reads from these tables. The defaults assumed `user_profiles.user_id`

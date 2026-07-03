@@ -19213,7 +19213,8 @@ def prewarm_handler(job):
     print(
         f"[prewarm] BUILD sha={os.environ.get('PROMPTLY_BUILD_SHA', 'unknown')[:12]} "
         f"dirty={os.environ.get('PROMPTLY_BUILD_DIRTY', '?')} "
-        f"ts={os.environ.get('PROMPTLY_BUILD_TS', '?')}",
+        f"ts={os.environ.get('PROMPTLY_BUILD_TS', '?')} "
+        f"deployer={os.environ.get('PROMPTLY_DEPLOYER', 'unknown')}",
         flush=True,
     )
     input_data = job.get("input") or {}
@@ -20019,8 +20020,10 @@ def handler(job):
         _build_sha = os.environ.get("PROMPTLY_BUILD_SHA", "unknown")
         _build_dirty = os.environ.get("PROMPTLY_BUILD_DIRTY", "?")
         _build_ts = os.environ.get("PROMPTLY_BUILD_TS", "?")
+        _build_deployer = os.environ.get("PROMPTLY_DEPLOYER", "unknown")
         print(
-            f"BUILD sha={_build_sha[:12]} dirty={_build_dirty} ts={_build_ts}",
+            f"BUILD sha={_build_sha[:12]} dirty={_build_dirty} ts={_build_ts} "
+            f"deployer={_build_deployer}",
             flush=True,
         )
         print(f"{'='*80}", flush=True)

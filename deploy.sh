@@ -24,4 +24,8 @@ echo ""
 echo "════════════════════════════════════════════════════════════"
 echo "  Deploying to Modal"
 echo "════════════════════════════════════════════════════════════"
+# Single-deployer protocol (directive #10): every deploy names its operator.
+# Override per-operator: PROMPTLY_DEPLOYER=codex ./deploy.sh (etc.)
+export PROMPTLY_DEPLOYER="${PROMPTLY_DEPLOYER:-claude-code}"
+echo "  deployer: $PROMPTLY_DEPLOYER"
 modal deploy modal_app.py

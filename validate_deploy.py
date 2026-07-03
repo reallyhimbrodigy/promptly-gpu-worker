@@ -4032,6 +4032,19 @@ def _terminal_telemetry_wiring():
     assert handler._vocab_markers(None).get("broll_count") == 0
 
 
+@check("deployer stamp: deploy.sh exports it, image bakes it, job log prints it")
+def _deployer_stamp():
+    # Single-deployer protocol (directive #10): a phantom deploy names itself
+    # in the first line of every job it serves.
+    _ds = open("deploy.sh").read()
+    assert 'PROMPTLY_DEPLOYER="${PROMPTLY_DEPLOYER:-claude-code}"' in _ds, "deploy.sh export missing"
+    _ma = open("modal_app.py").read()
+    assert '"PROMPTLY_DEPLOYER": _DEPLOYER,' in _ma, "image bake missing"
+    _h = open("handler.py").read()
+    assert 'deployer={_build_deployer}' in _h, "job-log stamp missing"
+    assert "deployer={os.environ.get('PROMPTLY_DEPLOYER', 'unknown')}" in _h, "prewarm stamp missing"
+
+
 @check("RESPONSE FORMAT enums derive from type_registries (stale-enum class dead)")
 def _response_format_enums_derive():
     # The prompt's output-shape enum lines were hand-written copies that
