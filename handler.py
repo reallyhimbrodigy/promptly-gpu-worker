@@ -16502,22 +16502,27 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         if not _sound_path:
             continue
         _sfx_wi = _sfx.get("_word_idx")
-        # [fix-1] Coherence check (NOT a drop). With the bind running after the
-        # visual track is closed, a committed SFX sits on a confirmed-surviving
-        # visual. If — only in a genuine zero-visual case the production data has
-        # never actually shown — the trigger word has NO surviving visual of any
-        # type, we do NOT drop the sound (the no-drop contract): KEEP it and emit
-        # a loud upstream-placement WARN. The real fix is the post-cuts prompt —
-        # Gemini must never bind a sound to a word whose only visual is a
-        # stochastic B-roll (educate-Gemini-not-validate).
+        # [fix-1 → orphan cascade, directive #8 Part 5] When the SFX's visual
+        # partner died during resolution (b-roll unresolved, MG dropped, …),
+        # the sound CASCADES to a drop — a transient with nothing visible
+        # happening reads as random audio, which is worse than silence. This
+        # replaces the old WARN-and-KEEP behavior; the doctrine ("sound rides
+        # under visuals, never alone") is now enforced at the last honest
+        # moment, after the full visual track is closed.
         if _sfx_wi is not None and _sfx_wi not in _sfx_covered_words:
             print(
-                f"[fix-1] WARN sfx {_sound_style} word {_sfx_wi} "
-                f"('{_sfx.get('word', '')}'): zero surviving visuals on its "
-                f"trigger word after full visual resolution — KEPT (no drop); "
-                f"fix the placement in the PostCutPlan prompt",
+                f"[sfx] orphan cascade: {_sound_style} word {_sfx_wi} "
+                f"('{_sfx.get('word', '')}') — zero surviving visuals on its "
+                f"trigger word after full visual resolution — DROPPED",
                 flush=True,
             )
+            _record_divergence(
+                "sfx", {"sound": _sound_style, "word_index": _sfx_wi},
+                "orphan_cascade_drop",
+                reason="visual partner died during resolution — "
+                       "sound never rides alone",
+            )
+            continue
         # [fix-2] advisory (NOT a drop): this SFX has a visual partner but its
         # trigger is a function/filler word — the placement the content-over-
         # function prompt steer discourages. Surfaced for verification only.
@@ -18610,6 +18615,41 @@ def _sync_floor_state(state, edit_plan):
             state["floor_reason"] = str(edit_plan["_floor_render"])
     except Exception:
         pass  # telemetry may never cost a job
+
+
+# ─── VARIETY TELEMETRY (directive #8 · Part 4) ───────────────────────────────
+def _vocab_markers(edit_plan):
+    """The chosen vocabulary of a delivered edit, for the terminal
+    result.vocab write — variety across the user base becomes one SQL
+    GROUP BY instead of vibes. Sorted-unique type lists (the vocabulary,
+    not the density); broll_count is the resolved count at write time.
+    NEVER raises — telemetry may not cost a job."""
+    try:
+        ep = edit_plan if isinstance(edit_plan, dict) else {}
+        def _types(key, field="type"):
+            vals = set()
+            for _e in (ep.get(key) or []):
+                if isinstance(_e, dict) and _e.get(field):
+                    vals.add(str(_e[field]))
+            return sorted(vals)
+        zooms = set()
+        for _em in (ep.get("emphasis_moments") or []):
+            if isinstance(_em, dict):
+                _z = _em.get("zoom_effect")
+                if isinstance(_z, dict) and _z.get("type"):
+                    zooms.add(str(_z["type"]))
+        return {
+            "caption_style": ep.get("caption_style"),
+            "mg_types": _types("motion_graphics"),
+            "zoom_types": sorted(zooms),
+            "sfx": _types("sound_effects", field="sound"),
+            # resolved overlays = post-validation truth (includes demotions)
+            "tco_types": _types("_resolved_tight_cut_overlays"),
+            "transition_types": _types("transitions"),
+            "broll_count": len(ep.get("broll_clips") or []),
+        }
+    except Exception:
+        return {}
 
 
 # ─── ENHANCEMENT FAIL-OPEN (zero-fatal ladder · P1b) ─────────────────────────
@@ -22763,6 +22803,10 @@ def handler(job):
                 "video_url": result_payload.get("video_url"),
                 "hls_manifest_url": result_payload.get("hls_manifest_url"),
                 **_floor_markers(_floor_state),
+                # Variety telemetry (directive #8 Part 4): the delivered
+                # edit's vocabulary — complete writes only (a failed job
+                # delivered no vocabulary).
+                "vocab": _vocab_markers(edit_plan),
             },
         )
         return result_payload

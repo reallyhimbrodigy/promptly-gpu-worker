@@ -314,6 +314,13 @@ def evaluate_recipe(plan, words, cut_boundaries, duration, tight_boundaries=None
     visual_words = set(emphasis_words)
     for t in transitions:
         visual_words.update({t["after_word_index"], t["after_word_index"] + 1})
+    # tight_cut_overlays ARE visual partners (directive #8 Part 5.2 — this
+    # check predates their emittability and false-FAILed TCO-partnered SFX;
+    # the flash lands across the boundary, so both flanking words count).
+    for tco in tight_overlays:
+        _tawi = tco.get("after_word_index") if isinstance(tco, dict) else None
+        if isinstance(_tawi, (int, float)):
+            visual_words.update({int(_tawi), int(_tawi) + 1})
     for s_, e_ in mg_ranges:
         visual_words.add(s_)
     for o in overlays:

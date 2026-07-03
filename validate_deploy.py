@@ -4017,6 +4017,21 @@ def _outer_rescue_wiring():
         assert _code in handler._OUTER_RESCUE_DENY, f"deny set lost {_code}"
 
 
+@check("terminal telemetry: complete write carries floor + vocab; orphan cascade wired")
+def _terminal_telemetry_wiring():
+    # Behavioral coverage: test_floor_telemetry.py + test_vocab_and_orphan.py.
+    # This pins the WIRING a refactor could silently drop.
+    _src = open("handler.py").read()
+    _c = _src.find('status="complete", phase="Done"')
+    assert _c != -1, "complete terminal write missing"
+    _win = _src[_c:_c + 700]
+    assert "**_floor_markers(_floor_state)" in _win, "complete write lost floor markers"
+    assert '"vocab": _vocab_markers(edit_plan)' in _win, "complete write lost vocab"
+    assert _src.count("orphan_cascade_drop") >= 1, "orphan cascade divergence missing"
+    # the helper itself must never raise on junk
+    assert handler._vocab_markers(None).get("broll_count") == 0
+
+
 @check("RESPONSE FORMAT enums derive from type_registries (stale-enum class dead)")
 def _response_format_enums_derive():
     # The prompt's output-shape enum lines were hand-written copies that
