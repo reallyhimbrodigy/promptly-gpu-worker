@@ -2883,7 +2883,11 @@ def _recipe_omittable_field_contract():
     EXPECTED = {
         # cut_refinements: YOUR CUT PASS — omission-tolerant BY DESIGN (the
         # merge reads .get() with [] default; proven by the kill test).
-        "PostCutPlan": {"cut_refinements", "generated_scenes", "notes"},
+        # tight_cut_overlays: R2 (directive #7) — omission-tolerant BY DESIGN
+        # (every reader does .get() or []; that WAS the status quo when the
+        # field didn't exist at all; kill test in test_tco_emission.py).
+        "PostCutPlan": {"cut_refinements", "generated_scenes", "notes",
+                        "tight_cut_overlays"},
         "_EmphasisMoment": {"motion_graphic", "zoom_effect"},
         "_EmphasisMotionGraphic": {"props"},
         "_ZoomEffect": {"events"},
@@ -2896,10 +2900,13 @@ def _recipe_omittable_field_contract():
         "_Transition": {"accentColor", "direction", "flashColor", "intensity",
                         "label", "labelColor", "palette", "showDivider",
                         "theme", "title", "titleColor", "variant", "why"},
+        # why: normalized to None when absent (same wire as the other arrays).
+        "_TightCutOverlay": {"why"},
     }
     models = [H.PostCutPlan, H._EmphasisMoment, H._EmphasisMotionGraphic,
               H._ZoomEffect, H._ZoomEvent, H._TextOverlay, H._TextOverlayNote,
               H._MotionGraphic, H._SoundEffect, H._BrollClip, H._Transition,
+              H._TightCutOverlay,
               H._CaptionPositionChange, H._VideoPlan, H._ArcSegment,
               H._VideoPlanMoment, H._Movement]
     actual = {}

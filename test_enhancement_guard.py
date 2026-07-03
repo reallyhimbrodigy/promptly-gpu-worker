@@ -46,6 +46,7 @@ def run_block(code, ns):
     ns.setdefault("print", print)
     ns.setdefault("concurrent", concurrent)
     ns.setdefault("time", time)
+    ns.setdefault("_floor_state", {"enhancements_dropped": []})  # Part 3 sink
     buf = io.StringIO()
     err = None
     try:

@@ -140,6 +140,7 @@ def _validate_and_write_render_input(
 # one file; these Literals update automatically.
 _CAPTION_STYLES = Literal[tuple(sorted(VALID_CAPTION_STYLES))]
 _TRANSITION_TYPES = Literal[tuple(sorted(VALID_TRANSITION_TYPES))]
+_TCO_TYPES = Literal[tuple(sorted(VALID_TIGHT_CUT_OVERLAYS))]
 _ZOOM_TYPES = Literal[tuple(sorted(VALID_ZOOM_TYPES))]
 # Natural duration per zoom type (ms). When Gemini omits durationMs from a
 # zoom event, the pipeline fills in the per-type natural duration so the
@@ -409,6 +410,21 @@ class _Transition(BaseModel):
     intensity: Optional[float] = None
     flashColor: Optional[str] = None
 
+class _TightCutOverlay(BaseModel):
+    """Discretionary tight-cut decoration (R2, directive #7). The RESPONSE
+    FORMAT block has documented this shape since the enum derivation landed;
+    the schema omitting it structurally forbade emission — Gemini would then
+    CLAIM overlays in editorial_vision it could not emit, and the
+    [reconcile-overlays] re-ask papered over the contradiction every job.
+    Entries match the existing dict-level TCO validation contract exactly
+    (registry type, TIGHT-boundary membership, ≤2 cap, one-decoration-per-
+    boundary collision guards, why normalization + strip) — zero new
+    validation code."""
+    after_word_index: int
+    type: _TCO_TYPES
+    why: Optional[str] = None
+
+
 class _VideoPlanMoment(BaseModel):
     """One emphasis-worthy moment in the video. Gemini names these in video_plan
     BEFORE picking components, so every component placed later anchors to a
@@ -588,6 +604,10 @@ class PostCutPlan(BaseModel):
     caption_keywords: List[str]
     emphasis_moments: List[_EmphasisMoment]
     transitions: List[_Transition]
+    # R2 (directive #7): discretionary tight-cut overlays are now EMITTABLE —
+    # the schema finally matches the RESPONSE FORMAT + vision-consistency rule.
+    # Default [] (omission-tolerant: Vertex drops empty lists).
+    tight_cut_overlays: List[_TightCutOverlay] = Field(default_factory=list)
     sound_effects: List[_SoundEffect]
     motion_graphics: List[_MotionGraphic]
     text_overlays: List[_TextOverlay]
@@ -10841,6 +10861,13 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
 
             edit_plan["analysis_data"] = analysis
 
+            # Floor telemetry (Part 3): the safe edit is the recipe FLOOR —
+            # mark the plan so the terminal status write records it queryably.
+            # _-prefixed → stripped from the persisted sanitized recipe.
+            if _use_safe:
+                edit_plan["_floor"] = {"floor": "safe_edit",
+                                       "floor_reason": _safe_reason}
+
             print(
                 f"[generate-edit] Recipe: {len(final_cuts)} clips, "
                 f"{len(edit_plan.get('sound_effects', []))} sfx, "
@@ -18173,6 +18200,11 @@ def _render_degrade_ladder(render_once, edit_plan, broll_clips, output_path):
                     reason="two render crashes — decorations stripped, "
                            "cuts+captions+zooms kept",
                 )
+                # Floor telemetry (Part 3): the render floor, read back into
+                # the job's floor state after the ladder returns.
+                edit_plan["_floor_render"] = (
+                    "two render crashes — decorations stripped"
+                )
             render_once(edit_plan["cuts"], broll_clips)
             return
         except Exception as _render_err:
@@ -18545,8 +18577,43 @@ def _async_job_status(job_id, **kw):
     threading.Thread(target=lambda: write_job_status(job_id, **kw), daemon=True).start()
 
 
+# ─── FLOOR TELEMETRY (directive #7 · Part 3 — the monitoring seam) ───────────
+def _floor_markers(state):
+    """Degradation markers stamped into the terminal video_jobs.result write,
+    so floor-rate is queryable (SQL over result jsonb), not grep-only.
+    floor: the deepest floor the delivery stood on — "safe_edit" (recipe
+    floor) beats "render_stripped" (render floor); null = the full recipe
+    delivered as planned. Populated from the SAME state that emits
+    [safe-edit] engaged / [render-degrade] stripped / [enhancement-guard]
+    dropped. Fail-open like every status write."""
+    state = state if isinstance(state, dict) else {}
+    return {
+        "floor": state.get("floor"),
+        "floor_reason": state.get("floor_reason"),
+        "enhancements_dropped": list(state.get("enhancements_dropped") or []),
+    }
+
+
+def _sync_floor_state(state, edit_plan):
+    """Copy the recipe/render floor markers off edit_plan into the job-scoped
+    state dict (pre-initialized before handler's try, so terminal writes can
+    ALWAYS read it — never an unbound local in the except path)."""
+    try:
+        if not isinstance(state, dict) or not isinstance(edit_plan, dict):
+            return
+        _fp = edit_plan.get("_floor")
+        if isinstance(_fp, dict) and _fp.get("floor"):
+            state["floor"] = str(_fp["floor"])
+            state["floor_reason"] = _fp.get("floor_reason")
+        elif edit_plan.get("_floor_render") and not state.get("floor"):
+            state["floor"] = "render_stripped"
+            state["floor_reason"] = str(edit_plan["_floor_render"])
+    except Exception:
+        pass  # telemetry may never cost a job
+
+
 # ─── ENHANCEMENT FAIL-OPEN (zero-fatal ladder · P1b) ─────────────────────────
-def _enhancement_guard(subsystem, err):
+def _enhancement_guard(subsystem, err, sink=None):
     """An enhancement may never outrank the video: one grep-stable line +
     divergence when a whole enhancement subsystem is dropped because its
     orchestration glue raised. The job proceeds with the remaining plan.
@@ -18567,6 +18634,8 @@ def _enhancement_guard(subsystem, err):
         "enhancement", {"subsystem": subsystem}, "drop_enhancement",
         reason="an enhancement may never outrank the video",
     )
+    if isinstance(sink, list):
+        sink.append(str(subsystem))  # floor telemetry (Part 3)
 
 
 # ─── THE OUTERMOST RUNG (zero-fatal ladder · P1a) ────────────────────────────
@@ -19522,6 +19591,9 @@ def handler(job):
     # except can ALWAYS read it. "ready" flips once transcript + prepared
     # source are both established in this scope; mode/dur recorded there too.
     _rescue_state = {"ready": False, "mode": "", "dur": 0.0, "t0": time.time()}
+    # Floor telemetry (Part 3) — pre-initialized for the same reason; synced
+    # from edit_plan markers at the recipe collect + after the render ladder.
+    _floor_state = {"floor": None, "floor_reason": None, "enhancements_dropped": []}
     try:
         app_url = os.environ.get("APP_URL", "").rstrip("/")
 
@@ -21634,7 +21706,7 @@ def handler(job):
                             flush=True,
                         )
         except Exception as _eg_err:
-            _enhancement_guard('audio_denoise_remediation', _eg_err)
+            _enhancement_guard('audio_denoise_remediation', _eg_err, _floor_state['enhancements_dropped'])
 
         # ── Layer 3 safety net for guided_redraft mode ───────────────────
         # The freshly-generated edit_plan came from generate_edit_gemini
@@ -21708,7 +21780,7 @@ def handler(job):
                     )
                     _broll_fetch_futures[_fut] = _bi
         except Exception as _eg_err:
-            _enhancement_guard('broll', _eg_err)
+            _enhancement_guard('broll', _eg_err, _floor_state['enhancements_dropped'])
             _broll_fetch_futures = {}
             broll_clips = []
             if isinstance(edit_plan, dict):
@@ -21788,7 +21860,7 @@ def handler(job):
                         flush=True,
                     )
         except Exception as _eg_err:
-            _enhancement_guard('generated_scenes', _eg_err)
+            _enhancement_guard('generated_scenes', _eg_err, _floor_state['enhancements_dropped'])
             if isinstance(edit_plan, dict):
                 edit_plan["generated_scenes"] = []
                 edit_plan.pop("_generated_subjects", None)
@@ -21813,6 +21885,9 @@ def handler(job):
         _rescue_state["ready"] = bool(transcript.get("words"))
         _rescue_state["mode"] = mode
         _rescue_state["dur"] = float(source_duration or 0.0)
+        # Floor telemetry (Part 3): pick up the recipe floor (safe edit) here
+        # so even a post-recipe failure's terminal write carries it.
+        _sync_floor_state(_floor_state, edit_plan)
         # Attach the offset to the edit_plan so render_multi_clip can pass
         # it down to build_per_cut_audio (which converts file-time slice
         # positions back to audio-data-time for WAV indexing).
@@ -21939,7 +22014,7 @@ def handler(job):
                     flush=True,
                 )
         except Exception as _eg_err:
-            _enhancement_guard('budget_shed', _eg_err)
+            _enhancement_guard('budget_shed', _eg_err, _floor_state['enhancements_dropped'])
         try:  # P1b fail-open: b-roll collection
             if _broll_fetch_futures:
                 broll_clips = prefetch_and_verify_broll(broll_clips, _broll_fetch_futures)
@@ -21947,7 +22022,7 @@ def handler(job):
             if _broll_fetch_pool:
                 _broll_fetch_pool.shutdown(wait=False)
         except Exception as _eg_err:
-            _enhancement_guard('broll', _eg_err)
+            _enhancement_guard('broll', _eg_err, _floor_state['enhancements_dropped'])
             _broll_fetch_futures = {}
             broll_clips = []
             if isinstance(edit_plan, dict):
@@ -21992,6 +22067,9 @@ def handler(job):
         finally:
             _render_hb_stop.set()
         edit_plan["_deepgram_words"] = transcript.get("words", [])
+        # Floor telemetry (Part 3): pick up the render floor (stripped) the
+        # ladder may have recorded during the render that just returned.
+        _sync_floor_state(_floor_state, edit_plan)
 
         render_elapsed = time.time() - t
         _timings["render"] = render_elapsed
@@ -22495,7 +22573,7 @@ def handler(job):
                 try:
                     cover_bytes, _ = f_cover.result()
                 except Exception as _eg_err:
-                    _enhancement_guard("cover_frame", _eg_err)
+                    _enhancement_guard("cover_frame", _eg_err, _floor_state['enhancements_dropped'])
                     cover_bytes = None
                 f_hls.result()
                 # Durable boundary: upload+HLS complete (closes the documented
@@ -22637,7 +22715,7 @@ def handler(job):
             try:
                 update_user_style_profile(user_id, edit_plan, vibe, source_duration)
             except Exception as _eg_err:
-                _enhancement_guard("user_style_profile", _eg_err)
+                _enhancement_guard("user_style_profile", _eg_err, _floor_state['enhancements_dropped'])
 
         result_payload = {
             "status": "success",
@@ -22668,11 +22746,14 @@ def handler(job):
         if exported_formats:
             result_payload["exported_formats"] = exported_formats
         # Durable TERMINAL write (synchronous so it lands before return): complete.
+        # Carries the floor markers (Part 3) so degradation-rate is a SQL
+        # query over result jsonb, not a log grep.
         write_job_status(
             job_id, status="complete", phase="Done", progress=100,
             result={
                 "video_url": result_payload.get("video_url"),
                 "hls_manifest_url": result_payload.get("hls_manifest_url"),
+                **_floor_markers(_floor_state),
             },
         )
         return result_payload
@@ -22702,6 +22783,7 @@ def handler(job):
                 "error_code": classified.get("error_code"),
                 "user_message": classified.get("user_message"),
                 "retryable": classified.get("retryable"),
+                **_floor_markers(_floor_state),
             },
         )
         return {
