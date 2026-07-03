@@ -49,12 +49,13 @@ const OVERLAY_TYPE_MAP: Record<TightCutOverlayType, OverlayCutEffectType> = {
 // Caption styles. All render through PromptlyOverlay's transparent canvas
 // and composite onto the source via FFmpeg in a single final encode.
 import {
-  PaperII,
-  Prime, TypewriterReveal, CinematicLetterpress, Cove,
-  EditorialPop, Illuminate, Lumen,
-  Passage, Pulse, Quintessence, Serif,
+  Prime, TypewriterReveal, Cove,
+  Lumen,
+  Pulse, Quintessence,
   // Batch 2 (4 net-new caption styles)
   TwoTone, NeonStripe, Spectrum, CleanCut,
+  // Directive #12 promotions (ABE archive)
+  HormoziPopIn, Gadzhi, MagazineCutout,
 } from "./captions";
 
 // Transitions — all 12
@@ -86,12 +87,11 @@ import {
 
 // ─── Component maps ────────────────────────────────────────────────────────
 const CAPTION_MAP: Record<string, React.FC<any>> = {
-  PaperII,
-  Prime, TypewriterReveal, CinematicLetterpress, Cove,
-  EditorialPop, Illuminate, Lumen,
-  Passage, Pulse, Quintessence, Serif,
+  Prime, TypewriterReveal, Cove, Lumen, Pulse, Quintessence,
   // Batch 2 (4 net-new)
   TwoTone, NeonStripe, Spectrum, CleanCut,
+  // Directive #12 promotions (ABE archive)
+  HormoziPopIn, Gadzhi, MagazineCutout,
 };
 
 const TRANSITION_MAP: Record<string, React.FC<any>> = {

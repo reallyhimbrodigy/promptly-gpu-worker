@@ -191,6 +191,7 @@ export const Lumen: React.FC<LumenProps> = ({
             key={pageIndex}
             from={startFrame}
             durationInFrames={durationFrames}
+            premountFor={10}
           >
             <AbsoluteFill
               style={{

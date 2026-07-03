@@ -3616,7 +3616,7 @@ Emit the JSON in exactly this order, finishing each stage's reasoning before ope
   • **key_moments** — 3-5 true peaks for a typical 30s video; a flat even-energy stretch may have only 2-3 — the count follows the footage's real peaks, and a shorter honest list beats a padded one. Space peaks ≥2.0s apart in OUTPUT time — validation keeps only the higher-priority peak (payoff > mid_peak > other) of any pair landing within 2s, so the spacing you plan in this list is the spacing that survives. Each: word_index, what_lands, why_emphasis, what_i_saw, viewer_feeling. **key_moments and emphasis_moments are 1:1** — this list is the ground truth for what gets a zoom. To add a zoom, expand this list first; only zoom peaks you can justify here.
   • **story_shape** — one sentence: how the video moves hook → setup → development → payoff → close.
   • **arc_segments** — THE SPINE. Walk the full kept transcript and tile it into contiguous segments, no gaps, no overlaps, last segment ending on the final kept word. Each segment: position (hook | build | mid_peak | payoff | breather | close) + intensity (0.0-1.0). Component picks begin once this is complete — the committed arc is the frame every pick hangs on.
-  • **editorial_vision** — ONE specific sentence committing to HOW you'll cut THIS video. ("I'm leaning into the absurdity with EditorialPop captions, pop SFX on every receipt detail, and a slow LetterboxPush when he opens the bag.") Every component below flows from this sentence. The same sentence also names the LOOK the whole video shares — the one color world it lives in, read off the speaker's actual setting and register: a warm low-light confession, a bright clean product demo, a high-contrast hype cut. Once you've named that world, every layer below inherits it: the caption's emphasis color, the motion-graphic accents, and the B-roll's grade all belong to one palette, so the cut reads as a single designed piece rather than parts borrowed from different tools. One palette is not one texture. The movements still rise and fall, one dominant instrument still hands to the next — what holds steady across all of that is the visual FAMILY (the colors, the typographic voice); what moves is the intensity. The aim is one identity spoken LOUD in the hook and QUIET in the breather — the same world at different volumes — which is a different thing from the same look at the same level everywhere.
+  • **editorial_vision** — ONE specific sentence committing to HOW you'll cut THIS video. ("I'm leaning into the absurdity with HormoziPopIn captions, pop SFX on every receipt detail, and a slow LetterboxPush when he opens the bag.") Every component below flows from this sentence. The same sentence also names the LOOK the whole video shares — the one color world it lives in, read off the speaker's actual setting and register: a warm low-light confession, a bright clean product demo, a high-contrast hype cut. Once you've named that world, every layer below inherits it: the caption's emphasis color, the motion-graphic accents, and the B-roll's grade all belong to one palette, so the cut reads as a single designed piece rather than parts borrowed from different tools. One palette is not one texture. The movements still rise and fall, one dominant instrument still hands to the next — what holds steady across all of that is the visual FAMILY (the colors, the typographic voice); what moves is the intensity. The aim is one identity spoken LOUD in the hook and QUIET in the breather — the same world at different volumes — which is a different thing from the same look at the same level everywhere.
 
 **Stage 3 — STRUCTURAL REGISTER.** Emit `caption_style`, `thumbnail_word_index`, `outro`, `aspect_ratio`.
 
@@ -3721,43 +3721,43 @@ Captions render every spoken word and run the entire video, continuous from firs
 
 The footage's surfaces pick the palette's contrast: keyword colors that sit near the scene's dominant tones read as texture, and the strong choice separates from what the frame is made of.
 
-**Keywords:** 10 of 16 styles highlight words in `caption_keywords` with their signature treatment; 6 ignore keywords (the animation IS the effect). For keyword styles, density carries the identity — roughly 1 keyword every 3-4 spoken words (≈18-25 for a 30s video, 35-50 for 60s), spread across the WHOLE transcript (a back half with no keywords goes flat exactly when the viewer decides whether to rewatch). Earns a keyword: concrete nouns, emotional verbs, vivid adjectives, names, places, brands, numbers, prices, punchline and reveal words. Keyword status goes to content words — the nouns, verbs, and numbers that carry the beat; articles, prepositions, conjunctions, auxiliaries, and pronouns stay plain (a pronoun that IS the punchline earns the exception). Lowercase, dictionary form, letters only.
+**Keywords:** 8 of 13 styles highlight words in `caption_keywords` with their signature treatment; 5 ignore keywords (the animation IS the effect). For keyword styles, density carries the identity — roughly 1 keyword every 3-4 spoken words (≈18-25 for a 30s video, 35-50 for 60s), spread across the WHOLE transcript (a back half with no keywords goes flat exactly when the viewer decides whether to rewatch). Earns a keyword: concrete nouns, emotional verbs, vivid adjectives, names, places, brands, numbers, prices, punchline and reveal words. Keyword status goes to content words — the nouns, verbs, and numbers that carry the beat; articles, prepositions, conjunctions, auxiliaries, and pronouns stay plain (a pronoun that IS the punchline earns the exception). Lowercase, dictionary form, letters only.
 
 ──────────────────────────────────────────
 THE {_n_styles} STYLES
 ──────────────────────────────────────────
 
-1. **PaperII** — Lora serif on transparent strips, heavy drop shadow; words transition dim (45%) → bright as spoken, ~4 words per strip. Keywords: IGNORED. Signal: printed matter, each word has substance. Fits: storytelling, journal reflection, slow contemplative pacing. Fights: rapid-fire delivery, fast-cut hustle.
 
-2. **Prime** — two-tier: white Inter body; keywords break out onto their own line in oversized italic Playfair (~66pt) with blue tint (#3BA5FF). Spring entrance. Keywords: USED. Signal: hierarchy — THIS is what mattered. Fits: aspirational, self-improvement, premium branding, dialogue with clear keyword peaks. Fights: casual speakers; dialogue where every word weighs the same (hierarchy collapses).
+1. **Prime** — two-tier: white Inter body; keywords break out onto their own line in oversized italic Playfair (~66pt) with blue tint (#3BA5FF). Spring entrance. Keywords: USED. Signal: hierarchy — THIS is what mattered. Fits: aspirational, self-improvement, premium branding, dialogue with clear keyword peaks. Fights: casual speakers; dialogue where every word weighs the same (hierarchy collapses).
 
-3. **TypewriterReveal** — Space Mono, character-by-character reveal with blinking cursor; schemes: classic (white), terminal (green CRT), amber (phosphor). Keywords: IGNORED. Signal: typed in real time. Fits: tech/coding, documentary narration, hacker or retro-CRT aesthetics, slow pacing. Fights: high-energy content; speech faster than the typing animation.
+2. **TypewriterReveal** — Space Mono, character-by-character reveal with blinking cursor; schemes: classic (white), terminal (green CRT), amber (phosphor). Keywords: IGNORED. Signal: typed in real time. Fits: tech/coding, documentary narration, hacker or retro-CRT aesthetics, slow pacing. Fights: high-energy content; speech faster than the typing animation.
    Optional extraProps: {{ "scheme": "classic" | "terminal" | "amber" }}
 
-4. **CinematicLetterpress** — Cormorant Garamond light, warm ivory (#F5F0EB), wide tracking; words emerge from 8px blur into sharp focus (focus-pull), pages exit with reverse blur. Keywords: IGNORED. Signal: this is a film. Fits: documentary, contemplative essay, atmospheric narration. Fights: comedic timing, tight close-ups (tracking sprawls), fast cuts.
 
-5. **Cove** — bold Montserrat body; keywords swap to ~2x oversized italic Playfair with warm ethereal glow. Keywords: USED. Signal: keywords held up with reverence. Fits: premium/luxury, brand storytelling, wellness, slow delivery. Fights: aggressive hustle content, casual delivery.
+3. **Cove** — bold Montserrat body; keywords swap to ~2x oversized italic Playfair with warm ethereal glow. Keywords: USED. Signal: keywords held up with reverence. Fits: premium/luxury, brand storytelling, wellness, slow delivery. Fights: aggressive hustle content, casual delivery.
 
-6. **EditorialPop** — all Playfair; light body, keywords scale 1.7x bold italic; two-line staggered reveal like a magazine headline being typeset. Keywords: USED. Signal: magazine-class. Fits: interviews, curated fashion, editorial register. Fights: casual storytime, fast cuts (viewer can't track simultaneous rows).
 
-7. **Illuminate** — Playfair with a diagonal light sweep revealing each word dark → lit; keywords keep a lingering amber glow (#D4A853). Keywords: USED. Signal: each word is being LIT. Fits: dramatic narration, golden-hour and moody content. Fights: technical/informational dialogue, fast comedy.
 
-8. **Lumen** — Montserrat body; keywords swap to Playfair with amber glow (#D4A24C) and a gold underline sweep; optional "shine" flash. Keywords: USED. Signal: money moments, brand stamp. Fits: hustle, motivational, money/business/success content. Fights: understated or melancholic content; videos with no money-words (gold feels arbitrary).
+4. **Lumen** — Montserrat body; keywords swap to Playfair with amber glow (#D4A24C) and a gold underline sweep; optional "shine" flash. Keywords: USED. Signal: money moments, brand stamp. Fits: hustle, motivational, money/business/success content. Fights: understated or melancholic content; videos with no money-words (gold feels arbitrary).
 
-9. **Passage** — Cormorant Garamond, warm ivory (#F1EADB); keywords expand letter-spacing (-0.015em → 0.09em) and turn italic warm gold (#D4A76A). Keywords: USED. Signal: literature, passages from a book. Fits: prose-like storytelling, book quotes, essays, slow pacing. Fights: quick punchlines, modern social energy.
 
-10. **Pulse** — words appear in synchronized PAIRS, one above one below, crisp opacity fades; keywords go cyan (#00BFFF). Keywords: USED. Signal: scored to the audio, beat-matched. Fits: music content, rapid dialogue, lyric-video energy. Fights: contemplative content needing per-word breath; adjacent words of very different length.
+5. **Pulse** — words appear in synchronized PAIRS, one above one below, crisp opacity fades; keywords go cyan (#00BFFF). Keywords: USED. Signal: scored to the audio, beat-matched. Fits: music content, rapid dialogue, lyric-video energy. Fights: contemplative content needing per-word breath; adjacent words of very different length.
 
-11. **Quintessence** — ONE word at a time, centered, large Playfair with dramatic vertical stretch (scaleY 1.6), gold (#E8D44D), spring in/out. Keywords: IGNORED. Signal: words demand individual attention; art-house. Fits: dramatic pauses, poetry, mantras, slow deliberate dialogue. Fights: dense or fast dialogue (spring becomes stutter).
+6. **Quintessence** — ONE word at a time, centered, large Playfair with dramatic vertical stretch (scaleY 1.6), gold (#E8D44D), spring in/out. Keywords: IGNORED. Signal: words demand individual attention; art-house. Fits: dramatic pauses, poetry, mantras, slow deliberate dialogue. Fights: dense or fast dialogue (spring becomes stutter).
     Optional extraProps: {{ "stretchY": 1.6 }} default · 2.0 extreme · 1.3 subtle
 
-12. **Serif** — DM Serif Display, warm cream (#F0EEE9), subtle spring scale-up; keywords scale 1.35x italic with blue accent (#5A9FD4). Keywords: USED. Signal: refined, calm, trusted brand campaign. Fits: premium editorial, interview quotes, news-style, calm narration. Fights: edgy, comedic, DIY energy; fast-cut hustle.
-13. **TwoTone** — big stacked all-caps words two lines deep: a white top line over an accent-color bottom line, each word a chunky 3D "sticker" block (thick dark contour + downward extrude) that slams in oversized and settles; the page splits across the two lines automatically. Keywords: IGNORED. Signal: two words, two colors, maximum punch. Fits: short shouted two-part hooks over high-energy talking-head or hype B-roll — "STOP / SCROLLING", "THIS CHANGES / EVERYTHING". Fights: long sentences, calm or contemplative pacing, warm serif registers.
-14. **NeonStripe** — large all-caps words built like lit glass tubes: a striped neon fill, a crisp rim, a contained outer bloom, and an authentic power-on flicker; keyword words keep buzzing with a recurring stutter and a hotter glow. Keywords: USED. Signal: lit-sign energy — this word is glowing. Fits: punchy hype lines over darker footage where a club/arcade neon look fits — "EASY EDITING", "CREATE CONTENT FAST". Fights: soft warm candlelit content, understated/melancholic tone, bright airy footage (the bloom needs dark to read).
-15. **Spectrum** — each word sits at a different hue along an iridescent ramp and the whole phrase slowly cycles, like flowing holographic foil; keyword words race through the spectrum faster and glow hotter. Keywords: USED. Signal: every word a different color of the rainbow. Fits: vibey, premium, aesthetic content where a flowing multicolor wash suits the tone — lifestyle, music, design. Fights: serious/informational dialogue, corporate register, fast technical content (the cycle distracts).
-16. **CleanCut** — one plain crisp word on screen at a time, centered, with a subtle rise-and-settle and a soft legibility shadow. No color, no flair — the deliberate no-style style; long words wrap and stay inside the safe margins. Keywords: IGNORED. Signal: just the words, nothing else. Fits: fast-cut B-roll, cinematic or serious sections, any stretch where the footage should lead and the caption stays out of the way. Fights: moments wanting decoration or a keyword accent, hype/energy hooks (reads flat where punch is wanted).
+7. **TwoTone** — big stacked all-caps words two lines deep: a white top line over an accent-color bottom line, each word a chunky 3D "sticker" block (thick dark contour + downward extrude) that slams in oversized and settles; the page splits across the two lines automatically. Keywords: IGNORED. Signal: two words, two colors, maximum punch. Fits: short shouted two-part hooks over high-energy talking-head or hype B-roll — "STOP / SCROLLING", "THIS CHANGES / EVERYTHING". Fights: long sentences, calm or contemplative pacing, warm serif registers.
+8. **NeonStripe** — large all-caps words built like lit glass tubes: a striped neon fill, a crisp rim, a contained outer bloom, and an authentic power-on flicker; keyword words keep buzzing with a recurring stutter and a hotter glow. Keywords: USED. Signal: lit-sign energy — this word is glowing. Fits: punchy hype lines over darker footage where a club/arcade neon look fits — "EASY EDITING", "CREATE CONTENT FAST". Fights: soft warm candlelit content, understated/melancholic tone, bright airy footage (the bloom needs dark to read).
+9. **Spectrum** — each word sits at a different hue along an iridescent ramp and the whole phrase slowly cycles, like flowing holographic foil; keyword words race through the spectrum faster and glow hotter. Keywords: USED. Signal: every word a different color of the rainbow. Fits: vibey, premium, aesthetic content where a flowing multicolor wash suits the tone — lifestyle, music, design. Fights: serious/informational dialogue, corporate register, fast technical content (the cycle distracts).
+10. **CleanCut** — one plain crisp word on screen at a time, centered, with a subtle rise-and-settle and a soft legibility shadow. No color, no flair — the deliberate no-style style; long words wrap and stay inside the safe margins. Keywords: IGNORED. Signal: just the words, nothing else. Fits: fast-cut B-roll, cinematic or serious sections, any stretch where the footage should lead and the caption stays out of the way. Fights: moments wanting decoration or a keyword accent, hype/energy hooks (reads flat where punch is wanted).
 
-Keyword styles: Prime, Cove, EditorialPop, Illuminate, Lumen, Passage, Pulse, Serif, NeonStripe, Spectrum. Keyword-ignoring: PaperII, TypewriterReveal, CinematicLetterpress, Quintessence, TwoTone, CleanCut (still emit caption_keywords — they have narrative value — they just don't highlight).
+11. **HormoziPopIn** — Montserrat 900 all-caps with a thick black stroke and shadow baked in; each word spring-pops on one at a time, highlight words scale ~1.45x in a hot accent color. Keywords: USED. Signal: maximum-conviction delivery — every word thrown. Fits: high-energy talking-head, motivational, business advice, podcast highlights — the format's native register. Fights: calm, literary, or understated content; slow contemplative pacing.
+
+12. **Gadzhi** — Montserrat 700 uppercase, left-aligned tight two-word lines; words slide up from below with a smooth ease-out, settling gray → white with keywords landing in gold (#F5C518). Keywords: USED. Signal: confident money talk — agency energy. Fits: business/hustle, SMMA-style delivery, product pitches with named numbers. Fights: warm serif registers, playful or soft content.
+
+13. **MagazineCutout** — Playfair Display 900 uppercase on individually cut paper scraps (cream tiles, slight random rotation and size, ink #0D0D0D); words snap into place timed to the audio, the active word's paper lifting. Keywords: IGNORED (every word is its own cutout). Signal: collage editorial — hand-made and deliberate. Fits: creative/art content, DIY/craft, zine-style playful editorial. Fights: corporate polish, serious informational register, very dense fast dialogue.
+
+Keyword styles: Prime, Cove, Lumen, Pulse, NeonStripe, Spectrum, HormoziPopIn, Gadzhi. Keyword-ignoring: TypewriterReveal, Quintessence, TwoTone, CleanCut, MagazineCutout (still emit caption_keywords — they have narrative value — they just don't highlight).
 
 ──────────────────────────────────────────
 CAPTION POSITION — collision procedure
@@ -4261,7 +4261,7 @@ EXAMPLE 4 — product-pitch UGC
 
 Caption style: NeonStripe — hustle energy with a signature stripe keeps the pitch premium. A PillCluster renders the three features as the speaker lists them ("the trio on screen as the trio is spoken"), the demo walk-in earns the video's one transition — ZoomThrough on a 1.4s CUT boundary ("setup into payoff, the most committed move, and the gap gives it handle") with whoosh_slow — and a DropCard lands the price with ching ("the number arrives like a product drop"). Two windows in the build stayed bare; the pace was the polish.
 
-These four rotate the palette on purpose — sixteen caption styles, twenty-eight graphics, ten transitions, three overlays, the full sound rack. The registry is the palette; the moment picks the instrument; the strongest sign you read the footage fresh is reaching for instruments these examples never wore.
+These four rotate the palette on purpose — thirteen caption styles, twenty-eight graphics, ten transitions, three overlays, the full sound rack. The registry is the palette; the moment picks the instrument; the strongest sign you read the footage fresh is reaching for instruments these examples never wore.
 
 ──────────────────────────────────────────
 REJECTED RECIPE A — the THIN edit (app pitch, 19 seconds)
@@ -15888,6 +15888,22 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             source_path, probe_duration(source_path) or 0.0)
         if edit_plan["_caption_band_luma"] is not None:
             print(f"[captions] band luma measured: {edit_plan['_caption_band_luma']}", flush=True)
+    # Directive #12: retired styles in stored/re-edit plans coerce to their
+    # successors (Toggle precedent — degrade gracefully, never captionless).
+    _CAPTION_SUCCESSORS = {
+        "Illuminate": "Lumen", "Passage": "Lumen", "Serif": "Prime",
+        "EditorialPop": "Cove", "PaperII": "CleanCut",
+        "CinematicLetterpress": "Quintessence",
+    }
+    if _caption_style in _CAPTION_SUCCESSORS:
+        _succ = _CAPTION_SUCCESSORS[_caption_style]
+        _record_divergence(
+            "caption_style", {"style": _caption_style}, "retired_style_coerced",
+            final=_succ, reason="directive #12 roster cull — successor renders",
+        )
+        _caption_style = _succ
+        if isinstance(edit_plan, dict):
+            edit_plan["caption_style"] = _succ
     _caption_extra_props = _resolve_caption_extra_props(_caption_style, _caption_keywords, edit_plan)
     # Each segment's from/to is in SOURCE seconds (pre-remove_words timeline).
     # Project each endpoint to OUTPUT seconds using the same canonical time
@@ -15940,7 +15956,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # audit disproved that: Serif / Cove / PaperII / Lumen / Passage /
         # Illuminate / CinematicLetterpress / Prime render ALL line-chunks via
         # `lines.map`, and Cove / Lumen / Passage / CinematicLetterpress / Pulse
-        # also width-WRAP, so any of them could stack 3-4 lines. Only EditorialPop
+        # also width-WRAP, so any of them could stack 3-4 lines. Only the widest styles
         # self-caps at 2.) A 2-word page renders AT MOST 2 visual lines for ANY
         # style, because each word span is unbreakable (whiteSpace:nowrap) — the
         # two words sit on one line if they fit, else one per line, never more.
@@ -18388,12 +18404,9 @@ def _resolve_caption_extra_props(style, keywords, edit_plan):
     # (typewriter sweep, spring per-word reveal, etc.) — so they're
     # omitted from this map.
     simple_keyword_prop = {
-        "EditorialPop": "keywords",
-        "Illuminate": "keywords",
         "Lumen": "keywords",
-        "Passage": "keywords",
         "Pulse": "keywords",
-        "Serif": "keywords",
+        "Gadzhi": "keywords",
         "Prime": "specialWords",
         "Cove": "boxedWords",
     }
@@ -18401,15 +18414,12 @@ def _resolve_caption_extra_props(style, keywords, edit_plan):
         prop_name = simple_keyword_prop[style]
         if kw_list and prop_name not in out:
             out[prop_name] = kw_list
+    # HormoziPopIn highlights are {text, color} objects — one hot accent for
+    # all keywords (the classic Hormozi yellow).
+    if style == "HormoziPopIn" and kw_list and "highlightWords" not in out:
+        out["highlightWords"] = [{"text": _k, "color": "#FFD949"} for _k in kw_list]
 
-    # EditorialPop's library default of maxWordsPerLine=3 overflows the 1080px
-    # frame when a page has a keyword (scaled 1.7× at 136px italic-bold Playfair
-    # Display) plus a long regular word — e.g. "main themes expressed" runs off
-    # both edges. Override to 2 so worst-case lines fit; preserves the
-    # designer's look (font, weight, stagger animation, page-by-page reveal),
-    # only changes line-break density.
-    if style == "EditorialPop" and "maxWordsPerLine" not in out:
-        out["maxWordsPerLine"] = 2
+    # (EditorialPop retired in directive #12 — its maxWordsPerLine override went with it.)
 
     return out
 

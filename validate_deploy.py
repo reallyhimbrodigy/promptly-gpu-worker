@@ -2199,7 +2199,7 @@ def _full_plan_constructs():
             ],
             "editorial_vision": "test creative vision for the video",
         },
-        "caption_style": "PaperII",
+        "caption_style": "CleanCut",
         "caption_keywords": [],
         "emphasis_moments": [],
         "transitions": [],
@@ -2816,7 +2816,7 @@ def _build_post_cuts_prompt_guided_block_active():
     # parameter could be silently accepted but never used.
     import handler
     prior = {
-        "caption_style": "PaperII",
+        "caption_style": "CleanCut",
         "broll_clips": [{"keyword": "anything", "start_word_index": 0, "end_word_index": 5}],
     }
     sys_prompt, user_content = handler._build_post_cuts_prompt(
@@ -2830,7 +2830,7 @@ def _build_post_cuts_prompt_guided_block_active():
         "prior_plan was set. The Layer 2 carry-over guidance is missing from "
         "the prompt — Gemini won't see the prior plan."
     )
-    assert "PaperII" in user_content, (
+    assert "CleanCut" in user_content, (
         "Prior plan JSON not embedded in the GUIDED REDRAFT block. Gemini "
         "needs the prior decisions visible to carry them over."
     )
@@ -2985,7 +2985,7 @@ print("\n[5b4/6] Re-edit diff-confirmation safety net (Layer 3)")
 @check("compute_plan_diff returns empty list when plans are identical")
 def _diff_identical_plans_empty():
     import handler
-    plan = {"caption_style": "PaperII", "emphasis_moments": [{"word_indices": [3]}]}
+    plan = {"caption_style": "CleanCut", "emphasis_moments": [{"word_indices": [3]}]}
     diffs = handler.compute_plan_diff(plan, dict(plan))
     assert diffs == [], (
         f"identical plans must produce 0 diffs; got {diffs}"
@@ -2995,13 +2995,13 @@ def _diff_identical_plans_empty():
 @check("compute_plan_diff catches top-level scalar changes")
 def _diff_scalar_change():
     import handler
-    prior = {"caption_style": "PaperII", "outro": "none"}
+    prior = {"caption_style": "CleanCut", "outro": "none"}
     new = {"caption_style": "Lumen", "outro": "none"}
     diffs = handler.compute_plan_diff(prior, new)
     cs_diffs = [d for d in diffs if d["path"] == "caption_style"]
     assert len(cs_diffs) == 1, f"expected 1 caption_style diff, got: {diffs}"
     d = cs_diffs[0]
-    assert d["op"] == "changed" and d["old"] == "PaperII" and d["new"] == "Lumen", d
+    assert d["op"] == "changed" and d["old"] == "CleanCut" and d["new"] == "Lumen", d
     # outro unchanged → must NOT diff
     assert not [x for x in diffs if x["path"] == "outro"], (
         f"outro unchanged shouldn't appear in diffs; got: {diffs}"
@@ -3416,13 +3416,13 @@ def _phase2_on_scalar_plus_array_both_revert():
     try:
         prior_em = {"word_indices": [3], "zoom_effect": {"type": "StepZoom"}}
         new_em = {"word_indices": [3], "zoom_effect": {"type": "SmoothPush"}}
-        prior = {"caption_style": "PaperII", "emphasis_moments": [prior_em]}
+        prior = {"caption_style": "CleanCut", "emphasis_moments": [prior_em]}
         new = {"caption_style": "Lumen", "emphasis_moments": [new_em]}
         validation = {
             "verdict": "partial_out_of_scope",
             "diffs": [
                 {"path": "caption_style", "list_key": None, "anchor": None,
-                 "op": "changed", "old": "PaperII", "new": "Lumen"},
+                 "op": "changed", "old": "CleanCut", "new": "Lumen"},
                 {"path": "emphasis_moments[anchor=(3,)]",
                  "list_key": "emphasis_moments", "anchor": (3,),
                  "op": "changed", "old": prior_em, "new": new_em},
@@ -3430,7 +3430,7 @@ def _phase2_on_scalar_plus_array_both_revert():
             "out_of_scope_paths": ["caption_style", "emphasis_moments[anchor=(3,)]"],
         }
         out = handler.apply_scalar_reverts(prior, new, validation, mode="tweak")
-        assert out["caption_style"] == "PaperII", (
+        assert out["caption_style"] == "CleanCut", (
             f"scalar revert failed in combined pass; got: {out}"
         )
         assert out["emphasis_moments"][0]["zoom_effect"]["type"] == "StepZoom", (
@@ -3516,7 +3516,7 @@ def _tco_schema_roundtrip():
         "transitions": [],
         "broll": [],
         "caption": {
-            "style": "PaperII",
+            "style": "CleanCut",
             "pages": [],
             "keywords": [],
             "positionSegments": [],
@@ -4098,14 +4098,18 @@ def _caption_legibility_floor():
     assert '"0 0 2px rgba(0,0,0,0.75)"' in _leg, "anchor layer 1 drifted"
     assert '"0 2px 6px rgba(0,0,0,0.85)"' in _leg, "anchor layer 2 drifted"
     assert "withLegibilityAnchor" in _leg
-    _importers = {"Lumen", "Pulse", "EditorialPop", "Illuminate",
-                  "Serif", "Passage", "CinematicLetterpress"}
+    # Directive #12 roster: 6 retired (Illuminate/Passage/Serif/EditorialPop/
+    # PaperII/CinematicLetterpress), 3 promoted from the ABE archive.
+    _importers = {"Lumen", "Pulse",
+                  "Gadzhi"}  # Gadzhi: ABE shadow was diffuse-only; anchor prepended
     _exempt = {  # own treatment already meets the floor (box/scrim/contour/anchor)
-        "PaperII": "solid paper strip", "Prime": "tight anchor shadow",
-        "TypewriterReveal": "strongest tight stack in pack",
+        "Prime": "tight anchor shadow",
+        "TypewriterReveal": "4-direction 1.5px stroke (directive #12)",
         "Cove": "word-shaped scrim", "Quintessence": "blurred word-copy scrim",
         "TwoTone": "3px contour", "NeonStripe": "4.2px contour",
         "Spectrum": "tight anchor shadow", "CleanCut": "tight anchor shadow",
+        "HormoziPopIn": "built-in 4-direction black stroke + shadows",
+        "MagazineCutout": "self-backgrounded paper tiles",
     }
     _dirs = sorted(
         d for d in os.listdir(_cap)
@@ -4117,7 +4121,7 @@ def _caption_legibility_floor():
             f"classified exempt — classify it before shipping")
         if _d in _importers:
             _tsx = open(os.path.join(_cap, _d, f"{_d}.tsx")).read()
-            assert ("LEGIBILITY_ANCHOR_LAYERS" in _tsx
+            assert ("LEGIBILITY_ANCHOR_LAYERS" in _tsx or "LEGIBILITY_ANCHOR" in _tsx
                     or "withLegibilityAnchor" in _tsx), (
                 f"{_d} classified as importer but does not import the floor")
     _pr = open(os.path.join(_root, "src", "remotion", "src", "PromptlyRender.tsx")).read()

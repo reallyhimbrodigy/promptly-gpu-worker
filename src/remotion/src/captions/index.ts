@@ -5,17 +5,11 @@ export { normalizeWord, buildKeywordSet, isKeyword } from "./shared/keywords";
 export { Prime } from "./Prime";
 export type { PrimeProps } from "./Prime";
 
-export { PaperII } from "./PaperII";
-export type { PaperIIProps, PaperIIHighlightWord } from "./PaperII";
 
 export { Cove } from "./Cove";
 export type { CoveProps } from "./Cove";
 
-export { CinematicLetterpress } from "./CinematicLetterpress";
-export type { CinematicLetterpressProps } from "./CinematicLetterpress";
 
-export { EditorialPop } from "./EditorialPop";
-export type { EditorialPopProps } from "./EditorialPop";
 
 export { Lumen } from "./Lumen";
 export type { LumenProps } from "./Lumen";
@@ -26,20 +20,22 @@ export type { PulseProps } from "./Pulse";
 export { Quintessence } from "./Quintessence";
 export type { QuintessenceProps } from "./Quintessence";
 
-export { Serif } from "./Serif";
-export type { SerifProps } from "./Serif";
 
 export { TypewriterReveal } from "./TypewriterReveal";
 export type { TypewriterRevealProps, TypewriterColorScheme } from "./TypewriterReveal";
 
-export { Illuminate } from "./Illuminate";
-export type { IlluminateProps } from "./Illuminate";
 
-export { Passage } from "./Passage";
-export type { PassageProps } from "./Passage";
 
 // ── Batch 2 — 4 net-new caption styles (additive; same shared/ interface) ──
 export { TwoTone } from "./TwoTone";
 export { NeonStripe } from "./NeonStripe";
 export { Spectrum } from "./Spectrum";
 export { CleanCut } from "./CleanCut";
+
+// Directive #12 promotions (ABE archive)
+export { HormoziPopIn } from "./HormoziPopIn";
+export type { HormoziPopInProps } from "./HormoziPopIn";
+export { Gadzhi } from "./Gadzhi";
+export type { GadzhiProps } from "./Gadzhi";
+export { MagazineCutout } from "./MagazineCutout";
+export type { MagazineCutoutProps } from "./MagazineCutout";

@@ -446,7 +446,10 @@ def evaluate_recipe(plan, words, cut_boundaries, duration, tight_boundaries=None
         r.fail("breather-budget", f"breathers total {breather_total:.1f}s = {breather_total/end_t*100:.0f}% of runtime (max ~15%)")
 
     # caption keyword density for keyword styles
-    KEYWORD_STYLES = {"Prime", "Cove", "EditorialPop", "Illuminate", "Lumen", "Passage", "Pulse", "Serif"}
+    # Directive #12 roster: the keyword-USED survivors + promotions (NeonStripe/
+    # Spectrum were always keyword styles — the old set predated batch 2).
+    KEYWORD_STYLES = {"Prime", "Cove", "Lumen", "Pulse", "NeonStripe", "Spectrum",
+                      "HormoziPopIn", "Gadzhi"}
     if plan.get("caption_style") in KEYWORD_STYLES:
         kw = len(plan.get("caption_keywords") or [])
         floor = n_words // 5  # advisory floor: 1 per 5 words (target 1 per 3-4)

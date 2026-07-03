@@ -93,7 +93,7 @@ const TypewriterPage: React.FC<{
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
-  if (frame < 0) return null;
+  if (frame < 0) return null; // intentional premount guard (repo-side; changelogged directive #12)
 
   // Absolute time for character timing lookups
   const currentTimeMs = page.startMs + (frame / fps) * 1000;
@@ -135,11 +135,16 @@ const TypewriterPage: React.FC<{
   const charStyle: React.CSSProperties = {
     fontFamily,
     fontSize,
-    fontWeight: 400,
+    fontWeight: 600, // directive #12: was 400
     letterSpacing,
     lineHeight,
     whiteSpace: "pre-wrap",
     textShadow: [
+      // directive #12: real stroke under the mono glyphs (4-direction)
+      "-1.5px -1.5px 0 rgba(0,0,0,0.9)",
+      "1.5px -1.5px 0 rgba(0,0,0,0.9)",
+      "-1.5px 1.5px 0 rgba(0,0,0,0.9)",
+      "1.5px 1.5px 0 rgba(0,0,0,0.9)",
       "0 2px 4px rgba(0,0,0,0.9)",
       "0 0 8px rgba(0,0,0,0.8)",
       "0 0 20px rgba(0,0,0,0.6)",
@@ -184,7 +189,7 @@ export const TypewriterReveal: React.FC<TypewriterRevealProps> = ({
   pages,
   scheme = "classic",
   customColors,
-  fontSize = 48,
+  fontSize = 62, // directive #12: bumped from 48 — mono identity was too faint at phone scale
   fontFamily = CAPTION_FONTS.spaceMono,
   position = "bottom",
   showCursor = true,

@@ -215,21 +215,18 @@ export interface TikTokPageLike {
 }
 
 export type CaptionStyle =
-  | "PaperII"
   | "Prime"
   | "TypewriterReveal"
-  | "CinematicLetterpress"
   | "Cove"
-  | "EditorialPop"
-  | "Illuminate"
   | "Lumen"
-  | "Passage"
   | "Pulse"
   | "Quintessence"
-  | "Serif"
   | "TwoTone"
   | "NeonStripe"
   | "Spectrum"
+  | "HormoziPopIn"
+  | "Gadzhi"
+  | "MagazineCutout"
   | "CleanCut";
 
 export interface CaptionPositionSegment {

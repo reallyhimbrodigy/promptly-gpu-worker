@@ -27,12 +27,11 @@ Frozensets, not sets — these are vocabularies, not mutable collections.
 """
 
 VALID_CAPTION_STYLES = frozenset({
-    "PaperII",
-    "Prime", "TypewriterReveal", "CinematicLetterpress", "Cove",
-    "EditorialPop", "Illuminate", "Lumen",
-    "Passage", "Pulse", "Quintessence", "Serif",
+    "Prime", "TypewriterReveal", "Cove", "Lumen", "Pulse", "Quintessence",
     # Batch 2 — 4 net-new styles (both tiers).
     "TwoTone", "NeonStripe", "Spectrum", "CleanCut",
+    # Directive #12 promotions (from the ABE archive):
+    "HormoziPopIn", "Gadzhi", "MagazineCutout",
     # Renderer skips caption rendering entirely when style == "none"
     # (user explicit opt-out in vibe or re-edit). Kept here so the
     # Pydantic Literal accepts the sentinel; the TS-side CaptionStyle
