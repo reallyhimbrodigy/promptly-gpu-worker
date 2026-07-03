@@ -60,6 +60,31 @@ def safe_media_get(url, max_redirects=5, **kwargs):
         return resp
     raise ValueError("too many redirects")
 
+
+def is_cancelled(job_id, app_url):
+    """Has the user cancelled this render? Synchronous GET to the app server with
+    a short timeout. FAIL-OPEN: returns False on any error / missing app_url, so a
+    check failure (or a slow server) can never abort a legitimate render — the
+    worst case is we render something the user tried to cancel."""
+    if not job_id or not app_url:
+        return False
+    try:
+        headers = {}
+        _secret = os.environ.get("MODAL_CALLBACK_SECRET", "")
+        if _secret:
+            headers["X-Modal-Secret"] = _secret
+        r = requests.get(
+            f"{app_url}/api/render-cancelled",
+            params={"job_id": job_id},
+            headers=headers,
+            timeout=3,
+        )
+        if r.status_code == 200:
+            return r.json().get("cancelled") is True
+    except Exception:
+        pass
+    return False
+
 os.environ["SSL_CERT_FILE"] = certifi.where()
 os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
 
@@ -21620,6 +21645,12 @@ def handler(job):
                     "Every edit decision is speech-anchored — please upload "
                     "a video of someone speaking."
                 )
+            # Cancel checkpoint #1 — before the edit recipe. The cheap CPU work
+            # (download/transcribe) is done; the recipe + GPU render are next. If
+            # the user cancelled while the button was visible, abort now.
+            if is_cancelled(job_id, app_url):
+                print(f"[cancel] job {job_id} cancelled before recipe — aborting (no GPU)", flush=True)
+                return {"cancelled": True}
             send_progress(job_id, "plan", 38, "Writing your edit recipe", app_url)
             print(
                 f"[pipeline] Gemini edit starting (words: {len(_dg_words)}, "
@@ -22356,6 +22387,13 @@ def handler(job):
                 _broll_fetch_pool.shutdown(wait=False)
 
         print("[pipeline] step=parallel_render", flush=True)
+        # Cancel checkpoint #2 (critical) — right before the GPU render. Catches
+        # a cancel issued while the button was still visible through the recipe.
+        # Everything past here is the expensive H100 work, so this is the last
+        # place we can save real compute.
+        if is_cancelled(job_id, app_url):
+            print(f"[cancel] job {job_id} cancelled before render — aborting (no GPU)", flush=True)
+            return {"cancelled": True}
         send_progress(job_id, "render", 65, "Rendering your edit", app_url)
         # Heartbeat: render_multi_clip is the longest single phase. Duration
         # scales with source length — a 30s source renders in ~60-90s, a 60s
