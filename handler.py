@@ -15,8 +15,50 @@ import re
 import concurrent.futures
 import threading
 import signal
+import socket
+import ipaddress
+from urllib.parse import urlparse, urljoin
 from datetime import datetime
 import certifi
+
+
+def _host_is_private(host):
+    """True if host is missing, internal, or resolves to a private/loopback/
+    link-local/reserved IP (blocks SSRF to cloud metadata + internal services)."""
+    host = (host or "").strip().rstrip(".").lower()
+    if not host or host == "localhost" or host.endswith((".localhost", ".internal", ".local")):
+        return True
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except Exception:
+        return True  # unresolvable -> treat as unsafe
+    for info in infos:
+        try:
+            addr = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            return True
+        if (addr.is_private or addr.is_loopback or addr.is_link_local
+                or addr.is_reserved or addr.is_multicast or addr.is_unspecified):
+            return True
+    return False
+
+
+def safe_media_get(url, max_redirects=5, **kwargs):
+    """requests.get for a client-supplied media URL, hardened against SSRF: https
+    only, no host that resolves to an internal IP, and redirects followed
+    MANUALLY so each hop is re-validated (a public URL can't 302 to metadata)."""
+    kwargs["allow_redirects"] = False
+    current = url
+    for _ in range(max_redirects + 1):
+        p = urlparse(current)
+        if p.scheme != "https" or _host_is_private(p.hostname):
+            raise ValueError("unsafe media url")
+        resp = requests.get(current, **kwargs)
+        if resp.status_code in (301, 302, 303, 307, 308) and resp.headers.get("Location"):
+            current = urljoin(current, resp.headers["Location"])
+            continue
+        return resp
+    raise ValueError("too many redirects")
 
 os.environ["SSL_CERT_FILE"] = certifi.where()
 os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
@@ -20429,7 +20471,7 @@ def handler(job):
             _proxy_t = time.time()
             if proxy_video_url:
                 try:
-                    _resp = requests.get(proxy_video_url, timeout=30)
+                    _resp = safe_media_get(proxy_video_url, timeout=30)
                     _resp.raise_for_status()
                     _proxy_bytes = _resp.content
                     _proxy_mb = len(_proxy_bytes) / (1024 * 1024)
