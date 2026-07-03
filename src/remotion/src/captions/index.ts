@@ -31,7 +31,5 @@ export { TwoTone } from "./TwoTone";
 export { CleanCut } from "./CleanCut";
 
 // Directive #12 promotions (ABE archive)
-export { HormoziPopIn } from "./HormoziPopIn";
-export type { HormoziPopInProps } from "./HormoziPopIn";
 export { Gadzhi } from "./Gadzhi";
 export type { GadzhiProps } from "./Gadzhi";

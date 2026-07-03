@@ -54,7 +54,7 @@ import {
   // Batch 2 (4 net-new caption styles)
   TwoTone, CleanCut,
   // Directive #12 promotions (ABE archive)
-  HormoziPopIn, Gadzhi,
+  Gadzhi,
 } from "./captions";
 
 // Transitions — all 12
@@ -90,7 +90,7 @@ const CAPTION_MAP: Record<string, React.FC<any>> = {
   // Batch 2 (4 net-new)
   TwoTone, CleanCut,
   // Directive #12 promotions (ABE archive)
-  HormoziPopIn, Gadzhi,
+  Gadzhi,
 };
 
 const TRANSITION_MAP: Record<string, React.FC<any>> = {

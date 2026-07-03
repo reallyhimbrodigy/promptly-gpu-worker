@@ -221,7 +221,6 @@ export type CaptionStyle =
   | "Pulse"
   | "Quintessence"
   | "TwoTone"
-  | "HormoziPopIn"
   | "Gadzhi"
   | "CleanCut";
 

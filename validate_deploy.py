@@ -4107,7 +4107,6 @@ def _caption_legibility_floor():
         "TypewriterReveal": "4-direction 1.5px stroke (directive #12)",
         "Cove": "word-shaped scrim", "Quintessence": "blurred word-copy scrim",
         "TwoTone": "3px contour", "CleanCut": "tight anchor shadow",
-        "HormoziPopIn": "built-in 4-direction black stroke + shadows",
     }
     _dirs = sorted(
         d for d in os.listdir(_cap)

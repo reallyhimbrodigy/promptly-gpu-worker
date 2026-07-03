@@ -181,8 +181,11 @@ ns2 = {"_record_divergence": H._record_divergence, "print": print,
        "edit_plan": ep2, "_caption_style": "EmojiPop", "isinstance": isinstance, "dict": dict}
 with contextlib.redirect_stdout(io.StringIO()):
     exec(compile(block2, "<successors>", "exec"), ns2)
-check("EmojiPop -> HormoziPopIn", ns2["_caption_style"] == "HormoziPopIn")
-for _retired, _succ in (("Spectrum", "TwoTone"), ("NeonStripe", "HormoziPopIn")):
+check("EmojiPop -> TwoTone (ONE hop, re-chained by #16)", ns2["_caption_style"] == "TwoTone")
+# Directive #16: every loud register lands on TwoTone in ONE hop — a stored
+# EmojiPop plan must resolve directly, never through the dead HormoziPopIn.
+for _retired, _succ in (("Spectrum", "TwoTone"), ("NeonStripe", "TwoTone"),
+                        ("EmojiPop", "TwoTone"), ("HormoziPopIn", "TwoTone")):
     ep3 = {"transitions": [], "tight_cut_overlays": [], "_resolved_tight_cut_overlays": [],
            "caption_style": _retired}
     ns3 = {"_record_divergence": H._record_divergence, "print": print,

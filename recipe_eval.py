@@ -447,8 +447,7 @@ def evaluate_recipe(plan, words, cut_boundaries, duration, tight_boundaries=None
 
     # caption keyword density for keyword styles
     # Directive #15 locked roster: the keyword-USED survivors.
-    KEYWORD_STYLES = {"Prime", "Cove", "Lumen", "Pulse",
-                      "HormoziPopIn", "Gadzhi"}
+    KEYWORD_STYLES = {"Prime", "Cove", "Lumen", "Pulse", "Gadzhi"}
     if plan.get("caption_style") in KEYWORD_STYLES:
         kw = len(plan.get("caption_keywords") or [])
         floor = n_words // 5  # advisory floor: 1 per 5 words (target 1 per 3-4)
