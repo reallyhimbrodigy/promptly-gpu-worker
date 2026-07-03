@@ -1300,6 +1300,82 @@ def fetch_user_style_profile(user_id):
         return None
 
 
+# ─── Platform style pulse (launch nudge · pre-freeze F2) ────────────────────
+#
+# Counter for day-one caption monoculture (burn-in F2: 3/3 fresh-history jobs
+# chose the same style): a rolling frequency over the last N delivered edits'
+# `result.vocab.caption_style` across ALL users becomes ONE soft nudge line in
+# the per-job USER content. Cache-safety is the design constraint — the
+# system prompt stays byte-identical (implicit caching holds); only user
+# content varies per job, which it already does (transcript, signals).
+# FAIL-OPEN everywhere: any error, thin data, or no dominant style → None →
+# the line is simply omitted. This may never cost a job.
+
+_PLATFORM_PULSE_WINDOW = 50       # rolling window of recent delivered edits
+_PLATFORM_PULSE_MIN_ROWS = 5      # below this "the platform" is one user — omit
+_PLATFORM_PULSE_MIN_SHARE = 0.20  # a style is "frequent" at ≥20% of the window
+
+
+def fetch_platform_style_pulse():
+    """Last-50 platform caption-style frequency → one USER-content nudge line, or None."""
+    if supabase is None:
+        return None
+    try:
+        table = os.environ.get("PROMPTLY_JOB_TABLE") or "jobs"
+        # Arrow-path select pulls just the nested string (PostgREST names the
+        # column after the last path element). Over-fetch 4× the window, then
+        # keep the newest rows that actually carry vocab (older builds wrote
+        # none) — "the last 50 vocab rows", not "the last 50 rows".
+        # Status match is two-spelling: the worker's terminal write says
+        # "complete"; the app's own completion write respells it "completed"
+        # (and today also clobbers result — see the pre-freeze report). Either
+        # spelling marks a delivered edit.
+        result = (
+            supabase.table(table)
+            .select("result->vocab->>caption_style")
+            .in_("status", ["complete", "completed"])
+            .order("created_at", desc=True)
+            .limit(_PLATFORM_PULSE_WINDOW * 4)
+            .execute()
+        )
+        styles = []
+        for row in (result.data or []):
+            s = (row or {}).get("caption_style")
+            if s and s != "none":
+                styles.append(str(s))
+            if len(styles) >= _PLATFORM_PULSE_WINDOW:
+                break
+        if len(styles) < _PLATFORM_PULSE_MIN_ROWS:
+            print(
+                f"[platform-pulse] window too thin ({len(styles)} vocab rows) — omitting nudge",
+                flush=True,
+            )
+            return None
+        counts = {}
+        for s in styles:
+            counts[s] = counts.get(s, 0) + 1
+        ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+        floor = max(2, int(len(styles) * _PLATFORM_PULSE_MIN_SHARE))
+        top = [name for name, n in ranked[:2] if n >= floor]
+        if not top:
+            print(
+                f"[platform-pulse] no dominant style (window={len(styles)}) — omitting nudge",
+                flush=True,
+            )
+            return None
+        print(
+            f"[platform-pulse] window={len(styles)} top3={ranked[:3]} nudge={top}",
+            flush=True,
+        )
+        return (
+            f"Recently frequent caption styles across the platform: {', '.join(top)} "
+            f"— when the footage's register allows, reach for a different garment."
+        )
+    except Exception as e:
+        print(f"[platform-pulse] fetch failed (omitting nudge): {e}", flush=True)
+        return None
+
+
 # ─── User tier + multi-clip concurrency gate ─────────────────────────────────
 #
 # Backend defense-in-depth for the premium multi-clip feature. The frontend
@@ -3207,7 +3283,7 @@ def _build_post_cuts_prompt(
     vibe, duration, trend_context=None,
     shot_changes=None, vocal_emphasis=None, source_loudness=None,
     face_visibility=None, speaker_positions=None, off_center=False,
-    shot_scale=None, user_style_profile=None,
+    shot_scale=None, user_style_profile=None, platform_style_note=None,
     face_zone=None,
     prior_plan=None, prior_plan_change_request=None,
     premium=False, resolved_policy=None,
@@ -4562,6 +4638,11 @@ Every anchor field references the kept-only index space [0..M-1] shown in the tr
         user_content_parts.append(_usr_block.strip())
     if _recent_styles_block:
         user_content_parts.append(_recent_styles_block.strip())
+    if platform_style_note:
+        # F2 launch nudge — USER content ONLY. The system prompt must stay
+        # byte-identical across jobs (implicit caching); this line rides the
+        # already-per-job user content. None upstream omits it entirely.
+        user_content_parts.append(str(platform_style_note).strip())
     if trend_block:
         user_content_parts.append(trend_block.strip())
 
@@ -7412,7 +7493,7 @@ def generate_edit_gemini(
     video_path, vibe, duration, trend_context=None, deepgram_words=None,
     shot_changes=None, shot_change_scores=None, vocal_emphasis=None, source_loudness=None,
     face_positions=None, smoothed_face_trajectory=None,
-    user_style_profile=None,
+    user_style_profile=None, platform_style_note=None,
     gemini_file=None, cached_response=None, inline_video_bytes=None,
     prior_plan=None, prior_plan_change_request=None,
     premium=False, resolved_policy=None,
@@ -7491,6 +7572,7 @@ def generate_edit_gemini(
         off_center=_off_center,
         shot_scale=_shot_scale,
         user_style_profile=user_style_profile,
+        platform_style_note=platform_style_note,
         face_zone=_face_zone,
         prior_plan=prior_plan,
         prior_plan_change_request=prior_plan_change_request,
@@ -21665,6 +21747,13 @@ def handler(job):
                 except Exception as _upe:
                     print(f"[user-style] Profile fetch failed: {_upe}", flush=True)
                     _user_profile = None
+            _platform_pulse = None
+            if future_platform_pulse is not None:
+                try:
+                    _platform_pulse = future_platform_pulse.result(timeout=10)
+                except Exception as _ppe:
+                    print(f"[platform-pulse] read failed (omitting nudge): {_ppe}", flush=True)
+                    _platform_pulse = None
             # Heartbeat: Gemini Pro editorial call is the biggest opaque wait
             # in the pipeline (30-60s typical). Without ticks the UI bar
             # sits at 38% and users report "stuck at 43%". Heartbeat ramps
@@ -21728,6 +21817,7 @@ def handler(job):
                     face_positions=_face_positions,
                     smoothed_face_trajectory=_smoothed_trajectory,
                     user_style_profile=_user_profile,
+                    platform_style_note=_platform_pulse,
                     inline_video_bytes=_proxy_bytes,
                     cached_response=_cached_analysis,
                     prior_plan=_gr_prior,
@@ -21803,6 +21893,12 @@ def handler(job):
         # Skip in render_only (plan is deterministic from the provided edit_plan).
         future_user_style = (
             None if _skip_edit_gen else mega_pool.submit(fetch_user_style_profile, user_id)
+        )
+        # Platform-wide style pulse (F2 launch nudge) — same pattern as the
+        # per-user profile: parallel fetch, read just before the Gemini call,
+        # fail-open to None (line omitted).
+        future_platform_pulse = (
+            None if _skip_edit_gen else mega_pool.submit(fetch_platform_style_pulse)
         )
         # Edit recipe waits on transcript + upload + face/signals internally — skipped entirely in render_only
         future_edit = None if _skip_edit_gen else mega_pool.submit(_do_edit_recipe_overlapped)
