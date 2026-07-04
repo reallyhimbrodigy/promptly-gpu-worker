@@ -148,9 +148,10 @@ print("\n=== D8: schema seams ===")
 src = open("handler.py").read()
 check("PostCutPlan carries the field with default",
       src.count('existing_caption_region: Literal["none", "bottom", "top", "other"] = "none"') == 2)
-check("prompt teaches watch-first reporting (positive voice)",
-      "Also report `existing_caption_region`" in src
-      and "a watermark or a single title card is not a caption track" in src)
+check("prompt teaches watch-first reporting (Stage 0, first look)",
+      "Stage 0 — WHAT'S ALREADY ON THE FRAME" in src
+      and "A watermark or a single title card is not a caption track" in src
+      and "even when it's small or center-frame" in src)
 check("RESPONSE FORMAT lists the field",
       '"existing_caption_region": "none" | "bottom" | "top" | "other"' in src)
 check("re-edit rail note documented", "re-edit rail" in src)
