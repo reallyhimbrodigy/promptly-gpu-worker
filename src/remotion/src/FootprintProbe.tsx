@@ -70,12 +70,18 @@ const CANDIDATES: Record<string, React.ReactNode> = {
   ),
 };
 
-export const FootprintProbe: React.FC<{ candidate: string }> = ({
-  candidate,
-}) => {
+export const FootprintProbe: React.FC<{
+  candidate: string;
+  dx?: number;
+  dy?: number;
+}> = ({ candidate, dx = 0, dy = 0 }) => {
   const node = CANDIDATES[candidate];
   if (!node) {
     throw new Error(`FootprintProbe: unknown candidate "${candidate}"`);
   }
-  return <AbsoluteFill>{node}</AbsoluteFill>;
+  return (
+    <AbsoluteFill style={{ transform: `translate(${dx}px, ${dy}px)` }}>
+      {node}
+    </AbsoluteFill>
+  );
 };
