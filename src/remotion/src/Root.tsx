@@ -10,6 +10,8 @@ import type {
 } from "./types";
 import { OverlayCutTest, type OverlayCutTestProps } from "./transitions/overlays/_OverlayCutTest";
 import { FitSpecimen } from "./FitSpecimen";
+import { BehindSpecimen } from "./BehindSpecimen";
+import { AlphaProbe } from "./AlphaProbe";
 
 /**
  * Remotion root — two production compositions:
@@ -139,6 +141,31 @@ export const RemotionRoot: React.FC = () => {
           keywords: [],
           position: "bottom",
         } as unknown as Record<string, unknown>}
+      />
+      {/* BehindSpecimen — behind-layer Phase 1 harness (BRANCH-ONLY).
+          Footage → real StatCard → RVM-matted foreground sandwich; doubles
+          as the alpha-format decode-cost rig. Not in any production render. */}
+      <Composition
+        id="BehindSpecimen"
+        component={BehindSpecimen as unknown as React.FC<Record<string, unknown>>}
+        width={1080}
+        height={1920}
+        fps={30}
+        durationInFrames={150}
+        defaultProps={{
+          footageUrl: "",
+          alphaUrl: "",
+          startFromS: 0,
+        } as unknown as Record<string, unknown>}
+      />
+      <Composition
+        id="AlphaProbe"
+        component={AlphaProbe as unknown as React.FC<Record<string, unknown>>}
+        width={720}
+        height={1280}
+        fps={30}
+        durationInFrames={30}
+        defaultProps={{ alphaUrl: "" } as unknown as Record<string, unknown>}
       />
     </>
   );
