@@ -12,6 +12,7 @@ import { TYPEWRITER_SCHEMES } from "./types";
 import { CAPTION_FONTS } from "../shared/fonts";
 import { msToFrames } from "../shared/timing";
 import { getCaptionPositionStyle } from "../shared/captionPosition";
+import { fitScale, CHARWRAP_FALLBACK_STYLE } from "../shared/fit";
 
 function resolveScheme(
   scheme: TypewriterRevealProps["scheme"],
@@ -103,6 +104,28 @@ const TypewriterPage: React.FC<{
     [page, lowercase],
   );
 
+  // F4 width-fit guarantee: pre-wrap breaks at spaces, so the overflow unit
+  // is the longest word (mono glyphs, wide). Scale it into the box; below
+  // the floor the container gets overflowWrap:anywhere (per-char spans give
+  // CSS clean break points).
+  const fit = fitScale(
+    text
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((w) => ({
+        parts: [
+          {
+            text: w,
+            fontSize,
+            font: { fontFamily, fontWeight: 600, letterSpacingEm: 0.03 },
+          },
+        ],
+      })),
+    maxWidth,
+    "TypewriterReveal",
+  );
+  const fittedFontSize = fontSize * fit.scale;
+
   // Page fade
   const pageLocalMs = (frame / fps) * 1000;
   const fadeIn = interpolate(pageLocalMs, [0, fadeInDurationMs], [0, 1], {
@@ -134,7 +157,7 @@ const TypewriterPage: React.FC<{
 
   const charStyle: React.CSSProperties = {
     fontFamily,
-    fontSize,
+    fontSize: fittedFontSize,
     fontWeight: 600, // directive #12: was 400
     letterSpacing,
     lineHeight,
@@ -162,6 +185,7 @@ const TypewriterPage: React.FC<{
             : {}),
           maxWidth,
           textAlign: "center",
+          ...(fit.floored ? CHARWRAP_FALLBACK_STYLE : {}),
         }}
       >
         {text.split("").map((char, i) => {

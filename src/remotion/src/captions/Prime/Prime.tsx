@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 import {
   AbsoluteFill,
   Sequence,
@@ -12,6 +12,7 @@ import type { PrimeProps } from "./types";
 import { CAPTION_FONTS } from "../shared/fonts";
 import { msToFrames } from "../shared/timing";
 import { CAPTION_PADDING } from "../shared/captionPosition";
+import { fitScale, CHARWRAP_FALLBACK_STYLE, type ScaleFitItem } from "../shared/fit";
 
 // ---------------------------------------------------------------------------
 // PrimeWord — single word with staggered entrance
@@ -34,6 +35,7 @@ const PrimeWord: React.FC<{
   specialColor: string;
   letterSpacing: string;
   textShadow: string;
+  fitFloored?: boolean;
 }> = ({
   token,
   pageStartMs,
@@ -51,6 +53,7 @@ const PrimeWord: React.FC<{
   specialColor,
   letterSpacing,
   textShadow,
+  fitFloored,
 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
@@ -88,6 +91,9 @@ const PrimeWord: React.FC<{
         transform: `translateY(${slideY}px)`,
         opacity: wordOpacity,
         marginRight: 12,
+        // F4 last resort: below the fit floor, let the glyph run break
+        // rather than ever cross a margin.
+        ...(fitFloored ? CHARWRAP_FALLBACK_STYLE : {}),
       }}
     >
       {token.text}
@@ -123,9 +129,7 @@ const PrimePage: React.FC<{
   ...wordProps
 }) => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
-
-  if (frame < 0) return null;
+  const { fps, width } = useVideoConfig();
 
   const isSpecial = (text: string) =>
     specialWords.some((w) => w.toLowerCase() === text.toLowerCase());
@@ -152,6 +156,44 @@ const PrimePage: React.FC<{
   if (buffer.length > 0) {
     lines.push({ tokens: buffer, hasSpecial: false });
   }
+
+  // F4 width-fit guarantee: Prime's lines never CSS-wrap, so the overflow
+  // unit is the whole nowrap line (mixed fonts: inter normals, playfair
+  // italic specials at DOUBLE size). Measure each composed line and scale
+  // the page uniformly; below the floor the word spans get the char-break
+  // fallback and the rows are allowed to flex-wrap.
+  const fit = useMemo(() => {
+    let normalCount = 0;
+    const items = lines.map((line) => {
+      const isL2 = !line.hasSpecial && normalCount++ >= 1;
+      return {
+        parts: line.tokens.map((t) => ({
+          text: t.text,
+          fontSize: line.hasSpecial
+            ? wordProps.line2FontSize * 2
+            : isL2
+              ? wordProps.line2FontSize
+              : wordProps.line1FontSize,
+          font: {
+            fontFamily: line.hasSpecial
+              ? wordProps.specialFontFamily
+              : wordProps.fontFamily,
+            fontWeight: line.hasSpecial
+              ? 600
+              : isL2
+                ? wordProps.line2FontWeight
+                : wordProps.line1FontWeight,
+            letterSpacingEm: 0.01,
+          },
+        })),
+        extraPx: 12 * line.tokens.length, // marginRight 12 on every word
+      };
+    });
+    return fitScale(items as ScaleFitItem[], width * 0.85, "Prime");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, specialWords, width]);
+
+  if (frame < 0) return null;
 
   // Fade out
   const pageLocalMs = (frame / fps) * 1000;
@@ -185,10 +227,14 @@ const PrimePage: React.FC<{
               alignItems: "baseline",
               marginTop: lineIdx > 0 ? lineGap : 0,
               ...(line.hasSpecial ? { justifyContent: "center" } : {}),
+              ...(fit.floored
+                ? { flexWrap: "wrap", justifyContent: "center" }
+                : {}),
             }}
           >
             {line.tokens.map((token, idx) => {
               const wi = globalWordIdx++;
+              const specialMul = line.hasSpecial ? 2 : 1;
               return (
                 <PrimeWord
                   key={idx}
@@ -198,8 +244,9 @@ const PrimePage: React.FC<{
                   isLine2={isLine2}
                   isSpecial={line.hasSpecial}
                   {...wordProps}
-                  line2FontSize={line.hasSpecial ? wordProps.line2FontSize * 2 : wordProps.line2FontSize}
-                  line1FontSize={line.hasSpecial ? wordProps.line1FontSize * 2 : wordProps.line1FontSize}
+                  line2FontSize={wordProps.line2FontSize * specialMul * fit.scale}
+                  line1FontSize={wordProps.line1FontSize * specialMul * fit.scale}
+                  fitFloored={fit.floored}
                 />
               );
             })}

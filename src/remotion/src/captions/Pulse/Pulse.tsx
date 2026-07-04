@@ -8,7 +8,8 @@ import {
 import type { PulseProps } from "./types";
 import { msToFrames } from "../shared/timing";
 import { CAPTION_FONTS } from "../shared/fonts";
-import { getCaptionPositionStyle } from "../shared/captionPosition";
+import { getCaptionPositionStyle, CAPTION_PADDING } from "../shared/captionPosition";
+import { fitScale, CHARWRAP_FALLBACK_STYLE } from "../shared/fit";
 import { buildKeywordSet, isKeyword } from "../shared/keywords";
 import { LEGIBILITY_ANCHOR_LAYERS } from "../shared/legibility";
 
@@ -22,7 +23,8 @@ const PulseLine: React.FC<{
   fontSize: number;
   opacity: number;
   dimmed: boolean;
-}> = ({ tokens, keywordSet, textColor, keywordColor, fontSize, opacity, dimmed }) => {
+  fitFloored?: boolean;
+}> = ({ tokens, keywordSet, textColor, keywordColor, fontSize, opacity, dimmed, fitFloored }) => {
   const dimColor = "#BBBBBB";
 
   return (
@@ -68,6 +70,8 @@ const PulseLine: React.FC<{
                   : []),
               ].join(", "),
               whiteSpace: "nowrap",
+              // F4 last resort: below the fit floor, char-break.
+              ...(fitFloored ? CHARWRAP_FALLBACK_STYLE : {}),
             }}
           >
             {token.text}
@@ -155,6 +159,31 @@ export const Pulse: React.FC<PulseProps> = ({
   const t = frame / fps;
   const floatY = Math.sin(t * 1.2) * 14 + Math.sin(t * 1.8) * 7;
 
+  // F4 width-fit guarantee: both visible pages share one uniform scale so
+  // the pair reads as one block; rows flex-wrap, so the overflow unit is a
+  // single word (keywords at x1.25). Real box = the 200px-inset safe rect.
+  const fitTokens = hasSlot2
+    ? [...pages[slot1PageIdx].tokens, ...pages[slot2PageIdx].tokens]
+    : pages[slot1PageIdx].tokens;
+  const fit = fitScale(
+    fitTokens.map((tok) => ({
+      parts: [
+        {
+          text: tok.text,
+          fontSize: isKeyword(tok.text, keywordSet) ? fontSize * 1.25 : fontSize,
+          font: {
+            fontFamily: CAPTION_FONTS.dmSans,
+            fontWeight: 700,
+            letterSpacingEm: -0.02,
+          },
+        },
+      ],
+    })),
+    Math.min(maxWidth, width - 2 * CAPTION_PADDING.sidesSafe),
+    "Pulse",
+  );
+  const fittedFontSize = fontSize * fit.scale;
+
   return (
     <AbsoluteFill
       style={{
@@ -180,9 +209,10 @@ export const Pulse: React.FC<PulseProps> = ({
           keywordSet={keywordSet}
           textColor={textColor}
           keywordColor={keywordColor}
-          fontSize={fontSize}
+          fontSize={fittedFontSize}
           opacity={slot1Opacity}
           dimmed={hasSlot2}
+          fitFloored={fit.floored}
         />
         {hasSlot2 && (
           <PulseLine
@@ -190,9 +220,10 @@ export const Pulse: React.FC<PulseProps> = ({
             keywordSet={keywordSet}
             textColor={textColor}
             keywordColor={keywordColor}
-            fontSize={fontSize}
+            fontSize={fittedFontSize}
             opacity={slot2Opacity}
             dimmed={false}
+            fitFloored={fit.floored}
           />
         )}
       </div>

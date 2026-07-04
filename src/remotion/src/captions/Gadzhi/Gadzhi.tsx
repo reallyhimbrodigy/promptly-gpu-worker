@@ -15,6 +15,7 @@ import { buildKeywordSet, isKeyword } from "../shared/keywords";
 import { CAPTION_PADDING } from "../shared/captionPosition";
 
 import { LEGIBILITY_ANCHOR } from "../shared/legibility";
+import { fitPage } from "../shared/fit";
 // E legibility floor (directive #12 promotion check): the ABE shadow is
 // diffuse-only; the shared anchor rides in front so the gray entry blend
 // stays readable over bright footage.
@@ -44,13 +45,35 @@ const GadzhiStylePage: React.FC<{
   wordGap,
 }) => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
+  const { fps, width } = useVideoConfig();
   const currentTimeMs = getCurrentTimeMs(frame, fps) + pageStartMs;
 
-  const lines: TikTokToken[][] = [];
-  for (let i = 0; i < tokens.length; i += maxWordsPerLine) {
-    lines.push(tokens.slice(i, i + maxWordsPerLine));
-  }
+  // F4 width-fit guarantee: lines come from the shared fit ladder (word
+  // widths measured against the loaded font), not from a blind word count.
+  // The style's 2-words-per-line look is the preference; fit beats it.
+  const fit = useMemo(
+    () =>
+      fitPage(
+        {
+          words: tokens.map((t) => t.text),
+          baseFontSize: fontSize,
+          font: {
+            fontFamily: CAPTION_FONTS.montserrat,
+            fontWeight: 700,
+            letterSpacingEm: 0.02,
+            uppercase: true,
+          },
+          wordGap,
+          preferredWordsPerLine: maxWordsPerLine,
+          maxLines:
+            Math.max(Math.ceil(tokens.length / Math.max(maxWordsPerLine, 1)), 2) + 1,
+          // Gadzhi's own box: 85% of canvas, inside 80px side paddings.
+          availableWidth: Math.min(width * 0.85, width - 160),
+        },
+        "Gadzhi",
+      ),
+    [tokens, fontSize, wordGap, maxWordsPerLine, width],
+  );
 
   return (
     <div
@@ -61,7 +84,7 @@ const GadzhiStylePage: React.FC<{
         gap: 4,
       }}
     >
-      {lines.map((lineTokens, lineIdx) => (
+      {fit.lines.map((lineEntries, lineIdx) => (
         <div
           key={lineIdx}
           style={{
@@ -70,7 +93,8 @@ const GadzhiStylePage: React.FC<{
             gap: wordGap,
           }}
         >
-          {lineTokens.map((token, wi) => {
+          {lineEntries.map((entry, wi) => {
+            const token = tokens[entry.tokenIndex];
             const isSpoken = currentTimeMs >= token.fromMs;
             const isKw = isKeyword(token.text, keywordSet);
             const finalColor = isKw ? highlightColor : textColor;
@@ -110,7 +134,7 @@ const GadzhiStylePage: React.FC<{
                 style={{
                   display: "inline-block",
                   fontFamily: CAPTION_FONTS.montserrat,
-                  fontSize,
+                  fontSize: fit.fontSize,
                   fontWeight: 700,
                   color,
                   textTransform: "uppercase",
@@ -123,7 +147,7 @@ const GadzhiStylePage: React.FC<{
                   visibility: isSpoken ? "visible" : "hidden",
                 }}
               >
-                {token.text}
+                {entry.text}
               </span>
             );
           })}

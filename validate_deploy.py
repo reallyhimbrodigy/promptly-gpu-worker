@@ -4183,6 +4183,25 @@ def _repair_classification_entry():
     assert _cls.get("retryable") is True
 
 
+@check("F4: caption width-fit layer wired into EVERY text renderer (stale-parallel-set lesson, layout edition)")
+def _f4_fit_wiring():
+    import os as _os
+    _cap_dir = _os.path.join("src", "remotion", "src", "captions")
+    _styles = ["CleanCut", "Cove", "Gadzhi", "Lumen", "Prime", "Pulse",
+               "Quintessence", "TwoTone", "TypewriterReveal"]
+    for _st in _styles:
+        _src = open(_os.path.join(_cap_dir, _st, f"{_st}.tsx")).read()
+        assert 'from "../shared/fit"' in _src, f"{_st} lost its fit-layer import"
+    _sticky = open(_os.path.join("src", "remotion", "src", "motion-graphics",
+                                 "StickyNotes", "StickyNotes.tsx")).read()
+    assert 'from "../../captions/shared/fit"' in _sticky, "StickyNotes lost the shared measurer"
+    _fit = open(_os.path.join(_cap_dir, "shared", "fit.ts")).read()
+    assert "TIKTOK_SAFE_SIDE" in _fit and "MIN_FIT_SCALE = 0.6" in _fit
+    assert "REMOTION_FIT_STRICT" in _fit and "INVARIANT VIOLATION" in _fit
+    _root = open(_os.path.join("src", "remotion", "src", "Root.tsx")).read()
+    assert 'id="FitSpecimen"' in _root, "FitSpecimen battery composition unregistered"
+
+
 # ─── REPORT ────────────────────────────────────────────────────────────
 print(f"\n{'=' * 64}")
 print(f"RESULTS: {len(_passed)} passed, {len(_failures)} failed")

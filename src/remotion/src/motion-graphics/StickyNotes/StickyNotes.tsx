@@ -9,6 +9,59 @@ import {
 import { MG_FONTS } from "../shared/fonts";
 import { msToFrames } from "../shared/timing";
 import type { StickyNotesProps } from "./types";
+import {
+  canvasMeasurer,
+  CHARWRAP_FALLBACK_STYLE,
+} from "../../captions/shared/fit";
+
+// F4 width-fit guarantee (sticky_note text overlay): the note is a FIXED
+// square, so the fit is two-axis — the longest word must fit the inner
+// width and the greedy-wrapped line stack must fit the inner height. Walk
+// the scale down until both hold; below the floor, char-break (the note
+// never grows, text never escapes it).
+const STICKY_FIT_FLOOR = 0.35;
+
+function fitStickyNote(
+  text: string,
+  noteFontSize: number,
+  fontFamily: string,
+  noteSize: number,
+): { scale: number; floored: boolean } {
+  const font = { fontFamily, fontWeight: 400 };
+  const inner = noteSize - 20 - 8; // padding(10x2) + breathing room
+  const vBudget = inner - 30; // marker glyph / underline allowance
+  const words = text.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return { scale: 1, floored: false };
+  for (let s = 1; s >= STICKY_FIT_FLOOR - 1e-6; s -= 0.05) {
+    const size = noteFontSize * s;
+    const widths = words.map((w) => canvasMeasurer(w, size, font));
+    if (Math.max(...widths) > inner) continue;
+    const spacePx = canvasMeasurer(" ", size, font);
+    let lines = 1;
+    let w = 0;
+    for (const ww of widths) {
+      const extra = w > 0 ? spacePx + ww : ww;
+      if (w > 0 && w + extra > inner) {
+        lines++;
+        w = ww;
+      } else {
+        w += extra;
+      }
+    }
+    if (lines * size * 1.1 <= vBudget) {
+      if (s < 1) {
+        console.log(
+          `[caption-fit] style=StickyNotes page="${text}" action=scale(${s.toFixed(2)})`,
+        );
+      }
+      return { scale: s, floored: false };
+    }
+  }
+  console.log(
+    `[caption-fit] style=StickyNotes page="${text}" action=charwrap`,
+  );
+  return { scale: STICKY_FIT_FLOOR, floored: true };
+}
 
 
 const NOTE_POSITIONS: [number, number][] = [
@@ -203,6 +256,12 @@ export const StickyNotes: React.FC<StickyNotesProps> = ({
             : enterShadowOp;
 
           const [xOff, yOff] = NOTE_POSITIONS[i] ?? [0, 0];
+          const noteFit = fitStickyNote(
+            note.text,
+            noteFontSize,
+            noteFontFamily,
+            noteSize,
+          );
 
           return (
             <div
@@ -251,12 +310,14 @@ export const StickyNotes: React.FC<StickyNotesProps> = ({
                 <span
                   style={{
                     fontFamily: noteFontFamily,
-                    fontSize: noteFontSize,
+                    fontSize: noteFontSize * noteFit.scale,
                     fontWeight: 400,
                     color: "#1A1A1A",
                     textAlign: "center",
                     lineHeight: 1.1,
                     fontStyle: i === 2 ? "italic" : "normal",
+                    maxWidth: "100%",
+                    ...(noteFit.floored ? CHARWRAP_FALLBACK_STYLE : {}),
                   }}
                 >
                   {note.text}

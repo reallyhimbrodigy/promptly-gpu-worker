@@ -10,6 +10,7 @@ import type { QuintessenceProps } from "./types";
 import { msToFrames } from "../shared/timing";
 import { CAPTION_FONTS } from "../shared/fonts";
 import { getCaptionPositionStyle } from "../shared/captionPosition";
+import { fitScale, CHARWRAP_FALLBACK_STYLE } from "../shared/fit";
 
 /* ─── Helpers ─── */
 
@@ -84,6 +85,32 @@ export const Quintessence: React.FC<QuintessenceProps> = ({
 
   const opacity = fadeIn * fadeOut;
 
+  // F4 width-fit guarantee: one 160px Playfair word, nowrap — the worst
+  // single-word overflow risk of the pack. Uniform scale to the margins;
+  // below the floor the spans char-break (the blurred scrim twin mirrors).
+  const displayText = toTitleCase(activeSlot.token.text);
+  const fit = fitScale(
+    [
+      {
+        parts: [
+          {
+            text: displayText,
+            fontSize,
+            font: {
+              fontFamily: CAPTION_FONTS.playfairDisplay,
+              fontWeight: 700,
+              letterSpacingEm: -0.06,
+            },
+          },
+        ],
+      },
+    ],
+    maxWidth,
+    "Quintessence",
+  );
+  const fittedFontSize = fontSize * fit.scale;
+  const fitFallback = fit.floored ? CHARWRAP_FALLBACK_STYLE : {};
+
   return (
     <AbsoluteFill
       style={{
@@ -103,7 +130,7 @@ export const Quintessence: React.FC<QuintessenceProps> = ({
             right: 0,
             fontFamily: CAPTION_FONTS.playfairDisplay,
             fontWeight: 700,
-            fontSize,
+            fontSize: fittedFontSize,
             lineHeight: 0.9,
             letterSpacing: "-0.06em",
             whiteSpace: "nowrap",
@@ -113,9 +140,10 @@ export const Quintessence: React.FC<QuintessenceProps> = ({
             transformOrigin: "center bottom",
             textAlign: "center",
             pointerEvents: "none",
+            ...fitFallback,
           }}
         >
-          {toTitleCase(activeSlot.token.text)}
+          {displayText}
         </span>
         <span
           style={{
@@ -123,7 +151,7 @@ export const Quintessence: React.FC<QuintessenceProps> = ({
             position: "relative",
             fontFamily: CAPTION_FONTS.playfairDisplay,
             fontWeight: 700,
-            fontSize,
+            fontSize: fittedFontSize,
             color,
             lineHeight: 0.9,
             letterSpacing: "-0.06em",
@@ -131,9 +159,10 @@ export const Quintessence: React.FC<QuintessenceProps> = ({
             transform: `scaleY(${stretchY})`,
             transformOrigin: "center bottom",
             textAlign: "center",
+            ...fitFallback,
           }}
         >
-          {toTitleCase(activeSlot.token.text)}
+          {displayText}
         </span>
       </div>
     </AbsoluteFill>

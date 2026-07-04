@@ -12,6 +12,7 @@ import type { TwoToneProps } from "./types";
 import { CAPTION_FONTS } from "../shared/fonts";
 import { msToFrames } from "../shared/timing";
 import { getCaptionPositionStyle } from "../shared/captionPosition";
+import { fitScale, CHARWRAP_FALLBACK_STYLE } from "../shared/fit";
 
 const SLAM_SPRING: SpringConfig = {
   mass: 0.5,
@@ -57,6 +58,7 @@ const TwoToneWord: React.FC<{
   allCaps: boolean;
   textShadow: string;
   localFrame: number;
+  fitFloored?: boolean;
 }> = ({
   token,
   globalIndex,
@@ -67,6 +69,7 @@ const TwoToneWord: React.FC<{
   allCaps,
   textShadow,
   localFrame,
+  fitFloored,
 }) => {
   const { fps } = useVideoConfig();
 
@@ -99,6 +102,7 @@ const TwoToneWord: React.FC<{
         opacity,
         whiteSpace: "nowrap",
         padding: "0 0.1em",
+        ...(fitFloored ? CHARWRAP_FALLBACK_STYLE : {}),
       }}
     >
       {token.text}
@@ -116,6 +120,7 @@ const TwoToneLine: React.FC<{
   allCaps: boolean;
   textShadow: string;
   localFrame: number;
+  fitFloored?: boolean;
 }> = ({
   tokens,
   startIndex,
@@ -126,6 +131,7 @@ const TwoToneLine: React.FC<{
   allCaps,
   textShadow,
   localFrame,
+  fitFloored,
 }) => (
   <div
     style={{
@@ -148,6 +154,7 @@ const TwoToneLine: React.FC<{
         allCaps={allCaps}
         textShadow={textShadow}
         localFrame={localFrame}
+        fitFloored={fitFloored}
       />
     ))}
   </div>
@@ -199,6 +206,31 @@ export const TwoTone: React.FC<TwoToneProps> = ({
         const line1 = page.tokens.slice(0, splitAt);
         const line2 = page.tokens.slice(splitAt);
 
+        // F4 width-fit guarantee: rows flex-wrap between words, so the
+        // overflow unit is a single word (900-weight caps at 110px). Scale
+        // the page uniformly to bring the widest word inside the margins;
+        // the 0.1em side paddings are folded in as fixed px (conservative).
+        const fit = fitScale(
+          page.tokens.map((t) => ({
+            parts: [
+              {
+                text: t.text,
+                fontSize,
+                font: {
+                  fontFamily,
+                  fontWeight: 900,
+                  letterSpacingEm: -0.02,
+                  uppercase: allCaps,
+                },
+              },
+            ],
+            extraPx: 0.2 * fontSize,
+          })),
+          maxWidth,
+          "TwoTone",
+        );
+        const fittedFontSize = fontSize * fit.scale;
+
         return (
           <AbsoluteFill
             key={pageIndex}
@@ -220,10 +252,11 @@ export const TwoTone: React.FC<TwoToneProps> = ({
                 pageStartMs={page.startMs}
                 color={topColor}
                 fontFamily={fontFamily}
-                fontSize={fontSize}
+                fontSize={fittedFontSize}
                 allCaps={allCaps}
                 textShadow={topShadow}
                 localFrame={localFrame}
+                fitFloored={fit.floored}
               />
               {line2.length > 0 ? (
                 <TwoToneLine
@@ -232,10 +265,11 @@ export const TwoTone: React.FC<TwoToneProps> = ({
                   pageStartMs={page.startMs}
                   color={accentColor}
                   fontFamily={fontFamily}
-                  fontSize={fontSize}
+                  fontSize={fittedFontSize}
                   allCaps={allCaps}
                   textShadow={accentShadow}
                   localFrame={localFrame}
+                  fitFloored={fit.floored}
                 />
               ) : null}
             </div>

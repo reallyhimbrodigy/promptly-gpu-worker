@@ -4,6 +4,7 @@ import type { CoveProps } from "./types";
 import { CAPTION_FONTS } from "../shared/fonts";
 import { msToFrames } from "../shared/timing";
 import { CAPTION_PADDING } from "../shared/captionPosition";
+import { fitScale, CHARWRAP_FALLBACK_STYLE } from "../shared/fit";
 
 export const Cove: React.FC<CoveProps> = ({
   pages,
@@ -69,6 +70,39 @@ export const Cove: React.FC<CoveProps> = ({
           lines.push(page.tokens.slice(i, i + maxWordsPerLine));
         }
 
+        // F4 width-fit guarantee: rows flex-wrap between words, so the
+        // overflow unit is one word — the ×1.8 Playfair boxed words are the
+        // risk. Uniform page scale; below the floor, char-break fallback.
+        // The box the style actually occupies depends on position: bottom
+        // is inset 200px both sides; top/center are left-anchored at 80.
+        const fitBox =
+          position === "bottom"
+            ? width - 2 * CAPTION_PADDING.sidesSafe
+            : Math.min(maxWidth, width - 2 * CAPTION_PADDING.sides);
+        const fit = fitScale(
+          page.tokens.map((t) => {
+            const boxed = boxedSet.has(t.text.toLowerCase());
+            return {
+              parts: [
+                {
+                  text: t.text,
+                  fontSize: boxed ? fontSize * 1.8 : fontSize,
+                  font: boxed
+                    ? {
+                        fontFamily: CAPTION_FONTS.playfairDisplay,
+                        fontWeight: 400,
+                        letterSpacingEm: -0.02,
+                      }
+                    : { fontFamily: CAPTION_FONTS.montserrat, fontWeight: 700 },
+                },
+              ],
+              extraPx: boxed ? 2 * boxPaddingX : 0,
+            };
+          }),
+          fitBox,
+          "Cove",
+        );
+
         return (
           <Sequence
             key={pageIndex}
@@ -120,9 +154,9 @@ export const Cove: React.FC<CoveProps> = ({
                                 fontFamily: isSpecial
                                   ? CAPTION_FONTS.playfairDisplay
                                   : CAPTION_FONTS.montserrat,
-                                fontSize: isSpecial
-                                  ? fontSize * 1.8
-                                  : fontSize,
+                                fontSize:
+                                  (isSpecial ? fontSize * 1.8 : fontSize) *
+                                  fit.scale,
                                 fontWeight: isSpecial ? 400 : 700,
                                 fontStyle: isSpecial
                                   ? "italic"
@@ -135,6 +169,9 @@ export const Cove: React.FC<CoveProps> = ({
                                 whiteSpace: "nowrap",
                                 display: "inline-block",
                                 position: "relative",
+                                ...(fit.floored
+                                  ? CHARWRAP_FALLBACK_STYLE
+                                  : {}),
                                 padding: isSpecial
                                   ? `${boxPaddingY}px ${boxPaddingX}px`
                                   : undefined,
@@ -155,7 +192,7 @@ export const Cove: React.FC<CoveProps> = ({
                                     left: 0,
                                     right: 0,
                                     fontFamily: isSpecial ? CAPTION_FONTS.playfairDisplay : CAPTION_FONTS.montserrat,
-                                    fontSize: isSpecial ? fontSize * 1.8 : fontSize,
+                                    fontSize: (isSpecial ? fontSize * 1.8 : fontSize) * fit.scale,
                                     fontWeight: isSpecial ? 400 : 700,
                                     fontStyle: isSpecial ? "italic" : "normal",
                                     letterSpacing: isSpecial ? "-0.02em" : "normal",

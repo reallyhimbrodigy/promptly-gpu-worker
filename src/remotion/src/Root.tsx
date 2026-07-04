@@ -9,6 +9,7 @@ import type {
   PromptlyMicroSegmentsInput,
 } from "./types";
 import { OverlayCutTest, type OverlayCutTestProps } from "./transitions/overlays/_OverlayCutTest";
+import { FitSpecimen } from "./FitSpecimen";
 
 /**
  * Remotion root — two production compositions:
@@ -120,6 +121,24 @@ export const RemotionRoot: React.FC = () => {
           overlayDurationInFrames: 18,
           withAudio: true,
         } as unknown as Record<string, unknown> & OverlayCutTestProps}
+      />
+      {/* FitSpecimen — STANDALONE F4 caption width-fit battery composition.
+          Renders one style with a worst-case-string page over black, strict
+          fit invariant armed. Driven by fit-battery.mjs; pixel-scanned by
+          test_caption_fit.py. Not used in production renders. */}
+      <Composition
+        id="FitSpecimen"
+        component={FitSpecimen as unknown as React.FC<Record<string, unknown>>}
+        width={1080}
+        height={1920}
+        fps={60}
+        durationInFrames={120}
+        defaultProps={{
+          style: "Gadzhi",
+          words: ["DOWNLOAD", "PROMPTLY"],
+          keywords: [],
+          position: "bottom",
+        } as unknown as Record<string, unknown>}
       />
     </>
   );

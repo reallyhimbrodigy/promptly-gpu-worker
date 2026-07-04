@@ -9,7 +9,8 @@ import type { TikTokPage } from "../shared/types";
 import type { CleanCutProps } from "./types";
 import { CAPTION_FONTS } from "../shared/fonts";
 import { msToFrames } from "../shared/timing";
-import { getCaptionPositionStyle } from "../shared/captionPosition";
+import { getCaptionPositionStyle, CAPTION_PADDING } from "../shared/captionPosition";
+import { fitScale } from "../shared/fit";
 
 const easeOutCubic = (t: number): number => 1 - Math.pow(1 - t, 3);
 
@@ -36,7 +37,7 @@ const CleanCutPage: React.FC<{
   localFrame,
   positionStyle,
 }) => {
-  const { fps } = useVideoConfig();
+  const { fps, width } = useVideoConfig();
   const localMs = (localFrame / fps) * 1000;
 
   // Pick the single active token — the last one that has started.
@@ -46,6 +47,26 @@ const CleanCutPage: React.FC<{
   }
   const token = page.tokens[activeIdx];
   if (!token) return null;
+
+  // F4 width-fit guarantee: one word at a time; scale it to the real box
+  // (the 200px-inset safe rect) before the existing break-word fallback —
+  // a scaled whole word beats a mid-word CSS break. fitScale floors at 0.6;
+  // below that, overflowWrap:break-word (already on the span) takes over.
+  const fit = fitScale(
+    [
+      {
+        parts: [
+          {
+            text: token.text,
+            fontSize,
+            font: { fontFamily, fontWeight, letterSpacingEm: -0.02, uppercase: allCaps },
+          },
+        ],
+      },
+    ],
+    Math.min(maxWidth, width - 2 * CAPTION_PADDING.sidesSafe),
+    "CleanCut",
+  );
 
   const since = localMs - (token.fromMs - page.startMs);
   // Crisp, quick entrance — a small rise + settle, no flair.
@@ -79,7 +100,7 @@ const CleanCutPage: React.FC<{
       <span
         style={{
           fontFamily,
-          fontSize,
+          fontSize: fontSize * fit.scale,
           fontWeight,
           color: textColor,
           textTransform: allCaps ? "uppercase" : "none",

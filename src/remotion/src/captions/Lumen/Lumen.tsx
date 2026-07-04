@@ -11,7 +11,8 @@ import type { TikTokToken } from "../shared/types";
 import type { LumenProps } from "./types";
 import { msToFrames } from "../shared/timing";
 import { CAPTION_FONTS } from "../shared/fonts";
-import { getCaptionPositionStyle } from "../shared/captionPosition";
+import { getCaptionPositionStyle, CAPTION_PADDING } from "../shared/captionPosition";
+import { fitScale, CHARWRAP_FALLBACK_STYLE } from "../shared/fit";
 import { buildKeywordSet, isKeyword } from "../shared/keywords";
 import {
   LEGIBILITY_ANCHOR_LAYERS,
@@ -31,6 +32,7 @@ const LumenWord: React.FC<{
   keywordColor: string;
   sweepDuration: number;
   bandLuma?: number;
+  fitFloored?: boolean;
 }> = ({
   token,
   pageStartMs,
@@ -41,6 +43,7 @@ const LumenWord: React.FC<{
   keywordColor,
   sweepDuration,
   bandLuma,
+  fitFloored,
 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
@@ -79,6 +82,8 @@ const LumenWord: React.FC<{
     lineHeight: 1.1,
     whiteSpace: "nowrap" as const,
     letterSpacing: isKw ? "-0.02em" : "0.01em",
+    // F4 last resort: below the fit floor, char-break instead of overflow.
+    ...(fitFloored ? CHARWRAP_FALLBACK_STYLE : {}),
   };
 
   // Sweep clip: angled white strip that moves left→right
@@ -186,6 +191,37 @@ export const Lumen: React.FC<LumenProps> = ({
           lines.push(page.tokens.slice(i, i + maxWordsPerLine));
         }
 
+        // F4 width-fit guarantee: rows flex-wrap between words; the risk is
+        // a single word at its multiplier (shine x1.6 / keyword x1.3). The
+        // real box is the 200px-inset safe rect (680), not maxWidth.
+        const fit = fitScale(
+          page.tokens.map((t) => {
+            const kw = isKeyword(t.text, keywordSet);
+            const shine = isKeyword(t.text, shineSet);
+            return {
+              parts: [
+                {
+                  text: t.text,
+                  fontSize: shine ? fontSize * 1.6 : kw ? fontSize * 1.3 : fontSize,
+                  font: kw
+                    ? {
+                        fontFamily: CAPTION_FONTS.playfairDisplay,
+                        fontWeight: 400,
+                        letterSpacingEm: -0.02,
+                      }
+                    : {
+                        fontFamily: CAPTION_FONTS.montserrat,
+                        fontWeight: 600,
+                        letterSpacingEm: 0.01,
+                      },
+                },
+              ],
+            };
+          }),
+          Math.min(maxWidth, width - 2 * CAPTION_PADDING.sidesSafe),
+          "Lumen",
+        );
+
         return (
           <Sequence
             key={pageIndex}
@@ -227,13 +263,14 @@ export const Lumen: React.FC<LumenProps> = ({
                         key={tokenIdx}
                         token={token}
                         pageStartMs={page.startMs}
-                        fontSize={fontSize}
+                        fontSize={fontSize * fit.scale}
                         isKw={isKeyword(token.text, keywordSet)}
                         hasShine={isKeyword(token.text, shineSet)}
                         textColor={textColor}
                         keywordColor={keywordColor}
                         sweepDuration={sweepDuration}
                         bandLuma={bandLuma}
+                        fitFloored={fit.floored}
                       />
                     ))}
                   </div>
