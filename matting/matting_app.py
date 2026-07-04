@@ -38,10 +38,18 @@ _DEPLOYER = os.environ.get("PROMPTLY_DEPLOYER", "claude-code")
 LEAD_IN_S = 1.0  # recurrent-state settle time before each window opens
 # RVM guidance: downsample so the matting backbone sees ~256-512px on the
 # short side. Portrait 1080x1920: 0.25 => 270x480 (fast), 0.375 => 405x720.
-QUALITY_RATIO = {"fast": 0.25, "best": 0.375}
+QUALITY_RATIO = {"fast": 0.25, "best": 0.375, "full": 1.0}
+
+# ── The keying finish (Phase 1.5 R3) — alpha post-chain, constants named ────
+# Applied to the raw per-frame mattes BEFORE composing/encoding. Bias: a
+# hair-thin dark bite (erode) reads better than a bright un-dimmed halo —
+# the wash shot is the worst case and the tiebreak.
+ALPHA_TEMPORAL_WINDOW = 3   # median over t-1, t, t+1 (odd; 1 disables)
+ALPHA_ERODE_PX = 1          # min-filter radius, px (0 disables)
+ALPHA_FEATHER_PX = 1.0      # gaussian sigma, px (0 disables)
 
 
-def _matte_impl(video_url, windows, quality, model_name, formats, gpu_label):
+def _matte_impl(video_url, windows, quality, model_name, formats, gpu_label, post=None):
     import json
     import subprocess
     import time
@@ -107,7 +115,8 @@ def _matte_impl(video_url, windows, quality, model_name, formats, gpu_label):
              "-pix_fmt", "rgb24", "pipe:1"],
             stdout=subprocess.PIPE)
         frame_bytes = W * H * 3
-        rgba_frames = []  # window frames only (lead-in discarded post-inference)
+        fgr_frames = []  # window frames only (lead-in discarded post-inference)
+        pha_frames = []
         rec = [None] * 4
         infer_s = 0.0
         idx = 0
@@ -123,15 +132,51 @@ def _matte_impl(video_url, windows, quality, model_name, formats, gpu_label):
                 torch.cuda.synchronize()
                 infer_s += time.time() - ti
                 if idx >= n_lead:
-                    rgba = torch.cat(
-                        [fgr.clamp(0, 1), pha.clamp(0, 1)], dim=1
-                    )[0].permute(1, 2, 0)
-                    rgba_frames.append(
-                        (rgba * 255).byte().cpu().numpy().astype(np.uint8))
+                    fgr_frames.append(
+                        (fgr.clamp(0, 1)[0].permute(1, 2, 0) * 255)
+                        .byte().cpu().numpy().astype(np.uint8))
+                    pha_frames.append(
+                        (pha.clamp(0, 1)[0, 0] * 255)
+                        .byte().cpu().numpy().astype(np.uint8))
                 idx += 1
         dec.stdout.close()
         dec.wait()
         decode_s = time.time() - t0 - infer_s
+
+        # ── R3 keying finish: temporal median → erode → feather ────────────
+        post_s = 0.0
+        if post:
+            import torch.nn.functional as Fnn
+            ti = time.time()
+            tw = int(post.get("temporal", ALPHA_TEMPORAL_WINDOW))
+            er = int(post.get("erode", ALPHA_ERODE_PX))
+            fe = float(post.get("feather", ALPHA_FEATHER_PX))
+            ph = torch.from_numpy(np.stack(pha_frames)).cuda().half() / 255.0
+            ph = ph.unsqueeze(1)  # T,1,H,W
+            if tw >= 3:
+                pad = tw // 2
+                idxs = [torch.clamp(torch.arange(len(pha_frames)) + o, 0,
+                                    len(pha_frames) - 1) for o in range(-pad, pad + 1)]
+                ph = torch.median(torch.stack([ph[i] for i in idxs]), dim=0).values
+            if er > 0:
+                k = 2 * er + 1
+                ph = -Fnn.max_pool2d(-ph, k, stride=1, padding=er)
+            if fe > 0:
+                rad = max(1, int(round(3 * fe)))
+                x = torch.arange(-rad, rad + 1, dtype=torch.half, device="cuda")
+                g = torch.exp(-(x ** 2) / (2 * fe * fe))
+                g = (g / g.sum()).reshape(1, 1, 1, -1)
+                ph = Fnn.conv2d(ph, g, padding=(0, rad))
+                ph = Fnn.conv2d(ph, g.reshape(1, 1, -1, 1), padding=(rad, 0))
+            ph = (ph.clamp(0, 1)[:, 0] * 255).byte().cpu().numpy()
+            pha_frames = [ph[i] for i in range(ph.shape[0])]
+            torch.cuda.synchronize()
+            post_s = time.time() - ti
+
+        rgba_frames = [
+            np.dstack([fgr_frames[i], pha_frames[i]]) for i in range(len(fgr_frames))
+        ]
+        del fgr_frames, pha_frames
 
         # encode each requested alpha format from the buffered RGBA frames
         enc_out = {}
@@ -144,6 +189,11 @@ def _matte_impl(video_url, windows, quality, model_name, formats, gpu_label):
                     "-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p",
                     "-b:v", "0", "-crf", "28", "-row-mt", "1", "-speed", "6"]
                 key += ".webm"
+            elif fmt == "webm_hq":  # R4 encode-isolation rung: near-lossless VP9
+                out, args = "/tmp/out_hq.webm", [
+                    "-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p",
+                    "-b:v", "0", "-crf", "10", "-row-mt", "1", "-speed", "4"]
+                key += "_hq.webm"
             elif fmt == "prores":
                 out, args = "/tmp/out.mov", [
                     "-c:v", "prores_ks", "-profile:v", "4444",
@@ -179,6 +229,7 @@ def _matte_impl(video_url, windows, quality, model_name, formats, gpu_label):
 
         results.append({
             "window": [w_start, w_end], "frames": len(rgba_frames),
+            "post_s": round(post_s, 2),
             "decode_s": round(decode_s, 2), "infer_s": round(infer_s, 2),
             "infer_fps": round(len(rgba_frames) / infer_s, 1) if infer_s else None,
             "encodes": enc_out,
@@ -195,13 +246,13 @@ def _matte_impl(video_url, windows, quality, model_name, formats, gpu_label):
 
 @app.function(gpu="T4", memory=16384, timeout=1200)
 def matte_windows_t4(video_url, windows, quality="fast",
-                     model_name="mobilenetv3", formats=("webm",)):
+                     model_name="mobilenetv3", formats=("webm",), post=None):
     return _matte_impl(video_url, windows, quality, model_name,
-                       list(formats), "T4")
+                       list(formats), "T4", post=post)
 
 
 @app.function(gpu="L4", memory=16384, timeout=1200)
 def matte_windows_l4(video_url, windows, quality="fast",
-                     model_name="mobilenetv3", formats=("webm",)):
+                     model_name="mobilenetv3", formats=("webm",), post=None):
     return _matte_impl(video_url, windows, quality, model_name,
-                       list(formats), "L4")
+                       list(formats), "L4", post=post)
