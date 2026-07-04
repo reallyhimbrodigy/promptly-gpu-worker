@@ -176,6 +176,233 @@ def _face_clear_anchor(band, sw_s, ew_s, face_traj, component=""):
     except Exception:
         return band, False
 
+
+# ── MG truth, readability & clearance validators (F5/F6/F7 · launch wave) ───
+#
+# Design law: shape/content-class problems RAISE into the repair net with
+# model-actionable messages; the model rewrites. Nothing is dropped, hidden,
+# or snapped. Exhibit class: the model copying the MG catalog's example props
+# ("1. The Missing Piece" genre advice) onto a real user's video — content
+# absent from the dialogue, on screen too briefly to read, over the face.
+
+_MG_GROUNDING_THRESHOLD = 0.6   # F5: min fraction of content words in the known set
+_MG_READ_BASE_S = 0.8           # F6: base reading time
+_MG_READ_PER_WORD_S = 0.35      # F6: per content word
+_MG_READ_FLOOR_S = 1.5          # F6: absolute minimum window
+_MG_FACE_CLEAR_THRESHOLD = 0.35  # F7: same bar as _face_clear_anchor
+
+_MG_STOPWORDS = frozenset(
+    "a an the and or but if then than so to of in on at for from by with as "
+    "is are was be been being it its this that these those you your yours we "
+    "our ours i my me mine they their them he she his her him what how why "
+    "when where who which do does did done can could will would should shall "
+    "may might must just not no yes up down out over under again once more "
+    "most some any all both each few other such only own same too very s t "
+    "don now get got has have had having there here about into through".split()
+)
+
+# Text-bearing prop fields per MG type — mirrors the prompt catalog (the sole
+# prop map; props are otherwise an opaque dict end-to-end). Paths: "field",
+# "list[]", "list[].field", "obj.field". Enum/color/numeric knobs are not text.
+_MG_TEXT_FIELDS = {
+    "StatCard": ("label", "prefix", "suffix"),
+    "NumberTicker": ("prefix", "suffix"),
+    "ProgressBar": ("label",),
+    "BarRace": ("bars[].label",),
+    "RankedList": ("items[].label", "items[].value", "items[].rank"),
+    "StickyNotes": ("notes[].text",),
+    "PillCluster": ("tags[]",),
+    "PillMarquee": ("pills[]",),
+    "DropBanner": ("title", "subtitle", "points[].title", "points[].caption"),
+    "DropCard": ("title", "titleLead", "steps[].label", "points[].title", "points[].caption"),
+    "IconLabel": ("label",),
+    "PullQuote": ("text", "keywords[]"),
+    "TweetBubble": ("name", "handle", "text"),
+    "InstagramComment": ("username", "comment", "timestamp"),
+    "TikTokComment": ("username", "comment"),
+    "IMessageBubble": ("text",),
+    "ChatThread": ("messages[].text", "header.name", "header.subtitle"),
+    "Notification": ("notifications[].appName", "notifications[].title",
+                     "notifications[].body", "notifications[].timestamp"),
+    "EditorialQuote": ("text", "author", "role"),
+    "RecordingFrame": ("annotations[].label",),  # `value` carries special tokens
+    "MouseDrag": ("label",),
+    "Stamp": ("text", "subtextTop", "subtextBottom"),
+    "Timeline": ("steps[].label", "steps[].description"),
+    "TimelineRoadmap": ("steps[].label", "steps[].sublabel"),
+    "StepDivider": ("title", "kicker"),
+    "SectionDivider": ("title", "label", "number"),
+    "AnnotationArrow": (),
+    "Reticle": ("label",),
+}
+
+# F5.3 — numbers-only components: the NUMBER itself must exist in the
+# transcript's numerals (spelled or digit form; vibe/identity numerals count).
+_MG_NUMBER_FIELDS = {
+    "StatCard": ("value", "fromValue"),
+    "NumberTicker": ("value", "fromValue"),
+}
+
+_MG_WORD_NUMBERS = {
+    "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11,
+    "twelve": 12, "fifteen": 15, "twenty": 20, "thirty": 30, "forty": 40,
+    "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90,
+    "hundred": 100, "thousand": 1000, "million": 1000000, "billion": 10**9,
+}
+
+# Full-height card classes for F7 — these occupy more than one anchor band at
+# their fitted size, so clearance is judged on the band PAIR.
+_MG_FULLSIZE_TYPES = frozenset({
+    "DropBanner", "DropCard", "SectionDivider", "StepDivider", "Timeline",
+    "TimelineRoadmap", "ChatThread", "RankedList", "BarRace", "Notification",
+})
+
+
+def _mg_norm_token(w):
+    return "".join(ch for ch in str(w).lower() if ch.isalnum())
+
+
+def _mg_token_variants(tok):
+    """Light stemming both ways — 'videos'→'video', 'editing'→'edit'."""
+    out = {tok}
+    for suf in ("ing", "ed", "es", "s", "ly"):
+        if tok.endswith(suf) and len(tok) - len(suf) >= 3:
+            out.add(tok[: -len(suf)])
+    return out
+
+
+def _mg_iter_text_values(mg_type, props):
+    """Yield (path, string) for every text-bearing field present in props."""
+    if not isinstance(props, dict):
+        return
+    for path in _MG_TEXT_FIELDS.get(mg_type, ()):
+        try:
+            if path.endswith("[]"):  # list of strings
+                for v in props.get(path[:-2]) or []:
+                    if isinstance(v, str) and v.strip():
+                        yield path, v
+            elif "[]." in path:  # list of objects
+                lst, field = path.split("[].", 1)
+                for item in props.get(lst) or []:
+                    if isinstance(item, dict):
+                        v = item.get(field)
+                        if isinstance(v, str) and v.strip():
+                            yield path, v
+            elif "." in path:  # nested object
+                obj, field = path.split(".", 1)
+                parent = props.get(obj)
+                if isinstance(parent, dict):
+                    v = parent.get(field)
+                    if isinstance(v, str) and v.strip():
+                        yield path, v
+            else:
+                v = props.get(path)
+                if isinstance(v, str) and v.strip():
+                    yield path, v
+        except Exception:
+            continue  # malformed shapes are the schema's problem, not F5's
+
+
+def _mg_known_sets(dg_words, removed_indices, vibe, video_identity):
+    """(token set, number set) = kept transcript ∪ user vibe ∪ video_identity."""
+    removed = set(removed_indices or ())
+    tokens = set()
+    numbers = set()
+
+    def _feed(text):
+        for raw in str(text or "").split():
+            tok = _mg_norm_token(raw)
+            if not tok:
+                continue
+            tokens.update(_mg_token_variants(tok))
+            if any(ch.isdigit() for ch in tok):
+                digits = "".join(ch for ch in tok if ch.isdigit() or ch == ".")
+                try:
+                    numbers.add(float(digits))
+                except ValueError:
+                    pass
+            elif tok in _MG_WORD_NUMBERS:
+                numbers.add(float(_MG_WORD_NUMBERS[tok]))
+
+    for i, w in enumerate(dg_words or []):
+        if i in removed:
+            continue
+        _feed(w.get("punctuated_word") or w.get("word") or "")
+    _feed(vibe)
+    _feed(video_identity)
+    return tokens, numbers
+
+
+def _mg_grounding_fraction(text, known_tokens):
+    """Fraction of content words present in the known set. Numerals always
+    pass. Pure-stopword/empty text passes (nothing to ground)."""
+    content = []
+    for raw in str(text).split():
+        tok = _mg_norm_token(raw)
+        if tok and tok not in _MG_STOPWORDS:
+            content.append(tok)
+    if not content:
+        return 1.0
+    hits = 0
+    for tok in content:
+        if any(ch.isdigit() for ch in tok):
+            hits += 1
+        elif _mg_token_variants(tok) & known_tokens:
+            hits += 1
+    return hits / len(content)
+
+
+def _mg_content_word_count(mg_type, props):
+    """Content words across ALL text fields (numerals count — they're read)."""
+    n = 0
+    for _path, text in _mg_iter_text_values(mg_type, props):
+        for raw in str(text).split():
+            tok = _mg_norm_token(raw)
+            if tok and tok not in _MG_STOPWORDS:
+                n += 1
+    return n
+
+
+def _mg_reading_floor_s(content_words):
+    return max(_MG_READ_FLOOR_S,
+               _MG_READ_BASE_S + _MG_READ_PER_WORD_S * content_words)
+
+
+def _mg_clear_region_exists(mg_type, sw_s, ew_s, face_traj):
+    """F7 — does ANY anchor band clear the dense-face trajectory at this
+    card's fitted size? Full-size classes are judged on band PAIRS (they
+    occupy more than one band). Fail-open (True) when face data is absent."""
+    try:
+        if not face_traj:
+            return True
+        _BANDS = {"top": (120.0, 640.0), "center": (640.0, 1280.0),
+                  "bottom": (1280.0, 1800.0)}
+        pts = [p for p in face_traj
+               if isinstance(p, dict) and p.get("found")
+               and (sw_s - 0.5) <= float(p.get("t") or 0.0) <= (ew_s + 0.5)]
+        if not pts:
+            return True
+        FH = 600.0
+
+        def band_overlap(y0, y1, span):
+            cov = 0.0
+            for p in pts:
+                fy0 = float(p.get("cy") or 960.0) - FH / 2.0
+                fy1 = fy0 + FH
+                cov += max(0.0, min(y1, fy1) - max(y0, fy0)) / FH
+            return cov / len(pts)
+
+        if mg_type in _MG_FULLSIZE_TYPES:
+            regions = [(120.0, 1280.0), (640.0, 1800.0)]  # top+center · center+bottom
+        else:
+            regions = list(_BANDS.values())
+        return any(band_overlap(y0, y1, y1 - y0) <= _MG_FACE_CLEAR_THRESHOLD
+                   for y0, y1 in regions)
+    except Exception:
+        return True  # fail-open, like every face-data consumer
+
+
 # ── Pydantic EditPlan schema ─────────────────────────────────────────────────
 # Gemini's response_json_schema enforces this at token-generation time — the
 # model cannot emit missing fields, wrong types, or out-of-enum values. Python
@@ -9743,6 +9970,12 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
             _mg_kept_set = (
                 set(range(len(_dg_words))) - set(_removed_word_indices or set())
             )
+            # F5 grounding sources — computed once per validation attempt:
+            # kept transcript ∪ user vibe ∪ video_identity (numerals from all).
+            _mg_known_tokens, _mg_known_numbers = _mg_known_sets(
+                _dg_words, _removed_word_indices, vibe,
+                edit_plan.get("video_identity"),
+            )
             validated_mg = []
             for _i, _mg in enumerate(raw_mg):
                 if not isinstance(_mg, dict):
@@ -9840,6 +10073,62 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                 # time — same precision bug class as the emphasis-moment one.
                 _sw_start = float(_dg_words[_sw].get("start") or 0)
                 _ew_end = float(_dg_words[_ew].get("end") or 0)
+
+                # ── F5: content grounding — card text must come from the
+                # dialogue (∪ vibe ∪ identity). Numerals always pass here;
+                # numbers-only components get the stricter check below.
+                for _f5_path, _f5_text in _mg_iter_text_values(_mg_type, _props):
+                    _f5_frac = _mg_grounding_fraction(_f5_text, _mg_known_tokens)
+                    if _f5_frac < _MG_GROUNDING_THRESHOLD:
+                        raise ValueError(
+                            f"MG {_mg_type} at word {_sw}: card text must be drawn "
+                            f"from the dialogue — \"{_f5_text}\" appears nowhere in it. "
+                            f"Rewrite from the speaker's own words or remove the card."
+                        )
+                # F5.3: StatCard/NumberTicker values validate against the
+                # transcript's numerals (spelled or digit; vibe/identity count).
+                for _f5_nf in _MG_NUMBER_FIELDS.get(_mg_type, ()):
+                    _f5_nv = _props.get(_f5_nf)
+                    if _f5_nv is None:
+                        continue
+                    try:
+                        _f5_num = float(_f5_nv)
+                    except (TypeError, ValueError):
+                        continue  # non-numeric value is a schema-shape concern
+                    if _f5_num not in _mg_known_numbers:
+                        raise ValueError(
+                            f"MG {_mg_type} at word {_sw}: card text must be drawn "
+                            f"from the dialogue — \"{_f5_nf}={_f5_nv}\" appears nowhere in it. "
+                            f"Rewrite from the speaker's own words or remove the card."
+                        )
+
+                # ── F6: reading-time floor — viewers must be able to READ it.
+                _f6_words = _mg_content_word_count(_mg_type, _props)
+                if _f6_words > 0:
+                    _f6_window = (
+                        float(_dur_override) if _dur_override is not None
+                        else (_ew_end - _sw_start)
+                    )
+                    _f6_floor = _mg_reading_floor_s(_f6_words)
+                    if _f6_window < _f6_floor:
+                        raise ValueError(
+                            f"{_mg_type} at word {_sw} shows {_f6_words} words for "
+                            f"{_f6_window:.1f}s; viewers need ~{_f6_floor:.1f}s — "
+                            f"shorten the text or widen the window."
+                        )
+
+                # ── F7: clear-region rule — an oversized card with no
+                # face-clear anchor at its fitted size cannot be placed.
+                # Fail-open when face data is absent (inside the helper).
+                if not _mg_clear_region_exists(
+                    _mg_type, _sw_start, _ew_end, _smoothed_trajectory
+                ):
+                    raise ValueError(
+                        f"{_mg_type} at word {_sw}: no face-clear region exists for "
+                        f"a card this size — reduce its content, or move it to a "
+                        f"window where the speaker sits lower/off-center."
+                    )
+
                 validated_mg.append({
                     "type": _mg_type,
                     "start_word_index": _sw,
@@ -10148,6 +10437,17 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                         _mg_props = {}
                     if not isinstance(_mg_props, dict):
                         raise ValueError(f"emphasis_moments[{_ei}].motion_graphic.props must be object")
+                    # F5 grounding applies to emphasis-nested MGs identically —
+                    # same known set, same message contract (word = the moment's
+                    # first anchor word).
+                    _f5_em_word = (em.get("word_indices") or [0])[0]
+                    for _f5_path, _f5_text in _mg_iter_text_values(_mgt, _mg_props):
+                        if _mg_grounding_fraction(_f5_text, _mg_known_tokens) < _MG_GROUNDING_THRESHOLD:
+                            raise ValueError(
+                                f"MG {_mgt} at word {_f5_em_word}: card text must be drawn "
+                                f"from the dialogue — \"{_f5_text}\" appears nowhere in it. "
+                                f"Rewrite from the speaker's own words or remove the card."
+                            )
                     _mg_out = {"type": _mgt, "anchor": _anc, "props": _mg_props}
                 _em_word_parts = []
                 for idx in _wis:
@@ -10773,6 +11073,15 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                             flush=True,
                         )
                         continue
+                    # F5 grounding — the sticky_note overlay renders the SAME
+                    # StickyNotes component as the MG; same content law.
+                    for _f5_note in _entry["notes"]:
+                        if _mg_grounding_fraction(_f5_note["text"], _mg_known_tokens) < _MG_GROUNDING_THRESHOLD:
+                            raise ValueError(
+                                f"MG StickyNotes at word {_swi}: card text must be drawn "
+                                f"from the dialogue — \"{_f5_note['text']}\" appears nowhere in it. "
+                                f"Rewrite from the speaker's own words or remove the card."
+                            )
                 elif _var == "caption_match":
                     # text + position are variant-required but schema-OPTIONAL, so Vertex
                     # omits them. No text → no content → DROP (render continues). position
@@ -16214,8 +16523,20 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # start so the floor can't silently push an MG into a B-roll or
         # overlay's window — that would invoke downstream collision rules
         # and drop the overlapped component invisibly.
-        _floor_end_sec = _out_start + _MG_MIN_DURATION_SECONDS
+        # F6 backstop: the floor target is the READING floor for this card's
+        # actual text (validation enforces it in source time; projection
+        # through cuts can still shrink the output window — extend it back
+        # where the timeline has free space). Same collision cap as ever;
+        # reveal animations (~≤1s) complete well under 70% of any window
+        # that satisfies the floor.
+        _read_floor_sec = max(
+            _MG_MIN_DURATION_SECONDS,
+            _mg_reading_floor_s(_mg_content_word_count(_mg.get("type"), _mg.get("props")))
+            if _mg_content_word_count(_mg.get("type"), _mg.get("props")) > 0 else 0.0,
+        )
+        _floor_end_sec = _out_start + _read_floor_sec
         if _out_end < _floor_end_sec:
+            _pre_extend_end = _out_end
             _caps = [s for s in _boundary_starts_sec if s > _out_start]
             _caps += [s for s, mi in _other_mg_starts_sec if s > _out_start and mi != _i]
             _next_sec = min(_caps) if _caps else None
@@ -16223,6 +16544,13 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 _out_end = _floor_end_sec
             else:
                 _out_end = min(_floor_end_sec, _next_sec)
+            if _out_end > _pre_extend_end and _read_floor_sec > _MG_MIN_DURATION_SECONDS:
+                print(
+                    f"[mg-fit] extended type={_mg.get('type')} "
+                    f"+{_out_end - _pre_extend_end:.2f}s to the reading floor "
+                    f"({_read_floor_sec:.1f}s)",
+                    flush=True,
+                )
 
         _from_frame = max(0, int(round(_out_start * source_fps)))
         _to_frame = min(total_output_frames, int(round(_out_end * source_fps)))
