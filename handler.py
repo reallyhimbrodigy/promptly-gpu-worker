@@ -1581,14 +1581,13 @@ def fetch_platform_style_pulse():
         # column after the last path element). Over-fetch 4× the window, then
         # keep the newest rows that actually carry vocab (older builds wrote
         # none) — "the last 50 vocab rows", not "the last 50 rows".
-        # Status match is two-spelling: the worker's terminal write says
-        # "complete"; the app's own completion write respells it "completed"
-        # (and today also clobbers result — see the pre-freeze report). Either
-        # spelling marks a delivered edit.
+        # Canonical status vocabulary: "completed" marks a delivered edit
+        # (the reconciliation normalized spellings; the worker's old
+        # "complete" write bounced off valid_status and never landed).
         result = (
             supabase.table(table)
             .select("result->vocab->>caption_style")
-            .in_("status", ["complete", "completed"])
+            .eq("status", "completed")
             .order("created_at", desc=True)
             .limit(_PLATFORM_PULSE_WINDOW * 4)
             .execute()
@@ -19359,7 +19358,13 @@ def write_job_status(job_id, *, status=None, phase=None, progress=None, result=N
     partial_state column; jsonb, so it holds the plan + transcript."""
     if supabase is None or not job_id or not _job_status_enabled():
         return
-    _terminal = status in ("complete", "failed", "canceled", "needs_input")
+    # Canonical status vocabulary (Step 2 of the status reconciliation):
+    # queued/processing/completed/failed/canceled/needs_input. The old
+    # "complete" spelling BOUNCED off video_jobs.valid_status (check 23514)
+    # and PostgREST drops the WHOLE patch atomically on a bounce — the
+    # terminal result payload (floor markers + vocab) never landed. One
+    # vocabulary everywhere; no both-spellings tax.
+    _terminal = status in ("completed", "failed", "canceled", "needs_input")
     table = os.environ.get("PROMPTLY_JOB_TABLE") or "jobs"
     status_col = os.environ.get("PROMPTLY_JOB_STATUS_COLUMN") or "status"
     if progress is not None:
@@ -23675,7 +23680,7 @@ def handler(job):
         # Carries the floor markers (Part 3) so degradation-rate is a SQL
         # query over result jsonb, not a log grep.
         write_job_status(
-            job_id, status="complete", phase="Done", progress=100,
+            job_id, status="completed", phase="Done", progress=100,
             result={
                 "video_url": result_payload.get("video_url"),
                 "hls_manifest_url": result_payload.get("hls_manifest_url"),

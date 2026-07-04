@@ -4028,7 +4028,7 @@ def _terminal_telemetry_wiring():
     # Behavioral coverage: test_floor_telemetry.py + test_vocab_and_orphan.py.
     # This pins the WIRING a refactor could silently drop.
     _src = open("handler.py").read()
-    _c = _src.find('status="complete", phase="Done"')
+    _c = _src.find('status="completed", phase="Done"')
     assert _c != -1, "complete terminal write missing"
     _win = _src[_c:_c + 700]
     assert "**_floor_markers(_floor_state)" in _win, "complete write lost floor markers"

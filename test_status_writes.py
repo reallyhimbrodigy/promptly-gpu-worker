@@ -113,7 +113,7 @@ def _w6(stub):
     job = {"input": {"job_id": "j-resc", "video_url": "u", "vibe": "v",
                      "user_id": "u1", "upload_url": "up"}}
     def fake_inner(j):
-        H.write_job_status(j["input"]["job_id"], status="complete", phase="Done",
+        H.write_job_status(j["input"]["job_id"], status="completed", phase="Done",
                            progress=100, result={"video_url": "https://cdn/v.mp4"})
         return {"status": "success", "video_url": "https://cdn/v.mp4"}
     import time as _t
@@ -122,7 +122,7 @@ def _w6(stub):
                                 {"error_code": "UNKNOWN"}, state, run_fn=fake_inner)
 out, stub, o = flag_on(_w6)
 check("rescued payload returned", isinstance(out, dict) and out.get("status") == "success", str(out))
-comp = [p for (t, p, j) in stub.patches if p.get("status") == "complete" and j == "j-resc"]
+comp = [p for (t, p, j) in stub.patches if p.get("status") == "completed" and j == "j-resc"]
 check("complete write landed via the inner run", len(comp) == 1, str(stub.patches))
 
 print("\n=== W7: source pins — every early return is write-covered ===")

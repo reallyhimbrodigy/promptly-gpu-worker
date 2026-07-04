@@ -92,7 +92,7 @@ check("sink collected the drop", sink == ["broll"])
 
 print("\n=== F6: terminal writes carry the markers (wire pins) ===")
 src = open("handler.py").read()
-_complete = src.find('status="complete", phase="Done"')
+_complete = src.find('status="completed", phase="Done"')
 check("complete write spreads markers",
       "**_floor_markers(_floor_state)" in src[_complete:_complete + 400])
 _failed = src.find('status="failed", phase="Something went wrong"', src.find("classified = classify_error(e)"))

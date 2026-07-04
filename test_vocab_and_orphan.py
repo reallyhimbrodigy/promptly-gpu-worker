@@ -37,7 +37,7 @@ check("junk-safe", isinstance(H._vocab_markers(None), dict) and H._vocab_markers
 
 print("\n=== V2: complete write carries result.vocab (wire pin) ===")
 src = open("handler.py").read()
-_c = src.find('status="complete", phase="Done"')
+_c = src.find('status="completed", phase="Done"')
 check("vocab in the complete terminal write",
       '"vocab": _vocab_markers(edit_plan)' in src[_c:_c + 700])
 

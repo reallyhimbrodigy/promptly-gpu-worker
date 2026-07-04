@@ -77,8 +77,8 @@ check("top-1 line verbatim",
 check("queries the job table by env", fake.calls.get("table") == "video_jobs")
 check("arrow-path select on nested vocab",
       fake.calls.get("select") == "result->vocab->>caption_style")
-check("delivered rows only — BOTH spellings (worker 'complete', app 'completed')",
-      fake.calls.get("in") == ("status", ("complete", "completed")))
+check("delivered rows only — canonical spelling",
+      fake.calls.get("eq") == ("status", "completed"))
 check("newest first", fake.calls.get("order") == ("created_at", True))
 check("over-fetch 4x window for older no-vocab rows", fake.calls.get("limit") == 200)
 
