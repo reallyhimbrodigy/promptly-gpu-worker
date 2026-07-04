@@ -12,6 +12,7 @@ import { OverlayCutTest, type OverlayCutTestProps } from "./transitions/overlays
 import { FitSpecimen } from "./FitSpecimen";
 import { BehindSpecimen } from "./BehindSpecimen";
 import { AlphaProbe } from "./AlphaProbe";
+import { FootprintProbe } from "./FootprintProbe";
 
 /**
  * Remotion root — two production compositions:
@@ -166,6 +167,15 @@ export const RemotionRoot: React.FC = () => {
         fps={30}
         durationInFrames={30}
         defaultProps={{ alphaUrl: "" } as unknown as Record<string, unknown>}
+      />
+      <Composition
+        id="FootprintProbe"
+        component={FootprintProbe as unknown as React.FC<Record<string, unknown>>}
+        width={1080}
+        height={1920}
+        fps={60}
+        durationInFrames={300}
+        defaultProps={{ candidate: "DropBanner" } as unknown as Record<string, unknown>}
       />
     </>
   );
