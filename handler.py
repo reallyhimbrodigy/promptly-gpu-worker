@@ -18618,6 +18618,25 @@ class RecipeInvalidError(ValueError):
     generate_edit_gemini."""
 
 
+# ── Intake duration cap (pre-freeze F3) ─────────────────────────────────────
+# Boundary-probed against the deployed build in a Vertex-healthy window
+# (2026-07-03, after correcting for a ~1h editorial-scale brownout that
+# contaminated the first probe round): 74.9s, 90.4s and 110.4s sources all
+# deliver a FULL recipe; 149.9s reliably FLOORS — the Gemini editorial call
+# hits its 480s client timeout, the safe-edit fallback delivers a bare
+# CleanCut edit in ~710s, grazing the 900s Modal ceiling. An honest fast
+# reject before ANY spend beats a decoration-free delivery near the timeout
+# cliff. Cap per the ratified decision tree: 110s passes → 120s. Root fix
+# (duration-scaled editorial budget / provisioned throughput) is ledgered
+# post-launch (F1) and must re-run these probes before the cap moves up.
+_MAX_SOURCE_DURATION_S = 120.0
+
+
+def _clip_cap_minutes_label():
+    """The cap as a clean minutes string for the user message (120 → '2')."""
+    return "%g" % round(_MAX_SOURCE_DURATION_S / 60.0, 2)
+
+
 def classify_error(e):
     """
     Convert a pipeline exception into structured error data for the iOS app.
@@ -18680,6 +18699,12 @@ def classify_error(e):
         )
 
     # ── Fast input rejections (honest, requires a different input) ──
+    if "CLIP_TOO_LONG" in msg:
+        return _e(
+            "CLIP_TOO_LONG",
+            f"Promptly currently edits clips up to {_clip_cap_minutes_label()} minutes — trim and resubmit.",
+            retryable=False, new_video=True,
+        )
     if "NO_SPEECH" in msg:
         return _e(
             "NO_SPEECH",
@@ -19070,6 +19095,7 @@ def _enhancement_guard(subsystem, err, sink=None):
 #                     the safe recipe itself failed validation), or the source/
 #                     transcript never materialized to build a safe edit from.
 _OUTER_RESCUE_DENY = frozenset({
+    "CLIP_TOO_LONG",
     "NO_SPEECH", "NOT_TALKING_HEAD", "INVALID_SOURCE_URL", "INVALID_FORMAT",
     "WRONG_ORIENTATION", "EMPTY_UPLOAD",
     "UPLOAD_NEVER_STARTED", "UPLOAD_STALLED", "UPLOAD_TIMEOUT",
@@ -20670,6 +20696,32 @@ def handler(job):
         # Quick probe of raw source for duration (needed for face detect timestamps)
         # Uses cached probe — same data reused by analyze_source_video, probe_resolution, etc.
         source_duration = probe_duration(source_path) or 0
+
+        # ─── INTAKE DURATION CAP (pre-freeze F3) ──────────────────────
+        # Fires immediately after the duration probe and BEFORE any spend
+        # (Deepgram, Gemini upload, editorial call, GPU render). Sources
+        # past the boundary-probed cap reliably land on the safe-edit
+        # floor via the 480s editorial timeout — an honest reject with a
+        # trim message beats a ~710s bare delivery near the 900s ceiling.
+        # FRESH INTAKE ONLY (mode == "full"): the re-edit rails (tweak /
+        # guided_redraft / reinterpret) resubmit the ORIGINAL source, so
+        # "trim and resubmit" is unsatisfiable there and videos delivered
+        # before the cap existed must stay re-editable — nothing new may
+        # kill a job that would previously deliver; they keep pre-cap
+        # behavior (worst case: safe-edit floor, still delivers).
+        # render_only replays an already-validated render. CLIP_TOO_LONG
+        # is in _OUTER_RESCUE_DENY: an input reject is never rescue-
+        # worthy. Probe failure (source_duration=0) proceeds — fail-open.
+        # NB multi-input (premium, MULTI_INPUT_ENABLED, dormant): here
+        # source_duration is the CONCATENATED total — the single-clip
+        # message is wrong for that case; reconcile the copy before
+        # flag-on (ledgered in prefreeze_ships.md).
+        if mode == "full" and source_duration > _MAX_SOURCE_DURATION_S:
+            raise RuntimeError(
+                f"CLIP_TOO_LONG: source is {source_duration:.1f}s; the intake cap "
+                f"is {_MAX_SOURCE_DURATION_S:.0f}s (boundary-probed editorial-path limit)."
+            )
+
         sample_timestamps = [round(i * 4.0, 3) for i in range(int(source_duration / 4.0) + 1)] if source_duration > 0 else []
 
         # Initialize Gemini client early so we can pre-upload
