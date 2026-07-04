@@ -259,6 +259,28 @@ _MG_FULLSIZE_TYPES = frozenset({
 })
 
 
+_ECR_TO_SEMANTIC = {"bottom": "lower_third_safe", "top": "upper_third_safe"}
+
+import re as _f8_re
+_F8_CAPTION_WORD = _f8_re.compile(r"\bcaptions?\b|\bsubtitles?\b", _f8_re.IGNORECASE)
+_F8_NEGATION = _f8_re.compile(
+    r"\b(no|not|don'?t|without|remove|skip|disable|hide)\b[\w\s,]{0,24}"
+    r"\b(captions?|subtitles?)\b", _f8_re.IGNORECASE)
+
+
+def _vibe_requests_captions(vibe):
+    """F8 override — the instruction mappings win, as everywhere: an explicit
+    captions-on ask in the vibe beats the double-caption coercion. Any
+    affirmative caption/subtitle mention counts; a negated mention
+    ("no captions", "without subtitles") does not."""
+    v = str(vibe or "")
+    if not _F8_CAPTION_WORD.search(v):
+        return False
+    if _F8_NEGATION.search(v):
+        return False
+    return True
+
+
 def _mg_norm_token(w):
     return "".join(ch for ch in str(w).lower() if ch.isalnum())
 
@@ -939,6 +961,11 @@ class PostCutPlan(BaseModel):
     indices after the call returns.
     """
     video_identity: str
+    # F8 — burned-in caption detection (watch-first identity stage). Report
+    # ONLY when clearly visible as synced word captions across multiple
+    # sampled moments — a watermark or a single title card is not a caption
+    # track. Vertex omits the field when "none" (the schema default).
+    existing_caption_region: Literal["none", "bottom", "top", "other"] = "none"
     # video_plan is the editorial scaffold Gemini fills BEFORE picking any
     # components. Forces moment-first reasoning: identify the dramatic shape
     # and the 2-4 strongest moments, then every component placed later
@@ -990,6 +1017,7 @@ class EditPlan(BaseModel):
     remove_words: List[dict]
     pacing: Literal["fast", "medium", "slow"]
     video_identity: str
+    existing_caption_region: Literal["none", "bottom", "top", "other"] = "none"
     caption_style: _CAPTION_STYLES
     caption_keywords: List[str]
     emphasis_moments: List[_EmphasisMoment]
@@ -3933,7 +3961,7 @@ DECISION ORDER — arc first, ALWAYS
 
 Emit the JSON in exactly this order, finishing each stage's reasoning before opening the next. Out-of-order thinking — picking a zoom before naming the arc — produces decisions that don't reference the spine.
 
-**Stage 1 — IDENTITY.** Decide what the video ISN'T before deciding what it is — run YOUR CUT PASS first, so every later judgment reads the footage that will actually render. Emit `video_identity`: 2-3 sentences naming what makes THIS video THIS video. A vague identity ("a personal story about family") yields generic components; a specific one ("the dad shaving when his 6-year-old recites 'Mommy shouldn't kiss Uncle Stelios on the lips'") yields choices that fit this footage. Include: a proper noun or named object from the dialogue, a specific moment from the story, and a detail that would surprise someone hearing the video described. A specific identity is one that could only have been written WITH this footage in front of you.
+**Stage 1 — IDENTITY.** Decide what the video ISN'T before deciding what it is — run YOUR CUT PASS first, so every later judgment reads the footage that will actually render. Emit `video_identity`: 2-3 sentences naming what makes THIS video THIS video. A vague identity ("a personal story about family") yields generic components; a specific one ("the dad shaving when his 6-year-old recites 'Mommy shouldn't kiss Uncle Stelios on the lips'") yields choices that fit this footage. Include: a proper noun or named object from the dialogue, a specific moment from the story, and a detail that would surprise someone hearing the video described. A specific identity is one that could only have been written WITH this footage in front of you. Also report `existing_caption_region`: when the footage already carries burned-in word captions — clearly visible as synced text across multiple sampled moments; a watermark or a single title card is not a caption track — name the band they occupy ("bottom" / "top" / "other"). When present, set caption_style to "none" (the video already has its caption layer; a second one would double it), let keyword emphasis live in zooms and motion graphics instead, and treat the reported band as occupied space your layout respects. Otherwise emit "none".
 
 **Stage 2 — VIDEO PLAN.** Emit `video_plan` IN FIELD ORDER: what_happens → hook_word_index → payoff_word_index → close_word_index → key_moments → story_shape → arc_segments → movements → editorial_vision. Each later field depends on the earlier ones — the movements fall out of the arc, and the editorial vision speaks to the movements.
 
@@ -4723,6 +4751,7 @@ Output is a bare JSON object — the response is JSON-parsed and the parser is t
 
 {{
   "video_identity": "<2-3 sentences: what makes this video specifically THIS video. Include a proper noun or named object from the dialogue, a specific moment from the story, and a detail that would surprise someone hearing it described. Phrase it as THIS video's specific identity — the concrete subject and stake; a genre-shaped phrasing ('a personal story about...') describes a thousand videos, and this field describes one.>",
+  "existing_caption_region": "none" | "bottom" | "top" | "other",  ← "none" unless burned-in word captions are clearly visible as synced text across multiple sampled moments
   "video_plan": {{
     "what_happens": "<1-2 sentences: literal narrative summary>",
     "hook_word_index": int,
@@ -9928,6 +9957,29 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                 )
             edit_plan["caption_style"] = _cs_raw
 
+            # ── F8 — double-caption prevention (belt and suspenders under the
+            # watch-first prompt teach). The watcher reports burned-in word
+            # captions via existing_caption_region; when a track is present
+            # and the user didn't explicitly ask for captions, our caption
+            # layer stands down (keyword emphasis lives in zooms/graphics).
+            # Junk/unknown region values bias to "none" — never over-strip.
+            # Applies identically on the re-edit rail (all modes traverse
+            # this span); render_only replays an already-coerced plan.
+            _ecr = str(edit_plan.get("existing_caption_region") or "none").strip().lower()
+            if _ecr not in ("none", "bottom", "top", "other"):
+                _ecr = "none"
+            edit_plan["existing_caption_region"] = _ecr
+            if (_ecr != "none" and edit_plan["caption_style"] != "none"
+                    and not _vibe_requests_captions(vibe)):
+                _record_divergence(
+                    "caption",
+                    {"style": edit_plan["caption_style"], "region": _ecr},
+                    "double_caption_prevented",
+                    final={"style": "none"},
+                    reason="source_carries_burned_in_captions",
+                )
+                edit_plan["caption_style"] = "none"
+
             # caption_keywords — required array of strings
             _ck_raw = edit_plan.get("caption_keywords")
             if not isinstance(_ck_raw, list):
@@ -10040,6 +10092,19 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                     )
                     _anchor = "center"
                 _mg["anchor"] = _anchor
+                # F8 — the reported burned-in caption band is occupied space:
+                # an MG anchored into it relocates to center (same mechanism
+                # as the platform UI zones).
+                _ecr_band = _ECR_TO_SEMANTIC.get(_ecr)
+                if _ecr_band and _anchor == _ecr_band:
+                    _record_divergence(
+                        "mg", {"type": _mg_type, "anchor": _anchor, "region": _ecr},
+                        "double_caption_prevented",
+                        final={"anchor": "center"},
+                        reason="anchored_into_burned_in_caption_band",
+                    )
+                    _anchor = "center"
+                    _mg["anchor"] = _anchor
 
                 # props has default_factory=dict in the schema → it is NOT a required
                 # field, so Gemini/Vertex OMITS it whenever the component uses default
@@ -10429,6 +10494,16 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                         )
                         _anc = "center"
                     _mg_raw["anchor"] = _anc
+                    _f8_band = _ECR_TO_SEMANTIC.get(_ecr)
+                    if _f8_band and _anc == _f8_band:
+                        _record_divergence(
+                            "mg", {"type": _mgt, "anchor": _anc, "region": _ecr},
+                            "double_caption_prevented",
+                            final={"anchor": "center"},
+                            reason="anchored_into_burned_in_caption_band",
+                        )
+                        _anc = "center"
+                        _mg_raw["anchor"] = _anc
                     # props has default_factory=dict → NOT required. Vertex omits it when
                     # the component uses default props; missing/null means {} (the schema
                     # default), only a PRESENT non-dict is a malformation.
@@ -11100,6 +11175,18 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                     _pos = str(_ov.get("position") or "").strip().lower()
                     if _pos not in ("top", "center"):
                         _pos = "top"
+                    # F8 — burned-in captions at the top: the caption_match
+                    # overlay yields the band (bottom region never collides —
+                    # this overlay only renders top|center).
+                    if _ecr == "top" and _pos == "top":
+                        _record_divergence(
+                            "overlay", {"variant": "caption_match", "position": _pos,
+                                        "region": _ecr},
+                            "double_caption_prevented",
+                            final={"position": "center"},
+                            reason="anchored_into_burned_in_caption_band",
+                        )
+                        _pos = "center"
                     _entry["position"] = _pos
                 _to_validated.append(_entry)
             edit_plan["text_overlays"] = _to_validated

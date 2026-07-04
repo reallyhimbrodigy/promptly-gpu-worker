@@ -2886,8 +2886,12 @@ def _recipe_omittable_field_contract():
         # tight_cut_overlays: R2 (directive #7) — omission-tolerant BY DESIGN
         # (every reader does .get() or []; that WAS the status quo when the
         # field didn't exist at all; kill test in test_tco_emission.py).
-        "PostCutPlan": {"cut_refinements", "generated_scenes", "notes",
-                        "tight_cut_overlays"},
+        # existing_caption_region: F8 (double-caption prevention) — omission-
+        # tolerant BY DESIGN: the coercion reads .get() or "none" and junk
+        # values bias to "none" (never over-strip); kill test in
+        # test_double_caption.py (omitted-field case).
+        "PostCutPlan": {"cut_refinements", "existing_caption_region",
+                        "generated_scenes", "notes", "tight_cut_overlays"},
         "_EmphasisMoment": {"motion_graphic", "zoom_effect"},
         "_EmphasisMotionGraphic": {"props"},
         "_ZoomEffect": {"events"},
