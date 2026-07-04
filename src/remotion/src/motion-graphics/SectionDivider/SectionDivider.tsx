@@ -221,7 +221,14 @@ export const SectionDivider: React.FC<SectionDividerProps> = ({
       <div style={wrapperStyle}>
         <div
           style={{
-            width: CONTENT_MAX_WIDTH,
+            // ALIGNMENT-SNAP fix (behind-layer Phase 1 measurement): a fixed
+            // 840px column overflows the resolver's symmetric 680px box and
+            // Chromium's safe-centering pins the overflow to the LEFT edge —
+            // the whole block landed at x=620 (+80px off the 540 the resolver
+            // promises). width:100% + maxWidth lets the column fit the box
+            // and center exactly.
+            width: "100%",
+            maxWidth: CONTENT_MAX_WIDTH,
             display: "flex",
             flexDirection: "column",
             alignItems: crossAlign,

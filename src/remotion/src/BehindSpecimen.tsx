@@ -23,6 +23,7 @@ export interface BehindSpecimenProps {
   dividerTitle?: string;
   dividerLabel?: string;
   dividerNumber?: string;
+  dividerAnchor?: string; // grid anchor (alignment-snap law): "center" | "top" | "bottom"
 }
 
 export const BehindSpecimen: React.FC<BehindSpecimenProps> = ({
@@ -38,6 +39,7 @@ export const BehindSpecimen: React.FC<BehindSpecimenProps> = ({
   dividerTitle = "HOW IT\nWORKS",
   dividerLabel = "PART ONE",
   dividerNumber = "01",
+  dividerAnchor = "center",
 }) => {
   return (
     <AbsoluteFill style={{ backgroundColor: "#000" }}>
@@ -49,17 +51,25 @@ export const BehindSpecimen: React.FC<BehindSpecimenProps> = ({
       />
       <AbsoluteFill>
         {mgType === "SectionDivider" ? (
-          <SectionDivider
-            startMs={0}
-            durationMs={60_000}
-            title={dividerTitle}
-            label={dividerLabel}
-            number={dividerNumber}
-            variant="band"
-            anchor="center"
-            offsetX={cardOffsetX}
-            offsetY={cardOffsetY}
-          />
+          // Grid translate OUTSIDE the component: the production resolver
+          // structurally forces horizontal center for non-freeHorizontal
+          // types (offsetX discarded) — the left/right-column grid anchors
+          // proposed by the alignment-snap law need a Phase-2 resolver
+          // change; the specimen demonstrates the DEFINED grid position via
+          // an external transform (identical to the measurement rig).
+          <AbsoluteFill
+            style={{ transform: `translate(${cardOffsetX}px, ${cardOffsetY}px)` }}
+          >
+            <SectionDivider
+              startMs={0}
+              durationMs={60_000}
+              title={dividerTitle}
+              label={dividerLabel}
+              number={dividerNumber}
+              variant="band"
+              anchor={dividerAnchor as never}
+            />
+          </AbsoluteFill>
         ) : (
           <StatCard
             startMs={0}

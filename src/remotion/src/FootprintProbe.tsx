@@ -50,6 +50,16 @@ const CANDIDATES: Record<string, React.ReactNode> = {
       variant="band"
     />
   ),
+  SectionDivider_band_top: (
+    <SectionDivider
+      {...TIMING}
+      title={"HOW IT\nWORKS"}
+      label="PART ONE"
+      number="01"
+      variant="band"
+      anchor="top"
+    />
+  ),
   SectionDivider_full: (
     <SectionDivider
       {...TIMING}
