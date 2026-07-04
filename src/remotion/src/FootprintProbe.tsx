@@ -60,6 +60,18 @@ const CANDIDATES: Record<string, React.ReactNode> = {
       anchor="top"
     />
   ),
+  SectionDivider_titleonly_top: (
+    <SectionDivider
+      {...TIMING}
+      title={"HOW IT\nWORKS"}
+      label="PART ONE"
+      number="01"
+      variant="band"
+      anchor="top"
+      scrimColor="rgba(0,0,0,0)"
+      vignetteStrength={0}
+    />
+  ),
   SectionDivider_full: (
     <SectionDivider
       {...TIMING}

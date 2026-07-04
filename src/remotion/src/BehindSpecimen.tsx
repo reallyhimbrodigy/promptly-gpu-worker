@@ -51,25 +51,39 @@ export const BehindSpecimen: React.FC<BehindSpecimenProps> = ({
       />
       <AbsoluteFill>
         {mgType === "SectionDivider" ? (
-          // Grid translate OUTSIDE the component: the production resolver
-          // structurally forces horizontal center for non-freeHorizontal
-          // types (offsetX discarded) — the left/right-column grid anchors
-          // proposed by the alignment-snap law need a Phase-2 resolver
-          // change; the specimen demonstrates the DEFINED grid position via
-          // an external transform (identical to the measurement rig).
-          <AbsoluteFill
-            style={{ transform: `translate(${cardOffsetX}px, ${cardOffsetY}px)` }}
-          >
+          // TRUE Phase-2 look, layers separated (zero rig artifacts): the
+          // WASH holds full-frame and untranslated; only the TITLE BLOCK
+          // translates to the defined grid anchor. (Production Phase 2 does
+          // this inside the resolver; the demo does it with two component
+          // instances — wash-only via empty title, title-only via
+          // transparent scrim + zero vignette.)
+          <>
             <SectionDivider
               startMs={0}
               durationMs={60_000}
-              title={dividerTitle}
-              label={dividerLabel}
-              number={dividerNumber}
+              title=""
+              label=""
+              number=""
+              showRule={false}
               variant="band"
               anchor={dividerAnchor as never}
             />
-          </AbsoluteFill>
+            <AbsoluteFill
+              style={{ transform: `translate(${cardOffsetX}px, ${cardOffsetY}px)` }}
+            >
+              <SectionDivider
+                startMs={0}
+                durationMs={60_000}
+                title={dividerTitle}
+                label={dividerLabel}
+                number={dividerNumber}
+                scrimColor="rgba(0,0,0,0)"
+                vignetteStrength={0}
+                variant="band"
+                anchor={dividerAnchor as never}
+              />
+            </AbsoluteFill>
+          </>
         ) : (
           <StatCard
             startMs={0}
