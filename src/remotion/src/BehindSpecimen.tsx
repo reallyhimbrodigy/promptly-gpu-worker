@@ -24,6 +24,7 @@ export interface BehindSpecimenProps {
   dividerLabel?: string;
   dividerNumber?: string;
   dividerAnchor?: string; // grid anchor (alignment-snap law): "center" | "top" | "bottom"
+  badge?: string; // Round-2 provenance: burned-in corner label (rung + config)
 }
 
 export const BehindSpecimen: React.FC<BehindSpecimenProps> = ({
@@ -40,6 +41,7 @@ export const BehindSpecimen: React.FC<BehindSpecimenProps> = ({
   dividerLabel = "PART ONE",
   dividerNumber = "01",
   dividerAnchor = "center",
+  badge = "",
 }) => {
   return (
     <AbsoluteFill style={{ backgroundColor: "#000" }}>
@@ -104,6 +106,25 @@ export const BehindSpecimen: React.FC<BehindSpecimenProps> = ({
         muted
         style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }}
       />
+      {badge ? (
+        <div
+          style={{
+            position: "absolute",
+            top: 24,
+            right: 24,
+            padding: "10px 16px",
+            backgroundColor: "rgba(0,0,0,0.75)",
+            color: "#7CFC9A",
+            fontFamily: "monospace",
+            fontSize: 30,
+            fontWeight: 700,
+            borderRadius: 8,
+            zIndex: 99,
+          }}
+        >
+          {badge}
+        </div>
+      ) : null}
     </AbsoluteFill>
   );
 };

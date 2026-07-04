@@ -158,6 +158,12 @@ def _matte_impl(video_url, windows, quality, model_name, formats, gpu_label, pos
                 idxs = [torch.clamp(torch.arange(len(pha_frames)) + o, 0,
                                     len(pha_frames) - 1) for o in range(-pad, pad + 1)]
                 ph = torch.median(torch.stack([ph[i] for i in idxs]), dim=0).values
+            elif tw == 2:
+                # Round-2 D2b: lighter smoothing, half the temporal reach —
+                # mean of (t-1, t); trades less lag for less flicker damping.
+                prev = torch.clamp(torch.arange(len(pha_frames)) - 1, 0,
+                                   len(pha_frames) - 1)
+                ph = 0.5 * ph + 0.5 * ph[prev]
             if er > 0:
                 k = 2 * er + 1
                 ph = -Fnn.max_pool2d(-ph, k, stride=1, padding=er)
