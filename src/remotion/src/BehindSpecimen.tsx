@@ -1,6 +1,7 @@
 import React from "react";
 import { AbsoluteFill, OffthreadVideo } from "remotion";
 import { StatCard } from "./motion-graphics/StatCard";
+import { SectionDivider } from "./motion-graphics/SectionDivider";
 
 // ---------------------------------------------------------------------------
 // BehindSpecimen — behind-layer Phase 1 harness (BRANCH-ONLY, never deployed).
@@ -18,6 +19,10 @@ export interface BehindSpecimenProps {
   cardSuffix?: string;
   cardOffsetX?: number;
   cardOffsetY?: number;
+  mgType?: string; // "StatCard" (default) | "SectionDivider" (act-break specimen)
+  dividerTitle?: string;
+  dividerLabel?: string;
+  dividerNumber?: string;
 }
 
 export const BehindSpecimen: React.FC<BehindSpecimenProps> = ({
@@ -29,6 +34,10 @@ export const BehindSpecimen: React.FC<BehindSpecimenProps> = ({
   cardSuffix = "",
   cardOffsetX = 0,
   cardOffsetY = 0,
+  mgType = "StatCard",
+  dividerTitle = "HOW IT\nWORKS",
+  dividerLabel = "PART ONE",
+  dividerNumber = "01",
 }) => {
   return (
     <AbsoluteFill style={{ backgroundColor: "#000" }}>
@@ -39,17 +48,31 @@ export const BehindSpecimen: React.FC<BehindSpecimenProps> = ({
         style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }}
       />
       <AbsoluteFill>
-        <StatCard
-          startMs={0}
-          durationMs={60_000}
-          value={cardValue}
-          label={cardLabel}
-          suffix={cardSuffix}
-          accentColor="#F5A11E"
-          anchor="center"
-          offsetX={cardOffsetX}
-          offsetY={cardOffsetY}
-        />
+        {mgType === "SectionDivider" ? (
+          <SectionDivider
+            startMs={0}
+            durationMs={60_000}
+            title={dividerTitle}
+            label={dividerLabel}
+            number={dividerNumber}
+            variant="band"
+            anchor="center"
+            offsetX={cardOffsetX}
+            offsetY={cardOffsetY}
+          />
+        ) : (
+          <StatCard
+            startMs={0}
+            durationMs={60_000}
+            value={cardValue}
+            label={cardLabel}
+            suffix={cardSuffix}
+            accentColor="#F5A11E"
+            anchor="center"
+            offsetX={cardOffsetX}
+            offsetY={cardOffsetY}
+          />
+        )}
       </AbsoluteFill>
       <OffthreadVideo
         src={alphaUrl}
