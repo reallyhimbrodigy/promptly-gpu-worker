@@ -5909,7 +5909,12 @@ def detect_dead_air(
     # Silent-failure visibility (the mode behind "seconds of silence left
     # in"): zero regions on a source of any real length means dead-air
     # cutting is INACTIVE this job — loud warning instead of a quiet zero.
-    if not silence_regions and kept and float(kept[-1].get("end") or 0.0) > 10.0:
+    # kept holds INT INDICES into words (see its construction above) — the
+    # dereference must go through words[]. The prior direct .get() only ever
+    # executed on zero-VAD sources (pre-edited/tight uploads) and crashed
+    # them at intake (2026-07-04, user 048c366f ×2). Zero regions now flow
+    # through: zero mechanical dead-air cuts, full video to Gemini.
+    if not silence_regions and kept and float(words[kept[-1]].get("end") or 0.0) > 10.0:
         print(
             "[dead-air] WARNING: VAD produced zero regions — dead-air "
             "cutting inactive this job",
@@ -19416,7 +19421,11 @@ def write_job_status(job_id, *, status=None, phase=None, progress=None, result=N
                      partial_state=None):
     """Patch the durable video_jobs row. SYNCHRONOUS, fail-open, monotonic. No-op
     unless the flag is on. Terminal statuses (complete/failed/canceled/needs_input)
-    always write; intermediate progress never regresses.
+    always write; intermediate progress never regresses. NOTHING lands on a
+    failed/canceled row (v195 hard-terminal fence — a DB-side predicate, because
+    the in-process guard below is writer-local and the app's cancel is invisible
+    to it; RUN 3 observed a post-cancel heartbeat tick resurrect a canceled row).
+    Soft terminals (needs_input) stay open for the resume rail.
 
     `partial_state` (Phase D ask-back): the everything-computed-so-far blob
     (recipe/transcript/quality signals) persisted alongside a needs_input write
@@ -19472,7 +19481,16 @@ def write_job_status(job_id, *, status=None, phase=None, progress=None, result=N
         if partial_state is not None:
             patch["partial_state"] = partial_state
         try:
-            supabase.table(table).update(patch).eq("id", job_id).execute()
+            # HARD-TERMINAL FENCE (v195): invariants that span writers live where
+            # the writers meet. failed/canceled only — needs_input must accept the
+            # resume run's writes, and a terminal re-write stays legal. Zero
+            # matched rows = the fence declining (logged; that log IS the proof
+            # in the cancel-run redux).
+            _resp = supabase.table(table).update(patch).eq("id", job_id).not_.in_(
+                status_col, ("failed", "canceled")).execute()
+            if not (getattr(_resp, "data", None) or []):
+                print(f"[job-status] fence declined job={job_id} "
+                      f"patch_keys={sorted(patch.keys())} matched=0", flush=True)
         except Exception as e:
             print(f"[job-status] write failed job={job_id}: {e} (fail open)", flush=True)
         if _terminal:

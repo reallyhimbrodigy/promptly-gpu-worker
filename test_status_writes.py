@@ -16,21 +16,45 @@ def check(name, cond, detail=""):
     print(f"  {'PASS' if cond else 'FAIL'}  {name}" + (f"   :: {detail}" if (detail and not cond) else ""))
 
 class StubSupabase:
+    """Models the fence: `.not_.in_(status_col, vals)` declines when the row's
+    current status is in vals — mirroring PostgREST's conditional UPDATE.
+    row_status defaults to 'processing' so every pre-fence case still lands."""
     def __init__(self):
         self.patches = []      # (table, patch, job_id)
         self.raise_next = False
+        self.row_status = "processing"
     def table(self, name):
         outer = self
+        class _Resp:
+            def __init__(self, data):
+                self.data = data
         class _T:
             def update(self, patch):
                 class _U:
                     def eq(self, col, jid):
                         class _E:
+                            @property
+                            def not_(_s):
+                                class _N:
+                                    def in_(_n, col2, vals):
+                                        class _F:
+                                            def execute(_f):
+                                                if outer.raise_next:
+                                                    outer.raise_next = False
+                                                    raise RuntimeError("supabase down")
+                                                if outer.row_status in tuple(vals):
+                                                    return _Resp([])  # fence declines
+                                                outer.patches.append((name, patch, jid))
+                                                return _Resp([{"id": jid}])
+                                        return _F()
+                                return _N()
                             def execute(_s):
+                                # unfenced legacy chain (kept so a regression to it FAILS loudly)
                                 if outer.raise_next:
                                     outer.raise_next = False
                                     raise RuntimeError("supabase down")
-                                outer.patches.append((name, patch, jid))
+                                outer.patches.append((name, patch, jid, "UNFENCED"))
+                                return _Resp([{"id": jid}])
                         return _E()
                 return _U()
         return _T()
@@ -149,6 +173,48 @@ def _guard_case(stub):
     check("a terminal RE-write still lands (needs_input->resume->terminal class)",
           any(p.get("status") == "failed" for p in term2))
 flag_on(_guard_case)
+
+print("=== F1: CANCEL FENCE — terminal write DECLINES on a canceled row ===")
+def _fence_terminal(stub):
+    stub.row_status = "canceled"
+    H.write_job_status("j-fence1", status="completed", phase="Done", progress=100,
+                       result={"video_url": "x", "vocab": {}})
+_, stub, logs = flag_on(_fence_terminal)
+check("no patch landed on the canceled row", len(stub.patches) == 0, str(stub.patches))
+check("fence decline logged with matched=0",
+      "fence declined job=j-fence1" in logs and "matched=0" in logs, logs[-200:])
+
+print("\n=== F2: CANCEL FENCE — heartbeat tick (the RUN-3 resurrector) DECLINES ===")
+def _fence_tick(stub):
+    stub.row_status = "canceled"
+    H.write_job_status("j-fence2", status="processing",
+                       phase="Cutting your timeline", progress=72)
+_, stub, logs = flag_on(_fence_tick)
+check("tick did not land on the canceled row", len(stub.patches) == 0, str(stub.patches))
+
+print("\n=== F3: CANCEL FENCE — failed rows equally fenced ===")
+def _fence_failed(stub):
+    stub.row_status = "failed"
+    H.write_job_status("j-fence3", status="completed", phase="Done", progress=100,
+                       result={"video_url": "x"})
+_, stub, logs = flag_on(_fence_failed)
+check("no resurrection of a failed row", len(stub.patches) == 0, str(stub.patches))
+
+print("\n=== F4: SOFT TERMINAL — needs_input stays OPEN for the resume rail ===")
+def _fence_soft(stub):
+    stub.row_status = "needs_input"
+    H.write_job_status("j-fence4", status="completed", phase="Done", progress=100,
+                       result={"video_url": "x"})
+_, stub, _ = flag_on(_fence_soft)
+check("resume terminal lands over needs_input", len(stub.patches) == 1
+      and stub.patches[0][1].get("status") == "completed", str(stub.patches))
+
+print("\n=== F5: no write rides the UNFENCED legacy chain ===")
+def _fence_chain(stub):
+    H.write_job_status("j-fence5", status="processing", phase="x", progress=10)
+_, stub, _ = flag_on(_fence_chain)
+check("every write carries the predicate",
+      all(len(p) == 3 for p in stub.patches), str(stub.patches))
 
 print(f"\n=== RESULT: {len(PASS)} passed, {len(FAIL)} failed ===")
 if FAIL:

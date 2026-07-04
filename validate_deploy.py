@@ -4222,6 +4222,35 @@ def _caption_stack_invariant():
         assert _a["startMs"] + _a["durationMs"] <= _b["startMs"], "page overlap survived"
 
 
+@check("zero-silence (5912): dead-air warning dereferences words[kept[-1]] — ints never .get()")
+def _zero_silence_shape():
+    _src = open("handler.py").read()
+    assert 'float(words[kept[-1]].get("end") or 0.0) > 10.0' in _src, \
+        "the fixed dereference is missing"
+    assert 'float(kept[-1].get(' not in _src, "the crashing direct dereference is back"
+    # behavioral: the REAL function with VAD stubbed to the zero-region result
+    _saved = handler._detect_silence_regions_vad
+    handler._detect_silence_regions_vad = lambda *a, **k: []
+    try:
+        _w = [{"word": "w", "punctuated_word": "w", "start": float(i), "end": i + 0.9}
+              for i in range(30)]
+        assert handler.detect_dead_air(_w, set(), "x.mp4") == [], \
+            "zero-silence path must produce zero dead-air cuts"
+    finally:
+        handler._detect_silence_regions_vad = _saved
+
+
+@check("cancel-fence (v195): rail UPDATE carries the hard-terminal predicate at the 19475 chokepoint")
+def _cancel_fence_wired():
+    _src = open("handler.py").read()
+    assert '.eq("id", job_id).not_.in_(' in _src, "fence predicate missing from write_job_status chain"
+    assert 'status_col, ("failed", "canceled")).execute()' in _src, \
+        "hard-terminal value set missing or reordered (must be failed+canceled ONLY — needs_input stays open)"
+    assert "fence declined job=" in _src, "zero-match decline log missing (the redux proof line)"
+    # exactly ONE rail write chain exists — the chokepoint stays the chokepoint
+    assert _src.count(".update(patch).eq(\"id\", job_id)") == 1, "a second rail write chain appeared"
+
+
 # ─── REPORT ────────────────────────────────────────────────────────────
 print(f"\n{'=' * 64}")
 print(f"RESULTS: {len(_passed)} passed, {len(_failures)} failed")
