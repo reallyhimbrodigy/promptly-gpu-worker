@@ -40,6 +40,9 @@ export interface FitFont {
    *  (matches CSS letter-spacing on an inline-block span). */
   letterSpacingEm?: number;
   uppercase?: boolean;
+  /** Models textTransform:lowercase (Prime) — caps input measured as caps
+   *  over-measures the lowercase glyphs actually rendered. */
+  lowercase?: boolean;
 }
 
 export interface FitRequest {
@@ -92,7 +95,11 @@ function getCtx(): CanvasRenderingContext2D | null {
 export type WordMeasurer = (word: string, fontSize: number, font: FitFont) => number;
 
 export const canvasMeasurer: WordMeasurer = (word, fontSize, font) => {
-  const text = font.uppercase ? word.toUpperCase() : word;
+  const text = font.uppercase
+    ? word.toUpperCase()
+    : font.lowercase
+      ? word.toLowerCase()
+      : word;
   const spacingPx = (font.letterSpacingEm ?? 0) * fontSize;
   const key = `${font.fontFamily}|${font.fontWeight}|${fontSize}|${spacingPx}|${text}`;
   const hit = _measureCache.get(key);

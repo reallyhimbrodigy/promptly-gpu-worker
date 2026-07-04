@@ -184,6 +184,7 @@ const PrimePage: React.FC<{
                 ? wordProps.line2FontWeight
                 : wordProps.line1FontWeight,
             letterSpacingEm: 0.01,
+            lowercase: true, // PrimeWord renders textTransform:"lowercase"
           },
         })),
         extraPx: 12 * line.tokens.length, // marginRight 12 on every word

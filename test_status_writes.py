@@ -134,6 +134,22 @@ _resc = src.find("_outer_safe_rescue(job, input_data, classified, _rescue_state)
 _failw = src.find('status="failed"', _resc)
 check("except path: rescue precedes the failed write", -1 < _exc < _resc < _failw)
 
+
+print("\n=== T-GUARD: first-terminal-wins — late async 'processing' cannot regress a terminal row ===")
+def _guard_case(stub):
+    H._JOB_TERMINAL_SEEN.discard("j-guard")
+    H.write_job_status("j-guard", status="completed", phase="Done", progress=100, result={"ok": True})
+    H.write_job_status("j-guard", status="processing", phase="Finalizing", progress=99)
+    term = [p for (t_, p, j) in stub.patches if j == "j-guard"]
+    check("terminal write landed", any(p.get("status") == "completed" for p in term))
+    check("late processing write dropped entirely",
+          not any(p.get("status") == "processing" for p in term) and len(term) == 1)
+    H.write_job_status("j-guard", status="failed", phase="Something went wrong", progress=100)
+    term2 = [p for (t_, p, j) in stub.patches if j == "j-guard"]
+    check("a terminal RE-write still lands (needs_input->resume->terminal class)",
+          any(p.get("status") == "failed" for p in term2))
+flag_on(_guard_case)
+
 print(f"\n=== RESULT: {len(PASS)} passed, {len(FAIL)} failed ===")
 if FAIL:
     print("FAILURES:", FAIL); sys.exit(1)

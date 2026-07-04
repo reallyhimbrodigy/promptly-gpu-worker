@@ -129,7 +129,7 @@ SEMANTIC_TO_MG_ANCHOR = {
 }
 
 
-def _face_clear_anchor(band, sw_s, ew_s, face_traj, component=""):
+def _face_clear_anchor(band, sw_s, ew_s, face_traj, component="", blocked=None):
     """Face-cover validator (PR-γ · directive #9): test the anchor BAND's rect
     against the interpolated face rect across the component's source window;
     when the face is covered beyond threshold, coerce to the alternative band
@@ -144,6 +144,19 @@ def _face_clear_anchor(band, sw_s, ew_s, face_traj, component=""):
     try:
         _BANDS = {"top": (120.0, 640.0), "center": (640.0, 1280.0),
                   "bottom": (1280.0, 1800.0)}
+        # F8 (final-wave review): a band occupied by burned-in captions is
+        # never a candidate — and a component sitting IN it must move even
+        # when the face math would have kept it there.
+        if blocked in _BANDS and band == blocked:
+            _alt = [b for b in _BANDS if b != blocked]
+            _next = "center" if "center" in _alt else _alt[0]
+            _record_divergence(
+                "anchor", {"component": component, "band": band},
+                "double_caption_prevented",
+                final={"band": _next},
+                reason="render_anchor_in_burned_in_caption_band",
+            )
+            band = _next
         if band not in _BANDS or not face_traj:
             return band, False
         _pts = [p for p in face_traj
@@ -163,7 +176,10 @@ def _face_clear_anchor(band, sw_s, ew_s, face_traj, component=""):
         _cur = _overlap(band)
         if _cur <= 0.35:
             return band, False
-        _best_ov, _best = sorted((_overlap(_b), _b) for _b in _BANDS if _b != band)[0]
+        _best_ov, _best = sorted(
+            (_overlap(_b), _b) for _b in _BANDS
+            if _b != band and _b != blocked
+        )[0]
         if _best_ov >= _cur:
             return band, False
         _record_divergence(
@@ -217,15 +233,17 @@ _MG_TEXT_FIELDS = {
     "DropCard": ("title", "titleLead", "steps[].label", "points[].title", "points[].caption"),
     "IconLabel": ("label",),
     "PullQuote": ("text", "keywords[]"),
-    "TweetBubble": ("name", "handle", "text"),
-    "InstagramComment": ("username", "comment", "timestamp"),
-    "TikTokComment": ("username", "comment"),
+    # Social chrome (name/handle/username/appName/timestamp) is structural
+    # UI dressing the catalog itself prescribes — grounding it against the
+    # dialogue false-raises (final-wave review). Only CONTENT fields ground.
+    "TweetBubble": ("text",),
+    "InstagramComment": ("comment",),
+    "TikTokComment": ("comment",),
     "IMessageBubble": ("text",),
-    "ChatThread": ("messages[].text", "header.name", "header.subtitle"),
-    "Notification": ("notifications[].appName", "notifications[].title",
-                     "notifications[].body", "notifications[].timestamp"),
+    "ChatThread": ("messages[].text",),
+    "Notification": ("notifications[].title", "notifications[].body"),
     "EditorialQuote": ("text", "author", "role"),
-    "RecordingFrame": ("annotations[].label",),  # `value` carries special tokens
+    "RecordingFrame": (),  # labels ("REC","WPM") + token values are chrome
     "MouseDrag": ("label",),
     "Stamp": ("text", "subtextTop", "subtextBottom"),
     "Timeline": ("steps[].label", "steps[].description"),
@@ -333,19 +351,26 @@ def _mg_known_sets(dg_words, removed_indices, vibe, video_identity):
     numbers = set()
 
     def _feed(text):
+        import re as _re
         for raw in str(text or "").split():
-            tok = _mg_norm_token(raw)
-            if not tok:
-                continue
-            tokens.update(_mg_token_variants(tok))
-            if any(ch.isdigit() for ch in tok):
-                digits = "".join(ch for ch in tok if ch.isdigit() or ch == ".")
-                try:
-                    numbers.add(float(digits))
-                except ValueError:
-                    pass
-            elif tok in _MG_WORD_NUMBERS:
-                numbers.add(float(_MG_WORD_NUMBERS[tok]))
+            # Split compound forms on non-alnum boundaries so "zero-dollar",
+            # "$1,000", "3.5%" ground their parts (final-wave review fix);
+            # keep the joined form too for tokens like "don't" -> "dont".
+            subs = [t for t in _re.split(r"[^0-9A-Za-z.]+", raw) if t]
+            joined = _mg_norm_token(raw)
+            for piece in subs + ([joined] if joined else []):
+                tok = _mg_norm_token(piece)
+                if not tok:
+                    continue
+                tokens.update(_mg_token_variants(tok))
+                if any(ch.isdigit() for ch in tok):
+                    digits = "".join(ch for ch in piece if ch.isdigit() or ch == ".")
+                    try:
+                        numbers.add(float(digits.rstrip(".") or "0"))
+                    except ValueError:
+                        pass
+                elif tok in _MG_WORD_NUMBERS:
+                    numbers.add(float(_MG_WORD_NUMBERS[tok]))
 
     for i, w in enumerate(dg_words or []):
         if i in removed:
@@ -10027,6 +10052,10 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                 _dg_words, _removed_word_indices, vibe,
                 edit_plan.get("video_identity"),
             )
+            # Final-wave review: violations BATCH into one raise so a single
+            # repair attempt carries every correction (first-raise-wins burned
+            # one attempt per flaw and exhausted the budget on real plans).
+            _mg_violations = []
             validated_mg = []
             for _i, _mg in enumerate(raw_mg):
                 if not isinstance(_mg, dict):
@@ -10144,7 +10173,7 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                 for _f5_path, _f5_text in _mg_iter_text_values(_mg_type, _props):
                     _f5_frac = _mg_grounding_fraction(_f5_text, _mg_known_tokens)
                     if _f5_frac < _MG_GROUNDING_THRESHOLD:
-                        raise ValueError(
+                        _mg_violations.append(
                             f"MG {_mg_type} at word {_sw}: card text must be drawn "
                             f"from the dialogue — \"{_f5_text}\" appears nowhere in it. "
                             f"Rewrite from the speaker's own words or remove the card."
@@ -10160,25 +10189,10 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                     except (TypeError, ValueError):
                         continue  # non-numeric value is a schema-shape concern
                     if _f5_num not in _mg_known_numbers:
-                        raise ValueError(
+                        _mg_violations.append(
                             f"MG {_mg_type} at word {_sw}: card text must be drawn "
                             f"from the dialogue — \"{_f5_nf}={_f5_nv}\" appears nowhere in it. "
                             f"Rewrite from the speaker's own words or remove the card."
-                        )
-
-                # ── F6: reading-time floor — viewers must be able to READ it.
-                _f6_words = _mg_content_word_count(_mg_type, _props)
-                if _f6_words > 0:
-                    _f6_window = (
-                        float(_dur_override) if _dur_override is not None
-                        else (_ew_end - _sw_start)
-                    )
-                    _f6_floor = _mg_reading_floor_s(_f6_words)
-                    if _f6_window < _f6_floor:
-                        raise ValueError(
-                            f"{_mg_type} at word {_sw} shows {_f6_words} words for "
-                            f"{_f6_window:.1f}s; viewers need ~{_f6_floor:.1f}s — "
-                            f"shorten the text or widen the window."
                         )
 
                 # ── F7: clear-region rule — an oversized card with no
@@ -10187,7 +10201,7 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                 if not _mg_clear_region_exists(
                     _mg_type, _sw_start, _ew_end, _smoothed_trajectory
                 ):
-                    raise ValueError(
+                    _mg_violations.append(
                         f"{_mg_type} at word {_sw}: no face-clear region exists for "
                         f"a card this size — reduce its content, or move it to a "
                         f"window where the speaker sits lower/off-center."
@@ -10207,6 +10221,37 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                     "props": _props,
                 })
             edit_plan["motion_graphics"] = validated_mg
+
+            # ── F6: reading-time floor, SPACE-AWARE (final-wave review): the
+            # render backstop extends short windows to the reading floor when
+            # the timeline has free space — so the validator raises only when
+            # even that extension cannot reach the floor (next MG start or the
+            # end of the video caps it; B-roll/clip caps are render-refined).
+            _mg_starts_sorted = sorted(m["_source_start"] for m in validated_mg)
+            for _vm in validated_mg:
+                _f6_words = _mg_content_word_count(_vm["type"], _vm["props"])
+                if _f6_words <= 0:
+                    continue
+                _f6_window = (
+                    float(_vm["duration_seconds_override"])
+                    if _vm["duration_seconds_override"] is not None
+                    else (_vm["_source_end"] - _vm["_source_start"])
+                )
+                _f6_floor = _mg_reading_floor_s(_f6_words)
+                if _f6_window >= _f6_floor:
+                    continue
+                _f6_nexts = [t for t in _mg_starts_sorted if t > _vm["_source_start"]]
+                _f6_space = (min(_f6_nexts) if _f6_nexts else float(duration)) - _vm["_source_start"]
+                if _f6_space >= _f6_floor:
+                    continue  # the render backstop will extend; logs [mg-fit]
+                _mg_violations.append(
+                    f"{_vm['type']} at word {_vm['start_word_index']} shows "
+                    f"{_f6_words} words for {_f6_window:.1f}s; viewers need "
+                    f"~{_f6_floor:.1f}s — shorten the text or widen the window."
+                )
+
+            if _mg_violations:
+                raise ValueError("\n".join(_mg_violations))
             if validated_mg:
                 print(f"[mg] Gemini requested {len(validated_mg)} motion graphic(s)", flush=True)
 
@@ -16655,8 +16700,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # generate_edit_gemini normalization) with a missing/None field can't
         # crash the spread — {**None} would raise. Validated plans are unchanged.
         _mg_anchor = SEMANTIC_TO_MG_ANCHOR.get(_mg.get("anchor"), "center")
+        _ecr_blocked = {"bottom": "bottom", "top": "top"}.get(
+            str(edit_plan.get("existing_caption_region") or "none"))
         _mg_anchor, _ = _face_clear_anchor(
             _mg_anchor, _sw_source, _ew_source, _face_trajectory,
+            blocked=_ecr_blocked,
             component=f"mg:{_mg.get('type')}")
         _mg_props = {**(_mg.get("props") or {}), "anchor": _mg_anchor}
         motion_graphics_out.append({
@@ -16714,7 +16762,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _em_mg_anchor = SEMANTIC_TO_MG_ANCHOR.get(em["motion_graphic"]["anchor"], "center")
             _em_mg_anchor, _ = _face_clear_anchor(
                 _em_mg_anchor, float(em["t"]), float(em["t"]) + _em_dur,
-                _face_trajectory, component=f"emphasis-mg:{em['motion_graphic'].get('type')}")
+                _face_trajectory, component=f"emphasis-mg:{em['motion_graphic'].get('type')}",
+                blocked={"bottom": "bottom", "top": "top"}.get(
+                    str(edit_plan.get("existing_caption_region") or "none")))
             _em_mg_props = {**em["motion_graphic"]["props"], "anchor": _em_mg_anchor}
             motion_graphics_out.append({
                 "type": em["motion_graphic"]["type"],
@@ -19306,7 +19356,8 @@ def classify_error(e):
 # so a process-local high-water mark is authoritative; the supabase update runs
 # UNDER the lock so the decision and the write are atomic (ordered, no race).
 _JOB_STATUS_LOCK = threading.Lock()
-_JOB_PROGRESS_HW = {}  # job_id -> highest progress written this process
+_JOB_PROGRESS_HW = {}
+_JOB_TERMINAL_SEEN = set()  # first-terminal-wins guard (bounded: one small string per job per warm container)  # job_id -> highest progress written this process
 
 # Weighted re-map: (lo, hi, live_lo, live_hi). Render is ~66% of wall-clock so it
 # gets the widest band (30->92); a naive uniform bar races then stalls at 35 for
@@ -19373,6 +19424,19 @@ def write_job_status(job_id, *, status=None, phase=None, progress=None, result=N
         except (TypeError, ValueError):
             progress = None
     with _JOB_STATUS_LOCK:
+        # First-terminal-wins (final-wave review): async intermediate writes
+        # ride daemon threads and can land AFTER the synchronous terminal
+        # write — a late "processing" status would regress a "completed" row
+        # under the app's feet. Once a job is terminal in this process, later
+        # non-terminal writes drop their status/phase/progress (the terminal
+        # row is the truth; a terminal RE-write, e.g. needs_input → resumed →
+        # completed, still lands).
+        if not _terminal and job_id in _JOB_TERMINAL_SEEN:
+            status = None
+            phase = None
+            progress = None
+        if _terminal:
+            _JOB_TERMINAL_SEEN.add(job_id)
         if progress is not None:
             hw = _JOB_PROGRESS_HW.get(job_id, -1)
             if not _terminal and progress <= hw:
@@ -19380,6 +19444,8 @@ def write_job_status(job_id, *, status=None, phase=None, progress=None, result=N
             else:
                 _JOB_PROGRESS_HW[job_id] = max(hw, progress)
         patch = {"updated_at": datetime.utcnow().isoformat()}
+        if status is None and phase is None and progress is None and result is None and partial_state is None:
+            return  # guard emptied the patch — nothing worth an UPDATE
         if status is not None:
             patch[status_col] = status
         if phase is not None:

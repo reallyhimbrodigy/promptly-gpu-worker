@@ -130,6 +130,20 @@ check("omitted field treated as none; Lumen survives",
       err is None and out and out["caption_style"] == "Lumen"
       and out["existing_caption_region"] == "none")
 
+print("\n=== D7b: render-side face-clear respects the burned band (source pins) ===")
+src0 = open("handler.py").read()
+check("_face_clear_anchor takes a blocked band",
+      'def _face_clear_anchor(band, sw_s, ew_s, face_traj, component="", blocked=None):' in src0)
+check("render MG call passes the blocked band", "blocked=_ecr_blocked" in src0)
+check("blocked band never a relocation candidate", "_b != band and _b != blocked" in src0)
+band, moved = H._face_clear_anchor("bottom", 0.0, 2.0, [], component="t", blocked="bottom")
+check("component IN the blocked band moves even without face data",
+      band == "center")
+band2, _ = H._face_clear_anchor("top", 0.0, 2.0,
+    [{"t": 0.5, "cy": 400.0, "found": True}], component="t", blocked="bottom")
+check("face-covered top band cannot relocate INTO the blocked bottom band",
+      band2 != "bottom", band2)
+
 print("\n=== D8: schema seams ===")
 src = open("handler.py").read()
 check("PostCutPlan carries the field with default",

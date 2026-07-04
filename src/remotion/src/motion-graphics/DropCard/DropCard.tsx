@@ -37,26 +37,11 @@ const SETTLE = 20; // frames for a slide to settle before its caption types
 const WORD_STEP = 4; // frames between successive words lighting up
 const WORD_FADE = 5; // per-word grey -> black fade length
 
-const DEFAULT_STEPS: DropCardStep[] = [
-  { label: "Hook" },
-  { label: "Tension" },
-  { label: "Payoff" },
-];
-
-const DEFAULT_POINTS: DropCardPoint[] = [
-  {
-    title: "1. The Missing Piece",
-    caption: "Tell them what they don’t know yet so they have to keep watching.",
-  },
-  {
-    title: "2. The Open Loop",
-    caption: "Tease the payoff early but hold the answer back until the very end.",
-  },
-  {
-    title: "3. The Payoff",
-    caption: "Deliver on the promise so the watch felt worth it and they share it.",
-  },
-];
+// F5 (final-wave review): the catalog-example fallback content that used to
+// live here ("1. The Missing Piece" genre advice) was the ACTUAL mechanism
+// behind ungrounded cards reaching real videos — the model omits points and
+// the renderer invented them. A card with no points renders its grounded
+// title/steps only; nothing is ever invented.
 
 export const DropCard: React.FC<DropCardProps> = ({
   startMs,
@@ -66,8 +51,8 @@ export const DropCard: React.FC<DropCardProps> = ({
   title,
   titleLead,
   subtitle,
-  steps = DEFAULT_STEPS,
-  points = DEFAULT_POINTS,
+  steps = [],
+  points = [],
   cardColor = "#FFFFFF",
   titleColor = "#15151E",
   subtitleColor = "#5A5A5A",

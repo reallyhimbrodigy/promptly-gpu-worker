@@ -168,6 +168,29 @@ check("short window raises",
           r"shorten the text or widen the window", str(err)) is not None,
       str(err)[:200])
 
+print("\n=== F6-1b: short window WITH free space passes (render backstop extends) ===")
+spacey = clean_plan(motion_graphics=[mg("ProgressBar",
+    {"value": 50, "total": 100, "label": "upload video"}, sw=1, ew=2)])
+# window 0.4..1.15 = 0.75s < floor 1.5s, but no neighbor and video end at 4.8s
+# → 4.4s of free space → the render backstop extends; the validator stays quiet.
+plan, err, stub, out = run_gen([spacey])
+check("space-aware validator does not raise", err is None and plan is not None,
+      str(err)[:150])
+
+print("\n=== F5-6: number normalization (final-wave review fixes) ===")
+kt, kn = H._mg_known_sets(
+    [{"word": "it's"}, {"word": "a"}, {"word": "$1,000"}, {"word": "3.5%"}, {"word": "win"}],
+    set(), "make it pop", "the zero-dollar price tag")
+check("compound '$1,000' grounds 1000", 1000.0 in kn)
+check("decimal '3.5%' grounds 3.5", 3.5 in kn)
+check("hyphenated 'zero-dollar' grounds 0", 0.0 in kn)
+
+print("\n=== F5-7: social chrome is not graded against the dialogue ===")
+check("TweetBubble name/handle exempt; text grounds",
+      H._MG_TEXT_FIELDS["TweetBubble"] == ("text",))
+check("Notification appName/timestamp exempt",
+      H._MG_TEXT_FIELDS["Notification"] == ("notifications[].title", "notifications[].body"))
+
 print("\n=== F6-2: a 4-word card at 2s passes (3 content words → floor 1.85s) ===")
 four = clean_plan(motion_graphics=[mg("IconLabel",
     {"label": "upload your video vibe"}, dur=2.0)])
@@ -231,6 +254,16 @@ check("compact card over the same centered face passes (top band clears)",
       err is None and plan is not None)
 plan, err, stub, out = run_gen([fullcard], face_traj=[])
 check("fail-open when face data is absent", err is None and plan is not None)
+
+print("\n=== F-BATCH: one raise carries every correction ===")
+multi = clean_plan(motion_graphics=[
+    mg("Stamp", {"text": "Synergy"}, sw=1, ew=2, dur=2.5),          # F5: ungrounded
+    mg("StatCard", {"value": 42, "label": "upload video"}, sw=3, ew=4, dur=2.5),  # F5.3
+])
+plan, err, stub, out = run_gen([multi])
+check("both violations in ONE raise (single repair attempt carries all)",
+      err is not None and '"Synergy"' in str(err) and 'value=42' in str(err),
+      str(err)[:250])
 
 print("\n=== W: wire pins ===")
 check("sticky_note overlay grounded (same law)",

@@ -162,7 +162,10 @@ export const Pulse: React.FC<PulseProps> = ({
   // F4 width-fit guarantee: both visible pages share one uniform scale so
   // the pair reads as one block; rows flex-wrap, so the overflow unit is a
   // single word (keywords at x1.25). Real box = the 200px-inset safe rect.
-  const fitTokens = hasSlot2
+  // Both pages of the pair inform the scale from the FIRST frame — gating
+  // on slot-2 activation made the visible line pop smaller mid-display the
+  // moment a wide second page arrived (final-wave review finding).
+  const fitTokens = slot2PageIdx < pages.length
     ? [...pages[slot1PageIdx].tokens, ...pages[slot2PageIdx].tokens]
     : pages[slot1PageIdx].tokens;
   const fit = fitScale(
