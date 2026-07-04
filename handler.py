@@ -18920,6 +18920,19 @@ def _build_tiktok_pages_from_projected(projected_words, max_words_per_page=3, po
         elif w_text and w_text[-1] in SENTENCE_END:
             _flush()
     _flush()
+    # ── SINGLE-PAINT INVARIANT (caption-stack fix, 2026-07-04) ──────────
+    # Deepgram routinely emits prosody-stretched words whose end overlaps —
+    # or fully contains — the next word ("but" 14.88-16.08 containing
+    # "luckily," 15.005-15.645 on the launch-day exhibit; "nice" containing
+    # "warm" on the towel anchor). A page's window ran to its last word's
+    # END, so an overlap at a page boundary put TWO page windows live at
+    # once and every caption style painted both (the stacked-caption bug).
+    # Non-overlap BY CONSTRUCTION: each page ends strictly at or before the
+    # next page's start. One source of pages → every style inherits it.
+    for _pi in range(len(pages) - 1):
+        _limit = pages[_pi + 1]["startMs"] - pages[_pi]["startMs"]
+        if pages[_pi]["durationMs"] > _limit:
+            pages[_pi]["durationMs"] = max(1, _limit)
     return pages
 
 

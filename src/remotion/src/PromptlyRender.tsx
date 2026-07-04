@@ -271,6 +271,25 @@ const CaptionSegmentRenderer: React.FC<{
     });
   }
   if (!clippedPages.length) return null;
+  // SINGLE-PAINT INVARIANT tripwire (caption-stack fix, 2026-07-04): the
+  // Python page builder now guarantees non-overlapping page windows by
+  // construction — an overlap reaching this point means a construction
+  // regression (or a replayed pre-fix plan), so clamp it here too and log
+  // the grep-stable line. This guard should be unreachable.
+  for (let pi = 0; pi < clippedPages.length - 1; pi++) {
+    const limit = clippedPages[pi + 1].startMs - clippedPages[pi].startMs;
+    if (clippedPages[pi].durationMs > limit) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `[caption-paint] deduped page="${clippedPages[pi].text}" ` +
+          `clamped=${clippedPages[pi].durationMs - Math.max(1, limit)}ms`,
+      );
+      clippedPages[pi] = {
+        ...clippedPages[pi],
+        durationMs: Math.max(1, limit),
+      };
+    }
+  }
   return (
     <AbsoluteFill style={{ pointerEvents: "none" }}>
       <Comp

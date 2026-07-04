@@ -4206,6 +4206,22 @@ def _f4_fit_wiring():
     assert 'id="FitSpecimen"' in _root, "FitSpecimen battery composition unregistered"
 
 
+@check("caption-stack: SINGLE-PAINT INVARIANT wired (builder clamp + renderer tripwire)")
+def _caption_stack_invariant():
+    _src = open("handler.py").read()
+    assert "SINGLE-PAINT INVARIANT" in _src, "builder clamp missing"
+    assert '_limit = pages[_pi + 1]["startMs"] - pages[_pi]["startMs"]' in _src
+    _tsx = open("src/remotion/src/PromptlyRender.tsx").read()
+    assert "[caption-paint] deduped" in _tsx, "renderer tripwire missing"
+    # behavioral: the real exhibit pair through the real builder
+    _pages = handler._build_tiktok_pages_from_projected(
+        [{"word": "but", "punctuated_word": "but", "start": 14.88, "end": 16.08},
+         {"word": "luckily,", "punctuated_word": "luckily,", "start": 15.005, "end": 15.645}],
+        max_words_per_page=1)
+    for _a, _b in zip(_pages, _pages[1:]):
+        assert _a["startMs"] + _a["durationMs"] <= _b["startMs"], "page overlap survived"
+
+
 # ─── REPORT ────────────────────────────────────────────────────────────
 print(f"\n{'=' * 64}")
 print(f"RESULTS: {len(_passed)} passed, {len(_failures)} failed")
