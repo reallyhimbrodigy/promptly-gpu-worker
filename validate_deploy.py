@@ -4240,6 +4240,18 @@ def _zero_silence_shape():
         handler._detect_silence_regions_vad = _saved
 
 
+@check("v196.1 interim: transition-slot suppression wired at the render entry")
+def _v1961_suppression():
+    _src = open("handler.py").read()
+    assert "def _suppress_transition_slots(" in _src, "sanitizer missing"
+    assert "_suppress_transition_slots(cuts, edit_plan)" in _src, "render-entry call missing"
+    assert "interim_slot_suppression" in _src, "divergence line missing"
+    _cuts = [{"source_start": 0.0, "source_end": 1.0, "transition_out": "CardSwipe"}]
+    _plan = {"transitions": [{"type": "CardSwipe"}], "tight_cut_overlays": []}
+    assert handler._suppress_transition_slots(_cuts, _plan) == 2
+    assert _cuts[0]["transition_out"] == "none" and _plan["transitions"] == []
+
+
 @check("v196 divider pair: release margined off removed START; incoming edge floors at removed END")
 def _v196_divider():
     _src = open("handler.py").read()

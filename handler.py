@@ -15613,6 +15613,40 @@ def compute_effective_durations(cuts, fps=60):
     return durations
 
 
+def _suppress_transition_slots(cuts, edit_plan):
+    """INTERIM SUPPRESSION (v196.1, Zac-authorized): the every-transition A/V
+    skew class (P1 conviction — geometry-independent slot timeline accounting,
+    +400..1900ms measured across 23 organic seams incl. zero-handle types).
+    ALL slot-class elements are deterministically stripped at this ONE site
+    (post-recipe, pre-render — covers full/render_only/tweak/safe paths) until
+    v197's root fix. v197's exit criterion: this sanitizer REMOVED + slots
+    RESTORED + the offset curve stays flat by the meter. Transition-glued SFX
+    are KEPT — they serve the word at the bare cut, not the slot."""
+    n_cut = 0
+    for _c in cuts or []:
+        if str(_c.get("transition_out") or "none") != "none":
+            _c["transition_out"] = "none"
+            n_cut += 1
+    n_tr = n_tco = 0
+    if isinstance(edit_plan, dict):
+        n_tr = len(edit_plan.get("transitions") or [])
+        n_tco = len(edit_plan.get("tight_cut_overlays") or [])
+        n_tco += len(edit_plan.get("_resolved_tight_cut_overlays") or [])
+        edit_plan["transitions"] = []
+        edit_plan["tight_cut_overlays"] = []
+        edit_plan["_resolved_tight_cut_overlays"] = []
+    if n_cut or n_tr or n_tco:
+        _record_divergence(
+            "transition",
+            {"cut_slots": n_cut, "plan_transitions": n_tr,
+             "tight_cut_overlays": n_tco},
+            "interim_slot_suppression",
+            reason="v196.1 interim: every-transition A/V skew (P1) — "
+                   "slot class OFF until v197 root fix",
+        )
+    return n_cut + n_tr + n_tco
+
+
 def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, work_dir, speech_segments=None,
                       broll_clips=None):
     """
@@ -15638,6 +15672,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     audio inline so `-shortest` can trim to exact video duration.
     """
     import math
+
+    # ── INTERIM (v196.1): suppress the full transition-slot class ───────────
+    # Every-transition A/V skew (P1) — see _suppress_transition_slots.
+    _suppress_transition_slots(cuts, edit_plan)
 
     # ── 0. Source is already canonical ──────────────────────────────────────
     # The ingest pass (_do_fps_normalize in mega_pool) folded fps + scale +
