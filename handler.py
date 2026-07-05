@@ -5901,6 +5901,10 @@ def detect_dead_air(
     silence_regions = _detect_silence_regions_vad(
         source_path, min_silence_s=0.15,
     )
+    # v196 head-snap feed: the clip builder needs VAD onsets to correct
+    # Deepgram word-starts that absorbed leading silence (measured +85..466ms
+    # of kept pause). Module stash, reset per detection run (warm containers).
+    _VAD_SILENCES_LAST[:] = [(float(a), float(b)) for (a, b) in silence_regions]
     print(
         f"[silero-vad] detected {len(silence_regions)} silence region(s) "
         f"≥150ms in source audio",
@@ -6847,6 +6851,18 @@ _REPAIR_MIN_HEADROOM_S = 180.0   # recipe repair re-ask allowance: a corrective
                                  # 900s job budget after the projected render
                                  # time (same projection clock as the
                                  # _RERENDER_HEADROOM_S pre-check: duration*3).
+_VAD_SILENCES_LAST: list = []    # v196 head-snap feed: silero silence regions
+                                 # from the most recent detect_dead_air run in
+                                 # this process; the clip builder reads them to
+                                 # snap dead-air incoming boundaries to true
+                                 # speech onsets. Reset at each detection run.
+_HEAD_SNAP_MARGIN_S = 0.075      # v196: VAD triggers late on soft onsets
+                                 # (fricatives/breathy consonants) — measured
+                                 # lag {0,+5,+60}ms on ground truth; the snap
+                                 # ships as VAD_onset − margin, never assumed 0.
+_REMOVED_EDGE_MARGIN_S = 0.075   # v196: release approaches no closer than this
+                                 # to a removed word's START (measured p99 of
+                                 # Deepgram end-variance, short tail — Phase B).
 _RELEASE_PAD_S = 0.12            # word-boundary release pad (PR-delta): source
                                  # kept past the OUTGOING word's Deepgram end at
                                  # every interior splice, so plosive/fricative
@@ -8988,7 +9004,10 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                     f"{len(normalized_remove_words)} Gemini removals",
                     flush=True,
                 )
-                validated_cuts, _removed_word_indices = build_clips_from_words(_dg_words, normalized_remove_words, video_duration=video_duration)
+                validated_cuts, _removed_word_indices = build_clips_from_words(
+                    _dg_words, normalized_remove_words,
+                    video_duration=video_duration,
+                    vad_silences=list(_VAD_SILENCES_LAST))
                 edit_plan["_removed_word_indices"] = _removed_word_indices
 
                 # ── Shot-change-based clip splitting ────────────────────────────────
@@ -15062,7 +15081,8 @@ def get_output_clip_ranges(cuts, effective_durations, transition_duration=None, 
     return ranges
 
 
-def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0):
+def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0,
+                           vad_silences=None):
     """Apply Gemini's remove_words decisions and split kept words into clips.
 
     Gemini owns every cut decision; Python is a verbatim executor.
@@ -15327,24 +15347,66 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0):
         _b = _in_c["_first_wi"]
         _rm = [_words_by_idx[_k] for _k in range(_a + 1, _b)
                if _k in removed_indices and _k in _words_by_idx]
-        if _rm:
-            _rs = min(_w["_start"] for _w in _rm)
-            _re = max(_w["_end"] for _w in _rm)
-            _mid = min(max(_rs + (_re - _rs) / 2.0, _E), _S)
-        else:
-            _mid = _E + _gap / 2.0
         _rel_cap, _head_cap = _RELEASE_PAD_S, _HEAD_PAD_S
         _is_compress = (_a, _b) in _gap_compress_pairs
         if _is_compress:
             # compressed pause: keep the floor around the splice (0.18/0.12)
             _rel_cap = _GAP_COMPRESS_FLOOR_S * 0.6
             _head_cap = _GAP_COMPRESS_FLOOR_S * 0.4
-        _applied_release = max(0.0, min(_rel_cap, _mid - _E))
-        _applied_head = max(0.0, min(_head_cap, _S - _mid))
-        if _applied_release > 0:
-            _out_c["padded_end"] = _E + _applied_release
-        if _applied_head > 0:
-            _in_c["padded_start"] = _S - _applied_head
+        if _rm:
+            # v196 DIVIDER PAIR (replaces the span-midpoint divider, which let
+            # pads reveal up to HALF a removed word — field-convicted at
+            # 30-117ms leaks, and at gap-0 removed only the middle third):
+            #   release approaches no closer than 75ms to the removed word's
+            #   START (measured p99 Deepgram end-variance);
+            #   the incoming edge FLOORS at the removed word's END — kept-word
+            #   starts get timestamped INSIDE adjacent removed words (S2-head,
+            #   measured −314ms on stutter pairs; the "187ms puzzle" class).
+            _rs = min(_w["_start"] for _w in _rm)
+            _re = max(_w["_end"] for _w in _rm)
+            _release_limit = min(max(_E, _rs - _REMOVED_EDGE_MARGIN_S), _S)
+            _head_floor = min(max(_E, min(_re, _S + 0.5)), _S) if _re <= _S \
+                else min(_re, _S + 0.5)
+            _applied_release = max(0.0, min(_rel_cap, _release_limit - _E))
+            _applied_head = max(0.0, min(_head_cap, _S - _head_floor))
+            if _applied_release > 0:
+                _out_c["padded_end"] = _E + _applied_release
+            _new_start = _S - _applied_head
+            if _re > _S:
+                # Deepgram start sits inside the removed span — push the
+                # incoming edge forward to the removed word's end (sanity-
+                # capped at +500ms past the claimed start).
+                _new_start = min(_re, _S + 0.5)
+            _in_c["padded_start"] = _new_start
+        else:
+            _mid = _E + _gap / 2.0
+            _applied_release = max(0.0, min(_rel_cap, _mid - _E))
+            _applied_head = max(0.0, min(_head_cap, _S - _mid))
+            if _applied_release > 0:
+                _out_c["padded_end"] = _E + _applied_release
+            if _applied_head > 0:
+                _in_c["padded_start"] = _S - _applied_head
+            # v196 HEAD-SNAP (dead-air splices only): Deepgram word-starts
+            # absorb leading silence (+85..466ms of kept pause measured), so
+            # when a VAD silence region covering this gap ends LATER than the
+            # padded start, snap forward to VAD_onset − 75ms (soft-onset
+            # margin, measured — never assumed zero).
+            if vad_silences:
+                _sil_end = None
+                for (_sa, _sb) in vad_silences:
+                    if _sa < _S + 0.4 and _sb > _E:
+                        _sil_end = max(_sil_end or 0.0, min(_sb, _S + 0.4))
+                _snap_to = (_sil_end - _HEAD_SNAP_MARGIN_S) if _sil_end else None
+                if _snap_to and _snap_to > _in_c["padded_start"]:
+                    _record_divergence(
+                        "cut_boundary",
+                        {"boundary": _bi, "deepgram_start": round(_S, 3),
+                         "vad_onset": round(_sil_end, 3)},
+                        "head_snap",
+                        reason=(f"moved={_snap_to - _in_c['padded_start']:.3f}s "
+                                f"margin={_HEAD_SNAP_MARGIN_S}"),
+                    )
+                    _in_c["padded_start"] = _snap_to
         if _applied_release > 0 or _applied_head > 0:
             _record_divergence(
                 "cut_boundary",

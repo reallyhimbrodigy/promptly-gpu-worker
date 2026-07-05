@@ -4240,6 +4240,35 @@ def _zero_silence_shape():
         handler._detect_silence_regions_vad = _saved
 
 
+@check("v196 divider pair: release margined off removed START; incoming edge floors at removed END")
+def _v196_divider():
+    _src = open("handler.py").read()
+    assert "_REMOVED_EDGE_MARGIN_S = 0.075" in _src, "margin constant missing/changed"
+    assert "_rs - _REMOVED_EDGE_MARGIN_S" in _src, "release limit missing"
+    assert "min(_re, _S + 0.5)" in _src, "head floor / sanity cap missing"
+    # behavioral: gap-0 removed word dies whole
+    _w = [{"word": "a", "punctuated_word": "a", "start": 0.0, "end": 1.0},
+          {"word": "d", "punctuated_word": "d", "start": 1.0, "end": 1.32},
+          {"word": "d", "punctuated_word": "d", "start": 1.32, "end": 1.64}]
+    _c, _ = handler.build_clips_from_words(_w, [{"word_index": 1}], video_duration=10.0)
+    assert _c[0]["source_end"] <= 1.0 + 1e-6, "release entered the removed word"
+    assert _c[1]["source_start"] >= 1.32 - 1e-6, "incoming edge below removed end"
+
+
+@check("v196 head-snap: dead-air incoming boundary snaps to VAD onset − 75ms, never backward")
+def _v196_headsnap():
+    _src = open("handler.py").read()
+    assert "_HEAD_SNAP_MARGIN_S = 0.075" in _src, "snap margin missing/changed"
+    assert "_VAD_SILENCES_LAST[:] =" in _src, "VAD stash (reset semantics) missing"
+    assert "vad_silences=list(_VAD_SILENCES_LAST)" in _src, "call-site plumbing missing"
+    _w = [{"word": "a", "punctuated_word": "a", "start": 0.0, "end": 1.0},
+          {"word": "b", "punctuated_word": "b", "start": 2.6, "end": 3.2}]
+    _c, _ = handler.build_clips_from_words(
+        _w, [{"after_word_index": 0, "before_word_index": 1, "reason": "dead_air"}],
+        video_duration=10.0, vad_silences=[(1.05, 2.95)])
+    assert abs(_c[1]["source_start"] - 2.875) < 0.01, "snap-forward failed"
+
+
 @check("cancel-fence (v195): rail UPDATE carries the hard-terminal predicate at the 19475 chokepoint")
 def _cancel_fence_wired():
     _src = open("handler.py").read()
