@@ -4349,6 +4349,39 @@ def _gate_trip_path():
     assert "fail-open — instrument crashed" in _src
 
 
+@check("L1 wave: NO_AUDIO_TRACK intake gate — probe-time, fresh-only, fail-open, honest envelope, rescue-denied")
+def _l1_no_audio_gate():
+    import handler
+    _src = open("handler.py").read()
+    # the gate exists at intake, fresh-mode-gated, fail-open on probe trouble
+    assert "INTAKE AUDIO-TRACK GATE" in _src
+    _gate = _src.index("INTAKE AUDIO-TRACK GATE")
+    assert _src.index("FAST-FAIL TALKING-HEAD CHECK") > _gate, "gate must precede the talking-head check"
+    assert '_has_audio_stream = True' in _src, "fail-open branch missing"
+    _env = handler.classify_error(RuntimeError("NO_AUDIO_TRACK: source has no audio stream"))
+    assert _env.get("error_code") == "NO_AUDIO_TRACK", _env
+    assert "add audio and resubmit" in str(_env.get("user_message")), "honest copy missing"
+    assert _env.get("retryable") is False, "paid-retry loop must be closed"
+    assert _env.get("requires_new_video") is True
+    assert "NO_AUDIO_TRACK" in handler._OUTER_RESCUE_DENY
+
+
+@check("credit ruling: designed rejections marked on the terminal envelope (app refunds on the class)")
+def _credit_ruling_marker():
+    import handler
+    # class membership: named INPUT-boundary rejections, not infrastructure
+    for c in ("NO_AUDIO_TRACK", "NO_SPEECH", "NOT_TALKING_HEAD",
+              "CLIP_TOO_LONG", "WRONG_ORIENTATION", "INVALID_FORMAT",
+              "EMPTY_UPLOAD", "INVALID_SOURCE_URL", "TRANSCRIPTION"):
+        assert c in handler._DESIGNED_REJECTION_CODES, c
+    for c in ("UPLOAD_STALLED", "S3_ACCESS", "NETWORK", "RENDER_FFMPEG",
+              "INTEGRITY_TRIP", "UNKNOWN"):
+        assert c not in handler._DESIGNED_REJECTION_CODES, c + " must not release via this class"
+    _src = open("handler.py").read()
+    assert _src.count('"designed_rejection": _designed_reject') == 2, \
+        "marker must ride BOTH the durable row result and the return dict"
+
+
 @check("integrity gate: behavioral — mask algebra + per-check bounding on synthetic spans")
 def _gate_behavior():
     import handler
@@ -4363,7 +4396,16 @@ def _gate_behavior():
         "_render_fps": 60.0,
         "_integrity_slot_ranges": [{"start": 2.0, "end": 2.6, "type": "CardSwipe"}],
     })
-    assert _m2["black"] == [], "non-dip slot must not mask black"
+    assert _m2["black"] == [], "non-through-black slot must not mask black"
+    # through-black membership is evidence-based: ShutterFlash convicted live
+    # (corpus job 15055764 — trip span == its slot window; CRT beam frames)
+    assert handler._IG_BLACK_MASK_TYPES == {"diptoblack", "shutterflash"}, \
+        "black-mask membership changed without evidence citation"
+    _m3 = handler._build_integrity_masks({
+        "_render_fps": 60.0,
+        "_integrity_slot_ranges": [{"start": 2.0, "end": 2.7, "type": "ShutterFlash"}],
+    })
+    assert len(_m3["black"]) == 1, "ShutterFlash must mask black (false-trip class otherwise)"
 
 
 # ─── REPORT ────────────────────────────────────────────────────────────

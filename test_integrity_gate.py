@@ -147,9 +147,17 @@ def main():
         m = H._build_integrity_masks(plan)
         check("freeze mask = slots + fullMG + broll + genscenes",
               len(m["freeze"]) == 5, str(m["freeze"]))
-        check("black mask = DipToBlack slots only",
+        check("black mask = through-black slot types only",
               len(m["black"]) == 1 and abs(m["black"][0][0] - 8.75) < 1e-6,
               str(m["black"]))
+        plan_sf = {"_render_fps": 60.0,
+                   "_integrity_slot_ranges": [
+                       {"start": 6.0, "end": 6.7, "type": "ShutterFlash"},
+                       {"start": 9.0, "end": 9.5, "type": "CardSwipe"}]}
+        m_sf = H._build_integrity_masks(plan_sf)
+        check("ShutterFlash joins the black mask (job 15055764 conviction); CardSwipe does not",
+              len(m_sf["black"]) == 1 and abs(m_sf["black"][0][0] - 5.75) < 1e-6,
+              str(m_sf["black"]))
         check("hole mask = all slots", len(m["hole"]) == 2, str(m["hole"]))
         check("mask pad applied (±0.25s)",
               abs(m["freeze"][0][0] - 4.75) < 1e-6

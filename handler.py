@@ -14383,11 +14383,21 @@ def _ig_source_echo(source_path, spans, out_to_src):
     return defects, downgraded
 
 
+_IG_BLACK_MASK_TYPES = frozenset({"diptoblack", "shutterflash"})
+# Transition types whose ANIMATION passes through near-black by design.
+# DipToBlack: by construction. ShutterFlash: CRT power-off — clip A
+# collapses to a thin beam (frames read <10% luma; convicted live on the
+# corpus landscape render, job 15055764, trip span == its slot window).
+# Membership is evidence-based; a type joins when its animation is shown
+# to cross blackdetect's floor, never speculatively.
+
+
 def _build_integrity_masks(edit_plan):
     """Assemble per-check mask windows from the post-safeguard render plan
     stash. freeze: transition slots + full-screen MGs + generated scenes +
-    B-roll. black: DipToBlack slots only. hole: transition slots (designed
-    handle silence under a designed-still slot)."""
+    B-roll. black: through-black slot types only (_IG_BLACK_MASK_TYPES).
+    hole: transition slots (designed handle silence under a designed-still
+    slot)."""
     pad = _IG_MASK_PAD_S
     slots = edit_plan.get("_integrity_slot_ranges") or []
     fullmg = edit_plan.get("_integrity_fullmg_ranges") or []
@@ -14401,11 +14411,11 @@ def _build_integrity_masks(edit_plan):
         return [(max(0.0, float(s) - pad), float(e) + pad)
                 for (s, e) in ranges]
     slot_rngs = [(s["start"], s["end"]) for s in slots]
-    dip_rngs = [(s["start"], s["end"]) for s in slots
-                if str(s.get("type") or "").lower().startswith("dip")]
+    black_rngs = [(s["start"], s["end"]) for s in slots
+                  if str(s.get("type") or "").lower() in _IG_BLACK_MASK_TYPES]
     return {
         "freeze": _p(slot_rngs) + _p(list(fullmg)) + _p(list(broll)) + _p(gs),
-        "black": _p(dip_rngs),
+        "black": _p(black_rngs),
         "hole": _p(slot_rngs),
     }
 
@@ -19588,6 +19598,12 @@ def classify_error(e):
             "We couldn't hear any speech in this video. Promptly edits talking videos — please upload a clip of someone speaking.",
             retryable=False, new_video=True,
         )
+    if "NO_AUDIO_TRACK" in msg:
+        return _e(
+            "NO_AUDIO_TRACK",
+            "This video has no audio track — Promptly edits speech, so add audio and resubmit.",
+            retryable=False, new_video=True,
+        )
     if "Not a valid AWS S3 URL" in msg:
         return _e(
             "INVALID_SOURCE_URL",
@@ -20009,7 +20025,7 @@ def _enhancement_guard(subsystem, err, sink=None):
 _OUTER_RESCUE_DENY = frozenset({
     "CLIP_TOO_LONG",
     "NO_SPEECH", "NOT_TALKING_HEAD", "INVALID_SOURCE_URL", "INVALID_FORMAT",
-    "WRONG_ORIENTATION", "EMPTY_UPLOAD",
+    "WRONG_ORIENTATION", "EMPTY_UPLOAD", "NO_AUDIO_TRACK",
     "UPLOAD_NEVER_STARTED", "UPLOAD_STALLED", "UPLOAD_TIMEOUT",
     "S3_ACCESS", "S3_GENERIC", "TRANSCRIPTION",
     "RENDER_FATAL", "RECIPE_INVALID",
@@ -20017,6 +20033,19 @@ _OUTER_RESCUE_DENY = frozenset({
     # forensics). A safe-edit re-run would be an auto-retry, which the
     # gate design explicitly forbids.
     "INTEGRITY_TRIP",
+})
+
+# ─── CREDIT RULING (Zac, 2026-07-05): DESIGNED REJECTIONS ARE FREE ─────────
+# "A named intake rejection releases the credit; users pay for renders, not
+# for boundaries." The worker marks the class on the terminal envelope
+# (designed_rejection: true); the APP performs the refund on the class —
+# the INTEGRITY_TRIP refund leg, generalized (single-writer law: worker
+# never writes usage_events). Membership = named INPUT-boundary rejections
+# only; infrastructure failures (upload/S3/network) are not this class.
+_DESIGNED_REJECTION_CODES = frozenset({
+    "NO_AUDIO_TRACK", "NO_SPEECH", "NOT_TALKING_HEAD", "CLIP_TOO_LONG",
+    "WRONG_ORIENTATION", "INVALID_FORMAT", "EMPTY_UPLOAD",
+    "INVALID_SOURCE_URL", "TRANSCRIPTION",
 })
 _RESCUE_REPREP_S = 90.0   # projected re-download + re-transcribe + re-probe
 _RESCUE_MARGIN_S = 60.0   # slack under the 900s job budget after the render
@@ -21643,6 +21672,28 @@ def handler(job):
                 f"CLIP_TOO_LONG: source is {source_duration:.1f}s; the intake cap "
                 f"is {_MAX_SOURCE_DURATION_S:.0f}s (boundary-probed editorial-path limit)."
             )
+
+        # ─── INTAKE AUDIO-TRACK GATE (corpus-sweep L1, credit-ruling wave) ──
+        # A source with no audio stream can never transcribe; pre-gate it
+        # surfaced as the greedy RENDER_FFMPEG class with retryable=true —
+        # a paid-retry loop on a permanently-failing input (corpus sweep
+        # 2026-07-05, fixture no_audio_stream, job 2e7eb5a7). FRESH INTAKE
+        # ONLY, mirroring CLIP_TOO_LONG: re-edit rails resubmit a source
+        # that already delivered (so it had audio), and render_only carries
+        # its transcript. Fail-open on probe trouble — a probe hiccup is
+        # not the user's missing audio. Rescue-denied like every named
+        # intake reject.
+        if mode == "full":
+            try:
+                _intake_streams = _probe_full(source_path).get("streams") or []
+                _has_audio_stream = any(
+                    s.get("codec_type") == "audio" for s in _intake_streams)
+            except Exception:
+                _has_audio_stream = True
+            if not _has_audio_stream:
+                raise RuntimeError(
+                    "NO_AUDIO_TRACK: source has no audio stream; "
+                    "transcription is impossible.")
 
         sample_timestamps = [round(i * 4.0, 3) for i in range(int(source_duration / 4.0) + 1)] if source_duration > 0 else []
 
@@ -24308,12 +24359,17 @@ def handler(job):
             return _rescued
         # Durable TERMINAL write (synchronous): failed — so the bar shows a real
         # error state and the client stops polling, instead of freezing.
+        # Credit ruling: designed rejections are free — the worker marks the
+        # class, the app refunds on it (INTEGRITY_TRIP leg, generalized).
+        _designed_reject = (classified.get("error_code")
+                            in _DESIGNED_REJECTION_CODES)
         write_job_status(
             input_data.get("job_id"), status="failed", phase="Something went wrong",
             result={
                 "error_code": classified.get("error_code"),
                 "user_message": classified.get("user_message"),
                 "retryable": classified.get("retryable"),
+                "designed_rejection": _designed_reject,
                 **_floor_markers(_floor_state),
             },
         )
@@ -24324,6 +24380,7 @@ def handler(job):
             "retryable": classified["retryable"],
             "requires_new_video": classified["requires_new_video"],
             "requires_vibe_change": classified["requires_vibe_change"],
+            "designed_rejection": _designed_reject,
             "error_detail": str(e),                   # for support / logs
         }
 
