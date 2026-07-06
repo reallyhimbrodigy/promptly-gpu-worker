@@ -4473,14 +4473,17 @@ def _timeline_d3_fixed():
     assert _tl["total_frames"] == _expect, "total diverged from body+slot sum"
 
 
-@check("pacing budget (Slice 3): max-compress is eval-gated OFF by default, per-job flagged, threaded to the clip builder")
+@check("pacing budget (Slice 3): max-compress SHIPPED ON via env, per-job overridable, threaded to the clip builder")
 def _pacing_max_compress():
     import handler
     _src = open("handler.py").read()
-    # default OFF, reset every job (warm-container safe)
-    assert "_PACING_MAX_COMPRESS: bool = False" in _src, "global default must be False"
-    assert '_PACING_MAX_COMPRESS = bool(input_data.get("pacing_max_compression"))' in _src, \
-        "per-job flag must be set (and reset) at job entry"
+    # SHIPPED ON: env default (image flag), per-job override, warm-safe reset
+    assert 'os.environ.get("PACING_MAX_COMPRESSION_ENABLED", "0")' in _src, \
+        "env-default read missing"
+    assert "_PACING_MAX_COMPRESS = _pmc_env if _pmc_job is None else bool(_pmc_job)" in _src, \
+        "env-default-with-per-job-override wiring missing"
+    assert '"PACING_MAX_COMPRESSION_ENABLED": "1"' in open("modal_app.py").read(), \
+        "the ship flag must be ON in the image env"
     assert "max_compress=_PACING_MAX_COMPRESS" in _src, "flag not threaded to build_clips_from_words"
     # behavioral: max_compress compresses more gaps AND tighter than baseline
     W = [{"word": "a", "punctuated_word": "a", "start": 0.0, "end": 1.0},

@@ -21202,13 +21202,17 @@ def handler(job):
         # loud log line instead of failing the job. Production jobs never
         # set this.
         integrity_observe_only = bool(input_data.get("integrity_observe_only"))
-        # PACING BUDGET flag — ALWAYS set (reset to False on the common path)
-        # so a warm container never leaks a prior job's test setting.
+        # PACING BUDGET — SHIPPED ON (Zac's ear ruling 2026-07-06): default from
+        # the image env flag, per-job input still overrides. ALWAYS set here so a
+        # warm container never leaks a prior job's override.
         global _PACING_MAX_COMPRESS
-        _PACING_MAX_COMPRESS = bool(input_data.get("pacing_max_compression"))
+        _pmc_env = os.environ.get("PACING_MAX_COMPRESSION_ENABLED", "0").strip().lower() in (
+            "1", "true", "yes", "on")
+        _pmc_job = input_data.get("pacing_max_compression")
+        _PACING_MAX_COMPRESS = _pmc_env if _pmc_job is None else bool(_pmc_job)
         if _PACING_MAX_COMPRESS:
-            print("[pacing-budget] MAX COMPRESSION ON (eval render) — every gap "
-                  "to the 75ms safety floor", flush=True)
+            print("[pacing-budget] MAX COMPRESSION ON — every boundary gap to the "
+                  "75ms safety floor (within-clip speech rhythm untouched)", flush=True)
         provided_plan = input_data.get("edit_plan") if isinstance(input_data.get("edit_plan"), dict) else None
         provided_transcript = input_data.get("transcript") if isinstance(input_data.get("transcript"), dict) else None
         provided_analysis = input_data.get("analysis_data") if isinstance(input_data.get("analysis_data"), dict) else None

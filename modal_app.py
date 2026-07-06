@@ -426,6 +426,12 @@ image = (
         # review): kept inter-word pauses above 0.45s compress to 0.30s at
         # the clip-build layer. ROLLBACK: flip to "0" and redeploy.
         "GAP_COMPRESSION_ENABLED": "1",
+        # Pacing budget / MAX COMPRESSION (Slice 3, Zac's EAR ruling 2026-07-06):
+        # every kept boundary gap collapses to the 75ms safety floor — boundary
+        # dead air dies, within-clip speech rhythm (the human breath, plays 1:1)
+        # is untouched. This is now the DEFAULT path for every render. Per-job
+        # input `pacing_max_compression` still overrides. ROLLBACK: flip to "0".
+        "PACING_MAX_COMPRESSION_ENABLED": "1",
         # ── Re-edit Layer 3 Phase 2: array-level auto-revert ─────
         # Phase 1 (always on) auto-reverts top-level scalar drift
         # (caption_style / thumbnail_word_index / outro). Phase 2
