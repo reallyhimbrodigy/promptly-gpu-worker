@@ -442,6 +442,9 @@ image = (
     })
     .add_local_dir("src/assets/sounds", "/assets/sounds")
     .add_local_file("handler.py", "/handler.py")
+    # RenderTimeline (unification pillar 3). handler.py imports it inside the
+    # shadow block (Slice 1) — bundle it or the shadow silently self-skips.
+    .add_local_file("render_timeline.py", "/render_timeline.py")
     # EditPolicy spine (Phase 2). handler.py lazy-imports `edit_policy` only when
     # the per-job/env flag is on; without this entry the flag-on path would hit
     # ModuleNotFoundError (caught + disabled per-job, but the feature wouldn't run).

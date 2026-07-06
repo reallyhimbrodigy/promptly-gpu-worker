@@ -18008,6 +18008,45 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     edit_plan["_render_clip_output_ranges"] = _clip_ranges
     edit_plan["_render_total_output_frames"] = int(total_output_frames)
 
+    # ── UNIFICATION SLICE 1 — RenderTimeline SHADOW (zero behavior change) ──
+    # The one truth is built here (post-safeguard, where every mutation has
+    # completed) ALONGSIDE the five current representations, and compared.
+    # NOTHING consumes it — this only logs divergences for the census
+    # (Slice 2, a separate GO, does the consumer cutover + deletion). Fully
+    # guarded: a shadow bug must never touch a real render.
+    try:
+        import render_timeline as _rtl
+        _shadow_tl = _rtl.build_render_timeline(
+            render_cuts, effective_durations, _trim_head_dur, _trim_tail_dur,
+            _trans_dur_after, _clip_time_maps, source_fps)
+        _shadow_body_s = [
+            (effective_durations[_i] - _trim_head_dur[_i] - _trim_tail_dur[_i])
+            for _i in range(len(render_cuts))]
+        _shadow_div = _rtl.shadow_check(
+            _shadow_tl,
+            current_total_frames=total_output_frames,
+            current_per_cut_render_frames=_per_cut_render_dur_frames,
+            body_seconds=_shadow_body_s,
+            slot_seconds=list(_trans_dur_after),
+            transitions_out=transitions_out,
+            clip_ranges=_clip_ranges,
+            source_fps=source_fps)
+        if _shadow_div["has_divergence"]:
+            print(f"[timeline-shadow] divergence "
+                  f"integrity={_shadow_div['integrity_divergence']} "
+                  f"rounding={_shadow_div['rounding_divergence']} "
+                  f"total_delta={_shadow_div['total']['delta']} "
+                  f"body={_shadow_div['body']} slots={_shadow_div['slots']} "
+                  f"d1={_shadow_div['d1']}", flush=True)
+        else:
+            print(f"[timeline-shadow] parity OK "
+                  f"({_shadow_tl['total_frames']}f, {len(_shadow_tl['entries'])} cuts)",
+                  flush=True)
+    except Exception as _shadow_err:
+        print(f"[timeline-shadow] SKIPPED (shadow error, render unaffected): "
+              f"{type(_shadow_err).__name__}: {str(_shadow_err)[:160]}",
+              flush=True)
+
     # [fix-1] Strip the internal scratch keys the SFX coverage set already
     # consumed above (14350-14355) before broll_out enters the render contract.
     # _start_word_kept/_end_word_kept are underscore-prefixed PLAN-TIME fields,
