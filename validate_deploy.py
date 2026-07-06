@@ -4473,6 +4473,27 @@ def _timeline_d3_fixed():
     assert _tl["total_frames"] == _expect, "total diverged from body+slot sum"
 
 
+@check("pacing budget (Slice 3): max-compress is eval-gated OFF by default, per-job flagged, threaded to the clip builder")
+def _pacing_max_compress():
+    import handler
+    _src = open("handler.py").read()
+    # default OFF, reset every job (warm-container safe)
+    assert "_PACING_MAX_COMPRESS: bool = False" in _src, "global default must be False"
+    assert '_PACING_MAX_COMPRESS = bool(input_data.get("pacing_max_compression"))' in _src, \
+        "per-job flag must be set (and reset) at job entry"
+    assert "max_compress=_PACING_MAX_COMPRESS" in _src, "flag not threaded to build_clips_from_words"
+    # behavioral: max_compress compresses more gaps AND tighter than baseline
+    W = [{"word": "a", "punctuated_word": "a", "start": 0.0, "end": 1.0},
+         {"word": "b", "punctuated_word": "b", "start": 1.6, "end": 2.0},
+         {"word": "c", "punctuated_word": "c", "start": 2.25, "end": 2.6}]
+    base, _ = handler.build_clips_from_words(W, [], video_duration=10.0, vad_silences=[], max_compress=False)
+    mc, _ = handler.build_clips_from_words(W, [], video_duration=10.0, vad_silences=[], max_compress=True)
+    base_dur = sum(c["source_end"] - c["source_start"] for c in base)
+    mc_dur = sum(c["source_end"] - c["source_start"] for c in mc)
+    assert mc_dur < base_dur, "max_compress must shorten output (removes gap silence)"
+    assert len(mc) >= len(base), "max_compress must split at least as many gaps"
+
+
 @check("integrity gate: behavioral — mask algebra + per-check bounding on synthetic spans")
 def _gate_behavior():
     import handler

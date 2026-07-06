@@ -6852,6 +6852,10 @@ _REPAIR_MIN_HEADROOM_S = 180.0   # recipe repair re-ask allowance: a corrective
                                  # time (same projection clock as the
                                  # _RERENDER_HEADROOM_S pre-check: duration*3).
 _VAD_SILENCES_LAST: list = []    # v196 head-snap feed: silero silence regions
+# PACING BUDGET (Slice 3): per-job max-compression flag, RESET at every job
+# entry (warm-container-safe, like _VAD_SILENCES_LAST). Eval-gated: OFF unless
+# input_data.pacing_max_compression is set for a specific test render.
+_PACING_MAX_COMPRESS: bool = False
                                  # from the most recent detect_dead_air run in
                                  # this process; the clip builder reads them to
                                  # snap dead-air incoming boundaries to true
@@ -9007,7 +9011,8 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                 validated_cuts, _removed_word_indices = build_clips_from_words(
                     _dg_words, normalized_remove_words,
                     video_duration=video_duration,
-                    vad_silences=list(_VAD_SILENCES_LAST))
+                    vad_silences=list(_VAD_SILENCES_LAST),
+                    max_compress=_PACING_MAX_COMPRESS)
                 edit_plan["_removed_word_indices"] = _removed_word_indices
 
                 # ── Shot-change-based clip splitting ────────────────────────────────
@@ -15335,7 +15340,7 @@ def get_output_clip_ranges(cuts, effective_durations, transition_duration=None, 
 
 
 def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0,
-                           vad_silences=None):
+                           vad_silences=None, max_compress=False):
     """Apply Gemini's remove_words decisions and split kept words into clips.
 
     Gemini owns every cut decision; Python is a verbatim executor.
@@ -15500,6 +15505,17 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0,
     _gap_compress_on = os.environ.get(
         "GAP_COMPRESSION_ENABLED", "0"
     ).strip().lower() in ("1", "true", "yes", "on")
+    # PACING BUDGET (Slice 3, eval-gated per-job flag): maximal compression —
+    # every kept inter-word/inter-clause gap collapses to the 75ms safety
+    # floor, targeting the global <200ms removable-silence budget. Zac's
+    # ruling: the earned-pause judgment is GONE (dead air is poison for UGC),
+    # so this is deterministic, not a re-mechanized decision. The two 75ms
+    # margins protect kept-word onsets/tails and are the hard floor — leak
+    # meter proves zero clipping before this ever ships. Default OFF.
+    _max_compress = bool(max_compress)
+    if _max_compress:
+        _gap_compress_on = True
+    _MC_CEILING_S = 0.12   # compress any gap with >120ms of gap
     _gap_compress_pairs = set()
 
     if not kept_words:
@@ -15540,7 +15556,8 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0,
         gap_compress = (
             _gap_compress_on
             and not (removed_between or dead_air_split)
-            and (curr["_start"] - prev["_end"]) > _GAP_COMPRESS_CEILING_S
+            and (curr["_start"] - prev["_end"]) > (
+                _MC_CEILING_S if _max_compress else _GAP_COMPRESS_CEILING_S)
         )
         if gap_compress:
             _gap_compress_pairs.add((prev["_word_index"], curr["_word_index"]))
@@ -15601,8 +15618,13 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0,
         _rm = [_words_by_idx[_k] for _k in range(_a + 1, _b)
                if _k in removed_indices and _k in _words_by_idx]
         _rel_cap, _head_cap = _RELEASE_PAD_S, _HEAD_PAD_S
+        if _max_compress:
+            # BUDGET mode: every splice collapses to the 75ms safety floor —
+            # the tightest pads that still protect the outgoing release tail
+            # and incoming onset (leak-proven). Removable silence → ~0.
+            _rel_cap, _head_cap = _REMOVED_EDGE_MARGIN_S, _HEAD_SNAP_MARGIN_S
         _is_compress = (_a, _b) in _gap_compress_pairs
-        if _is_compress:
+        if _is_compress and not _max_compress:
             # compressed pause: keep the floor around the splice (0.18/0.12)
             _rel_cap = _GAP_COMPRESS_FLOOR_S * 0.6
             _head_cap = _GAP_COMPRESS_FLOOR_S * 0.4
@@ -21180,6 +21202,13 @@ def handler(job):
         # loud log line instead of failing the job. Production jobs never
         # set this.
         integrity_observe_only = bool(input_data.get("integrity_observe_only"))
+        # PACING BUDGET flag — ALWAYS set (reset to False on the common path)
+        # so a warm container never leaks a prior job's test setting.
+        global _PACING_MAX_COMPRESS
+        _PACING_MAX_COMPRESS = bool(input_data.get("pacing_max_compression"))
+        if _PACING_MAX_COMPRESS:
+            print("[pacing-budget] MAX COMPRESSION ON (eval render) — every gap "
+                  "to the 75ms safety floor", flush=True)
         provided_plan = input_data.get("edit_plan") if isinstance(input_data.get("edit_plan"), dict) else None
         provided_transcript = input_data.get("transcript") if isinstance(input_data.get("transcript"), dict) else None
         provided_analysis = input_data.get("analysis_data") if isinstance(input_data.get("analysis_data"), dict) else None
