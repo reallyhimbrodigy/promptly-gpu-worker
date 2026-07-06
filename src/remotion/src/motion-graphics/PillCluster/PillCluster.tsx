@@ -13,15 +13,6 @@ const DEFAULT_TEXT_SHADOW =
 const START = 6;
 const STAGGER = 4;
 
-const DEFAULT_TAGS = [
-  "#mindset",
-  "#discipline",
-  "#focus",
-  "#growth",
-  "#habits",
-  "#consistency",
-  "#showup",
-];
 
 // Deterministic 0..1 hash (no Math.random — render must be reproducible).
 const hash01 = (i: number): number => {
@@ -34,7 +25,7 @@ export const PillCluster: React.FC<PillClusterProps> = ({
   durationMs,
   enterFrames,
   exitFrames,
-  tags = DEFAULT_TAGS,
+  tags = [],
   accentColor = "#4F9DF7",
   accentEvery = 3,
   glass = true,
@@ -47,6 +38,10 @@ export const PillCluster: React.FC<PillClusterProps> = ({
   offsetY,
   scale,
 }) => {
+  // v197 fail-closed: no invented content — empty props render nothing
+  // (the DropCard DEFAULT_POINTS class; worker-side F5 now rejects these
+  // upstream, this is the renderer belt).
+  if (!tags || tags.length === 0) return null;
   const { containerStyle, wrapperStyle } = resolveMGPosition(
     { anchor, offsetX, offsetY, scale },
     { anchor: "center" },

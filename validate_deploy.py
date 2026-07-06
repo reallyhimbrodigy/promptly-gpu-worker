@@ -4240,16 +4240,34 @@ def _zero_silence_shape():
         handler._detect_silence_regions_vad = _saved
 
 
-@check("v196.1 interim: transition-slot suppression wired at the render entry")
-def _v1961_suppression():
+@check("v197: safeguards DEGRADE (never drop/resize) + slot-integrity tripwire enforced")
+def _v197_degrade():
     _src = open("handler.py").read()
-    assert "def _suppress_transition_slots(" in _src, "sanitizer missing"
-    assert "_suppress_transition_slots(cuts, edit_plan)" in _src, "render-entry call missing"
-    assert "interim_slot_suppression" in _src, "divergence line missing"
-    _cuts = [{"source_start": 0.0, "source_end": 1.0, "transition_out": "CardSwipe"}]
-    _plan = {"transitions": [{"type": "CardSwipe"}], "tight_cut_overlays": []}
-    assert handler._suppress_transition_slots(_cuts, _plan) == 2
-    assert _cuts[0]["transition_out"] == "none" and _plan["transitions"] == []
+    assert "def _assert_slot_integrity(" in _src, "tripwire missing"
+    assert "_assert_slot_integrity(_pre_safeguard_slots, transitions_out)" in _src, "enforcement call missing"
+    assert "_suppress_transition_slots" not in _src, "v196.1 sanitizer still present — exit criterion violated"
+    assert _src.count('_t["type"] = "HardHold"') == 3, "all three safeguard sites must degrade, not drop"
+    import render_schemas as _rs
+    assert "HardHold" in str(_rs.RenderTransitionType), "render schema missing HardHold"
+    assert "HardHold" not in str(_rs.TransitionType), "recipe vocabulary must exclude HardHold"
+    # behavioral fault-injection
+    try:
+        handler._assert_slot_integrity([(0, 36)], [])
+        assert False, "tripwire failed to fire on removed slot"
+    except RuntimeError:
+        pass
+
+
+@check("v197: F5 vacuous-pass closed — empty MG props are a grounding violation")
+def _v197_emptyprops():
+    _src = open("handler.py").read()
+    assert "props are empty" in _src, "empty-props violation missing from MG validation"
+    for _f in ("PillCluster/PillCluster.tsx", "BarRace/BarRace.tsx", "RankedList/RankedList.tsx"):
+        _t = open("src/remotion/src/motion-graphics/" + _f).read()
+        assert "DEFAULT_TAGS" not in _t and "DEFAULT_BARS" not in _t and "DEFAULT_ITEMS" not in _t, _f + " still invents content"
+        assert "return null" in _t, _f + " not fail-closed"
+    _sc = open("src/remotion/src/motion-graphics/StatCard/StatCard.tsx").read()
+    assert "Number.isFinite(value)" in _sc, "StatCard NaN guard missing"
 
 
 @check("v196 divider pair: release margined off removed START; incoming edge floors at removed END")

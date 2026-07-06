@@ -10091,6 +10091,22 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                     raise ValueError(
                         f"motion_graphics[{_i}].type must be one of {sorted(_valid_mg_types)}, got {_mg_type!r}"
                     )
+                # v197 F5 vacuous-pass closure: empty props are a grounding
+                # FAIL, never a pass. Convicted chain: Vertex omits optional
+                # props → {} sails past text-field checks (nothing to
+                # validate) → the renderer used to invent content (PillCluster
+                # hashtags, StatCard NaN). Renderers are fail-closed now; this
+                # is the semantic half — the repair net gets the model to
+                # rewrite with real grounded props.
+                if not (_mg.get("props") or {}):
+                    _mg_violations.append(
+                        f"MG {_mg_type} at word {_mg.get('start_word_index')}: "
+                        f"props are empty — every component carries its own "
+                        f"grounded content (labels, values, tags drawn from "
+                        f"the dialogue or what is seen on screen). Rewrite "
+                        f"with real props or remove the component."
+                    )
+                    continue
                 try:
                     _sw = int(_mg["start_word_index"])
                     _ew = int(_mg["end_word_index"])
@@ -15613,38 +15629,26 @@ def compute_effective_durations(cuts, fps=60):
     return durations
 
 
-def _suppress_transition_slots(cuts, edit_plan):
-    """INTERIM SUPPRESSION (v196.1, Zac-authorized): the every-transition A/V
-    skew class (P1 conviction — geometry-independent slot timeline accounting,
-    +400..1900ms measured across 23 organic seams incl. zero-handle types).
-    ALL slot-class elements are deterministically stripped at this ONE site
-    (post-recipe, pre-render — covers full/render_only/tweak/safe paths) until
-    v197's root fix. v197's exit criterion: this sanitizer REMOVED + slots
-    RESTORED + the offset curve stays flat by the meter. Transition-glued SFX
-    are KEPT — they serve the word at the bare cut, not the slot."""
-    n_cut = 0
-    for _c in cuts or []:
-        if str(_c.get("transition_out") or "none") != "none":
-            _c["transition_out"] = "none"
-            n_cut += 1
-    n_tr = n_tco = 0
-    if isinstance(edit_plan, dict):
-        n_tr = len(edit_plan.get("transitions") or [])
-        n_tco = len(edit_plan.get("tight_cut_overlays") or [])
-        n_tco += len(edit_plan.get("_resolved_tight_cut_overlays") or [])
-        edit_plan["transitions"] = []
-        edit_plan["tight_cut_overlays"] = []
-        edit_plan["_resolved_tight_cut_overlays"] = []
-    if n_cut or n_tr or n_tco:
-        _record_divergence(
-            "transition",
-            {"cut_slots": n_cut, "plan_transitions": n_tr,
-             "tight_cut_overlays": n_tco},
-            "interim_slot_suppression",
-            reason="v196.1 interim: every-transition A/V skew (P1) — "
-                   "slot class OFF until v197 root fix",
+def _assert_slot_integrity(pre_slots, post_transitions):
+    """v197 STABILITY TRIPWIRE + SLOT PARITY (enforced, not logged).
+    The two-pass stability argument rests on 'safeguards only DEGRADE type —
+    never remove or resize': every timeline consumer (frame accounting, the
+    audio builder, word projections, overlay windows) snapshotted the slot
+    set BEFORE the safeguards ran, so a removed or resized slot desyncs
+    video from audio by exactly that slot (the convicted P1 class). This
+    assertion fails the render loudly if a future safeguard ever violates
+    it. pre_slots: [(afterClipIndex, durationInFrames)] snapshot; the same
+    tuple set must survive."""
+    post = [(int(t.get("afterClipIndex", -1)), int(t.get("durationInFrames", 0)))
+            for t in post_transitions]
+    if post != list(pre_slots):
+        raise RuntimeError(
+            "SLOT INTEGRITY VIOLATION: transition safeguards removed or "
+            f"resized a slot (pre={list(pre_slots)} post={post}). Safeguards "
+            "may only degrade type. Timeline consumers already snapshotted "
+            "the pre-safeguard slot set — this render would ship with A/V "
+            "content skew (the convicted P1 class)."
         )
-    return n_cut + n_tr + n_tco
 
 
 def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, work_dir, speech_segments=None,
@@ -15672,10 +15676,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     audio inline so `-shortest` can trim to exact video duration.
     """
     import math
-
-    # ── INTERIM (v196.1): suppress the full transition-slot class ───────────
-    # Every-transition A/V skew (P1) — see _suppress_transition_slots.
-    _suppress_transition_slots(cuts, edit_plan)
 
     # ── 0. Source is already canonical ──────────────────────────────────────
     # The ingest pass (_do_fps_normalize in mega_pool) folded fps + scale +
@@ -17518,6 +17518,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _MIN_TRANSITION_SPACING_S = 3.0
     _TRANSITION_CAP_PER_30S = 4.0
 
+    # v197: snapshot the slot set every timeline consumer has already read.
+    _pre_safeguard_slots = [
+        (int(_t.get("afterClipIndex", -1)), int(_t.get("durationInFrames", 0)))
+        for _t in transitions_out
+    ]
+
     if transitions_out:
         # ── Helper: transition's output frame range ──────────────────────
         # The transition plays during the trailing _slot_frames of clip
@@ -17576,8 +17582,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 _kept_after_collision.append(_t)
                 continue
             _o_kind, _o_name, _o_start, _o_end = _collided_with
+            # v197: DEGRADE, never drop — the slot stays in the timeline
+            # (concat + audio + accounting all counted it); only the
+            # animation dies. HardHold renders clip B's head via the
+            # TransitionRenderer fallback: no animation to fight the overlay.
             print(
-                f"[transition] DROP '{_t.get('type','?')}' after clip "
+                f"[transition] DEGRADE '{_t.get('type','?')}'→HardHold after clip "
                 f"{_t.get('afterClipIndex','?')} — overlaps {_o_kind} "
                 f"'{_o_name}' window=[{_o_start}..{_o_end}). Overlay wins.",
                 flush=True,
@@ -17593,9 +17603,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                     "overlay_window_frames": [_o_start, _o_end],
                 },
                 "drop_overlay_collision",
-                final=None,
+                final={"type": "HardHold"},
                 reason=f"overlaps_{_o_kind}",
             )
+            _t["type"] = "HardHold"
+            _kept_after_collision.append(_t)
 
         # ── #5a: Minimum spacing ─────────────────────────────────────────
         _kept_after_spacing = []
@@ -17608,13 +17620,16 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 continue
             _t_start, _t_end = _twin
             _cut_frame_t = (_t_start + _t_end) // 2
+            if _t.get("type") == "HardHold":
+                _kept_after_spacing.append(_t)   # degraded slots are inert for spacing
+                continue
             if (
                 _last_kept_cut_frame is not None
                 and _cut_frame_t - _last_kept_cut_frame < _min_spacing_frames
             ):
                 _gap_s = (_cut_frame_t - _last_kept_cut_frame) / float(source_fps)
                 print(
-                    f"[transition] DROP '{_t.get('type','?')}' after clip "
+                    f"[transition] DEGRADE '{_t.get('type','?')}'→HardHold after clip "
                     f"{_t.get('afterClipIndex','?')} — only {_gap_s:.2f}s "
                     f"after previous kept transition (min {_MIN_TRANSITION_SPACING_S}s).",
                     flush=True,
@@ -17628,9 +17643,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                         "min_spacing_s": _MIN_TRANSITION_SPACING_S,
                     },
                     "drop_too_close",
-                    final=None,
+                    final={"type": "HardHold"},
                     reason=f"min_spacing_{_MIN_TRANSITION_SPACING_S}s",
                 )
+                _t["type"] = "HardHold"
+                _kept_after_spacing.append(_t)
                 continue
             _kept_after_spacing.append(_t)
             _last_kept_cut_frame = _cut_frame_t
@@ -17645,27 +17662,29 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         else:
             _cap = len(_kept_after_spacing)
         _kept_after_cap = list(_kept_after_spacing)
-        if len(_kept_after_cap) > _cap:
+        _real_count = sum(1 for _t in _kept_after_cap if _t.get("type") != "HardHold")
+        if _real_count > _cap:
             # Sort kept transitions by ascending natural duration (shortest
             # first = lowest priority = dropped first).
-            _indexed = list(enumerate(_kept_after_cap))
+            _indexed = [(_ix, _t) for _ix, _t in enumerate(_kept_after_cap)
+                        if _t.get("type") != "HardHold"]
             _indexed.sort(
                 key=lambda _ix_t: (
                     TRANSITION_NATURAL_DURATION_MS.get(_ix_t[1].get("type", ""), 0),
                     _ix_t[0],
                 )
             )
-            _n_to_drop = len(_kept_after_cap) - _cap
+            _n_to_drop = _real_count - _cap
             _drop_indices = {_ix for _ix, _ in _indexed[:_n_to_drop]}
             _new_kept = []
             for _ix, _t in enumerate(_kept_after_cap):
                 if _ix in _drop_indices:
                     _nat_ms = TRANSITION_NATURAL_DURATION_MS.get(_t.get("type", ""), 0)
                     print(
-                        f"[transition] DROP '{_t.get('type','?')}' after clip "
+                        f"[transition] DEGRADE '{_t.get('type','?')}'→HardHold after clip "
                         f"{_t.get('afterClipIndex','?')} — over cap "
-                        f"({len(_kept_after_cap)} > {_cap} for {_runtime_s:.1f}s "
-                        f"runtime). Shortest-natural-duration drops first.",
+                        f"({_real_count} > {_cap} for {_runtime_s:.1f}s "
+                        f"runtime). Shortest-natural-duration degrades first.",
                         flush=True,
                     )
                     _record_divergence(
@@ -17679,20 +17698,28 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                             "runtime_s": round(_runtime_s, 2),
                         },
                         "drop_over_cap",
-                        final=None,
+                        final={"type": "HardHold"},
                         reason=f"exceeds_{_TRANSITION_CAP_PER_30S}_per_30s_cap",
                     )
+                    _t["type"] = "HardHold"
+                    _new_kept.append(_t)
                 else:
                     _new_kept.append(_t)
             _kept_after_cap = _new_kept
 
-        if len(_kept_after_cap) != len(transitions_out):
+        _n_degraded = sum(1 for _t in _kept_after_cap if _t.get("type") == "HardHold")
+        if _n_degraded:
             print(
-                f"[transition] safeguards: {len(transitions_out)} → "
-                f"{len(_kept_after_cap)} (collision/spacing/cap drops applied)",
+                f"[transition] safeguards: {len(_kept_after_cap)} slots kept, "
+                f"{_n_degraded} degraded→HardHold (collision/spacing/cap) — "
+                f"timeline unchanged",
                 flush=True,
             )
         transitions_out = _kept_after_cap
+
+    # v197 ENFORCED: slot integrity + video/audio parity are structural —
+    # fail the render loudly rather than ship the convicted P1 skew class.
+    _assert_slot_integrity(_pre_safeguard_slots, transitions_out)
 
     # ── Authoritative caption-position override over MG / B-roll windows ─
     # The system prompt promises the pipeline owns caption position during

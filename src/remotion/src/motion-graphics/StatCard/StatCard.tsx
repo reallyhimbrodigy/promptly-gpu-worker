@@ -67,6 +67,9 @@ export const StatCard: React.FC<StatCardProps> = ({
     extrapolateRight: "clamp",
   });
   const easedCount = easeOutCubic(countProgress);
+  // v197 fail-closed: a non-numeric value would paint NaN via the count-up
+  // (convicted on the f1e15483 specimen — empty props passed F5 vacuously).
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
   const currentValue = fromValue + (value - fromValue) * easedCount;
   const display =
     decimals !== undefined

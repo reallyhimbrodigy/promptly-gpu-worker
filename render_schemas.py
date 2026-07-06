@@ -55,6 +55,14 @@ ZoomType = Literal[tuple(sorted(VALID_ZOOM_TYPES))]
 
 TransitionType = Literal[tuple(sorted(VALID_TRANSITION_TYPES))]
 
+# Render-input-only sentinel (v197): a safeguard-DEGRADED transition keeps its
+# slot in the timeline (slot-parity invariant) but renders as a hard hold —
+# the TransitionRenderer fallback plays clip B's head, no animation. NEVER a
+# recipe vocabulary member: Gemini cannot emit it (recipe validation uses
+# VALID_TRANSITION_TYPES); it exists only between the safeguard pass and the
+# renderer.
+RenderTransitionType = Literal[tuple(sorted(VALID_TRANSITION_TYPES | {"HardHold"}))]
+
 TightCutOverlayType = Literal[tuple(sorted(VALID_TIGHT_CUT_OVERLAYS))]
 
 # Render-input never carries the renderer "none" sentinel — CaptionSpec is
@@ -118,7 +126,7 @@ class ClipSpec(_RemotionModel):
 
 class TransitionSpec(_RemotionModel):
     afterClipIndex: int
-    type: TransitionType
+    type: RenderTransitionType
     durationInFrames: int
     clipAStartFromFrames: int
     clipBStartFromFrames: int

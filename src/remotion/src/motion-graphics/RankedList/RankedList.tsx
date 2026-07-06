@@ -17,19 +17,13 @@ const REVEAL = 16;
 const RANK_COL = 150;
 const ROW_GAP = 30;
 
-const DEFAULT_ITEMS: RankedListItem[] = [
-  { label: "Consistency", value: "98" },
-  { label: "Strong hooks", value: "91" },
-  { label: "Storytelling", value: "84" },
-  { label: "Clean editing", value: "76" },
-];
 
 export const RankedList: React.FC<RankedListProps> = ({
   startMs,
   durationMs,
   enterFrames,
   exitFrames,
-  items = DEFAULT_ITEMS,
+  items = [],
   order = "topDown",
   highlightTop = true,
   accentColor = "#FFC53D",
@@ -43,6 +37,8 @@ export const RankedList: React.FC<RankedListProps> = ({
   offsetY,
   scale,
 }) => {
+  // v197 fail-closed: no invented content (DEFAULT_POINTS class).
+  if (!items || items.length === 0) return null;
   const { containerStyle, wrapperStyle } = resolveMGPosition(
     { anchor, offsetX, offsetY, scale },
     { anchor: "center" },

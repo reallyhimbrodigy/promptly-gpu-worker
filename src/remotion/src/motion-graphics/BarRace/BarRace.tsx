@@ -36,18 +36,13 @@ const SHEEN_W = 82; // width of the traveling light sweep
 const BADGE = 48; // rank badge diameter
 const NEUTRAL = "#FFFFFF"; // runners-up fill; leader uses accentColor
 
-const DEFAULT_BARS: RaceBarItem[] = [
-  { label: "Organic", value: 82 },
-  { label: "Referral", value: 64 },
-  { label: "Paid ads", value: 41 },
-];
 
 export const BarRace: React.FC<BarRaceProps> = ({
   startMs,
   durationMs,
   enterFrames,
   exitFrames,
-  bars = DEFAULT_BARS,
+  bars = [],
   maxValue,
   mode = "compare",
   valuePrefix = "",
@@ -60,6 +55,8 @@ export const BarRace: React.FC<BarRaceProps> = ({
   offsetY,
   scale,
 }) => {
+  // v197 fail-closed: no invented content (DEFAULT_POINTS class).
+  if (!bars || bars.length === 0) return null;
   const { containerStyle, wrapperStyle } = resolveMGPosition(
     { anchor, offsetX, offsetY, scale },
     { anchor: "center" },
