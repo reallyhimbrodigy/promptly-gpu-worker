@@ -14256,6 +14256,233 @@ def run_ffmpeg(args):
     return result
 
 
+# ── POST-RENDER INTEGRITY GATE (CUT_STACK_REFORM Part 1) ───────────────────
+# The render never leaves the box unexamined: one decode pass on the final
+# mp4 (freeze + black + silence detectors), plus packet-level timestamp and
+# duration checks, immediately before upload. Masks are PER-CHECK and
+# PROFILE-BOUNDED: each window comes from the ONE post-safeguard render plan
+# (transition slots from the canonical clip-range cursor law, full-screen
+# MGs, generated scenes, B-roll) — the gate never re-derives layout math.
+#
+# Calibration pins (validate_deploy asserts these against their evidence):
+#   FREEZE_TRIP 0.80s   — specimen dde5945d = 0.883s; field sub-trip max
+#                          0.75s across 45-file battery (2026-07-05)
+#   HOLE 0.30s          — TIMELINE_HOLES joint-span class signature
+#   DUR_DELTA 0.25s     — PC2 injection = 0.993s
+#   -50dB freeze noise  — rendered stills only; organic camera sensor noise
+#                          never freezes at this floor (forensics sweep)
+_IG_FREEZE_NOISE_DB = -50
+_IG_FREEZE_DETECT_S = 0.45
+_IG_FREEZE_TRIP_S = 0.80
+_IG_BLACK_DETECT_S = 0.20
+_IG_BLACK_PIX_TH = 0.10
+_IG_SILENCE_DB = -50
+_IG_SILENCE_DETECT_S = 0.30
+_IG_HOLE_TRIP_S = 0.30
+_IG_DUR_DELTA_TRIP_S = 0.25
+_IG_FRAME_TOL = 2
+_IG_MASK_PAD_S = 0.25
+_IG_SOURCE_ECHO_COVER = 0.60   # source frozen-coverage ≥ this → content stillness
+
+
+def _ig_parse_spans(text, start_pat, end_pat, total_dur):
+    """Detector start/end log lines → [(s, e)]; an unclosed start closes at
+    total_dur (a freeze/black running to the end of file emits no end line)."""
+    starts = [float(m) for m in re.findall(start_pat, text)]
+    ends = [float(m) for m in re.findall(end_pat, text)]
+    spans = []
+    for i, s in enumerate(starts):
+        e = ends[i] if i < len(ends) else total_dur
+        if e > s:
+            spans.append((s, e))
+    return spans
+
+
+def _ig_subtract(spans, masks):
+    out = list(spans)
+    for (ms, me) in masks:
+        nxt = []
+        for (s, e) in out:
+            if me <= s or ms >= e:
+                nxt.append((s, e))
+                continue
+            if s < ms:
+                nxt.append((s, ms))
+            if me < e:
+                nxt.append((me, e))
+        out = nxt
+    return [(s, e) for (s, e) in out if e - s > 1e-6]
+
+
+def _ig_intersect(a, b):
+    out = []
+    for (s1, e1) in a:
+        for (s2, e2) in b:
+            s, e = max(s1, s2), min(e1, e2)
+            if e > s:
+                out.append((s, e))
+    return out
+
+
+def _ig_probe_timestamps(path):
+    """Video-stream packet sanity: DTS monotone (decode order law) + PTS
+    unique. PTS itself is NOT required monotone — B-frames reorder it."""
+    p = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0",
+         "-show_entries", "packet=pts,dts", "-of", "csv=p=0", path],
+        capture_output=True, text=True)
+    pts, dts = [], []
+    for line in (p.stdout or "").splitlines():
+        parts = line.split(",")
+        if len(parts) >= 2:
+            try:
+                pts.append(int(parts[0]))
+                dts.append(int(parts[1]))
+            except ValueError:
+                continue
+    return {
+        "n_packets": len(pts),
+        "dts_monotone": all(b >= a for a, b in zip(dts, dts[1:])),
+        "pts_unique": len(set(pts)) == len(pts),
+    }
+
+
+def _ig_source_echo(source_path, spans, out_to_src):
+    """Content-stillness discriminator for residual freeze spans: a frozen
+    OUTPUT span whose mapped SOURCE window is also frozen is source content
+    (screen recording, static shot — an organic input class per
+    TIMELINE_HOLES), not a render defect. Returns (defect_spans, downgraded).
+    """
+    defects, downgraded = [], []
+    for (s, e) in spans:
+        try:
+            src_s, src_e = out_to_src(s), out_to_src(e)
+        except Exception:
+            defects.append((s, e))
+            continue
+        if src_s is None or src_e is None or src_e <= src_s:
+            defects.append((s, e))
+            continue
+        a, b = max(0.0, src_s - 0.3), src_e + 0.3
+        p = subprocess.run(
+            ["ffmpeg", "-v", "info", "-ss", str(a), "-t", str(b - a),
+             "-i", source_path,
+             "-vf", "freezedetect=n=%ddB:d=%s" % (
+                 _IG_FREEZE_NOISE_DB, _IG_FREEZE_DETECT_S),
+             "-an", "-f", "null", "-"],
+            capture_output=True, text=True)
+        src_frozen = _ig_parse_spans(p.stderr or "",
+                                     r"freeze_start: ([\d.]+)",
+                                     r"freeze_end: ([\d.]+)", b - a)
+        cover = sum(fe - fs for fs, fe in src_frozen)
+        if cover >= (src_e - src_s) * _IG_SOURCE_ECHO_COVER:
+            downgraded.append({"span": (s, e), "src": (src_s, src_e),
+                               "src_frozen_cover_s": round(cover, 3)})
+        else:
+            defects.append((s, e))
+    return defects, downgraded
+
+
+def _build_integrity_masks(edit_plan):
+    """Assemble per-check mask windows from the post-safeguard render plan
+    stash. freeze: transition slots + full-screen MGs + generated scenes +
+    B-roll. black: DipToBlack slots only. hole: transition slots (designed
+    handle silence under a designed-still slot)."""
+    pad = _IG_MASK_PAD_S
+    slots = edit_plan.get("_integrity_slot_ranges") or []
+    fullmg = edit_plan.get("_integrity_fullmg_ranges") or []
+    broll = edit_plan.get("_broll_output_ranges") or []
+    fps = float(edit_plan.get("_render_fps") or 60.0)
+    gs = [((float(g.get("fromFrame") or 0)) / fps,
+           (float(g.get("fromFrame") or 0)
+            + float(g.get("durationInFrames") or 0)) / fps)
+          for g in (edit_plan.get("_rendered_generated_scenes") or [])]
+    def _p(ranges):
+        return [(max(0.0, float(s) - pad), float(e) + pad)
+                for (s, e) in ranges]
+    slot_rngs = [(s["start"], s["end"]) for s in slots]
+    dip_rngs = [(s["start"], s["end"]) for s in slots
+                if str(s.get("type") or "").lower().startswith("dip")]
+    return {
+        "freeze": _p(slot_rngs) + _p(list(fullmg)) + _p(list(broll)) + _p(gs),
+        "black": _p(dip_rngs),
+        "hole": _p(slot_rngs),
+    }
+
+
+def _integrity_gate(output_path, v_dur, a_dur, expected_frames, nb_frames,
+                    fps, masks, source_path=None, out_to_src=None):
+    """Run every check; return the verdict dict. Pure inspector — the caller
+    owns trip handling (fail vs observe-only) and persistence."""
+    total = max(float(v_dur or 0), float(a_dur or 0))
+    t0 = time.time()
+    p = subprocess.run(
+        ["ffmpeg", "-v", "info", "-i", output_path,
+         "-vf", "freezedetect=n=%ddB:d=%s,blackdetect=d=%s:pix_th=%s" % (
+             _IG_FREEZE_NOISE_DB, _IG_FREEZE_DETECT_S,
+             _IG_BLACK_DETECT_S, _IG_BLACK_PIX_TH),
+         "-af", "silencedetect=n=%ddB:d=%s" % (
+             _IG_SILENCE_DB, _IG_SILENCE_DETECT_S),
+         "-f", "null", "-"],
+        capture_output=True, text=True)
+    err = p.stderr or ""
+    freeze = _ig_parse_spans(err, r"freeze_start: ([\d.]+)",
+                             r"freeze_end: ([\d.]+)", total)
+    black = _ig_parse_spans(err, r"black_start:([\d.]+)",
+                            r"black_end:([\d.]+)", total)
+    silence = _ig_parse_spans(err, r"silence_start: ([-\d.]+)",
+                              r"silence_end: ([-\d.]+)", total)
+
+    freeze_resid = [(s, e) for (s, e)
+                    in _ig_subtract(freeze, masks.get("freeze", []))
+                    if e - s >= _IG_FREEZE_TRIP_S]
+    downgraded = []
+    if freeze_resid and source_path and out_to_src:
+        freeze_resid, downgraded = _ig_source_echo(
+            source_path, freeze_resid, out_to_src)
+    black_resid = _ig_subtract(black, masks.get("black", []))
+    holes = [(s, e) for (s, e) in _ig_subtract(
+                 _ig_intersect(silence, sorted(set(freeze + black))),
+                 masks.get("hole", []))
+             if e - s >= _IG_HOLE_TRIP_S]
+    ts = _ig_probe_timestamps(output_path)
+
+    trips = []
+    if freeze_resid:
+        trips.append({"check": "freeze", "spans": freeze_resid})
+    if black_resid:
+        trips.append({"check": "black", "spans": black_resid})
+    if holes:
+        trips.append({"check": "both_stream_hole", "spans": holes})
+    dur_delta = abs(float(v_dur or 0) - float(a_dur or 0))
+    if v_dur and a_dur and dur_delta >= _IG_DUR_DELTA_TRIP_S:
+        trips.append({"check": "av_duration_delta",
+                      "delta_s": round(dur_delta, 3)})
+    if expected_frames and nb_frames and \
+            abs(int(nb_frames) - int(expected_frames)) > _IG_FRAME_TOL:
+        trips.append({"check": "frame_count", "nb_frames": int(nb_frames),
+                      "expected": int(expected_frames)})
+    if not ts["dts_monotone"] or not ts["pts_unique"]:
+        trips.append({"check": "timestamps", **ts})
+
+    return {
+        "clean": not trips,
+        "trips": trips,
+        "gate_elapsed_s": round(time.time() - t0, 2),
+        "detail": {
+            "v_dur": round(float(v_dur or 0), 3),
+            "a_dur": round(float(a_dur or 0), 3),
+            "nb_frames": nb_frames, "expected_frames": expected_frames,
+            "fps": fps,
+            "freeze_raw": freeze, "black_raw": black, "silence": silence,
+            "content_stillness_downgraded": downgraded,
+            "masks": {k: [(round(s, 3), round(e, 3)) for (s, e) in v]
+                      for k, v in masks.items()},
+            "timestamps": ts,
+        },
+    }
+
+
 def _download_and_concat_sources(source_urls, dest_path, work_dir):
     """Phase B (multi-input, PREMIUM): download every source S3 object and, in
     order, concatenate them into ONE uniform file at dest_path.
@@ -17745,6 +17972,31 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _broll_ranges_for_caption_override,
     )
 
+    # ── Integrity-gate designed-window stash ────────────────────────────────
+    # The gate (post-assembly, pre-upload) masks DESIGNED stillness/black/
+    # silence. Windows come from the ONE post-safeguard plan, right here where
+    # every mutation has completed (transition degrades + integrity assert,
+    # B-roll strict separation, MG finalization) — the gate never re-derives
+    # layout math. Slot window after clip i = the overlap under the canonical
+    # cursor law: [_clip_ranges[i].end − slot_dur, _clip_ranges[i].end].
+    _ig_slot_ranges = []
+    for _t in transitions_out:
+        _ai = int(_t.get("afterClipIndex") if _t.get("afterClipIndex") is not None else -1)
+        if 0 <= _ai < len(_clip_ranges):
+            _sd = float(_t.get("durationInFrames") or 0) / float(source_fps)
+            _se = float(_clip_ranges[_ai]["end"])
+            _ig_slot_ranges.append({"start": max(0.0, _se - _sd), "end": _se,
+                                    "type": str(_t.get("type") or "")})
+    edit_plan["_integrity_slot_ranges"] = _ig_slot_ranges
+    edit_plan["_integrity_fullmg_ranges"] = [
+        (float(_mg.get("fromFrame") or 0) / float(source_fps),
+         (float(_mg.get("fromFrame") or 0)
+          + float(_mg.get("durationInFrames") or 0)) / float(source_fps))
+        for _mg in motion_graphics_out
+        if str(_mg.get("type") or "") in _MG_FULLSIZE_TYPES
+    ]
+    edit_plan["_render_clip_output_ranges"] = _clip_ranges
+    edit_plan["_render_total_output_frames"] = int(total_output_frames)
 
     # [fix-1] Strip the internal scratch keys the SFX coverage set already
     # consumed above (14350-14355) before broll_out enters the render contract.
@@ -19286,6 +19538,20 @@ def classify_error(e):
             "requires_vibe_change": vibe,
         }
 
+    # ── Integrity gate (post-render inspection tripped) ───────────────
+    # ORDERED FIRST among sentinels: the trip summary embeds check names
+    # and spans that greedier classes below would absorb. The app owns the
+    # credit refund when it sees this code (refund topology ruling:
+    # worker marks, app refunds). retryable — the defect is ours, a
+    # re-run may render clean.
+    if "INTEGRITY_TRIP" in msg:
+        return _e(
+            "INTEGRITY_TRIP",
+            "We caught a rendering defect on our side — your video was "
+            "not delivered and your credit was returned.",
+            retryable=True,
+        )
+
     # ── Plan validation (recipe repair loop exhausted) ────────────────
     # ORDERED FIRST — the validator messages routinely contain substrings
     # the greedier classes below absorb ("Gemini" → EDITOR_GENERIC,
@@ -19747,6 +20013,10 @@ _OUTER_RESCUE_DENY = frozenset({
     "UPLOAD_NEVER_STARTED", "UPLOAD_STALLED", "UPLOAD_TIMEOUT",
     "S3_ACCESS", "S3_GENERIC", "TRANSCRIPTION",
     "RENDER_FATAL", "RECIPE_INVALID",
+    # Integrity trip = designed terminal outcome (failed + refund + P0
+    # forensics). A safe-edit re-run would be an auto-retry, which the
+    # gate design explicitly forbids.
+    "INTEGRITY_TRIP",
 })
 _RESCUE_REPREP_S = 90.0   # projected re-download + re-transcribe + re-probe
 _RESCUE_MARGIN_S = 60.0   # slack under the 900s job budget after the render
@@ -20820,6 +21090,12 @@ def handler(job):
         mode = str(input_data.get("mode") or "full").strip().lower()
         if mode not in ("full", "render_only", "tweak", "guided_redraft", "reinterpret", "resume_ask"):
             mode = "full"
+        # Integrity-gate observe-only: operator-harness fixtures deliberately
+        # contain freezes/black (engineered corpus material) — the gate still
+        # runs and persists its verdict, but a trip delivers anyway with a
+        # loud log line instead of failing the job. Production jobs never
+        # set this.
+        integrity_observe_only = bool(input_data.get("integrity_observe_only"))
         provided_plan = input_data.get("edit_plan") if isinstance(input_data.get("edit_plan"), dict) else None
         provided_transcript = input_data.get("transcript") if isinstance(input_data.get("transcript"), dict) else None
         provided_analysis = input_data.get("analysis_data") if isinstance(input_data.get("analysis_data"), dict) else None
@@ -23432,6 +23708,100 @@ def handler(job):
                     f"— shipping the validated output",
                     flush=True,
                 )
+
+        # ── POST-RENDER INTEGRITY GATE (CUT_STACK_REFORM Part 1) ────────────
+        # The render never leaves the box unexamined. Runs on the FINAL
+        # output_path (after any QA-judge re-render), before any byte
+        # uploads. Trip → INTEGRITY_TRIP failure (app owns the credit
+        # refund on that code), forensic preservation, NO auto-retry
+        # (INTEGRITY_TRIP is in _OUTER_RESCUE_DENY). An instrument crash
+        # inside the gate itself fails OPEN with a loud log line — a gate
+        # bug must never eat a good render.
+        try:
+            probe_cache_clear(output_path)
+            _ig_meta = _probe_full(output_path)
+            _ig_v = next((s for s in _ig_meta.get("streams", [])
+                          if s.get("codec_type") == "video"), {})
+            _ig_a = next((s for s in _ig_meta.get("streams", [])
+                          if s.get("codec_type") == "audio"), {})
+            _ig_vd = float(_ig_v.get("duration") or 0)
+            _ig_ad = float(_ig_a.get("duration") or 0)
+            _ig_nb = int(_ig_v.get("nb_frames") or 0)
+            _ig_fps = float(edit_plan.get("_render_fps") or 60.0)
+            _ig_expected = int(edit_plan.get("_render_total_output_frames") or 0)
+            _ig_cranges = edit_plan.get("_render_clip_output_ranges") or []
+            _ig_rcuts = edit_plan.get("_render_cuts") or []
+            _ig_tmaps = edit_plan.get("_render_clip_time_maps") or []
+
+            def _ig_out_to_src(t):
+                for _ci, _r in enumerate(_ig_cranges):
+                    if _r["start"] - 1e-6 <= t <= _r["end"] + 1e-6:
+                        if _ci < len(_ig_rcuts):
+                            _pbr = 1.0
+                            if _ci < len(_ig_tmaps):
+                                _pbr = float(_ig_tmaps[_ci].get("avg_speed") or 1.0)
+                            return (float(_ig_rcuts[_ci]["source_start"])
+                                    + (t - _r["start"]) * _pbr)
+                return None
+
+            _ig_verdict = _integrity_gate(
+                output_path, _ig_vd, _ig_ad, _ig_expected, _ig_nb, _ig_fps,
+                _build_integrity_masks(edit_plan),
+                source_path=source_path if os.path.exists(source_path) else None,
+                out_to_src=_ig_out_to_src,
+            )
+        except Exception as _ig_err:
+            _ig_verdict = {"clean": None, "trips": [],
+                           "gate_error": f"{type(_ig_err).__name__}: {str(_ig_err)[:200]}"}
+            print(f"[integrity-gate] ERROR (fail-open — instrument crashed, "
+                  f"render delivered unexamined): {_ig_verdict['gate_error']}",
+                  flush=True)
+
+        # Verdict persisted ALWAYS — clean verdicts feed the corpus baseline.
+        _ig_bucket = None
+        try:
+            import io as _ig_io
+            if _aws_s3_client is not None:
+                _ig_bucket = (os.environ.get("S3_BUCKET_NAME")
+                              or os.environ.get("SUPABASE_S3_BUCKET")
+                              or "promptly-video-storage")
+                _aws_s3_client.upload_fileobj(
+                    _ig_io.BytesIO(json.dumps(
+                        {"job_id": job_id, **_ig_verdict}).encode()),
+                    _ig_bucket, f"integrity/{job_id}.json",
+                    ExtraArgs={"ContentType": "application/json"})
+        except Exception as _ig_persist_err:
+            print(f"[integrity-gate] verdict persist failed (non-fatal): "
+                  f"{str(_ig_persist_err)[:120]}", flush=True)
+
+        if _ig_verdict.get("clean") is True:
+            print(f"[integrity-gate] CLEAN in {_ig_verdict.get('gate_elapsed_s')}s "
+                  f"(masks: {sum(len(v) for v in _ig_verdict['detail']['masks'].values())} windows, "
+                  f"downgrades: {len(_ig_verdict['detail']['content_stillness_downgraded'])})",
+                  flush=True)
+        elif _ig_verdict.get("clean") is False:
+            _ig_summary = ", ".join(
+                t["check"] + "=" + json.dumps(t.get("spans") or t.get("delta_s")
+                                              or t.get("nb_frames"))
+                for t in _ig_verdict["trips"])
+            print(f"[integrity-gate] TRIP {_ig_summary}", flush=True)
+            try:
+                if _aws_s3_client is not None and _ig_bucket:
+                    _aws_s3_client.upload_file(
+                        output_path, _ig_bucket,
+                        f"forensics/{job_id}/output.mp4",
+                        ExtraArgs={"ContentType": "video/mp4"},
+                        Config=_S3_TRANSFER_CONFIG)
+                    print(f"[integrity-gate] forensic specimen preserved → "
+                          f"forensics/{job_id}/", flush=True)
+            except Exception as _ig_f_err:
+                print(f"[integrity-gate] forensic preserve failed: "
+                      f"{str(_ig_f_err)[:120]}", flush=True)
+            if integrity_observe_only:
+                print("[integrity-gate] TRIP (observe-only — operator "
+                      "fixture, delivering anyway)", flush=True)
+            else:
+                raise RuntimeError(f"INTEGRITY_TRIP: {_ig_summary}")
 
         send_progress(job_id, "thumbnail", 92, "Picking your cover frame", app_url)
         send_progress(job_id, "upload", 96, "Publishing to your library", app_url)

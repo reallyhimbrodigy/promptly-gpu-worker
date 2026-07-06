@@ -4310,6 +4310,62 @@ def _cancel_fence_wired():
     assert _src.count(".update(patch).eq(\"id\", job_id)") == 1, "a second rail write chain appeared"
 
 
+@check("integrity gate: thresholds pinned to calibration evidence (dde5945d/PC2/45-file field battery)")
+def _gate_thresholds():
+    import handler
+    # dde5945d = 0.883s; field sub-trip max 0.75s (battery 2026-07-05)
+    assert handler._IG_FREEZE_TRIP_S == 0.80, "freeze trip moved off its calibration"
+    assert handler._IG_FREEZE_NOISE_DB == -50, "freeze noise floor moved"
+    assert handler._IG_HOLE_TRIP_S == 0.30, "hole trip moved off TIMELINE_HOLES signature"
+    assert handler._IG_DUR_DELTA_TRIP_S == 0.25, "duration-delta trip moved (PC2 = 0.993s)"
+    assert handler._IG_BLACK_DETECT_S == 0.20 and handler._IG_BLACK_PIX_TH == 0.10
+
+
+@check("integrity gate: wired at the pre-upload seam, verdict persisted always, masks from the ONE post-safeguard plan")
+def _gate_wired():
+    _src = open("handler.py").read()
+    _seam = _src.index("POST-RENDER INTEGRITY GATE (CUT_STACK_REFORM Part 1) ────")
+    assert _seam < _src.index("def _upload_main"), "gate must precede upload"
+    assert "_integrity_gate(" in _src and "_build_integrity_masks(edit_plan)" in _src
+    assert 'f"integrity/{job_id}.json"' in _src, "always-persist verdict missing"
+    assert 'f"forensics/{job_id}/output.mp4"' in _src, "forensic preservation missing"
+    # masks come from the post-safeguard stash, never re-derived layout math
+    assert "_integrity_slot_ranges" in _src and "_integrity_fullmg_ranges" in _src
+    assert '_clip_ranges[_ai]["end"]' in _src, "slot windows must come from the canonical clip-range cursor law"
+
+
+@check("integrity gate: trip is terminal — INTEGRITY_TRIP envelope, refund copy, rescue-denied, observe-only plumbed")
+def _gate_trip_path():
+    import handler
+    _env = handler.classify_error(RuntimeError("INTEGRITY_TRIP: freeze=[[1.0, 2.0]]"))
+    assert _env.get("error_code") == "INTEGRITY_TRIP", _env
+    assert "credit was returned" in str(_env.get("user_message")), "honest refund copy missing"
+    assert _env.get("retryable") is True
+    assert "INTEGRITY_TRIP" in handler._OUTER_RESCUE_DENY, "safe-edit rescue would auto-retry a tripped render"
+    _src = open("handler.py").read()
+    assert 'input_data.get("integrity_observe_only")' in _src, "operator observe-only flag missing"
+    assert "observe-only — operator" in _src, "observe-only trip branch missing"
+    # fail-open on instrument crash is LOUD, never silent
+    assert "fail-open — instrument crashed" in _src
+
+
+@check("integrity gate: behavioral — mask algebra + per-check bounding on synthetic spans")
+def _gate_behavior():
+    import handler
+    assert handler._ig_subtract([(0.0, 10.0)], [(4.0, 6.0)]) == [(0.0, 4.0), (6.0, 10.0)]
+    assert handler._ig_intersect([(1.0, 3.0)], [(2.0, 5.0)]) == [(2.0, 3.0)]
+    _m = handler._build_integrity_masks({
+        "_render_fps": 60.0,
+        "_integrity_slot_ranges": [{"start": 2.0, "end": 2.6, "type": "DipToBlack"}],
+    })
+    assert len(_m["black"]) == 1 and len(_m["hole"]) == 1 and len(_m["freeze"]) == 1
+    _m2 = handler._build_integrity_masks({
+        "_render_fps": 60.0,
+        "_integrity_slot_ranges": [{"start": 2.0, "end": 2.6, "type": "CardSwipe"}],
+    })
+    assert _m2["black"] == [], "non-dip slot must not mask black"
+
+
 # ─── REPORT ────────────────────────────────────────────────────────────
 print(f"\n{'=' * 64}")
 print(f"RESULTS: {len(_passed)} passed, {len(_failures)} failed")
