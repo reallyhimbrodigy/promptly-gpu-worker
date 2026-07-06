@@ -61,6 +61,40 @@ def build_render_timeline(render_cuts, effective_durations, trim_head_dur,
     return {"fps": fps, "total_frames": max(1, cum), "entries": entries}
 
 
+def assert_frame_truth(tl, effective_durations, trim_head_dur, trim_tail_dur,
+                       trans_dur_after, source_fps):
+    """v197-lineage parity tripwire, re-anchored to the one truth (Slice 2).
+
+    Re-derives the proven-correct per-cut frame accounting and asserts the
+    timeline matches it EXACTLY on body frames and every REAL slot. The
+    ONLY sanctioned difference is the #D3 phantom drop (a sub-frame slot
+    that the old total counted as max(1) and the timeline correctly omits) —
+    that lives in the total, never in a body or a real slot. Any body-frame
+    or real-slot movement is a hard STOP: raise, failing the render loudly
+    rather than shipping a shifted boundary (the census proved these were
+    perfect; they must stay perfect).
+    """
+    fps = float(source_fps)
+    for e in tl["entries"]:
+        i = e["cut_index"]
+        eff = float(effective_durations[i]) if i < len(effective_durations) else 0.0
+        th = float(trim_head_dur[i]) if i < len(trim_head_dur) else 0.0
+        tt = float(trim_tail_dur[i]) if i < len(trim_tail_dur) else 0.0
+        old_body = max(1, int(round((eff - th - tt) * fps)))
+        if e["body_frames"] != old_body:
+            raise RuntimeError(
+                f"ONE-TRUTH BODY VIOLATION cut {i}: timeline "
+                f"{e['body_frames']}f != accounting {old_body}f")
+        slot_s = float(trans_dur_after[i]) if i < len(trans_dur_after) else 0.0
+        old_slot = int(round(slot_s * fps))
+        # a REAL slot (rounds to >=1) must match to the frame; a phantom
+        # (old max(1) over a sub-frame slot) is the sanctioned #D3 drop.
+        if old_slot > 0 and e["slot_frames_after"] != old_slot:
+            raise RuntimeError(
+                f"ONE-TRUTH SLOT VIOLATION cut {i}: timeline "
+                f"{e['slot_frames_after']}f != accounting {old_slot}f")
+
+
 # ── Derived views (never re-accumulate; read the frame truth) ──────────────
 def total_seconds(tl):
     return tl["total_frames"] / tl["fps"]

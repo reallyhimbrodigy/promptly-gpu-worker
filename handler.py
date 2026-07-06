@@ -16262,16 +16262,17 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # (playbackRate≈0.048) rendered a glitched static frame in production
     # and the additive insertion grew output duration ~1s beyond content.
     # Zero-handle transitions at tight cuts are NOT supported in this model.
+    # Seconds-domain slot durations only — the FRAME truth (and the total)
+    # come from RenderTimeline below, not a parallel frame accumulator
+    # (the old _trans_frames_after used max(1) here and counted a phantom
+    # frame per skipped zero-handle transition — the #D3 bug, deleted).
     _trans_dur_after = []
-    _trans_frames_after = 0
     for _i, _rc in enumerate(render_cuts):
         _has_out = _i < len(render_cuts) - 1 and _has_real_transition(_rc)
         if _has_out:
             _natural_here = _natural_trans_dur_for_cut(_rc)
             _slot = min(_natural_here, _trim_tail_dur[_i], _trim_head_dur[_i + 1])
-            _slot_frames = max(1, int(round(_slot * source_fps)))
             _trans_dur_after.append(_slot)
-            _trans_frames_after += _slot_frames
         else:
             _trans_dur_after.append(0.0)
 
@@ -16298,15 +16299,30 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     edit_plan["_render_effective_durations"] = effective_durations
     edit_plan["_render_clip_time_maps"] = _clip_time_maps
 
-    # Per-cut RENDER frame count (after handle trim).
-    _per_cut_render_dur_frames: List[int] = []
-    for _i in range(len(render_cuts)):
-        _render_dur = effective_durations[_i] - _trim_head_dur[_i] - _trim_tail_dur[_i]
-        _per_cut_render_dur_frames.append(max(1, int(round(_render_dur * source_fps))))
+    # ── UNIFICATION Slice 2 — the ONE output-timeline truth (frame domain) ──
+    # RenderTimeline is the single frames-first authority (pillar 3). Body
+    # frames, slot frames, and the total are READ from it; the duplicate
+    # frame accumulators are gone. It applies the one floor rule (a sub-frame
+    # slot exists nowhere) — the #D3 fix, convicted live (census 2026-07-06,
+    # up to −6 phantom frames of overlay/audio past the video base).
+    import render_timeline as _rtl
+    _timeline = _rtl.build_render_timeline(
+        render_cuts, effective_durations, _trim_head_dur, _trim_tail_dur,
+        _trans_dur_after, _clip_time_maps, source_fps)
+    edit_plan["_render_timeline"] = _timeline
+    # v197-lineage tripwire, re-anchored to the one truth: body + every real
+    # slot MUST match the proven accounting to the frame, or the render fails
+    # loudly (a shifted boundary is never shipped). The #D3 phantom drop is
+    # the only sanctioned difference, and it lives only in the total.
+    _rtl.assert_frame_truth(_timeline, effective_durations, _trim_head_dur,
+                            _trim_tail_dur, _trans_dur_after, source_fps)
 
-    # Total output = sum(render frames) + sum(trans frames)
-    n = len(render_cuts)
-    total_output_frames = max(1, sum(_per_cut_render_dur_frames) + _trans_frames_after)
+    # Per-cut RENDER frame count — READ from the one truth (was a duplicate
+    # int(round()) loop; proven bit-exact across the census, body=[] always).
+    _per_cut_render_dur_frames: List[int] = _rtl.body_frames_list(_timeline)
+
+    # Total output — the one truth (drops the #D3 phantom frames).
+    total_output_frames = _timeline["total_frames"]
     total_output_duration = total_output_frames / float(source_fps)
 
     # Output clip ranges — COMPRESSION model. Each cut's full output window
@@ -16505,7 +16521,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # transitions where gap >= 2 × natural_duration), but the guard
         # remains as a safety net for impossible boundaries.
         _slot_dur = _trans_dur_after[i] if i < len(_trans_dur_after) else 0.0
-        _slot_frames = max(0, int(round(_slot_dur * source_fps)))
+        # Slot frames READ from the one truth (was a second, independent
+        # round() — the #D3 double-rounding site; now single-sourced).
+        _slot_frames = (_timeline["entries"][i]["slot_frames_after"]
+                        if i < len(_timeline["entries"]) else 0)
         if _slot_frames <= 0:
             _skipped_zero_slot_transitions += 1
             print(
@@ -18007,45 +18026,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     ]
     edit_plan["_render_clip_output_ranges"] = _clip_ranges
     edit_plan["_render_total_output_frames"] = int(total_output_frames)
-
-    # ── UNIFICATION SLICE 1 — RenderTimeline SHADOW (zero behavior change) ──
-    # The one truth is built here (post-safeguard, where every mutation has
-    # completed) ALONGSIDE the five current representations, and compared.
-    # NOTHING consumes it — this only logs divergences for the census
-    # (Slice 2, a separate GO, does the consumer cutover + deletion). Fully
-    # guarded: a shadow bug must never touch a real render.
-    try:
-        import render_timeline as _rtl
-        _shadow_tl = _rtl.build_render_timeline(
-            render_cuts, effective_durations, _trim_head_dur, _trim_tail_dur,
-            _trans_dur_after, _clip_time_maps, source_fps)
-        _shadow_body_s = [
-            (effective_durations[_i] - _trim_head_dur[_i] - _trim_tail_dur[_i])
-            for _i in range(len(render_cuts))]
-        _shadow_div = _rtl.shadow_check(
-            _shadow_tl,
-            current_total_frames=total_output_frames,
-            current_per_cut_render_frames=_per_cut_render_dur_frames,
-            body_seconds=_shadow_body_s,
-            slot_seconds=list(_trans_dur_after),
-            transitions_out=transitions_out,
-            clip_ranges=_clip_ranges,
-            source_fps=source_fps)
-        if _shadow_div["has_divergence"]:
-            print(f"[timeline-shadow] divergence "
-                  f"integrity={_shadow_div['integrity_divergence']} "
-                  f"rounding={_shadow_div['rounding_divergence']} "
-                  f"total_delta={_shadow_div['total']['delta']} "
-                  f"body={_shadow_div['body']} slots={_shadow_div['slots']} "
-                  f"d1={_shadow_div['d1']}", flush=True)
-        else:
-            print(f"[timeline-shadow] parity OK "
-                  f"({_shadow_tl['total_frames']}f, {len(_shadow_tl['entries'])} cuts)",
-                  flush=True)
-    except Exception as _shadow_err:
-        print(f"[timeline-shadow] SKIPPED (shadow error, render unaffected): "
-              f"{type(_shadow_err).__name__}: {str(_shadow_err)[:160]}",
-              flush=True)
+    # Slice 1 shadow REMOVED — the frame-domain truth is now consumed
+    # directly (built + tripwire-asserted at ~16310); the census is filed
+    # (UNIFICATION_CENSUS_2026-07-06.md). The projection- and audio-group
+    # cutovers (get_output_clip_ranges consumers, project_words_to_output's
+    # private cursor, the #D1 quantization collapse, the audio slot
+    # sec→samples) are the remaining Slice-2 groups, each gated on their own
+    # render-level parity proof + Zac's eye per "each group green before the
+    # next".
 
     # [fix-1] Strip the internal scratch keys the SFX coverage set already
     # consumed above (14350-14355) before broll_out enters the render contract.

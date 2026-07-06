@@ -110,8 +110,43 @@ check("#D1 delta recorded (rounding class, not integrity)",
       str(d6["d1"]))
 check("#D1 sum-of-rounds > round-of-sum here", d6["d1"]["delta"] == 2, str(d6["d1"]))
 
+print("\n=== T7: Slice 2 tripwire — body/real-slot immovability (STOP-and-report) ===")
+tl7 = RT.build_render_timeline(cuts, eff, th, tt, tda, tmaps, FPS)
+RT.assert_frame_truth(tl7, eff, th, tt, tda, FPS)  # clean → no raise
+check("clean timeline passes the tripwire", True)
+_bad = dict(tl7)
+_bad["entries"] = [dict(e) for e in tl7["entries"]]
+_bad["entries"][1]["body_frames"] += 1   # move a body frame
+raised = False
+try:
+    RT.assert_frame_truth(_bad, eff, th, tt, tda, FPS)
+except RuntimeError as e:
+    raised = "BODY VIOLATION" in str(e)
+check("body-frame movement is a hard STOP", raised)
+# real-slot movement
+_bad2 = {"fps": FPS, "total_frames": 999,
+         "entries": [{"cut_index": 0, "out_start_frame": 0, "body_frames": 60,
+                      "slot_frames_after": 99}]}
+raised2 = False
+try:
+    RT.assert_frame_truth(_bad2, [1.0], [0], [0], [0.5], FPS)
+except RuntimeError as e:
+    raised2 = "SLOT VIOLATION" in str(e)
+check("real-slot movement is a hard STOP", raised2)
+
+print("\n=== T8: #D3 EXEMPLAR — the total_delta=-6 shape (six zero-handle slots) ===")
+cuts8 = [cut(i, i + 1.0) for i in range(7)]
+eff8 = [1.0] * 7
+tda8 = [0.004] * 6 + [0.0]   # six sub-frame slots → six phantoms in old code
+tl8 = RT.build_render_timeline(cuts8, eff8, [0] * 7, [0] * 7, tda8,
+                               [{"avg_speed": 1.0}] * 7, FPS)
+check("all six sub-frame slots are nonexistent",
+      [e["slot_frames_after"] for e in tl8["entries"]] == [0] * 7)
+check("total = pure bodies, zero phantoms (old code would be +6)",
+      tl8["total_frames"] == 420, str(tl8["total_frames"]))
+
 print(f"\n=== RESULT: {len(PASS)} passed, {len(FAIL)} failed ===")
 if FAIL:
     print("FAILURES:", FAIL)
     sys.exit(1)
-print("ALL RENDER-TIMELINE SLICE-1 CASES PASS")
+print("ALL RENDER-TIMELINE CASES PASS")

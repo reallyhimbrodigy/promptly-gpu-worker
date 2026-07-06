@@ -4413,51 +4413,64 @@ def _compilation_copy():
     assert "CLIP_TOO_LONG" in handler._DESIGNED_REJECTION_CODES
 
 
-@check("unification Slice 1: RenderTimeline shadow is wired, GUARDED, and ZERO-CONSUMER (no behavior change)")
-def _timeline_shadow_slice1():
+@check("unification Slice 2: frame-domain truth CUT OVER — total/body/slots read from RenderTimeline, duplicates deleted")
+def _timeline_slice2_cutover():
     _src = open("handler.py").read()
-    assert "UNIFICATION SLICE 1 — RenderTimeline SHADOW" in _src, "shadow block missing"
-    _lo = _src.index("UNIFICATION SLICE 1 — RenderTimeline SHADOW")
-    _hi = _src.index("[fix-1] Strip the internal scratch keys", _lo)
-    block = _src[_lo:_hi]
-    # guarded — the whole shadow is inside try/except so it can never break a render
-    assert "try:" in block and "except Exception as _shadow_err" in block, "shadow not guarded"
-    assert "render unaffected" in block, "guard must state render safety"
-    # zero-consumer: the shadow only LOGS. It must not feed the render contract —
-    # no assignment of the shadow timeline into edit_plan / overlay_input / any _out.
-    assert "_shadow_tl" in block
-    assert "edit_plan[" not in block, "shadow must not write edit_plan (would be a consumer)"
-    assert "overlay_input" not in block, "shadow must not touch the render contract"
-    assert "[timeline-shadow]" in block, "census log line missing"
-    # module bundled or the shadow silently self-skips in prod
-    assert 'add_local_file("render_timeline.py"' in open("modal_app.py").read(), \
-        "render_timeline.py not bundled into the image"
+    # the one truth is built and CONSUMED (not a shadow)
+    assert "UNIFICATION Slice 2 — the ONE output-timeline truth" in _src, "cutover block missing"
+    assert "total_output_frames = _timeline[\"total_frames\"]" in _src, "total not sourced from the one truth"
+    assert "_per_cut_render_dur_frames: List[int] = _rtl.body_frames_list(_timeline)" in _src, \
+        "body frames not sourced from the one truth"
+    assert '_slot_frames = (_timeline["entries"][i]["slot_frames_after"]' in _src, \
+        "transitions_out slot not sourced from the one truth"
+    # the duplicate frame accumulator is DELETED (deletion mandate)
+    assert "_trans_frames_after" not in _src.replace(
+        "# (the old _trans_frames_after used max(1) here and counted a phantom", ""), \
+        "the deleted #D3 phantom accumulator reappeared"
+    assert "sum(_per_cut_render_dur_frames) + _trans_frames_after" not in _src, \
+        "the old total sum must be gone"
+    # the Slice-1 shadow is retired (its census is filed)
+    assert "[timeline-shadow]" not in _src, "the Slice-1 shadow must be removed post-cutover"
+    assert 'add_local_file("render_timeline.py"' in open("modal_app.py").read()
 
 
-@check("unification Slice 1: RenderTimeline one-truth — floor rule + divergence classes (behavioral)")
-def _timeline_behavior():
+@check("unification Slice 2: the tripwire — body + real-slot immovability enforced (STOP-and-report in code)")
+def _timeline_tripwire():
+    _src = open("handler.py").read()
+    assert "_rtl.assert_frame_truth(_timeline" in _src, "tripwire not called on the cutover path"
     import render_timeline as RT
-    # THE floor rule: a sub-frame slot exists nowhere
+    # a clean timeline passes
     _tl = RT.build_render_timeline(
-        [{"source_start": 0, "source_end": 1.0}, {"source_start": 2, "source_end": 3.0}],
-        [1.0, 1.0], [0, 0], [0, 0], [0.005, 0.0], [{"avg_speed": 1.0}] * 2, 60.0)
-    assert _tl["entries"][0]["slot_frames_after"] == 0, "sub-frame slot must round to 0 (no phantom)"
-    assert _tl["total_frames"] == 120, "phantom frame leaked into total"
-    # #D3 phantom surfaces as an INTEGRITY divergence vs R1's max(1)
-    _d = RT.shadow_check(_tl, current_total_frames=121,
-                         current_per_cut_render_frames=[60, 60],
-                         body_seconds=[1.0, 1.0], slot_seconds=[0.005, 0.0],
-                         transitions_out=[], clip_ranges=None, source_fps=60.0)
-    assert _d["integrity_divergence"] and _d["total"]["delta"] == -1, str(_d["total"])
-    # clean render → no divergence
-    _tl2 = RT.build_render_timeline(
-        [{"source_start": 0, "source_end": 1.0}], [1.0], [0], [0], [0.0],
+        [{"source_start": 0, "source_end": 2.0}], [2.0], [0], [0], [0.0],
         [{"avg_speed": 1.0}], 60.0)
-    _d2 = RT.shadow_check(_tl2, current_total_frames=60,
-                          current_per_cut_render_frames=[60],
-                          body_seconds=[1.0], slot_seconds=[0.0],
-                          transitions_out=[], clip_ranges=None, source_fps=60.0)
-    assert not _d2["has_divergence"], "clean render must show parity"
+    RT.assert_frame_truth(_tl, [2.0], [0], [0], [0.0], 60.0)  # no raise
+    # a body-frame movement is a hard STOP
+    _bad = {"fps": 60.0, "total_frames": 999,
+            "entries": [{"cut_index": 0, "out_start_frame": 0, "body_frames": 999,
+                         "slot_frames_after": 0}]}
+    try:
+        RT.assert_frame_truth(_bad, [2.0], [0], [0], [0.0], 60.0)
+        assert False, "tripwire failed to fire on a body-frame movement"
+    except RuntimeError as e:
+        assert "BODY VIOLATION" in str(e)
+
+
+@check("unification Slice 2: #D3 fixed — one floor rule, phantom frame gone (behavioral + regression guard)")
+def _timeline_d3_fixed():
+    import render_timeline as RT
+    # zero-handle recipe: the exemplar shape (a slot < 0.5 frame). Old code
+    # counted max(1)=1 phantom per skip; the one truth counts 0.
+    _tl = RT.build_render_timeline(
+        [{"source_start": 0, "source_end": 1.0}, {"source_start": 2, "source_end": 3.0},
+         {"source_start": 4, "source_end": 5.0}],
+        [1.0, 1.0, 1.0], [0, 0, 0], [0, 0, 0], [0.004, 0.004, 0.0],
+        [{"avg_speed": 1.0}] * 3, 60.0)
+    # two sub-frame slots → both nonexistent → total is pure bodies (180), no phantoms
+    assert [e["slot_frames_after"] for e in _tl["entries"]] == [0, 0, 0], "sub-frame slots must not exist"
+    assert _tl["total_frames"] == 180, "phantom frames leaked into the total (#D3 regressed)"
+    # regression guard: the total equals sum(body)+sum(real slots), never a max(1) inflation
+    _expect = sum(e["body_frames"] + e["slot_frames_after"] for e in _tl["entries"])
+    assert _tl["total_frames"] == _expect, "total diverged from body+slot sum"
 
 
 @check("integrity gate: behavioral — mask algebra + per-check bounding on synthetic spans")
