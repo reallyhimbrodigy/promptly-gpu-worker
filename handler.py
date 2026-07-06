@@ -19587,6 +19587,26 @@ def classify_error(e):
 
     # ── Fast input rejections (honest, requires a different input) ──
     if "CLIP_TOO_LONG" in msg:
+        # Compilation-aware copy (2026-07-05, the 20-clip creator): a source
+        # several times past the cap isn't a "trim it" case — it's a
+        # compilation. "trim and resubmit" on a 41-minute upload is an absurd
+        # instruction; name the real path instead. Threshold: ≥300s (2.5×
+        # the cap) reads as multi-clip material, not an over-long take.
+        _src_len = None
+        _m_len = re.search(r"source is ([\d.]+)s", msg)
+        if _m_len:
+            try:
+                _src_len = float(_m_len.group(1))
+            except ValueError:
+                _src_len = None
+        if _src_len is not None and _src_len >= 300.0:
+            return _e(
+                "CLIP_TOO_LONG",
+                "This looks like a compilation — Promptly edits single clips "
+                f"up to {_clip_cap_minutes_label()} minutes; split it and run "
+                "your best moments.",
+                retryable=False, new_video=True,
+            )
         return _e(
             "CLIP_TOO_LONG",
             f"Promptly currently edits clips up to {_clip_cap_minutes_label()} minutes — trim and resubmit.",
@@ -19887,6 +19907,14 @@ def write_job_status(job_id, *, status=None, phase=None, progress=None, result=N
             patch["progress"] = progress
         if result is not None:
             patch["result"] = result
+            # COPY-TRUTH MIRROR (2026-07-05): the failed-terminal patch carries
+            # the honest copy in BOTH places — result.user_message (structured)
+            # and the legacy error_message column (cold-load readers). Same
+            # patch, atomic; every envelope. First organic victim: the July-4
+            # cold-load item (rows read failed with NULL error_message).
+            if status == "failed" and isinstance(result, dict) and \
+                    result.get("user_message"):
+                patch["error_message"] = str(result["user_message"])
         if partial_state is not None:
             patch["partial_state"] = partial_state
         try:

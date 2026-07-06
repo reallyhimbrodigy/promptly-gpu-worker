@@ -4382,6 +4382,37 @@ def _credit_ruling_marker():
         "marker must ride BOTH the durable row result and the return dict"
 
 
+@check("copy-truth mirror: failed-terminal patch carries error_message = result.user_message atomically")
+def _copy_truth_mirror():
+    _src = open("handler.py").read()
+    assert 'patch["error_message"] = str(result["user_message"])' in _src, "mirror missing from the rail"
+    # the mirror lives INSIDE write_job_status's patch assembly (same atomic
+    # patch as the fence-guarded UPDATE), gated to failed+user_message
+    _fn = _src.index("def write_job_status")
+    _mirror = _src.index('patch["error_message"]')
+    _update = _src.index(".update(patch).eq(\"id\", job_id)")
+    assert _fn < _mirror < _update, "mirror must ride the same patch as the fenced UPDATE"
+    assert 'if status == "failed"' in _src[_mirror - 400:_mirror], "mirror must be failed-only"
+
+
+@check("compilation-aware CLIP_TOO_LONG copy: extreme-length sources get the split-it copy, moderate get trim")
+def _compilation_copy():
+    import handler
+    _long = handler.classify_error(RuntimeError(
+        "CLIP_TOO_LONG: source is 2500.0s; the intake cap is 120s"))
+    assert _long["error_code"] == "CLIP_TOO_LONG"
+    assert "compilation" in _long["user_message"] and "split it" in _long["user_message"], _long
+    _mod = handler.classify_error(RuntimeError(
+        "CLIP_TOO_LONG: source is 150.6s; the intake cap is 120s"))
+    assert "trim and resubmit" in _mod["user_message"], _mod
+    # threshold pinned: 300s = 2.5× cap
+    _edge = handler.classify_error(RuntimeError(
+        "CLIP_TOO_LONG: source is 299.0s; the intake cap is 120s"))
+    assert "trim and resubmit" in _edge["user_message"], _edge
+    # both remain designed rejections (credit ruling class)
+    assert "CLIP_TOO_LONG" in handler._DESIGNED_REJECTION_CODES
+
+
 @check("integrity gate: behavioral — mask algebra + per-check bounding on synthetic spans")
 def _gate_behavior():
     import handler
