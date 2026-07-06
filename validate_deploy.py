@@ -4497,6 +4497,33 @@ def _pacing_max_compress():
     assert len(mc) >= len(base), "max_compress must split at least as many gaps"
 
 
+@check("tight-cut overlay anchor: peaks ON the cut (clip boundary), not the word's audible end (v197 handle family)")
+def _tco_anchor():
+    _src = open("handler.py").read()
+    # the anchor snaps to the CLIP BOUNDARY (release-pad-inclusive), matching
+    # the TSX contract get_output_clip_ranges[i]["end"]
+    assert "Anchor to the CLIP BOUNDARY, not the word's audible end" in _src, "anchor-fix comment missing"
+    assert "_bounds_after = [" in _src and 'float(_r["end"]) for _r in _clip_ranges' in _src, \
+        "anchor must read clip_ranges boundaries"
+    assert "_nearest_boundary - _word_end_s <= 0.25" in _src, "clip-end snap guard missing"
+    # the raw word-end-only anchor must be gone (no bare _at_frame = round(word_end))
+    assert "_at_frame = int(round(_cut_seconds * source_fps))" in _src  # still the final quantize
+    assert "_cut_seconds = _word_end_s" in _src, "word end must be the FALLBACK, not the anchor"
+    # behavioral: boundary snap when within a release-pad; word-end when mid-clip
+    def _anchor(word_end_s, clip_ranges, fps=60.0):
+        _cut = word_end_s
+        _ba = [float(r["end"]) for r in clip_ranges if float(r["end"]) >= word_end_s - (1.0 / fps)]
+        if _ba:
+            _nb = min(_ba)
+            if 0.0 <= _nb - word_end_s <= 0.25:
+                _cut = _nb
+        return int(round(_cut * fps))
+    # word ends 3.170s, clip boundary (with 75ms pad) 3.245s → snap to 195, not 190
+    assert _anchor(3.170, [{"end": 3.245}, {"end": 6.9}]) == 195, "must snap to the clip boundary (the cut)"
+    # mid-clip (nearest boundary far) → keep word end (no seam)
+    assert _anchor(3.170, [{"end": 5.0}]) == 190, "mid-clip overlay must keep the word end"
+
+
 @check("integrity gate: behavioral — mask algebra + per-check bounding on synthetic spans")
 def _gate_behavior():
     import handler

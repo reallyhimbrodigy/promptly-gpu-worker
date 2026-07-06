@@ -16617,7 +16617,28 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 flush=True,
             )
             continue
-        _cut_seconds = float(_pw.get("end") or 0.0)
+        # Anchor to the CLIP BOUNDARY, not the word's audible end. The cut
+        # sits at get_output_clip_ranges[i]["end"] — which already carries the
+        # release pad — while _pw["end"] is the word's AUDIBLE end, ~release-pad
+        # frames EARLIER. Anchoring to the word end made the flash peak BEFORE
+        # the seam, masking clip A's tail instead of the cut (frame-convicted on
+        # 8f8c82b1: peak at f190, actual cut ~f192-194; v197 handle family). The
+        # TSX contract (TightCutOverlayLayer) already specifies clip_ranges[i]
+        # ["end"] — this makes Python match it. Universal: every tight_cut
+        # overlay type shares this _at_frame.
+        _word_end_s = float(_pw.get("end") or 0.0)
+        _cut_seconds = _word_end_s
+        _bounds_after = [
+            float(_r["end"]) for _r in _clip_ranges
+            if float(_r["end"]) >= _word_end_s - (1.0 / source_fps)
+        ]
+        if _bounds_after:
+            _nearest_boundary = min(_bounds_after)
+            # Snap only when the word genuinely ENDS a clip (boundary within a
+            # release-pad of the word end). A mid-clip overlay has no nearby
+            # boundary → keep the word end (no seam to mask there anyway).
+            if 0.0 <= _nearest_boundary - _word_end_s <= 0.25:
+                _cut_seconds = _nearest_boundary
         _at_frame = int(round(_cut_seconds * source_fps))
         _dur_frames = _TIGHT_CUT_OVERLAY_FRAMES_BY_TYPE.get(_tco)
         if _dur_frames is None:
