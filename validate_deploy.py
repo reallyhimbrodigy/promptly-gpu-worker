@@ -2154,7 +2154,7 @@ def _mg_no_defense():
 
 @check("_SoundEffect NO LONGER requires viewer_feeling")
 def _sfx_no_defense():
-    s = handler._SoundEffect(word_index=5, sound="hit")
+    s = handler._SoundEffect(word_index=5, sound="boom")
     assert s is not None
 
 

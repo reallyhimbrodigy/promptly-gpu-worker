@@ -31,7 +31,7 @@ def run(p, tight=None):
     return recipe_eval.evaluate_recipe(p, words, [], 12.0, tight_boundaries=tight or [])
 
 print("=== R2: two-sound lean recipe passes clean (advice-level WARN only) ===")
-rep = run(plan(sound_effects=[{"sound": "pop", "word_index": 20},
+rep = run(plan(sound_effects=[{"sound": "popsfx", "word_index": 20},
                               {"sound": "boom", "word_index": 20}],
                emphasis_moments=[{"word_indices": [20],
                                    "zoom_effect": {"type": "SmoothPush"}}]))
@@ -39,10 +39,10 @@ check("two-sound lean recipe fully clean",
       not any(f[0] == "variety-sfx" for f in rep.failures)
       and not any(w[0] == "variety-sfx" for w in rep.warnings), str(rep.failures))
 # 4 sounds / 2 distinct: dense enough for the rotation advice — WARN, never FAIL
-rep = run(plan(sound_effects=[{"sound": "pop", "word_index": 20},
-                              {"sound": "pop", "word_index": 21},
-                              {"sound": "hit", "word_index": 22},
-                              {"sound": "hit", "word_index": 23}],
+rep = run(plan(sound_effects=[{"sound": "popsfx", "word_index": 20},
+                              {"sound": "popsfx", "word_index": 21},
+                              {"sound": "punchsfx", "word_index": 22},
+                              {"sound": "punchsfx", "word_index": 23}],
                emphasis_moments=[{"word_indices": [20],
                                    "zoom_effect": {"type": "SmoothPush"}}]))
 sfx_fails = [f for f in rep.failures if f[0] == "variety-sfx"]
@@ -52,7 +52,7 @@ check("advice WARN present at density", len(sfx_warns) >= 1, str(rep.warnings))
 check("sfx-once cap still FAILs on a boom double",
       any(f[0] == "sfx-once" for f in run(plan(sound_effects=[
           {"sound": "boom", "word_index": 20}, {"sound": "boom", "word_index": 21},
-          {"sound": "pop", "word_index": 22}],
+          {"sound": "popsfx", "word_index": 22}],
           emphasis_moments=[{"word_indices": [20], "zoom_effect": {"type": "SmoothPush"}}])).failures))
 
 print("\n=== R3: mask zooms live outside the key_moments ledger ===")

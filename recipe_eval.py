@@ -344,7 +344,7 @@ def evaluate_recipe(plan, words, cut_boundaries, duration, tight_boundaries=None
             # Recalibrated (γ rider R2): advice, not failure — the count
             # follows the beats; a lean two-sound edit is a legitimate read.
             r.warn("variety-sfx", f"only {len(set(sounds))} distinct sounds across {len(sounds)} SFX (rack rotation reads fresher)")
-        for once_only in ("boom", "drum_roll", "reverse"):
+        for once_only in ("boom",):
             if sounds.count(once_only) > 1:
                 r.fail("sfx-once", f"'{once_only}' used {sounds.count(once_only)}× (max once)")
         most, cnt = Counter(sounds).most_common(1)[0]

@@ -18,6 +18,18 @@ import sys
 import time
 import requests
 
+# ─── SUPERSEDED (2026-07-07) ────────────────────────────────────────────────
+# The live SFX library is now a CURATED, hand-trimmed set of 17 sounds in
+# src/assets/sounds/ (Zac's OURsfx), NOT ElevenLabs-generated. This script
+# generated the OLD 14-sound set and its SFX_LIBRARY below still lists those old
+# names/prompts — running it would OVERWRITE the curated files with approximations.
+# Kept for history only; it refuses to run unless REGENERATE_SFX_OVERRIDE=1.
+if os.environ.get("REGENERATE_SFX_OVERRIDE") != "1":
+    print("SUPERSEDED: the SFX library is now a curated hand-trimmed set in "
+          "src/assets/sounds/. This generator would clobber it. Set "
+          "REGENERATE_SFX_OVERRIDE=1 only if you truly intend to regenerate.")
+    sys.exit(0)
+
 API_KEY = os.environ.get("ELEVENLABS_API_KEY")
 if not API_KEY:
     print("ERROR: Set ELEVENLABS_API_KEY environment variable")

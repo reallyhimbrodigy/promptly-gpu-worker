@@ -34,7 +34,7 @@ def run_b1(word_start, boundary):
     ns = {"_record_divergence": H._record_divergence, "print": print, "abs": abs,
           "_SFX_REANCHOR_TOLERANCE_S": H._SFX_REANCHOR_TOLERANCE_S,
           "_sfx_cut_anchor_t": {12: boundary}, "_sfx_wi": 12,
-          "_sound_style": "ching", "_projected_t": word_start, "round": round}
+          "_sound_style": "money-ching", "_projected_t": word_start, "round": round}
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         exec(compile(block, "<b1>", "exec"), ns)
@@ -79,7 +79,7 @@ with contextlib.redirect_stdout(buf):
 sfx = (out.get("sound_effects") or [])
 check("sfx why normalized to 12 words", sfx and len((sfx[0].get("why") or "").split()) == 12,
       str(sfx[:1]))
-H._SoundEffect.model_validate({"word_index": 3, "sound": "pop"})
+H._SoundEffect.model_validate({"word_index": 3, "sound": "popsfx"})
 check("why omission tolerated by schema", True)
 check("why in _SoundEffect schema, optional",
       "why" in H._SoundEffect.model_json_schema().get("properties", {})
