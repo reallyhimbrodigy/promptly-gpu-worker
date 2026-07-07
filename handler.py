@@ -19241,7 +19241,15 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # Collect its output now so the final-audio build can start while the
     # Remotion renders are still in flight.
     _speed_audio_path = _speed_audio_future.result(timeout=60)
-    _audio_pool.shutdown(wait=False)
+    # wait=True (was False): the future above is already .result()'d, so the
+    # single audio worker is idle and this join is INSTANT. Joining here, inside
+    # the job, means no non-daemon worker outlives render_multi_clip — nothing
+    # for the container-exit atexit to catch ("N threads still running after
+    # container exit") and nothing left to race a re-entrant pool during an
+    # upstream-timeout teardown. (Exception paths never reach this line: a hung
+    # future raises at .result(timeout=60) above and skips the shutdown, so
+    # wait=True can never convert a fast-fail into a hang.)
+    _audio_pool.shutdown(wait=True)
     if not _speed_audio_path or not os.path.exists(_speed_audio_path):
         raise RuntimeError(f"Per-cut audio pipeline produced no output at {_speed_audio_path}")
 
@@ -19332,7 +19340,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 f"{os.path.getsize(micro_video_path)/1024/1024:.1f}MB",
                 flush=True,
             )
-    _render_pool.shutdown(wait=False)
+    # wait=True (was False): every render future was .result()'d above
+    # (19308/19318 — a hung render raises there and skips this line), so the
+    # workers are idle and the join is instant. Joining in-job keeps the render
+    # threads from outliving this call. Same rationale as _audio_pool above.
+    _render_pool.shutdown(wait=True)
     _render_elapsed = time.time() - _render_t0
 
     # ── Concat overlay chunks (-c copy, lossless) ─────────────────────────
@@ -19428,7 +19440,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 flush=True,
             )
         if _composite_pool is not None:
-            _composite_pool.shutdown(wait=False)
+            # wait=True (was False): the composite chain futures were all
+            # .result(timeout=600)'d in the loop just above (a hung chain raises
+            # there and skips this line), so the workers are idle and the join is
+            # instant. Joining in-job keeps them from outliving this call.
+            _composite_pool.shutdown(wait=True)
 
         _max_chunk = max(_composite_chunk_elapsed)
         print(
@@ -19804,6 +19820,63 @@ def _resolve_caption_extra_props(style, keywords, edit_plan):
 
 # ─── MAIN HANDLER ─────────────────────────────────────────────────────────────
 
+def _interpreter_is_shutting_down(exc=None):
+    """True once the Python interpreter has begun finalizing — either the global
+    ThreadPoolExecutor shutdown flag is set or `exc` is the tell-tale "cannot
+    schedule new futures after interpreter shutdown" RuntimeError that a fresh
+    executor raises in that state.
+
+    The flag is `concurrent.futures.thread._shutdown` (a module-level bool). Its
+    atexit finalizer `_python_exit()` runs `global _shutdown; _shutdown = True`,
+    and ThreadPoolExecutor.submit() raises EXACTLY our target message off
+    `if _shutdown:` — so this is the correct source. (There is NO `_global_shutdown`
+    bool; `_global_shutdown_lock` is a threading.Lock. Verified on CPython
+    3.9–3.14; the worker runs 3.10.) When the interpreter starts tearing down —
+    e.g. a Modal container reclaim after an upstream Gemini ReadTimeout — this
+    flips True.
+
+    This condition is STICKY for the life of the process: no fresh
+    ThreadPoolExecutor can accept work once it is set, so a render can neither
+    proceed nor be retried. Callers use it to fail fast with a designed
+    ContainerTeardownError instead of thrashing the degrade ladder against a
+    dead interpreter."""
+    try:
+        import concurrent.futures.thread as _cft
+        if getattr(_cft, "_shutdown", False):
+            return True
+    except Exception:
+        pass
+    # Match the INTERPRETER-level message specifically ("...after interpreter
+    # shutdown"), NOT the per-executor "cannot schedule new futures after
+    # shutdown" (raised when one specific executor was .shutdown() and then
+    # submitted to). The per-executor case is a normal code bug that should ride
+    # the degrade rungs / surface as RENDER_FATAL, not be masked as a container
+    # reclaim. The distinguishing suffix is "interpreter shutdown".
+    if exc is not None and "after interpreter shutdown" in str(exc).lower():
+        return True
+    return False
+
+
+class ContainerTeardownError(RuntimeError):
+    """The interpreter began finalizing (container reclaim) while a render was
+    still in flight — typically after an upstream Gemini editorial ReadTimeout
+    tore the request down and Modal started reclaiming the container. A fresh
+    ThreadPoolExecutor can no longer accept work, so the render CANNOT proceed
+    and CANNOT be retried (the global shutdown flag is sticky). Carries the
+    CONTAINER_TEARDOWN sentinel in its message so the degrade ladder skips its
+    doomed rungs and classify_error routes it out of the RENDER_FATAL traceback
+    bucket. Not our render's fault and nothing to repair — a re-run on a fresh
+    container renders clean. This is the anti-retry-mask fix: stop retrying the
+    structurally impossible."""
+
+    def __init__(self, detail=""):
+        super().__init__(
+            "CONTAINER_TEARDOWN: render aborted — the interpreter is finalizing "
+            "(container reclaim; no fresh thread pool can start)"
+            + (f" [{detail}]" if detail else "")
+        )
+
+
 def _render_degrade_ladder(render_once, edit_plan, broll_clips, output_path):
     """RENDER DEGRADE LADDER (zero-fatal): rung 0 = full render; a crash
     retries the IDENTICAL spec once (rung 1, transient class); a second crash
@@ -19822,6 +19895,14 @@ def _render_degrade_ladder(render_once, edit_plan, broll_clips, output_path):
     _pristine_cuts = _copy_rl.deepcopy(edit_plan["cuts"])
     _rung = 0
     while True:
+        # (B) container-teardown fast-fail: if the interpreter has begun
+        # finalizing (upstream-timeout container reclaim), no fresh thread pool
+        # can start — every rung below would spawn a pool that instantly raises
+        # "cannot schedule new futures after interpreter shutdown". Raise the
+        # designed error and skip the doomed rungs rather than thrash the ladder
+        # 3× against a dead interpreter and surface a RENDER_FATAL traceback.
+        if _interpreter_is_shutting_down():
+            raise ContainerTeardownError("degrade ladder entry")
         try:
             if _rung >= 1:
                 # clean re-entry: restore pristine cuts, drop staging keys
@@ -19865,6 +19946,16 @@ def _render_degrade_ladder(render_once, edit_plan, broll_clips, output_path):
             render_once(edit_plan["cuts"], broll_clips)
             return
         except Exception as _render_err:
+            # (B) if the interpreter began finalizing DURING this rung, the crash
+            # is a container reclaim, not a render defect — surface the designed
+            # ContainerTeardownError and STOP. Retrying is structurally impossible
+            # (the global shutdown flag is sticky), so the remaining rungs would
+            # each spawn a pool that instantly re-fails. This is the anti-retry-
+            # mask guard: don't retry the impossible.
+            if _interpreter_is_shutting_down(_render_err):
+                raise ContainerTeardownError(
+                    f"{type(_render_err).__name__} during render"
+                ) from _render_err
             if _rung >= 2:
                 raise RuntimeError(
                     f"RENDER_FATAL after full + retry + stripped renders: "
@@ -19972,6 +20063,23 @@ def classify_error(e):
         return _e(
             "RECIPE_INVALID",
             "The edit plan didn't pass validation after a retry — please run the job again.",
+            retryable=True,
+        )
+
+    # ── Container reclaim mid-render (interpreter finalizing) ─────────────
+    # ORDERED BEFORE RENDER_FATAL: a teardown that surfaced as a render
+    # exception can carry render-ish substrings, and the greedy render/ffmpeg
+    # classes below would absorb it. This is NOT a render defect — the
+    # container was reclaimed (typically an upstream Gemini editorial
+    # ReadTimeout tore the request down) while the render thread was still in
+    # flight. Retryable: a re-run on a fresh container renders clean. The
+    # degrade ladder raises ContainerTeardownError here instead of thrashing
+    # its rungs against a dead interpreter (see _interpreter_is_shutting_down).
+    if "CONTAINER_TEARDOWN" in msg:
+        return _e(
+            "CONTAINER_TEARDOWN",
+            "A temporary infrastructure interruption stopped rendering — "
+            "please run the job again.",
             retryable=True,
         )
 
@@ -20456,6 +20564,18 @@ _OUTER_RESCUE_DENY = frozenset({
     "UPLOAD_NEVER_STARTED", "UPLOAD_STALLED", "UPLOAD_TIMEOUT",
     "S3_ACCESS", "S3_GENERIC", "TRANSCRIPTION",
     "RENDER_FATAL", "RECIPE_INVALID",
+    # Container reclaim mid-render: the interpreter is finalizing and the global
+    # thread-pool shutdown flag is STICKY for the life of the process — an
+    # in-process handler re-run would re-hit "cannot schedule new futures" on its
+    # first pool submit (get_trend_context / mega_pool / _early_pool). The outer
+    # safe-edit rescue is exactly as doomed here as the inner degrade ladder, so
+    # deny it and let the designed CONTAINER_TEARDOWN terminal stand. The only
+    # valid retry is the USER re-running on a FRESH container, not an in-process
+    # one. (Without this, the new (B) class turns a fast terminal into a doomed
+    # full re-download/re-transcribe/re-render that delays the terminal write and
+    # widens the SIGKILL-before-terminal window — a regression vs the prior
+    # RENDER_FATAL path, which was already denied here.)
+    "CONTAINER_TEARDOWN",
     # Integrity trip = designed terminal outcome (failed + refund + P0
     # forensics). A safe-edit re-run would be an auto-retry, which the
     # gate design explicitly forbids.
