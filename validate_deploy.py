@@ -4524,6 +4524,59 @@ def _tco_anchor():
     assert _anchor(3.170, [{"end": 5.0}]) == 190, "mid-clip overlay must keep the word end"
 
 
+@check("zone composer (shadow): packs disjoint bands — the AFFORDABLE-LUXURY stack becomes impossible; parity when no accents")
+def _zone_composer_shadow():
+    import handler
+    _src = open("handler.py").read()
+    # wired in shadow (default), cutover flag-gated OFF, never touches prod render
+    assert "def _compose_band_occupancy(" in _src, "composer missing"
+    assert 'os.environ.get(\n        "COMPOSER_CUTOVER_ENABLED"' in _src or \
+           'os.environ.get("COMPOSER_CUTOVER_ENABLED"' in _src, "cutover flag missing"
+    assert '"COMPOSER_CUTOVER_ENABLED"' not in open("modal_app.py").read(), \
+        "composer must NOT be cut over in the image env (stays shadow until Zac)"
+    assert "shadow=not _composer_cutover" in _src, "shadow wiring missing"
+
+    def _seg(a, b, p): return {"fromFrame": a, "toFrame": b, "position": p}
+    def _mg(f, d, anchor, typ="StatCard"):
+        return {"fromFrame": f, "durationInFrames": d, "type": typ, "props": {"anchor": anchor}}
+    def _to(f, d, variant, pos="top"):
+        return {"fromFrame": f, "durationInFrames": d, "variant": variant, "position": pos}
+
+    # AFFORDABLE-LUXURY: text_overlay(top) + MG(bottom) + caption → 3 disjoint bands
+    r = handler._compose_band_occupancy(
+        [_seg(0, 300, "bottom")], [_mg(100, 60, "lower_third_safe")],
+        [_to(100, 60, "caption_match", "top")], [],
+        shipped_caption=[_seg(0, 300, "bottom")], shadow=True)
+    _cap = next(b for a, b_, b in r["caption_track"] if a <= 130 < b_)
+    _to0 = [b for a, b_, b in r["element_bands"]["to0"] if a <= 130 < b_][0]
+    _mg0 = [b for a, b_, b in r["element_bands"]["mg0"] if a <= 130 < b_][0]
+    assert len({_cap, _to0, _mg0}) == 3, f"bands must be disjoint, got {_cap}/{_to0}/{_mg0}"
+    # parity: no accents → composer caption == authored
+    r2 = handler._compose_band_occupancy([_seg(0, 300, "bottom")], [], [], [],
+                                         shipped_caption=[_seg(0, 300, "bottom")], shadow=True)
+    assert all(b == "bottom" for _, _, b in r2["caption_track"]), "parity broken with no accents"
+    # sticky_note (top-pinned) forces caption off top
+    r3 = handler._compose_band_occupancy([_seg(0, 200, "top")], [], [_to(0, 200, "sticky_note")], [],
+                                         shipped_caption=[_seg(0, 200, "top")], shadow=True)
+    assert next(b for a, b_, b in r3["caption_track"] if a <= 50 < b_) != "top", \
+        "caption must clear the sticky_note's top band"
+    # B-roll full-frame → caption rides top, accent dropped
+    r4 = handler._compose_band_occupancy([_seg(0, 200, "bottom")], [_mg(0, 200, "center")], [], [(0, 200)],
+                                         shipped_caption=[_seg(0, 200, "bottom")], shadow=True)
+    assert next(b for a, b_, b in r4["caption_track"] if a <= 50 < b_) == "top"
+    assert "dropped_broll" in str(r4["element_bands"].get("mg0"))
+
+
+@check("transition fold-in: single-camera content-jump magnitude named on the top per-video gap tier")
+def _transition_jump_foldin():
+    _src = open("handler.py").read()
+    assert "_scene_turn_set" in _src and "_SCENE_TURN_FRACTION" in _src, "scene-turn tier missing"
+    assert "the footage turns here even with no camera cut" in _src, "magnitude annotation missing"
+    assert "Read the gap as the size of the content jump" in _src, "transitions magnitude prose missing"
+    # the floor guards a breath from being named a scene turn
+    assert "_SCENE_TURN_FLOOR_S" in _src, "absolute scene-turn floor missing"
+
+
 @check("render source staging: dangling-symlink class-kill (dereference source before os.link into the Remotion bundle)")
 def _stage_dereferences_symlink():
     import os

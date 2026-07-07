@@ -759,12 +759,6 @@ export const PromptlyOverlay: React.FC<PromptlyRenderProps> = ({ input }) => {
           (bottom of the overlay stack); captions/MGs render on top. Empty by
           default → zero DOM, identical to the pre-GeneratedScene pipeline. */}
       <GeneratedSceneLayer items={generatedScenes ?? []} fps={fps} />
-      {/* Captions on top — readable over speaker, B-roll, and any
-          text-overlay/MG underneath. Every style meets the legibility
-          floor — a solid box/scrim, a ≥2px dark contour, or the tight
-          anchor shadow from captions/shared/legibility.ts — so text keeps
-          contrast against arbitrary backgrounds. */}
-      <CaptionsLayer caption={caption} fps={fps} />
       <TextOverlaysLayer
         overlays={textOverlays ?? []}
         captionStyle={caption.style}
@@ -773,6 +767,19 @@ export const PromptlyOverlay: React.FC<PromptlyRenderProps> = ({ input }) => {
         fps={fps}
       />
       <MotionGraphicsLayer items={motionGraphics} fps={fps} />
+      {/* Captions paint ABOVE the content-accent tier (text overlays + motion
+          graphics) and BELOW only the tight-cut flash — readable over speaker,
+          B-roll, accents, and any residual overlap. Captions are the dialogue
+          itself and carry the legibility floor (solid box/scrim, ≥2px dark
+          contour, or the tight anchor shadow from captions/shared/legibility.ts),
+          so an editorial accent must never occlude speech. Zones are kept
+          disjoint upstream (handler.py _force_caption_position_around_overlays
+          clears captions out of any text_overlay zone), so with clearance live
+          this reorder is pixel-identical — it is the safety net that keeps the
+          dialogue legible on any residual clearing miss (wrapped/grown caption,
+          edge overlap). Previously this layer sat UNDER text-overlays + MGs,
+          contradicting this very comment. */}
+      <CaptionsLayer caption={caption} fps={fps} />
       {/* Tight-cut overlays render on TOP of every other layer. The flash /
           warm leak briefly washes through captions + MGs at the cut frame,
           masking the hard-cut discontinuity. Outside each 11-frame window

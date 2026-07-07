@@ -5388,6 +5388,253 @@ def _force_caption_position_around_overlays(
     return out
 
 
+# Motion-graphic types whose metaphor REQUIRES the top band (drop-down) —
+# treated as fixed-TOP occupants. Only Notification is pinned here, matching
+# the existing _force_caption_position_around_overlays authority (line 5273),
+# so the shadow census's caption parity is clean. StickyNotes / DropBanner /
+# DropCard are candidate top-pins pending a renderer-behavior confirmation —
+# adding them is a post-cutover refinement, not a parity baseline.
+_COMPOSER_TOP_PINNED_MG = frozenset({"Notification"})
+
+
+def _compose_band_occupancy(
+    raw_caption_segments, motion_graphics, text_overlays, broll_frame_ranges,
+    shipped_caption=None, shadow=True,
+):
+    """DETERMINISTIC ZONE COMPOSER (ratified hybrid — Gemini owns what/when/why,
+    the composer owns which vertical band × which frames). Generalizes
+    _force_caption_position_around_overlays: instead of only clearing captions
+    around MG/B-roll, it builds the COMPLETE band×time occupancy for every
+    band-occupant (captions, text_overlays, motion_graphics, B-roll) and packs
+    each into a disjoint band by the ratified priority, so stacking is
+    structurally impossible.
+
+    Priority (least-movable first, drop-minimizing):
+      1. B-roll        — full-frame, exclusive ground; captions ride TOP over it.
+      2. Caption legibility — the one hard floor; captions are never dropped.
+      3. Fixed-band accents — TOP-pinned MG + sticky_note reserve their band.
+      4. Flexible accents  — honor the anchor preference, else re-band; drop last.
+      5. Caption position  — flows into the best remaining free band (bottom→top→center).
+
+    Bands are the canonical top/center/bottom (same vocabulary as caption
+    position and _face_clear_anchor). Non-occupants (zoom, SFX, transitions,
+    tight-cut overlays) are not passed in — they don't hold a persistent band.
+
+    SHADOW MODE (shadow=True, the only mode until cutover): computes the layout
+    it WOULD ship, asserts its own output never stacks (the standing tripwire),
+    and — given `shipped_caption` — logs where its caption track diverges from
+    what ships today, plus where each accent's composed band differs from the
+    authored band. Drives NOTHING; the caller's existing outputs still ship.
+    Returns the composed layout for the eventual cutover.
+    """
+    _BANDS = ("top", "center", "bottom")
+
+    def _band_at(track, f):
+        # Handles both the composer's (a,b,band) tuples and the pipeline's
+        # {fromFrame,toFrame,position} segment dicts (raw/shipped captions).
+        for _e in track or []:
+            if isinstance(_e, dict):
+                a, b, band = int(_e["fromFrame"]), int(_e["toFrame"]), _e["position"]
+            else:
+                a, b, band = _e
+            if a <= f < b:
+                return band
+        return None
+
+    def _mg_band(_mg):
+        if str(_mg.get("type") or "") in _COMPOSER_TOP_PINNED_MG:
+            return "top", True
+        # props.anchor in motion_graphics_out is ALREADY the resolved band
+        # (top/center/bottom — SEMANTIC_TO_MG_ANCHOR was applied at build time,
+        # ~17372). Read it DIRECTLY; re-translating collapses top/bottom→center
+        # (they aren't SEMANTIC_TO_MG_ANCHOR keys) and would band every MG center.
+        _anchor = str((_mg.get("props") or {}).get("anchor") or "center")
+        return (_anchor if _anchor in _BANDS else "center"), False
+
+    def _to_band(_to):
+        if str(_to.get("variant") or "") == "sticky_note":
+            return "top", True
+        _pos = str(_to.get("position") or "top")
+        return (_pos if _pos in _BANDS else "top"), False
+
+    # ── Phase 0: claims (id, kind, band_pref, f0, f1, rigid) ──────────────
+    claims = []
+    for _i, _mg in enumerate(motion_graphics or []):
+        _ff = int(_mg.get("fromFrame") or 0)
+        _tf = _ff + int(_mg.get("durationInFrames") or 0)
+        if _tf <= _ff:
+            continue
+        _band, _rigid = _mg_band(_mg)
+        claims.append({"id": f"mg{_i}", "kind": "mg", "band": _band,
+                       "f0": _ff, "f1": _tf, "rigid": _rigid})
+    for _i, _to in enumerate(text_overlays or []):
+        _ff = int(_to.get("fromFrame") or 0)
+        _tf = _ff + int(_to.get("durationInFrames") or 0)
+        if _tf <= _ff:
+            continue
+        _band, _rigid = _to_band(_to)
+        claims.append({"id": f"to{_i}", "kind": "overlay", "band": _band,
+                       "f0": _ff, "f1": _tf, "rigid": _rigid})
+    broll_windows = [
+        (int(_f), int(_t)) for _f, _t in (broll_frame_ranges or []) if int(_t) > int(_f)
+    ]
+
+    # ── Phase 1: boundary sweep ───────────────────────────────────────────
+    boundaries = set()
+    for _s in raw_caption_segments or []:
+        boundaries.add(int(_s["fromFrame"]))
+        boundaries.add(int(_s["toFrame"]))
+    for _c in claims:
+        boundaries.add(_c["f0"])
+        boundaries.add(_c["f1"])
+    for _f, _t in broll_windows:
+        boundaries.add(_f)
+        boundaries.add(_t)
+    sorted_b = sorted(boundaries)
+
+    # ── Phase 2: pack every atomic interval in priority order ─────────────
+    composed_caption = []            # [(a,b,band)]
+    element_bands = {}               # id -> [(a,b,band|dropped_reason)]
+    for _i in range(len(sorted_b) - 1):
+        a, b = sorted_b[_i], sorted_b[_i + 1]
+        if a >= b:
+            continue
+        _active = [_c for _c in claims if _c["f0"] <= a and _c["f1"] >= b]
+        # P1: B-roll full-frame — exclusive ground, caption rides top.
+        if any(_f <= a and _t >= b for _f, _t in broll_windows):
+            composed_caption.append((a, b, "top"))
+            for _c in _active:
+                element_bands.setdefault(_c["id"], []).append((a, b, "dropped_broll"))
+            continue
+        _free = set(_BANDS)
+        # P3: fixed-band accents reserve their mandated band (weight tiebreak
+        # unavailable at shadow v1 — order by start, then id, deterministic).
+        for _c in sorted([c for c in _active if c["rigid"]],
+                         key=lambda c: (c["f0"], c["id"])):
+            if _c["band"] in _free:
+                _free.discard(_c["band"])
+                element_bands.setdefault(_c["id"], []).append((a, b, _c["band"]))
+            else:
+                element_bands.setdefault(_c["id"], []).append((a, b, "dropped_collision"))
+        # P4: flexible accents — honor the anchor, else re-band before drop.
+        for _c in sorted([c for c in _active if not c["rigid"]],
+                         key=lambda c: (c["f0"], c["id"])):
+            _pref = _c["band"]
+            _pick = None
+            for _cand in [_pref] + [z for z in ("top", "bottom", "center") if z != _pref]:
+                if _cand in _free:
+                    _pick = _cand
+                    break
+            if _pick is not None:
+                _free.discard(_pick)
+                element_bands.setdefault(_c["id"], []).append((a, b, _pick))
+            else:
+                element_bands.setdefault(_c["id"], []).append((a, b, "dropped_no_band"))
+        # P2/P5: caption legibility — flows into the best remaining free band,
+        # PREFERRING the band Gemini authored for this interval (parity with
+        # _force_caption_position_around_overlays, which keeps orig_pos outside
+        # accent windows). Falls through bottom→top→center only when the authored
+        # band is taken by an accent.
+        _auth_cap = _band_at(raw_caption_segments, a)
+        _cap = (_auth_cap if _auth_cap in _free
+                else "bottom" if "bottom" in _free
+                else "top" if "top" in _free
+                else "center" if "center" in _free
+                else (_auth_cap or "bottom"))   # fully squeezed — z-order floor backstops
+        composed_caption.append((a, b, _cap))
+
+    # ── Phase 3: coalesce the caption track ───────────────────────────────
+    _coalesced = []
+    for a, b, band in composed_caption:
+        if _coalesced and _coalesced[-1][2] == band and _coalesced[-1][1] == a:
+            _coalesced[-1] = (_coalesced[-1][0], b, band)
+        else:
+            _coalesced.append((a, b, band))
+    composed_caption = _coalesced
+
+    # ── Phase 4: the standing tripwire — the composer NEVER stacks ────────
+    # For every atomic interval, the surviving occupant bands (accents that got
+    # a real band + the caption band) must be pairwise DISJOINT. B-roll is the
+    # sole intended overlap (caption-over-broll) and is excluded above.
+    _stack_violations = []
+    for _i in range(len(sorted_b) - 1):
+        a, b = sorted_b[_i], sorted_b[_i + 1]
+        if a >= b or any(_f <= a and _t >= b for _f, _t in broll_windows):
+            continue
+        _occ = []
+        for _id, _spans in element_bands.items():
+            for (sa, sb, band) in _spans:
+                if sa == a and sb == b and band in _BANDS:
+                    _occ.append((_id, band))
+        _cap_band = _band_at(composed_caption, a)
+        if _cap_band:
+            _occ.append(("caption", _cap_band))
+        _bands_here = [band for _id, band in _occ]
+        if len(_bands_here) != len(set(_bands_here)):
+            _stack_violations.append((a, b, _occ))
+
+    if _stack_violations and shadow:
+        # A violation means ≥4 things wanted the 3 bands in one interval — the
+        # composer kept the caption + dropped/collided the surplus, so this is
+        # observability, not a crash. Log loudly for the census (it's the exact
+        # over-dense frame the design's fallback covers).
+        print(
+            f"[shadow-composer] band-squeeze on {len(_stack_violations)} interval(s) "
+            f"(>3 band-occupants at once; caption held, surplus dropped) — census signal",
+            flush=True,
+        )
+
+    if not shadow and _stack_violations:
+        # Cutover: an over-dense frame (≥3 accents occupying all 3 bands) leaves
+        # the caption no free band. Do NOT discard the whole track — keep the
+        # composed caption; the z-order legibility floor (dialogue paints ON TOP)
+        # keeps it readable on that rare interval. Log for visibility. (A hard
+        # assert here would fail-open the ENTIRE render's caption track to the
+        # old path on one over-dense frame — worse than the z-order-backstopped
+        # stack it guards against.)
+        print(
+            f"[shadow-composer] CUTOVER band-squeeze on {len(_stack_violations)} "
+            f"interval(s) — caption kept, z-order floor backstops legibility",
+            flush=True,
+        )
+
+    # ── Phase 5 (shadow): divergence vs what ships today ──────────────────
+    if shadow and shipped_caption is not None:
+        _n_cap_div = 0
+        for a, b, band in composed_caption:
+            _shipped = _band_at(shipped_caption, a)
+            if _shipped is not None and _shipped != band:
+                _n_cap_div += 1
+                _record_divergence(
+                    "caption_position",
+                    {"from_frame": a, "to_frame": b, "position": _shipped},
+                    "shadow_composer_would_move",
+                    final={"from_frame": a, "to_frame": b, "position": band},
+                    reason="shadow_composer_band_differs_from_shipped",
+                )
+        # accent band divergences: composed band vs authored band
+        _n_acc_div = 0
+        _authored = {}
+        for _c in claims:
+            _authored[_c["id"]] = _c["band"]
+        for _id, _spans in element_bands.items():
+            _composed_bands = {band for (_a, _b, band) in _spans if band in _BANDS}
+            _auth = _authored.get(_id)
+            if _auth and _composed_bands and _composed_bands != {_auth}:
+                _n_acc_div += 1
+        if _n_cap_div or _n_acc_div:
+            print(
+                f"[shadow-composer] divergence vs shipped: caption {_n_cap_div} "
+                f"interval(s), accents {_n_acc_div} element(s) re-banded "
+                f"(would-ship if cut over — drives nothing now)",
+                flush=True,
+            )
+        else:
+            print("[shadow-composer] parity: composed layout == shipped (no divergence)", flush=True)
+
+    return {"caption_track": composed_caption, "element_bands": element_bands}
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # MECHANICAL CUTS — captions.ai-style deterministic detection
 # ═══════════════════════════════════════════════════════════════════════════
@@ -8158,6 +8405,30 @@ def generate_edit_gemini(
             flush=True,
         )
 
+        # CONTENT-JUMP MAGNITUDE tier (single-camera scene-turn perception).
+        # scdet finds no shot change on one camera, so a real scene turn — the
+        # speaker paused, repositioned, started a fresh take or a new thought —
+        # reaches Gemini tagged only "pause". But the audio gap already IS the
+        # fingerprint of that turn: the widest gaps are where the footage
+        # actually changes moment even though the camera never cut. Name only
+        # the top tier of gaps, RELATIVE to this video's own distribution, so a
+        # tight talking-head (400ms max gaps) and a vlog (3s gaps) each get
+        # THEIR biggest jumps surfaced — with an absolute floor so a breath is
+        # never mislabeled a scene turn. Only the top tier is named; every other
+        # boundary keeps its bare ms (zero "small"/"skip" language). scdet SCENE
+        # CHANGE boundaries are already always dressed, so this exists to surface
+        # the pause-tagged big jumps scdet is blind to.
+        _cut_gaps = {_ni: _audio_gap_at_boundary(_ni) for _ni in _cut_boundary_indices}
+        _finite_gaps = [_g for _g in _cut_gaps.values() if _g != float("inf")]
+        _max_gap = max(_finite_gaps) if _finite_gaps else 0.0
+        _SCENE_TURN_FRACTION = 0.6   # top-tier = within 60% of the video's widest gap
+        _SCENE_TURN_FLOOR_S = 1.0     # below this, a gap is a breath, never a scene turn
+        _scene_turn_threshold = max(_SCENE_TURN_FLOOR_S, _SCENE_TURN_FRACTION * _max_gap)
+        _scene_turn_set = {
+            _ni for _ni, _g in _cut_gaps.items()
+            if _g != float("inf") and _g >= _scene_turn_threshold
+        }
+
         # Human-readable list formatter — used by both message blocks.
         # Gap annotation is essential: without it Gemini can't tell a 1100ms
         # slot from a 4000ms one and rationally defaults to short safe
@@ -8185,7 +8456,17 @@ def generate_edit_gemini(
                 # clean hard cut. A boundary that is both a gap AND a shot
                 # change is a scene change — the camera moved.
                 _src = "SCENE CHANGE" if _ni in _shot_boundary_set else "pause"
-                _parts.append(f'{_ni} (after "{_w}", {_gap_ms}ms gap, {_src})')
+                # Name the content-jump magnitude on the top-tier pause gaps —
+                # the single-camera scene turns scdet can't see. scdet SCENE
+                # CHANGE entries are already dressed, so only pause big-jumps
+                # get the extra reading.
+                if _ni in _scene_turn_set and _ni not in _shot_boundary_set:
+                    _parts.append(
+                        f'{_ni} (after "{_w}", {_gap_ms}ms gap, {_src} — a wide '
+                        f'jump, the footage turns here even with no camera cut)'
+                    )
+                else:
+                    _parts.append(f'{_ni} (after "{_w}", {_gap_ms}ms gap, {_src})')
             return ", ".join(_parts)
 
         _cut_boundary_block = _fmt_boundary_list(_cut_boundary_indices)
@@ -8245,6 +8526,8 @@ Each transition component renders at its natural duration — the cadence its ra
 **HARD RULE 1 — `after_word_index` MUST come from CUT BOUNDARIES or TIGHT BOUNDARIES.** Standard crossfade transitions (Stack, CardSwipe, ZoomThrough, SlideOver, CrossfadeZoom, StepPush, FilmStrip) MUST anchor on CUT BOUNDARIES — they consume audio handle for the equal-power crossfade and would audio-mush continuous speech on a tight cut. Zero-handle transitions (ShutterFlash, DipToBlack) MAY anchor on EITHER list — their renderers substitute silence for the audio mix at peak and don't need handle frames. A transition at any non-boundary index has no cut to play across and the renderer will not produce it. The validator hard-rejects a crossfade type on a tight boundary.
 
 **HARD RULE 2 — the transition's natural duration must fit the boundary's gap.** Each CUT BOUNDARIES entry shows its available audio gap (`820ms gap`). A transition fits when its natural duration ≤ gap/2. If you want FilmStrip (1200ms natural) at a boundary annotated `1600ms gap`, that does NOT fit (need ≥ 2400ms gap). Match the transition's weight to both the dialogue's shift AND the available room — the moment earns the transition, the gap only sets which weights fit; the long heavy types (FilmStrip, Stack) are the ones a genuine chapter turn with a long pause can carry.
+
+**Read the gap as the size of the content jump, not only as room.** On single-camera footage the camera never cuts, so the audio gap IS the scene change: the widest gaps are where the speaker paused, repositioned, started a fresh take or a new thought — the footage turns there even with nothing visible marking it, which is why the widest openings carry the note "a wide jump, the footage turns here." A wide jump both earns the heavier transition and leaves the room to fit it — the same fact from two sides, because a real turn leaves a real pause. Reach for the fuller transitions where the video actually turns; where speech carries unbroken across a boundary — a small gap, the thought continuing — the clean hard cut is the confident default and the speaker finishes the line.
 
 **If no transition type fits a particular boundary, leave it alone.** The cut plays straight (hard cut). That is the correct behavior — better a clean hard cut than a compressed flicker. Do NOT force a transition where it doesn't fit.
 
@@ -18051,11 +18334,44 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
          int(_b.get("fromFrame") or 0) + int(_b.get("durationInFrames") or 0))
         for _b in broll_out
     ]
+    _raw_caption_for_shadow = list(caption_position_segments_out)
     caption_position_segments_out = _force_caption_position_around_overlays(
         caption_position_segments_out,
         motion_graphics_out,
         _broll_ranges_for_caption_override,
     )
+
+    # ── SHADOW ZONE COMPOSER (ratified hybrid — INERT until cutover) ─────────
+    # Runs the deterministic band composer alongside the shipping layout: it
+    # computes the disjoint band×time occupancy it WOULD ship, asserts it never
+    # stacks, and logs where it diverges from what ships (caption re-bands +
+    # accent re-bands) for the census. Drives NOTHING — caption_position_
+    # segments_out above still ships. Cutover only after Zac reviews the census
+    # (zero divergence / reviewed-improvement) and flips COMPOSER_CUTOVER_ENABLED.
+    # Fail-open: the shadow never affects the render.
+    _composer_cutover = os.environ.get(
+        "COMPOSER_CUTOVER_ENABLED", "0"
+    ).strip().lower() in ("1", "true", "yes", "on")
+    try:
+        _composed = _compose_band_occupancy(
+            _raw_caption_for_shadow,
+            motion_graphics_out,
+            text_overlays_out,
+            _broll_ranges_for_caption_override,
+            shipped_caption=caption_position_segments_out,
+            shadow=not _composer_cutover,
+        )
+        if _composer_cutover:
+            # CUTOVER (flag ON, default OFF): the composer's caption track drives
+            # — captions land in a band guaranteed clear of every accent + the
+            # face. Used for preview exemplars before Zac's production cutover.
+            caption_position_segments_out = [
+                {"fromFrame": int(_a), "toFrame": int(_b), "position": _band}
+                for (_a, _b, _band) in _composed["caption_track"]
+            ]
+            print("[shadow-composer] CUTOVER active — composer caption track drives", flush=True)
+    except Exception as _shadow_err:
+        print(f"[shadow-composer] skipped ({type(_shadow_err).__name__}: {str(_shadow_err)[:120]})", flush=True)
 
     # ── Integrity-gate designed-window stash ────────────────────────────────
     # The gate (post-assembly, pre-upload) masks DESIGNED stillness/black/
