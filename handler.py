@@ -7385,6 +7385,11 @@ def _perturb_scene_prompt(scene, qa_reason, attempt):
 def _gemini_generate_with_cache(client, model_name, contents, base_config_kwargs, system_instruction):
     """Run client.models.generate_content with explicit prompt caching.
 
+    NOTE: the live post-cut editorial path now uses the STREAMING variant
+    _gemini_stream_with_cache (streaming + early degen-abort, Lever 1). This
+    blocking helper is intentionally retained as a ready non-streaming fallback
+    (same cache + backoff semantics); it currently has no caller.
+
     `base_config_kwargs` is the dict of keyword args for GenerateContentConfig
     EXCLUDING system_instruction / cached_content — those are added here based
     on whether a cache resolved successfully. On cache-miss errors at use time,
@@ -7429,6 +7434,107 @@ def _gemini_generate_with_cache(client, model_name, contents, base_config_kwargs
         raise
 
 
+def _gemini_stream_with_cache(client, model_name, contents, base_config_kwargs,
+                              system_instruction, abort_over_output_tokens=None,
+                              label="post-cuts"):
+    """Streaming counterpart of _gemini_generate_with_cache (Lever 1).
+
+    Runs generate_content_stream with the explicit system-instruction cache and,
+    when abort_over_output_tokens is set, STOPS consuming the stream the moment the
+    running output-token count crosses it — the repetition-loop cutoff. A spiral is
+    caught at ~16K tokens (~200s) instead of running to the 30-40K cap (~400s) and
+    then being discarded + re-rolled. Measured root: the timeout tail is
+    output-bound (r=0.59 wall-clock vs output; r=0.05 vs thinking), driven by
+    degeneration ballooning output to 16-36K tokens.
+
+    A NORMAL (non-degenerate) call streams to completion and assembles the SAME
+    JSON the blocking call would return — streaming changes only WHEN we stop, not
+    WHAT a healthy call produces (no quality change). Also logs TTFB + token-arrival
+    rate (the streaming instrumentation), and preserves the cache-miss →
+    retry-without-cache fallback of the blocking wrapper.
+
+    Returns dict: {text, output_tokens, prompt_tokens, cached_tokens,
+    thoughts_tokens, ttfb_s, total_s, aborted}."""
+    cache_name = _get_or_create_gemini_system_cache(client, model_name, system_instruction)
+
+    def _build_config(use_cache):
+        kwargs = dict(base_config_kwargs)
+        if use_cache and cache_name:
+            kwargs["cached_content"] = cache_name
+        else:
+            kwargs["system_instruction"] = system_instruction
+        return genai_types.GenerateContentConfig(**kwargs)
+
+    def _run(use_cache):
+        _t0 = time.time()
+        _ttfb = None
+        _parts = []
+        _out_tok = 0
+        _usage = None
+        _aborted = False
+        _stream = client.models.generate_content_stream(
+            model=model_name, contents=contents, config=_build_config(use_cache),
+        )
+        for _chunk in _stream:
+            if _ttfb is None:
+                _ttfb = time.time() - _t0
+            _delta = getattr(_chunk, "text", None)
+            if _delta:
+                _parts.append(_delta)
+            _um = getattr(_chunk, "usage_metadata", None)
+            if _um is not None:
+                _usage = _um
+                _ct = getattr(_um, "candidates_token_count", None)
+                if isinstance(_ct, int):
+                    _out_tok = _ct
+            # Running output estimate: prefer the server's cumulative count; fall
+            # back to a char/4 estimate until usage_metadata first arrives, so the
+            # cutoff still fires even if early chunks omit usage.
+            _est = _out_tok or (sum(len(p) for p in _parts) // 4)
+            if abort_over_output_tokens and _est > abort_over_output_tokens:
+                _aborted = True
+                try:
+                    _stream.close()
+                except Exception:
+                    pass
+                break
+        _total = time.time() - _t0
+        _full = "".join(_parts)
+        _eff_out = _out_tok or (len(_full) // 4)
+        _rate = (_eff_out / _total) if (_eff_out and _total) else 0.0
+        print(
+            f"[gemini-post] stream {'ABORTED@degen-cutoff' if _aborted else 'complete'} "
+            f"in {_total:.1f}s (ttfb={(_ttfb or 0):.1f}s, out={_eff_out}tok, "
+            f"rate={_rate:.0f}tok/s)",
+            flush=True,
+        )
+        return {
+            "text": _full,
+            "output_tokens": _out_tok or None,
+            "prompt_tokens": getattr(_usage, "prompt_token_count", None) if _usage else None,
+            "cached_tokens": getattr(_usage, "cached_content_token_count", None) if _usage else None,
+            "thoughts_tokens": getattr(_usage, "thoughts_token_count", None) if _usage else None,
+            "ttfb_s": _ttfb, "total_s": _total, "aborted": _aborted,
+        }
+
+    try:
+        return _gemini_generate_with_backoff(
+            lambda: _run(use_cache=cache_name is not None), label=f"stream({label})")
+    except Exception as e:
+        if cache_name:
+            _msg = str(e).lower()
+            if "cache" in _msg or "not found" in _msg or "404" in _msg:
+                print(
+                    f"[gemini-cache] streamed call failed ({type(e).__name__}: {e}) — "
+                    f"dropping cache, retrying without",
+                    flush=True,
+                )
+                _drop_gemini_cache(model_name, system_instruction)
+                return _gemini_generate_with_backoff(
+                    lambda: _run(use_cache=False), label=f"stream-nocache({label})")
+        raise
+
+
 def _call_gemini_post_cuts(client, system_instruction, user_content, video_part, model_name):
     """Second Gemini call: visual placement on the kept-only transcript.
 
@@ -7462,19 +7568,25 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
     _degen = None
     for _attempt in (1, 2):
         t0 = time.time()
-        response = _gemini_generate_with_cache(
+        _stream_result = _gemini_stream_with_cache(
             client, model_name,
             contents=[video_part, user_content],
             base_config_kwargs=dict(
                 temperature=1.0,
-                # max_output_tokens cap is SHARED between thinking and the
-                # actual JSON response. Typical PostCutPlan JSON is 2-4K tokens
-                # and thinking_budget is 24576, so ~28-29K is the legit ceiling.
-                # Capped at 40000 (was 65536) to bound the blast radius of a
-                # repetition-loop degeneration — a spiral can't run to 64K
-                # tokens / 430s anymore. The degeneration GUARD below (re-roll
-                # on oversized/unparseable output) is what recovers the job;
-                # this cap just limits a single bad roll's wall-clock.
+                # max_output_tokens is the SHARED thinking+output cap. HELD at
+                # 40000: with thinking_budget=24576 that leaves ~15,424 tokens of
+                # output headroom, deliberately kept ABOVE the 16K degen threshold
+                # so any recipe the degen guard accepts as legit (a complex edit can
+                # run 10-15K output) can actually be produced without truncating at
+                # the cap. Lever 2 (a proposed 40000→30000 reduction) was DROPPED
+                # after review: it left only ~5,424 output tokens — BELOW the 16K
+                # degen line — so a legit large edit would truncate mid-JSON and be
+                # misclassified as degeneration. Lever 1's streaming early-abort
+                # already bounds a spiral's wall-clock independently of the cap, so
+                # lowering the cap only shrinks the legit-output envelope for no
+                # benefit. Measured root: the timeout tail is output-bound (r=0.59
+                # wall-clock vs output, r=0.05 vs thinking) — degeneration ballooning
+                # output to 16-36K; Lever 1 cuts it at the 16K degen threshold.
                 max_output_tokens=40000,
                 response_mime_type="application/json",
                 response_json_schema=PostCutPlan.model_json_schema(),
@@ -7490,24 +7602,24 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
                 media_resolution="MEDIA_RESOLUTION_MEDIUM",
             ),
             system_instruction=system_instruction,
+            # Lever 1: stream and abort the instant output crosses the degen
+            # threshold — catch the repetition loop AT detection, not at the cap.
+            abort_over_output_tokens=_POST_CUTS_DEGEN_OUTPUT_TOKENS,
+            label="post-cuts",
         )
+        # Full attempt wall-clock (includes cache creation + any backoff sleeps +
+        # a no-cache retry) — NOT the stream's total_s, which covers only the last
+        # _run's streaming. The helper logs ttfb + stream duration separately.
         dt = time.time() - t0
-        print(f"[gemini-post] Complete in {dt:.1f}s", flush=True)
-        _out_tokens = None
-        try:
-            usage = getattr(response, "usage_metadata", None)
-            if usage is not None:
-                _out_tokens = getattr(usage, "candidates_token_count", None)
-                print(
-                    f"[gemini-post] Tokens — prompt={getattr(usage,'prompt_token_count',None)} "
-                    f"cached={getattr(usage,'cached_content_token_count',None)} "
-                    f"thoughts={getattr(usage,'thoughts_token_count',None)} "
-                    f"output={_out_tokens}",
-                    flush=True,
-                )
-        except Exception:
-            pass
-        response_text = str(getattr(response, "text", "") or "").strip()
+        _out_tokens = _stream_result["output_tokens"]
+        print(
+            f"[gemini-post] Tokens — prompt={_stream_result['prompt_tokens']} "
+            f"cached={_stream_result['cached_tokens']} "
+            f"thoughts={_stream_result['thoughts_tokens']} "
+            f"output={_out_tokens} ttfb={(_stream_result['ttfb_s'] or 0):.1f}s",
+            flush=True,
+        )
+        response_text = (_stream_result["text"] or "").strip()
 
         # ── Degeneration guard ───────────────────────────────────────────────
         # A repetition loop (the model echoing the prompt's cadence) runs the
@@ -7521,9 +7633,18 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
         # (the ≤50-word notes instruction is already present and was ignored).
         _degen = None
         _parsed = None
-        if not response_text:
+        if _stream_result["aborted"]:
+            # Lever 1 early cutoff: the stream crossed the degen threshold and was
+            # stopped mid-flight (saved the run to the cap). The partial JSON is
+            # unparseable by construction — re-roll, exactly as an oversized
+            # completed response would, but ~200s sooner.
+            _degen = (f"streamed output crossed {_POST_CUTS_DEGEN_OUTPUT_TOKENS} tok "
+                      f"— repetition-loop degeneration, aborted early at {dt:.0f}s")
+        elif not response_text:
             _degen = "empty/None response"
         elif isinstance(_out_tokens, int) and _out_tokens > _POST_CUTS_DEGEN_OUTPUT_TOKENS:
+            # Belt-and-suspenders: usage lagged the cutoff and the call completed
+            # just over-threshold before the abort fired. Same re-roll.
             _degen = (f"output {_out_tokens} tok > {_POST_CUTS_DEGEN_OUTPUT_TOKENS} "
                       f"— repetition-loop degeneration")
         else:
