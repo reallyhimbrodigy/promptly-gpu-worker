@@ -595,9 +595,12 @@ _TEXT_OVERLAY_VARIANTS = Literal[
     "sticky_note", "caption_match",
 ]
 _SFX_SOUNDS = Literal[
-    "boom", "hit", "drum_roll", "reverse", "ching", "ding", "click",
-    "camera_shutter", "sad_trombone", "typing", "whoosh_slow",
-    "transition_smooth", "thunder", "pop",
+    # Keys are the EXACT filename stems in assets/sounds/ (normalize_sfx_style
+    # does no aliasing → key must equal {stem}.mp3).
+    "boom", "punchsfx", "swoosh-sound-effects", "woosh-professional",
+    "transition-sfx", "camera-flash", "money-ching", "iphoneding",
+    "mouse-click-sound", "popsfx", "correct", "gunshot", "rizz",
+    "shockingsfx", "awkward-moment", "wompwomp", "imposter",
 ]
 
 class _CutRefinement(BaseModel):
@@ -3709,7 +3712,7 @@ VOCAL EMPHASIS PEAKS (source seconds, score 0-1)
   words, pitch peaks, punches. Use as PRIMARY anchors for:
     - zoom_effect events (StepZoom or SmoothPush completing ON a vocal peak)
     - emphasis_moments.t (pick the peak, then map word_indices to it)
-    - sound_effects (drum_roll buildup ending at a peak, hit on the peak)
+    - sound_effects (a punchsfx or popsfx landing on the peak)
 
 FACE VISIBILITY (source-seconds ranges; yes = face detected in 0.5s bucket)
   {_fv_display}
@@ -4016,7 +4019,7 @@ Every component decision is judged against: "does this produce the feeling this 
 
   • **mid_peak** (1-4 per video, each a key_moments entry, intensity 0.6-0.85) — a beat lands: a fact, a reaction, a punchline mid-arc. Feeling: a small "oh!" registered in the body. Treatment: punctuation — StepZoom or SnapReframe, quick in, quick out, paired with a hit/pop/ding. Match the size of the moment exactly; this is a real peak but not THE peak.
 
-  • **payoff** (1 segment, centered on payoff_word_index, intensity 1.0) — THE moment, the line everyone shares. Feeling: the camera and sound COMMIT and the line lands with weight. Treatment: SmoothPush or LetterboxPush, slow ramp, the deepest scale of the video, paired with boom or a build-up climaxing on the word. Captions go big on the payoff word. The payoff takes the committed push (SmoothPush or LetterboxPush) — the slow commitment is what separates it from every peak before it; a StepZoom snap reads as just another mid-peak. The payoff word belongs to the speaker's face — the biggest face moment in the format; the cutaway lane closes before it, and the camera holds the person while it lands. **The payoff is the FINAL committed move.** It holds and resolves cleanly to the close — the payoff's zoom is the last one through the close, with one exception: a deliberate callback beat separated by real time (≥1.5s). The close rides the payoff's resolution — the settle IS the close's motion.
+  • **payoff** (1 segment, centered on payoff_word_index, intensity 1.0) — THE moment, the line everyone shares. Feeling: the camera and sound COMMIT and the line lands with weight. Treatment: SmoothPush or LetterboxPush, slow ramp, the deepest scale of the video, paired with a committing boom on the word. Captions go big on the payoff word. The payoff takes the committed push (SmoothPush or LetterboxPush) — the slow commitment is what separates it from every peak before it; a StepZoom snap reads as just another mid-peak. The payoff word belongs to the speaker's face — the biggest face moment in the format; the cutaway lane closes before it, and the camera holds the person while it lands. **The payoff is the FINAL committed move.** It holds and resolves cleanly to the close — the payoff's zoom is the last one through the close, with one exception: a deliberate callback beat separated by real time (≥1.5s). The close rides the payoff's resolution — the settle IS the close's motion.
 
   • **breather** (between peaks or right before the payoff, intensity 0.0-0.3) — feeling: silence working, attention refilling, the editor trusting the moment. Treatment: stillness — the frame holds bare; at most one quiet B-roll when it perfectly matches what was just said. Zoom, transition, and SFX all sit this beat out. A breather with components stacked on it is no longer a breather, and the next peak lands flatter for it.
 
@@ -4045,7 +4048,7 @@ Words 48-56 are a deliberate breather before the payoff — those windows stay e
 CRAFT MOVES — what senior editors reach for when composing a moment
 ═══════════════════════════════════════════════════════════════════════════
 
-**Anticipation lands harder than payoff.** A zoom that COMPLETES on the payoff word feels inevitable; one that starts at it feels late. Back-time startMs so the motion arrives as the word lands. Build-up SFX (drum_roll, reverse, boom, thunder) are auto-scheduled by the pipeline to climax on the trigger word — your job is picking a trigger word where anticipation has been earned.
+**Anticipation lands harder than payoff.** A zoom that COMPLETES on the payoff word feels inevitable; one that starts at it feels late. Back-time startMs so the motion arrives as the word lands.
 
 **The callback.** Plant in the hook, pay off in the close. When the close consciously echoes the hook — parallel zoom, callback MG content, echoed caption emphasis — the loop closes satisfyingly and earns the replay. hook_word_index, payoff_word_index, and close_word_index should feel like one connected arc, not three independent picks.
 
@@ -4374,7 +4377,7 @@ Pick each emphasis by the AUDIENCE REACTION it earns with sound on: laugh = punc
   • close → CALLBACK: echo the hook's type at lower intensity; for a zoom-free hook, SmoothPush as confident lock-in. A close within 1.5s of the payoff word rides the payoff's resolution instead — validation keeps the payoff of any peak pair inside 2s, so the resolution IS the close's motion there.
   • build / breather → the camera holds flat. An urge to zoom there is the tell that the word sits outside the peak set — drop it from key_moments and let the stretch run flat.
 
-**The weight belongs to the moment first, and the camera is its first instrument.** A peak's weight is set by what the moment is doing — the laugh, the gasp, the line the video exists to deliver — and the camera is the first instrument that serves it. So when the camera is held still on a beat that already earns its place in `key_moments`, the weight still lands; it simply moves to the instruments that remain. Carry the same emphasis intent across: let a committing sound do the pushing (the boom or build-up that climaxes on the payoff word), let the caption hold and go big on that word, let a stat land on the syllable it names. Read the moment's intended feeling first, then ask which available instrument delivers it here — a payoff with the camera held still still commits, through sound and a held caption, and the viewer feels the same weight arrive. This carries the intent to instruments you already own; the peak set stays exactly the 3-5 you committed in `key_moments`, build/breather words stay clear, and only the routing changes when the camera is the one tool that's quiet.
+**The weight belongs to the moment first, and the camera is its first instrument.** A peak's weight is set by what the moment is doing — the laugh, the gasp, the line the video exists to deliver — and the camera is the first instrument that serves it. So when the camera is held still on a beat that already earns its place in `key_moments`, the weight still lands; it simply moves to the instruments that remain. Carry the same emphasis intent across: let a committing sound do the pushing (the boom on the payoff word), let the caption hold and go big on that word, let a stat land on the syllable it names. Read the moment's intended feeling first, then ask which available instrument delivers it here — a payoff with the camera held still still commits, through sound and a held caption, and the viewer feels the same weight arrive. This carries the intent to instruments you already own; the peak set stays exactly the 3-5 you committed in `key_moments`, build/breather words stay clear, and only the routing changes when the camera is the one tool that's quiet.
 
 **Variety happens at the moment, not the clip.** Pick the type each peak's actual reaction wants — the pipeline splits the underlying clip behind the scenes so adjacent emphases with different types each render their own. Two peaks sharing a clip can each render their own type, so a row of identical zooms means you didn't ask what each moment wanted. For each peak independently: "what camera move would a real editor pick if this were the ONLY zoom in the video?"
 
@@ -4440,60 +4443,57 @@ An SFX puts a tactile peak under a moment the viewer is ALREADY watching land. W
 Three checks, all required:
   1. **Visual partner** — what does the viewer SEE happen on this exact word?
   2. **Verbs over nouns, content over function** — the trigger is the word where a listener with eyes closed would expect that sound. "She *called* me" earns a ding on `called`; "your wife's on the *phone*" doesn't earn one on `phone`. That word is almost always one the speaker leans on — a verb, a name, a number, the stressed noun. The trigger word is a stressed content word the voice leans on — function words the voice skates over (`a`, `the`, `to`, `of`, `is`, `and`, `it`) lack a beat of their own, so a sound there fires a half-step off the moment even with a visual nearby. When the beat you want sits next to such a word, the trigger is the stressed word the visual actually lands on, not the little word beside it.
-  3. **Tonal match** — even when the word literally matches, the register must carry the sound's character. A real failure in a serious story is honored by silence — sad_trombone belongs to comic beats that invite the joke.
+  3. **Tonal match** — even when the word literally matches, the register must carry the sound's character. A real failure in a serious story is honored by silence — wompwomp belongs to comic beats that invite the joke.
 
-Every sound is the audio face of a visual beat — its why names the beat. A sound whose why names no moment stays in the rack. SFX count is downstream of the visual track: roughly one SFX per visual event with the right character — the count falls out of the visual track you actually placed, not a quota. SFX land on event words — breather words keep their quiet; the pause is the point. Pick flavor by the partner's arc position: hook events → gripping (whoosh, hit, pop) · build events → ambient (transition_smooth, pop, click, typing, ding) · mid_peak events → punctuating (hit, pop, ding, ching) · the payoff event → committing (boom, or a build-up climaxing on the word — the one moment to lean heavier) · close → echo the hook's SFX at lower intensity, or nothing.
+Every sound is the audio face of a visual beat — its why names the beat. A sound whose why names no moment stays in the rack. SFX count is downstream of the visual track: roughly one SFX per visual event with the right character — the count falls out of the visual track you actually placed, not a quota. SFX land on event words — breather words keep their quiet; the pause is the point. Pick flavor by the partner's arc position: hook events → gripping (swoosh-sound-effects, punchsfx, popsfx) · build events → ambient (transition-sfx, popsfx, mouse-click-sound, iphoneding) · mid_peak events → punctuating (punchsfx, popsfx, iphoneding, money-ching) · the payoff event → committing (boom — the one moment to lean heavier) · close → echo the hook's SFX at lower intensity, or nothing.
 
-Entry shape: {{ "word_index": int, "sound": <name> }}. Timing derives from the word; build-up sounds are auto-scheduled to climax ON the trigger word — no offsets to compute.
+Entry shape: {{ "word_index": int, "sound": <name> }}. Timing derives from the word — every sound is trimmed to a zero-silence onset, so it fires right on its trigger word; no offsets to compute.
 
 ──────────────────────────────────────────
-THE 14 SOUNDS
+THE 17 SOUNDS
 ──────────────────────────────────────────
 
-IMPACT — instant transient on the trigger word:
+**boom** — a deep, cinematic bass impact. Punctuate a bold statement, a dramatic reveal, or the single biggest moment of emphasis in the video; it lands hardest reserved for one peak rather than repeated. Pairs with LetterboxPush/DepthPull or a transition landing.
 
-**hit** — short cinematic body thud, mid-low. "This moment lands — feel it." For punchlines, hard statements, impact verbs (*hit, snap, slam, broke, dropped*). Pairs with a StepZoom/SmoothPush snap or a hard transition — the camera move and the thud are one event.
+**punchsfx** — a sharp, percussive hit with real impact. For a hard cut, a punchy claim, or a beat that needs sudden physical force behind it — great on a strong word or a quick visual snap. Pairs with a StepZoom/SmoothPush or a hard transition.
 
-**ching** — bright metallic cash-register ring. "Money just hit." For *paid, earned, made, sold*, or a number when the amount IS the moment. Pairs with the amount made visible: StatCard counting up, payment Notification, receipt B-roll.
+**swoosh-sound-effects** — a fast, short whoosh. For a quick transition, a rapid movement, or something entering or exiting frame quickly. The brief, clean motion sound for snappy cuts.
 
-**ding** — clean notification bell (not metallic). Two valid uses: a phone event in the narration (*pinged, buzzed, texted* — paired with a Notification MG rendering the banner) or a clean positive-confirmation beat ("Correct!", "Yes!" — game-show register). ding fires on the literal event — a confirmation or success actually happening on screen or in the dialogue; metaphorical reaches sit outside its range.
+**woosh-professional** — a smooth, polished whoosh with more body than the quick swoosh. For a deliberate transition between scenes or ideas — motion that feels intentional and clean rather than frantic. Pairs with a transition firing or a B-roll entering.
 
-**pop** — quick cartoony bubble-burst. "Something just APPEARED." The sound of arrival — pairs with the thing arriving: an overlay slamming in, StickyNotes dropping, an arrow drawing, a playful StepZoom. Light/comedic/casual registers.
+**transition-sfx** — a textured transitional sweep that carries across a scene change. Bridges two distinct segments or topics, smoothing a larger shift where a plain cut would feel abrupt.
 
-**camera_shutter** — mechanical DSLR snap. Strictly literal: a photo being taken in the story (*took a picture, snapped, screenshot*). Pairs with a B-roll of the photo/phone/camera or a freeze-frame beat. Rare — most videos don't earn it.
+**camera-flash** — a crisp photo-shutter snap. For a freeze-frame, a "picture this" moment, or to punctuate a quick highlight — anywhere the visual should feel captured or frozen for a beat.
 
-**click** — soft, almost subliminal UI click. A literal interaction (*tap, press, enable, checked*) — the interaction verb is the trigger; the destination noun rides after it. Pairs with a finger-press B-roll, an arrow at the click target. Tutorial/demo content.
+**money-ching** — a bright cash-register "cha-ching." For mentions of money, price, value, savings, or a payoff — the go-to accent for cost, deals, or getting paid. Pairs with the amount made visible: a StatCard counting up, a payment Notification.
 
-CINEMATIC IMPACT WITH BUILD — short build (~0.4-0.7s), auto-scheduled so the climax lands on the trigger word:
+**iphoneding** — a literal iPhone text-message notification chime. For a message, text, alert, or update landing — a text arriving on screen, or "and then this happened." Not a got-it-right tone (that's correct) and not a money sound (that's money-ching); this is specifically the phone-notification ping. Pairs with a Notification MG rendering the banner.
 
-**boom** — deep sub-bass impact with fading rumble. "Heavy reveal. Big drop." Reserve for THE big moment (typically the payoff); one sub-bass per video keeps it feeling like the moment. Pairs with LetterboxPush/DepthPull, a transition landing, or a dramatic-reveal B-roll.
+**mouse-click-sound** — a quick, tactile click. For a selection, a decision point, a "click here" beat, or to snap attention to a small precise action. Very short and sharp — pairs with a finger-press B-roll or an arrow at the target.
 
-**thunder** — natural crack + 1.7s rolling rumble, the longest-tailed impact. Storm-coded drama (*exploded, shook, catastrophic*). Pairs with weather/dark visuals, StepZoom + LetterboxPush weight, a dramatic chapter transition. Light content can't hold the rumble.
+**popsfx** — a tiny, bright pop. For a word, caption, or small graphic appearing on screen — light punctuation for something popping into view. The subtlest accent in the set; pairs with an overlay slamming in or StickyNotes dropping.
 
-BUILD-UP — long anticipation tail (1.3-1.7s) climaxing AT the trigger word:
+**correct** — a positive confirmation chime (a "ding — correct!" tone). For a right answer, a good decision, a point being validated, or a satisfying "yes, exactly" moment. Signals rightness or success.
 
-**drum_roll** — snare roll (~1.65s) into a payoff crash. Slightly comedic by design — announcements, award beats, "and the answer is…" in playful/game-show registers. REQUIRES a major visual reveal at the climax word (StatCard count-up, Notification drop, StepZoom lock); a drum roll into nothing sells anticipation and delivers nothing. Once per video.
+**gunshot** — a sharp gunshot crack. A hard, aggressive punctuation on a blunt statement, a sudden stop, or a shocking beat. Strong and jarring — reserve for moments that earn real intensity.
 
-**reverse** — continuous riser (~1.37s) climaxing at the end; pure anticipation. Reserve for priming the single most-committed visual moment of the video — a transition peak, a LetterboxPush locking, an MG slamming. Without a hard visual climax on the trigger word, the build feels unfinished. Once per video, maximum.
+**rizz** — a romantic-but-comedic flourish (a smooth, flirty sting played for laughs). For a charming or flirty beat, a "smooth move" moment, or anything romantic that's meant to be funny rather than serious. Playful and a little tongue-in-cheek.
 
-**sad_trombone** — the "wah wah waaah" descent. Unambiguously comedic; impossible to use sincerely. Only where the FAILURE IS THE JOKE and the vibe + delivery invite laughing along (blooper, roast, self-deprecation). Pairs with a comically-deflated zoom, a fail B-roll, or an overlay landing the joke. Real failures held seriously want silence.
+**shockingsfx** — a dramatic, SUDDEN shock sting. For a surprising reveal, a plot twist, or a "wait, what?" beat that lands as a jarring hit. The sudden jolt of surprise — a hard hit the instant the reveal drops, not a slow build (that's imposter).
 
-ATMOSPHERIC SWEEPS — near-instant onset, long trail, used between moments:
+**awkward-moment** — a comedic awkward-silence cue. Right after something cringe, an uncomfortable pause, or a beat that lands flat on purpose. The sound of secondhand embarrassment.
 
-**whoosh_slow** — mid-energy cinematic sweep with weight. "Something is moving through; a pivot happened." Pairs with a transition firing (the sweep IS its audio layer), a B-roll entering, or a frame-shifting zoom+MG combo.
+**wompwomp** — a comedic "sad trombone" fail sound. For a letdown, a mistake, a punchline about failure, or an anticlimax — the classic "that didn't work out." Playful disappointment; use it only where the failure is the joke.
 
-**transition_smooth** — the softer, gentler wash. "Soft pivot; moving on." Same sweep shape as whoosh_slow, less commitment — for quiet topic changes, low-stakes B-roll entries, hard cuts that want a whisper of glue. Reach for it when whoosh_slow would overcommit.
+**imposter** — a tense, slow-burn suspenseful cue (Among Us-style). For a "something's off here" beat, a suspicious reveal, or calling out something fishy. The building sus feeling — creeping doubt, suspicion, caught-in-the-act — not a sudden jolt (that's shockingsfx).
 
-CONTINUOUS TEXTURE:
-
-**typing** — rapid mechanical keyboard across ~1s; a texture, not a transient. Literal typing in the moment (*typed, wrote, emailed, coded*) with typing visible on screen: TypewriterReveal captions, a ChatThread typing indicator, a keyboard B-roll. typing lands on literal keys — someone actually typing in the story or on screen; "I wrote the rules" is metaphor, and metaphor is the voice's alone.
-
-AMBIGUITY MAP — when two sounds feel close:
-  • boom / thunder / hit — synthetic drop (cinematic zoom partner) / natural crack + rumble (dark visual partner) / short percussion punch (snap partner).
-  • ching / ding — metallic cash (money visual) / notification bell (Notification MG or confirmation beat).
-  • click / pop / camera_shutter — subliminal UI / bright arrival burst / literal photo only.
-  • whoosh_slow / transition_smooth — presence and weight / soft and low-key.
-  • drum_roll / reverse — comedic-traditional anticipation / cinematic prep that REQUIRES a hard visual climax.
+AMBIGUITY MAP — when sounds feel close:
+  • swoosh-sound-effects / woosh-professional / transition-sfx — quick snap whoosh / smooth deliberate whoosh / textured sweep across a full scene change.
+  • money-ching / iphoneding / correct — cash register on money beats / iPhone text-message ping on messages and alerts / "you got it right" confirmation tone on a validated answer. Three distinct chimes; never interchange them.
+  • popsfx / mouse-click-sound — something appearing on screen / a precise interaction or selection.
+  • boom / punchsfx / gunshot — deep cinematic bass on the biggest moment / sharp percussive hit / aggressive crack for real intensity.
+  • wompwomp / awkward-moment — the failure is the joke (sad-trombone letdown) / a cringe or awkward pause landing flat on purpose.
+  • shockingsfx / imposter — a sudden jolt the instant a reveal drops / a slow-burn "something's off" suspicion that builds.
 
 ═══════════════════════════════════════════════════════════════════════════
 === B-ROLL ===
@@ -4610,7 +4610,7 @@ Read the WHY on each — that's the principle you carry to videos you haven't se
 EXAMPLE 1 — hook, street-interview trivia
 ──────────────────────────────────────────
 
-Caption style: Pulse — rapid-fire quiz energy in paired coral pops, one beat per pair. The question word gets a SnapReframe with camera_shutter riding the freeze ("the question locks the frame"). The hard cut into the answer wears a ShutterFlash overlay ("the answer lands like a flash going off"), and a caption_match text overlay pins "Q1" top. The mine surfaced a StatCard referent on the score; it stayed unplaced — mid-hook, the person is the star and the why wouldn't write.
+Caption style: Pulse — rapid-fire quiz energy in paired coral pops, one beat per pair. The question word gets a SnapReframe with camera-flash riding the freeze ("the question locks the frame"). The hard cut into the answer wears a ShutterFlash overlay ("the answer lands like a flash going off"), and a caption_match text overlay pins "Q1" top. The mine surfaced a StatCard referent on the score; it stayed unplaced — mid-hook, the person is the star and the why wouldn't write.
 
 ──────────────────────────────────────────
 EXAMPLE 2 — mid-arc teach-down, three-point listicle
@@ -4622,13 +4622,13 @@ Caption style: TwoTone — structured teaching reads cleanest in a two-color sys
 EXAMPLE 3 — storytime payoff
 ──────────────────────────────────────────
 
-Caption style: Quintessence — a slow-burn confession earns an elegant, quiet frame. DepthPull as the confession starts ("the world narrows to the voice"), a LightLeak overlay on the callback splice ("the opening line returns, warm"), reverse into the commit and boom on the land, LetterboxPush carrying the payoff ("the frame commits with the sentence"). Captions run bottom the whole way; the payoff belongs to the face.
+Caption style: Quintessence — a slow-burn confession earns an elegant, quiet frame. DepthPull as the confession starts ("the world narrows to the voice"), a LightLeak overlay on the callback splice ("the opening line returns, warm"), a committing boom on the land, LetterboxPush carrying the payoff ("the frame commits with the sentence"). Captions run bottom the whole way; the payoff belongs to the face.
 
 ──────────────────────────────────────────
 EXAMPLE 4 — product-pitch UGC
 ──────────────────────────────────────────
 
-Caption style: Gadzhi — hustle energy in left-aligned gold keeps the pitch confident and premium. A PillCluster renders the three features as the speaker lists them ("the trio on screen as the trio is spoken"), the demo walk-in earns the video's one transition — ZoomThrough on a 1.4s CUT boundary ("setup into payoff, the most committed move, and the gap gives it handle") with whoosh_slow — and a DropCard lands the price with ching ("the number arrives like a product drop"). Two windows in the build stayed bare; the pace was the polish.
+Caption style: Gadzhi — hustle energy in left-aligned gold keeps the pitch confident and premium. A PillCluster renders the three features as the speaker lists them ("the trio on screen as the trio is spoken"), the demo walk-in earns the video's one transition — ZoomThrough on a 1.4s CUT boundary ("setup into payoff, the most committed move, and the gap gives it handle") with woosh-professional — and a DropCard lands the price with money-ching ("the number arrives like a product drop"). Two windows in the build stayed bare; the pace was the polish.
 
 These four rotate the palette on purpose — nine caption styles, twenty-eight graphics, ten transitions, three overlays, the full sound rack. The registry is the palette; the moment picks the instrument; the strongest sign you read the footage fresh is reaching for instruments these examples never wore.
 
@@ -4733,9 +4733,9 @@ These override creative reasoning when they conflict.
     eyebrow, attributed quote, three parallel items). Text is framing — the transcript already lives in the captions.
   • sound_effects: The sound rack is vocabulary: a beat that hits visually
     usually earns its sound, and rotating through the rack keeps the hits
-    reading fresh — the count follows the beats. boom, drum_roll, and
-    reverse are single-use sounds — each lands once per video (the
-    validator holds that line).
+    reading fresh — the count follows the beats. boom is the one to
+    reserve — a single deep impact on the biggest moment reads harder
+    than a repeated one.
 
 **VARIETY:** every zoom type, transition type, and SFX sound stays at or under 60% of its category's events — the mix is what keeps each firing feeling chosen. If 4 of 5 emphases share one zoom type,
 re-read those moments — at least one is doing something different.
@@ -4853,7 +4853,7 @@ Output is a bare JSON object — the response is JSON-parsed and the parser is t
   "sound_effects": [
     {{
       "word_index": int,
-      "sound": "boom" | "hit" | "drum_roll" | "reverse" | "ching" | "ding" | "click" | "camera_shutter" | "sad_trombone" | "typing" | "whoosh_slow" | "transition_smooth" | "thunder" | "pop",
+      "sound": "boom" | "punchsfx" | "swoosh-sound-effects" | "woosh-professional" | "transition-sfx" | "camera-flash" | "money-ching" | "iphoneding" | "mouse-click-sound" | "popsfx" | "correct" | "gunshot" | "rizz" | "shockingsfx" | "awkward-moment" | "wompwomp" | "imposter",
       "why": "<≤10 words: the beat this sound is the audio face of>"
     }}
   ],
@@ -11835,7 +11835,7 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                 word = str(_trigger_w.get("word") or _trigger_w.get("punctuated_word") or "").strip().lower().rstrip(".,!?;:'\"")
                 # No in-clip pre-roll check — SFX audio plays on the GLOBAL output
                 # timeline via FFmpeg's adelay + amix (see render_multi_clip). The
-                # build-up phase plays over whatever precedes the trigger word in the
+                # sound plays over whatever precedes the trigger word in the
                 # output, with no respect for source clip boundaries. The only physical
                 # limit is the output-timeline start (t=0); if the projected trigger
                 # time is within the onset duration of that, adelay clamps to 0 and
@@ -12116,7 +12116,7 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None)
         "        named type, and an anchor (default upper_third_safe / lower_third_safe).\n"
         "  • 'add a text overlay K-M saying X' / 'put a sticky note here'\n"
         "      → append a new text_overlays entry with the right variant and start_word_index.\n"
-        "  • 'add an SFX on word K' / 'put a ching on the punchline'\n"
+        "  • 'add an SFX on word K' / 'put a money-ching on the punchline'\n"
         "      → append a new sound_effects entry with word_index=K and a matching sound style.\n\n"
         "REPLACEMENTS are tweaks too — combine the targeted edit with the new state:\n\n"
         "  • 'change the sticky_note on word K to caption_match' / 'swap the StatCard on word K\n"
@@ -12851,60 +12851,44 @@ _SFX_CATEGORY_LEVELS = {
 # Sound → category mapping. Adding a new SFX only requires placing it in
 # one of 3 categories — no per-file volume calibration needed.
 _SFX_CATEGORIES = {
+    # loud — big impacts that own the beat
     "boom": "loud",
-    "camera_shutter": "medium",
-    "ching": "loud",
-    "click": "medium",
-    "ding": "medium",
-    "drum_roll": "medium",
-    "hit": "loud",
-    "pop": "medium",
-    "reverse": "quiet",
-    "sad_trombone": "medium",
-    "transition_smooth": "quiet",
-    "typing": "quiet",
-    "whoosh_slow": "quiet",
-    "thunder": "medium",
+    "punchsfx": "loud",
+    "gunshot": "loud",
+    "money-ching": "loud",
+    "shockingsfx": "loud",
+    # medium — mid accents / cues
+    "camera-flash": "medium",
+    "iphoneding": "medium",
+    "mouse-click-sound": "medium",
+    "popsfx": "medium",
+    "correct": "medium",
+    "rizz": "medium",
+    "awkward-moment": "medium",
+    "wompwomp": "medium",
+    "imposter": "medium",
+    # quiet — sweeps / whooshes that sit under the bed
+    "swoosh-sound-effects": "quiet",
+    "woosh-professional": "quiet",
+    "transition-sfx": "quiet",
 }
 
-# Sound → onset offset (seconds). The "onset" is the time within the file
-# at which the meaningful moment of the sound occurs (the impact, the climax,
-# the perceived "hit"). When mixing, we schedule each SFX to start at
-# (placement_time - onset) so the perceived moment lands EXACTLY on the word.
+# Sound → onset offset (seconds). The "onset" is the time within the file at
+# which the meaningful moment of the sound occurs. When mixing, we schedule each
+# SFX to start at (placement_time - onset) so the perceived moment lands EXACTLY
+# on the word.
 #
-# For impact sounds (boom, hit, ching, ding, click, pop, camera_shutter), the
-# onset is the peak amplitude.
-#
-# For build-up sounds (drum_roll, reverse, sad_trombone, thunder, whoosh_slow,
-# transition_smooth), the onset is the climactic moment — the build PRECEDES
-# the trigger word and the climax lands on it.
-#
-# Measured by decoding each file to PCM and finding the peak amplitude sample.
+# Every SFX in this set is pre-trimmed to ZERO leading silence — the audible onset
+# is at sample 0 — so every offset is 0.0 and the file starts right on the word.
+# (.get() below defaults to 0.0, so these explicit zeros just document the
+# pre-trim contract; a future sound with a mid-file peak would add its measured
+# offset here.)
 _SFX_ONSET_OFFSETS = {
-    # Short impacts — offset to ATTACK (first audible transient on the word)
-    "hit":               0.000,
-    "ching":             0.000,
-    "ding":              0.000,
-    "click":             0.052,
-    "pop":               0.013,
-    "camera_shutter":    0.012,
-    # Cinematic impacts — offset to PEAK (crash/hit lands on the word, buildup precedes)
-    "boom":              0.440,
-    "thunder":           0.734,
-    # Build-up sounds — offset to CLIMAX (the payoff moment lands on the word)
-    "drum_roll":         1.657,
-    "reverse":           1.372,
-    # sad_trombone is special: pre-rolling 1.29s makes the "wah wah waaah"
-    # build start playing while the speaker is still mid-sentence, which
-    # reads as accidental — a joke sound floating in over serious dialogue.
-    # Anchor to the START of the descending phrase instead so it triggers
-    # ON the word the editor picked, not 1.3s before.
-    "sad_trombone":      0.000,
-    # Atmospheric — offset to ONSET (first audible whoosh on the word)
-    "transition_smooth": 0.089,
-    "whoosh_slow":       0.034,
-    # Continuous — no offset
-    "typing":            0.000,
+    "boom": 0.0, "punchsfx": 0.0, "swoosh-sound-effects": 0.0,
+    "woosh-professional": 0.0, "transition-sfx": 0.0, "camera-flash": 0.0,
+    "money-ching": 0.0, "iphoneding": 0.0, "mouse-click-sound": 0.0,
+    "popsfx": 0.0, "correct": 0.0, "gunshot": 0.0, "rizz": 0.0,
+    "shockingsfx": 0.0, "awkward-moment": 0.0, "wompwomp": 0.0, "imposter": 0.0,
 }
 
 # RMS measurement cache — populated lazily, avoids re-measuring same file
@@ -18168,7 +18152,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 # pulls it ONLY when the boundary sits within
                 # _SFX_REANCHOR_TOLERANCE_S of that start (exact boundary-word
                 # membership AND proximity). A partner that would drag the
-                # sound further stays a visual-only partner — render C's ching
+                # sound further stays a visual-only partner — render C's SFX
                 # was dragged +557ms to the splice and read as ~1s late by
                 # ear. Pads are excluded from this arithmetic by construction:
                 # the map targets the word's projected END, never the padded
