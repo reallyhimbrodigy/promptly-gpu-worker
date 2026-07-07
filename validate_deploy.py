@@ -4524,6 +4524,41 @@ def _tco_anchor():
     assert _anchor(3.170, [{"end": 5.0}]) == 190, "mid-clip overlay must keep the word end"
 
 
+@check("render source staging: dangling-symlink class-kill (dereference source before os.link into the Remotion bundle)")
+def _stage_dereferences_symlink():
+    import os
+    import tempfile
+    _src = open("handler.py").read()
+    # the fix is wired: dereference (realpath) the source before hardlinking it
+    # into /remotion/bundle/public, so the bundle never holds a symlink that can
+    # dangle (prod job d7207dc8 — a passthrough-canonical source is a symlink;
+    # on Linux os.link preserves it; Remotion 404s it if its target goes
+    # unresolvable at transition-micro serve time).
+    assert "os.link(os.path.realpath(src_abs_path), _dst)" in _src, \
+        "staging must dereference the source (realpath) before os.link"
+    # the bare (bug) form is gone
+    assert "os.link(src_abs_path, _dst)" not in _src, \
+        "the bare os.link(symlink) staging (dangling-symlink bug) must be gone"
+    # behavioral (platform-independent): realpath-link yields a REAL file that
+    # SURVIVES target removal — a symlink would dangle (exists→False).
+    _d = tempfile.mkdtemp()
+    try:
+        _real = os.path.join(_d, "src.bin")
+        with open(_real, "wb") as _f:
+            _f.write(b"REAL" * 1000)
+        _sym = os.path.join(_d, "canon.bin")
+        os.symlink(os.path.abspath(_real), _sym)
+        _dst = os.path.join(_d, "staged.bin")
+        os.link(os.path.realpath(_sym), _dst)
+        assert not os.path.islink(_dst), "staged file must be a real file, not a symlink"
+        os.unlink(_real)  # target gone → a symlink here would dangle
+        assert os.path.exists(_dst), \
+            "dereferenced staging must survive target removal (no dangle)"
+    finally:
+        import shutil as _sh
+        _sh.rmtree(_d, ignore_errors=True)
+
+
 @check("integrity gate: behavioral — mask algebra + per-check bounding on synthetic spans")
 def _gate_behavior():
     import handler

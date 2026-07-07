@@ -17347,8 +17347,21 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 os.unlink(_dst)
             except OSError:
                 pass
+        # PRESENCE-GUARANTEE (dangling-symlink class-kill): a passthrough-
+        # canonical source_canonical.mp4 is a SYMLINK (fps-normalize _is_canonical
+        # branch, os.symlink → abspath(raw source)). On Linux os.link() does NOT
+        # dereference a symlink source (bare link(2)), so a plain os.link would
+        # stage a SYMLINK into the bundle. Remotion serves a VALID symlink fine —
+        # but if that symlink's target becomes unresolvable at frame-serve time
+        # (the transition/micro subprocess is the only source reader), its
+        # serve-handler returns 404 "could not be found" and fails the render
+        # (prod job d7207dc8). Dereference to the real file so the bundle holds a
+        # hardlink to the source INODE (or a copy on cross-fs) — target-independent
+        # and impossible to dangle. realpath is a no-op on a non-symlink (the
+        # re-encode path), so this only changes the fragile passthrough case.
+        # (macOS link() dereferences, which masked the symlink staging in dev.)
         try:
-            os.link(src_abs_path, _dst)
+            os.link(os.path.realpath(src_abs_path), _dst)
         except OSError:
             shutil.copy2(src_abs_path, _dst)
         _staged_for_cleanup.append(_dst)
