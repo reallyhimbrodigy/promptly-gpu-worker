@@ -5692,6 +5692,23 @@ _PAREN_FILLER_MULTI: tuple = (
 # is more likely rhetorical ("very, very good") or a natural restart.
 _STUTTER_MAX_GAP_S: float = 0.20
 
+# ── Phrase-retake detector constants (detect_phrase_retake) ──────────────────
+# A complete-phrase retake: the speaker lands a line, then lands it again from
+# the same start with a different ending ("this is a hot towel WARMER" → "this
+# is a hot towel DISPENSER"). Mechanically: two adjacent same-speaker runs that
+# share a long lemma STEM and where the first (discarded) take diverges only at
+# its short TAIL. Deliberately narrow — the long-stem/short-tail shape is what
+# separates a corrected retake from rhetorical repetition (anaphora shares a
+# SHORT opener then diverges for a LONG body; triples/lists repeat 3+ times or
+# end on a comma). Keep the LATER take, cut the EARLIER (matches detect_stutter's
+# keep-the-last polarity).
+_RETAKE_MIN_STEM: int = 3          # a real multi-word re-read, not a 1-word stutter
+_RETAKE_EXACT_MIN_STEM: int = 5    # tail==0 (verbatim repeat) needs a longer stem —
+                                   #   guards emphatic repetition ("Stop. Stop.")
+_RETAKE_TAIL_MAX: int = 2          # the discarded take diverges only at its END
+_RETAKE_MAX_STEM: int = 15         # bounds the period loop → O(n·MAXP·MAXL), not O(n^3)
+_RETAKE_MAX_SEAM_GAP_S: float = 2.0  # the retake follows promptly (not a far callback)
+
 def _word_lemma(word: dict) -> str:
     """Lowercase, punctuation-stripped word text for matching."""
     text = (word.get("punctuated_word") or word.get("word") or "")
@@ -6362,6 +6379,113 @@ def detect_stutter(words: list) -> list:
     return out
 
 
+def detect_phrase_retake(words: list) -> list:
+    """Detect within-speaker COMPLETE-PHRASE retakes and cut the discarded take.
+
+    A retake: the speaker delivers a line, then re-delivers it from the same
+    start with a different ending — "this is a hot towel WARMER. this is a hot
+    towel DISPENSER" — and the airing edit keeps the second, cleaner take. This
+    is the failure class the mechanical layer structurally should cover but the
+    other four detectors miss (filler = hesitation tokens; false_start = hyphen
+    fragments; stutter = adjacent single-word repeats; dead_air = silence). It is
+    a DETERMINISTIC structural pattern, not an editorial judgment.
+
+    Shape (same speaker throughout): two adjacent runs where the LATER run
+    re-reads the EARLIER from the same anchor. The earlier (discarded) take
+    occupies [s .. m-1] (period P = m-s); the shared lemma STEM has length L
+    (words[s+k] == words[m+k] for k < L); the discarded TAIL is t = P-L. It is a
+    retake when L >= MIN_STEM (a substantial multi-word re-read), t in
+    [0, TAIL_MAX] (the first take is almost all stem and diverges only at its
+    end), the retake follows within MAX_SEAM_GAP_S, and the guards below hold.
+    Cut the EARLIER take [s .. m-1]; keep the later (detect_stutter polarity).
+
+    The long-stem/short-tail shape is the anaphora discriminator: rhetorical
+    parallelism ("In the morning I run. In the afternoon I rest.") shares a
+    short opener then diverges for a LONG body (large tail) → rejected. Guards
+    additionally reject 3+ occurrence rhetoric/lists (triples, enumerations),
+    comma-continuation list items, and short verbatim emphatic repeats. Returns
+    a list of {word_index, reason} exactly like the sibling detectors.
+    """
+    out: list = []
+    n = len(words)
+    if n < 2 * _RETAKE_MIN_STEM:
+        return out
+
+    lemmas = [_word_lemma(w) for w in words]
+    spk = [int(w.get("speaker") or 0) for w in words]
+    starts = [float(w.get("start") or 0.0) for w in words]
+    ends = [float(w.get("end") or 0.0) for w in words]
+
+    def _stem_len(a, b, max_len):
+        """Common same-speaker lemma prefix of words[a:] and words[b:]."""
+        L = 0
+        while (L < max_len and b + L < n
+               and lemmas[a + L] and lemmas[b + L]
+               and lemmas[a + L] == lemmas[b + L]
+               and spk[a + L] == spk[a] == spk[b + L]):
+            L += 1
+        return L
+
+    cut_idx: set = set()
+    s = 0
+    while s < n - _RETAKE_MIN_STEM:
+        if not lemmas[s] or s in cut_idx:
+            s += 1
+            continue
+        best = None
+        # Period P = length of the (candidate) discarded first take.
+        for P in range(_RETAKE_MIN_STEM, _RETAKE_MAX_STEM + _RETAKE_TAIL_MAX + 1):
+            m = s + P
+            if m + _RETAKE_MIN_STEM > n:
+                break
+            L = _stem_len(s, m, P)  # stem can't exceed the period
+            tail = P - L
+            if L < _RETAKE_MIN_STEM or tail < 0 or tail > _RETAKE_TAIL_MAX:
+                continue
+            if tail == 0 and L < _RETAKE_EXACT_MIN_STEM:
+                continue  # short verbatim repeat = emphasis, not a retake
+            best = (P, m, L, tail)
+            break  # first qualifying period wins
+        if best is None:
+            s += 1
+            continue
+        P, m, L, tail = best
+
+        # ── Guards (precision-biased) ───────────────────────────────────────
+        # G6: the retake must follow promptly (not a far-apart callback).
+        if starts[m] - ends[m - 1] > _RETAKE_MAX_SEAM_GAP_S:
+            s += 1
+            continue
+        # G3: occurrence must be exactly 2 — reject rhetorical triples/enumerations
+        # ("Retire. Retire. Retire.", "of the people, by the people, for the
+        # people"). A third forward repeat of the stem, or a prior backward one,
+        # means it is a rhetorical device, not a corrected take.
+        _third = all(m + P + k < n and lemmas[m + P + k] == lemmas[s + k]
+                     and spk[m + P + k] == spk[s]
+                     for k in range(_RETAKE_MIN_STEM))
+        _prior = all(s - P >= 0 and lemmas[s - P + k] == lemmas[s + k]
+                     and spk[s - P + k] == spk[s]
+                     for k in range(_RETAKE_MIN_STEM))
+        if _third or _prior:
+            s += 1
+            continue
+        # G4: comma-terminated discard = a list item / continuation, not a
+        # completed discarded take ("you get a charger, you get a cable,").
+        _last_pw = (words[m - 1].get("punctuated_word") or words[m - 1].get("word") or "").rstrip()
+        if _last_pw.endswith(","):
+            s += 1
+            continue
+
+        # Cut the discarded first take [s .. m-1]; keep the retake.
+        for k in range(s, m):
+            if k not in cut_idx:
+                out.append({"word_index": k, "reason": "retake"})
+                cut_idx.add(k)
+        s = m  # continue scanning from the surviving retake
+
+    return out
+
+
 def compute_mechanical_cuts(
     deepgram_words: list,
     source_path: str = None,
@@ -6387,7 +6511,8 @@ def compute_mechanical_cuts(
     fillers = detect_filler(deepgram_words)
     false_starts = detect_false_start(deepgram_words)
     stutters = detect_stutter(deepgram_words)
-    word_removals = fillers + false_starts + stutters
+    retakes = detect_phrase_retake(deepgram_words)
+    word_removals = fillers + false_starts + stutters + retakes
 
     removed_so_far: set = set()
     for item in word_removals:
@@ -6405,7 +6530,8 @@ def compute_mechanical_cuts(
         f"Mechanical cuts: {len(dead_airs)} dead_air, "
         f"{len(fillers)} filler, "
         f"{len(false_starts)} false_start, "
-        f"{len(stutters)} stutter"
+        f"{len(stutters)} stutter, "
+        f"{len(retakes)} retake"
     )
 
     return {

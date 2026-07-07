@@ -4577,6 +4577,44 @@ def _transition_jump_foldin():
     assert "_SCENE_TURN_FLOOR_S" in _src, "absolute scene-turn floor missing"
 
 
+@check("phrase-retake detector: 5th mechanical detector — catches complete-phrase retakes, preserves rhetorical repetition")
+def _phrase_retake_detector():
+    import handler
+    _src = open("handler.py").read()
+    # wired as the 5th detector, feeding word_removals like the other four
+    assert "retakes = detect_phrase_retake(deepgram_words)" in _src, \
+        "detect_phrase_retake must run in compute_mechanical_cuts"
+    assert "word_removals = fillers + false_starts + stutters + retakes" in _src, \
+        "retakes must join the mechanical word_removals set"
+    # behavioral: build word dicts and exercise recall + the FP guards
+
+    def _mk(text, gap=0.15, spk=0):
+        ws, t = [], 0.0
+        for tok in text.split():
+            ws.append({"punctuated_word": tok, "word": tok.strip(".,!?"),
+                       "start": t, "end": t + 0.25, "speaker": spk})
+            t += 0.25 + gap
+        return ws
+
+    def _cuts(text):
+        return sorted(x["word_index"] for x in handler.detect_phrase_retake(_mk(text)))
+
+    # RECALL — the caf020a5 specimen: cut the discarded first take, keep the retake
+    assert _cuts("This is a hot towel warmer. This is a hot towel dispenser.") == [0, 1, 2, 3, 4, 5], \
+        "must cut the discarded 'warmer' take and keep the 'dispenser' retake"
+    # verbatim full-sentence re-delivery is also a retake
+    assert _cuts("I really love this product a lot. I really love this product a lot.") == [0, 1, 2, 3, 4, 5, 6]
+    # FALSE-POSITIVE GUARDS — intentional repetition MUST be preserved (zero cuts)
+    assert _cuts("Retire. Retire. Retire.") == [], "rhetorical triple must survive"
+    assert _cuts("of the people by the people for the people") == [], "multiword triad must survive"
+    assert _cuts("In the morning I go running outside. In the evening I cook a nice dinner.") == [], \
+        "anaphora (short shared opener, long divergent body) must survive"
+    assert _cuts("Stop. Stop.") == [], "short emphatic repeat must survive"
+    assert _cuts("you get a charger, you get a cable,") == [], "comma-continuation list must survive"
+    assert _cuts("this is a totally normal sentence with no repeats at all here") == [], \
+        "non-repetitive speech must never be cut"
+
+
 @check("render source staging: dangling-symlink class-kill (dereference source before os.link into the Remotion bundle)")
 def _stage_dereferences_symlink():
     import os
