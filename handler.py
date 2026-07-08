@@ -8675,6 +8675,17 @@ def generate_edit_gemini(
             _ni for _ni, _g in _cut_gaps.items()
             if _g != float("inf") and _g >= _scene_turn_threshold
         }
+        # Fold-in visibility: the scene-turn tier lives in the prompt body (not
+        # echoed to the app-log), so surface its size here so its effect is
+        # greppable in prod. On single-camera footage (0 shot-change boundaries)
+        # this is the ONLY signal that content-jump magnitude reached the model.
+        print(
+            f"[shot-split] scene-turn fold-in: {len(_scene_turn_set)} content-jump "
+            f"boundary(ies) tagged (gap >= {_scene_turn_threshold:.2f}s = "
+            f"max({_SCENE_TURN_FLOOR_S:.1f}s floor, {_SCENE_TURN_FRACTION:.2f}x"
+            f"{_max_gap:.2f}s max-gap))",
+            flush=True,
+        )
 
         # Human-readable list formatter — used by both message blocks.
         # Gap annotation is essential: without it Gemini can't tell a 1100ms
