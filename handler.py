@@ -4453,47 +4453,46 @@ Entry shape: {{ "word_index": int, "sound": <name> }}. Timing derives from the w
 THE 17 SOUNDS
 ──────────────────────────────────────────
 
-**boom** — a deep, cinematic bass impact. Punctuate a bold statement, a dramatic reveal, or the single biggest moment of emphasis in the video; it lands hardest reserved for one peak rather than repeated. Pairs with LetterboxPush/DepthPull or a transition landing.
+**boom** — A deep cinematic bass impact. Serves weight, authority, and dramatic finality; it makes a statement land with force. Use it on the single biggest claim, a bold reveal, or the payoff moment — reserved for one peak per video so it hits hardest.
 
-**punchsfx** — a sharp, percussive hit with real impact. For a hard cut, a punchy claim, or a beat that needs sudden physical force behind it — great on a strong word or a quick visual snap. Pairs with a StepZoom/SmoothPush or a hard transition.
+**punchsfx** — A sharp percussive hit. Serves impact and emphasis; it adds sudden physical force to a beat. Use it on a hard-hitting word, a punchy claim, or a quick snap where the moment needs to feel like it lands a blow.
 
-**swoosh-sound-effects** — a fast, short whoosh. For a quick transition, a rapid movement, or something entering or exiting frame quickly. The brief, clean motion sound for snappy cuts.
+**swoosh-sound-effects** — A fast, short whoosh. Serves speed and motion; it makes a quick change feel snappy and energetic. Use it on a rapid transition or when something quickly enters or exits the frame — the brief motion accent for fast cuts.
 
-**woosh-professional** — a smooth, polished whoosh with more body than the quick swoosh. For a deliberate transition between scenes or ideas — motion that feels intentional and clean rather than frantic. Pairs with a transition firing or a B-roll entering.
+**woosh-professional** — A smooth, polished whoosh with more body. Serves clean, intentional motion; it makes a transition feel deliberate rather than frantic. Use it on a purposeful shift between scenes or ideas where you want polish, not chaos.
 
-**transition-sfx** — a textured transitional sweep that carries across a scene change. Bridges two distinct segments or topics, smoothing a larger shift where a plain cut would feel abrupt.
+**transition-sfx** — A textured transitional sweep. Serves the bridging of two distinct segments; it smooths a larger topic or scene change. Use it when moving between clearly different sections where a plain cut would feel abrupt.
 
-**camera-flash** — a crisp photo-shutter snap. For a freeze-frame, a "picture this" moment, or to punctuate a quick highlight — anywhere the visual should feel captured or frozen for a beat.
+**camera-flash** — A crisp photo-shutter snap. Serves the feeling of a moment being captured or frozen. Use it on a freeze-frame, a "picture this" beat, or to punctuate a quick highlight that should feel snapshotted.
 
-**money-ching** — a bright cash-register "cha-ching." For mentions of money, price, value, savings, or a payoff — the go-to accent for cost, deals, or getting paid. Pairs with the amount made visible: a StatCard counting up, a payment Notification.
+**money-ching** — A bright cash-register cha-ching. Serves the feeling of money, value, or payoff. Use it ONLY on mentions of cost, price, savings, deals, or getting paid — the literal money accent, never for anything unrelated to money.
 
-**iphoneding** — a literal iPhone text-message notification chime. For a message, text, alert, or update landing — a text arriving on screen, or "and then this happened." Not a got-it-right tone (that's correct) and not a money sound (that's money-ching); this is specifically the phone-notification ping. Pairs with a Notification MG rendering the banner.
+**iphoneding** — A literal iPhone text-notification chime. Serves the feeling of an alert or new message arriving. Use it on mentions of texts, notifications, updates, or an "and then this happened" beat — signals something newly incoming.
 
-**mouse-click-sound** — a quick, tactile click. For a selection, a decision point, a "click here" beat, or to snap attention to a small precise action. Very short and sharp — pairs with a finger-press B-roll or an arrow at the target.
+**mouse-click-sound** — A quick tactile click. Serves precision and decisiveness; it snaps attention to a small exact action. Use it on a selection, a decision point, or a "click here" beat — sharp and immediate.
 
-**popsfx** — a tiny, bright pop. For a word, caption, or small graphic appearing on screen — light punctuation for something popping into view. The subtlest accent in the set; pairs with an overlay slamming in or StickyNotes dropping.
+**popsfx** — A tiny bright pop. Serves light punctuation; it makes a small element appearing feel crisp and satisfying. Use it when a word, caption, or small graphic pops onto screen — the subtlest accent, good for quick appearances.
 
-**correct** — a positive confirmation chime (a "ding — correct!" tone). For a right answer, a good decision, a point being validated, or a satisfying "yes, exactly" moment. Signals rightness or success.
+**correct** — A positive confirmation ding (a "you got it right" tone). Serves rightness, success, and validation. Use it on a correct point, a good decision, or a satisfying "yes, exactly" moment — signals something is right or confirmed.
 
-**gunshot** — a sharp gunshot crack. A hard, aggressive punctuation on a blunt statement, a sudden stop, or a shocking beat. Strong and jarring — reserve for moments that earn real intensity.
+**gunshot** — A sharp gunshot crack. Serves aggressive, jarring punctuation and hard stops. Use it on a blunt statement, a sudden halt, or a shocking beat that earns real intensity — strong, reserve for moments that can carry it.
 
-**rizz** — a romantic-but-comedic flourish (a smooth, flirty sting played for laughs). For a charming or flirty beat, a "smooth move" moment, or anything romantic that's meant to be funny rather than serious. Playful and a little tongue-in-cheek.
+**rizz** — A romantic-but-comedic flourish (a smooth, flirty sting played for laughs). Serves charm and playful confidence. Use it on a flirty or "smooth move" beat meant to be funny, or anything romantic played tongue-in-cheek — light and self-aware.
 
-**shockingsfx** — a dramatic, SUDDEN shock sting. For a surprising reveal, a plot twist, or a "wait, what?" beat that lands as a jarring hit. The sudden jolt of surprise — a hard hit the instant the reveal drops, not a slow build (that's imposter).
+**shockingsfx** — A dramatic shock/tension sting (a sudden jolt). Serves surprise and alarm; it hits on something unexpected. Use it on a sudden reveal, a "wait, what?" beat, or a jarring surprise — a sharp shock, distinct from slow-burn suspense.
 
-**awkward-moment** — a comedic awkward-silence cue. Right after something cringe, an uncomfortable pause, or a beat that lands flat on purpose. The sound of secondhand embarrassment.
+**awkward-moment** — A comedic awkward-silence cue. Serves secondhand embarrassment and cringe. Use it right after something awkward, an uncomfortable pause, or a beat meant to land flat on purpose — the sound of a cringe moment.
 
-**wompwomp** — a comedic "sad trombone" fail sound. For a letdown, a mistake, a punchline about failure, or an anticlimax — the classic "that didn't work out." Playful disappointment; use it only where the failure is the joke.
+**wompwomp** — A comedic sad-trombone fail sound. Serves playful disappointment and letdown. Use it on a fail, a mistake, an anticlimax, or a punchline about something not working out — the classic "that didn't go well" beat.
 
-**imposter** — a tense, slow-burn suspenseful cue (Among Us-style). For a "something's off here" beat, a suspicious reveal, or calling out something fishy. The building sus feeling — creeping doubt, suspicion, caught-in-the-act — not a sudden jolt (that's shockingsfx).
+**imposter** — A tense suspenseful sting (sus/suspicious, Among Us-style). Serves doubt, suspicion, and slow-burn tension. Use it on a "something's off here" beat, a suspicious reveal, or calling out something fishy — signals building suspicion, distinct from a sudden shock.
 
-AMBIGUITY MAP — when sounds feel close:
-  • swoosh-sound-effects / woosh-professional / transition-sfx — quick snap whoosh / smooth deliberate whoosh / textured sweep across a full scene change.
-  • money-ching / iphoneding / correct — cash register on money beats / iPhone text-message ping on messages and alerts / "you got it right" confirmation tone on a validated answer. Three distinct chimes; never interchange them.
-  • popsfx / mouse-click-sound — something appearing on screen / a precise interaction or selection.
-  • boom / punchsfx / gunshot — deep cinematic bass on the biggest moment / sharp percussive hit / aggressive crack for real intensity.
-  • wompwomp / awkward-moment — the failure is the joke (sad-trombone letdown) / a cringe or awkward pause landing flat on purpose.
-  • shockingsfx / imposter — a sudden jolt the instant a reveal drops / a slow-burn "something's off" suspicion that builds.
+AMBIGUITY MAP — when sounds feel close, keep them distinct:
+  • swoosh-sound-effects / woosh-professional / transition-sfx — fast & snappy / smooth & deliberate / section-bridge across a full scene change.
+  • money-ching / iphoneding / correct — money ONLY / alerts & texts / rightness & confirmation. Three different chimes, never interchangeable.
+  • boom / punchsfx / gunshot — deep & final on the peak / sharp emphasis / aggressive & jarring hard stop.
+  • shockingsfx / imposter — a sudden jolt / a slow-burn suspicion that builds.
+  • wompwomp / awkward-moment — a comedic fail (sad trombone) / a cringe awkward-silence.
 
 ═══════════════════════════════════════════════════════════════════════════
 === B-ROLL ===
