@@ -3910,13 +3910,17 @@ def _handler_error_shape():
     assert "error" in res
 
 
-@check("crossfade-on-tight DEMOTES to a light overlay instead of raising")
+@check("transition on a non-scene-change tight boundary DROPS to a hard cut (scene gate, default-ON), never raises")
 def _repair_demotion_path():
     # Stubbed run of the REAL generate_edit_gemini: 12 synthetic words, word 5
     # mechanically removed → the splice after src word 4 has a 0.45s gap
     # (< 0.70s) → TIGHT. A ZoomThrough there used to raise ValueError and kill
-    # the job; it must now demote to one light tight_cut_overlay at that
-    # boundary with a divergence log, and the plan must come back whole.
+    # the job; then it demoted to a light overlay. Now (scene gate DEFAULT-ON,
+    # 2026-07-08): awi=4 is a plain edit-cut, NOT a scene change (no scdet source,
+    # no B-roll) → the gate DROPS it to a bare hard cut BEFORE the tight-demotion.
+    # The safety property is unchanged: never raise, plan comes back whole. The
+    # demote-to-overlay path still exists but is now reached only by a crossfade on
+    # a SCENE-CHANGE tight boundary (scdet/B-roll edge), a rarer sub-case.
     import contextlib as _ctx
     import copy as _copy
     import io as _io
@@ -3948,11 +3952,18 @@ def _repair_demotion_path():
     finally:
         (handler.compute_mechanical_cuts, handler._call_gemini_post_cuts,
          handler._get_genai_client) = _saved
+    _log = _buf.getvalue()
+    # plan came back WHOLE (no raise) — the core safety property
+    assert isinstance(_out, dict) and _out.get("transitions") is not None, \
+        "plan must come back whole (never raise on a placement-class conflict)"
+    # the scene gate DROPPED the non-scene-change transition to a hard cut …
+    assert "not on a scene change" in _log, \
+        "scene gate must DROP the non-scene-change ZoomThrough (hard cut)"
+    # … and it must NOT have been demoted to a light overlay (no flash on a
+    # content cut — that's the whole point of the gate)
     _ovl = [o for o in (_out.get("_resolved_tight_cut_overlays") or [])
             if o.get("after_word_index") == 4]
-    assert len(_ovl) == 1, f"expected 1 demoted overlay at awi=4, got {_ovl}"
-    assert _ovl[0]["type"] in ("ShutterFlash", "LightLeak")
-    assert "action=demote" in _buf.getvalue(), "demote divergence line missing"
+    assert len(_ovl) == 0, f"non-scene transition must be a bare hard cut, not an overlay: {_ovl}"
 
 
 @check("safe-edit recipe: valid by construction, passes the full validation span")
@@ -4524,16 +4535,17 @@ def _tco_anchor():
     assert _anchor(3.170, [{"end": 5.0}]) == 190, "mid-clip overlay must keep the word end"
 
 
-@check("zone composer (shadow): packs disjoint bands — the AFFORDABLE-LUXURY stack becomes impossible; parity when no accents")
+@check("zone composer (DEFAULT-ON): drives the caption track in prod; packs disjoint bands; parity when no accents")
 def _zone_composer_shadow():
     import handler
     _src = open("handler.py").read()
-    # wired in shadow (default), cutover flag-gated OFF, never touches prod render
+    # DEFAULT-ON (2026-07-08): the composer DRIVES the caption track in prod; the
+    # env var is a kill-switch only, so it's NOT hard-set in the image env.
     assert "def _compose_band_occupancy(" in _src, "composer missing"
-    assert 'os.environ.get(\n        "COMPOSER_CUTOVER_ENABLED"' in _src or \
-           'os.environ.get("COMPOSER_CUTOVER_ENABLED"' in _src, "cutover flag missing"
+    assert '"COMPOSER_CUTOVER_ENABLED", "1"' in _src, \
+        "cutover env read must default to '1' (composer drives in prod)"
     assert '"COMPOSER_CUTOVER_ENABLED"' not in open("modal_app.py").read(), \
-        "composer must NOT be cut over in the image env (stays shadow until Zac)"
+        "kill-switch var must NOT be hard-set in the image env (default drives it ON)"
     assert "shadow=not _composer_cutover" in _src, "shadow wiring missing"
 
     def _seg(a, b, p): return {"fromFrame": a, "toFrame": b, "position": p}
@@ -4648,16 +4660,18 @@ def _within_clip_deadair():
         "flag OFF must keep a wider release pad than flag ON (proves the trim is real)"
 
 
-@check("transition scene-change gate (shadow): flag-gated OFF, non-scene transitions DROP to hard cut (not overlay flash)")
+@check("transition scene-change gate (DEFAULT-ON): live in prod, non-scene transitions DROP to hard cut (not overlay flash)")
 def _transition_scene_gate():
     import handler
     _src = open("handler.py").read()
     _modal = open("modal_app.py").read()
-    # flag-gated, default OFF, NOT in the image env (stays shadow until Zac)
-    assert handler._TRANSITION_SCENE_GATE is False, "flag must default OFF"
-    assert '"TRANSITION_SCENE_GATE_ENABLED"' in _src, "env flag read missing"
+    # DEFAULT-ON (2026-07-08): module default True + env default "1"; the var stays
+    # only as a kill-switch, so it's NOT hard-set in the image env.
+    assert handler._TRANSITION_SCENE_GATE is True, "gate must default ON (live in prod)"
+    assert '"TRANSITION_SCENE_GATE_ENABLED", "1"' in _src, \
+        "env read must default to '1' (ON in prod; var is a kill-switch)"
     assert '"TRANSITION_SCENE_GATE_ENABLED"' not in _modal, \
-        "scene gate must NOT be enabled in the image env (stays shadow until Zac)"
+        "kill-switch var must NOT be hard-set in the image env (default drives it ON)"
     # qualifying signal = scdet SOURCE shot boundaries UNION B-roll edges (scdet is
     # blind to B-roll inserts, so the edges are added explicitly).
     assert "_scene_change_qualify = set(_shot_boundary_set) | _broll_edge_set" in _src, \
@@ -4671,6 +4685,25 @@ def _transition_scene_gate():
     # the strip keeps the plan honest so SFX/timing consumers also see the hard cut
     assert 'edit_plan["transitions"] = _kept_trs' in _src, \
         "dropped transitions must be stripped from the plan"
+    # the prompt teaches PICTURE-change placement (transitions = picture, not talk)
+    assert "A transition marks a change in the PICTURE" in _src, \
+        "transition prompt must teach picture-change (not content-turn) placement"
+
+
+@check("face-clear coerce: caption_match never coerced to bottom (schema-invalid → render crash class killed)")
+def _face_clear_no_bottom_caption_match():
+    import handler
+    _src = open("handler.py").read()
+    # the fix: caption_match excluded from 'bottom' candidate in _face_clear_anchor
+    assert '_is_caption_match and _b == "bottom"' in _src, \
+        "face-clear must exclude bottom for caption_match (top/center only)"
+    # behavioral: a top caption_match fully covering the face coerces to CENTER,
+    # never bottom (bottom would fail PromptlyRenderInput and crash the render).
+    _traj = [{"found": True, "t": t / 10.0, "cy": 380.0} for t in range(0, 20)]  # face high (top band)
+    band, moved = handler._face_clear_anchor(
+        "top", 0.0, 1.5, _traj, component="text_overlay:caption_match")
+    assert band in ("top", "center"), f"caption_match must stay top|center, got {band!r}"
+    assert band != "bottom", "caption_match must never coerce to bottom (schema-invalid)"
 
 
 @check("render source staging: dangling-symlink class-kill (dereference source before os.link into the Remotion bundle)")

@@ -176,10 +176,20 @@ def _face_clear_anchor(band, sw_s, ew_s, face_traj, component="", blocked=None):
         _cur = _overlap(band)
         if _cur <= 0.35:
             return band, False
-        _best_ov, _best = sorted(
+        # caption_match renders top|center ONLY (schema Literal) — coercing it to
+        # 'bottom' produces a render-input that fails PromptlyRenderInput validation
+        # and crashes the render into a decoration-stripping degrade. Exclude bottom
+        # from its candidate bands so a face-covered top caption_match lands on
+        # center, never bottom. (Convicted 2026-07-08 in the composer-cutover render.)
+        _is_caption_match = "caption_match" in (component or "")
+        _cands = sorted(
             (_overlap(_b), _b) for _b in _BANDS
             if _b != band and _b != blocked
-        )[0]
+            and not (_is_caption_match and _b == "bottom")
+        )
+        if not _cands:
+            return band, False
+        _best_ov, _best = _cands[0]
         if _best_ov >= _cur:
             return band, False
         _record_divergence(
@@ -4539,9 +4549,9 @@ Register tunes the cutaway's CHARACTER (the extend test still decides whether ea
 === TRANSITIONS ===
 ═══════════════════════════════════════════════════════════════════════════
 
-A transition is the visual treatment ON a cut. Every entry in the CUT BOUNDARIES list is a visible splice in the rendered output — dead air removed, or a shot change already in the source. The viewer's eye experiences a jump there; in this genre the clean jump cut already reads as pace — punctuate the few that mark genuine turns.
+A transition is the visual treatment ON a cut, and it belongs on ONE kind of cut: the kind where the PICTURE changes. A source shot change (the camera actually cut, the angle or location changed) or a B-roll cutaway entering or leaving — those are picture changes, and a transition smooths them. Every other entry in the CUT BOUNDARIES list is dead air removed from continuous single-camera speech: the picture is the same face in the same room on both sides, and the clean jump cut already reads as pace. Punctuate the picture changes; let the speech cuts play straight.
 
-**DEFAULT: the cut plays straight.** Every entry in the CUT BOUNDARIES list is a legitimate slot, and most of them stay bare — that's the lean grammar working. Place a transition only where the dialogue genuinely turns: a movement boundary from your own `movements`, an act shift, the acceleration into the payoff. Each one you emit should be defensible in a sentence naming the turn it marks (that sentence is its `why`). One to three per video is the natural range for lean UGC. Crossfade-family types anchor on CUT BOUNDARIES entries (the audio gap is their handle); zero-handle types (ShutterFlash, DipToBlack) sit on either boundary list. Both lists are detector output — boundaries inferred from timestamp gaps don't exist in the render.
+**DEFAULT: the cut plays straight.** A transition marks a change in the PICTURE, never a change in the talk. Place one only where what's on screen actually changes: a shot change already in the source footage, or a B-roll cutaway entering or leaving. On continuous single-camera footage — the speaker talking straight to camera — the picture never changes, so every cut plays straight no matter how big the topic turn. A content turn (an act shift, the acceleration into the payoff) earns its emphasis elsewhere — a mask-zoom, an overlay, an SFX — not a transition. Each transition you emit names the on-screen picture change it rides in its `why`. Zero is the right count for a talking-head with no cutaways; one to three is the natural range once real B-roll or shot changes are present. Crossfade-family types anchor on CUT BOUNDARIES entries (the audio gap is their handle); zero-handle types (ShutterFlash, DipToBlack) sit on either boundary list. Both lists are detector output — boundaries inferred from timestamp gaps don't exist in the render.
 
 **Duration mechanics:** each transition consumes half its NATURAL DURATION of source from the outgoing tail and half from the incoming head (per-type durations are in the user message's TRANSITION NATURAL DURATIONS table; a boundary fits a type when its gap ≥ 2x that duration). A clip between two transitions loses both handles to crossfades. Decision tree by clip length: <800ms → only ONE transition fits; keep the stronger shift. 800-1500ms with both shifts strong → place both (a tight middle is the better trade than skipping a real shift). 800-1500ms with one weak shift → drop the weak side. >1500ms → room for a transition at each shift that genuinely turns (the default is still the straight cut).
 
@@ -7368,14 +7378,15 @@ _MOTION_DECODE_FPS = 8.0         # sample rate — dense enough to catch a gestu
 _FRAME_ACTIVITY_LAST: list = []  # (t_s, score) per-frame motion timeline from the
                                  # most recent detect_dead_air run; the activity gate
                                  # reads it. Reset at each detection run.
-# TRANSITION SCENE-CHANGE GATE (Action 3, FLAG-OFF until proven): when ON, a
+# TRANSITION SCENE-CHANGE GATE (Action 3, DEFAULT-ON as of 2026-07-08): a
 # transition only survives if its boundary sits on a real scene change — a scdet
 # SOURCE shot boundary OR a B-roll entry/exit edge (scdet runs on the source, so
 # it never sees B-roll inserts; those edges are added explicitly). Transitions on
-# plain edit cuts (word_removal / dead_air) or content-jumps DEMOTE to hard cuts.
+# plain edit cuts (word_removal / dead_air) or content-jumps DROP to hard cuts.
 # On single-cam footage with no B-roll (scdet=0) this yields ZERO transitions —
-# all straight cuts. Reset per job.
-_TRANSITION_SCENE_GATE: bool = False
+# all straight cuts. This is how the pipeline works now; the env var
+# TRANSITION_SCENE_GATE_ENABLED remains ONLY as a kill-switch (set "0" to disable).
+_TRANSITION_SCENE_GATE: bool = True
                                  # from the most recent detect_dead_air run in
                                  # this process; the clip builder reads them to
                                  # snap dead-air incoming boundaries to true
@@ -18850,9 +18861,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # accent re-bands) for the census. Drives NOTHING — caption_position_
     # segments_out above still ships. Cutover only after Zac reviews the census
     # (zero divergence / reviewed-improvement) and flips COMPOSER_CUTOVER_ENABLED.
-    # Fail-open: the shadow never affects the render.
+    # DEFAULT-ON 2026-07-08: the composer DRIVES the caption track in prod; the env
+    # var COMPOSER_CUTOVER_ENABLED remains only as a kill-switch (set "0" to disable).
     _composer_cutover = os.environ.get(
-        "COMPOSER_CUTOVER_ENABLED", "0"
+        "COMPOSER_CUTOVER_ENABLED", "1"
     ).strip().lower() in ("1", "true", "yes", "on")
     try:
         _composed = _compose_band_occupancy(
@@ -22197,11 +22209,12 @@ def handler(job):
             print("[within-clip-15ms] ON — within-clip dead air trimmed to "
                   f"{_WITHIN_CLIP_FLOOR_S*1000:.0f}ms unless the pause carries clear "
                   f"visual motion (activity gate >= {_WITHIN_CLIP_ACTIVITY_KEEP})", flush=True)
-        # TRANSITION SCENE-CHANGE GATE (Action 3, FLAG-OFF until proven): default
-        # from the image env flag, per-job input overrides. ALWAYS set here so a
+        # TRANSITION SCENE-CHANGE GATE (Action 3, DEFAULT-ON 2026-07-08): env
+        # defaults to "1" (ON in prod); the var remains only as a kill-switch
+        # (set "0" to disable). Per-job input overrides. ALWAYS set here so a
         # warm container never leaks a prior job's value.
         global _TRANSITION_SCENE_GATE
-        _tsg_env = os.environ.get("TRANSITION_SCENE_GATE_ENABLED", "0").strip().lower() in (
+        _tsg_env = os.environ.get("TRANSITION_SCENE_GATE_ENABLED", "1").strip().lower() in (
             "1", "true", "yes", "on")
         _tsg_job = input_data.get("transition_scene_gate")
         _TRANSITION_SCENE_GATE = _tsg_env if _tsg_job is None else bool(_tsg_job)
