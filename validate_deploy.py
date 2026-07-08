@@ -4615,6 +4615,64 @@ def _phrase_retake_detector():
         "non-repetitive speech must never be cut"
 
 
+@check("within-clip 15ms dead-air (shadow): flag-gated OFF, motion gate + VAD-boundary trim, prod bit-identical when off")
+def _within_clip_deadair():
+    import handler
+    _src = open("handler.py").read()
+    # flag-gated, default OFF, NOT in the image env (stays shadow until Zac)
+    assert handler._WITHIN_CLIP_DEADAIR is False, "flag must default OFF"
+    assert '"WITHIN_CLIP_DEADAIR_ENABLED"' in _src, "env flag read missing"
+    assert '"WITHIN_CLIP_DEADAIR_ENABLED"' not in open("modal_app.py").read(), \
+        "within-clip 15ms must NOT be enabled in the image env (stays shadow until Zac)"
+    assert "within_clip_15ms" in _src, "build_clips_from_words trim param missing"
+    # motion gate helper (real path): mean inter-frame motion over the span;
+    # empty timeline reads as zero → cut (the ruling's bias-toward-cutting default).
+    tl = [(0.0, 1.0), (0.1, 2.0), (0.2, 9.0), (0.3, 1.0)]
+    assert handler._gap_visual_activity(tl, 0.05, 0.25) == 5.5, "mean motion over span wrong"
+    assert handler._gap_visual_activity([], 0.0, 1.0) == 0.0, \
+        "empty timeline must read as zero motion (cut), not raise"
+    # trim behavioral (real path): a pure-pause dead_air cut with VAD silence over
+    # the gap. Flag ON caps the outgoing clip's trailing silence ~15ms past the VAD
+    # silence start; flag OFF keeps the wider release pad. Same cuts, different trim.
+    dg = [{"word": "hello", "punctuated_word": "hello", "start": 0.0, "end": 0.5},
+          {"word": "world", "punctuated_word": "world", "start": 1.5, "end": 2.0}]
+    rw = [{"after_word_index": 0, "before_word_index": 1, "reason": "dead_air"}]
+    vad = [(0.5, 1.5)]
+    off, _ = handler.build_clips_from_words(dg, rw, video_duration=2.0,
+                                            vad_silences=vad, within_clip_15ms=False)
+    on, _ = handler.build_clips_from_words(dg, rw, video_duration=2.0,
+                                           vad_silences=vad, within_clip_15ms=True)
+    assert on[0]["source_end"] <= 0.5 + 0.02, \
+        f"flag ON must cap ~15ms past VAD silence start (0.5), got {on[0]['source_end']}"
+    assert off[0]["source_end"] > on[0]["source_end"], \
+        "flag OFF must keep a wider release pad than flag ON (proves the trim is real)"
+
+
+@check("transition scene-change gate (shadow): flag-gated OFF, non-scene transitions DROP to hard cut (not overlay flash)")
+def _transition_scene_gate():
+    import handler
+    _src = open("handler.py").read()
+    _modal = open("modal_app.py").read()
+    # flag-gated, default OFF, NOT in the image env (stays shadow until Zac)
+    assert handler._TRANSITION_SCENE_GATE is False, "flag must default OFF"
+    assert '"TRANSITION_SCENE_GATE_ENABLED"' in _src, "env flag read missing"
+    assert '"TRANSITION_SCENE_GATE_ENABLED"' not in _modal, \
+        "scene gate must NOT be enabled in the image env (stays shadow until Zac)"
+    # qualifying signal = scdet SOURCE shot boundaries UNION B-roll edges (scdet is
+    # blind to B-roll inserts, so the edges are added explicitly).
+    assert "_scene_change_qualify = set(_shot_boundary_set) | _broll_edge_set" in _src, \
+        "qualify set must be scdet shot boundaries UNION B-roll edges"
+    # the gate DROPS to a hard cut — must NOT route to the tight_cut_overlay flash
+    # path (the bug that would paint a flash on every content turn).
+    assert "_scene_gate_dropped_awis.append(awi)" in _src, "drop tracking missing"
+    assert "demote_not_scene_change" not in _src, \
+        "gate must DROP (hard cut), never demote to a tight_cut_overlay flash"
+    assert "not on a scene change" in _src, "gate drop log missing"
+    # the strip keeps the plan honest so SFX/timing consumers also see the hard cut
+    assert 'edit_plan["transitions"] = _kept_trs' in _src, \
+        "dropped transitions must be stripped from the plan"
+
+
 @check("render source staging: dangling-symlink class-kill (dereference source before os.link into the Remotion bundle)")
 def _stage_dereferences_symlink():
     import os

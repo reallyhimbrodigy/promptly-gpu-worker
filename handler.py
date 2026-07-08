@@ -6127,6 +6127,67 @@ def apply_pyannote_speakers(words: list, segments: list) -> None:
     )
 
 
+def _frame_activity_timeline(source_path: str) -> list:
+    """Per-frame visual-motion timeline for the within-clip dead-air gate.
+
+    ONE ffmpeg pass decodes the whole video downscaled to gray at
+    _MOTION_DECODE_FPS; motion[i] = mean absolute pixel difference vs the prior
+    frame (0-255 scale). High = the picture is changing (a gesture, a
+    demonstration, action); low = a near-static talking head. Returns
+    [(t_s, motion), ...].
+
+    Why not scdet's per-frame score: on this ffmpeg build scdet's
+    `metadata=print` emits nothing (its `-` output collides with `-f null -`,
+    and a file target came back empty too — convicted 2026-07-07), so the raw
+    decode is the robust path. It also has no external-format dependency.
+
+    On decode failure returns [] — the gate then reads every gap as zero motion
+    and CUTS it, which is the ruling's own bias-toward-cutting default. Logged
+    loudly (never a silent degrade) so a broken decode is visible, not masked.
+    """
+    import numpy as np
+    W, H = _MOTION_DECODE_W, _MOTION_DECODE_H
+    cmd = [
+        "ffmpeg", "-i", source_path, "-an",
+        "-vf", f"scale={W}:{H},fps={_MOTION_DECODE_FPS}",
+        "-f", "rawvideo", "-pix_fmt", "gray", "pipe:1",
+    ]
+    proc = subprocess.run(cmd, capture_output=True, timeout=180)
+    buf = np.frombuffer(proc.stdout, dtype=np.uint8)
+    n = buf.size // (W * H)
+    if n < 2:
+        print(
+            f"[within-clip-15ms] WARNING: motion decode yielded {n} frame(s) "
+            f"(rc={proc.returncode}) — activity gate reads zero motion, every "
+            f"pause cuts. stderr tail: {proc.stderr.decode(errors='ignore')[-200:]}",
+            flush=True,
+        )
+        return []
+    frames = buf[:n * W * H].reshape(n, H, W).astype(np.int16)
+    motion = np.zeros(n, dtype=np.float32)
+    motion[1:] = np.abs(np.diff(frames, axis=0)).reshape(n - 1, -1).mean(axis=1)
+    return [(round(i / _MOTION_DECODE_FPS, 3), round(float(motion[i]), 3))
+            for i in range(n)]
+
+
+def _gap_visual_activity(timeline: list, start_s: float, end_s: float) -> float:
+    """Mean scdet motion score over the frames inside [start_s, end_s].
+
+    Returns 0.0 (treated as DEAD → cut) when no frame falls in the span — a
+    silence shorter than one frame interval, or a timeline that failed to
+    parse, both mean "no evidence of motion," and the bias is toward cutting.
+    """
+    if not timeline or end_s <= start_s:
+        return 0.0
+    scores = [s for (t, s) in timeline if start_s <= t <= end_s]
+    if not scores:
+        # Fall back to the single nearest frame so a sub-frame silence still
+        # gets SOME motion evidence rather than a blind 0.0.
+        nearest = min(timeline, key=lambda ts: abs(ts[0] - (start_s + end_s) / 2.0))
+        return float(nearest[1])
+    return sum(scores) / len(scores)
+
+
 def detect_dead_air(
     words: list,
     removed_so_far: set,
@@ -6197,17 +6258,66 @@ def detect_dead_air(
     SENTENCE_END_THRESHOLD = 0.25   # after . ? !
     COMMA_END_THRESHOLD = 0.50      # after ,
     MID_CLAUSE_THRESHOLD = 0.70     # no punctuation on preceding word
+
+    # WITHIN-CLIP 15ms path (Action 2, flag-gated): compute the per-frame
+    # motion timeline ONCE so the activity gate can query each gap's silence
+    # span. Flag-OFF renders never touch scdet here — bit-identical to before.
+    _activity_timeline: list = []
+    if _WITHIN_CLIP_DEADAIR and source_path:
+        _activity_timeline = _frame_activity_timeline(source_path)
+        _FRAME_ACTIVITY_LAST[:] = list(_activity_timeline)
+        print(
+            f"[within-clip-15ms] frame-activity timeline: {len(_activity_timeline)} "
+            f"frame(s); a pause is KEPT when its silence-span mean score >= "
+            f"{_WITHIN_CLIP_ACTIVITY_KEEP} (else cut, trailing silence trimmed to "
+            f"{_WITHIN_CLIP_FLOOR_S*1000:.0f}ms in build_clips_from_words)",
+            flush=True,
+        )
+
     for a, b in zip(kept, kept[1:]):
         gap_start = float(words[a].get("end") or 0.0)
         gap_end = float(words[b].get("start") or 0.0)
         if gap_end <= gap_start:
             continue
         silence_in_gap = 0.0
+        _sil_lo = _sil_hi = None
         for sil_start, sil_end in silence_regions:
             ovl_start = max(sil_start, gap_start)
             ovl_end = min(sil_end, gap_end)
             if ovl_end > ovl_start:
                 silence_in_gap += ovl_end - ovl_start
+                _sil_lo = ovl_start if _sil_lo is None else min(_sil_lo, ovl_start)
+                _sil_hi = ovl_end if _sil_hi is None else max(_sil_hi, ovl_end)
+
+        if _WITHIN_CLIP_DEADAIR:
+            # Flat punchy floor + motion exception REPLACES the punctuation
+            # tiers: cut every gap with real VAD silence UNLESS the silence
+            # span carries clear visual motion — a demonstration the pause
+            # serves. Bias is toward cutting (only obvious motion survives);
+            # build_clips_from_words trims the trailing silence to the floor.
+            if silence_in_gap < _WITHIN_CLIP_TRIM_TRIGGER_S:
+                continue
+            _act = _gap_visual_activity(
+                _activity_timeline,
+                _sil_lo if _sil_lo is not None else gap_start,
+                _sil_hi if _sil_hi is not None else gap_end,
+            )
+            _keep = _act >= _WITHIN_CLIP_ACTIVITY_KEEP
+            print(
+                f"[within-clip-15ms] gap [{gap_start:.3f}-{gap_end:.3f}]s "
+                f"silence={silence_in_gap:.3f}s activity={_act:.2f} -> "
+                f"{'KEEP (demonstration)' if _keep else 'cut'}",
+                flush=True,
+            )
+            if _keep:
+                continue
+            out.append({
+                "after_word_index": a,
+                "before_word_index": b,
+                "reason": "dead_air",
+            })
+            continue
+
         _prev_text = str(
             words[a].get("punctuated_word") or words[a].get("word") or ""
         ).rstrip()
@@ -7228,6 +7338,44 @@ _VAD_SILENCES_LAST: list = []    # v196 head-snap feed: silero silence regions
 # entry (warm-container-safe, like _VAD_SILENCES_LAST). Eval-gated: OFF unless
 # input_data.pacing_max_compression is set for a specific test render.
 _PACING_MAX_COMPRESS: bool = False
+# WITHIN-CLIP 15ms DEAD-AIR (Action 2, FLAG-OFF until proven): when ON,
+# detect_dead_air cuts EVERY kept-word gap whose VAD-confirmed silence exceeds
+# _WITHIN_CLIP_TRIM_TRIGGER_S — unless the silence span carries clear visual
+# motion (a demonstration beat) per the frame-diff activity gate — and
+# build_clips_from_words trims the trailing silence at those splices to
+# _WITHIN_CLIP_FLOOR_S. Replaces the punctuation tiers (0.25/0.50/0.70s) with a
+# flat "punchy" floor + a motion exception. Reset per job like _PACING_MAX_COMPRESS.
+_WITHIN_CLIP_DEADAIR: bool = False
+_WITHIN_CLIP_FLOOR_S = 0.015     # silence left at a trimmed within-clip splice
+_WITHIN_CLIP_TRIM_TRIGGER_S = 0.05  # cut a gap only when VAD silence exceeds this
+                                 # (below it there is nothing worth trimming; the
+                                 # existing pads already sit near the floor)
+_WITHIN_CLIP_ACTIVITY_KEEP = 4.5  # mean inter-frame motion (64x36 gray @ 8fps,
+                                 # 0-255 abs-diff scale) over the silence span
+                                 # at/above which the pause is treated as a
+                                 # DEMONSTRATION / obvious-motion beat and is
+                                 # PRESERVED. Tuned on the towel exemplar: dead
+                                 # talking-head pauses measured mean 0.5-3.8
+                                 # (global p50=1.8, p90=4.6); 4.5 sits at p90 so
+                                 # only top-decile sustained motion survives —
+                                 # biased toward cutting per the ruling. Motion
+                                 # magnitude is a PROXY for demonstration, not a
+                                 # semantic detector (see the gate's report).
+_MOTION_DECODE_W = 64            # motion timeline: downscale width (speed; motion
+_MOTION_DECODE_H = 36            # magnitude is scale-invariant at this size)
+_MOTION_DECODE_FPS = 8.0         # sample rate — dense enough to catch a gesture,
+                                 # cheap enough for one whole-video decode pass
+_FRAME_ACTIVITY_LAST: list = []  # (t_s, score) per-frame motion timeline from the
+                                 # most recent detect_dead_air run; the activity gate
+                                 # reads it. Reset at each detection run.
+# TRANSITION SCENE-CHANGE GATE (Action 3, FLAG-OFF until proven): when ON, a
+# transition only survives if its boundary sits on a real scene change — a scdet
+# SOURCE shot boundary OR a B-roll entry/exit edge (scdet runs on the source, so
+# it never sees B-roll inserts; those edges are added explicitly). Transitions on
+# plain edit cuts (word_removal / dead_air) or content-jumps DEMOTE to hard cuts.
+# On single-cam footage with no B-roll (scdet=0) this yields ZERO transitions —
+# all straight cuts. Reset per job.
+_TRANSITION_SCENE_GATE: bool = False
                                  # from the most recent detect_dead_air run in
                                  # this process; the clip builder reads them to
                                  # snap dead-air incoming boundaries to true
@@ -9552,7 +9700,8 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                     _dg_words, normalized_remove_words,
                     video_duration=video_duration,
                     vad_silences=list(_VAD_SILENCES_LAST),
-                    max_compress=_PACING_MAX_COMPRESS)
+                    max_compress=_PACING_MAX_COMPRESS,
+                    within_clip_15ms=_WITHIN_CLIP_DEADAIR)
                 edit_plan["_removed_word_indices"] = _removed_word_indices
 
                 # ── Shot-change-based clip splitting ────────────────────────────────
@@ -9916,11 +10065,45 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
             # resolved layer (after the TCO pass defines _resolved_overlays /
             # _overlay_awis — they don't exist yet at this point). (awi, original_type).
             _demoted_tight_transitions = []
+            _scene_gate_dropped_awis = []   # Action 3: transitions dropped off a
+                                            # scene change — stripped from the plan
+                                            # below so SFX-partner + beat-timing
+                                            # consumers also see the hard cut.
             raw_transitions = edit_plan.get("transitions") or []
             if raw_transitions and _dg_words:
                 # Transitions = pack PascalCase names. VALID_TRANSITION_TYPES is the
                 # canonical set; mirror it here so adding a type only edits one place.
                 _valid_tr_types = set(VALID_TRANSITION_TYPES)
+                # SCENE-CHANGE QUALIFICATION (Action 3, flag-gated): the set of
+                # source word-indices where a real scene change happens — scdet
+                # SOURCE shot boundaries UNION B-roll entry/exit edges. scdet is
+                # blind to B-roll (it decodes the source, where the insert does
+                # not exist), so each B-roll clip contributes its entry boundary
+                # (awi = start_word_index-1, the splice just before the insert)
+                # and its exit boundary (awi = end_word_index, where the speaker
+                # returns), with ±1 tolerance for boundary-index variance. Built
+                # ONLY when the gate is on — a pure no-op (and zero CPU) otherwise.
+                _scene_change_qualify = set()
+                if _TRANSITION_SCENE_GATE:
+                    _broll_edge_set = set()
+                    for _bc in (edit_plan.get("broll_clips") or []):
+                        if not isinstance(_bc, dict):
+                            continue
+                        _bs, _be = _bc.get("start_word_index"), _bc.get("end_word_index")
+                        if isinstance(_bs, int):
+                            _broll_edge_set.update((_bs - 1, _bs))
+                        if isinstance(_be, int):
+                            _broll_edge_set.update((_be, _be + 1))
+                    _scene_change_qualify = set(_shot_boundary_set) | _broll_edge_set
+                    print(
+                        f"[transition-gate] ON — qualifying scene changes: "
+                        f"{len(_shot_boundary_set)} scdet shot boundary(ies) + "
+                        f"{len(_broll_edge_set)} B-roll edge(s). Transitions off "
+                        f"these boundaries demote to hard cuts. "
+                        f"scdet_awi={sorted(_shot_boundary_set)} "
+                        f"broll_awi={sorted(_broll_edge_set)}",
+                        flush=True,
+                    )
                 for _ti, tr in enumerate(raw_transitions):
                     if not isinstance(tr, dict):
                         raise ValueError(f"transitions[{_ti}] must be an object")
@@ -9956,6 +10139,25 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                             f"continues without this transition.",
                             flush=True,
                         )
+                        continue
+                    # SCENE-CHANGE GATE (Action 3, flag-gated): a transition only
+                    # earns its place on a real scene change (scdet shot boundary
+                    # or B-roll edge). On a plain edit cut / content-jump it is
+                    # DROPPED — not demoted to a tight_cut_overlay. A drop leaves
+                    # transition_out="none", so the boundary plays as a bare hard
+                    # cut (the clean jump cut IS the pace on continuous single-cam
+                    # footage); a demote-to-overlay would paint a light flash on
+                    # every turn, the exact opposite of the intent. The content
+                    # turn earns its emphasis elsewhere (mask-zoom / overlay / SFX).
+                    if _TRANSITION_SCENE_GATE and awi not in _scene_change_qualify:
+                        print(
+                            f"[transition-gate] DROP transition '{tr_type}' at "
+                            f"after_word_index={awi}: not on a scene change "
+                            f"(scdet shot boundary / B-roll edge). Plays as a hard "
+                            f"cut.",
+                            flush=True,
+                        )
+                        _scene_gate_dropped_awis.append(awi)
                         continue
                     # Type-eligibility per boundary class: crossfade transitions need
                     # CUT BOUNDARIES (audio handle for the equal-power crossfade in
@@ -10371,6 +10573,33 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
             # each after_word_index to an output frame via _projected_words. Boundary-
             # keyed and clip-agnostic — works for mid-clip boundaries with no split.
             edit_plan["_resolved_tight_cut_overlays"] = _resolved_overlays
+
+            # SCENE-CHANGE GATE cleanup (Action 3): the render's transition treatment
+            # is already gated (it reads clip.transition_out, never set for a dropped
+            # transition), but edit_plan["transitions"] still carries the dropped
+            # entries — and secondary consumers (SFX partner registration, beat-timing
+            # anchors) read that ungated list. Strip the dropped ones so EVERY consumer
+            # sees the hard cut and the returned recipe is honest about what rendered.
+            if _scene_gate_dropped_awis:
+                _dropped_set = set(_scene_gate_dropped_awis)
+
+                def _tr_is_dropped(_t):
+                    if not isinstance(_t, dict):
+                        return False
+                    _a = _t.get("after_word_index")
+                    if not isinstance(_a, (int, float)):
+                        return False
+                    _a = int(_a)
+                    return _a in _dropped_set and _a not in _transition_type_by_awi
+                _kept_trs = [_t for _t in (edit_plan.get("transitions") or [])
+                             if not _tr_is_dropped(_t)]
+                print(
+                    f"[transition-gate] stripped {len(edit_plan.get('transitions') or []) - len(_kept_trs)} "
+                    f"off-scene-change transition(s) from the plan; "
+                    f"{len(_kept_trs)} remain (on scene changes).",
+                    flush=True,
+                )
+                edit_plan["transitions"] = _kept_trs
 
             # caption_style, caption_keywords, caption_position_segments, text_overlays,
             # emphasis_moments, motion_graphics, audio_denoise, outro, aspect_ratio,
@@ -15864,7 +16093,8 @@ def get_output_clip_ranges(cuts, effective_durations, transition_duration=None, 
 
 
 def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0,
-                           vad_silences=None, max_compress=False):
+                           vad_silences=None, max_compress=False,
+                           within_clip_15ms=False):
     """Apply Gemini's remove_words decisions and split kept words into clips.
 
     Gemini owns every cut decision; Python is a verbatim executor.
@@ -16185,6 +16415,37 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0,
                 _out_c["padded_end"] = _E + _applied_release
             if _applied_head > 0:
                 _in_c["padded_start"] = _S - _applied_head
+            # WITHIN-CLIP 15ms trim (Action 2, flag-gated): a dead-air splice
+            # normally keeps up to _RELEASE_PAD_S (0.12s) of trailing source —
+            # word release PLUS whatever silence rides inside the pad. When the
+            # 15ms path is on, cap the outgoing edge at the VAD silence START
+            # (where the word's audible release ends) + the floor, so only the
+            # floor of silence survives. Leak-safe by construction: the release
+            # lives entirely BEFORE the VAD silence start; nothing audible is
+            # trimmed. Only ever TIGHTENS (never loosens past the default) and
+            # never crosses back before the outgoing word's end.
+            if within_clip_15ms and vad_silences:
+                _sil_lo = None
+                for (_sa, _sb) in vad_silences:
+                    if _sa < _S and _sb > _E:  # region straddles this gap
+                        _cand = max(_sa, _E)   # release ends at VAD silence start
+                        _sil_lo = _cand if _sil_lo is None else min(_sil_lo, _cand)
+                if _sil_lo is not None:
+                    _trim_end = min(
+                        _out_c["padded_end"], max(_E, _sil_lo + _WITHIN_CLIP_FLOOR_S)
+                    )
+                    if _trim_end < _out_c["padded_end"]:
+                        _record_divergence(
+                            "cut_boundary",
+                            {"boundary": _bi,
+                             "vad_silence_start": round(_sil_lo, 3),
+                             "was_release": round(_applied_release, 3)},
+                            "within_clip_15ms_trim",
+                            reason=(f"trailing silence -> {_WITHIN_CLIP_FLOOR_S*1000:.0f}ms "
+                                    f"(padded_end {_out_c['padded_end']:.3f}->{_trim_end:.3f})"),
+                        )
+                        _out_c["padded_end"] = _trim_end
+                        _applied_release = _trim_end - _E
             # v196 HEAD-SNAP (dead-air splices only): Deepgram word-starts
             # absorb leading silence (+85..466ms of kept pause measured), so
             # when a VAD silence region covering this gap ends LATER than the
@@ -21924,6 +22185,30 @@ def handler(job):
         if _PACING_MAX_COMPRESS:
             print("[pacing-budget] MAX COMPRESSION ON — every boundary gap to the "
                   "75ms safety floor (within-clip speech rhythm untouched)", flush=True)
+        # WITHIN-CLIP 15ms DEAD-AIR (Action 2, FLAG-OFF until proven): default
+        # from the image env flag, per-job input overrides. ALWAYS set here so a
+        # warm container never leaks a prior job's value.
+        global _WITHIN_CLIP_DEADAIR
+        _wc_env = os.environ.get("WITHIN_CLIP_DEADAIR_ENABLED", "0").strip().lower() in (
+            "1", "true", "yes", "on")
+        _wc_job = input_data.get("within_clip_deadair")
+        _WITHIN_CLIP_DEADAIR = _wc_env if _wc_job is None else bool(_wc_job)
+        if _WITHIN_CLIP_DEADAIR:
+            print("[within-clip-15ms] ON — within-clip dead air trimmed to "
+                  f"{_WITHIN_CLIP_FLOOR_S*1000:.0f}ms unless the pause carries clear "
+                  f"visual motion (activity gate >= {_WITHIN_CLIP_ACTIVITY_KEEP})", flush=True)
+        # TRANSITION SCENE-CHANGE GATE (Action 3, FLAG-OFF until proven): default
+        # from the image env flag, per-job input overrides. ALWAYS set here so a
+        # warm container never leaks a prior job's value.
+        global _TRANSITION_SCENE_GATE
+        _tsg_env = os.environ.get("TRANSITION_SCENE_GATE_ENABLED", "0").strip().lower() in (
+            "1", "true", "yes", "on")
+        _tsg_job = input_data.get("transition_scene_gate")
+        _TRANSITION_SCENE_GATE = _tsg_env if _tsg_job is None else bool(_tsg_job)
+        if _TRANSITION_SCENE_GATE:
+            print("[transition-gate] ON — transitions qualify only on scdet shot "
+                  "boundaries or B-roll edges; edit-cut/content-jump transitions "
+                  "demote to hard cuts (single-cam → zero transitions)", flush=True)
         provided_plan = input_data.get("edit_plan") if isinstance(input_data.get("edit_plan"), dict) else None
         provided_transcript = input_data.get("transcript") if isinstance(input_data.get("transcript"), dict) else None
         provided_analysis = input_data.get("analysis_data") if isinstance(input_data.get("analysis_data"), dict) else None
