@@ -467,7 +467,7 @@ def _mg_clear_region_exists(mg_type, sw_s, ew_s, face_traj):
 #     come from adjacent cuts at contrasting speeds (the buildup-arrival
 #     pattern), not from interpolating speed within a single clip.
 from pydantic import BaseModel, Field, ValidationError
-from typing import List, Optional, Literal, Dict, Any
+from typing import List, Optional, Literal, Dict, Any, Annotated
 
 # Pydantic schemas mirroring src/remotion/src/types.ts. Validating the
 # render input dicts against these models BEFORE writing JSON turns every
@@ -613,7 +613,7 @@ class _CutRefinement(BaseModel):
     # (hook/payoff/close/key_moments), malformed entries raise (net repairs).
     start_word_index: int
     end_word_index: int
-    reason: str
+    reason: str = Field(max_length=240)
 
 
 class _CaptionPositionChange(BaseModel):
@@ -660,19 +660,19 @@ class _EmphasisMoment(BaseModel):
     type: Literal["punchline", "statement", "question", "reaction", "revelation"]
     intensity: Literal["high", "medium"]
     duration: float
-    viewer_feeling: str
+    viewer_feeling: str = Field(max_length=200)
     zoom_effect: Optional[_ZoomEffect] = None
     motion_graphic: Optional[_EmphasisMotionGraphic] = None
 
 class _TextOverlayNote(BaseModel):
-    text: str
-    color: str
+    text: str = Field(max_length=200)
+    color: str = Field(max_length=60)
     rotation: float
 
 class _TextOverlay(BaseModel):
     variant: _TEXT_OVERLAY_VARIANTS
     # See _Transition.why — the intent wire.
-    why: Optional[str] = None
+    why: Optional[str] = Field(default=None, max_length=240)
     # Word-anchored timing: overlay appears when `start_word_index`'s word is
     # spoken (projected to output frames by Python). Duration is caller-
     # specified because text overlays are short title cards with chosen
@@ -681,12 +681,12 @@ class _TextOverlay(BaseModel):
     start_word_index: int
     duration_seconds: float
     # Variant-specific — Python validator enforces per-variant required fields.
-    topText: Optional[str] = None
-    bottomText: Optional[str] = None
+    topText: Optional[str] = Field(default=None, max_length=200)
+    bottomText: Optional[str] = Field(default=None, max_length=200)
     notes: Optional[List[_TextOverlayNote]] = None
-    quote: Optional[str] = None
-    attribution: Optional[str] = None
-    text: Optional[str] = None
+    quote: Optional[str] = Field(default=None, max_length=500)
+    attribution: Optional[str] = Field(default=None, max_length=120)
+    text: Optional[str] = Field(default=None, max_length=200)
     # caption_match position: "top" or "center" only. NEVER "bottom" — the
     # main captions live in the bottom zone by default, so a bottom-anchored
     # caption_match would collide. Text overlays own the upper half;
@@ -699,7 +699,7 @@ class _MotionGraphic(BaseModel):
     # single source of truth for whether a component fits.
     type: _MG_TYPES
     # See _Transition.why — the intent wire.
-    why: Optional[str] = None
+    why: Optional[str] = Field(default=None, max_length=240)
     # Word-anchored timing. MG appears when `start_word_index`'s word is
     # spoken and disappears when `end_word_index`'s word ends. Python
     # projects word start/end times to output frames. Both indices must
@@ -719,13 +719,13 @@ class _SoundEffect(BaseModel):
     sound: _SFX_SOUNDS
     # B4 (directive #11): the intent wire, same contract as the other
     # component families — normalized post-parse, recipe-side only.
-    why: Optional[str] = None
+    why: Optional[str] = Field(default=None, max_length=240)
 
 class _BrollClip(BaseModel):
-    keyword: str
+    keyword: str = Field(max_length=200)
     start_word_index: int
     end_word_index: int
-    reason: str
+    reason: str = Field(max_length=240)
 
 # ── GeneratedScene (Phase E · composed premium graphic) ──────────────────────
 # A GeneratedScene is NOT a flat image dropped in like b-roll — it's a SCENE
@@ -742,9 +742,9 @@ class _GenSceneBackground(BaseModel):
     kind: _GENSCENE_BG_KINDS
     # Inherits the video's COMMITTED palette (unified-visual-identity) — the
     # scene is born on-palette, not styled in isolation.
-    palette_ref: Optional[str] = None
+    palette_ref: Optional[str] = Field(default=None, max_length=80)
     # Consulted only when kind == "generated".
-    generation_prompt: Optional[str] = None
+    generation_prompt: Optional[str] = Field(default=None, max_length=600)
     # Explicit color override (rare; normally derived from palette_ref).
     colors: Optional[List[str]] = None
 
@@ -752,7 +752,7 @@ class _GenSceneSubject(BaseModel):
     # The bespoke object/subject. The still is generated (Sub-step 3) from this
     # prompt, conditioned on ref_image_keys (brand/user references the ask-back
     # loop collects).
-    generation_prompt: str
+    generation_prompt: str = Field(max_length=600)
     ref_image_keys: List[str] = Field(default_factory=list)
     anchor: _SEMANTIC_ANCHOR
     scale: Optional[float] = None
@@ -762,9 +762,9 @@ class _GenSceneTextLayer(BaseModel):
     # user-provided string — NEVER model-invented text. Model-invented words put
     # wrong numbers / garbled text on screen. Enforced at emission in Sub-step
     # 5; the contract is documented here at the schema seam.
-    content: str
+    content: str = Field(max_length=200)
     # Inherits the video's committed type voice (unified visual identity).
-    style_ref: Optional[str] = None
+    style_ref: Optional[str] = Field(default=None, max_length=80)
     anchor: _SEMANTIC_ANCHOR
 
 class _GenSceneMotion(BaseModel):
@@ -790,20 +790,20 @@ class _Transition(BaseModel):
     # Intent made checkable — <=12 words naming the moment that asked for
     # this component. Recipe-side only: normalized post-parse (never raises),
     # stripped before the render schemas. Audited by recipe_eval [why-audit].
-    why: Optional[str] = None
+    why: Optional[str] = Field(default=None, max_length=240)
     # Component-specific optional props; most are passthrough.
-    direction: Optional[str] = None
-    palette: Optional[str] = None
-    title: Optional[str] = None
-    label: Optional[str] = None
-    variant: Optional[str] = None
+    direction: Optional[str] = Field(default=None, max_length=80)
+    palette: Optional[str] = Field(default=None, max_length=80)
+    title: Optional[str] = Field(default=None, max_length=200)
+    label: Optional[str] = Field(default=None, max_length=120)
+    variant: Optional[str] = Field(default=None, max_length=80)
     theme: Optional[Literal["dark", "light"]] = None
-    accentColor: Optional[str] = None
-    titleColor: Optional[str] = None
-    labelColor: Optional[str] = None
+    accentColor: Optional[str] = Field(default=None, max_length=60)
+    titleColor: Optional[str] = Field(default=None, max_length=60)
+    labelColor: Optional[str] = Field(default=None, max_length=60)
     showDivider: Optional[bool] = None
     intensity: Optional[float] = None
-    flashColor: Optional[str] = None
+    flashColor: Optional[str] = Field(default=None, max_length=60)
 
 class _TightCutOverlay(BaseModel):
     """Discretionary tight-cut decoration (R2, directive #7). The RESPONSE
@@ -817,7 +817,7 @@ class _TightCutOverlay(BaseModel):
     validation code."""
     after_word_index: int
     type: _TCO_TYPES
-    why: Optional[str] = None
+    why: Optional[str] = Field(default=None, max_length=240)
 
 
 class _VideoPlanMoment(BaseModel):
@@ -827,23 +827,23 @@ class _VideoPlanMoment(BaseModel):
     word_index: int
     # One-sentence description of what lands at this moment — the joke
     # resolving, the new fact arriving, the speaker's reaction breaking.
-    what_lands: str
+    what_lands: str = Field(max_length=240)
     # One-sentence justification for why this specific moment is worth
     # emphasizing vs. the surrounding context. Forces Gemini to articulate
     # the editorial reason instead of picking moments by intuition.
-    why_emphasis: str
+    why_emphasis: str = Field(max_length=240)
     # REQUIRED visual-grounding field. One sentence on what is VISIBLE in
     # the proxy at this moment — the speaker's expression, gesture, head
     # position, framing, energy. This is what forces Gemini to actually
     # use its multimodal capability on the proxy attached to the call,
     # not to reason purely from the transcript with annotations.
-    what_i_saw: str
+    what_i_saw: str = Field(max_length=240)
     # REQUIRED — the editor's named viewer end-state for this moment. The v2
     # prompt uses this as the bridge between key_moment and arc position:
     # the feeling drives which zoom personality fits, which SFX flavor, etc.
     # Format: one specific phrase, not generic ("the camera leaning in as
     # the line lands" not "feels exciting").
-    viewer_feeling: str
+    viewer_feeling: str = Field(max_length=200)
 
 
 # Arc positions — the editorial role a stretch of dialogue plays in the
@@ -900,7 +900,7 @@ class _Movement(BaseModel):
     end_word_index: int
     # One phrase for what this stretch is doing ("grip and pattern-interrupt",
     # "drive the argument", "teach the three-part method", "land it and send off").
-    job: str
+    job: str = Field(max_length=240)
     # Pace at which one dominant element hands off to the next: hot = fast
     # succession, deep = a single graphic holds and builds, calm = the frame
     # rests so a line can breathe.
@@ -926,7 +926,7 @@ class _VideoPlan(BaseModel):
     # 1-2 sentence factual summary of what happens in the video. Different
     # from video_identity (which describes the video's character); this is
     # the literal narrative arc.
-    what_happens: str
+    what_happens: str = Field(max_length=500)
     # The kept-word index where the HOOK lands — the first 1-2 seconds that
     # promise something specific to the viewer. Often word_index = 0 or
     # close to it, but not always (some videos open on a question, the
@@ -947,7 +947,7 @@ class _VideoPlan(BaseModel):
     # One sentence describing the dramatic shape: how the video moves from
     # hook through setup through development through payoff through close.
     # Forces Gemini to think about the WHOLE before picking parts.
-    story_shape: str
+    story_shape: str = Field(max_length=500)
     # The arc spine — a tiled list of segments covering every kept word.
     # Each segment names its editorial role (hook/build/mid_peak/payoff/
     # breather/close) and intensity. Every downstream component decision
@@ -975,7 +975,7 @@ class _VideoPlan(BaseModel):
     # the previous per-component `viewer_feeling` defense — instead of
     # justifying each choice individually, Gemini commits to one creative
     # treatment for the whole video and lets every component flow from it.
-    editorial_vision: str
+    editorial_vision: str = Field(max_length=800)
 
 
 class PostCutPlan(BaseModel):
@@ -988,7 +988,7 @@ class PostCutPlan(BaseModel):
     reference the kept-only space; Python translates them back to source
     indices after the call returns.
     """
-    video_identity: str
+    video_identity: str = Field(max_length=500)
     # F8 — burned-in caption detection (watch-first identity stage). Report
     # ONLY when clearly visible as synced word captions across multiple
     # sampled moments — a watermark or a single title card is not a caption
@@ -1001,7 +1001,7 @@ class PostCutPlan(BaseModel):
     # BEFORE PICKING COMPONENTS" in the post-cuts prompt for the workflow.
     video_plan: _VideoPlan
     caption_style: _CAPTION_STYLES
-    caption_keywords: List[str]
+    caption_keywords: List[Annotated[str, Field(max_length=120)]]
     emphasis_moments: List[_EmphasisMoment]
     transitions: List[_Transition]
     # R2 (directive #7): discretionary tight-cut overlays are now EMITTABLE —
@@ -1027,7 +1027,7 @@ class PostCutPlan(BaseModel):
     # FIRST call (silence/filler/stutter detection) and merged in after this
     # call returns; if Gemini emits notes here, they take precedence in the
     # downstream merge (see edit_plan construction in generate_edit_gemini).
-    notes: Optional[str] = None
+    notes: Optional[str] = Field(default=None, max_length=800)
 
 
 class EditPlan(BaseModel):
@@ -1038,16 +1038,16 @@ class EditPlan(BaseModel):
     translation. Kept as a Pydantic model for type clarity and documentation;
     not passed as response_json_schema to any Gemini call.
     """
-    notes: str
+    notes: str = Field(max_length=800)
     # remove_words is built mechanically by compute_mechanical_cuts() —
     # each entry is one of {word_index, reason} or
     # {after_word_index, before_word_index, reason}.
     remove_words: List[dict]
     pacing: Literal["fast", "medium", "slow"]
-    video_identity: str
+    video_identity: str = Field(max_length=500)
     existing_caption_region: Literal["none", "bottom", "top", "other"] = "none"
     caption_style: _CAPTION_STYLES
-    caption_keywords: List[str]
+    caption_keywords: List[Annotated[str, Field(max_length=120)]]
     emphasis_moments: List[_EmphasisMoment]
     transitions: List[_Transition]
     sound_effects: List[_SoundEffect]
