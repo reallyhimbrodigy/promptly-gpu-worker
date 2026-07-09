@@ -4655,28 +4655,40 @@ def _within_clip_deadair():
     assert "located_silences" in _src, "located-silences hand-off to Gemini missing"
     assert "preserved_silences" in _src, "Gemini DECIDE field missing"
     assert "within_clip_edge_trim" in _src, "unified clip-edge EXECUTE pass missing"
-    # WORD-BOUNDARY FLOOR behavioral (the structural fix Zac ordered): a pure-pause
-    # dead_air cut with a LEVEL-silence span [0.35, 1.7] that STARTS before the
-    # outgoing word's Deepgram end (0.35 < 0.5 = an over-run, like the "rich"
-    # fricative sub-threshold but inside the word) and ENDS after the incoming
-    # word's Deepgram start (1.7 > 1.5 = an under-run onset). The trim MUST protect
-    # both word spans: outgoing clip ends at/after word_end 0.5 (never inside [0,0.5]),
-    # incoming clip starts at/before word_start 1.5 (never inside [1.5,2.0]).
+    # WITHIN-WORD LOCATOR behavioral (Zac 2026-07-09): _keep_to = min(word_end,
+    # sound_end + decay). sound_end is the true end of sound from the WITHIN-word
+    # threshold (floor+Y) — a fricative tail is SOUND at floor+Y, so the within-silence
+    # starts AFTER it and the fricative survives. Room-relative thresholds live at emit
+    # time; here we inject the located silences directly.
+    assert "_compute_noise_floor_p5" in _src, "room-relative noise-floor derivation missing"
+    assert "_DEADAIR_BETWEEN_OFFSET_DB" in _src and "_DEADAIR_WITHIN_OFFSET_DB" in _src, \
+        "between/within floor-relative offsets missing"
+    assert "_keep_to = min(_we, _sound_end + _DEADAIR_DECAY_TAIL_S)" in _src, \
+        "within-word locator (min(word_end, sound_end+decay)) missing"
     dg = [{"word": "rich", "punctuated_word": "rich", "start": 0.0, "end": 0.5},
           {"word": "world", "punctuated_word": "world", "start": 1.5, "end": 2.0}]
     rw = [{"after_word_index": 0, "before_word_index": 1, "reason": "dead_air"}]
-    lvl = [(0.35, 1.7)]
+    lvl = [(0.35, 1.7)]   # BETWEEN-thresh (floor+X): dead air from 0.35 — triggers the trim
+    # Case A — the "ch" fricative [0.35,0.5] is sub-(-25) but ABOVE floor+Y, so the WITHIN
+    # silence starts at word_end 0.5: the fricative is kept whole.
+    handler._WITHIN_WORD_SILENCES_LAST[:] = [(0.5, 1.7)]
     on, _ = handler.build_clips_from_words(dg, rw, video_duration=2.0,
                                            level_silences=lvl, within_clip_15ms=True)
-    # outgoing clip's tail NEVER breaches the word span — ends at/after word_end 0.5
-    # (the "rich" fricative in [0.35, 0.5] survives), and at ~word_end+15ms (dead air trimmed)
     assert on[0]["source_end"] >= 0.5 - 1e-6, \
-        f"WORD-BOUNDARY FLOOR: outgoing clip must not cut into the word span (end>=0.5), got {on[0]['source_end']}"
+        f"fricative must survive to sound_end 0.5, got {on[0]['source_end']}"
     assert on[0]["source_end"] <= 0.5 + 0.05, \
-        f"between-word dead air must still collapse (end ~0.515s), got {on[0]['source_end']}"
+        f"dead air past sound_end must collapse (~0.515s), got {on[0]['source_end']}"
+    # Case B — Deepgram OVER-RAN: sound truly ended at 0.40 (within-silence [0.40,1.7]).
+    # Collapse the over-run to sound_end+decay (~0.46), never past word_end, no sound clipped.
+    handler._WITHIN_WORD_SILENCES_LAST[:] = [(0.40, 1.7)]
+    on2, _ = handler.build_clips_from_words(dg, rw, video_duration=2.0,
+                                            level_silences=lvl, within_clip_15ms=True)
+    assert 0.40 <= on2[0]["source_end"] <= 0.5 + 0.02, \
+        f"over-run must collapse to sound_end 0.40 + decay, never past word_end 0.5, got {on2[0]['source_end']}"
+    handler._WITHIN_WORD_SILENCES_LAST[:] = []
     # incoming clip's head NEVER breaches the word span — starts at/before word_start 1.5
     assert on[-1]["source_start"] <= 1.5 + 1e-6, \
-        f"WORD-BOUNDARY FLOOR: incoming clip must not cut into the word span (start<=1.5), got {on[-1]['source_start']}"
+        f"incoming clip must not cut into the word span (start<=1.5), got {on[-1]['source_start']}"
     # FINAL/FIRST word protection: a single-clip video is never edge-trimmed
     solo, _ = handler.build_clips_from_words(
         [{"word": "you", "punctuated_word": "you", "start": 0.5, "end": 1.0}],

@@ -4139,25 +4139,27 @@ The footage's surfaces pick the palette's contrast: keyword colors that sit near
 THE {_n_styles} STYLES
 ──────────────────────────────────────────
 
+The caption style governs the CAPTION LAYER — the type, its animation, its keyword treatment. It does not set how much else the video carries. A quiet typeface on footage with four real scene changes still takes four transitions; a loud one on a single continuous shot still takes none. Density comes from the footage and the moments, never from the caption's voice. Each style's Fits/Fights below is about what DELIVERY the typography suits, never about the edit.
 
-1. **Prime** — two-tier: white Inter body; keywords break out onto their own line in oversized italic Playfair (~66pt) with blue tint (#3BA5FF). Spring entrance. Keywords: USED. Signal: hierarchy — THIS is what mattered. Fits: aspirational, self-improvement, premium branding, dialogue with clear keyword peaks. Fights: casual speakers; dialogue where every word weighs the same (hierarchy collapses).
 
-2. **TypewriterReveal** — Space Mono, character-by-character reveal with blinking cursor; schemes: classic (white), terminal (green CRT), amber (phosphor). Keywords: IGNORED. Signal: typed in real time. Fits: tech/coding, documentary narration, hacker or retro-CRT aesthetics, slow pacing. Fights: high-energy content; speech faster than the typing animation.
+1. **Prime** — two-tier: white Inter body; keywords break out onto their own line in oversized italic Playfair (~66pt) with blue tint (#3BA5FF). Spring entrance. Keywords: USED. Signal: two-tier typographic hierarchy — the oversized italic keyword breaks above the plain body line and carries the visual weight. Fits: aspirational, self-improvement, and premium-branding delivery registers; speech with clear keyword peaks the breakout line can lift onto. Fights: casual speakers; flat, even-weight delivery where no single word peaks, leaving the two-tier hierarchy nothing to elevate.
+
+2. **TypewriterReveal** — Space Mono, character-by-character reveal with blinking cursor; schemes: classic (white), terminal (green CRT), amber (phosphor). Keywords: IGNORED. Signal: typed in real time. Fits: tech/coding, documentary narration, hacker or retro-CRT registers, slow deliberate delivery. Fights: high-energy delivery; speech faster than the typing animation.
    Optional extraProps: {{ "scheme": "classic" | "terminal" | "amber" }}
 
-3. **Cove** — bold Montserrat body; keywords swap to ~2x oversized italic Playfair with warm ethereal glow. Keywords: USED. Signal: keywords held up with reverence. Fits: premium/luxury, brand storytelling, wellness, slow delivery. Fights: aggressive hustle content, casual delivery.
+3. **Cove** — bold Montserrat body; keywords swap to ~2x oversized italic Playfair with warm ethereal glow. Keywords: USED. Signal: keywords held up with reverence — the oversized glowing italic serif treats each keyword as precious. Fits: premium/luxury and wellness registers, brand storytelling, slow deliberate delivery — the register the warm italic-serif keyword treatment suits. Fights: aggressive, high-energy delivery and casual, offhand delivery, where a reverent warm-serif keyword treatment reads as mismatched.
 
-4. **Lumen** — Montserrat body; keywords swap to Playfair with amber glow (#D4A24C) and a gold underline sweep; optional "shine" flash. Keywords: USED. Signal: money moments, brand stamp. Fits: hustle, motivational, money/business/success content. Fights: understated or melancholic content; videos with no money-words (gold feels arbitrary).
+4. **Lumen** — Montserrat body; keywords swap to Playfair with amber glow (#D4A24C) and a gold underline sweep; optional "shine" flash. Keywords: USED. Signal: keywords gilded — money and brand words get the amber-glow, gold-underline stamp. Fits: hustle, motivational, money/business/success delivery registers whose keywords are value words (numbers, prices, named brands) for the gold treatment to gild. Fights: understated or melancholic delivery (the loud gold clashes with a quiet register); delivery with no money or value words for the keyword treatment to key off (the gold reads arbitrary).
 
-5. **Pulse** — words appear in synchronized PAIRS, one above one below, crisp opacity fades; keywords go cyan (#00BFFF). Keywords: USED. Signal: scored to the audio, beat-matched. Fits: music content, rapid dialogue, lyric-video energy. Fights: contemplative content needing per-word breath; adjacent words of very different length.
+5. **Pulse** — words appear in synchronized PAIRS, one above one below, crisp opacity fades; keywords go cyan (#00BFFF). Keywords: USED. Signal: rhythmic pulse — paired words fade on and off in sync. Fits: sung or musical delivery, rapid dialogue, the doubled cadence of a lyric video. Fights: contemplative, unhurried delivery needing per-word breath; adjacent words of very different length.
 
-6. **Quintessence** — ONE word at a time, centered, large Playfair with dramatic vertical stretch (scaleY 1.6), gold (#E8D44D), spring in/out. Keywords: IGNORED. Signal: words demand individual attention; art-house. Fits: dramatic pauses, poetry, mantras, slow deliberate dialogue. Fights: dense or fast dialogue (spring becomes stutter).
+6. **Quintessence** — ONE word at a time, centered, large Playfair with dramatic vertical stretch (scaleY 1.6), gold (#E8D44D), spring in/out. Keywords: IGNORED. Signal: each word made monumental, one alone in the frame; art-house register. Fits: delivery built on dramatic pauses — poetry, mantras, slow deliberate dialogue. Fights: dense or fast dialogue, where the spring in/out turns to stutter.
     Optional extraProps: {{ "stretchY": 1.6 }} default · 2.0 extreme · 1.3 subtle
 
-7. **TwoTone** — big stacked all-caps words two lines deep: a white top line over an accent-color bottom line, each word a chunky 3D "sticker" block (thick dark contour + downward extrude) that slams in oversized and settles; the page splits across the two lines automatically. Keywords: IGNORED. Signal: two words, two colors, maximum punch. Fits: short shouted two-part hooks over high-energy talking-head or hype B-roll — "STOP / SCROLLING", "THIS CHANGES / EVERYTHING". Fights: long sentences, calm or contemplative pacing, warm serif registers.
-8. **CleanCut** — one plain crisp word on screen at a time, centered, with a subtle rise-and-settle and a soft legibility shadow. No color, no flair — the deliberate no-style style; long words wrap and stay inside the safe margins. Keywords: IGNORED. Signal: just the words, nothing else. Fits: fast-cut B-roll, cinematic or serious sections, any stretch where the footage should lead and the caption stays out of the way. Fights: moments wanting decoration or a keyword accent, hype/energy hooks (reads flat where punch is wanted).
+7. **TwoTone** — big stacked all-caps words two lines deep: a white top line over an accent-color bottom line, each word a chunky 3D "sticker" block (thick dark contour + downward extrude) that slams in oversized and settles; the page splits across the two lines automatically. Keywords: IGNORED. Signal: two words, two colors — a two-line white-over-accent split. Fits: short, shouted, two-part hooks — a line that breaks cleanly into two beats to fill the two stacked words ("STOP / SCROLLING", "THIS CHANGES / EVERYTHING"); loud, exclamatory delivery. Fights: long sentences that will not compress into two words; calm, quiet, or contemplative delivery; warm serif registers.
+8. **CleanCut** — one plain crisp word on screen at a time, centered, with a subtle rise-and-settle and a soft legibility shadow. No color, no flair — the deliberate no-style style; long words wrap and stay inside the safe margins. Keywords: IGNORED. Signal: plain, unstyled legibility — the word carries no typographic voice of its own. Fits: serious, restrained, or cinematic-register delivery; measured, deliberate speech that reads well under neutral type with no stylistic accent coloring it. Fights: hype or high-energy delivery, and any moment that wants a decorated or keyword-accented word — plain type reads flat where punch is wanted.
 
-9. **Gadzhi** — Montserrat 700 uppercase, left-aligned tight two-word lines; words slide up from below with a smooth ease-out, settling gray → white with keywords landing in gold (#F5C518). Keywords: USED. Signal: confident money talk — agency energy. Fits: business/hustle, SMMA-style delivery, product pitches with named numbers. Fights: warm serif registers, playful or soft content.
+9. **Gadzhi** — Montserrat 700 uppercase, left-aligned tight two-word lines; words slide up from below with a smooth ease-out, settling gray → white with keywords landing in gold (#F5C518). Keywords: USED. Signal: a confident, self-assured money-talk voice — hard uppercase, named numbers and money terms landing in gold. Fits: business/hustle and SMMA-style delivery; product pitches that name numbers, where figures and money terms suit the gold keyword treatment. Fights: warm serif registers; soft, gentle, or playful delivery, where the hard uppercase money-talk voice clashes.
 
 Keyword styles: Prime, Cove, Lumen, Pulse, Gadzhi. Keyword-ignoring: TypewriterReveal, Quintessence, TwoTone, CleanCut (still emit caption_keywords — they have narrative value — they just don't highlight).
 
@@ -5806,6 +5808,47 @@ def _get_audio_stream_offset_seconds(source_path: str) -> float:
         return 0.0
 
 
+# ── ROOM-RELATIVE DEAD-AIR THRESHOLDS (Zac 2026-07-09) ─────────────────────────
+# Silence is not a dB value — it is the absence of speech RELATIVE to the room. A
+# hardcoded -25/-45dB encodes one mic in one kitchen. Both thresholds derive from the
+# source's own noise floor (p5 of per-frame RMS energy), so a whisper, a phone mic and a
+# studio condenser all locate correctly — the RELATIONSHIP holds where the absolute does
+# not. X/Y calibrated so the towel (floor_p5 = -56.5dB) resolves to the proven -25/-45.
+_DEADAIR_BETWEEN_OFFSET_DB = 31.5   # X: between-words threshold = noise_floor + X (-> -25 on towel)
+_DEADAIR_WITHIN_OFFSET_DB = 11.5    # Y: within-word threshold  = noise_floor + Y (-> -45 on towel);
+                                    # Y < X because a fricative tail is SOUND at floor+Y.
+_DEADAIR_FRAME_S = 0.020            # 20ms frames for the floor estimate
+_DEADAIR_DECAY_TAIL_S = 0.06        # decay pad kept past a word's within-word sound_end
+                                    # (fricative/vowel/breath decay lives here). Swept
+                                    # 40/60/80/120ms across voices; the pad that keeps the
+                                    # softest word-final fricative intact everywhere ships.
+_WITHIN_WORD_SILENCES_LAST: list = []   # within-threshold (floor+Y) silences from the last
+                                        # detect run; the Step-4c within-word locator reads them.
+
+
+def _compute_noise_floor_p5(source_path, sample_rate=48000, frame_s=_DEADAIR_FRAME_S):
+    """Noise floor = 5th percentile of per-frame RMS energy (dB). The dead-air
+    thresholds derive from THIS, not an absolute dB, so the same X/Y offsets locate
+    on any microphone. No except-swallow of the ffmpeg extract — a failure surfaces."""
+    import numpy as _np
+    import wave as _wave
+    import tempfile as _tf
+    _wav = os.path.join(_tf.gettempdir(), f"nf_{abs(hash(source_path)) % (10 ** 8)}.wav")
+    subprocess.run(["ffmpeg", "-y", "-i", source_path, "-map", "0:a:0", "-ac", "1",
+                    "-ar", str(sample_rate), "-acodec", "pcm_s16le", _wav],
+                   check=True, capture_output=True, timeout=120)
+    with _wave.open(_wav) as _wf:
+        _raw = _wf.readframes(_wf.getnframes())
+    _x = _np.frombuffer(_raw, dtype=_np.int16).astype(_np.float64) / 32768.0
+    _fl = int(frame_s * sample_rate)
+    _n = len(_x) // _fl
+    if _n < 1:
+        return -50.0
+    _fr = _x[:_n * _fl].reshape(_n, _fl)
+    _db = 20.0 * _np.log10(_np.sqrt(_np.mean(_fr ** 2, axis=1) + 1e-12) + 1e-12)
+    return float(_np.percentile(_db, 5))
+
+
 def _detect_silence_regions_level(
     source_path: str,
     threshold_db: float = -30.0,
@@ -6337,14 +6380,25 @@ def detect_dead_air(
     # renders keep the VAD punctuation tiers below — bit-identical to before.
     _level_regions: list = []
     if _WITHIN_CLIP_DEADAIR and source_path:
+        # ROOM-RELATIVE (Zac 2026-07-09): derive both thresholds from THIS source's
+        # noise floor, not a hardcoded -25/-45. between = floor+X locates the dead air
+        # between words; within = floor+Y locates the true end-of-sound inside a word
+        # (a fricative tail is above floor+Y, so it is never mistaken for silence).
+        _nf = _compute_noise_floor_p5(source_path)
+        _between_db = _nf + _DEADAIR_BETWEEN_OFFSET_DB
+        _within_db = _nf + _DEADAIR_WITHIN_OFFSET_DB
         _level_regions = _detect_silence_regions_level(
-            source_path, _WITHIN_CLIP_SILENCE_DB, _WITHIN_CLIP_TRIM_TRIGGER_S)
+            source_path, _between_db, _WITHIN_CLIP_TRIM_TRIGGER_S)
         _LEVEL_SILENCES_LAST[:] = list(_level_regions)
+        _WITHIN_WORD_SILENCES_LAST[:] = _detect_silence_regions_level(
+            source_path, _within_db, _WITHIN_CLIP_TRIM_TRIGGER_S)
         print(
-            f"[within-clip-locate] {len(_level_regions)} level-silence span(s) "
-            f"<= {_WITHIN_CLIP_SILENCE_DB}dB located — Gemini decides keep/cut per "
-            f"span (dead air trimmed to {_WITHIN_CLIP_FLOOR_S*1000:.0f}ms unless it's "
-            f"a showing-beat / deliberate content beat)",
+            f"[within-clip-locate] noise_floor_p5={_nf:.1f}dB -> between={_between_db:.1f}dB "
+            f"(floor+{_DEADAIR_BETWEEN_OFFSET_DB}) within={_within_db:.1f}dB "
+            f"(floor+{_DEADAIR_WITHIN_OFFSET_DB}); {len(_level_regions)} between-silence + "
+            f"{len(_WITHIN_WORD_SILENCES_LAST)} within-silence span(s) located — Gemini "
+            f"decides keep/cut; dead air trimmed to {_WITHIN_CLIP_FLOOR_S*1000:.0f}ms unless "
+            f"a showing-beat, word tails kept to sound_end+decay",
             flush=True,
         )
 
@@ -9132,9 +9186,10 @@ Each transition component renders at its natural duration — the cadence its ra
   3. **Decide the seam — the HANDLE picks the family, the beat picks the type.** Read the seam's audio handle (its boundary entry shows the gap, e.g. `820ms gap`), then take the family that FITS it:
      - **≥700ms handle → crossfade family.** There is room to blend frames. Pick the crossfade the beat wants (CardSwipe, ZoomThrough, SlideOver, Stack, CrossfadeZoom, StepPush, FilmStrip — see THE TRANSITIONS above). Emit it in `transitions`.
      - **Tight (under 700ms, no handle) → zero-handle family.** No room to blend, and that is fine — the seam still gets a treatment. The calm, everyday answer is a tight-cut OVERLAY (emit in `tight_cut_overlays`: LightLeak or the light ShutterFlash, ~180ms, audio plays straight through — see HOW TO PLACE TIGHT-CUT OVERLAYS). When the beat carries real weight, a heavy zero-handle transition instead (emit in `transitions`: DipToBlack or the heavy ShutterFlash). **The overlay IS the transition treatment for a tight seam — it is the same decision made at the same seam, not a separate section you visit independently.**
-     - **Punchline on the seam → bare cut.** When the picture change lands on a snap or a reveal, the abruptness IS the beat — leave it a clean hard cut, deliberately.
+     - **Punchline on the seam → bare cut, wide or tight.** When the picture change lands on a snap or a reveal, the abruptness IS the beat — leave it a clean hard cut, deliberately. This holds at EVERY seam regardless of handle: a tight punchline seam is a bare cut, not an overlay; do not dress a snap.
      Every picture change gets exactly one of these. **There is no seam with nothing to wear, so a tight gap is NEVER a reason to move a transition off its seam to hunt for room — if the gap is tight you change the FAMILY, not the location.**
   4. **Name it.** In the `why`, name the PICTURE CHANGE you rode — the shot-change second or the B-roll edge you crossed. If your `why` names a content moment ("out of the hook", "into the reveal", "the spec finale") instead of a picture change, you scanned the dialogue and chased a beat — that is the exact mistake this procedure exists to prevent. There is no step where you find a punchy content moment and go looking for a boundary near it. You look at a picture change and decide what it wears.
+  4b. **The index you emit IS the boundary's listed index — the exact number in the SHOT CHANGES / CUT / TIGHT BOUNDARIES list, not a word inside the new scene.** The transition plays ACROSS the seam, using the seam's gap as its handle, so its `after_word_index` is the seam boundary itself (the last word before the picture change). Naming the scene change in the `why` but emitting an index a few words into the new scene puts the transition on a different, off-boundary content cut and leaves the real seam bare. If you open a B-roll a few words into the new scene, that B-roll edge is its OWN picture change with its own treatment — it is not a stand-in for the seam. One picture change, one index: the one the list gives you.
 
 You already do this correctly for your own B-roll edges — you know where you put a cutaway, so you ride its edge. Do it for the SHOT CHANGES entries too: those are picture changes you did not author, and they need the same walk. The list is the driver, every time.
 
@@ -16927,6 +16982,11 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0,
     # untouched, so a release that runs to the clip end is never clipped.
     if within_clip_15ms and level_silences and raw_clips:
         _sils = sorted((float(a), float(b)) for (a, b) in level_silences)
+        # WITHIN-word (floor+Y) silences for the sound_end locator; falls back to the
+        # between-thresh spans if the within-detect produced nothing (no crash on a
+        # music-bed source where there is no silence at all).
+        _within_word_sils = sorted((float(a), float(b)) for (a, b) in
+                                   (_WITHIN_WORD_SILENCES_LAST or level_silences))
         _n = len(raw_clips)
         _edge_trims = 0
         for _ci, _rc in enumerate(raw_clips):
@@ -16942,11 +17002,17 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0,
                     if _sa < _ce and _sb >= _ce - 0.03:
                         _edge = _sa if _edge is None else min(_edge, _sa)
                 if _edge is not None:
-                    # word_end is the FLOOR at margin 0 (strict, no clip); the margin
-                    # lets the trim reach word_end - MARGIN, but the audible edge is a
-                    # hard floor under that (never trim past where the audio drops
-                    # below threshold — the loud part of the word is always kept).
-                    _keep_to = max(_we - _WITHIN_CLIP_WORD_MARGIN_S, _edge)
+                    # WITHIN-WORD LOCATOR (Zac 2026-07-09): _keep_to = min(word_end,
+                    # sound_end + DECAY_TAIL). sound_end is where the audio drops below the
+                    # WITHIN-word threshold (floor+Y) inside this word's tail — the true end
+                    # of sound. A fricative tail is SOUND at floor+Y, so it survives; only
+                    # the over-run silence past it is trimmed. Never keep past word_end
+                    # (protects the next word's onset).
+                    _sound_end = _we
+                    for (_wsa, _wsb) in _within_word_sils:
+                        if _wsa < _we + 0.05 and _wsb >= _we - 0.03:
+                            _sound_end = min(_sound_end, _wsa)
+                    _keep_to = min(_we, _sound_end + _DEADAIR_DECAY_TAIL_S)
                     _new_ce = _keep_to + _WITHIN_CLIP_FLOOR_S
                     if _cs + 0.05 < _new_ce < _ce - 0.001:
                         _rc["padded_end"] = _new_ce
