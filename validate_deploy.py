@@ -4660,9 +4660,11 @@ def _within_clip_deadair():
     # threshold (floor+Y) — a fricative tail is SOUND at floor+Y, so the within-silence
     # starts AFTER it and the fricative survives. Room-relative thresholds live at emit
     # time; here we inject the located silences directly.
-    assert "_compute_noise_floor_p5" in _src, "room-relative noise-floor derivation missing"
-    assert "_DEADAIR_BETWEEN_OFFSET_DB" in _src and "_DEADAIR_WITHIN_OFFSET_DB" in _src, \
-        "between/within floor-relative offsets missing"
+    assert "_compute_floor_speech_range" in _src, "floor/speech/range derivation missing"
+    assert "_DEADAIR_BETWEEN_PCT" in _src and "_DEADAIR_WITHIN_PCT" in _src, \
+        "proportional (position-in-range) thresholds missing"
+    assert "_DEADAIR_BETWEEN_PCT * _range" in _src, \
+        "between threshold must be floor + PCT*range (proportional, not a fixed offset)"
     assert "_keep_to = min(_we, _sound_end + _DEADAIR_DECAY_TAIL_S)" in _src, \
         "within-word locator (min(word_end, sound_end+decay)) missing"
     dg = [{"word": "rich", "punctuated_word": "rich", "start": 0.0, "end": 0.5},

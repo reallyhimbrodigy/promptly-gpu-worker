@@ -5814,10 +5814,17 @@ def _get_audio_stream_offset_seconds(source_path: str) -> float:
 # source's own noise floor (p5 of per-frame RMS energy), so a whisper, a phone mic and a
 # studio condenser all locate correctly — the RELATIONSHIP holds where the absolute does
 # not. X/Y calibrated so the towel (floor_p5 = -56.5dB) resolves to the proven -25/-45.
-_DEADAIR_BETWEEN_OFFSET_DB = 31.5   # X: between-words threshold = noise_floor + X (-> -25 on towel)
-_DEADAIR_WITHIN_OFFSET_DB = 11.5    # Y: within-word threshold  = noise_floor + Y (-> -45 on towel);
-                                    # Y < X because a fricative tail is SOUND at floor+Y.
-_DEADAIR_FRAME_S = 0.020            # 20ms frames for the floor estimate
+# PROPORTIONAL, not fixed-offset (Zac 2026-07-09): a fixed dB offset travels with the ROOM
+# (floor) but assumes a constant floor->speech DYNAMIC RANGE. It doesn't: measured ranges
+# span 26-40dB across three real sources, and a fixed +31.5 put srcB's between-threshold
+# ABOVE srcB's own speech (-23.2 vs speech -28.46) — the pass would eat the clip. The
+# threshold sits at a PERCENTAGE of the floor->speech range, which travels across both the
+# room AND the dynamic range (a -20dB-floor phone mic where +31.5 lands above full scale).
+_DEADAIR_BETWEEN_PCT = 0.796   # between-words threshold = floor + PCT*(speech - floor)
+_DEADAIR_WITHIN_PCT = 0.291    # within-word threshold (< between: a fricative is above it).
+                               # Calibrated so the towel (floor -56.5, speech_p90_voiced
+                               # -16.9, range 39.6dB) resolves to the proven -25/-45.
+_DEADAIR_FRAME_S = 0.020            # 20ms frames for the energy estimate
 _DEADAIR_DECAY_TAIL_S = 0.06        # decay pad kept past a word's within-word sound_end
                                     # (fricative/vowel/breath decay lives here). Swept
                                     # 40/60/80/120ms across voices; the pad that keeps the
@@ -5826,10 +5833,12 @@ _WITHIN_WORD_SILENCES_LAST: list = []   # within-threshold (floor+Y) silences fr
                                         # detect run; the Step-4c within-word locator reads them.
 
 
-def _compute_noise_floor_p5(source_path, sample_rate=48000, frame_s=_DEADAIR_FRAME_S):
-    """Noise floor = 5th percentile of per-frame RMS energy (dB). The dead-air
-    thresholds derive from THIS, not an absolute dB, so the same X/Y offsets locate
-    on any microphone. No except-swallow of the ffmpeg extract — a failure surfaces."""
+def _compute_floor_speech_range(source_path, word_spans, sample_rate=48000, frame_s=_DEADAIR_FRAME_S):
+    """floor = p5 of per-frame RMS energy; speech = p90 of per-frame energy DURING VOICED
+    spans (frames inside a Deepgram word span — whole-clip p90 is dragged down by pauses);
+    range = speech - floor. The dead-air thresholds sit at a PERCENTAGE of this range so
+    they travel across both the room (floor) and the dynamic range. Returns
+    (floor_db, speech_db, range_db). No except-swallow of the ffmpeg extract."""
     import numpy as _np
     import wave as _wave
     import tempfile as _tf
@@ -5843,10 +5852,17 @@ def _compute_noise_floor_p5(source_path, sample_rate=48000, frame_s=_DEADAIR_FRA
     _fl = int(frame_s * sample_rate)
     _n = len(_x) // _fl
     if _n < 1:
-        return -50.0
+        return (-50.0, -20.0, 30.0)
     _fr = _x[:_n * _fl].reshape(_n, _fl)
     _db = 20.0 * _np.log10(_np.sqrt(_np.mean(_fr ** 2, axis=1) + 1e-12) + 1e-12)
-    return float(_np.percentile(_db, 5))
+    _floor = float(_np.percentile(_db, 5))
+    _t = (_np.arange(_n) + 0.5) * frame_s
+    _voiced = _np.zeros(_n, dtype=bool)
+    for (_ws, _we) in (word_spans or []):
+        _voiced |= (_t >= _ws) & (_t < _we)
+    _speech = float(_np.percentile(_db[_voiced], 90)) if _voiced.any() else float(_np.percentile(_db, 90))
+    _rng = max(6.0, _speech - _floor)   # guard a degenerate range (music-bed source: no silence)
+    return (_floor, _speech, _rng)
 
 
 def _detect_silence_regions_level(
@@ -6380,25 +6396,26 @@ def detect_dead_air(
     # renders keep the VAD punctuation tiers below — bit-identical to before.
     _level_regions: list = []
     if _WITHIN_CLIP_DEADAIR and source_path:
-        # ROOM-RELATIVE (Zac 2026-07-09): derive both thresholds from THIS source's
-        # noise floor, not a hardcoded -25/-45. between = floor+X locates the dead air
-        # between words; within = floor+Y locates the true end-of-sound inside a word
-        # (a fricative tail is above floor+Y, so it is never mistaken for silence).
-        _nf = _compute_noise_floor_p5(source_path)
-        _between_db = _nf + _DEADAIR_BETWEEN_OFFSET_DB
-        _within_db = _nf + _DEADAIR_WITHIN_OFFSET_DB
+        # PROPORTIONAL (Zac 2026-07-09): thresholds sit at a PERCENTAGE of THIS source's
+        # floor->speech range, not a hardcoded -25/-45 nor a fixed offset. between locates
+        # the dead air between words; within locates the true end-of-sound inside a word (a
+        # fricative tail is above the within threshold, so it is never mistaken for silence).
+        _word_spans = [(float(_w.get("start") or 0.0), float(_w.get("end") or 0.0)) for _w in words]
+        _floor, _speech, _range = _compute_floor_speech_range(source_path, _word_spans)
+        _between_db = _floor + _DEADAIR_BETWEEN_PCT * _range
+        _within_db = _floor + _DEADAIR_WITHIN_PCT * _range
         _level_regions = _detect_silence_regions_level(
             source_path, _between_db, _WITHIN_CLIP_TRIM_TRIGGER_S)
         _LEVEL_SILENCES_LAST[:] = list(_level_regions)
         _WITHIN_WORD_SILENCES_LAST[:] = _detect_silence_regions_level(
             source_path, _within_db, _WITHIN_CLIP_TRIM_TRIGGER_S)
         print(
-            f"[within-clip-locate] noise_floor_p5={_nf:.1f}dB -> between={_between_db:.1f}dB "
-            f"(floor+{_DEADAIR_BETWEEN_OFFSET_DB}) within={_within_db:.1f}dB "
-            f"(floor+{_DEADAIR_WITHIN_OFFSET_DB}); {len(_level_regions)} between-silence + "
-            f"{len(_WITHIN_WORD_SILENCES_LAST)} within-silence span(s) located — Gemini "
-            f"decides keep/cut; dead air trimmed to {_WITHIN_CLIP_FLOOR_S*1000:.0f}ms unless "
-            f"a showing-beat, word tails kept to sound_end+decay",
+            f"[within-clip-locate] floor={_floor:.1f}dB speech={_speech:.1f}dB range={_range:.1f}dB "
+            f"-> between={_between_db:.1f}dB (floor+{_DEADAIR_BETWEEN_PCT:.3f}*range) "
+            f"within={_within_db:.1f}dB (floor+{_DEADAIR_WITHIN_PCT:.3f}*range); "
+            f"{len(_level_regions)} between-silence + {len(_WITHIN_WORD_SILENCES_LAST)} "
+            f"within-silence span(s) located — Gemini decides keep/cut; dead air trimmed to "
+            f"{_WITHIN_CLIP_FLOOR_S*1000:.0f}ms, word tails kept to sound_end+decay",
             flush=True,
         )
 
