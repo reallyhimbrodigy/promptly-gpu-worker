@@ -163,7 +163,20 @@ def _face_clear_anchor(band, sw_s, ew_s, face_traj, component="", blocked=None):
                 if isinstance(p, dict) and p.get("found")
                 and (sw_s - 0.5) <= float(p.get("t") or 0.0) <= (ew_s + 0.5)]
         if not _pts:
-            return band, False
+            # NEAREST-SAMPLE FALLBACK (Zac 2026-07-09 render verdict, C-feed): the
+            # trajectory is sparse BY DESIGN (~1 keyframe per 6s) and smoothed to be
+            # continuous — nearest-neighbor lookup is its designed consumption
+            # (_face_position_at does exactly this for zoom origins). The hard window
+            # filter silently no-opped on Zac's render: keyframes at t=0/6/12/18s,
+            # all three MG windows missed every keyframe by 40-120ms, and three
+            # center-anchored MGs covered a centered face with zero coerce records.
+            # INTERIM protection (Tier-2 ledgered): dies after the re-census proves
+            # Gemini anchors clear on its own from the schema + teach fixes.
+            _mid = (float(sw_s) + float(ew_s)) / 2.0
+            _found = [p for p in face_traj if isinstance(p, dict) and p.get("found")]
+            if not _found:
+                return band, False
+            _pts = [min(_found, key=lambda p: abs(float(p.get("t") or 0.0) - _mid))]
         _FH = 600.0
         def _overlap(_b):
             _y0, _y1 = _BANDS[_b]
@@ -3478,29 +3491,27 @@ def _build_face_signals(face_positions, deepgram_words, duration, premium=False)
     #   >500px         → extreme close-up (head dominates frame)
     shot_scale = {"median_w": 0.0, "median_h": 0.0, "label": "unknown"}
     if _found:
-        if premium:
-            # PREMIUM: the detector now stores real face bbox w/h, so the median
-            # width resolves a true wide/medium/close label that gates zoom.
-            _ws = sorted(float(p.get("w") or 0) for p in _found)
-            _hs = sorted(float(p.get("h") or 0) for p in _found)
-            _mw = _ws[len(_ws) // 2]
-            _mh = _hs[len(_hs) // 2]
-            if _mw < 180:
-                _label = "wide"
-            elif _mw < 320:
-                _label = "medium"
-            elif _mw < 500:
-                _label = "close_up"
-            else:
-                _label = "extreme_close_up"
-            shot_scale = {"median_w": round(_mw, 1), "median_h": round(_mh, 1), "label": _label}
+        # ALL TIERS (Zac 2026-07-09 render verdict, C-feed): the detector stores
+        # real face bbox w/h for every path (detect_face_positions_dense); reading
+        # it here is a PROMPT-SIGNAL change only — no pixel path is touched. The
+        # old free-path fork deliberately reproduced the pre-fix zeros
+        # (median_w=0.0 → label "wide") for byte-identical Flare prompts; Zac's
+        # rejected render ran free tier and Gemini's SHOT SCALE block read
+        # "wide, face w≈0px" while three center MGs covered a centered face.
+        # The signal is live for everyone now.
+        _ws = sorted(float(p.get("w") or 0) for p in _found)
+        _hs = sorted(float(p.get("h") or 0) for p in _found)
+        _mw = _ws[len(_ws) // 2]
+        _mh = _hs[len(_hs) // 2]
+        if _mw < 180:
+            _label = "wide"
+        elif _mw < 320:
+            _label = "medium"
+        elif _mw < 500:
+            _label = "close_up"
         else:
-            # FREE/FLARE byte-identical: before the detector stored bbox w/h, the
-            # median width was always 0 → the label collapsed to "wide" for any
-            # clip with a detected face ("unknown" only with no face). Reproduce
-            # that exactly — do NOT read the new w/h keys on the free path, so the
-            # Gemini prompt's SHOT SCALE block is unchanged for Flare.
-            shot_scale = {"median_w": 0.0, "median_h": 0.0, "label": "wide"}
+            _label = "extreme_close_up"
+        shot_scale = {"median_w": round(_mw, 1), "median_h": round(_mh, 1), "label": _label}
 
     # Face VERTICAL zone over time. Face detection is sparse (typically
     # ~1 sample every 6s — far sparser than our 0.5s buckets), so directly
@@ -3541,10 +3552,11 @@ def _build_face_signals(face_positions, deepgram_words, duration, premium=False)
                 return "unknown"
             _best = min(_candidates, key=lambda p: abs(float(p.get("t") or 0) - t_sec))
             _cy = float(_best.get("cy") or 960)
-            # FREE/FLARE byte-identical: legacy face dicts had no "h", so this
-            # always defaulted to 400. Only premium reads the real bbox height
-            # (a better face-top estimate → more accurate vertical zone).
-            _h = (float(_best.get("h") or 400.0) if premium else 400.0)
+            # ALL TIERS (Zac 2026-07-09, C-feed): read the real bbox height wherever
+            # the detector stored it (a better face-top estimate → more accurate
+            # vertical zone). The old free-path fork pinned 400px for byte-identical
+            # Flare prompts — retired with the shot-scale fork above.
+            _h = float(_best.get("h") or 400.0)
             _face_top_norm = max(0.0, (_cy - 0.35 * _h) / 1920.0)
             if _face_top_norm < 0.33:
                 return "upper"
@@ -4246,7 +4258,7 @@ Entry shape:
 ANCHOR GEOMETRY — keeping the face AND the MG visible
 ──────────────────────────────────────────
 
-The goal every time: the viewer sees the speaker and the MG simultaneously. The anchor names the band the component anchors to; the component extends downward from it. Canvas bands: upper_third_safe ≈ y 120-600 · center ≈ y 600-1300 (where the face sits on talking-head) · lower_third_safe ≈ y 1300-1700 (where captions sit).
+The goal every time: the viewer sees the speaker and the MG simultaneously. **An anchor is chosen AGAINST the frame — the graphic lands where the face is not.** On a centered talking-head, center is the speaker; a graphic that covers the person who is talking has deleted the video's subject. Read the FACE VERTICAL ZONE signal and take the band the face isn't in — top/bottom per the zone. Center belongs to the graphic only when the frame does: the speaker is off-camera for the window, or the moment is a deliberate full-screen takeover. The anchor names the band the component anchors to; the component extends downward from it. Canvas bands: upper_third_safe ≈ y 120-600 · center ≈ y 600-1300 (where the face sits on talking-head) · lower_third_safe ≈ y 1300-1700 (where captions sit).
 
 Component sizes:
   • TOP-PINNED — Notification, StickyNotes, DropBanner, DropCard: ALWAYS render in the top band regardless of anchor (the metaphor depends on it). Emit anchor "upper_third_safe" so your spec matches reality.
@@ -4287,7 +4299,7 @@ Props: {{ "bars": [{{"label":"Our team","value":40}},{{"label":"Competitor","val
 ── WHEN STEPS OR ITEMS ARE ENUMERATED ──
 
 **RankedList** (MEDIUM) — a clean ordered Top-N: numbered badges + labels reveal top→bottom, each badge popping a beat before its label wipes in, a hairline rule under each row, #1 subtly highlighted. Claim: "The ranked list, in order." Use when the dialogue enumerates an ORDERED set ("number one... number two...", "my top three reasons") — 2–6 short rows. Scattered hand-written notes → StickyNotes; unordered keyword tags → PillCluster.
-Props: {{ "items": [{{"label": "Hook them fast", "value"?: "98%", "rank"?: "1"}}], "order"?: "topDown"|"bottomUp", "highlightTop"?: true, "accentColor"?: "#FFC53D", "anchor"?: "center" }}
+Props: {{ "items": [{{"label": "Hook them fast", "value"?: "98%", "rank"?: "1"}}], "order"?: "topDown"|"bottomUp", "highlightTop"?: true, "accentColor"?: "#FFC53D", "anchor"?: "upper_third_safe"|"center"|"lower_third_safe" }}
 
 **StickyNotes** (TOP-PINNED) — same component as the sticky_note text overlay: three notes slamming into the upper third. Claim: "Three parallel items worth pinning." Use when the dialogue enumerates three standalone sibling thoughts (≤4 words each). Mid-sentence fragments read as one thought — one note carries them; separate notes go to separate thoughts.
 Props: {{ "notes": [{{"text": "MOVE FAST", "color": "#FFE066", "rotation": -3}}, {{"text": "BREAK STUFF", "color": "#FFB3C1", "rotation": 1}}, {{"text": "FIX LATER", "color": "#A8E6CF", "rotation": 4}}] }}
@@ -4312,7 +4324,7 @@ Also answers here: Timeline (see WHEN TIME OR SEQUENCE IS THE STORY).
 Props: {{ "icon": "bolt"|"check"|"star"|"dollar"|"fire"|"heart"|"trophy"|"target"|"chart-up"|"clock"|"lock"|"sparkle"|"arrow-up"|"x", "label"?: "FAST", "iconColor"?: "#hex", "showPill"?: true, "layout"?: "row"|"stack", "anchor"?: "upper_third_safe"|"center"|"lower_third_safe" }}
 
 **PullQuote** (LARGE) — the speaker's own line blown up full-frame in bold caps, building word-by-word with keywords landing bigger and in an accent color. No card, no quotation marks, no name. Claim: "What they just said, as the whole screen." Use when one spoken sentence is the punchline and deserves the full frame ("most people quit right before the breakthrough") — pass the line as text and the 1–2 hit words as keywords. Framed/attributed quotes → EditorialQuote; the running transcript → a caption style.
-Props: {{ "text": "Most people quit right before the breakthrough", "keywords"?: ["quit","breakthrough"], "highlightStyle"?: "color"|"bar"|"scale", "keywordColor"?: "#FFD60A", "fontKey"?: "anton", "anchor"?: "center" }}
+Props: {{ "text": "Most people quit right before the breakthrough", "keywords"?: ["quit","breakthrough"], "highlightStyle"?: "color"|"bar"|"scale", "keywordColor"?: "#FFD60A", "fontKey"?: "anton", "anchor"?: "upper_third_safe"|"center"|"lower_third_safe" }}
 
 Also answers here: Stamp (see WHEN A CLAIM GETS A VERDICT OR STAMP) · DropCard (see WHEN STEPS OR ITEMS ARE ENUMERATED).
 
@@ -4337,7 +4349,7 @@ Props: {{ "messages": [{{"sender": "me" | "them", "text": "...", "typingMs"?: in
 Props: {{ "notifications": [{{"app": "apple-pay" | "venmo" | "stripe" | "imessage" | "instagram" | "email" | "bank", "appName": "Venmo", "title": "Sarah Lee paid you", "body": "$200 — for dinner", "timestamp"?: "now"}}, ...], "platform"?: "ios" | "android" }}
 
 **EditorialQuote** (LARGE) — a centered serif quote in italic Playfair behind a big opening quotation mark, with a tall accent left-bar and an optional author + role attribution that fades in beneath; lines reveal one at a time and the type auto-fits the frame. Claim: "Someone notable said this." Use when you're quoting a NAMED source and want the attribution shown — a guest, an author, a study ("'Most growth happens outside your comfort zone' — James Clear"). Pass the line as text and the name as author. The speaker's OWN sentence with no marks or name → PullQuote.
-Props: {{ "text": "Most growth happens outside your comfort zone", "author"?: "James Clear", "role"?: "Atomic Habits", "fontKey"?: "playfairDisplay"|"dmSerifDisplay", "showQuoteMark"?: true, "accentColor"?: "#FFD60A", "anchor"?: "center" }}
+Props: {{ "text": "Most growth happens outside your comfort zone", "author"?: "James Clear", "role"?: "Atomic Habits", "fontKey"?: "playfairDisplay"|"dmSerifDisplay", "showQuoteMark"?: true, "accentColor"?: "#FFD60A", "anchor"?: "upper_third_safe"|"center"|"lower_third_safe" }}
 
 ── WHEN THE SCREEN OR APP IS THE SUBJECT ──
 
@@ -4346,30 +4358,30 @@ Props: {{ "accentColor"?: "#hex", "showScanLine"?: bool, "scanLineColor"?: "#hex
 # Special value strings: "timestamp" = live T+N.Ns, "wordcount" = ticking count, "wpm" = words per minute
 
 **MouseDrag** (MEDIUM) — a UI cursor drags a labeled card in from off-frame and drops it into place with a settle, then arcs back out as the card dissolves away. Claim: "Watch this get dragged into place." Use to dramatize a drag-and-drop or "just drop it in" action in a product/SaaS demo or tutorial ("drag your file right here", "drop it on the canvas") — pass the card label. A static targeting box on a spot → Reticle; an arrow pointing in from elsewhere → AnnotationArrow.
-Props: {{ "label": "Drag & Drop", "cardColor"?: "#F2C211", "cardTextColor"?: "#1C1C1C", "showCursor"?: true, "anchor"?: "center" }}
+Props: {{ "label": "Drag & Drop", "cardColor"?: "#F2C211", "cardTextColor"?: "#1C1C1C", "showCursor"?: true, "anchor"?: "upper_third_safe"|"center"|"lower_third_safe" }}
 
 Also answers here: Reticle (see WHEN A REGION OF THE FRAME NEEDS POINTING AT).
 
 ── WHEN A CLAIM GETS A VERDICT OR STAMP ──
 
 **Stamp** (MEDIUM) — a circular VERIFIED-style seal (or rectangular rubber-stamp) that slams onto the frame from oversized to rest with weight: a compression-recoil bounce, a locked tilt, a flash and an expanding shock ring, then a brief settle. Single-ink — ring and text share one color. Claim: "Stamp it — this is OFFICIAL." Use when the dialogue confers a status or seal ("officially verified", "certified", "brand new") — one short word reads best. A light icon+word pop → IconLabel; an app banner → Notification.
-Props: {{ "text": "VERIFIED", "style"?: "seal"|"stamp"|"ribbon", "subtextTop"?: "OFFICIALLY", "subtextBottom"?: "AUTHENTIC", "mark"?: "star"|"check"|"none", "color"?: "#C8321F", "anchor"?: "center" }}
+Props: {{ "text": "VERIFIED", "style"?: "seal"|"stamp"|"ribbon", "subtextTop"?: "OFFICIALLY", "subtextBottom"?: "AUTHENTIC", "mark"?: "star"|"check"|"none", "color"?: "#C8321F", "anchor"?: "upper_third_safe"|"center"|"lower_third_safe" }}
 
 Also answers here: IconLabel (see WHEN SOMETHING IS NAMED OR REVEALED).
 
 ── WHEN TIME OR SEQUENCE IS THE STORY ──
 
 **Timeline** (MEDIUM) — a vertical rail of numbered station-nodes with a label card beside each; an accent fill travels node→node and a comet head rides it, each station popping active as the fill docks. Claim: "Here's the PROCESS, step by step." Use when the dialogue walks ordered stages of one journey ("first we research, then design, then build, then ship") — 2–5 named steps. A single quantity advancing toward a target → ProgressBar; unordered parallel items → StickyNotes or RankedList; a scenic winding-path version → TimelineRoadmap.
-Props: {{ "steps": [{{"label": "Research", "description"?: "Find the real problem"}}], "accentColor"?: "#hex", "anchor"?: "center" }}
+Props: {{ "steps": [{{"label": "Research", "description"?: "Find the real problem"}}], "accentColor"?: "#hex", "anchor"?: "upper_third_safe"|"center"|"lower_third_safe" }}
 
 **TimelineRoadmap** (MEDIUM) — a winding S-curve "road" of numbered stations with a comet that travels the path, each station popping active with its label + time sublabel as the comet docks (the scenic-route variant of Timeline). Claim: "Here's the journey, stage by stage." Use for a phased roadmap where a flowing path suits the story better than a straight rail — plans with time sublabels ("Discovery — Week 1 → Launch — Week 6"), 3–5 stations. A straight node-to-node process rail → Timeline; a single advancing quantity → ProgressBar.
-Props: {{ "steps": [{{"label": "Discovery", "sublabel"?: "Week 1"}}, {{"label": "Launch", "sublabel"?: "Week 6"}}], "accentColor"?: "#hex", "anchor"?: "center" }}
+Props: {{ "steps": [{{"label": "Discovery", "sublabel"?: "Week 1"}}, {{"label": "Launch", "sublabel"?: "Week 6"}}], "accentColor"?: "#hex", "anchor"?: "upper_third_safe"|"center"|"lower_third_safe" }}
 
 **StepDivider** (LARGE) — a full-frame step card: a "STEP 2 / 05" kicker, a giant title, and a segmented progress bar filled to the current step. Claim: "We're on step N of the process." Use when the script advances through a NUMBERED sequence and you want each beat marked with its position ("Step two: build the offer") — pass step and totalSteps so the bar tracks. A one-off chapter/part header with no running count → SectionDivider; the whole multi-step process on one rail → Timeline.
-Props: {{ "title": "Build the\\nOffer", "step": 2, "totalSteps": 5, "kicker"?: "STEP", "showProgress"?: true, "fontKey"?: "anton"|"oswald", "accentColor"?: "#4F9DF7", "anchor"?: "center" }}
+Props: {{ "title": "Build the\\nOffer", "step": 2, "totalSteps": 5, "kicker"?: "STEP", "showProgress"?: true, "fontKey"?: "anton"|"oswald", "accentColor"?: "#4F9DF7", "anchor"?: "upper_third_safe"|"center"|"lower_third_safe" }}
 
 **SectionDivider** (LARGE) — a full-frame chapter card: an eyebrow kicker and a giant index over an accent rule, with the big title unfolding line-by-line from behind the line; optional dark scrim. Claim: "A new section starts here." Use when the script hits a clear chapter or segment boundary ("Part one: the setup", "Step two"). An attributed framed card → EditorialQuote; the speaker's huge sentence → PullQuote; a numbered running step → StepDivider.
-Props: {{ "title": "The\\nBreakthrough", "label"?: "PART ONE", "number"?: "01", "fontKey"?: "anton"|"dmSerifDisplay", "variant"?: "full"|"band", "accentColor"?: "#hex", "anchor"?: "center" }}
+Props: {{ "title": "The\\nBreakthrough", "label"?: "PART ONE", "number"?: "01", "fontKey"?: "anton"|"dmSerifDisplay", "variant"?: "full"|"band", "accentColor"?: "#hex", "anchor"?: "upper_third_safe"|"center"|"lower_third_safe" }}
 
 Also answers here: ProgressBar (see WHEN A NUMBER LANDS).
 
@@ -4379,7 +4391,7 @@ Also answers here: ProgressBar (see WHEN A NUMBER LANDS).
 Props: {{ "start": {{"x": 0.0-1.0, "y": 0.0-1.0}}, "end": {{"x": 0.0-1.0, "y": 0.0-1.0}}, "pathType"?: "straight" | "curved-arc" | "j-shape" | "custom", "customPath"?: "M ...", "color"?: "#hex", "strokeWidth"?: number }}
 
 **Reticle** (SMALL) — HUD corner-brackets that snap onto a small rectangular region with an overshoot lock, a brief acquiring wobble, an inner scan sweep, and a monospace tag that slides in after lock. Claim: "Lock onto THIS exact spot." Use when the speaker points at a localized thing on screen ("look right here", "see this button") and you want a targeting callout around it. Full-frame recording chrome → RecordingFrame; an arrow pointing in from elsewhere → AnnotationArrow.
-Props: {{ "label"?: "LOCK", "regionWidth"?: 620, "regionHeight"?: 720, "accentColor"?: "#36E27A", "bracketColor"?: "#FFFFFF", "showScanline"?: true, "showCrosshair"?: false, "anchor"?: "center"|"upper_third_safe"|"lower_third_safe", "offsetX"?: int, "offsetY"?: int }}
+Props: {{ "label"?: "LOCK", "regionWidth"?: 620, "regionHeight"?: 720, "accentColor"?: "#36E27A", "bracketColor"?: "#FFFFFF", "showScanline"?: true, "showCrosshair"?: false, "anchor"?: "upper_third_safe"|"center"|"lower_third_safe", "offsetX"?: int, "offsetY"?: int }}
 
 Also answers here: MouseDrag (see WHEN THE SCREEN OR APP IS THE SUBJECT).
 
@@ -4467,14 +4479,17 @@ THE 7 ZOOM TYPES
 === SOUND EFFECTS ===
 ═══════════════════════════════════════════════════════════════════════════
 
-An SFX puts a tactile peak under a moment the viewer is ALREADY watching land. When the visual and the sound share a beat, they register as one event larger than either; when the sound fires with nothing visible happening, it lands as random audio. **Every SFX needs a discrete visual partner on its trigger word** — a zoom locking, an MG dropping, a transition firing, a B-roll cutting in, an overlay revealing. A visual partner is a discrete on-screen event — a zoom, an MG, a B-roll entry; captions run regardless and the speaker simply talking is the baseline state, so the partner comes from the event layer.
+A sound effect gives a CONTENT beat physical weight — the number that costs something, the claim that stops the scroll, the payoff word. It lands where the viewer's ear should flinch, on the word that earns it.
 
-Three checks, all required:
-  1. **Visual partner** — what does the viewer SEE happen on this exact word?
-  2. **Verbs over nouns, content over function** — the trigger is the word where a listener with eyes closed would expect that sound. "She *called* me" earns a ding on `called`; "your wife's on the *phone*" doesn't earn one on `phone`. That word is almost always one the speaker leans on — a verb, a name, a number, the stressed noun. The trigger word is a stressed content word the voice leans on — function words the voice skates over (`a`, `the`, `to`, `of`, `is`, `and`, `it`) lack a beat of their own, so a sound there fires a half-step off the moment even with a visual nearby. When the beat you want sits next to such a word, the trigger is the stressed word the visual actually lands on, not the little word beside it.
-  3. **Tonal match** — even when the word literally matches, the register must carry the sound's character. A real failure in a serious story is honored by silence — wompwomp belongs to comic beats that invite the joke.
+**Density is the physics of impact.** A sound lands against the quiet around it — the boom works because the two seconds before it carried nothing. When every event has a sound, the ear stops hearing sounds: it hears texture, and texture is noise. The count falls out of the footage's real beats — the claims, numbers, names, and turns the dialogue actually lands — never from coverage.
 
-Every sound is the audio face of a visual beat — its why names the beat. A sound whose why names no moment stays in the rack. SFX count is downstream of the visual track: roughly one SFX per visual event with the right character — the count falls out of the visual track you actually placed, not a quota. SFX land on event words — breather words keep their quiet; the pause is the point. Pick flavor by the partner's arc position: hook events → gripping (swoosh-sound-effects, punchsfx, popsfx) · build events → ambient (transition-sfx, popsfx, mouse-click-sound, iphoneding) · mid_peak events → punctuating (punchsfx, popsfx, iphoneding, money-ching) · the payoff event → committing (boom — the one moment to lean heavier) · close → echo the hook's SFX at lower intensity, or nothing.
+**The edit's own machinery does not need foley.** A zoom, a stat card, an overlay entering — these are visual events; they carry themselves. A sound whose why annotates the edit ("rides the overlay", "hits the transition", "click on the zoom") is foley for machinery, and when the machinery plays quietly the sound fires against nothing. The one exception is a signature pairing the style genuinely calls for: ONE sound riding ONE transition that renders large — chosen, not systematic.
+
+Two checks on every sound you do place:
+  1. **Content trigger** — the trigger is the word where a listener with eyes closed would expect that sound. "She *called* me" earns a ding on `called`; "your wife's on the *phone*" doesn't earn one on `phone`. That word is almost always one the speaker leans on — a verb, a name, a number, the stressed noun. Function words the voice skates over (`a`, `the`, `to`, `of`, `is`, `and`, `it`) lack a beat of their own — when the beat you want sits next to such a word, the trigger is the stressed word the moment actually lands on.
+  2. **Tonal match** — even when the word literally matches, the register must carry the sound's character. A real failure in a serious story is honored by silence — wompwomp belongs to comic beats that invite the joke.
+
+SFX land on event words — breather words keep their quiet; the pause is the point. Pick flavor by the beat's arc position: hook beats → gripping (swoosh-sound-effects, punchsfx, popsfx) · build beats → ambient (transition-sfx, popsfx, mouse-click-sound, iphoneding) · mid_peak beats → punctuating (punchsfx, popsfx, iphoneding, money-ching) · the payoff beat → committing (boom — the one moment to lean heavier) · close → echo the hook's sound at lower intensity, or nothing.
 
 Entry shape: {{ "word_index": int, "sound": <name> }}. Timing derives from the word — every sound is trimmed to a zero-silence onset, so it fires right on its trigger word; no offsets to compute.
 
