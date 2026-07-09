@@ -3720,7 +3720,7 @@ AUDIO PROFILE
 SHOT CHANGES (source seconds)
   {_shots_display}
 
-  These are source-time moments where the FOOTAGE already contains a hard cut. The pipeline classifies each detected shot change by its audio gap: with handle room it lands in CUT BOUNDARIES (a transition slot); without, it lands in TIGHT BOUNDARIES tagged SCENE CHANGE (most do). The boundary lists shown later are the canonical placement indices. The raw seconds above are context for emphasis placement: a StepZoom or SmoothPush on a word that coincides with a shot change reads cleanly because the camera move lands as the new shot enters.
+  These are the seams where the CAMERA CUT — the footage's own hard cuts, the picture changes in this video. Each one surfaces in the boundary lists below carrying the SCENE CHANGE tag: with handle room it lands in CUT BOUNDARIES (a transition slot), without it lands in TIGHT BOUNDARIES, either way tagged SCENE CHANGE. **THESE ARE THE HOMES FOR TRANSITIONS.** A SCENE CHANGE-tagged boundary is a picture change, and a picture change is what a transition rides — walk this list (plus your own B-roll entry/exit edges, which are picture changes on equal footing) and decide each one (see HOW TO PLACE TRANSITIONS). They are ALSO context for emphasis: a StepZoom or SmoothPush on a word that coincides with a shot change reads cleanly because the camera move lands as the new shot enters. Transition first, then emphasis — but both key off this list, because this is the only place the picture actually turns.
 
 VOCAL EMPHASIS PEAKS (source seconds, score 0-1)
   {_vocal_display}
@@ -4580,32 +4580,34 @@ When a picture change lands on a punchline or a hard beat — a reveal, an escal
 THE {_n_transitions} TRANSITIONS
 ──────────────────────────────────────────
 
-**CardSwipe** — clip A swipes off with 3D tilt like dismissing an app card; B rises from behind. ~0.4s, light, mobile-gesture DNA. The casual pivot — the speaker shrugged and moved on. Props: {{ "direction": "left" | "right" }}
+Every type below reads the same way: a PICTURE CHANGE is what it rides — a picture change makes a transition the strong default and most are better for one; the beat under it decides which type, OR whether the seam is sharper as a bare cut (a punchline / snap of recognition wants the abruptness itself). It is the treatment a picture change wears when the beat beneath it calls for it.
 
-**ZoomThrough** — A scales up past the camera; B emerges small and grows. ~0.4s, forward-rushing. ACCELERATION made visible — setup→payoff boundaries, explanation→demonstration, the cut into the most committed beat.
+**CardSwipe** — a picture change on a casual pivot wants the swipe: clip A tilts off like dismissing an app card, B rises from behind. The speaker shrugged and moved on. Needs the audio handle, so it rides CUT-boundary picture changes. Props: {{ "direction": "left" | "right" }}
 
-**SlideOver** — B slides over A with contact shadow; A shifts and scales down behind. ~0.4s, clean editorial. The structured chapter shift — explainers, chaptered talking-head. Props: {{ "direction": "left" | "right" }}
+**ZoomThrough** — a picture change accelerating into the payoff wants the rush: A scales up past the camera, B emerges small and grows. Setup→demonstration, the cut into the most committed beat. Needs the audio handle, so it rides CUT-boundary picture changes.
 
-**Stack** — full iOS task-switcher: A shrinks to a card and slides off; B comes forward from the stack. ~0.4s. Context-switching where iOS visual language IS the topic — phone/app demos. Elsewhere it reads as costume.
+**SlideOver** — a picture change at a structured chapter turn wants the slide: B slides over A with a contact shadow, A shifts and scales down behind. Clean editorial — explainers, chaptered talking-head. Needs the audio handle, so it rides CUT-boundary picture changes. Props: {{ "direction": "left" | "right" }}
 
-**CrossfadeZoom** — A zooms in and fades; B fades in zooming out; opposite motion shared for a beat. ~0.4s, premium dissolve. "Time passed." Sentimental bridges, documentary, emotional beats. Accepts image paths (jpg/png/webp) for either clip.
+**Stack** — a picture change into a phone or app demo wants the task-switcher: A shrinks to a card and slides off, B comes forward from the stack. Where iOS visual language IS the topic; elsewhere it reads as costume. Needs the audio handle, so it rides CUT-boundary picture changes.
 
-**ShutterFlash** — CRT power-off/on: A collapses to a beam, to a dot, then B expands back. ~0.4s. The snap-cut where the cut ITSELF is the visual event — gaming, retro-tech, punchline flashes. Props: {{ "flashColor": "#ffffff" }} (colored flashes read music-video)
+**CrossfadeZoom** — a picture change that lands on an emotional beat wants the dissolve: the frames blend and the feeling carries across the seam. Sentimental bridges, documentary, "time passed". Needs the audio handle, so it rides CUT-boundary picture changes. Accepts image paths (jpg/png/webp) for either clip.
 
-**StepPush** — Keynote-style slide push, both panels traveling together, cubic ease. ~0.4s, presentation grammar. Structured panels — how-to, business, training. Props: {{ "direction": "left" | "right" | "up" | "down", "separatorShadow": bool }}
+**ShutterFlash** — a picture change where the cut itself should be the event wants the snap: A collapses to a beam, to a dot, then B expands back. Gaming, retro-tech, a punchline flash. The HEAVY version — audio drops out under it and the cut halts the video for a beat; reach for it when the picture change should stop everything. (For a light accent with the audio playing straight through, use the ShutterFlash tight-cut overlay below.) Zero-handle, so it sits on either boundary list. Props: {{ "flashColor": "#ffffff" }} (colored flashes read music-video)
 
-**FilmStrip** — A morphs into a small tile; a film strip scrolls one position to reveal B; B expands to full. ~0.4-0.6s, gallery feel. "Next item in the curated collection" — portfolios, "5 things I made". Props: {{ "caption": "Project 1", "showBookmark": bool, "showGrid": bool, "advanceFrames": 1 }}
+**StepPush** — a picture change between structured panels wants the push: both panels travel together, cubic ease, presentation grammar. How-to, business, training. Needs the audio handle, so it rides CUT-boundary picture changes. Props: {{ "direction": "left" | "right" | "up" | "down", "separatorShadow": bool }}
 
-**DipToBlack** (~700ms) — the frame breathes to black and returns. The heaviest pause in the vocabulary: an act ending, a held beat before the turn, the inhale ahead of the payoff. Zero-handle — it sits on cut or tight boundaries alike, trading darkness for handle. It lands where the footage genuinely holds that weight — as many of those beats as the video actually contains, and none where the gravity isn't there.
+**FilmStrip** — a picture change to the next item in a curated collection wants the strip: A morphs into a small tile, a film strip scrolls one position to reveal B, B expands to full. Portfolios, "5 things I made". Needs the audio handle, so it rides CUT-boundary picture changes. Props: {{ "caption": "Project 1", "showBookmark": bool, "showGrid": bool, "advanceFrames": 1 }}
+
+**DipToBlack** (~700ms) — a picture change closing an act wants the blackout: the screen goes dark and the chapter is over. The heaviest pause in the vocabulary — an act ending, a held beat before the turn, the inhale ahead of the payoff. Zero-handle, so it sits on either boundary list.
 
 ═══════════════════════════════════════════════════════════════════════════
 === THE 2 TIGHT-CUT OVERLAYS ===
 ═══════════════════════════════════════════════════════════════════════════
 
-A tight-cut overlay is punctuation ON a hard splice — it plays across the cut, substituting a flash of its own energy for the audio handle the boundary lacks.
-**LightLeak** — a warm bloom washing over the cut, ~180ms. The reflective register: a quiet realization landing, a takeaway arriving, a hook-to-close callback. Reads like memory.
-**ShutterFlash** — a white camera-flash snap. The high-energy register: the escalation after a setup, a surprise pivot, the exact frame a stat or punchline lands on.
-Each carries a why naming its moment; rotating types across the ones you place keeps them reading as vocabulary.
+A tight-cut overlay is punctuation on a picture change that landed on a handle-less cut — a SCENE-CHANGE tight boundary, where a crossfade can't fit. It plays across the cut, substituting a flash of its own energy for the audio handle the boundary lacks. As with the transitions: the picture change decides WHETHER; the beat under it decides WHICH.
+**LightLeak** — a picture change on a reflective beat wants the warm bloom, ~180ms: a quiet realization landing, a takeaway arriving, a hook-to-close callback. Reads like memory.
+**ShutterFlash** — a picture change on a high-energy beat wants the white flash: the escalation after a setup, a surprise pivot, the exact frame a stat or punchline lands on. The LIGHT version (~180ms) — audio plays straight through and the flash only accents the cut, energy still moving. (When the cut itself should be the event with the audio dropping out, use the full ShutterFlash transition above.)
+Each carries a why naming the picture change it rides; rotating types across the ones you place keeps them reading as vocabulary.
 
 ═══════════════════════════════════════════════════════════════════════════
 === GLOBAL FIELDS ===
@@ -7485,14 +7487,19 @@ _FRAME_ACTIVITY_LAST: list = []  # (t_s, score) per-frame motion timeline from t
 # all straight cuts. This is how the pipeline works now; the env var
 # TRANSITION_SCENE_GATE_ENABLED remains ONLY as a kill-switch (set "0" to disable).
 _TRANSITION_SCENE_GATE: bool = True
-# LOG-AND-PASS mode (Zac 2026-07-08): while we MEASURE whether the picture-change
-# teaching landed, the gate is an INSTRUMENT, not an enforcer. It still RUNS (records
-# every proposed transition + whether it sits on a qualifying picture change), but it
-# does NOT rewrite Gemini's editorial output — off-boundary transitions pass through
-# and render. ENFORCE=False = log-and-pass (measure). Flip to True to restore the
-# drop-to-hard-cut behavior once the spread decides (zero off-boundary → remove the
-# gate entirely; off-boundary → fix the PROMPT, not the output).
-_TRANSITION_SCENE_GATE_ENFORCE: bool = False
+# ENFORCING in prod (Zac 2026-07-08 STEP 1): the gate DROPS off-boundary transitions to
+# hard cuts before render AND records every proposal (the instrument runs regardless of
+# enforce). This is what lets the transition rewrite ship today — unlanded teaching
+# (Gemini placing 16-43 words off the real seams at content beats, measured) cannot reach
+# a user render. Flipped to False ONLY for a log-and-pass census; the gate is DELETED (not
+# left False) the moment a clean multi-seam census on ridable seams earns its removal.
+_TRANSITION_SCENE_GATE_ENFORCE: bool = True
+# CUT-REFINEMENT 25% CAP — LOG-AND-PASS (Zac 2026-07-08 TIER 0): the cap dropped
+# Gemini's LARGEST cut-pass ranges (biggest, most deliberate cuts) to hold total
+# refinement removal under 25% of kept words. It is a taste ceiling, not physics, and
+# every dead-air observation this session passed through it. ENFORCE=False = record the
+# would-drop (grep [cut-refine-measure]) but keep every range. Flip True to re-enforce.
+_CUT_REFINE_CAP_ENFORCE: bool = False
                                  # from the most recent detect_dead_air run in
                                  # this process; the clip builder reads them to
                                  # snap dead-air incoming boundaries to true
@@ -8354,6 +8361,50 @@ def _record_divergence(component, original, action, *, final=None, reason=""):
         f"reason={reason} original={_orig} final={_final}",
         flush=True,
     )
+    # LEDGER (Zac 2026-07-08): the print above goes to a void — a divergence is not
+    # queryable across renders, so no overrule's fire rate can be read (the same failure
+    # as the scene-gate). Accumulate a structured record here; the handler flushes the
+    # per-job ledger to S3 so `component`+`action` become greppable at scale. Best-effort,
+    # never raises into the render.
+    try:
+        _DIVERGENCE_LOG.append({
+            "component": component, "action": action, "reason": reason,
+            "original": original, "final": final, "t": time.time(),
+        })
+    except Exception:
+        pass
+
+
+# Per-job divergence accumulator — cleared at handler entry, flushed to S3 at teardown.
+_DIVERGENCE_LOG: list = []
+
+
+def _flush_divergence_ledger(job_id):
+    """Persist this job's accumulated divergences to S3 as JSONL so the overrule spine
+    is QUERYABLE by component+action across renders (not print-to-void). Best-effort:
+    any failure is logged and swallowed — the render already succeeded."""
+    try:
+        if not _DIVERGENCE_LOG or not job_id or _aws_s3_client is None:
+            return
+        _bucket = (os.environ.get("S3_BUCKET_NAME")
+                   or os.environ.get("SUPABASE_S3_BUCKET") or "promptly-video-storage")
+        _body = "\n".join(
+            json.dumps(_d, separators=(",", ":"), default=str) for _d in _DIVERGENCE_LOG)
+        _key = f"divergences/{job_id}.jsonl"
+        _aws_s3_client.put_object(
+            Bucket=_bucket, Key=_key, Body=_body.encode("utf-8"),
+            ContentType="application/x-ndjson")
+        # A compact by-(component,action) tally on the same line for quick grep.
+        from collections import Counter as _Ctr
+        _tally = _Ctr((_d["component"], _d["action"]) for _d in _DIVERGENCE_LOG)
+        print(
+            f"[divergence-ledger] persisted {len(_DIVERGENCE_LOG)} divergence(s) -> "
+            f"s3://{_bucket}/{_key} | by_component_action="
+            f"{ {f'{c}:{a}': n for (c, a), n in _tally.most_common()} }",
+            flush=True,
+        )
+    except Exception as _e:
+        print(f"[divergence-ledger] persist failed (non-fatal): {_e}", flush=True)
 
 
 # EXPRESSIVE features, in the order they read in the enforcement log.
@@ -8885,6 +8936,26 @@ def generate_edit_gemini(
             else:
                 _tight_boundary_indices.append(_ni)
 
+        # SEAM DIAGNOSTIC (Zac 2026-07-08): per scdet SHOT-CHANGE boundary, its SOURCE
+        # audio gap (kept_words carries raw transcript times — this is the gap BEFORE any
+        # dead-air/clip trim) + CUT/TIGHT class + what a transition can physically wear
+        # there. Distinguishes (a) CUT-but-Gemini-didn't-select from (b) TIGHT-in-source
+        # (the calm zero-handle gap) from (c) our-render-trim-removed-a-handle-that-existed.
+        for _sni in sorted(_shot_boundary_set):
+            _sgap = _audio_gap_at_boundary(_sni)
+            _scls = "CUT" if _sgap >= _trans_dur_for_filter else "TIGHT"
+            _wb = (kept_words[_sni].get("punctuated_word") or kept_words[_sni].get("word")
+                   if 0 <= _sni < len(kept_words) else "?")
+            _wa = (kept_words[_sni + 1].get("punctuated_word") or kept_words[_sni + 1].get("word")
+                   if 0 <= _sni + 1 < len(kept_words) else "?")
+            print(
+                f"[seam-diag] scdet_ni={_sni} source_gap_ms={int(round(_sgap * 1000))} "
+                f"class={_scls} threshold_ms={int(round(_trans_dur_for_filter * 1000))} "
+                f"placeable={'crossfade-family + zero-handle' if _scls == 'CUT' else 'zero-handle only (ShutterFlash/DipToBlack)'} "
+                f"after_word={_wb!r} next_word={_wa!r}",
+                flush=True,
+            )
+
         # Divergence log — every tight boundary is named, with its gap and
         # which detector surfaced it. One grep finds them all.
         for _ni in _tight_boundary_indices:
@@ -9043,7 +9114,7 @@ Indices below are the NEW kept-only space [0..{_kept_count - 1}]. Every word_ind
 
   {_cut_boundary_block}
 
-=== TIGHT BOUNDARIES (real cuts with no audio handle — crossfade transitions cannot fit here, but zero-handle transitions (ShutterFlash / DipToBlack) can, and `tight_cut_overlay` decorations can. Each is tagged SCENE CHANGE (the shot actually changed — a picture change) or pause (a silence-only splice inside one continuous shot). The tag tells you what the seam IS. A SCENE CHANGE is a picture change: the shot moved, and this is the home for punctuation — a zero-handle transition or an overlay rides it when the moment landing there is a reveal, an escalation, or a callback, and the treatment tells the viewer this is where the picture turned. A pause is the same shot on both sides with dead air removed; the hard cut owns it, the eye follows the cut and the momentum holds. A small mask zoom on the first word after a scene-change cut carries the eye across the jump — mask zooms serve the boundary and live outside the key_moments ledger. Vary types across the decorations you do place. See HOW TO PLACE TRANSITIONS and HOW TO PLACE TIGHT-CUT OVERLAYS below.) ===
+=== TIGHT BOUNDARIES (real cuts with no audio handle. Each is tagged SCENE CHANGE (the shot actually changed — a picture change) or pause (a silence-only splice inside one continuous shot). The tag tells you what the seam IS and what it wears. A SCENE CHANGE here is a picture change with no handle to blend across — so its treatment is the zero-handle family: a tight-cut overlay (LightLeak / the light ShutterFlash, ~180ms, audio plays straight through — the calm, everyday answer), or a heavy zero-handle transition (DipToBlack / the heavy ShutterFlash) when the beat carries that weight, or a bare cut when the beat snaps on a punchline. A crossfade needs a wider gap and belongs on a CUT boundary — do NOT move one here; take the zero-handle family that fits. A pause is the same shot on both sides with dead air removed; the hard cut owns it, the eye follows the cut and the momentum holds. A small mask zoom on the first word after a scene-change cut carries the eye across the jump — mask zooms serve the boundary and live outside the key_moments ledger. Vary types across the decorations you do place. See HOW TO PLACE TRANSITIONS and HOW TO PLACE TIGHT-CUT OVERLAYS below.) ===
 
   {_tight_boundary_block}
 
@@ -9055,7 +9126,19 @@ Each transition component renders at its natural duration — the cadence its ra
 
 === HOW TO PLACE TRANSITIONS ===
 
-**HARD RULE 1 — `after_word_index` MUST come from CUT BOUNDARIES or TIGHT BOUNDARIES.** Standard crossfade transitions (Stack, CardSwipe, ZoomThrough, SlideOver, CrossfadeZoom, StepPush, FilmStrip) MUST anchor on CUT BOUNDARIES — they consume audio handle for the equal-power crossfade and would audio-mush continuous speech on a tight cut. Zero-handle transitions (ShutterFlash, DipToBlack) MAY anchor on EITHER list — their renderers substitute silence for the audio mix at peak and don't need handle frames. A transition at any non-boundary index has no cut to play across and the renderer will not produce it. The validator hard-rejects a crossfade type on a tight boundary.
+**THE PROCEDURE — walk the picture changes. Do NOT scan the dialogue for a place to put a transition.** The picture change is what you ITERATE OVER; the beat is a PROPERTY of it. Run this in order:
+  1. **Build the candidate list.** Every picture change in this video, and only these: each SHOT CHANGES entry (it appears in the boundary lists carrying the SCENE CHANGE tag) plus each of YOUR OWN B-roll entry/exit edges. Nothing else is a candidate. A talking-head with no shot changes and no B-roll has an EMPTY list → zero transitions, and that is the right answer.
+  2. **Walk it.** For EACH picture change on that list, read the beat sitting under it — the dialogue at that exact seam. What turn is it: a chapter shift, an acceleration into a payoff, an emotional bridge, a punchline?
+  3. **Decide the seam — the HANDLE picks the family, the beat picks the type.** Read the seam's audio handle (its boundary entry shows the gap, e.g. `820ms gap`), then take the family that FITS it:
+     - **≥700ms handle → crossfade family.** There is room to blend frames. Pick the crossfade the beat wants (CardSwipe, ZoomThrough, SlideOver, Stack, CrossfadeZoom, StepPush, FilmStrip — see THE TRANSITIONS above). Emit it in `transitions`.
+     - **Tight (under 700ms, no handle) → zero-handle family.** No room to blend, and that is fine — the seam still gets a treatment. The calm, everyday answer is a tight-cut OVERLAY (emit in `tight_cut_overlays`: LightLeak or the light ShutterFlash, ~180ms, audio plays straight through — see HOW TO PLACE TIGHT-CUT OVERLAYS). When the beat carries real weight, a heavy zero-handle transition instead (emit in `transitions`: DipToBlack or the heavy ShutterFlash). **The overlay IS the transition treatment for a tight seam — it is the same decision made at the same seam, not a separate section you visit independently.**
+     - **Punchline on the seam → bare cut.** When the picture change lands on a snap or a reveal, the abruptness IS the beat — leave it a clean hard cut, deliberately.
+     Every picture change gets exactly one of these. **There is no seam with nothing to wear, so a tight gap is NEVER a reason to move a transition off its seam to hunt for room — if the gap is tight you change the FAMILY, not the location.**
+  4. **Name it.** In the `why`, name the PICTURE CHANGE you rode — the shot-change second or the B-roll edge you crossed. If your `why` names a content moment ("out of the hook", "into the reveal", "the spec finale") instead of a picture change, you scanned the dialogue and chased a beat — that is the exact mistake this procedure exists to prevent. There is no step where you find a punchy content moment and go looking for a boundary near it. You look at a picture change and decide what it wears.
+
+You already do this correctly for your own B-roll edges — you know where you put a cutaway, so you ride its edge. Do it for the SHOT CHANGES entries too: those are picture changes you did not author, and they need the same walk. The list is the driver, every time.
+
+**HARD RULE 1 — the family must match the handle; `after_word_index` comes from CUT or TIGHT BOUNDARIES.** This is step 3's fork stated as physics. A crossfade (Stack, CardSwipe, ZoomThrough, SlideOver, CrossfadeZoom, StepPush, FilmStrip) blends frames across the cut, so it needs a CUT boundary's handle (≥700ms gap) — the validator rejects a crossfade on a tight boundary because there are no frames to blend, not to punish the choice. A tight seam takes the zero-handle family instead: a zero-handle transition (ShutterFlash, DipToBlack — either list) or a tight-cut overlay, both of which substitute their own energy for the missing handle. A transition at any non-boundary index has no cut to play across and the renderer will not produce it. The handle decides the family; the beat decides the type.
 
 **HARD RULE 2 — the transition's natural duration must fit the boundary's gap.** Each CUT BOUNDARIES entry shows its available audio gap (`820ms gap`). A transition fits when its natural duration ≤ gap/2. If you want FilmStrip (1200ms natural) at a boundary annotated `1600ms gap`, that does NOT fit (need ≥ 2400ms gap). Match the transition's weight to both the dialogue's shift AND the available room — the moment earns the transition, the gap only sets which weights fit; the long heavy types (FilmStrip, Stack) are the ones a genuine chapter turn with a long pause can carry.
 
@@ -9065,7 +9148,7 @@ Each transition component renders at its natural duration — the cadence its ra
 
 **Place transitions where the picture turns and the moment earns it.** A transition lands on a picture change — a shot change or a cutaway edge; mid-shot boundaries where the dialogue carries unbroken across the cut (same verb-subject continuing) stay bare, letting the speaker finish the thought clean.
 
-For each chosen `after_word_index`, pick a transition `type` whose character matches the dialogue's shift at that boundary (ZoomThrough, CardSwipe, ShutterFlash, SlideOver, CrossfadeZoom, FilmStrip, Stack, StepPush). Vary the type across emitted transitions — repeating the same type at adjacent boundaries reads as templating.
+For each picture change you're riding (step 3), the `after_word_index` is that boundary's index, and the `type` is the one whose character matches the beat under it (ZoomThrough, CardSwipe, ShutterFlash, SlideOver, CrossfadeZoom, FilmStrip, Stack, StepPush). Vary the type across emitted transitions — repeating the same type at adjacent picture changes reads as templating.
 
 **Zero-handle transition vs `tight_cut_overlay` — same effect family, different editorial weight, one per boundary.** ShutterFlash exists both as a zero-handle TRANSITION on tight boundaries AND as a `tight_cut_overlay` decoration (LightLeak exists only as an overlay; DipToBlack only as a transition). They are NOT interchangeable: a `tight_cut_overlay` is LIGHT (~180ms), audio plays through unaltered, video plays through unaltered, decoration paints on top. A zero-handle transition is HEAVY (350-1200ms), audio goes silent under the transition window, video animation dominates the cut. A zero-handle transition on a tight cut is the heavy pick — it belongs where the dialogue's shift is big enough that you want the cut itself to be the editorial event. The boundaries that genuinely carry that weight are the ones that take it, as many as the footage turns up; the lighter overlay carries the rest, and reaching for the heavy treatment where the shift doesn't earn it reads as dramatic templating. **Each boundary takes one decoration — a transition or a tight_cut_overlay; the validator holds the one-per-boundary line, so the single pick is the recipe that ships.**
 
@@ -9451,20 +9534,67 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                         )
                         continue
                     _ranges.append((_ra, _rb, _rr))
-                # 25% cap: drop LARGEST ranges first
+                # 25% cap — LOG-AND-PASS (Zac 2026-07-08 TIER 0): record what the cap
+                # WOULD drop (largest ranges first) but keep every range unless enforcing.
+                # The [cut-refine-measure] line is what the drop-rate sweep greps.
                 _cap = int(0.25 * _n_kept_words)
                 _total = sum(_rb - _ra + 1 for _ra, _rb, _ in _ranges)
-                if _total > _cap:
-                    _ranges.sort(key=lambda t: (t[1] - t[0]), reverse=True)
-                    while _ranges and _total > _cap:
-                        _ra, _rb, _rr = _ranges.pop(0)
-                        _total -= (_rb - _ra + 1)
+                _pct = (100.0 * _total / _n_kept_words) if _n_kept_words else 0.0
+                _fires = _total > _cap
+                _all_ranges_pre = list(_ranges)   # before any enforce removal
+
+                def _rng_secs(_ra, _rb):
+                    try:
+                        _s = float(kept_words[_ra].get("start") or 0.0)
+                        _e = float(kept_words[_rb].get("end") or 0.0)
+                        return round(_s, 2), round(max(0.0, _e - _s), 3)
+                    except Exception:
+                        return None, None
+                _would_drop = []
+                if _fires:
+                    _t = _total
+                    for _rng in sorted(_ranges, key=lambda t: (t[1] - t[0]), reverse=True):
+                        if _t <= _cap:
+                            break
+                        _would_drop.append(_rng)
+                        _t -= (_rng[1] - _rng[0] + 1)
+                    for _ra, _rb, _rr in _would_drop:
                         _record_divergence(
                             "cut_refinements", {"kept_range": [_ra, _rb], "reason": _rr},
-                            "over_cap",
+                            "over_cap" if _CUT_REFINE_CAP_ENFORCE else "over_cap_logpass",
                             reason=f"total refinement removal exceeded 25% of kept "
-                                   f"words ({_cap}) — largest ranges dropped first",
+                                   f"words ({_cap}) — largest ranges "
+                                   f"{'dropped' if _CUT_REFINE_CAP_ENFORCE else 'KEPT (log-and-pass)'} first",
                         )
+                    if _CUT_REFINE_CAP_ENFORCE:
+                        for _rng in _would_drop:
+                            _ranges.remove(_rng)
+                # Per-range detail (Zac 2026-07-08): duration + position + Gemini's why for
+                # every would-drop range, kept ranges' durations beside them (the ordering
+                # effect — did the cap eat the biggest cuts?), and proposed vs surviving seconds.
+                _total_s = round(sum((_rng_secs(_ra, _rb)[1] or 0.0) for _ra, _rb, _ in _all_ranges_pre), 3)
+                _wd_detail = [{"range": [_ra, _rb], "start_s": _rng_secs(_ra, _rb)[0],
+                               "dur_s": _rng_secs(_ra, _rb)[1], "why": _rr}
+                              for _ra, _rb, _rr in _would_drop]
+                _wd_s = round(sum((d["dur_s"] or 0.0) for d in _wd_detail), 3)
+                _kept_pre = [r for r in _all_ranges_pre if r not in _would_drop]
+                print(
+                    f"[cut-refine-measure] fired={_fires} total_removed_words={_total} "
+                    f"cap={_cap} pct_of_kept={_pct:.1f}% n_ranges={len(_all_ranges_pre)} "
+                    f"would_drop_ranges={len(_would_drop)} enforce={_CUT_REFINE_CAP_ENFORCE}",
+                    flush=True,
+                )
+                print("[cut-refine-detail] " + json.dumps({
+                    "fired": _fires, "n_ranges": len(_all_ranges_pre),
+                    "total_proposed_words": _total, "total_proposed_s": _total_s,
+                    "cap_words": _cap, "pct_of_kept": round(_pct, 1),
+                    "would_drop_s": _wd_s, "would_survive_s": round(_total_s - _wd_s, 3),
+                    "dropped_ranges": _wd_detail,
+                    "kept_ranges_dur_s": sorted(
+                        [_rng_secs(_ra, _rb)[1] for _ra, _rb, _ in _kept_pre],
+                        reverse=True),
+                    "enforce": _CUT_REFINE_CAP_ENFORCE,
+                }, default=str), flush=True)
                 for _ra, _rb, _rr in _ranges:
                     for _ki in range(_ra, _rb + 1):
                         if 0 <= _ki < len(new_to_src):
@@ -9489,11 +9619,12 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
             )
 
             # ── The `why` wire: normalize intent strings (never raise) ──────────────
-            # Every transition / overlay / MG may carry `why` (<=12 words naming the
-            # moment that asked for it). Missing why coerces to None; an over-long
-            # why truncates to 12 words. Recipe-side only — stripped before the render
-            # schemas (the transitions extras copy excludes it; the other arrays build
-            # their render specs field-by-field). recipe_eval audits the counts.
+            # Every transition / overlay / MG may carry `why` naming the moment that
+            # asked for it. Missing/empty why coerces to None. The 12-word TRUNCATION
+            # was DELETED (Zac 2026-07-08): it clipped Gemini's stated reason — the very
+            # standard we hold placements to — and recipe_eval was auditing a fragment.
+            # Recipe-side only — stripped before the render schemas, so keeping the full
+            # string costs nothing downstream.
             for _why_key in ("transitions", "tight_cut_overlays", "motion_graphics", "text_overlays", "sound_effects"):
                 for _why_e in (edit_plan.get(_why_key) or []):
                     if not isinstance(_why_e, dict):
@@ -9502,7 +9633,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                     if not isinstance(_w_val, str) or not _w_val.strip():
                         _why_e["why"] = None
                         continue
-                    _why_e["why"] = " ".join(_w_val.strip().split()[:12])
+                    _why_e["why"] = " ".join(_w_val.strip().split())
 
             # ── EditPolicy · Step 2: ENFORCEMENT (hard-zero the off EXPRESSIVE features) ─
             # The resolved policy is the AUTHORITY over Gemini's output. Applied right
@@ -16080,6 +16211,21 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
         speed_a = float(cut_a.get("speed") or 1.0)
         speed_b = float(cut_b.get("speed") or 1.0)
         n_trans = max(1, int(round(_t_after * sample_rate)))
+        # AV-DESYNC INSTRUMENT (Zac 2026-07-08): the video renders this slot as
+        # round(_t_after*fps) frames; the audio as n_trans samples. They agree ONLY when
+        # _t_after lands on a 1/fps grid (natural durations do). A clamped _t_after
+        # (min(natural, trim_tail, trim_head)) drifts. Log the per-transition step so a
+        # render's cumulative drift = sum of these. drift_step = a_samples − v_frames*800.
+        _v_slot_frames = int(round(_t_after * source_fps))
+        _v_slot_samples = int(round(_v_slot_frames * sample_rate / source_fps))
+        _drift_step = n_trans - _v_slot_samples
+        print(
+            f"[av-drift] slot ci={ci} t_after={_t_after:.6f}s v_frames={_v_slot_frames} "
+            f"v_samples={_v_slot_samples} a_samples={n_trans} "
+            f"drift_step_samples={_drift_step} drift_step_ms={_drift_step / sample_rate * 1000:.3f} "
+            f"phantom={'YES(video=hardcut,audio=crossfade)' if _v_slot_frames == 0 else 'no'}",
+            flush=True,
+        )
         c_a_end = float(cut_a["source_end"])
         c_b_start = float(cut_b["source_start"])
         _off = float(audio_stream_offset or 0.0)
@@ -22352,6 +22498,7 @@ def _quick_face_check(source_path, max_samples=8):
 
 def handler(job):
     input_data = job["input"]
+    _DIVERGENCE_LOG.clear()   # LEDGER: fresh accumulator per job (flushed in finally)
     work_dir = None
     premium_ctx = None       # Phase 1 premium scaffold (assigned at the tier fork; torn down in finally)
     _cost_meter = None
@@ -25799,6 +25946,8 @@ def handler(job):
             premium_ctx.shutdown()
         if work_dir:
             shutil.rmtree(work_dir, ignore_errors=True)
+        # LEDGER flush: persist this job's divergences so the overrule spine is queryable.
+        _flush_divergence_ledger(input_data.get("job_id"))
 
 
 # Modal entrypoint — handler() is called directly by modal_app.py

@@ -3960,16 +3960,16 @@ def _repair_demotion_path():
     # plan came back WHOLE (no raise) — the core safety property, unchanged
     assert isinstance(_out, dict) and _out.get("transitions") is not None, \
         "plan must come back whole (never raise on a placement-class conflict)"
-    # LOG-AND-PASS: the scene gate RECORDED the off-boundary transition as an
-    # instrument reading (proposed=1, off_boundary=1) rather than dropping it.
-    assert "[transition-measure]" in _log, "log-and-pass measurement summary must emit"
+    # ENFORCING in prod: the scene gate RECORDS the off-boundary transition (instrument
+    # runs regardless) AND drops it to a hard cut before render.
+    assert "[transition-measure]" in _log, "measurement summary must emit (instrument always runs)"
     assert "off_boundary=1" in _log, \
-        "the non-scene ZoomThrough must be recorded OFF-BOUNDARY (proposed, not dropped)"
+        "the non-scene ZoomThrough must be recorded OFF-BOUNDARY"
     assert "on_picture_change=0" in _log, \
         "no qualifying picture change here (no scdet/B-roll) → on_picture_change=0"
-    # the gate did NOT enforce (drop) while measuring — enforcement is dormant
-    assert "DROP (enforce)" not in _log, \
-        "log-and-pass must not drop; enforcement stays dormant while measuring"
+    # ENFORCE=True: the off-boundary transition is DROPPED to a hard cut before render.
+    assert "DROP (enforce)" in _log, \
+        "enforcing gate must DROP the off-boundary transition (unlanded teaching can't reach a render)"
 
 
 @check("safe-edit recipe: valid by construction, passes the full validation span")
@@ -4701,11 +4701,12 @@ def _transition_scene_gate():
     # blind to B-roll inserts, so the edges are added explicitly).
     assert "_scene_change_qualify = set(_shot_boundary_set) | _broll_edge_set" in _src, \
         "qualify set must be scdet shot boundaries UNION B-roll edges"
-    # LOG-AND-PASS mode (Zac 2026-07-08): while we MEASURE whether the picture-change
-    # teaching landed, the gate is an instrument — it RECORDS but does not rewrite
-    # Gemini's output. ENFORCE defaults False (off-boundary transitions pass through).
-    assert handler._TRANSITION_SCENE_GATE_ENFORCE is False, \
-        "gate must be LOG-AND-PASS while measuring (ENFORCE default False)"
+    # ENFORCING in prod (Zac 2026-07-08 STEP 1): the gate DROPS off-boundary transitions
+    # before render (unlanded teaching can't reach a user) AND records every proposal. It
+    # flips to False only for a log-and-pass census; a clean census on ridable seams then
+    # DELETES the gate entirely (never leaves it False).
+    assert handler._TRANSITION_SCENE_GATE_ENFORCE is True, \
+        "gate must ENFORCE in prod (drops off-boundary transitions); flip False only for a census"
     assert "_scene_gate_measure.append(" in _src, "log-and-pass instrument recording missing"
     assert "[transition-measure]" in _src, "measurement summary line missing"
     assert "on_picture_change=" in _src, "measurement must report on-picture-change count"
