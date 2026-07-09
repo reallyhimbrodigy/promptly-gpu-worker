@@ -3914,17 +3914,17 @@ def _handler_error_shape():
     assert "error" in res
 
 
-@check("transition on a non-scene-change tight boundary DROPS to a hard cut (scene gate, default-ON), never raises")
+@check("transition on a non-scene-change tight boundary: scene gate LOG-AND-PASS records it OFF-BOUNDARY, never drops or raises")
 def _repair_demotion_path():
     # Stubbed run of the REAL generate_edit_gemini: 12 synthetic words, word 5
     # mechanically removed → the splice after src word 4 has a 0.45s gap
     # (< 0.70s) → TIGHT. A ZoomThrough there used to raise ValueError and kill
-    # the job; then it demoted to a light overlay. Now (scene gate DEFAULT-ON,
-    # 2026-07-08): awi=4 is a plain edit-cut, NOT a scene change (no scdet source,
-    # no B-roll) → the gate DROPS it to a bare hard cut BEFORE the tight-demotion.
-    # The safety property is unchanged: never raise, plan comes back whole. The
-    # demote-to-overlay path still exists but is now reached only by a crossfade on
-    # a SCENE-CHANGE tight boundary (scdet/B-roll edge), a rarer sub-case.
+    # the job; then it demoted to a light overlay; then (enforce gate) it DROPPED.
+    # Now (LOG-AND-PASS, Zac 2026-07-08): the scene gate is an instrument — awi=4 is
+    # a plain edit-cut, NOT a scene change (no scdet source, no B-roll) → the gate
+    # RECORDS it OFF-BOUNDARY and passes it through, rewriting nothing. The safety
+    # property is unchanged: never raise, plan comes back whole. Enforcement (drop)
+    # is dormant (ENFORCE=False) while we measure the picture-change teaching.
     import contextlib as _ctx
     import copy as _copy
     import io as _io
@@ -3957,17 +3957,19 @@ def _repair_demotion_path():
         (handler.compute_mechanical_cuts, handler._call_gemini_post_cuts,
          handler._get_genai_client) = _saved
     _log = _buf.getvalue()
-    # plan came back WHOLE (no raise) — the core safety property
+    # plan came back WHOLE (no raise) — the core safety property, unchanged
     assert isinstance(_out, dict) and _out.get("transitions") is not None, \
         "plan must come back whole (never raise on a placement-class conflict)"
-    # the scene gate DROPPED the non-scene-change transition to a hard cut …
-    assert "not on a scene change" in _log, \
-        "scene gate must DROP the non-scene-change ZoomThrough (hard cut)"
-    # … and it must NOT have been demoted to a light overlay (no flash on a
-    # content cut — that's the whole point of the gate)
-    _ovl = [o for o in (_out.get("_resolved_tight_cut_overlays") or [])
-            if o.get("after_word_index") == 4]
-    assert len(_ovl) == 0, f"non-scene transition must be a bare hard cut, not an overlay: {_ovl}"
+    # LOG-AND-PASS: the scene gate RECORDED the off-boundary transition as an
+    # instrument reading (proposed=1, off_boundary=1) rather than dropping it.
+    assert "[transition-measure]" in _log, "log-and-pass measurement summary must emit"
+    assert "off_boundary=1" in _log, \
+        "the non-scene ZoomThrough must be recorded OFF-BOUNDARY (proposed, not dropped)"
+    assert "on_picture_change=0" in _log, \
+        "no qualifying picture change here (no scdet/B-roll) → on_picture_change=0"
+    # the gate did NOT enforce (drop) while measuring — enforcement is dormant
+    assert "DROP (enforce)" not in _log, \
+        "log-and-pass must not drop; enforcement stays dormant while measuring"
 
 
 @check("safe-edit recipe: valid by construction, passes the full validation span")
@@ -4583,12 +4585,19 @@ def _zone_composer_shadow():
     assert "dropped_broll" in str(r4["element_bands"].get("mg0"))
 
 
-@check("transition fold-in: single-camera content-jump magnitude named on the top per-video gap tier")
+@check("content-jump magnitude: wide single-cam jumps annotated as EMPHASIS signal (picture holds, hard cut carries), not a transition home")
 def _transition_jump_foldin():
     _src = open("handler.py").read()
     assert "_scene_turn_set" in _src and "_SCENE_TURN_FRACTION" in _src, "scene-turn tier missing"
-    assert "the footage turns here even with no camera cut" in _src, "magnitude annotation missing"
-    assert "Read the gap as the size of the content jump" in _src, "transitions magnitude prose missing"
+    # READING A (Zac 2026-07-08): the wide single-cam jump is a CONTENT jump, not a
+    # picture change — the annotation must point the energy at emphasis, not invite a
+    # transition. The old "the footage turns here" wording (READING B) is gone.
+    assert "the footage turns here even with no camera cut" not in _src, \
+        "old READING-B annotation (invites single-cam transitions) must be gone"
+    assert "the talk turns here but the picture holds" in _src, \
+        "magnitude annotation must frame the jump as content (picture holds), not a picture change"
+    assert "goes to the first word back" in _src, \
+        "annotation must route the jump's energy to emphasis (mask-zoom/caption/SFX)"
     # the floor guards a breath from being named a scene turn
     assert "_SCENE_TURN_FLOOR_S" in _src, "absolute scene-turn floor missing"
 
@@ -4676,7 +4685,7 @@ def _within_clip_deadair():
         "FINAL-word protection: the video-final word's tail must never be trimmed"
 
 
-@check("transition scene-change gate (DEFAULT-ON): live in prod, non-scene transitions DROP to hard cut (not overlay flash)")
+@check("transition scene-change gate (LOG-AND-PASS): instrument records proposed vs on-picture-change; enforce dormant while measuring the picture-change teaching")
 def _transition_scene_gate():
     import handler
     _src = open("handler.py").read()
@@ -4692,18 +4701,29 @@ def _transition_scene_gate():
     # blind to B-roll inserts, so the edges are added explicitly).
     assert "_scene_change_qualify = set(_shot_boundary_set) | _broll_edge_set" in _src, \
         "qualify set must be scdet shot boundaries UNION B-roll edges"
-    # the gate DROPS to a hard cut — must NOT route to the tight_cut_overlay flash
-    # path (the bug that would paint a flash on every content turn).
-    assert "_scene_gate_dropped_awis.append(awi)" in _src, "drop tracking missing"
+    # LOG-AND-PASS mode (Zac 2026-07-08): while we MEASURE whether the picture-change
+    # teaching landed, the gate is an instrument — it RECORDS but does not rewrite
+    # Gemini's output. ENFORCE defaults False (off-boundary transitions pass through).
+    assert handler._TRANSITION_SCENE_GATE_ENFORCE is False, \
+        "gate must be LOG-AND-PASS while measuring (ENFORCE default False)"
+    assert "_scene_gate_measure.append(" in _src, "log-and-pass instrument recording missing"
+    assert "[transition-measure]" in _src, "measurement summary line missing"
+    assert "on_picture_change=" in _src, "measurement must report on-picture-change count"
+    assert "off_boundary=" in _src, "measurement must report off-boundary count"
+    # enforcement path is preserved (dormant) so flipping ENFORCE restores the drop:
+    assert "if _TRANSITION_SCENE_GATE_ENFORCE and not _on_qual:" in _src, \
+        "dormant enforce/drop path must be preserved for post-measurement flip"
+    assert "_scene_gate_dropped_awis.append(awi)" in _src, "drop tracking (enforce path) missing"
     assert "demote_not_scene_change" not in _src, \
         "gate must DROP (hard cut), never demote to a tight_cut_overlay flash"
-    assert "not on a scene change" in _src, "gate drop log missing"
-    # the strip keeps the plan honest so SFX/timing consumers also see the hard cut
+    # the strip keeps the plan honest when enforcing (empty in log-and-pass, no-op)
     assert 'edit_plan["transitions"] = _kept_trs' in _src, \
-        "dropped transitions must be stripped from the plan"
-    # the prompt teaches PICTURE-change placement (transitions = picture, not talk)
-    assert "A transition marks a change in the PICTURE" in _src, \
-        "transition prompt must teach picture-change (not content-turn) placement"
+        "enforce-path strip must be preserved"
+    # the prompt teaches PICTURE-change placement (3-paragraph picture-change anchoring)
+    assert "A transition is the visual treatment on a PICTURE CHANGE" in _src, \
+        "transition prompt must teach picture-change anchoring (para 1)"
+    assert "The hard cut owns those splices" in _src, \
+        "transition prompt must teach hard-cut-owns-same-scene (para 2)"
 
 
 @check("face-clear coerce: caption_match never coerced to bottom (schema-invalid → render crash class killed)")

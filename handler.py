@@ -4114,6 +4114,16 @@ Doubling up dilutes: if captions show the words, an MG rendering the same words 
 **One palette across the layers.** Several of these layers carry an accent color of their own — the caption style's keyword tint, an MG's divider or arrow, a sticky note's fill. Each ships with a sensible default; when a beat lets you choose, pull that accent toward the video's committed color world rather than leaving it at the factory hue, so the emphasis tint, the MG accents, and the overlays read as one color family the viewer's eye groups together. The volumes still differ layer to layer and movement to movement — this tunes which family those colors belong to, not how loud any one of them plays.
 
 ═══════════════════════════════════════════════════════════════════════════
+=== THE INTENT STANDARD ===
+═══════════════════════════════════════════════════════════════════════════
+
+Every component here exists because it does something for the viewer. A zoom punches the moment that earned it. A caption carries the words. A transition tells the eye the video turned. A motion graphic renders the thing the speaker is pointing at off-camera. A sound effect gives a beat physical weight. An overlay says where you are.
+
+When you place one, you should be able to name what it does for the viewer at that instant. That question is the whole standard. A placement that answers it belongs on the screen; a placement that can only cite a rule is decoration, and decoration is what separates an edit that was made from an edit that was assembled.
+
+This is a standard of intent, not of scarcity. Where a moment calls for a component, place it — that is what the component is for, and a video whose moments go unserved is as broken as one whose moments are buried. Read the footage, find what each moment is doing, and give it the instrument that serves it.
+
+═══════════════════════════════════════════════════════════════════════════
 === CAPTIONS ===
 ═══════════════════════════════════════════════════════════════════════════
 
@@ -4172,7 +4182,7 @@ The most common mistake: emitting a change that moves captions INTO a zone an up
 
 A text overlay is a short editorial card on screen for 1.5-4 seconds — a hook label, a topic eyebrow, an act-break marker, three parallel items. Captions show what's being said; an overlay shows framing — two different jobs on two different layers. **An overlay's text is editorial — words about the moment; the transcript already lives in the captions.** If the candidate text duplicates what captions are about to show, rewrite it as a label ("THE NAME", "WHO?") or skip it. And if the candidate text could fit any video in this genre, rewrite it from video_identity's specifics.
 
-Overlays earn their place only at REAL structural anchors: a cold-open hook frame, a chapter eyebrow at a genuine pivot, an attributed third-party quote, three parallel items the speaker enumerates. A structural anchor is what summons an overlay — chapter turn, act shift, hook eyebrow; the anchor comes first, the overlay follows. Most videos have 0-2 such anchors.
+An overlay marks structure. It tells the viewer where they are in the video: a cold-open hook frame that names the promise, a chapter eyebrow at a genuine pivot, an attributed third-party quote, three parallel items the speaker enumerates. The anchor summons the overlay — chapter turn, act shift, hook eyebrow — so read the script for its turns, and where the video changes chapters, let the overlay say so. A video with clear structural turns wants an overlay at each one; a video that runs as one continuous thought lets the captions carry it.
 
 Geometry: captions sit at bottom, the face sits in the upper-middle band, so the upper third is the natural overlay home. Keep captions at bottom during overlay windows (see CAPTIONS procedure).
 
@@ -4188,7 +4198,7 @@ Entry shape:
 sticky_note — pins to the upper third
 ────────────────────────────────────
 Three colored square notes (~300px) pinned left/center/right; handwritten Caveat Brush, ≤4 words per note; left note carries a checkmark, center plain, right italic+underlined. Notes slam in with spring physics, staggered ~150ms.
-Use when the dialogue gives you THREE PARALLEL ITEMS of equal weight — three rules, three takeaways, "first… second… third…". Each note is a complete standalone thought; fragments of one running sentence read as a broken sentence in three boxes. Warm, casual craft texture — fits educational/process/how-to tone. Once per video; the three-note rhythm IS the moment.
+Use when the dialogue gives you THREE PARALLEL ITEMS of equal weight — three rules, three takeaways, "first… second… third…". Each note is a complete standalone thought; fragments of one running sentence read as a broken sentence in three boxes. Warm, casual craft texture — fits educational/process/how-to tone. The three-note rhythm is the moment — the stagger, the slam, the three ideas landing as one. It lands where the dialogue gives three parallel items of equal weight.
 
 Required props:
 {{
@@ -4203,8 +4213,8 @@ Required props:
 ────────────────────────────────────
 caption_match — position "top" or "center"
 ────────────────────────────────────
-A short label (≤6 words) rendered in the SAME font/style as the running captions — a structural marker that visually belongs. Topic eyebrows ("PART 1", "Q1"), brand tags, cold-open hook labels. Strongest on edits where the caption style IS the visual identity. Once per video keeps it deliberate.
-**On centered talking-head — the vast majority of footage — position is "top".** "center" covers the face; the only conditions that allow it: speaker off-camera for the whole window, face confirmed non-center by the FACE VERTICAL ZONE signal, or a deliberate full-screen takeover where the screen IS the moment.
+A short label (≤6 words) rendered in the SAME font/style as the running captions — a structural marker that visually belongs. Topic eyebrows ("PART 1", "Q1"), brand tags, cold-open hook labels. Strongest on edits where the caption style IS the visual identity. It reads as structure because it looks like the captions — a marker in the video's own typographic voice, landing where the video turns.
+**On centered talking-head — the vast majority of footage — position is "top".** 'top' keeps the face clear on centered talking-head, which is most footage. 'center' is the choice when the frame belongs to the overlay — the speaker off-camera for the window, the face confirmed non-center by the FACE VERTICAL ZONE signal, or a deliberate full-screen takeover where the screen IS the moment.
 
 Required props:
 {{
@@ -4218,7 +4228,7 @@ Required props:
 
 An MG shows the viewer the thing the speaker is REFERRING to off-camera — a number, a notification event, a text message, someone else's words. The placement test is one question: **what specifically is the speaker referencing?** If you can name the referent in a sentence ("her phone showed a Venmo from Sarah for $200"), match it to the component that renders that kind of evidence. An MG lives in concrete moments — a message, a stat, a named thing; a feeling, theme, or abstraction belongs to the speaker and the captions, and they carry it whole. An MG's rendered text extends the moment beyond what captions show at the same instant — when the words would echo the captions, rephrase as framing or let the captions carry it alone.
 
-Arc placement: **build** is where informational MGs live (StatCard, ProgressBar, StickyNotes, Notification, AnnotationArrow). **mid_peak** can take a reaction MG (Notification, TweetBubble, IMessageBubble, social comments) if the peak references a real off-camera reaction. **payoff** takes at most THE reveal MG (StatCard for a number-driven payoff) — anchored clear of the face, where it COMPOSES with the payoff zoom rather than competing: the camera commits to the face while the number lands above it. An MG that would cover the face on the payoff is the violation, not the MG itself. **hook** — the face earns the watch; an MG here is the rare exception. **breather** — stillness is the whole treatment. **close** — a callback to a hook MG (same component, evolved content) is the one move that fits.
+Arc placement: **build** is where informational MGs live — StatCard, ProgressBar, StickyNotes, Notification, AnnotationArrow — because build is where the speaker hands the viewer facts, and a fact the eye can read lands twice. **mid_peak** takes a reaction MG when the peak references a real off-camera reaction — the notification, the tweet, the message that provoked this beat. **payoff** takes the reveal graphic anchored clear of the face, composing with the payoff zoom: the camera commits to the person while the number lands above them. **hook** belongs to the face when the face is the claim, and to the graphic when the claim is a thing — a shocking number in the first two seconds is the hook. **breather** is where stillness does the work; the held frame is the placed event. **close** is where a hook MG returns evolved — the same component, the number now different — and the callback closes the loop the hook opened.
 
 Entry shape:
   {{
@@ -4259,7 +4269,7 @@ Each entry carries a generic `props` dict — fill it from the shape shown — a
 
 ── WHEN A NUMBER LANDS ──
 
-**StatCard** (MEDIUM) — hero number (~120-180pt, white) counting up digit-by-digit from 0 (or fromValue) to target; accent divider drawing in; caps label below; optional prefix/suffix. No card background — the number floats over the footage. Claim: "The HEADLINE NUMBER the speaker just stated, full size." The check before placing: can you quote the dialogue line where the speaker says THAT number as the moment's headline? "We hit a hundred thousand subscribers" → value=100000, label="SUBSCRIBERS". A StatCard is a quoted line — the number or claim comes verbatim from the dialogue. One to two per video. A number that should itself MOVE is NumberTicker; numbers racing each other are BarRace.
+**StatCard** (MEDIUM) — hero number (~120-180pt, white) counting up digit-by-digit from 0 (or fromValue) to target; accent divider drawing in; caps label below; optional prefix/suffix. No card background — the number floats over the footage. Claim: "The HEADLINE NUMBER the speaker just stated, full size." The check before placing: can you quote the dialogue line where the speaker says THAT number as the moment's headline? "We hit a hundred thousand subscribers" → value=100000, label="SUBSCRIBERS". A StatCard is a quoted line — the number or claim comes verbatim from the dialogue. A number that should itself MOVE is NumberTicker; numbers racing each other are BarRace.
 Props: {{ "value": 100000, "label": "SUBSCRIBERS", "prefix"?: "$", "suffix"?: "%" | "K" | "M" | "+", "fromValue"?: number, "decimals"?: int, "accentColor"?: "#hex" }}
 
 **NumberTicker** (SMALL) — a compact counter, corner- or edge-anchored, that springs in and rolls from fromValue up to value with steady tabular digits; optional prefix/suffix and a pulsing "live" dot. No divider, no caps label, no card — the rolling number is the whole graphic. Claim: "this number is climbing live." Use when the dialogue tracks a value in motion or a running tally the speaker keeps coming back to — a follower count ticking up, "we're at twelve thousand and rising." The headline number stated full-size and center → StatCard; a value advancing toward a known target → ProgressBar.
@@ -4286,10 +4296,10 @@ Props: {{ "tags": ["mindset","focus","discipline"], "accentColor"?: "#4F9DF7", "
 **PillMarquee** (FULL-WIDTH) — rows of rounded keyword pills scrolling horizontally across a soft band, alternating direction per row with edge fades, optionally each a different palette hue. Claim: "A living stream of tags for this topic." Use as ambient texture when the speaker rattles off many related keywords or hashtags and you want a continuous ticker feel rather than a tidy group ("mindset, focus, discipline, habits, growth…") — 6+ tags read best. A small static popped-in group → PillCluster; an ordered ranked list → RankedList. Keep talking over it.
 Props: {{ "pills": ["mindset","focus","discipline","habits","growth"], "rows"?: 3, "hashtag"?: true, "colorMode"?: "single"|"varied", "accentColor"?: "#FF6A3D", "offsetY"?: 0 }}
 
-**DropBanner** (TOP-PINNED) — a full-width banner that drops from the top with a bounce, opens on a numbered-circle intro (connected 1-2-3 rings), then scrolls through one captioned point per beat, each point's words lighting grey→black as if spoken. Claim: "Here's the framework, one point at a time." Use for an explainer/listicle stretch where you walk through 2–3 named points under a header ("The 3-part hook framework") and want a clean edge-to-edge banner carrying the structure while you talk. A contained floating-card version → DropCard; scattered notes → StickyNotes; one ordered list revealed at once → RankedList. One per segment.
+**DropBanner** (TOP-PINNED) — a full-width banner that drops from the top with a bounce, opens on a numbered-circle intro (connected 1-2-3 rings), then scrolls through one captioned point per beat, each point's words lighting grey→black as if spoken. Claim: "Here's the framework, one point at a time." Use for an explainer/listicle stretch where you walk through 2–3 named points under a header ("The 3-part hook framework") and want a clean edge-to-edge banner carrying the structure while you talk. A contained floating-card version → DropCard; scattered notes → StickyNotes; one ordered list revealed at once → RankedList.
 Props: {{ "title": "The 3-Part Hook", "subtitle"?: "Why people keep watching", "count"?: 3, "points"?: [{{"title": "1. The Missing Piece", "caption": "Tell them what they don't know yet."}}], "accentColor"?: "#F5A11E" }}
 
-**DropCard** (TOP-PINNED) — the floating-card sibling of DropBanner: a rounded card inset from the edges drops in near the top with a numbered dashed stepper (a short label under each circle), then scrolls one captioned point per beat with words lighting grey→black. Claim: "Here's the framework, on a clean card." Use exactly where DropBanner fits but you want a contained card over the footage rather than an edge-to-edge banner — same 2–3 named points, with step labels ("Hook / Tension / Payoff"). Edge-to-edge banner → DropBanner. One per segment.
+**DropCard** (TOP-PINNED) — the floating-card sibling of DropBanner: a rounded card inset from the edges drops in near the top with a numbered dashed stepper (a short label under each circle), then scrolls one captioned point per beat with words lighting grey→black. Claim: "Here's the framework, on a clean card." Use exactly where DropBanner fits but you want a contained card over the footage rather than an edge-to-edge banner — same 2–3 named points, with step labels ("Hook / Tension / Payoff"). Edge-to-edge banner → DropBanner.
 Props: {{ "title": "Hook Framework", "titleLead"?: "3", "steps"?: [{{"label": "Hook"}}, {{"label": "Tension"}}, {{"label": "Payoff"}}], "points"?: [{{"title": "1. The Missing Piece", "caption": "Tell them what they don't know yet."}}], "accentColor"?: "#F5A11E" }}
 
 Also answers here: Timeline (see WHEN TIME OR SEQUENCE IS THE STORY).
@@ -4299,14 +4309,14 @@ Also answers here: Timeline (see WHEN TIME OR SEQUENCE IS THE STORY).
 **IconLabel** (SMALL) — a single line-icon springs in with overshoot and a radiating ping ring, then a short ALL-CAPS word wipes out of it; optional glass pill. No card, no chrome. Claim: "One concept, stamped." Use when the dialogue lands a single punchy attribute or status you can pair with a glyph — "fully verified" (check), "this is fast" (bolt), "pure profit" (dollar). Multi-line app alerts → Notification; a hero number → StatCard; several keywords at once → PillCluster.
 Props: {{ "icon": "bolt"|"check"|"star"|"dollar"|"fire"|"heart"|"trophy"|"target"|"chart-up"|"clock"|"lock"|"sparkle"|"arrow-up"|"x", "label"?: "FAST", "iconColor"?: "#hex", "showPill"?: true, "layout"?: "row"|"stack", "anchor"?: "upper_third_safe"|"center"|"lower_third_safe" }}
 
-**PullQuote** (LARGE) — the speaker's own line blown up full-frame in bold caps, building word-by-word with keywords landing bigger and in an accent color. No card, no quotation marks, no name. Claim: "What they just said, as the whole screen." Use when one spoken sentence is the punchline and deserves the full frame ("most people quit right before the breakthrough") — pass the line as text and the 1–2 hit words as keywords. Framed/attributed quotes → EditorialQuote; the running transcript → a caption style. One to two per video.
+**PullQuote** (LARGE) — the speaker's own line blown up full-frame in bold caps, building word-by-word with keywords landing bigger and in an accent color. No card, no quotation marks, no name. Claim: "What they just said, as the whole screen." Use when one spoken sentence is the punchline and deserves the full frame ("most people quit right before the breakthrough") — pass the line as text and the 1–2 hit words as keywords. Framed/attributed quotes → EditorialQuote; the running transcript → a caption style.
 Props: {{ "text": "Most people quit right before the breakthrough", "keywords"?: ["quit","breakthrough"], "highlightStyle"?: "color"|"bar"|"scale", "keywordColor"?: "#FFD60A", "fontKey"?: "anton", "anchor"?: "center" }}
 
 Also answers here: Stamp (see WHEN A CLAIM GETS A VERDICT OR STAMP) · DropCard (see WHEN STEPS OR ITEMS ARE ENUMERATED).
 
 ── WHEN SOCIAL PROOF OR A MESSAGE IS QUOTED ──
 
-**TweetBubble** (MEDIUM) — Twitter/X post card: avatar, name + handle, optional verified check, body, engagement stats ticking up on entrance. Claim: "This specific tweet exists." Use when the speaker reads, references, or responds to a real tweet. Platform cross-check: Instagram → InstagramComment, multi-message → ChatThread, TikTok-native content wears TikTokComment — platform-match the card. One per video.
+**TweetBubble** (MEDIUM) — Twitter/X post card: avatar, name + handle, optional verified check, body, engagement stats ticking up on entrance. Claim: "This specific tweet exists." Use when the speaker reads, references, or responds to a real tweet. Platform cross-check: Instagram → InstagramComment, multi-message → ChatThread, TikTok-native content wears TikTokComment — platform-match the card.
 Props: {{ "name": "Elon Musk", "handle": "@elonmusk", "text": "Tweet body content here.", "verified"?: bool, "stats"?: {{"replies": int, "reposts": int, "likes": int, "views": int}}, "darkMode"?: bool }}
 
 **InstagramComment** (MEDIUM) — IG comment row: avatar, bold username, single-line comment, timestamp, heart + like count. Claim: "This IG comment exists — receipts." Use when a specific Instagram comment is part of the story ("this comment under my last post said…"). Real social proof — a comment the moment actually earns, grounded in what was said. One per narrative thread.
@@ -4321,10 +4331,10 @@ Props: {{ "text": "ETA 10 mins, parking now", "messageType": "incoming" | "outgo
 **ChatThread** (LARGE) — full iMessage screen: header, stacked bubbles (outgoing #0A84FF right, incoming #26252A left), typing indicators resolving into messages, home indicator. ~820×1320px. Claim: "This is the literal exchange — both sides." Use when the speaker quotes a MULTI-MESSAGE exchange line-by-line ("I texted X, she said Y, I said Z") — 3+ messages with turn-taking. Single message → IMessageBubble; phone event → Notification.
 Props: {{ "messages": [{{"sender": "me" | "them", "text": "...", "typingMs"?: int, "holdMs"?: int}}, ...], "header"?: {{"name": "Sarah", "subtitle"?: "Active 2m ago"}}, "incomingColor"?: "#hex", "outgoingColor"?: "#hex" }}
 
-**Notification** (TOP-PINNED) — platform banner drops from the top with spring bounce; up to 3 stack, staggered ~400ms. Claim: "This phone event actually happened — here's the banner." Trigger is an action VERB on the timeline: called, texted, paid, pinged, buzzed. The body text matches what the speaker described — the actual message content, specific and quoted from the moment. One per video — the banner is most powerful as the moment off-screen reality breaks in. When the event should feel physical rather than digital, Stamp.
+**Notification** (TOP-PINNED) — platform banner drops from the top with spring bounce; up to 3 stack, staggered ~400ms. Claim: "This phone event actually happened — here's the banner." Trigger is an action VERB on the timeline: called, texted, paid, pinged, buzzed. The body text matches what the speaker described — the actual message content, specific and quoted from the moment. The banner is most powerful as the moment off-screen reality breaks in. When the event should feel physical rather than digital, Stamp.
 Props: {{ "notifications": [{{"app": "apple-pay" | "venmo" | "stripe" | "imessage" | "instagram" | "email" | "bank", "appName": "Venmo", "title": "Sarah Lee paid you", "body": "$200 — for dinner", "timestamp"?: "now"}}, ...], "platform"?: "ios" | "android" }}
 
-**EditorialQuote** (LARGE) — a centered serif quote in italic Playfair behind a big opening quotation mark, with a tall accent left-bar and an optional author + role attribution that fades in beneath; lines reveal one at a time and the type auto-fits the frame. Claim: "Someone notable said this." Use when you're quoting a NAMED source and want the attribution shown — a guest, an author, a study ("'Most growth happens outside your comfort zone' — James Clear"). Pass the line as text and the name as author. The speaker's OWN sentence with no marks or name → PullQuote. One to two per video.
+**EditorialQuote** (LARGE) — a centered serif quote in italic Playfair behind a big opening quotation mark, with a tall accent left-bar and an optional author + role attribution that fades in beneath; lines reveal one at a time and the type auto-fits the frame. Claim: "Someone notable said this." Use when you're quoting a NAMED source and want the attribution shown — a guest, an author, a study ("'Most growth happens outside your comfort zone' — James Clear"). Pass the line as text and the name as author. The speaker's OWN sentence with no marks or name → PullQuote.
 Props: {{ "text": "Most growth happens outside your comfort zone", "author"?: "James Clear", "role"?: "Atomic Habits", "fontKey"?: "playfairDisplay"|"dmSerifDisplay", "showQuoteMark"?: true, "accentColor"?: "#FFD60A", "anchor"?: "center" }}
 
 ── WHEN THE SCREEN OR APP IS THE SUBJECT ──
@@ -4340,7 +4350,7 @@ Also answers here: Reticle (see WHEN A REGION OF THE FRAME NEEDS POINTING AT).
 
 ── WHEN A CLAIM GETS A VERDICT OR STAMP ──
 
-**Stamp** (MEDIUM) — a circular VERIFIED-style seal (or rectangular rubber-stamp) that slams onto the frame from oversized to rest with weight: a compression-recoil bounce, a locked tilt, a flash and an expanding shock ring, then a brief settle. Single-ink — ring and text share one color. Claim: "Stamp it — this is OFFICIAL." Use when the dialogue confers a status or seal ("officially verified", "certified", "brand new") — one short word reads best. A light icon+word pop → IconLabel; an app banner → Notification. One per beat.
+**Stamp** (MEDIUM) — a circular VERIFIED-style seal (or rectangular rubber-stamp) that slams onto the frame from oversized to rest with weight: a compression-recoil bounce, a locked tilt, a flash and an expanding shock ring, then a brief settle. Single-ink — ring and text share one color. Claim: "Stamp it — this is OFFICIAL." Use when the dialogue confers a status or seal ("officially verified", "certified", "brand new") — one short word reads best. A light icon+word pop → IconLabel; an app banner → Notification.
 Props: {{ "text": "VERIFIED", "style"?: "seal"|"stamp"|"ribbon", "subtextTop"?: "OFFICIALLY", "subtextBottom"?: "AUTHENTIC", "mark"?: "star"|"check"|"none", "color"?: "#C8321F", "anchor"?: "center" }}
 
 Also answers here: IconLabel (see WHEN SOMETHING IS NAMED OR REVEALED).
@@ -4353,17 +4363,17 @@ Props: {{ "steps": [{{"label": "Research", "description"?: "Find the real proble
 **TimelineRoadmap** (MEDIUM) — a winding S-curve "road" of numbered stations with a comet that travels the path, each station popping active with its label + time sublabel as the comet docks (the scenic-route variant of Timeline). Claim: "Here's the journey, stage by stage." Use for a phased roadmap where a flowing path suits the story better than a straight rail — plans with time sublabels ("Discovery — Week 1 → Launch — Week 6"), 3–5 stations. A straight node-to-node process rail → Timeline; a single advancing quantity → ProgressBar.
 Props: {{ "steps": [{{"label": "Discovery", "sublabel"?: "Week 1"}}, {{"label": "Launch", "sublabel"?: "Week 6"}}], "accentColor"?: "#hex", "anchor"?: "center" }}
 
-**StepDivider** (LARGE) — a full-frame step card: a "STEP 2 / 05" kicker, a giant title, and a segmented progress bar filled to the current step. Claim: "We're on step N of the process." Use when the script advances through a NUMBERED sequence and you want each beat marked with its position ("Step two: build the offer") — pass step and totalSteps so the bar tracks. A one-off chapter/part header with no running count → SectionDivider; the whole multi-step process on one rail → Timeline. One per step beat.
+**StepDivider** (LARGE) — a full-frame step card: a "STEP 2 / 05" kicker, a giant title, and a segmented progress bar filled to the current step. Claim: "We're on step N of the process." Use when the script advances through a NUMBERED sequence and you want each beat marked with its position ("Step two: build the offer") — pass step and totalSteps so the bar tracks. A one-off chapter/part header with no running count → SectionDivider; the whole multi-step process on one rail → Timeline.
 Props: {{ "title": "Build the\\nOffer", "step": 2, "totalSteps": 5, "kicker"?: "STEP", "showProgress"?: true, "fontKey"?: "anton"|"oswald", "accentColor"?: "#4F9DF7", "anchor"?: "center" }}
 
-**SectionDivider** (LARGE) — a full-frame chapter card: an eyebrow kicker and a giant index over an accent rule, with the big title unfolding line-by-line from behind the line; optional dark scrim. Claim: "A new section starts here." Use when the script hits a clear chapter or segment boundary ("Part one: the setup", "Step two"). An attributed framed card → EditorialQuote; the speaker's huge sentence → PullQuote; a numbered running step → StepDivider. One to three per video.
+**SectionDivider** (LARGE) — a full-frame chapter card: an eyebrow kicker and a giant index over an accent rule, with the big title unfolding line-by-line from behind the line; optional dark scrim. Claim: "A new section starts here." Use when the script hits a clear chapter or segment boundary ("Part one: the setup", "Step two"). An attributed framed card → EditorialQuote; the speaker's huge sentence → PullQuote; a numbered running step → StepDivider.
 Props: {{ "title": "The\\nBreakthrough", "label"?: "PART ONE", "number"?: "01", "fontKey"?: "anton"|"dmSerifDisplay", "variant"?: "full"|"band", "accentColor"?: "#hex", "anchor"?: "center" }}
 
 Also answers here: ProgressBar (see WHEN A NUMBER LANDS).
 
 ── WHEN A REGION OF THE FRAME NEEDS POINTING AT ──
 
-**AnnotationArrow** (SMALL) — hand-drawn marker arrow (chevron head, jitter, default #C8551F) drawing on like a live pen, retracting on exit. Claim: "Look at THIS thing on screen." Use when the speaker directs the eye to a specific visible element — a UI control in a walkthrough, a feature in a demo. The moment must contain the on-screen coordinate. One arrow per shot. Lock-on tracking is Reticle; UI demonstration is MouseDrag.
+**AnnotationArrow** (SMALL) — hand-drawn marker arrow (chevron head, jitter, default #C8551F) drawing on like a live pen, retracting on exit. Claim: "Look at THIS thing on screen." Use when the speaker directs the eye to a specific visible element — a UI control in a walkthrough, a feature in a demo. The moment must contain the on-screen coordinate. Lock-on tracking is Reticle; UI demonstration is MouseDrag.
 Props: {{ "start": {{"x": 0.0-1.0, "y": 0.0-1.0}}, "end": {{"x": 0.0-1.0, "y": 0.0-1.0}}, "pathType"?: "straight" | "curved-arc" | "j-shape" | "custom", "customPath"?: "M ...", "color"?: "#hex", "strokeWidth"?: number }}
 
 **Reticle** (SMALL) — HUD corner-brackets that snap onto a small rectangular region with an overshoot lock, a brief acquiring wobble, an inner scan sweep, and a monospace tag that slides in after lock. Claim: "Lock onto THIS exact spot." Use when the speaker points at a localized thing on screen ("look right here", "see this button") and you want a targeting callout around it. Full-frame recording chrome → RecordingFrame; an arrow pointing in from elsewhere → AnnotationArrow.
@@ -4379,7 +4389,7 @@ Every instrument here is an equal — the moment picks. Reading the footage fres
 
 An emphasis moment is a PEAK — a moment the viewer will physically react to, not every word the pitch treats as important. The test is the body, not the meaning: does the viewer FEEL something land here — a laugh, a small gasp, a nod, a lean-in? A peak is felt energy — delivery spikes, stakes land; "important to the argument" is a property of the writing, and peaks are a property of the performance. "Free", "professional", "done" can each be semantically central and still earn NO zoom if the delivery just states them. A word the speaker leans on with voice, face, or timing is a peak; a word that merely carries information is not. Map emphasis 1:1 to video_plan.key_moments. Emphasis lands on the words that carry the beat — the payoff noun, the number, the verb of the reveal; on connector words, qualifiers, or generic nouns ("entire", "this", "after") a zoom reads as the camera zooming on random words. Every emphasis carries a zoom by default (null is the rare exception).
 
-**Count follows the footage — the real peaks set it, however many there are.** Most 30-second videos have 3-5 TRUE peaks — a flat, even-energy stretch may have only 2-3, and that is correct. If you find yourself at 6+ similar-weight emphases spaced evenly every few seconds, you are padding semantic highlights to hit a number, and the result reads as a metronome: same punch, same cadence, nothing standing out. When in doubt, cut the weakest — three peaks that each land beat five that blur together.
+**Count follows the footage — the real peaks set it, however many there are.** The footage sets the count — the real peaks are however many the delivery contains. Three peaks that each land beat five that blur together, and the reason is contrast: a peak is only a peak against the flat around it. When emphases arrive at even spacing with even weight, the ear stops hearing them as peaks and starts hearing a metronome. So find the moments the speaker actually leans on, and let their number be what it is.
 
 **Peaks must differ in WEIGHT, not just type.** A real edit has a rhythm of sizes: ONE deepest moment (the payoff — the line the video exists to deliver), a few mid-peaks that punctuate without competing with it, and a hook that grips. Look at your emphasis list as a SET before finalizing: if more than half share one type, or they're all "high" intensity, or they're spaced evenly end-to-end, you haven't found the real peaks — you've highlighted the transcript. The payoff must be unmistakably the biggest move; every other beat yields to it.
 
@@ -4392,7 +4402,7 @@ Pick each emphasis by the AUDIENCE REACTION it earns with sound on: laugh = punc
   • mid_peak → PUNCTUATION: StepZoom or SnapReframe, quick in/out.
   • payoff → COMMITMENT: SmoothPush or LetterboxPush, the slowest and deepest move of the video, holds to the end. The payoff takes the slow commitment — that commitment is the only thing that makes it feel bigger than the beats before it; a StepZoom snap reads as just another mid-peak. Any zoom in the seconds immediately after the payoff steps on the moment you just earned.
   • close → CALLBACK: echo the hook's type at lower intensity; for a zoom-free hook, SmoothPush as confident lock-in. A close within 1.5s of the payoff word rides the payoff's resolution instead — validation keeps the payoff of any peak pair inside 2s, so the resolution IS the close's motion there.
-  • build / breather → the camera holds flat. An urge to zoom there is the tell that the word sits outside the peak set — drop it from key_moments and let the stretch run flat.
+  • build / breather → the camera holds. The flat is doing work — it's what the next peak lands against, and a viewer needs the still frame to feel the push when it comes.
 
 **The weight belongs to the moment first, and the camera is its first instrument.** A peak's weight is set by what the moment is doing — the laugh, the gasp, the line the video exists to deliver — and the camera is the first instrument that serves it. So when the camera is held still on a beat that already earns its place in `key_moments`, the weight still lands; it simply moves to the instruments that remain. Carry the same emphasis intent across: let a committing sound do the pushing (the boom on the payoff word), let the caption hold and go big on that word, let a stat land on the syllable it names. Read the moment's intended feeling first, then ask which available instrument delivers it here — a payoff with the camera held still still commits, through sound and a held caption, and the viewer feels the same weight arrive. This carries the intent to instruments you already own; the peak set stays exactly the 3-5 you committed in `key_moments`, build/breather words stay clear, and only the routing changes when the camera is the one tool that's quiet.
 
@@ -4412,7 +4422,7 @@ Entry shape:
     "duration": float,              # 1.5-3.0 output-seconds the visual hit lasts
     "viewer_feeling": "<one specific phrase: the feeling this moment produces in the viewer>",
     "zoom_effect": {{ "type": <zoom type>, "events": [{{"startMs": int}}, ...] }} | null,
-    "motion_graphic": {{...}} | null   # almost always null — the zoom carries the punctuation
+    "motion_graphic": {{...}} | null   # the zoom is the camera's punctuation; a graphic joins it when the moment names something the camera cannot show
   }}
 
 **OMIT durationMs, scale, originX, originY from events by default.** The pipeline auto-fills the natural duration and perceptible scale per type — the values that make each move look its best — and runs face detection at the event's start frame to lock the zoom origin onto the face (fallback: canvas center). Your event is just {{"startMs": int}}. Emit originX/originY ONLY when zooming a NON-face element (a prop, a gesture, a whiteboard); emit durationMs/scale only when a specific beat genuinely wants a non-default feel (rare).
@@ -4470,7 +4480,7 @@ Entry shape: {{ "word_index": int, "sound": <name> }}. Timing derives from the w
 THE 17 SOUNDS
 ──────────────────────────────────────────
 
-**boom** — A deep cinematic bass impact. Serves weight, authority, and dramatic finality; it makes a statement land with force. Use it on the single biggest claim, a bold reveal, or the payoff moment — reserved for one peak per video so it hits hardest.
+**boom** — A deep cinematic bass impact carrying weight and finality. It drops the floor under a statement. It belongs on the video's biggest claim or its payoff, where the line the video exists to deliver arrives. Its force comes from where it lands — a single boom on the right moment reads harder than several spread across lesser ones, because the ear measures it against the beats that carried no weight.
 
 **punchsfx** — A sharp percussive hit. Serves impact and emphasis; it adds sudden physical force to a beat. Use it on a hard-hitting word, a punchy claim, or a quick snap where the moment needs to feel like it lands a blow.
 
@@ -4482,7 +4492,7 @@ THE 17 SOUNDS
 
 **camera-flash** — A crisp photo-shutter snap. Serves the feeling of a moment being captured or frozen. Use it on a freeze-frame, a "picture this" beat, or to punctuate a quick highlight that should feel snapshotted.
 
-**money-ching** — A bright cash-register cha-ching. Serves the feeling of money, value, or payoff. Use it ONLY on mentions of cost, price, savings, deals, or getting paid — the literal money accent, never for anything unrelated to money.
+**money-ching** — A bright cash-register cha-ching. It makes money land as something real and immediate rather than an abstract number. It belongs on the word where cost, price, savings, or a payoff arrives — the instant the viewer registers a figure that costs or earns them something.
 
 **iphoneding** — A literal iPhone text-notification chime. Serves the feeling of an alert or new message arriving. Use it on mentions of texts, notifications, updates, or an "and then this happened" beat — signals something newly incoming.
 
@@ -4492,7 +4502,7 @@ THE 17 SOUNDS
 
 **correct** — A positive confirmation ding (a "you got it right" tone). Serves rightness, success, and validation. Use it on a correct point, a good decision, or a satisfying "yes, exactly" moment — signals something is right or confirmed.
 
-**gunshot** — A sharp gunshot crack. Serves aggressive, jarring punctuation and hard stops. Use it on a blunt statement, a sudden halt, or a shocking beat that earns real intensity — strong, reserve for moments that can carry it.
+**gunshot** — A sharp aggressive crack. It serves a blunt stop or a shock the viewer feels in the chest. It belongs where the speaker cuts something off hard, or on the beat that's meant to jar.
 
 **rizz** — A romantic-but-comedic flourish (a smooth, flirty sting played for laughs). Serves charm and playful confidence. Use it on a flirty or "smooth move" beat meant to be funny, or anything romantic played tongue-in-cheek — light and self-aware.
 
@@ -4548,7 +4558,7 @@ Entry shape:
   • Opening gate (check BEFORE you construct any keyword): do NOT GENERATE a `broll_clips` entry whose window opens in the first ~3 seconds of output, or anywhere inside the hook segment — whichever extends later. The OPENING belongs to the speaker; viewers form "whose story is this" judgments in the first 2 seconds and need a face to anchor on. This is a gate on what you emit, not a filter applied afterward — if a beat you'd otherwise cut lands in that window, the entry simply does not exist. (Not about clip index: a long first clip can still carry B-roll in its later build words; and the hook IS the exception only when the hook itself is a visual claim — then the B-roll is the hook.)
   • B-roll and overlays each get the screen alone — the pipeline drops a B-roll whose frames overlap any motion_graphic or text_overlay (overlays win: word-anchored and scarce, while B-roll has 2-3s of flex to slide clear). Plan B-roll before or after your overlays.
   • Face moments are off-limits. Any word inside an emphasis_moments[].word_indices with a non-null zoom is a face moment by your own declaration — keep B-roll windows clear. When dialogue both describes an action AND is the moment of recognition, the face wins — the camera holds the person and the recognition lands on them.
-  • Arc placement: **build** is where B-roll lives — the concrete nouns named during build are your cutaway candidates, and most of the video's B-roll belongs there. **breather** allows at most one quiet, perfectly-matched cutaway (most breathers want none). **hook** — the face carries it (when the hook IS a visual claim, the B-roll is the hook). **mid_peak** — the peak word stays on the face; B-roll resumes right after. **payoff** — the payoff word belongs entirely to the face. **close** — a deliberate callback to a hook-era cutaway is the one move that fits.
+  • Arc placement: **build** is where B-roll lives — the concrete nouns named during build are your cutaway candidates, and most of the video's B-roll belongs there. **breather** takes a quiet, perfectly-matched cutaway when the moment has a picture to give; otherwise the held frame is itself the event. **hook** — the face carries it (when the hook IS a visual claim, the B-roll is the hook). **mid_peak** — the peak word stays on the face; B-roll resumes right after. **payoff** — the payoff word belongs entirely to the face. **close** — a deliberate callback to a hook-era cutaway is the one move that fits.
 
 Register tunes the cutaway's CHARACTER (the extend test still decides whether each exists): vulnerable/interview — atmospheric close-up details, warm light, 1.5-3s · promo/demo/hustle — product evidence, the named feature or screen when the moment asks to see it, 1-2s · comedy — reaction shots and situational framing, tight on the joke beat · documentary/essay — illustrative concept shots, deliberate scene-setters.
 
@@ -4556,11 +4566,13 @@ Register tunes the cutaway's CHARACTER (the extend test still decides whether ea
 === TRANSITIONS ===
 ═══════════════════════════════════════════════════════════════════════════
 
-A transition is the visual treatment ON a cut, and it belongs on ONE kind of cut: the kind where the PICTURE changes. A source shot change (the camera actually cut, the angle or location changed) or a B-roll cutaway entering or leaving — those are picture changes, and a transition smooths them. Every other entry in the CUT BOUNDARIES list is dead air removed from continuous single-camera speech: the picture is the same face in the same room on both sides, and the clean jump cut already reads as pace. Punctuate the picture changes; let the speech cuts play straight.
+A transition is the visual treatment on a PICTURE CHANGE — the seam where what's on screen turns over. Two things make a picture change, and both reach you named in the material: a source shot change (the SHOT CHANGES list — the camera already cut, the angle or location moved) and a B-roll cutaway entering or leaving. These are a transition's home and its strong default. When the video crosses one, ride it: the transition tells the eye the picture turned, and a real scene change that plays as a bare jump reads as a beat the edit missed. Name the picture change it rides in its `why` — the shot change or the cutaway edge — so the seam is traceable. Zero transitions is the honest read of a talking-head with no cutaways — there are no picture changes to ride. Where the footage has real shot changes and cutaways, each one is a candidate, and the count is however many the footage contains.
 
-**DEFAULT: the cut plays straight.** A transition marks a change in the PICTURE, never a change in the talk. Place one only where what's on screen actually changes: a shot change already in the source footage, or a B-roll cutaway entering or leaving. On continuous single-camera footage — the speaker talking straight to camera — the picture never changes, so every cut plays straight no matter how big the topic turn. A content turn (an act shift, the acceleration into the payoff) earns its emphasis elsewhere — a mask-zoom, an overlay, an SFX — not a transition. Each transition you emit names the on-screen picture change it rides in its `why`. Zero is the right count for a talking-head with no cutaways; one to three is the natural range once real B-roll or shot changes are present. Crossfade-family types anchor on CUT BOUNDARIES entries (the audio gap is their handle); zero-handle types (ShutterFlash, DipToBlack) sit on either boundary list. Both lists are detector output — boundaries inferred from timestamp gaps don't exist in the render.
+Between two moments of one continuous shot — the speaker straight to camera, a breath or a repositioning or a fresh take lifted out — the picture has not changed: same face, same room, both sides of the seam. The hard cut owns those splices. The jump carries the momentum and reads as pace; a transition dressed over it smooths a turn that isn't there. So the same-scene speech cuts play straight, however big the topic swing, and their energy goes where it belongs — a mask-zoom on the first word back, a caption that leans in, an SFX that lands the beat.
 
-**Duration mechanics:** each transition consumes half its NATURAL DURATION of source from the outgoing tail and half from the incoming head (per-type durations are in the user message's TRANSITION NATURAL DURATIONS table; a boundary fits a type when its gap ≥ 2x that duration). A clip between two transitions loses both handles to crossfades. Decision tree by clip length: <800ms → only ONE transition fits; keep the stronger shift. 800-1500ms with both shifts strong → place both (a tight middle is the better trade than skipping a real shift). 800-1500ms with one weak shift → drop the weak side. >1500ms → room for a transition at each shift that genuinely turns (the default is still the straight cut).
+When a picture change lands on a punchline or a hard beat — a reveal, an escalation, the line the video exists to deliver — the snap can carry more than a dissolve. A zero-handle cut (ShutterFlash, DipToBlack) makes the turn itself the visual event, the picture change and the beat hitting as one; a crossfade-family type (ZoomThrough, SlideOver, Stack, CardSwipe, CrossfadeZoom, StepPush, FilmStrip) rides a calmer chapter turn. Read the beat under the picture change and give the seam the treatment its energy asks for. The physics set which fits where: crossfade-family types need the audio handle, so they ride CUT-boundary picture changes; zero-handle types substitute silence and sit on either boundary list. Both lists are detector output — a seam inferred from a timestamp gap that isn't in a list doesn't exist in the render.
+
+**Duration mechanics:** each transition consumes half its NATURAL DURATION of source from the outgoing tail and half from the incoming head (per-type durations are in the user message's TRANSITION NATURAL DURATIONS table; a boundary fits a type when its gap ≥ 2x that duration). A clip between two transitions loses both handles to crossfades. Decision tree by clip length: <800ms → one transition fits; keep the stronger picture change. 800-1500ms with both picture changes strong → place both (a tight middle is the better trade than skipping a real turn). 800-1500ms with one weak side → keep the stronger. >1500ms → room for a transition at each picture change that genuinely turns.
 
 **Type selection:** match the character of THIS shift (arc-transition flavors in ARC SPINE), then sanity-check against the register — a Stack on a confession reads costume; a FilmStrip on a 20-second clip is too much weight. Fresh type each time — adjacent repeats read as a stuck effect rack.
 
@@ -4584,7 +4596,7 @@ THE {_n_transitions} TRANSITIONS
 
 **FilmStrip** — A morphs into a small tile; a film strip scrolls one position to reveal B; B expands to full. ~0.4-0.6s, gallery feel. "Next item in the curated collection" — portfolios, "5 things I made". Props: {{ "caption": "Project 1", "showBookmark": bool, "showGrid": bool, "advanceFrames": 1 }}
 
-**DipToBlack** (~700ms) — the frame breathes to black and returns. The heaviest pause in the vocabulary: an act ending, a held beat before the turn, the inhale ahead of the payoff. Zero-handle — it sits on cut or tight boundaries alike, trading darkness for handle. One per video is usually all its weight can earn.
+**DipToBlack** (~700ms) — the frame breathes to black and returns. The heaviest pause in the vocabulary: an act ending, a held beat before the turn, the inhale ahead of the payoff. Zero-handle — it sits on cut or tight boundaries alike, trading darkness for handle. It lands where the footage genuinely holds that weight — as many of those beats as the video actually contains, and none where the gravity isn't there.
 
 ═══════════════════════════════════════════════════════════════════════════
 === THE 2 TIGHT-CUT OVERLAYS ===
@@ -4695,22 +4707,23 @@ A professional editor rejects this on sight, and the window doctrine names why: 
 REJECTED RECIPE C — the DECORATED edit (product pitch, cleanup request)
 ──────────────────────────────────────────
 
-Video: a creator pitching a countertop hot-towel dispenser. The user's vibe: 'edit out the deadspace and retakes and stuff so I can post as a TikTok shop video.'
+Video: a creator walking through a note-taking app they use every day. The user's vibe: 'make it feel premium and cinematic.'
 
-Rejected recipe: six transitions across nine cuts (ZoomThrough, SlideOver, FilmStrip, CrossfadeZoom, CardSwipe, StepPush), a full-screen chapter card mid-pitch, a cash-register SFX on 'rich', two annotation arrows, a branded text overlay, an ornate serif caption style.
+Rejected recipe: six transitions across nine cuts (ZoomThrough, SlideOver, FilmStrip, CrossfadeZoom, CardSwipe, StepPush), a full-screen chapter card mid-sentence, a cash-register SFX on 'insights', two annotation arrows, a branded text overlay, an ornate serif caption style.
 
-A professional editor rejects this on sight — and every single element can cite a rule. The transitions each sat on a real boundary. The arrows pointed at real props. The SFX landed on real words. What none of them can do is name the moment that asked for it, because the user told the edit what the moments were: the dead space, the retakes, the postability. 'TikTok shop video' names the FORMAT — lean, fast, product-forward — not a commission to deploy the catalog. The correct recipe cuts hard, runs kinetic captions, lands two or three earned beats (the mechanism reveal, the spec payoff, the CTA), and leaves everything else on the speaker. The decorated edit and the correct edit contain the same footage; the difference is that one's components answer to the moments and the other's answer to the rules. When your whys read like rule citations, you are building this recipe.
+A professional editor rejects this on sight — and every single element can cite a rule. The transitions each sat on a real boundary. The arrows pointed at real props. The SFX landed on real words. What none of them can do is name the moment that asked for it — each answers to a rule instead of to a moment. The correct recipe places the beats the moments asked for — the mechanism reveal gets the camera, the spec lands with the graphic that renders it, the CTA closes with the caption's weight — and each element can name the moment that summoned it. The decorated edit and the correct edit contain the same footage; the difference is that one's components answer to the moments and the other's answer to the rules. When your whys read like rule citations, you are building this recipe.
 
 ═══════════════════════════════════════════════════════════════════════════
 HARD CONSTRAINTS — re-read this block before emitting the JSON
 ═══════════════════════════════════════════════════════════════════════════
 
-These override creative reasoning when they conflict.
+These are the mechanics the render depends on — the physics of the frame, the timeline, and the pipeline. Craft decides what belongs; these describe what the medium does with it.
 
 **THE WINDOW RULE (the master constraint):**
-  • Walk the runtime in ~2-second windows. A window holds AT MOST one dominant
-    visual event (zoom landing / B-roll entering / transition firing / MG
-    dropping / overlay revealing). A window is where you LOOK, and the mine is
+  • Walk the runtime in ~2-second windows. A window holds one dominant visual event — the thing the eye goes to: a zoom
+    landing, B-roll entering, a transition firing, an MG dropping, an overlay
+    revealing. Two dominant events in one window split the viewer's attention and
+    neither lands; the window is where the eye looks, so give it one thing to look at. A window is where you LOOK, and the mine is
     how you look — finding every candidate is mandatory; placing each one is a
     judgment its why has to win. In a hot movement the windows fill and the
     screen moves with the voice; in a lean stretch a run of speaker-only
@@ -4721,8 +4734,8 @@ These override creative reasoning when they conflict.
     and a graphic that holds and builds across a deep movement is one sustained
     event that fills its windows as it grows — the building IS the event in
     each, so keep it whole rather than placing a new one per window.
-  • Breather windows (per arc_segments) stay empty — the stillness is the placed event. 2-3 breather
-    windows per 30s is typical.
+  • Breather windows carry stillness — the empty frame is the placed event, and it's
+    what gives the next movement somewhere to arrive from.
   • SFX and captions ride outside the window system. Every SFX has a visual partner on its trigger word, and breather words keep their quiet.
   • Fullness is read PER MOVEMENT — each movement is judged against its own energy, one at a time. A hot movement
     runs full and fast; a deep teach movement may hold one graphic across many
@@ -4734,13 +4747,14 @@ These override creative reasoning when they conflict.
 **PER-COMPONENT RULES:**
   • emphasis_moments: 1:1 with key_moments (3-5 true peaks for a typical 30s video; a flat even-energy stretch may have only 2-3 — the honest peak count is the right count). At least 2 distinct zoom types across
     them. Peaks only — build and breather words run flat, and that flatness is what gives each peak its contrast. Payoff = SmoothPush or LetterboxPush — the committed-push family; StepZoom's snap belongs to mid-peaks. Events emit startMs only.
-  • transitions: the straight cut is the default; a transition marks a genuine
+  • transitions: a transition marks a genuine
     turn — a movement boundary, an act shift, the walk into the payoff — and
-    carries its why. Crossfade-family types anchor on CUT-boundary entries,
+    carries its why. The straight cut carries every other splice, and carries it
+    cleanly. Crossfade-family types anchor on CUT-boundary entries,
     where the audio gap gives them handle to breathe; zero-handle types
     (ShutterFlash, DipToBlack) sit on either list, substituting
     their own beat for the missing handle. Fresh type each turn.
-  • broll_clips: build (and sparingly breather) only. Windows open after the first ~3s of output and after the hook segment; mid-peak and payoff words stay on the face; the close word holds on the speaker (callback B-roll earlier in the close segment fits); the pipeline drops any B-roll overlapping an MG or overlay window, so clear windows are the ones that ship.
+  • broll_clips: build is where B-roll lives — the concrete nouns named during build are the cutaway candidates. A breather takes a quiet, perfectly-matched cutaway when the stillness wants a picture rather than a held frame. Windows open after the first ~3s of output and after the hook segment; mid-peak and payoff words stay on the face; the close word holds on the speaker (callback B-roll earlier in the close segment fits); the pipeline drops any B-roll overlapping an MG or overlay window, so clear windows are the ones that ship.
     Each keyword concrete + distinct.
   • motion_graphics: only for an off-camera referent the dialogue literally
     names. Build and peak stretches are MG territory — the hook belongs to the face, and breathers keep their stillness. Anchor must clear the face per
@@ -7423,6 +7437,17 @@ _WITHIN_CLIP_DEADAIR: bool = False  # HELD OFF (Zac 2026-07-08 deploy gate): the
                                  # within-word conservative margin lands next; then ON.
                                  # env var flips it back ("1") once green.
 _WITHIN_CLIP_FLOOR_S = 0.015     # silence left at a trimmed within-clip splice
+_WITHIN_CLIP_WORD_MARGIN_S = 0.0  # WITHIN-WORD CONSERVATIVE MARGIN (Zac 2026-07-08).
+                                 # The tail trim's floor is max(word_end - MARGIN,
+                                 # audible_edge): at 0.0 it is the STRICT word-boundary
+                                 # floor (keeps to word_end, ZERO clip risk — an over-run
+                                 # word's whole span survives). Raising it (0.040-0.060)
+                                 # lets the trim reach up to MARGIN inside the span to
+                                 # collapse Deepgram END over-run, but never past the
+                                 # audible edge — the tradeoff is up to MARGIN of a
+                                 # fricative tail ("rich") at risk when word_end is
+                                 # accurate. Default 0.0: "clipped words are worse than
+                                 # dead air" (Zac). Tune + re-prove on the exemplar.
 _WITHIN_CLIP_TRIM_TRIGGER_S = 0.05  # cut a gap only when LEVEL silence exceeds this
                                  # (below it there is nothing worth trimming; the
                                  # existing pads already sit near the floor)
@@ -7460,6 +7485,14 @@ _FRAME_ACTIVITY_LAST: list = []  # (t_s, score) per-frame motion timeline from t
 # all straight cuts. This is how the pipeline works now; the env var
 # TRANSITION_SCENE_GATE_ENABLED remains ONLY as a kill-switch (set "0" to disable).
 _TRANSITION_SCENE_GATE: bool = True
+# LOG-AND-PASS mode (Zac 2026-07-08): while we MEASURE whether the picture-change
+# teaching landed, the gate is an INSTRUMENT, not an enforcer. It still RUNS (records
+# every proposed transition + whether it sits on a qualifying picture change), but it
+# does NOT rewrite Gemini's editorial output — off-boundary transitions pass through
+# and render. ENFORCE=False = log-and-pass (measure). Flip to True to restore the
+# drop-to-hard-cut behavior once the spread decides (zero off-boundary → remove the
+# gate entirely; off-boundary → fix the PROMPT, not the output).
+_TRANSITION_SCENE_GATE_ENFORCE: bool = False
                                  # from the most recent detect_dead_air run in
                                  # this process; the clip builder reads them to
                                  # snap dead-air incoming boundaries to true
@@ -8952,13 +8985,17 @@ def generate_edit_gemini(
                 # change is a scene change — the camera moved.
                 _src = "SCENE CHANGE" if _ni in _shot_boundary_set else "pause"
                 # Name the content-jump magnitude on the top-tier pause gaps —
-                # the single-camera scene turns scdet can't see. scdet SCENE
-                # CHANGE entries are already dressed, so only pause big-jumps
-                # get the extra reading.
+                # the wide single-camera jumps. Under the picture-change model
+                # (Zac 2026-07-08) these are NOT transition homes: the picture is
+                # the same shot on both sides, so the hard cut carries the seam.
+                # The magnitude is an EMPHASIS signal — the talk turns here, so the
+                # energy goes to the first word back (mask-zoom / caption / SFX).
                 if _ni in _scene_turn_set and _ni not in _shot_boundary_set:
                     _parts.append(
                         f'{_ni} (after "{_w}", {_gap_ms}ms gap, {_src} — a wide '
-                        f'jump, the footage turns here even with no camera cut)'
+                        f'content jump: the talk turns here but the picture holds '
+                        f'(same shot), so the hard cut carries it and the energy '
+                        f'goes to the first word back — a mask-zoom, a caption, an SFX)'
                     )
                 else:
                     _parts.append(f'{_ni} (after "{_w}", {_gap_ms}ms gap, {_src})')
@@ -9002,11 +9039,11 @@ Indices below are the NEW kept-only space [0..{_kept_count - 1}]. Every word_ind
 
 {kept_transcript_block}
 
-=== CUT BOUNDARIES (transition slots — place at most one transition per entry, after_word_index = the listed index) ===
+=== CUT BOUNDARIES (transition slots — one transition per entry, anchored at after_word_index — the listed index) ===
 
   {_cut_boundary_block}
 
-=== TIGHT BOUNDARIES (real cuts with no audio handle — crossfade transitions cannot fit here, but zero-handle transitions (ShutterFlash / DipToBlack) can, and `tight_cut_overlay` decorations can. Each is tagged SCENE CHANGE (the shot actually changed) or pause (a silence-only splice). Both classes default to a clean hard cut. Decorate a boundary only when the moment it lands on earns punctuation — a reveal, an escalation, a callback — and a small MASK zoom (SnapReframe or StepZoom scale, under a second) on the first word after a tight cut carries the eye across the jump — mask zooms serve the boundary and live outside the key_moments ledger. Vary types across the decorations you do place. See HOW TO PLACE TRANSITIONS and HOW TO PLACE TIGHT-CUT OVERLAYS below.) ===
+=== TIGHT BOUNDARIES (real cuts with no audio handle — crossfade transitions cannot fit here, but zero-handle transitions (ShutterFlash / DipToBlack) can, and `tight_cut_overlay` decorations can. Each is tagged SCENE CHANGE (the shot actually changed — a picture change) or pause (a silence-only splice inside one continuous shot). The tag tells you what the seam IS. A SCENE CHANGE is a picture change: the shot moved, and this is the home for punctuation — a zero-handle transition or an overlay rides it when the moment landing there is a reveal, an escalation, or a callback, and the treatment tells the viewer this is where the picture turned. A pause is the same shot on both sides with dead air removed; the hard cut owns it, the eye follows the cut and the momentum holds. A small mask zoom on the first word after a scene-change cut carries the eye across the jump — mask zooms serve the boundary and live outside the key_moments ledger. Vary types across the decorations you do place. See HOW TO PLACE TRANSITIONS and HOW TO PLACE TIGHT-CUT OVERLAYS below.) ===
 
   {_tight_boundary_block}
 
@@ -9022,15 +9059,15 @@ Each transition component renders at its natural duration — the cadence its ra
 
 **HARD RULE 2 — the transition's natural duration must fit the boundary's gap.** Each CUT BOUNDARIES entry shows its available audio gap (`820ms gap`). A transition fits when its natural duration ≤ gap/2. If you want FilmStrip (1200ms natural) at a boundary annotated `1600ms gap`, that does NOT fit (need ≥ 2400ms gap). Match the transition's weight to both the dialogue's shift AND the available room — the moment earns the transition, the gap only sets which weights fit; the long heavy types (FilmStrip, Stack) are the ones a genuine chapter turn with a long pause can carry.
 
-**Read the gap as the size of the content jump, not only as room.** On single-camera footage the camera never cuts, so the audio gap IS the scene change: the widest gaps are where the speaker paused, repositioned, started a fresh take or a new thought — the footage turns there even with nothing visible marking it, which is why the widest openings carry the note "a wide jump, the footage turns here." A wide jump both earns the heavier transition and leaves the room to fit it — the same fact from two sides, because a real turn leaves a real pause. Reach for the fuller transitions where the video actually turns; where speech carries unbroken across a boundary — a small gap, the thought continuing — the clean hard cut is the confident default and the speaker finishes the line.
+**A picture change is what a transition rides — the gap only sets which weights fit.** What earns a transition is the seam being a picture change: a source shot change (SHOT CHANGES / a SCENE CHANGE-tagged boundary) or a B-roll cutaway edge. The gap size is physics on top of that — it tells you which transition weights fit (natural duration ≤ gap/2), not whether to place one. A wide gap in continuous single-camera speech — the speaker paused, repositioned, took a fresh run at the thought — is dead air lifted from one unbroken shot: the picture is the same on both sides, the hard cut carries it, and the speaker finishes the line. Reach for the fuller transitions where the footage actually turns over — the shot changes and the cutaway edges — and let the same-scene splices play straight, however wide the pause.
 
 **If no transition type fits a particular boundary, leave it alone.** The cut plays straight (hard cut). That is the correct behavior — better a clean hard cut than a compressed flicker. Do NOT force a transition where it doesn't fit.
 
-**Place transitions where they fit and earn the moment.** Transitions land where a thought completes — mid-sentence boundaries where the dialogue carries unbroken across the cut (same verb-subject continuing) stay bare, letting the speaker finish the thought clean.
+**Place transitions where the picture turns and the moment earns it.** A transition lands on a picture change — a shot change or a cutaway edge; mid-shot boundaries where the dialogue carries unbroken across the cut (same verb-subject continuing) stay bare, letting the speaker finish the thought clean.
 
 For each chosen `after_word_index`, pick a transition `type` whose character matches the dialogue's shift at that boundary (ZoomThrough, CardSwipe, ShutterFlash, SlideOver, CrossfadeZoom, FilmStrip, Stack, StepPush). Vary the type across emitted transitions — repeating the same type at adjacent boundaries reads as templating.
 
-**Zero-handle transition vs `tight_cut_overlay` — same effect family, different editorial weight, one per boundary.** ShutterFlash exists both as a zero-handle TRANSITION on tight boundaries AND as a `tight_cut_overlay` decoration (LightLeak exists only as an overlay; DipToBlack only as a transition). They are NOT interchangeable: a `tight_cut_overlay` is LIGHT (~180ms), audio plays through unaltered, video plays through unaltered, decoration paints on top. A zero-handle transition is HEAVY (350-1200ms), audio goes silent under the transition window, video animation dominates the cut. A zero-handle transition on a tight cut is a RARE choice — reserve it for the single biggest moment of the video where you want the cut itself to be the editorial event. Reaching for the heavy transition by default would read as dramatic templating. **Each boundary takes one decoration — a transition or a tight_cut_overlay; the validator holds the one-per-boundary line, so the single pick is the recipe that ships.**
+**Zero-handle transition vs `tight_cut_overlay` — same effect family, different editorial weight, one per boundary.** ShutterFlash exists both as a zero-handle TRANSITION on tight boundaries AND as a `tight_cut_overlay` decoration (LightLeak exists only as an overlay; DipToBlack only as a transition). They are NOT interchangeable: a `tight_cut_overlay` is LIGHT (~180ms), audio plays through unaltered, video plays through unaltered, decoration paints on top. A zero-handle transition is HEAVY (350-1200ms), audio goes silent under the transition window, video animation dominates the cut. A zero-handle transition on a tight cut is the heavy pick — it belongs where the dialogue's shift is big enough that you want the cut itself to be the editorial event. The boundaries that genuinely carry that weight are the ones that take it, as many as the footage turns up; the lighter overlay carries the rest, and reaching for the heavy treatment where the shift doesn't earn it reads as dramatic templating. **Each boundary takes one decoration — a transition or a tight_cut_overlay; the validator holds the one-per-boundary line, so the single pick is the recipe that ships.**
 
 === HOW TO PLACE TIGHT-CUT OVERLAYS ===
 
@@ -9043,7 +9080,7 @@ PUNCTUATION CLASS (~180ms — quick, decorates the cut moment):
 
 **HARD RULE 1 — `after_word_index` comes from the TIGHT BOUNDARIES list above; the validator checks membership against exactly that list, and tight boundaries are the only splices these decorate.** tight_cut_overlays decorate tight boundaries — CUT boundaries already get full transitions, and only an actual splice gives the overlay something to decorate: the renderer produces it there and there alone.
 
-**HARD RULE 2 — decoration is discretionary everywhere; ≤2 per video.** Both boundary classes (SCENE CHANGE and pause) default to a clean hard cut. Place an overlay only where the moment itself earns punctuation — a reveal landing, an escalation snapping, a callback closing — at most 2 across the whole video, and vary the type when you place two. One thing is fixed: your array and your `editorial_vision` tell the same story — the claims-but-empty detector reconciles any gap between them. A vision that names a tight-cut overlay (by type or effect) resolves one of two ways — the overlay lands on the single tight boundary that most earns it, or, when genuinely zero boundaries earn it, the vision sheds the claim; either way the claim and the array end up saying one thing, and the reconcile pass enforces the match. A named overlay in the vision materializes in the array — the claims-but-empty detector fires on the mismatch and the reconcile sub-call closes it. When vision and array disagree, that is an error you fix here — by emitting the earned overlay, or by having not claimed it.
+**HARD RULE 2 — decoration is discretionary; the footage governs how many land.** A pause boundary is the same shot on both sides and the clean hard cut owns it; a SCENE CHANGE boundary is a picture change a punctuation can ride when the moment earns it. Place an overlay where a tight boundary's moment genuinely carries weight — a reveal landing, an escalation snapping, a callback closing — and leave the boundaries that don't earn it as clean hard cuts; where several earn it, vary the type so they don't read as a stuck rack. One thing is fixed: your array and your `editorial_vision` tell the same story — the claims-but-empty detector reconciles any gap between them. A vision that names a tight-cut overlay (by type or effect) resolves one of two ways — the overlay lands on the single tight boundary that most earns it, or, when genuinely zero boundaries earn it, the vision sheds the claim; either way the claim and the array end up saying one thing, and the reconcile pass enforces the match. A named overlay in the vision materializes in the array — the claims-but-empty detector fires on the mismatch and the reconcile sub-call closes it. When vision and array disagree, that is an error you fix here — by emitting the earned overlay, or by having not claimed it.
 
 Your `editorial_vision` and your `tight_cut_overlays` array must agree. If your vision commits to tight-cut overlays — either by naming a specific TYPE ('tight ShutterFlash cuts') OR by naming the EFFECT/MECHANISM ({_tco_mechanism_examples}) — emit at least one matching entry on the boundary that earns it. An empty array is a legitimate read — and it pairs with a vision that stays quiet about overlays; the claims-but-empty detector holds vision and array to the same story. Vision and array tell the same story.
 
@@ -9056,7 +9093,7 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
 
 **Variety.** Adjacent boundaries wearing the same punctuation type read as templating — rotate types across the ones you place.
 
-**For heavier editorial weight, see the zero-handle transition path in HOW TO PLACE TRANSITIONS.** ShutterFlash is also available as a full zero-handle transition on tight boundaries (DipToBlack as well) — 350-1200ms with audio silence and dominant video animation. Overlays are the LIGHT default for tight cuts; the heavy transition is the RARE exception reserved for the single biggest moment. One decoration per boundary — the validator holds that line, so the single choice is the one that renders.
+**For heavier editorial weight, see the zero-handle transition path in HOW TO PLACE TRANSITIONS.** ShutterFlash is also available as a full zero-handle transition on tight boundaries (DipToBlack as well) — 350-1200ms with audio silence and dominant video animation. Overlays are the light, everyday punctuation for tight cuts; the heavy zero-handle transition is the weightier choice, earned by the boundaries whose moment carries the most editorial force — the footage decides how many land, and where no beat earns it, none does. One decoration per boundary — the validator holds that line, so the single choice is the one that renders.
 """
 
 
@@ -10247,6 +10284,18 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                                             # scene change — stripped from the plan
                                             # below so SFX-partner + beat-timing
                                             # consumers also see the hard cut.
+                                            # (ENFORCE=False: stays empty, nothing dropped.)
+            _scene_gate_measure = []        # LOG-AND-PASS instrument: one record per
+                                            # proposed transition — {awi, type, on_qualifying,
+                                            # qualifier}. The condition-3 measurement reads
+                                            # this to report proposed / on-picture-change /
+                                            # off-boundary per render.
+            # Unconditional inits so the log-and-pass summary (guarded only by
+            # _TRANSITION_SCENE_GATE) never reads an unbound name when the transition
+            # loop below is skipped (no raw_transitions / no _dg_words). Populated inside
+            # the loop when the gate qualifies.
+            _broll_edge_set = set()
+            _scene_change_qualify = set()
             raw_transitions = edit_plan.get("transitions") or []
             if raw_transitions and _dg_words:
                 # Transitions = pack PascalCase names. VALID_TRANSITION_TYPES is the
@@ -10327,16 +10376,44 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                     # footage); a demote-to-overlay would paint a light flash on
                     # every turn, the exact opposite of the intent. The content
                     # turn earns its emphasis elsewhere (mask-zoom / overlay / SFX).
-                    if _TRANSITION_SCENE_GATE and awi not in _scene_change_qualify:
+                    if _TRANSITION_SCENE_GATE:
+                        _on_qual = awi in _scene_change_qualify
+                        _qualifier = (
+                            "scdet_shot_boundary" if awi in _shot_boundary_set
+                            else "broll_edge" if awi in _broll_edge_set
+                            else "off_boundary")
+                        # DISTANCE TO NEAREST PICTURE CHANGE (Zac 2026-07-08 C3 addition):
+                        # ON the boundary (dist 0) = Gemini read the SHOT CHANGES / B-roll
+                        # signal block directly. NEAR it (dist > 0) = Gemini inferred from
+                        # content and coincided — which fails when a content turn and a
+                        # picture change diverge. This decides whether the gate can come out.
+                        _nearest_awi = min(
+                            _scene_change_qualify,
+                            key=lambda _q: abs(awi - _q), default=None)
+                        _nearest_dist_words = (
+                            abs(awi - _nearest_awi) if _nearest_awi is not None else None)
+                        _scene_gate_measure.append({
+                            "awi": awi, "type": tr_type,
+                            "on_qualifying": _on_qual, "qualifier": _qualifier,
+                            "nearest_qual_awi": _nearest_awi,
+                            "nearest_dist_words": _nearest_dist_words})
                         print(
-                            f"[transition-gate] DROP transition '{tr_type}' at "
-                            f"after_word_index={awi}: not on a scene change "
-                            f"(scdet shot boundary / B-roll edge). Plays as a hard "
-                            f"cut.",
+                            f"[transition-gate] {'ON-BOUNDARY' if _on_qual else 'OFF-BOUNDARY'} "
+                            f"transition '{tr_type}' at after_word_index={awi} "
+                            f"(qualifier={_qualifier})",
                             flush=True,
                         )
-                        _scene_gate_dropped_awis.append(awi)
-                        continue
+                        # LOG-AND-PASS while measuring: record above, DROP only when
+                        # enforcement is on. ENFORCE=False → off-boundary transitions
+                        # pass through and render (we measure Gemini's raw editorial read).
+                        if _TRANSITION_SCENE_GATE_ENFORCE and not _on_qual:
+                            print(
+                                f"[transition-gate] DROP (enforce) '{tr_type}' at "
+                                f"after_word_index={awi}: off scene change. Hard cut.",
+                                flush=True,
+                            )
+                            _scene_gate_dropped_awis.append(awi)
+                            continue
                     # Type-eligibility per boundary class: crossfade transitions need
                     # CUT BOUNDARIES (audio handle for the equal-power crossfade in
                     # build_per_cut_audio's crossfade branch); zero-handle types work on
@@ -10758,6 +10835,26 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
             # entries — and secondary consumers (SFX partner registration, beat-timing
             # anchors) read that ungated list. Strip the dropped ones so EVERY consumer
             # sees the hard cut and the returned recipe is honest about what rendered.
+            # LOG-AND-PASS measurement summary (Zac 2026-07-08): emit the instrument's
+            # reading whenever the gate ran — proposed / on-picture-change / off-boundary.
+            # This is the condition-3 signal, printed the same way whether or not the gate
+            # enforced. The [transition-measure] line is what the spread harness greps.
+            if _TRANSITION_SCENE_GATE:
+                _m_total = len(_scene_gate_measure)
+                _m_on = sum(1 for _r in _scene_gate_measure if _r["on_qualifying"])
+                _m_off = _m_total - _m_on
+                _m_scdet = sum(1 for _r in _scene_gate_measure if _r["qualifier"] == "scdet_shot_boundary")
+                _m_broll = sum(1 for _r in _scene_gate_measure if _r["qualifier"] == "broll_edge")
+                print(
+                    f"[transition-measure] proposed={_m_total} "
+                    f"on_picture_change={_m_on} (scdet={_m_scdet} broll={_m_broll}) "
+                    f"off_boundary={_m_off} | "
+                    f"qualifying_picture_changes_available={len(_scene_change_qualify)} "
+                    f"(scdet={len(_shot_boundary_set)} broll={len(_broll_edge_set)}) | "
+                    f"enforce={_TRANSITION_SCENE_GATE_ENFORCE} | "
+                    f"records={_scene_gate_measure}",
+                    flush=True,
+                )
             if _scene_gate_dropped_awis:
                 _dropped_set = set(_scene_gate_dropped_awis)
 
@@ -16699,7 +16796,11 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0,
                     if _sa < _ce and _sb >= _ce - 0.03:
                         _edge = _sa if _edge is None else min(_edge, _sa)
                 if _edge is not None:
-                    _keep_to = max(_we, _edge)          # word end is the FLOOR
+                    # word_end is the FLOOR at margin 0 (strict, no clip); the margin
+                    # lets the trim reach word_end - MARGIN, but the audible edge is a
+                    # hard floor under that (never trim past where the audio drops
+                    # below threshold — the loud part of the word is always kept).
+                    _keep_to = max(_we - _WITHIN_CLIP_WORD_MARGIN_S, _edge)
                     _new_ce = _keep_to + _WITHIN_CLIP_FLOOR_S
                     if _cs + 0.05 < _new_ce < _ce - 0.001:
                         _rc["padded_end"] = _new_ce
