@@ -5824,6 +5824,12 @@ _DEADAIR_BETWEEN_PCT = 0.796   # between-words threshold = floor + PCT*(speech -
 _DEADAIR_WITHIN_PCT = 0.291    # within-word threshold (< between: a fricative is above it).
                                # Calibrated so the towel (floor -56.5, speech_p90_voiced
                                # -16.9, range 39.6dB) resolves to the proven -25/-45.
+_DEADAIR_MIN_RANGE_DB = 8.0    # below this floor->speech separation the pass NO-OPS. A loud
+                               # continuous bed (music under speech) collapses the range toward
+                               # zero — there is no true silence to locate, and floor+PCT*range
+                               # would sit a hair under speech and eat it. Synthetic corpus: the
+                               # -21dBFS music bed lands at range ~4 (no-op); whisper 14.5 / phone
+                               # 18.6 / towel 39.6 / srcB 26.3 / concat 35.7 all clear it (trim).
 _DEADAIR_FRAME_S = 0.020            # 20ms frames for the energy estimate
 _DEADAIR_DECAY_TAIL_S = 0.06        # decay pad kept past a word's within-word sound_end
                                     # (fricative/vowel/breath decay lives here). Swept
@@ -5861,8 +5867,10 @@ def _compute_floor_speech_range(source_path, word_spans, sample_rate=48000, fram
     for (_ws, _we) in (word_spans or []):
         _voiced |= (_t >= _ws) & (_t < _we)
     _speech = float(_np.percentile(_db[_voiced], 90)) if _voiced.any() else float(_np.percentile(_db, 90))
-    _rng = max(6.0, _speech - _floor)   # guard a degenerate range (music-bed source: no silence)
-    return (_floor, _speech, _rng)
+    # TRUE range — NOT floored. A degenerate range (loud continuous bed) must stay small so the
+    # caller's MIN_RANGE guard can NO-OP it; flooring it to 6 would push floor+PCT*range up above
+    # speech and eat the words. The no-op decision belongs to the caller, not this measurement.
+    return (_floor, _speech, _speech - _floor)
 
 
 def _detect_silence_regions_level(
@@ -6402,22 +6410,36 @@ def detect_dead_air(
         # fricative tail is above the within threshold, so it is never mistaken for silence).
         _word_spans = [(float(_w.get("start") or 0.0), float(_w.get("end") or 0.0)) for _w in words]
         _floor, _speech, _range = _compute_floor_speech_range(source_path, _word_spans)
-        _between_db = _floor + _DEADAIR_BETWEEN_PCT * _range
-        _within_db = _floor + _DEADAIR_WITHIN_PCT * _range
-        _level_regions = _detect_silence_regions_level(
-            source_path, _between_db, _WITHIN_CLIP_TRIM_TRIGGER_S)
-        _LEVEL_SILENCES_LAST[:] = list(_level_regions)
-        _WITHIN_WORD_SILENCES_LAST[:] = _detect_silence_regions_level(
-            source_path, _within_db, _WITHIN_CLIP_TRIM_TRIGGER_S)
-        print(
-            f"[within-clip-locate] floor={_floor:.1f}dB speech={_speech:.1f}dB range={_range:.1f}dB "
-            f"-> between={_between_db:.1f}dB (floor+{_DEADAIR_BETWEEN_PCT:.3f}*range) "
-            f"within={_within_db:.1f}dB (floor+{_DEADAIR_WITHIN_PCT:.3f}*range); "
-            f"{len(_level_regions)} between-silence + {len(_WITHIN_WORD_SILENCES_LAST)} "
-            f"within-silence span(s) located — Gemini decides keep/cut; dead air trimmed to "
-            f"{_WITHIN_CLIP_FLOOR_S*1000:.0f}ms, word tails kept to sound_end+decay",
-            flush=True,
-        )
+        if _range < _DEADAIR_MIN_RANGE_DB:
+            # No reliable floor->speech separation (a loud continuous bed — music under speech —
+            # fills every gap; there is no true silence to locate). LOCATE NOTHING and no-op:
+            # trimming here would cut the bed mid-note and pop the seam. This is the unconstructible
+            # form of "don't eat speech when the room won't let you tell speech from silence."
+            _LEVEL_SILENCES_LAST[:] = []
+            _WITHIN_WORD_SILENCES_LAST[:] = []
+            print(
+                f"[within-clip-locate] floor={_floor:.1f}dB speech={_speech:.1f}dB "
+                f"range={_range:.1f}dB < MIN_RANGE {_DEADAIR_MIN_RANGE_DB:.1f}dB — continuous "
+                f"bed / no true silence; NO-OP (located nothing, trimmed nothing)",
+                flush=True,
+            )
+        else:
+            _between_db = _floor + _DEADAIR_BETWEEN_PCT * _range
+            _within_db = _floor + _DEADAIR_WITHIN_PCT * _range
+            _level_regions = _detect_silence_regions_level(
+                source_path, _between_db, _WITHIN_CLIP_TRIM_TRIGGER_S)
+            _LEVEL_SILENCES_LAST[:] = list(_level_regions)
+            _WITHIN_WORD_SILENCES_LAST[:] = _detect_silence_regions_level(
+                source_path, _within_db, _WITHIN_CLIP_TRIM_TRIGGER_S)
+            print(
+                f"[within-clip-locate] floor={_floor:.1f}dB speech={_speech:.1f}dB range={_range:.1f}dB "
+                f"-> between={_between_db:.1f}dB (floor+{_DEADAIR_BETWEEN_PCT:.3f}*range) "
+                f"within={_within_db:.1f}dB (floor+{_DEADAIR_WITHIN_PCT:.3f}*range); "
+                f"{len(_level_regions)} between-silence + {len(_WITHIN_WORD_SILENCES_LAST)} "
+                f"within-silence span(s) located — Gemini decides keep/cut; dead air trimmed to "
+                f"{_WITHIN_CLIP_FLOOR_S*1000:.0f}ms, word tails kept to sound_end+decay",
+                flush=True,
+            )
 
     # within-clip locator uses LEVEL silence; the flag-off tiers use VAD silence.
     _wc_regions = _level_regions if _WITHIN_CLIP_DEADAIR else silence_regions
@@ -16999,11 +17021,16 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0,
     # untouched, so a release that runs to the clip end is never clipped.
     if within_clip_15ms and level_silences and raw_clips:
         _sils = sorted((float(a), float(b)) for (a, b) in level_silences)
-        # WITHIN-word (floor+Y) silences for the sound_end locator; falls back to the
-        # between-thresh spans if the within-detect produced nothing (no crash on a
-        # music-bed source where there is no silence at all).
-        _within_word_sils = sorted((float(a), float(b)) for (a, b) in
-                                   (_WITHIN_WORD_SILENCES_LAST or level_silences))
+        # WITHIN-word (floor+Y) silences for the sound_end locator. NO fallback to the
+        # between-thresh (floor+X) spans (Zac 2026-07-09 corpus sweep): an EMPTY within-detect
+        # means the within threshold found no silence inside any word tail — on a high-floor /
+        # noisy source (phone in a loud room) floor+Y sits BELOW the typical noise, so nothing
+        # trips it. The correct read is then "there is no locatable within-word silence — keep
+        # the word tail WHOLE" (sound_end stays word_end below). Borrowing the between-spans
+        # here located the trailing fricative ITSELF ("rich" clipped to "ri") — the exact
+        # speech-clipping the design forbids. The music-bed case can't reach here at all: the
+        # MIN_RANGE no-op empties level_silences upstream, so this whole block is skipped.
+        _within_word_sils = sorted((float(a), float(b)) for (a, b) in _WITHIN_WORD_SILENCES_LAST)
         _n = len(raw_clips)
         _edge_trims = 0
         for _ci, _rc in enumerate(raw_clips):

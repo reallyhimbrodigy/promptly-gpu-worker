@@ -4667,6 +4667,37 @@ def _within_clip_deadair():
         "between threshold must be floor + PCT*range (proportional, not a fixed offset)"
     assert "_keep_to = min(_we, _sound_end + _DEADAIR_DECAY_TAIL_S)" in _src, \
         "within-word locator (min(word_end, sound_end+decay)) missing"
+    # MIN-RANGE NO-OP GUARD (Zac 2026-07-09): a loud continuous bed (music under speech)
+    # collapses floor->speech separation; floor+PCT*range would sit a hair under speech and
+    # EAT it. Below MIN_RANGE the pass LOCATES NOTHING (unconstructible form of "don't trim
+    # when the room won't let you tell speech from silence"). The old max(6,...) floor is DELETED
+    # — flooring a degenerate range pushes the between threshold ABOVE speech.
+    assert hasattr(handler, "_DEADAIR_MIN_RANGE_DB"), "MIN_RANGE no-op guard constant missing"
+    assert 4.0 <= handler._DEADAIR_MIN_RANGE_DB <= 12.0, \
+        f"MIN_RANGE must sit between music-bed (~6.4) and whisper (~14.4), got {handler._DEADAIR_MIN_RANGE_DB}"
+    assert "if _range < _DEADAIR_MIN_RANGE_DB:" in _src, "no-op guard branch missing"
+    assert "NO-OP (located nothing" in _src, "no-op log line missing"
+    assert "max(6.0, _speech - _floor)" not in _src, \
+        "the flawed degenerate-range FLOOR must be DELETED (it eats speech on a music bed)"
+    assert "return (_floor, _speech, _speech - _floor)" in _src, \
+        "_compute_floor_speech_range must return the TRUE range so the caller's guard can no-op"
+    # BEHAVIORAL: a stationary bed (no true silence) yields a range BELOW MIN_RANGE and is NOT
+    # floored to 6 — proves the guard has something to fire on and the old floor is gone.
+    import numpy as _np, wave as _wave, tempfile as _tf, os as _os
+    _wp = _os.path.join(_tf.gettempdir(), "deadair_gate_lowrange.wav")
+    _bed = _np.random.RandomState(7).uniform(-0.09, 0.09, 48000 * 2).astype(_np.float32)
+    with _wave.open(_wp, "w") as _wf:
+        _wf.setnchannels(1); _wf.setsampwidth(2); _wf.setframerate(48000)
+        _wf.writeframes((_np.clip(_bed, -1, 1) * 32767).astype("<i2").tobytes())
+    _r = None
+    try:
+        _fl, _sp, _r = handler._compute_floor_speech_range(_wp, [(0.0, 2.0)])
+    except (FileNotFoundError, OSError):
+        _r = None   # ffmpeg unavailable locally — the source assertions above still gate
+    if _r is not None:
+        assert _r < handler._DEADAIR_MIN_RANGE_DB, \
+            f"stationary bed (no silence) must yield range < MIN_RANGE, got {_r:.1f}dB"
+        assert abs(_r - 6.0) > 1e-6, "range must be the TRUE separation, not the deleted max(6,...) floor"
     dg = [{"word": "rich", "punctuated_word": "rich", "start": 0.0, "end": 0.5},
           {"word": "world", "punctuated_word": "world", "start": 1.5, "end": 2.0}]
     rw = [{"after_word_index": 0, "before_word_index": 1, "reason": "dead_air"}]
