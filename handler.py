@@ -7415,7 +7415,10 @@ _PACING_MAX_COMPRESS: bool = False
 # Proven: dead air 0.594s→one 0.231s within-word micro-pause, leak-clean (zero
 # speech clipped @-20dB). The env var WITHIN_CLIP_DEADAIR_ENABLED is now a
 # kill-switch only (set "0" to disable). Reset per job like _PACING_MAX_COMPRESS.
-_WITHIN_CLIP_DEADAIR: bool = True
+_WITHIN_CLIP_DEADAIR: bool = False  # OFF until the word-boundary-floor re-prove
+                                 # (Zac 2026-07-08): the edge-trim clipped word tails
+                                 # ("rich" fricative, final "you"); flipped back OFF
+                                 # until the re-prove confirms both words intact.
 _WITHIN_CLIP_FLOOR_S = 0.015     # silence left at a trimmed within-clip splice
 _WITHIN_CLIP_TRIM_TRIGGER_S = 0.05  # cut a gap only when LEVEL silence exceeds this
                                  # (below it there is nothing worth trimming; the
@@ -16657,59 +16660,71 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0,
                 )
                 raw_clips[-1]["padded_end"] = _new_end
 
-    # ── Step 4c: UNIFIED CLIP-EDGE SILENCE TRIM (within-clip 15ms dead-air) ──
-    # The dead air the ear catches lives at clip EDGES regardless of how the clip
-    # was formed (pure pause, retake/removed-content boundary, head, tail) — and
-    # Deepgram word timing over/under-runs the audible content by up to ~0.3s, so
-    # the word-boundary pads above leave it in. This ONE pass trims every clip's
-    # leading + trailing sub-threshold silence (from the level_silences the
-    # locator already found) to the audible edge + the floor. Leak-safe by
-    # construction: only audio BELOW the silence threshold is trimmed; everything
-    # above it (all speech) is kept. It refines the padded edges Step 3b set —
-    # the pads protect releases ABOVE the threshold, this trims silence BELOW it.
-    # Replaces the per-branch within-clip trims (one path, all seam types).
+    # ── Step 4c: UNIFIED CLIP-EDGE SILENCE TRIM (within-clip dead-air) ──
+    # WORD-BOUNDARY FLOOR (Zac 2026-07-08): word boundaries are CONTENT boundaries;
+    # dB thresholds decide NOTHING inside them. The trim NEVER cuts into a Deepgram
+    # word span [ws, we] — sub-threshold audio inside a word is the word's own quiet
+    # tail/onset (a voiceless fricative hiss like "rich", a trailing vowel like the
+    # final "you", breathy decay) and the EAR hears it as the word even though the
+    # -20dB leak gate calls it "not speech". Only the BETWEEN-word zone is dead air.
+    #   TAIL keeps to max(word_end, audible_edge) + floor — the word end is the FLOOR
+    #        (never breach the span); the audible edge EXTENDS it only when the
+    #        release UNDER-runs past word_end (Deepgram cut the word short). It never
+    #        pulls IN past word_end, so an OVER-run word (audible edge before word_end,
+    #        e.g. the "rich" fricative) keeps its full span.
+    #   HEAD symmetric: min(word_start, audible_onset) − floor.
+    #   FINAL word's tail + FIRST word's onset are NEVER trimmed (sentence-final /
+    #   video-boundary words always trail off / ramp in — that decay is content, and
+    #   the video must never end by amputating its last word).
+    # Guard: only trims when a real between-word silence span exists at the edge — a
+    # clip that ends/starts ON audible content (no trailing/leading silence) is left
+    # untouched, so a release that runs to the clip end is never clipped.
     if within_clip_15ms and level_silences and raw_clips:
         _sils = sorted((float(a), float(b)) for (a, b) in level_silences)
+        _n = len(raw_clips)
         _edge_trims = 0
-        for _rc in raw_clips:
+        for _ci, _rc in enumerate(raw_clips):
             _cs = float(_rc["padded_start"])
             _ce = float(_rc["padded_end"])
-            # TRAILING: a level-silence span starting inside the clip and running
-            # to (or past) the clip end → audio is silent from its start _sa;
-            # that _sa is the true audible end. Keep _sa + floor. Earliest such
-            # start wins (sustained silence began there).
-            _tail = None
-            for (_sa, _sb) in _sils:
-                if _cs < _sa < _ce and _sb >= _ce - 0.03:
-                    _tail = _sa if _tail is None else min(_tail, _sa)
-            if _tail is not None:
-                _new_ce = _tail + _WITHIN_CLIP_FLOOR_S
-                if _cs + 0.05 < _new_ce < _ce - 0.001:
-                    _rc["padded_end"] = _new_ce
-                    _ce = _new_ce
-                    _edge_trims += 1
-            # LEADING: a level-silence span covering the clip start and ending
-            # inside it → audio silent until _sb (the audible onset). Start at
-            # _sb − floor (small onset toe). Latest such end wins.
-            _head = None
-            for (_sa, _sb) in _sils:
-                if _sa <= _cs + 0.03 and _cs < _sb < _ce:
-                    _head = _sb if _head is None else max(_head, _sb)
-            if _head is not None:
-                _new_cs = _head - _WITHIN_CLIP_FLOOR_S
-                if _cs < _new_cs < _ce - 0.05:
-                    _rc["padded_start"] = _new_cs
-                    _edge_trims += 1
+            _lw = _words_by_idx.get(_rc["_last_wi"])
+            _fw = _words_by_idx.get(_rc["_first_wi"])
+            # TRAILING — skip the video-final clip (last word protected, hard rule).
+            if _lw is not None and _ci < _n - 1:
+                _we = float(_lw["_end"])
+                _edge = None   # start of the trailing silence span = audible edge
+                for (_sa, _sb) in _sils:
+                    if _sa < _ce and _sb >= _ce - 0.03:
+                        _edge = _sa if _edge is None else min(_edge, _sa)
+                if _edge is not None:
+                    _keep_to = max(_we, _edge)          # word end is the FLOOR
+                    _new_ce = _keep_to + _WITHIN_CLIP_FLOOR_S
+                    if _cs + 0.05 < _new_ce < _ce - 0.001:
+                        _rc["padded_end"] = _new_ce
+                        _ce = _new_ce
+                        _edge_trims += 1
+            # LEADING — skip the video-first clip (first word protected, hard rule).
+            if _fw is not None and _ci > 0:
+                _ws = float(_fw["_start"])
+                _onset = None   # end of the leading silence span = audible onset
+                for (_sa, _sb) in _sils:
+                    if _sa <= _cs + 0.03 and _cs < _sb < _ce:
+                        _onset = _sb if _onset is None else max(_onset, _sb)
+                if _onset is not None:
+                    _start_at = min(_ws, _onset)        # word start is the FLOOR
+                    _new_cs = _start_at - _WITHIN_CLIP_FLOOR_S
+                    if _cs + 0.001 < _new_cs < _ce - 0.05:
+                        _rc["padded_start"] = _new_cs
         if _edge_trims:
             _record_divergence(
                 "cut_boundary", {"edge_trims": _edge_trims},
                 "within_clip_edge_trim",
-                reason=(f"trimmed {_edge_trims} clip edge(s) to the audible edge + "
-                        f"{_WITHIN_CLIP_FLOOR_S*1000:.0f}ms (level<= {_WITHIN_CLIP_SILENCE_DB}dB)"),
+                reason=(f"trimmed {_edge_trims} between-word edge(s) to word-boundary + "
+                        f"{_WITHIN_CLIP_FLOOR_S*1000:.0f}ms (word spans protected)"),
             )
             print(
-                f"[within-clip-15ms] edge-trim: tightened {_edge_trims} clip edge(s) "
-                f"to audible+{_WITHIN_CLIP_FLOOR_S*1000:.0f}ms",
+                f"[within-clip-15ms] edge-trim: tightened {_edge_trims} between-word "
+                f"edge(s) to word-boundary+{_WITHIN_CLIP_FLOOR_S*1000:.0f}ms "
+                f"(word spans never breached)",
                 flush=True,
             )
 
@@ -22390,7 +22405,7 @@ def handler(job):
         # (set "0" to disable). Per-job input overrides. ALWAYS set here so a warm
         # container never leaks a prior job's value.
         global _WITHIN_CLIP_DEADAIR
-        _wc_env = os.environ.get("WITHIN_CLIP_DEADAIR_ENABLED", "1").strip().lower() in (
+        _wc_env = os.environ.get("WITHIN_CLIP_DEADAIR_ENABLED", "0").strip().lower() in (
             "1", "true", "yes", "on")
         _wc_job = input_data.get("within_clip_deadair")
         _WITHIN_CLIP_DEADAIR = _wc_env if _wc_job is None else bool(_wc_job)

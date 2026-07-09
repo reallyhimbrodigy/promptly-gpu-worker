@@ -4631,48 +4631,49 @@ def _phrase_retake_detector():
         "non-repetitive speech must never be cut"
 
 
-@check("within-clip dead-air (DEFAULT-ON): dB LOCATES, Gemini DECIDES (preserved_silences), machinery EXECUTES (unified clip-edge trim); live in prod")
+@check("within-clip dead-air (OFF, re-proving): WORD-BOUNDARY FLOOR — the edge-trim NEVER cuts into a Deepgram word span")
 def _within_clip_deadair():
     import handler
     _src = open("handler.py").read()
-    # DEFAULT-ON (2026-07-08): module default True + env default "1"; the var is a
-    # kill-switch only, so it's NOT hard-set in the image env.
-    assert handler._WITHIN_CLIP_DEADAIR is True, "flag must default ON (live in prod)"
-    assert '"WITHIN_CLIP_DEADAIR_ENABLED", "1"' in _src, \
-        "env read must default to '1' (ON in prod; var is a kill-switch)"
+    # OFF until the word-boundary-floor re-prove (the audible-edge trim clipped word
+    # tails — "rich" fricative, final "you"). Flipped back OFF; env default "0".
+    assert handler._WITHIN_CLIP_DEADAIR is False, "flag must be OFF while re-proving the word-boundary floor"
+    assert '"WITHIN_CLIP_DEADAIR_ENABLED", "0"' in _src, "env read must default to '0' while OFF"
     assert '"WITHIN_CLIP_DEADAIR_ENABLED"' not in open("modal_app.py").read(), \
-        "kill-switch var must NOT be hard-set in the image env (default drives it ON)"
+        "kill-switch var must NOT be hard-set in the image env"
     # ARCHITECTURE: dB locates, Gemini decides, machinery executes.
     assert "def _detect_silence_regions_level(" in _src, "level LOCATOR missing"
     assert "located_silences" in _src, "located-silences hand-off to Gemini missing"
     assert "preserved_silences" in _src, "Gemini DECIDE field missing"
     assert "within_clip_edge_trim" in _src, "unified clip-edge EXECUTE pass missing"
-    # LOCATE (real path): level silences from silencedetect-shaped input.
-    # (helper parses ffmpeg stderr; presence + the edge-trim behavioral below
-    #  exercise the executor, which is the part that touches the render.)
-    # EXECUTE behavioral: a pure-pause dead_air cut, with a LEVEL-silence span
-    # that starts BEFORE the outgoing word's Deepgram end (0.35 < 0.5 = the
-    # within-word over-run) and ends AFTER the incoming word's Deepgram start
-    # (1.7 > 1.5 = the under-run). The unified edge-trim must cap the outgoing
-    # clip at the audible edge (~0.35+15ms, BEFORE the word end) and start the
-    # incoming clip at the audible onset (~1.7-15ms), removing the within-word
-    # silence the word-boundary pads leave in. Leak-safe: only sub-threshold.
-    dg = [{"word": "hello", "punctuated_word": "hello", "start": 0.0, "end": 0.5},
+    # WORD-BOUNDARY FLOOR behavioral (the structural fix Zac ordered): a pure-pause
+    # dead_air cut with a LEVEL-silence span [0.35, 1.7] that STARTS before the
+    # outgoing word's Deepgram end (0.35 < 0.5 = an over-run, like the "rich"
+    # fricative sub-threshold but inside the word) and ENDS after the incoming
+    # word's Deepgram start (1.7 > 1.5 = an under-run onset). The trim MUST protect
+    # both word spans: outgoing clip ends at/after word_end 0.5 (never inside [0,0.5]),
+    # incoming clip starts at/before word_start 1.5 (never inside [1.5,2.0]).
+    dg = [{"word": "rich", "punctuated_word": "rich", "start": 0.0, "end": 0.5},
           {"word": "world", "punctuated_word": "world", "start": 1.5, "end": 2.0}]
     rw = [{"after_word_index": 0, "before_word_index": 1, "reason": "dead_air"}]
-    lvl = [(0.35, 1.7)]   # audio silent 0.35→1.7 (straddles both loose word edges)
-    off, _ = handler.build_clips_from_words(dg, rw, video_duration=2.0,
-                                            level_silences=lvl, within_clip_15ms=False)
+    lvl = [(0.35, 1.7)]
     on, _ = handler.build_clips_from_words(dg, rw, video_duration=2.0,
                                            level_silences=lvl, within_clip_15ms=True)
-    # outgoing clip trimmed to the AUDIBLE end (0.35+15ms), not the word end 0.5
-    assert on[0]["source_end"] <= 0.40, \
-        f"edge-trim must cap outgoing clip at audible edge ~0.365s, got {on[0]['source_end']}"
-    assert off[0]["source_end"] > on[0]["source_end"], \
-        "flag OFF must keep the wider word-boundary pad (proves the edge-trim is real)"
-    # incoming clip started at the audible onset (~1.7-15ms), not the word start 1.5
-    assert on[-1]["source_start"] >= 1.60, \
-        f"edge-trim must start incoming clip at audible onset ~1.685s, got {on[-1]['source_start']}"
+    # outgoing clip's tail NEVER breaches the word span — ends at/after word_end 0.5
+    # (the "rich" fricative in [0.35, 0.5] survives), and at ~word_end+15ms (dead air trimmed)
+    assert on[0]["source_end"] >= 0.5 - 1e-6, \
+        f"WORD-BOUNDARY FLOOR: outgoing clip must not cut into the word span (end>=0.5), got {on[0]['source_end']}"
+    assert on[0]["source_end"] <= 0.5 + 0.05, \
+        f"between-word dead air must still collapse (end ~0.515s), got {on[0]['source_end']}"
+    # incoming clip's head NEVER breaches the word span — starts at/before word_start 1.5
+    assert on[-1]["source_start"] <= 1.5 + 1e-6, \
+        f"WORD-BOUNDARY FLOOR: incoming clip must not cut into the word span (start<=1.5), got {on[-1]['source_start']}"
+    # FINAL/FIRST word protection: a single-clip video is never edge-trimmed
+    solo, _ = handler.build_clips_from_words(
+        [{"word": "you", "punctuated_word": "you", "start": 0.5, "end": 1.0}],
+        [], video_duration=1.5, level_silences=[(1.0, 1.5)], within_clip_15ms=True)
+    assert solo and solo[-1]["source_end"] >= 1.0, \
+        "FINAL-word protection: the video-final word's tail must never be trimmed"
 
 
 @check("transition scene-change gate (DEFAULT-ON): live in prod, non-scene transitions DROP to hard cut (not overlay flash)")
