@@ -4245,9 +4245,13 @@ def _zero_silence_shape():
     assert 'float(words[kept[-1]].get("end") or 0.0) > 10.0' in _src, \
         "the fixed dereference is missing"
     assert 'float(kept[-1].get(' not in _src, "the crashing direct dereference is back"
-    # behavioral: the REAL function with VAD stubbed to the zero-region result
+    # behavioral: the REAL function with VAD stubbed to the zero-region result. This tests
+    # the flag-OFF VAD tier (the zero-silence warning path); the within-clip locate would
+    # ffmpeg-extract the fake source, so scope the flag OFF for the call (it is ON in prod).
     _saved = handler._detect_silence_regions_vad
+    _saved_flag = handler._WITHIN_CLIP_DEADAIR
     handler._detect_silence_regions_vad = lambda *a, **k: []
+    handler._WITHIN_CLIP_DEADAIR = False
     try:
         _w = [{"word": "w", "punctuated_word": "w", "start": float(i), "end": i + 0.9}
               for i in range(30)]
@@ -4255,6 +4259,7 @@ def _zero_silence_shape():
             "zero-silence path must produce zero dead-air cuts"
     finally:
         handler._detect_silence_regions_vad = _saved
+        handler._WITHIN_CLIP_DEADAIR = _saved_flag
 
 
 @check("v197: safeguards DEGRADE (never drop/resize) + slot-integrity tripwire enforced")
@@ -4640,16 +4645,18 @@ def _phrase_retake_detector():
         "non-repetitive speech must never be cut"
 
 
-@check("within-clip dead-air (HELD OFF): WORD-BOUNDARY FLOOR wired; flag OFF in prod until within-word margin re-prove is green")
+@check("within-clip dead-air (LIVE default-ON): 15ms gap INVARIANT — audible-to-audible between-words gap derived, not measured; Zac ear-confirmed 2026-07-09")
 def _within_clip_deadair():
     import handler
     _src = open("handler.py").read()
-    # HELD OFF (Zac 2026-07-08 deploy gate): floor already prevents edge-trim clipping,
-    # but flag stays OFF until the full re-prove is green (within-word margin + Zac's ear).
-    assert handler._WITHIN_CLIP_DEADAIR is False, "flag HELD OFF until word-boundary re-prove is green"
-    assert '"WITHIN_CLIP_DEADAIR_ENABLED", "0"' in _src, "env read default '0' (OFF until green; env flips to '1')"
+    # LIVE (Zac 2026-07-09): ear-confirmed on towel + whisper (cuts tight, no word clipped);
+    # invariant proven — towel/srcB/concat max between-words gap 15-16ms (was 280ms), Step-4c
+    # clips ZERO speech on all 6 corpus sources. Env var is a kill-switch only.
+    assert handler._WITHIN_CLIP_DEADAIR is True, "flag must default ON (live in prod, ear-confirmed)"
+    assert '"WITHIN_CLIP_DEADAIR_ENABLED", "1"' in _src, \
+        "env read must default to '1' (ON in prod; var is a kill-switch)"
     assert '"WITHIN_CLIP_DEADAIR_ENABLED"' not in open("modal_app.py").read(), \
-        "kill-switch var must NOT be hard-set in the image env"
+        "kill-switch var must NOT be hard-set in the image env (default drives it ON)"
     # ARCHITECTURE: dB locates, Gemini decides, machinery executes.
     assert "def _detect_silence_regions_level(" in _src, "level LOCATOR missing"
     assert "located_silences" in _src, "located-silences hand-off to Gemini missing"

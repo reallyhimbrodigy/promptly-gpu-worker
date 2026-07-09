@@ -7553,13 +7553,13 @@ _PACING_MAX_COMPRESS: bool = False
 # Proven: dead air 0.594s→one 0.231s within-word micro-pause, leak-clean (zero
 # speech clipped @-20dB). The env var WITHIN_CLIP_DEADAIR_ENABLED is now a
 # kill-switch only (set "0" to disable). Reset per job like _PACING_MAX_COMPRESS.
-_WITHIN_CLIP_DEADAIR: bool = False  # HELD OFF (Zac 2026-07-08 deploy gate): the
-                                 # word-boundary FLOOR already prevents the edge-trim
-                                 # from clipping "rich"/final "you" by construction,
-                                 # but this stays OFF until the full re-prove is green
-                                 # (words intact + dead air ~15ms + Zac's ear). The
-                                 # within-word conservative margin lands next; then ON.
-                                 # env var flips it back ("1") once green.
+_WITHIN_CLIP_DEADAIR: bool = True  # LIVE default-ON (Zac 2026-07-09, ear-confirmed on
+                                 # towel + whisper: cuts tight, no word clipped). The
+                                 # 15ms gap INVARIANT is proven: towel/srcB/concat max
+                                 # between-words gap 15-16ms (was 280ms), Step-4c clips
+                                 # ZERO speech on all 6 corpus sources (energy-verified,
+                                 # mc=True prod composition). Env var is a kill-switch
+                                 # only (set "0" to disable). Reset per job.
 _WITHIN_CLIP_FLOOR_S = 0.015     # silence left at a trimmed within-clip splice
 _WITHIN_CLIP_WORD_MARGIN_S = 0.0  # WITHIN-WORD CONSERVATIVE MARGIN (Zac 2026-07-08).
                                  # The tail trim's floor is max(word_end - MARGIN,
@@ -22784,7 +22784,7 @@ def handler(job):
         # (set "0" to disable). Per-job input overrides. ALWAYS set here so a warm
         # container never leaks a prior job's value.
         global _WITHIN_CLIP_DEADAIR
-        _wc_env = os.environ.get("WITHIN_CLIP_DEADAIR_ENABLED", "0").strip().lower() in (
+        _wc_env = os.environ.get("WITHIN_CLIP_DEADAIR_ENABLED", "1").strip().lower() in (
             "1", "true", "yes", "on")
         _wc_job = input_data.get("within_clip_deadair")
         _WITHIN_CLIP_DEADAIR = _wc_env if _wc_job is None else bool(_wc_job)
