@@ -5821,15 +5821,29 @@ def _get_audio_stream_offset_seconds(source_path: str) -> float:
 # threshold sits at a PERCENTAGE of the floor->speech range, which travels across both the
 # room AND the dynamic range (a -20dB-floor phone mic where +31.5 lands above full scale).
 _DEADAIR_BETWEEN_PCT = 0.796   # between-words threshold = floor + PCT*(speech - floor)
-_DEADAIR_WITHIN_PCT = 0.291    # within-word threshold (< between: a fricative is above it).
-                               # Calibrated so the towel (floor -56.5, speech_p90_voiced
-                               # -16.9, range 39.6dB) resolves to the proven -25/-45.
+_DEADAIR_WITHIN_PCT = 0.2525   # AUDIBLE-EDGE threshold = floor + PCT*range (Zac 2026-07-09
+                               # rebuild). This is where a word's sound becomes INAUDIBLE:
+                               # floor+10dB on the towel (range 39.6). The last ~10dB of decay
+                               # above the room floor is inaudible, so sound_end = the last frame
+                               # above this line = the last audible sample of the word (its
+                               # fricative/vowel decay is kept as part of the word — Zac's "60ms
+                               # decay inside the word"). Proportional so it scales DOWN on small
+                               # ranges (whisper -> floor+3.6, keeps more) — never clips.
 _DEADAIR_MIN_RANGE_DB = 8.0    # below this floor->speech separation the pass NO-OPS. A loud
                                # continuous bed (music under speech) collapses the range toward
                                # zero — there is no true silence to locate, and floor+PCT*range
                                # would sit a hair under speech and eat it. Synthetic corpus: the
                                # -21dBFS music bed lands at range ~4 (no-op); whisper 14.5 / phone
                                # 18.6 / towel 39.6 / srcB 26.3 / concat 35.7 all clear it (trim).
+_BETWEEN_WORD_GAP_S = 0.015    # THE INVARIANT (Zac 2026-07-09): the dead air in the OUTPUT
+                               # between the last audible sample of word N and the first audible
+                               # sample of word N+1 is EXACTLY this, always. Split half onto each
+                               # side of the splice (clip_end = sound_end + gap/2; clip_start =
+                               # sound_start - gap/2), so the gap is DERIVED, not measured — 280ms
+                               # is unconstructible. The pads live INSIDE the words they protect.
+_VIDEO_EDGE_PAD_S = 0.06       # lead-in before the FIRST word's onset / lead-out after the FINAL
+                               # word's tail. A video shouldn't hard-cut on its opening/closing
+                               # word; the word is protected, the silence around it is trimmed.
 _DEADAIR_FRAME_S = 0.020            # 20ms frames for the energy estimate
 _DEADAIR_DECAY_TAIL_S = 0.06        # decay pad kept past a word's within-word sound_end
                                     # (fricative/vowel/breath decay lives here). Swept
@@ -5837,6 +5851,11 @@ _DEADAIR_DECAY_TAIL_S = 0.06        # decay pad kept past a word's within-word s
                                     # softest word-final fricative intact everywhere ships.
 _WITHIN_WORD_SILENCES_LAST: list = []   # within-threshold (floor+Y) silences from the last
                                         # detect run; the Step-4c within-word locator reads them.
+_AUDIO_DB_LAST = None    # per-frame dB of the last analyzed source (5ms hop, numpy array). The
+                         # Step-4c gap invariant locates the last/first AUDIBLE sample from this
+                         # directly — the floor+10 silence SPANS fragment on breaths (209 pieces
+                         # on the towel), so span-matching misses clip edges; energy does not.
+_AUDIO_DB_META: dict = {}   # {"floor", "range", "hop"} for _AUDIO_DB_LAST
 
 
 def _compute_floor_speech_range(source_path, word_spans, sample_rate=48000, frame_s=_DEADAIR_FRAME_S):
@@ -5867,6 +5886,16 @@ def _compute_floor_speech_range(source_path, word_spans, sample_rate=48000, fram
     for (_ws, _we) in (word_spans or []):
         _voiced |= (_t >= _ws) & (_t < _we)
     _speech = float(_np.percentile(_db[_voiced], 90)) if _voiced.any() else float(_np.percentile(_db, 90))
+    # Stash a FINE (5ms) per-frame dB array for the Step-4c audible-edge locator. The trim needs
+    # the last/first sample above the audible line, and the floor+10 silence SPANS fragment on
+    # breaths — energy read directly does not. Same wav, one extra reshape, no extra I/O.
+    global _AUDIO_DB_LAST, _AUDIO_DB_META
+    _fine = max(1, int(0.005 * sample_rate))
+    _nf = len(_x) // _fine
+    if _nf > 0:
+        _AUDIO_DB_LAST = 20.0 * _np.log10(
+            _np.sqrt(_np.mean(_x[:_nf * _fine].reshape(_nf, _fine) ** 2, axis=1) + 1e-12) + 1e-12)
+        _AUDIO_DB_META = {"floor": _floor, "range": _speech - _floor, "hop": 0.005}
     # TRUE range — NOT floored. A degenerate range (loud continuous bed) must stay small so the
     # caller's MIN_RANGE guard can NO-OP it; flooring it to 6 would push floor+PCT*range up above
     # speech and eat the words. The no-op decision belongs to the caller, not this measurement.
@@ -7543,9 +7572,10 @@ _WITHIN_CLIP_WORD_MARGIN_S = 0.0  # WITHIN-WORD CONSERVATIVE MARGIN (Zac 2026-07
                                  # fricative tail ("rich") at risk when word_end is
                                  # accurate. Default 0.0: "clipped words are worse than
                                  # dead air" (Zac). Tune + re-prove on the exemplar.
-_WITHIN_CLIP_TRIM_TRIGGER_S = 0.05  # cut a gap only when LEVEL silence exceeds this
-                                 # (below it there is nothing worth trimming; the
-                                 # existing pads already sit near the floor)
+_WITHIN_CLIP_TRIM_TRIGGER_S = 0.03  # cut a gap only when LEVEL silence exceeds this. Lowered
+                                 # 50->30ms (Zac 2026-07-09 census: class-f sub-trigger gaps left
+                                 # 0.57s of audible dead air on the towel). A 60-80ms pause IS
+                                 # audible and IS 100% dead air; 30ms is above stop-closure noise.
 _WITHIN_CLIP_SILENCE_DB = -25.0  # level-based silence threshold: any span quieter
                                  # than this is dead air. -25dB catches the room-tone
                                  # pauses the ear hears (VAD holds through them; -30dB
@@ -17000,91 +17030,79 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0,
                 )
                 raw_clips[-1]["padded_end"] = _new_end
 
-    # ── Step 4c: UNIFIED CLIP-EDGE SILENCE TRIM (within-clip dead-air) ──
-    # WORD-BOUNDARY FLOOR (Zac 2026-07-08): word boundaries are CONTENT boundaries;
-    # dB thresholds decide NOTHING inside them. The trim NEVER cuts into a Deepgram
-    # word span [ws, we] — sub-threshold audio inside a word is the word's own quiet
-    # tail/onset (a voiceless fricative hiss like "rich", a trailing vowel like the
-    # final "you", breathy decay) and the EAR hears it as the word even though the
-    # -20dB leak gate calls it "not speech". Only the BETWEEN-word zone is dead air.
-    #   TAIL keeps to max(word_end, audible_edge) + floor — the word end is the FLOOR
-    #        (never breach the span); the audible edge EXTENDS it only when the
-    #        release UNDER-runs past word_end (Deepgram cut the word short). It never
-    #        pulls IN past word_end, so an OVER-run word (audible edge before word_end,
-    #        e.g. the "rich" fricative) keeps its full span.
-    #   HEAD symmetric: min(word_start, audible_onset) − floor.
-    #   FINAL word's tail + FIRST word's onset are NEVER trimmed (sentence-final /
-    #   video-boundary words always trail off / ramp in — that decay is content, and
-    #   the video must never end by amputating its last word).
-    # Guard: only trims when a real between-word silence span exists at the edge — a
-    # clip that ends/starts ON audible content (no trailing/leading silence) is left
-    # untouched, so a release that runs to the clip end is never clipped.
-    if within_clip_15ms and level_silences and raw_clips:
-        _sils = sorted((float(a), float(b)) for (a, b) in level_silences)
-        # WITHIN-word (floor+Y) silences for the sound_end locator. NO fallback to the
-        # between-thresh (floor+X) spans (Zac 2026-07-09 corpus sweep): an EMPTY within-detect
-        # means the within threshold found no silence inside any word tail — on a high-floor /
-        # noisy source (phone in a loud room) floor+Y sits BELOW the typical noise, so nothing
-        # trips it. The correct read is then "there is no locatable within-word silence — keep
-        # the word tail WHOLE" (sound_end stays word_end below). Borrowing the between-spans
-        # here located the trailing fricative ITSELF ("rich" clipped to "ri") — the exact
-        # speech-clipping the design forbids. The music-bed case can't reach here at all: the
-        # MIN_RANGE no-op empties level_silences upstream, so this whole block is skipped.
-        _within_word_sils = sorted((float(a), float(b)) for (a, b) in _WITHIN_WORD_SILENCES_LAST)
+    # ── Step 4c: BETWEEN-WORDS GAP INVARIANT (within-clip dead-air) ──
+    # THE INVARIANT (Zac 2026-07-09): the dead air in the OUTPUT between the last audible
+    # sample of word N and the first audible sample of word N+1 is EXACTLY _BETWEEN_WORD_GAP_S.
+    # Always. Derived, not measured — so a 280ms gap is unconstructible.
+    #   sound_end   = last frame ABOVE the audible line (floor + WITHIN_PCT*range) at the clip's
+    #                 trailing edge = the last sample the ear hears (the word's fricative/vowel
+    #                 decay down to the audible floor is kept; it IS the word). Robust to an
+    #                 affricate closure/burst: only the silence that REACHES the clip end counts.
+    #   sound_start = first frame above the audible line at the clip's leading edge.
+    #   clip_end    = sound_end   + gap/2      clip_start = sound_start − gap/2   → output gap = gap.
+    # This inverts the old signs: the old head floored at word_start and kept ALL of Deepgram's
+    # loose pre-onset slack (75-265ms rode into the output); the new head clips TOWARD the audible
+    # onset. The pads live INSIDE the words, not between them.
+    # VIDEO EDGES: the first clip's lead-in and the final clip's lead-out get _VIDEO_EDGE_PAD_S
+    # (a video must not hard-cut on its opening/closing word) — the WORD is protected, the silence
+    # around it is trimmed. Guard: no audible-silence at an edge (clip ends/starts ON sound) → that
+    # edge is left untouched. Music-bed no-op empties the audible silences upstream → whole block skips.
+    if within_clip_15ms and raw_clips and _WITHIN_WORD_SILENCES_LAST and _AUDIO_DB_LAST is not None:
+        import numpy as _np
+        _db = _AUDIO_DB_LAST
+        _hop = _AUDIO_DB_META.get("hop", 0.005)
+        _audible = _AUDIO_DB_META["floor"] + _DEADAIR_WITHIN_PCT * _AUDIO_DB_META["range"]
+        _nfr = len(_db)
+        def _last_audible(_a, _b):
+            _lo = max(0, int(_a / _hop)); _hi = min(_nfr, int(_b / _hop))
+            if _hi <= _lo:
+                return None
+            _w = _np.where(_db[_lo:_hi] > _audible)[0]
+            return (_lo + int(_w[-1]) + 1) * _hop if len(_w) else None
+        def _first_audible(_a, _b):
+            _lo = max(0, int(_a / _hop)); _hi = min(_nfr, int(_b / _hop))
+            if _hi <= _lo:
+                return None
+            _w = _np.where(_db[_lo:_hi] > _audible)[0]
+            return (_lo + int(_w[0])) * _hop if len(_w) else None
+        _half = _BETWEEN_WORD_GAP_S / 2.0
         _n = len(raw_clips)
         _edge_trims = 0
         for _ci, _rc in enumerate(raw_clips):
             _cs = float(_rc["padded_start"])
             _ce = float(_rc["padded_end"])
-            _lw = _words_by_idx.get(_rc["_last_wi"])
-            _fw = _words_by_idx.get(_rc["_first_wi"])
-            # TRAILING — skip the video-final clip (last word protected, hard rule).
-            if _lw is not None and _ci < _n - 1:
-                _we = float(_lw["_end"])
-                _edge = None   # start of the trailing silence span = audible edge
-                for (_sa, _sb) in _sils:
-                    if _sa < _ce and _sb >= _ce - 0.03:
-                        _edge = _sa if _edge is None else min(_edge, _sa)
-                if _edge is not None:
-                    # WITHIN-WORD LOCATOR (Zac 2026-07-09): _keep_to = min(word_end,
-                    # sound_end + DECAY_TAIL). sound_end is where the audio drops below the
-                    # WITHIN-word threshold (floor+Y) inside this word's tail — the true end
-                    # of sound. A fricative tail is SOUND at floor+Y, so it survives; only
-                    # the over-run silence past it is trimmed. Never keep past word_end
-                    # (protects the next word's onset).
-                    _sound_end = _we
-                    for (_wsa, _wsb) in _within_word_sils:
-                        if _wsa < _we + 0.05 and _wsb >= _we - 0.03:
-                            _sound_end = min(_sound_end, _wsa)
-                    _keep_to = min(_we, _sound_end + _DEADAIR_DECAY_TAIL_S)
-                    _new_ce = _keep_to + _WITHIN_CLIP_FLOOR_S
-                    if _cs + 0.05 < _new_ce < _ce - 0.001:
-                        _rc["padded_end"] = _new_ce
-                        _ce = _new_ce
-                        _edge_trims += 1
-            # LEADING — skip the video-first clip (first word protected, hard rule).
-            if _fw is not None and _ci > 0:
-                _ws = float(_fw["_start"])
-                _onset = None   # end of the leading silence span = audible onset
-                for (_sa, _sb) in _sils:
-                    if _sa <= _cs + 0.03 and _cs < _sb < _ce:
-                        _onset = _sb if _onset is None else max(_onset, _sb)
-                if _onset is not None:
-                    _start_at = min(_ws, _onset)        # word start is the FLOOR
-                    _new_cs = _start_at - _WITHIN_CLIP_FLOOR_S
-                    if _cs + 0.001 < _new_cs < _ce - 0.05:
-                        _rc["padded_start"] = _new_cs
+            # TRAILING — sound_end = the LAST audible sample inside the clip (energy read, not the
+            # fragmented silence spans). clip_end = sound_end + gap/2 (video-final: lead-out pad).
+            _sound_end = _last_audible(_cs, _ce)
+            if _sound_end is not None:
+                _tail_pad = _VIDEO_EDGE_PAD_S if _ci == _n - 1 else _half
+                _new_ce = _sound_end + _tail_pad
+                if _cs + 0.05 < _new_ce < _ce - 0.001:
+                    _rc["padded_end"] = _new_ce
+                    _ce = _new_ce
+                    _edge_trims += 1
+            # LEADING — sound_start = the FIRST audible sample inside the clip. clip_start =
+            # sound_start − gap/2 (video-first: lead-in pad). This clips TOWARD the audible onset,
+            # dropping Deepgram's loose pre-onset slack (the old min(word_start) kept all of it).
+            _sound_start = _first_audible(_cs, _ce)
+            if _sound_start is not None:
+                _head_pad = _VIDEO_EDGE_PAD_S if _ci == 0 else _half
+                _new_cs = _sound_start - _head_pad
+                if _cs + 0.001 < _new_cs < _ce - 0.05:
+                    _rc["padded_start"] = _new_cs
+                    _edge_trims += 1
         if _edge_trims:
             _record_divergence(
                 "cut_boundary", {"edge_trims": _edge_trims},
                 "within_clip_edge_trim",
-                reason=(f"trimmed {_edge_trims} between-word edge(s) to word-boundary + "
-                        f"{_WITHIN_CLIP_FLOOR_S*1000:.0f}ms (word spans protected)"),
+                reason=(f"enforced {_BETWEEN_WORD_GAP_S*1000:.0f}ms audible-to-audible gap on "
+                        f"{_edge_trims} clip edge(s) (video edges keep "
+                        f"{_VIDEO_EDGE_PAD_S*1000:.0f}ms lead-in/out)"),
             )
             print(
-                f"[within-clip-15ms] edge-trim: tightened {_edge_trims} between-word "
-                f"edge(s) to word-boundary+{_WITHIN_CLIP_FLOOR_S*1000:.0f}ms "
-                f"(word spans never breached)",
+                f"[within-clip-15ms] gap-invariant: {_edge_trims} clip edge(s) trimmed to the "
+                f"audible sample ± {_half*1000:.1f}ms → {_BETWEEN_WORD_GAP_S*1000:.0f}ms "
+                f"between-words gap (word decay kept inside the word)",
                 flush=True,
             )
 

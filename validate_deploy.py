@@ -4655,18 +4655,22 @@ def _within_clip_deadair():
     assert "located_silences" in _src, "located-silences hand-off to Gemini missing"
     assert "preserved_silences" in _src, "Gemini DECIDE field missing"
     assert "within_clip_edge_trim" in _src, "unified clip-edge EXECUTE pass missing"
-    # WITHIN-WORD LOCATOR behavioral (Zac 2026-07-09): _keep_to = min(word_end,
-    # sound_end + decay). sound_end is the true end of sound from the WITHIN-word
-    # threshold (floor+Y) — a fricative tail is SOUND at floor+Y, so the within-silence
-    # starts AFTER it and the fricative survives. Room-relative thresholds live at emit
-    # time; here we inject the located silences directly.
+    # BETWEEN-WORDS GAP INVARIANT (Zac 2026-07-09 rebuild): the OUTPUT dead air between the
+    # last audible sample of word N and the first of N+1 is _BETWEEN_WORD_GAP_S — DERIVED, not
+    # measured (a 280ms gap is unconstructible). clip_end = sound_end + gap/2; clip_start =
+    # sound_start - gap/2, where sound_end/start are the last/first AUDIBLE sample located from
+    # the per-frame energy (the floor+10 silence spans fragment on breaths — 209 on the towel).
     assert "_compute_floor_speech_range" in _src, "floor/speech/range derivation missing"
     assert "_DEADAIR_BETWEEN_PCT" in _src and "_DEADAIR_WITHIN_PCT" in _src, \
         "proportional (position-in-range) thresholds missing"
     assert "_DEADAIR_BETWEEN_PCT * _range" in _src, \
         "between threshold must be floor + PCT*range (proportional, not a fixed offset)"
-    assert "_keep_to = min(_we, _sound_end + _DEADAIR_DECAY_TAIL_S)" in _src, \
-        "within-word locator (min(word_end, sound_end+decay)) missing"
+    assert hasattr(handler, "_BETWEEN_WORD_GAP_S"), "the 15ms gap-invariant constant missing"
+    assert 0.008 <= handler._BETWEEN_WORD_GAP_S <= 0.030, \
+        f"between-words gap must be ~15ms, got {handler._BETWEEN_WORD_GAP_S}"
+    assert "_AUDIO_DB_LAST" in _src, "energy-based audible-edge locator missing (spans fragment on breaths)"
+    assert "_new_ce = _sound_end + _tail_pad" in _src, "clip_end = sound_end + gap/2 (invariant) missing"
+    assert "_new_cs = _sound_start - _head_pad" in _src, "clip_start = sound_start - gap/2 (invariant) missing"
     # MIN-RANGE NO-OP GUARD (Zac 2026-07-09): a loud continuous bed (music under speech)
     # collapses floor->speech separation; floor+PCT*range would sit a hair under speech and
     # EAT it. Below MIN_RANGE the pass LOCATES NOTHING (unconstructible form of "don't trim
@@ -4698,36 +4702,45 @@ def _within_clip_deadair():
         assert _r < handler._DEADAIR_MIN_RANGE_DB, \
             f"stationary bed (no silence) must yield range < MIN_RANGE, got {_r:.1f}dB"
         assert abs(_r - 6.0) > 1e-6, "range must be the TRUE separation, not the deleted max(6,...) floor"
-    dg = [{"word": "rich", "punctuated_word": "rich", "start": 0.0, "end": 0.5},
-          {"word": "world", "punctuated_word": "world", "start": 1.5, "end": 2.0}]
-    rw = [{"after_word_index": 0, "before_word_index": 1, "reason": "dead_air"}]
-    lvl = [(0.35, 1.7)]   # BETWEEN-thresh (floor+X): dead air from 0.35 — triggers the trim
-    # Case A — the "ch" fricative [0.35,0.5] is sub-(-25) but ABOVE floor+Y, so the WITHIN
-    # silence starts at word_end 0.5: the fricative is kept whole.
-    handler._WITHIN_WORD_SILENCES_LAST[:] = [(0.5, 1.7)]
-    on, _ = handler.build_clips_from_words(dg, rw, video_duration=2.0,
-                                           level_silences=lvl, within_clip_15ms=True)
-    assert on[0]["source_end"] >= 0.5 - 1e-6, \
-        f"fricative must survive to sound_end 0.5, got {on[0]['source_end']}"
-    assert on[0]["source_end"] <= 0.5 + 0.05, \
-        f"dead air past sound_end must collapse (~0.515s), got {on[0]['source_end']}"
-    # Case B — Deepgram OVER-RAN: sound truly ended at 0.40 (within-silence [0.40,1.7]).
-    # Collapse the over-run to sound_end+decay (~0.46), never past word_end, no sound clipped.
-    handler._WITHIN_WORD_SILENCES_LAST[:] = [(0.40, 1.7)]
-    on2, _ = handler.build_clips_from_words(dg, rw, video_duration=2.0,
-                                            level_silences=lvl, within_clip_15ms=True)
-    assert 0.40 <= on2[0]["source_end"] <= 0.5 + 0.02, \
-        f"over-run must collapse to sound_end 0.40 + decay, never past word_end 0.5, got {on2[0]['source_end']}"
-    handler._WITHIN_WORD_SILENCES_LAST[:] = []
-    # incoming clip's head NEVER breaches the word span — starts at/before word_start 1.5
-    assert on[-1]["source_start"] <= 1.5 + 1e-6, \
-        f"incoming clip must not cut into the word span (start<=1.5), got {on[-1]['source_start']}"
-    # FINAL/FIRST word protection: a single-clip video is never edge-trimmed
-    solo, _ = handler.build_clips_from_words(
+    # BEHAVIORAL — the gap invariant. Synthesize the per-frame energy the locator reads: word
+    # "one" audible [0.0,0.40], dead air to 1.60, word "two" audible [1.60,2.00]. floor -50,
+    # range 40 -> audible line floor+0.2525*40 = -39.9. The trim must land clip_end at 0.40+gap/2
+    # and clip_start at 1.60-gap/2, so the output gap is exactly _BETWEEN_WORD_GAP_S.
+    _hop = 0.005
+    _arr = _np.full(int(2.2 / _hop), -50.0)
+    _arr[int(0.0 / _hop):int(0.40 / _hop)] = -20.0
+    _arr[int(1.60 / _hop):int(2.00 / _hop)] = -20.0
+    handler._AUDIO_DB_LAST = _arr
+    handler._AUDIO_DB_META = {"floor": -50.0, "range": 40.0, "hop": _hop}
+    handler._WITHIN_WORD_SILENCES_LAST[:] = [(0.40, 1.60)]   # non-empty so the block runs
+    _dg = [{"word": "one", "punctuated_word": "one", "start": 0.0, "end": 0.5},
+           {"word": "two", "punctuated_word": "two", "start": 1.5, "end": 2.0}]
+    _rw = [{"after_word_index": 0, "before_word_index": 1, "reason": "dead_air"}]
+    _g, _ = handler.build_clips_from_words(_dg, _rw, video_duration=2.2,
+                                           level_silences=[(0.40, 1.60)], within_clip_15ms=True)
+    _half = handler._BETWEEN_WORD_GAP_S / 2.0
+    assert abs(_g[0]["source_end"] - (0.40 + _half)) < 0.012, \
+        f"clip_end must be audible sound_end 0.40 + gap/2, got {_g[0]['source_end']}"
+    assert abs(_g[-1]["source_start"] - (1.60 - _half)) < 0.012, \
+        f"clip_start must be audible sound_start 1.60 - gap/2, got {_g[-1]['source_start']}"
+    _gap = (_g[0]["source_end"] - 0.40) + (1.60 - _g[-1]["source_start"])
+    assert abs(_gap - handler._BETWEEN_WORD_GAP_S) < 0.006, \
+        f"between-words OUTPUT gap must equal {handler._BETWEEN_WORD_GAP_S}, got {_gap:.4f}"
+    assert _g[0]["source_end"] >= 0.40 - 1e-6, "must keep ALL of word one's audible sound (no clip)"
+    # video-final word protection: single clip keeps its audible tail (lead-out, not amputated)
+    _arr2 = _np.full(int(1.5 / _hop), -50.0)
+    _arr2[int(0.5 / _hop):int(1.0 / _hop)] = -20.0
+    handler._AUDIO_DB_LAST = _arr2
+    handler._AUDIO_DB_META = {"floor": -50.0, "range": 40.0, "hop": _hop}
+    handler._WITHIN_WORD_SILENCES_LAST[:] = [(1.0, 1.5)]
+    _solo, _ = handler.build_clips_from_words(
         [{"word": "you", "punctuated_word": "you", "start": 0.5, "end": 1.0}],
         [], video_duration=1.5, level_silences=[(1.0, 1.5)], within_clip_15ms=True)
-    assert solo and solo[-1]["source_end"] >= 1.0, \
-        "FINAL-word protection: the video-final word's tail must never be trimmed"
+    assert _solo and _solo[-1]["source_end"] >= 1.0 - 1e-6, \
+        "video-final word's audible tail must be kept (lead-out), never amputated"
+    handler._AUDIO_DB_LAST = None
+    handler._AUDIO_DB_META = {}
+    handler._WITHIN_WORD_SILENCES_LAST[:] = []
 
 
 @check("transition scene-change gate (LOG-AND-PASS): instrument records proposed vs on-picture-change; enforce dormant while measuring the picture-change teaching")
