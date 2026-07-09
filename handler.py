@@ -15136,18 +15136,36 @@ def _kb_crop_exprs(direction, kb_smooth, extra_px_w, extra_px_h):
 # checks each CUT BOUNDARY's available gap against these values to decide
 # which transition (if any) fits; the pipeline renders at whatever natural
 # duration the chosen type calls for.
-TRANSITION_NATURAL_DURATION_MS = {
-    "DipToBlack":    350,
-    "ZoomThrough":   500,
-    "CardSwipe":     600,
-    "StepPush":      600,
-    "SlideOver":     700,
-    "ShutterFlash":  700,
-    "CrossfadeZoom": 800,
-    "LightLeak":     800,
-    "Stack":        1000,
-    "FilmStrip":    1200,
+# ── TRANSITION DURATIONS — DECLARED IN FRAMES (B2, Zac 2026-07-09) ──────
+# THE declaration, in output frames at 60fps. Milliseconds are DERIVED below
+# for display/prompt/logging only — no duration is expressed in ms anywhere
+# else in the code, so an off-grid type (a "550ms" landing between frames)
+# is not caught by an assertion — it cannot be written. The wrong state has
+# no representation.
+TRANSITION_FPS = 60
+TRANSITION_DURATION_FRAMES = {
+    "DipToBlack":    21,   # → 350ms
+    "ZoomThrough":   30,   # → 500ms
+    "CardSwipe":     36,   # → 600ms
+    "StepPush":      36,   # → 600ms
+    "SlideOver":     42,   # → 700ms
+    "ShutterFlash":  42,   # → 700ms
+    "CrossfadeZoom": 48,   # → 800ms
+    "LightLeak":     48,   # → 800ms
+    "Stack":         60,   # → 1000ms
+    "FilmStrip":     72,   # → 1200ms
 }
+# DERIVED view (display/prompt only). Import-time exactness: every frame
+# count must resolve to integer ms on the 60fps grid, so a non-grid type
+# fails the deploy gate's import — never a render.
+TRANSITION_NATURAL_DURATION_MS = {}
+for _tt, _tf in TRANSITION_DURATION_FRAMES.items():
+    if (int(_tf) * 1000) % TRANSITION_FPS != 0:
+        raise ValueError(
+            f"transition {_tt}: {_tf} frames is not ms-exact at {TRANSITION_FPS}fps "
+            f"— durations are declared in FRAMES; pick an on-grid count")
+    TRANSITION_NATURAL_DURATION_MS[_tt] = (int(_tf) * 1000) // TRANSITION_FPS
+del _tt, _tf
 
 # ── Zero-handle transition class ──────────────────────────────────────
 # Transitions whose renderers either (a) render ONE clip at a time and
@@ -15200,17 +15218,47 @@ _TRANSITION_MIN_NATURAL_MS = min(TRANSITION_NATURAL_DURATION_MS.values())
 
 TRANSITION_DURATION_DEFAULT = _TRANSITION_MIN_NATURAL_MS / 1000.0
 
-def get_transition_duration(transition_type=None):
-    """Look up natural duration in seconds for a given transition type.
+def get_transition_duration_frames(transition_type=None):
+    """Natural duration in output FRAMES — the canonical unit (B2).
 
-    `transition_type` is the string name (e.g. "ZoomThrough"). Returns the
-    type's natural duration in seconds. Unknown types fall back to the
-    shortest natural duration so the pipeline doesn't allocate more handle
-    than necessary. Pass None to get the default floor.
+    Unknown types fall back to the shortest natural duration so the pipeline
+    doesn't allocate more handle than necessary. Pass None for the floor.
     """
+    _min_f = min(TRANSITION_DURATION_FRAMES.values())
     if transition_type is None:
-        return TRANSITION_DURATION_DEFAULT
-    return TRANSITION_NATURAL_DURATION_MS.get(transition_type, _TRANSITION_MIN_NATURAL_MS) / 1000.0
+        return _min_f
+    return TRANSITION_DURATION_FRAMES.get(transition_type, _min_f)
+
+
+def get_transition_duration(transition_type=None):
+    """Natural duration in SECONDS — DERIVED from the frame declaration.
+
+    Seconds exist for source-span math and display only; the frame count is
+    the truth (see TRANSITION_DURATION_FRAMES / compute_transition_slot_frames).
+    """
+    return get_transition_duration_frames(transition_type) / float(TRANSITION_FPS)
+
+
+def compute_transition_slot_frames(transition_type, tail_room_s, head_room_s,
+                                   fps=TRANSITION_FPS):
+    """THE single source of truth for a transition slot (B1, Zac 2026-07-09).
+
+    Returns the slot's size in output FRAMES — the ONE quantization of the
+    transition duration. 0 means the slot DOES NOT EXIST (hard cut), and both
+    tracks consume that same answer: video renders no slot frames, audio
+    inserts no crossfade. The phantom (video hard-cut + audio crossfade) is
+    unconstructible because there is no second skip decision to disagree.
+
+    Available handle room is FLOORED to the frame grid — a slot must never
+    read more handle than physically exists (round() could overshoot the real
+    room by up to half a frame).
+    """
+    if str(transition_type or "none") not in VALID_TRANSITION_TYPES:
+        return 0
+    _nat_f = get_transition_duration_frames(str(transition_type))
+    _tail_f = int(math.floor(float(tail_room_s) * fps + 1e-9))
+    _head_f = int(math.floor(float(head_room_s) * fps + 1e-9))
+    return max(0, min(_nat_f, _tail_f, _head_f))
 
 
 # ── Probe cache — eliminates redundant ffprobe calls on the same file ─────────
@@ -16141,7 +16189,7 @@ def _refine_boundary_to_low_energy(
     return refined_sample / sample_rate
 
 
-def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample_rate=48000, trans_dur_after=None, per_cut_render_dur_frames=None, source_fps=60.0, trim_head_dur=None, trim_tail_dur=None, audio_stream_offset=0.0, removed_word_spans=None):
+def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample_rate=48000, trans_slot_frames=None, per_cut_render_dur_frames=None, source_fps=60.0, trim_head_dur=None, trim_tail_dur=None, audio_stream_offset=0.0, removed_word_spans=None):
     """Build the per-cut audio track — COMPRESSION (overlap) transition model.
 
     Each cut's RENDER range is source[start + trim_head*speed, end - trim_tail*speed]
@@ -16173,17 +16221,31 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
       The 400ms crossfade inside trans_audio handles the source jump
       between A and B; no 5ms splice fade is needed at either edge.
 
-    SAMPLE-LOCKED ALIGNMENT:
-      Per-cut audio sample count is derived from the *exact* video
-      frame count (per_cut_render_dur_frames[i]) so audio and video
-      lengths match within ±1 sample (~21 µs) per cut. Transition
-      slot audio is exactly trans_dur*sample_rate samples, matching
-      the visual transition's frame count.
+    SAMPLE-LOCKED ALIGNMENT (B1, one derivation):
+      Per-cut audio = per_cut_render_dur_frames[i] × samples-per-frame.
+      Transition slot audio = trans_slot_frames[i] × samples-per-frame,
+      where trans_slot_frames is the SAME table the video renders
+      (RenderTimeline slot_frames_after). Audio and video lengths are
+      the same integers — not checked equal, derived identical. The
+      skip decision (slot_frames == 0) is shared, so a phantom
+      (video hard-cut + audio crossfade) cannot be constructed.
 
     Returns the path to the concatenated WAV.
     """
     import numpy as np
     import wave
+
+    # ── B1 (Zac 2026-07-09): ONE frame grid for both tracks ────────────────
+    # samples-per-frame must be an exact integer (48000/60 = 800) — audio
+    # lengths are video frame counts × this. A rate/fps pair that doesn't
+    # share the grid cannot silently drift; it cannot start.
+    _spf_float = sample_rate / float(source_fps)
+    _spf = int(round(_spf_float))
+    if abs(_spf_float - _spf) > 1e-9:
+        raise ValueError(
+            f"sample_rate {sample_rate} is not integer-divisible by fps "
+            f"{source_fps} ({_spf_float} samples/frame): audio and video "
+            f"cannot share the frame grid")
 
     output_wav = os.path.join(work_dir, "per_cut_audio.wav")
 
@@ -16254,9 +16316,11 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
         if render_src_end - render_src_start < 0.001:
             cut_audios.append(np.zeros(1, dtype=np.float32))
             continue
-        # Lock audio sample count to video frame count when provided.
+        # Lock audio sample count to video frame count when provided —
+        # exact integer multiplication (frames × samples-per-frame), not a
+        # float division re-derivation (B1).
         if per_cut_render_dur_frames is not None and ci < len(per_cut_render_dur_frames):
-            n_out = max(1, int(round(per_cut_render_dur_frames[ci] * sample_rate / source_fps)))
+            n_out = max(1, int(per_cut_render_dur_frames[ci]) * _spf)
         else:
             n_out = max(1, int(round((effective_durations[ci] - trim_h - trim_t) * sample_rate)))
         if abs(clip_speed - 1.0) < 0.001:
@@ -16337,10 +16401,16 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
     _SAMPLE_TOLERANCE_S = 1.0 / sample_rate  # contiguity = within 1 sample
     for ci, cut_audio in enumerate(cut_audios):
         all_clips.append(cut_audio)
-        _t_after = 0.0
-        if trans_dur_after is not None and ci < len(trans_dur_after):
-            _t_after = float(trans_dur_after[ci] or 0.0)
-        if _t_after <= 0 or ci + 1 >= len(cuts):
+        # B1 (Zac 2026-07-09): the slot's frame count is READ from the same
+        # table the video renders (RenderTimeline's slot_frames_after). The
+        # skip decision is the video's skip decision — slot_frames == 0 means
+        # the slot DOES NOT EXIST on either track. There is no seconds
+        # re-conversion, so the phantom (video hard-cut + audio crossfade)
+        # and clamped-slot drift are unconstructible.
+        _slot_f = 0
+        if trans_slot_frames is not None and ci < len(trans_slot_frames):
+            _slot_f = int(trans_slot_frames[ci] or 0)
+        if _slot_f <= 0 or ci + 1 >= len(cuts):
             # No transition. Boundary cut_audio[ci] → cut_audio[ci+1] is a
             # SPLICE — but only NEEDS a fade if source is non-contiguous.
             if ci + 1 < len(cut_audios):
@@ -16355,20 +16425,20 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
         cut_b = cuts[ci + 1]
         speed_a = float(cut_a.get("speed") or 1.0)
         speed_b = float(cut_b.get("speed") or 1.0)
-        n_trans = max(1, int(round(_t_after * sample_rate)))
-        # AV-DESYNC INSTRUMENT (Zac 2026-07-08): the video renders this slot as
-        # round(_t_after*fps) frames; the audio as n_trans samples. They agree ONLY when
-        # _t_after lands on a 1/fps grid (natural durations do). A clamped _t_after
-        # (min(natural, trim_tail, trim_head)) drifts. Log the per-transition step so a
-        # render's cumulative drift = sum of these. drift_step = a_samples − v_frames*800.
-        _v_slot_frames = int(round(_t_after * source_fps))
-        _v_slot_samples = int(round(_v_slot_frames * sample_rate / source_fps))
-        _drift_step = n_trans - _v_slot_samples
+        # ONE derivation: n_trans = slot_frames × samples-per-frame. The video
+        # renders _slot_f frames = _slot_f × _spf samples of timeline; the
+        # audio emits exactly that. Seconds exist only for source-span reads.
+        n_trans = _slot_f * _spf
+        _t_after = _slot_f / float(source_fps)
+        # AV-DRIFT (post-B1 identity): drift_step ≡ 0 because both tracks read
+        # the same integer. Printed computed (not hardcoded) so any future
+        # re-divergence would surface here instead of hiding.
+        _drift_step = n_trans - _slot_f * _spf
         print(
-            f"[av-drift] slot ci={ci} t_after={_t_after:.6f}s v_frames={_v_slot_frames} "
-            f"v_samples={_v_slot_samples} a_samples={n_trans} "
-            f"drift_step_samples={_drift_step} drift_step_ms={_drift_step / sample_rate * 1000:.3f} "
-            f"phantom={'YES(video=hardcut,audio=crossfade)' if _v_slot_frames == 0 else 'no'}",
+            f"[av-drift] slot ci={ci} slot_frames={_slot_f} "
+            f"a_samples={n_trans} v_samples={_slot_f * _spf} "
+            f"drift_step_samples={_drift_step} "
+            f"(single derivation: n_trans = slot_frames*{_spf})",
             flush=True,
         )
         c_a_end = float(cut_a["source_end"])
@@ -17771,18 +17841,28 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # (playbackRate≈0.048) rendered a glitched static frame in production
     # and the additive insertion grew output duration ~1s beyond content.
     # Zero-handle transitions at tight cuts are NOT supported in this model.
-    # Seconds-domain slot durations only — the FRAME truth (and the total)
-    # come from RenderTimeline below, not a parallel frame accumulator
-    # (the old _trans_frames_after used max(1) here and counted a phantom
-    # frame per skipped zero-handle transition — the #D3 bug, deleted).
+    # ── B1 (Zac 2026-07-09): the slot is quantized ONCE, in FRAMES, here. ──
+    # compute_transition_slot_frames is the single source of truth: natural
+    # duration is declared in frames (B2), available handle room is floored
+    # to the frame grid, 0 means the slot DOES NOT EXIST. RenderTimeline
+    # carries these integers verbatim and the audio reads the SAME table
+    # (slot_frames_list) — n_trans = slot_frames × samples-per-frame. There
+    # is no second conversion of _t_after anywhere, so clamped-slot drift and
+    # the phantom (video hard-cut + audio crossfade) are unconstructible.
+    # _trans_dur_after (seconds) is a DERIVED view (slot_frames/fps, exact)
+    # kept for the seconds-domain consumers (overlap ranges, logs).
+    _trans_slot_frames = []
     _trans_dur_after = []
     for _i, _rc in enumerate(render_cuts):
         _has_out = _i < len(render_cuts) - 1 and _has_real_transition(_rc)
         if _has_out:
-            _natural_here = _natural_trans_dur_for_cut(_rc)
-            _slot = min(_natural_here, _trim_tail_dur[_i], _trim_head_dur[_i + 1])
-            _trans_dur_after.append(_slot)
+            _slot_f = compute_transition_slot_frames(
+                str(_rc.get("transition_out") or "none"),
+                _trim_tail_dur[_i], _trim_head_dur[_i + 1], fps=source_fps)
+            _trans_slot_frames.append(_slot_f)
+            _trans_dur_after.append(_slot_f / float(source_fps))
         else:
+            _trans_slot_frames.append(0)
             _trans_dur_after.append(0.0)
 
     # NOTE: source_end is NOT extended in the compression model. A's source
@@ -17817,7 +17897,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     import render_timeline as _rtl
     _timeline = _rtl.build_render_timeline(
         render_cuts, effective_durations, _trim_head_dur, _trim_tail_dur,
-        _trans_dur_after, _clip_time_maps, source_fps)
+        _trans_dur_after, _clip_time_maps, source_fps,
+        trans_slot_frames=_trans_slot_frames)
     edit_plan["_render_timeline"] = _timeline
     # v197-lineage tripwire, re-anchored to the one truth: body + every real
     # slot MUST match the proven accounting to the frame, or the render fails
@@ -19927,7 +20008,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _speed_audio_future = _audio_pool.submit(
         build_per_cut_audio, source_path, render_cuts,
         effective_durations, work_dir,
-        sample_rate=sample_rate, trans_dur_after=_trans_dur_after,
+        sample_rate=sample_rate,
+        # B1 (Zac 2026-07-09): audio reads the SAME slot table the video
+        # renders from — the RenderTimeline entries. Not a parallel seconds
+        # conversion; the same integers (slot_frames_list == the entries'
+        # slot_frames_after). n_trans = slot_frames × samples-per-frame.
+        trans_slot_frames=_rtl.slot_frames_list(_timeline),
         per_cut_render_dur_frames=_per_cut_render_dur_frames,
         source_fps=source_fps,
         trim_head_dur=_trim_head_dur, trim_tail_dur=_trim_tail_dur,

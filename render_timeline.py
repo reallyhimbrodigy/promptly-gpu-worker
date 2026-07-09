@@ -21,12 +21,18 @@ view; the shadow records where the two diverge rather than assuming parity.
 
 def build_render_timeline(render_cuts, effective_durations, trim_head_dur,
                           trim_tail_dur, trans_dur_after, clip_time_maps,
-                          source_fps):
+                          source_fps, trans_slot_frames=None):
     """Construct the one truth. Returns a dict:
         {fps, total_frames, entries: [{cut_index, out_start_frame,
          body_frames, slot_frames_after, source_start, source_end,
          avg_speed, trim_head_s, trim_tail_s}]}
     All frame quantities are the AUTHORITATIVE integer-frame truth.
+
+    trans_slot_frames (B1, 2026-07-09): when provided, the slot's frame count
+    is CARRIED VERBATIM from the one quantization (handler's
+    compute_transition_slot_frames) — never re-derived from seconds. The
+    production path always provides it; the seconds fallback exists only for
+    direct-API callers (gate tests) exercising other properties.
     """
     fps = float(source_fps)
     n = len(render_cuts)
@@ -38,9 +44,13 @@ def build_render_timeline(render_cuts, effective_durations, trim_head_dur,
         tt = float(trim_tail_dur[i]) if i < len(trim_tail_dur) else 0.0
         body_s = eff - th - tt
         body_frames = max(1, int(round(body_s * fps)))
-        slot_s = float(trans_dur_after[i]) if i < len(trans_dur_after) else 0.0
-        # THE ONE FLOOR RULE: round once; 0 means the slot does not exist.
-        slot_frames = int(round(slot_s * fps))
+        if trans_slot_frames is not None and i < len(trans_slot_frames):
+            # THE ONE TABLE: read the already-quantized integer; 0 = no slot.
+            slot_frames = int(trans_slot_frames[i] or 0)
+        else:
+            slot_s = float(trans_dur_after[i]) if i < len(trans_dur_after) else 0.0
+            # THE ONE FLOOR RULE: round once; 0 means the slot does not exist.
+            slot_frames = int(round(slot_s * fps))
         if slot_frames < 0:
             slot_frames = 0
         avg_speed = 1.0

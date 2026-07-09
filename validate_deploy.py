@@ -1537,7 +1537,7 @@ def _splice_contiguous_no_attenuation():
             effective_durations=eff_durs,
             work_dir=_tmp,
             sample_rate=_SR,
-            trans_dur_after=[0.0, 0.0],
+            trans_slot_frames=[0, 0],
             per_cut_render_dur_frames=per_cut_render_dur_frames,
             source_fps=60.0,
             trim_head_dur=[0.0, 0.0],
@@ -1605,7 +1605,7 @@ def _splice_with_source_jump_still_fades():
             effective_durations=eff_durs,
             work_dir=_tmp,
             sample_rate=_SR,
-            trans_dur_after=[0.0, 0.0],
+            trans_slot_frames=[0, 0],
             per_cut_render_dur_frames=per_cut_render_dur_frames,
             source_fps=60.0,
             trim_head_dur=[0.0, 0.0],
@@ -1653,7 +1653,7 @@ def _handle_silence_on_removed_word():
             out_path = handler.build_per_cut_audio(
                 source_path=_src, cuts=cuts,
                 effective_durations=[1.25, 1.55], work_dir=_tmp, sample_rate=_SR,
-                trans_dur_after=[0.25, 0.0],
+                trans_slot_frames=[15, 0],   # 0.25s = 15 frames @60fps (B1: frames are the unit)
                 per_cut_render_dur_frames=[60, 78],  # eff - trims: 1.0s, 1.3s
                 source_fps=60.0, trim_head_dur=[0.0, 0.25],
                 trim_tail_dur=[0.25, 0.0], audio_stream_offset=0.0,
@@ -1692,7 +1692,7 @@ def _handle_realaudio_when_no_removed_word():
             out_path = handler.build_per_cut_audio(
                 source_path=_src, cuts=cuts,
                 effective_durations=[1.25, 1.55], work_dir=_tmp, sample_rate=_SR,
-                trans_dur_after=[0.25, 0.0],
+                trans_slot_frames=[15, 0],   # 0.25s = 15 frames @60fps (B1: frames are the unit)
                 per_cut_render_dur_frames=[60, 78],  # eff - trims: 1.0s, 1.3s
                 source_fps=60.0, trim_head_dur=[0.0, 0.25],
                 trim_tail_dur=[0.25, 0.0], audio_stream_offset=0.0,
@@ -1705,6 +1705,68 @@ def _handle_realaudio_when_no_removed_word():
         assert _slot_rms > 2000, f"crossfade slot RMS {_slot_rms:.0f} — real audio expected"
         assert "handle_silence_substitution" not in _buf.getvalue(), (
             "guard fired on a non-overlapping boundary")
+
+
+@check("B1/B2 one-derivation: slot quantized ONCE in frames; audio reads the video's table (× samples-per-frame); durations DECLARED in frames — phantom + clamped-slot drift unconstructible")
+def _b1b2_one_derivation():
+    import contextlib as _ctx, io as _io, os, tempfile, wave
+    _src = open("handler.py").read()
+    # B2: durations DECLARED in integer frames; ms is a DERIVED display view.
+    assert all(isinstance(v, int) for v in handler.TRANSITION_DURATION_FRAMES.values()), \
+        "TRANSITION_DURATION_FRAMES must declare integer frames"
+    assert handler.TRANSITION_NATURAL_DURATION_MS == {
+        "DipToBlack": 350, "ZoomThrough": 500, "CardSwipe": 600, "StepPush": 600,
+        "SlideOver": 700, "ShutterFlash": 700, "CrossfadeZoom": 800, "LightLeak": 800,
+        "Stack": 1000, "FilmStrip": 1200}, \
+        "derived ms view must match the proven natural durations exactly"
+    assert '"DipToBlack":    350' not in _src, \
+        "the literal ms declaration must be GONE (frames are the unit; ms is derived)"
+    # B1: THE single quantization — compute_transition_slot_frames (handler.py).
+    _f = handler.compute_transition_slot_frames
+    assert _f("ZoomThrough", 0.007, 9.0) == 0, \
+        "7ms tail clamp must produce NO slot — the shared skip both tracks consume"
+    assert _f("ZoomThrough", 9.0, 0.007) == 0, "7ms head room must also kill the slot"
+    assert _f("ZoomThrough", 0.355, 9.0) == 21, \
+        "355ms clamp floors to 21 frames (never reads more handle than exists)"
+    assert 21 * 800 == int(round(21 / 60 * 48000)), \
+        "frames × 800 IS the sample count — the identity that kills drift"
+    assert _f("FilmStrip", 1.2, 1.2) == 72, "natural duration exact (72 frames = 1200ms)"
+    assert _f("none", 9.0, 9.0) == 0 and _f(None, 9.0, 9.0) == 0, "no type → no slot"
+    # The audio path: same table, one multiplication, shared skip. The old
+    # independent quantization (round(t_after*48000)) must be DELETED.
+    assert "n_trans = _slot_f * _spf" in _src, "n_trans must be slot_frames × samples-per-frame"
+    assert "max(1, int(round(_t_after * sample_rate)))" not in _src, \
+        "the independent audio quantization must be DELETED (it was the drift)"
+    assert "if _slot_f <= 0 or ci + 1 >= len(cuts):" in _src, \
+        "audio's skip must be the frame-domain decision (slot_frames == 0)"
+    assert "trans_slot_frames=_rtl.slot_frames_list(_timeline)" in _src, \
+        "audio must read the SAME slot table the video renders (RenderTimeline entries)"
+    assert "trans_slot_frames=_trans_slot_frames" in _src, \
+        "RenderTimeline must carry the one quantization verbatim (no re-derivation)"
+    # BEHAVIORAL — total audio samples == total video frames × 800, both regimes:
+    # a 21-frame slot adds exactly 16800 samples; a 0-frame slot (the 7ms-clamp
+    # answer) adds exactly none — no phantom crossfade exists to add anything.
+    _SR = 48000
+    _cuts = [{"source_start": 0.2, "source_end": 1.4, "speed": 1.0,
+              "transition_out": "ZoomThrough"},
+             {"source_start": 1.6, "source_end": 2.6, "speed": 1.0,
+              "transition_out": "none"}]
+    for _slots, _want_frames in (([21, 0], 48 + 48 + 21), ([0, 0], 48 + 48)):
+        with tempfile.TemporaryDirectory() as _tmp:
+            _sp = os.path.join(_tmp, "source.wav")
+            _synthesize_source_wav(_sp, sample_rate=_SR, duration_s=3.0)
+            with _ctx.redirect_stdout(_io.StringIO()):
+                _op = handler.build_per_cut_audio(
+                    source_path=_sp, cuts=_cuts,
+                    effective_durations=[0.8, 0.8], work_dir=_tmp, sample_rate=_SR,
+                    trans_slot_frames=_slots, per_cut_render_dur_frames=[48, 48],
+                    source_fps=60.0, trim_head_dur=[0.0, 0.0],
+                    trim_tail_dur=[0.0, 0.0], audio_stream_offset=0.0)
+            with wave.open(_op, "rb") as _w:
+                _n = _w.getnframes()
+            assert _n == _want_frames * 800, (
+                f"audio must be video_frames×800 exactly: slots={_slots} → "
+                f"expected {_want_frames * 800} samples, got {_n}")
 
 
 @check("Zero-handle additive path is NOT wired (rollback guard, ACTIVE)")
