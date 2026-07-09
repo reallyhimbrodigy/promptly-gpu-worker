@@ -4631,14 +4631,14 @@ def _phrase_retake_detector():
         "non-repetitive speech must never be cut"
 
 
-@check("within-clip dead-air (DEFAULT-ON): WORD-BOUNDARY FLOOR — the edge-trim NEVER cuts into a Deepgram word span; live in prod")
+@check("within-clip dead-air (HELD OFF): WORD-BOUNDARY FLOOR wired; flag OFF in prod until within-word margin re-prove is green")
 def _within_clip_deadair():
     import handler
     _src = open("handler.py").read()
-    # DEFAULT-ON with the word-boundary floor: word spans protected by construction,
-    # so word tails ("rich" fricative, final "you") can't be clipped. env default "1".
-    assert handler._WITHIN_CLIP_DEADAIR is True, "flag must default ON (live in prod)"
-    assert '"WITHIN_CLIP_DEADAIR_ENABLED", "1"' in _src, "env read must default to '1' (ON in prod; kill-switch)"
+    # HELD OFF (Zac 2026-07-08 deploy gate): floor already prevents edge-trim clipping,
+    # but flag stays OFF until the full re-prove is green (within-word margin + Zac's ear).
+    assert handler._WITHIN_CLIP_DEADAIR is False, "flag HELD OFF until word-boundary re-prove is green"
+    assert '"WITHIN_CLIP_DEADAIR_ENABLED", "0"' in _src, "env read default '0' (OFF until green; env flips to '1')"
     assert '"WITHIN_CLIP_DEADAIR_ENABLED"' not in open("modal_app.py").read(), \
         "kill-switch var must NOT be hard-set in the image env"
     # ARCHITECTURE: dB locates, Gemini decides, machinery executes.
