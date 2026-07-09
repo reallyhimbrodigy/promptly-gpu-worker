@@ -1028,6 +1028,13 @@ class PostCutPlan(BaseModel):
     generated_scenes: List[_GeneratedScene] = Field(default_factory=list)
     # YOUR CUT PASS — default [] (omission-tolerant: Vertex drops empty lists).
     cut_refinements: List[_CutRefinement] = Field(default_factory=list)
+    # DEAD-AIR DECISION (2026-07-08): the mechanical pass LOCATED every within-clip
+    # silence and listed them (numbered) in the prompt. Each is dead air and gets
+    # cut to 15ms BY DEFAULT. Return here ONLY the list-numbers of the silences to
+    # PRESERVE — the ones carrying a visual beat (the speaker is showing something
+    # on screen, a deliberate held beat). Everything not listed is cut. When in
+    # doubt, do NOT preserve — punchy is the default. Empty [] = cut them all.
+    preserved_silences: List[int] = Field(default_factory=list)
     caption_position_changes: List[_CaptionPositionChange]
     thumbnail_word_index: int
     audio_denoise: bool
@@ -5783,6 +5790,41 @@ def _get_audio_stream_offset_seconds(source_path: str) -> float:
         return 0.0
 
 
+def _detect_silence_regions_level(
+    source_path: str,
+    threshold_db: float = -30.0,
+    min_silence_s: float = 0.05,
+) -> list:
+    """Level-based silence regions via ffmpeg `silencedetect`.
+
+    Returns (start_s, end_s) for every span where the audio stays below
+    `threshold_db` for at least `min_silence_s`. Unlike Silero VAD — which
+    classifies speech-vs-non-speech and HOLDS through quiet room-tone pauses —
+    this cuts purely on LEVEL, so it catches the ~-30 dB inter-word "dead air"
+    that VAD calls speech (the pauses the ear catches but VAD misses; convicted
+    2026-07-08 in the all-on render: 0.45-0.61 s gaps survived at -25/-30 dB
+    with the VAD-gated detector ON). Used only by the within-clip 15 ms pass.
+
+    No except-wrapping: a silencedetect failure should surface, not silently
+    degrade the pass to zero cuts.
+    """
+    cmd = [
+        "ffmpeg", "-i", source_path, "-map", "0:a:0",
+        "-af", f"silencedetect=noise={threshold_db}dB:d={min_silence_s}",
+        "-f", "null", "-",
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    _txt = proc.stderr or ""
+    _starts = [float(x) for x in re.findall(r"silence_start:\s*(-?[\d.]+)", _txt)]
+    _ends = [float(x) for x in re.findall(r"silence_end:\s*(-?[\d.]+)", _txt)]
+    regions = []
+    for _i, _s in enumerate(_starts):
+        _e = _ends[_i] if _i < len(_ends) else None   # trailing unmatched → skip
+        if _e is not None and _e > _s:
+            regions.append((max(0.0, _s), _e))
+    return regions
+
+
 def _detect_silence_regions_vad(
     source_path: str,
     min_silence_s: float = 0.30,
@@ -6269,21 +6311,29 @@ def detect_dead_air(
     COMMA_END_THRESHOLD = 0.50      # after ,
     MID_CLAUSE_THRESHOLD = 0.70     # no punctuation on preceding word
 
-    # WITHIN-CLIP 15ms path (Action 2, flag-gated): compute the per-frame
-    # motion timeline ONCE so the activity gate can query each gap's silence
-    # span. Flag-OFF renders never touch scdet here — bit-identical to before.
-    _activity_timeline: list = []
+    # WITHIN-CLIP LOCATOR (dead-air redesign 2026-07-08): when ON, this pass
+    # only LOCATES within-clip silences by LEVEL (silencedetect) — it does NOT
+    # decide keep-vs-cut. That decision is a CONTENT judgment (breath vs a
+    # "showing something on screen" beat are identical at the audio level), so it
+    # moves to Gemini in the post-cuts call. dB locates; Gemini decides; the cut
+    # machinery executes. VAD holds through ~-30dB room-tone pauses and misses the
+    # dead air the ear catches, so LEVEL is the right locator signal. Flag-OFF
+    # renders keep the VAD punctuation tiers below — bit-identical to before.
+    _level_regions: list = []
     if _WITHIN_CLIP_DEADAIR and source_path:
-        _activity_timeline = _frame_activity_timeline(source_path)
-        _FRAME_ACTIVITY_LAST[:] = list(_activity_timeline)
+        _level_regions = _detect_silence_regions_level(
+            source_path, _WITHIN_CLIP_SILENCE_DB, _WITHIN_CLIP_TRIM_TRIGGER_S)
+        _LEVEL_SILENCES_LAST[:] = list(_level_regions)
         print(
-            f"[within-clip-15ms] frame-activity timeline: {len(_activity_timeline)} "
-            f"frame(s); a pause is KEPT when its silence-span mean score >= "
-            f"{_WITHIN_CLIP_ACTIVITY_KEEP} (else cut, trailing silence trimmed to "
-            f"{_WITHIN_CLIP_FLOOR_S*1000:.0f}ms in build_clips_from_words)",
+            f"[within-clip-locate] {len(_level_regions)} level-silence span(s) "
+            f"<= {_WITHIN_CLIP_SILENCE_DB}dB located — Gemini decides keep/cut per "
+            f"span (dead air trimmed to {_WITHIN_CLIP_FLOOR_S*1000:.0f}ms unless it's "
+            f"a showing-beat / deliberate content beat)",
             flush=True,
         )
 
+    # within-clip locator uses LEVEL silence; the flag-off tiers use VAD silence.
+    _wc_regions = _level_regions if _WITHIN_CLIP_DEADAIR else silence_regions
     for a, b in zip(kept, kept[1:]):
         gap_start = float(words[a].get("end") or 0.0)
         gap_end = float(words[b].get("start") or 0.0)
@@ -6291,7 +6341,7 @@ def detect_dead_air(
             continue
         silence_in_gap = 0.0
         _sil_lo = _sil_hi = None
-        for sil_start, sil_end in silence_regions:
+        for sil_start, sil_end in _wc_regions:
             ovl_start = max(sil_start, gap_start)
             ovl_end = min(sil_end, gap_end)
             if ovl_end > ovl_start:
@@ -6300,31 +6350,21 @@ def detect_dead_air(
                 _sil_hi = ovl_end if _sil_hi is None else max(_sil_hi, ovl_end)
 
         if _WITHIN_CLIP_DEADAIR:
-            # Flat punchy floor + motion exception REPLACES the punctuation
-            # tiers: cut every gap with real VAD silence UNLESS the silence
-            # span carries clear visual motion — a demonstration the pause
-            # serves. Bias is toward cutting (only obvious motion survives);
-            # build_clips_from_words trims the trailing silence to the floor.
+            # LOCATE ONLY — no keep/cut decision here. Every within-clip gap with
+            # real LEVEL silence above the trigger is a CANDIDATE; Gemini judges
+            # each (showing-beat → keep; dead air → cut to the floor) in the
+            # post-cuts call, and build_clips_from_words trims the ones Gemini
+            # does NOT preserve. Carry the level-silence edges + duration so the
+            # prompt can show Gemini each span's timestamp window.
             if silence_in_gap < _WITHIN_CLIP_TRIM_TRIGGER_S:
-                continue
-            _act = _gap_visual_activity(
-                _activity_timeline,
-                _sil_lo if _sil_lo is not None else gap_start,
-                _sil_hi if _sil_hi is not None else gap_end,
-            )
-            _keep = _act >= _WITHIN_CLIP_ACTIVITY_KEEP
-            print(
-                f"[within-clip-15ms] gap [{gap_start:.3f}-{gap_end:.3f}]s "
-                f"silence={silence_in_gap:.3f}s activity={_act:.2f} -> "
-                f"{'KEEP (demonstration)' if _keep else 'cut'}",
-                flush=True,
-            )
-            if _keep:
                 continue
             out.append({
                 "after_word_index": a,
                 "before_word_index": b,
-                "reason": "dead_air",
+                "start_s": round(_sil_lo if _sil_lo is not None else gap_start, 3),
+                "end_s": round(_sil_hi if _sil_hi is not None else gap_end, 3),
+                "dur": round(silence_in_gap, 3),
+                "reason": "located_silence",
             })
             continue
 
@@ -6644,6 +6684,25 @@ def compute_mechanical_cuts(
         source_path=source_path,
         min_silence_s=min_silence_s,
     )
+
+    # Dead-air redesign (2026-07-08): when the within-clip locator is ON,
+    # detect_dead_air returns LOCATED silences (reason="located_silence"), NOT
+    # cuts — Gemini decides keep/cut per span in the post-cuts call. Keep them
+    # OUT of remove_words; the non-preserved ones become dead_air cuts after
+    # Gemini (see generate_edit_gemini). Flag-OFF, dead_airs are VAD-tier cuts
+    # and merge into remove_words as before.
+    if _WITHIN_CLIP_DEADAIR:
+        notes = (
+            f"Mechanical cuts: {len(dead_airs)} located_silence (Gemini decides), "
+            f"{len(fillers)} filler, {len(false_starts)} false_start, "
+            f"{len(stutters)} stutter, {len(retakes)} retake"
+        )
+        return {
+            "notes": notes,
+            "remove_words": word_removals,
+            "located_silences": dead_airs,
+            "pacing": "fast",
+        }
 
     notes = (
         f"Mechanical cuts: {len(dead_airs)} dead_air, "
@@ -7348,18 +7407,26 @@ _VAD_SILENCES_LAST: list = []    # v196 head-snap feed: silero silence regions
 # entry (warm-container-safe, like _VAD_SILENCES_LAST). Eval-gated: OFF unless
 # input_data.pacing_max_compression is set for a specific test render.
 _PACING_MAX_COMPRESS: bool = False
-# WITHIN-CLIP 15ms DEAD-AIR (Action 2, FLAG-OFF until proven): when ON,
-# detect_dead_air cuts EVERY kept-word gap whose VAD-confirmed silence exceeds
-# _WITHIN_CLIP_TRIM_TRIGGER_S — unless the silence span carries clear visual
-# motion (a demonstration beat) per the frame-diff activity gate — and
-# build_clips_from_words trims the trailing silence at those splices to
-# _WITHIN_CLIP_FLOOR_S. Replaces the punctuation tiers (0.25/0.50/0.70s) with a
-# flat "punchy" floor + a motion exception. Reset per job like _PACING_MAX_COMPRESS.
-_WITHIN_CLIP_DEADAIR: bool = False
+# WITHIN-CLIP DEAD-AIR (dead-air redesign, DEFAULT-ON 2026-07-08): dB LOCATES,
+# Gemini DECIDES, machinery EXECUTES. detect_dead_air LOCATES within-clip silences
+# by LEVEL (silencedetect); Gemini judges each (showing-beat → keep via
+# preserved_silences; else → cut); build_clips_from_words' unified clip-edge trim
+# (Step 4c) tightens every non-preserved silence to the audible edge + the floor.
+# Proven: dead air 0.594s→one 0.231s within-word micro-pause, leak-clean (zero
+# speech clipped @-20dB). The env var WITHIN_CLIP_DEADAIR_ENABLED is now a
+# kill-switch only (set "0" to disable). Reset per job like _PACING_MAX_COMPRESS.
+_WITHIN_CLIP_DEADAIR: bool = True
 _WITHIN_CLIP_FLOOR_S = 0.015     # silence left at a trimmed within-clip splice
-_WITHIN_CLIP_TRIM_TRIGGER_S = 0.05  # cut a gap only when VAD silence exceeds this
+_WITHIN_CLIP_TRIM_TRIGGER_S = 0.05  # cut a gap only when LEVEL silence exceeds this
                                  # (below it there is nothing worth trimming; the
                                  # existing pads already sit near the floor)
+_WITHIN_CLIP_SILENCE_DB = -25.0  # level-based silence threshold: any span quieter
+                                 # than this is dead air. -25dB catches the room-tone
+                                 # pauses the ear hears (VAD holds through them; -30dB
+                                 # KEPT them); proven leak-clean (all real speech is
+                                 # above -20dB, kept). Tuned on the exemplar.
+_LEVEL_SILENCES_LAST: list = []  # level-silence regions from the most recent
+                                 # detect_dead_air run; the within-clip trim reads them.
 _WITHIN_CLIP_ACTIVITY_KEEP = 4.5  # mean inter-frame motion (64x36 gray @ 8fps,
                                  # 0-255 abs-diff scale) over the silence span
                                  # at/above which the pause is treated as a
@@ -8622,9 +8689,15 @@ def generate_edit_gemini(
             deepgram_words or [], source_path=video_path,
         )
     raw_cut_remove_words = cut_plan.get("remove_words") or []
+    # Dead-air redesign: within-clip silences LOCATED by the mechanical pass but
+    # NOT yet cut — Gemini decides keep/cut per span (by list-number) in this
+    # call; the non-preserved ones become dead_air cuts after it returns.
+    _located_silences = cut_plan.get("located_silences") or []
     print(
         f"[cuts-mechanical] {cut_plan.get('notes', '')} "
-        f"→ {len(raw_cut_remove_words)} remove_word entries",
+        f"→ {len(raw_cut_remove_words)} remove_word entries"
+        + (f", {len(_located_silences)} located silence(s) for Gemini"
+           if _located_silences else ""),
         flush=True,
     )
 
@@ -9011,6 +9084,44 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
         _repair_max = 1
     # Same projection clock as the _RERENDER_HEADROOM_S pre-check: a re-ask
     # is affordable only when the projected render time (duration * 3) leaves
+    # ── WITHIN-CLIP SILENCES block (dead-air redesign): number each located
+    #    silence, show its timestamp window + the words around it, and teach the
+    #    UGC rule. Gemini watches the video at each timestamp and returns
+    #    preserved_silences (the show-beats to keep); the rest cut to the floor.
+    if _located_silences:
+        _src_to_new = {}
+        for _ni, _si in enumerate(new_to_src or []):
+            _src_to_new[int(_si)] = _ni
+
+        def _wtext(_i):
+            if 0 <= _i < len(deepgram_words or []):
+                return (deepgram_words[_i].get("punctuated_word")
+                        or deepgram_words[_i].get("word") or "")
+            return "?"
+        _sil_lines = []
+        for _n, _s in enumerate(_located_silences):
+            _a = int(_s.get("after_word_index", -1))
+            _b = int(_s.get("before_word_index", -1))
+            _ka = _src_to_new.get(_a)
+            _sil_lines.append(
+                f"  #{_n}  {float(_s.get('start_s') or 0):.2f}-{float(_s.get('end_s') or 0):.2f}s "
+                f"({float(_s.get('dur') or 0):.2f}s)  after kept[{_ka if _ka is not None else '?'}] "
+                f"\"{_wtext(_a)}\" → before \"{_wtext(_b)}\""
+            )
+        _located_block = "\n".join(_sil_lines)
+        post_user += f"""
+
+=== WITHIN-CLIP SILENCES — YOUR DEAD-AIR DECISION ===
+
+The mechanical pass LOCATED these {len(_located_silences)} silences inside the kept dialogue (they are NOT yet cut). Each is dead air and will be CUT to {_WITHIN_CLIP_FLOOR_S*1000:.0f}ms BY DEFAULT. This is a CONTENT judgment only you can make — a breath and a "showing something on screen in silence" beat are identical at the audio level; the difference is what's ON SCREEN, which you can see in the video you're watching.
+
+Watch the video at each silence's timestamp. Return in `preserved_silences` ONLY the numbers (#) of the silences to KEEP — the ones where the speaker is SHOWING SOMETHING on screen during the pause (holding up the product, pointing at it, a visual reveal) or the silence is a deliberate held beat that carries real weight. Every silence you do NOT list is cut to {_WITHIN_CLIP_FLOOR_S*1000:.0f}ms.
+
+WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kept pause has to earn it with something on screen. On a plain talking-head with nothing being shown, preserve nothing — every one of these is dead air.
+
+{_located_block}
+"""
+
     # at least _REPAIR_MIN_HEADROOM_S of slack in the 900s job budget.
     _repair_budget_ok = (float(duration or 0.0) * 3.0 + _REPAIR_MIN_HEADROOM_S) <= 900.0
     _post_user_attempt = post_user
@@ -9599,6 +9710,55 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
             # no merging from upstream passes (those have been removed from the
             # pipeline entirely).
 
+            # DEAD-AIR DECISION (redesign 2026-07-08): the within-clip silences the
+            # mechanical pass LOCATED and Gemini did NOT preserve become dead_air
+            # range cuts here (build_clips trims each to 15ms). preserved_silences
+            # are list-numbers into _located_silences; everything else is dead air.
+            # This is the EXECUTE step: dB located, Gemini decided, machinery cuts.
+            if _located_silences:
+                _preserved_nums = set()
+                for _pv in (edit_plan.get("preserved_silences") or []):
+                    try:
+                        _preserved_nums.add(int(_pv))
+                    except (TypeError, ValueError):
+                        continue
+                # Idempotent across repair re-runs: skip any dead_air range already
+                # present in raw_remove_words (a re-run re-reads edit_plan's
+                # remove_words, which already carries last pass's injected cuts).
+                _existing_da = set()
+                for _r in raw_remove_words:
+                    if (isinstance(_r, dict) and _r.get("reason") == "dead_air"
+                            and _r.get("after_word_index") is not None
+                            and _r.get("before_word_index") is not None):
+                        try:
+                            _existing_da.add((int(_r["after_word_index"]),
+                                              int(_r["before_word_index"])))
+                        except (TypeError, ValueError):
+                            pass
+                _da_cuts = []
+                for _i, _s in enumerate(_located_silences):
+                    if _i in _preserved_nums:
+                        continue
+                    try:
+                        _pair = (int(_s["after_word_index"]), int(_s["before_word_index"]))
+                    except (TypeError, ValueError, KeyError):
+                        continue
+                    if _pair in _existing_da:
+                        continue
+                    _da_cuts.append({
+                        "after_word_index": _pair[0],
+                        "before_word_index": _pair[1],
+                        "reason": "dead_air",
+                    })
+                if _da_cuts:
+                    raw_remove_words = list(raw_remove_words) + _da_cuts
+                print(
+                    f"[within-clip-decide] Gemini preserved {len(_preserved_nums & set(range(len(_located_silences))))} "
+                    f"of {len(_located_silences)} located silence(s); {len(_da_cuts)} cut "
+                    f"to {_WITHIN_CLIP_FLOOR_S*1000:.0f}ms as dead air",
+                    flush=True,
+                )
+
             validated_cuts = []
             if not _dg_words:
                 raise ValueError(
@@ -9712,7 +9872,8 @@ If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a fill
                     video_duration=video_duration,
                     vad_silences=list(_VAD_SILENCES_LAST),
                     max_compress=_PACING_MAX_COMPRESS,
-                    within_clip_15ms=_WITHIN_CLIP_DEADAIR)
+                    within_clip_15ms=_WITHIN_CLIP_DEADAIR,
+                    level_silences=list(_LEVEL_SILENCES_LAST))
                 edit_plan["_removed_word_indices"] = _removed_word_indices
 
                 # ── Shot-change-based clip splitting ────────────────────────────────
@@ -16105,7 +16266,7 @@ def get_output_clip_ranges(cuts, effective_durations, transition_duration=None, 
 
 def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0,
                            vad_silences=None, max_compress=False,
-                           within_clip_15ms=False):
+                           within_clip_15ms=False, level_silences=None):
     """Apply Gemini's remove_words decisions and split kept words into clips.
 
     Gemini owns every cut decision; Python is a verbatim executor.
@@ -16426,42 +16587,13 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0,
                 _out_c["padded_end"] = _E + _applied_release
             if _applied_head > 0:
                 _in_c["padded_start"] = _S - _applied_head
-            # WITHIN-CLIP 15ms trim (Action 2, flag-gated): a dead-air splice
-            # normally keeps up to _RELEASE_PAD_S (0.12s) of trailing source —
-            # word release PLUS whatever silence rides inside the pad. When the
-            # 15ms path is on, cap the outgoing edge at the VAD silence START
-            # (where the word's audible release ends) + the floor, so only the
-            # floor of silence survives. Leak-safe by construction: the release
-            # lives entirely BEFORE the VAD silence start; nothing audible is
-            # trimmed. Only ever TIGHTENS (never loosens past the default) and
-            # never crosses back before the outgoing word's end.
-            if within_clip_15ms and vad_silences:
-                _sil_lo = None
-                for (_sa, _sb) in vad_silences:
-                    if _sa < _S and _sb > _E:  # region straddles this gap
-                        _cand = max(_sa, _E)   # release ends at VAD silence start
-                        _sil_lo = _cand if _sil_lo is None else min(_sil_lo, _cand)
-                if _sil_lo is not None:
-                    _trim_end = min(
-                        _out_c["padded_end"], max(_E, _sil_lo + _WITHIN_CLIP_FLOOR_S)
-                    )
-                    if _trim_end < _out_c["padded_end"]:
-                        _record_divergence(
-                            "cut_boundary",
-                            {"boundary": _bi,
-                             "vad_silence_start": round(_sil_lo, 3),
-                             "was_release": round(_applied_release, 3)},
-                            "within_clip_15ms_trim",
-                            reason=(f"trailing silence -> {_WITHIN_CLIP_FLOOR_S*1000:.0f}ms "
-                                    f"(padded_end {_out_c['padded_end']:.3f}->{_trim_end:.3f})"),
-                        )
-                        _out_c["padded_end"] = _trim_end
-                        _applied_release = _trim_end - _E
             # v196 HEAD-SNAP (dead-air splices only): Deepgram word-starts
             # absorb leading silence (+85..466ms of kept pause measured), so
             # when a VAD silence region covering this gap ends LATER than the
-            # padded start, snap forward to VAD_onset − 75ms (soft-onset
-            # margin, measured — never assumed zero).
+            # padded start, snap forward to VAD_onset − 75ms (soft-onset margin,
+            # measured — never assumed zero). NOTE: the within-clip 15ms dead-air
+            # edge-trim (Step 4c below) does the level-based edge tightening; this
+            # stays VAD-only so flag-off behavior is unchanged.
             if vad_silences:
                 _sil_end = None
                 for (_sa, _sb) in vad_silences:
@@ -16524,6 +16656,62 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0,
                     flush=True,
                 )
                 raw_clips[-1]["padded_end"] = _new_end
+
+    # ── Step 4c: UNIFIED CLIP-EDGE SILENCE TRIM (within-clip 15ms dead-air) ──
+    # The dead air the ear catches lives at clip EDGES regardless of how the clip
+    # was formed (pure pause, retake/removed-content boundary, head, tail) — and
+    # Deepgram word timing over/under-runs the audible content by up to ~0.3s, so
+    # the word-boundary pads above leave it in. This ONE pass trims every clip's
+    # leading + trailing sub-threshold silence (from the level_silences the
+    # locator already found) to the audible edge + the floor. Leak-safe by
+    # construction: only audio BELOW the silence threshold is trimmed; everything
+    # above it (all speech) is kept. It refines the padded edges Step 3b set —
+    # the pads protect releases ABOVE the threshold, this trims silence BELOW it.
+    # Replaces the per-branch within-clip trims (one path, all seam types).
+    if within_clip_15ms and level_silences and raw_clips:
+        _sils = sorted((float(a), float(b)) for (a, b) in level_silences)
+        _edge_trims = 0
+        for _rc in raw_clips:
+            _cs = float(_rc["padded_start"])
+            _ce = float(_rc["padded_end"])
+            # TRAILING: a level-silence span starting inside the clip and running
+            # to (or past) the clip end → audio is silent from its start _sa;
+            # that _sa is the true audible end. Keep _sa + floor. Earliest such
+            # start wins (sustained silence began there).
+            _tail = None
+            for (_sa, _sb) in _sils:
+                if _cs < _sa < _ce and _sb >= _ce - 0.03:
+                    _tail = _sa if _tail is None else min(_tail, _sa)
+            if _tail is not None:
+                _new_ce = _tail + _WITHIN_CLIP_FLOOR_S
+                if _cs + 0.05 < _new_ce < _ce - 0.001:
+                    _rc["padded_end"] = _new_ce
+                    _ce = _new_ce
+                    _edge_trims += 1
+            # LEADING: a level-silence span covering the clip start and ending
+            # inside it → audio silent until _sb (the audible onset). Start at
+            # _sb − floor (small onset toe). Latest such end wins.
+            _head = None
+            for (_sa, _sb) in _sils:
+                if _sa <= _cs + 0.03 and _cs < _sb < _ce:
+                    _head = _sb if _head is None else max(_head, _sb)
+            if _head is not None:
+                _new_cs = _head - _WITHIN_CLIP_FLOOR_S
+                if _cs < _new_cs < _ce - 0.05:
+                    _rc["padded_start"] = _new_cs
+                    _edge_trims += 1
+        if _edge_trims:
+            _record_divergence(
+                "cut_boundary", {"edge_trims": _edge_trims},
+                "within_clip_edge_trim",
+                reason=(f"trimmed {_edge_trims} clip edge(s) to the audible edge + "
+                        f"{_WITHIN_CLIP_FLOOR_S*1000:.0f}ms (level<= {_WITHIN_CLIP_SILENCE_DB}dB)"),
+            )
+            print(
+                f"[within-clip-15ms] edge-trim: tightened {_edge_trims} clip edge(s) "
+                f"to audible+{_WITHIN_CLIP_FLOOR_S*1000:.0f}ms",
+                flush=True,
+            )
 
     # ── Step 5: Non-overlap invariant ─────────────────────────────────────
     # Clips are derived from sorted word groups with strictly non-overlapping
@@ -22197,11 +22385,12 @@ def handler(job):
         if _PACING_MAX_COMPRESS:
             print("[pacing-budget] MAX COMPRESSION ON — every boundary gap to the "
                   "75ms safety floor (within-clip speech rhythm untouched)", flush=True)
-        # WITHIN-CLIP 15ms DEAD-AIR (Action 2, FLAG-OFF until proven): default
-        # from the image env flag, per-job input overrides. ALWAYS set here so a
-        # warm container never leaks a prior job's value.
+        # WITHIN-CLIP DEAD-AIR (dead-air redesign, DEFAULT-ON 2026-07-08): env
+        # defaults to "1" (ON in prod); the var remains only as a kill-switch
+        # (set "0" to disable). Per-job input overrides. ALWAYS set here so a warm
+        # container never leaks a prior job's value.
         global _WITHIN_CLIP_DEADAIR
-        _wc_env = os.environ.get("WITHIN_CLIP_DEADAIR_ENABLED", "0").strip().lower() in (
+        _wc_env = os.environ.get("WITHIN_CLIP_DEADAIR_ENABLED", "1").strip().lower() in (
             "1", "true", "yes", "on")
         _wc_job = input_data.get("within_clip_deadair")
         _WITHIN_CLIP_DEADAIR = _wc_env if _wc_job is None else bool(_wc_job)

@@ -2890,8 +2890,12 @@ def _recipe_omittable_field_contract():
         # tolerant BY DESIGN: the coercion reads .get() or "none" and junk
         # values bias to "none" (never over-strip); kill test in
         # test_double_caption.py (omitted-field case).
+        # preserved_silences: Vertex drops it when empty → generate_edit_gemini
+        # reads `.get("preserved_silences") or []`, and empty means "preserve
+        # nothing" = cut every located silence (the dead-air default). Omission-safe.
         "PostCutPlan": {"cut_refinements", "existing_caption_region",
-                        "generated_scenes", "notes", "tight_cut_overlays"},
+                        "generated_scenes", "notes", "tight_cut_overlays",
+                        "preserved_silences"},
         "_EmphasisMoment": {"motion_graphic", "zoom_effect"},
         "_EmphasisMotionGraphic": {"props"},
         "_ZoomEffect": {"events"},
@@ -4627,37 +4631,48 @@ def _phrase_retake_detector():
         "non-repetitive speech must never be cut"
 
 
-@check("within-clip 15ms dead-air (shadow): flag-gated OFF, motion gate + VAD-boundary trim, prod bit-identical when off")
+@check("within-clip dead-air (DEFAULT-ON): dB LOCATES, Gemini DECIDES (preserved_silences), machinery EXECUTES (unified clip-edge trim); live in prod")
 def _within_clip_deadair():
     import handler
     _src = open("handler.py").read()
-    # flag-gated, default OFF, NOT in the image env (stays shadow until Zac)
-    assert handler._WITHIN_CLIP_DEADAIR is False, "flag must default OFF"
-    assert '"WITHIN_CLIP_DEADAIR_ENABLED"' in _src, "env flag read missing"
+    # DEFAULT-ON (2026-07-08): module default True + env default "1"; the var is a
+    # kill-switch only, so it's NOT hard-set in the image env.
+    assert handler._WITHIN_CLIP_DEADAIR is True, "flag must default ON (live in prod)"
+    assert '"WITHIN_CLIP_DEADAIR_ENABLED", "1"' in _src, \
+        "env read must default to '1' (ON in prod; var is a kill-switch)"
     assert '"WITHIN_CLIP_DEADAIR_ENABLED"' not in open("modal_app.py").read(), \
-        "within-clip 15ms must NOT be enabled in the image env (stays shadow until Zac)"
-    assert "within_clip_15ms" in _src, "build_clips_from_words trim param missing"
-    # motion gate helper (real path): mean inter-frame motion over the span;
-    # empty timeline reads as zero → cut (the ruling's bias-toward-cutting default).
-    tl = [(0.0, 1.0), (0.1, 2.0), (0.2, 9.0), (0.3, 1.0)]
-    assert handler._gap_visual_activity(tl, 0.05, 0.25) == 5.5, "mean motion over span wrong"
-    assert handler._gap_visual_activity([], 0.0, 1.0) == 0.0, \
-        "empty timeline must read as zero motion (cut), not raise"
-    # trim behavioral (real path): a pure-pause dead_air cut with VAD silence over
-    # the gap. Flag ON caps the outgoing clip's trailing silence ~15ms past the VAD
-    # silence start; flag OFF keeps the wider release pad. Same cuts, different trim.
+        "kill-switch var must NOT be hard-set in the image env (default drives it ON)"
+    # ARCHITECTURE: dB locates, Gemini decides, machinery executes.
+    assert "def _detect_silence_regions_level(" in _src, "level LOCATOR missing"
+    assert "located_silences" in _src, "located-silences hand-off to Gemini missing"
+    assert "preserved_silences" in _src, "Gemini DECIDE field missing"
+    assert "within_clip_edge_trim" in _src, "unified clip-edge EXECUTE pass missing"
+    # LOCATE (real path): level silences from silencedetect-shaped input.
+    # (helper parses ffmpeg stderr; presence + the edge-trim behavioral below
+    #  exercise the executor, which is the part that touches the render.)
+    # EXECUTE behavioral: a pure-pause dead_air cut, with a LEVEL-silence span
+    # that starts BEFORE the outgoing word's Deepgram end (0.35 < 0.5 = the
+    # within-word over-run) and ends AFTER the incoming word's Deepgram start
+    # (1.7 > 1.5 = the under-run). The unified edge-trim must cap the outgoing
+    # clip at the audible edge (~0.35+15ms, BEFORE the word end) and start the
+    # incoming clip at the audible onset (~1.7-15ms), removing the within-word
+    # silence the word-boundary pads leave in. Leak-safe: only sub-threshold.
     dg = [{"word": "hello", "punctuated_word": "hello", "start": 0.0, "end": 0.5},
           {"word": "world", "punctuated_word": "world", "start": 1.5, "end": 2.0}]
     rw = [{"after_word_index": 0, "before_word_index": 1, "reason": "dead_air"}]
-    vad = [(0.5, 1.5)]
+    lvl = [(0.35, 1.7)]   # audio silent 0.35→1.7 (straddles both loose word edges)
     off, _ = handler.build_clips_from_words(dg, rw, video_duration=2.0,
-                                            vad_silences=vad, within_clip_15ms=False)
+                                            level_silences=lvl, within_clip_15ms=False)
     on, _ = handler.build_clips_from_words(dg, rw, video_duration=2.0,
-                                           vad_silences=vad, within_clip_15ms=True)
-    assert on[0]["source_end"] <= 0.5 + 0.02, \
-        f"flag ON must cap ~15ms past VAD silence start (0.5), got {on[0]['source_end']}"
+                                           level_silences=lvl, within_clip_15ms=True)
+    # outgoing clip trimmed to the AUDIBLE end (0.35+15ms), not the word end 0.5
+    assert on[0]["source_end"] <= 0.40, \
+        f"edge-trim must cap outgoing clip at audible edge ~0.365s, got {on[0]['source_end']}"
     assert off[0]["source_end"] > on[0]["source_end"], \
-        "flag OFF must keep a wider release pad than flag ON (proves the trim is real)"
+        "flag OFF must keep the wider word-boundary pad (proves the edge-trim is real)"
+    # incoming clip started at the audible onset (~1.7-15ms), not the word start 1.5
+    assert on[-1]["source_start"] >= 1.60, \
+        f"edge-trim must start incoming clip at audible onset ~1.685s, got {on[-1]['source_start']}"
 
 
 @check("transition scene-change gate (DEFAULT-ON): live in prod, non-scene transitions DROP to hard cut (not overlay flash)")
