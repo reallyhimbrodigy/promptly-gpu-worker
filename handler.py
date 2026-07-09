@@ -7415,10 +7415,11 @@ _PACING_MAX_COMPRESS: bool = False
 # Proven: dead air 0.594s→one 0.231s within-word micro-pause, leak-clean (zero
 # speech clipped @-20dB). The env var WITHIN_CLIP_DEADAIR_ENABLED is now a
 # kill-switch only (set "0" to disable). Reset per job like _PACING_MAX_COMPRESS.
-_WITHIN_CLIP_DEADAIR: bool = False  # OFF until the word-boundary-floor re-prove
-                                 # (Zac 2026-07-08): the edge-trim clipped word tails
-                                 # ("rich" fricative, final "you"); flipped back OFF
-                                 # until the re-prove confirms both words intact.
+_WITHIN_CLIP_DEADAIR: bool = True  # DEFAULT-ON with the WORD-BOUNDARY FLOOR fix
+                                 # (2026-07-08): the edge-trim never cuts into a
+                                 # Deepgram word span, so word tails ("rich"
+                                 # fricative, final "you") are protected by
+                                 # construction. Live in prod; env var is a kill-switch.
 _WITHIN_CLIP_FLOOR_S = 0.015     # silence left at a trimmed within-clip splice
 _WITHIN_CLIP_TRIM_TRIGGER_S = 0.05  # cut a gap only when LEVEL silence exceeds this
                                  # (below it there is nothing worth trimming; the
@@ -22405,7 +22406,7 @@ def handler(job):
         # (set "0" to disable). Per-job input overrides. ALWAYS set here so a warm
         # container never leaks a prior job's value.
         global _WITHIN_CLIP_DEADAIR
-        _wc_env = os.environ.get("WITHIN_CLIP_DEADAIR_ENABLED", "0").strip().lower() in (
+        _wc_env = os.environ.get("WITHIN_CLIP_DEADAIR_ENABLED", "1").strip().lower() in (
             "1", "true", "yes", "on")
         _wc_job = input_data.get("within_clip_deadair")
         _WITHIN_CLIP_DEADAIR = _wc_env if _wc_job is None else bool(_wc_job)
