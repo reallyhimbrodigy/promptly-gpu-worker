@@ -4745,9 +4745,39 @@ def _within_clip_deadair():
         [], video_duration=1.5, level_silences=[(1.0, 1.5)], within_clip_15ms=True)
     assert _solo and _solo[-1]["source_end"] >= 1.0 - 1e-6, \
         "video-final word's audible tail must be kept (lead-out), never amputated"
+    # SPAN-SPLIT (Step 4d): silence Deepgram hid INSIDE a word span. One word [0,2.4] whose
+    # audio is audible [0.06,0.8] + [1.2,2.34] with a 400ms interior silence — the split must
+    # produce TWO clips at the invariant edges (0.8+gap/2 | 1.2-gap/2). A Gemini-preserved
+    # span covering that silence must make the split a no-op (judgment stays Gemini's).
+    assert hasattr(handler, "_SPAN_SPLIT_MIN_S"), "span-split minimum constant missing"
+    assert "span_split" in _src, "span-split divergence record missing"
+    assert "_PRESERVED_SILENCES_LAST" in _src, "preserved-silences exclusion missing from span-split"
+    _arr3 = _np.full(int(2.4 / _hop), -50.0)
+    _arr3[int(0.06 / _hop):int(0.8 / _hop)] = -20.0
+    _arr3[int(1.2 / _hop):int(2.34 / _hop)] = -20.0
+    handler._AUDIO_DB_LAST = _arr3
+    handler._AUDIO_DB_META = {"floor": -50.0, "range": 40.0, "hop": _hop}
+    handler._WITHIN_WORD_SILENCES_LAST[:] = [(0.8, 1.2)]
+    handler._PRESERVED_SILENCES_LAST[:] = []
+    _sp, _ = handler.build_clips_from_words(
+        [{"word": "offff", "punctuated_word": "offff", "start": 0.0, "end": 2.4}],
+        [], video_duration=2.4, level_silences=[(0.8, 1.2)], within_clip_15ms=True)
+    assert len(_sp) == 2, f"interior 400ms silence must SPLIT the clip, got {len(_sp)} clip(s)"
+    _half2 = handler._BETWEEN_WORD_GAP_S / 2.0
+    assert abs(_sp[0]["source_end"] - (0.8 + _half2)) < 0.012, \
+        f"split piece1 must end at sound_end 0.8 + gap/2, got {_sp[0]['source_end']}"
+    assert abs(_sp[1]["source_start"] - (1.2 - _half2)) < 0.012, \
+        f"split piece2 must start at sound_start 1.2 - gap/2, got {_sp[1]['source_start']}"
+    handler._PRESERVED_SILENCES_LAST[:] = [(0.8, 1.2)]
+    _sp2, _ = handler.build_clips_from_words(
+        [{"word": "offff", "punctuated_word": "offff", "start": 0.0, "end": 2.4}],
+        [], video_duration=2.4, level_silences=[(0.8, 1.2)], within_clip_15ms=True)
+    assert len(_sp2) == 1, \
+        f"a Gemini-PRESERVED showing beat must never be span-split, got {len(_sp2)} clip(s)"
     handler._AUDIO_DB_LAST = None
     handler._AUDIO_DB_META = {}
     handler._WITHIN_WORD_SILENCES_LAST[:] = []
+    handler._PRESERVED_SILENCES_LAST[:] = []
 
 
 @check("transition scene-change gate (LOG-AND-PASS): instrument records proposed vs on-picture-change; enforce dormant while measuring the picture-change teaching")

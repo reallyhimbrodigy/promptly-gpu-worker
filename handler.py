@@ -5835,6 +5835,14 @@ _DEADAIR_MIN_RANGE_DB = 8.0    # below this floor->speech separation the pass NO
                                # would sit a hair under speech and eat it. Synthetic corpus: the
                                # -21dBFS music bed lands at range ~4 (no-op); whisper 14.5 / phone
                                # 18.6 / towel 39.6 / srcB 26.3 / concat 35.7 all clear it (trim).
+_SPAN_SPLIT_MIN_S = 0.12       # SPAN-SPLIT (Zac 2026-07-09): an interior sub-audible run at
+                               # least this long INSIDE a clip is silence Deepgram hid inside
+                               # a word span (loose spans: srcB over-ran 6 tails = 0.73s;
+                               # towel 'off,' held 340ms). Split the clip there with the same
+                               # invariant edges — the hidden silence returns to the
+                               # between-words path. Below this, no split: a jump cut costs
+                               # more than <=105ms of quiet buys. Gemini-preserved showing
+                               # beats are excluded (stashed at the decide site).
 _BETWEEN_WORD_GAP_S = 0.015    # THE INVARIANT (Zac 2026-07-09): the dead air in the OUTPUT
                                # between the last audible sample of word N and the first audible
                                # sample of word N+1 is EXACTLY this, always. Split half onto each
@@ -5851,6 +5859,9 @@ _DEADAIR_DECAY_TAIL_S = 0.06        # decay pad kept past a word's within-word s
                                     # softest word-final fricative intact everywhere ships.
 _WITHIN_WORD_SILENCES_LAST: list = []   # within-threshold (floor+Y) silences from the last
                                         # detect run; the Step-4c within-word locator reads them.
+_PRESERVED_SILENCES_LAST: list = []     # (start_s, end_s) spans Gemini PRESERVED as showing
+                                        # beats (decide site). Step 4d never splits inside one
+                                        # — judgment stays Gemini's. Reset per decide run.
 _AUDIO_DB_LAST = None    # per-frame dB of the last analyzed source (5ms hop, numpy array). The
                          # Step-4c gap invariant locates the last/first AUDIBLE sample from this
                          # directly — the floor+10 silence SPANS fragment on breaths (209 pieces
@@ -10013,6 +10024,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
             # range cuts here (build_clips trims each to 15ms). preserved_silences
             # are list-numbers into _located_silences; everything else is dead air.
             # This is the EXECUTE step: dB located, Gemini decided, machinery cuts.
+            _PRESERVED_SILENCES_LAST[:] = []   # reset per decide run (warm containers)
             if _located_silences:
                 _preserved_nums = set()
                 for _pv in (edit_plan.get("preserved_silences") or []):
@@ -10020,6 +10032,15 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                         _preserved_nums.add(int(_pv))
                     except (TypeError, ValueError):
                         continue
+                # Stash the PRESERVED spans (timestamps) so Step 4d's span-split never cuts
+                # inside a showing beat Gemini chose to keep — judgment stays Gemini's.
+                for _i, _s in enumerate(_located_silences):
+                    if _i in _preserved_nums:
+                        try:
+                            _PRESERVED_SILENCES_LAST.append(
+                                (float(_s["start_s"]), float(_s["end_s"])))
+                        except (TypeError, ValueError, KeyError):
+                            pass
                 # Idempotent across repair re-runs: skip any dead_air range already
                 # present in raw_remove_words (a re-run re-reads edit_plan's
                 # remove_words, which already carries last pass's injected cuts).
@@ -17103,6 +17124,95 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0,
                 f"[within-clip-15ms] gap-invariant: {_edge_trims} clip edge(s) trimmed to the "
                 f"audible sample ± {_half*1000:.1f}ms → {_BETWEEN_WORD_GAP_S*1000:.0f}ms "
                 f"between-words gap (word decay kept inside the word)",
+                flush=True,
+            )
+
+    # ── Step 4d: SPAN-SPLIT (Zac 2026-07-09) — silence Deepgram hid INSIDE a word span ──
+    # A loose span leaves dead air MID-CLIP where transcript space has no gap (srcB: 6
+    # trailing over-runs = 0.73s; towel: 'off,' held 340ms of pause). No between-words gap
+    # exists there, so no candidate was ever located, Gemini never saw it, and the edge trim
+    # structurally cannot reach it. Locate interior sub-audible runs >= _SPAN_SPLIT_MIN_S on
+    # the energy array and split the clip there with the SAME invariant edges
+    # (sound_end + gap/2 | sound_start - gap/2) — the hidden silence returns to the
+    # between-words path and the 15ms invariant holds. Every removed frame is sub-audible by
+    # construction (the run is defined as frames <= the line). Gemini-preserved showing
+    # beats are EXCLUDED via _PRESERVED_SILENCES_LAST — this only cuts silence that was
+    # never anyone's to keep.
+    if within_clip_15ms and raw_clips and _WITHIN_WORD_SILENCES_LAST and _AUDIO_DB_LAST is not None:
+        _db4 = _AUDIO_DB_LAST
+        _hop4 = _AUDIO_DB_META.get("hop", 0.005)
+        _aud4 = _AUDIO_DB_META["floor"] + _DEADAIR_WITHIN_PCT * _AUDIO_DB_META["range"]
+        _half4 = _BETWEEN_WORD_GAP_S / 2.0
+        _preserved4 = [(float(_pa), float(_pb)) for (_pa, _pb) in _PRESERVED_SILENCES_LAST]
+        _split_out = []
+        _n_splits = 0
+        _split_removed_s = 0.0
+        for _rc in raw_clips:
+            _cs4 = float(_rc["padded_start"])
+            _ce4 = float(_rc["padded_end"])
+            _lo4 = max(0, int(_cs4 / _hop4))
+            _hi4 = min(len(_db4), int(_ce4 / _hop4))
+            if _hi4 - _lo4 <= 3:
+                _split_out.append(_rc)
+                continue
+            _sub4 = _db4[_lo4:_hi4] <= _aud4
+            _runs4 = []
+            _rs4 = None
+            for _i4 in range(len(_sub4)):
+                if _sub4[_i4]:
+                    if _rs4 is None:
+                        _rs4 = _i4
+                else:
+                    if _rs4 is not None:
+                        _runs4.append((_rs4, _i4))
+                        _rs4 = None
+            if _rs4 is not None:
+                _runs4.append((_rs4, len(_sub4)))
+            _cuts4 = []
+            for (_ra4, _rb4) in _runs4:
+                _ta4 = (_lo4 + _ra4) * _hop4      # end of the last audible frame before the run
+                _tb4 = (_lo4 + _rb4) * _hop4      # start of the first audible frame after it
+                if _tb4 - _ta4 < _SPAN_SPLIT_MIN_S:
+                    continue
+                if _ta4 - _cs4 < 0.05 or _ce4 - _tb4 < 0.05:
+                    continue                       # interior only — edges belong to Step 4c
+                if any(_pa < _tb4 and _pb > _ta4 for (_pa, _pb) in _preserved4):
+                    continue                       # Gemini kept this beat — never split it
+                _cuts4.append((_ta4, _tb4))
+            if not _cuts4:
+                _split_out.append(_rc)
+                continue
+            _cur4 = _cs4
+            for (_ta4, _tb4) in _cuts4:
+                if (_ta4 + _half4) - _cur4 < 0.05:
+                    continue                       # never mint a degenerate micro-piece
+                _p4 = dict(_rc)
+                _p4["padded_start"] = _cur4
+                _p4["padded_end"] = _ta4 + _half4
+                _split_out.append(_p4)
+                _cur4 = _tb4 - _half4
+                _n_splits += 1
+                _split_removed_s += (_tb4 - _ta4) - _BETWEEN_WORD_GAP_S
+            _pl4 = dict(_rc)
+            _pl4["padded_start"] = _cur4
+            _pl4["padded_end"] = _ce4
+            _split_out.append(_pl4)
+        if _n_splits:
+            raw_clips[:] = _split_out
+            _record_divergence(
+                "cut_boundary", {"span_splits": _n_splits,
+                                 "removed_s": round(_split_removed_s, 3)},
+                "span_split",
+                reason=(f"split {_n_splits} hidden mid-clip silence(s) >= "
+                        f"{_SPAN_SPLIT_MIN_S*1000:.0f}ms to the "
+                        f"{_BETWEEN_WORD_GAP_S*1000:.0f}ms invariant "
+                        f"({_split_removed_s:.2f}s of in-span dead air removed)"),
+            )
+            print(
+                f"[span-split] {_n_splits} hidden mid-clip silence(s) split to the "
+                f"{_BETWEEN_WORD_GAP_S*1000:.0f}ms invariant — {_split_removed_s:.2f}s of "
+                f"dead air Deepgram hid inside word spans removed "
+                f"(preserved showing beats untouched)",
                 flush=True,
             )
 
