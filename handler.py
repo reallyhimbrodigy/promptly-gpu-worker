@@ -11954,232 +11954,14 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                 })
             emphasis_moments.sort(key=lambda x: x["t"])
 
-            # ── Payoff-tail protection + min zoom spacing ─────────────────────────
-            # Mirrors the transition-spacing safeguards shipped in commit a95cfb2.
-            # Two passes applied to emphasis_moments AFTER sort-by-t and BEFORE the
-            # zoom-type clip-split pre-pass:
-            #
-            #   PASS 1 — Payoff-tail protection: drop any emphasis whose first zoom
-            #     event starts within [payoff_zoom_start, payoff_zoom_end + 1.5s].
-            #     The payoff is the final committed move; nothing zooms on its
-            #     heels through the close. The close still gets captions/SFX/MGs,
-            #     just not a competing zoom.
-            #
-            #   PASS 2 — Minimum spacing: drop any emphasis whose zoom peak is
-            #     within _MIN_ZOOM_SPACING_S of a previously-kept peak. Priority:
-            #     payoff (3) > mid_peak (2) > anything else (1). Lower priority
-            #     drops; ties go to the EARLIER emphasis (first emitted wins).
-            #
-            # Both passes log via _record_divergence so grep [divergence]
-            # component=emphasis surfaces every drop with the reason.
-            _MIN_ZOOM_SPACING_S = 2.0
-            _PAYOFF_TAIL_PROTECTION_S = 1.5
-
-            _arc_segments_for_priority = []
-            if isinstance(_vp, dict):
-                _arc_segments_for_priority = _vp.get("arc_segments") or []
-
-            def _arc_position_at_word(word_index):
-                """Look up arc position (hook/build/mid_peak/payoff/breather/close)
-                for a given src word_index. Returns '' if no segment matches."""
-                if not isinstance(word_index, int):
-                    return ""
-                for _seg in _arc_segments_for_priority:
-                    if not isinstance(_seg, dict):
-                        continue
-                    try:
-                        _ss = int(_seg.get("start_word_index"))
-                        _se = int(_seg.get("end_word_index"))
-                    except (TypeError, ValueError):
-                        continue
-                    if _ss <= word_index <= _se:
-                        return str(_seg.get("position") or "")
-                return ""
-
-            _ZOOM_PRIORITY = {"payoff": 3, "mid_peak": 2}
-
-            def _emphasis_priority(em):
-                _wis = em.get("word_indices") or []
-                _wi0 = _wis[0] if _wis else None
-                _pos = _arc_position_at_word(_wi0)
-                return _ZOOM_PRIORITY.get(_pos, 1)
-
-            def _first_event_window_s(em):
-                """Returns (start_s, end_s, peak_s) for the emphasis's first zoom
-                event, or None if no zoom event exists. All times in source-seconds.
-                Peak time uses ZOOM_PEAK_REACH_MS per type — same source of truth
-                as the Fix B1 startMs correction (handler.py:~6900)."""
-                _ze = em.get("zoom_effect")
-                if not isinstance(_ze, dict):
-                    return None
-                _events = _ze.get("events") or []
-                if not _events or not isinstance(_events[0], dict):
-                    return None
-                _ev = _events[0]
-                try:
-                    _start_ms = float(_ev.get("startMs") or 0)
-                    _dur_ms = float(_ev.get("durationMs") or 0)
-                except (TypeError, ValueError):
-                    return None
-                _zoom_type = str(_ze.get("type") or "")
-                _peak_ms = _start_ms + float(ZOOM_PEAK_REACH_MS.get(_zoom_type, 0))
-                return (_start_ms / 1000.0, (_start_ms + _dur_ms) / 1000.0, _peak_ms / 1000.0)
-
-            # PASS 1 — Payoff-tail protection.
-            _payoff_wi = (
-                _vp.get("payoff_word_index") if isinstance(_vp, dict) else None
-            )
-            _payoff_em = None
-            _payoff_protected_window = None
-            if isinstance(_payoff_wi, int):
-                for _em_search in emphasis_moments:
-                    _em_wis = _em_search.get("word_indices") or []
-                    if _em_wis and _em_wis[0] == _payoff_wi:
-                        _payoff_em = _em_search
-                        _win = _first_event_window_s(_em_search)
-                        if _win is not None:
-                            _payoff_protected_window = (
-                                _win[0],
-                                _win[1] + _PAYOFF_TAIL_PROTECTION_S,
-                            )
-                        break
-
-            _kept_after_payoff = []
-            for _em in emphasis_moments:
-                if _em is _payoff_em or _payoff_protected_window is None:
-                    _kept_after_payoff.append(_em)
-                    continue
-                _win = _first_event_window_s(_em)
-                if _win is None:
-                    _kept_after_payoff.append(_em)
-                    continue
-                _start_s, _end_s, _peak_s = _win
-                # Drop if the emphasis's zoom STARTS inside the protected window.
-                # Half-open: an emphasis starting EXACTLY at payoff_zoom_end + 1.5s
-                # is the close callback the prompt allows.
-                if _payoff_protected_window[0] <= _start_s < _payoff_protected_window[1]:
-                    _wi0 = (_em.get("word_indices") or [None])[0]
-                    _zt = (_em.get("zoom_effect") or {}).get("type", "")
-                    print(
-                        f"[emphasis] DROP {_zt} on word {_wi0} "
-                        f"(zoom_start={_start_s:.2f}s) — falls inside payoff "
-                        f"tail-protection window "
-                        f"[{_payoff_protected_window[0]:.2f}..{_payoff_protected_window[1]:.2f}]s.",
-                        flush=True,
-                    )
-                    _record_divergence(
-                        "emphasis",
-                        {
-                            "type": _em.get("type", ""),
-                            "zoom_type": _zt,
-                            "word_index": _wi0,
-                            "zoom_start_s": round(_start_s, 3),
-                            "payoff_window_s": [
-                                round(_payoff_protected_window[0], 3),
-                                round(_payoff_protected_window[1], 3),
-                            ],
-                            "payoff_word_index": _payoff_wi,
-                        },
-                        "drop_post_payoff",
-                        final=None,
-                        reason="protects_payoff_commitment",
-                    )
-                    continue
-                _kept_after_payoff.append(_em)
-
-            # PASS 2 — Minimum spacing between zoom peaks.
-            _kept_after_spacing = []
-            for _em in _kept_after_payoff:
-                _win = _first_event_window_s(_em)
-                if _win is None:
-                    _kept_after_spacing.append(_em)
-                    continue
-                _start_s, _end_s, _peak_s = _win
-                _prio = _emphasis_priority(_em)
-
-                if _kept_after_spacing:
-                    # Find the most recently kept emphasis that HAS a zoom event
-                    # (skip text-only emphases that have no peak).
-                    _last_idx = None
-                    for _i in range(len(_kept_after_spacing) - 1, -1, -1):
-                        _last_win = _first_event_window_s(_kept_after_spacing[_i])
-                        if _last_win is not None:
-                            _last_idx = _i
-                            break
-                    if _last_idx is not None:
-                        _last_em = _kept_after_spacing[_last_idx]
-                        _last_win = _first_event_window_s(_last_em)
-                        _last_peak_s = _last_win[2]
-                        _last_prio = _emphasis_priority(_last_em)
-                        _gap = abs(_peak_s - _last_peak_s)
-                        if _gap < _MIN_ZOOM_SPACING_S:
-                            if _prio > _last_prio:
-                                # Current outranks previous — drop previous, keep current.
-                                _wi0_prev = (_last_em.get("word_indices") or [None])[0]
-                                _zt_prev = (_last_em.get("zoom_effect") or {}).get("type", "")
-                                print(
-                                    f"[emphasis] DROP {_zt_prev} on word {_wi0_prev} "
-                                    f"(peak={_last_peak_s:.2f}s, prio={_last_prio}) — "
-                                    f"within {_MIN_ZOOM_SPACING_S}s of higher-priority "
-                                    f"peak at {_peak_s:.2f}s (prio={_prio}).",
-                                    flush=True,
-                                )
-                                _record_divergence(
-                                    "emphasis",
-                                    {
-                                        "type": _last_em.get("type", ""),
-                                        "zoom_type": _zt_prev,
-                                        "word_index": _wi0_prev,
-                                        "peak_s": round(_last_peak_s, 3),
-                                        "priority": _last_prio,
-                                        "winning_peak_s": round(_peak_s, 3),
-                                        "winning_priority": _prio,
-                                        "gap_s": round(_gap, 3),
-                                    },
-                                    "drop_too_close",
-                                    final=None,
-                                    reason="min_zoom_spacing",
-                                )
-                                del _kept_after_spacing[_last_idx]
-                                _kept_after_spacing.append(_em)
-                            else:
-                                # Current is lower-or-equal priority — current drops
-                                # (ties go to the earlier kept emphasis).
-                                _wi0 = (_em.get("word_indices") or [None])[0]
-                                _zt = (_em.get("zoom_effect") or {}).get("type", "")
-                                print(
-                                    f"[emphasis] DROP {_zt} on word {_wi0} "
-                                    f"(peak={_peak_s:.2f}s, prio={_prio}) — "
-                                    f"within {_MIN_ZOOM_SPACING_S}s of kept peak at "
-                                    f"{_last_peak_s:.2f}s (prio={_last_prio}).",
-                                    flush=True,
-                                )
-                                _record_divergence(
-                                    "emphasis",
-                                    {
-                                        "type": _em.get("type", ""),
-                                        "zoom_type": _zt,
-                                        "word_index": _wi0,
-                                        "peak_s": round(_peak_s, 3),
-                                        "priority": _prio,
-                                        "kept_peak_s": round(_last_peak_s, 3),
-                                        "kept_priority": _last_prio,
-                                        "gap_s": round(_gap, 3),
-                                    },
-                                    "drop_too_close",
-                                    final=None,
-                                    reason="min_zoom_spacing",
-                                )
-                            continue
-                _kept_after_spacing.append(_em)
-
-            if len(_kept_after_spacing) != len(emphasis_moments):
-                print(
-                    f"[emphasis] safeguards: {len(emphasis_moments)} → "
-                    f"{len(_kept_after_spacing)} (payoff-tail + min spacing drops)",
-                    flush=True,
-                )
-                emphasis_moments = _kept_after_spacing
+            # ── DELETED (Zac 2026-07-09): payoff-tail protection + min-zoom-spacing ──
+            # Both passes silently dropped Gemini emphases on timing overrules — the
+            # same mechanism, one block (mirrored the a95cfb2 transition safeguards).
+            # min-zoom-spacing's body: it ate the @78 SnapReframe 340ms before the
+            # payoff on Zac's own render (job 7013697d, [emphasis] DROP SnapReframe
+            # on word 78). The per-clip event budget taught in the prompt is the real
+            # physics; every emphasis Gemini emits now renders. Two of the 27
+            # overrules die here (drop_post_payoff, drop_too_close/min_zoom_spacing).
 
             # ── PRE-PASS: split clips at zoom-type boundaries ─────────────────────
             # Multiple emphasis_moments can target the same clip; the Remotion
@@ -15241,24 +15023,33 @@ def get_transition_duration(transition_type=None):
 
 def compute_transition_slot_frames(transition_type, tail_room_s, head_room_s,
                                    fps=TRANSITION_FPS):
-    """THE single source of truth for a transition slot (B1, Zac 2026-07-09).
+    """THE single source of truth for a transition slot (B1 + Build A).
 
-    Returns the slot's size in output FRAMES — the ONE quantization of the
-    transition duration. 0 means the slot DOES NOT EXIST (hard cut), and both
-    tracks consume that same answer: video renders no slot frames, audio
-    inserts no crossfade. The phantom (video hard-cut + audio crossfade) is
-    unconstructible because there is no second skip decision to disagree.
+    ALL-OR-NOTHING (Zac 2026-07-09 render verdict): a transition renders at
+    its designed duration or does not exist. slot = natural_frames when BOTH
+    handle rooms fit the full natural duration, else 0. The shrink-to-fit
+    clamp is DELETED — it rendered a 700ms ShutterFlash as a 2-frame (33ms)
+    flicker on Zac's own render (job 7013697d: pre-edited source, 0ms seam
+    gaps, the clamp squeezed the design into the boundary pads). The partial
+    transition has no representation.
 
-    Available handle room is FLOORED to the frame grid — a slot must never
-    read more handle than physically exists (round() could overshoot the real
-    room by up to half a frame).
+    Zero-handle types (DipToBlack, ShutterFlash) are room-gated identically —
+    M2 proved they CONSUME clip room through the same trim/slot machinery, so
+    they get no exemption: on tight footage they go extinct and tight-cut
+    overlays + bare cuts own the seams (overlays render OVER and consume
+    nothing — that is their physics).
+
+    0 means the slot DOES NOT EXIST on either track — video renders no slot
+    frames, audio inserts no crossfade (the shared skip; the phantom stays
+    unconstructible). Rooms are FLOORED to the frame grid — a slot must never
+    read more handle than physically exists.
     """
     if str(transition_type or "none") not in VALID_TRANSITION_TYPES:
         return 0
     _nat_f = get_transition_duration_frames(str(transition_type))
     _tail_f = int(math.floor(float(tail_room_s) * fps + 1e-9))
     _head_f = int(math.floor(float(head_room_s) * fps + 1e-9))
-    return max(0, min(_nat_f, _tail_f, _head_f))
+    return _nat_f if (_tail_f >= _nat_f and _head_f >= _nat_f) else 0
 
 
 # ── Probe cache — eliminates redundant ffprobe calls on the same file ─────────
