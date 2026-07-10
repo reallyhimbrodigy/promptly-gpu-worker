@@ -3874,16 +3874,17 @@ def _repair_demotion_path():
     # plan came back WHOLE (no raise) — the core safety property, unchanged
     assert isinstance(_out, dict) and _out.get("transitions") is not None, \
         "plan must come back whole (never raise on a placement-class conflict)"
-    # ENFORCING in prod: the scene gate RECORDS the off-boundary transition (instrument
-    # runs regardless) AND drops it to a hard cut before render.
-    assert "[transition-measure]" in _log, "measurement summary must emit (instrument always runs)"
-    assert "off_boundary=1" in _log, \
-        "the non-scene ZoomThrough must be recorded OFF-BOUNDARY"
-    assert "on_picture_change=0" in _log, \
-        "no qualifying picture change here (no scdet/B-roll) → on_picture_change=0"
-    # ENFORCE=True: the off-boundary transition is DROPPED to a hard cut before render.
-    assert "DROP (enforce)" in _log, \
-        "enforcing gate must DROP the off-boundary transition (unlanded teaching can't reach a render)"
+    # A1/A2 SINGLE OWNERSHIP: the sub-call is the only transitions author. The
+    # main-call ZoomThrough@4 is DISCARDED (ledgered); this job has zero
+    # qualifying seams (no scdet, no B-roll) → the sub-call is SKIPPED (R1)
+    # → zero transitions BY CONSTRUCTION. The off-boundary emission never
+    # reaches the render — not by gate-drop, by having no author that can say it.
+    assert "main_call_transitions_discarded" in _log, \
+        "main-call transitions must be discarded + ledgered (sub-call is the single author)"
+    assert "zero qualifying seams" in _log, \
+        "zero-seam job must SKIP the sub-call (zero transitions by construction)"
+    assert _out.get("transitions") == [], \
+        "no author can emit a transition on a seamless job — expected []"
 
 
 @check("safe-edit recipe: valid by construction, passes the full validation span")

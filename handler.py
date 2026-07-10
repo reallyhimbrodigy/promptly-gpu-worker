@@ -7986,6 +7986,96 @@ def _gemini_stream_with_cache(client, model_name, contents, base_config_kwargs,
         raise
 
 
+# ── A1/A2 TRANSITIONS SUB-CALL (Zac 2026-07-09/10) ─────────────────────────────
+# R3 proved response_schema is part of the Vertex cache key (same schema: 32,658
+# cached tokens / 3.6s; different schema: 0 cached / 52.5s) — a per-job schema in
+# the MAIN call would bust the 35.5k prefix every render. The per-job boundary
+# variants therefore live HERE, in a small dedicated call (precedent: the
+# tight-overlay reconcile sub-call). R2 proved (4/4 adversarial) that constrained
+# decoding honors items-level anyOf discrimination: each seam variant pairs its
+# const index (STRING enum — SDK requires string enum values; parsed to int once
+# at the merge edge) with exactly the consuming types its own room fits. An
+# unfittable transition is unsayable; a mangled slot has no representation.
+# Rider #1 (the arm-B lesson forward): the sub-call CARRIES THE PLAN'S READ —
+# arc/key-moment context + transcript windows; no video re-send (the plan and
+# transcript carry the beat; scdet already watched the picture).
+# Rider #2 (failure direction): any failure → zero transitions, bare cuts, render
+# ships. A missing transition is invisible; a failed render is not.
+
+_TRANSITIONS_SUBCALL_SYS = """You are placing TRANSITIONS for a short-form video edit. You receive the edit plan's read of the footage (arc segments, key moments), the transcript around each seam, and the seams themselves.
+
+A transition rides a PICTURE CHANGE — these seams are the picture changes this video has (source shot changes and B-roll cutaway edges). Walk the seams and decide each one: does this seam's beat want a treatment, and which one?
+
+THE PROCEDURE: read each seam's beat from the plan and the words around it. A seam whose beat snaps on a PUNCHLINE takes a bare cut — the cut IS the joke's timing; leave it untaken. A seam where the story genuinely turns can carry a full transition. A seam that is a picture change without a story turn reads cleanly as a bare cut or a light overlay. Not taking a seam is a decision, and often the right one — absence is the bare cut.
+
+The schema offers, per seam, exactly the transition types whose designed duration fits that seam's real silence — what it offers is what fits; choose editorially among what is offered, or decline the seam.
+
+RIDER SOUND: a transition entry may carry "sound": "transition-sfx" — a broad cinematic sweep, THE SCENARIO being the video's single largest act turn, where the turn itself deserves its sound. At most the one turn that earns it; omit everywhere else.
+
+Every why names the beat at the seam, read from the plan — not the mechanics of the transition."""
+
+
+def _build_transitions_subcall_schema(seams):
+    """Per-job variant schema (R2 pattern). seams = [{awi:int, gap_ms:int, kind:str}].
+    Each consuming variant offers ONLY the types whose natural duration fits the
+    seam's room (M2: zero-handle types CONSUME room — same gate). Seams with no
+    fitting consuming type appear only as overlay candidates. Returns (schema,
+    consuming_count, overlay_count); caller SKIPS the call when both are 0 (R1:
+    zero seams → no call → zero transitions by construction)."""
+    _variants = []
+    _overlay_idx = []
+    for _s in seams:
+        _room_f = int(math.floor((float(_s["gap_ms"]) / 1000.0) * TRANSITION_FPS + 1e-9))
+        _fits = sorted(_t for _t, _f in TRANSITION_DURATION_FRAMES.items()
+                       if _f <= _room_f and _t in VALID_TRANSITION_TYPES)
+        if _fits:
+            _v = {"type": "object", "properties": {
+                    "after_word_index": {"type": "string", "enum": [str(_s["awi"])]},
+                    "type": {"type": "string", "enum": _fits},
+                    "why": {"type": "string", "maxLength": 120},
+                    "sound": {"type": "string", "enum": ["transition-sfx"], "nullable": True}},
+                  "required": ["after_word_index", "type", "why"]}
+            _variants.append(_v)
+        _overlay_idx.append(str(_s["awi"]))
+    _props = {}
+    if _variants:
+        _props["cut_boundary_transitions"] = {"type": "array", "items": {"anyOf": _variants}}
+    if _overlay_idx:
+        _props["tight_boundary_overlays"] = {"type": "array", "items": {"type": "object",
+            "properties": {
+                "after_word_index": {"type": "string", "enum": _overlay_idx},
+                "type": {"type": "string", "enum": sorted(VALID_TIGHT_CUT_OVERLAYS)},
+                "why": {"type": "string", "maxLength": 120}},
+            "required": ["after_word_index", "type", "why"]}}
+    if not _props:
+        return None, 0, 0
+    return ({"type": "object", "properties": _props, "required": []},
+            len(_variants), len(_overlay_idx))
+
+
+def _call_transitions_subcall(client, model_name, plan_read, seam_block, schema):
+    """The small dedicated call. Stable system block (its own cacheable prefix);
+    per-job data rides in user content. FAILURE DIRECTION: None on any error —
+    zero transitions, bare cuts, the render ships."""
+    from google.genai import types as _gt
+    try:
+        _resp = client.models.generate_content(
+            model=model_name,
+            contents=f"{plan_read}\n\n=== THE SEAMS ===\n{seam_block}",
+            config=_gt.GenerateContentConfig(
+                system_instruction=_TRANSITIONS_SUBCALL_SYS,
+                response_mime_type="application/json",
+                response_schema=schema,
+                temperature=1.0,
+                max_output_tokens=8192,
+            ))
+        return json.loads(_resp.text)
+    except Exception as _e:
+        print(f"[transitions-subcall] FAILED — zero transitions, bare cuts, render ships: "
+              f"{type(_e).__name__}: {str(_e)[:200]}", flush=True)
+        return None
+
+
 def _call_gemini_post_cuts(client, system_instruction, user_content, video_part, model_name):
     """Second Gemini call: visual placement on the kept-only transcript.
 
@@ -10492,6 +10582,93 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
             # the loop when the gate qualifies.
             _broll_edge_set = set()
             _scene_change_qualify = set()
+            # ── A1/A2 TRANSITIONS SUB-CALL wire-in ──────────────────────────
+            # Single ownership: the sub-call authors transitions + tight-cut
+            # overlays against the per-job variant schema. Main-call emissions
+            # are DISCARDED (ledgered when non-empty) — one author, one truth.
+            # Seams = scdet shot boundaries ∪ the plan's B-roll edges, with the
+            # real inter-word silence as each seam's room. R1: zero seams →
+            # the call is SKIPPED — zero transitions by construction.
+            try:
+                _seams = []
+                _seam_awis_seen = set()
+                _broll_edges_for_seams = set()
+                for _bc in (edit_plan.get("broll_clips") or []):
+                    if isinstance(_bc, dict):
+                        _bs2, _be2 = _bc.get("start_word_index"), _bc.get("end_word_index")
+                        if isinstance(_bs2, int):
+                            _broll_edges_for_seams.add(_bs2 - 1)
+                        if isinstance(_be2, int):
+                            _broll_edges_for_seams.add(_be2)
+                for _awi2 in sorted(set(_shot_boundary_set) | _broll_edges_for_seams):
+                    if not isinstance(_awi2, int) or _awi2 < 0 or _awi2 + 1 >= len(_dg_words):
+                        continue
+                    if _awi2 in _seam_awis_seen or _awi2 in _tr_removed:
+                        continue
+                    _seam_awis_seen.add(_awi2)
+                    _g_ms = max(0, int(round((float(_dg_words[_awi2 + 1].get("start") or 0.0)
+                                              - float(_dg_words[_awi2].get("end") or 0.0)) * 1000)))
+                    _kind = "shot change" if _awi2 in _shot_boundary_set else "B-roll edge"
+                    _seams.append({"awi": _awi2, "gap_ms": _g_ms, "kind": _kind})
+                _main_trs = list(edit_plan.get("transitions") or [])
+                _main_ovl = list(edit_plan.get("tight_cut_overlays") or [])
+                if _main_trs or _main_ovl:
+                    _record_divergence(
+                        "transition", {"main_transitions": len(_main_trs),
+                                       "main_overlays": len(_main_ovl)},
+                        "main_call_transitions_discarded",
+                        reason="sub-call is the single author (A1/A2)")
+                edit_plan["transitions"] = []
+                edit_plan["tight_cut_overlays"] = []
+                if _seams:
+                    _sc_schema, _n_var, _n_ovl = _build_transitions_subcall_schema(_seams)
+                    if _sc_schema is not None:
+                        _pr = {"arc_segments": (edit_plan.get("video_plan") or {}).get("arc_segments"),
+                               "key_moments": (edit_plan.get("video_plan") or {}).get("key_moments"),
+                               "movements": (edit_plan.get("video_plan") or {}).get("movements")}
+                        _plan_read = "=== THE PLAN'S READ ===\n" + json.dumps(_pr, default=str)[:6000]
+                        _seam_lines = []
+                        for _s2 in _seams:
+                            _w0 = max(0, _s2["awi"] - 6); _w1 = min(len(_dg_words), _s2["awi"] + 7)
+                            _ctx = " ".join(str(_dg_words[_k].get("punctuated_word")
+                                                or _dg_words[_k].get("word") or "")
+                                            for _k in range(_w0, _w1))
+                            _seam_lines.append(
+                                f'{_s2["awi"]} ({_s2["kind"]}, {_s2["gap_ms"]}ms silence) — '
+                                f'"...{_ctx}..."')
+                        _sc_out = _call_transitions_subcall(
+                            client, GEMINI_EDITORIAL_MODEL, _plan_read,
+                            "\n".join(_seam_lines), _sc_schema)
+                        if isinstance(_sc_out, dict):
+                            _new_trs = []
+                            for _e2 in (_sc_out.get("cut_boundary_transitions") or []):
+                                if isinstance(_e2, dict) and _e2.get("type"):
+                                    _ent = {"after_word_index": int(_e2["after_word_index"]),
+                                            "type": str(_e2["type"]),
+                                            "why": str(_e2.get("why") or "")}
+                                    if _e2.get("sound"):
+                                        _ent["sound"] = str(_e2["sound"])
+                                    _new_trs.append(_ent)
+                            _new_ovl = []
+                            for _e2 in (_sc_out.get("tight_boundary_overlays") or []):
+                                if isinstance(_e2, dict) and _e2.get("type"):
+                                    _new_ovl.append({"after_word_index": int(_e2["after_word_index"]),
+                                                     "type": str(_e2["type"]),
+                                                     "why": str(_e2.get("why") or "")})
+                            edit_plan["transitions"] = _new_trs
+                            edit_plan["tight_cut_overlays"] = _new_ovl
+                            print(f"[transitions-subcall] {len(_seams)} seam(s) offered "
+                                  f"({_n_var} consuming variant(s)); took "
+                                  f"{len(_new_trs)} transition(s) + {len(_new_ovl)} overlay(s)",
+                                  flush=True)
+                else:
+                    print("[transitions-subcall] zero qualifying seams — skipped "
+                          "(zero transitions by construction)", flush=True)
+            except Exception as _sce:
+                print(f"[transitions-subcall] wire-in error — bare cuts: "
+                      f"{type(_sce).__name__}: {str(_sce)[:200]}", flush=True)
+                edit_plan["transitions"] = []
+                edit_plan["tight_cut_overlays"] = []
             raw_transitions = edit_plan.get("transitions") or []
             if raw_transitions and _dg_words:
                 # Transitions = pack PascalCase names. VALID_TRANSITION_TYPES is the
