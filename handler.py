@@ -8034,6 +8034,26 @@ def _call_transitions_subcall(client, model_name, plan_read, seam_block, schema)
         return None
 
 
+def _transition_sound_events(render_cuts, timeline, fps):
+    """A1/A2 rider sounds — ONE derivation. A transition's sound fires at the
+    SLOT's start frame, read from the same RenderTimeline entry the video
+    renders: t = (out_start_frame + body_frames) / fps. slot_frames == 0 means
+    the event does not exist → its sound does not exist (structural: the sound
+    rides the event; no event, no rider). Returns [(sound_name, t_seconds)]."""
+    _out = []
+    _entries = (timeline or {}).get("entries") or []
+    for _i, _rc in enumerate(render_cuts or []):
+        _snd = (_rc or {}).get("_transition_sound") if isinstance(_rc, dict) else None
+        if not _snd or _i >= len(_entries):
+            continue
+        _e = _entries[_i]
+        if int(_e.get("slot_frames_after") or 0) <= 0:
+            continue   # event dead → sound unrepresentable
+        _t = (int(_e.get("out_start_frame") or 0) + int(_e.get("body_frames") or 0)) / float(fps)
+        _out.append((_snd, _t))
+    return _out
+
+
 def _call_gemini_post_cuts(client, system_instruction, user_content, video_part, model_name):
     """Second Gemini call: visual placement on the kept-only transcript.
 
@@ -10763,6 +10783,10 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                         ce = float(clip["source_end"])
                         if cs - 0.05 <= word_end <= ce + 0.05 and ci < len(validated_cuts) - 1:
                             clip["transition_out"] = tr_type
+                            # A1/A2 rider sound: authored ON the transition (sub-call);
+                            # rides the clip to the render, fires at the SLOT's frame.
+                            if tr.get("sound"):
+                                clip["_transition_sound"] = str(tr["sound"])
                             _transition_type_by_awi[awi] = tr_type
                             if _extras:
                                 clip["_transition_extras"] = _extras
@@ -19083,6 +19107,29 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         sfx_timestamps.append(_ts)
         _sfx_src_t = float(_sfx.get("t") or 0.0)
         print(f"[sfx] sound_effect: {_sound_style} vol={_vol:.3f} source={_sfx_src_t:.3f}s → output={_projected_t:.3f}s → onset_comp(-{_onset:.3f}s)={_ts:.3f}s", flush=True)
+        _sfx_extra_idx += 1
+
+    # ── A1/A2 RIDER SOUNDS: fire at the transition's rendered slot frame ──
+    # One derivation: the same RenderTimeline entry the video renders. Event
+    # dead (slot 0) → no sound exists to fire (_transition_sound_events skips).
+    _rt_tl = edit_plan.get("_render_timeline") or {}
+    for _rs_snd, _rs_t in _transition_sound_events(render_cuts, _rt_tl, source_fps):
+        _rs_style = normalize_sfx_style(_rs_snd)
+        _rs_path = get_sfx_path(_rs_style) if _rs_style != "none" else None
+        if not _rs_path:
+            continue
+        _rs_onset = _SFX_ONSET_OFFSETS.get(_rs_style, 0.0)
+        _rs_ts = max(0.0, _rs_t - _rs_onset)
+        _rs_ms = round(_rs_ts * 1000)
+        _rs_vol = get_sfx_volume(_rs_style, _rs_ts, _speech_segs, is_text_overlay=False)
+        sfx_input_args += ["-i", _rs_path]
+        sfx_audio_labels.append(f"[ridersfx{len(sfx_audio_labels)}]")
+        sfx_filter_strs.append(
+            f"[{_sfx_extra_idx + 1}:a]volume={_rs_vol:.3f},"
+            f"adelay={_rs_ms}|{_rs_ms}[ridersfx{len(sfx_audio_labels)-1}]")
+        sfx_timestamps.append(_rs_ts)
+        print(f"[sfx] rider: {_rs_style} at slot frame → t={_rs_ts:.3f}s "
+              f"(one derivation from the timeline)", flush=True)
         _sfx_extra_idx += 1
 
     # ── Transition pro-grade safeguards (#3 + #5 from the 2026-06-14 audit) ──

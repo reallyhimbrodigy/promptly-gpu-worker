@@ -4755,6 +4755,21 @@ def _transition_scene_gate():
         "main stub must keep the same-scene hard-cut line (energy goes to emphasis/caption/SFX)"
 
 
+@check("A1/A2 rider sound: fires at the transition's rendered slot frame; dead event → no sound (structural)")
+def _rider_sound_one_derivation():
+    tl = {"entries": [
+        {"out_start_frame": 0,   "body_frames": 48, "slot_frames_after": 21},
+        {"out_start_frame": 69,  "body_frames": 50, "slot_frames_after": 0},
+        {"out_start_frame": 119, "body_frames": 40, "slot_frames_after": 0}]}
+    cuts = [{"_transition_sound": "transition-sfx"},
+            {"_transition_sound": "transition-sfx"},   # slot 0 → event dead
+            {}]
+    ev = handler._transition_sound_events(cuts, tl, 60.0)
+    assert ev == [("transition-sfx", 48 / 60.0)], (
+        f"sound must fire at the SLOT's frame (body end, same table the video renders); "
+        f"the slot-0 rider must not exist — got {ev}")
+
+
 @check("NO-ADJUSTMENT ruling: SFX word is the ONE anchor (reanchor pass deleted); MG anchors authored, never coerced")
 def _no_adjustment_ruling():
     _src = open("handler.py").read()
