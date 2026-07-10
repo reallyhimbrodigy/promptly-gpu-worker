@@ -3807,8 +3807,6 @@ SPEAKER POSITIONS (where each speaker sits in frame, by diarization + face detec
         f'"{_n}"' for _n in sorted(VALID_CAPTION_STYLES - {"none"})
     ) + ' | "none"'
     _mg_enum = " | ".join(f'"{_n}"' for _n in sorted(VALID_MG_TYPES))
-    _transition_enum = " | ".join(f'"{_n}"' for _n in sorted(VALID_TRANSITION_TYPES))
-    _tco_enum = " | ".join(f'"{_n}"' for _n in sorted(VALID_TIGHT_CUT_OVERLAYS))
     _n_styles = len(VALID_CAPTION_STYLES) - 1   # minus the "none" sentinel
     _n_transitions = len(VALID_TRANSITION_TYPES)
     _n_mgs = len(VALID_MG_TYPES)
@@ -4031,6 +4029,8 @@ CRAFT MOVES — what senior editors reach for when composing a moment
 ═══════════════════════════════════════════════════════════════════════════
 
 **Anticipation lands harder than payoff.** A zoom that COMPLETES on the payoff word feels inevitable; one that starts at it feels late. The pipeline back-times every event so the motion arrives as the word lands — your anchor word is the arrival point.
+
+**An emphasis zoom lives inside one shot** — the move begins and completes on the same picture. A zoom that rides across a shot change makes the frame jump mid-move, and the punctuation reads as a mistake. Where a peak lands beside a seam, the zoom anchors on the side the word lives on.
 
 **The callback.** Plant in the hook, pay off in the close. When the close consciously echoes the hook — parallel zoom, callback MG content, echoed caption emphasis — the loop closes satisfyingly and earns the replay. hook_word_index, payoff_word_index, and close_word_index should feel like one connected arc, not three independent picks.
 
@@ -7505,22 +7505,10 @@ _MOTION_DECODE_FPS = 8.0         # sample rate — dense enough to catch a gestu
 _FRAME_ACTIVITY_LAST: list = []  # (t_s, score) per-frame motion timeline from the
                                  # most recent detect_dead_air run; the activity gate
                                  # reads it. Reset at each detection run.
-# TRANSITION SCENE-CHANGE GATE (Action 3, DEFAULT-ON as of 2026-07-08): a
-# transition only survives if its boundary sits on a real scene change — a scdet
-# SOURCE shot boundary OR a B-roll entry/exit edge (scdet runs on the source, so
-# it never sees B-roll inserts; those edges are added explicitly). Transitions on
-# plain edit cuts (word_removal / dead_air) or content-jumps DROP to hard cuts.
-# On single-cam footage with no B-roll (scdet=0) this yields ZERO transitions —
-# all straight cuts. This is how the pipeline works now; the env var
-# TRANSITION_SCENE_GATE_ENABLED remains ONLY as a kill-switch (set "0" to disable).
-_TRANSITION_SCENE_GATE: bool = True
-# ENFORCING in prod (Zac 2026-07-08 STEP 1): the gate DROPS off-boundary transitions to
-# hard cuts before render AND records every proposal (the instrument runs regardless of
-# enforce). This is what lets the transition rewrite ship today — unlanded teaching
-# (Gemini placing 16-43 words off the real seams at content beats, measured) cannot reach
-# a user render. Flipped to False ONLY for a log-and-pass census; the gate is DELETED (not
-# left False) the moment a clean multi-seam census on ridable seams earns its removal.
-_TRANSITION_SCENE_GATE_ENFORCE: bool = True
+# ── DELETED (Zac step-6): the TRANSITION SCENE-CHANGE GATE flags ──
+# Deleted, not disabled. Knowledge: the qualify union (scdet ∪ B-roll edges)
+# is extracted to the sub-call's seam construction — the same union now BUILDS
+# what is offered instead of policing what was said.
 # CUT-REFINEMENT 25% CAP — LOG-AND-PASS (Zac 2026-07-08 TIER 0): the cap dropped
 # Gemini's LARGEST cut-pass ranges (biggest, most deliberate cuts) to hold total
 # refinement removal under 25% of kept words. It is a taste ceiling, not physics, and
@@ -8289,193 +8277,8 @@ def _scene_floor_rotation(current_types):
     return resolved
 
 
-def _reconcile_tight_cut_overlays(client, vision_text, tight_boundaries, kept_words):
-    """Focused second Gemini call to resolve a vision-claims-but-empty
-    tight_cut_overlays contradiction. Returns a list of 0 or 1 overlay
-    entries to merge into post_cut_plan["tight_cut_overlays"].
-
-    Fires from the recipe-eval site (handler.py:~6148+) only when the
-    detector found that editorial_vision committed to a tight-cut overlay
-    AND the emitted array is empty AND tight boundaries exist. Three
-    prior prose fixes (coherence rule + EFFECT/MECHANISM extension +
-    HARD RULE 2 tiebreaker) failed to prevent the contradiction in the
-    main 60K-token generation; the working theory is that a narrow
-    decision with reasoning room executes reliably where a buried self-
-    check loses to nearby restraint framing. Same lesson as the picker
-    thinking_budget=32 → 256 fix.
-
-    Inputs deliberately scoped tight:
-      - vision_text         — the editor's commitment (one sentence)
-      - tight_boundaries    — kept-word indices, the candidate set
-      - kept_words          — for the "after <word>" context per boundary
-
-    Bounded latency: thinking_budget=512 (narrow 6-boundary × 4-type
-    decision); 30s hard timeout via ThreadPoolExecutor. Caps emission
-    at 1 entry (the bug pattern is claims-but-empty, give the vision
-    one earned overlay). Fail-open to [] on any error / timeout / cap
-    violation / validation failure — never raises, never mutates inputs.
-    """
-    if not tight_boundaries or not vision_text:
-        return []
-
-    _boundary_lines = []
-    for _idx in tight_boundaries:
-        if 0 <= _idx < len(kept_words):
-            _w = (
-                kept_words[_idx].get("punctuated_word")
-                or kept_words[_idx].get("word")
-                or "?"
-            )
-            _boundary_lines.append(f'{_idx} (after "{_w}")')
-    if not _boundary_lines:
-        return []
-    _boundary_block = ", ".join(_boundary_lines)
-
-    _prompt = (
-        "RECONCILIATION TASK — your editorial_vision committed to a tight-cut "
-        "overlay, but the tight_cut_overlays array was emitted empty. Resolve "
-        "by picking the SINGLE tight boundary that most earns the overlay your "
-        "vision named, or return [] if no boundary genuinely earns one.\n\n"
-        f'YOUR EDITORIAL VISION: "{vision_text}"\n\n'
-        f"TIGHT BOUNDARIES (candidate set — kept-word indices, with the word "
-        f"that precedes the cut): {_boundary_block}\n\n"
-        "TWO OVERLAY TYPES + when each fits:\n"
-        "  - LightLeak — warm bloom across the cut. Use for a reflective / "
-        "arrived-at register: quiet realization, takeaway landing, hook/close "
-        "callback.\n"
-        "  - ShutterFlash — quick white camera-flash snap. Use for higher-"
-        "energy / surprise / payoff hitting: escalation beat after a setup, "
-        "unexpected pivot, the moment a stat or punchline lands.\n"
-        "  - `after_word_index` MUST come from the TIGHT BOUNDARIES candidate "
-        "set above.\n"
-        "  - Max 1 entry. Pick the SINGLE most-earning boundary.\n"
-        "  - Entries carry `after_word_index` and `type`, the complete field "
-        "set — the response_schema defines exactly those two, and the recipe "
-        "validator holds entries to them.\n"
-        "  - Place it only where a boundary genuinely earns it; an empty array "
-        "[] is the correct read of footage whose splices are already clean.\n\n"
-        "Return a JSON array of 0 or 1 tight_cut_overlay entries."
-    )
-
-    _schema = {
-        "type": "array",
-        "maxItems": 1,
-        "items": {
-            "type": "object",
-            "properties": {
-                "after_word_index": {"type": "integer"},
-                "type": {"type": "string", "enum": sorted(VALID_TIGHT_CUT_OVERLAYS)},
-                "title": {"type": "string"},
-                "label": {"type": "string"},
-            },
-            "required": ["after_word_index", "type"],
-        },
-    }
-
-    def _do_call():
-        return client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=[_prompt],
-            config=genai_types.GenerateContentConfig(
-                temperature=0.2,
-                max_output_tokens=512,
-                response_mime_type="application/json",
-                response_schema=_schema,
-                thinking_config=genai_types.ThinkingConfig(thinking_budget=512),
-            ),
-        )
-
-    _t0 = time.time()
-    try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _pool:
-            _fut = _pool.submit(_do_call)
-            _resp = _fut.result(timeout=30.0)
-    except concurrent.futures.TimeoutError:
-        print(
-            f"[reconcile-overlays] TIMEOUT (>30s, {time.time() - _t0:.1f}s elapsed) "
-            f"— failing open to []",
-            flush=True,
-        )
-        return []
-    except Exception as _e:
-        print(
-            f"[reconcile-overlays] error ({type(_e).__name__}: {_e}) "
-            f"in {time.time() - _t0:.1f}s — failing open to []",
-            flush=True,
-        )
-        return []
-
-    _elapsed = time.time() - _t0
-    _text = str(getattr(_resp, "text", "") or "").strip()
-    if not _text:
-        print(
-            f"[reconcile-overlays] empty response in {_elapsed:.1f}s — failing open to []",
-            flush=True,
-        )
-        return []
-    try:
-        _parsed = json.loads(_text)
-    except Exception:
-        print(
-            f"[reconcile-overlays] JSON parse failed in {_elapsed:.1f}s "
-            f"(raw: {_text[:120]!r}) — failing open to []",
-            flush=True,
-        )
-        return []
-    if not isinstance(_parsed, list):
-        print(
-            f"[reconcile-overlays] non-list response in {_elapsed:.1f}s "
-            f"(got {type(_parsed).__name__}) — failing open to []",
-            flush=True,
-        )
-        return []
-    if len(_parsed) == 0:
-        print(
-            f"[reconcile-overlays] re-ask returned [] in {_elapsed:.1f}s "
-            f"(model judged no boundary earns the overlay) — keeping empty",
-            flush=True,
-        )
-        return []
-    if len(_parsed) > 1:
-        print(
-            f"[reconcile-overlays] re-ask returned {len(_parsed)} entries in "
-            f"{_elapsed:.1f}s (helper cap=1) — failing open to []",
-            flush=True,
-        )
-        return []
-    _entry = _parsed[0]
-    if not isinstance(_entry, dict):
-        print(
-            f"[reconcile-overlays] entry is not a dict — failing open to []",
-            flush=True,
-        )
-        return []
-    _awi = _entry.get("after_word_index")
-    _typ = _entry.get("type")
-    _tight_set = set(tight_boundaries)
-    if not isinstance(_awi, int) or _awi not in _tight_set:
-        print(
-            f"[reconcile-overlays] after_word_index {_awi!r} not in TIGHT "
-            f"BOUNDARIES {sorted(_tight_set)} — failing open to []",
-            flush=True,
-        )
-        return []
-    if _typ not in VALID_TIGHT_CUT_OVERLAYS:
-        print(
-            f"[reconcile-overlays] type {_typ!r} not in "
-            f"{sorted(VALID_TIGHT_CUT_OVERLAYS)} — failing open to []",
-            flush=True,
-        )
-        return []
-    # Overlays carry no extras — strip anything stray the model attached.
-    _entry.pop("title", None)
-    _entry.pop("label", None)
-    print(
-        f"[reconcile-overlays] vision-claims-empty contradiction RESOLVED in "
-        f"{_elapsed:.1f}s: type={_typ} after_word_index={_awi}",
-        flush=True,
-    )
-    return [_entry]
+# ── DELETED (Zac step-6): _reconcile_tight_cut_overlays — the re-ask function
+# died with its only call site. ──
 
 
 def _record_divergence(component, original, action, *, final=None, reason=""):
@@ -9222,29 +9025,16 @@ def generate_edit_gemini(
                     _parts.append(f'{_ni} (after "{_w}", {_gap_ms}ms gap, {_src})')
             return ", ".join(_parts)
 
-        _cut_boundary_block = _fmt_boundary_list(_cut_boundary_indices)
-        _tight_boundary_block = _fmt_boundary_list(_tight_boundary_indices)
+        # (boundary block builders deleted — the prompt no longer interpolates them)
 
-        _natural_dur_lines = "\n".join(
-            f"  - {_name}: {_ms}ms  (fits when boundary gap ≥ {2 * _ms}ms)"
-            for _name, _ms in sorted(
-                TRANSITION_NATURAL_DURATION_MS.items(), key=lambda kv: kv[1]
-            )
-            # Only emittable transitions: the duration table still carries
-            # LightLeak for its overlay life, but the transitions schema enum
-            # derives from VALID_TRANSITION_TYPES — advertising a type the
-            # model cannot emit is prompt noise (PR B hygiene).
-            if _name in VALID_TRANSITION_TYPES
-        )
+        # (_natural_dur_lines deleted — fit is structural; the table is gone)
 
         # Coherence-rule example phrases — interpolated below so this single
         # source of truth (type_registries.py) feeds BOTH the prompt prose AND
         # the recipe-eval re-ask detector. Hand-maintaining parallel phrase
         # lists in the two consumers would drift the detector from what the
         # prompt taught Gemini to recognize.
-        _tco_mechanism_examples = ", ".join(
-            f"'{_p}'" for _p in TIGHT_CUT_OVERLAY_MECHANISM_PHRASES
-        )
+        # (_tco_mechanism_examples deleted with the vision-reconcile prose)
 
         post_user += f"""
 
@@ -9474,64 +9264,12 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                     # Eval errors must never block the render — log and continue.
                     print(f"[recipe-eval] error: {_eval_err} (non-blocking)", flush=True)
 
-            # ── Vision↔array reconciliation for tight_cut_overlays ────────────────
-            # Detects the "vision claims a tight-cut overlay, array came back empty"
-            # contradiction that three prose fixes (coherence rule c1a, EFFECT/
-            # MECHANISM extension 7b9069c, HARD RULE 2 tiebreaker c109e55) failed
-            # to prevent in the main 60K-token generation. The detector and the
-            # coherence rule both consume TIGHT_CUT_OVERLAY_MECHANISM_PHRASES from
-            # type_registries — single source of truth so the reconciler fires on
-            # exactly what the prompt taught Gemini to recognize as a commitment.
-            #
-            # Runs ONLY when: tight boundaries exist AND vision text claims an
-            # overlay (TYPE name or MECHANISM phrase) AND emitted array is empty.
-            # No-op for the common case (vision silent on overlays → default 0
-            # framing stays correctly applied; no re-ask, no wall-clock cost).
-            if isinstance(post_cut_plan, dict) and _eval_tight:
-                try:
-                    _vp = post_cut_plan.get("video_plan") or {}
-                    _vision_raw = str(_vp.get("editorial_vision") or "").strip()
-                    _vision_lower = _vision_raw.lower()
-                    _types_lower = {_t.lower() for _t in VALID_TIGHT_CUT_OVERLAYS}
-                    _vision_claims_overlay = (
-                        any(_t in _vision_lower for _t in _types_lower)
-                        or any(_p in _vision_lower for _p in TIGHT_CUT_OVERLAY_MECHANISM_PHRASES)
-                    )
-                    _emitted_overlays = post_cut_plan.get("tight_cut_overlays") or []
-                    if _vision_claims_overlay and not _emitted_overlays:
-                        print(
-                            f"[reconcile-overlays] DETECTED vision-claims-empty: "
-                            f"vision={_vision_raw[:100]!r} tight_boundaries="
-                            f"{sorted(_eval_tight)} — re-asking",
-                            flush=True,
-                        )
-                        # One decoration per boundary (census row 33): exclude
-                        # tight boundaries already carrying a zero-handle
-                        # transition from the reconciler's candidate set, so
-                        # the merged output can't double-decorate (the render
-                        # collision guard would drop it anyway — this keeps
-                        # the reconcile pick from being wasted on it).
-                        _trans_awis_rec = {
-                            int(_t["after_word_index"])
-                            for _t in (post_cut_plan.get("transitions") or [])
-                            if isinstance(_t, dict)
-                            and isinstance(_t.get("after_word_index"), (int, float))
-                        }
-                        _reconciled = _reconcile_tight_cut_overlays(
-                            client, _vision_raw,
-                            [_b for _b in _eval_tight if _b not in _trans_awis_rec],
-                            kept_words,
-                        )
-                        if _reconciled:
-                            post_cut_plan["tight_cut_overlays"] = _reconciled
-                except Exception as _rec_err:
-                    # Reconciliation must never block the render — log and continue.
-                    # The array stays whatever Gemini's original pass produced.
-                    print(
-                        f"[reconcile-overlays] outer error: {_rec_err} (non-blocking, "
-                        f"keeping original empty array)",
-                        flush=True,
-                    )
+            # ── DELETED (Zac step-6): the claims-but-empty detector + the overlay
+            # reconcile re-ask (a LIVE Gemini call that ran and was overwritten by
+            # the sub-call wire-in). Knowledge: vision→array consistency is
+            # extracted-to-sub-call-context — the seam author READS
+            # editorial_vision directly; consistency by construction. Its removal
+            # is the OFFSET side of the step-7 cost pair.
 
             # ── Translate anchors: new index space → source index space ─────────────
             post_cut_plan = _translate_post_cut_anchors_to_src(post_cut_plan, new_to_src)
@@ -10506,23 +10244,6 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
             # during the loop below and DEMOTED to light tight_cut_overlays at the
             # resolved layer (after the TCO pass defines _resolved_overlays /
             # _overlay_awis — they don't exist yet at this point). (awi, original_type).
-            _demoted_tight_transitions = []
-            _scene_gate_dropped_awis = []   # Action 3: transitions dropped off a
-                                            # scene change — stripped from the plan
-                                            # below so SFX-partner + beat-timing
-                                            # consumers also see the hard cut.
-                                            # (ENFORCE=False: stays empty, nothing dropped.)
-            _scene_gate_measure = []        # LOG-AND-PASS instrument: one record per
-                                            # proposed transition — {awi, type, on_qualifying,
-                                            # qualifier}. The condition-3 measurement reads
-                                            # this to report proposed / on-picture-change /
-                                            # off-boundary per render.
-            # Unconditional inits so the log-and-pass summary (guarded only by
-            # _TRANSITION_SCENE_GATE) never reads an unbound name when the transition
-            # loop below is skipped (no raw_transitions / no _dg_words). Populated inside
-            # the loop when the gate qualifies.
-            _broll_edge_set = set()
-            _scene_change_qualify = set()
             # ── A1/A2 TRANSITIONS SUB-CALL wire-in ──────────────────────────
             # Single ownership: the sub-call authors transitions + tight-cut
             # overlays against the per-job variant schema. Main-call emissions
@@ -10556,6 +10277,11 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                 # discard. Initialize the plan keys the downstream consumers read.
                 edit_plan["transitions"] = []
                 edit_plan["tight_cut_overlays"] = []
+                # Generation stamp (Zac rider 2): recipes born under the A1/A2
+                # schema carry it; its absence marks a legacy-shape replay. The
+                # slot-clamp alarm reads this to separate real alerts (new-schema
+                # fire = room-at-execution broke) from expected legacy floor.
+                edit_plan["_schema_generation"] = "a1a2"
                 if _seams:
                     _sc_schema, _n_var, _n_ovl = _build_transitions_subcall_schema(_seams)
                     if _sc_schema is not None:
@@ -10614,36 +10340,11 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                 # Transitions = pack PascalCase names. VALID_TRANSITION_TYPES is the
                 # canonical set; mirror it here so adding a type only edits one place.
                 _valid_tr_types = set(VALID_TRANSITION_TYPES)
-                # SCENE-CHANGE QUALIFICATION (Action 3, flag-gated): the set of
-                # source word-indices where a real scene change happens — scdet
-                # SOURCE shot boundaries UNION B-roll entry/exit edges. scdet is
-                # blind to B-roll (it decodes the source, where the insert does
-                # not exist), so each B-roll clip contributes its entry boundary
-                # (awi = start_word_index-1, the splice just before the insert)
-                # and its exit boundary (awi = end_word_index, where the speaker
-                # returns), with ±1 tolerance for boundary-index variance. Built
-                # ONLY when the gate is on — a pure no-op (and zero CPU) otherwise.
-                _scene_change_qualify = set()
-                if _TRANSITION_SCENE_GATE:
-                    _broll_edge_set = set()
-                    for _bc in (edit_plan.get("broll_clips") or []):
-                        if not isinstance(_bc, dict):
-                            continue
-                        _bs, _be = _bc.get("start_word_index"), _bc.get("end_word_index")
-                        if isinstance(_bs, int):
-                            _broll_edge_set.update((_bs - 1, _bs))
-                        if isinstance(_be, int):
-                            _broll_edge_set.update((_be, _be + 1))
-                    _scene_change_qualify = set(_shot_boundary_set) | _broll_edge_set
-                    print(
-                        f"[transition-gate] ON — qualifying scene changes: "
-                        f"{len(_shot_boundary_set)} scdet shot boundary(ies) + "
-                        f"{len(_broll_edge_set)} B-roll edge(s). Transitions off "
-                        f"these boundaries demote to hard cuts. "
-                        f"scdet_awi={sorted(_shot_boundary_set)} "
-                        f"broll_awi={sorted(_broll_edge_set)}",
-                        flush=True,
-                    )
+                # ── DELETED (Zac step-6): the scene-gate qualify construction ──
+                # Knowledge extracted-to-the-sub-call seam list (scdet ∪ B-roll
+                # edges — the same union now BUILDS the offered seams instead of
+                # policing emitted ones). Off-boundary is unrepresentable on the
+                # governed path: the sub-call emits const indices only.
                 for _ti, tr in enumerate(raw_transitions):
                     if not isinstance(tr, dict):
                         raise ValueError(f"transitions[{_ti}] must be an object")
@@ -10689,112 +10390,17 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                     # footage); a demote-to-overlay would paint a light flash on
                     # every turn, the exact opposite of the intent. The content
                     # turn earns its emphasis elsewhere (mask-zoom / overlay / SFX).
-                    if _TRANSITION_SCENE_GATE:
-                        _on_qual = awi in _scene_change_qualify
-                        _qualifier = (
-                            "scdet_shot_boundary" if awi in _shot_boundary_set
-                            else "broll_edge" if awi in _broll_edge_set
-                            else "off_boundary")
-                        # DISTANCE TO NEAREST PICTURE CHANGE (Zac 2026-07-08 C3 addition):
-                        # ON the boundary (dist 0) = Gemini read the SHOT CHANGES / B-roll
-                        # signal block directly. NEAR it (dist > 0) = Gemini inferred from
-                        # content and coincided — which fails when a content turn and a
-                        # picture change diverge. This decides whether the gate can come out.
-                        _nearest_awi = min(
-                            _scene_change_qualify,
-                            key=lambda _q: abs(awi - _q), default=None)
-                        _nearest_dist_words = (
-                            abs(awi - _nearest_awi) if _nearest_awi is not None else None)
-                        _scene_gate_measure.append({
-                            "awi": awi, "type": tr_type,
-                            "on_qualifying": _on_qual, "qualifier": _qualifier,
-                            "nearest_qual_awi": _nearest_awi,
-                            "nearest_dist_words": _nearest_dist_words})
-                        print(
-                            f"[transition-gate] {'ON-BOUNDARY' if _on_qual else 'OFF-BOUNDARY'} "
-                            f"transition '{tr_type}' at after_word_index={awi} "
-                            f"(qualifier={_qualifier})",
-                            flush=True,
-                        )
-                        # LOG-AND-PASS while measuring: record above, DROP only when
-                        # enforcement is on. ENFORCE=False → off-boundary transitions
-                        # pass through and render (we measure Gemini's raw editorial read).
-                        if _TRANSITION_SCENE_GATE_ENFORCE and not _on_qual:
-                            print(
-                                f"[transition-gate] DROP (enforce) '{tr_type}' at "
-                                f"after_word_index={awi}: off scene change. Hard cut.",
-                                flush=True,
-                            )
-                            _scene_gate_dropped_awis.append(awi)
-                            continue
-                    # Type-eligibility per boundary class: crossfade transitions need
-                    # CUT BOUNDARIES (audio handle for the equal-power crossfade in
-                    # build_per_cut_audio's crossfade branch); zero-handle types work on
-                    # either CUT or TIGHT BOUNDARIES (the hard-cut branch substitutes
-                    # silence + click-prevention fades, no handle needed). On TIGHT
-                    # BOUNDARIES, anything outside ZERO_HANDLE_TRANSITION_TYPES would
-                    # audio-mush the speaker's continuous speech across the cut.
-                    # HOW TO PLACE TRANSITIONS HARD RULE 1 in the prompt teaches the
-                    # same rule; this backstop used to RAISE here — the placement-class
-                    # anomaly that killed jobs at temperature 1.0 (every sibling
-                    # placement conflict DROPS). Now it DEMOTES: skip the transition and
-                    # queue the boundary for a light tight_cut_overlay at the resolved
-                    # layer below — the doctrine's own default for tight cuts. The A2
-                    # repair loop rarely sees this class as a result; it nets the rest.
-                    if awi in _tight_src_set and tr_type not in ZERO_HANDLE_TRANSITION_TYPES:
-                        _demoted_tight_transitions.append((awi, tr_type, "demote"))
-                        continue
-                    # Membership enforcement: every transition must anchor on
-                    # the detector candidate union — crossfade types on a CUT
-                    # boundary (the only class with handle room), zero-handle
-                    # types on CUT u TIGHT. An awi outside both lists has no
-                    # detected cut to play across; the containment attach below
-                    # would silently glue it to whatever splice ends the
-                    # containing clip (4 of the exhibit's 7 transitions rode
-                    # through exactly this hole, playing deleted-word
-                    # fragments). DEMOTE-ONLY, never raise — the lists are not
-                    # yet trusted to be exhaustive over real boundaries; the
-                    # [boundary-coverage] telemetry below measures that.
-                    # Ordered AFTER the tight check so a crossfade at a LISTED
-                    # tight boundary keeps action="demote".
-                    if tr_type in ZERO_HANDLE_TRANSITION_TYPES:
-                        _is_member = awi in _cut_src_set or awi in _tight_src_set
-                    else:
-                        _is_member = awi in _cut_src_set
-                    if not _is_member:
-                        print(
-                            f"[generate-edit] transition '{tr_type}' at "
-                            f"after_word_index={awi} is outside the "
-                            f"{'CUT/TIGHT lists' if tr_type in ZERO_HANDLE_TRANSITION_TYPES else 'CUT list'} "
-                            f"— demoting (nonmember).",
-                            flush=True,
-                        )
-                        _demoted_tight_transitions.append(
-                            (awi, tr_type, "demote_nonmember")
-                        )
-                        continue
-                    # Heavy full-card FIT enforcement (FilmStrip only):
-                    # HARD RULE 2 teaches natural <= gap/2 but nothing
-                    # enforced it — the render-side slot clamp silently
-                    # shortens or skips, which is where half-rendered chapter
-                    # cards came from. Where the boundary's source gap (next
-                    # kept word's start - this word's end, the classifier's
-                    # own metric) can't fit 2x the natural duration, DEMOTE to
-                    # the light overlay treatment. Placement-class -> never a
-                    # raise. General fit enforcement for all types stays
-                    # ledgered (distribution risk too broad this sprint).
-                    if tr_type == "FilmStrip":
-                        _nk = awi + 1
-                        while _nk < len(_dg_words) and _nk in _tr_removed:
-                            _nk += 1
-                        if _nk < len(_dg_words):
-                            _hv_gap = max(0.0, float(_dg_words[_nk].get("start") or 0.0)
-                                          - float(_dg_words[awi].get("end") or 0.0))
-                            if _hv_gap < 2.0 * get_transition_duration(tr_type):
-                                _demoted_tight_transitions.append(
-                                    (awi, tr_type, "demote_heavy_unfit")
-                                )
-                                continue
+                    # ── DELETED (Zac step-6): the scene gate + [transition-measure]
+                    # instrument + the enforce-drop. Zero-fire scoped to the
+                    # governed path (classification is the evidence): the sub-call
+                    # offers only listed const-index seams — nothing off-boundary
+                    # can be said. Legacy replays skip generate entirely.
+                    # ── DELETED (Zac step-6): the demote stack ──
+                    # crossfade-on-tight → extracted-to-per-seam-variants (a tight
+                    # seam offers no consuming type); nonmember → extracted-to-
+                    # const-indices (membership IS the schema); heavy-unfit →
+                    # extracted-to-room-gating (natural must fit the seam's room).
+                    # All three unrepresentable on the governed path.
                     word_end = float(_dg_words[awi].get("end") or 0)
                     # Build extras dict — copy through all component-specific props
                     _extras = {
@@ -10977,52 +10583,13 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
             # cuts; the split-boundary cross-check stays silent (known index) and the
             # collision backstop sees no transition at the boundary (we never wrote
             # _transition_type_by_awi for a demoted one).
-            if _demoted_tight_transitions:
-                _demote_apply = []
-                for _d_awi, _d_orig, _d_action in sorted(_demoted_tight_transitions):
-                    if _d_awi in _overlay_awis or _d_awi in _transition_type_by_awi:
-                        # Boundary already carries its one decoration — plain drop.
-                        print(
-                            f"[generate-edit] DROP transition '{_d_orig}' at "
-                            f"after_word_index={_d_awi} ({_d_action}): the boundary "
-                            f"already carries a decoration. "
-                            f"Render continues without it.",
-                            flush=True,
-                        )
-                        continue
-                    _demote_apply.append((_d_awi, _d_orig, _d_action))
-                _demote_types = _scene_floor_rotation([None] * len(_demote_apply))
-                _DEMOTE_REASONS = {
-                    "demote": "crossfade-family type on a TIGHT boundary (no audio "
-                              "handle) — demoted to the light overlay default for "
-                              "tight cuts instead of failing the job",
-                    "demote_heavy_unfit": "heavy full-card transition does not fit "
-                              "the boundary's gap (gap < 2x natural duration) — "
-                              "demoted to the light overlay default instead of a "
-                              "half-rendered chapter card",
-                    "demote_nonmember": "after_word_index outside the detector "
-                              "candidate union (CUT/TIGHT lists) — no detected cut "
-                              "to play across; demoted to the light overlay default",
-                }
-                for _d_i, (_d_awi, _d_orig, _d_action) in enumerate(_demote_apply):
-                    _resolved_overlays.append(
-                        {"after_word_index": _d_awi, "type": _demote_types[_d_i]}
-                    )
-                    _overlay_awis.add(_d_awi)
-                    _record_divergence(
-                        "transitions",
-                        {"type": _d_orig, "after_word_index": _d_awi},
-                        _d_action,
-                        final={"tight_cut_overlay": _demote_types[_d_i],
-                               "after_word_index": _d_awi},
-                        reason=_DEMOTE_REASONS.get(_d_action, _DEMOTE_REASONS["demote"]),
-                    )
-
-            # Variety: types rotate across the 3 light punctuation overlays (DipToBlack
-            # held out) so no two adjacent scene decorations share a type.
+            # ── DELETED (Zac step-6): the demote-APPLY consumer — dead with its
+            # stack (nothing appends to a demote list that no longer exists).
+            # scene-floor counters (inits restored — the scene-floor pass STAYS;
+            # only the demote-apply span around them was deleted)
             _scene_n_shot = 0
-            _scene_n_lowconf = 0
             _scene_n_gemini = 0
+            _scene_n_lowconf = 0
             _scene_backfilled = 0
             if _transitions_off and _shot_src_set:
                 # "no transitions" (EditPolicy) suppresses the always-on scene-floor
@@ -11152,47 +10719,10 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
             # entries — and secondary consumers (SFX partner registration, beat-timing
             # anchors) read that ungated list. Strip the dropped ones so EVERY consumer
             # sees the hard cut and the returned recipe is honest about what rendered.
-            # LOG-AND-PASS measurement summary (Zac 2026-07-08): emit the instrument's
-            # reading whenever the gate ran — proposed / on-picture-change / off-boundary.
-            # This is the condition-3 signal, printed the same way whether or not the gate
-            # enforced. The [transition-measure] line is what the spread harness greps.
-            if _TRANSITION_SCENE_GATE:
-                _m_total = len(_scene_gate_measure)
-                _m_on = sum(1 for _r in _scene_gate_measure if _r["on_qualifying"])
-                _m_off = _m_total - _m_on
-                _m_scdet = sum(1 for _r in _scene_gate_measure if _r["qualifier"] == "scdet_shot_boundary")
-                _m_broll = sum(1 for _r in _scene_gate_measure if _r["qualifier"] == "broll_edge")
-                print(
-                    f"[transition-measure] proposed={_m_total} "
-                    f"on_picture_change={_m_on} (scdet={_m_scdet} broll={_m_broll}) "
-                    f"off_boundary={_m_off} | "
-                    f"qualifying_picture_changes_available={len(_scene_change_qualify)} "
-                    f"(scdet={len(_shot_boundary_set)} broll={len(_broll_edge_set)}) | "
-                    f"enforce={_TRANSITION_SCENE_GATE_ENFORCE} | "
-                    f"records={_scene_gate_measure}",
-                    flush=True,
-                )
-            if _scene_gate_dropped_awis:
-                _dropped_set = set(_scene_gate_dropped_awis)
-
-                def _tr_is_dropped(_t):
-                    if not isinstance(_t, dict):
-                        return False
-                    _a = _t.get("after_word_index")
-                    if not isinstance(_a, (int, float)):
-                        return False
-                    _a = int(_a)
-                    return _a in _dropped_set and _a not in _transition_type_by_awi
-                _kept_trs = [_t for _t in (edit_plan.get("transitions") or [])
-                             if not _tr_is_dropped(_t)]
-                print(
-                    f"[transition-gate] stripped {len(edit_plan.get('transitions') or []) - len(_kept_trs)} "
-                    f"off-scene-change transition(s) from the plan; "
-                    f"{len(_kept_trs)} remain (on scene changes).",
-                    flush=True,
-                )
-                edit_plan["transitions"] = _kept_trs
-
+            # ── DELETED (Zac step-6): the [transition-measure] instrument + the
+            # enforce-strip — consumers of gate outputs that no longer exist. The
+            # census's questions are answered upstream now: placement IS the
+            # sub-call's const-index emission; distance-0 is structural.
             # caption_style, caption_keywords, caption_position_segments, text_overlays,
             # emphasis_moments, motion_graphics, audio_denoise, outro, aspect_ratio,
             # sound_effects — ALL required. No presence defaults. Gemini must emit every
@@ -11844,79 +11374,16 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                                 _corrected_start_ms = _clip_start_ms
                                 _clamp_reason = "clamped_to_clip_source_start"
                         _ev["startMs"] = _corrected_start_ms
-                        _record_divergence(
-                            "zoom_startMs_corrected",
-                            {
-                                "type": _zt,
-                                "old_startMs": (
-                                    int(_gemini_start_ms)
-                                    if isinstance(_gemini_start_ms, (int, float))
-                                    else None
-                                ),
-                                "word_start_ms": _word_start_ms,
-                                "peak_reach_ms": _peak_reach_ms,
-                            },
-                            "corrected" if _clamp_reason is None else _clamp_reason,
-                            final={"new_startMs": _corrected_start_ms},
-                            reason=(_clamp_reason or "align_perceptual_peak_to_word"),
-                        )
-                        # ── Shot-change boundary clamp ────────────────────────────
-                        # A zoom window must not straddle a tight SHOT-CHANGE boundary:
-                        # the footage cuts to a new shot mid-window and the held/moving
-                        # zoom carries the old shot's framing (+ the frozen face-lock
-                        # origin) into the new shot — the StepZoom "staircase", a framing
-                        # pop on the moving types. End the window at or before the first
-                        # shot-change boundary strictly inside it. _shot_src_set holds
-                        # SHOT-CHANGE tights as SOURCE WORD INDICES (NOT times); the cut
-                        # time is that word's `.end` (s)×1000 = source ms, matching
-                        # startMs (source ms). dead_air tights are excluded — they don't
-                        # cut footage.
-                        _zc_start = _ev.get("startMs")
-                        _zc_dur = _ev.get("durationMs")
-                        if (
-                            isinstance(_zc_start, (int, float))
-                            and isinstance(_zc_dur, (int, float))
-                            and _zc_dur > 0
-                            and _shot_src_set
-                        ):
-                            _zc_end = _zc_start + _zc_dur
-                            _cut_ms = None
-                            for _tsi in _shot_src_set:
-                                if not (0 <= _tsi < len(_dg_words)):
-                                    continue
-                                _tms = float(_dg_words[_tsi].get("end") or 0.0) * 1000.0
-                                if _zc_start < _tms < _zc_end:
-                                    _cut_ms = _tms if _cut_ms is None else min(_cut_ms, _tms)
-                            if _cut_ms is not None:
-                                _clamped_dur = int(round(_cut_ms - _zc_start))
-                                # Floor: never clamp to a stub. 200ms ≈ 12 frames @ 60fps,
-                                # ≥ SnapReframe's ~171ms spring settle, so a clamped zoom
-                                # still completes its move. Below the floor we leave the
-                                # window UNCHANGED (rare — the straddle persists for that
-                                # one event rather than rendering a stub; safest default).
-                                _ZOOM_CLAMP_FLOOR_MS = 200
-                                if _ZOOM_CLAMP_FLOOR_MS <= _clamped_dur < _zc_dur:
-                                    _record_divergence(
-                                        "zoom_window",
-                                        {
-                                            "type": _zt,
-                                            "startMs": int(_zc_start),
-                                            "durationMs": int(_zc_dur),
-                                            "shot_change_ms": int(round(_cut_ms)),
-                                        },
-                                        "clamp_to_shot_change",
-                                        final={"durationMs": _clamped_dur},
-                                        reason="zoom_window_straddled_tight_shot_change",
-                                    )
-                                    print(
-                                        f"[zoom-clamp] {_zt} window "
-                                        f"[{int(_zc_start)},{int(_zc_end)}]ms straddles "
-                                        f"shot-change at {int(round(_cut_ms))}ms — "
-                                        f"durationMs {int(_zc_dur)}→{_clamped_dur} "
-                                        f"(release on shot A)",
-                                        flush=True,
-                                    )
-                                    _ev["durationMs"] = _clamped_dur
+                        # ── DELETED (Zac step-6): the zoom_startMs_corrected divergence
+                        # framing — a derivation is not a divergence. The write above IS
+                        # the derivation (peak-reach + clip-head floor); nothing was
+                        # corrected because nothing was authored.
+                        # ── DELETED (Zac step-6): the shot-change window clamp — the
+                        # @18.6/@78 eater. GENERATE-ONLY (old replays consume stored
+                        # values untouched; deleting cannot un-eat stored recipes).
+                        # Knowledge EXTRACTED-TO-TEACH before deletion: the straddle
+                        # observation now lives in the emphasis prompt ("An emphasis
+                        # zoom lives inside one shot...") — taught, never clamped.
                         _filled_events.append(_ev)
                     _ze_out = {"type": _zt, "events": _filled_events}
                     for _ek in ("firstStage", "secondStage", "windowScale", "borderWidth",
@@ -17690,6 +17157,25 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _slot_f = compute_transition_slot_frames(
                 str(_rc.get("transition_out") or "none"),
                 _trim_tail_dur[_i], _trim_head_dur[_i + 1], fps=source_fps)
+            if _slot_f == 0:
+                # THE CLAMP, RECLASSIFIED (Zac step-6 ruling): retained as render
+                # physics — the renderer refusing to render frames that don't
+                # exist (the word_end-floor class). On a NEW-schema recipe this
+                # fire means room-at-execution broke (the R5 invariant) — a real
+                # alarm. On legacy replays it is the load-bearing floor for
+                # old-era unfittables — expected, not an alert. Queryable:
+                # component=transition action=slot_clamp generation=new.
+                _gen = "new" if edit_plan.get("_schema_generation") == "a1a2" else "legacy"
+                _record_divergence(
+                    "transition",
+                    {"cut_index": _i, "type": str(_rc.get("transition_out") or ""),
+                     "tail_room_s": round(float(_trim_tail_dur[_i]), 3),
+                     "head_room_s": round(float(_trim_head_dur[_i + 1]), 3),
+                     "generation": _gen},
+                    "slot_clamp",
+                    reason=("room_at_execution_below_natural — REAL ALERT (new-schema)"
+                            if _gen == "new" else "legacy-era unfittable — expected floor"),
+                )
             _trans_slot_frames.append(_slot_f)
             _trans_dur_after.append(_slot_f / float(source_fps))
         else:
@@ -22784,19 +22270,8 @@ def handler(job):
             print("[within-clip-15ms] ON — within-clip dead air trimmed to "
                   f"{_WITHIN_CLIP_FLOOR_S*1000:.0f}ms unless the pause carries clear "
                   f"visual motion (activity gate >= {_WITHIN_CLIP_ACTIVITY_KEEP})", flush=True)
-        # TRANSITION SCENE-CHANGE GATE (Action 3, DEFAULT-ON 2026-07-08): env
-        # defaults to "1" (ON in prod); the var remains only as a kill-switch
-        # (set "0" to disable). Per-job input overrides. ALWAYS set here so a
-        # warm container never leaks a prior job's value.
-        global _TRANSITION_SCENE_GATE
-        _tsg_env = os.environ.get("TRANSITION_SCENE_GATE_ENABLED", "1").strip().lower() in (
-            "1", "true", "yes", "on")
-        _tsg_job = input_data.get("transition_scene_gate")
-        _TRANSITION_SCENE_GATE = _tsg_env if _tsg_job is None else bool(_tsg_job)
-        if _TRANSITION_SCENE_GATE:
-            print("[transition-gate] ON — transitions qualify only on scdet shot "
-                  "boundaries or B-roll edges; edit-cut/content-jump transitions "
-                  "demote to hard cuts (single-cam → zero transitions)", flush=True)
+        # ── DELETED (Zac step-6): the scene-gate env read + kill-switch —
+        # the gate does not exist; there is nothing to switch.
         provided_plan = input_data.get("edit_plan") if isinstance(input_data.get("edit_plan"), dict) else None
         provided_transcript = input_data.get("transcript") if isinstance(input_data.get("transcript"), dict) else None
         provided_analysis = input_data.get("analysis_data") if isinstance(input_data.get("analysis_data"), dict) else None

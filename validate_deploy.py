@@ -4714,49 +4714,19 @@ def _within_clip_deadair():
     handler._PRESERVED_SILENCES_LAST[:] = []
 
 
-@check("transition scene-change gate (LOG-AND-PASS): instrument records proposed vs on-picture-change; enforce dormant while measuring the picture-change teaching")
-def _transition_scene_gate():
-    import handler
+# ── DELETED (Zac step-6): the scene-gate check — its mechanism is deleted,
+# not disabled. Off-boundary transitions are unrepresentable (sub-call const
+# indices); the qualify union builds the seam list instead of policing output.
+# The two teaching assertions it carried move here:
+@check("A1/A2 teaching anchors: sub-call teaches picture-change + hard-cut-owns-same-scene; main stub keeps the energy line")
+def _a1a2_teaching_anchors():
     _src = open("handler.py").read()
-    _modal = open("modal_app.py").read()
-    # DEFAULT-ON (2026-07-08): module default True + env default "1"; the var stays
-    # only as a kill-switch, so it's NOT hard-set in the image env.
-    assert handler._TRANSITION_SCENE_GATE is True, "gate must default ON (live in prod)"
-    assert '"TRANSITION_SCENE_GATE_ENABLED", "1"' in _src, \
-        "env read must default to '1' (ON in prod; var is a kill-switch)"
-    assert '"TRANSITION_SCENE_GATE_ENABLED"' not in _modal, \
-        "kill-switch var must NOT be hard-set in the image env (default drives it ON)"
-    # qualifying signal = scdet SOURCE shot boundaries UNION B-roll edges (scdet is
-    # blind to B-roll inserts, so the edges are added explicitly).
-    assert "_scene_change_qualify = set(_shot_boundary_set) | _broll_edge_set" in _src, \
-        "qualify set must be scdet shot boundaries UNION B-roll edges"
-    # ENFORCING in prod (Zac 2026-07-08 STEP 1): the gate DROPS off-boundary transitions
-    # before render (unlanded teaching can't reach a user) AND records every proposal. It
-    # flips to False only for a log-and-pass census; a clean census on ridable seams then
-    # DELETES the gate entirely (never leaves it False).
-    assert handler._TRANSITION_SCENE_GATE_ENFORCE is True, \
-        "gate must ENFORCE in prod (drops off-boundary transitions); flip False only for a census"
-    assert "_scene_gate_measure.append(" in _src, "log-and-pass instrument recording missing"
-    assert "[transition-measure]" in _src, "measurement summary line missing"
-    assert "on_picture_change=" in _src, "measurement must report on-picture-change count"
-    assert "off_boundary=" in _src, "measurement must report off-boundary count"
-    # enforcement path is preserved (dormant) so flipping ENFORCE restores the drop:
-    assert "if _TRANSITION_SCENE_GATE_ENFORCE and not _on_qual:" in _src, \
-        "dormant enforce/drop path must be preserved for post-measurement flip"
-    assert "_scene_gate_dropped_awis.append(awi)" in _src, "drop tracking (enforce path) missing"
-    assert "demote_not_scene_change" not in _src, \
-        "gate must DROP (hard cut), never demote to a tight_cut_overlay flash"
-    # the strip keeps the plan honest when enforcing (empty in log-and-pass, no-op)
-    assert 'edit_plan["transitions"] = _kept_trs' in _src, \
-        "enforce-path strip must be preserved"
-    # the prompt teaches PICTURE-change placement (3-paragraph picture-change anchoring)
     assert "A transition is the visual treatment on a PICTURE CHANGE" in _src, \
-        "transition prompt must teach picture-change anchoring (para 1)"
+        "sub-call block must teach picture-change anchoring"
     assert "those splices are not offered here" in _src, \
-        "sub-call block must teach hard-cut-owns-same-scene (continuous-shot splices excluded)"
+        "sub-call block must teach hard-cut-owns-same-scene"
     assert "the hard cut owns them" in _src, \
-        "main stub must keep the same-scene hard-cut line (energy goes to emphasis/caption/SFX)"
-
+        "main stub must keep the same-scene energy line"
 
 @check("A1/A2 rider sound: fires at the transition's rendered slot frame; dead event → no sound (structural)")
 def _rider_sound_one_derivation():
