@@ -945,13 +945,20 @@ class PostCutPlan(BaseModel):
     video_plan: _VideoPlan
     caption_style: _CAPTION_STYLES
     caption_keywords: List[Annotated[str, Field(max_length=120)]]
+    # ORDER EXPERIMENT (Zac 2026-07-09, component-pairing pin): sound_effects is
+    # authored FIRST among the component families. Constrained decoding emits in
+    # schema order, and the model's strongest context is what it has already
+    # emitted — with sounds authored before any visual component exists in the
+    # emission, there is nothing to pair with yet. The sounds must come from the
+    # footage's spoken scenarios alone. (Parsing/merge/validators are all
+    # name-based — order is load-bearing nowhere downstream; verified.)
+    sound_effects: List[_SoundEffect]
     emphasis_moments: List[_EmphasisMoment]
     transitions: List[_Transition]
     # R2 (directive #7): discretionary tight-cut overlays are now EMITTABLE —
     # the schema finally matches the RESPONSE FORMAT + vision-consistency rule.
     # Default [] (omission-tolerant: Vertex drops empty lists).
     tight_cut_overlays: List[_TightCutOverlay] = Field(default_factory=list)
-    sound_effects: List[_SoundEffect]
     motion_graphics: List[_MotionGraphic]
     text_overlays: List[_TextOverlay]
     broll_clips: List[_BrollClip]
@@ -3954,7 +3961,7 @@ Emit the JSON in exactly this order, finishing each stage's reasoning before ope
 
 **Stage 3 — STRUCTURAL REGISTER.** Emit `caption_style`, `thumbnail_word_index`, `outro`, `aspect_ratio`.
 
-**Stage 4 — COMPONENT PLACEMENTS.** Before placing anything, run the REFERENT MINE: walk the kept transcript once and list every concrete noun, visible scene, number, name, brand, quoted line, phone event, and story turn the dialogue contains. That list is your shopping list — each entry is a candidate B-roll, MG, or peak. The mine guarantees every candidate was FOUND; whether each is PLACED is then a judgment against the extend test and its why — an unplaced referent is a decision, not a failure. Then emit: emphasis_moments, text_overlays, sound_effects, broll_clips, transitions, motion_graphics, caption_keywords, caption_position_changes. Every component looks up its target word's arc position in arc_segments and matches that position's treatment. If a component makes you want to revise the arc — STOP, revise arc_segments first, then place the component against the revised arc. Every component references an arc state you committed to — the committed arc is the vocabulary components draw from.
+**Stage 4 — COMPONENT PLACEMENTS.** Before placing anything, run the REFERENT MINE: walk the kept transcript once and list every concrete noun, visible scene, number, name, brand, quoted line, phone event, and story turn the dialogue contains. That list is your shopping list — each entry is a candidate B-roll, MG, or peak. The mine guarantees every candidate was FOUND; whether each is PLACED is then a judgment against the extend test and its why — an unplaced referent is a decision, not a failure. Then emit: sound_effects (first — matched to the spoken scenarios alone, before any visual component exists), emphasis_moments, text_overlays, broll_clips, transitions, motion_graphics, caption_keywords, caption_position_changes. Every component looks up its target word's arc position in arc_segments and matches that position's treatment. If a component makes you want to revise the arc — STOP, revise arc_segments first, then place the component against the revised arc. Every component references an arc state you committed to — the committed arc is the vocabulary components draw from.
 
 ═══════════════════════════════════════════════════════════════════════════
 ARC SPINE — what each position is FOR, and what it gets
@@ -4401,6 +4408,8 @@ THE 7 ZOOM TYPES
 
 **The library below is a set of defined scenarios.** A sound effect is placed by recognizing its scenario in the footage — the moment class each entry names. Read the footage for which scenarios it actually contains, and place each sound where its scenario occurs. The count is however many scenarios the footage genuinely holds; a video containing none carries none, and that is a correct read. Every placement's `why` names the scenario it matched — a placement that cannot name its scenario is the tell that the moment was not one.
 
+**The scenarios live in the source.** A scenario is something the speaker says, shows, or does on camera — the sentence, the number, the reversal, the charm. That is where a sound's `why` points: at the spoken moment that matched. The graphics, zooms, and transitions this plan adds are the edit's answer to those same moments — when a sound and a component land on the same word, each earned it from the footage independently: the graphic renders the fact, the sound punctuates the delivery. A `why` that names a component has matched the edit instead of the footage — re-read that moment for its spoken scenario, and where none exists, the moment carries no sound. And a scenario is matched literally: the moment contains the thing the predicate names, not a pun or association of it ("five minutes" is time, not money).
+
 Entry shape: {{ "word_index": int, "sound": <name> }}. Timing derives from the word — every sound is trimmed to a zero-silence onset, so it fires right on its trigger word; no offsets to compute.
 
 ──────────────────────────────────────────
@@ -4773,6 +4782,14 @@ Output is a bare JSON object — the response is JSON-parsed and the parser is t
   "aspect_ratio": "9:16",
   "notes": "<≤50 words>",
 
+  "sound_effects": [
+    {{
+      "word_index": int,
+      "sound": "boom" | "punchsfx" | "swoosh-sound-effects" | "woosh-professional" | "transition-sfx" | "camera-flash" | "money-ching" | "iphoneding" | "mouse-click-sound" | "popsfx" | "correct" | "rizz" | "shockingsfx" | "awkward-moment" | "wompwomp" | "imposter",
+      "why": "<≤10 words: the beat this sound is the audio face of>"
+    }}
+  ],
+
   "emphasis_moments": [
     {{
       "word_indices": [int, ...],
@@ -4797,14 +4814,6 @@ Output is a bare JSON object — the response is JSON-parsed and the parser is t
       "duration_seconds": float,
       "why": "<≤12 words: the moment that asked for this>"
       // ...variant-specific required props per the TEXT OVERLAYS section
-    }}
-  ],
-
-  "sound_effects": [
-    {{
-      "word_index": int,
-      "sound": "boom" | "punchsfx" | "swoosh-sound-effects" | "woosh-professional" | "transition-sfx" | "camera-flash" | "money-ching" | "iphoneding" | "mouse-click-sound" | "popsfx" | "correct" | "rizz" | "shockingsfx" | "awkward-moment" | "wompwomp" | "imposter",
-      "why": "<≤10 words: the beat this sound is the audio face of>"
     }}
   ],
 
