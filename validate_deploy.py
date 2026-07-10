@@ -2808,7 +2808,7 @@ def _recipe_omittable_field_contract():
         # reads `.get("preserved_silences") or []`, and empty means "preserve
         # nothing" = cut every located silence (the dead-air default). Omission-safe.
         "PostCutPlan": {"cut_refinements", "existing_caption_region",
-                        "generated_scenes", "notes", "tight_cut_overlays",
+                        "generated_scenes", "notes",
                         "preserved_silences"},
         "_EmphasisMoment": {"motion_graphic", "zoom_effect"},
         "_EmphasisMotionGraphic": {"props"},
@@ -3879,8 +3879,12 @@ def _repair_demotion_path():
     # qualifying seams (no scdet, no B-roll) → the sub-call is SKIPPED (R1)
     # → zero transitions BY CONSTRUCTION. The off-boundary emission never
     # reaches the render — not by gate-drop, by having no author that can say it.
-    assert "main_call_transitions_discarded" in _log, \
-        "main-call transitions must be discarded + ledgered (sub-call is the single author)"
+    # BY CONSTRUCTION (Zac injection): the main schema no longer carries the
+    # fields — the stubbed plan's transitions key is IGNORED by model parsing;
+    # nothing to discard, nothing ledgered. The stubbed ZoomThrough@4 cannot
+    # enter the plan at all.
+    assert "main_call_transitions_discarded" not in open("handler.py").read(), \
+        "the discard path must be DELETED (single ownership is by construction now)"
     assert "zero qualifying seams" in _log, \
         "zero-seam job must SKIP the sub-call (zero transitions by construction)"
     assert _out.get("transitions") == [], \

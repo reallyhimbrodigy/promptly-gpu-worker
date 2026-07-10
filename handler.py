@@ -946,11 +946,11 @@ class PostCutPlan(BaseModel):
     caption_style: _CAPTION_STYLES
     caption_keywords: List[Annotated[str, Field(max_length=120)]]
     emphasis_moments: List[_EmphasisMoment]
-    transitions: List[_Transition]
-    # R2 (directive #7): discretionary tight-cut overlays are now EMITTABLE —
-    # the schema finally matches the RESPONSE FORMAT + vision-consistency rule.
-    # Default [] (omission-tolerant: Vertex drops empty lists).
-    tight_cut_overlays: List[_TightCutOverlay] = Field(default_factory=list)
+    # A1/A2 (Zac 2026-07-10): transitions + tight_cut_overlays are DELETED from
+    # this schema — the main call cannot author what its schema cannot express.
+    # The transitions SUB-CALL is the single author by construction (per-seam
+    # room-gated variants); the only transition authorship remaining here is
+    # structural: broll entry_transition/exit_transition ride the clip object.
     # ORDER RULING (Zac 2026-07-09, A/B-measured): sound_effects stays AFTER the
     # visual families. The sounds-first experiment added nothing (pairing was
     # already 0 from the source-vs-edit teach) and cost predicate discipline —
@@ -10610,22 +10610,21 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                                               - float(_dg_words[_awi2].get("end") or 0.0)) * 1000)))
                     _kind = "shot change" if _awi2 in _shot_boundary_set else "B-roll edge"
                     _seams.append({"awi": _awi2, "gap_ms": _g_ms, "kind": _kind})
-                _main_trs = list(edit_plan.get("transitions") or [])
-                _main_ovl = list(edit_plan.get("tight_cut_overlays") or [])
-                if _main_trs or _main_ovl:
-                    _record_divergence(
-                        "transition", {"main_transitions": len(_main_trs),
-                                       "main_overlays": len(_main_ovl)},
-                        "main_call_transitions_discarded",
-                        reason="sub-call is the single author (A1/A2)")
+                # Single ownership BY CONSTRUCTION: the main schema no longer
+                # carries transitions/tight_cut_overlays fields — nothing to
+                # discard. Initialize the plan keys the downstream consumers read.
                 edit_plan["transitions"] = []
                 edit_plan["tight_cut_overlays"] = []
                 if _seams:
                     _sc_schema, _n_var, _n_ovl = _build_transitions_subcall_schema(_seams)
                     if _sc_schema is not None:
-                        _pr = {"arc_segments": (edit_plan.get("video_plan") or {}).get("arc_segments"),
-                               "key_moments": (edit_plan.get("video_plan") or {}).get("key_moments"),
-                               "movements": (edit_plan.get("video_plan") or {}).get("movements")}
+                        _vp_sc = edit_plan.get("video_plan") or {}
+                        _pr = {"editorial_vision": _vp_sc.get("editorial_vision")
+                                   or edit_plan.get("editorial_vision"),
+                               "story_shape": _vp_sc.get("story_shape"),
+                               "arc_segments": _vp_sc.get("arc_segments"),
+                               "key_moments": _vp_sc.get("key_moments"),
+                               "movements": _vp_sc.get("movements")}
                         _plan_read = "=== THE PLAN'S READ ===\n" + json.dumps(_pr, default=str)[:6000]
                         _seam_lines = []
                         for _s2 in _seams:
