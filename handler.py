@@ -129,91 +129,11 @@ SEMANTIC_TO_MG_ANCHOR = {
 }
 
 
-def _face_clear_anchor(band, sw_s, ew_s, face_traj, component="", blocked=None):
-    """Face-cover validator (PR-γ · directive #9): test the anchor BAND's rect
-    against the interpolated face rect across the component's source window;
-    when the face is covered beyond threshold, coerce to the alternative band
-    with lesser overlap. This is the validator behind the prompt's face-cover
-    rules — the render now KEEPS the person visible, so the rules can teach
-    craft instead of policing. Bands (1080x1920 canvas): top y=[120,640] ·
-    center y=[640,1280] · bottom y=[1280,1800]; face rect ≈ 600px tall centered
-    on the smoothed trajectory point (MGs render full-width, so vertical
-    coverage is the measure). Fail-open: absent face data, unknown band, or
-    any error → unchanged. Never raises; [divergence] action=face_clear_coerce.
-    """
-    try:
-        _BANDS = {"top": (120.0, 640.0), "center": (640.0, 1280.0),
-                  "bottom": (1280.0, 1800.0)}
-        # F8 (final-wave review): a band occupied by burned-in captions is
-        # never a candidate — and a component sitting IN it must move even
-        # when the face math would have kept it there.
-        if blocked in _BANDS and band == blocked:
-            _alt = [b for b in _BANDS if b != blocked]
-            _next = "center" if "center" in _alt else _alt[0]
-            _record_divergence(
-                "anchor", {"component": component, "band": band},
-                "double_caption_prevented",
-                final={"band": _next},
-                reason="render_anchor_in_burned_in_caption_band",
-            )
-            band = _next
-        if band not in _BANDS or not face_traj:
-            return band, False
-        _pts = [p for p in face_traj
-                if isinstance(p, dict) and p.get("found")
-                and (sw_s - 0.5) <= float(p.get("t") or 0.0) <= (ew_s + 0.5)]
-        if not _pts:
-            # NEAREST-SAMPLE FALLBACK (Zac 2026-07-09 render verdict, C-feed): the
-            # trajectory is sparse BY DESIGN (~1 keyframe per 6s) and smoothed to be
-            # continuous — nearest-neighbor lookup is its designed consumption
-            # (_face_position_at does exactly this for zoom origins). The hard window
-            # filter silently no-opped on Zac's render: keyframes at t=0/6/12/18s,
-            # all three MG windows missed every keyframe by 40-120ms, and three
-            # center-anchored MGs covered a centered face with zero coerce records.
-            # INTERIM protection (Tier-2 ledgered): dies after the re-census proves
-            # Gemini anchors clear on its own from the schema + teach fixes.
-            _mid = (float(sw_s) + float(ew_s)) / 2.0
-            _found = [p for p in face_traj if isinstance(p, dict) and p.get("found")]
-            if not _found:
-                return band, False
-            _pts = [min(_found, key=lambda p: abs(float(p.get("t") or 0.0) - _mid))]
-        _FH = 600.0
-        def _overlap(_b):
-            _y0, _y1 = _BANDS[_b]
-            _cov = 0.0
-            for _p in _pts:
-                _fy0 = float(_p.get("cy") or 960.0) - _FH / 2.0
-                _fy1 = _fy0 + _FH
-                _cov += max(0.0, min(_y1, _fy1) - max(_y0, _fy0)) / _FH
-            return _cov / len(_pts)
-        _cur = _overlap(band)
-        if _cur <= 0.35:
-            return band, False
-        # caption_match renders top|center ONLY (schema Literal) — coercing it to
-        # 'bottom' produces a render-input that fails PromptlyRenderInput validation
-        # and crashes the render into a decoration-stripping degrade. Exclude bottom
-        # from its candidate bands so a face-covered top caption_match lands on
-        # center, never bottom. (Convicted 2026-07-08 in the composer-cutover render.)
-        _is_caption_match = "caption_match" in (component or "")
-        _cands = sorted(
-            (_overlap(_b), _b) for _b in _BANDS
-            if _b != band and _b != blocked
-            and not (_is_caption_match and _b == "bottom")
-        )
-        if not _cands:
-            return band, False
-        _best_ov, _best = _cands[0]
-        if _best_ov >= _cur:
-            return band, False
-        _record_divergence(
-            "anchor", {"component": component, "band": band,
-                       "face_overlap": round(_cur, 2)},
-            "face_clear_coerce",
-            reason=f"face {_cur:.0%} covered -> {_best} ({_best_ov:.0%})",
-        )
-        return _best, True
-    except Exception:
-        return band, False
+# ── DELETED (Zac 2026-07-09 follow-through): _face_clear_anchor ──
+# The face-cover position/anchor coerce is gone at every call site (MGs, then
+# text_overlays in the same stroke): authored choice, taught, never coerced.
+# The caption_match-to-bottom crash class died with it — nothing rewrites
+# position, so no rewrite can produce a schema-invalid render input.
 
 
 # ── MG truth, readability & clearance validators (F5/F6/F7 · launch wave) ───
@@ -228,7 +148,7 @@ _MG_GROUNDING_THRESHOLD = 0.6   # F5: min fraction of content words in the known
 _MG_READ_BASE_S = 0.8           # F6: base reading time
 _MG_READ_PER_WORD_S = 0.35      # F6: per content word
 _MG_READ_FLOOR_S = 1.5          # F6: absolute minimum window
-_MG_FACE_CLEAR_THRESHOLD = 0.35  # F7: same bar as _face_clear_anchor
+_MG_FACE_CLEAR_THRESHOLD = 0.35  # F7 repair-prompt bar (asks GEMINI to revise — not a coerce)
 
 _MG_STOPWORDS = frozenset(
     "a an the and or but if then than so to of in on at for from by with as "
@@ -18074,23 +17994,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # anchoring it is a near-no-op (harmless if +1 is removed/out-of-range — no
     # surviving SFX targets such a word). The boundary is the before-cut word's
     # end = a real hard cut even when a transition is render-skipped.
-    # RULING (Zac 2026-07-09, no-adjustment): the cut-partner TIME map is DELETED —
-    # the WORD is the anchor and its projected output start is the only time an SFX
-    # has. The boundary words still seed the coverage set (below); no times survive.
-    _sfx_boundary_words = set()
-
-    def _register_cut_partner(_awi):
-        if not isinstance(_awi, int):
-            return
-        if _pw_by_idx.get(_awi) is None:
-            return
-        _sfx_boundary_words.add(_awi)
-        _sfx_boundary_words.add(_awi + 1)
-
-    for _ov in (edit_plan.get("_resolved_tight_cut_overlays") or []):
-        _register_cut_partner(_ov.get("after_word_index"))
-    for _tr in (edit_plan.get("transitions") or []):
-        _register_cut_partner(_tr.get("after_word_index"))
+    # RULING (Zac 2026-07-09, no-adjustment + follow-through): the cut-partner TIME
+    # map AND the coverage seeding are DELETED with the reanchor pass and the orphan
+    # cascade. The WORD is the anchor; its projected output start is the only time
+    # an SFX has, and its existence follows the word alone.
 
     # ── [fix-1] SFX coverage + commit REORDERED to after visual resolution ──
     # The SFX coverage set and the per-SFX commit loop were MOVED out of here to
@@ -18158,11 +18065,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             if _k in ("variant", "start_word_index", "_source_start", "duration_seconds"):
                 continue
             _entry[_k] = _v
-        if _entry.get("position") in ("top", "center", "bottom"):
-            _src_t_fc = float(_pw.get("_source_start") or 0.0)
-            _entry["position"], _ = _face_clear_anchor(
-                _entry["position"], _src_t_fc, _src_t_fc + _du,
-                _face_trajectory, component=f"text_overlay:{_ov.get('variant')}")
+        # RULING (Zac 2026-07-09 follow-through): position is Gemini's AUTHORED
+        # choice — taught, never coerced; same species as the MG anchor. The
+        # face-clear position coerce is DELETED (the teach lives in the
+        # text_overlays section; the re-census is its evidence).
         text_overlays_out.append(_entry)
         _src_t = float(_pw.get("_source_start") or 0.0)
         print(
@@ -19050,27 +18956,17 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # same _pw_by_idx space as _sfx_wi. The init lists + boundary-word set
     # were built above (plan-time) and persist to here. No circular dependency —
     # no visual resolver reads SFX.
-    _sfx_covered_words = set(_sfx_boundary_words)  # transitions + tight-cut overlays
-    for _em in (edit_plan.get("_emphasis_moments") or edit_plan.get("emphasis_moments") or []):
-        if isinstance(_em, dict) and (_em.get("zoom_effect") or _em.get("motion_graphic")):
-            for _wi in (_em.get("word_indices") or []):
-                if isinstance(_wi, int):
-                    _sfx_covered_words.add(_wi)
-    for _mg in (edit_plan.get("motion_graphics") or []):
-        if not isinstance(_mg, dict):
-            continue
-        _ms, _me = _mg.get("start_word_index"), _mg.get("end_word_index")
-        if isinstance(_ms, int) and isinstance(_me, int) and _me >= _ms:
-            _sfx_covered_words.update(range(_ms, _me + 1))
-    for _to in (edit_plan.get("text_overlays") or []):
-        if isinstance(_to, dict) and isinstance(_to.get("start_word_index"), int):
-            _sfx_covered_words.add(_to["start_word_index"])
-    for _b in (broll_out or []):  # FINAL survivors — post coverage-ceiling + overlay-separation trims
-        if not isinstance(_b, dict):
-            continue
-        _bs, _be = _b.get("_start_word_kept"), _b.get("_end_word_kept")
-        if isinstance(_bs, int) and isinstance(_be, int) and _be >= _bs:
-            _sfx_covered_words.update(range(_bs, _be + 1))
+    # ── DELETED (Zac 2026-07-09 follow-through): the SFX ORPHAN CASCADE ──
+    # It enforced the deleted machinery-foley doctrine ("sound never rides alone")
+    # and INVERTED the new teach: content-beat sounds (word-only, no visual
+    # partner — the teach's intended output) were eaten while machinery-riders
+    # survived. Its legitimate jobs are covered: cut-word protection is
+    # structural (8cc554e: word gone → sound has no existence via the
+    # removed-word skip below); dead-event riders become unrepresentable when
+    # A1/A2's sound-on-event field lands. HONEST TRANSIENT until then: a
+    # machinery-rider on a dead event can ghost — one class, short window,
+    # visible rather than silently eaten. The coverage-set construction went
+    # with it (nothing else consumed it).
 
     # [fix-2] observability only (never a drop/gate): a surviving SFX (it HAS a
     # visual) that still sits on a function/filler word the voice skates over —
@@ -19088,27 +18984,6 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         if not _sound_path:
             continue
         _sfx_wi = _sfx.get("_word_idx")
-        # [fix-1 → orphan cascade, directive #8 Part 5] When the SFX's visual
-        # partner died during resolution (b-roll unresolved, MG dropped, …),
-        # the sound CASCADES to a drop — a transient with nothing visible
-        # happening reads as random audio, which is worse than silence. This
-        # replaces the old WARN-and-KEEP behavior; the doctrine ("sound rides
-        # under visuals, never alone") is now enforced at the last honest
-        # moment, after the full visual track is closed.
-        if _sfx_wi is not None and _sfx_wi not in _sfx_covered_words:
-            print(
-                f"[sfx] orphan cascade: {_sound_style} word {_sfx_wi} "
-                f"('{_sfx.get('word', '')}') — zero surviving visuals on its "
-                f"trigger word after full visual resolution — DROPPED",
-                flush=True,
-            )
-            _record_divergence(
-                "sfx", {"sound": _sound_style, "word_index": _sfx_wi},
-                "orphan_cascade_drop",
-                reason="visual partner died during resolution — "
-                       "sound never rides alone",
-            )
-            continue
         # [fix-2] advisory (NOT a drop): this SFX has a visual partner but its
         # trigger is a function/filler word — the placement the content-over-
         # function prompt steer discourages. Surfaced for verification only.

@@ -3964,7 +3964,9 @@ def _terminal_telemetry_wiring():
     _win = _src[_c:_c + 700]
     assert "**_floor_markers(_floor_state)" in _win, "complete write lost floor markers"
     assert '"vocab": _vocab_markers(edit_plan)' in _win, "complete write lost vocab"
-    assert _src.count("orphan_cascade_drop") >= 1, "orphan cascade divergence missing"
+    # orphan-cascade wiring assertion DELETED with the cascade (Zac 2026-07-09
+    # follow-through: it enforced the dead machinery-foley doctrine and inverted
+    # the content-first teach).
     # the helper itself must never raise on junk
     assert handler._vocab_markers(None).get("broll_count") == 0
 
@@ -4749,28 +4751,20 @@ def _no_adjustment_ruling():
     import handler as _h
     assert set(_h._SoundEffect.model_fields.keys()) == {"word_index", "sound", "why"}, \
         "SFX schema must author word_index+sound(+why) only — no absolute time"
-    # MG anchors: authored, never coerced — _face_clear_anchor has exactly ONE call site
-    # (text_overlays position, not ruled); both MG call sites are deleted.
-    assert _src.count("_face_clear_anchor(") == 2, \
-        "expect def + exactly one call site (text_overlays); MG coerce calls must be gone"
-    assert "component=f\"mg:" not in _src and "emphasis-mg:" not in _src, \
-        "MG face-coerce call sites must be deleted (authored anchors render as authored)"
+    # Anchors/positions: authored, never coerced — _face_clear_anchor is fully
+    # deleted (MG sites, then text_overlays in the same stroke, then the function).
+    assert "_face_clear_anchor(" not in _src, \
+        "the face-coerce function and every call site must be deleted"
+    assert "orphan_cascade_drop" not in _src, \
+        "the SFX orphan cascade must be deleted (it inverted the content-first teach)"
+    assert "_sfx_covered_words" not in _src, \
+        "the cascade's coverage-set construction must go with it"
 
 
-@check("face-clear coerce: caption_match never coerced to bottom (schema-invalid → render crash class killed)")
-def _face_clear_no_bottom_caption_match():
-    import handler
-    _src = open("handler.py").read()
-    # the fix: caption_match excluded from 'bottom' candidate in _face_clear_anchor
-    assert '_is_caption_match and _b == "bottom"' in _src, \
-        "face-clear must exclude bottom for caption_match (top/center only)"
-    # behavioral: a top caption_match fully covering the face coerces to CENTER,
-    # never bottom (bottom would fail PromptlyRenderInput and crash the render).
-    _traj = [{"found": True, "t": t / 10.0, "cy": 380.0} for t in range(0, 20)]  # face high (top band)
-    band, moved = handler._face_clear_anchor(
-        "top", 0.0, 1.5, _traj, component="text_overlay:caption_match")
-    assert band in ("top", "center"), f"caption_match must stay top|center, got {band!r}"
-    assert band != "bottom", "caption_match must never coerce to bottom (schema-invalid)"
+# ── DELETED (Zac 2026-07-09 follow-through): the caption_match face-clear check ──
+# _face_clear_anchor is deleted at every call site and then as a function (authored
+# position, taught, never coerced). Nothing rewrites position, so no rewrite can
+# produce the schema-invalid bottom caption_match — the crash class is unconstructible.
 
 
 @check("render source staging: dangling-symlink class-kill (dereference source before os.link into the Remotion bundle)")
