@@ -542,7 +542,7 @@ _SFX_SOUNDS = Literal[
     # does no aliasing → key must equal {stem}.mp3).
     "boom", "punchsfx", "swoosh-sound-effects", "woosh-professional",
     "transition-sfx", "camera-flash", "money-ching", "iphoneding",
-    "mouse-click-sound", "popsfx", "correct", "gunshot", "rizz",
+    "mouse-click-sound", "popsfx", "correct", "rizz",
     "shockingsfx", "awkward-moment", "wompwomp", "imposter",
 ]
 
@@ -4399,64 +4399,45 @@ THE 7 ZOOM TYPES
 === SOUND EFFECTS ===
 ═══════════════════════════════════════════════════════════════════════════
 
-A sound effect gives a CONTENT beat physical weight — the number that costs something, the claim that stops the scroll, the payoff word. It lands where the viewer's ear should flinch, on the word that earns it.
-
-**Density is the physics of impact.** A sound lands against the quiet around it — the boom works because the two seconds before it carried nothing. When every event has a sound, the ear stops hearing sounds: it hears texture, and texture is noise. The count falls out of the footage's real beats — the claims, numbers, names, and turns the dialogue actually lands — never from coverage.
-
-**The edit's own machinery does not need foley.** A zoom, a stat card, an overlay entering — these are visual events; they carry themselves. A sound whose why annotates the edit ("rides the overlay", "hits the transition", "click on the zoom") is foley for machinery, and when the machinery plays quietly the sound fires against nothing. The one exception is a signature pairing the style genuinely calls for: ONE sound riding ONE transition that renders large — chosen, not systematic.
-
-Two checks on every sound you do place:
-  1. **Content trigger** — the trigger is the word where a listener with eyes closed would expect that sound. "She *called* me" earns a ding on `called`; "your wife's on the *phone*" doesn't earn one on `phone`. That word is almost always one the speaker leans on — a verb, a name, a number, the stressed noun. Function words the voice skates over (`a`, `the`, `to`, `of`, `is`, `and`, `it`) lack a beat of their own — when the beat you want sits next to such a word, the trigger is the stressed word the moment actually lands on.
-  2. **Tonal match** — even when the word literally matches, the register must carry the sound's character. A real failure in a serious story is honored by silence — wompwomp belongs to comic beats that invite the joke.
-
-SFX land on event words — breather words keep their quiet; the pause is the point. Pick flavor by the beat's arc position: hook beats → gripping (swoosh-sound-effects, punchsfx, popsfx) · build beats → ambient (transition-sfx, popsfx, mouse-click-sound, iphoneding) · mid_peak beats → punctuating (punchsfx, popsfx, iphoneding, money-ching) · the payoff beat → committing (boom — the one moment to lean heavier) · close → echo the hook's sound at lower intensity, or nothing.
+**The library below is a set of defined scenarios.** A sound effect is placed by recognizing its scenario in the footage — the moment class each entry names. Read the footage for which scenarios it actually contains, and place each sound where its scenario occurs. The count is however many scenarios the footage genuinely holds; a video containing none carries none, and that is a correct read. Every placement's `why` names the scenario it matched — a placement that cannot name its scenario is the tell that the moment was not one.
 
 Entry shape: {{ "word_index": int, "sound": <name> }}. Timing derives from the word — every sound is trimmed to a zero-silence onset, so it fires right on its trigger word; no offsets to compute.
 
 ──────────────────────────────────────────
-THE 17 SOUNDS
+THE 16 SOUNDS — each a defined scenario
 ──────────────────────────────────────────
 
-**boom** — A deep cinematic bass impact carrying weight and finality. It drops the floor under a statement. It belongs on the video's biggest claim or its payoff, where the line the video exists to deliver arrives. Its force comes from where it lands — a single boom on the right moment reads harder than several spread across lesser ones, because the ear measures it against the beats that carried no weight.
+**boom** — A deep cinematic bass impact with weight and finality. **THE SCENARIO:** the video's single heaviest claim — the payoff line the whole video was built to deliver, or the one stat that reframes everything before it. It lands on the word that carries the weight. **WHAT IT DOES:** the floor drops under the sentence; and because it is the one bass hit in the video, the ear measures it against every beat that carried nothing.
 
-**punchsfx** — A sharp percussive hit. Serves impact and emphasis; it adds sudden physical force to a beat. Use it on a hard-hitting word, a punchy claim, or a quick snap where the moment needs to feel like it lands a blow.
+**punchsfx** — A sharp percussive hit. **THE SCENARIO:** the speaker throws a verbal blow — a short, hard declarative that indicts, dismisses, or shuts something down ("that's a scam," "it's dead," "you're doing it wrong"), delivered like a jab, not an explanation. It fires on the word that lands the hit. **WHAT IT DOES:** the jab connects physically; the viewer feels the sentence strike instead of just hearing it.
 
-**swoosh-sound-effects** — A fast, short whoosh. Serves speed and motion; it makes a quick change feel snappy and energetic. Use it on a rapid transition or when something quickly enters or exits the frame — the brief motion accent for fast cuts.
+**swoosh-sound-effects** — A fast, short whoosh. **THE SCENARIO:** the speech itself claims SPEED — a stated how-fast ("in under five minutes," "instantly," "before your coffee's cold") or a rapid-fire run of items delivered at a clip. It fires on the speed word, or on the takeoff of the run. **WHAT IT DOES:** the pace the words claim becomes audible; the ear feels the rush.
 
-**woosh-professional** — A smooth, polished whoosh with more body. Serves clean, intentional motion; it makes a transition feel deliberate rather than frantic. Use it on a purposeful shift between scenes or ideas where you want polish, not chaos.
+**woosh-professional** — A smooth, polished whoosh with more body. **THE SCENARIO:** the narration itself travels — an explicit spoken jump in time or place mid-story ("fast-forward two years," "now come with me to the warehouse," "meanwhile, back at the office"). It fires on the travel phrase. **WHAT IT DOES:** the viewer is carried through the jump instead of dropped across it; the story's motion gets a body.
 
-**transition-sfx** — A textured transitional sweep. Serves the bridging of two distinct segments; it smooths a larger topic or scene change. Use it when moving between clearly different sections where a plain cut would feel abrupt.
+**transition-sfx** — A broad cinematic sweep. **THE SCENARIO:** the video's single largest act turn, where a full transition renders — this is the sound of that turn itself. **WHAT IT DOES:** the turn becomes physical; the sweep carries the eye's journey in the ear.
 
-**camera-flash** — A crisp photo-shutter snap. Serves the feeling of a moment being captured or frozen. Use it on a freeze-frame, a "picture this" beat, or to punctuate a quick highlight that should feel snapshotted.
+**camera-flash** — A camera shutter click with flash. **THE SCENARIO:** a photo or screenshot is taken, shown, or demanded in the content — "screenshot this," "I took one picture," the moment the story itself contains a shutter. The sound IS the shutter the story references. **WHAT IT DOES:** diegetic reality; the viewer hears the photo happen inside the story.
 
-**money-ching** — A bright cash-register cha-ching. It makes money land as something real and immediate rather than an abstract number. It belongs on the word where cost, price, savings, or a payoff arrives — the instant the viewer registers a figure that costs or earns them something.
+**money-ching** — A bright cash-register cha-ching. **THE SCENARIO:** the speaker states a specific amount of money — a price, a cost, a saving, a payout — and the figure itself is the point of the sentence. It fires on the word where the amount lands ("$500," "ten grand," "free" when free is the price). **WHAT IT DOES:** the number stops being abstract; the viewer hears money hit the table.
 
-**iphoneding** — A literal iPhone text-notification chime. Serves the feeling of an alert or new message arriving. Use it on mentions of texts, notifications, updates, or an "and then this happened" beat — signals something newly incoming.
+**iphoneding** — The literal iPhone text tone. **THE SCENARIO:** a message, text, or notification is quoted, shown, or reenacted in the content — the sound IS the notification the story references. **WHAT IT DOES:** diegetic reality; the viewer hears the message arrive inside the story.
 
-**mouse-click-sound** — A quick tactile click. Serves precision and decisiveness; it snaps attention to a small exact action. Use it on a selection, a decision point, or a "click here" beat — sharp and immediate.
+**mouse-click-sound** — A clean tactile interface click. **THE SCENARIO:** the speech names a single discrete digital action — "just upload it," "one tap," "hit publish" — where the action's simplicity is the point. It fires on the spoken action word. **WHAT IT DOES:** the action feels physically performed; simplicity becomes tactile.
 
-**popsfx** — A tiny bright pop. Serves light punctuation; it makes a small element appearing feel crisp and satisfying. Use it when a word, caption, or small graphic pops onto screen — the subtlest accent, good for quick appearances.
+**popsfx** — A tiny bright pop. **THE SCENARIO:** the speaker stacks a light bonus on top of a point already made — the "oh, and it even does this" beat: small, pleasing, an extra rather than a headline. It fires on the bonus's landing word. **WHAT IT DOES:** a small tick of delight; the extra feels like a gift being set on the pile.
 
-**correct** — A positive confirmation ding (a "you got it right" tone). Serves rightness, success, and validation. Use it on a correct point, a good decision, or a satisfying "yes, exactly" moment — signals something is right or confirmed.
+**correct** — A positive confirmation ding. **THE SCENARIO:** something is verified in the content — the result checks out, the number is confirmed, the method visibly worked. It fires at the instant the verification lands in speech or on screen. **WHAT IT DOES:** the viewer gets the "that's right" signal at the exact moment of proof.
 
-**gunshot** — A sharp aggressive crack. It serves a blunt stop or a shock the viewer feels in the chest. It belongs where the speaker cuts something off hard, or on the beat that's meant to jar.
+**rizz** — A romantic-but-comedic flourish (a smooth, flirty sting played for laughs). **THE SCENARIO:** the speaker plays charm for comedy — a flirty line, a self-aware flex, a "smooth move" recounted or performed with a wink ("and that's how you get their number"). It fires as the charm lands. **WHAT IT DOES:** the wink becomes audible; the viewer is told, gently, that the confidence is a bit.
 
-**rizz** — A romantic-but-comedic flourish (a smooth, flirty sting played for laughs). Serves charm and playful confidence. Use it on a flirty or "smooth move" beat meant to be funny, or anything romantic played tongue-in-cheek — light and self-aware.
+**shockingsfx** — A sudden jolt. **THE SCENARIO:** a genuine reversal — the sentence lands somewhere the setup made impossible, or a stat contradicts what the viewer was led to assume. It fires on the twist word, in a video that actually contains a twist. **WHAT IT DOES:** the viewer's own flinch, rendered.
 
-**shockingsfx** — A dramatic shock/tension sting (a sudden jolt). Serves surprise and alarm; it hits on something unexpected. Use it on a sudden reveal, a "wait, what?" beat, or a jarring surprise — a sharp shock, distinct from slow-burn suspense.
+**awkward-moment** — A comedic awkward-silence cue. **THE SCENARIO:** the story lands on deliberate cringe and holds it — an embarrassing beat recounted or performed, then left sitting (the failed handshake, the reply-all disaster, the joke that died). It fires just after the line, inside the hold. **WHAT IT DOES:** secondhand embarrassment made audible; the viewer squirms with the story instead of past it. The hold it fires inside is a silence worth keeping — a video that contains this scenario contains a preserved silence: mark the hold in preserved_silences so the beat survives the cut.
 
-**awkward-moment** — A comedic awkward-silence cue. Serves secondhand embarrassment and cringe. Use it right after something awkward, an uncomfortable pause, or a beat meant to land flat on purpose — the sound of a cringe moment.
+**wompwomp** — A comedic sad-trombone fail sound. **THE SCENARIO:** the story reports a failure played for comedy — the attempt flopped and the speaker frames the flop as the punchline ("and it made exactly zero dollars"). It fires on the fail's landing word. **WHAT IT DOES:** the anticlimax gets its trombone; disappointment reads as a joke, not a wound.
 
-**wompwomp** — A comedic sad-trombone fail sound. Serves playful disappointment and letdown. Use it on a fail, a mistake, an anticlimax, or a punchline about something not working out — the classic "that didn't go well" beat.
-
-**imposter** — A tense suspenseful sting (sus/suspicious, Among Us-style). Serves doubt, suspicion, and slow-burn tension. Use it on a "something's off here" beat, a suspicious reveal, or calling out something fishy — signals building suspicion, distinct from a sudden shock.
-
-AMBIGUITY MAP — when sounds feel close, keep them distinct:
-  • swoosh-sound-effects / woosh-professional / transition-sfx — fast & snappy / smooth & deliberate / section-bridge across a full scene change.
-  • money-ching / iphoneding / correct — money ONLY / alerts & texts / rightness & confirmation. Three different chimes, never interchangeable.
-  • boom / punchsfx / gunshot — deep & final on the peak / sharp emphasis / aggressive & jarring hard stop.
-  • shockingsfx / imposter — a sudden jolt / a slow-burn suspicion that builds.
-  • wompwomp / awkward-moment — a comedic fail (sad trombone) / a cringe awkward-silence.
+**imposter** — A tense, suspenseful sting (sus, Among Us-register). **THE SCENARIO:** the speaker voices building suspicion — something doesn't add up and they're saying so before the answer arrives ("but something felt off," "turns out he never worked there"). It fires where the doubt is named. **WHAT IT DOES:** the viewer leans in; doubt gets a pulse before the reveal pays it off. Suspicion BUILDING lives here; the twist LANDING is shockingsfx.
 
 ═══════════════════════════════════════════════════════════════════════════
 === B-ROLL ===
@@ -4822,7 +4803,7 @@ Output is a bare JSON object — the response is JSON-parsed and the parser is t
   "sound_effects": [
     {{
       "word_index": int,
-      "sound": "boom" | "punchsfx" | "swoosh-sound-effects" | "woosh-professional" | "transition-sfx" | "camera-flash" | "money-ching" | "iphoneding" | "mouse-click-sound" | "popsfx" | "correct" | "gunshot" | "rizz" | "shockingsfx" | "awkward-moment" | "wompwomp" | "imposter",
+      "sound": "boom" | "punchsfx" | "swoosh-sound-effects" | "woosh-professional" | "transition-sfx" | "camera-flash" | "money-ching" | "iphoneding" | "mouse-click-sound" | "popsfx" | "correct" | "rizz" | "shockingsfx" | "awkward-moment" | "wompwomp" | "imposter",
       "why": "<≤10 words: the beat this sound is the audio face of>"
     }}
   ],
@@ -13482,7 +13463,6 @@ _SFX_CATEGORIES = {
     # loud — big impacts that own the beat
     "boom": "loud",
     "punchsfx": "loud",
-    "gunshot": "loud",
     "money-ching": "loud",
     "shockingsfx": "loud",
     # medium — mid accents / cues
@@ -13515,7 +13495,7 @@ _SFX_ONSET_OFFSETS = {
     "boom": 0.0, "punchsfx": 0.0, "swoosh-sound-effects": 0.0,
     "woosh-professional": 0.0, "transition-sfx": 0.0, "camera-flash": 0.0,
     "money-ching": 0.0, "iphoneding": 0.0, "mouse-click-sound": 0.0,
-    "popsfx": 0.0, "correct": 0.0, "gunshot": 0.0, "rizz": 0.0,
+    "popsfx": 0.0, "correct": 0.0, "rizz": 0.0,
     "shockingsfx": 0.0, "awkward-moment": 0.0, "wompwomp": 0.0, "imposter": 0.0,
 }
 
@@ -18990,8 +18970,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         if _sfx_wi is not None and _sfx.get("word", "") in _SFX_FUNCTION_WORDS:
             print(
                 f"[fix-2] sfx {_sound_style} on function-word "
-                f"'{_sfx.get('word', '')}' word {_sfx_wi} (kept — has a visual "
-                f"partner; prefer a stressed content word)",
+                f"'{_sfx.get('word', '')}' word {_sfx_wi} (kept — advisory only; "
+                f"a scenario lands on a stressed content word)",
                 flush=True,
             )
         _projected_t = None
