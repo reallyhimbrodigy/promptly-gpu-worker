@@ -480,15 +480,26 @@ _ZOOM_TYPES = Literal[tuple(sorted(VALID_ZOOM_TYPES))]
 # of freedom Gemini was getting wrong (subtle 200ms SmoothPushes that don't
 # read). Each value is the full event span including ramp-in + hold +
 # ramp-out (see each component's tsx for the specific motion shape).
-ZOOM_NATURAL_DURATION_MS = {
-    "SmoothPush":    1200,
-    "SnapReframe":    700,
-    "FocusWindow":   1500,
-    "StepZoom":       800,
-    "LetterboxPush": 1400,
-    "StageZoom":     1800,  # one event drives the full 5-phase two-stage progression internally
-    "DepthPull":     2200,
+# B2 pattern (A1/A2 step 3): durations DECLARED IN FRAMES at 60fps; ms is a
+# DERIVED display/param view with an import-time exactness check. An off-grid
+# zoom duration cannot be written. (ZOOM_PEAK_REACH_MS below deliberately stays
+# in measured milliseconds — spring 99%-settling measurements, sub-frame
+# perceptual offsets, single-consumer; Zac-accepted carve-out.)
+ZOOM_NATURAL_DURATION_FRAMES = {
+    "SmoothPush":    72,    # → 1200ms
+    "SnapReframe":   42,    # → 700ms
+    "FocusWindow":   90,    # → 1500ms
+    "StepZoom":      48,    # → 800ms
+    "LetterboxPush": 84,    # → 1400ms
+    "StageZoom":    108,    # → 1800ms (one event drives the 5-phase progression)
+    "DepthPull":    132,    # → 2200ms
 }
+ZOOM_NATURAL_DURATION_MS = {}
+for _zt0, _zf0 in ZOOM_NATURAL_DURATION_FRAMES.items():
+    if (int(_zf0) * 1000) % 60 != 0:
+        raise ValueError(f"zoom {_zt0}: {_zf0} frames is not ms-exact at 60fps")
+    ZOOM_NATURAL_DURATION_MS[_zt0] = (int(_zf0) * 1000) // 60
+del _zt0, _zf0
 # Default scale per type — used when Gemini omits scale. These are the
 # perceptible-baseline values; deeper or gentler is a Gemini override.
 ZOOM_NATURAL_SCALE = {
@@ -568,7 +579,13 @@ class _CaptionPositionChange(BaseModel):
     position: Literal["top", "center", "bottom"]
 
 class _ZoomEvent(BaseModel):
-    startMs: int
+    # A1/A2 step 3 (Zac-ruled): startMs is NOT authored. The zoom is word-anchored;
+    # the pipeline back-times it so the PERCEPTUAL PEAK arrives on the word:
+    # start = word_start − ZOOM_PEAK_REACH_MS[type] (measured arrival table — the
+    # approved deviation from raw natural-duration back-timing), floored at the
+    # clip head (derivation, not adjustment). The ms→frames conversion happens
+    # EXACTLY ONCE downstream; every consumer (including any future zoom-rider
+    # sound) reads that one frame number.
     # durationMs is optional. When omitted, the pipeline fills in
     # ZOOM_NATURAL_DURATION_MS[type]. Gemini emits this only when overriding
     # the natural duration for a specific moment (rare).
@@ -4004,7 +4021,7 @@ Words 48-56 are a deliberate breather before the payoff — those windows stay e
 CRAFT MOVES — what senior editors reach for when composing a moment
 ═══════════════════════════════════════════════════════════════════════════
 
-**Anticipation lands harder than payoff.** A zoom that COMPLETES on the payoff word feels inevitable; one that starts at it feels late. Back-time startMs so the motion arrives as the word lands.
+**Anticipation lands harder than payoff.** A zoom that COMPLETES on the payoff word feels inevitable; one that starts at it feels late. The pipeline back-times every event so the motion arrives as the word lands — your anchor word is the arrival point.
 
 **The callback.** Plant in the hook, pay off in the close. When the close consciously echoes the hook — parallel zoom, callback MG content, echoed caption emphasis — the loop closes satisfyingly and earns the replay. hook_word_index, payoff_word_index, and close_word_index should feel like one connected arc, not three independent picks.
 
@@ -4362,21 +4379,21 @@ Entry shape:
     "intensity": "high" | "medium",
     "duration": float,              # 1.5-3.0 output-seconds the visual hit lasts
     "viewer_feeling": "<one specific phrase: the feeling this moment produces in the viewer>",
-    "zoom_effect": {{ "type": <zoom type>, "events": [{{"startMs": int}}, ...] }} | null,
+    "zoom_effect": {{ "type": <zoom type>, "events": [{{}}, ...] }} | null,   // events are word-anchored; the pipeline times them
     "motion_graphic": {{...}} | null   # the zoom is the camera's punctuation; a graphic joins it when the moment names something the camera cannot show
   }}
 
-**OMIT durationMs, scale, originX, originY from events by default.** The pipeline auto-fills the natural duration and perceptible scale per type — the values that make each move look its best — and runs face detection at the event's start frame to lock the zoom origin onto the face (fallback: canvas center). Your event is just {{"startMs": int}}. Emit originX/originY ONLY when zooming a NON-face element (a prop, a gesture, a whiteboard); emit durationMs/scale only when a specific beat genuinely wants a non-default feel (rare).
+**OMIT durationMs, scale, originX, originY from events by default.** The pipeline auto-fills the natural duration and perceptible scale per type — the values that make each move look its best — and runs face detection at the event's start frame to lock the zoom origin onto the face (fallback: canvas center). Your event is just {{}} — word-anchored, pipeline-timed. Emit originX/originY ONLY when zooming a NON-face element (a prop, a gesture, a whiteboard); emit durationMs/scale only when a specific beat genuinely wants a non-default feel (rare).
 
 Natural durations (for back-timing math): SmoothPush 1200ms · SnapReframe 700ms · FocusWindow 1500ms · StepZoom 800ms per hold · LetterboxPush 1400ms · StageZoom 1800ms · DepthPull 2200ms.
 
-**startMs is where the motion STARTS — back-time it so the move COMPLETES on the emphasis word.** startMs = word_start_ms − natural_duration. Emphasis word starts at 12.32s with a SmoothPush → startMs = 12320 − 1200 = 11120.
+**Every zoom is word-anchored — the pipeline times it.** You author WHICH moment (word_indices) and WHICH type; the renderer back-times the event so its perceptual peak ARRIVES on the anchor word (a measured per-type arrival table) and floors it at the clip head. There is no time to compute.
 
-**Hard constraint: startMs must live inside the owning clip's source range.** If back-timing would land before the clip's source_start, anchor startMs at source_start instead — the zoom begins at the clip's first frame and lands a moment after the cut opens. Never emit startMs outside [source_start, source_end]; out-of-range events get truncated into a glitchy frame-0 blip.
+**Timing is derived, floored at the clip head.** When back-timing would land before the clip's first frame, the zoom begins there — a shorter run-up that still completes on the word. Nothing for you to compute or clamp.
 
 **Zoom type is per-emphasis, not per-clip.** Each emphasis's `zoom_effect.type` renders independently — when adjacent emphases on the same kept-source clip differ in type, the pipeline splits the clip at the midpoint between them so each event plays under its own component. Plan each peak's type by what THAT peak's reaction wants; the pipeline handles the split behind the scenes.
 
-**Per-clip event budget:** the camera must fully play each event (in → hold → out) before the next, so max events ≈ clip_duration / natural_duration, and consecutive startMs values on a clip must be ≥ natural_duration apart. A 6s clip fits ~3 LetterboxPush events or ~6 StepZoom events. The budget is where the camera stays composed — past it the motion visibly oscillates, and the pipeline strips the zoom from over-budget extras while their SFX/captions carry on.
+**Per-clip event budget:** the camera must fully play each event (in → hold → out) before the next, so max events ≈ clip_duration / natural_duration, and consecutive events on a clip must sit ≥ the type's natural duration apart (space the anchor words). A 6s clip fits ~3 LetterboxPush events or ~6 StepZoom events. The budget is where the camera stays composed — past it the motion visibly oscillates, and the pipeline strips the zoom from over-budget extras while their SFX/captions carry on.
 
 **StageZoom: ONE event.** The renderer drives the full two-stage progression (ramp → hold → deeper ramp → hold → out) inside one event's window. Chaining two events produces two back-to-back double-zooms. First-stage scale via optional firstStage prop (default 1.15).
 
@@ -4633,7 +4650,7 @@ These are the mechanics the render depends on — the physics of the frame, the 
 
 **PER-COMPONENT RULES:**
   • emphasis_moments: 1:1 with key_moments (3-5 true peaks for a typical 30s video; a flat even-energy stretch may have only 2-3 — the honest peak count is the right count). At least 2 distinct zoom types across
-    them. Peaks only — build and breather words run flat, and that flatness is what gives each peak its contrast. Payoff = SmoothPush or LetterboxPush — the committed-push family; StepZoom's snap belongs to mid-peaks. Events emit startMs only.
+    them. Peaks only — build and breather words run flat, and that flatness is what gives each peak its contrast. Payoff = SmoothPush or LetterboxPush — the committed-push family; StepZoom's snap belongs to mid-peaks. Events are word-anchored; emit {{}}.
   • transitions: a transition marks a genuine
     turn — a movement boundary, an act shift, the walk into the payoff — and
     carries its why. The straight cut carries every other splice, and carries it
@@ -4750,7 +4767,7 @@ Output is a bare JSON object — the response is JSON-parsed and the parser is t
       "zoom_effect": {{
         "type": "SmoothPush" | "SnapReframe" | "FocusWindow" | "StepZoom" | "LetterboxPush" | "StageZoom" | "DepthPull",
         "events": [
-          {{"startMs": int}}                       // durationMs/scale/origin OMITTED — pipeline auto-fills. originX/originY only for non-face zoom targets.
+          {{}}                                     // word-anchored, pipeline-timed; durationMs/scale/origin OMITTED — auto-filled. originX/originY only for non-face zoom targets.
         ]
       }} | null,
       "motion_graphic": {{ "type": <MG type>, "anchor": <semantic zone>, "props": {{...}} }} | null   // almost always null
