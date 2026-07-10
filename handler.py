@@ -1833,7 +1833,7 @@ GUIDANCE — important:
 - Use this profile as a LIGHT signal about general taste, NOT a "pick the same thing again" instruction.
 - For caption_style specifically: AVOID picking whichever style ranks #1 in their history if it appeared in either of their last 2 videos. Variety is itself a quality signal — top creators rotate caption styles across videos to keep their feed visually fresh. Pick a different style that still matches the vibe.
 - For transition types, zoom types: gentle bias toward their top picks is fine; people develop a consistent overall feel for the LOOK of their edits.
-- DO NOT use this profile to infer how MANY components to place. Carrier-layer density (B-roll on every named noun, an SFX on every visual event, transitions at CUT BOUNDARIES that earn them, MGs on off-camera referents, captions running continuously) comes from the prompt above. Emphasis_moments are placed only where the dialogue earns them — there's no count to chase. The user's historical counts predate the current rules and would bias placement away from intent.
+- DO NOT use this profile to infer how MANY components to place. Carrier-layer density (B-roll on every named noun, an SFX on every visual event, seam treatments authored by the dedicated pass, MGs on off-camera referents, captions running continuously) comes from the prompt above. Emphasis_moments are placed only where the dialogue earns them — there's no count to chase. The user's historical counts predate the current rules and would bias placement away from intent.
 - If the current vibe EXPLICITLY contradicts (e.g. "completely different look"), ignore history entirely.
 """
 
@@ -3659,7 +3659,7 @@ AUDIO PROFILE
 SHOT CHANGES (source seconds)
   {_shots_display}
 
-  These are the seams where the CAMERA CUT — the footage's own hard cuts, the picture changes in this video. Each one surfaces in the boundary lists below carrying the SCENE CHANGE tag: with handle room it lands in CUT BOUNDARIES (a transition slot), without it lands in TIGHT BOUNDARIES, either way tagged SCENE CHANGE. **THESE ARE THE HOMES FOR TRANSITIONS.** A SCENE CHANGE-tagged boundary is a picture change, and a picture change is what a transition rides — walk this list (plus your own B-roll entry/exit edges, which are picture changes on equal footing) and decide each one (see HOW TO PLACE TRANSITIONS). They are ALSO context for emphasis: a StepZoom or SmoothPush on a word that coincides with a shot change reads cleanly because the camera move lands as the new shot enters. Transition first, then emphasis — but both key off this list, because this is the only place the picture actually turns.
+  These are the seams where the CAMERA CUT — the footage's own hard cuts, the picture changes in this video. Seam treatments (transitions, tight-cut overlays) are authored in a dedicated pass that walks these picture changes against your plan — your read here feeds it. For YOU, this list is context for emphasis: a StepZoom or SmoothPush on a word that coincides with a shot change reads cleanly because the camera move lands as the new shot enters — this is the only place the picture actually turns.
 
 VOCAL EMPHASIS PEAKS (source seconds, score 0-1)
   {_vocal_display}
@@ -4018,7 +4018,7 @@ CRAFT MOVES — what senior editors reach for when composing a moment
   • The audio under an overlay is the speaker continuing — don't cut, transition, or crossfade across it.
   • Don't place your B-roll over an overlay segment — two stacked cutaways means the viewer loses the thread. End an active B-roll at or before the overlay starts.
   • Don't place your MGs or text overlays during an overlay window — decoration on decoration dilutes both.
-  • Most important: an overlay popping in/out looks like a hard cut to the shot-change detector and may surface in CUT BOUNDARIES — but the underlying camera hasn't changed. A transition there crossfades continuous speech into itself. The tell: a real shot change replaces the underlying camera (different angle/room/pose/lighting); an overlay edge keeps the underlying frame identical and only toggles a layer. You watched the pixels — you can see the difference. Leave overlay-edge boundaries as straight cuts.
+  • Most important: an overlay popping in/out looks like a hard cut to the shot-change detector — but the underlying camera hasn't changed, and a seam treatment there would dress continuous speech into itself. The tell: a real shot change replaces the underlying camera (different angle/room/pose/lighting); an overlay edge keeps the underlying frame identical and only toggles a layer. You watched the pixels — you can see the difference. Leave overlay-edge boundaries as straight cuts.
 
 ═══════════════════════════════════════════════════════════════════════════
 HOW THE SCHEMA WORKS — the contract between you and the pipeline
@@ -4490,53 +4490,11 @@ Entry shape:
 Register tunes the cutaway's CHARACTER (the extend test still decides whether each exists): vulnerable/interview — atmospheric close-up details, warm light, 1.5-3s · promo/demo/hustle — product evidence, the named feature or screen when the moment asks to see it, 1-2s · comedy — reaction shots and situational framing, tight on the joke beat · documentary/essay — illustrative concept shots, deliberate scene-setters.
 
 ═══════════════════════════════════════════════════════════════════════════
-=== TRANSITIONS ===
+=== SEAM TREATMENTS (transitions & tight-cut overlays) — AUTHORED IN A DEDICATED PASS ===
 ═══════════════════════════════════════════════════════════════════════════
 
-A transition is the visual treatment on a PICTURE CHANGE — the seam where what's on screen turns over. Two things make a picture change, and both reach you named in the material: a source shot change (the SHOT CHANGES list — the camera already cut, the angle or location moved) and a B-roll cutaway entering or leaving. These are a transition's home and its strong default. When the video crosses one, ride it: the transition tells the eye the picture turned, and a real scene change that plays as a bare jump reads as a beat the edit missed. Name the picture change it rides in its `why` — the shot change or the cutaway edge — so the seam is traceable. Zero transitions is the honest read of a talking-head with no cutaways — there are no picture changes to ride. Where the footage has real shot changes and cutaways, each one is a candidate, and the count is however many the footage contains.
+Transitions and tight-cut overlays are decided by a dedicated seam-dressing pass that reads your editorial_vision, story_shape, arc_segments, and key_moments against the footage's actual picture changes. You do not emit them here. Write your vision's transition intent as INTENT (the energy, the register) — the seam pass consumes it. Same-scene splices need nothing from you: the hard cut owns them, and their energy goes where it belongs — a mask-zoom on the first word back, a caption that leans in, an SFX that lands the beat.
 
-Between two moments of one continuous shot — the speaker straight to camera, a breath or a repositioning or a fresh take lifted out — the picture has not changed: same face, same room, both sides of the seam. The hard cut owns those splices. The jump carries the momentum and reads as pace; a transition dressed over it smooths a turn that isn't there. So the same-scene speech cuts play straight, however big the topic swing, and their energy goes where it belongs — a mask-zoom on the first word back, a caption that leans in, an SFX that lands the beat.
-
-When a picture change lands on a punchline or a hard beat — a reveal, an escalation, the line the video exists to deliver — the snap can carry more than a dissolve. A zero-handle cut (ShutterFlash, DipToBlack) makes the turn itself the visual event, the picture change and the beat hitting as one; a crossfade-family type (ZoomThrough, SlideOver, Stack, CardSwipe, CrossfadeZoom, StepPush, FilmStrip) rides a calmer chapter turn. Read the beat under the picture change and give the seam the treatment its energy asks for. The physics set which fits where: crossfade-family types need the audio handle, so they ride CUT-boundary picture changes; zero-handle types substitute silence and sit on either boundary list. Both lists are detector output — a seam inferred from a timestamp gap that isn't in a list doesn't exist in the render.
-
-**Duration mechanics:** each transition consumes half its NATURAL DURATION of source from the outgoing tail and half from the incoming head (per-type durations are in the user message's TRANSITION NATURAL DURATIONS table; a boundary fits a type when its gap ≥ 2x that duration). A clip between two transitions loses both handles to crossfades. Decision tree by clip length: <800ms → one transition fits; keep the stronger picture change. 800-1500ms with both picture changes strong → place both (a tight middle is the better trade than skipping a real turn). 800-1500ms with one weak side → keep the stronger. >1500ms → room for a transition at each picture change that genuinely turns.
-
-**Type selection:** match the character of THIS shift (arc-transition flavors in ARC SPINE), then sanity-check against the register — a Stack on a confession reads costume; a FilmStrip on a 20-second clip is too much weight. Fresh type each time — adjacent repeats read as a stuck effect rack.
-
-──────────────────────────────────────────
-THE {_n_transitions} TRANSITIONS
-──────────────────────────────────────────
-
-Every type below reads the same way: a PICTURE CHANGE is what it rides — a picture change makes a transition the strong default and most are better for one; the beat under it decides which type, OR whether the seam is sharper as a bare cut (a punchline / snap of recognition wants the abruptness itself). It is the treatment a picture change wears when the beat beneath it calls for it.
-
-**CardSwipe** — a picture change on a casual pivot wants the swipe: clip A tilts off like dismissing an app card, B rises from behind. The speaker shrugged and moved on. Needs the audio handle, so it rides CUT-boundary picture changes. Props: {{ "direction": "left" | "right" }}
-
-**ZoomThrough** — a picture change accelerating into the payoff wants the rush: A scales up past the camera, B emerges small and grows. Setup→demonstration, the cut into the most committed beat. Needs the audio handle, so it rides CUT-boundary picture changes.
-
-**SlideOver** — a picture change at a structured chapter turn wants the slide: B slides over A with a contact shadow, A shifts and scales down behind. Clean editorial — explainers, chaptered talking-head. Needs the audio handle, so it rides CUT-boundary picture changes. Props: {{ "direction": "left" | "right" }}
-
-**Stack** — a picture change into a phone or app demo wants the task-switcher: A shrinks to a card and slides off, B comes forward from the stack. Where iOS visual language IS the topic; elsewhere it reads as costume. Needs the audio handle, so it rides CUT-boundary picture changes.
-
-**CrossfadeZoom** — a picture change that lands on an emotional beat wants the dissolve: the frames blend and the feeling carries across the seam. Sentimental bridges, documentary, "time passed". Needs the audio handle, so it rides CUT-boundary picture changes. Accepts image paths (jpg/png/webp) for either clip.
-
-**ShutterFlash** — a picture change where the cut itself should be the event wants the snap: A collapses to a beam, to a dot, then B expands back. Gaming, retro-tech, a punchline flash. The HEAVY version — audio drops out under it and the cut halts the video for a beat; reach for it when the picture change should stop everything. (For a light accent with the audio playing straight through, use the ShutterFlash tight-cut overlay below.) Zero-handle, so it sits on either boundary list. Props: {{ "flashColor": "#ffffff" }} (colored flashes read music-video)
-
-**StepPush** — a picture change between structured panels wants the push: both panels travel together, cubic ease, presentation grammar. How-to, business, training. Needs the audio handle, so it rides CUT-boundary picture changes. Props: {{ "direction": "left" | "right" | "up" | "down", "separatorShadow": bool }}
-
-**FilmStrip** — a picture change to the next item in a curated collection wants the strip: A morphs into a small tile, a film strip scrolls one position to reveal B, B expands to full. Portfolios, "5 things I made". Needs the audio handle, so it rides CUT-boundary picture changes. Props: {{ "caption": "Project 1", "showBookmark": bool, "showGrid": bool, "advanceFrames": 1 }}
-
-**DipToBlack** (~700ms) — a picture change closing an act wants the blackout: the screen goes dark and the chapter is over. The heaviest pause in the vocabulary — an act ending, a held beat before the turn, the inhale ahead of the payoff. Zero-handle, so it sits on either boundary list.
-
-═══════════════════════════════════════════════════════════════════════════
-=== THE 2 TIGHT-CUT OVERLAYS ===
-═══════════════════════════════════════════════════════════════════════════
-
-A tight-cut overlay is punctuation on a picture change that landed on a handle-less cut — a SCENE-CHANGE tight boundary, where a crossfade can't fit. It plays across the cut, substituting a flash of its own energy for the audio handle the boundary lacks. As with the transitions: the picture change decides WHETHER; the beat under it decides WHICH.
-**LightLeak** — a picture change on a reflective beat wants the warm bloom, ~180ms: a quiet realization landing, a takeaway arriving, a hook-to-close callback. Reads like memory.
-**ShutterFlash** — a picture change on a high-energy beat wants the white flash: the escalation after a setup, a surprise pivot, the exact frame a stat or punchline lands on. The LIGHT version (~180ms) — audio plays straight through and the flash only accents the cut, energy still moving. (When the cut itself should be the event with the audio dropping out, use the full ShutterFlash transition above.)
-Each carries a why naming the picture change it rides; rotating types across the ones you place keeps them reading as vocabulary.
-
-═══════════════════════════════════════════════════════════════════════════
 === GLOBAL FIELDS ===
 ═══════════════════════════════════════════════════════════════════════════
 
@@ -4823,24 +4781,6 @@ Output is a bare JSON object — the response is JSON-parsed and the parser is t
       "start_word_index": int,
       "end_word_index": int,
       "reason": "<one short sentence telling the picker what the clip must SHOW beyond the keyword — the specific visual that makes it right or wrong (e.g., 'must show an app's text-input field on screen, not a person holding a phone'). The picker reads this as an editor's note when choosing between candidate clips.>"
-    }}
-  ],
-
-  "transitions": [
-    {{
-      "after_word_index": int,                    // ALWAYS from the CUT BOUNDARIES list
-      "type": {_transition_enum},
-      "why": "<≤12 words: the moment that asked for this>"
-      // ...transition-specific props per the TRANSITIONS section
-    }}
-  ],
-
-  "tight_cut_overlays": [
-    {{
-      "after_word_index": int,                            // ALWAYS from the TIGHT BOUNDARIES list
-      "type": {_tco_enum},
-      "why": "<≤12 words: the moment that asked for this>"
-      // punctuation for tight boundaries: place one where the moment on the splice earns it (a reveal, an escalation, a callback) — the why names the moment; rotate types across the ones you place; up to 2 discretionary per video
     }}
   ],
 
@@ -8002,17 +7942,35 @@ def _gemini_stream_with_cache(client, model_name, contents, base_config_kwargs,
 # Rider #2 (failure direction): any failure → zero transitions, bare cuts, render
 # ships. A missing transition is invisible; a failed render is not.
 
-_TRANSITIONS_SUBCALL_SYS = """You are placing TRANSITIONS for a short-form video edit. You receive the edit plan's read of the footage (arc segments, key moments), the transcript around each seam, and the seams themselves.
+_TRANSITIONS_SUBCALL_SYS = """You are placing TRANSITIONS and TIGHT-CUT OVERLAYS for a short-form video edit — the seam-dressing pass. You receive the edit plan's read of the footage (editorial vision, story shape, arc segments, key moments), the transcript around each seam, and the seams themselves.
 
-A transition rides a PICTURE CHANGE — these seams are the picture changes this video has (source shot changes and B-roll cutaway edges). Walk the seams and decide each one: does this seam's beat want a treatment, and which one?
+A transition is the visual treatment on a PICTURE CHANGE — the seam where what's on screen turns over: a source shot change or a B-roll cutaway edge. When the video crosses one, riding it tells the eye the picture turned; a real scene change that plays as a bare jump can read as a beat the edit missed — and a punchline seam plays bare BECAUSE the snap is the beat. Between two moments of one continuous shot the picture has not changed — those splices are not offered here.
 
-THE PROCEDURE: read each seam's beat from the plan and the words around it. A seam whose beat snaps on a PUNCHLINE takes a bare cut — the cut IS the joke's timing; leave it untaken. A seam where the story genuinely turns can carry a full transition. A seam that is a picture change without a story turn reads cleanly as a bare cut or a light overlay. Not taking a seam is a decision, and often the right one — absence is the bare cut.
+THE PROCEDURE — walk the seams offered; the beat is a property of each:
+  1. For EACH seam, read the beat sitting under it — the plan's read (the vision, the arc position, any key moment at that word) and the dialogue around the seam.
+  2. Decide what it wears. The schema offers, per seam, exactly the types whose designed duration fits that seam's real silence — choose editorially among what is offered, or decline. A seam not taken is a bare cut, and often that is the right read: **when the picture change lands on a punchline, a reveal-snap, or a hard beat, the abruptness IS the treatment — leave it bare, deliberately.**
+  3. Each seam takes at most ONE treatment — a transition or an overlay, never both.
+  4. Every why names the BEAT at the seam — what the dialogue/story does there, read from the plan — not the mechanics of the transition and not bare geometry ("it's a boundary" is not a why).
 
-The schema offers, per seam, exactly the transition types whose designed duration fits that seam's real silence — what it offers is what fits; choose editorially among what is offered, or decline the seam.
+Type selection: match the character of THIS shift, then sanity-check the register — a Stack on a confession reads costume; a FilmStrip on a 20-second video is too much weight. Fresh type each time — adjacent repeats read as a stuck effect rack. Zero treatments is the honest read of footage whose seams don't earn them.
 
-RIDER SOUND: a transition entry may carry "sound": "transition-sfx" — a broad cinematic sweep, THE SCENARIO being the video's single largest act turn, where the turn itself deserves its sound. At most the one turn that earns it; omit everywhere else.
+THE TRANSITIONS (each: the picture change it rides, the beat that selects it, what it does):
+**CardSwipe** — a casual pivot wants the swipe: clip A tilts off like dismissing an app card, B rises from behind. The speaker shrugged and moved on.
+**ZoomThrough** — a seam accelerating into the payoff wants the rush: A scales up past the camera, B emerges small and grows. Setup→demonstration, the cut into the most committed beat.
+**SlideOver** — a structured chapter turn wants the slide: B slides over A with a contact shadow. Clean editorial — explainers, chaptered talking-head.
+**Stack** — a turn into a phone or app demo wants the task-switcher: A shrinks to a card and slides off, B comes forward from the stack. Where iOS visual language IS the topic; elsewhere it reads as costume.
+**CrossfadeZoom** — a picture change that lands on an emotional beat wants the dissolve: the frames blend and the feeling carries across the seam. Sentimental bridges, documentary, "time passed".
+**ShutterFlash** — a seam where the cut itself should be the event wants the snap: A collapses to a beam, to a dot, then B expands back. The HEAVY version — audio drops out under it and the cut halts the video for a beat; reach for it when the picture change should stop everything. (For a light accent with audio playing through, use the ShutterFlash overlay below.)
+**StepPush** — a turn between structured panels wants the push: both panels travel together, presentation grammar. How-to, business, training.
+**FilmStrip** — the next item in a curated collection wants the strip: A morphs to a tile, the strip scrolls, B expands to full. Portfolios, "5 things I made".
+**DipToBlack** — a seam closing an act wants the blackout: the screen goes dark and the chapter is over. The heaviest pause in the vocabulary — an act ending, the inhale ahead of the payoff.
 
-Every why names the beat at the seam, read from the plan — not the mechanics of the transition."""
+THE TIGHT-CUT OVERLAYS — punctuation painted OVER a hard cut (the cut plays straight; audio and time untouched), ~180ms, for seams whose beat earns an accent:
+**LightLeak** — warm bloom sweeping the cut. A quiet realization landing, a takeaway arriving, a hook-to-close callback. Reads like memory.
+**ShutterFlash** — quick white flash accenting the cut. The escalation after a setup, a surprise pivot, the exact frame a stat or punchline lands on. The LIGHT version — energy still moving.
+An overlay is the lighter weight; a zero-handle transition (ShutterFlash/DipToBlack) is the heavy pick, earned where the shift is big enough that the cut itself should be the editorial event. Weight to the beat; variety across placements.
+
+RIDER SOUND: a transition entry may carry "sound": "transition-sfx" — a broad cinematic sweep, THE SCENARIO being the video's single largest act turn, where the turn itself deserves its sound. At most the one turn that earns it; omit everywhere else."""
 
 
 def _build_transitions_subcall_schema(seams):
@@ -9254,74 +9212,9 @@ Indices below are the NEW kept-only space [0..{_kept_count - 1}]. Every word_ind
 
 {kept_transcript_block}
 
-=== CUT BOUNDARIES (transition slots — one transition per entry, anchored at after_word_index — the listed index) ===
+=== SEAM TAGS (context for your components) ===
 
-  {_cut_boundary_block}
-
-=== TIGHT BOUNDARIES (real cuts with no audio handle. Each is tagged SCENE CHANGE (the shot actually changed — a picture change) or pause (a silence-only splice inside one continuous shot). The tag tells you what the seam IS and what it wears. A SCENE CHANGE here is a picture change with no handle to blend across — so its treatment is the zero-handle family: a tight-cut overlay (LightLeak / the light ShutterFlash, ~180ms, audio plays straight through — the calm, everyday answer), or a heavy zero-handle transition (DipToBlack / the heavy ShutterFlash) when the beat carries that weight, or a bare cut when the beat snaps on a punchline. A crossfade needs a wider gap and belongs on a CUT boundary — do NOT move one here; take the zero-handle family that fits. A pause is the same shot on both sides with dead air removed; the hard cut owns it, the eye follows the cut and the momentum holds. A small mask zoom on the first word after a scene-change cut carries the eye across the jump — mask zooms serve the boundary and live outside the key_moments ledger. Vary types across the decorations you do place. See HOW TO PLACE TRANSITIONS and HOW TO PLACE TIGHT-CUT OVERLAYS below.) ===
-
-  {_tight_boundary_block}
-
-=== TRANSITION NATURAL DURATIONS ===
-
-Each transition component renders at its natural duration — the cadence its ramp-in / hold / ramp-out was designed for. Shortened transitions look glitchy; the pipeline doesn't compress them. A transition fits at a boundary when the boundary's audio gap is at least 2 × the type's natural duration (gap-sharing means each side of the boundary gets gap/2 of source room, and the animation needs a full natural duration per side).
-
-{_natural_dur_lines}
-
-=== HOW TO PLACE TRANSITIONS ===
-
-**THE PROCEDURE — walk the picture changes. Do NOT scan the dialogue for a place to put a transition.** The picture change is what you ITERATE OVER; the beat is a PROPERTY of it. Run this in order:
-  1. **Build the candidate list.** Every picture change in this video, and only these: each SHOT CHANGES entry (it appears in the boundary lists carrying the SCENE CHANGE tag) plus each of YOUR OWN B-roll entry/exit edges. Nothing else is a candidate. A talking-head with no shot changes and no B-roll has an EMPTY list → zero transitions, and that is the right answer.
-  2. **Walk it.** For EACH picture change on that list, read the beat sitting under it — the dialogue at that exact seam. What turn is it: a chapter shift, an acceleration into a payoff, an emotional bridge, a punchline?
-  3. **Decide the seam — the HANDLE picks the family, the beat picks the type.** Read the seam's audio handle (its boundary entry shows the gap, e.g. `820ms gap`), then take the family that FITS it:
-     - **≥700ms handle → crossfade family.** There is room to blend frames. Pick the crossfade the beat wants (CardSwipe, ZoomThrough, SlideOver, Stack, CrossfadeZoom, StepPush, FilmStrip — see THE TRANSITIONS above). Emit it in `transitions`.
-     - **Tight (under 700ms, no handle) → zero-handle family.** No room to blend, and that is fine — the seam still gets a treatment. The calm, everyday answer is a tight-cut OVERLAY (emit in `tight_cut_overlays`: LightLeak or the light ShutterFlash, ~180ms, audio plays straight through — see HOW TO PLACE TIGHT-CUT OVERLAYS). When the beat carries real weight, a heavy zero-handle transition instead (emit in `transitions`: DipToBlack or the heavy ShutterFlash). **The overlay IS the transition treatment for a tight seam — it is the same decision made at the same seam, not a separate section you visit independently.**
-     - **Punchline on the seam → bare cut, wide or tight.** When the picture change lands on a snap or a reveal, the abruptness IS the beat — leave it a clean hard cut, deliberately. This holds at EVERY seam regardless of handle: a tight punchline seam is a bare cut, not an overlay; do not dress a snap.
-     Every picture change gets exactly one of these. **There is no seam with nothing to wear, so a tight gap is NEVER a reason to move a transition off its seam to hunt for room — if the gap is tight you change the FAMILY, not the location.**
-  4. **Name it.** In the `why`, name the PICTURE CHANGE you rode — the shot-change second or the B-roll edge you crossed. If your `why` names a content moment ("out of the hook", "into the reveal", "the spec finale") instead of a picture change, you scanned the dialogue and chased a beat — that is the exact mistake this procedure exists to prevent. There is no step where you find a punchy content moment and go looking for a boundary near it. You look at a picture change and decide what it wears.
-  4b. **The index you emit IS the boundary's listed index — the exact number in the SHOT CHANGES / CUT / TIGHT BOUNDARIES list, not a word inside the new scene.** The transition plays ACROSS the seam, using the seam's gap as its handle, so its `after_word_index` is the seam boundary itself (the last word before the picture change). Naming the scene change in the `why` but emitting an index a few words into the new scene puts the transition on a different, off-boundary content cut and leaves the real seam bare. If you open a B-roll a few words into the new scene, that B-roll edge is its OWN picture change with its own treatment — it is not a stand-in for the seam. One picture change, one index: the one the list gives you.
-
-You already do this correctly for your own B-roll edges — you know where you put a cutaway, so you ride its edge. Do it for the SHOT CHANGES entries too: those are picture changes you did not author, and they need the same walk. The list is the driver, every time.
-
-**HARD RULE 1 — the family must match the handle; `after_word_index` comes from CUT or TIGHT BOUNDARIES.** This is step 3's fork stated as physics. A crossfade (Stack, CardSwipe, ZoomThrough, SlideOver, CrossfadeZoom, StepPush, FilmStrip) blends frames across the cut, so it needs a CUT boundary's handle (≥700ms gap) — the validator rejects a crossfade on a tight boundary because there are no frames to blend, not to punish the choice. A tight seam takes the zero-handle family instead: a zero-handle transition (ShutterFlash, DipToBlack — either list) or a tight-cut overlay, both of which substitute their own energy for the missing handle. A transition at any non-boundary index has no cut to play across and the renderer will not produce it. The handle decides the family; the beat decides the type.
-
-**HARD RULE 2 — the transition's natural duration must fit the boundary's gap.** Each CUT BOUNDARIES entry shows its available audio gap (`820ms gap`). A transition fits when its natural duration ≤ gap/2. If you want FilmStrip (1200ms natural) at a boundary annotated `1600ms gap`, that does NOT fit (need ≥ 2400ms gap). Match the transition's weight to both the dialogue's shift AND the available room — the moment earns the transition, the gap only sets which weights fit; the long heavy types (FilmStrip, Stack) are the ones a genuine chapter turn with a long pause can carry.
-
-**A picture change is what a transition rides — the gap only sets which weights fit.** What earns a transition is the seam being a picture change: a source shot change (SHOT CHANGES / a SCENE CHANGE-tagged boundary) or a B-roll cutaway edge. The gap size is physics on top of that — it tells you which transition weights fit (natural duration ≤ gap/2), not whether to place one. A wide gap in continuous single-camera speech — the speaker paused, repositioned, took a fresh run at the thought — is dead air lifted from one unbroken shot: the picture is the same on both sides, the hard cut carries it, and the speaker finishes the line. Reach for the fuller transitions where the footage actually turns over — the shot changes and the cutaway edges — and let the same-scene splices play straight, however wide the pause.
-
-**If no transition type fits a particular boundary, leave it alone.** The cut plays straight (hard cut). That is the correct behavior — better a clean hard cut than a compressed flicker. Do NOT force a transition where it doesn't fit.
-
-**Place transitions where the picture turns and the moment earns it.** A transition lands on a picture change — a shot change or a cutaway edge; mid-shot boundaries where the dialogue carries unbroken across the cut (same verb-subject continuing) stay bare, letting the speaker finish the thought clean.
-
-For each picture change you're riding (step 3), the `after_word_index` is that boundary's index, and the `type` is the one whose character matches the beat under it (ZoomThrough, CardSwipe, ShutterFlash, SlideOver, CrossfadeZoom, FilmStrip, Stack, StepPush). Vary the type across emitted transitions — repeating the same type at adjacent picture changes reads as templating.
-
-**Zero-handle transition vs `tight_cut_overlay` — same effect family, different editorial weight, one per boundary.** ShutterFlash exists both as a zero-handle TRANSITION on tight boundaries AND as a `tight_cut_overlay` decoration (LightLeak exists only as an overlay; DipToBlack only as a transition). They are NOT interchangeable: a `tight_cut_overlay` is LIGHT (~180ms), audio plays through unaltered, video plays through unaltered, decoration paints on top. A zero-handle transition is HEAVY (350-1200ms), audio goes silent under the transition window, video animation dominates the cut. A zero-handle transition on a tight cut is the heavy pick — it belongs where the dialogue's shift is big enough that you want the cut itself to be the editorial event. The boundaries that genuinely carry that weight are the ones that take it, as many as the footage turns up; the lighter overlay carries the rest, and reaching for the heavy treatment where the shift doesn't earn it reads as dramatic templating. **Each boundary takes one decoration — a transition or a tight_cut_overlay; the validator holds the one-per-boundary line, so the single pick is the recipe that ships.**
-
-=== HOW TO PLACE TIGHT-CUT OVERLAYS ===
-
-A `tight_cut_overlay` is a brief decoration painted ON TOP of a hard cut at a TIGHT BOUNDARY. The cut underneath plays straight (no handle frames consumed, no audio touched, no time inserted) — the overlay sits ABOVE the cut and ramps in/out around it. Three punctuation types, one duration class (~180ms):
-
-PUNCTUATION CLASS (~180ms — quick, decorates the cut moment):
-  - **LightLeak** — warm bloom sweeping diagonally across the cut. Reads as "the moment widened" — a polished, cinematic punctuation. Use when the dialogue shifts to a more reflective / arrived-at register: a quiet realization, a takeaway landing, the close of a callback. Warm light = the speaker zooming in on the point, the viewer drawn closer.
-  - **ShutterFlash** — quick white camera-flash snap. Reads as "the moment hit" — an editorial punch. Use when the dialogue shifts to higher energy / surprise / a payoff hitting: the escalation beat after a setup, an unexpected pivot, the moment a stat or punchline lands.
-
-
-**HARD RULE 1 — `after_word_index` comes from the TIGHT BOUNDARIES list above; the validator checks membership against exactly that list, and tight boundaries are the only splices these decorate.** tight_cut_overlays decorate tight boundaries — CUT boundaries already get full transitions, and only an actual splice gives the overlay something to decorate: the renderer produces it there and there alone.
-
-**HARD RULE 2 — decoration is discretionary; the footage governs how many land.** A pause boundary is the same shot on both sides and the clean hard cut owns it; a SCENE CHANGE boundary is a picture change a punctuation can ride when the moment earns it. Place an overlay where a tight boundary's moment genuinely carries weight — a reveal landing, an escalation snapping, a callback closing — and leave the boundaries that don't earn it as clean hard cuts; where several earn it, vary the type so they don't read as a stuck rack. One thing is fixed: your array and your `editorial_vision` tell the same story — the claims-but-empty detector reconciles any gap between them. A vision that names a tight-cut overlay (by type or effect) resolves one of two ways — the overlay lands on the single tight boundary that most earns it, or, when genuinely zero boundaries earn it, the vision sheds the claim; either way the claim and the array end up saying one thing, and the reconcile pass enforces the match. A named overlay in the vision materializes in the array — the claims-but-empty detector fires on the mismatch and the reconcile sub-call closes it. When vision and array disagree, that is an error you fix here — by emitting the earned overlay, or by having not claimed it.
-
-Your `editorial_vision` and your `tight_cut_overlays` array must agree. If your vision commits to tight-cut overlays — either by naming a specific TYPE ('tight ShutterFlash cuts') OR by naming the EFFECT/MECHANISM ({_tco_mechanism_examples}) — emit at least one matching entry on the boundary that earns it. An empty array is a legitimate read — and it pairs with a vision that stays quiet about overlays; the claims-but-empty detector holds vision and array to the same story. Vision and array tell the same story.
-
-**Place overlays only where the cut carries real editorial weight.** Editorially-significant cuts include:
-  - **chapter shift** — the speaker pivots from one segment of the argument to the next (setup → reveal, problem → solution, "and then" → "but here's the thing"). A chapter shift earns one of the punctuation overlays — the divider IS the cut; the overlay marks it.
-  - **escalation beat** — the energy steps up across the cut (a stat, a punchline, a payoff lands right after) → ShutterFlash.
-  - **hook / close callback** — the cut joins a callback back to the video's opening hook or closing point → LightLeak fits best (reflective warmth).
-
-If a tight boundary is a `pause` — mid-thought, a same-take micro-trim, a filler-removal splice, or any cut with no visual change — leaving it a clean hard cut is the right call there. (A scene change is a candidate for punctuation when its moment earns it; a clean hard cut is the confident default.)
-
-**Variety.** Adjacent boundaries wearing the same punctuation type read as templating — rotate types across the ones you place.
-
-**For heavier editorial weight, see the zero-handle transition path in HOW TO PLACE TRANSITIONS.** ShutterFlash is also available as a full zero-handle transition on tight boundaries (DipToBlack as well) — 350-1200ms with audio silence and dominant video animation. Overlays are the light, everyday punctuation for tight cuts; the heavy zero-handle transition is the weightier choice, earned by the boundaries whose moment carries the most editorial force — the footage decides how many land, and where no beat earns it, none does. One decoration per boundary — the validator holds that line, so the single choice is the one that renders.
+Each SHOT CHANGES entry is a picture change — the camera already cut. A seam is either a SCENE CHANGE (the shot actually turned — angle, location, cutaway) or a pause (a silence-only splice inside one continuous shot: same face, same room, both sides). The hard cut owns pause seams — the eye follows the cut and the momentum holds. A small mask zoom on the first word after a scene-change cut carries the eye across the jump — mask zooms serve the boundary and live outside the key_moments ledger. Seam treatments themselves (transitions, tight-cut overlays) are authored in a dedicated pass that reads your plan.
 """
 
 
@@ -12897,7 +12790,7 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None)
         "        type (default SmoothPush if unspecified, with the payoff matched to its arc role),\n"
         "        and a matching key_moment in video_plan.\n"
         "  • 'add a transition at the chapter break' / 'add a DipToBlack after the setup'\n"
-        "      → append a new transition with after_word_index from the CUT BOUNDARIES list and the\n"
+        "      → (transitions are authored in the dedicated seam pass — not repairable here)\n"
         "        named (or inferred-by-character) type.\n"
         "  • 'add a tight_cut_overlay at K' / 'add a LightLeak at the pivot'\n"
         "      → append a new tight_cut_overlays entry with after_word_index from the TIGHT\n"

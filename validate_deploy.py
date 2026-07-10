@@ -1073,9 +1073,15 @@ def _no_hardcoded_transition_set_drift():
     # The prompt's transitions enum line now DERIVES from the registry
     # ({_transition_enum} interpolation) — hallucinated names are
     # structurally impossible. Pin the derivation site instead.
-    assert '"type": {_transition_enum}' in _src, (
-        "Prompt schema transitions enum no longer derives from the "
-        "registry — the stale-enum class returns if this is hand-written."
+    # A1/A2: the transitions enum now derives PER SEAM in the sub-call schema
+    # builder — from TRANSITION_DURATION_FRAMES ∩ VALID_TRANSITION_TYPES (room-
+    # gated). Hallucinated names stay structurally impossible; hand-writing the
+    # enum anywhere would resurface the stale-enum class.
+    assert "_f <= _room_f and _t in VALID_TRANSITION_TYPES" in _src, (
+        "sub-call transitions enum must derive from the registry + frames table"
+    )
+    assert "sorted(VALID_TIGHT_CUT_OVERLAYS)" in _src, (
+        "sub-call overlay enum must derive from the registry"
     )
 
     # The Pydantic render-input schema at render_schemas.py:~38 used to
@@ -3996,12 +4002,11 @@ def _response_format_enums_derive():
     # DERIVE at f-string build time; this pins the derivation sites AND
     # renders the prompt to prove the registry members actually appear.
     _src = open("handler.py").read()
+    # A1/A2: transitions + overlay enums moved to the sub-call schema builder
+    # (registry-derived there; asserted in the source-of-truth check above).
     for _needle in ('"caption_style": {_caption_enum}',
                     '"type": {_mg_enum}',
-                    '"type": {_transition_enum}',
-                    '"type": {_tco_enum}',
                     "THE {_n_styles} STYLES",
-                    "THE {_n_transitions} TRANSITIONS",
                     "THE {_n_mgs} COMPONENTS"):
         assert _needle in _src, f"derivation site missing: {_needle}"
     _sys, _user = handler._build_post_cuts_prompt(vibe="t", duration=10.0)
@@ -4010,8 +4015,13 @@ def _response_format_enums_derive():
         assert f'"{_n}"' in _sys, f"MG {_n} missing from rendered enum"
     for _n in sorted(_tr.VALID_CAPTION_STYLES):
         assert f'"{_n}"' in _sys, f"caption style {_n} missing from rendered enum"
+    # A1/A2: transition types render in the SUB-CALL's stable block + per-seam
+    # schema, not the main prompt. Every registry type must appear in the
+    # sub-call vocabulary (bold-name form) so the model knows each one it may
+    # be offered; the schema itself is registry-derived (asserted elsewhere).
     for _n in sorted(_tr.VALID_TRANSITION_TYPES):
-        assert f'"{_n}"' in _sys, f"transition {_n} missing from rendered enum"
+        assert f"**{_n}**" in handler._TRANSITIONS_SUBCALL_SYS, \
+            f"transition {_n} missing from the sub-call vocabulary"
     assert f"THE {len(_tr.VALID_CAPTION_STYLES) - 1} STYLES" in _sys
 
 
@@ -4739,8 +4749,10 @@ def _transition_scene_gate():
     # the prompt teaches PICTURE-change placement (3-paragraph picture-change anchoring)
     assert "A transition is the visual treatment on a PICTURE CHANGE" in _src, \
         "transition prompt must teach picture-change anchoring (para 1)"
-    assert "The hard cut owns those splices" in _src, \
-        "transition prompt must teach hard-cut-owns-same-scene (para 2)"
+    assert "those splices are not offered here" in _src, \
+        "sub-call block must teach hard-cut-owns-same-scene (continuous-shot splices excluded)"
+    assert "the hard cut owns them" in _src, \
+        "main stub must keep the same-scene hard-cut line (energy goes to emphasis/caption/SFX)"
 
 
 @check("NO-ADJUSTMENT ruling: SFX word is the ONE anchor (reanchor pass deleted); MG anchors authored, never coerced")
