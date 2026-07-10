@@ -2817,6 +2817,9 @@ def _recipe_omittable_field_contract():
                         "generated_scenes", "notes",
                         "preserved_silences"},
         "_EmphasisMoment": {"motion_graphic", "zoom_effect"},
+        # A1/A2 step 4: broll edge treatments — omission = the bare cut (the
+        # wiring reads .get(); Vertex dropping the empty optional IS the default).
+        "_BrollClip": {"entry_transition", "exit_transition"},
         "_EmphasisMotionGraphic": {"props"},
         "_ZoomEffect": {"events"},
         "_ZoomEvent": {"durationMs", "originX", "originY", "scale"},

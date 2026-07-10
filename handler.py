@@ -686,6 +686,15 @@ class _BrollClip(BaseModel):
     start_word_index: int
     end_word_index: int
     reason: str = Field(max_length=240)
+    # A1/A2 step 4 (Zac-ruled): a cutaway carries its own edge treatment ON the
+    # clip — the index is never stated (inherited from the clip's placement:
+    # entry = fromFrame, exit = fromFrame + durationInFrames). The enum is
+    # RENDER-EXISTENCE HONEST: exactly the treatments the renderer can perform
+    # at an overlay edge today (the light punctuation pair — full-frame slot
+    # transitions have no defined operation at an overlay edge; ledgered).
+    # Visual-only by construction: overlays never touch audio.
+    entry_transition: Optional[Literal["LightLeak", "ShutterFlash"]] = None
+    exit_transition: Optional[Literal["LightLeak", "ShutterFlash"]] = None
 
 # ── GeneratedScene (Phase E · composed premium graphic) ──────────────────────
 # A GeneratedScene is NOT a flat image dropped in like b-roll — it's a SCENE
@@ -4489,6 +4498,8 @@ Entry shape:
 **The line between (1) and (4) — this test decides, and it OUTRANKS the "adjective" wording above.** Ask: is there a real, specific thing the camera could literally point at and film? If yes, request it (mode 1) — even if the dialogue phrases it as a property or names a sound. You CAN point the camera at a hundred-dollar bill ("$100"), the actual workshop ("I built it in my garage"), the real package at the door ("the package arrived"), the stage ("stepping onto the stage"), the receipt close-up ("every receipt detail"), the second-hand sweeping ("a stopwatch ticking") — all mode (1), all REQUESTED; a real object keeps its mode-(1) status with words like "detail" and "ticking" riding alongside. Only when the sole thing the lens could frame is a metaphor for the word — "easy," "simple," "value," "quality-of," "works," "results" — do you hold (mode 4). When in doubt, name the shot out loud: if you can describe the literal frame ("a hundred-dollar bill on a table," "a stopwatch's second hand sweeping"), it is mode (1) and you request it; if the only frame you can name is a stand-in for the adjective, it is mode (4) and you hold on the speaker.
 
 **(5) THE SOURCE IS ALREADY ITS OWN EVIDENCE — let the real footage carry the proof.** Read what the underlying shot is showing before you reach for stock. When the source itself is the visual evidence — a screen recording of the thing working, a product demo, an on-screen interface, the speaker's own captured result — that real footage already is the cutaway the beat wants, and it is more credible than anything Pexels returns because the viewer can see it is the actual thing. Stock dropped over a beat the source already proves competes with evidence the eye is already reading, and the weaker, generic clip wins the screen from the real one. This is a stable read you run every time — the same footage yields the same call on every pass. The test is what the lens is actually framing for that whole window: mode (5) is the source frame being the demo (a screen recording, the interface as the full shot). A talking-head source that mentions its app while the camera holds on the speaker's face still has that app as a referent to mine — mode (2)'s app-screen hold or a real interface clip carries it, the same as any named referent. (Mining still happens in full — this is the honest result of the search for these beats, the same way modes (2) and (4) are honest holds. The window stays mined; "the source already shows this" is simply one of the legitimate answers the mine hands back.)
+
+**A cutaway carries its own entry and exit treatment on the clip itself.** Emit `entry_transition` / `exit_transition` (LightLeak or ShutterFlash, or omit for the bare cut) — the light punctuation: the warm bloom or the flash, and the bare cut carries most of them. The beat under the edge selects: a reveal arriving warm → LightLeak; a stat snapping in → ShutterFlash. A cutaway's treatment fits inside its stay — a short cutaway takes the quick treatment or the bare cut.
 
 **B-roll earns its place by EXTENDING the moment.** You still mine every referent; before you request the cutaway it surfaced, name what the frame gives the viewer beyond what the words and the speaker's face already deliver. A clip that only re-pictures the literal words hands back the sentence as a picture — "saving you hours of frustration" over a frustrated person at a laptop gives the viewer what the captions already said, and the moment was complete in the speaking. Reach for the cutaway that opens the meaning: the scale behind the number, the place behind the name, the stakes behind the claim — the thing the words point at. The strongest test is the gap — name the one thing the viewer learns from the frame that the line left unsaid; when the frame and the line carry the same single fact, the speaker and the captions own that beat, and they own it cleanly.
 
@@ -18887,6 +18898,22 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             "_start_word_kept": _br_sw,
             "_end_word_kept": _br_ew,
         })
+        # A1/A2 step 4: broll edge treatments — ONE derivation from the same
+        # frame numbers the cutaway renders (entry = fromFrame, exit = end
+        # frame). Wired as overlay specs (the existing edge-decoration
+        # components); audio untouched by construction.
+        for _edge_field, _edge_frame in (("entry_transition", _from_frame),
+                                         ("exit_transition", _from_frame + _dur_frames)):
+            _et = _bc.get(_edge_field) if isinstance(_bc, dict) else None
+            if _et in ("LightLeak", "ShutterFlash"):
+                _et_dur = _TIGHT_CUT_OVERLAY_FRAMES_BY_TYPE.get(_et, 11)
+                tight_cut_overlays_out.append({
+                    "atFrame": max(0, int(_edge_frame)),
+                    "type": _et,
+                    "durationInFrames": _et_dur,
+                })
+                print(f"[broll-edge] {_edge_field.split('_')[0]} {_et} at frame "
+                      f"{_edge_frame} (clip-inherited, audio untouched)", flush=True)
         edit_plan.setdefault("_broll_output_ranges", []).append((_out_start, _out_end))
         _kw = _bc.get("keyword", "")
         print(
