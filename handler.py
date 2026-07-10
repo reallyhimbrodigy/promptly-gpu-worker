@@ -8027,6 +8027,46 @@ def _build_transitions_subcall_schema(seams):
             len(_variants), len(_overlay_idx))
 
 
+def _seam_splice_index(awi, dg_words, cuts, removed_src):
+    """SOURCE-domain seam (after word awi) -> index i of the splice
+    (cuts[i] -> cuts[i+1]) it dresses, or None when no splice exists there.
+
+    THE one mapping: the sub-call's room derivation and the transition
+    application loop both read it, so a seam offered with room > 0 always
+    applies to the same splice that priced that room. Two conditions:
+      (1) the seam word's end falls in clip i's DOMAIN [source_start_i,
+          source_start_{i+1}] with 50ms tolerance. Domain, not containment:
+          the dead-air trim / span-split pulls clip ends back to the audible
+          edge, which can sit hundreds of ms before a loose Deepgram word
+          end -- containment made every trimmed seam read "no clip-pair"
+          (convicted 2026-07-10: SlideOver @66, word_end 21.62s vs trimmed
+          clip end 21.44s).
+      (2) the next KEPT word is not inside clip i -- the splice actually
+          sits between the seam's two output-adjacent words. A mid-clip
+          shot change with speech straight through it has no splice; it
+          prices at room 0 and can only be offered as an overlay home.
+    """
+    try:
+        _we = float(dg_words[awi].get("end") or 0.0)
+    except Exception:
+        return None
+    _nk = awi + 1
+    while _nk in removed_src:
+        _nk += 1
+    if _nk >= len(dg_words):
+        return None
+    _nk_start = float(dg_words[_nk].get("start") or 0.0)
+    for _i in range(len(cuts) - 1):
+        _cs = float(cuts[_i]["source_start"])
+        _ns = float(cuts[_i + 1]["source_start"])
+        if _cs - 0.05 <= _we <= _ns + 0.05:
+            _ce = float(cuts[_i]["source_end"])
+            if _nk_start >= _ce - 0.05:
+                return _i
+            return None
+    return None
+
+
 def _call_transitions_subcall(client, model_name, plan_read, seam_block, schema):
     """The small dedicated call. Stable system block (its own cacheable prefix);
     per-job data rides in user content. FAILURE DIRECTION: None on any error —
@@ -9884,6 +9924,147 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                     level_silences=list(_LEVEL_SILENCES_LAST))
                 edit_plan["_removed_word_indices"] = _removed_word_indices
 
+                # ── A1/A2 TRANSITIONS SUB-CALL wire-in (room-domain corrected) ──
+                # Single ownership: the sub-call authors transitions + tight-cut
+                # overlays against the per-job variant schema. One author, one
+                # truth. Runs HERE -- after build_clips (the splice geometry
+                # exists) and before the shot splitter (which gates on the
+                # author's output). Seams live in SOURCE word space, the domain
+                # every consumer reads (application loop, overlay gate, atFrame
+                # projection); shot boundaries translate kept->src via
+                # new_to_src, the same pattern as _shot_src_set.
+                #
+                # THE ROOM (one derivation, Zac 2026-07-10): a seam's room is
+                # what the render can actually serve at its splice --
+                #   min(silence forward of clip-A's trimmed end,
+                #       silence backward of clip-B's trimmed start,
+                #       dropped-gap / 2)
+                # from the SAME validated_cuts edges and dB-located spans the
+                # executor consumes. gap/2 is the paired handle extension's
+                # sharing rule; the per-side silence bound means a handle can
+                # never replay removed speech. Schema-fit => execution-fit
+                # exactly (refinement is reserved off transition seams at the
+                # executor). Music-bed no-op => no located spans => rooms
+                # honestly 0 (nothing locatable to consume). R1: zero seams =>
+                # the call is SKIPPED -- zero transitions by construction.
+                try:
+                    _seam_removed_src = set(_removed_word_indices or [])
+                    _shot_seam_src = set()
+                    for _ni2 in _shot_boundary_set:
+                        if 0 <= int(_ni2) < len(new_to_src):
+                            _shot_seam_src.add(int(new_to_src[int(_ni2)]))
+                    _broll_edges_for_seams = set()
+                    for _bc in (edit_plan.get("broll_clips") or []):
+                        if isinstance(_bc, dict):
+                            _bs2, _be2 = _bc.get("start_word_index"), _bc.get("end_word_index")
+                            if isinstance(_bs2, int):
+                                _broll_edges_for_seams.add(_bs2 - 1)
+                            if isinstance(_be2, int):
+                                _broll_edges_for_seams.add(_be2)
+                    _sil_merged = []
+                    for _s0, _e0 in sorted(list(_LEVEL_SILENCES_LAST)
+                                           + list(_WITHIN_WORD_SILENCES_LAST)):
+                        _s0, _e0 = float(_s0), float(_e0)
+                        if _sil_merged and _s0 <= _sil_merged[-1][1] + 1e-6:
+                            _sil_merged[-1][1] = max(_sil_merged[-1][1], _e0)
+                        else:
+                            _sil_merged.append([_s0, _e0])
+
+                    def _sil_fwd(_t):
+                        for _a0, _b0 in _sil_merged:
+                            if _a0 <= _t + 0.02 and _b0 > _t:
+                                return max(0.0, _b0 - _t)
+                        return 0.0
+
+                    def _sil_back(_t):
+                        for _a0, _b0 in _sil_merged:
+                            if _b0 >= _t - 0.02 and _a0 < _t:
+                                return max(0.0, _t - _a0)
+                        return 0.0
+
+                    _seams = []
+                    for _awi2 in sorted(_shot_seam_src | _broll_edges_for_seams):
+                        if not isinstance(_awi2, int) or _awi2 < 0 or _awi2 + 1 >= len(_dg_words):
+                            continue
+                        if _awi2 in _seam_removed_src:
+                            continue
+                        _room_s = 0.0
+                        _sci2 = _seam_splice_index(_awi2, _dg_words, validated_cuts,
+                                                   _seam_removed_src)
+                        if _sci2 is not None:
+                            _E2 = float(validated_cuts[_sci2]["source_end"])
+                            _S2 = float(validated_cuts[_sci2 + 1]["source_start"])
+                            _gap2 = max(0.0, _S2 - _E2)
+                            _room_s = min(_sil_fwd(_E2), _sil_back(_S2), _gap2 / 2.0)
+                        _kind = "shot change" if _awi2 in _shot_seam_src else "B-roll edge"
+                        _seams.append({"awi": _awi2, "gap_ms": int(_room_s * 1000),
+                                       "kind": _kind})
+                    # Single ownership BY CONSTRUCTION: the main schema no longer
+                    # carries transitions/tight_cut_overlays fields -- nothing to
+                    # discard. Initialize the plan keys the downstream consumers read.
+                    edit_plan["transitions"] = []
+                    edit_plan["tight_cut_overlays"] = []
+                    edit_plan["_subcall_seam_awis"] = [int(_s2["awi"]) for _s2 in _seams]
+                    # Generation stamp (Zac rider 2): recipes born under the A1/A2
+                    # schema carry it; its absence marks a legacy-shape replay. The
+                    # slot-clamp alarm reads this to separate real alerts (new-schema
+                    # fire = room-at-execution broke) from expected legacy floor.
+                    edit_plan["_schema_generation"] = "a1a2"
+                    if _seams:
+                        _sc_schema, _n_var, _n_ovl = _build_transitions_subcall_schema(_seams)
+                        if _sc_schema is not None:
+                            _vp_sc = edit_plan.get("video_plan") or {}
+                            _pr = {"editorial_vision": _vp_sc.get("editorial_vision")
+                                       or edit_plan.get("editorial_vision"),
+                                   "story_shape": _vp_sc.get("story_shape"),
+                                   "arc_segments": _vp_sc.get("arc_segments"),
+                                   "key_moments": _vp_sc.get("key_moments"),
+                                   "movements": _vp_sc.get("movements")}
+                            _plan_read = "=== THE PLAN'S READ ===\n" + json.dumps(_pr, default=str)[:6000]
+                            _seam_lines = []
+                            for _s2 in _seams:
+                                _w0 = max(0, _s2["awi"] - 6); _w1 = min(len(_dg_words), _s2["awi"] + 7)
+                                _ctx = " ".join(str(_dg_words[_k].get("punctuated_word")
+                                                    or _dg_words[_k].get("word") or "")
+                                                for _k in range(_w0, _w1))
+                                _seam_lines.append(
+                                    f'{_s2["awi"]} ({_s2["kind"]}, {_s2["gap_ms"]}ms usable silence) — '
+                                    f'"...{_ctx}..."')
+                            _sc_out = _call_transitions_subcall(
+                                client, GEMINI_EDITORIAL_MODEL, _plan_read,
+                                "\n".join(_seam_lines), _sc_schema)
+                            if isinstance(_sc_out, dict):
+                                _new_trs = []
+                                for _e2 in (_sc_out.get("cut_boundary_transitions") or []):
+                                    if isinstance(_e2, dict) and _e2.get("type"):
+                                        _ent = {"after_word_index": int(_e2["after_word_index"]),
+                                                "type": str(_e2["type"]),
+                                                "why": str(_e2.get("why") or "")}
+                                        if _e2.get("sound"):
+                                            _ent["sound"] = str(_e2["sound"])
+                                        _new_trs.append(_ent)
+                                _new_ovl = []
+                                for _e2 in (_sc_out.get("tight_boundary_overlays") or []):
+                                    if isinstance(_e2, dict) and _e2.get("type"):
+                                        _new_ovl.append({"after_word_index": int(_e2["after_word_index"]),
+                                                         "type": str(_e2["type"]),
+                                                         "why": str(_e2.get("why") or "")})
+                                edit_plan["transitions"] = _new_trs
+                                edit_plan["tight_cut_overlays"] = _new_ovl
+                                print(f"[transitions-subcall] {len(_seams)} seam(s) offered "
+                                      f"({_n_var} consuming variant(s)); took "
+                                      f"{len(_new_trs)} transition(s) + {len(_new_ovl)} overlay(s)",
+                                      flush=True)
+                    else:
+                        print("[transitions-subcall] zero qualifying seams — skipped "
+                              "(zero transitions by construction)", flush=True)
+                except Exception as _sce:
+                    print(f"[transitions-subcall] wire-in error — bare cuts: "
+                          f"{type(_sce).__name__}: {str(_sce)[:200]}", flush=True)
+                    edit_plan["transitions"] = []
+                    edit_plan["tight_cut_overlays"] = []
+
+
                 # ── Shot-change-based clip splitting ────────────────────────────────
                 # Each entry in _shot_boundaries (computed pre-Gemini using the same
                 # cluster_shot_changes + shot_change_word_boundaries logic) is a
@@ -10240,101 +10421,16 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
             # Overlays and the scene-change floor read this to skip double-decorating a
             # boundary that already has a transition (transition wins — heavier).
             _transition_type_by_awi = {}
-            # Crossfade-family transitions Gemini placed on TIGHT boundaries, collected
-            # during the loop below and DEMOTED to light tight_cut_overlays at the
-            # resolved layer (after the TCO pass defines _resolved_overlays /
-            # _overlay_awis — they don't exist yet at this point). (awi, original_type).
-            # ── A1/A2 TRANSITIONS SUB-CALL wire-in ──────────────────────────
-            # Single ownership: the sub-call authors transitions + tight-cut
-            # overlays against the per-job variant schema. Main-call emissions
-            # are DISCARDED (ledgered when non-empty) — one author, one truth.
-            # Seams = scdet shot boundaries ∪ the plan's B-roll edges, with the
-            # real inter-word silence as each seam's room. R1: zero seams →
-            # the call is SKIPPED — zero transitions by construction.
-            try:
-                _seams = []
-                _seam_awis_seen = set()
-                _broll_edges_for_seams = set()
-                for _bc in (edit_plan.get("broll_clips") or []):
-                    if isinstance(_bc, dict):
-                        _bs2, _be2 = _bc.get("start_word_index"), _bc.get("end_word_index")
-                        if isinstance(_bs2, int):
-                            _broll_edges_for_seams.add(_bs2 - 1)
-                        if isinstance(_be2, int):
-                            _broll_edges_for_seams.add(_be2)
-                for _awi2 in sorted(set(_shot_boundary_set) | _broll_edges_for_seams):
-                    if not isinstance(_awi2, int) or _awi2 < 0 or _awi2 + 1 >= len(_dg_words):
-                        continue
-                    if _awi2 in _seam_awis_seen or _awi2 in _tr_removed:
-                        continue
-                    _seam_awis_seen.add(_awi2)
-                    _g_ms = max(0, int(round((float(_dg_words[_awi2 + 1].get("start") or 0.0)
-                                              - float(_dg_words[_awi2].get("end") or 0.0)) * 1000)))
-                    _kind = "shot change" if _awi2 in _shot_boundary_set else "B-roll edge"
-                    _seams.append({"awi": _awi2, "gap_ms": _g_ms, "kind": _kind})
-                # Single ownership BY CONSTRUCTION: the main schema no longer
-                # carries transitions/tight_cut_overlays fields — nothing to
-                # discard. Initialize the plan keys the downstream consumers read.
-                edit_plan["transitions"] = []
-                edit_plan["tight_cut_overlays"] = []
-                # Generation stamp (Zac rider 2): recipes born under the A1/A2
-                # schema carry it; its absence marks a legacy-shape replay. The
-                # slot-clamp alarm reads this to separate real alerts (new-schema
-                # fire = room-at-execution broke) from expected legacy floor.
-                edit_plan["_schema_generation"] = "a1a2"
-                if _seams:
-                    _sc_schema, _n_var, _n_ovl = _build_transitions_subcall_schema(_seams)
-                    if _sc_schema is not None:
-                        _vp_sc = edit_plan.get("video_plan") or {}
-                        _pr = {"editorial_vision": _vp_sc.get("editorial_vision")
-                                   or edit_plan.get("editorial_vision"),
-                               "story_shape": _vp_sc.get("story_shape"),
-                               "arc_segments": _vp_sc.get("arc_segments"),
-                               "key_moments": _vp_sc.get("key_moments"),
-                               "movements": _vp_sc.get("movements")}
-                        _plan_read = "=== THE PLAN'S READ ===\n" + json.dumps(_pr, default=str)[:6000]
-                        _seam_lines = []
-                        for _s2 in _seams:
-                            _w0 = max(0, _s2["awi"] - 6); _w1 = min(len(_dg_words), _s2["awi"] + 7)
-                            _ctx = " ".join(str(_dg_words[_k].get("punctuated_word")
-                                                or _dg_words[_k].get("word") or "")
-                                            for _k in range(_w0, _w1))
-                            _seam_lines.append(
-                                f'{_s2["awi"]} ({_s2["kind"]}, {_s2["gap_ms"]}ms silence) — '
-                                f'"...{_ctx}..."')
-                        _sc_out = _call_transitions_subcall(
-                            client, GEMINI_EDITORIAL_MODEL, _plan_read,
-                            "\n".join(_seam_lines), _sc_schema)
-                        if isinstance(_sc_out, dict):
-                            _new_trs = []
-                            for _e2 in (_sc_out.get("cut_boundary_transitions") or []):
-                                if isinstance(_e2, dict) and _e2.get("type"):
-                                    _ent = {"after_word_index": int(_e2["after_word_index"]),
-                                            "type": str(_e2["type"]),
-                                            "why": str(_e2.get("why") or "")}
-                                    if _e2.get("sound"):
-                                        _ent["sound"] = str(_e2["sound"])
-                                    _new_trs.append(_ent)
-                            _new_ovl = []
-                            for _e2 in (_sc_out.get("tight_boundary_overlays") or []):
-                                if isinstance(_e2, dict) and _e2.get("type"):
-                                    _new_ovl.append({"after_word_index": int(_e2["after_word_index"]),
-                                                     "type": str(_e2["type"]),
-                                                     "why": str(_e2.get("why") or "")})
-                            edit_plan["transitions"] = _new_trs
-                            edit_plan["tight_cut_overlays"] = _new_ovl
-                            print(f"[transitions-subcall] {len(_seams)} seam(s) offered "
-                                  f"({_n_var} consuming variant(s)); took "
-                                  f"{len(_new_trs)} transition(s) + {len(_new_ovl)} overlay(s)",
-                                  flush=True)
-                else:
-                    print("[transitions-subcall] zero qualifying seams — skipped "
-                          "(zero transitions by construction)", flush=True)
-            except Exception as _sce:
-                print(f"[transitions-subcall] wire-in error — bare cuts: "
-                      f"{type(_sce).__name__}: {str(_sce)[:200]}", flush=True)
-                edit_plan["transitions"] = []
-                edit_plan["tight_cut_overlays"] = []
+            # ── A1/A2 sub-call: MOVED above the shot splitter (room-domain
+            # correction, 2026-07-10). The splitter gates sub-clip creation on
+            # emitted transitions -- the author must write before that gate
+            # reads (at this old site the gate always read an empty list).
+            # The keys are guaranteed here for every downstream consumer;
+            # setdefault NEVER clobbers the author's output.
+            edit_plan.setdefault("transitions", [])
+            edit_plan.setdefault("tight_cut_overlays", [])
+            edit_plan.setdefault("_subcall_seam_awis", [])
+            edit_plan.setdefault("_schema_generation", "a1a2")
             raw_transitions = edit_plan.get("transitions") or []
             if raw_transitions and _dg_words:
                 # Transitions = pack PascalCase names. VALID_TRANSITION_TYPES is the
@@ -10412,21 +10508,24 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                     # clip (or isn't found), no clip-pair exists for this transition;
                     # drop it and continue.
                     _applied = False
-                    for ci, clip in enumerate(validated_cuts):
-                        cs = float(clip["source_start"])
-                        ce = float(clip["source_end"])
-                        if cs - 0.05 <= word_end <= ce + 0.05 and ci < len(validated_cuts) - 1:
-                            clip["transition_out"] = tr_type
-                            # A1/A2 rider sound: authored ON the transition (sub-call);
-                            # rides the clip to the render, fires at the SLOT's frame.
-                            if tr.get("sound"):
-                                clip["_transition_sound"] = str(tr["sound"])
-                            _transition_type_by_awi[awi] = tr_type
-                            if _extras:
-                                clip["_transition_extras"] = _extras
-                            print(f"[generate-edit] Transition '{tr_type}' applied to clip {ci} (after word {awi})", flush=True)
-                            _applied = True
-                            break
+                    # THE one mapping (see _seam_splice_index): the same rule
+                    # that priced this seam's room finds its splice here --
+                    # a seam offered with room > 0 cannot fail to apply.
+                    ci = _seam_splice_index(
+                        awi, _dg_words, validated_cuts,
+                        set(edit_plan.get("_removed_word_indices") or []))
+                    if ci is not None:
+                        clip = validated_cuts[ci]
+                        clip["transition_out"] = tr_type
+                        # A1/A2 rider sound: authored ON the transition (sub-call);
+                        # rides the clip to the render, fires at the SLOT's frame.
+                        if tr.get("sound"):
+                            clip["_transition_sound"] = str(tr["sound"])
+                        _transition_type_by_awi[awi] = tr_type
+                        if _extras:
+                            clip["_transition_extras"] = _extras
+                        print(f"[generate-edit] Transition '{tr_type}' applied to clip {ci} (after word {awi})", flush=True)
+                        _applied = True
                     if not _applied:
                         # Lands in the last clip OR doesn't fall in any clip range
                         # (rare edge case: dead-air gap exactly straddling word_end).
@@ -10501,10 +10600,14 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                             flush=True,
                         )
                         continue
-                    if awi_t not in _tight_src_set:
-                        # Overlay at a CUT boundary (transitions live there) or a
-                        # non-boundary index. The overlay path only fires at TIGHT
-                        # boundaries. (Empty _tight_src_set ≡ no tight boundaries pass.)
+                    if (awi_t not in _tight_src_set
+                            and awi_t not in set(edit_plan.get("_subcall_seam_awis") or [])):
+                        # Single ownership: on the governed path the sub-call's
+                        # offered seam set IS the authority -- an overlay taken at
+                        # any offered seam stands (const indices; nothing else is
+                        # sayable). _tight_src_set still admits legacy-shape plans.
+                        # (Convicted 2026-07-10: the src-domain tight-set check was
+                        # dropping every wide-seam overlay the sub-call took.)
                         print(
                             f"[generate-edit] DROP tight_cut_overlay '{tco_type}' [{_toi}]: "
                             f"after_word_index={awi_t} is not a TIGHT BOUNDARY — overlay "
@@ -17003,8 +17106,18 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _refinement_count = 0
     _refinement_total_shift_ms = 0.0
     _n_cuts_for_refine = len(render_cuts)
+    # THE RESERVATION (Zac 2026-07-10): a splice taken by a transition keeps
+    # its dropped-material gap intact -- the slot's handle extension owns that
+    # gap (gap/2 per side = the natural duration, by schema construction), so
+    # refinement must not shave it (observed up to ~47ms/edge, enough to break
+    # schema-fit => execution-fit). Those edges are already dB-aligned by the
+    # dead-air trim, and the transition covers the splice; refinement's
+    # anti-glitch job is moot there. Every untaken splice refines as today.
+    _reserved_seams = 0
     for _ri in range(_n_cuts_for_refine):
-        if _ri < _n_cuts_for_refine - 1:
+        if _ri < _n_cuts_for_refine - 1 and _has_real_transition(render_cuts[_ri]):
+            _reserved_seams += 1
+        if _ri < _n_cuts_for_refine - 1 and not _has_real_transition(render_cuts[_ri]):
             _orig_end = float(render_cuts[_ri]["source_end"])
             # source_end can only shift FORWARD into the removed-content
             # gap. Searching backward would land in the middle of the
@@ -17028,7 +17141,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 _refinement_count += 1
                 _refinement_total_shift_ms += abs(_delta_ms)
                 render_cuts[_ri]["source_end"] = _refined_end
-        if _ri > 0:
+        if _ri > 0 and not _has_real_transition(render_cuts[_ri - 1]):
             _orig_start = float(render_cuts[_ri]["source_start"])
             # source_start can only shift BACKWARD into the removed-content
             # gap. Searching forward would land inside the first kept
@@ -17062,7 +17175,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     )
     print(
         f"[boundary-refine] {_refinement_count} splice boundary refinement(s), "
-        f"avg |Δ|={_avg_shift_ms:.1f}ms, took {_refinement_elapsed_ms:.0f}ms",
+        f"avg |Δ|={_avg_shift_ms:.1f}ms, took {_refinement_elapsed_ms:.0f}ms"
+        + (f"; {_reserved_seams} transition seam(s) reserved (slot handle owns the gap)"
+           if _reserved_seams else ""),
         flush=True,
     )
     # Free the in-memory audio buffer; build_per_cut_audio re-reads the

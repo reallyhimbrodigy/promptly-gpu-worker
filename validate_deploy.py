@@ -4728,6 +4728,44 @@ def _a1a2_teaching_anchors():
     assert "the hard cut owns them" in _src, \
         "main stub must keep the same-scene energy line"
 
+@check("A1/A2 room domain: seams src-translated, rooms from splice-gap + located silence via THE one mapping; author precedes the split gate; refinement reserved off taken seams")
+def _a1a2_room_domain():
+    _src = open("handler.py").read()
+    # (1) Shot seams reach the sub-call in SOURCE space (new_to_src), the domain
+    # every consumer reads — the kept-ni-into-src-array class is dead.
+    assert "_shot_seam_src.add(int(new_to_src[int(_ni2)]))" in _src, \
+        "wire-in must translate shot boundaries kept→src via new_to_src"
+    assert "_dg_words[_awi2 + 1].get(\"start\")" not in _src, \
+        "the raw adjacent-Deepgram-gap room formula must be deleted"
+    # (2) THE one mapping: room derivation and the application loop read the
+    # same seam→splice rule, so an offered room cannot fail to apply.
+    assert _src.count("_seam_splice_index(") >= 3, \
+        "_seam_splice_index must exist and be read by BOTH the wire-in and the application loop"
+    assert "min(_sil_fwd(_E2), _sil_back(_S2), _gap2 / 2.0)" in _src, \
+        "room must be min(per-side located silence, dropped-gap/2) — the executor's own arithmetic"
+    # (3) Ordering: the author writes before the shot splitter's gate reads.
+    _wire = _src.index("A1/A2 TRANSITIONS SUB-CALL wire-in (room-domain corrected)")
+    _gate = _src.index("Filter to boundaries where Gemini emitted a transition.")
+    assert _wire < _gate, "sub-call must run BEFORE the transition-gated shot splitter"
+    # (4) The reservation: refinement skips both edges of a taken splice.
+    assert "not _has_real_transition(render_cuts[_ri])" in _src \
+        and "not _has_real_transition(render_cuts[_ri - 1])" in _src, \
+        "boundary refinement must be reserved off transition-carrying splices"
+    # (5) Overlay gate honors the sub-call's own seam set on the governed path.
+    assert "_subcall_seam_awis" in _src, "overlay gate must accept sub-call seam membership"
+    # (6) Behavioral: the mapping tolerates dB-trimmed edges (word_end beyond
+    # clip end lands in the gap → still maps) and refuses mid-clip seams.
+    import handler as _h
+    _dgw = [{"end": 1.0, "start": 0.5}, {"end": 21.625, "start": 21.0},
+            {"start": 22.985, "end": 23.2}, {"start": 23.3, "end": 23.5}]
+    _cuts = [{"source_start": 0.4, "source_end": 21.44},
+             {"source_start": 22.9, "source_end": 23.6}]
+    assert _h._seam_splice_index(1, _dgw, _cuts, set()) == 0, \
+        "trimmed-edge seam (word_end 21.625 vs clip end 21.44) must map to its splice"
+    assert _h._seam_splice_index(2, _dgw, _cuts, set()) is None, \
+        "mid-clip seam (next kept word inside the same clip) must have no splice"
+
+
 @check("A1/A2 rider sound: fires at the transition's rendered slot frame; dead event → no sound (structural)")
 def _rider_sound_one_derivation():
     tl = {"entries": [
