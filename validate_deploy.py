@@ -4736,6 +4736,27 @@ def _transition_scene_gate():
         "transition prompt must teach hard-cut-owns-same-scene (para 2)"
 
 
+@check("NO-ADJUSTMENT ruling: SFX word is the ONE anchor (reanchor pass deleted); MG anchors authored, never coerced")
+def _no_adjustment_ruling():
+    _src = open("handler.py").read()
+    # SFX: the second coordinate's machinery is GONE — no reanchor pass, no
+    # decline path, no tolerance constant. The word's projected output start is
+    # the only time a sound has; a cut word's sound does not exist.
+    assert "_SFX_REANCHOR_TOLERANCE_S" not in _src, "reanchor tolerance must be deleted"
+    assert "sfx_reanchor" not in _src, "reanchor pass + decline path must be deleted"
+    assert "_sfx_cut_anchor_t" not in _src, "the cut-partner TIME map must be deleted (boundary WORDS may seed coverage)"
+    # Gemini's SFX schema authors word_index only (t was never authored; now nothing consumes one)
+    import handler as _h
+    assert set(_h._SoundEffect.model_fields.keys()) == {"word_index", "sound", "why"}, \
+        "SFX schema must author word_index+sound(+why) only — no absolute time"
+    # MG anchors: authored, never coerced — _face_clear_anchor has exactly ONE call site
+    # (text_overlays position, not ruled); both MG call sites are deleted.
+    assert _src.count("_face_clear_anchor(") == 2, \
+        "expect def + exactly one call site (text_overlays); MG coerce calls must be gone"
+    assert "component=f\"mg:" not in _src and "emphasis-mg:" not in _src, \
+        "MG face-coerce call sites must be deleted (authored anchors render as authored)"
+
+
 @check("face-clear coerce: caption_match never coerced to bottom (schema-invalid → render crash class killed)")
 def _face_clear_no_bottom_caption_match():
     import handler

@@ -7668,11 +7668,6 @@ _GAP_COMPRESS_CEILING_S = 0.45   # B6 (directive #11, FLAG-OFF): kept inter-word
 _GAP_COMPRESS_FLOOR_S = 0.30     # gaps above the ceiling compress to the floor
                                  # (release 0.18 + head 0.12) instead of binary
                                  # keep/remove. GAP_COMPRESSION_ENABLED=1 to A/B.
-_SFX_REANCHOR_TOLERANCE_S = 0.120  # B1 (directive #11): an SFX serves its WORD.
-                                 # Boundary re-anchoring applies only when the
-                                 # boundary sits within this of the word's
-                                 # output start — a partner that would drag the
-                                 # sound further stays a visual-only partner.
 _HEAD_PAD_S = 0.05               # head pad before the INCOMING word's Deepgram
                                  # start (and before the first clip's first
                                  # word). Ear-tunable. Both pads clamp so they
@@ -18079,18 +18074,18 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # anchoring it is a near-no-op (harmless if +1 is removed/out-of-range — no
     # surviving SFX targets such a word). The boundary is the before-cut word's
     # end = a real hard cut even when a transition is render-skipped.
-    _sfx_cut_anchor_t = {}  # source word_index -> re-anchored output time (seconds)
+    # RULING (Zac 2026-07-09, no-adjustment): the cut-partner TIME map is DELETED —
+    # the WORD is the anchor and its projected output start is the only time an SFX
+    # has. The boundary words still seed the coverage set (below); no times survive.
+    _sfx_boundary_words = set()
 
     def _register_cut_partner(_awi):
         if not isinstance(_awi, int):
             return
-        _bpw = _pw_by_idx.get(_awi)
-        if not _bpw:  # before-cut word not in output (shouldn't happen for a real cut)
+        if _pw_by_idx.get(_awi) is None:
             return
-        _bf = int(round(float(_bpw.get("end") or 0.0) * source_fps))
-        _bt = max(0.0, _bf / float(source_fps))
-        _sfx_cut_anchor_t[_awi] = _bt          # SFX on the before-cut word
-        _sfx_cut_anchor_t[_awi + 1] = _bt      # SFX on the first post-cut word
+        _sfx_boundary_words.add(_awi)
+        _sfx_boundary_words.add(_awi + 1)
 
     for _ov in (edit_plan.get("_resolved_tight_cut_overlays") or []):
         _register_cut_partner(_ov.get("after_word_index"))
@@ -18104,7 +18099,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # Binding here committed a sound while two STOCHASTIC render-time B-roll
     # drops were still pending, so a sound bound to a cutaway those trims later
     # deleted ended up on an unchanged frame. The init lists above
-    # (sfx_input_args/…) and the cut-partner map (_sfx_cut_anchor_t) are computed
+    # (sfx_input_args/…) and the boundary-word set (_sfx_boundary_words) are computed
     # here from plan-time data and persist; the moved loop appends to those lists
     # and the ffmpeg audio assembly reads them further below. See the
     # "[fix-1] SFX bind — post visual-track resolution" block after the B-roll
@@ -18479,13 +18474,13 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # .get() on anchor/props/type so a render_only plan (which skips the
         # generate_edit_gemini normalization) with a missing/None field can't
         # crash the spread — {**None} would raise. Validated plans are unchanged.
+        # RULING (Zac 2026-07-09): the MG anchor is Gemini's AUTHORED choice —
+        # taught (against-the-frame + live face signals), never coerced. The
+        # face-clear coerce call is DELETED; the re-census is its evidence
+        # (3/4 MGs self-anchored off-face on the schema+teach alone). This also
+        # removes the burned-in-caption band redirect for MGs — if that case
+        # reappears it is a teach, not a corrector.
         _mg_anchor = SEMANTIC_TO_MG_ANCHOR.get(_mg.get("anchor"), "center")
-        _ecr_blocked = {"bottom": "bottom", "top": "top"}.get(
-            str(edit_plan.get("existing_caption_region") or "none"))
-        _mg_anchor, _ = _face_clear_anchor(
-            _mg_anchor, _sw_source, _ew_source, _face_trajectory,
-            blocked=_ecr_blocked,
-            component=f"mg:{_mg.get('type')}")
         _mg_props = {**(_mg.get("props") or {}), "anchor": _mg_anchor}
         motion_graphics_out.append({
             "type": _mg.get("type"),
@@ -18539,12 +18534,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _em_dur = float(em["duration"])
             _mg_from_frame = max(0, _em_t_frame - int(round(_em_dur * source_fps * 0.25)))
             _mg_dur_frames = int(round(_em_dur * source_fps))
+            # RULING (Zac 2026-07-09): authored anchor, never coerced (see MG site above).
             _em_mg_anchor = SEMANTIC_TO_MG_ANCHOR.get(em["motion_graphic"]["anchor"], "center")
-            _em_mg_anchor, _ = _face_clear_anchor(
-                _em_mg_anchor, float(em["t"]), float(em["t"]) + _em_dur,
-                _face_trajectory, component=f"emphasis-mg:{em['motion_graphic'].get('type')}",
-                blocked={"bottom": "bottom", "top": "top"}.get(
-                    str(edit_plan.get("existing_caption_region") or "none")))
             _em_mg_props = {**em["motion_graphic"]["props"], "anchor": _em_mg_anchor}
             motion_graphics_out.append({
                 "type": em["motion_graphic"]["type"],
@@ -19056,10 +19047,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # IMPOSSIBLE to form. B-roll is read from the POST-TRIM broll_out (it carries
     # _start_word_kept/_end_word_kept, filtered in lockstep by both trims), NOT
     # the pre-trim edit_plan["broll_clips"]. All indices are SOURCE words in the
-    # same _pw_by_idx space as _sfx_wi. The init lists + _sfx_cut_anchor_t map
+    # same _pw_by_idx space as _sfx_wi. The init lists + boundary-word set
     # were built above (plan-time) and persist to here. No circular dependency —
     # no visual resolver reads SFX.
-    _sfx_covered_words = set(_sfx_cut_anchor_t.keys())  # transitions + tight-cut overlays
+    _sfx_covered_words = set(_sfx_boundary_words)  # transitions + tight-cut overlays
     for _em in (edit_plan.get("_emphasis_moments") or edit_plan.get("emphasis_moments") or []):
         if isinstance(_em, dict) and (_em.get("zoom_effect") or _em.get("motion_graphic")):
             for _wi in (_em.get("word_indices") or []):
@@ -19132,46 +19123,21 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         if _sfx_wi is not None:
             _pw = _pw_by_idx.get(_sfx_wi)
             if _pw:
+                # RULING (Zac 2026-07-09): the WORD is the anchor. Its projected
+                # output start — read from the one timeline — IS the sound's time.
+                # The cut-boundary re-anchor pass and its decline path are DELETED;
+                # nothing remains to re-anchor. A cut word has no position, so its
+                # sound has no existence (the `continue` below).
                 _projected_t = float(_pw["start"])
-                # Cut-partnered SFX re-anchor (B1, directive #11): an SFX
-                # commits at its anchor word's output start; the boundary
-                # pulls it ONLY when the boundary sits within
-                # _SFX_REANCHOR_TOLERANCE_S of that start (exact boundary-word
-                # membership AND proximity). A partner that would drag the
-                # sound further stays a visual-only partner — render C's SFX
-                # was dragged +557ms to the splice and read as ~1s late by
-                # ear. Pads are excluded from this arithmetic by construction:
-                # the map targets the word's projected END, never the padded
-                # splice frame.
-                if _sfx_wi in _sfx_cut_anchor_t:
-                    _reanchor_t = _sfx_cut_anchor_t[_sfx_wi]
-                    if abs(_reanchor_t - _projected_t) <= _SFX_REANCHOR_TOLERANCE_S:
-                        print(
-                            f"[sfx] re-anchor {_sound_style} word {_sfx_wi}: "
-                            f"word-start {_projected_t:.3f}s → cut-boundary "
-                            f"{_reanchor_t:.3f}s (cut-partnered)",
-                            flush=True,
-                        )
-                        _projected_t = _reanchor_t
-                    else:
-                        _record_divergence(
-                            "sfx", {"sound": _sound_style, "word_index": _sfx_wi,
-                                    "word_start": round(_projected_t, 3),
-                                    "boundary": round(_reanchor_t, 3)},
-                            "sfx_reanchor_declined",
-                            reason=f"boundary {abs(_reanchor_t - _projected_t)*1000:.0f}ms "
-                                   f"from the word — the sound serves its word",
-                        )
             else:
                 _sfx_word = _sfx.get("word", "")
                 print(f"[sfx] Skipping {_sound_style} on '{_sfx_word}' — word removed from output", flush=True)
                 continue
         else:
-            _source_t = float(_sfx.get("t") or 0.0)
-            _projected_t = project_source_time_to_output(
-                _source_t, render_cuts, _clip_ranges,
-                clip_time_maps=_clip_time_maps,
-            )
+            # RULING (Zac 2026-07-09): `t` is not an authored coordinate — a sound
+            # with no word anchor has no anchor at all and does not exist. (Derived
+            # t survives on the entry for display/logging only.)
+            continue
         if _projected_t is None:
             continue
         _onset = _SFX_ONSET_OFFSETS.get(_sound_style, 0.0)
