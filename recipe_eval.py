@@ -28,10 +28,6 @@ from dataclasses import dataclass, field
 from type_registries import VALID_TIGHT_CUT_OVERLAYS
 
 WINDOW_S = 2.0
-ZOOM_NATURAL_MS = {
-    "SmoothPush": 1200, "SnapReframe": 700, "FocusWindow": 1500,
-    "StepZoom": 800, "LetterboxPush": 1400, "StageZoom": 1800, "DepthPull": 2200,
-}
 
 
 @dataclass
@@ -149,18 +145,23 @@ def evaluate_recipe(plan, words, cut_boundaries, duration, tight_boundaries=None
         r.warn("key_moments-count", f"{len(key_moments)} key_moments (typical 4-7 per 30s)")
 
     # ------------------------------------------------- per-emphasis arc + type
+    # Zoom static-anyOf (2026-07-10): type-per-position is SCHEMA now — the
+    # zoom-arc FAIL (which also over-fired on MG-only build emphases) and
+    # payoff-commitment are unsayable states, deleted. What remains measurable
+    # is the POSITION CLAIM itself: Gemini's authored arc_position vs the
+    # arc_segments-derived position — judgment, measured, never gated.
     for e in emphases:
-        a = e["word_indices"][0]
+        a = e["word_indices"][0] if e.get("word_indices") else None
+        if a is None:
+            continue
+        claim = e.get("arc_position")
         pos = _arc_position_of(arc, a)
-        ztype = (e.get("zoom_effect") or {}).get("type")
-        if pos in ("build", "breather"):
-            r.fail("zoom-arc", f"zoom on {pos} word {a} — builds/breathers get no zoom")
-        if pos == "payoff" and ztype == "StepZoom":
-            r.fail("payoff-commitment", f"StepZoom on payoff word {a} — payoff requires SmoothPush/LetterboxPush")
-        for ev in (e.get("zoom_effect") or {}).get("events", []):
-            for forbidden in ("durationMs", "scale"):
-                if forbidden in ev:
-                    r.warn("zoom-omit-fields", f"event at word {a} emits {forbidden} (should omit; pipeline auto-fills)")
+        if claim and pos and claim != pos:
+            r.warn("arc-claim", f"emphasis at word {a} claims {claim}, arc_segments says {pos}")
+        ze = e.get("zoom_effect") or {}
+        for forbidden in ("durationMs", "scale"):
+            if ze.get(forbidden) is not None:
+                r.warn("zoom-omit-fields", f"zoom at word {a} emits {forbidden} (should omit; pipeline auto-fills)")
 
     # zoom variety
     ztypes = [(e.get("zoom_effect") or {}).get("type") for e in emphases if e.get("zoom_effect")]

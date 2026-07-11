@@ -2194,67 +2194,70 @@ def _recipe_eval_imports():
     assert hasattr(recipe_eval, "Report")
 
 
-@check("recipe_eval flags zoom on a build word (zoom-arc rule)")
-def _recipe_eval_zoom_arc():
-    import recipe_eval
-    bad_plan = {
+@check("zoom static-anyOf: six per-position emphasis variants; payoff = committed-push only; build/breather zoomless; events array unrepresentable; homes tile the registry; STATIC")
+def _zoom_static_anyof():
+    sch = handler._post_cuts_response_schema()
+    variants = sch["properties"]["emphasis_moments"]["items"]["anyOf"]
+    assert len(variants) == 6, f"expected 6 position variants, got {len(variants)}"
+    by_pos = {}
+    for v in variants:
+        assert v["required"][0] == "arc_position", "arc_position must be the discriminator"
+        pos = v["properties"]["arc_position"]["enum"][0]
+        by_pos[pos] = v
+    assert set(by_pos) == {"hook", "build", "mid_peak", "payoff", "breather", "close"}
+    for pos in ("build", "breather"):
+        assert "zoom_effect" not in by_pos[pos]["properties"], \
+            f"a zoom on {pos} must be UNREPRESENTABLE (no property), not dropped"
+    housed = set()
+    for pos, want in handler.ZOOM_ARC_HOMES.items():
+        got = by_pos[pos]["properties"]["zoom_effect"]["anyOf"][0]["properties"]["type"]["enum"]
+        assert sorted(got) == sorted(want), f"{pos} enum {got} != ZOOM_ARC_HOMES {want}"
+        assert "events" not in by_pos[pos]["properties"]["zoom_effect"]["anyOf"][0]["properties"], \
+            "the events array must be unrepresentable on the authored surface"
+        housed.update(got)
+    assert housed == set(handler.VALID_ZOOM_TYPES), \
+        "every registry type must be housed somewhere (no silent extinction)"
+    zt = by_pos["payoff"]["properties"]["zoom_effect"]["anyOf"][0]["properties"]["type"]["enum"]
+    assert set(zt) == {"SmoothPush", "LetterboxPush"}, "payoff purity (the commitment rule)"
+    import json as _json
+    assert _json.dumps(sch, sort_keys=True) == _json.dumps(
+        handler._post_cuts_response_schema(), sort_keys=True), \
+        "the schema must be STATIC — identical every call (R3: cache-key stability)"
+
+
+@check("zoom arc-claim: position claim vs arc_segments is MEASURED (warn), never gated; the old zoom-arc/payoff-commitment FAILs are deleted (unsayable states)")
+def _zoom_arc_claim_measure():
+    import recipe_eval, inspect
+    src = inspect.getsource(recipe_eval)
+    assert 'r.fail("zoom-arc"' not in src and 'r.fail("payoff-commitment"' not in src, \
+        "the unsayable-state FAILs must stay deleted"
+    assert "ZOOM_NATURAL_MS" not in src, "the stale hardcoded copy must stay deleted (76ad30b class)"
+    plan = {
         "video_plan": {
             "arc_segments": [
                 {"start_word_index": 0, "end_word_index": 4, "position": "hook", "intensity": 0.9},
                 {"start_word_index": 5, "end_word_index": 9, "position": "build", "intensity": 0.3},
                 {"start_word_index": 10, "end_word_index": 12, "position": "payoff", "intensity": 1.0},
             ],
-            "key_moments": [
-                {"word_index": 7},  # build word
-            ],
-            "payoff_word_index": 11,
-            "close_word_index": 12,
+            "key_moments": [{"word_index": 11}],
+            "payoff_word_index": 11, "close_word_index": 12,
         },
         "emphasis_moments": [
-            {
-                "word_indices": [7],
-                "zoom_effect": {"type": "StepZoom", "events": [{"startMs": 0}]},
-            }
+            {"word_indices": [11], "arc_position": "mid_peak",
+             "zoom_effect": {"type": "SnapReframe"},
+             "type": "revelation", "intensity": "high", "duration": 2.0,
+             "viewer_feeling": "the number lands"},
         ],
-        "transitions": [],
-        "broll_clips": [],
-        "motion_graphics": [],
-        "text_overlays": [],
-        "sound_effects": [],
     }
-    words = [{"word": str(i), "start": i * 0.5, "end": i * 0.5 + 0.4} for i in range(13)]
-    rep = recipe_eval.evaluate_recipe(bad_plan, words, [], 6.5)
-    rule_ids = {r for (r, _) in rep.failures}
-    assert "zoom-arc" in rule_ids, f"expected zoom-arc failure, got: {rule_ids}"
-
-
-@check("recipe_eval flags StepZoom on payoff (payoff-commitment rule)")
-def _recipe_eval_payoff_commitment():
-    import recipe_eval
-    bad_plan = {
-        "video_plan": {
-            "arc_segments": [
-                {"start_word_index": 0, "end_word_index": 4, "position": "hook", "intensity": 0.9},
-                {"start_word_index": 5, "end_word_index": 8, "position": "build", "intensity": 0.3},
-                {"start_word_index": 9, "end_word_index": 11, "position": "payoff", "intensity": 1.0},
-            ],
-            "key_moments": [{"word_index": 10}],
-            "payoff_word_index": 10,
-            "close_word_index": 11,
-        },
-        "emphasis_moments": [
-            {
-                "word_indices": [10],
-                "zoom_effect": {"type": "StepZoom", "events": [{"startMs": 0}]},
-            }
-        ],
-        "transitions": [], "broll_clips": [], "motion_graphics": [],
-        "text_overlays": [], "sound_effects": [],
-    }
-    words = [{"word": str(i), "start": i * 0.5, "end": i * 0.5 + 0.4} for i in range(12)]
-    rep = recipe_eval.evaluate_recipe(bad_plan, words, [], 6.0)
-    rule_ids = {r for (r, _) in rep.failures}
-    assert "payoff-commitment" in rule_ids
+    words = [{"start": i * 0.5, "end": i * 0.5 + 0.4, "word": f"w{i}"} for i in range(13)]
+    rep = recipe_eval.evaluate_recipe(plan, words, [], 6.5, tight_boundaries=[])
+    ids = {r for r, _ in rep.warnings}
+    assert "arc-claim" in ids, f"claim mismatch (claims mid_peak, arc says payoff) must WARN: {ids}"
+    plan["emphasis_moments"][0]["arc_position"] = "payoff"
+    plan["emphasis_moments"][0]["zoom_effect"] = {"type": "SmoothPush"}
+    rep2 = recipe_eval.evaluate_recipe(plan, words, [], 6.5, tight_boundaries=[])
+    ids2 = {r for r, _ in rep2.warnings}
+    assert "arc-claim" not in ids2, f"honest claim must not warn: {ids2}"
 
 
 @check("recipe_eval flags long dead zone (v2.1 dead-zone rule)")
@@ -2821,8 +2824,9 @@ def _recipe_omittable_field_contract():
         # wiring reads .get(); Vertex dropping the empty optional IS the default).
         "_BrollClip": {"entry_transition", "exit_transition"},
         "_EmphasisMotionGraphic": {"props"},
-        "_ZoomEffect": {"events"},
-        "_ZoomEvent": {"durationMs", "originX", "originY", "scale"},
+        # zoom static-anyOf: the flat rare-override payload — omission is the
+        # canonical case (pipeline fills naturals; face-lock aims the origin).
+        "_ZoomEffect": {"durationMs", "originX", "originY", "scale"},
         "_TextOverlay": {"attribution", "bottomText", "notes", "position",
                          "quote", "text", "topText", "why"},
         "_MotionGraphic": {"duration_seconds", "props", "why"},
@@ -2837,7 +2841,7 @@ def _recipe_omittable_field_contract():
         "_SoundEffect": {"why"},
     }
     models = [H.PostCutPlan, H._EmphasisMoment, H._EmphasisMotionGraphic,
-              H._ZoomEffect, H._ZoomEvent, H._TextOverlay, H._TextOverlayNote,
+              H._ZoomEffect, H._TextOverlay, H._TextOverlayNote,
               H._MotionGraphic, H._SoundEffect, H._BrollClip, H._Transition,
               H._TightCutOverlay,
               H._CaptionPositionChange, H._VideoPlan, H._ArcSegment,

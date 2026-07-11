@@ -474,6 +474,38 @@ _CAPTION_STYLES = Literal[tuple(sorted(VALID_CAPTION_STYLES))]
 _TRANSITION_TYPES = Literal[tuple(sorted(VALID_TRANSITION_TYPES))]
 _TCO_TYPES = Literal[tuple(sorted(VALID_TIGHT_CUT_OVERLAYS))]
 _ZOOM_TYPES = Literal[tuple(sorted(VALID_ZOOM_TYPES))]
+
+# ── ZOOM ARC HOMES (zoom static-anyOf pin, Zac 2026-07-10) ───────────────────
+# THE table: which zoom types are SAYABLE at which claimed arc position. The
+# per-position emphasis variants derive from this — a mismatched type is
+# unrepresentable, not dropped. Position itself is Gemini's CLAIM (judgment —
+# measured against arc_segments by recipe_eval's arc-claim line, never gated).
+# build/breather have no entry: a zoom there is unsayable by construction; an
+# MG-only emphasis stays legal (the old zoom-arc FAIL over-fired on those).
+# Doctrine: payoff purity = the commitment rule (committed-push family ONLY);
+# hook/mid_peak = the snap pair; close = echo-of-hook ∪ SmoothPush lock-in.
+# PROVISIONAL homes pending Zac's flag ruling (nearest taught evidence,
+# chosen over silent extinction): DepthPull→hook ("intros, title-sequence
+# energy"); StageZoom→mid_peak ("weight for the revelation", the two-stage
+# escalation); FocusWindow→mid_peak ("specialty: a detail AND its context" —
+# condition-based, weakest evidence). FLAGGED tension: the taught MASK zoom
+# (snap pair on the first word after a splice) is unsayable when that word
+# sits in build/breather — the seam's energy routes to caption/SFX there.
+ZOOM_ARC_HOMES = {
+    "hook":     ("DepthPull", "SnapReframe", "StepZoom"),
+    "mid_peak": ("FocusWindow", "SnapReframe", "StageZoom", "StepZoom"),
+    "payoff":   ("LetterboxPush", "SmoothPush"),
+    "close":    ("SmoothPush", "SnapReframe", "StepZoom"),
+}
+_ZOOMLESS_ARC_POSITIONS = ("build", "breather")
+# Import-time exactness (the 76ad30b lesson): the homes must tile the registry
+# — every registry type housed somewhere (no silent extinction), no stranger.
+assert {t for _h in ZOOM_ARC_HOMES.values() for t in _h} == set(VALID_ZOOM_TYPES), (
+    "ZOOM_ARC_HOMES must house exactly the zoom registry: "
+    f"{sorted({t for _h in ZOOM_ARC_HOMES.values() for t in _h}) } vs {sorted(VALID_ZOOM_TYPES)}")
+assert set(ZOOM_ARC_HOMES) | set(_ZOOMLESS_ARC_POSITIONS) == {
+    "hook", "build", "mid_peak", "payoff", "breather", "close"}, (
+    "arc-home positions + zoomless positions must tile the _ArcPosition vocabulary")
 # Natural duration per zoom type (ms). When Gemini omits durationMs from a
 # zoom event, the pipeline fills in the per-type natural duration so the
 # camera move plays at the look it was designed for. This removes a degree
@@ -578,25 +610,27 @@ class _CaptionPositionChange(BaseModel):
     word_index: int
     position: Literal["top", "center", "bottom"]
 
-class _ZoomEvent(BaseModel):
-    # A1/A2 step 3 (Zac-ruled): startMs is NOT authored. The zoom is word-anchored;
-    # the pipeline back-times it so the PERCEPTUAL PEAK arrives on the word:
-    # start = word_start − ZOOM_PEAK_REACH_MS[type] (measured arrival table — the
-    # approved deviation from raw natural-duration back-timing), floored at the
-    # clip head (derivation, not adjustment). The ms→frames conversion happens
-    # EXACTLY ONCE downstream; every consumer (including any future zoom-rider
-    # sound) reads that one frame number.
-    # durationMs is optional. When omitted, the pipeline fills in
-    # ZOOM_NATURAL_DURATION_MS[type]. Gemini emits this only when overriding
-    # the natural duration for a specific moment (rare).
+class _ZoomEffect(BaseModel):
+    # Zoom static-anyOf pin (Zac 2026-07-10): the events ARRAY is not authored.
+    # Event count was degenerate by construction — every event in an emphasis
+    # derived the SAME startMs (one anchor word: start = word_start −
+    # ZOOM_PEAK_REACH_MS[type], floored at the clip head), so N events meant
+    # N zooms at the same instant (the staircase hazard), and events:[] was a
+    # silent no-zoom no-op (kill-site inventory, ledgered). One emphasis = ONE
+    # zoom event, synthesized by the pipeline; the event's rare payload is
+    # flattened here. durationMs/scale: only when a beat genuinely wants a
+    # non-default feel (pipeline fills ZOOM_NATURAL_DURATION_MS/_SCALE).
+    # originX/originY: ONLY for a non-face zoom target (prop, gesture,
+    # whiteboard) — the one authored capability with no derivable substitute;
+    # face targets omit them and the face-lock aims at the event frame.
+    # (The old _ZoomEvent model died with the array; the internal event shape
+    # lives on unchanged in _zoom_effect stashes, the render projection, and
+    # replays — this is an AUTHORING-surface change only.)
+    type: _ZOOM_TYPES
     durationMs: Optional[int] = None
     scale: Optional[float] = None
     originX: Optional[float] = None
     originY: Optional[float] = None
-
-class _ZoomEffect(BaseModel):
-    type: _ZOOM_TYPES
-    events: List[_ZoomEvent] = Field(default_factory=list)
 
 class _EmphasisMotionGraphic(BaseModel):
     type: _MG_TYPES
@@ -3993,13 +4027,13 @@ ARC SPINE — what each position is FOR, and what it gets
 
 Every component decision is judged against: "does this produce the feeling this arc position is supposed to produce?" The components are means; the viewer feelings are ends.
 
-  • **hook** (opens at hook_word_index, 1-5 words, intensity 0.7-1.0) — the viewer's thumb is hovering over the swipe-away. Feeling: "wait, what is this?" Treatment: instant grip — StepZoom or SnapReframe in the first 2s, optionally one opening text_overlay landing the curiosity gap. The face carries the hook — B-roll and heavy MGs enter after it (exception: when the hook IS a visual claim — "look at this thing in my backyard" — the B-roll is the hook).
+  • **hook** (opens at hook_word_index, 1-5 words, intensity 0.7-1.0) — the viewer's thumb is hovering over the swipe-away. Feeling: "wait, what is this?" Treatment: instant grip in the first 2s, optionally one opening text_overlay landing the curiosity gap. The face carries the hook — B-roll and heavy MGs enter after it (exception: when the hook IS a visual claim — "look at this thing in my backyard" — the B-roll is the hook).
 
   • **build** (the bulk of the runtime, intensity 0.2-0.5) — the viewer committed attention and wants to be rewarded for it. Feeling: "they're SHOWING me the world, not narrating at me." Treatment: this is where the carrier layer lives — B-roll on the concrete nouns, MGs on the off-camera referents, the process instruments on their beats (a Timeline or StepDivider marking stages, a RankedList or DropCard carrying an enumerated framework, a NumberTicker tracking a running value); boundaries inside build usually play straight, and a transition there marks a genuine turn. Zooms belong to peaks — build stretches run flat, and that flatness is the contrast a peak's zoom lands against.
 
-  • **mid_peak** (1-4 per video, each a key_moments entry, intensity 0.6-0.85) — a beat lands: a fact, a reaction, a punchline mid-arc. Feeling: a small "oh!" registered in the body. Treatment: punctuation — StepZoom or SnapReframe, quick in, quick out, paired with a hit/pop/ding. Match the size of the moment exactly; this is a real peak but not THE peak.
+  • **mid_peak** (1-4 per video, each a key_moments entry, intensity 0.6-0.85) — a beat lands: a fact, a reaction, a punchline mid-arc. Feeling: a small "oh!" registered in the body. Treatment: punctuation — quick in, quick out, paired with a hit/pop/ding. Match the size of the moment exactly; this is a real peak but not THE peak.
 
-  • **payoff** (1 segment, centered on payoff_word_index, intensity 1.0) — THE moment, the line everyone shares. Feeling: the camera and sound COMMIT and the line lands with weight. Treatment: SmoothPush or LetterboxPush, slow ramp, the deepest scale of the video, paired with a committing boom on the word. Captions go big on the payoff word. The payoff takes the committed push (SmoothPush or LetterboxPush) — the slow commitment is what separates it from every peak before it; a StepZoom snap reads as just another mid-peak. The payoff word belongs to the speaker's face — the biggest face moment in the format; the cutaway lane closes before it, and the camera holds the person while it lands. **The payoff is the FINAL committed move.** It holds and resolves cleanly to the close — the payoff's zoom is the last one through the close, with one exception: a deliberate callback beat separated by real time (≥1.5s). The close rides the payoff's resolution — the settle IS the close's motion.
+  • **payoff** (1 segment, centered on payoff_word_index, intensity 1.0) — THE moment, the line everyone shares. Feeling: the camera and sound COMMIT and the line lands with weight. Treatment: the committed push, slow ramp, the deepest scale of the video, paired with a committing boom on the word. Captions go big on the payoff word. The slow commitment is what separates the payoff from every peak before it; a snap would read as just another mid-peak. The payoff word belongs to the speaker's face — the biggest face moment in the format; the cutaway lane closes before it, and the camera holds the person while it lands. **The payoff is the FINAL committed move.** It holds and resolves cleanly to the close — the payoff's zoom is the last one through the close, with one exception: a deliberate callback beat separated by real time (≥1.5s). The close rides the payoff's resolution — the settle IS the close's motion.
 
   • **breather** (between peaks or right before the payoff, intensity 0.0-0.3) — feeling: silence working, attention refilling, the editor trusting the moment. Treatment: stillness — the frame holds bare; at most one quiet B-roll when it perfectly matches what was just said. Zoom, transition, and SFX all sit this beat out. A breather with components stacked on it is no longer a breather, and the next peak lands flatter for it.
 
@@ -4362,20 +4396,20 @@ An emphasis moment is a PEAK — a moment the viewer will physically react to, n
 
 A zoom does one of two jobs. EMPHASIS zooms map 1:1 to key_moments — they are the ledger of the video's loudest beats, and every one carries its moment. MASK zooms are functional: the small punch on the first word after a hard splice that carries the eye across the jump. They serve the boundary, live outside the moment ledger, and stay small — SnapReframe or StepZoom scale, under a second.
 
-Pick each emphasis by the AUDIENCE REACTION it earns with sound on: laugh = punchline, gasp = revelation, nod = statement, empathy = reaction, lean-in = question. Two beats side-by-side are usually revelation then reaction — the fact arriving, then the speaker responding — and they want different cameras: weight for the revelation (LetterboxPush, StageZoom), snap for the reaction (StepZoom).
+Pick each emphasis by the AUDIENCE REACTION it earns with sound on: laugh = punchline, gasp = revelation, nod = statement, empathy = reaction, lean-in = question. Two beats side-by-side are usually revelation then reaction — the fact arriving, then the speaker responding — and they want different cameras: weight for the revelation (the committed family — StageZoom at a mid-peak; LetterboxPush when the revelation IS the payoff), snap for the reaction.
 
-**Zoom personality by arc position** (this rule outranks "what feels punchy"):
-  • hook → GRIP: StepZoom or SnapReframe, instant.
-  • mid_peak → PUNCTUATION: StepZoom or SnapReframe, quick in/out.
-  • payoff → COMMITMENT: SmoothPush or LetterboxPush, the slowest and deepest move of the video, holds to the end. The payoff takes the slow commitment — that commitment is the only thing that makes it feel bigger than the beats before it; a StepZoom snap reads as just another mid-peak. Any zoom in the seconds immediately after the payoff steps on the moment you just earned.
-  • close → CALLBACK: echo the hook's type at lower intensity; for a zoom-free hook, SmoothPush as confident lock-in. A close within 1.5s of the payoff word rides the payoff's resolution instead — validation keeps the payoff of any peak pair inside 2s, so the resolution IS the close's motion there.
-  • build / breather → the camera holds. The flat is doing work — it's what the next peak lands against, and a viewer needs the still frame to feel the push when it comes.
+**Zoom personality by arc position** (this rule outranks "what feels punchy") — the schema pairs each claimed position with the zoom types that live there; what remains yours is the WHY:
+  • hook → GRIP, instant — the viewer's thumb is mid-swipe and the snap is what stops it.
+  • mid_peak → PUNCTUATION, quick in/out — sized to its moment exactly; a real peak, not THE peak.
+  • payoff → COMMITMENT: the slowest and deepest move of the video, holds to the end. The slow commitment is the only thing that makes it feel bigger than the beats before it — a snap would read as just another mid-peak. Any zoom in the seconds immediately after the payoff steps on the moment you just earned.
+  • close → CALLBACK: echo the hook's personality at lower intensity; for a zoom-free hook, a confident lock-in. A close within 1.5s of the payoff word rides the payoff's resolution instead — validation keeps the payoff of any peak pair inside 2s, so the resolution IS the close's motion there.
+  • build / breather → the camera holds — a zoom there does not exist to be written. The flat is doing work — it's what the next peak lands against, and a viewer needs the still frame to feel the push when it comes.
 
 **The weight belongs to the moment first, and the camera is its first instrument.** A peak's weight is set by what the moment is doing — the laugh, the gasp, the line the video exists to deliver — and the camera is the first instrument that serves it. So when the camera is held still on a beat that already earns its place in `key_moments`, the weight still lands; it simply moves to the instruments that remain. Carry the same emphasis intent across: let a committing sound do the pushing (the boom on the payoff word), let the caption hold and go big on that word, let a stat land on the syllable it names. Read the moment's intended feeling first, then ask which available instrument delivers it here — a payoff with the camera held still still commits, through sound and a held caption, and the viewer feels the same weight arrive. This carries the intent to instruments you already own; the peak set stays exactly the 3-5 you committed in `key_moments`, build/breather words stay clear, and only the routing changes when the camera is the one tool that's quiet.
 
 **Variety happens at the moment, not the clip.** Pick the type each peak's actual reaction wants — the pipeline splits the underlying clip behind the scenes so adjacent emphases with different types each render their own. Two peaks sharing a clip can each render their own type, so a row of identical zooms means you didn't ask what each moment wanted. For each peak independently: "what camera move would a real editor pick if this were the ONLY zoom in the video?"
 
-**Build-and-release pulse** — this governs HOW a peak you ALREADY chose moves; WHICH moments get a zoom was settled upstream in key_moments. The peak set is fixed upstream: the 3-5 true peaks in key_moments — build and breather words live outside it by definition. This paragraph only shapes the motion of those few approved peaks. **For the payoff**, the move is a slow push (SmoothPush, LetterboxPush) that begins gently and RESOLVES on the next cut — the lean-in mirrors how a listener leans toward something interesting; the cut snaps attention back. That push → cut release is the rhythm of pro short-form editing, and it is what makes the payoff read as a composed commitment rather than a scattered punch. **For mid_peaks**, SnapReframe and StepZoom are the two punctuation options — pick by the beat's character: snap for a reaction or punchline (a laugh, a gasp, the speaker's expression breaking), step for a landing statement (the fact arrives, the word weighs in the chest). Both are quick in / quick out. On tight-cut footage (most boundaries play as hard splices with no handle room), the cut itself IS the release — a slow push landing INTO a tight cut is the canonical move for the payoff, and what would otherwise feel like a jump cut becomes the engine of the pulse. When this paragraph makes a serious-sounding statement outside your 3-5 true peaks feel zoom-worthy, the peak set holds — importance is a property of the writing, a peak is a property of the delivery, and the zoom follows the delivery.
+**Build-and-release pulse** — this governs HOW a peak you ALREADY chose moves; WHICH moments get a zoom was settled upstream in key_moments. The peak set is fixed upstream: the 3-5 true peaks in key_moments — build and breather words live outside it by definition. This paragraph only shapes the motion of those few approved peaks. **For the payoff**, the move is the slow committed push that begins gently and RESOLVES on the next cut — the lean-in mirrors how a listener leans toward something interesting; the cut snaps attention back. That push → cut release is the rhythm of pro short-form editing, and it is what makes the payoff read as a composed commitment rather than a scattered punch. **For mid_peaks**, pick the punctuation by the beat's character: snap for a reaction or punchline (a laugh, a gasp, the speaker's expression breaking), step for a landing statement (the fact arrives, the word weighs in the chest). Both are quick in / quick out. On tight-cut footage (most boundaries play as hard splices with no handle room), the cut itself IS the release — a slow push landing INTO a tight cut is the canonical move for the payoff, and what would otherwise feel like a jump cut becomes the engine of the pulse. When this paragraph makes a serious-sounding statement outside your 3-5 true peaks feel zoom-worthy, the peak set holds — importance is a property of the writing, a peak is a property of the delivery, and the zoom follows the delivery.
 
 ──────────────────────────────────────────
 PIPELINE MECHANICS — read carefully, these are load-bearing
@@ -4383,16 +4417,17 @@ PIPELINE MECHANICS — read carefully, these are load-bearing
 
 Entry shape:
   {{
+    "arc_position": "hook" | "build" | "mid_peak" | "payoff" | "breather" | "close",   # your CLAIM: the arc position this emphasis serves (same vocabulary as arc_segments); the schema pairs each position with the zoom types that live there — build/breather offer none
     "word_indices": [int, ...],     # 1-3 kept-word indices that ARE the emphasis
     "type": "punchline" | "revelation" | "statement" | "reaction" | "question",
     "intensity": "high" | "medium",
     "duration": float,              # 1.5-3.0 output-seconds the visual hit lasts
     "viewer_feeling": "<one specific phrase: the feeling this moment produces in the viewer>",
-    "zoom_effect": {{ "type": <zoom type>, "events": [{{}}, ...] }} | null,   // events are word-anchored; the pipeline times them
+    "zoom_effect": {{ "type": <a type the claimed position offers> }} | null,   // word-anchored; the pipeline times it
     "motion_graphic": {{...}} | null   # the zoom is the camera's punctuation; a graphic joins it when the moment names something the camera cannot show
   }}
 
-**OMIT durationMs, scale, originX, originY from events by default.** The pipeline auto-fills the natural duration and perceptible scale per type — the values that make each move look its best — and runs face detection at the event's start frame to lock the zoom origin onto the face (fallback: canvas center). Your event is just {{}} — word-anchored, pipeline-timed. Emit originX/originY ONLY when zooming a NON-face element (a prop, a gesture, a whiteboard); emit durationMs/scale only when a specific beat genuinely wants a non-default feel (rare).
+**OMIT durationMs, scale, originX, originY by default.** The pipeline auto-fills the natural duration and perceptible scale per type — the values that make each move look its best — and runs face detection at the zoom's start frame to lock the origin onto the face (fallback: canvas center). Your zoom_effect is just its type — word-anchored, pipeline-timed, one move per emphasis. Emit originX/originY ONLY when zooming a NON-face element (a prop, a gesture, a whiteboard); emit durationMs/scale only when a specific beat genuinely wants a non-default feel (rare).
 
 Natural durations (for back-timing math): SmoothPush 1200ms · SnapReframe 700ms · FocusWindow 1500ms · StepZoom 800ms per hold · LetterboxPush 1400ms · StageZoom 1800ms · DepthPull 2200ms.
 
@@ -4402,9 +4437,7 @@ Natural durations (for back-timing math): SmoothPush 1200ms · SnapReframe 700ms
 
 **Zoom type is per-emphasis, not per-clip.** Each emphasis's `zoom_effect.type` renders independently — when adjacent emphases on the same kept-source clip differ in type, the pipeline splits the clip at the midpoint between them so each event plays under its own component. Plan each peak's type by what THAT peak's reaction wants; the pipeline handles the split behind the scenes.
 
-**Per-clip event budget:** the camera must fully play each event (in → hold → out) before the next, so max events ≈ clip_duration / natural_duration, and consecutive events on a clip must sit ≥ the type's natural duration apart (space the anchor words). A 6s clip fits ~3 LetterboxPush events or ~6 StepZoom events. The budget is where the camera stays composed — past it the motion visibly oscillates, and the pipeline strips the zoom from over-budget extras while their SFX/captions carry on.
-
-**StageZoom: ONE event.** The renderer drives the full two-stage progression (ramp → hold → deeper ramp → hold → out) inside one event's window. Chaining two events produces two back-to-back double-zooms. First-stage scale via optional firstStage prop (default 1.15).
+**Per-clip zoom spacing:** the camera must fully play each move (in → hold → out) before the next, so emphasis zooms sharing a clip must sit ≥ the type's natural duration apart (space the anchor words). A 6s clip composes ~3 LetterboxPush moves or ~6 StepZoom moves; past that the motion visibly oscillates.
 
 ──────────────────────────────────────────
 THE 7 ZOOM TYPES
@@ -4661,7 +4694,7 @@ These are the mechanics the render depends on — the physics of the frame, the 
 
 **PER-COMPONENT RULES:**
   • emphasis_moments: 1:1 with key_moments (3-5 true peaks for a typical 30s video; a flat even-energy stretch may have only 2-3 — the honest peak count is the right count). At least 2 distinct zoom types across
-    them. Peaks only — build and breather words run flat, and that flatness is what gives each peak its contrast. Payoff = SmoothPush or LetterboxPush — the committed-push family; StepZoom's snap belongs to mid-peaks. Events are word-anchored; emit {{}}.
+    them. Peaks only — build and breather words run flat, and that flatness is what gives each peak its contrast. Claim each emphasis's arc_position honestly — the peak set is judged by it. Zooms are word-anchored; the pipeline times them.
   • transitions: a transition marks a genuine
     turn — a movement boundary, an act shift, the walk into the payoff — and
     carries its why. The straight cut carries every other splice, and carries it
@@ -4776,10 +4809,8 @@ Output is a bare JSON object — the response is JSON-parsed and the parser is t
       "duration": float,                          // 1.5-3.0 output-seconds
       "viewer_feeling": "<one specific phrase>",
       "zoom_effect": {{
-        "type": "SmoothPush" | "SnapReframe" | "FocusWindow" | "StepZoom" | "LetterboxPush" | "StageZoom" | "DepthPull",
-        "events": [
-          {{}}                                     // word-anchored, pipeline-timed; durationMs/scale/origin OMITTED — auto-filled. originX/originY only for non-face zoom targets.
-        ]
+        "type": <the claimed arc position's offering — the schema knows>,
+        "originX": float, "originY": float         // ONLY for non-face zoom targets; omit for faces — the face-lock aims. durationMs/scale likewise omitted unless a beat genuinely wants a non-default feel.
       }} | null,
       "motion_graphic": {{ "type": <MG type>, "anchor": <semantic zone>, "props": {{...}} }} | null   // almost always null
     }}
@@ -8089,6 +8120,54 @@ def _transition_sound_events(render_cuts, timeline, fps):
     return _out
 
 
+def _emphasis_position_variants(base_schema):
+    """The zoom static-anyOf: six per-position emphasis variants derived from
+    the ONE pydantic base ($defs/_EmphasisMoment + $defs/_ZoomEffect) and
+    ZOOM_ARC_HOMES. arc_position is the discriminator — Gemini's authored
+    CLAIM, first property in every variant (R2 pattern: const-per-variant).
+    Each claim's zoom_effect.type enum = that position's homes; build/breather
+    variants carry NO zoom_effect property — a zoom there is unrepresentable.
+    STATIC: same dict every job — the Vertex cache key moves exactly once, at
+    deploy (R3; the per-job-variance class lives in the transitions sub-call,
+    never here)."""
+    import copy as _copy
+    _defs = base_schema.get("$defs") or {}
+    _em_base = _defs.get("_EmphasisMoment")
+    _ze_base = _defs.get("_ZoomEffect")
+    if not isinstance(_em_base, dict) or not isinstance(_ze_base, dict):
+        raise RuntimeError("emphasis anyOf: pydantic $defs shape drifted")
+    _variants = []
+    for _pos in ("hook", "build", "mid_peak", "payoff", "breather", "close"):
+        _v = _copy.deepcopy(_em_base)
+        _props = {"arc_position": {"type": "string", "enum": [_pos]}}
+        for _pk, _pv in (_v.get("properties") or {}).items():
+            _props[_pk] = _pv
+        if _pos in ZOOM_ARC_HOMES:
+            _ze = _copy.deepcopy(_ze_base)
+            _ze.setdefault("properties", {})["type"] = {
+                "type": "string", "enum": sorted(ZOOM_ARC_HOMES[_pos])}
+            _props["zoom_effect"] = {"anyOf": [_ze, {"type": "null"}],
+                                     "default": None}
+        else:
+            _props.pop("zoom_effect", None)
+        _v["properties"] = _props
+        _v["required"] = ["arc_position"] + list(_v.get("required") or [])
+        _v.pop("title", None)
+        _variants.append(_v)
+    return _variants
+
+
+def _post_cuts_response_schema():
+    """PostCutPlan schema with the per-position emphasis anyOf injected at
+    emphasis_moments.items. Everything else stays pydantic-derived; the
+    passthrough response_json_schema path already ships anyOf constructs
+    (pydantic Optionals) every render, so no string-enum caveat applies."""
+    _s = PostCutPlan.model_json_schema()
+    _s["properties"]["emphasis_moments"]["items"] = {
+        "anyOf": _emphasis_position_variants(_s)}
+    return _s
+
+
 def _call_gemini_post_cuts(client, system_instruction, user_content, video_part, model_name):
     """Second Gemini call: visual placement on the kept-only transcript.
 
@@ -8143,7 +8222,7 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
                 # output to 16-36K; Lever 1 cuts it at the 16K degen threshold.
                 max_output_tokens=40000,
                 response_mime_type="application/json",
-                response_json_schema=PostCutPlan.model_json_schema(),
+                response_json_schema=_post_cuts_response_schema(),
                 # 24576 thinking budget — lowered from 60000. 60K bought no
                 # quality (every good recipe this session ran at ≤24576) and
                 # drove the model to spiral past its output budget into an
@@ -11433,7 +11512,20 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                             f"emphasis_moments[{_ei}].zoom_effect.type must be one of "
                             f"{sorted(_valid_zoom_types)}, got {_zt!r}"
                         )
-                    _raw_events = _ze_raw.get("events") or []
+                    # Zoom static-anyOf pin: ONE event per emphasis,
+                    # synthesized HERE. The authored payload arrives FLAT on
+                    # zoom_effect; legacy plan shapes still carrying an events
+                    # array migrate on read (first entry's payload — count was
+                    # degenerate: every event derived the same startMs). The
+                    # events:[] silent no-op is unrepresentable on the new
+                    # surface and self-heals on legacy (an empty array now
+                    # synthesizes the one event instead of rendering nothing).
+                    _legacy_ev = next((e for e in (_ze_raw.get("events") or [])
+                                       if isinstance(e, dict)), {})
+                    _flat_src = {k: (_ze_raw.get(k) if _ze_raw.get(k) is not None
+                                     else _legacy_ev.get(k))
+                                 for k in ("durationMs", "scale", "originX", "originY")}
+                    _raw_events = [{k: v for k, v in _flat_src.items() if v is not None}]
                     # Fill in natural durationMs and scale per zoom type when Gemini
                     # omits them. This locks the look of each zoom to its designed
                     # motion shape regardless of what Gemini chose for the moment —
