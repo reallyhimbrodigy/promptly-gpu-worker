@@ -8687,12 +8687,61 @@ def build_safe_recipe(kept_words, vocal_emphasis=None, ep_off=None):
     }
 
 
+def _ensure_proxy_reference(job_id, proxy_bytes, client_proxy_url):
+    """LEVER 4 (upload once, reference everywhere; Zac 2026-07-10): ONE https
+    reference per job for the Gemini proxy — every video-carrying call (the
+    editorial call + every repair re-ask) reads it instead of re-sending the
+    bytes. Transport-probed on the standing discipline: Vertex fileData
+    accepts https URLs (28.8s on a 33MB source, ~10s median on the 1.56MB
+    proxy vs ~20s inline); GCS is NOT needed (and the Vertex service account
+    has no storage perms — 403 probed); cache-with-video loses (31s create).
+    Client-proxy jobs already HAVE the object in the bucket — zero upload;
+    otherwise ONE put_object with the existing S3 credentials. A presigned
+    GET (6h) carries the reference — no public-ACL or CDN-domain assumption.
+
+    Returns (reference_url, uploaded_key). uploaded_key is non-None ONLY
+    when this function uploaded — teardown deletes exactly that, never the
+    client's own proxy object.
+
+    FAILURE DIRECTION (stated): any miss here → (None, None) → the job runs
+    on inline bytes, ledgered video_reference_fallback — the render ships
+    slow, never fails. A latency optimization must not be able to kill a job.
+    Kill switch: VIDEO_REFERENCE_ENABLED=0 (default ON — no dark flags)."""
+    if str(os.environ.get("VIDEO_REFERENCE_ENABLED", "1")).strip().lower() in ("0", "false", "off"):
+        return None, None
+    try:
+        _s3 = globals().get("_aws_s3_client")
+        _bucket = os.environ.get("S3_BUCKET_NAME") or "promptly-video-storage"
+        if client_proxy_url and str(client_proxy_url).startswith("https://"):
+            return str(client_proxy_url), None
+        if proxy_bytes and _s3 is not None:
+            _key = f"sources/gemini-proxies/{job_id or int(time.time())}.mp4"
+            _s3.put_object(Bucket=_bucket, Key=_key, Body=proxy_bytes,
+                           ContentType="video/mp4")
+            _url = _s3.generate_presigned_url(
+                "get_object", Params={"Bucket": _bucket, "Key": _key},
+                ExpiresIn=21600)
+            print(f"[video-ref] proxy uploaded once "
+                  f"({len(proxy_bytes)/1048576:.1f}MB → {_key}) — every Gemini "
+                  f"call references it", flush=True)
+            return _url, _key
+    except Exception as _vre:
+        print(f"[video-ref] reference setup failed "
+              f"({type(_vre).__name__}: {str(_vre)[:120]}) — inline bytes for "
+              f"this job (render ships slow, never fails)", flush=True)
+        _record_divergence(
+            "render", {"stage": "upload", "error": type(_vre).__name__},
+            "video_reference_fallback", reason=str(_vre)[:180])
+    return None, None
+
+
 def generate_edit_gemini(
     video_path, vibe, duration, trend_context=None, deepgram_words=None,
     shot_changes=None, shot_change_scores=None, vocal_emphasis=None, source_loudness=None,
     face_positions=None, smoothed_face_trajectory=None,
     user_style_profile=None, platform_style_note=None,
     gemini_file=None, cached_response=None, inline_video_bytes=None,
+    video_reference_url=None,
     prior_plan=None, prior_plan_change_request=None,
     premium=False, resolved_policy=None,
     force_safe_reason=None,
@@ -8823,7 +8872,22 @@ def generate_edit_gemini(
     # 100-200ms; 18fps captures all of them with comfortable margin.
     # Paired with the 480p@18fps proxy encode (see _do_gemini_proxy).
     _video_fps_meta = genai_types.VideoMetadata(fps=18) if hasattr(genai_types, "VideoMetadata") else None
-    if inline_video_bytes:
+    _video_part_fallback = None
+    if inline_video_bytes and video_reference_url:
+        # LEVER 4: the call references the job's ONE uploaded proxy; the
+        # inline bytes stay armed as the fallback (reference fails → the
+        # call retries inline, ledgered — the render ships slow, never fails).
+        _video_part = genai_types.Part(
+            file_data=genai_types.FileData(file_uri=video_reference_url, mime_type="video/mp4"),
+            video_metadata=_video_fps_meta,
+        )
+        _video_part_fallback = genai_types.Part(
+            inline_data=genai_types.Blob(data=inline_video_bytes, mime_type="video/mp4"),
+            video_metadata=_video_fps_meta,
+        )
+        print(f"[generate-edit] Using video REFERENCE ({len(inline_video_bytes)/1024/1024:.1f}MB "
+              f"proxy referenced, not re-sent; inline fallback armed, sample_fps=18)", flush=True)
+    elif inline_video_bytes:
         _video_part = genai_types.Part(
             inline_data=genai_types.Blob(data=inline_video_bytes, mime_type="video/mp4"),
             video_metadata=_video_fps_meta,
@@ -9294,7 +9358,24 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
             )
         else:
             try:
-                post_cut_plan = _call_gemini_post_cuts(client, post_sys, _post_user_attempt, _video_part, GEMINI_EDITORIAL_MODEL)
+                try:
+                    post_cut_plan = _call_gemini_post_cuts(client, post_sys, _post_user_attempt, _video_part, GEMINI_EDITORIAL_MODEL)
+                except Exception as _ref_err:
+                    if _video_part_fallback is None:
+                        raise
+                    # LEVER 4 failure direction: reference broke → inline
+                    # bytes for the REST OF THE JOB (every later repair
+                    # re-ask included), ledgered so a broken reference path
+                    # is visible, never silent.
+                    print(f"[video-ref] reference call failed "
+                          f"({type(_ref_err).__name__}: {str(_ref_err)[:120]}) — "
+                          f"falling back to inline bytes for this job", flush=True)
+                    _record_divergence(
+                        "render", {"stage": "call", "error": type(_ref_err).__name__},
+                        "video_reference_fallback", reason=str(_ref_err)[:180])
+                    _video_part = _video_part_fallback
+                    _video_part_fallback = None
+                    post_cut_plan = _call_gemini_post_cuts(client, post_sys, _post_user_attempt, _video_part, GEMINI_EDITORIAL_MODEL)
             except Exception as _tx_err:
                 # Transport exhaustion (backoff spent / terminal degenerate
                 # response). Retries already happened inside the call; the
@@ -24155,6 +24236,11 @@ def handler(job):
             """
             _transcript = _get_resolved_transcript()
             _proxy_bytes = future_gemini_proxy.result() if future_gemini_proxy is not None else None
+            # LEVER 4: one reference per job, derived as early as the proxy
+            # exists. Client-proxy jobs reference the client's own object
+            # (zero upload); otherwise one put_object here.
+            _video_ref_url, _video_ref_uploaded_key = _ensure_proxy_reference(
+                input_data.get("job_id"), _proxy_bytes, proxy_video_url)
             if future_early_trend is not None:
                 try:
                     _trend = future_early_trend.result(timeout=10)
@@ -24341,6 +24427,7 @@ def handler(job):
                     user_style_profile=_user_profile,
                     platform_style_note=_platform_pulse,
                     inline_video_bytes=_proxy_bytes,
+                    video_reference_url=_video_ref_url,
                     cached_response=_cached_analysis,
                     prior_plan=_gr_prior,
                     prior_plan_change_request=_gr_dir,
@@ -25904,6 +25991,20 @@ def handler(job):
             premium_ctx.shutdown()
         if work_dir:
             shutil.rmtree(work_dir, ignore_errors=True)
+        # LEVER 4 lifecycle: delete the job's UPLOADED proxy reference (only
+        # what _ensure_proxy_reference uploaded — never the client's own
+        # object). Same teardown that flushes the ledger; a failed delete
+        # ages out via the presigned expiry, printed not silent.
+        try:
+            if _video_ref_uploaded_key:
+                globals()["_aws_s3_client"].delete_object(
+                    Bucket=os.environ.get("S3_BUCKET_NAME") or "promptly-video-storage",
+                    Key=_video_ref_uploaded_key)
+                print(f"[video-ref] reference deleted at teardown ({_video_ref_uploaded_key})", flush=True)
+        except NameError:
+            pass
+        except Exception as _vrd_err:
+            print(f"[video-ref] teardown delete failed ({_vrd_err}) — object ages out with the URL expiry", flush=True)
         # LEDGER flush: persist this job's divergences so the overrule spine is queryable.
         _flush_divergence_ledger(input_data.get("job_id"))
 

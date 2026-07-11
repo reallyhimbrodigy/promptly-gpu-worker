@@ -4867,6 +4867,30 @@ def _k4_future_drift_guard():
         f"render_multi_clip scope detection or the read regex has drifted")
 
 
+@check("LEVER 4 video reference: one upload per job, every call references; inline fallback armed + ledgered; teardown deletes only what we uploaded; kill switch default ON")
+def _lever4_video_reference():
+    _src = open("handler.py").read()
+    assert "def _ensure_proxy_reference(" in _src, "the one upload site must exist"
+    assert _src.count("video_reference_fallback") >= 2, \
+        "both fallback stages (upload + call) must ledger"
+    assert "file_data=genai_types.FileData(file_uri=video_reference_url" in _src, \
+        "the reference part must be fileData, not a second byte copy"
+    assert "_video_part = _video_part_fallback" in _src, \
+        "a broken reference must fall back to inline for the job, never fail it"
+    assert 'os.environ.get("VIDEO_REFERENCE_ENABLED", "1")' in _src, \
+        "kill switch must default ON (no dark flags)"
+    assert "if _video_ref_uploaded_key:" in _src and "delete_object" in _src, \
+        "teardown must delete the uploaded reference"
+    _i_help = _src.index("def _ensure_proxy_reference(")
+    assert "client_proxy_url and str(client_proxy_url).startswith" in _src, \
+        "client-proxy jobs must reference the existing object (zero upload)"
+    # uploaded_key stays None on the client-proxy path — teardown can never
+    # delete the client's own object (source-shape assertion).
+    _h = _src[_i_help:_i_help + 3000]
+    assert "return str(client_proxy_url), None" in _h, \
+        "client-proxy reference must carry uploaded_key=None"
+
+
 @check("MG empty-props: drops the ONE component + ledgers (K7 at the generate layer) — never a plan-nuking raise")
 def _mg_empty_props_drop():
     _src = open("handler.py").read()
