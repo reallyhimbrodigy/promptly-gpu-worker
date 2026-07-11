@@ -59,6 +59,26 @@ def run(days: int = 7):
     by_vibe = defaultdict(Counter)
     samples = defaultdict(list)
     n_jobs = 0
+    # WATCH 1 (Zac 2026-07-10): per-class repair columns — the convergence
+    # finding generalizes (whole-plan re-ask × per-component predicates =
+    # whack-a-mole for EVERY raise class; F5 was just the loudest). The
+    # table decides per class whether raise keeps its value or takes K7.
+    def _repair_class(r):
+        if "NUMBER must come" in r:
+            return "F5.3-number"
+        if "no face-clear region" in r:
+            return "F7-clear-region"
+        if "viewers need" in r:
+            return "F6-reading-floor"
+        if "card text must be drawn" in r:
+            return "F5-text(dead-9495895)"
+        return "other"
+    repair_fires = Counter()
+    repair_jobs = defaultdict(set)
+    repair_fixed = defaultdict(set)
+    repair_exhausted = defaultdict(set)
+    # WATCH 2: drop-precision — the dropped texts, verbatim, with counts.
+    drop_texts = Counter()
     for k in keys:
         n_jobs += 1
         body = s3.get_object(Bucket=bucket, Key=k)["Body"].read().decode("utf-8", "replace")
@@ -97,8 +117,40 @@ def run(days: int = 7):
             r = str(rec.get("reason") or "")[:110]
             if r and len(samples[rule]) < 2 and r not in samples[rule]:
                 samples[rule].append(r)
+            if rule == "recipe_repair:repair_reask":
+                _cls = _repair_class(str(rec.get("reason") or ""))
+                repair_fires[_cls] += 1
+                repair_jobs[_cls].add(k)
+            if rule.endswith(":drop_ungrounded_text") and isinstance(orig, dict):
+                drop_texts[str(orig.get("text") or "?")[:60]] += 1
+        # outcome attribution: exhaust attributed to EVERY class that fired
+        # in the job (the whack-a-mole mechanism makes single-attribution
+        # dishonest — attempt 2's violation is often a different class).
+        _job_safe = "safe_edit_fallback" in body
+        for _cls, _jobs in repair_jobs.items():
+            if k in _jobs:
+                (repair_exhausted if _job_safe else repair_fixed)[_cls].add(k)
     lines = [f"WEEKLY QUALITY TABLE — last {days}d · {n_jobs} job ledger(s) · "
              f"{sum(counts.values())} record(s) (observations deduped; occurrences counted raw)", "=" * 78]
+    if repair_fires:
+        lines.append("")
+        lines.append("REPAIR CLASSES — fire / fixed / exhausted (whack-a-mole watch; "
+                     "exhaust attributed to each class firing in the job)")
+        for _cls, _n in repair_fires.most_common():
+            lines.append(f"{_n:>5}  {_cls}: jobs={len(repair_jobs[_cls])} "
+                         f"fixed={len(repair_fixed[_cls])} exhausted={len(repair_exhausted[_cls])}")
+        lines.append("       standing: F5.3 stays raise by the brand bar (an invented "
+                     "number is a fabrication); if its exhausts kill videos, "
+                     "drop-the-lying-card removes the lie AND saves the plan.")
+    if drop_texts:
+        lines.append("")
+        lines.append("DROP-PRECISION WATCH — drop_ungrounded_text verbatim (audit record "
+                     "4/4 false-positive; sustained designer-quality drops convict the "
+                     "predicate → the drop ruling revisits, and this line IS the priced "
+                     "Lumen-tier business case)")
+        for _t, _n in drop_texts.most_common(8):
+            lines.append(f"{_n:>5}  {_t!r}")
+    lines.append("")
     for rule, n in counts.most_common():
         lines.append(f"{n:>5}  {rule}")
         st = ", ".join(f"{s}×{c}" for s, c in by_style[rule].most_common(3))
