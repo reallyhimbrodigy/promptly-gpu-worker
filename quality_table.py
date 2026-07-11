@@ -52,7 +52,11 @@ def run(days: int = 7):
     for k in keys:
         n_jobs += 1
         body = s3.get_object(Bucket=bucket, Key=k)["Body"].read().decode("utf-8", "replace")
-        for line in body.splitlines():
+        # DEDUP (rule audit 2026-07-10): records written inside the repair
+        # loop double-write on re-attempts (convicted in both audits — the
+        # ×9 was 5, the ×12 was 6). Identical full lines within one job
+        # collapse to one; only the shipped plan's story counts.
+        for line in dict.fromkeys(body.splitlines()):
             try:
                 rec = json.loads(line)
             except Exception:
@@ -71,7 +75,7 @@ def run(days: int = 7):
             if r and len(samples[rule]) < 2 and r not in samples[rule]:
                 samples[rule].append(r)
     lines = [f"WEEKLY QUALITY TABLE — last {days}d · {n_jobs} job ledger(s) · "
-             f"{sum(counts.values())} record(s)", "=" * 78]
+             f"{sum(counts.values())} record(s) (repair-attempt duplicates collapsed)", "=" * 78]
     for rule, n in counts.most_common():
         lines.append(f"{n:>5}  {rule}")
         st = ", ".join(f"{s}×{c}" for s, c in by_style[rule].most_common(3))

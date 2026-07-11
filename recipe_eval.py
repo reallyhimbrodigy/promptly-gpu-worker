@@ -224,22 +224,49 @@ def evaluate_recipe(plan, words, cut_boundaries, duration, tight_boundaries=None
             )
 
     # ──────────────────────────────────────────────── tight-boundary masking
-    # Prompt rule: "land a zoom on the first word after a tight cut to mask
-    # the jump." Warn for every tight boundary whose following word doesn't
-    # carry a zoom emphasis. This catches the same-spot-splice case where
-    # the cut WAS surfaced to Gemini but no masking treatment was placed.
+    # PREDICATE v2 (rule audit, Zac 2026-07-10). The v1 predicate counted
+    # EVERY maskless tight boundary — transition-coverage in disguise: no
+    # visibility condition (it fired on 0ms scdet camera cuts, which read as
+    # normal editing and are the sub-call's jurisdiction) and no alternative-
+    # treatment check (an overlay ON the seam still "failed"). Audited live:
+    # its first ×9 was 5 shot-change seams (gap 0-80ms, ZERO excision),
+    # double-counted by repair re-runs. HONEST FORM: fire only where the
+    # jump is VISIBLE (a same-shot splice — word_removal/dead_air excision
+    # ≥ 300ms of source) AND ZERO treatment landed (no zoom on the first
+    # word back, no overlay on the seam, no SFX on seam/first-word-back,
+    # no MG starting there). The bare cut carries most seams — this rule
+    # names only the naked visible jump.
     if tight_set:
         zoom_anchor_indices = {
             (e.get("word_indices") or [None])[0]
             for e in emphases
             if e.get("zoom_effect")
         }
+        _treated = set(zoom_anchor_indices)
+        for tco in tight_overlays:
+            _ta = (tco or {}).get("after_word_index")
+            if isinstance(_ta, (int, float)):
+                _treated.update({int(_ta), int(_ta) + 1})
+        for s_ in sfx:
+            if isinstance(s_.get("word_index"), (int, float)):
+                _treated.add(int(s_["word_index"]))
+        for m_ in mgs:
+            if isinstance(m_.get("start_word_index"), (int, float)):
+                _treated.add(int(m_["start_word_index"]))
+        _MASK_VISIBLE_EXCISION_S = 0.300  # below this a splice reads as a beat, not a jump
         for tb in sorted(tight_set):
             mask_word = tb + 1
             if mask_word >= n_words:
                 continue
-            if mask_word not in zoom_anchor_indices:
-                r.warn("tight-no-mask", f"tight cut at word {tb} has no masking zoom on word {mask_word} — jump will read as broken editing")
+            if tb + 1 < len(words):
+                _exc = float(words[tb + 1].get("start") or 0.0) - float(words[tb].get("end") or 0.0)
+            else:
+                _exc = 0.0
+            if _exc < _MASK_VISIBLE_EXCISION_S:
+                continue  # invisible-by-design micro-splice or a real camera cut
+            if tb in _treated or mask_word in _treated:
+                continue
+            r.warn("tight-no-mask", f"visible splice at word {tb} ({_exc*1000:.0f}ms excised) has ZERO treatment — no mask zoom, overlay, SFX, or MG on the seam or first word back")
 
     # ----------------------------------------------------------------- B-roll
     emphasis_words = {w for e in emphases if e.get("zoom_effect") for w in e["word_indices"]}
