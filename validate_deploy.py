@@ -4824,6 +4824,25 @@ def _rhythm_beats():
         "the orphaned fragment must be gone"
     assert "Zero treatments is the honest read" not in _src \
         and "rarest currency" not in _src, "safe-harbor phrasing swept"
+    # fragment-integrity wave (Zac rider 2026-07-11): dangling referents truthed
+    assert _src.count('"sound": <one of the 16 sounds') >= 2, \
+        "the RESPONSE FORMAT emphasis template must carry the sound rider (the zero-sounds template gap)"
+    assert "THE 7 ZOOM TYPES" not in _src and "THE 6 ZOOM TYPES" in _src, \
+        "zoom-library header count truthed (StageZoom deleted)"
+    assert "emit an empty sound_effects array" not in _src \
+        and "sound_effects: []`" not in _src, \
+        "sfx-off surfaces re-aimed at the rider (standalone list unauthorable)"
+    assert "emphasis_moments.t (" not in _src, "the emphasis .t anchor reference is dead"
+    _p_sfx = {"sound_effects": [{"word_index": 1, "sound": "boom"}],
+              "emphasis_moments": [{"word_indices": [2], "sound": "punchsfx",
+                                    "zoom_effect": None}],
+              "transitions": [{"after_word_index": 3, "type": "CardSwipe",
+                               "sound": "transition-sfx"}]}
+    _h._enforce_off_expressive_features(_p_sfx, {"sfx"})
+    assert (_p_sfx["sound_effects"] == []
+            and _p_sfx["emphasis_moments"][0]["sound"] is None
+            and "sound" not in _p_sfx["transitions"][0]), \
+        "sfx-off must strip the rider surfaces (the enforcement hole stays closed)"
 
 
 @check("D1 perceptual sync: ONE audible-onset derivation consumed by emphasis t + SFX + projected anchors; the projection reads the render_timeline arithmetic (frames cursor); D2 floors live")

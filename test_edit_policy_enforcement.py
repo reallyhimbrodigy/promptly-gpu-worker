@@ -72,11 +72,12 @@ def full_plan():
         "sound_effects": [{"word_index": 2, "sound": "whoosh"}],
         "text_overlays": [{"variant": "sticky_note", "text": "hi"}],
         "motion_graphics": [{"type": "StatCard", "start_word_index": 1, "end_word_index": 2}],
-        "transitions": [{"afterClipIndex": 0, "type": "ZoomThrough"}],
+        "transitions": [{"afterClipIndex": 0, "type": "ZoomThrough", "sound": "transition-sfx"}],
         "tight_cut_overlays": [{"after_word_index": 4, "type": "ShutterFlash"}],
         "emphasis_moments": [
             {"type": "punchline", "intensity": "high", "word_indices": [5],
              "zoom_effect": {"type": "SmoothPush", "events": [{"startMs": 0}]},
+             "sound": "boom",
              "motion_graphic": {"type": "Stamp", "props": {}}},
             {"type": "statement", "intensity": "medium", "word_indices": [8],
              "zoom_effect": {"type": "StepZoom", "events": []}, "motion_graphic": None},
@@ -103,7 +104,9 @@ def assert_only_stripped(feature, checks_absent, checks_present_keys):
 
 assert_only_stripped("broll", [lambda p: p["broll_clips"] == []],
                      ["sound_effects", "text_overlays", "motion_graphics", "transitions", "tight_cut_overlays"])
-assert_only_stripped("sfx", [lambda p: p["sound_effects"] == []],
+assert_only_stripped("sfx", [lambda p: p["sound_effects"] == [],
+                             lambda p: all(m.get("sound") is None for m in p["emphasis_moments"]),
+                             lambda p: all("sound" not in tr for tr in p["transitions"])],
                      ["broll_clips", "text_overlays", "motion_graphics", "transitions"])
 assert_only_stripped("text_overlays", [lambda p: p["text_overlays"] == []],
                      ["broll_clips", "sound_effects", "motion_graphics", "transitions"])

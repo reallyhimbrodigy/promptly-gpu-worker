@@ -3814,8 +3814,8 @@ VOCAL EMPHASIS PEAKS (source seconds, score 0-1)
   These are moments where the speaker's voice spikes in prominence — loud
   words, pitch peaks, punches. Use as PRIMARY anchors for:
     - zoom_effect events (StepZoom or SmoothPush completing ON a vocal peak)
-    - emphasis_moments.t (pick the peak, then map word_indices to it)
-    - sound_effects (a punchsfx or popsfx landing on the peak)
+    - emphasis_moments (pick the peak, then map word_indices to it)
+    - the emphasis's `sound` field (a punchsfx or popsfx when the peak is one of the video's hits)
 
 FACE VISIBILITY (source-seconds ranges; yes = face detected in 0.5s bucket)
   {_fv_display}
@@ -3991,8 +3991,8 @@ Exact mappings:
 
   • **"no captions" / "don't add captions" / "without subtitles"** → `caption_style: "none"`, `caption_keywords: []`, `caption_position_changes: []`
   • **"no b-roll" / "just talking head" / "no cutaways" / "no stock footage"** → `broll_clips: []`
-  • **"no sfx" / "no sound effects" / "no music"** → `sound_effects: []`
-  • **"no transitions" / "just hard cuts"** → `transitions: []`
+  • **"no sfx" / "no sound effects" / "no music"** → no emphasis moment carries its `sound` field; no transition rider
+  • **"no transitions" / "just hard cuts"** → the seam-dressing pass is turned off by the resolved policy — write no transition intent into the vision
   • **"no zooms" / "static camera" / "no emphasis"** → `emphasis_moments: []`
   • **"no motion graphics" / "no MGs" / "no popups"** → `motion_graphics: []`
   • **"no text overlays" / "no titles" / "no labels"** → `text_overlays: []`
@@ -4003,7 +4003,7 @@ Exact mappings:
   • **Aesthetic adjectives** ("darker", "cinematic", "minimalist", "chaotic") → bias the palette toward that register while honoring any explicit exclusions in the same vibe
   • **"keep it minimal" / "less is more" / "don't over-edit"** → the window doctrine relaxes: place events only on the strongest 1-3 moments of the whole video; empty windows are correct under this instruction
 
-A vibe can combine directives. "Cinematic feel but no captions and no SFX" = cinematic palette AND `caption_style: "none"` AND `sound_effects: []`. All directives are binding. Where the vibe is silent on a category, the defaults in this prompt apply. The user knows what they want; your taste operates only in the gaps their instructions leave open.
+A vibe can combine directives. "Cinematic feel but no captions and no SFX" = cinematic palette AND `caption_style: "none"` AND no `sound` field on any beat. All directives are binding. Where the vibe is silent on a category, the defaults in this prompt apply. The user knows what they want; your taste operates only in the gaps their instructions leave open.
 
 ═══════════════════════════════════════════════════════════════════════════
 MOVEMENTS — MAP THE ENERGY BEFORE YOU WALK THE WINDOWS
@@ -4106,7 +4106,7 @@ Emit the JSON in exactly this order, finishing each stage's reasoning before ope
 
 **Stage 3 — STRUCTURAL REGISTER.** Emit `caption_style`, `thumbnail_word_index`, `outro`, `aspect_ratio`.
 
-**Stage 4 — COMPONENT PLACEMENTS.** Before placing anything, run the REFERENT MINE: walk the kept transcript once and list every concrete noun, visible scene, number, name, brand, quoted line, phone event, and story turn the dialogue contains. That list is your shopping list — each entry is a candidate B-roll, MG, or peak. The mine guarantees every candidate was FOUND; whether each is PLACED is then a judgment against the extend test and its why — an unplaced referent is a decision, not a failure. Then emit: emphasis_moments, text_overlays, sound_effects, broll_clips, transitions, motion_graphics, caption_keywords, caption_position_changes. Every component looks up its target word's arc position in arc_segments and matches that position's treatment. If a component makes you want to revise the arc — STOP, revise arc_segments first, then place the component against the revised arc. Every component references an arc state you committed to — the committed arc is the vocabulary components draw from.
+**Stage 4 — COMPONENT PLACEMENTS.** Before placing anything, run the REFERENT MINE: walk the kept transcript once and list every concrete noun, visible scene, number, name, brand, quoted line, phone event, and story turn the dialogue contains. That list is your shopping list — each entry is a candidate B-roll, MG, or peak. The mine guarantees every candidate was FOUND; whether each is PLACED is then a judgment against the extend test and its why — an unplaced referent is a decision, not a failure. Then emit: emphasis_moments (each optionally carrying its zoom, sound, and motion_graphic), text_overlays, broll_clips, motion_graphics, caption_keywords, caption_position_changes. Every component looks up its target word's arc position in arc_segments and matches that position's treatment. If a component makes you want to revise the arc — STOP, revise arc_segments first, then place the component against the revised arc. Every component references an arc state you committed to — the committed arc is the vocabulary components draw from.
 
 ═══════════════════════════════════════════════════════════════════════════
 ARC SPINE — what each position is FOR, and what it gets
@@ -4128,7 +4128,7 @@ The plan reads the video's phases and sets each phase's energy from the footage:
 
   • **close** (last 1-5 words, intensity 0.6-0.9) — the viewer is deciding whether to rewatch; the platform auto-loops. Feeling: the loop CLOSING. Treatment: callback. Echo the hook — same zoom personality at lower intensity, callback MG content if the hook had one, parallel caption emphasis. If the hook was a SnapReframe, the close mirrors with a SnapReframe. The callback IS the satisfaction that earns the replay. End on the close beat so the platform's loop lands clean — the rendered loop itself carries the moment out.
 
-The map names the character IF a turn earns a transition at that shift — the map is an offer, and the earned turn is what redeems it. Transitions between positions take their flavor from the shift: build → mid_peak accelerates (ZoomThrough, CardSwipe) · mid_peak → build descends (SlideOver, CrossfadeZoom) · build → build chapter shifts are structured (SlideOver, StepPush) · peak → peak is sharp (ShutterFlash, CardSwipe) · build → payoff accelerates HARD (on a cut boundary: ZoomThrough, the most committed transition in the video; on a tight boundary the same acceleration lands as a ShutterFlash overlay plus a zoom punch on the first word) · payoff → close is calm (CrossfadeZoom or none) · breather → anything is minimal or none. When register and arc-position suggest different answers, arc-position wins — that's the spine talking. Every type named in this map plays by the boundary lists — the arc shift picks the energy, and the boundary class picks whether that energy arrives as the named transition or as its overlay-plus-zoom equivalent.
+The map names the character IF a turn earns a transition at that shift — the map is an offer, and the earned turn is what redeems it. Transitions between positions take their flavor from the shift: build → mid_peak accelerates (ZoomThrough, CardSwipe) · mid_peak → build descends (SlideOver, CrossfadeZoom) · build → build chapter shifts are structured (SlideOver, StepPush) · peak → peak is sharp (ShutterFlash, CardSwipe) · build → payoff accelerates HARD (on a cut boundary: ZoomThrough, the most committed transition in the video; on a tight boundary the same acceleration lands as a ShutterFlash overlay plus a zoom punch on the first word) · payoff → close is calm (CrossfadeZoom or none) · breather → anything is minimal or none. When register and arc-position suggest different answers, arc-position wins — that's the spine talking. Every type named in this map plays by the seam pass's physics — the arc shift picks the energy, and each seam's real room picks whether that energy arrives as the named transition or as its overlay-plus-zoom equivalent.
 
 EXAMPLE arc_segments for a 30-second video with 2 mid-peaks:
 
@@ -4193,7 +4193,7 @@ LAYER RESPONSIBILITIES — which component owns which job
   emphasis_moments — AUDIENCE REACTION. The camera is the default instrument and the zoom punctuates the moment that earned it; when the camera is held still, a committing sound and a held caption carry that same weight across.
   motion_graphics  — VISUAL CLAIMS. Renders the off-camera thing the speaker referenced.
   text_overlays — FRAMING. A chapter label, a hook eyebrow, editorial context — words ABOUT the moment, while captions carry the words OF it.
-  sound_effects — SONIC PUNCTUATION under a visual event. Rides outside the window system, always paired with the visual it punctuates.
+  sounds (emphasis riders) — SONIC PUNCTUATION riding a beat: the emphasis's `sound` field, or a transition's rider. Rides outside the window system; the beat it rides is its visual partner.
   broll_clips      — the OFF-SCREEN REFERENT as a full-frame shot.
   transitions      — CUT-BOUNDARY PUNCTUATION for the few splices that mark a turn; the rest read intentional as clean cuts.
 
@@ -4482,7 +4482,7 @@ An emphasis moment is a PEAK — a moment the viewer will physically react to, n
 
 A zoom does one of two jobs. EMPHASIS zooms map 1:1 to key_moments — they are the ledger of the video's loudest beats, and every one carries its moment. MASK zooms are functional: the small punch on the first word after a hard splice that carries the eye across the jump. They serve the boundary, live outside the moment ledger, and stay small — SnapReframe or StepZoom scale, under a second. A mask zoom CLAIMS the arc position of the word it sits on — build/breather claims exist for exactly this job, and offer nothing else.
 
-Pick each emphasis by the AUDIENCE REACTION it earns with sound on: laugh = punchline, gasp = revelation, nod = statement, empathy = reaction, lean-in = question. Two beats side-by-side are usually revelation then reaction — the fact arriving, then the speaker responding — and they want different cameras: weight for the revelation (LetterboxPush when the revelation IS the payoff; at a mid-peak the snap pair carries it), snap for the reaction.
+Pick each emphasis by the AUDIENCE REACTION it earns with sound on: laugh = punchline, gasp = revelation, nod = statement, empathy = reaction, lean-in = question. Two beats side-by-side are usually revelation then reaction — the fact arriving, then the speaker responding — and they want different cameras: weight for the revelation (LetterboxPush when the revelation IS the payoff; at a mid-peak the snap pair — SnapReframe or StepZoom — carries it), snap for the reaction.
 
 **Zoom personality by arc position** (this rule outranks "what feels punchy") — the schema pairs each claimed position with the zoom types that live there; what remains yours is the WHY:
   • hook → GRIP, instant — the viewer's thumb is mid-swipe and the snap is what stops it.
@@ -4526,7 +4526,7 @@ Natural durations (for back-timing math): SmoothPush 1200ms · SnapReframe 700ms
 **Per-clip zoom spacing:** the camera must fully play each move (in → hold → out) before the next, so emphasis zooms sharing a clip must sit ≥ the type's natural duration apart (space the anchor words). A 6s clip composes ~3 LetterboxPush moves or ~6 StepZoom moves; past that the motion visibly oscillates.
 
 ──────────────────────────────────────────
-THE 7 ZOOM TYPES
+THE 6 ZOOM TYPES
 ──────────────────────────────────────────
 
 **SmoothPush** — slow deliberate forward glide, cubic ease, the "lean in to hear better" move. For statements of weight, revelations wanting gravity, reflective beats, the payoff.
@@ -4540,7 +4540,6 @@ THE 7 ZOOM TYPES
 
 **LetterboxPush** — center zoom while cinematic bars close from top and bottom; the frame becomes "film" for the moment. For revelations earning cinematic weight, climaxes, heavy reveals.
   Optional props: {{ "maxBarHeight": 0.12 }}
-
 
 **DepthPull** — multi-layer depth zoom with bokeh, edge blur, haze, frame lines. Premium-production claim. For intros, title-sequence energy, atmospheric reveals.
   Optional props: {{ "edgeBlur": 4, "frameLines": true }}
@@ -4560,7 +4559,7 @@ Most videos contain at least the two classic hits: the hook's grab and the line 
 Authoring shape: the emphasis's `sound` field (one of the names below) — timing derives from the beat's word; every sound is trimmed to a zero-silence onset; no offsets to compute. The beat's `viewer_feeling` doubles as the placement's why: it names what makes THIS beat one of the video's hits — why it earned treatment where the beats around it didn't — and the moment it matched. A why that can only name a category has answered "could"; the why answers "why this one".
 
 ──────────────────────────────────────────
-THE 16 SOUNDS — each a defined scenario
+THE 16 SOUNDS + THE BARE VOICE — each a defined moment
 ──────────────────────────────────────────
 
 **boom** — A deep cinematic bass impact with weight and finality. **THE MOMENT:** the video's single heaviest claim — the payoff line the whole video was built to deliver, or the one stat that reframes everything before it. It lands on the word that carries the weight. **WHAT IT DOES:** the floor drops under the sentence; and because it is the one bass hit in the video, the ear measures it against every beat that carried nothing.
@@ -4735,11 +4734,11 @@ Same fragment as Example 3 (kept words 55-62, ~3 seconds → 1-2 windows):
 
   • emphasis_moments: [55] ("And") StepZoom · [58] ("counter") StepZoom ·
     [61] ("wallet") StepZoom
-  • sounds (on beats): 61 boom — the payoff carries the video's one bass hit; the other peaks ride the voice
+  • sounds (on beats): 55 punchsfx · 58 popsfx · 61 boom — every beat carries a hit
   • broll_clips: keyword="man surprised holding stolen wallet realizing
     mistake", start_word_index=59, end_word_index=62
 
-A professional editor rejects this on sight, and the window doctrine names why: this fragment is at most two windows, and the recipe crams SIX events into them while the surrounding windows sit empty — density in the wrong place, mistaken for density. Three zooms in eight words means none registers as the peak; when every word is emphasized, no word is. Four SFX in the same span is noise — the boom loses its weight to the pops competing for the same attention budget. And the B-roll covers the reveal, hiding the reaction face that makes the line work. Each individual choice can cite a rule ("zooms punctuate," "SFX pair with visuals," "B-roll shows the referent") — which is exactly the lesson: locally-justified components stacked into one window still produce a broken edit. The window is the unit of intent, not the component.
+A professional editor rejects this on sight, and the window doctrine names why: this fragment is at most two windows, and the recipe crams SEVEN placements into them while the surrounding windows sit empty — density in the wrong place, mistaken for density. Three zooms in eight words means none registers as the peak; when every word is emphasized, no word is. Three sounds in the same span is noise — the boom loses its weight to the pop and punch competing for the same attention budget. And the B-roll covers the reveal, hiding the reaction face that makes the line work. Each individual choice can cite a rule ("zooms punctuate," "SFX pair with visuals," "B-roll shows the referent") — which is exactly the lesson: locally-justified components stacked into one window still produce a broken edit. The window is the unit of intent, not the component.
 
 ──────────────────────────────────────────
 REJECTED RECIPE C — the DECORATED edit (product pitch, cleanup request)
@@ -4805,7 +4804,7 @@ These are the mechanics the render depends on — the physics of the frame, the 
     boom is the one to reserve — a single deep impact on the biggest moment
     reads harder than a repeated one.
 
-**VARIETY:** every zoom type, transition type, and SFX sound stays at or under 60% of its category's events — the mix is what keeps each firing feeling chosen. If 4 of 5 emphases share one zoom type,
+**VARIETY:** every zoom type and SFX sound stays at or under 60% of its category's events — the mix is what keeps each firing feeling chosen. If 4 of 5 emphases share one zoom type,
 re-read those moments — at least one is doing something different.
 
 **TIEBREAKER — the window decides, not temperament:**
@@ -4903,6 +4902,7 @@ Output is a bare JSON object — the response is JSON-parsed and the parser is t
         "type": <the claimed position's offering — the schema knows>,
         "originX": float, "originY": float         // ONLY for non-face zoom targets; omit for faces — the face-lock aims. durationMs/scale likewise omitted unless a beat genuinely wants a non-default feel.
       }} | null,
+      "sound": <one of the 16 sounds — see THE SOUNDS> | null,   // the hook's grab and the payoff's landing are the usual two; a voice-carried beat omits it
       "motion_graphic": {{ "type": <MG type>, "anchor": <semantic zone>, "props": {{...}} }} | null   // almost always null
     }}
   ],
@@ -5015,9 +5015,9 @@ Every anchor field references the kept-only index space [0..M-1] shown in the tr
             "transition, because those weren't asked for. Stay disciplined.\n\n"
             "4) The full editorial vocabulary from the rules above still applies. "
             "Components you ADD must follow the same placement rules (zoom-on-key-"
-            "moments, transition-on-CUT-BOUNDARIES, tight_cut_overlay-on-TIGHT-"
-            "BOUNDARIES with the per-type duration, "
-            "etc.). You can't bypass the rules by citing the prior plan; the prior "
+            "moments, MG grounding and anchor geometry, "
+            "etc.); transitions and tight-cut overlays are owned by the dedicated "
+            "seam pass and are not added here. You can't bypass the rules by citing the prior plan; the prior "
             "plan is a default, not a license.\n\n"
             "5) The video's transcript / signals / face data below are FRESH — the "
             "pipeline regenerated all of it from the source. Word indices in the "
@@ -5108,7 +5108,7 @@ already follow) and return when the face leads again."""
             "zoom": "Hold every shot at a steady, locked framing — let the performance and the cutting carry the emphasis; leave each emphasis_moment's zoom_effect empty.",
             "broll": "Keep this edit entirely on-camera and b-roll-free — carry every moment with the speaker, the captions, and emphasis; emit an empty broll_clips array.",
             "motion_graphics": "Keep this edit free of motion graphics — deliver information through the speaker and the captions; emit an empty motion_graphics array and leave every emphasis_moment's motion_graphic empty.",
-            "sfx": "Let the natural production audio carry the edit — emit an empty sound_effects array.",
+            "sfx": "Let the natural production audio carry the edit — no emphasis moment carries its sound field, and no transition carries a rider sound.",
             "transitions": "Let every cut land clean and direct, each shot meeting the next on a straight cut — emit empty transitions and tight_cut_overlays arrays.",
             "text_overlays": "Carry supporting words through the captions rather than overlay cards — emit an empty text_overlays array.",
         }
@@ -8673,7 +8673,17 @@ def _enforce_off_expressive_features(edit_plan, off_features):
         edit_plan["broll_clips"] = []
         removed.append("broll")
     if "sfx" in _off:
+        # Sounds ride beats since 15bc18b (emphasis.sound + the transition
+        # rider); the standalone list survives only as a legacy-replay shape.
+        # Stripping only the list left the ACTUAL authoring surfaces live —
+        # the fragment-integrity wave (Zac rider 2026-07-11) closed the hole.
         edit_plan["sound_effects"] = []
+        for _em in (edit_plan.get("emphasis_moments") or []):
+            if isinstance(_em, dict) and _em.get("sound") is not None:
+                _em["sound"] = None
+        for _tr in (edit_plan.get("transitions") or []):
+            if isinstance(_tr, dict):
+                _tr.pop("sound", None)
         removed.append("sfx")
     if "text_overlays" in _off:
         edit_plan["text_overlays"] = []
@@ -10405,7 +10415,10 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                                         _ent = {"after_word_index": int(_e2["after_word_index"]),
                                                 "type": str(_e2["type"]),
                                                 "why": str(_e2.get("why") or "")}
-                                        if _e2.get("sound"):
+                                        # rider sound honors EditPolicy sfx-off
+                                        # (the sub-call runs AFTER the Step-2
+                                        # enforcement pass, so gate here).
+                                        if _e2.get("sound") and "sfx" not in _ep_off:
                                             _ent["sound"] = str(_e2["sound"])
                                         _new_trs.append(_ent)
                                 _new_ovl = []
@@ -12963,11 +12976,12 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None)
         "        type (default SmoothPush if unspecified, with the payoff matched to its arc role),\n"
         "        and a matching key_moment in video_plan.\n"
         "  • 'add a transition at the chapter break' / 'add a DipToBlack after the setup'\n"
-        "      → (transitions are authored in the dedicated seam pass — not repairable here)\n"
-        "        named (or inferred-by-character) type.\n"
+        "      → transitions are authored in the dedicated seam pass — not addable here;\n"
+        "        acknowledge the ask in notes and leave the plan's transitions untouched.\n"
         "  • 'add a tight_cut_overlay at K' / 'add a LightLeak at the pivot'\n"
-        "      → append a new tight_cut_overlays entry with after_word_index from the TIGHT\n"
-        "        BOUNDARIES list. Overlays carry after_word_index and type only — no other fields.\n"
+        "      → append a new tight_cut_overlays entry with after_word_index at the named cut\n"
+        "        (the pipeline validates it sits on a real tight boundary). Overlays carry\n"
+        "        after_word_index and type only — no other fields.\n"
         "  • 'add a B-roll over words K-M of <subject>' / 'add a cutaway showing X'\n"
         "      → append a new broll_clips entry with start_word_index=K, end_word_index=M, and a\n"
         "        keyword + reason field. The picker will resolve the keyword to a real clip later.\n"
