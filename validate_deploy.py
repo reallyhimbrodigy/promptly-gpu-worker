@@ -2194,13 +2194,13 @@ def _recipe_eval_imports():
     assert hasattr(recipe_eval, "Report")
 
 
-@check("zoom static-anyOf: four position-claimed zoom variants (claim ON the zoom — the compiling shape); no build/breather claim exists; payoff = committed-push only; events unrepresentable; homes tile the registry; STATIC")
+@check("zoom static-anyOf: six position-claimed zoom variants; build/breather = the MASK FORM only (snap pair, <=1s, mask scale); payoff = committed-push only; events unrepresentable; homes tile the registry; STATIC")
 def _zoom_static_anyof():
     sch = handler._post_cuts_response_schema()
     ze = sch["$defs"]["_EmphasisMoment"]["properties"]["zoom_effect"]["anyOf"]
     variants = [b for b in ze if "$ref" in b]
     assert ze[-1] == {"type": "null"}, "zoom_effect must remain nullable"
-    assert len(variants) == 4, f"expected 4 claim variants, got {len(variants)}"
+    assert len(variants) == 6, f"expected 6 claim variants, got {len(variants)}"
     by_pos = {}
     for b in variants:
         d = sch["$defs"][b["$ref"].split("/")[-1]]
@@ -2210,8 +2210,21 @@ def _zoom_static_anyof():
         assert "events" not in d["properties"], "events array must be unrepresentable"
         assert set(d["properties"]) == {"arc_position", "type"} | set(handler._ZOOM_OVERRIDE_FIELDS), \
             "zoom variant fields = claim + type + the flat override payload"
-    assert set(by_pos) == set(handler.ZOOM_ARC_HOMES) == {"hook", "mid_peak", "payoff", "close"}, \
-        "a zoom claiming build/breather must not exist"
+    assert set(by_pos) == set(handler.ZOOM_ARC_HOMES) == {
+        "hook", "build", "mid_peak", "payoff", "breather", "close"}, \
+        "every position carries a claim variant (mask form on build/breather)"
+    for pos in handler.ZOOM_MASK_POSITIONS:
+        d = by_pos[pos]
+        assert sorted(d["properties"]["type"]["enum"]) == ["SnapReframe", "StepZoom"], \
+            f"{pos} must offer EXACTLY the mask pair"
+        assert d["properties"]["durationMs"].get("maximum") == 1000, \
+            f"{pos} mask form: durationMs <= 1000 (under a second)"
+        _msc = max(handler.ZOOM_NATURAL_SCALE[t] for t in ("SnapReframe", "StepZoom"))
+        assert d["properties"]["scale"].get("maximum") == _msc, \
+            f"{pos} mask form: scale ceiling = the snap pair's natural max ({_msc})"
+    for pos in ("hook", "mid_peak", "payoff", "close"):
+        assert "maximum" not in by_pos[pos]["properties"]["durationMs"], \
+            "mask ceilings must not leak onto punctuation positions"
     housed = set()
     for pos, d in by_pos.items():
         got = d["properties"]["type"]["enum"]
@@ -4852,6 +4865,16 @@ def _k4_future_drift_guard():
     assert len(_reads) >= 15, (
         f"guard parsed only {len(_reads)} render-path _-key reads — the "
         f"render_multi_clip scope detection or the read regex has drifted")
+
+
+@check("MG empty-props: drops the ONE component + ledgers (K7 at the generate layer) — never a plan-nuking raise")
+def _mg_empty_props_drop():
+    _src = open("handler.py").read()
+    assert "drop_empty_props" in _src, "the empty-props drop + ledger must exist"
+    assert "props are empty — every component carries its own" not in _src, \
+        "the plan-nuking raise text must stay deleted"
+    assert _src.index("drop_empty_props") < _src.index('raise ValueError("\\n".join(_mg_violations))'), \
+        "the drop must fire before the batch raise (never enter it)"
 
 
 @check("A1/A2 rider sound: fires at the transition's rendered slot frame; dead event → no sound (structural)")

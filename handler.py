@@ -488,24 +488,37 @@ _ZOOM_TYPES = Literal[tuple(sorted(VALID_ZOOM_TYPES))]
 # chosen over silent extinction): DepthPull→hook ("intros, title-sequence
 # energy"); StageZoom→mid_peak ("weight for the revelation", the two-stage
 # escalation); FocusWindow→mid_peak ("specialty: a detail AND its context" —
-# condition-based, weakest evidence). FLAGGED tension: the taught MASK zoom
-# (snap pair on the first word after a splice) is unsayable when that word
-# sits in build/breather — the seam's energy routes to caption/SFX there.
+# condition-based, weakest evidence). RULED 2026-07-10: all three ACCEPTED
+# as housed, measure-watched — the arc-claim WARN is the watchdog; a wrong
+# read in the census is a one-line edit here, with evidence.
+# THE MASK RULING (Zac ⚑4, 2026-07-10): build/breather carry a claim variant
+# whose form is EXACTLY the mask — the small eye-carry across a splice (the
+# snap pair, under a second, mask scale). The mask is SPLICE MECHANICS, not
+# arc punctuation, and splices land everywhere — extinction on build (most
+# of most videos' runtime) would have silently killed the tight-seam
+# treatment. Punctuation zooms stay unrepresentable there: the mask variant
+# offers nothing but the mask form.
 ZOOM_ARC_HOMES = {
     "hook":     ("DepthPull", "SnapReframe", "StepZoom"),
     "mid_peak": ("FocusWindow", "SnapReframe", "StageZoom", "StepZoom"),
     "payoff":   ("LetterboxPush", "SmoothPush"),
     "close":    ("SmoothPush", "SnapReframe", "StepZoom"),
+    "build":    ("SnapReframe", "StepZoom"),
+    "breather": ("SnapReframe", "StepZoom"),
 }
-_ZOOMLESS_ARC_POSITIONS = ("build", "breather")
+# The mask positions: their variants carry the mask form's OWN constraints
+# (durationMs ≤ 1000 — "under a second"; scale ≤ the snap pair's natural —
+# "stays small"), derived from ZOOM_NATURAL_SCALE, never hand-copied.
+ZOOM_MASK_POSITIONS = ("build", "breather")
 # Import-time exactness (the 76ad30b lesson): the homes must tile the registry
 # — every registry type housed somewhere (no silent extinction), no stranger.
 assert {t for _h in ZOOM_ARC_HOMES.values() for t in _h} == set(VALID_ZOOM_TYPES), (
     "ZOOM_ARC_HOMES must house exactly the zoom registry: "
     f"{sorted({t for _h in ZOOM_ARC_HOMES.values() for t in _h}) } vs {sorted(VALID_ZOOM_TYPES)}")
-assert set(ZOOM_ARC_HOMES) | set(_ZOOMLESS_ARC_POSITIONS) == {
+assert set(ZOOM_ARC_HOMES) == {
     "hook", "build", "mid_peak", "payoff", "breather", "close"}, (
-    "arc-home positions + zoomless positions must tile the _ArcPosition vocabulary")
+    "every arc position carries a claim variant (mask form on build/breather)")
+assert all(_p in ZOOM_ARC_HOMES for _p in ZOOM_MASK_POSITIONS)
 # Natural duration per zoom type (ms). When Gemini omits durationMs from a
 # zoom event, the pipeline fills in the per-type natural duration so the
 # camera move plays at the look it was designed for. This removes a degree
@@ -4394,7 +4407,7 @@ An emphasis moment is a PEAK — a moment the viewer will physically react to, n
 
 **Peaks must differ in WEIGHT, not just type.** A real edit has a rhythm of sizes: ONE deepest moment (the payoff — the line the video exists to deliver), a few mid-peaks that punctuate without competing with it, and a hook that grips. Look at your emphasis list as a SET before finalizing: if more than half share one type, or they're all "high" intensity, or they're spaced evenly end-to-end, you haven't found the real peaks — you've highlighted the transcript. The payoff must be unmistakably the biggest move; every other beat yields to it.
 
-A zoom does one of two jobs. EMPHASIS zooms map 1:1 to key_moments — they are the ledger of the video's loudest beats, and every one carries its moment. MASK zooms are functional: the small punch on the first word after a hard splice that carries the eye across the jump. They serve the boundary, live outside the moment ledger, and stay small — SnapReframe or StepZoom scale, under a second.
+A zoom does one of two jobs. EMPHASIS zooms map 1:1 to key_moments — they are the ledger of the video's loudest beats, and every one carries its moment. MASK zooms are functional: the small punch on the first word after a hard splice that carries the eye across the jump. They serve the boundary, live outside the moment ledger, and stay small — SnapReframe or StepZoom scale, under a second. A mask zoom CLAIMS the arc position of the word it sits on — build/breather claims exist for exactly this job, and offer nothing else.
 
 Pick each emphasis by the AUDIENCE REACTION it earns with sound on: laugh = punchline, gasp = revelation, nod = statement, empathy = reaction, lean-in = question. Two beats side-by-side are usually revelation then reaction — the fact arriving, then the speaker responding — and they want different cameras: weight for the revelation (the committed family — StageZoom at a mid-peak; LetterboxPush when the revelation IS the payoff), snap for the reaction.
 
@@ -4403,7 +4416,7 @@ Pick each emphasis by the AUDIENCE REACTION it earns with sound on: laugh = punc
   • mid_peak → PUNCTUATION, quick in/out — sized to its moment exactly; a real peak, not THE peak.
   • payoff → COMMITMENT: the slowest and deepest move of the video, holds to the end. The slow commitment is the only thing that makes it feel bigger than the beats before it — a snap would read as just another mid-peak. Any zoom in the seconds immediately after the payoff steps on the moment you just earned.
   • close → CALLBACK: echo the hook's personality at lower intensity; for a zoom-free hook, a confident lock-in. A close within 1.5s of the payoff word rides the payoff's resolution instead — validation keeps the payoff of any peak pair inside 2s, so the resolution IS the close's motion there.
-  • build / breather → the camera holds — a zoom there does not exist to be written. The flat is doing work — it's what the next peak lands against, and a viewer needs the still frame to feel the push when it comes.
+  • build / breather → the camera holds; the ONLY zoom sayable there is the MASK — the small eye-carry on the first word after a splice (snap pair, under a second), serving the boundary, not the beat. The flat is doing work — it's what the next peak lands against, and a viewer needs the still frame to feel the push when it comes.
 
 **The weight belongs to the moment first, and the camera is its first instrument.** A peak's weight is set by what the moment is doing — the laugh, the gasp, the line the video exists to deliver — and the camera is the first instrument that serves it. So when the camera is held still on a beat that already earns its place in `key_moments`, the weight still lands; it simply moves to the instruments that remain. Carry the same emphasis intent across: let a committing sound do the pushing (the boom on the payoff word), let the caption hold and go big on that word, let a stat land on the syllable it names. Read the moment's intended feeling first, then ask which available instrument delivers it here — a payoff with the camera held still still commits, through sound and a held caption, and the viewer feels the same weight arrive. This carries the intent to instruments you already own; the peak set stays exactly the 3-5 you committed in `key_moments`, build/breather words stay clear, and only the routing changes when the camera is the one tool that's quiet.
 
@@ -4422,7 +4435,7 @@ Entry shape:
     "intensity": "high" | "medium",
     "duration": float,              # 1.5-3.0 output-seconds the visual hit lasts
     "viewer_feeling": "<one specific phrase: the feeling this moment produces in the viewer>",
-    "zoom_effect": {{ "arc_position": <the arc position this zoom serves — your CLAIM, same vocabulary as arc_segments>, "type": <a type that position offers> }} | null,   // word-anchored; the pipeline times it. A zoom cannot claim build/breather — those positions hold the camera still.
+    "zoom_effect": {{ "arc_position": <the arc position this zoom serves — your CLAIM, same vocabulary as arc_segments>, "type": <a type that position offers> }} | null,   // word-anchored; the pipeline times it. A build/breather claim offers ONLY the mask form — the small eye-carry on the first word after a splice; arc punctuation there is unsayable.
     "motion_graphic": {{...}} | null   # the zoom is the camera's punctuation; a graphic joins it when the moment names something the camera cannot show
   }}
 
@@ -4808,7 +4821,7 @@ Output is a bare JSON object — the response is JSON-parsed and the parser is t
       "duration": float,                          // 1.5-3.0 output-seconds
       "viewer_feeling": "<one specific phrase>",
       "zoom_effect": {{
-        "arc_position": "hook" | "mid_peak" | "payoff" | "close",   // your claim — the position this zoom serves; each offers its own types (build/breather offer none)
+        "arc_position": "hook" | "build" | "mid_peak" | "payoff" | "breather" | "close",   // your claim — the position this zoom serves; each offers its own types (build/breather: ONLY the mask form)
         "type": <the claimed position's offering — the schema knows>,
         "originX": float, "originY": float         // ONLY for non-face zoom targets; omit for faces — the face-lock aims. durationMs/scale likewise omitted unless a beat genuinely wants a non-default feel.
       }} | null,
@@ -8131,9 +8144,11 @@ _ZOOM_OVERRIDE_FIELDS = {"durationMs": "integer", "scale": "number",
 def _zoom_claim_variants():
     """The zoom static-anyOf, at the surface it governs: four tiny variants,
     each pairing arc_position (const — Gemini's authored CLAIM) with that
-    position's sayable types from ZOOM_ARC_HOMES. No build/breather variant
-    exists: a zoom cannot CLAIM those positions — unrepresentable, not
-    dropped (an MG-only emphasis there stays legal and carries no claim).
+    position's sayable types from ZOOM_ARC_HOMES. build/breather variants
+    offer EXACTLY the mask form (Zac ruling 2026-07-10): the snap pair with
+    the mask's own duration/scale ceilings — splice mechanics stays sayable
+    at every splice; arc punctuation there stays unrepresentable. An MG-only
+    emphasis stays legal and carries no claim.
     Claim honesty (the position vs the anchor word's arc segment) is
     judgment — measured by recipe_eval's arc-claim WARN, never gated.
 
@@ -8147,11 +8162,19 @@ def _zoom_claim_variants():
     moved here: same guarantees, compiling grammar. STATIC: same dict every
     job (R3 — the cache key moves exactly once, at deploy)."""
     _variants = []
-    for _pos in ("hook", "mid_peak", "payoff", "close"):
+    _mask_scale_max = max(ZOOM_NATURAL_SCALE[_t]
+                          for _t in ZOOM_ARC_HOMES["build"])
+    for _pos in ("hook", "build", "mid_peak", "payoff", "breather", "close"):
         _props = {"arc_position": {"type": "string", "enum": [_pos]},
                   "type": {"type": "string", "enum": sorted(ZOOM_ARC_HOMES[_pos])}}
         for _f, _t in _ZOOM_OVERRIDE_FIELDS.items():
             _props[_f] = {"type": _t}
+        if _pos in ZOOM_MASK_POSITIONS:
+            # The mask form's own physics: under a second, mask scale. The
+            # constraints bind only explicit overrides — the naturals of the
+            # snap pair already satisfy both.
+            _props["durationMs"] = {"type": "integer", "maximum": 1000}
+            _props["scale"] = {"type": "number", "maximum": _mask_scale_max}
         _variants.append({"type": "object", "properties": _props,
                           "required": ["arc_position", "type"]})
     return _variants
@@ -11196,13 +11219,27 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                 # is the semantic half — the repair net gets the model to
                 # rewrite with real grounded props.
                 if not (_mg.get("props") or {}):
-                    _mg_violations.append(
-                        f"MG {_mg_type} at word {_mg.get('start_word_index')}: "
-                        f"props are empty — every component carries its own "
-                        f"grounded content (labels, values, tags drawn from "
-                        f"the dialogue or what is seen on screen). Rewrite "
-                        f"with real props or remove the component."
+                    # RECLASSIFIED (Zac 2026-07-10, K7's class at the generate
+                    # layer): an empty dict has nothing to rewrite FROM — a
+                    # raise here burned a full pass-2 re-ask (video re-sent) +
+                    # a transitions sub-call re-run, then nuked the whole
+                    # valid plan to safe-edit on exhaustion (convicted live:
+                    # zoomproof zac run 1). The one component DROPS, ledgered;
+                    # the plan survives. Renderers stay fail-closed; the
+                    # grounding teach stays in the prompt (educate, and floor).
+                    print(
+                        f"[generate-edit] DROP motion_graphic '{_mg_type}' "
+                        f"[{_i}]: props are empty — nothing to render, "
+                        f"nothing to rewrite from. Render continues without it.",
+                        flush=True,
                     )
+                    _record_divergence(
+                        "motion_graphic",
+                        {"type": _mg_type,
+                         "word_index": _mg.get("start_word_index")},
+                        "drop_empty_props",
+                        reason="empty props dict — grounding miss dropped at "
+                               "the component, never raised at the plan")
                     continue
                 try:
                     _sw = int(_mg["start_word_index"])
