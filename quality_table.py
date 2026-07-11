@@ -24,6 +24,16 @@ app = modal.App("promptly-quality-table", image=image,
                 secrets=[modal.Secret.from_name("promptly-secrets")])
 
 
+# OCCURRENCE records (never deduped — each one is a real second/dollar):
+OCCURRENCE_RULES = {
+    "recipe_repair:repair_reask",
+    "recipe_transport:gemini_degen_tail",
+    "render:video_reference_fallback",
+    "recipe:safe_edit_fallback",
+    "render:render_stripped",
+}
+
+
 @app.function(timeout=600, cpu=4, memory=8192, region=["us-west", "us-east"])
 def run(days: int = 7):
     import boto3, json, datetime
@@ -52,23 +62,28 @@ def run(days: int = 7):
     for k in keys:
         n_jobs += 1
         body = s3.get_object(Bucket=bucket, Key=k)["Body"].read().decode("utf-8", "replace")
-        # DEDUP (rule audit 2026-07-10): records written inside the repair
-        # loop double-write on re-attempts (convicted in both audits — the
-        # ×9 was 5, the ×12 was 6). Records carry a wall-clock `t`, so the
-        # dedup keys on the record MINUS its timestamp; identical events
-        # within one job collapse to one — only the shipped plan's story
-        # counts.
+        # DEDUP SEMANTICS (Zac ruling 2026-07-10) — two record species:
+        #   OBSERVATION — a property of the final plan/timeline (recipe_eval
+        #     rules, cut_boundary geometry, ...): repair re-attempts re-observe
+        #     the same property, so identical records (minus wall-clock t)
+        #     collapse — only the shipped plan's story counts.
+        #   OCCURRENCE — a real event, a real second, a real dollar
+        #     (repair re-asks, degen fires, reference fallbacks, safe edits,
+        #     render strips): NEVER deduped — the weekly repair fire-rate is
+        #     a latency line item and must be the attempt count.
         _seen = set()
         for line in body.splitlines():
             try:
                 rec = json.loads(line)
             except Exception:
                 continue
-            _k = json.dumps({k2: v2 for k2, v2 in rec.items() if k2 != "t"},
-                            sort_keys=True, default=str)
-            if _k in _seen:
-                continue
-            _seen.add(_k)
+            _rule_key = f"{rec.get('component')}:{rec.get('action')}"
+            if _rule_key not in OCCURRENCE_RULES:
+                _k = json.dumps({k2: v2 for k2, v2 in rec.items() if k2 != "t"},
+                                sort_keys=True, default=str)
+                if _k in _seen:
+                    continue
+                _seen.add(_k)
             comp = str(rec.get("component") or "?")
             act = str(rec.get("action") or "?")
             rule = f"{comp}:{act}"
@@ -83,7 +98,7 @@ def run(days: int = 7):
             if r and len(samples[rule]) < 2 and r not in samples[rule]:
                 samples[rule].append(r)
     lines = [f"WEEKLY QUALITY TABLE — last {days}d · {n_jobs} job ledger(s) · "
-             f"{sum(counts.values())} record(s) (repair-attempt duplicates collapsed)", "=" * 78]
+             f"{sum(counts.values())} record(s) (observations deduped; occurrences counted raw)", "=" * 78]
     for rule, n in counts.most_common():
         lines.append(f"{n:>5}  {rule}")
         st = ", ".join(f"{s}×{c}" for s, c in by_style[rule].most_common(3))

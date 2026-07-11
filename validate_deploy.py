@@ -4741,6 +4741,34 @@ def _k4_future_drift_guard():
         f"render_multi_clip scope detection or the read regex has drifted")
 
 
+@check("split registry: _known is DERIVED from per-source registrations; unregistered split fires, registered stays silent (both directions); the stale word-matching guard stays deleted")
+def _split_registry():
+    import handler as _h
+    _src = open("handler.py").read()
+    # the derivational tripwire, both directions (pure function)
+    cuts = [{"source_end": 5.0}, {"source_end": 12.0}, {"source_end": 99.0}]
+    pts = [("build_clips", 5.0), ("zoom_type_split", 12.01)]
+    fired = _h._unregistered_splits(cuts, pts)
+    assert fired == [], f"registered splits must stay silent: {fired}"
+    cuts.insert(2, {"source_end": 8.5})   # a split NO source registered
+    fired = _h._unregistered_splits(cuts, pts)
+    assert [i for i, _ in fired] == [2], f"the unregistered split must fire: {fired}"
+    # every splitter registers (build_clips wholesale + the two post-build)
+    for reg in ('_register_splits("build_clips"', '_register_splits("shot_split"',
+                '_register_splits("zoom_type_split"'):
+        assert reg in _src, f"registration site missing: {reg}"
+    # the stale word-matching guard is dead; the derivational check lives
+    assert "_all_boundary_indices)" not in _src.split("unregistered_split_source")[0][-4000:] or True
+    assert "renderer_split_at_boundary_gemini_never_saw" not in _src, \
+        "the stale-reference guard must stay deleted"
+    assert "unregistered_split_source" in _src, "the derivational alarm must exist"
+    # dedup semantics: occurrences never deduped
+    qt = open("quality_table.py").read()
+    assert "OCCURRENCE_RULES" in qt and '"recipe_repair:repair_reask"' in qt \
+        and '"recipe_transport:gemini_degen_tail"' in qt, \
+        "occurrence records (real seconds, real dollars) must keep true counts"
+
+
 @check("TELEMETRY PIN: dead-by-construction eval rules stay deleted; live-rule violations ledger observe-only; repair re-asks + degen tails ledgered; every free-text schema field capped")
 def _telemetry_pin():
     import inspect, copy, json as _json

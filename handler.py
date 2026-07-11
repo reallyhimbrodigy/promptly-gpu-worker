@@ -8419,6 +8419,39 @@ def _scene_floor_rotation(current_types):
 # died with its only call site. ──
 
 
+# ── SPLIT REGISTRY (clip_split ruling, Zac 2026-07-10: FEED, derivational) ──
+# Every mechanism that creates a clip boundary REGISTERS its split points
+# here (the _LAST pattern; reset per job at build_clips exit registration).
+# _known is DERIVED per job from these registrations — no hand-maintained
+# list, no future staleness: a new mechanism cannot split silently without
+# ALSO failing to self-report, and that failure IS the fire.
+_SPLIT_REGISTRY_LAST = {"points": []}
+
+
+def _register_splits(source, times, reset=False):
+    """Register split points (source-time seconds) created by `source`."""
+    try:
+        if reset:
+            _SPLIT_REGISTRY_LAST["points"] = []
+        _SPLIT_REGISTRY_LAST["points"].extend(
+            (str(source), float(t)) for t in (times or []))
+    except Exception:
+        pass
+
+
+def _unregistered_splits(cuts, points, tol_s=0.03):
+    """Pure checker: internal boundaries of `cuts` with NO registered point
+    within tol — the true unregistered-source alarm. Returns
+    [(cut_index, source_end_seconds)]."""
+    _times = [t for (_, t) in (points or [])]
+    _out = []
+    for _i in range(max(0, len(cuts or []) - 1)):
+        _e = float((cuts[_i] or {}).get("source_end") or 0.0)
+        if not any(abs(_e - _t) <= tol_s for _t in _times):
+            _out.append((_i, _e))
+    return _out
+
+
 def _record_divergence(component, original, action, *, final=None, reason=""):
     """Single grep-stable log line for any post-Gemini drop / coerce / clamp /
     withhold / override.
@@ -10140,6 +10173,9 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                     within_clip_15ms=_WITHIN_CLIP_DEADAIR,
                     level_silences=list(_LEVEL_SILENCES_LAST))
                 edit_plan["_removed_word_indices"] = sorted(_removed_word_indices or [])
+                _register_splits("build_clips",
+                                 [float(_c.get("source_end") or 0.0)
+                                  for _c in validated_cuts[:-1]], reset=True)
 
                 # ── A1/A2 TRANSITIONS SUB-CALL wire-in (room-domain corrected) ──
                 # Single ownership: the sub-call authors transitions + tight-cut
@@ -10362,6 +10398,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                             flush=True,
                         )
                     _split_times = sorted({_st for (_, _st) in _gated_pairs})
+                    _register_splits("shot_split", _split_times)
                     if _split_times:
                         _new_cuts = []
                         _total_splits = 0
@@ -10392,49 +10429,13 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                             )
                             validated_cuts = _new_cuts
 
-                # ── Cross-check guard: every clip-split boundary must be a known cut ─
-                # The original transitions bug was two boundary sources that never
-                # agreed — the list shown to Gemini (CUT BOUNDARIES + TIGHT BOUNDARIES
-                # union) and the clip-split path inside build_clips_from_words. If the
-                # renderer splits a clip at a kept-word index that's in NEITHER list,
-                # that's a new instance of the same bug class and means a third
-                # boundary source has appeared (or a code path drifted). Loud log
-                # rather than silent jump-cut.
-                try:
-                    if validated_cuts and len(validated_cuts) > 1 and kept_words:
-                        try:
-                            _known = set(_all_boundary_indices)
-                        except NameError:
-                            # kept_words was empty so the boundary block never ran.
-                            # No known boundaries — every split is unknown by definition.
-                            _known = set()
-                        _split_boundaries = set()
-                        for _ci in range(len(validated_cuts) - 1):
-                            _end_t = float(validated_cuts[_ci].get("source_end") or 0.0)
-                            # Find the kept-word whose .end is closest BELOW _end_t.
-                            # One-sided window: the clip end sits AT or ABOVE the
-                            # word end by the boundary's applied release pad
-                            # (PR-delta, <= _RELEASE_PAD_S), so match within
-                            # [-0.02, _RELEASE_PAD_S + 0.10].
-                            _best_ni = None
-                            _best_dist = _RELEASE_PAD_S + 0.10
-                            for _ni, _w in enumerate(kept_words):
-                                _delta = _end_t - float(_w.get("end") or 0.0)
-                                if -0.02 <= _delta <= _best_dist:
-                                    _best_dist = abs(_delta)
-                                    _best_ni = _ni
-                            if _best_ni is not None:
-                                _split_boundaries.add(_best_ni)
-                        for _b in sorted(_split_boundaries - _known):
-                            _record_divergence(
-                                "cut_boundary",
-                                {"kept_word_index": _b},
-                                "clip_split_without_known_boundary",
-                                reason="renderer_split_at_boundary_gemini_never_saw",
-                            )
-                except Exception as _xc_err:
-                    # The guard is observability only — must never break the render.
-                    print(f"[divergence] cross-check guard error: {_xc_err}", flush=True)
+                # ── DELETED (clip_split ruling, Zac 2026-07-10): the word-matching
+                # cross-check guard — its _known set was the pre-pass-2 candidate
+                # union, which postdates NOTHING in the modern cut stack (pacing/
+                # gap-compression splits fired it ×283 as manufactured noise —
+                # the transition-boundary staleness class). Knowledge: the
+                # third-source tripwire survives, DERIVATIONAL, at the final-cuts
+                # check below (the split registry — see _register_splits).
 
                 # Drop caption_position_changes anchored to removed words and
                 # re-derive caption_position_segments. If Gemini happens to anchor
@@ -11913,6 +11914,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
 
             if _zoom_type_split_times:
                 _split_times_sorted = sorted(set(_zoom_type_split_times))
+                _register_splits("zoom_type_split", _split_times_sorted)
                 _new_cuts = []
                 _total_splits = 0
                 for _clip in validated_cuts:
@@ -12532,6 +12534,23 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
 
             # Strip legacy fields that older Gemini outputs (or re-edit plans) may
             # carry. The Remotion-primary pipeline doesn't consume them.
+            # ── UNREGISTERED-SOURCE ALARM (the derivational tripwire) ──
+            # Every boundary in the FINAL timeline must match a registered
+            # split point. A fire = a mechanism split the timeline without
+            # self-reporting — the silent-third-source class, caught by
+            # construction rather than by a hand-maintained list.
+            try:
+                for _ui, _ut in _unregistered_splits(
+                        final_cuts, _SPLIT_REGISTRY_LAST.get("points")):
+                    _record_divergence(
+                        "cut_boundary",
+                        {"cut_index": _ui, "source_end_s": round(_ut, 4),
+                         "generation": "a1a2"},
+                        "clip_split_without_known_boundary",
+                        reason="unregistered_split_source — a mechanism split "
+                               "the timeline without self-reporting")
+            except Exception as _usa_err:
+                print(f"[divergence] split-registry check error: {_usa_err}", flush=True)
             edit_plan["cuts"] = final_cuts
             for _legacy_field in (
                 "teal_orange", "beat_sync", "video_profile", "frame_layout",
