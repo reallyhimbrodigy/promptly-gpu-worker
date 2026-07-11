@@ -2349,45 +2349,6 @@ def _recipe_eval_breather_budget():
     assert "breather-budget" in rule_ids, f"expected breather-budget failure, got: {rule_ids}"
 
 
-@check("recipe_eval flags transition placed at a TIGHT boundary")
-def _recipe_eval_transition_tight():
-    # The new tight_boundaries kwarg must route transitions placed at tight
-    # cuts to the dedicated `transition-tight-boundary` fail (not the
-    # generic `transition-boundary` miss). This exercises the post-bug-fix
-    # eval path: slots-only cut_boundaries + tight_boundaries explicit.
-    import recipe_eval
-    bad_plan = {
-        "video_plan": {
-            "arc_segments": [
-                {"start_word_index": 0, "end_word_index": 1, "position": "hook", "intensity": 0.9},
-                {"start_word_index": 2, "end_word_index": 5, "position": "build", "intensity": 0.4},
-                {"start_word_index": 6, "end_word_index": 7, "position": "payoff", "intensity": 1.0},
-            ],
-            "key_moments": [{"word_index": 1}, {"word_index": 7}],
-            "payoff_word_index": 7,
-            "close_word_index": 7,
-        },
-        "emphasis_moments": [
-            {"word_indices": [1], "zoom_effect": {"type": "SnapReframe", "events": [{"startMs": 0}]}},
-            {"word_indices": [7], "zoom_effect": {"type": "SmoothPush", "events": [{"startMs": 0}]}},
-        ],
-        "transitions": [
-            {"after_word_index": 3, "type": "CardSwipe"},   # at TIGHT boundary
-        ],
-        "broll_clips": [], "motion_graphics": [],
-        "text_overlays": [], "sound_effects": [],
-    }
-    words = [{"word": str(i), "start": i * 0.5, "end": i * 0.5 + 0.4} for i in range(8)]
-    rep = recipe_eval.evaluate_recipe(
-        bad_plan, words, cut_boundaries=[], duration=4.0,
-        tight_boundaries=[3],
-    )
-    rule_ids = {r for (r, _) in rep.failures}
-    assert "transition-tight-boundary" in rule_ids, f"expected transition-tight-boundary, got: {rule_ids}"
-    # Crucially must NOT also fire the generic boundary miss for the same index.
-    assert "transition-boundary" not in rule_ids, "tight should not double-fire as boundary-miss"
-
-
 @check("recipe_eval warns when TIGHT cut has no masking zoom on next word")
 def _recipe_eval_tight_no_mask():
     # Tight cut at word 3 with no emphasis on word 4 → tight-no-mask warning.
@@ -3512,45 +3473,6 @@ def _tco_schema_roundtrip():
     raise AssertionError("FilmStrip should not validate as a tightCutOverlay type")
 
 
-@check("recipe_eval flags tight_cut_overlay carrying title/label extras")
-def _recipe_eval_tco_extras_misuse():
-    # Overlays carry no extra fields — extras on any type must fail.
-    # ShutterFlash) is a hard error — the validator rejects
-    # it. recipe_eval mirrors this as the tight-overlay-extras-misuse rule.
-    import recipe_eval
-    bad_plan = {
-        "video_plan": {
-            "arc_segments": [
-                {"start_word_index": 0, "end_word_index": 1, "position": "hook", "intensity": 0.9},
-                {"start_word_index": 2, "end_word_index": 5, "position": "build", "intensity": 0.4},
-                {"start_word_index": 6, "end_word_index": 7, "position": "payoff", "intensity": 1.0},
-            ],
-            "key_moments": [{"word_index": 1}, {"word_index": 7}],
-            "payoff_word_index": 7,
-            "close_word_index": 7,
-        },
-        "emphasis_moments": [
-            {"word_indices": [1], "zoom_effect": {"type": "SnapReframe", "events": [{"startMs": 0}]}},
-            {"word_indices": [7], "zoom_effect": {"type": "SmoothPush", "events": [{"startMs": 0}]}},
-        ],
-        "transitions": [],
-        "tight_cut_overlays": [
-            {"after_word_index": 3, "type": "LightLeak", "title": "OOPS"},
-        ],
-        "broll_clips": [], "motion_graphics": [],
-        "text_overlays": [], "sound_effects": [],
-    }
-    words = [{"word": str(i), "start": i * 0.5, "end": i * 0.5 + 0.4} for i in range(8)]
-    rep = recipe_eval.evaluate_recipe(
-        bad_plan, words, cut_boundaries=[], duration=4.0,
-        tight_boundaries=[3],
-    )
-    rule_ids = {r for (r, _) in rep.failures}
-    assert "tight-overlay-extras-misuse" in rule_ids, (
-        f"expected tight-overlay-extras-misuse failure, got: {rule_ids}"
-    )
-
-
 @check("recipe_eval accepts valid overlays (active passing path)")
 def _recipe_eval_tco_valid_passes():
     # Valid overlays at TIGHT boundaries should not fire any
@@ -3593,44 +3515,6 @@ def _recipe_eval_tco_valid_passes():
     assert not tco_rules, (
         f"valid ShutterFlash + LightLeak placement should not fail any "
         f"tight-overlay-* rule, got: {tco_rules}"
-    )
-
-
-@check("recipe_eval flags tight_cut_overlay placed at a CUT BOUNDARY")
-def _recipe_eval_tco_wrong_boundary():
-    # Overlay anchored at a CUT BOUNDARY (where transitions live) — must fail.
-    # This is the "wrong boundary type" misuse the prompt warns against.
-    import recipe_eval
-    bad_plan = {
-        "video_plan": {
-            "arc_segments": [
-                {"start_word_index": 0, "end_word_index": 1, "position": "hook", "intensity": 0.9},
-                {"start_word_index": 2, "end_word_index": 5, "position": "build", "intensity": 0.4},
-                {"start_word_index": 6, "end_word_index": 7, "position": "payoff", "intensity": 1.0},
-            ],
-            "key_moments": [{"word_index": 1}, {"word_index": 7}],
-            "payoff_word_index": 7,
-            "close_word_index": 7,
-        },
-        "emphasis_moments": [
-            {"word_indices": [1], "zoom_effect": {"type": "SnapReframe", "events": [{"startMs": 0}]}},
-            {"word_indices": [7], "zoom_effect": {"type": "SmoothPush", "events": [{"startMs": 0}]}},
-        ],
-        "transitions": [],
-        "tight_cut_overlays": [
-            {"after_word_index": 5, "type": "LightLeak"},  # 5 is a CUT BOUNDARY, not TIGHT
-        ],
-        "broll_clips": [], "motion_graphics": [],
-        "text_overlays": [], "sound_effects": [],
-    }
-    words = [{"word": str(i), "start": i * 0.5, "end": i * 0.5 + 0.4} for i in range(8)]
-    rep = recipe_eval.evaluate_recipe(
-        bad_plan, words, cut_boundaries=[5], duration=4.0,
-        tight_boundaries=[3],
-    )
-    rule_ids = {r for (r, _) in rep.failures}
-    assert "tight-overlay-boundary" in rule_ids, (
-        f"expected tight-overlay-boundary failure, got: {rule_ids}"
     )
 
 
@@ -4865,6 +4749,76 @@ def _k4_future_drift_guard():
     assert len(_reads) >= 15, (
         f"guard parsed only {len(_reads)} render-path _-key reads — the "
         f"render_multi_clip scope detection or the read regex has drifted")
+
+
+@check("TELEMETRY PIN: dead-by-construction eval rules stay deleted; live-rule violations ledger observe-only; repair re-asks + degen tails ledgered; every free-text schema field capped")
+def _telemetry_pin():
+    import inspect, copy, json as _json
+    import recipe_eval
+    esrc = inspect.getsource(recipe_eval)
+    # dead-by-construction rules REMOVED (not skipped): the sub-call's const
+    # indices + room pricing made them unsayable or false-firing; the TCO
+    # shape rules police fields the schema cannot express.
+    for dead in ('r.fail("transition-boundary"', 'r.fail("transition-tight-boundary"',
+                 'r.warn("transition-coverage"', 'r.fail("tight-overlay-type"',
+                 'r.fail("tight-overlay-extras-misuse"', 'r.fail("tight-overlay-anchor"',
+                 'r.fail("tight-overlay-boundary"'):
+        assert dead not in esrc, f"dead rule must stay deleted: {dead}"
+    # the surviving taste measures still fire (covered by their own checks:
+    # variety-transition below, tight-overlay-cap check, tight-no-mask check)
+    assert '"variety-transition"' in esrc and '"tight-overlay-cap"' in esrc, \
+        "the surviving taste measures must stay live"
+    # OBSERVE-ONLY, asserted two ways: (1) evaluate_recipe never mutates the
+    # plan — unit with deepcopy; (2) the handler wiring block writes ONLY the
+    # ledger (no assignment into the plan objects).
+    plan = {"video_plan": {"arc_segments": [
+                {"start_word_index": 0, "end_word_index": 3, "position": "hook", "intensity": 0.9},
+                {"start_word_index": 4, "end_word_index": 5, "position": "payoff", "intensity": 1.0}],
+            "key_moments": [{"word_index": 4}], "payoff_word_index": 4, "close_word_index": 5},
+            "emphasis_moments": [{"word_indices": [4],
+                "zoom_effect": {"type": "SmoothPush", "arc_position": "payoff"},
+                "type": "revelation", "intensity": "high", "duration": 2.0,
+                "viewer_feeling": "lands"}],
+            "transitions": [], "tight_cut_overlays": [], "broll_clips": [],
+            "sound_effects": [], "motion_graphics": [], "text_overlays": []}
+    words = [{"word": f"w{i}", "start": i * 0.5, "end": i * 0.5 + 0.4} for i in range(6)]
+    before = copy.deepcopy(plan)
+    recipe_eval.evaluate_recipe(plan, words, [], 3.0, tight_boundaries=[])
+    assert plan == before, "evaluate_recipe must never mutate the plan (observe-only)"
+    hsrc = open("handler.py").read()
+    i0 = hsrc.index("TELEMETRY (Zac 2026-07-10): every live-rule violation")
+    i1 = hsrc.index("except Exception as _eval_err:", i0)
+    block = hsrc[i0:i1]
+    assert "_record_divergence" in block and '"recipe_eval"' in block, "eval wiring must ledger"
+    for tag in ('"style"', '"vibe"', '"source_class"', '"generation"'):
+        assert tag in block, f"telemetry tag {tag} missing"
+    assert not re.search(r"(post_cut_plan|edit_plan)\s*\[[^\]]+\]\s*=", block), \
+        "the wiring block must WRITE nothing but the ledger (observe-only)"
+    # repair re-asks ledgered (folds the four MG raise-classes' fire-rates)
+    assert '"repair_reask"' in hsrc, "repair re-asks must ledger"
+    # degeneration tail captured (the conviction instrument — the abort did
+    # NOT capture the tail before this pin; the next fire convicts)
+    assert '"gemini_degen_tail"' in hsrc and "DEGEN TAIL" in hsrc, \
+        "degeneration must print + ledger its tail"
+    # K4-completeness for Lever 3: every free-text schema field carries a cap
+    import handler as _h
+    sch = _h._post_cuts_response_schema()
+    _viol = []
+    def _walk(node, path):
+        if isinstance(node, dict):
+            if (node.get("type") == "string" and "enum" not in node
+                    and "const" not in node and "maxLength" not in node):
+                _viol.append(path)
+            for k, vv in node.items():
+                _walk(vv, f"{path}.{k}")
+        elif isinstance(node, list):
+            for i, vv in enumerate(node):
+                _walk(vv, f"{path}[{i}]")
+    _walk(sch, "$")
+    assert not _viol, (
+        f"free-text schema fields without max_length: {_viol} — a future "
+        f"field cannot reopen the degeneration door undeclared (Lever 3 K4-pattern)")
+import re
 
 
 @check("LEVER 4 video reference: one upload per job, every call references; inline fallback armed + ledgered; teardown deletes only what we uploaded; kill switch default ON")

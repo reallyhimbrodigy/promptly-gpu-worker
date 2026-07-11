@@ -762,14 +762,14 @@ class _GenSceneBackground(BaseModel):
     # Consulted only when kind == "generated".
     generation_prompt: Optional[str] = Field(default=None, max_length=600)
     # Explicit color override (rare; normally derived from palette_ref).
-    colors: Optional[List[str]] = None
+    colors: Optional[List[Annotated[str, Field(max_length=16)]]] = None
 
 class _GenSceneSubject(BaseModel):
     # The bespoke object/subject. The still is generated (Sub-step 3) from this
     # prompt, conditioned on ref_image_keys (brand/user references the ask-back
     # loop collects).
     generation_prompt: str = Field(max_length=600)
-    ref_image_keys: List[str] = Field(default_factory=list)
+    ref_image_keys: List[Annotated[str, Field(max_length=200)]] = Field(default_factory=list)
     anchor: _SEMANTIC_ANCHOR
     scale: Optional[float] = None
 
@@ -8316,6 +8316,15 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
                 _parsed = extract_json(response_text)
             except Exception as _pe:
                 _degen = f"unparseable JSON ({type(_pe).__name__}: {str(_pe)[:140]})"
+        if _degen is not None and response_text:
+            # CONVICTION INSTRUMENT (Zac 2026-07-10): where was the decoder
+            # when it degenerated? The tail names the field — printed AND
+            # ledgered so the next fire convicts without a re-run.
+            _degen_tail = str(response_text)[-600:]
+            print(f"[gemini-post] DEGEN TAIL (last 600 chars):\n{_degen_tail}", flush=True)
+            _record_divergence(
+                "recipe_transport", {"class": str(_degen)[:80]},
+                "gemini_degen_tail", reason=_degen_tail[-400:])
         if _degen is None:
             print(f"[gemini-post] RAW:\n{response_text}\n[gemini-post] END", flush=True)
             # [fix-4] notes soft-cap. notes is the LAST, decorative PostCutPlan
@@ -9485,6 +9494,29 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                         f"window_shaped={_eval_report.stats.get('why_window_shaped', '?')}",
                         flush=True,
                     )
+                    # ── TELEMETRY (Zac 2026-07-10): every live-rule violation
+                    # writes a divergence record — component=recipe_eval,
+                    # action=<rule>, tagged style × vibe × source-class ×
+                    # generation. OBSERVE-ONLY by construction: this block
+                    # reads the report and writes the ledger; it never touches
+                    # the plan and never gates (gate-asserted). The aggregate
+                    # is the quality instrument — a rule firing hot is a
+                    # prompt sentence that isn't landing; the loop is
+                    # read-aggregate → edit prompt → next week's table.
+                    _tel_style = str((post_cut_plan or {}).get("caption_style") or "")[:40]
+                    _tel_vibe = str(vibe or "")[:60]
+                    _tel_src = ("<=35s" if float(duration or 0) <= 35.0
+                                else "<=75s" if float(duration or 0) <= 75.0 else ">75s")
+                    for _tel_sev, _tel_rules in (("fail", _eval_report.failures),
+                                                 ("warn", _eval_report.warnings)):
+                        for _tel_rule, _tel_detail in _tel_rules:
+                            _record_divergence(
+                                "recipe_eval",
+                                {"severity": _tel_sev, "style": _tel_style,
+                                 "vibe": _tel_vibe, "source_class": _tel_src,
+                                 "generation": "a1a2"},
+                                str(_tel_rule),
+                                reason=str(_tel_detail)[:220])
                 except Exception as _eval_err:
                     # Eval errors must never block the render — log and continue.
                     print(f"[recipe-eval] error: {_eval_err} (non-blocking)", flush=True)
@@ -12560,6 +12592,14 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                 f"reason={str(_repair_err)[:200]}",
                 flush=True,
             )
+            # TELEMETRY (Zac 2026-07-10): every repair re-ask ledgered — the
+            # four semantic MG raise-classes' fire-rates fold into the same
+            # aggregate (the reason text names the class). Observe-only.
+            _record_divergence(
+                "recipe_repair",
+                {"attempt": _repair_attempt + 1, "generation": "a1a2"},
+                "repair_reask",
+                reason=str(_repair_err)[:220])
             _post_user_attempt = post_user + (
                 "\n\nThe validator rejected one element of the previous plan. "
                 "Re-emit the complete recipe JSON with this corrected:\n"

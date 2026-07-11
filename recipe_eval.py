@@ -25,7 +25,6 @@ rule in the prompt so when quality drifts you know WHICH rule drifted.
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
-from type_registries import VALID_TIGHT_CUT_OVERLAYS
 
 WINDOW_S = 2.0
 
@@ -169,31 +168,25 @@ def evaluate_recipe(plan, words, cut_boundaries, duration, tight_boundaries=None
         most, cnt = Counter(ztypes).most_common(1)[0]
         if len(ztypes) >= 3 and cnt / len(ztypes) > 0.6:
             r.fail("variety-zoom", f"{most} is {cnt}/{len(ztypes)} of zooms (>60%)")
-        if len(set(ztypes)) < 2 and len(ztypes) >= 3:
-            r.fail("variety-zoom", "only one zoom type across all emphases")
+        # (the only-one-type line was mathematically subsumed — one type of
+        # >=3 zooms is 100% > 60% — and double-fired the same violation)
 
     # ----------------------------------------------------------- transitions
-    # boundary_set is SLOTS-ONLY (handle-room verified). tight_set is real
-    # cuts that render as hard cuts. A transition emitted at a tight index
-    # would be dropped by the renderer's handle check — the eval flags
-    # this distinctly so the failure points to the right fix (re-anchor
-    # the transition to a slot, or replace with a masking zoom).
-    boundary_set = set(cut_boundaries)
+    # ── DEAD-BY-CONSTRUCTION deletions (telemetry pin, Zac 2026-07-10) ──
+    # transition-boundary + transition-tight-boundary: the sub-call emits
+    # const-index seams room-priced by the render's own geometry (1a99c72 →
+    # 606d4f8) — off-boundary is unsayable, and these lists were the LEGACY
+    # 2×natural classification: a legal room-priced broll-edge seam FALSE-
+    # FIRED transition-boundary on the governed path (manufactured noise).
+    # transition-coverage: contradicted current doctrine — the bare cut
+    # carries most seams and decline is a decision (the sub-call teach).
+    # What survives is the taste measure:
     tight_set = set(tight_boundaries or [])
-    seen_boundaries = set()
     prev_type = None
     for t in transitions:
-        awi = t["after_word_index"]
-        if awi in tight_set:
-            r.fail("transition-tight-boundary", f"transition '{t['type']}' at word {awi} — boundary is TIGHT (no handle room); renderer will drop it. Replace with a masking zoom on word {awi + 1}.")
-        elif awi not in boundary_set:
-            r.fail("transition-boundary", f"after_word_index {awi} not in CUT BOUNDARIES {sorted(boundary_set)}")
-        seen_boundaries.add(awi)
-        if t["type"] == prev_type:
-            r.fail("variety-transition", f"'{t['type']}' repeated back-to-back at word {awi}")
-        prev_type = t["type"]
-    for b in boundary_set - seen_boundaries:
-        r.warn("transition-coverage", f"cut boundary at word {b} has no transition (valid only if mid-sentence flow or sub-800ms sandwich)")
+        if t.get("type") == prev_type:
+            r.fail("variety-transition", f"'{t.get('type')}' repeated back-to-back at word {t.get('after_word_index')}")
+        prev_type = t.get("type")
 
     # ─────────────────────────────────────────────── tight-cut overlay caps
     # Overlay-on-top-of-hard-cut decoration for TIGHT BOUNDARIES. Hard rules
@@ -207,57 +200,22 @@ def evaluate_recipe(plan, words, cut_boundaries, duration, tight_boundaries=None
     #     same type twice can be right if the editorial character actually
     #     matches)
     if tight_overlays:
-        _VALID_TCO_TYPES = set(VALID_TIGHT_CUT_OVERLAYS)  # derive; no hardcoded copy
-        _TCO_CAP = 2  # across ALL types combined — sparing is the whole point
+        # ── DEAD-BY-CONSTRUCTION deletions (telemetry pin, Zac 2026-07-10) ──
+        # tight-overlay-type / -extras-misuse / -anchor: unsayable — the
+        # sub-call schema is const-awi enum + type enum + why, nothing else
+        # (2d21701 single ownership). tight-overlay-boundary: contradicted
+        # the CURRENT law — the sub-call offers overlays on every seam and
+        # the application gate accepts its own seam set (606d4f8); the
+        # CUT/TIGHT split it policed is the legacy classification.
+        # What survives is the taste measure (teach adherence):
+        _TCO_CAP = 2  # sparing is the whole point
         if len(tight_overlays) > _TCO_CAP:
             r.fail(
                 "tight-overlay-cap",
                 f"{len(tight_overlays)} tight_cut_overlays emitted (max {_TCO_CAP} per video "
                 f"across all types — sparing keeps the overlay editorial, not templated)",
             )
-        _tco_types_seen = []
-        for tco in tight_overlays:
-            tco_type = (tco or {}).get("type")
-            tco_awi = (tco or {}).get("after_word_index")
-            tco_title = (tco or {}).get("title")
-            tco_label = (tco or {}).get("label")
-            if tco_type not in _VALID_TCO_TYPES:
-                r.fail(
-                    "tight-overlay-type",
-                    f"tight_cut_overlay type {tco_type!r} not in {sorted(_VALID_TCO_TYPES)}",
-                )
-            # Overlays carry no extra fields — mirror the handler.py
-            # application-layer enforcement so misuse surfaces at eval time.
-            if tco_type in _VALID_TCO_TYPES:
-                _bad_extras = []
-                if tco_title not in (None, ""):
-                    _bad_extras.append("title")
-                if tco_label not in (None, ""):
-                    _bad_extras.append("label")
-                if _bad_extras:
-                    r.fail(
-                        "tight-overlay-extras-misuse",
-                        f"{tco_type} tight_cut_overlay at word {tco_awi} carries "
-                        f"{_bad_extras} — overlays take no extra fields.",
-                    )
-            if tco_awi is None:
-                r.fail("tight-overlay-anchor", "tight_cut_overlay missing after_word_index")
-                continue
-            if tco_awi in boundary_set:
-                # Wrong boundary type — Gemini placed the overlay at a CUT
-                # boundary (which already gets a full transition).
-                r.fail(
-                    "tight-overlay-boundary",
-                    f"tight_cut_overlay {tco_type!r} at word {tco_awi} — that's a CUT "
-                    f"BOUNDARY (transitions live there). Move it to a TIGHT BOUNDARY.",
-                )
-            elif tco_awi not in tight_set:
-                r.fail(
-                    "tight-overlay-boundary",
-                    f"tight_cut_overlay {tco_type!r} at word {tco_awi} — not in TIGHT "
-                    f"BOUNDARIES {sorted(tight_set)}",
-                )
-            _tco_types_seen.append(tco_type)
+        _tco_types_seen = [(tco or {}).get("type") for tco in tight_overlays]
         if len(_tco_types_seen) == 2 and _tco_types_seen[0] == _tco_types_seen[1]:
             r.warn(
                 "tight-overlay-variety",
@@ -291,7 +249,6 @@ def evaluate_recipe(plan, words, cut_boundaries, duration, tight_boundaries=None
     mg_ranges = [(m["start_word_index"], m["end_word_index"]) for m in mgs]
     payoff_word = vp.get("payoff_word_index")
     close_word = vp.get("close_word_index")
-    first_boundary = min(boundary_set) if boundary_set else None
     for b in brolls:
         s, e_ = b["start_word_index"], b["end_word_index"]
         covered = set(range(s, e_ + 1))
