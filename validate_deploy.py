@@ -2194,31 +2194,37 @@ def _recipe_eval_imports():
     assert hasattr(recipe_eval, "Report")
 
 
-@check("zoom static-anyOf: six per-position emphasis variants; payoff = committed-push only; build/breather zoomless; events array unrepresentable; homes tile the registry; STATIC")
+@check("zoom static-anyOf: four position-claimed zoom variants (claim ON the zoom — the compiling shape); no build/breather claim exists; payoff = committed-push only; events unrepresentable; homes tile the registry; STATIC")
 def _zoom_static_anyof():
     sch = handler._post_cuts_response_schema()
-    variants = sch["properties"]["emphasis_moments"]["items"]["anyOf"]
-    assert len(variants) == 6, f"expected 6 position variants, got {len(variants)}"
+    ze = sch["$defs"]["_EmphasisMoment"]["properties"]["zoom_effect"]["anyOf"]
+    variants = [b for b in ze if "$ref" in b]
+    assert ze[-1] == {"type": "null"}, "zoom_effect must remain nullable"
+    assert len(variants) == 4, f"expected 4 claim variants, got {len(variants)}"
     by_pos = {}
-    for v in variants:
-        assert v["required"][0] == "arc_position", "arc_position must be the discriminator"
-        pos = v["properties"]["arc_position"]["enum"][0]
-        by_pos[pos] = v
-    assert set(by_pos) == {"hook", "build", "mid_peak", "payoff", "breather", "close"}
-    for pos in ("build", "breather"):
-        assert "zoom_effect" not in by_pos[pos]["properties"], \
-            f"a zoom on {pos} must be UNREPRESENTABLE (no property), not dropped"
+    for b in variants:
+        d = sch["$defs"][b["$ref"].split("/")[-1]]
+        pos = d["properties"]["arc_position"]["enum"][0]
+        by_pos[pos] = d
+        assert d["required"] == ["arc_position", "type"], "claim + type required, overrides optional"
+        assert "events" not in d["properties"], "events array must be unrepresentable"
+        assert set(d["properties"]) == {"arc_position", "type"} | set(handler._ZOOM_OVERRIDE_FIELDS), \
+            "zoom variant fields = claim + type + the flat override payload"
+    assert set(by_pos) == set(handler.ZOOM_ARC_HOMES) == {"hook", "mid_peak", "payoff", "close"}, \
+        "a zoom claiming build/breather must not exist"
     housed = set()
-    for pos, want in handler.ZOOM_ARC_HOMES.items():
-        got = by_pos[pos]["properties"]["zoom_effect"]["anyOf"][0]["properties"]["type"]["enum"]
-        assert sorted(got) == sorted(want), f"{pos} enum {got} != ZOOM_ARC_HOMES {want}"
-        assert "events" not in by_pos[pos]["properties"]["zoom_effect"]["anyOf"][0]["properties"], \
-            "the events array must be unrepresentable on the authored surface"
+    for pos, d in by_pos.items():
+        got = d["properties"]["type"]["enum"]
+        assert sorted(got) == sorted(handler.ZOOM_ARC_HOMES[pos]), f"{pos}: {got}"
         housed.update(got)
-    assert housed == set(handler.VALID_ZOOM_TYPES), \
-        "every registry type must be housed somewhere (no silent extinction)"
-    zt = by_pos["payoff"]["properties"]["zoom_effect"]["anyOf"][0]["properties"]["type"]["enum"]
-    assert set(zt) == {"SmoothPush", "LetterboxPush"}, "payoff purity (the commitment rule)"
+    assert housed == set(handler.VALID_ZOOM_TYPES), "every registry type housed (no silent extinction)"
+    assert set(by_pos["payoff"]["properties"]["type"]["enum"]) == {"SmoothPush", "LetterboxPush"}, \
+        "payoff purity (the commitment rule)"
+    # single-source guard: override fields mirror the pydantic model's optionals
+    ms = handler._ZoomEffect.model_json_schema()
+    opt = set(ms.get("properties", {})) - set(ms.get("required", []))
+    assert set(handler._ZOOM_OVERRIDE_FIELDS) == opt, \
+        f"_ZOOM_OVERRIDE_FIELDS {set(handler._ZOOM_OVERRIDE_FIELDS)} must equal _ZoomEffect optionals {opt}"
     import json as _json
     assert _json.dumps(sch, sort_keys=True) == _json.dumps(
         handler._post_cuts_response_schema(), sort_keys=True), \
@@ -2243,8 +2249,8 @@ def _zoom_arc_claim_measure():
             "payoff_word_index": 11, "close_word_index": 12,
         },
         "emphasis_moments": [
-            {"word_indices": [11], "arc_position": "mid_peak",
-             "zoom_effect": {"type": "SnapReframe"},
+            {"word_indices": [11],
+             "zoom_effect": {"type": "SnapReframe", "arc_position": "mid_peak"},
              "type": "revelation", "intensity": "high", "duration": 2.0,
              "viewer_feeling": "the number lands"},
         ],
@@ -2253,8 +2259,7 @@ def _zoom_arc_claim_measure():
     rep = recipe_eval.evaluate_recipe(plan, words, [], 6.5, tight_boundaries=[])
     ids = {r for r, _ in rep.warnings}
     assert "arc-claim" in ids, f"claim mismatch (claims mid_peak, arc says payoff) must WARN: {ids}"
-    plan["emphasis_moments"][0]["arc_position"] = "payoff"
-    plan["emphasis_moments"][0]["zoom_effect"] = {"type": "SmoothPush"}
+    plan["emphasis_moments"][0]["zoom_effect"] = {"type": "SmoothPush", "arc_position": "payoff"}
     rep2 = recipe_eval.evaluate_recipe(plan, words, [], 6.5, tight_boundaries=[])
     ids2 = {r for r, _ in rep2.warnings}
     assert "arc-claim" not in ids2, f"honest claim must not warn: {ids2}"

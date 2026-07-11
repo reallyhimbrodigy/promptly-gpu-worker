@@ -4417,13 +4417,12 @@ PIPELINE MECHANICS — read carefully, these are load-bearing
 
 Entry shape:
   {{
-    "arc_position": "hook" | "build" | "mid_peak" | "payoff" | "breather" | "close",   # your CLAIM: the arc position this emphasis serves (same vocabulary as arc_segments); the schema pairs each position with the zoom types that live there — build/breather offer none
     "word_indices": [int, ...],     # 1-3 kept-word indices that ARE the emphasis
     "type": "punchline" | "revelation" | "statement" | "reaction" | "question",
     "intensity": "high" | "medium",
     "duration": float,              # 1.5-3.0 output-seconds the visual hit lasts
     "viewer_feeling": "<one specific phrase: the feeling this moment produces in the viewer>",
-    "zoom_effect": {{ "type": <a type the claimed position offers> }} | null,   // word-anchored; the pipeline times it
+    "zoom_effect": {{ "arc_position": <the arc position this zoom serves — your CLAIM, same vocabulary as arc_segments>, "type": <a type that position offers> }} | null,   // word-anchored; the pipeline times it. A zoom cannot claim build/breather — those positions hold the camera still.
     "motion_graphic": {{...}} | null   # the zoom is the camera's punctuation; a graphic joins it when the moment names something the camera cannot show
   }}
 
@@ -4694,7 +4693,7 @@ These are the mechanics the render depends on — the physics of the frame, the 
 
 **PER-COMPONENT RULES:**
   • emphasis_moments: 1:1 with key_moments (3-5 true peaks for a typical 30s video; a flat even-energy stretch may have only 2-3 — the honest peak count is the right count). At least 2 distinct zoom types across
-    them. Peaks only — build and breather words run flat, and that flatness is what gives each peak its contrast. Claim each emphasis's arc_position honestly — the peak set is judged by it. Zooms are word-anchored; the pipeline times them.
+    them. Peaks only — build and breather words run flat, and that flatness is what gives each peak its contrast. Claim each zoom's arc_position honestly — the peak set is judged by it. Zooms are word-anchored; the pipeline times them.
   • transitions: a transition marks a genuine
     turn — a movement boundary, an act shift, the walk into the payoff — and
     carries its why. The straight cut carries every other splice, and carries it
@@ -4809,7 +4808,8 @@ Output is a bare JSON object — the response is JSON-parsed and the parser is t
       "duration": float,                          // 1.5-3.0 output-seconds
       "viewer_feeling": "<one specific phrase>",
       "zoom_effect": {{
-        "type": <the claimed arc position's offering — the schema knows>,
+        "arc_position": "hook" | "mid_peak" | "payoff" | "close",   // your claim — the position this zoom serves; each offers its own types (build/breather offer none)
+        "type": <the claimed position's offering — the schema knows>,
         "originX": float, "originY": float         // ONLY for non-face zoom targets; omit for faces — the face-lock aims. durationMs/scale likewise omitted unless a beat genuinely wants a non-default feel.
       }} | null,
       "motion_graphic": {{ "type": <MG type>, "anchor": <semantic zone>, "props": {{...}} }} | null   // almost always null
@@ -8120,51 +8120,59 @@ def _transition_sound_events(render_cuts, timeline, fps):
     return _out
 
 
-def _emphasis_position_variants(base_schema):
-    """The zoom static-anyOf: six per-position emphasis variants derived from
-    the ONE pydantic base ($defs/_EmphasisMoment + $defs/_ZoomEffect) and
-    ZOOM_ARC_HOMES. arc_position is the discriminator — Gemini's authored
-    CLAIM, first property in every variant (R2 pattern: const-per-variant).
-    Each claim's zoom_effect.type enum = that position's homes; build/breather
-    variants carry NO zoom_effect property — a zoom there is unrepresentable.
-    STATIC: same dict every job — the Vertex cache key moves exactly once, at
-    deploy (R3; the per-job-variance class lives in the transitions sub-call,
-    never here)."""
-    import copy as _copy
-    _defs = base_schema.get("$defs") or {}
-    _em_base = _defs.get("_EmphasisMoment")
-    _ze_base = _defs.get("_ZoomEffect")
-    if not isinstance(_em_base, dict) or not isinstance(_ze_base, dict):
-        raise RuntimeError("emphasis anyOf: pydantic $defs shape drifted")
+# The zoom's flat rare-override payload, slim-typed for the constrained-
+# decoding grammar (pydantic's anyOf-null wrappers are dialect, not need:
+# Vertex omits optionals; absence IS the default). The single-source guard:
+# the deploy gate asserts these keys == _ZoomEffect's optional fields.
+_ZOOM_OVERRIDE_FIELDS = {"durationMs": "integer", "scale": "number",
+                         "originX": "number", "originY": "number"}
+
+
+def _zoom_claim_variants():
+    """The zoom static-anyOf, at the surface it governs: four tiny variants,
+    each pairing arc_position (const — Gemini's authored CLAIM) with that
+    position's sayable types from ZOOM_ARC_HOMES. No build/breather variant
+    exists: a zoom cannot CLAIM those positions — unrepresentable, not
+    dropped (an MG-only emphasis there stays legal and carries no claim).
+    Claim honesty (the position vs the anchor word's arc segment) is
+    judgment — measured by recipe_eval's arc-claim WARN, never gated.
+
+    WHY zoom-level and not emphasis-level variants: the directive's six
+    item-level emphasis variants hit a Vertex constrained-decoding grammar
+    ceiling on the full PostCutPlan schema (400 INVALID_ARGUMENT) — fully
+    bisected 2026-07-10: 6 baseline variants compile; adding ANY per-variant
+    zoom branch tips it, and stripping motion_graphic (free-form props Dict)
+    from the variants un-tips it. The coupling the pin exists for —
+    type-per-position — lives entirely inside zoom_effect, so the anyOf
+    moved here: same guarantees, compiling grammar. STATIC: same dict every
+    job (R3 — the cache key moves exactly once, at deploy)."""
     _variants = []
-    for _pos in ("hook", "build", "mid_peak", "payoff", "breather", "close"):
-        _v = _copy.deepcopy(_em_base)
-        _props = {"arc_position": {"type": "string", "enum": [_pos]}}
-        for _pk, _pv in (_v.get("properties") or {}).items():
-            _props[_pk] = _pv
-        if _pos in ZOOM_ARC_HOMES:
-            _ze = _copy.deepcopy(_ze_base)
-            _ze.setdefault("properties", {})["type"] = {
-                "type": "string", "enum": sorted(ZOOM_ARC_HOMES[_pos])}
-            _props["zoom_effect"] = {"anyOf": [_ze, {"type": "null"}],
-                                     "default": None}
-        else:
-            _props.pop("zoom_effect", None)
-        _v["properties"] = _props
-        _v["required"] = ["arc_position"] + list(_v.get("required") or [])
-        _v.pop("title", None)
-        _variants.append(_v)
+    for _pos in ("hook", "mid_peak", "payoff", "close"):
+        _props = {"arc_position": {"type": "string", "enum": [_pos]},
+                  "type": {"type": "string", "enum": sorted(ZOOM_ARC_HOMES[_pos])}}
+        for _f, _t in _ZOOM_OVERRIDE_FIELDS.items():
+            _props[_f] = {"type": _t}
+        _variants.append({"type": "object", "properties": _props,
+                          "required": ["arc_position", "type"]})
     return _variants
 
 
 def _post_cuts_response_schema():
-    """PostCutPlan schema with the per-position emphasis anyOf injected at
-    emphasis_moments.items. Everything else stays pydantic-derived; the
-    passthrough response_json_schema path already ships anyOf constructs
-    (pydantic Optionals) every render, so no string-enum caveat applies."""
+    """PostCutPlan schema with the zoom claim-anyOf injected at
+    $defs/_EmphasisMoment.properties.zoom_effect. Everything else stays
+    pydantic-derived; the passthrough response_json_schema path ships anyOf
+    constructs every render, so no string-enum caveat applies."""
     _s = PostCutPlan.model_json_schema()
-    _s["properties"]["emphasis_moments"]["items"] = {
-        "anyOf": _emphasis_position_variants(_s)}
+    _zrefs = []
+    for _i, _v in enumerate(_zoom_claim_variants()):
+        _zn = f"_ZoomClaim__{_v['properties']['arc_position']['enum'][0]}"
+        _s["$defs"][_zn] = _v
+        _zrefs.append({"$ref": f"#/$defs/{_zn}"})
+    _s["$defs"]["_EmphasisMoment"]["properties"]["zoom_effect"] = {
+        "anyOf": _zrefs + [{"type": "null"}], "default": None}
+    # the pydantic _ZoomEffect def is unreferenced post-injection (the model
+    # remains the contract source for the override fields; gate-pinned)
+    _s["$defs"].pop("_ZoomEffect", None)
     return _s
 
 
@@ -11506,6 +11514,12 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                 if _ze_raw is not None:
                     if not isinstance(_ze_raw, dict):
                         raise ValueError(f"emphasis_moments[{_ei}].zoom_effect must be object or null")
+                    # zoom-anyOf: the claim rides the zoom. Mirror it onto
+                    # the emphasis for the eval/persist record; it must NOT
+                    # enter _ze_out (ZoomEffectSpec is extra="forbid" — the
+                    # K2 lesson: nothing undeclared rides to the renderer).
+                    if _ze_raw.get("arc_position") is not None:
+                        em["arc_position"] = str(_ze_raw.get("arc_position"))
                     _zt = str(_ze_raw.get("type") or "").strip()
                     if _zt not in _valid_zoom_types:
                         raise ValueError(

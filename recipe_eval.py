@@ -154,7 +154,7 @@ def evaluate_recipe(plan, words, cut_boundaries, duration, tight_boundaries=None
         a = e["word_indices"][0] if e.get("word_indices") else None
         if a is None:
             continue
-        claim = e.get("arc_position")
+        claim = (e.get("zoom_effect") or {}).get("arc_position") or e.get("arc_position")
         pos = _arc_position_of(arc, a)
         if claim and pos and claim != pos:
             r.warn("arc-claim", f"emphasis at word {a} claims {claim}, arc_segments says {pos}")
