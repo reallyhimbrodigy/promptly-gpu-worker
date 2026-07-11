@@ -54,13 +54,21 @@ def run(days: int = 7):
         body = s3.get_object(Bucket=bucket, Key=k)["Body"].read().decode("utf-8", "replace")
         # DEDUP (rule audit 2026-07-10): records written inside the repair
         # loop double-write on re-attempts (convicted in both audits — the
-        # ×9 was 5, the ×12 was 6). Identical full lines within one job
-        # collapse to one; only the shipped plan's story counts.
-        for line in dict.fromkeys(body.splitlines()):
+        # ×9 was 5, the ×12 was 6). Records carry a wall-clock `t`, so the
+        # dedup keys on the record MINUS its timestamp; identical events
+        # within one job collapse to one — only the shipped plan's story
+        # counts.
+        _seen = set()
+        for line in body.splitlines():
             try:
                 rec = json.loads(line)
             except Exception:
                 continue
+            _k = json.dumps({k2: v2 for k2, v2 in rec.items() if k2 != "t"},
+                            sort_keys=True, default=str)
+            if _k in _seen:
+                continue
+            _seen.add(_k)
             comp = str(rec.get("component") or "?")
             act = str(rec.get("action") or "?")
             rule = f"{comp}:{act}"
