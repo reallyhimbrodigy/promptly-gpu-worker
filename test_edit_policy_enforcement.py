@@ -105,7 +105,7 @@ def assert_only_stripped(feature, checks_absent, checks_present_keys):
 assert_only_stripped("broll", [lambda p: p["broll_clips"] == []],
                      ["sound_effects", "text_overlays", "motion_graphics", "transitions", "tight_cut_overlays"])
 assert_only_stripped("sfx", [lambda p: p["sound_effects"] == [],
-                             lambda p: all(m.get("sound") is None for m in p["emphasis_moments"]),
+                             lambda p: all(m.get("sound") == "voice" for m in p["emphasis_moments"]),
                              lambda p: all("sound" not in tr for tr in p["transitions"])],
                      ["broll_clips", "text_overlays", "motion_graphics", "transitions"])
 assert_only_stripped("text_overlays", [lambda p: p["text_overlays"] == []],

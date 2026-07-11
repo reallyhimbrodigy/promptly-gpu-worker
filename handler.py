@@ -661,6 +661,17 @@ _SFX_SOUNDS = Literal[
     "mouse-click-sound", "popsfx", "correct", "rizz",
     "shockingsfx", "awkward-moment", "wompwomp", "imposter",
 ]
+# THE SOUND DECISION (Zac ruling 2026-07-11, fourth verdict): the DECISION is
+# required, the sound never is — every beat signs its choice, exactly as bare
+# seams carry whys; "voice" is the explicit bare member. Single-source: the
+# gate asserts this enum == _SFX_SOUNDS ∪ {"voice"}.
+_SOUND_DECISION = Literal[
+    "boom", "punchsfx", "swoosh-sound-effects", "woosh-professional",
+    "transition-sfx", "camera-flash", "money-ching", "iphoneding",
+    "mouse-click-sound", "popsfx", "correct", "rizz",
+    "shockingsfx", "awkward-moment", "wompwomp", "imposter",
+    "voice",
+]
 
 class _CutRefinement(BaseModel):
     # Gemini's word-level cut pass (YOUR CUT PASS in the prompt): a KEPT-space
@@ -741,11 +752,15 @@ class _EmphasisMoment(BaseModel):
     # ride transitions; the library remains the CHOOSER of which sound fits
     # THIS beat. Fires at the emphasis's word via the audible-onset
     # derivation, exactly like every other rider.
-    sound: Optional[_SFX_SOUNDS] = Field(
-        default=None,
-        description="Carried by the video's hits — the hook's grab and "
-                    "the payoff's landing are the usual two; a beat the "
-                    "voice carries alone omits it.")
+    # REQUIRED (Zac ruling 2026-07-11): decision-forcing, never sound-
+    # forcing — a model that rides everything on the voice must now say so,
+    # per beat, and viewer_feeling carries the why. Migrate-on-read: absent
+    # on stored recipes reads as "voice".
+    sound: _SOUND_DECISION = Field(
+        description="REQUIRED — the beat's signed choice. Carried by the "
+                    "video's hits — the hook's grab and the payoff's landing "
+                    "are the usual two; \"voice\" is the signed bare choice "
+                    "for a beat the delivery carries alone.")
 
 class _TextOverlayNote(BaseModel):
     text: str = Field(max_length=200)
@@ -4509,9 +4524,13 @@ Entry shape:
     "duration": float,              # 1.5-3.0 output-seconds the visual hit lasts
     "viewer_feeling": "<one specific phrase: the feeling this moment produces in the viewer>",
     "zoom_effect": {{ "arc_position": <the arc position this zoom serves — your CLAIM, same vocabulary as arc_segments>, "type": <a type that position offers> }} | null,   // word-anchored; the pipeline times it. A build/breather claim offers ONLY the mask form — the small eye-carry on the first word after a splice; arc punctuation there is unsayable.
-    "sound": <one of the 16 sounds — see THE SOUNDS> | null,   // the beat can carry ONE sound that amplifies it — the hook's grab and the payoff's landing are the usual two; a voice-carried beat omits it
+    "sound": <one of the 16 sounds, or "voice"> ,   // REQUIRED — the beat's signed choice: ONE sound that amplifies it (the hook's grab and the payoff's landing are the usual two) or "voice", the signed bare choice; viewer_feeling carries the why either way
     "motion_graphic": {{...}} | null   # the zoom is the camera's punctuation; a graphic joins it when the moment names something the camera cannot show
   }}
+
+A modeled pair — both choices signed, neither the default:
+  {{ "word_indices": [0], "type": "punchline", "intensity": "high", "duration": 2.0, "viewer_feeling": "the grab — the jab lands harder than the words alone", "zoom_effect": {{ "arc_position": "hook", "type": "SnapReframe" }}, "sound": "punchsfx", "motion_graphic": null }}
+  {{ "word_indices": [23], "type": "statement", "intensity": "medium", "duration": 1.8, "viewer_feeling": "the delivery already lands it — a mark here would double the hit", "zoom_effect": {{ "arc_position": "mid_peak", "type": "StepZoom" }}, "sound": "voice", "motion_graphic": null }}
 
 **OMIT durationMs, scale, originX, originY by default.** The pipeline auto-fills the natural duration and perceptible scale per type — the values that make each move look its best — and runs face detection at the zoom's start frame to lock the origin onto the face (fallback: canvas center). Your zoom_effect is just its type — word-anchored, pipeline-timed, one move per emphasis. Emit originX/originY ONLY when zooming a NON-face element (a prop, a gesture, a whiteboard); emit durationMs/scale only when a specific beat genuinely wants a non-default feel (rare).
 
@@ -4574,7 +4593,7 @@ THE 16 SOUNDS + THE BARE VOICE — each a defined moment
 
 **camera-flash** — A camera shutter click with flash. **THE MOMENT:** a photo or screenshot is taken, shown, or demanded in the content — "screenshot this," "I took one picture," the moment the story itself contains a shutter. The sound IS the shutter the story references. **WHAT IT DOES:** diegetic reality; the viewer hears the photo happen inside the story.
 
-**nothing** — the bare-voice treatment, chosen like any other. **THE MOMENT:** a beat whose delivery already does what a sound would do — the voice lands it whole, and marking it would double the hit. **WHAT IT DOES:** keeps the air clear around the treated moments; chosen with intent it reads as confidence, defaulted to it reads as an unmarked peak.
+**voice** — the signed bare choice, chosen like any other. **THE MOMENT:** a beat whose delivery already does what a sound would do — the voice lands it whole, and marking it would double the hit. **WHAT IT DOES:** keeps the air clear around the treated moments; signed with intent it reads as confidence, defaulted to it reads as an unmarked peak — the why signs it either way.
 
 **money-ching** — A bright cash-register cha-ching. **THE MOMENT:** the anchor word itself IS the amount — a number of money, a price, or "free" standing as the price ("$500," "ten grand," "free"). Minutes, hours, and days are TIME words; time words never take the register. **WHAT IT DOES:** the number stops being abstract; the viewer hears money hit the table.
 
@@ -4902,7 +4921,7 @@ Output is a bare JSON object — the response is JSON-parsed and the parser is t
         "type": <the claimed position's offering — the schema knows>,
         "originX": float, "originY": float         // ONLY for non-face zoom targets; omit for faces — the face-lock aims. durationMs/scale likewise omitted unless a beat genuinely wants a non-default feel.
       }} | null,
-      "sound": <one of the 16 sounds — see THE SOUNDS> | null,   // the hook's grab and the payoff's landing are the usual two; a voice-carried beat omits it
+      "sound": <one of the 16 sounds, or "voice">,   // REQUIRED — the signed choice; see THE SOUNDS
       "motion_graphic": {{ "type": <MG type>, "anchor": <semantic zone>, "props": {{...}} }} | null   // almost always null
     }}
   ],
@@ -8832,8 +8851,10 @@ def _enforce_off_expressive_features(edit_plan, off_features):
         # the fragment-integrity wave (Zac rider 2026-07-11) closed the hole.
         edit_plan["sound_effects"] = []
         for _em in (edit_plan.get("emphasis_moments") or []):
-            if isinstance(_em, dict) and _em.get("sound") is not None:
-                _em["sound"] = None
+            if isinstance(_em, dict):
+                # the DECISION surface stays signed — policy forces the
+                # bare choice, never an absence
+                _em["sound"] = "voice"
         for _tr in (edit_plan.get("transitions") or []):
             if isinstance(_tr, dict):
                 _tr.pop("sound", None)
@@ -8921,6 +8942,9 @@ def build_safe_recipe(kept_words, vocal_emphasis=None, ep_off=None):
             "intensity": "medium",
             "duration": 2.0,
             "viewer_feeling": "the strongest measured beat lands",
+            # WS3: the decision is required — the deterministic safe edit
+            # signs the bare choice on every beat.
+            "sound": "voice",
             "zoom_effect": {"type": _zoom_types[_zi % 2],
                             "events": [{"startMs": 0}]},
             "motion_graphic": None,
@@ -12776,7 +12800,8 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                  "sound": em.get("sound"),
                  "why": str(em.get("viewer_feeling") or "")[:240]}
                 for em in (edit_plan.get("emphasis_moments") or [])
-                if isinstance(em, dict) and em.get("sound")
+                if isinstance(em, dict)
+                and em.get("sound") not in (None, "voice")
             ] + list(edit_plan.get("sound_effects") or [])
             sound_effects = []
             valid_sounds = set(_SFX_CATEGORIES.keys())
@@ -12841,6 +12866,21 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
             # no spacing filter, no auto-placement, no dedup. The Gemini prompt is
             # the single source of truth for SFX placement rules — if a placement
             # is wrong, the fix is the prompt.
+            for _emd in (edit_plan.get("emphasis_moments") or []):
+                # WS3 ledger (Zac 2026-07-11): EVERY beat's signed choice —
+                # choice × position × style; three eras of silent omission
+                # become one week of stated decisions. Migrate-on-read:
+                # absent (stored recipes) reads as "voice".
+                if not isinstance(_emd, dict):
+                    continue
+                _record_divergence(
+                    "sfx",
+                    {"choice": str(_emd.get("sound") or "voice"),
+                     "position": ((_emd.get("zoom_effect") or {}) or {}).get("arc_position"),
+                     "style": str(edit_plan.get("caption_style") or "")[:40],
+                     "generation": "a1a2"},
+                    "sound_decision",
+                    reason=str(_emd.get("viewer_feeling") or "")[:120])
             for _sob in sound_effects:
                 # B ledger: the new surface's numbers from day one — sound ×
                 # beat position × style lands in the weekly table.

@@ -2016,6 +2016,7 @@ def _em_requires_viewer_feeling():
             type="punchline",
             intensity="high",
             duration=2.0,
+            sound="voice",
         )
         raise AssertionError("should have raised ValidationError for missing viewer_feeling")
     except Exception as e:
@@ -2026,6 +2027,7 @@ def _em_requires_viewer_feeling():
         type="punchline",
         intensity="high",
         duration=2.0,
+        sound="voice",
         viewer_feeling="x",
     )
     assert em is not None
@@ -2791,7 +2793,7 @@ def _recipe_omittable_field_contract():
                         "preserved_silences"},
         # B (Zac 2026-07-11): sound rides the beat — omission IS the default
         # ("most beats are carried by the voice"); the derivation .get()s it.
-        "_EmphasisMoment": {"motion_graphic", "sound", "zoom_effect"},
+        "_EmphasisMoment": {"motion_graphic", "zoom_effect"},
         # A1/A2 step 4: broll edge treatments — omission = the bare cut (the
         # wiring reads .get(); Vertex dropping the empty optional IS the default).
         "_BrollClip": {"entry_transition", "exit_transition"},
@@ -4786,12 +4788,19 @@ def _rhythm_beats():
     assert _src.count("_sentence_final_word(") >= 3, "span-split must share the gate"
     # B — sounds ride ranked beats
     assert "sound" in _h._EmphasisMoment.model_fields, "emphasis must carry the sound"
+    # WS3 (Zac ruling): the DECISION is required, the sound never is
+    assert _h._EmphasisMoment.model_fields["sound"].is_required(), \
+        "the sound decision must be REQUIRED (decision-forcing, never sound-forcing)"
+    from typing import get_args as _ga
+    assert set(_ga(_h._SOUND_DECISION)) == set(_ga(_h._SFX_SOUNDS)) | {"voice"}, \
+        "single-source: decision enum == the 16 sounds + voice"
     assert "sound_effects" not in _h.PostCutPlan.model_fields, \
         "the standalone word-anchored list must be unrepresentable"
     _d = _h._EmphasisMoment.model_fields["sound"].description or ""
     assert "the hook's grab and" in _d and "the usual two" in _d, \
         "the schema-description lever must carry the intent frame (usual-two)"
     assert '"sound_on_beat"' in _src and '"money_ching_anchor"' in _src, "the ledgers must exist"
+    assert '"sound_decision"' in _src, "every beat's signed choice must ledger (WS3)"
     import recipe_eval, inspect
     esrc = inspect.getsource(recipe_eval)
     assert '"sfx-partner"' not in esrc, "sfx-partner is dead-by-construction (the beat IS the partner)"
@@ -4803,9 +4812,9 @@ def _rhythm_beats():
     assert "Read each moment and give it what it calls for." in _src \
         and "an unmarked peak is as wrong as a marked nothing" in _src, \
         "the intent opener must be verbatim"
-    assert "**nothing** — the bare-voice treatment" in _src \
-        and "**nothing** — the default treatment." not in _src, \
-        "nothing survives de-throned — one honest choice, not the recommended one"
+    assert "**voice** — the signed bare choice" in _src \
+        and "**nothing** —" not in _src, \
+        "the bare member is 'voice' — the enum's own name, one honest choice"
     assert "**THE SCENARIO:**" not in _src and _src.count("**THE MOMENT:**") >= 16, \
         "the detection grammar must be gone"
     # FROM RESTRAINT TO INTENT (Zac 2026-07-11): register rebalanced, bounds intact
@@ -4840,7 +4849,7 @@ def _rhythm_beats():
                                "sound": "transition-sfx"}]}
     _h._enforce_off_expressive_features(_p_sfx, {"sfx"})
     assert (_p_sfx["sound_effects"] == []
-            and _p_sfx["emphasis_moments"][0]["sound"] is None
+            and _p_sfx["emphasis_moments"][0]["sound"] == "voice"
             and "sound" not in _p_sfx["transitions"][0]), \
         "sfx-off must strip the rider surfaces (the enforcement hole stays closed)"
 

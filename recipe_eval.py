@@ -99,7 +99,7 @@ def evaluate_recipe(plan, words, cut_boundaries, duration, tight_boundaries=None
         {"word_index": (em.get("word_indices") or [None])[0],
          "sound": em.get("sound"), "why": em.get("viewer_feeling")}
         for em in (plan.get("emphasis_moments") or [])
-        if isinstance(em, dict) and em.get("sound")
+        if isinstance(em, dict) and em.get("sound") not in (None, "voice")
     ] + list(plan.get("sound_effects") or [])
     n_words = len(words)
 
@@ -181,7 +181,7 @@ def evaluate_recipe(plan, words, cut_boundaries, duration, tight_boundaries=None
         _low = str(_txt or "").lower()
         return next((_v for _v in _component_vocab if _v in _low), None)
     for e2 in emphases:
-        if isinstance(e2, dict) and e2.get("sound"):
+        if isinstance(e2, dict) and e2.get("sound") not in (None, "voice"):
             _hit = _names_component(e2.get("viewer_feeling"))
             if _hit:
                 r.warn("why-component", f"sound '{e2.get('sound')}' beat names machinery ('{_hit}') — name the MOMENT")
