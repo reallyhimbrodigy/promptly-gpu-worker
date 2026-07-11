@@ -743,9 +743,9 @@ class _EmphasisMoment(BaseModel):
     # derivation, exactly like every other rider.
     sound: Optional[_SFX_SOUNDS] = Field(
         default=None,
-        description="The video's few biggest hits carry one. Most beats — "
-                    "including strong ones — are carried by the voice and "
-                    "omit this field.")
+        description="Carried by the video's hits — the hook's grab and "
+                    "the payoff's landing are the usual two; a beat the "
+                    "voice carries alone omits it.")
 
 class _TextOverlayNote(BaseModel):
     text: str = Field(max_length=200)
@@ -4114,13 +4114,15 @@ ARC SPINE — what each position is FOR, and what it gets
 
 Every component decision is judged against: "does this produce the feeling this arc position is supposed to produce?" The components are means; the viewer feelings are ends.
 
+The plan reads the video's phases and sets each phase's energy from the footage: the HOOK is explosive — the grab gets the type-layer energy and usually the video's first hit. The ARGUMENT is kinetic — captions and annotation graphics carry the pace. The TEACH is calm — one clean structural graphic lets the content breathe. The CLOSE lands — the payoff line is the video's reason to exist, and usually its second hit. Density varies BY PHASE; a calm phase in an energetic video is a choice, and so is an explosive one.
+
   • **hook** (opens at hook_word_index, 1-5 words, intensity 0.7-1.0) — the viewer's thumb is hovering over the swipe-away. Feeling: "wait, what is this?" Treatment: instant grip in the first 2s, optionally one opening text_overlay landing the curiosity gap. The face carries the hook — B-roll and heavy MGs enter after it (exception: when the hook IS a visual claim — "look at this thing in my backyard" — the B-roll is the hook).
 
   • **build** (the bulk of the runtime, intensity 0.2-0.5) — the viewer committed attention and wants to be rewarded for it. Feeling: "they're SHOWING me the world, not narrating at me." Treatment: this is where the carrier layer lives — B-roll on the concrete nouns, MGs on the off-camera referents, the process instruments on their beats (a Timeline or StepDivider marking stages, a RankedList or DropCard carrying an enumerated framework, a NumberTicker tracking a running value); boundaries inside build usually play straight, and a transition there marks a genuine turn. Zooms belong to peaks — build stretches run flat, and that flatness is the contrast a peak's zoom lands against.
 
-  • **mid_peak** (1-4 per video, each a key_moments entry, intensity 0.6-0.85) — a beat lands: a fact, a reaction, a punchline mid-arc. Feeling: a small "oh!" registered in the body. Treatment: punctuation — quick in, quick out; a hit/pop/ding is available when this peak is one of the video's few biggest hits (most mid-peaks ride the voice). Match the size of the moment exactly; this is a real peak but not THE peak.
+  • **mid_peak** (1-4 per video, each a key_moments entry, intensity 0.6-0.85) — a beat lands: a fact, a reaction, a punchline mid-arc. Feeling: a small "oh!" registered in the body. Treatment: punctuation — quick in, quick out; a hit/pop/ding when this peak is one of the video's hits, the voice when it isn't — read the moment, not the safe side. Match the size of the moment exactly; this is a real peak but not THE peak.
 
-  • **payoff** (1 segment, centered on payoff_word_index, intensity 1.0) — THE moment, the line everyone shares. Feeling: the camera and sound COMMIT and the line lands with weight. Treatment: the committed push, slow ramp, the deepest scale of the video, and when any beat carries the video's one bass hit, it is this one. Captions go big on the payoff word. The slow commitment is what separates the payoff from every peak before it; a snap would read as just another mid-peak. The payoff word belongs to the speaker's face — the biggest face moment in the format; the cutaway lane closes before it, and the camera holds the person while it lands. **The payoff is the FINAL committed move.** It holds and resolves cleanly to the close — the payoff's zoom is the last one through the close, with one exception: a deliberate callback beat separated by real time (≥1.5s). The close rides the payoff's resolution — the settle IS the close's motion.
+  • **payoff** (1 segment, centered on payoff_word_index, intensity 1.0) — THE moment, the line everyone shares. Feeling: the camera and sound COMMIT and the line lands with weight. Treatment: the committed push, slow ramp, the deepest scale of the video — and usually the video's second hit: the payoff line is the video's reason to exist, and the boom lives here (a payoff sent bare is a deliberate claim, never a default). Captions go big on the payoff word. The slow commitment is what separates the payoff from every peak before it; a snap would read as just another mid-peak. The payoff word belongs to the speaker's face — the biggest face moment in the format; the cutaway lane closes before it, and the camera holds the person while it lands. **The payoff is the FINAL committed move.** It holds and resolves cleanly to the close — the payoff's zoom is the last one through the close, with one exception: a deliberate callback beat separated by real time (≥1.5s). The close rides the payoff's resolution — the settle IS the close's motion.
 
   • **breather** (between peaks or right before the payoff, intensity 0.0-0.3) — feeling: silence working, attention refilling, the editor trusting the moment. Treatment: stillness — the frame holds bare; at most one quiet B-roll when it perfectly matches what was just said. Zoom, transition, and SFX all sit this beat out. A breather with components stacked on it is no longer a breather, and the next peak lands flatter for it.
 
@@ -4347,7 +4349,7 @@ Anchor preference: 1) upper_third_safe (default — above the face, clear of bot
 THE {_n_mgs} COMPONENTS
 ──────────────────────────────────────────
 
-**Reach for the choice that reads as inevitable.** The whole roster below is a set of instruments at different volumes, and the strongest edits reach for the quietest one that still does the job. A component earns the screen when it carries something the speaker and the captions can't carry alone; when a plainer treatment would land the same moment with more confidence — a caption held a beat longer, a clean emphasis, the speaker's own face given the frame — that restraint is the more produced choice, and the viewer reads it as an editor who trusted the moment. The instruments that look decorative announce themselves: a literal UI control sitting over a line it only labels, a busy graphic, a stock cutaway that restates the words already on screen — each reads as added on, a thing placed because the window was open. The designed-looking choice feels inevitable instead, as if the moment always had it. So weigh each placement by that bar: pick the instrument a thoughtful editor would defend as the thing this beat needed, and the screen reads as composed rather than decorated.
+**Reach for the choice that reads as inevitable.** The whole roster below is a set of instruments at different volumes, and the strongest edits reach for the quietest one that still does the job. A component earns the screen when it carries something the speaker and the captions can't carry alone; when a plainer treatment would land the same moment with more confidence — a caption held a beat longer, a clean emphasis, the speaker's own face given the frame — that plainer treatment is the more produced choice. The bar cuts both ways — an unserved moment is as wrong as an over-dressed one; trusting the moment and abandoning it are different reads, and the difference is whether the choice can name its why. The instruments that look decorative announce themselves: a literal UI control sitting over a line it only labels, a busy graphic, a stock cutaway that restates the words already on screen — each reads as added on, a thing placed because the window was open. The designed-looking choice feels inevitable instead, as if the moment always had it. So weigh each placement by that bar: pick the instrument a thoughtful editor would defend as the thing this beat needed, and the screen reads as composed rather than decorated.
 
 **Every transition, overlay, and motion graphic carries a `why` — ≤12 words naming the specific moment that asked for it** ('the 55° spec is the payoff number', 'pivot from problem into the demo'). Write the why FIRST, then place the component — a real why names the moment; a why that names the screen ('window was empty') is the moment telling you it already reads clean bare. The why is the intent made checkable — a reviewer reading only your whys should be able to reconstruct the video's structure.
 
@@ -4507,7 +4509,7 @@ Entry shape:
     "duration": float,              # 1.5-3.0 output-seconds the visual hit lasts
     "viewer_feeling": "<one specific phrase: the feeling this moment produces in the viewer>",
     "zoom_effect": {{ "arc_position": <the arc position this zoom serves — your CLAIM, same vocabulary as arc_segments>, "type": <a type that position offers> }} | null,   // word-anchored; the pipeline times it. A build/breather claim offers ONLY the mask form — the small eye-carry on the first word after a splice; arc punctuation there is unsayable.
-    "sound": <one of the 16 sounds — see THE SOUNDS> | null,   // the beat can carry ONE sound that amplifies it; most beats carry silence
+    "sound": <one of the 16 sounds — see THE SOUNDS> | null,   // the beat can carry ONE sound that amplifies it — the hook's grab and the payoff's landing are the usual two; a voice-carried beat omits it
     "motion_graphic": {{...}} | null   # the zoom is the camera's punctuation; a graphic joins it when the moment names something the camera cannot show
   }}
 
@@ -4547,11 +4549,11 @@ THE 7 ZOOM TYPES
 === SOUND EFFECTS ===
 ═══════════════════════════════════════════════════════════════════════════
 
-**Sound is the edit's rarest currency.** You are choosing the few moments in this video that deserve to be FELT as well as seen — the hits. Every sound spends the viewer's attention, and each one is worth more when nothing near it competes: a video where the payoff carries the only bass hit makes that payoff land like a verdict. Most beats — including strong ones — are carried by the voice, the cut, and the visual layer, and carrying a beat on the voice alone is a confident choice with its own payoff: it keeps the mix clean, keeps the ear fresh, and makes the treated moments unmistakable when they arrive.
+Read each moment and give it what it calls for. A hit placed with intent and silence chosen with intent are the same skill — neither is the safe choice, because there is no safe choice: an unmarked peak is as wrong as a marked nothing. The footage sets the dial, phase by phase.
 
-Sound-designing a beat is two decisions, in order. **First, the editorial one:** is this one of the video's few biggest hits — a moment a viewer would replay? The voice and visuals carry everything else. **Second, only for a beat that earns it:** which sound is native to that moment — that is what each library entry describes. Sounds are authored ON emphasis moments (the `sound` field) and on transitions (the rider) — nowhere else.
+Sound-designing a beat is two decisions, in order. **First, the editorial one:** is this one of the video's hits — a moment a viewer would replay? The voice and visuals carry the beats that aren't. **Second, for a hit:** which sound is native to that moment — that is what each library entry describes. Sounds are authored ON emphasis moments (the `sound` field) and on transitions (the rider) — nowhere else.
 
-A worked read of a 20-second pitch: the hook's jab takes the punch; the final line — the video's reason to exist — takes the boom; the demo, the stats, and the reveal between them ride on the voice and the visual layer, and the two hits land harder for it. A mix where every line carries a sound stops reading as emphasis at all — the ear normalizes it within seconds, and the actual peak arrives with nothing left to mark it.
+Most videos contain at least the two classic hits: the hook's grab and the line the video exists to deliver. Read for them first — a video whose hook and payoff both ride bare is making a strong claim, and it should be a deliberate one. The dial has two wrong ends: a mix where every line carries a sound stops reading as emphasis within seconds — and a video that never marks a hit reads as an edit that missed them.
 
 **The scenarios live in the source.** A scenario is something the speaker says, shows, or does on camera — the sentence, the number, the reversal, the charm. That is where a sound's `why` points: at the spoken moment that matched. The graphics, zooms, and transitions this plan adds are the edit's answer to those same moments — when a sound and a component land on the same word, each earned it from the footage independently: the graphic renders the fact, the sound punctuates the delivery. A `why` that names a component has matched the edit instead of the footage — re-read that moment for its spoken scenario, and where none exists, the moment carries no sound. And a scenario is matched literally: the moment contains the thing the predicate names, not a pun or association of it ("five minutes" is time, not money).
 
@@ -4573,7 +4575,7 @@ THE 16 SOUNDS — each a defined scenario
 
 **camera-flash** — A camera shutter click with flash. **THE MOMENT:** a photo or screenshot is taken, shown, or demanded in the content — "screenshot this," "I took one picture," the moment the story itself contains a shutter. The sound IS the shutter the story references. **WHAT IT DOES:** diegetic reality; the viewer hears the photo happen inside the story.
 
-**nothing** — the default treatment. **THE MOMENT:** every beat the voice and visuals already carry, which is most of them, including strong ones. **WHAT IT DOES:** keeps the mix clean and the ear fresh; makes the few treated moments land as events instead of wallpaper.
+**nothing** — the bare-voice treatment, chosen like any other. **THE MOMENT:** a beat whose delivery already does what a sound would do — the voice lands it whole, and marking it would double the hit. **WHAT IT DOES:** keeps the air clear around the treated moments; chosen with intent it reads as confidence, defaulted to it reads as an unmarked peak.
 
 **money-ching** — A bright cash-register cha-ching. **THE MOMENT:** the anchor word itself IS the amount — a number of money, a price, or "free" standing as the price ("$500," "ten grand," "free"). Minutes, hours, and days are TIME words; time words never take the register. **WHAT IT DOES:** the number stops being abstract; the viewer hears money hit the table.
 
@@ -4797,11 +4799,11 @@ These are the mechanics the render depends on — the physics of the frame, the 
     the geometry rules.
   • text_overlays: only at real structural anchors (hook frame, chapter
     eyebrow, attributed quote, three parallel items). Text is framing — the transcript already lives in the captions.
-  • sounds: the edit's rarest currency — the few biggest hits carry one (see THE SOUNDS); everything else rides the voice, and reads stronger for it.
-    usually earns its sound, and rotating through the rack keeps the hits
-    reading fresh — the count follows the beats. boom is the one to
-    reserve — a single deep impact on the biggest moment reads harder
-    than a repeated one.
+  • sounds: read the beats for the video's hits — the hook's grab and the
+    payoff's landing are the usual two (see THE SOUNDS). The count follows
+    the beats, and rotating through the rack keeps the hits reading fresh;
+    boom is the one to reserve — a single deep impact on the biggest moment
+    reads harder than a repeated one.
 
 **VARIETY:** every zoom type, transition type, and SFX sound stays at or under 60% of its category's events — the mix is what keeps each firing feeling chosen. If 4 of 5 emphases share one zoom type,
 re-read those moments — at least one is doing something different.
@@ -8077,13 +8079,15 @@ _TRANSITIONS_SUBCALL_SYS = """You are placing TRANSITIONS and TIGHT-CUT OVERLAYS
 
 A transition is the visual treatment on a PICTURE CHANGE — the seam where what's on screen turns over: a source shot change or a B-roll cutaway edge. When the video crosses one, riding it tells the eye the picture turned; a real scene change that plays as a bare jump can read as a beat the edit missed — and a punchline seam plays bare BECAUSE the snap is the beat. Between two moments of one continuous shot the picture has not changed — those splices are not offered here.
 
+A picture change is an event the edit reads, never ignores. The treatment scales with the turn: the act turn takes the full transition where the silence fits it; the mid-scene camera cut takes the flash, the bloom, or the confident bare cut. Each seam is a decision with a why — including the bare ones.
+
 THE PROCEDURE — walk the seams offered; the beat is a property of each:
   1. For EACH seam, read the beat sitting under it — the plan's read (the vision, the arc position, any key moment at that word) and the dialogue around the seam.
-  2. Decide what it wears. The schema offers, per seam, exactly the types whose designed duration fits that seam's real silence — choose editorially among what is offered, or decline. A seam not taken is a bare cut, and often that is the right read: **when the picture change lands on a punchline, a reveal-snap, or a hard beat, the abruptness IS the treatment — leave it bare, deliberately.**
+  2. Decide what it wears. The schema offers, per seam, exactly the types whose designed duration fits that seam's real silence — choose editorially among what is offered, or choose the bare cut — and say why, as a `bare_seams` entry. **When the picture change lands on a punchline, a reveal-snap, or a hard beat, the abruptness IS the treatment — the bare cut, chosen.**
   3. Each seam takes at most ONE treatment — a transition or an overlay, never both.
-  4. Every why names the BEAT at the seam — what the dialogue/story does there, read from the plan — not the mechanics of the transition and not bare geometry ("it's a boundary" is not a why).
+  4. Every why names the BEAT at the seam — what the dialogue/story does there, read from the plan — not the mechanics of the transition and not bare geometry ("it's a boundary" is not a why). A bare seam's why names the same thing: what the hard cut itself does for that beat.
 
-Type selection: match the character of THIS shift, then sanity-check the register — a Stack on a confession reads costume; a FilmStrip on a 20-second video is too much weight. Fresh type each time — adjacent repeats read as a stuck effect rack. Zero treatments is the honest read of footage whose seams don't earn them.
+Type selection: match the character of THIS shift, then sanity-check the register — a Stack on a confession reads costume; a FilmStrip on a 20-second video is too much weight. Fresh type each time — adjacent repeats read as a stuck effect rack. Footage whose seams genuinely earn nothing takes nothing — a per-seam finding, made seam by seam, never a posture arrived at in advance.
 
 THE TRANSITIONS (each: the picture change it rides, the beat that selects it, what it does):
 **CardSwipe** — a casual pivot wants the swipe: clip A tilts off like dismissing an app card, B rises from behind. The speaker shrugged and moved on.
@@ -8136,6 +8140,17 @@ def _build_transitions_subcall_schema(seams):
                 "type": {"type": "string", "enum": sorted(VALID_TIGHT_CUT_OVERLAYS)},
                 "why": {"type": "string", "maxLength": 120}},
             "required": ["after_word_index", "type", "why"]}}
+        # From-Restraint-to-Intent (Zac 2026-07-11): "each seam is a decision
+        # with a why — including the bare ones." The bare cut gets a SURFACE
+        # so declining is a choice the model states, not an absence the log
+        # infers. Consumed as ledger only (seam_bare_choice, observe-only) —
+        # the render is identical; the weekly table and the proof packets
+        # read the whys.
+        _props["bare_seams"] = {"type": "array", "items": {"type": "object",
+            "properties": {
+                "after_word_index": {"type": "string", "enum": _overlay_idx},
+                "why": {"type": "string", "maxLength": 120}},
+            "required": ["after_word_index", "why"]}}
     if not _props:
         return None, 0, 0
     return ({"type": "object", "properties": _props, "required": []},
@@ -10401,9 +10416,27 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                                                          "why": str(_e2.get("why") or "")})
                                 edit_plan["transitions"] = _new_trs
                                 edit_plan["tight_cut_overlays"] = _new_ovl
+                                _n_bare = 0
+                                for _e2 in (_sc_out.get("bare_seams") or []):
+                                    if not isinstance(_e2, dict):
+                                        continue
+                                    try:
+                                        _bw = int(_e2["after_word_index"])
+                                    except Exception:
+                                        continue
+                                    _n_bare += 1
+                                    _bwhy = str(_e2.get("why") or "")[:120]
+                                    _record_divergence(
+                                        "transition",
+                                        {"after_word_index": _bw, "generation": "a1a2"},
+                                        "seam_bare_choice",
+                                        reason=_bwhy)
+                                    print(f"[transitions-subcall] bare seam @awi={_bw} — {_bwhy}",
+                                          flush=True)
                                 print(f"[transitions-subcall] {len(_seams)} seam(s) offered "
                                       f"({_n_var} consuming variant(s)); took "
-                                      f"{len(_new_trs)} transition(s) + {len(_new_ovl)} overlay(s)",
+                                      f"{len(_new_trs)} transition(s) + {len(_new_ovl)} overlay(s) "
+                                      f"+ {_n_bare} bare-with-why",
                                       flush=True)
                     else:
                         print("[transitions-subcall] transitions=off (edit policy) — "
@@ -10880,7 +10913,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                             reason="_seam_splice_index priced this seam's room — "
                                    "a fail here means pricing and application diverged (real alarm)")
 
-            # Transition count/variety is Gemini's decision — the prompt teaches restraint.
+            # Transition count/variety is Gemini's decision — the prompt teaches intent.
 
             # ── Tight-cut overlays (paint-on-top decorations at TIGHT BOUNDARIES) ────
             # Overlays attach to a FRAME POSITION (the boundary word's projected output
@@ -10900,9 +10933,14 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
             raw_tco = edit_plan.get("tight_cut_overlays") or []
             if raw_tco and _dg_words:
                 _valid_tco_types = set(VALID_TIGHT_CUT_OVERLAYS)
-                # The ≤2 cap governs Gemini's DISCRETIONARY emissions only; the
-                # scene-change floor below backfills uncapped (a separate goal).
-                _TIGHT_CUT_OVERLAY_CAP = 2
+                # Overlay density is Gemini's per-seam judgment, taught in the
+                # sub-call (From-Restraint-to-Intent, Zac 2026-07-11). The legacy
+                # per-video cap of 2 (1fbf966, pre-sub-call era) is REMOVED — on
+                # diag-1783799727 it silently vetoed the model's third
+                # acknowledgment of a 5-scene-change video, exactly the
+                # judgment-gated-not-taught class. overlay_density_watch ledgers
+                # counts above the old cap; the weekly table decides whether
+                # taught density holds.
                 _applied_tco_count = 0
                 for _toi, tco in enumerate(raw_tco):
                     if not isinstance(tco, dict):
@@ -10974,14 +11012,6 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                             flush=True,
                         )
                         continue
-                    if _applied_tco_count >= _TIGHT_CUT_OVERLAY_CAP:
-                        print(
-                            f"[generate-edit] DROP tight_cut_overlay '{tco_type}' [{_toi}]: "
-                            f"per-video cap of {_TIGHT_CUT_OVERLAY_CAP} already reached. "
-                            f"Sparing placement keeps the overlay editorial, not templated.",
-                            flush=True,
-                        )
-                        continue
                     _spec = {"after_word_index": awi_t, "type": tco_type}
                     _resolved_overlays.append(_spec)
                     _overlay_awis.add(awi_t)
@@ -10991,6 +11021,14 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                         f"after_word_index={awi_t}",
                         flush=True,
                     )
+
+                if _applied_tco_count > 2:
+                    _record_divergence(
+                        "transition",
+                        {"count": _applied_tco_count, "generation": "a1a2"},
+                        "overlay_density_watch",
+                        reason="above the legacy cap of 2 — the weekly table decides "
+                               "whether taught density holds")
 
             # ── Scene-change decoration FLOOR (deterministic backfill) ─────────
             # Every shot-change tight boundary (a real scdet-flagged visual cut, not a
@@ -11012,7 +11050,8 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
             #
             # Cap scoping (Option A): backfill appends straight to _resolved_overlays
             # and never touches _applied_tco_count, so it is UNCAPPED by construction;
-            # the ≤2 cap still governs Gemini's discretionary emissions.
+            # the legacy ≤2 cap on Gemini's emissions is removed (taught +
+            # overlay_density_watch).
             #
             # ── Crossfade-on-tight DEMOTIONS → light overlays (resolved layer) ──────
             # Transitions the loop above collected instead of raising: each demotes to

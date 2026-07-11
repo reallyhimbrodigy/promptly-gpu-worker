@@ -4789,7 +4789,8 @@ def _rhythm_beats():
     assert "sound_effects" not in _h.PostCutPlan.model_fields, \
         "the standalone word-anchored list must be unrepresentable"
     _d = _h._EmphasisMoment.model_fields["sound"].description or ""
-    assert "carried by the voice" in _d, "the schema-description lever must be live"
+    assert "the hook's grab and" in _d and "the usual two" in _d, \
+        "the schema-description lever must carry the intent frame (usual-two)"
     assert '"sound_on_beat"' in _src and '"money_ching_anchor"' in _src, "the ledgers must exist"
     import recipe_eval, inspect
     esrc = inspect.getsource(recipe_eval)
@@ -4799,10 +4800,30 @@ def _rhythm_beats():
     assert "StageZoom" not in _h.VALID_ZOOM_TYPES
     assert "StageZoom" not in str(_h.ZOOM_ARC_HOMES)
     # the reframe anchors
-    assert "Sound is the edit's rarest currency." in _src, "the task opener must be verbatim"
-    assert "**nothing** — the default treatment." in _src, "restraint must be the first library entry"
+    assert "Read each moment and give it what it calls for." in _src \
+        and "an unmarked peak is as wrong as a marked nothing" in _src, \
+        "the intent opener must be verbatim"
+    assert "**nothing** — the bare-voice treatment" in _src \
+        and "**nothing** — the default treatment." not in _src, \
+        "nothing survives de-throned — one honest choice, not the recommended one"
     assert "**THE SCENARIO:**" not in _src and _src.count("**THE MOMENT:**") >= 16, \
         "the detection grammar must be gone"
+    # FROM RESTRAINT TO INTENT (Zac 2026-07-11): register rebalanced, bounds intact
+    assert "Density varies BY PHASE" in _src, "the phase-energy structure must be taught"
+    assert "the two classic hits" in _src, "the usual-two anchor must be present"
+    assert "A picture change is an event the edit reads, never ignores." in _src, \
+        "the sub-call must teach scene-change acknowledgment"
+    assert '"bare_seams"' in _src and '"seam_bare_choice"' in _src, \
+        "a bare seam is a decision with a why — sayable and ledgered"
+    assert "_TIGHT_CUT_OVERLAY_CAP" not in _src, \
+        "the legacy overlay cap is removed-not-skipped (judgment taught, not gated)"
+    assert '"overlay_density_watch"' in _src, "the density watch replaces the cap"
+    assert "count follows the beats" in " ".join(_src.split()).lower(), \
+        "the killed energy teach is restored (the orphaned bullet is whole again)"
+    assert "reads stronger for it.\n    usually earns its sound" not in _src, \
+        "the orphaned fragment must be gone"
+    assert "Zero treatments is the honest read" not in _src \
+        and "rarest currency" not in _src, "safe-harbor phrasing swept"
 
 
 @check("D1 perceptual sync: ONE audible-onset derivation consumed by emphasis t + SFX + projected anchors; the projection reads the render_timeline arithmetic (frames cursor); D2 floors live")

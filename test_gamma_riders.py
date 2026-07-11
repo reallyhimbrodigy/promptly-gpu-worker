@@ -74,7 +74,7 @@ check("tight-no-mask machinery untouched (warn family intact)",
 print("\n=== Prompt side: floor text gone, taxonomy present (source pins) ===")
 src = open("handler.py").read()
 check("SFX floor sentence replaced", "at least 3 distinct sounds" not in src
-      and "the count follows the beats" in src)
+      and "count follows the beats" in " ".join(src.split()).lower())
 check("zoom two-job taxonomy present", "A zoom does one of two jobs." in src
       and "MASK zooms are functional" in src)
 check("TIGHT header speaks the same taxonomy",
