@@ -4807,6 +4807,44 @@ def _kill_site_inventory():
         "translate-stage transitions/TCO walkers must stay deleted"
 
 
+@check("K4 future-drift guard: every _-key the render path reads is whitelisted (persists) or declared transient (recomputed) — an undeclared read cannot deploy")
+def _k4_future_drift_guard():
+    import re as _re
+    _lines = open("handler.py").read().splitlines()
+    _start = next(_i for _i, _l in enumerate(_lines)
+                  if _l.startswith("def render_multi_clip("))
+    _end = next(_i for _i in range(_start + 1, len(_lines))
+                if _lines[_i].startswith("def "))
+    _body = "\n".join(_lines[_start:_end])
+    _reads = set(_re.findall(r'edit_plan(?:\.get\(|\[)"(_[A-Za-z0-9_]+)"', _body))
+    _src = "\n".join(_lines)
+
+    def _set_lit(name):
+        _blk = _src.split(name + " = {")[1].split("}")[0]
+        return set(_re.findall(r'"(_[A-Za-z0-9_]+)"', _blk))
+
+    _persist = _set_lit("_PERSIST_DERIVED_KEYS")
+    _transient = _set_lit("_RENDER_TRANSIENT_KEYS")
+    # Completeness: an undeclared render-read key is K4 reborn for that field.
+    _undeclared = _reads - _persist - _transient
+    assert not _undeclared, (
+        f"render path reads UNDECLARED _-keys {sorted(_undeclared)} — add each to "
+        f"_PERSIST_DERIVED_KEYS (replays depend on it) or _RENDER_TRANSIENT_KEYS "
+        f"(recomputed every render). Silent replay loss is otherwise reborn.")
+    # Exclusivity: a key cannot be both persisted and recomputed-per-render.
+    _both = _persist & _transient
+    assert not _both, f"keys declared BOTH persist and transient: {sorted(_both)}"
+    # Honesty: stale transient declarations rot the guard.
+    _stale = _transient - _reads
+    assert not _stale, (
+        f"_RENDER_TRANSIENT_KEYS declares keys the render path no longer reads: "
+        f"{sorted(_stale)} — remove them")
+    # Self-integrity: if the scope/regex rots, fail loudly instead of passing empty.
+    assert len(_reads) >= 15, (
+        f"guard parsed only {len(_reads)} render-path _-key reads — the "
+        f"render_multi_clip scope detection or the read regex has drifted")
+
+
 @check("A1/A2 rider sound: fires at the transition's rendered slot frame; dead event → no sound (structural)")
 def _rider_sound_one_derivation():
     tl = {"entries": [

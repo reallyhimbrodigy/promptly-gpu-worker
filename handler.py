@@ -16884,6 +16884,26 @@ def _assert_slot_integrity(pre_slots, post_transitions):
         )
 
 
+# ── RENDER-PATH _-KEY DECLARATION (K4 future-drift guard, 2026-07-10) ────────
+# Every underscore-prefixed edit_plan key the render path (render_multi_clip)
+# READS must appear in exactly one of two sets, or the deploy gate fails:
+#   _PERSIST_DERIVED_KEYS (at the persist sanitizer) — generate-derived and
+#     render-read, so it MUST survive storage for replays (the K4 class).
+#   _RENDER_TRANSIENT_KEYS (here) — recomputed on EVERY render (in-render or
+#     handler-main on both paths) before the read; persisting it would be
+#     dead weight and a staleness hazard.
+# A future pin that adds a render-read _-key without declaring it in one set
+# cannot deploy — silent replay loss is unconstructible for new fields.
+_RENDER_TRANSIENT_KEYS = {
+    "_audio_stream_offset", "_broll_output_ranges", "_caption_band_luma",
+    "_face_trajectory", "_generated_subjects", "_integrity_fullmg_ranges",
+    "_integrity_slot_ranges", "_projected_words", "_render_clip_output_ranges",
+    "_render_clip_time_maps", "_render_cuts", "_render_effective_durations",
+    "_render_fps", "_render_timeline", "_render_total_output_frames",
+    "_rendered_generated_scenes", "_source_loudness",
+}
+
+
 def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, work_dir, speech_segments=None,
                       broll_clips=None):
     """
