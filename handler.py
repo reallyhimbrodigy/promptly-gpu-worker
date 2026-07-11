@@ -8687,6 +8687,12 @@ def build_safe_recipe(kept_words, vocal_emphasis=None, ep_off=None):
     }
 
 
+# LEVER 4: the uploaded-reference key, module-scoped (the established _LAST
+# pattern) because the upload happens inside the edit-recipe closure and the
+# teardown delete runs in handler()'s finally — closure locals don't cross.
+_VIDEO_REF_UPLOADED_LAST = {"key": None}
+
+
 def _ensure_proxy_reference(job_id, proxy_bytes, client_proxy_url):
     """LEVER 4 (upload once, reference everywhere; Zac 2026-07-10): ONE https
     reference per job for the Gemini proxy — every video-carrying call (the
@@ -8707,6 +8713,7 @@ def _ensure_proxy_reference(job_id, proxy_bytes, client_proxy_url):
     on inline bytes, ledgered video_reference_fallback — the render ships
     slow, never fails. A latency optimization must not be able to kill a job.
     Kill switch: VIDEO_REFERENCE_ENABLED=0 (default ON — no dark flags)."""
+    _VIDEO_REF_UPLOADED_LAST["key"] = None
     if str(os.environ.get("VIDEO_REFERENCE_ENABLED", "1")).strip().lower() in ("0", "false", "off"):
         return None, None
     try:
@@ -8721,6 +8728,7 @@ def _ensure_proxy_reference(job_id, proxy_bytes, client_proxy_url):
             _url = _s3.generate_presigned_url(
                 "get_object", Params={"Bucket": _bucket, "Key": _key},
                 ExpiresIn=21600)
+            _VIDEO_REF_UPLOADED_LAST["key"] = _key
             print(f"[video-ref] proxy uploaded once "
                   f"({len(proxy_bytes)/1048576:.1f}MB → {_key}) — every Gemini "
                   f"call references it", flush=True)
@@ -9361,7 +9369,14 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                 try:
                     post_cut_plan = _call_gemini_post_cuts(client, post_sys, _post_user_attempt, _video_part, GEMINI_EDITORIAL_MODEL)
                 except Exception as _ref_err:
-                    if _video_part_fallback is None:
+                    if (_video_part_fallback is None
+                            or type(_ref_err).__name__ != "ClientError"):
+                        # Only a transport rejection of the reference itself
+                        # (ClientError 4xx, e.g. "Cannot fetch content from
+                        # the provided URL") falls back. Degeneration aborts
+                        # and other classes keep their own paths — proven
+                        # live: a 16k repetition-loop abort mislabeled as a
+                        # reference failure in the first proof matrix.
                         raise
                     # LEVER 4 failure direction: reference broke → inline
                     # bytes for the REST OF THE JOB (every later repair
@@ -25996,15 +26011,19 @@ def handler(job):
         # object). Same teardown that flushes the ledger; a failed delete
         # ages out via the presigned expiry, printed not silent.
         try:
-            if _video_ref_uploaded_key:
+            _vru_key = _VIDEO_REF_UPLOADED_LAST.get("key")
+            if _vru_key:
                 globals()["_aws_s3_client"].delete_object(
                     Bucket=os.environ.get("S3_BUCKET_NAME") or "promptly-video-storage",
-                    Key=_video_ref_uploaded_key)
-                print(f"[video-ref] reference deleted at teardown ({_video_ref_uploaded_key})", flush=True)
-        except NameError:
-            pass
+                    Key=_vru_key)
+                _VIDEO_REF_UPLOADED_LAST["key"] = None
+                print(f"[video-ref] reference deleted at teardown ({_vru_key})", flush=True)
         except Exception as _vrd_err:
-            print(f"[video-ref] teardown delete failed ({_vrd_err}) — object ages out with the URL expiry", flush=True)
+            # HONEST: a presigned URL expiring does NOT delete the object. A
+            # failed delete (or a crash before teardown) leaks exactly one
+            # object under sources/gemini-proxies/ — visible by prefix.
+            print(f"[video-ref] teardown delete failed ({_vrd_err}) — one object "
+                  f"leaked under sources/gemini-proxies/ (visible by prefix)", flush=True)
         # LEDGER flush: persist this job's divergences so the overrule spine is queryable.
         _flush_divergence_ledger(input_data.get("job_id"))
 

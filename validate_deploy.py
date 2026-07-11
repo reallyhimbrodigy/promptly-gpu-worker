@@ -4877,10 +4877,14 @@ def _lever4_video_reference():
         "the reference part must be fileData, not a second byte copy"
     assert "_video_part = _video_part_fallback" in _src, \
         "a broken reference must fall back to inline for the job, never fail it"
+    assert 'type(_ref_err).__name__ != "ClientError"' in _src, \
+        "fallback fires ONLY on transport rejections — degeneration keeps its own path (convicted live)"
+    assert "_VIDEO_REF_UPLOADED_LAST" in _src and _src.count("_VIDEO_REF_UPLOADED_LAST") >= 4, \
+        "the uploaded key must cross the closure boundary via the module registry (teardown scope bug, convicted live)"
     assert 'os.environ.get("VIDEO_REFERENCE_ENABLED", "1")' in _src, \
         "kill switch must default ON (no dark flags)"
-    assert "if _video_ref_uploaded_key:" in _src and "delete_object" in _src, \
-        "teardown must delete the uploaded reference"
+    assert '_VIDEO_REF_UPLOADED_LAST.get("key")' in _src and "delete_object" in _src, \
+        "teardown must delete the uploaded reference (via the module registry)"
     _i_help = _src.index("def _ensure_proxy_reference(")
     assert "client_proxy_url and str(client_proxy_url).startswith" in _src, \
         "client-proxy jobs must reference the existing object (zero upload)"
