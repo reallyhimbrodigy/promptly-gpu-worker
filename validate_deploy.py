@@ -4766,6 +4766,47 @@ def _a1a2_room_domain():
         "mid-clip seam (next kept word inside the same clip) must have no splice"
 
 
+@check("Kill-site inventory: rider survives final_cuts; sound never leaks to extras; derived fields persist; replay parity + drops ledgered; policy gates the author; audits accept counted misses")
+def _kill_site_inventory():
+    _src = open("handler.py").read()
+    # K1: the rider's carrier survives the final_cuts rebuild (its ONE reader
+    # is _transition_sound_events over render cuts — severed = rider never fires).
+    assert '_new_cut["_transition_sound"] = clip_entry["_transition_sound"]' in _src, \
+        "final_cuts must copy _transition_sound"
+    # K2: "sound" must never leak into _transition_extras (TransitionSpec is
+    # extra=forbid — the leak was a render-killer on any rider-carrying recipe).
+    assert '"type", "after_word_index", "why", "sound"' in _src, \
+        "extras filter must exclude 'sound'"
+    # K3: EditPolicy transitions=off gates the sub-call itself.
+    assert "if not _transitions_off else []" in _src, \
+        "the sub-call's seam candidates must be gated on _transitions_off"
+    # K4/K5: derived carriers persist; replay parity is alarmed, not silent.
+    for _k in ("_resolved_tight_cut_overlays", "_parsed_sound_effects",
+               "_emphasis_moments", "_removed_word_indices", "_schema_generation"):
+        assert f'"{_k}",' in _src.split("_PERSIST_DERIVED_KEYS = {")[1].split("}")[0], \
+            f"persist whitelist must carry {_k}"
+    assert "replay_derived_fields_absent" in _src, "replay parity alarm must exist"
+    # K6: retired transition types coerce at the CUT level before slot sizing.
+    assert 'cuts.transition_out' in _src and _src.index('"site": "cuts.transition_out"') \
+        < _src.index("_trim_head_dur = [0.0] * len(render_cuts)"), \
+        "NewspaperWipe cut-level coerce must run before handle/slot sizing"
+    # K7: projection-miss drops are counted + ledgered and the integrity audits
+    # accept the counted misses (one miss must not rung-2 the whole video).
+    assert _src.count("projection_miss_drop") >= 3, "all three projection-miss drops must ledger"
+    assert "len(motion_graphics_out) + _mg_projection_misses" in _src \
+        and "len(text_overlays_out) + _tov_projection_misses" in _src, \
+        "integrity audits must accept counted projection misses"
+    # K8: every transition application drop + the wire-in except are ledgered.
+    for _a in ("drop_out_of_bounds", "drop_removed_word", "drop_no_clip_pair",
+               "subcall_wirein_error_bare_cuts"):
+        assert _a in _src, f"transition drop ledger {_a} missing"
+    # K9: the translate-stage transitions/TCO walkers are deleted (the space
+    # they translate FROM cannot author those fields since 2d21701).
+    assert "Dropping transition: after_word_index out of kept-range" not in _src \
+        and "Dropping tight_cut_overlay: after_word_index out of kept-range" not in _src, \
+        "translate-stage transitions/TCO walkers must stay deleted"
+
+
 @check("A1/A2 rider sound: fires at the transition's rendered slot frame; dead event → no sound (structural)")
 def _rider_sound_one_derivation():
     tl = {"entries": [

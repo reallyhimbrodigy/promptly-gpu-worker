@@ -6940,33 +6940,12 @@ def _translate_post_cut_anchors_to_src(post_cut_plan, new_to_src):
         sfx_out.append({**sfx, "word_index": v})
     out["sound_effects"] = sfx_out
 
-    # transitions — after_word_index
-    tr_in = out.get("transitions") or []
-    tr_out = []
-    for tr in tr_in:
-        if not isinstance(tr, dict):
-            continue
-        v = _xlate(tr.get("after_word_index"))
-        if v is None:
-            print(f"[two-pass] Dropping transition: after_word_index out of kept-range", flush=True)
-            continue
-        tr_out.append({**tr, "after_word_index": v})
-    out["transitions"] = tr_out
-
-    # tight_cut_overlays — after_word_index (same shape as transitions, target
-    # space is TIGHT BOUNDARIES instead of CUT BOUNDARIES — checked at the
-    # application site in generate_edit_gemini, not here)
-    tco_in = out.get("tight_cut_overlays") or []
-    tco_out = []
-    for tco in tco_in:
-        if not isinstance(tco, dict):
-            continue
-        v = _xlate(tco.get("after_word_index"))
-        if v is None:
-            print(f"[two-pass] Dropping tight_cut_overlay: after_word_index out of kept-range", flush=True)
-            continue
-        tco_out.append({**tco, "after_word_index": v})
-    out["tight_cut_overlays"] = tco_out
+    # (transitions / tight_cut_overlays translate walkers DELETED, kill-site
+    # inventory 2026-07-10: the main schema cannot author those fields since
+    # 2d21701, so this function's input never carries them — the sub-call
+    # authors them in SOURCE space after translation. Knowledge: their
+    # kept→src remap + out-of-range drop lives structurally in the sub-call's
+    # const-index seam construction.)
 
     # motion_graphics — start_word_index, end_word_index
     mg_in = out.get("motion_graphics") or []
@@ -9922,7 +9901,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                     max_compress=_PACING_MAX_COMPRESS,
                     within_clip_15ms=_WITHIN_CLIP_DEADAIR,
                     level_silences=list(_LEVEL_SILENCES_LAST))
-                edit_plan["_removed_word_indices"] = _removed_word_indices
+                edit_plan["_removed_word_indices"] = sorted(_removed_word_indices or [])
 
                 # ── A1/A2 TRANSITIONS SUB-CALL wire-in (room-domain corrected) ──
                 # Single ownership: the sub-call authors transitions + tight-cut
@@ -9983,7 +9962,12 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                         return 0.0
 
                     _seams = []
-                    for _awi2 in sorted(_shot_seam_src | _broll_edges_for_seams):
+                    # EditPolicy (kill-site inventory 2026-07-10): with
+                    # transitions=off the sub-call must not author — the Step-2
+                    # strip ran BEFORE this wire-in and was silently undone.
+                    _seam_candidates = (sorted(_shot_seam_src | _broll_edges_for_seams)
+                                        if not _transitions_off else [])
+                    for _awi2 in _seam_candidates:
                         if not isinstance(_awi2, int) or _awi2 < 0 or _awi2 + 1 >= len(_dg_words):
                             continue
                         if _awi2 in _seam_removed_src:
@@ -10056,11 +10040,18 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                                       f"{len(_new_trs)} transition(s) + {len(_new_ovl)} overlay(s)",
                                       flush=True)
                     else:
-                        print("[transitions-subcall] zero qualifying seams — skipped "
+                        print("[transitions-subcall] transitions=off (edit policy) — "
+                              "sub-call skipped (zero transitions by policy)"
+                              if _transitions_off else
+                              "[transitions-subcall] zero qualifying seams — skipped "
                               "(zero transitions by construction)", flush=True)
                 except Exception as _sce:
                     print(f"[transitions-subcall] wire-in error — bare cuts: "
                           f"{type(_sce).__name__}: {str(_sce)[:200]}", flush=True)
+                    _record_divergence(
+                        "transition", {"error": type(_sce).__name__, "generation": "new"},
+                        "subcall_wirein_error_bare_cuts",
+                        reason=str(_sce)[:200])
                     edit_plan["transitions"] = []
                     edit_plan["tight_cut_overlays"] = []
 
@@ -10466,6 +10457,11 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                             f"transition.",
                             flush=True,
                         )
+                        _record_divergence(
+                            "transition", {"type": tr_type, "awi": awi,
+                                           "generation": "new"},
+                            "drop_out_of_bounds",
+                            reason="unrepresentable on the governed path — real alarm")
                         continue
                     if awi in _tr_removed:
                         # The transition word got cut by a downstream pass. Drop the
@@ -10476,6 +10472,11 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                             f"continues without this transition.",
                             flush=True,
                         )
+                        _record_divergence(
+                            "transition", {"type": tr_type, "awi": awi,
+                                           "generation": "new"},
+                            "drop_removed_word",
+                            reason="seam construction filters removed words — real alarm")
                         continue
                     # SCENE-CHANGE GATE (Action 3, flag-gated): a transition only
                     # earns its place on a real scene change (scdet shot boundary
@@ -10499,9 +10500,13 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                     # All three unrepresentable on the governed path.
                     word_end = float(_dg_words[awi].get("end") or 0)
                     # Build extras dict — copy through all component-specific props
+                    # "sound" rides _transition_sound (its own carrier);
+                    # leaking it here spread into TransitionSpec (extra="forbid")
+                    # and crashed the render into the degrade ladder.
                     _extras = {
                         k: v for k, v in tr.items()
-                        if k not in ("type", "after_word_index", "why") and v is not None
+                        if k not in ("type", "after_word_index", "why", "sound")
+                        and v is not None
                     }
                     # Find the clip that contains this word (with 50ms tolerance) and
                     # has a successor to transition INTO. If the word lands in the last
@@ -10537,6 +10542,12 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                             f"without this transition.",
                             flush=True,
                         )
+                        _record_divergence(
+                            "transition", {"type": tr_type, "awi": awi,
+                                           "generation": "new"},
+                            "drop_no_clip_pair",
+                            reason="_seam_splice_index priced this seam's room — "
+                                   "a fail here means pricing and application diverged (real alarm)")
 
             # Transition count/variety is Gemini's decision — the prompt teaches restraint.
 
@@ -12228,6 +12239,11 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                 # title, etc.).
                 if clip_entry.get("_transition_extras"):
                     _new_cut["_transition_extras"] = clip_entry["_transition_extras"]
+                # Rider sound (kill-site inventory 2026-07-10): this key was
+                # SEVERED here — the one reader (_transition_sound_events) reads
+                # final render cuts, so the A1/A2 rider could never fire.
+                if clip_entry.get("_transition_sound"):
+                    _new_cut["_transition_sound"] = clip_entry["_transition_sound"]
                 if clip_entry.get("_zoom_effect"):
                     _new_cut["_zoom_effect"] = clip_entry["_zoom_effect"]
                 # NOTE: tight-cut overlays no longer travel on clips. They are resolved
@@ -16908,6 +16924,18 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     )
 
     render_cuts = list(cuts)
+    # Retired-type coerce at the CUT level (kill-site inventory 2026-07-10):
+    # the plan-list coerce (below, pre-caption block) never touched
+    # cuts[i].transition_out, so a stored NewspaperWipe cut was silently
+    # skipped at emit and then crashed the replay's parity audit. Coerced
+    # HERE, before handle/slot sizing, the successor actually renders.
+    for _rw_c in render_cuts:
+        if isinstance(_rw_c, dict) and _rw_c.get("transition_out") == "NewspaperWipe":
+            _record_divergence(
+                "transition", {"type": "NewspaperWipe", "site": "cuts.transition_out"},
+                "retired_style_coerced", final="ShutterFlash",
+                reason="directive #13 kill — successor renders (cut level)")
+            _rw_c["transition_out"] = "ShutterFlash"
 
     # Tag clips with _original_idx for downstream lookups.
     for _idx, _rc in enumerate(render_cuts):
@@ -17600,6 +17628,33 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         "ShutterFlash":  11,
     }
     tight_cut_overlays_out = []
+    # REPLAY PARITY ALARM (kill-site inventory 2026-07-10): recipes stored
+    # before the derived-field whitelist lack these carriers — the persisted
+    # arrays exist but nothing at render reads them, so the whole component
+    # class would be absent from this replay. Ledgered, never silent. Key
+    # PRESENCE is the test (an empty list is an honest all-dropped state).
+    for _dk2, _n_src2 in (
+        ("_resolved_tight_cut_overlays", len(edit_plan.get("tight_cut_overlays") or [])),
+        ("_parsed_sound_effects", len(edit_plan.get("sound_effects") or [])),
+        ("_emphasis_moments", sum(1 for _em2 in (edit_plan.get("emphasis_moments") or [])
+                                  if isinstance(_em2, dict) and _em2.get("motion_graphic"))),
+    ):
+        if _n_src2 and _dk2 not in edit_plan:
+            _record_divergence(
+                "render",
+                {"derived_key": _dk2, "source_entries": _n_src2,
+                 "generation": "new" if edit_plan.get("_schema_generation") == "a1a2"
+                 else "legacy"},
+                "replay_derived_fields_absent",
+                reason="recipe predates the persist whitelist — this component "
+                       "class is absent from this replay (legacy floor)")
+    # Projection-miss accounting (kill-site inventory 2026-07-10): a word that
+    # fell into a transition-tail handle or past a refined boundary is a valid
+    # render-existence edge — its MG/text overlay dies ALONE (ledgered), and
+    # the integrity audits accept the counted misses instead of converting one
+    # miss into a rung-2 full-decoration strip.
+    _mg_projection_misses = 0
+    _tov_projection_misses = 0
     for _ov in (edit_plan.get("_resolved_tight_cut_overlays") or []):
         _tco = str(_ov.get("type") or "").strip()
         if _tco not in VALID_TIGHT_CUT_OVERLAYS:
@@ -17765,6 +17820,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 f"(transition-tail/refinement). Render continues without it.",
                 flush=True,
             )
+            _tov_projection_misses += 1
+            _record_divergence(
+                "text_overlay", {"variant": str(_ov.get("variant")), "word_index": _swi},
+                "projection_miss_drop",
+                reason="anchor word not on output timeline (transition-tail/refinement)")
             continue
         _out_start = float(_pw["start"])
         _entry = {
@@ -18023,6 +18083,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 f"timeline (transition-tail/refinement). Render continues without it.",
                 flush=True,
             )
+            _mg_projection_misses += 1
+            _record_divergence(
+                "motion_graphic", {"type": str(_mg.get("type")), "start": _swi, "end": _ewi},
+                "projection_miss_drop",
+                reason="anchor word not on output timeline (transition-tail/refinement)")
             continue
         _out_start = float(_pw_start["start"])
         _out_end = float(_pw_end["end"])
@@ -18133,6 +18198,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 f"(transition-tail/refinement). Render continues without it.",
                 flush=True,
             )
+            _mg_projection_misses += 1
+            _record_divergence(
+                "motion_graphic", {"type": "emphasis_mg", "word_index": _em_first_wi},
+                "projection_miss_drop",
+                reason="anchor word not on output timeline (transition-tail/refinement)")
             continue
         _em_t_out = float(_em_pw["start"])
         _em_t_frame = int(round(_em_t_out * source_fps))
@@ -18268,22 +18338,24 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     )
     _expected_top_mgs = len(edit_plan.get("motion_graphics") or [])
     _expected_total_mgs = _expected_top_mgs + _expected_emphasis_mgs
-    if len(motion_graphics_out) != _expected_total_mgs:
+    if len(motion_graphics_out) + _mg_projection_misses != _expected_total_mgs:
         raise RuntimeError(
             f"Pipeline integrity violation: motion_graphics_out has "
-            f"{len(motion_graphics_out)} entries but validation produced "
+            f"{len(motion_graphics_out)} entries (+{_mg_projection_misses} "
+            f"ledgered projection-miss drops) but validation produced "
             f"{_expected_top_mgs} top-level + {_expected_emphasis_mgs} emphasis "
             f"MGs ({_expected_total_mgs} total). Every validated MG must reach "
-            f"the output spec."
+            f"the output spec or be explicitly ledgered."
         )
 
     _expected_text_overlays = len(edit_plan.get("text_overlays") or [])
-    if len(text_overlays_out) != _expected_text_overlays:
+    if len(text_overlays_out) + _tov_projection_misses != _expected_text_overlays:
         raise RuntimeError(
             f"Pipeline integrity violation: text_overlays_out has "
-            f"{len(text_overlays_out)} entries but validation produced "
+            f"{len(text_overlays_out)} entries (+{_tov_projection_misses} "
+            f"ledgered projection-miss drops) but validation produced "
             f"{_expected_text_overlays}. Every validated text overlay must "
-            f"reach the output spec."
+            f"reach the output spec or be explicitly ledgered."
         )
 
     print(
@@ -25536,9 +25608,22 @@ def handler(job):
         # re-renders rely on them and the validator that recomputes them
         # only runs in full/tweak/reinterpret modes.
         _BROLL_NONPERSISTABLE = {"_local_path"}
+        # DERIVED-FIELD WHITELIST (kill-site inventory 2026-07-10): the render
+        # reads ONLY these derived carriers — the persisted arrays they derive
+        # from have no render-side reader. Stripping them made every
+        # render_only / accepted-tweak replay silently lose ALL tight-cut
+        # overlays, ALL word-anchored SFX, and ALL emphasis MGs, disarmed the
+        # removed-word projection filter (replay caption regression), and made
+        # the slot-clamp alarm misclassify replayed new-schema recipes as
+        # legacy. They persist so a replay renders what the fresh render did.
+        _PERSIST_DERIVED_KEYS = {
+            "_resolved_tight_cut_overlays", "_parsed_sound_effects",
+            "_emphasis_moments", "_removed_word_indices", "_schema_generation",
+        }
         sanitized_recipe = {
             k: v for k, v in edit_plan.items()
-            if k != "analysis_data" and not (isinstance(k, str) and k.startswith("_"))
+            if k != "analysis_data" and (k in _PERSIST_DERIVED_KEYS
+                or not (isinstance(k, str) and k.startswith("_")))
         }
         if isinstance(sanitized_recipe.get("broll_clips"), list):
             sanitized_recipe["broll_clips"] = [
