@@ -45,12 +45,6 @@ export interface LetterboxPushProps extends BaseZoomProps {
   maxBarHeight?: number;
 }
 
-export interface StageZoomProps extends BaseZoomProps {
-  // Scale for first stage. Default 1.15.
-  firstStage?: number;
-  // Scale for second stage. Default 1.35.
-  secondStage?: number;
-}
 
 export interface DepthPullProps extends BaseZoomProps {
   // Edge blur max in px. Default 4.

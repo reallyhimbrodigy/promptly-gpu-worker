@@ -541,8 +541,7 @@ _ZOOM_TYPES = Literal[tuple(sorted(VALID_ZOOM_TYPES))]
 # hook/mid_peak = the snap pair; close = echo-of-hook ∪ SmoothPush lock-in.
 # PROVISIONAL homes pending Zac's flag ruling (nearest taught evidence,
 # chosen over silent extinction): DepthPull→hook ("intros, title-sequence
-# energy"); StageZoom→mid_peak ("weight for the revelation", the two-stage
-# escalation); FocusWindow→mid_peak ("specialty: a detail AND its context" —
+# energy"); FocusWindow→mid_peak ("specialty: a detail AND its context" —
 # condition-based, weakest evidence). RULED 2026-07-10: all three ACCEPTED
 # as housed, measure-watched — the arc-claim WARN is the watchdog; a wrong
 # read in the census is a one-line edit here, with evidence.
@@ -555,7 +554,7 @@ _ZOOM_TYPES = Literal[tuple(sorted(VALID_ZOOM_TYPES))]
 # offers nothing but the mask form.
 ZOOM_ARC_HOMES = {
     "hook":     ("DepthPull", "SnapReframe", "StepZoom"),
-    "mid_peak": ("FocusWindow", "SnapReframe", "StageZoom", "StepZoom"),
+    "mid_peak": ("FocusWindow", "SnapReframe", "StepZoom"),
     "payoff":   ("LetterboxPush", "SmoothPush"),
     "close":    ("SmoothPush", "SnapReframe", "StepZoom"),
     "build":    ("SnapReframe", "StepZoom"),
@@ -564,6 +563,15 @@ ZOOM_ARC_HOMES = {
 # The mask positions: their variants carry the mask form's OWN constraints
 # (durationMs ≤ 1000 — "under a second"; scale ≤ the snap pair's natural —
 # "stays small"), derived from ZOOM_NATURAL_SCALE, never hand-copied.
+# StageZoom DELETED (Zac ruling 2026-07-11: its designed signature — push to
+# 1.15, hold, push to 1.35, hold, out — reads as a defect to the founder's
+# eye; never had a taught arc home; its moment class is served by the
+# committed pair at payoff and the snap pair at mid_peak). KNOWLEDGE
+# extracted before deletion: peak-reach was 1170ms = 65% of its 1800ms
+# natural (a two-stage move's perceptual landing sits at the SECOND push's
+# settle); stages measured 1.15/1.35; the escalation teach ("setup→payoff
+# escalation inside one moment") retires WITH the component — no surviving
+# type performs escalation-within-one-event.
 ZOOM_MASK_POSITIONS = ("build", "breather")
 # Import-time exactness (the 76ad30b lesson): the homes must tile the registry
 # — every registry type housed somewhere (no silent extinction), no stranger.
@@ -591,7 +599,6 @@ ZOOM_NATURAL_DURATION_FRAMES = {
     "FocusWindow":   90,    # → 1500ms
     "StepZoom":      48,    # → 800ms
     "LetterboxPush": 84,    # → 1400ms
-    "StageZoom":    108,    # → 1800ms (one event drives the 5-phase progression)
     "DepthPull":    132,    # → 2200ms
 }
 ZOOM_NATURAL_DURATION_MS = {}
@@ -608,7 +615,6 @@ ZOOM_NATURAL_SCALE = {
     "FocusWindow":   1.80,  # bgScale; FocusWindow is dual-view, not a push
     "StepZoom":      1.25,
     "LetterboxPush": 1.25,
-    "StageZoom":     1.30,  # final stage scale; firstStage handled separately
     "DepthPull":     1.25,
 }
 # Per-type PERCEPTUAL PEAK reach time relative to event start.
@@ -635,7 +641,6 @@ ZOOM_PEAK_REACH_MS = {
     "FocusWindow":    234,   # spring 99% settling (damping=24, mass=0.7, stiffness=180)
     "StepZoom":         0,   # instant — peak at startMs
     "LetterboxPush":  490,   # 35% × 1400ms (ramp-in end)
-    "StageZoom":     1170,   # 65% × 1800ms (second-stage peak)
     "DepthPull":      770,   # 35% × 2200ms (ramp-in end)
 }
 _MG_TYPES = Literal[tuple(sorted(VALID_MG_TYPES))]
@@ -725,6 +730,22 @@ class _EmphasisMoment(BaseModel):
     viewer_feeling: str = Field(max_length=200)
     zoom_effect: Optional[_ZoomEffect] = None
     motion_graphic: Optional[_EmphasisMotionGraphic] = None
+    # B — SOUNDS RIDE RANKED BEATS (Zac 2026-07-11, second rejection): sounds
+    # within ±130ms of their words STILL read as random — the per-sound
+    # scenario match was the wrong unit; the unit is the video's beat
+    # economy. A sound fits when it amplifies a moment the edit already
+    # treats as a peak — and the plan already ranks the peaks: THESE. The
+    # standalone word-anchored sound_effects list is DELETED from the schema;
+    # a sound on a non-beat is unrepresentable, spam is unwritable (count
+    # bounded by the beat count by construction). Transition sounds already
+    # ride transitions; the library remains the CHOOSER of which sound fits
+    # THIS beat. Fires at the emphasis's word via the audible-onset
+    # derivation, exactly like every other rider.
+    sound: Optional[_SFX_SOUNDS] = Field(
+        default=None,
+        description="The video's few biggest hits carry one. Most beats — "
+                    "including strong ones — are carried by the voice and "
+                    "omit this field.")
 
 class _TextOverlayNote(BaseModel):
     text: str = Field(max_length=200)
@@ -1086,7 +1107,6 @@ class PostCutPlan(BaseModel):
     # plan's read of the footage (arc, ranked moments) and are authored after
     # it. Confirms A1/A2's sound-on-event design: a sound authored ON its event
     # has maximal context by construction.
-    sound_effects: List[_SoundEffect]
     motion_graphics: List[_MotionGraphic]
     text_overlays: List[_TextOverlay]
     broll_clips: List[_BrollClip]
@@ -1135,7 +1155,6 @@ class EditPlan(BaseModel):
     caption_keywords: List[Annotated[str, Field(max_length=120)]]
     emphasis_moments: List[_EmphasisMoment]
     transitions: List[_Transition]
-    sound_effects: List[_SoundEffect]
     motion_graphics: List[_MotionGraphic]
     text_overlays: List[_TextOverlay]
     broll_clips: List[_BrollClip]
@@ -4099,9 +4118,9 @@ Every component decision is judged against: "does this produce the feeling this 
 
   • **build** (the bulk of the runtime, intensity 0.2-0.5) — the viewer committed attention and wants to be rewarded for it. Feeling: "they're SHOWING me the world, not narrating at me." Treatment: this is where the carrier layer lives — B-roll on the concrete nouns, MGs on the off-camera referents, the process instruments on their beats (a Timeline or StepDivider marking stages, a RankedList or DropCard carrying an enumerated framework, a NumberTicker tracking a running value); boundaries inside build usually play straight, and a transition there marks a genuine turn. Zooms belong to peaks — build stretches run flat, and that flatness is the contrast a peak's zoom lands against.
 
-  • **mid_peak** (1-4 per video, each a key_moments entry, intensity 0.6-0.85) — a beat lands: a fact, a reaction, a punchline mid-arc. Feeling: a small "oh!" registered in the body. Treatment: punctuation — quick in, quick out, paired with a hit/pop/ding. Match the size of the moment exactly; this is a real peak but not THE peak.
+  • **mid_peak** (1-4 per video, each a key_moments entry, intensity 0.6-0.85) — a beat lands: a fact, a reaction, a punchline mid-arc. Feeling: a small "oh!" registered in the body. Treatment: punctuation — quick in, quick out; a hit/pop/ding is available when this peak is one of the video's few biggest hits (most mid-peaks ride the voice). Match the size of the moment exactly; this is a real peak but not THE peak.
 
-  • **payoff** (1 segment, centered on payoff_word_index, intensity 1.0) — THE moment, the line everyone shares. Feeling: the camera and sound COMMIT and the line lands with weight. Treatment: the committed push, slow ramp, the deepest scale of the video, paired with a committing boom on the word. Captions go big on the payoff word. The slow commitment is what separates the payoff from every peak before it; a snap would read as just another mid-peak. The payoff word belongs to the speaker's face — the biggest face moment in the format; the cutaway lane closes before it, and the camera holds the person while it lands. **The payoff is the FINAL committed move.** It holds and resolves cleanly to the close — the payoff's zoom is the last one through the close, with one exception: a deliberate callback beat separated by real time (≥1.5s). The close rides the payoff's resolution — the settle IS the close's motion.
+  • **payoff** (1 segment, centered on payoff_word_index, intensity 1.0) — THE moment, the line everyone shares. Feeling: the camera and sound COMMIT and the line lands with weight. Treatment: the committed push, slow ramp, the deepest scale of the video, and when any beat carries the video's one bass hit, it is this one. Captions go big on the payoff word. The slow commitment is what separates the payoff from every peak before it; a snap would read as just another mid-peak. The payoff word belongs to the speaker's face — the biggest face moment in the format; the cutaway lane closes before it, and the camera holds the person while it lands. **The payoff is the FINAL committed move.** It holds and resolves cleanly to the close — the payoff's zoom is the last one through the close, with one exception: a deliberate callback beat separated by real time (≥1.5s). The close rides the payoff's resolution — the settle IS the close's motion.
 
   • **breather** (between peaks or right before the payoff, intensity 0.0-0.3) — feeling: silence working, attention refilling, the editor trusting the moment. Treatment: stillness — the frame holds bare; at most one quiet B-roll when it perfectly matches what was just said. Zoom, transition, and SFX all sit this beat out. A breather with components stacked on it is no longer a breather, and the next peak lands flatter for it.
 
@@ -4461,7 +4480,7 @@ An emphasis moment is a PEAK — a moment the viewer will physically react to, n
 
 A zoom does one of two jobs. EMPHASIS zooms map 1:1 to key_moments — they are the ledger of the video's loudest beats, and every one carries its moment. MASK zooms are functional: the small punch on the first word after a hard splice that carries the eye across the jump. They serve the boundary, live outside the moment ledger, and stay small — SnapReframe or StepZoom scale, under a second. A mask zoom CLAIMS the arc position of the word it sits on — build/breather claims exist for exactly this job, and offer nothing else.
 
-Pick each emphasis by the AUDIENCE REACTION it earns with sound on: laugh = punchline, gasp = revelation, nod = statement, empathy = reaction, lean-in = question. Two beats side-by-side are usually revelation then reaction — the fact arriving, then the speaker responding — and they want different cameras: weight for the revelation (the committed family — StageZoom at a mid-peak; LetterboxPush when the revelation IS the payoff), snap for the reaction.
+Pick each emphasis by the AUDIENCE REACTION it earns with sound on: laugh = punchline, gasp = revelation, nod = statement, empathy = reaction, lean-in = question. Two beats side-by-side are usually revelation then reaction — the fact arriving, then the speaker responding — and they want different cameras: weight for the revelation (LetterboxPush when the revelation IS the payoff; at a mid-peak the snap pair carries it), snap for the reaction.
 
 **Zoom personality by arc position** (this rule outranks "what feels punchy") — the schema pairs each claimed position with the zoom types that live there; what remains yours is the WHY:
   • hook → GRIP, instant — the viewer's thumb is mid-swipe and the snap is what stops it.
@@ -4488,12 +4507,13 @@ Entry shape:
     "duration": float,              # 1.5-3.0 output-seconds the visual hit lasts
     "viewer_feeling": "<one specific phrase: the feeling this moment produces in the viewer>",
     "zoom_effect": {{ "arc_position": <the arc position this zoom serves — your CLAIM, same vocabulary as arc_segments>, "type": <a type that position offers> }} | null,   // word-anchored; the pipeline times it. A build/breather claim offers ONLY the mask form — the small eye-carry on the first word after a splice; arc punctuation there is unsayable.
+    "sound": <one of the 16 sounds — see THE SOUNDS> | null,   // the beat can carry ONE sound that amplifies it; most beats carry silence
     "motion_graphic": {{...}} | null   # the zoom is the camera's punctuation; a graphic joins it when the moment names something the camera cannot show
   }}
 
 **OMIT durationMs, scale, originX, originY by default.** The pipeline auto-fills the natural duration and perceptible scale per type — the values that make each move look its best — and runs face detection at the zoom's start frame to lock the origin onto the face (fallback: canvas center). Your zoom_effect is just its type — word-anchored, pipeline-timed, one move per emphasis. Emit originX/originY ONLY when zooming a NON-face element (a prop, a gesture, a whiteboard); emit durationMs/scale only when a specific beat genuinely wants a non-default feel (rare).
 
-Natural durations (for back-timing math): SmoothPush 1200ms · SnapReframe 700ms · FocusWindow 1500ms · StepZoom 800ms per hold · LetterboxPush 1400ms · StageZoom 1800ms · DepthPull 2200ms.
+Natural durations (for back-timing math): SmoothPush 1200ms · SnapReframe 700ms · FocusWindow 1500ms · StepZoom 800ms per hold · LetterboxPush 1400ms · DepthPull 2200ms.
 
 **Every zoom is word-anchored — the pipeline times it.** You author WHICH moment (word_indices) and WHICH type; the renderer back-times the event so its perceptual peak ARRIVES on the anchor word (a measured per-type arrival table) and floors it at the clip head. There is no time to compute.
 
@@ -4519,8 +4539,6 @@ THE 7 ZOOM TYPES
 **LetterboxPush** — center zoom while cinematic bars close from top and bottom; the frame becomes "film" for the moment. For revelations earning cinematic weight, climaxes, heavy reveals.
   Optional props: {{ "maxBarHeight": 0.12 }}
 
-**StageZoom** — two-stage push: settle to ~1.15, hold, then commit to ~1.35. A camera operator finding focus, then committing. For setup→payoff escalation inside one moment.
-  Optional props: {{ "firstStage": 1.15, "secondStage": 1.35 }}
 
 **DepthPull** — multi-layer depth zoom with bokeh, edge blur, haze, frame lines. Premium-production claim. For intros, title-sequence energy, atmospheric reveals.
   Optional props: {{ "edgeBlur": 4, "frameLines": true }}
@@ -4529,47 +4547,53 @@ THE 7 ZOOM TYPES
 === SOUND EFFECTS ===
 ═══════════════════════════════════════════════════════════════════════════
 
-**The library below is a set of defined scenarios.** A sound effect is placed by recognizing its scenario in the footage — the moment class each entry names. Read the footage for which scenarios it actually contains, and place each sound where its scenario occurs. The count is however many scenarios the footage genuinely holds; a video containing none carries none, and that is a correct read. Every placement's `why` names the scenario it matched — a placement that cannot name its scenario is the tell that the moment was not one.
+**Sound is the edit's rarest currency.** You are choosing the few moments in this video that deserve to be FELT as well as seen — the hits. Every sound spends the viewer's attention, and each one is worth more when nothing near it competes: a video where the payoff carries the only bass hit makes that payoff land like a verdict. Most beats — including strong ones — are carried by the voice, the cut, and the visual layer, and carrying a beat on the voice alone is a confident choice with its own payoff: it keeps the mix clean, keeps the ear fresh, and makes the treated moments unmistakable when they arrive.
+
+Sound-designing a beat is two decisions, in order. **First, the editorial one:** is this one of the video's few biggest hits — a moment a viewer would replay? The voice and visuals carry everything else. **Second, only for a beat that earns it:** which sound is native to that moment — that is what each library entry describes. Sounds are authored ON emphasis moments (the `sound` field) and on transitions (the rider) — nowhere else.
+
+A worked read of a 20-second pitch: the hook's jab takes the punch; the final line — the video's reason to exist — takes the boom; the demo, the stats, and the reveal between them ride on the voice and the visual layer, and the two hits land harder for it. A mix where every line carries a sound stops reading as emphasis at all — the ear normalizes it within seconds, and the actual peak arrives with nothing left to mark it.
 
 **The scenarios live in the source.** A scenario is something the speaker says, shows, or does on camera — the sentence, the number, the reversal, the charm. That is where a sound's `why` points: at the spoken moment that matched. The graphics, zooms, and transitions this plan adds are the edit's answer to those same moments — when a sound and a component land on the same word, each earned it from the footage independently: the graphic renders the fact, the sound punctuates the delivery. A `why` that names a component has matched the edit instead of the footage — re-read that moment for its spoken scenario, and where none exists, the moment carries no sound. And a scenario is matched literally: the moment contains the thing the predicate names, not a pun or association of it ("five minutes" is time, not money).
 
-Entry shape: {{ "word_index": int, "sound": <name> }}. Timing derives from the word — every sound is trimmed to a zero-silence onset, so it fires right on its trigger word; no offsets to compute.
+Authoring shape: the emphasis's `sound` field (one of the names below) — timing derives from the beat's word; every sound is trimmed to a zero-silence onset; no offsets to compute. The beat's `viewer_feeling` doubles as the placement's why: it names what makes THIS beat one of the video's hits — why it earned treatment where the beats around it didn't — and the moment it matched. A why that can only name a category has answered "could"; the why answers "why this one".
 
 ──────────────────────────────────────────
 THE 16 SOUNDS — each a defined scenario
 ──────────────────────────────────────────
 
-**boom** — A deep cinematic bass impact with weight and finality. **THE SCENARIO:** the video's single heaviest claim — the payoff line the whole video was built to deliver, or the one stat that reframes everything before it. It lands on the word that carries the weight. **WHAT IT DOES:** the floor drops under the sentence; and because it is the one bass hit in the video, the ear measures it against every beat that carried nothing.
+**boom** — A deep cinematic bass impact with weight and finality. **THE MOMENT:** the video's single heaviest claim — the payoff line the whole video was built to deliver, or the one stat that reframes everything before it. It lands on the word that carries the weight. **WHAT IT DOES:** the floor drops under the sentence; and because it is the one bass hit in the video, the ear measures it against every beat that carried nothing.
 
-**punchsfx** — A sharp percussive hit. **THE SCENARIO:** the speaker throws a verbal blow — a short, hard declarative that indicts, dismisses, or shuts something down ("that's a scam," "it's dead," "you're doing it wrong"), delivered like a jab, not an explanation. It fires on the word that lands the hit. **WHAT IT DOES:** the jab connects physically; the viewer feels the sentence strike instead of just hearing it.
+**punchsfx** — A sharp percussive hit. **THE MOMENT:** the speaker throws a verbal blow — a short, hard declarative that indicts, dismisses, or shuts something down ("that's a scam," "it's dead," "you're doing it wrong"), delivered like a jab, not an explanation. It belongs on the word that lands the hit. **WHAT IT DOES:** the jab connects physically; the viewer feels the sentence strike instead of just hearing it.
 
-**swoosh-sound-effects** — A fast, short whoosh. **THE SCENARIO:** the speech itself claims SPEED — a stated how-fast ("in under five minutes," "instantly," "before your coffee's cold") or a rapid-fire run of items delivered at a clip. It fires on the speed word, or on the takeoff of the run. **WHAT IT DOES:** the pace the words claim becomes audible; the ear feels the rush.
+**swoosh-sound-effects** — A fast, short whoosh. **THE MOMENT:** the speech itself claims SPEED — a stated how-fast ("in under five minutes," "instantly," "before your coffee's cold") or a rapid-fire run of items delivered at a clip. It belongs on the speed word, or on the takeoff of the run. **WHAT IT DOES:** the pace the words claim becomes audible; the ear feels the rush.
 
-**woosh-professional** — A smooth, polished whoosh with more body. **THE SCENARIO:** the narration itself travels — an explicit spoken jump in time or place mid-story ("fast-forward two years," "now come with me to the warehouse," "meanwhile, back at the office"). It fires on the travel phrase. **WHAT IT DOES:** the viewer is carried through the jump instead of dropped across it; the story's motion gets a body.
+**woosh-professional** — A smooth, polished whoosh with more body. **THE MOMENT:** the narration itself travels — an explicit spoken jump in time or place mid-story ("fast-forward two years," "now come with me to the warehouse," "meanwhile, back at the office"). It belongs on the travel phrase. **WHAT IT DOES:** the viewer is carried through the jump instead of dropped across it; the story's motion gets a body.
 
-**transition-sfx** — A broad cinematic sweep. **THE SCENARIO:** the video's single largest act turn, where a full transition renders — this is the sound of that turn itself. **WHAT IT DOES:** the turn becomes physical; the sweep carries the eye's journey in the ear.
+**transition-sfx** — A broad cinematic sweep. **THE MOMENT:** the video's single largest act turn, where a full transition renders — this is the sound of that turn itself. **WHAT IT DOES:** the turn becomes physical; the sweep carries the eye's journey in the ear.
 
-**camera-flash** — A camera shutter click with flash. **THE SCENARIO:** a photo or screenshot is taken, shown, or demanded in the content — "screenshot this," "I took one picture," the moment the story itself contains a shutter. The sound IS the shutter the story references. **WHAT IT DOES:** diegetic reality; the viewer hears the photo happen inside the story.
+**camera-flash** — A camera shutter click with flash. **THE MOMENT:** a photo or screenshot is taken, shown, or demanded in the content — "screenshot this," "I took one picture," the moment the story itself contains a shutter. The sound IS the shutter the story references. **WHAT IT DOES:** diegetic reality; the viewer hears the photo happen inside the story.
 
-**money-ching** — A bright cash-register cha-ching. **THE SCENARIO:** the speaker states a specific amount of money — a price, a cost, a saving, a payout — and the figure itself is the point of the sentence. It fires on the word where the amount lands ("$500," "ten grand," "free" when free is the price). **WHAT IT DOES:** the number stops being abstract; the viewer hears money hit the table.
+**nothing** — the default treatment. **THE MOMENT:** every beat the voice and visuals already carry, which is most of them, including strong ones. **WHAT IT DOES:** keeps the mix clean and the ear fresh; makes the few treated moments land as events instead of wallpaper.
 
-**iphoneding** — The literal iPhone text tone. **THE SCENARIO:** a message, text, or notification is quoted, shown, or reenacted in the content — the sound IS the notification the story references. **WHAT IT DOES:** diegetic reality; the viewer hears the message arrive inside the story.
+**money-ching** — A bright cash-register cha-ching. **THE MOMENT:** the anchor word itself IS the amount — a number of money, a price, or "free" standing as the price ("$500," "ten grand," "free"). Minutes, hours, and days are TIME words; time words never take the register. **WHAT IT DOES:** the number stops being abstract; the viewer hears money hit the table.
 
-**mouse-click-sound** — A clean tactile interface click. **THE SCENARIO:** the speech names a single discrete digital action — "just upload it," "one tap," "hit publish" — where the action's simplicity is the point. It fires on the spoken action word. **WHAT IT DOES:** the action feels physically performed; simplicity becomes tactile.
+**iphoneding** — The literal iPhone text tone. **THE MOMENT:** a message, text, or notification is quoted, shown, or reenacted in the content — the sound IS the notification the story references. **WHAT IT DOES:** diegetic reality; the viewer hears the message arrive inside the story.
 
-**popsfx** — A tiny bright pop. **THE SCENARIO:** the speaker stacks a light bonus on top of a point already made — the "oh, and it even does this" beat: small, pleasing, an extra rather than a headline. It fires on the bonus's landing word. **WHAT IT DOES:** a small tick of delight; the extra feels like a gift being set on the pile.
+**mouse-click-sound** — A clean tactile interface click. **THE MOMENT:** the speech names a single discrete digital action — "just upload it," "one tap," "hit publish" — where the action's simplicity is the point. It belongs on the spoken action word. **WHAT IT DOES:** the action feels physically performed; simplicity becomes tactile.
 
-**correct** — A positive confirmation ding. **THE SCENARIO:** something is verified in the content — the result checks out, the number is confirmed, the method visibly worked. It fires at the instant the verification lands in speech or on screen. **WHAT IT DOES:** the viewer gets the "that's right" signal at the exact moment of proof.
+**popsfx** — A tiny bright pop. **THE MOMENT:** the speaker stacks a light bonus on top of a point already made — the "oh, and it even does this" beat: small, pleasing, an extra rather than a headline. It belongs on the bonus's landing word. **WHAT IT DOES:** a small tick of delight; the extra feels like a gift being set on the pile.
 
-**rizz** — A romantic-but-comedic flourish (a smooth, flirty sting played for laughs). **THE SCENARIO:** the speaker plays charm for comedy — a flirty line, a self-aware flex, a "smooth move" recounted or performed with a wink ("and that's how you get their number"). It fires as the charm lands. **WHAT IT DOES:** the wink becomes audible; the viewer is told, gently, that the confidence is a bit.
+**correct** — A positive confirmation ding. **THE MOMENT:** it belongs at the moment of PROOF — something was claimed or attempted, and now it is shown true: the result checks out, the number is confirmed, the method visibly worked. A first mention, a reveal, or an introduction has no verification in it yet. **WHAT IT DOES:** the viewer gets the "that's right" signal at the exact moment of proof.
 
-**shockingsfx** — A sudden jolt. **THE SCENARIO:** a genuine reversal — the sentence lands somewhere the setup made impossible, or a stat contradicts what the viewer was led to assume. It fires on the twist word, in a video that actually contains a twist. **WHAT IT DOES:** the viewer's own flinch, rendered.
+**rizz** — A romantic-but-comedic flourish (a smooth, flirty sting played for laughs). **THE MOMENT:** the speaker plays charm for comedy — a flirty line, a self-aware flex, a "smooth move" recounted or performed with a wink ("and that's how you get their number"). It belongs where the charm lands. **WHAT IT DOES:** the wink becomes audible; the viewer is told, gently, that the confidence is a bit.
 
-**awkward-moment** — A comedic awkward-silence cue. **THE SCENARIO:** the story lands on deliberate cringe and holds it — an embarrassing beat recounted or performed, then left sitting (the failed handshake, the reply-all disaster, the joke that died). It fires just after the line, inside the hold. **WHAT IT DOES:** secondhand embarrassment made audible; the viewer squirms with the story instead of past it. The hold it fires inside is a silence worth keeping — a video that contains this scenario contains a preserved silence: mark the hold in preserved_silences so the beat survives the cut.
+**shockingsfx** — A sudden jolt. **THE MOMENT:** a genuine reversal — the sentence lands somewhere the setup made impossible, or a stat contradicts what the viewer was led to assume. It belongs on the twist word, in a video that actually contains a twist. **WHAT IT DOES:** the viewer's own flinch, rendered.
 
-**wompwomp** — A comedic sad-trombone fail sound. **THE SCENARIO:** the story reports a failure played for comedy — the attempt flopped and the speaker frames the flop as the punchline ("and it made exactly zero dollars"). It fires on the fail's landing word. **WHAT IT DOES:** the anticlimax gets its trombone; disappointment reads as a joke, not a wound.
+**awkward-moment** — A comedic awkward-silence cue. **THE MOMENT:** the story lands on deliberate cringe and holds it — an embarrassing beat recounted or performed, then left sitting (the failed handshake, the reply-all disaster, the joke that died). It belongs just after the line, inside the hold. **WHAT IT DOES:** secondhand embarrassment made audible; the viewer squirms with the story instead of past it. The hold it lives inside is a silence worth keeping — a video that contains this scenario contains a preserved silence: mark the hold in preserved_silences so the beat survives the cut.
 
-**imposter** — A tense, suspenseful sting (sus, Among Us-register). **THE SCENARIO:** the speaker voices building suspicion — something doesn't add up and they're saying so before the answer arrives ("but something felt off," "turns out he never worked there"). It fires where the doubt is named. **WHAT IT DOES:** the viewer leans in; doubt gets a pulse before the reveal pays it off. Suspicion BUILDING lives here; the twist LANDING is shockingsfx.
+**wompwomp** — A comedic sad-trombone fail sound. **THE MOMENT:** the story reports a failure played for comedy — the attempt flopped and the speaker frames the flop as the punchline ("and it made exactly zero dollars"). It belongs on the fail's landing word. **WHAT IT DOES:** the anticlimax gets its trombone; disappointment reads as a joke, not a wound.
+
+**imposter** — A tense, suspenseful sting (sus, Among Us-register). **THE MOMENT:** the speaker voices building suspicion — something doesn't add up and they're saying so before the answer arrives ("but something felt off," "turns out he never worked there"). It belongs where the doubt is named. **WHAT IT DOES:** the viewer leans in; doubt gets a pulse before the reveal pays it off. Suspicion BUILDING lives here; the twist LANDING is shockingsfx.
 
 ═══════════════════════════════════════════════════════════════════════════
 === B-ROLL ===
@@ -4709,7 +4733,7 @@ Same fragment as Example 3 (kept words 55-62, ~3 seconds → 1-2 windows):
 
   • emphasis_moments: [55] ("And") StepZoom · [58] ("counter") StepZoom ·
     [61] ("wallet") StepZoom
-  • sound_effects: 55 hit · 58 pop · 60 ding · 61 boom
+  • sounds (on beats): 61 boom — the payoff carries the video's one bass hit; the other peaks ride the voice
   • broll_clips: keyword="man surprised holding stolen wallet realizing
     mistake", start_word_index=59, end_word_index=62
 
@@ -4773,7 +4797,7 @@ These are the mechanics the render depends on — the physics of the frame, the 
     the geometry rules.
   • text_overlays: only at real structural anchors (hook frame, chapter
     eyebrow, attributed quote, three parallel items). Text is framing — the transcript already lives in the captions.
-  • sound_effects: The sound rack is vocabulary: a beat that hits visually
+  • sounds: the edit's rarest currency — the few biggest hits carry one (see THE SOUNDS); everything else rides the voice, and reads stronger for it.
     usually earns its sound, and rotating through the rack keeps the hits
     reading fresh — the count follows the beats. boom is the one to
     reserve — a single deep impact on the biggest moment reads harder
@@ -4888,14 +4912,6 @@ Output is a bare JSON object — the response is JSON-parsed and the parser is t
       "duration_seconds": float,
       "why": "<≤12 words: the moment that asked for this>"
       // ...variant-specific required props per the TEXT OVERLAYS section
-    }}
-  ],
-
-  "sound_effects": [
-    {{
-      "word_index": int,
-      "sound": "boom" | "punchsfx" | "swoosh-sound-effects" | "woosh-professional" | "transition-sfx" | "camera-flash" | "money-ching" | "iphoneding" | "mouse-click-sound" | "popsfx" | "correct" | "rizz" | "shockingsfx" | "awkward-moment" | "wompwomp" | "imposter",
-      "why": "<≤10 words: the beat this sound is the audio face of>"
     }}
   ],
 
@@ -5824,6 +5840,25 @@ _DEADAIR_MIN_RANGE_DB = 8.0    # below this floor->speech separation the pass NO
                                # would sit a hair under speech and eat it. Synthetic corpus: the
                                # -21dBFS music bed lands at range ~4 (no-op); whisper 14.5 / phone
                                # 18.6 / towel 39.6 / srcB 26.3 / concat 35.7 all clear it (trim).
+# A — DEAD AIR IS EDITORIAL, NOT ACOUSTIC (Zac 2026-07-11, second rejection):
+# "dB locates, Gemini decides" had drifted to dB DECIDING — every located
+# quiet became a candidate, including within-sentence gaps that are speech
+# RHYTHM (convicted on diag-1783756104: 4 of 7 splices were mid-flow
+# 46-132ms gaps — "takes∥hours", "took∥five"). A located silence is
+# cut-eligible ONLY after sentence-final punctuation, or as a genuine
+# mid-sentence STALL at/above this threshold. Below it, within a sentence,
+# the gap is SPEECH: never offered to Gemini, never trimmed — uncuttable by
+# construction. Between-sentence behavior UNCHANGED (the 15ms crush is the
+# approved style).
+_MIDSENTENCE_STALL_S = 0.70
+
+
+def _sentence_final_word(w):
+    _t = str((w or {}).get("punctuated_word") or (w or {}).get("word") or "")
+    _t = _t.rstrip().rstrip('"\')]”’')
+    return _t.endswith((".", "?", "!", "…"))
+
+
 _SPAN_SPLIT_MIN_S = 0.12       # SPAN-SPLIT (Zac 2026-07-09): an interior sub-audible run at
                                # least this long INSIDE a clip is silence Deepgram hid inside
                                # a word span (loose spans: srcB over-ran 6 tails = 0.73s;
@@ -6495,6 +6530,11 @@ def detect_dead_air(
             # does NOT preserve. Carry the level-silence edges + duration so the
             # prompt can show Gemini each span's timestamp window.
             if silence_in_gap < _WITHIN_CLIP_TRIM_TRIGGER_S:
+                continue
+            # A — the linguistic gate: within a sentence, below the stall
+            # threshold, this gap is rhythm — not a candidate, not offered.
+            if (not _sentence_final_word(words[a])
+                    and silence_in_gap < _MIDSENTENCE_STALL_S):
                 continue
             out.append({
                 "after_word_index": a,
@@ -11848,7 +11888,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                         # zoom lives inside one shot...") — taught, never clamped.
                         _filled_events.append(_ev)
                     _ze_out = {"type": _zt, "events": _filled_events}
-                    for _ek in ("firstStage", "secondStage", "windowScale", "borderWidth",
+                    for _ek in ("windowScale", "borderWidth",
                                 "borderColor", "bgScale", "edgeBlur", "frameLines", "maxBarHeight"):
                         if _ek in _ze_raw:
                             _ze_out[_ek] = _ze_raw[_ek]
@@ -12131,7 +12171,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                         )
 
                 # Carry over non-events / non-type fields from the dominant emphasis's
-                # zoom_effect (firstStage, windowScale, borderColor, etc. — these are
+                # zoom_effect (windowScale, borderColor, etc. — these are
                 # type-specific config that only the dominant type knows what to do with).
                 _merged_zoom = {
                     "type": _dominant_type,
@@ -12495,7 +12535,19 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
             # caption_keywords is Gemini's explicit decision — no auto-derivation.
 
             # ── Parse sound effects ──────────────────────────────────────────────
-            raw_sfx = edit_plan.get("sound_effects", [])
+            # B (Zac 2026-07-11): sounds ride ranked beats. The raw list is
+            # DERIVED from emphasis moments carrying a sound (+ legacy plan
+            # shapes' standalone list, tolerated on read — replays and old
+            # reinterpret plans render as before). One derivation into the
+            # same validation/mix machinery; the fire time is the emphasis's
+            # audible-onset-corrected word.
+            raw_sfx = [
+                {"word_index": (em.get("word_indices") or [None])[0],
+                 "sound": em.get("sound"),
+                 "why": str(em.get("viewer_feeling") or "")[:240]}
+                for em in (edit_plan.get("emphasis_moments") or [])
+                if isinstance(em, dict) and em.get("sound")
+            ] + list(edit_plan.get("sound_effects") or [])
             sound_effects = []
             valid_sounds = set(_SFX_CATEGORIES.keys())
             _sfx_dg_words = edit_plan.get("_deepgram_words") or []
@@ -12559,6 +12611,38 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
             # no spacing filter, no auto-placement, no dedup. The Gemini prompt is
             # the single source of truth for SFX placement rules — if a placement
             # is wrong, the fix is the prompt.
+            for _sob in sound_effects:
+                # B ledger: the new surface's numbers from day one — sound ×
+                # beat position × style lands in the weekly table.
+                _sob_wi = _sob.get("word_index")
+                _sob_pos = None
+                for _em_sob in (edit_plan.get("emphasis_moments") or []):
+                    if (isinstance(_em_sob, dict)
+                            and (_em_sob.get("word_indices") or [None])[0] == _sob_wi):
+                        _sob_pos = ((_em_sob.get("zoom_effect") or {}) or {}).get("arc_position")
+                        break
+                _record_divergence(
+                    "sfx",
+                    {"sound": _sob.get("sound"), "position": _sob_pos,
+                     "style": str(edit_plan.get("caption_style") or "")[:40],
+                     "generation": "a1a2"},
+                    "sound_on_beat",
+                    reason=str(_sob.get("why") or "")[:120])
+                # D6-2b (money-ching, observe-first): every rendered
+                # money-ching logs its anchor word — the weekly table shows
+                # the production anchor distribution; the structural lexical
+                # check builds ONLY if time-word anchors recur.
+                if _sob.get("sound") == "money-ching":
+                    _mc_w = ""
+                    try:
+                        _mc_w = str((_sfx_dg_words[int(_sob_wi)] or {}).get("punctuated_word")
+                                    or (_sfx_dg_words[int(_sob_wi)] or {}).get("word") or "")
+                    except Exception:
+                        pass
+                    _record_divergence(
+                        "sfx", {"anchor_word": _mc_w[:40], "generation": "a1a2"},
+                        "money_ching_anchor",
+                        reason="observe-only — the weekly table decides the lexical check")
             if sound_effects:
                 sound_effects.sort(key=lambda x: x["t"])
                 print(f"[generate-edit] Sound effects: {len(sound_effects)} placements", flush=True)
@@ -17148,6 +17232,19 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0,
                     continue
                 if _ta4 - _cs4 < 0.05 or _ce4 - _tb4 < 0.05:
                     continue                       # interior only — edges belong to Step 4c
+                # A — the linguistic gate (same rule as the candidate set):
+                # the word whose loose span hides this quiet gives the
+                # sentence context; mid-sentence below the stall threshold
+                # is rhythm — uncuttable by construction.
+                _w4 = None
+                for _wd4 in deepgram_words:
+                    if float(_wd4.get("start") or 0.0) <= _ta4:
+                        _w4 = _wd4
+                    else:
+                        break
+                if (not _sentence_final_word(_w4)
+                        and (_tb4 - _ta4) < _MIDSENTENCE_STALL_S):
+                    continue
                 if any(_pa < _tb4 and _pb > _ta4 for (_pa, _pb) in _preserved4):
                     continue                       # Gemini kept this beat — never split it
                 _cuts4.append((_ta4, _tb4))
@@ -18780,7 +18877,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     #                              end so a single Remotion process amortizes
     #                              the ~10s startup tax across all of them.
     #   • Base video             — clip cuts, simple zoom (SmoothPush /
-    #                              StepZoom / StageZoom) ported to per-frame
+    #                              StepZoom) ported to per-frame
     #                              `crop` expressions, B-roll cutaways, outro
     #                              fade. Built directly by FFmpeg in the final
     #                              composite pass.
@@ -19813,7 +19910,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     # ── Pre-extract per-clip source for Remotion-rendered zoom clips ────────
     # The ABE.zip zoom components (SmoothPush, SnapReframe, FocusWindow,
-    # StepZoom, LetterboxPush, StageZoom, DepthPull) accept only `src` +
+    # StepZoom, LetterboxPush, DepthPull) accept only `src` +
     # `events` + their component-specific extras. They play `src` from frame
     # 0 with no built-in seek or playback-rate prop. To use them unmodified,
     # we materialize a frame-accurate per-clip mp4 whose frame 0 is the

@@ -980,14 +980,15 @@ def _zoom_correction_clips_to_source_start():
 @check("zoom startMs correction CLAMPS when word lands mid-clip but back-timing crosses boundary")
 def _zoom_correction_clip_mid_clamp():
     # Word at 5.2s; clip source_start at 5.0s (200ms before word).
-    # StageZoom peak-reach is 1170ms. canonical = 5200 − 1170 = 4030.
+    # DepthPull peak-reach is 770ms. canonical = 5200 − 770 = 4430.
     # That's BEFORE the clip's source_start (5000) → clamp to 5000.
+    # (fixture re-homed from StageZoom — deleted, Zac ruling 2026-07-11)
     word_start_ms = 5200
-    peak_reach_ms = handler.ZOOM_PEAK_REACH_MS["StageZoom"]
+    peak_reach_ms = handler.ZOOM_PEAK_REACH_MS["DepthPull"]
     canonical = word_start_ms - peak_reach_ms
     clip_source_start_ms = 5000
     clamped = max(clip_source_start_ms, canonical)
-    assert canonical == 4030
+    assert canonical == 4430
     assert clamped == 5000, f"corrected should clamp to clip start (5000), got {clamped}"
 
 
@@ -2788,7 +2789,9 @@ def _recipe_omittable_field_contract():
         "PostCutPlan": {"cut_refinements", "existing_caption_region",
                         "generated_scenes", "notes",
                         "preserved_silences"},
-        "_EmphasisMoment": {"motion_graphic", "zoom_effect"},
+        # B (Zac 2026-07-11): sound rides the beat — omission IS the default
+        # ("most beats are carried by the voice"); the derivation .get()s it.
+        "_EmphasisMoment": {"motion_graphic", "sound", "zoom_effect"},
         # A1/A2 step 4: broll edge treatments — omission = the bare cut (the
         # wiring reads .get(); Vertex dropping the empty optional IS the default).
         "_BrollClip": {"entry_transition", "exit_transition"},
@@ -4610,10 +4613,17 @@ def _within_clip_deadair():
     handler._AUDIO_DB_META = {"floor": -50.0, "range": 40.0, "hop": _hop}
     handler._WITHIN_WORD_SILENCES_LAST[:] = [(0.8, 1.2)]
     handler._PRESERVED_SILENCES_LAST[:] = []
+    # A (Zac 2026-07-11): the linguistic gate — the split now requires
+    # sentence-final context (or a >=700ms stall). Sentence-final word: splits.
     _sp, _ = handler.build_clips_from_words(
+        [{"word": "offff", "punctuated_word": "offff.", "start": 0.0, "end": 2.4}],
+        [], video_duration=2.4, level_silences=[(0.8, 1.2)], within_clip_15ms=True)
+    assert len(_sp) == 2, f"interior 400ms silence AFTER sentence-final punct must SPLIT, got {len(_sp)} clip(s)"
+    # Mid-sentence (no punctuation), same 400ms quiet: RHYTHM — uncuttable.
+    _sp_r, _ = handler.build_clips_from_words(
         [{"word": "offff", "punctuated_word": "offff", "start": 0.0, "end": 2.4}],
         [], video_duration=2.4, level_silences=[(0.8, 1.2)], within_clip_15ms=True)
-    assert len(_sp) == 2, f"interior 400ms silence must SPLIT the clip, got {len(_sp)} clip(s)"
+    assert len(_sp_r) == 1, f"mid-sentence 400ms quiet is RHYTHM — must NOT split, got {len(_sp_r)}"
     _half2 = handler._BETWEEN_WORD_GAP_S / 2.0
     assert abs(_sp[0]["source_end"] - (0.8 + _half2)) < 0.012, \
         f"split piece1 must end at sound_end 0.8 + gap/2, got {_sp[0]['source_end']}"
@@ -4760,6 +4770,39 @@ def _k4_future_drift_guard():
     assert len(_reads) >= 15, (
         f"guard parsed only {len(_reads)} render-path _-key reads — the "
         f"render_multi_clip scope detection or the read regex has drifted")
+
+
+@check("RHYTHM+BEATS: linguistic cut gate (mid-sentence rhythm uncuttable; sentence-final crush unchanged); sounds ride ranked beats (standalone list unrepresentable); StageZoom deleted; reframe anchors live")
+def _rhythm_beats():
+    import handler as _h
+    _src = open("handler.py").read()
+    # A — the linguistic gate, both directions
+    _w = [{"punctuated_word": "flow", "start": 0.0, "end": 0.5},
+          {"punctuated_word": "on.", "start": 1.0, "end": 1.5},
+          {"punctuated_word": "Next", "start": 1.8, "end": 2.2}]
+    assert not _h._sentence_final_word(_w[0]) and _h._sentence_final_word(_w[1])
+    assert "_MIDSENTENCE_STALL_S" in _src and _h._MIDSENTENCE_STALL_S == 0.70
+    assert "not _sentence_final_word(words[a])" in _src, "candidate gate missing"
+    assert _src.count("_sentence_final_word(") >= 3, "span-split must share the gate"
+    # B — sounds ride ranked beats
+    assert "sound" in _h._EmphasisMoment.model_fields, "emphasis must carry the sound"
+    assert "sound_effects" not in _h.PostCutPlan.model_fields, \
+        "the standalone word-anchored list must be unrepresentable"
+    _d = _h._EmphasisMoment.model_fields["sound"].description or ""
+    assert "carried by the voice" in _d, "the schema-description lever must be live"
+    assert '"sound_on_beat"' in _src and '"money_ching_anchor"' in _src, "the ledgers must exist"
+    import recipe_eval, inspect
+    esrc = inspect.getsource(recipe_eval)
+    assert '"sfx-partner"' not in esrc, "sfx-partner is dead-by-construction (the beat IS the partner)"
+    assert '"why-component"' in esrc, "the pairing-residual measure must exist"
+    # C — StageZoom deleted
+    assert "StageZoom" not in _h.VALID_ZOOM_TYPES
+    assert "StageZoom" not in str(_h.ZOOM_ARC_HOMES)
+    # the reframe anchors
+    assert "Sound is the edit's rarest currency." in _src, "the task opener must be verbatim"
+    assert "**nothing** — the default treatment." in _src, "restraint must be the first library entry"
+    assert "**THE SCENARIO:**" not in _src and _src.count("**THE MOMENT:**") >= 16, \
+        "the detection grammar must be gone"
 
 
 @check("D1 perceptual sync: ONE audible-onset derivation consumed by emphasis t + SFX + projected anchors; the projection reads the render_timeline arithmetic (frames cursor); D2 floors live")

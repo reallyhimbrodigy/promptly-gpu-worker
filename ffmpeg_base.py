@@ -7,7 +7,7 @@ Replaces the old PromptlyBase Remotion composition (which painted full
 filtergraph that does the same work natively:
 
   - Clip extraction (trim + setpts for playbackRate)
-  - Simple zoom effects (SmoothPush / SnapReframe / StepZoom / StageZoom)
+  - Simple zoom effects (SmoothPush / SnapReframe / StepZoom)
     expressed as per-frame `crop` expressions using the same easing math
     the Remotion components use.
   - Outro fade via `fade` filter
@@ -41,7 +41,7 @@ import math
 # plays that file with no seek/playback-rate prop — `src` + `events` only.
 #
 # The FFmpeg crop+lanczos path that was used for "pure scale" zoom types
-# (SmoothPush/SnapReframe/StepZoom/StageZoom) has been retired. It depended
+# (SmoothPush/SnapReframe/StepZoom) has been retired. It depended
 # on the FFmpeg crop filter re-evaluating `out_w`/`out_h` per frame, which
 # n7.1 (production) doesn't do — `w`/`h` evaluate once at filter init with
 # n=0 and the `eval` option was removed before n7.1 (see vf_crop.c on the
@@ -53,7 +53,7 @@ import math
 SIMPLE_ZOOM_TYPES: set = set()
 
 COMPLEX_ZOOM_TYPES = {
-    "SmoothPush", "SnapReframe", "StepZoom", "StageZoom",
+    "SmoothPush", "SnapReframe", "StepZoom",
     "FocusWindow", "LetterboxPush", "DepthPull",
 }
 
@@ -62,7 +62,6 @@ _DEFAULT_SCALE = {
     "SmoothPush": 1.2,
     "SnapReframe": 1.3,
     "StepZoom": 1.3,
-    "StageZoom": 1.35,
     "FocusWindow": 1.8,    # bgScale default
     "LetterboxPush": 1.2,
     "DepthPull": 1.15,
@@ -195,37 +194,6 @@ def _step_zoom_progress_expr(es: int, ed: int) -> str:
     return f"if(lt(n,({es})),0,if(lt(n,({ed})),1,0))"
 
 
-def _stage_zoom_scale_expr(es: int, ed: int, target_scale: float, first_stage: float) -> str:
-    """StageZoom returns SCALE (not progress) — it has two distinct scale
-    targets so a single 0→1 progress doesn't capture it.
-
-    Timeline (Remotion StageZoom.tsx):
-      - 0% .. 20%: out-cubic 1 → s1
-      - 20% .. 40%: hold s1
-      - 40% .. 65%: out-cubic s1 → s2
-      - 65% .. 80%: hold s2
-      - 80% .. 100%: in-cubic s2 → 1
-    """
-    duration = ed - es
-    p1_end = es + max(1, int(round(duration * 0.2)))
-    h1_end = es + max(p1_end - es + 1, int(round(duration * 0.4)))
-    p2_end = es + max(h1_end - es + 1, int(round(duration * 0.65)))
-    h2_end = es + max(p2_end - es + 1, int(round(duration * 0.8)))
-    end = ed
-
-    p1d = max(1, p1_end - es)
-    p2d = max(1, p2_end - h1_end)
-    od = max(1, end - h2_end)
-    s1 = first_stage
-    s2 = target_scale
-    return (
-        f"if(lt(n,({es})),1,"
-        f"if(lt(n,({p1_end})),1+({s1}-1)*(1-pow(1-(n-({es}))/{p1d},3)),"
-        f"if(lt(n,({h1_end})),{s1},"
-        f"if(lt(n,({p2_end})),{s1}+({s2}-{s1})*(1-pow(1-(n-({h1_end}))/{p2d},3)),"
-        f"if(lt(n,({h2_end})),{s2},"
-        f"if(lt(n,({end})),{s2}+(1-{s2})*pow((n-({h2_end}))/{od},3),1))))))"
-    )
 
 
 def _spring_response_expr(t_seconds_expr: str) -> str:
@@ -293,8 +261,6 @@ def build_zoom_filter_chain(
         elif ztype == "StepZoom":
             progress = _step_zoom_progress_expr(es, ed)
             scale_expr = f"(1+({ts}-1)*{progress})"
-        elif ztype == "StageZoom":
-            scale_expr = _stage_zoom_scale_expr(es, ed, ts, float(zoom_spec.get("firstStage", 1.15)))
         elif ztype == "SnapReframe":
             scale_expr = _snap_reframe_event_scale_expr(es, ed, ts, source_fps)
         else:
@@ -318,15 +284,13 @@ def build_zoom_filter_chain(
             elif ztype == "StepZoom":
                 progress = _step_zoom_progress_expr(es, ed)
                 term = f"(1+({ts}-1)*{progress})"
-            elif ztype == "StageZoom":
-                term = _stage_zoom_scale_expr(es, ed, ts, float(zoom_spec.get("firstStage", 1.15)))
             elif ztype == "SnapReframe":
                 term = _snap_reframe_event_scale_expr(es, ed, ts, source_fps)
             else:
                 continue
             scale_terms.append(term)
             # Origin window matches the visible scale window. For
-            # SmoothPush/StepZoom/StageZoom that's [es, ed]. For SnapReframe
+            # SmoothPush/StepZoom that's [es, ed]. For SnapReframe
             # the scale decays past ed for ~250ms — extend the origin
             # window so the crop doesn't pop sideways mid-decay.
             if ztype == "SnapReframe":

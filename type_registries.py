@@ -98,7 +98,7 @@ TIGHT_CUT_OVERLAY_MECHANISM_PHRASES = (
 
 VALID_ZOOM_TYPES = frozenset({
     "SmoothPush", "SnapReframe", "FocusWindow", "StepZoom", "LetterboxPush",
-    "StageZoom", "DepthPull",
+    "DepthPull",
 })
 
 VALID_MG_TYPES = frozenset({

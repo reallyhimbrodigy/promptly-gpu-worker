@@ -96,8 +96,6 @@ class ZoomEventSpec(_RemotionModel):
 class ZoomEffectSpec(_RemotionModel):
     type: ZoomType
     events: List[ZoomEventSpec] = Field(default_factory=list)
-    firstStage: Optional[float] = None
-    secondStage: Optional[float] = None
     windowScale: Optional[float] = None
     borderWidth: Optional[float] = None
     borderColor: Optional[str] = None

@@ -23,6 +23,7 @@ rule in the prompt so when quality drifts you know WHICH rule drifted.
 """
 
 from collections import Counter, defaultdict
+from type_registries import VALID_MG_TYPES, VALID_ZOOM_TYPES, VALID_TRANSITION_TYPES
 from dataclasses import dataclass, field
 
 
@@ -92,7 +93,14 @@ def evaluate_recipe(plan, words, cut_boundaries, duration, tight_boundaries=None
     brolls = plan.get("broll_clips") or []
     mgs = plan.get("motion_graphics") or []
     overlays = plan.get("text_overlays") or []
-    sfx = plan.get("sound_effects") or []
+    # B: the sound list derives from the beats (emphasis.sound) + any
+    # legacy standalone entries a replayed plan still carries.
+    sfx = [
+        {"word_index": (em.get("word_indices") or [None])[0],
+         "sound": em.get("sound"), "why": em.get("viewer_feeling")}
+        for em in (plan.get("emphasis_moments") or [])
+        if isinstance(em, dict) and em.get("sound")
+    ] + list(plan.get("sound_effects") or [])
     n_words = len(words)
 
     # ------------------------------------------------------------ why audit
@@ -161,6 +169,26 @@ def evaluate_recipe(plan, words, cut_boundaries, duration, tight_boundaries=None
         for forbidden in ("durationMs", "scale"):
             if ze.get(forbidden) is not None:
                 r.warn("zoom-omit-fields", f"zoom at word {a} emits {forbidden} (should omit; pipeline auto-fills)")
+
+    # D6-3 (Zac 2026-07-11): the pairing residual gets a NUMBER — a
+    # sound-carrying beat's feeling text (or a transition's why) naming
+    # component vocabulary is the machinery-pairing tell. WARN, never gated.
+    _component_vocab = {t.lower() for t in VALID_MG_TYPES} | {t.lower() for t in VALID_ZOOM_TYPES} \
+        | {t.lower() for t in VALID_TRANSITION_TYPES} \
+        | {"b-roll", "broll", "cutaway", "overlay", "caption", "zoom",
+           "transition", "graphic", "component"}
+    def _names_component(_txt):
+        _low = str(_txt or "").lower()
+        return next((_v for _v in _component_vocab if _v in _low), None)
+    for e2 in emphases:
+        if isinstance(e2, dict) and e2.get("sound"):
+            _hit = _names_component(e2.get("viewer_feeling"))
+            if _hit:
+                r.warn("why-component", f"sound '{e2.get('sound')}' beat names machinery ('{_hit}') — name the MOMENT")
+    for t2 in transitions:
+        _hit = _names_component((t2 or {}).get("why"))
+        if _hit:
+            r.warn("why-component", f"transition why names machinery ('{_hit}')")
 
     # zoom variety
     ztypes = [(e.get("zoom_effect") or {}).get("type") for e in emphases if e.get("zoom_effect")]
@@ -317,10 +345,11 @@ def evaluate_recipe(plan, words, cut_boundaries, duration, tight_boundaries=None
         visual_words.add(o["start_word_index"])
     for b in brolls:
         visual_words.add(b["start_word_index"])
+    # B (Zac 2026-07-11): sounds ride ranked beats — sfx-partner is
+    # DEAD-BY-CONSTRUCTION (the sound's visual partner IS the emphasis it
+    # rides; a sound on a non-beat is unsayable). Taste measures survive.
     for s in sfx:
         wi = s["word_index"]
-        if wi not in visual_words:
-            r.fail("sfx-partner", f"'{s['sound']}' at word {wi} has no visual partner on its trigger word")
         if _arc_position_of(arc, wi) == "breather":
             r.fail("sfx-breather", f"'{s['sound']}' at word {wi} lands on a breather")
     sounds = [s["sound"] for s in sfx]

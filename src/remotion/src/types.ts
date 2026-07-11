@@ -42,8 +42,6 @@ export interface ClipSpec {
 export interface ZoomEffectSpec {
   type: ZoomType;
   events: ZoomEventSpec[];
-  firstStage?: number;
-  secondStage?: number;
   windowScale?: number;
   borderWidth?: number;
   borderColor?: string;
@@ -67,7 +65,6 @@ export type ZoomType =
   | "FocusWindow"
   | "StepZoom"
   | "LetterboxPush"
-  | "StageZoom"
   | "DepthPull";
 
 export interface TransitionSpec {
