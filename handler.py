@@ -8197,6 +8197,129 @@ def _seam_splice_index(awi, dg_words, cuts, removed_src):
     return None
 
 
+# ── THE DEGENERATION RESPONSE, L1+L2 (Zac 2026-07-11) ───────────────────────
+# PLATFORM FACT (convicted on diag-1783799727): Vertex constrained decoding
+# does NOT enforce maxLength — a why declared 240 emitted 16,111 chars (67x)
+# inside a COMPLETED 5,512-token response ("auto edit fast " x831 is ~3-4
+# tokens/rep — the 16K token guard is structurally blind to compressible
+# loops). Every Lever-3 cap is a declaration; enforcement is ours, at the one
+# edge we control: the parse. L1 = declared caps enforced (truncate + ledger;
+# on-screen-verbatim text takes the K7 form instead — drop the one component,
+# a card never costs the video). L2 = repetition signature on field tails
+# (distinct-token-ratio collapse — the shrinking-vocabulary staircase,
+# measured 0.62→0.015 on the convicting blob) fires gemini_degen_tail exactly
+# as the streaming abort does, so completed-response degenerations reach the
+# weekly table and the fire-rate watch stops undercounting.
+
+_FALSIFY_TEXT_KEYS = {"text"}   # renders verbatim on screen — truncation would
+                                # falsify; the component drops instead (K7).
+                                # L4 extends this into structured props.
+_COMPONENT_ARRAYS = {"text_overlays", "motion_graphics", "emphasis_moments",
+                     "broll_clips", "transitions", "tight_cut_overlays"}
+
+
+def _schema_string_caps(schema, caps=None, name=None):
+    """field name -> the MAX declared maxLength across the schema. Collision
+    policy is MAX deliberately: enforcement targets order-of-magnitude
+    violations and must never trim a legitimate field under a sibling's
+    tighter cap; sub-cap loops are L2's job. $defs subtrees are walked
+    directly, so $ref resolution is unnecessary."""
+    if caps is None:
+        caps = {}
+    if isinstance(schema, dict):
+        if (schema.get("type") == "string" and name
+                and isinstance(schema.get("maxLength"), (int, float))):
+            caps[name] = max(caps.get(name, 0), int(schema["maxLength"]))
+        for _var in (schema.get("anyOf") or []):
+            _schema_string_caps(_var, caps, name)
+        if isinstance(schema.get("items"), dict):
+            _schema_string_caps(schema["items"], caps, name)
+        for _pn, _sub in (schema.get("properties") or {}).items():
+            _schema_string_caps(_sub, caps, _pn)
+        for _dn, _sub in (schema.get("$defs") or {}).items():
+            _schema_string_caps(_sub, caps, None)
+    return caps
+
+
+def _repetition_signature(value):
+    """L2: distinct-token ratio collapse on the tail. Convicted blob's tail:
+    3 distinct / ~200 tokens = 0.015; healthy prose tails sit 0.5-0.9. The
+    200-char floor keeps short fields out; 0.18 splits the staircase from
+    real language with a wide margin on both sides."""
+    if not isinstance(value, str) or len(value) < 200:
+        return False
+    _toks = value[-800:].split()
+    return len(_toks) >= 40 and (len(set(_toks)) / len(_toks)) < 0.18
+
+
+def _enforce_string_caps(parsed, schema, call_label):
+    """L1+L2 at the parse edge (mutates parsed in place; returns event count).
+    Downstream consumers read capped strings BY CONSTRUCTION — one site,
+    every response with a schema."""
+    if not isinstance(parsed, dict) or not isinstance(schema, dict):
+        return 0
+    _caps = _schema_string_caps(schema)
+    _events = [0]
+    _falsify_drops = []   # (list_obj, index, component_name)
+
+    def _walk(obj, comp_ctx=None):
+        if isinstance(obj, dict):
+            for _k, _v in list(obj.items()):
+                if isinstance(_v, str):
+                    _cap = _caps.get(_k)
+                    _over = _cap is not None and len(_v) > _cap
+                    _rep = _repetition_signature(_v)
+                    if _over or _rep:
+                        _events[0] += 1
+                        _tail = _v[-600:]
+                        print(f"[parse-edge] DEGEN TAIL ({call_label}.{_k}, "
+                              f"{'maxlength ' + str(len(_v)) + '>' + str(_cap) if _over else 'repetition signature'}"
+                              f", last 600 chars):\n{_tail}", flush=True)
+                        _record_divergence(
+                            "recipe_transport",
+                            {"class": ("parse-edge maxlength" if _over
+                                       else "parse-edge repetition (completed response)"),
+                             "field": f"{call_label}.{_k}",
+                             "declared": _cap, "actual": len(_v)},
+                            "gemini_degen_tail", reason=_tail[-400:])
+                    if _over:
+                        _record_divergence(
+                            "recipe_transport",
+                            {"field": f"{call_label}.{_k}", "declared": _cap,
+                             "actual": len(_v)},
+                            "maxlength_violation", reason=_v[:120])
+                        if _k in _FALSIFY_TEXT_KEYS and comp_ctx is not None:
+                            _falsify_drops.append(comp_ctx)
+                        else:
+                            obj[_k] = _v[:_cap]
+                elif isinstance(_v, list) and _k in _COMPONENT_ARRAYS:
+                    for _i, _entry in enumerate(_v):
+                        _walk(_entry, (_v, _i, _k))
+                elif isinstance(_v, (dict, list)):
+                    _walk(_v, comp_ctx)
+        elif isinstance(obj, list):
+            for _entry in obj:
+                _walk(_entry, comp_ctx)
+
+    _walk(parsed)
+    # drop falsify-class entries (descending index per owning list)
+    for _lst, _idx, _comp in sorted(_falsify_drops, key=lambda x: -x[1]):
+        try:
+            _dropped = _lst.pop(_idx)
+        except Exception:
+            continue
+        print(f"[parse-edge] DROP {_comp}[{_idx}]: on-screen text over its "
+              f"declared cap — truncation would falsify; the component drops "
+              f"(K7 form). Render continues.", flush=True)
+        _record_divergence(
+            _comp if _comp != "text_overlays" else "text_overlay",
+            {"entry": str(_dropped)[:200], "call": call_label},
+            "drop_maxlength_falsify",
+            reason="on-screen verbatim text exceeded its declared cap — "
+                   "dropped, never truncated (a card never costs the video)")
+    return _events[0]
+
+
 def _call_transitions_subcall(client, model_name, plan_read, seam_block, schema):
     """The small dedicated call. Stable system block (its own cacheable prefix);
     per-job data rides in user content. FAILURE DIRECTION: None on any error —
@@ -8213,7 +8336,9 @@ def _call_transitions_subcall(client, model_name, plan_read, seam_block, schema)
                 temperature=1.0,
                 max_output_tokens=8192,
             ))
-        return json.loads(_resp.text)
+        _sc_parsed = json.loads(_resp.text)
+        _enforce_string_caps(_sc_parsed, schema, "transitions_subcall")
+        return _sc_parsed
     except Exception as _e:
         print(f"[transitions-subcall] FAILED — zero transitions, bare cuts, render ships: "
               f"{type(_e).__name__}: {str(_e)[:200]}", flush=True)
@@ -8337,7 +8462,17 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
     _POST_CUTS_DEGEN_OUTPUT_TOKENS = 16000
     response_text = ""
     _degen = None
-    for _attempt in (1, 2):
+    # L3 (Zac 2026-07-11): a repetition loop is stochastic — a fresh sample
+    # usually clears it. Degeneration-classified failures get their own
+    # bounded +2 retries (separate from the single standard transport retry)
+    # so two loops cannot exhaust a render to safe-edit, as happened on
+    # intent-zac-1783803951. Each use ledgers degen_retry (occurrence-class:
+    # real seconds, never deduped).
+    _DEGEN_EXTRA_RETRIES = 2
+    _degen_extra_used = 0
+    _attempt = 0
+    while True:
+        _attempt += 1
         t0 = time.time()
         _stream_result = _gemini_stream_with_cache(
             client, model_name,
@@ -8434,6 +8569,9 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
                 "gemini_degen_tail", reason=_degen_tail[-400:])
         if _degen is None:
             print(f"[gemini-post] RAW:\n{response_text}\n[gemini-post] END", flush=True)
+            # L1+L2: declared caps + repetition signatures enforced at THE
+            # parse edge — every downstream consumer reads capped strings.
+            _enforce_string_caps(_parsed, _post_cuts_response_schema(), "post_cuts")
             # [fix-4] notes soft-cap. notes is the LAST, decorative PostCutPlan
             # field (Optional[str]); its only downstream reader is the burned-
             # caption keyword scan in infer_has_burned_captions. The prompt asks
@@ -8463,14 +8601,29 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
                         flush=True,
                     )
             return _parsed
-        # Degenerate. Log a BOUNDED snippet (never the full 64K spiral) + re-roll.
+        # Degenerate. Log a BOUNDED snippet (never the full 64K spiral) and
+        # decide the retry by CLASS (L3): degeneration draws from its own +2
+        # budget after the standard retry; transport-class keeps the single
+        # standard retry unchanged.
+        _is_degen_class = "repetition-loop degeneration" in str(_degen)
+        _will_retry = (_attempt < 2) or (
+            _is_degen_class and _degen_extra_used < _DEGEN_EXTRA_RETRIES)
         print(
             f"[gemini-post] Degenerate response ({_degen}) — "
-            f"{'retrying once' if _attempt == 1 else 'no attempts left'}. "
+            f"{'retrying' if _will_retry else 'no attempts left'} "
+            f"(attempt {_attempt}, degen_extra {_degen_extra_used}/{_DEGEN_EXTRA_RETRIES}). "
             f"head: {response_text[:600]!r}",
             flush=True,
         )
-    raise RuntimeError(f"Gemini post-cuts-call degenerate after retry: {_degen}")
+        if not _will_retry:
+            raise RuntimeError(f"Gemini post-cuts-call degenerate after retry: {_degen}")
+        if _attempt >= 2:
+            _degen_extra_used += 1
+            _record_divergence(
+                "recipe_transport",
+                {"attempt": _attempt, "class": str(_degen)[:80]},
+                "degen_retry",
+                reason="degeneration-classified — bounded fresh-sample retry (L3)")
 
 
 # Confidence floor for the AUTOMATIC scene-change backfill only. scdet scores
@@ -11007,6 +11160,17 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                             f"requires a tight cut to decorate.",
                             flush=True,
                         )
+                        # R1 ruling: generation-tagged like the clamp — post-
+                        # A1/A2 the sub-call owns the seam set, so an a1a2
+                        # fire = a leak past single-ownership (REAL alarm);
+                        # legacy replays are the expected floor.
+                        _record_divergence(
+                            "tight_cut_overlay",
+                            {"type": tco_type, "awi": awi_t,
+                             "generation": edit_plan.get("_schema_generation")},
+                            "drop_not_tight_boundary",
+                            reason="a1a2 fire = leak past sub-call single-ownership; "
+                                   "legacy replay = expected floor")
                         continue
                     if awi_t in _transition_type_by_awi:
                         # Collision: this boundary already carries a transition (the
@@ -11017,6 +11181,13 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                             f"{_transition_type_by_awi[awi_t]!r}.",
                             flush=True,
                         )
+                        _record_divergence(
+                            "tight_cut_overlay",
+                            {"type": tco_type, "awi": awi_t,
+                             "generation": edit_plan.get("_schema_generation")},
+                            "drop_collision",
+                            reason="one decoration per boundary — the transition "
+                                   "holds it (physics-with-ledger, R1)")
                         continue
                     if awi_t in _overlay_awis:
                         print(
@@ -11024,6 +11195,13 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                             f"after_word_index={awi_t} already has an overlay (duplicate).",
                             flush=True,
                         )
+                        _record_divergence(
+                            "tight_cut_overlay",
+                            {"type": tco_type, "awi": awi_t,
+                             "generation": edit_plan.get("_schema_generation")},
+                            "drop_duplicate",
+                            reason="one decoration per boundary — an overlay "
+                                   "already holds it (physics-with-ledger, R1)")
                         continue
                     _spec = {"after_word_index": awi_t, "type": tco_type}
                     _resolved_overlays.append(_spec)

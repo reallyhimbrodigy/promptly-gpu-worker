@@ -28,6 +28,7 @@ app = modal.App("promptly-quality-table", image=image,
 OCCURRENCE_RULES = {
     "recipe_repair:repair_reask",
     "recipe_transport:gemini_degen_tail",
+    "recipe_transport:degen_retry",
     "render:video_reference_fallback",
     "recipe:safe_edit_fallback",
     "render:render_stripped",

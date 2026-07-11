@@ -5003,6 +5003,45 @@ def _telemetry_pin():
 import re
 
 
+@check("DEGENERATION RESPONSE (L1/L2/L3/R1): declared caps ENFORCED at the parse edge (Vertex does not enforce maxLength); repetition signature fires the tail instrument on completed responses; degen retries bounded +2 and ledgered; the three TCO drops ledgered")
+def _degeneration_response():
+    import handler as _h
+    _src = open("handler.py").read()
+    # L1 — behavioral: truncate at declared cap + falsify-class K7 drop
+    _sch = {"type": "object", "properties": {
+        "motion_graphics": {"type": "array", "items": {"type": "object", "properties": {
+            "why": {"type": "string", "maxLength": 24}}}},
+        "text_overlays": {"type": "array", "items": {"type": "object", "properties": {
+            "text": {"type": "string", "maxLength": 10}}}}}}
+    _data = {"motion_graphics": [{"why": "x" * 300}],
+             "text_overlays": [{"text": "y" * 60}, {"text": "short"}]}
+    _n = _h._enforce_string_caps(_data, _sch, "gate_probe")
+    assert _data["motion_graphics"][0]["why"] == "x" * 24, "display field must truncate AT the declared cap"
+    assert len(_data["text_overlays"]) == 1 and _data["text_overlays"][0]["text"] == "short", \
+        "on-screen text over cap must DROP the component (K7), never truncate"
+    assert _n >= 1, "violations must be counted"
+    # L2 — the staircase is measurable; healthy prose passes
+    assert _h._repetition_signature("auto edit fast " * 80), "the convicting loop must trip the signature"
+    assert not _h._repetition_signature(
+        "the payoff line is the video's reason to exist and it usually carries "
+        "the second hit while the hook grabs the viewer in the first two seconds "
+        "of the runtime with the type layer energy " * 3), "healthy prose must pass"
+    # both parse edges call the walk
+    assert _src.count("_enforce_string_caps(") >= 3, "both parse edges (+def) must enforce"
+    assert '"maxlength_violation"' in _src and '"drop_maxlength_falsify"' in _src
+    # L3 — degen retries bounded + ledgered
+    assert "_DEGEN_EXTRA_RETRIES = 2" in _src and '"degen_retry"' in _src, \
+        "degeneration must carry its own bounded retry budget, ledgered"
+    # occurrence semantics: real seconds are never deduped
+    _qt = open("quality_table.py").read()
+    assert '"recipe_transport:degen_retry"' in _qt, "degen_retry must be an OCCURRENCE rule"
+    # R1 — the three TCO drops ledgered; not-tight is generation-tagged
+    for _act in ('"drop_not_tight_boundary"', '"drop_collision"', '"drop_duplicate"'):
+        assert _act in _src, f"TCO drop ledger {_act} missing (R1 ruling)"
+    _i = _src.index('"drop_not_tight_boundary"')
+    assert '"generation"' in _src[_i - 400:_i], "not-tight drop must be generation-tagged"
+
+
 @check("LEVER 4 video reference: one upload per job, every call references; inline fallback armed + ledgered; teardown deletes only what we uploaded; kill switch default ON")
 def _lever4_video_reference():
     _src = open("handler.py").read()
