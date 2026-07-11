@@ -326,12 +326,31 @@ def _mg_known_sets(dg_words, removed_indices, vibe, video_identity):
 
 def _mg_grounding_fraction(text, known_tokens):
     """Fraction of content words present in the known set. Numerals always
-    pass. Pure-stopword/empty text passes (nothing to ground)."""
+    pass. Pure-stopword/empty text passes (nothing to ground).
+
+    PREDICATE v2 (F5 audit, Zac 2026-07-10 — all four audited fires were
+    TRUE-TO-CONTENT rejections):
+    (a) SYMMETRIC compound split — the known side split "VIDEOS/DAY" into
+        groundable parts but the checked side kept it as one unmatchable
+        token (the final-wave fix went one direction only). Both sides now
+        split identically.
+    (b) TWO-WAY PREFIX at >=4 chars — display abbreviations are what
+        designers write: MINS↔minutes, TEMP↔temperature, AUTO↔automatically.
+        A token also grounds when it prefixes (or is prefixed by) a known
+        token with 4+ chars shared. Invented content ("ZORBULON") still
+        fails; concept-level compression the tokens can't see (POUR over a
+        demonstrated pour) is handled at the CONSUMER: drop-the-card,
+        never raise-the-plan (the K7 treatment)."""
+    import re as _re
     content = []
     for raw in str(text).split():
-        tok = _mg_norm_token(raw)
-        if tok and tok not in _MG_STOPWORDS:
-            content.append(tok)
+        subs = [t for t in _re.split(r"[^0-9A-Za-z.]+", raw) if t]
+        joined = _mg_norm_token(raw)
+        pieces = subs if len(subs) > 1 else ([joined] if joined else [])
+        for piece in pieces:
+            tok = _mg_norm_token(piece)
+            if tok and tok not in _MG_STOPWORDS:
+                content.append(tok)
     if not content:
         return 1.0
     hits = 0
@@ -339,6 +358,10 @@ def _mg_grounding_fraction(text, known_tokens):
         if any(ch.isdigit() for ch in tok):
             hits += 1
         elif _mg_token_variants(tok) & known_tokens:
+            hits += 1
+        elif len(tok) >= 4 and any(
+                (k.startswith(tok) or tok.startswith(k)) and min(len(k), len(tok)) >= 4
+                for k in known_tokens):
             hits += 1
     return hits / len(content)
 
@@ -11475,14 +11498,32 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                 # ── F5: content grounding — card text must come from the
                 # dialogue (∪ vibe ∪ identity). Numerals always pass here;
                 # numbers-only components get the stricter check below.
-                for _f5_path, _f5_text in _mg_iter_text_values(_mg_type, _props):
-                    _f5_frac = _mg_grounding_fraction(_f5_text, _mg_known_tokens)
-                    if _f5_frac < _MG_GROUNDING_THRESHOLD:
-                        _mg_violations.append(
-                            f"MG {_mg_type} at word {_sw}: card text must be drawn "
-                            f"from the dialogue — \"{_f5_text}\" appears nowhere in it. "
-                            f"Rewrite from the speaker's own words or remove the card."
-                        )
+                # DEMOTED raise→drop (F5 audit, Zac 2026-07-10): all four
+                # audited fires were TRUE-TO-CONTENT (designer compression the
+                # token predicate cannot see); the raise burned a full re-ask
+                # per fire and the regenerated plan rolled fresh violations on
+                # other cards (whack-a-mole exhaust → safe-edit killed the
+                # video). K7 treatment: the ONE card drops, ledgered; the
+                # plan survives. Renderers stay fail-closed.
+                _f5_bad_text = next(
+                    (_f5_text for _f5_path, _f5_text in _mg_iter_text_values(_mg_type, _props)
+                     if _mg_grounding_fraction(_f5_text, _mg_known_tokens) < _MG_GROUNDING_THRESHOLD),
+                    None)
+                if _f5_bad_text is not None:
+                    print(
+                        f"[generate-edit] DROP motion_graphic '{_mg_type}' [{_i}]: "
+                        f"text \"{_f5_bad_text}\" fails grounding even under the "
+                        f"loosened predicate. Render continues without it.",
+                        flush=True,
+                    )
+                    _record_divergence(
+                        "motion_graphic",
+                        {"type": _mg_type, "word_index": _sw,
+                         "text": str(_f5_bad_text)[:80], "generation": "a1a2"},
+                        "drop_ungrounded_text",
+                        reason="grounding below threshold after predicate v2 — "
+                               "card dropped, plan survives (K7)")
+                    continue
                 # F5.3: StatCard/NumberTicker values validate against the
                 # transcript's numerals (spelled or digit; vibe/identity count).
                 for _f5_nf in _MG_NUMBER_FIELDS.get(_mg_type, ()):
@@ -11494,10 +11535,14 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                     except (TypeError, ValueError):
                         continue  # non-numeric value is a schema-shape concern
                     if _f5_num not in _mg_known_numbers:
+                        # F5.3 stays RAISE-class by scope (F5 audit covered the
+                        # TEXT fires): an invented NUMBER is an on-screen lie —
+                        # the repair rewrites it from the transcript's numerals
+                        # or removes the card.
                         _mg_violations.append(
-                            f"MG {_mg_type} at word {_sw}: card text must be drawn "
+                            f"MG {_mg_type} at word {_sw}: the card's NUMBER must come "
                             f"from the dialogue — \"{_f5_nf}={_f5_nv}\" appears nowhere in it. "
-                            f"Rewrite from the speaker's own words or remove the card."
+                            f"Use the speaker's own numeral or remove the card."
                         )
 
                 # ── F7: clear-region rule — an oversized card with no
@@ -11821,14 +11866,30 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                     # same known set, same message contract (word = the moment's
                     # first anchor word).
                     _f5_em_word = (em.get("word_indices") or [0])[0]
-                    for _f5_path, _f5_text in _mg_iter_text_values(_mgt, _mg_props):
-                        if _mg_grounding_fraction(_f5_text, _mg_known_tokens) < _MG_GROUNDING_THRESHOLD:
-                            raise ValueError(
-                                f"MG {_mgt} at word {_f5_em_word}: card text must be drawn "
-                                f"from the dialogue — \"{_f5_text}\" appears nowhere in it. "
-                                f"Rewrite from the speaker's own words or remove the card."
-                            )
-                    _mg_out = {"type": _mgt, "anchor": _anc, "props": _mg_props}
+                    # DEMOTED raise→drop (F5 audit, Zac 2026-07-10) — the K7
+                    # treatment, same as top-level MGs: the moment keeps its
+                    # zoom; only the ungroundable card dies, ledgered.
+                    _f5_em_bad = next(
+                        (_f5_text for _f5_path, _f5_text in _mg_iter_text_values(_mgt, _mg_props)
+                         if _mg_grounding_fraction(_f5_text, _mg_known_tokens) < _MG_GROUNDING_THRESHOLD),
+                        None)
+                    if _f5_em_bad is not None:
+                        print(
+                            f"[generate-edit] DROP emphasis motion_graphic '{_mgt}' at word "
+                            f"{_f5_em_word}: text \"{_f5_em_bad}\" fails grounding even "
+                            f"under the loosened predicate. Emphasis keeps its zoom.",
+                            flush=True,
+                        )
+                        _record_divergence(
+                            "motion_graphic",
+                            {"type": _mgt, "word_index": _f5_em_word,
+                             "text": str(_f5_em_bad)[:80], "generation": "a1a2"},
+                            "drop_ungrounded_text",
+                            reason="grounding below threshold after predicate v2 — "
+                                   "card dropped, plan survives (K7)")
+                        _mg_out = None
+                    else:
+                        _mg_out = {"type": _mgt, "anchor": _anc, "props": _mg_props}
                 _em_word_parts = []
                 for idx in _wis:
                     if _dg_words and 0 <= idx < len(_dg_words):
@@ -12238,13 +12299,35 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                         continue
                     # F5 grounding — the sticky_note overlay renders the SAME
                     # StickyNotes component as the MG; same content law.
+                    # DEMOTED raise→drop (F5 audit, Zac 2026-07-10): the failing
+                    # NOTE drops (ledgered); surviving notes render; an emptied
+                    # overlay falls through to the existing no-content drop.
+                    _f5_kept_notes = []
                     for _f5_note in _entry["notes"]:
                         if _mg_grounding_fraction(_f5_note["text"], _mg_known_tokens) < _MG_GROUNDING_THRESHOLD:
-                            raise ValueError(
-                                f"MG StickyNotes at word {_swi}: card text must be drawn "
-                                f"from the dialogue — \"{_f5_note['text']}\" appears nowhere in it. "
-                                f"Rewrite from the speaker's own words or remove the card."
+                            print(
+                                f"[generate-edit] DROP sticky_note note at word {_swi}: "
+                                f"text \"{_f5_note['text']}\" fails grounding even under "
+                                f"the loosened predicate.",
+                                flush=True,
                             )
+                            _record_divergence(
+                                "text_overlay",
+                                {"variant": "sticky_note", "word_index": _swi,
+                                 "text": str(_f5_note["text"])[:80], "generation": "a1a2"},
+                                "drop_ungrounded_text",
+                                reason="grounding below threshold after predicate v2 — "
+                                       "note dropped, overlay survives (K7)")
+                            continue
+                        _f5_kept_notes.append(_f5_note)
+                    _entry["notes"] = _f5_kept_notes
+                    if not _entry["notes"]:
+                        print(
+                            f"[generate-edit] DROP text_overlay 'sticky_note' [{_i}]: "
+                            f"every note failed grounding. Render continues without it.",
+                            flush=True,
+                        )
+                        continue
                 elif _var == "caption_match":
                     # text + position are variant-required but schema-OPTIONAL, so Vertex
                     # omits them. No text → no content → DROP (render continues). position

@@ -4741,6 +4741,30 @@ def _k4_future_drift_guard():
         f"render_multi_clip scope detection or the read regex has drifted")
 
 
+@check("F5 verdict: predicate v2 (symmetric compound split + 4-char prefix); grounding NEVER raises — the card drops ledgered, the plan survives (K7)")
+def _f5_verdict():
+    import handler as _h
+    known, _nums = _h._mg_known_sets(
+        [{"word": w} for w in
+         "it took five minutes to edit this app edits your videos automatically ten times a day".split()],
+        [], "high-energy ad", "app demo")
+    # symmetric compound split: VIDEOS/DAY grounds part-by-part
+    assert _h._mg_grounding_fraction("VIDEOS/DAY", known) >= _h._MG_GROUNDING_THRESHOLD, \
+        "compound display text must split like the known side (the VIDEOS/DAY fire)"
+    # two-way 4-char prefix: AUTO grounds on 'automatically'
+    assert _h._mg_grounding_fraction("AUTO EDITOR", known) >= _h._MG_GROUNDING_THRESHOLD, \
+        "display abbreviations that prefix a known token must ground (AUTO EDITOR)"
+    # invented content still fails the predicate
+    assert _h._mg_grounding_fraction("ZORBULON FLEX", known) < _h._MG_GROUNDING_THRESHOLD, \
+        "invented content must still fail"
+    # and failure NEVER raises: all three sites drop + ledger (K7)
+    _src = open("handler.py").read()
+    assert "card text must be drawn" not in _src, \
+        "the grounding raise is dead — a card can never cost the video"
+    assert _src.count('"drop_ungrounded_text"') == 3, \
+        "all three F5 sites (top-level MG, emphasis MG, sticky note) must drop+ledger"
+
+
 @check("split registry: _known is DERIVED from per-source registrations; unregistered split fires, registered stays silent (both directions); the stale word-matching guard stays deleted")
 def _split_registry():
     import handler as _h
