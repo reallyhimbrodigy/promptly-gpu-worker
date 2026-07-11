@@ -446,7 +446,8 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
   exitFrames,
   header,
   messages,
-  width = 820,
+  // D4: fit the symmetric center box (max 680) — oversize dragged center right
+  width = 680,
   minHeight = 1320,
   borderRadius = 56,
   statusBarTime = "9:41",

@@ -4506,7 +4506,13 @@ def _within_clip_deadair():
     assert 0.008 <= handler._BETWEEN_WORD_GAP_S <= 0.030, \
         f"between-words gap must be ~15ms, got {handler._BETWEEN_WORD_GAP_S}"
     assert "_AUDIO_DB_LAST" in _src, "energy-based audible-edge locator missing (spans fragment on breaths)"
-    assert "_new_ce = _sound_end + _tail_pad" in _src, "clip_end = sound_end + gap/2 (invariant) missing"
+    # D2 (Zac's render verdict 2026-07-11): the tail derivation gained its
+    # floor — clip_end = max(sound_end, last word_end) + gap/2, and the FINAL
+    # clip is never tail-trimmed (nothing follows it; the decay is content).
+    assert "_new_ce = max(_sound_end, _floor_we) + _tail_pad" in _src, \
+        "clip_end = max(sound_end, word_end) + gap/2 (floored invariant) missing"
+    assert "_sound_end is not None and _ci < _n - 1" in _src, \
+        "the FINAL clip must never be tail-trimmed (the 'nothi-' class)"
     assert "_new_cs = _sound_start - _head_pad" in _src, "clip_start = sound_start - gap/2 (invariant) missing"
     # MIN-RANGE NO-OP GUARD (Zac 2026-07-09): a loud continuous bed (music under speech)
     # collapses floor->speech separation; floor+PCT*range would sit a hair under speech and
@@ -4556,10 +4562,25 @@ def _within_clip_deadair():
     _g, _ = handler.build_clips_from_words(_dg, _rw, video_duration=2.2,
                                            level_silences=[(0.40, 1.60)], within_clip_15ms=True)
     _half = handler._BETWEEN_WORD_GAP_S / 2.0
+    # D2 reconciliation: over DEAD-FLAT silence (this fixture: -50dB floor in
+    # [0.40, 0.50]) the loose Deepgram end is the artifact — the 15ms
+    # invariant rules and the tail trims to sound_end + gap/2 as ever.
     assert abs(_g[0]["source_end"] - (0.40 + _half)) < 0.012, \
-        f"clip_end must be audible sound_end 0.40 + gap/2, got {_g[0]['source_end']}"
+        f"dead-flat tail: clip_end must be sound_end 0.40 + gap/2, got {_g[0]['source_end']}"
     assert abs(_g[-1]["source_start"] - (1.60 - _half)) < 0.012, \
         f"clip_start must be audible sound_start 1.60 - gap/2, got {_g[-1]['source_start']}"
+    # D2 floor case ('nothi-' class): the same geometry but the band
+    # [0.40, 0.50] carries DECAYING SPEECH (-42dB > floor+10%·range = -46)
+    # → the word_end floor holds; the soft syllable is never cut.
+    _arr2 = _np.full(int(2.2 / _hop), -50.0)
+    _arr2[int(0.0 / _hop):int(0.40 / _hop)] = -20.0
+    _arr2[int(0.40 / _hop):int(0.50 / _hop)] = -42.0
+    _arr2[int(1.60 / _hop):int(2.00 / _hop)] = -20.0
+    handler._AUDIO_DB_LAST = _arr2
+    _g2, _ = handler.build_clips_from_words(_dg, _rw, video_duration=2.2,
+                                            level_silences=[(0.50, 1.60)], within_clip_15ms=True)
+    assert abs(_g2[0]["source_end"] - (0.50 + _half)) < 0.012, \
+        f"decaying tail: clip_end must FLOOR at word_end 0.50 + gap/2, got {_g2[0]['source_end']}"
     _gap = (_g[0]["source_end"] - 0.40) + (1.60 - _g[-1]["source_start"])
     assert abs(_gap - handler._BETWEEN_WORD_GAP_S) < 0.006, \
         f"between-words OUTPUT gap must equal {handler._BETWEEN_WORD_GAP_S}, got {_gap:.4f}"
@@ -4739,6 +4760,42 @@ def _k4_future_drift_guard():
     assert len(_reads) >= 15, (
         f"guard parsed only {len(_reads)} render-path _-key reads — the "
         f"render_multi_clip scope detection or the read regex has drifted")
+
+
+@check("D1 perceptual sync: ONE audible-onset derivation consumed by emphasis t + SFX + projected anchors; the projection reads the render_timeline arithmetic (frames cursor); D2 floors live")
+def _d1_perceptual_sync():
+    import handler as _h
+    _src = open("handler.py").read()
+    assert "def _audible_word_onset_s(" in _src, "the one onset derivation must exist"
+    assert _src.count("_audible_word_onset_s(") >= 4, \
+        "emphasis t, SFX, and projected anchors must all read the onset helper"
+    assert "_use_frames" in _src and "trans_slot_frames=_trans_slot_frames" in _src, \
+        "the projection must read the render_timeline arithmetic (int-frames cursor)"
+    # behavioral: a silence ending before the Deepgram stamp corrects the onset
+    _h._LEVEL_SILENCES_LAST[:] = [(0.5, 1.30)]
+    _h._WITHIN_WORD_SILENCES_LAST[:] = []
+    try:
+        _dg = [{"start": 0.1, "end": 0.45}, {"start": 1.44, "end": 1.9}]
+        _on = _h._audible_word_onset_s(_dg, 1)
+        assert abs(_on - 1.30) < 1e-6, f"onset must snap to the silence end (1.30), got {_on}"
+        _h._LEVEL_SILENCES_LAST[:] = []
+        _on2 = _h._audible_word_onset_s(_dg, 1)
+        assert abs(_on2 - 1.44) < 1e-6, "no located silence → Deepgram start unchanged (replay-safe)"
+    finally:
+        _h._LEVEL_SILENCES_LAST[:] = []
+        _h._WITHIN_WORD_SILENCES_LAST[:] = []
+    # zero-slot boundary: words after it must NOT inherit the dropped handles
+    words = {"words": [{"start": 0.1, "end": 0.5, "word": "a"}, {"start": 2.6, "end": 3.0, "word": "c"}]}
+    cuts = [{"source_start": 0.0, "source_end": 1.6, "speed": 1.0},
+            {"source_start": 2.4, "source_end": 3.2, "speed": 1.0}]
+    p = _h.project_words_to_output(words, cuts, [1.6, 0.8],
+                                   trim_head_dur=[0.0, 0.2], trim_tail_dur=[0.4, 0.0],
+                                   trans_slot_frames=[0, 0])
+    _c = [w for w in p if w["word"] == "c"][0]
+    assert abs(_c["start"] - 1.2) < 0.02, \
+        f"zero-slot dropped handles must not delay later words (want 1.2, got {_c['start']})"
+    # the standing instrument exists (the release ritual)
+    assert "PERCEPTUAL SYNC CHECK" in open("perceptual_sync_check.py").read()
 
 
 @check("F5 verdict: predicate v2 (symmetric compound split + 4-char prefix); grounding NEVER raises — the card drops ledgered, the plan survives (K7)")

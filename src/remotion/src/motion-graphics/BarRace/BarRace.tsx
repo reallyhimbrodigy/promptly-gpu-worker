@@ -48,7 +48,8 @@ export const BarRace: React.FC<BarRaceProps> = ({
   valuePrefix = "",
   valueSuffix = "",
   accentColor = "#FFB23E",
-  width = 880,
+  // D4: fit the symmetric center box (max 680) — oversize dragged center right
+  width = 680,
   textShadow = DEFAULT_TEXT_SHADOW,
   anchor,
   offsetX,

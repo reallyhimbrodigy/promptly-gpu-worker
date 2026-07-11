@@ -174,7 +174,6 @@ _MG_TEXT_FIELDS = {
     "PillMarquee": ("pills[]",),
     "DropBanner": ("title", "subtitle", "points[].title", "points[].caption"),
     "DropCard": ("title", "titleLead", "steps[].label", "points[].title", "points[].caption"),
-    "IconLabel": ("label",),
     "PullQuote": ("text", "keywords[]"),
     # Social chrome (name/handle/username/appName/timestamp) is structural
     # UI dressing the catalog itself prescribes — grounding it against the
@@ -240,6 +239,39 @@ def _vibe_requests_captions(vibe):
     if _F8_NEGATION.search(v):
         return False
     return True
+
+
+def _audible_word_onset_s(dg_words, idx):
+    """D1 (Zac's render verdict, 2026-07-11): Deepgram word STARTS run late
+    vs the audible onset — measured +120..250ms on the rejected render and
+    +179ms on 'nothing' directly. When a dB-located silence ENDS shortly
+    before the Deepgram start, speech began at that silence's end. ONE
+    derivation: every component anchor (emphasis/zoom t, SFX fire, MG/broll/
+    overlay fromFrame) reads THIS; captions keep raw Deepgram spans (page
+    timing is span-based, not beat-based). On render_only replays the
+    silence registries are empty → returns the Deepgram start unchanged
+    (no correction, no risk)."""
+    try:
+        _ds = float(dg_words[idx].get("start") or 0.0)
+    except Exception:
+        return 0.0
+    _best = _ds
+    try:
+        for _s0, _e0 in list(_LEVEL_SILENCES_LAST) + list(_WITHIN_WORD_SILENCES_LAST):
+            _e0 = float(_e0)
+            # silence ended just before Deepgram's stamp → speech onset = its end
+            if _ds - 0.45 <= _e0 <= _ds + 0.02 and _e0 < _best:
+                _best = _e0
+    except Exception:
+        return _ds
+    if idx > 0:
+        try:
+            # never reach into the previous word's speech (its Deepgram end
+            # may itself be loose-late — allow 80ms into its tail, no more)
+            _best = max(_best, float(dg_words[idx - 1].get("end") or 0.0) - 0.08)
+        except Exception:
+            pass
+    return _best
 
 
 def _mg_norm_token(w):
@@ -4287,7 +4319,7 @@ Component sizes:
   • TOP-PINNED — Notification, StickyNotes, DropBanner, DropCard: ALWAYS render in the top band regardless of anchor (the metaphor depends on it). Emit anchor "upper_third_safe" so your spec matches reality.
   • LARGE — IMessageBubble, ChatThread, RecordingFrame, PullQuote, EditorialQuote, SectionDivider, StepDivider: ≥half canvas height (the divider/quote cards are full-frame takeover moments — captions rest for their window). LARGE MGs resolve clear of the visible face — the render keeps the person visible; a B-roll window where the face is gone gives them the full upper third, and a smaller variant fits alongside a face that stays.
   • MEDIUM — TweetBubble, InstagramComment, TikTokComment, StatCard, RankedList, Timeline, TimelineRoadmap, Stamp, BarRace, MouseDrag: 25-40% canvas height. upper_third_safe works when the face is clearly center-or-lower; if the card would touch the face from above, use lower_third_safe with captions flipped to top, or a B-roll window.
-  • SMALL — AnnotationArrow, ProgressBar, NumberTicker, Reticle, IconLabel, PillCluster: <20% canvas. Any anchor; upper_third_safe is safe by construction.
+  • SMALL — AnnotationArrow, ProgressBar, NumberTicker, Reticle, PillCluster: <20% canvas. Any anchor; upper_third_safe is safe by construction.
   • FULL-WIDTH — PillMarquee: an edge-to-edge scrolling band; it rides the upper or lower band (emit upper_third_safe or lower_third_safe) and stays clear of the face like every other anchor.
 
 Anchor preference: 1) upper_third_safe (default — above the face, clear of bottom captions) · 2) lower_third_safe (requires captions moved to top for the window; good for footer-like content) · 3) center (ONLY when the speaker is off-camera or the face is confirmed in the lower band — on a visible talking-head, center lands on the face). MGs render horizontally centered — the anchor enum is vertical-only, so clearance comes from the vertical band you pick. Anchors resolve clear of the face — the render keeps the person visible; pick the vertical band that frames them, a smaller variant when space is tight, or a B-roll window when the frame is full. The clean speaker shot is the baseline the render protects.
@@ -4343,8 +4375,6 @@ Also answers here: Timeline (see WHEN TIME OR SEQUENCE IS THE STORY).
 
 ── WHEN SOMETHING IS NAMED OR REVEALED ──
 
-**IconLabel** (SMALL) — a single line-icon springs in with overshoot and a radiating ping ring, then a short ALL-CAPS word wipes out of it; optional glass pill. No card, no chrome. Claim: "One concept, stamped." Use when the dialogue lands a single punchy attribute or status you can pair with a glyph — "fully verified" (check), "this is fast" (bolt), "pure profit" (dollar). Multi-line app alerts → Notification; a hero number → StatCard; several keywords at once → PillCluster.
-Props: {{ "icon": "bolt"|"check"|"star"|"dollar"|"fire"|"heart"|"trophy"|"target"|"chart-up"|"clock"|"lock"|"sparkle"|"arrow-up"|"x", "label"?: "FAST", "iconColor"?: "#hex", "showPill"?: true, "layout"?: "row"|"stack", "anchor"?: "upper_third_safe"|"center"|"lower_third_safe" }}
 
 **PullQuote** (LARGE) — the speaker's own line blown up full-frame in bold caps, building word-by-word with keywords landing bigger and in an accent color. No card, no quotation marks, no name. Claim: "What they just said, as the whole screen." Use when one spoken sentence is the punchline and deserves the full frame ("most people quit right before the breakthrough") — pass the line as text and the 1–2 hit words as keywords. Framed/attributed quotes → EditorialQuote; the running transcript → a caption style.
 Props: {{ "text": "Most people quit right before the breakthrough", "keywords"?: ["quit","breakthrough"], "highlightStyle"?: "color"|"bar"|"scale", "keywordColor"?: "#FFD60A", "fontKey"?: "anton", "anchor"?: "upper_third_safe"|"center"|"lower_third_safe" }}
@@ -4387,10 +4417,9 @@ Also answers here: Reticle (see WHEN A REGION OF THE FRAME NEEDS POINTING AT).
 
 ── WHEN A CLAIM GETS A VERDICT OR STAMP ──
 
-**Stamp** (MEDIUM) — a circular VERIFIED-style seal (or rectangular rubber-stamp) that slams onto the frame from oversized to rest with weight: a compression-recoil bounce, a locked tilt, a flash and an expanding shock ring, then a brief settle. Single-ink — ring and text share one color. Claim: "Stamp it — this is OFFICIAL." Use when the dialogue confers a status or seal ("officially verified", "certified", "brand new") — one short word reads best. A light icon+word pop → IconLabel; an app banner → Notification.
+**Stamp** (MEDIUM) — a circular VERIFIED-style seal (or rectangular rubber-stamp) that slams onto the frame from oversized to rest with weight: a compression-recoil bounce, a locked tilt, a flash and an expanding shock ring, then a brief settle. Single-ink — ring and text share one color. Claim: "Stamp it — this is OFFICIAL." Use when the dialogue confers a status or seal ("officially verified", "certified", "brand new") — one short word reads best. An app banner → Notification.
 Props: {{ "text": "VERIFIED", "style"?: "seal"|"stamp"|"ribbon", "subtextTop"?: "OFFICIALLY", "subtextBottom"?: "AUTHENTIC", "mark"?: "star"|"check"|"none", "color"?: "#C8321F", "anchor"?: "upper_third_safe"|"center"|"lower_third_safe" }}
 
-Also answers here: IconLabel (see WHEN SOMETHING IS NAMED OR REVEALED).
 
 ── WHEN TIME OR SEQUENCE IS THE STORY ──
 
@@ -11698,7 +11727,9 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                 # introduces boundary mismatches like the v34→df1b62e bug where
                 # round(12.871, 2) = 12.87 fell below clip.source_start = 12.871.
                 _anchor_word = _dg_words[_wis[0]]
-                t = float(_anchor_word.get("start") or 0)
+                # D1: the moment's time is the AUDIBLE onset, not Deepgram's
+                # (often-late) stamp — the zoom peak/MG/SFX all key off t.
+                t = _audible_word_onset_s(_dg_words, _wis[0])
                 if t < 0 or (video_duration > 0 and t > video_duration + 0.5):
                     raise ValueError(
                         f"emphasis_moments[{_ei}] derived t={t:.3f}s (from word_indices[0]="
@@ -16414,7 +16445,7 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
     return output_wav
 
 
-def project_words_to_output(transcript, cuts, effective_durations, transition_duration=None, clip_time_maps=None, removed_word_indices=None, fps=60.0, trans_dur_after=None):
+def project_words_to_output(transcript, cuts, effective_durations, transition_duration=None, clip_time_maps=None, removed_word_indices=None, fps=60.0, trans_dur_after=None, trim_head_dur=None, trim_tail_dur=None, trans_slot_frames=None):
     """Project word timestamps from source to output timeline using canonical time maps.
 
     If removed_word_indices is provided, words at those indices are excluded.
@@ -16437,6 +16468,17 @@ def project_words_to_output(transcript, cuts, effective_durations, transition_du
         transition_duration=transition_duration,
         trans_dur_after=trans_dur_after,
     )
+    # D1 (Zac's render verdict, 2026-07-11): the projection must read the
+    # SAME arithmetic as render_timeline — the old parallel float cursor
+    # advanced eff_dur while the real tracks advance body+slot FRAMES, so
+    # (a) at a zero-slot boundary the retained handle trims made every later
+    # word project LATE by up to 2×natural (CONFIRMED mechanism), and (b)
+    # per-clip round() drift walked the cursor off the true frame grid. With
+    # the trim/slot tables passed, the cursor is INTEGER FRAMES, identical
+    # to render_timeline by construction.
+    _use_frames = (trim_head_dur is not None and trim_tail_dur is not None
+                   and trans_slot_frames is not None)
+    _cur_f = 0
     output_cursor = 0.0
     for i, cut in enumerate(cuts):
         c_start = float(cut["source_start"])
@@ -16444,6 +16486,19 @@ def project_words_to_output(transcript, cuts, effective_durations, transition_du
         tm = clip_time_maps[i] if clip_time_maps and i < len(clip_time_maps) else None
         _eff_i = effective_durations[i] if i < len(effective_durations) else (c_end - c_start)
         _trans_tail_i = float(trans_dur_after[i] or 0.0) if (trans_dur_after is not None and i < len(trans_dur_after)) else 0.0
+        if _use_frames:
+            _th_i = float(trim_head_dur[i] or 0.0) if i < len(trim_head_dur) else 0.0
+            _tt_i = float(trim_tail_dur[i] or 0.0) if i < len(trim_tail_dur) else 0.0
+            _body_s_i = max(0.0, _eff_i - _th_i - _tt_i)
+            _body_f_i = max(1, int(round(_body_s_i * fps)))
+            _slot_f_i = int(trans_slot_frames[i] or 0) if i < len(trans_slot_frames) else 0
+            _out_start_s = _cur_f / fps
+        else:
+            _th_i = 0.0
+            _body_s_i = None
+            _body_f_i = 0
+            _slot_f_i = 0
+            _out_start_s = output_cursor
         for word_idx, w in enumerate(words):
             if word_idx in _removed:
                 continue
@@ -16471,18 +16526,34 @@ def project_words_to_output(transcript, cuts, effective_durations, transition_du
             # head words own that output time range; rendering this cut's
             # tail words there would produce simultaneous overlapping
             # caption pages during every transition.
-            if _trans_tail_i > 0 and local_s >= (_eff_i - _trans_tail_i):
+            if _use_frames:
+                # body-local: the render plays kept content only; the head
+                # handle precedes frame 0 and the tail handle (kept OR
+                # dropped-at-zero-slot) is past the body — suppress both.
+                local_s -= _th_i
+                local_e -= _th_i
+                if local_e <= 0:
+                    continue
+                if local_s < 0:
+                    local_s = 0.0
+                if local_s >= _body_s_i:
+                    continue
+                if local_e > _body_s_i:
+                    local_e = _body_s_i
+            elif _trans_tail_i > 0 and local_s >= (_eff_i - _trans_tail_i):
                 continue
             # Preserve sub-millisecond precision for caption tokens.
             projected.append({
-                "start": float(output_cursor + local_s),
-                "end":   float(output_cursor + local_e),
+                "start": float(_out_start_s + local_s),
+                "end":   float(_out_start_s + local_e),
                 "word":  w.get("punctuated_word") or w.get("word") or "",
                 "punctuated_word": w.get("punctuated_word") or w.get("word") or "",
                 "speaker": int(w.get("speaker", 0) or 0),
                 "_source_start": max(ws, c_start),
                 "_word_index": word_idx,
             })
+        if _use_frames:
+            _cur_f += _body_f_i + _slot_f_i
         dur = effective_durations[i] if i < len(effective_durations) else (c_end - c_start)
         output_cursor += dur
         if trans_dur_after is not None and i < len(trans_dur_after):
@@ -16772,6 +16843,7 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0,
         raw_clips.append({
             "raw_start": first_start,
             "raw_end": last_end,
+            "_last_word_end": last_end,
             "padded_start": first_start,
             "padded_end": last_end,
             "first_word": word_group[0]["_text"],
@@ -16907,9 +16979,20 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0,
     if raw_clips and clips:
         _last_src_idx = clips[-1][-1]["_word_index"]
         _trailing_removed = any(idx > _last_src_idx for idx in removed_indices)
-        if not _trailing_removed:
+        # D2: the final word keeps its decay in EVERY case — with trailing
+        # removals the pad is bounded by the first removed word's start
+        # (never replay removed speech), else by the source end.
+        if True:
             _cur_end = raw_clips[-1]["padded_end"]
             _cap = _vd if _vd > 0 else (_cur_end + _FINAL_TAIL_PAD_S)
+            if _trailing_removed:
+                try:
+                    _next_rm_start = min(
+                        float(deepgram_words[idx].get("start") or 1e9)
+                        for idx in removed_indices if idx > _last_src_idx)
+                    _cap = min(_cap, max(_cur_end, _next_rm_start - 0.01))
+                except Exception:
+                    pass
             _new_end = min(_cur_end + _FINAL_TAIL_PAD_S, _cap)
             if _new_end > _cur_end:
                 print(
@@ -16963,9 +17046,30 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0,
             # TRAILING — sound_end = the LAST audible sample inside the clip (energy read, not the
             # fragmented silence spans). clip_end = sound_end + gap/2 (video-final: lead-out pad).
             _sound_end = _last_audible(_cs, _ce)
-            if _sound_end is not None:
-                _tail_pad = _VIDEO_EDGE_PAD_S if _ci == _n - 1 else _half
-                _new_ce = _sound_end + _tail_pad
+            if _sound_end is not None and _ci < _n - 1:
+                # D2 (Zac's render verdict): the trim FLOORS at the clip's
+                # last Deepgram word_end — the dB line classifying a soft
+                # trailing syllable as silence can never cut into the word
+                # (the 'nothi-' class is unconstructible). And the FINAL
+                # clip is never tail-trimmed at all (the _ci < _n-1 guard):
+                # nothing follows it; it keeps its full decay and breath
+                # (Step 4's +0.5s pad, capped at the source end).
+                _tail_pad = _half
+                _floor_we = float(_rc.get("_last_word_end") or 0.0)
+                if _floor_we > _sound_end:
+                    # D2 refinement (reconciling with the ear-confirmed 15ms
+                    # invariant): the word_end floor holds only over DECAYING
+                    # SPEECH — the band [sound_end, word_end] carrying energy
+                    # above floor+10%·range (a soft trailing syllable the
+                    # within-line misclassified). Over dead-flat silence the
+                    # loose Deepgram end is the artifact and the 15ms
+                    # invariant rules unchanged.
+                    _dk_lo = max(0, int(_sound_end / _hop))
+                    _dk_hi = min(_nfr, int(min(_floor_we, _sound_end + 0.25) / _hop))
+                    _dk_line = _AUDIO_DB_META["floor"] + 0.10 * _AUDIO_DB_META["range"]
+                    if _dk_hi <= _dk_lo or float(_np.mean(_db[_dk_lo:_dk_hi])) <= _dk_line:
+                        _floor_we = _sound_end
+                _new_ce = max(_sound_end, _floor_we) + _tail_pad
                 if _cs + 0.05 < _new_ce < _ce - 0.001:
                     _rc["padded_end"] = _new_ce
                     _ce = _new_ce
@@ -17799,6 +17903,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         transition_duration=None, clip_time_maps=_clip_time_maps,
         removed_word_indices=_removed_word_indices, fps=source_fps,
         trans_dur_after=_trans_dur_after,
+        trim_head_dur=_trim_head_dur, trim_tail_dur=_trim_tail_dur,
+        trans_slot_frames=_trans_slot_frames,
     )
     edit_plan["_projected_words"] = _projected_words
     _pw_by_idx = {pw["_word_index"]: pw for pw in _projected_words if pw.get("_word_index") is not None}
@@ -18406,7 +18512,19 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     def _proj_word_start_sec(idx):
         _pw = _pw_by_idx.get(idx) if idx is not None else None
-        return float(_pw["start"]) if _pw else None
+        if not _pw:
+            return None
+        _t0 = float(_pw["start"])
+        # D1: word-anchored components fire on the AUDIBLE onset (see
+        # _audible_word_onset_s) — same correction as SFX, one derivation.
+        try:
+            _dgw2 = transcript.get("words") or []
+            _sh = float(_dgw2[idx].get("start") or 0.0) - _audible_word_onset_s(_dgw2, idx)
+            if 0.0 < _sh <= 0.45:
+                _t0 = max(0.0, _t0 - _sh)
+        except Exception:
+            pass
+        return _t0
 
     def _proj_word_end_sec(idx):
         _pw = _pw_by_idx.get(idx) if idx is not None else None
@@ -19204,6 +19322,16 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 # nothing remains to re-anchor. A cut word has no position, so its
                 # sound has no existence (the `continue` below).
                 _projected_t = float(_pw["start"])
+                # D1: fire on the AUDIBLE onset — subtract the Deepgram-late
+                # shift measured in source time (speed is 1.0 by doctrine).
+                try:
+                    _sfx_dgw = transcript.get("words") or []
+                    _onset_shift = (float(_sfx_dgw[_sfx_wi].get("start") or 0.0)
+                                    - _audible_word_onset_s(_sfx_dgw, _sfx_wi))
+                    if 0.0 < _onset_shift <= 0.45:
+                        _projected_t = max(0.0, _projected_t - _onset_shift)
+                except Exception:
+                    pass
             else:
                 _sfx_word = _sfx.get("word", "")
                 print(f"[sfx] Skipping {_sound_style} on '{_sfx_word}' — word removed from output", flush=True)

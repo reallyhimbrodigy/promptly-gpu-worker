@@ -77,7 +77,7 @@ def full_plan():
         "emphasis_moments": [
             {"type": "punchline", "intensity": "high", "word_indices": [5],
              "zoom_effect": {"type": "SmoothPush", "events": [{"startMs": 0}]},
-             "motion_graphic": {"type": "IconLabel", "props": {}}},
+             "motion_graphic": {"type": "Stamp", "props": {}}},
             {"type": "statement", "intensity": "medium", "word_indices": [8],
              "zoom_effect": {"type": "StepZoom", "events": []}, "motion_graphic": None},
         ],

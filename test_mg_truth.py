@@ -192,7 +192,7 @@ check("Notification appName/timestamp exempt",
       H._MG_TEXT_FIELDS["Notification"] == ("notifications[].title", "notifications[].body"))
 
 print("\n=== F6-2: a 4-word card at 2s passes (3 content words → floor 1.85s) ===")
-four = clean_plan(motion_graphics=[mg("IconLabel",
+four = clean_plan(motion_graphics=[mg("Reticle",
     {"label": "upload your video vibe"}, dur=2.0)])
 plan, err, stub, out = run_gen([four])
 check("4-word card at 2s passes", err is None and plan is not None)

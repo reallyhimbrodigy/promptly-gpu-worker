@@ -17,7 +17,7 @@ def plan():
             "_resolved_tight_cut_overlays": [{"after_word_index": 3, "type": "ShutterFlash"}],
             "broll_clips": [{"keyword": "x"}], "generated_scenes": [{"x": 1}],
             "_generated_subjects": {"0": "/tmp/x.png"},
-            "_emphasis_moments": [{"zoom_effect": {"type": "SnapReframe"}, "motion_graphic": {"type": "IconLabel"}}],
+            "_emphasis_moments": [{"zoom_effect": {"type": "SnapReframe"}, "motion_graphic": {"type": "Stamp"}}],
             "_render_cuts": ["stale"], "_render_fps": 60}
 
 def run(fail_times):

@@ -254,6 +254,20 @@ export function resolveMGPosition(
       // when correctly anchored.
       maxWidth,
       maxHeight: SAFE_RECT.height,
+      // D4 (Zac's render verdict, 2026-07-11): the wrapper was a plain BLOCK
+      // div — a fixed-width child wider than maxWidth overflowed RIGHTWARD
+      // (ProgressBar width 860 > 680 → its bar rendered [200,1055], center
+      // dragged to ~630). A centering flex column makes oversize overflow
+      // SYMMETRIC: the structural center holds for EVERY component, not just
+      // the ones whose widths happen to fit. freeHorizontal/topExempt types
+      // keep their own layouts.
+      ...(cfg.freeHorizontal || cfg.topExempt
+        ? {}
+        : {
+            display: "flex",
+            flexDirection: "column" as const,
+            alignItems: "center" as const,
+          }),
       transform: `translate(${offsetX}px, ${offsetY}px) scale(${scale})`,
       transformOrigin,
     },

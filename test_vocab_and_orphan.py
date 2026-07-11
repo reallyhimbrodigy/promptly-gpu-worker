@@ -15,7 +15,7 @@ def check(name, cond, detail=""):
 print("=== V1: _vocab_markers from a synthetic plan ===")
 PLAN = {
     "caption_style": "Prime",
-    "motion_graphics": [{"type": "StatCard"}, {"type": "IconLabel"}, {"type": "StatCard"}],
+    "motion_graphics": [{"type": "StatCard"}, {"type": "Reticle"}, {"type": "StatCard"}],
     "emphasis_moments": [{"zoom_effect": {"type": "SnapReframe"}},
                           {"zoom_effect": {"type": "SmoothPush"}},
                           {"zoom_effect": None}],
@@ -27,7 +27,7 @@ PLAN = {
 }
 v = H._vocab_markers(PLAN)
 check("caption_style carried", v.get("caption_style") == "Prime")
-check("mg_types sorted-unique", v.get("mg_types") == ["IconLabel", "StatCard"])
+check("mg_types sorted-unique", v.get("mg_types") == ["Reticle", "StatCard"])
 check("zoom_types from emphasis (None skipped)", v.get("zoom_types") == ["SmoothPush", "SnapReframe"])
 check("sfx unique", v.get("sfx") == ["boom", "pop"])
 check("tco_types from RESOLVED overlays", v.get("tco_types") == ["LightLeak", "ShutterFlash"])

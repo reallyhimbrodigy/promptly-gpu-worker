@@ -255,7 +255,6 @@ export type MotionGraphicType =
   | "NumberTicker"
   | "Timeline"
   | "Reticle"
-  | "IconLabel"
   | "RankedList"
   | "PullQuote"
   | "PillCluster"

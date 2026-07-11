@@ -70,7 +70,7 @@ import {
   StageZoom, DepthPull,
 } from "./zoom";
 
-// Motion graphics — 30 components total (13 batch 1 + 17 batch 2). All share the
+// Motion graphics — 29 components total (13 batch 1 + 16 batch 2). All share the
 // MGTimingProps/MGPositionProps + useMGPhase interface; the renderer feeds each
 // startMs=0 + window-derived durationMs + spread props (see MotionGraphicRenderer).
 import {
@@ -78,8 +78,8 @@ import {
   Notification, ProgressBar, ChatThread,
   StickyNotes, RecordingFrame,
   TweetBubble, InstagramComment, IMessageBubble, TikTokComment,
-  // Batch 2 (17 net-new)
-  NumberTicker, Timeline, Reticle, IconLabel, RankedList, PullQuote,
+  // Batch 2 (16 net-new)
+  NumberTicker, Timeline, Reticle, RankedList, PullQuote,
   PillCluster, Stamp, BarRace, SectionDivider, EditorialQuote, StepDivider,
   DropBanner, DropCard, PillMarquee, TimelineRoadmap, MouseDrag,
 } from "./motion-graphics";
@@ -109,8 +109,8 @@ const MG_MAP: Record<string, React.FC<any>> = {
   Notification, ProgressBar, ChatThread,
   StickyNotes, RecordingFrame,
   TweetBubble, InstagramComment, IMessageBubble, TikTokComment,
-  // Batch 2 (17 net-new) — canonical type names = export names.
-  NumberTicker, Timeline, Reticle, IconLabel, RankedList, PullQuote,
+  // Batch 2 (16 net-new) — canonical type names = export names.
+  NumberTicker, Timeline, Reticle, RankedList, PullQuote,
   PillCluster, Stamp, BarRace, SectionDivider, EditorialQuote, StepDivider,
   DropBanner, DropCard, PillMarquee, TimelineRoadmap, MouseDrag,
 };

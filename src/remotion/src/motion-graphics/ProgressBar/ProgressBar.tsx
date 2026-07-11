@@ -25,7 +25,9 @@ export const ProgressBar: React.FC<ProgressBarProps> = (props) => {
     enterFrames,
     exitFrames,
     label,
-    width = 860,
+    // D4: 860 predates the symmetric center box (max 680) — the overflow
+    // dragged the whole card right of center on Zac's render.
+    width = 680,
     trackHeight = 18,
     fillColor = "#FFFFFF",
     accentColor = "#D4A12A",

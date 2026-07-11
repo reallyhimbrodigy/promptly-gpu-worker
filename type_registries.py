@@ -106,11 +106,11 @@ VALID_MG_TYPES = frozenset({
     "Notification", "ProgressBar", "RecordingFrame",
     "StatCard", "StickyNotes",
     "TweetBubble", "InstagramComment", "IMessageBubble", "TikTokComment",
-    # Batch 2 — 17 net-new motion graphics (both tiers). MGs carry a generic
+    # Batch 2 — 16 net-new (IconLabel DELETED, Zac ruling 2026-07-11: 'unnecessary and unprofessional in any scenario') motion graphics (both tiers). MGs carry a generic
     # `props` dict, so adding the type here is the whole schema seam: the
     # Pydantic + render Literals derive from this frozenset; render_schemas /
     # PostCutPlan / EditPlan accept the new types automatically.
-    "NumberTicker", "Timeline", "Reticle", "IconLabel", "RankedList",
+    "NumberTicker", "Timeline", "Reticle", "RankedList",
     "PullQuote", "PillCluster", "Stamp", "BarRace", "SectionDivider",
     "EditorialQuote", "StepDivider", "DropBanner", "DropCard", "PillMarquee",
     "TimelineRoadmap", "MouseDrag",

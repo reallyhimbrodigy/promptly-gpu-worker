@@ -37,7 +37,8 @@ export const Timeline: React.FC<TimelineProps> = ({
   accentColor = "#FF8A1E",
   trackColor = "rgba(255,255,255,0.16)",
   nodeSize = 84,
-  width = 880,
+  // D4: fit the symmetric center box (max 680) — oversize dragged center right
+  width = 680,
   rowGap = 210,
   labelColor = "#15171E",
   indexColor = "#FFFFFF",

@@ -42,11 +42,10 @@ export type {
   RecordingFrameAnnotation,
 } from "./RecordingFrame";
 
-// ── Batch 2 — 17 net-new motion graphics (additive; same shared/ interface) ──
+// ── Batch 2 — 16 net-new motion graphics (additive; same shared/ interface) ──
 export { NumberTicker } from "./NumberTicker";
 export { Timeline } from "./Timeline";
 export { Reticle } from "./Reticle";
-export { IconLabel } from "./IconLabel";
 export { RankedList } from "./RankedList";
 export { PullQuote } from "./PullQuote";
 export { PillCluster } from "./PillCluster";

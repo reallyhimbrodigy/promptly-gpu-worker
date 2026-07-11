@@ -29,7 +29,8 @@ export const PillCluster: React.FC<PillClusterProps> = ({
   accentColor = "#4F9DF7",
   accentEvery = 3,
   glass = true,
-  width = 900,
+  // D4: fit the symmetric center box (max 680) — oversize dragged center right
+  width = 680,
   fontSize = 42,
   textColor = "#FFFFFF",
   textShadow = DEFAULT_TEXT_SHADOW,
