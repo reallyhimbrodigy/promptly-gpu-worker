@@ -556,10 +556,20 @@ prewarm_volume = modal.Volume.from_name("promptly-prewarm-cache", create_if_miss
                       # preemption is not yet confirmed here — worst case this is a
                       # harmless no-op; the fully-robust form spawns the render as a
                       # retriable background function (a Tier-3-adjacent change).
+    enable_memory_snapshot=True,  # COLD-START (Zac 2026-07-12, audit #2): the
+                      # @modal.enter below re-imports handler (opencv/numpy/genai/
+                      # deepgram + ffmpeg checks + model init) — ~10-12s on every
+                      # cold container. With snapshot, that import runs ONCE at
+                      # snapshot time (snap=True) and every cold start restores the
+                      # post-import memory image instantly. Pixel-identical: it only
+                      # changes WHEN the import runs. Safe: the import is pure (no
+                      # lingering sockets/file handles that wouldn't survive a
+                      # snapshot); the prewarm-volume reload + all per-request work
+                      # stays in run_job, not startup.
     volumes={"/prewarm": prewarm_volume},
 )
 class PromptlyWorker:
-    @modal.enter()
+    @modal.enter(snap=True)
     def startup(self):
         """Import handler at container startup, not per-request. Saves ~10-12s
         of Python import overhead (opencv, numpy, google-genai, deepgram, etc.)

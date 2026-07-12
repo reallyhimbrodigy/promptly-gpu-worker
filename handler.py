@@ -21301,6 +21301,31 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     micro_input, micro_segments_meta = build_micro_segments_input(
         clips_out, transitions_out, _source_url, source_fps,
     )
+    # AUDIT #5 (Zac 2026-07-12): instrument the MICRO leg — the render's heaviest
+    # painter (measured 97.6s / 1.5GB on Zac's render, LONGER than the caption
+    # overlay). Log WHICH composite-effect zoom types (FocusWindow/LetterboxPush/
+    # DepthPull) + transitions compose it, with frame spans, so the finer
+    # per-type hunt has data (correlate with render-full's interval_render_fps to
+    # attribute the 97.6s to specific types). Log-only, pixel-identical.
+    try:
+        from collections import Counter as _MiCounter
+        _mi_zt, _mi_zf = _MiCounter(), _MiCounter()
+        for _c in (clips_out or []):
+            if isinstance(_c, dict) and _c.get("zoomEffect"):
+                _zty = str((_c.get("zoomEffect") or {}).get("type") or "none")
+                _mi_zt[_zty] += 1
+                try:
+                    _mi_zf[_zty] += int(_c.get("durationInFrames")
+                                        or _c.get("toFrame", 0) - _c.get("fromFrame", 0) or 0)
+                except Exception:
+                    pass
+        _mi_tt = _MiCounter(str((_t or {}).get("type") or "none")
+                            for _t in (transitions_out or []) if isinstance(_t, dict))
+        print(f"[micro-instr] MICRO-leg composition — zoom_types_by_count={dict(_mi_zt)} "
+              f"zoom_frames_by_type={dict(_mi_zf)} transition_types={dict(_mi_tt)} "
+              f"(correlate with render-full interval_render_fps for per-type time)", flush=True)
+    except Exception as _mi_err:
+        print(f"[micro-instr] composition log failed ({type(_mi_err).__name__})", flush=True)
     micro_input_path = None
     if micro_input is not None:
         micro_input_path = os.path.join(_stage_dir, "micro_input.json")
