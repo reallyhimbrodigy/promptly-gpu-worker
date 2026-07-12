@@ -35,6 +35,18 @@ check("carries the reason", "reason=CLIP_TOO_LONG" in _out, _out)
 check("carries the measured source length", "149.9" in _out, _out)
 check("carries the cap", "120" in _out, _out)
 
+# ─── generalized: gate-specific MEASURED context rides in the payload ────────
+_buf2 = io.StringIO()
+with contextlib.redirect_stdout(_buf2):
+    H._log_intake_reject("NOT_TALKING_HEAD", 30.0, face_ratio=0.1, samples=8, gate="fast_check")
+_out2 = _buf2.getvalue()
+check("carries gate-specific context (face_ratio/samples/gate)",
+      all(t in _out2 for t in ("reason=NOT_TALKING_HEAD", "face_ratio", "0.1", "fast_check")), _out2)
+_buf3 = io.StringIO()
+with contextlib.redirect_stdout(_buf3):
+    H._log_intake_reject("NO_SPEECH", 22.0, word_count=0)
+check("NO_SPEECH carries word_count context", "word_count" in _buf3.getvalue(), _buf3.getvalue())
+
 # ─── structured ledger entry (the weekly-table source, flushed to S3) ───────
 _before = len(H._DIVERGENCE_LOG)
 with contextlib.redirect_stdout(io.StringIO()):
@@ -66,6 +78,17 @@ if len(_seam) == 2:
           "_log_intake_reject(" in _w and _w.index("_log_intake_reject(") < _w.index("raise RuntimeError"), _w)
 else:
     check("reject site present", False, "cap guard not found")
+
+# ─── KILL-SITE ENUMERATION: EVERY intake gate wired, none missed (rider) ────
+import re as _re
+# every explicit intake-gate raise carries "CODE:" at the message-string start;
+# classify_error branches use `"CODE"` / `in msg` (no colon) and don't match.
+_raise_msgs = _re.findall(r'f?"(NO_SPEECH|NO_AUDIO_TRACK|NOT_TALKING_HEAD|CLIP_TOO_LONG):', _src)
+_measures = _src.count('_log_intake_reject("')
+for _code in ("CLIP_TOO_LONG", "NO_AUDIO_TRACK", "NOT_TALKING_HEAD", "NO_SPEECH"):
+    check(f"gate {_code} wired", f'_log_intake_reject("{_code}"' in _src)
+check("kill-site enumeration: #intake-gate raises == #measurements (none missed)",
+      len(_raise_msgs) == _measures == 5, {"raises": len(_raise_msgs), "measures": _measures})
 
 
 print(f"\n=== RESULT: {len(PASS)} passed, {len(FAIL)} failed ===")

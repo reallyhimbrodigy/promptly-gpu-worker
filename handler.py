@@ -22470,19 +22470,25 @@ def _clip_cap_minutes_label():
     return "%g" % round(_MAX_SOURCE_DURATION_S / 60.0, 2)
 
 
-def _log_intake_reject(reason, source_s, cap_s=None):
+def _log_intake_reject(reason, source_s=None, cap_s=None, **context):
     """The ONE intake-rejection measurement (Zac ruling 2026-07-11, 120s cap:
-    make-it-honest + MEASURE-it). Emits a grep-stable [divergence] line AND a
+    make-it-honest + MEASURE-it; rider: extend to EVERY intake gate). Emits a
+    grep-stable [divergence] component=intake action=intake_rejected line AND a
     structured _DIVERGENCE_LOG entry (flushed to S3 per job) so the count of
-    real uploads a named intake boundary turns away is QUERYABLE at scale —
-    the weekly-table data for whether the 2-minute limit should rise. Carries
-    the reason + the MEASURED source length. Best-effort: never raises into the
-    reject (a measurement must not kill an honest rejection)."""
+    real uploads EACH named intake boundary turns away is QUERYABLE at scale —
+    ONE unified turn-away table, the complete "who tries and can't get in"
+    picture. Carries the reason + the MEASURED context per gate: source length
+    where relevant, plus any gate-specific signal (face ratio, word count)
+    passed as keywords. Best-effort: never raises into the reject (a
+    measurement must not kill an honest rejection)."""
     try:
-        _payload = {"reason": str(reason),
-                    "source_s": round(float(source_s or 0.0), 1)}
+        _payload = {"reason": str(reason)}
+        if source_s is not None:
+            _payload["source_s"] = round(float(source_s or 0.0), 1)
         if cap_s is not None:
             _payload["cap_s"] = float(cap_s)
+        for _ck, _cv in context.items():
+            _payload[_ck] = _cv
         _record_divergence("intake", _payload, "intake_rejected", reason=str(reason))
     except Exception as _ir_err:
         print(f"[intake-reject] measurement failed ({type(_ir_err).__name__}) "
@@ -24785,6 +24791,7 @@ def handler(job):
             except Exception:
                 _has_audio_stream = True
             if not _has_audio_stream:
+                _log_intake_reject("NO_AUDIO_TRACK", source_duration)
                 raise RuntimeError(
                     "NO_AUDIO_TRACK: source has no audio stream; "
                     "transcription is impossible.")
@@ -24838,6 +24845,9 @@ def handler(job):
                 # clearly below threshold. Borderline cases proceed and
                 # are caught by the more thorough downstream gate.
                 if _qfc_samples >= 5 and _qfc_ratio < 0.25:
+                    _log_intake_reject("NOT_TALKING_HEAD", source_duration,
+                                       face_ratio=round(float(_qfc_ratio), 2),
+                                       samples=int(_qfc_samples), gate="fast_check")
                     raise RuntimeError(
                         f"NOT_TALKING_HEAD: face in only {_qfc_ratio*100:.0f}% "
                         f"of {_qfc_samples} sampled frames (fast-check). "
@@ -25900,6 +25910,10 @@ def handler(job):
             _face_low = (_face_samples >= 8 and _face_ratio < 0.20)
             _speech_low = (source_duration >= 15.0 and _word_count < 10)
             if _face_low and _speech_low:
+                _log_intake_reject("NOT_TALKING_HEAD", source_duration,
+                                   face_ratio=round(float(_face_ratio), 2),
+                                   face_hits=int(_face_hits), face_samples=int(_face_samples),
+                                   word_count=int(_word_count), gate="deep_check")
                 raise RuntimeError(
                     f"NOT_TALKING_HEAD: face in only {_face_hits}/{_face_samples} "
                     f"({_face_ratio*100:.0f}%) frames AND only {_word_count} "
@@ -25915,6 +25929,7 @@ def handler(job):
                 # die downstream as a retryable RECIPE_INVALID ("removed all
                 # words"). The speech-anchored pipeline cannot edit silence —
                 # reject BEFORE recipe spend with the honest class.
+                _log_intake_reject("NO_SPEECH", source_duration, word_count=0)
                 raise RuntimeError(
                     "NO_SPEECH: Deepgram returned 0 words for this source. "
                     "Every edit decision is speech-anchored — please upload "

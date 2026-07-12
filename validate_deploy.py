@@ -4301,6 +4301,18 @@ def _intake_reject_measured():
     assert "_log_intake_reject(" in _w and "raise RuntimeError" in _w \
         and _w.index("_log_intake_reject(") < _w.index("raise RuntimeError"), \
         "measure THEN reject — the count is taken before the raise"
+    # KILL-SITE ENUMERATION (rider): EVERY intake gate wired — none missed. The
+    # explicit intake-gate raises carry "CODE:" at the message-string start;
+    # classify_error branches use `"CODE"` (no colon) and don't match.
+    import re as _re
+    _raise_msgs = _re.findall(
+        r'f?"(NO_SPEECH|NO_AUDIO_TRACK|NOT_TALKING_HEAD|CLIP_TOO_LONG):', _src)
+    _measures = _src.count('_log_intake_reject("')
+    for _code in ("CLIP_TOO_LONG", "NO_AUDIO_TRACK", "NOT_TALKING_HEAD", "NO_SPEECH"):
+        assert f'_log_intake_reject("{_code}"' in _src, f"intake gate {_code} not measured"
+    assert len(_raise_msgs) == _measures == 5, \
+        f"kill-site enumeration: every intake-gate raise must have a measurement " \
+        f"(raises={len(_raise_msgs)} measures={_measures}); a new gate was added unmeasured"
 
 
 @check("unification Slice 2: frame-domain truth CUT OVER — total/body/slots read from RenderTimeline, duplicates deleted")
