@@ -104,7 +104,7 @@ const ZOOM_MAP: Record<string, React.FC<any>> = {
   StageZoom, DepthPull,
 };
 
-const MG_MAP: Record<string, React.FC<any>> = {
+export const MG_MAP: Record<string, React.FC<any>> = {
   AnnotationArrow, StatCard,
   Notification, ProgressBar, ChatThread,
   StickyNotes, RecordingFrame,

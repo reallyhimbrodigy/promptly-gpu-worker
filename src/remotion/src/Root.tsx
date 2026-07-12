@@ -10,6 +10,7 @@ import type {
 } from "./types";
 import { OverlayCutTest, type OverlayCutTestProps } from "./transitions/overlays/_OverlayCutTest";
 import { FitSpecimen } from "./FitSpecimen";
+import { MGAttackProbe } from "./MGAttackProbe";
 
 /**
  * Remotion root — two production compositions:
@@ -138,6 +139,21 @@ export const RemotionRoot: React.FC = () => {
           words: ["DOWNLOAD", "PROMPTLY"],
           keywords: [],
           position: "bottom",
+        } as unknown as Record<string, unknown>}
+      />
+      {/* MGAttackProbe — WS1 entrance-arrival measurement. One MG type on a
+          flat plate at startMs=0; driven by mg-attack-battery.mjs. Not used in
+          production renders. 96 frames @60fps = 1.6s (entrance + hold). */}
+      <Composition
+        id="MGAttackProbe"
+        component={MGAttackProbe as unknown as React.FC<Record<string, unknown>>}
+        width={1080}
+        height={1920}
+        fps={60}
+        durationInFrames={96}
+        defaultProps={{
+          type: "StatCard",
+          props: { value: 100000, label: "SUBSCRIBERS", anchor: "center" },
         } as unknown as Record<string, unknown>}
       />
     </>
