@@ -5054,6 +5054,37 @@ def _w1_w2_tier1():
     assert _k < _src.index("vidstabtransform=input="), "normalize must precede transform"
 
 
+@check("TIER-3b sound derivation FIXED POINT: derive(derive(plan)) == derive(plan) — a re-edit re-runs the span without doubling or raising on the derived shape")
+def _tier3b_sound_fixed_point():
+    import handler as _h
+    _emph = [{"word_indices": [5], "sound": "boom", "viewer_feeling": "the payoff lands"},
+             {"word_indices": [9], "sound": "voice", "viewer_feeling": "carried alone"}]
+    # first pass: authored raw from emphasis only (voice excluded)
+    _r1 = _h._reedit_normalize_raw_sfx(_emph, [])
+    assert [x["word_index"] for x in _r1] == [5], "emphasis sounds derive; voice omits"
+    # a SECOND pass over the DERIVED shape ({_word_idx}) must reproduce _r1
+    _derived = [{"t": 1.0, "sound": "boom", "word": "pay", "_word_idx": 5,
+                 "why": "the payoff lands"}]
+    _r2 = _h._reedit_normalize_raw_sfx(_emph, _derived)
+    assert _r2 == _r1, "derive(derive)==derive: re-run must not double or drop"
+    # a legacy standalone at a NON-emphasis word folds in, no double
+    _legacy = [{"t": 2.0, "sound": "popsfx", "word": "x", "_word_idx": 12, "why": "bonus"}]
+    _r3 = _h._reedit_normalize_raw_sfx(_emph, _legacy)
+    assert {x["word_index"] for x in _r3} == {5, 12}, "legacy standalone survives the fold"
+    # ...and folding r3's derived form is STILL a fixed point (no growth)
+    _r3d = [{"sound": "boom", "_word_idx": 5, "why": "the payoff lands"},
+            {"sound": "popsfx", "_word_idx": 12, "why": "bonus"}]
+    _r4 = _h._reedit_normalize_raw_sfx(_emph, _r3d)
+    assert {x["word_index"] for x in _r4} == {5, 12} and len(_r4) == 2, \
+        "the standalone fold is idempotent (no unbounded growth on re-runs)"
+    _src = open("handler.py").read()
+    assert "_reedit_normalize_raw_sfx(" in _src \
+        and "raw_sfx = _reedit_normalize_raw_sfx(" in _src, \
+        "the span must derive sounds through the fixed-point normalizer"
+    assert '] + list(edit_plan.get("sound_effects") or [])' not in _src, \
+        "the non-idempotent `+ list(sound_effects)` derivation is dead"
+
+
 @check("VACUOUS-READ GUARD (counted class): analyzer-field consumers answer from a carrying fixture; belt+coercion read the REAL analyzer output; present-but-fieldless is loud")
 def _vacuous_read_guard():
     import handler as _h

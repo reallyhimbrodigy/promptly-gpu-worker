@@ -9134,6 +9134,54 @@ def _ensure_proxy_reference(job_id, proxy_bytes, client_proxy_url):
     return None, None
 
 
+def _reedit_normalize_raw_sfx(emphasis_moments, sound_effects_in):
+    """TIER-3b (Zac 2026-07-11) — the sound derivation's PURE FIXED POINT.
+
+    Sounds ride ranked beats (B): the emphasis moments are the authoritative
+    source; the standalone sound_effects list survives only as a legacy /
+    already-derived shape. This folds BOTH shapes back to the authored
+    {word_index, sound, why} form the derivation loop consumes, deduping any
+    standalone entry that lands on an emphasis-sound word (the emphasis
+    wins). The point is idempotency: a re-edit re-runs the whole span on a
+    plan whose sound_effects is ALREADY the derived {t, sound, word,
+    _word_idx} shape, and the old `+ list(sound_effects)` both RAISED (no
+    word_index key) and DOUBLED (emphasis re-derived + old list re-appended).
+    With this, derive(derive(plan)) == derive(plan): a second pass reproduces
+    the first because emphasis re-derives identically and the derived
+    standalone entries fold to the same authored words (then dedup to the
+    emphasis). Gate-pinned.
+    """
+    _emph_wi = set()
+    out = []
+    for _em in (emphasis_moments or []):
+        if isinstance(_em, dict) and _em.get("sound") not in (None, "voice"):
+            _wi = (_em.get("word_indices") or [None])[0]
+            if _wi is None:
+                continue
+            out.append({"word_index": _wi, "sound": _em.get("sound"),
+                        "why": str(_em.get("viewer_feeling") or "")[:240]})
+            try:
+                _emph_wi.add(int(_wi))
+            except (TypeError, ValueError):
+                pass
+    for _e in (sound_effects_in or []):
+        if not isinstance(_e, dict):
+            continue
+        # authored (word_index) OR already-derived (_word_idx) — fold both
+        _wi = _e.get("word_index", _e.get("_word_idx"))
+        if _wi is None:
+            continue
+        try:
+            _wii = int(_wi)
+        except (TypeError, ValueError):
+            continue
+        if _wii in _emph_wi:
+            continue   # emphasis is authoritative — never double
+        out.append({"word_index": _wii, "sound": _e.get("sound"),
+                    "why": _e.get("why") if isinstance(_e.get("why"), str) else None})
+    return out
+
+
 def generate_edit_gemini(
     video_path, vibe, duration, trend_context=None, deepgram_words=None,
     shot_changes=None, shot_change_scores=None, vocal_emphasis=None, source_loudness=None,
@@ -12923,14 +12971,18 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
             # reinterpret plans render as before). One derivation into the
             # same validation/mix machinery; the fire time is the emphasis's
             # audible-onset-corrected word.
-            raw_sfx = [
-                {"word_index": (em.get("word_indices") or [None])[0],
-                 "sound": em.get("sound"),
-                 "why": str(em.get("viewer_feeling") or "")[:240]}
-                for em in (edit_plan.get("emphasis_moments") or [])
-                if isinstance(em, dict)
-                and em.get("sound") not in (None, "voice")
-            ] + list(edit_plan.get("sound_effects") or [])
+            # TIER-3b (Zac 2026-07-11): the derivation is a PURE FIXED POINT —
+            # derive(derive(plan)) == derive(plan). A re-edit re-runs this span
+            # on a plan whose sound_effects is ALREADY the derived shape
+            # ({t, sound, word, _word_idx}); the old `+ list(sound_effects)`
+            # both RAISED (derived entries lack word_index) and DOUBLED
+            # (emphasis re-derived + old list re-appended). The normalizer
+            # folds both authored (word_index) and already-derived (_word_idx)
+            # standalone entries back to authored shape and dedups
+            # emphasis-covered words to the emphasis — so a second pass
+            # reproduces the first exactly. Gate-pinned.
+            raw_sfx = _reedit_normalize_raw_sfx(
+                edit_plan.get("emphasis_moments"), edit_plan.get("sound_effects"))
             sound_effects = []
             valid_sounds = set(_SFX_CATEGORIES.keys())
             _sfx_dg_words = edit_plan.get("_deepgram_words") or []
