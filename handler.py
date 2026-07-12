@@ -8207,7 +8207,10 @@ THE TIGHT-CUT OVERLAYS — punctuation painted OVER a hard cut (the cut plays st
 **ShutterFlash** — quick white flash accenting the cut. The escalation after a setup, a surprise pivot, the exact frame a stat or punchline lands on. The LIGHT version — energy still moving.
 An overlay is the lighter weight; a zero-handle transition (ShutterFlash/DipToBlack) is the heavy pick, earned where the shift is big enough that the cut itself should be the editorial event. Weight to the beat; variety across placements.
 
-RIDER SOUND: a transition entry may carry "sound": "transition-sfx" — a broad cinematic sweep, THE SCENARIO being the video's single largest act turn, where the turn itself deserves its sound. At most the one turn that earns it; omit everywhere else."""
+RIDER SOUND: a transition entry may carry "sound" — TWO riders, two distinct characters; choose per seam, or omit (most seams carry none):
+  • "transition-sfx" — a broad cinematic SWEEP. THE SCENARIO: the video's single largest act turn, where a full transition renders and the turn itself deserves its sound. At most the one turn that earns it.
+  • "camera-flash" — the sharp mechanical SNAP of a DSLR shutter. THE SCENARIO: a hard, snapping picture-change — a crisp cut between two distinct shots where the edit itself should feel like a captured frame, a decisive moment stamped. Where transition-sfx sweeps the largest turn, the shutter snaps a single decisive cut. Reach for it rarely, on the cut that should land like a frame going off.
+Omit on every seam neither scenario fits."""
 
 
 def _build_transitions_subcall_schema(seams):
@@ -8228,7 +8231,7 @@ def _build_transitions_subcall_schema(seams):
                     "after_word_index": {"type": "string", "enum": [str(_s["awi"])]},
                     "type": {"type": "string", "enum": _fits},
                     "why": {"type": "string", "maxLength": 120},
-                    "sound": {"type": "string", "enum": ["transition-sfx"], "nullable": True}},
+                    "sound": {"type": "string", "enum": ["transition-sfx", "camera-flash"], "nullable": True}},
                   "required": ["after_word_index", "type", "why"]}
             _variants.append(_v)
         _overlay_idx.append(str(_s["awi"]))
@@ -14869,11 +14872,19 @@ _SFX_CATEGORIES = {
 # Every SFX in this set is pre-trimmed to ZERO leading silence — the audible onset
 # is at sample 0 — so every offset is 0.0 and the file starts right on the word.
 # (.get() below defaults to 0.0, so these explicit zeros just document the
-# pre-trim contract; a future sound with a mid-file peak would add its measured
-# offset here.)
+# pre-trim contract; a sound with a mid-file peak adds its measured offset here.)
+# camera-flash EXCEPTION (Zac swap 2026-07-12): the delivered DSLR shutter
+# (camera-shutter-dslrr.mp3) carries ~76ms of leading silence before the click
+# transient (measured: silence below −50 dB until 0.073s, audible onset 0.076s
+# across −50/−40/−30/−20 dB thresholds → a sharp, well-defined onset). Rather
+# than re-encode the delivered asset (no-quality-loss law), record the measured
+# onset so BOTH homes (emphasis path @ ~20616, transition-rider path @ ~20637)
+# schedule the file at (placement − 0.076) and the shutter SNAP lands on the
+# word. WS1 (attack table) must measure the perceptual peak FROM the audible
+# onset, not the file start, to avoid double-compensating this offset.
 _SFX_ONSET_OFFSETS = {
     "boom": 0.0, "punchsfx": 0.0, "swoosh-sound-effects": 0.0,
-    "woosh-professional": 0.0, "transition-sfx": 0.0, "camera-flash": 0.0,
+    "woosh-professional": 0.0, "transition-sfx": 0.0, "camera-flash": 0.076,
     "money-ching": 0.0, "iphoneding": 0.0, "mouse-click-sound": 0.0,
     "popsfx": 0.0, "correct": 0.0, "rizz": 0.0,
     "shockingsfx": 0.0, "awkward-moment": 0.0, "wompwomp": 0.0, "imposter": 0.0,

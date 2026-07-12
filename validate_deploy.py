@@ -5480,6 +5480,42 @@ def _rider_sound_one_derivation():
         f"the slot-0 rider must not exist — got {ev}")
 
 
+@check("CAMERA-SHUTTER two homes (Zac swap 2026-07-12): the DSLR shutter (camera-flash) rides EXACTLY two surfaces — the diegetic emphasis beat AND the transition rider — with distinct scenarios; the 76ms leading-silence onset is measured, not inherited; neither home leaks into the other")
+def _camera_shutter_two_homes():
+    import handler as _h
+    import os as _os
+    import typing as _ty
+    _src = open("handler.py").read()
+    _SFX = set(_ty.get_args(_h._SFX_SOUNDS))
+    # key = filename stem (the resolution seam); the deploy source file exists
+    assert _h.normalize_sfx_style("camera-flash") == "camera-flash", "key must equal its stem"
+    assert _os.path.exists("src/assets/sounds/camera-flash.mp3"), "the swapped file must exist at the deploy source"
+    # measured onset offset — a different file has a different envelope; not inherited
+    assert abs(_h._SFX_ONSET_OFFSETS.get("camera-flash", 0.0) - 0.076) < 1e-9, \
+        "the new shutter's 76ms leading silence must be the MEASURED onset offset (per-component measurement law)"
+    # HOME 1 — the diegetic emphasis beat
+    assert "camera-flash" in _SFX and _h._SFX_CATEGORIES.get("camera-flash") == "medium", \
+        "home 1: camera-flash on the emphasis-beat surface with a mix category"
+    assert "**camera-flash**" in _src and "photo or screenshot is taken" in _src, \
+        "home 1 scenario is the diegetic photo moment"
+    # HOME 2 — the transition rider (construction probe: the 2-member enum builds)
+    _schema, _cc, _oc = _h._build_transitions_subcall_schema([{"awi": 5, "gap_ms": 2000, "kind": "cut"}])
+    _v = _schema["properties"]["cut_boundary_transitions"]["items"]["anyOf"][0]
+    assert set(_v["properties"]["sound"]["enum"]) == {"transition-sfx", "camera-flash"} \
+        and _v["properties"]["sound"].get("nullable") is True, \
+        "home 2: the transition-rider sound enum offers both members, still nullable"
+    assert 'clip["_transition_sound"] = str(tr["sound"])' in _src, \
+        "the rider carries the sound verbatim (no transition-sfx-only whitelist)"
+    # THE BOUNDARY — exactly ONE schema sound-enum offers the rider; two distinct
+    # scenarios (photo-moment vs snapping-cut); no third surface (not on zoom).
+    _rider_lines = [ln for ln in _src.splitlines()
+                    if '"sound"' in ln and "enum" in ln and "transition-sfx" in ln]
+    assert len(_rider_lines) == 1 and "camera-flash" in _rider_lines[0], \
+        "exactly ONE rider sound-enum, and it carries camera-flash (no third surface)"
+    assert "DSLR shutter" in _src and "decisive cut" in _src, \
+        "the transition scenario reads distinctly from the diegetic photo scenario (the discriminator)"
+
+
 @check("NO-ADJUSTMENT ruling: SFX word is the ONE anchor (reanchor pass deleted); MG anchors authored, never coerced")
 def _no_adjustment_ruling():
     _src = open("handler.py").read()
