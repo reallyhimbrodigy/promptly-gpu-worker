@@ -5028,6 +5028,10 @@ def _w1_w2_tier1():
     _pt = open("src/remotion/src/PromptlyRender.tsx").read()
     assert "{caption ? <CaptionsLayer caption={caption} fps={fps} /> : null}" in _pt, \
         "Remotion must null-guard the captions layer"
+    assert 'captionStyle={caption?.style ?? "CleanCut"}' in _pt, \
+        "TextOverlaysLayer (the second consumer, w1_forced conviction) must null-guard too"
+    assert "captionStyle={caption.style}" not in _pt and "captionKeywords={caption.keywords}" not in _pt, \
+        "no unguarded caption dereference survives at the layer call sites"
     _ts = open("src/remotion/src/types.ts").read()
     assert "caption?: CaptionSpec | null;" in _ts, "TS type must allow absence"
     assert '"ladder_identical_input_failure"' in _src, \

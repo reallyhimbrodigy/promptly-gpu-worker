@@ -11638,6 +11638,20 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
             _ecr = str(edit_plan.get("existing_caption_region") or "none").strip().lower()
             if _ecr not in ("none", "bottom", "top", "other"):
                 _ecr = "none"
+            # W3.1 (derive, don't ask): the ANALYSIS pass detects burned-in
+            # captions deterministically (frame_layout.existing_overlays);
+            # Gemini's Stage-0 read missed them twice on the same production
+            # source (8004e7e6 + the W3 proof). Either signal engages the
+            # coercion; the analysis signal fills the region as "bottom"
+            # (the exhibit class) when the model reported none.
+            _ana_burned = bool(((analysis or {}).get("frame_layout") or {})
+                               .get("existing_overlays", {})
+                               .get("has_burned_captions"))
+            if _ecr == "none" and _ana_burned:
+                _ecr = "bottom"
+                print("[generate-edit] burned captions: analysis signal engaged "
+                      "(Stage-0 read said none) — existing_caption_region=bottom",
+                      flush=True)
             edit_plan["existing_caption_region"] = _ecr
             if (_ecr != "none" and edit_plan["caption_style"] != "none"
                     and not _vibe_requests_captions(vibe)):
@@ -13142,11 +13156,251 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
 # string for the reinterpret path. responseJsonSchema forces the echo — no field
 # drops — so the tweak path is surgically faithful.
 
+# ── TIER 3 (Zac 2026-07-11): THE MERGE — ops, never plans ───────────────────
+# The tweak rail's old contract asked the model to re-emit the WHOLE plan and
+# echo untouched fields "byte-identical" — prose, unenforced (Step-0
+# conviction). The new contract: the model emits OPS against the old plan's
+# anchor vocabulary (the same _DIFF_LIST_ANCHORS compute_plan_diff reads);
+# _apply_plan_ops applies them to a deepcopy — untouched fields are
+# byte-identical BY CONSTRUCTION, not by instruction-following.
+
+# op-eligible lists derive from _DIFF_LIST_ANCHORS at CALL time (it is
+# defined later in the module; module-load order forbids a top-level read).
+# top-level scalars `set` may touch (whitelist — everything else is a list op)
+_REEDIT_SET_SCALARS = ("caption_style", "aspect_ratio", "outro",
+                       "thumbnail_word_index", "pacing", "audio_denoise",
+                       "color_effect", "notes")
+_REEDIT_LAYERS = ("captions", "cuts", "emphasis", "sounds", "broll",
+                  "motion_graphics", "text_overlays", "transitions",
+                  "pacing", "vibe")
+
+
+def _plan_diff_ops_schema():
+    """The response schema for generate_plan_diff (rider 3: the echo gets a
+    REAL schema). Flat by design: op values ride as JSON-encoded strings
+    (value_json) — no free-form Dict inside the grammar (the props-Dict
+    lesson: unconstrained interiors are both the grammar hog and the
+    degeneration surface). Classifier-first: the field ORDER puts the
+    classification block ahead of the ops."""
+    _op = {"type": "object", "properties": {
+        "op": {"type": "string",
+               "enum": ["set", "clear_list", "remove", "replace", "add",
+                        "set_field"]},
+        "list_key": {"type": "string",
+                     "enum": sorted(_DIFF_LIST_ANCHORS) + list(_REEDIT_SET_SCALARS)},
+        "anchor": {"type": "string", "maxLength": 48},
+        "field": {"type": "string", "maxLength": 64},
+        "value_json": {"type": "string", "maxLength": 2400}},
+        "required": ["op", "list_key"]}
+    return {"type": "object", "properties": {
+        "classification": {"type": "string",
+                           "enum": ["tweak", "guided_redraft", "reinterpret",
+                                    "needs_clarification"]},
+        "layers_in_scope": {"type": "array",
+                            "items": {"type": "string",
+                                      "enum": list(_REEDIT_LAYERS)}},
+        "specific_targets": {"type": "array",
+                             "items": {"type": "string", "maxLength": 80}},
+        "ambiguity": {"type": "string", "maxLength": 240},
+        "clarification_question": {"type": "string", "maxLength": 300},
+        # NOTE (platform fact, bisected 2026-07-11): Vertex response_json_schema
+        # passthrough REJECTS maxItems (400 INVALID_ARGUMENT); maxLength is
+        # accepted. The ops count is bounded in code at parse (24).
+        "ops": {"type": "array", "items": _op},
+        "fused_vibe": {"type": "string", "maxLength": 500},
+        "human_summary": {"type": "string", "maxLength": 240}},
+        "required": ["classification", "layers_in_scope", "human_summary"]}
+
+
+def _parse_op_anchor(raw):
+    """anchor string -> comparable form. '22' -> 22; '[21, 25]' -> (21, 25);
+    anything else -> the stripped string."""
+    _t = str(raw if raw is not None else "").strip()
+    if not _t:
+        return None
+    try:
+        _v = json.loads(_t)
+        if isinstance(_v, list):
+            return tuple(_v)
+        return _v
+    except Exception:
+        return _t
+
+
+def _anchor_matches(entry_anchor, op_anchor):
+    """Match the list's derived anchor against the op's parsed anchor.
+    Tuple anchors match on full equality OR on their first element (the
+    model may say '22' for emphasis anchor (22,))."""
+    if entry_anchor is None or op_anchor is None:
+        return False
+    if entry_anchor == op_anchor:
+        return True
+    if isinstance(entry_anchor, tuple):
+        if isinstance(op_anchor, tuple):
+            return tuple(entry_anchor) == tuple(op_anchor)
+        return len(entry_anchor) >= 1 and entry_anchor[0] == op_anchor
+    return False
+
+
+def _apply_plan_ops(old_plan, ops):
+    """THE MERGE. deepcopy(old) + ops -> (new_plan, applied, failed).
+    Untouched fields byte-identical by construction. Sub-object granularity
+    (rider 2): set_field touches ONE field of ONE anchored entry — removing
+    'the zoom' nulls zoom_effect and leaves the beat, its sound decision,
+    its feeling intact; removing 'the beat' removes the entry."""
+    import copy as _copy_ops
+    plan = _copy_ops.deepcopy(
+        {k: v for k, v in old_plan.items()
+         if not (isinstance(k, str) and k.startswith("_"))})
+    applied, failed = [], []
+    for _o in (ops or []):
+        if not isinstance(_o, dict):
+            failed.append(("malformed", str(_o)[:60]))
+            continue
+        _kind = str(_o.get("op") or "")
+        _lk = str(_o.get("list_key") or "")
+        _val = None
+        if _o.get("value_json") is not None and str(_o.get("value_json")) != "":
+            try:
+                _val = json.loads(str(_o["value_json"]))
+            except Exception:
+                failed.append((f"{_kind}:{_lk}", "value_json unparseable"))
+                continue
+        try:
+            if _kind == "set" and _lk in _REEDIT_SET_SCALARS:
+                plan[_lk] = _val
+                applied.append(f"set {_lk}")
+            elif _kind == "clear_list" and _lk in _DIFF_LIST_ANCHORS:
+                plan[_lk] = []
+                applied.append(f"clear {_lk}")
+            elif _kind in ("remove", "replace", "set_field") and _lk in _DIFF_LIST_ANCHORS:
+                _fn = _DIFF_LIST_ANCHORS[_lk]
+                _tgt = _parse_op_anchor(_o.get("anchor"))
+                _lst = plan.get(_lk)
+                if not isinstance(_lst, list):
+                    failed.append((f"{_kind}:{_lk}", "list missing"))
+                    continue
+                _idx = next((i for i, e in enumerate(_lst)
+                             if _anchor_matches(_fn(e), _tgt)), None)
+                if _idx is None:
+                    failed.append((f"{_kind}:{_lk}", f"anchor {_tgt!r} not found"))
+                    continue
+                if _kind == "remove":
+                    _lst.pop(_idx)
+                    applied.append(f"remove {_lk}[{_tgt!r}]")
+                elif _kind == "replace":
+                    if not isinstance(_val, dict):
+                        failed.append((f"replace:{_lk}", "value not an object"))
+                        continue
+                    _lst[_idx] = _val
+                    applied.append(f"replace {_lk}[{_tgt!r}]")
+                else:  # set_field — the minimal touch
+                    _fname = str(_o.get("field") or "")
+                    if not _fname or not isinstance(_lst[_idx], dict):
+                        failed.append((f"set_field:{_lk}", "field missing"))
+                        continue
+                    _lst[_idx][_fname] = _val
+                    applied.append(f"set_field {_lk}[{_tgt!r}].{_fname}")
+            elif _kind == "add" and _lk in _DIFF_LIST_ANCHORS:
+                if not isinstance(_val, dict):
+                    failed.append((f"add:{_lk}", "value not an object"))
+                    continue
+                plan.setdefault(_lk, [])
+                if not isinstance(plan[_lk], list):
+                    plan[_lk] = []
+                plan[_lk].append(_val)
+                applied.append(f"add {_lk}")
+            else:
+                failed.append((f"{_kind}:{_lk}", "unknown op/list"))
+        except Exception as _oe:
+            failed.append((f"{_kind}:{_lk}", f"{type(_oe).__name__}: {str(_oe)[:60]}"))
+    return plan, applied, failed
+
+
+_REEDIT_OFF_PATTERNS = (
+    ("captions", r"(captions?|subtitles?)"),
+    ("broll", r"(b[- ]?rolls?|cutaways?|stock footage)"),
+    ("sfx", r"(sfx|sound effects?|sounds?)"),
+    ("zoom", r"(zooms?|zoom effects?)"),
+    ("motion_graphics", r"(motion graphics?|mgs?|graphics?|pop-?ups?)"),
+    ("text_overlays", r"(text overlays?|titles?|labels?)"),
+    ("transitions", r"(transitions?)"),
+)
+
+
+def _deterministic_reedit(old_plan, change_request):
+    """Instrument 1 (rider 4 — reuse, never parallel): when the ENTIRE
+    request is an unambiguous category-off (or caption-style swap), apply it
+    with ZERO model calls via the same deterministic engine EditPolicy uses.
+    Conservative by construction: every fragment must match, else None."""
+    _txt = str(change_request or "").strip().lower().rstrip(".!")
+    if not _txt:
+        return None
+    _frags = [f.strip() for f in re.split(r"\band\b|[,;+]", _txt) if f.strip()]
+    if not _frags:
+        return None
+    _off = set()
+    _style = None
+    _verb = r"(?:please )?(?:remove|no|delete|drop|kill|turn off|disable|get rid of)(?: the| all| my| any)?\s+"
+    for _f in _frags:
+        _hit = None
+        for _feat, _pat in _REEDIT_OFF_PATTERNS:
+            if re.fullmatch(_verb + _pat, _f):
+                _hit = ("off", _feat)
+                break
+        if _hit is None:
+            _m = re.fullmatch(
+                r"(?:use|switch to|change (?:the )?captions? (?:style )?to|captions? (?:style )?to)\s+"
+                r"(?P<s>[a-z]+)(?: captions?(?: style)?)?", _f)
+            if _m:
+                _cand = next((_st for _st in VALID_CAPTION_STYLES
+                              if _st.lower() == _m.group("s")), None)
+                if _cand and _cand != "none":
+                    _hit = ("style", _cand)
+        if _hit is None:
+            return None            # one non-matching fragment → the model rail
+        if _hit[0] == "off":
+            _off.add(_hit[1])
+        else:
+            _style = _hit[1]
+    import copy as _copy_det
+    plan = _copy_det.deepcopy(
+        {k: v for k, v in old_plan.items()
+         if not (isinstance(k, str) and k.startswith("_"))})
+    _parts = []
+    if _off:
+        _enforce_off_expressive_features(plan, _off)
+        _parts.append("removed " + ", ".join(sorted(_off)))
+    if _style:
+        plan["caption_style"] = _style
+        _parts.append(f"captions switched to {_style}")
+    _summary = (" and ".join(_parts)).capitalize() + " — everything else untouched."
+    _record_divergence(
+        "reedit", {"off": sorted(_off), "style": _style},
+        "reedit_deterministic",
+        reason=str(change_request)[:120])
+    print(f"[plan-diff] DETERMINISTIC — zero model calls: {_summary}", flush=True)
+    return {"classification": "tweak", "new_plan": plan,
+            "fused_vibe": None, "changed_fields": sorted(
+                list(_off) + (["caption_style"] if _style else [])),
+            "human_summary": _summary, "clarification_question": None,
+            "deterministic": True}
+
+
 def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None):
     """Call Gemini to produce a new plan from (old_plan, change_request).
 
     Returns a dict with keys: classification, new_plan, fused_vibe,
-    changed_fields, human_summary, clarification_question.
+    changed_fields, human_summary, clarification_question
+    (+ layers_in_scope / specific_targets / ambiguity from the classifier-first
+    emission; + deterministic=True when no model call was made).
+
+    TIER 3 (Zac 2026-07-11): the response is OPS under a real
+    response_json_schema — the model cannot emit a plan. new_plan is BUILT by
+    _apply_plan_ops on a deepcopy of the old plan, so untouched fields are
+    byte-identical by construction. (The previous version claimed a schema
+    forced the echo while setting none — the claim is true now because the
+    schema exists and the echo isn't even needed.)
     Raises RuntimeError on unrecoverable failure (caller should fall back to
     full reinterpret).
     """
@@ -13154,6 +13408,12 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None)
         raise RuntimeError("generate_plan_diff: old_plan must be a dict")
     if not change_request or not isinstance(change_request, str):
         raise RuntimeError("generate_plan_diff: change_request is required")
+
+    # Instrument 1: the unambiguous category-off / style-swap never pays a
+    # model call — the same engine EditPolicy trusts applies it directly.
+    _det = _deterministic_reedit(old_plan, change_request)
+    if _det is not None:
+        return _det
 
     client = _get_genai_client()
 
@@ -13168,8 +13428,10 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None)
     # Gemini 3.1 Pro with a multi-million-token context — the transcript is rounding
     # error against that.
     transcript_preview = ""
-    if isinstance(transcript, dict):
-        words = transcript.get("words") or []
+    _tw = (transcript.get("words") if isinstance(transcript, dict)
+           else transcript if isinstance(transcript, list) else None)
+    if _tw:
+        words = _tw
         if words:
             # Format as "[idx] word @ Ts" so the model can resolve any of the three
             # reference modes (ordinal / temporal / word-based) without guessing.
@@ -13352,15 +13614,25 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None)
             f"{transcript_preview}\n\n"
         )
     prompt_parts.append(
-        "Respond with a single JSON object matching this shape:\n"
-        "{\n"
-        '  "classification": "tweak" | "guided_redraft" | "reinterpret" | "needs_clarification",\n'
-        '  "clarification_question": string | null,                  // only for needs_clarification\n'
-        '  "new_plan": <full edit plan object> | null,               // only for tweak\n'
-        '  "fused_vibe": string | null,                              // for guided_redraft AND reinterpret\n'
-        '  "changed_fields": [string],                               // tweak only — paths you changed; empty array otherwise\n'
-        '  "human_summary": string                                   // always — one sentence the user reads\n'
-        "}\n"
+        "Respond ONLY with the classification block and OPS — you never emit a plan. "
+        "The pipeline applies your ops to the stored plan; every field no op touches "
+        "is byte-identical BY CONSTRUCTION, so your only job is naming the exact ops.\n\n"
+        "OPS VOCABULARY (each op: {op, list_key, anchor?, field?, value_json?}):\n"
+        "  • set — a top-level scalar: list_key names it (caption_style, outro, ...), value_json carries the JSON value.\n"
+        "  • clear_list — empty a component array: list_key names it.\n"
+        "  • remove — delete ONE entry: anchor identifies it (emphasis_moments: the first word index, e.g. \"22\"; broll_clips / motion_graphics: \"[start, end]\"; transitions / tight_cut_overlays: after_word_index; text_overlays: start_word_index; sound_effects / caption_position_changes: word_index).\n"
+        "  • set_field — THE MINIMAL TOUCH: change ONE field of ONE anchored entry. field names it, value_json carries the new value (JSON-encoded; null clears). Removing 'the zoom' is set_field emphasis_moments[anchor].zoom_effect = null — the beat keeps its sound decision, its feeling, everything the request didn't name. Removing 'the beat' is remove.\n"
+        "  • replace — swap ONE anchored entry wholesale (value_json = the full new entry). Reach for set_field first; replace only when the user asked for a different entry.\n"
+        "  • add — append a new entry (value_json = the full entry object).\n\n"
+        "value_json is ALWAYS a JSON-encoded STRING (e.g. \"null\", \"\\\"CleanCut\\\"\", \"{\\\"word_indices\\\": [40], ...}\").\n\n"
+        "Emit classification FIRST, then scope, then ops:\n"
+        "  classification — tweak | guided_redraft | reinterpret | needs_clarification (same meanings as above)\n"
+        "  layers_in_scope — which layers the request touches (captions, cuts, emphasis, sounds, broll, motion_graphics, text_overlays, transitions, pacing, vibe)\n"
+        "  specific_targets — the named elements, human-readable\n"
+        "  ambiguity — one sentence when a reference is unresolvable (pairs with needs_clarification)\n"
+        "  ops — tweak only; empty otherwise\n"
+        "  fused_vibe — guided_redraft / reinterpret only\n"
+        "  human_summary — one sentence the user reads\n"
     )
 
     prompt = "".join(prompt_parts)
@@ -13372,11 +13644,13 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None)
         contents=[prompt],
         config=genai_types.GenerateContentConfig(
             temperature=0.2,
-            # 16K so the response can include the full echoed plan plus
-            # thinking. The plan itself runs 3-5K JSON; HIGH thinking adds
-            # another 2-4K. Old 8K cap could truncate.
+            # Ops are small (the plan is never re-emitted); 16K leaves
+            # generous thinking headroom.
             max_output_tokens=16384,
             response_mime_type="application/json",
+            # Rider 3: the echo has a REAL schema — the model CANNOT emit a
+            # plan; it can only name ops. Transport-probed.
+            response_json_schema=_plan_diff_ops_schema(),
             # HIGH thinking so the model actually reasons about whether the
             # request maps to a tweak / guided_redraft / reinterpret /
             # clarification and picks the right surgical edit. The prior
@@ -13398,22 +13672,41 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None)
         raise RuntimeError(f"Invalid plan-diff classification: {classification!r}")
 
     if classification == "tweak":
-        new_plan = parsed.get("new_plan")
-        if not isinstance(new_plan, dict):
-            raise RuntimeError("tweak classification requires new_plan object")
-        # Enforce: new_plan must retain the required scaffold fields from old_plan.
-        for required in ("cuts", "caption_style", "aspect_ratio"):
-            if required not in new_plan or new_plan[required] in (None, "", []):
-                if required in sanitized_old_plan:
-                    new_plan[required] = sanitized_old_plan[required]
-        # Ensure broll persistence fields survive when Gemini echoes broll_clips
-        if isinstance(new_plan.get("broll_clips"), list) and isinstance(sanitized_old_plan.get("broll_clips"), list):
-            for _i, _new_br in enumerate(new_plan["broll_clips"]):
-                if _i < len(sanitized_old_plan["broll_clips"]) and isinstance(_new_br, dict):
-                    _old_br = sanitized_old_plan["broll_clips"][_i]
-                    for _persist_key in ("pexels_video_id", "pexels_file_url", "width", "height", "duration"):
-                        if _persist_key not in _new_br and _persist_key in _old_br:
-                            _new_br[_persist_key] = _old_br[_persist_key]
+        _ops = (parsed.get("ops") or [])[:24]   # code-side bound (maxItems unsupported)
+        if not _ops:
+            raise RuntimeError("tweak classification requires at least one op")
+        # THE MERGE: the model named ops; the plan is BUILT from the old one.
+        # The old scaffold-backfill and broll-persistence patches are gone —
+        # byte-identity is structural now, not patched after the fact.
+        new_plan, _applied, _op_failed = _apply_plan_ops(sanitized_old_plan, _ops)
+        if _op_failed and not _applied:
+            raise RuntimeError(
+                f"plan-diff ops all failed to apply: {_op_failed[:3]}")
+        parsed["new_plan"] = new_plan   # the MERGED plan is the tweak's output
+        # changed_fields DERIVED from the ops (never trusted from prose)
+        parsed["changed_fields"] = sorted({str(_o.get("list_key"))
+                                           for _o in _ops if isinstance(_o, dict)})
+        _diff_entries = compute_plan_diff(sanitized_old_plan, new_plan)
+        _record_divergence(
+            "reedit",
+            {"request_class": "tweak",
+             "ops": len(_ops), "applied": len(_applied),
+             "op_failures": len(_op_failed),
+             "diff_entries": len(_diff_entries or []),
+             "layers": parsed.get("layers_in_scope") or []},
+            "reedit_diff",
+            reason=str(change_request)[:140])
+        print(f"[plan-diff] MERGE: ops={len(_ops)} applied={len(_applied)} "
+              f"failed={_op_failed[:2] if _op_failed else 0} "
+              f"diff_entries={len(_diff_entries or [])}", flush=True)
+        if _op_failed:
+            # a partially-applied tweak is reported, never silent
+            parsed["human_summary"] = (str(parsed.get("human_summary") or "").rstrip(". ")
+                + f" (note: {len(_op_failed)} requested change(s) could not be "
+                  f"matched to the plan and were skipped).")
+        elif parsed.get("human_summary"):
+            parsed["human_summary"] = (str(parsed["human_summary"]).rstrip(". ")
+                                       + " — everything else untouched.")
     elif classification in ("guided_redraft", "reinterpret"):
         # Both shape Gemini's response the same way: emit a fused_vibe
         # carrying the user's directional change_request. The downstream
@@ -13442,6 +13735,11 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None)
         "fused_vibe": parsed.get("fused_vibe"),
         "changed_fields": parsed.get("changed_fields") or [],
         "human_summary": str(parsed.get("human_summary") or "Updated your video."),
+        # classifier-first emission (Tier 3): scope rides to the dispatcher —
+        # guided_redraft consumes layers_in_scope for out-of-scope carry-over.
+        "layers_in_scope": parsed.get("layers_in_scope") or [],
+        "specific_targets": parsed.get("specific_targets") or [],
+        "ambiguity": parsed.get("ambiguity"),
     }
 
 
@@ -24772,7 +25070,7 @@ def handler(job):
             _size_mb = os.path.getsize(_norm_path) / (1024 * 1024)
             print(
                 f"[fps-normalize] r={_r_val:.4f}fps avg={_avg:.4f}fps "
-                f"-> {_target_fps:.4f}fps CFR (re-encoded: medium preset, "
+                f"-> {_target_fps:.4f}fps CFR (re-encoded: fast preset, "
                 f"deshake={_needs_deshake}, normalize_vf={'yes' if _normalize_vf else 'no'}) in "
                 f"{time.time() - _norm_t0:.1f}s ({_size_mb:.1f}MB)",
                 flush=True,
