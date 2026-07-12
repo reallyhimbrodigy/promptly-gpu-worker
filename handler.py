@@ -13549,6 +13549,169 @@ def _deterministic_reedit(old_plan, change_request):
             "deterministic": True}
 
 
+def _revalidate_reedit_plan(plan, dg_words, face_traj, vibe, duration,
+                            pre_analysis=None):
+    """TIER-3b ONE-PLAN CONTRACT (Zac 2026-07-11): the re-edit rail's
+    validation pass. Step-0 convicted the old tweak rail of SKIPPING the
+    fresh-plan validation span — a re-edit could construct states a fresh
+    plan cannot (an ops-added ungrounded StatCard, a bad caption, a
+    doubled sound). This closes that hole by RE-RUNNING the same validator
+    LOGIC on the merged (final-shape) plan — through the SAME module-level
+    predicate helpers the fresh span uses (`_mg_grounding_fraction`,
+    `_mg_clear_region_exists`, `_mg_known_sets`, `_reedit_normalize_raw_sfx`,
+    ...), so there is ONE source of truth for the grounding/clear-region/
+    sound logic. The orchestration is DROP-mode, not raise-mode: a re-edit
+    has no repair re-ask, so a batched-raise class (F5.3 numbers, F7
+    clear-region, F6 floor) DROPS the one offending card (K7 — a card never
+    costs the video) instead of raising. Mutates `plan` in place; returns
+    the list of (action, detail) it applied. A separate job → fresh
+    _DIVERGENCE_LOG → these ledgers do not double-count.
+
+    Scope (honest): this covers the ops-reachable defect classes —
+    caption/F8/W3 semantics, MG grounding/numbers/reading-floor/clear-region/
+    empty-props, and the sound fixed-point. The emphasis/zoom/text-overlay
+    anchor→cut CONSTRUCTION (validated_cuts / zoom-merge) stays in the fresh
+    span and is handled by the render path's projection/drop on replay; the
+    FULL construction-entangled span re-run needs the src↔kept shape bridge,
+    reported as the deeper follow-up.
+    """
+    _dg = dg_words or []
+    _applied = []
+
+    # ── caption / F8 / W3 semantics (same reads as the fresh span) ──────────
+    _ecr = str((plan.get("existing_caption_region") or "none")).strip().lower()
+    if _ecr not in ("none", "bottom", "top", "other"):
+        _ecr = "none"
+    _ana_burned = bool((((pre_analysis if isinstance(pre_analysis, dict) else {})
+                         or {}).get("frame_layout") or {})
+                       .get("existing_overlays", {}).get("has_burned_captions"))
+    if _ecr == "none" and _ana_burned:
+        _ecr = "bottom"
+    plan["existing_caption_region"] = _ecr
+    if (_ecr != "none" and plan.get("caption_style") != "none"
+            and not _vibe_requests_captions(vibe)):
+        _record_divergence(
+            "caption", {"style": plan.get("caption_style"), "region": _ecr,
+                        "signal": ("analysis" if _ana_burned else "stage0"),
+                        "generation": "reedit"},
+            "burned_suppress", final={"style": "none"},
+            reason="source_carries_burned_in_captions (re-edit revalidation)")
+        plan["caption_style"] = "none"
+        _applied.append(("caption_suppressed", _ecr))
+    _str_raw = plan.get("source_text_regions")
+    _str_bands = sorted({str(_b).strip().lower() for _b in _str_raw
+                         if str(_b).strip().lower() in ("top", "center", "bottom")}) \
+        if isinstance(_str_raw, list) else []
+    plan["source_text_regions"] = _str_bands
+
+    # ── motion_graphics: DROP-mode grounding + numbers + floor + clear ──────
+    _raw_mg = plan.get("motion_graphics")
+    if isinstance(_raw_mg, list) and _raw_mg:
+        _known_tokens, _known_numbers = _mg_known_sets(
+            _dg, set(), vibe, plan.get("video_identity"))
+        _burned = frozenset(plan.get("source_text_regions") or ())
+        _kept_mg = []
+        for _i, _mg in enumerate(_raw_mg):
+            if not isinstance(_mg, dict):
+                continue
+            _mt = str(_mg.get("type") or "")
+            if _mt not in VALID_MG_TYPES:
+                continue   # render_only graceful type-drop also catches this
+            _props = _mg.get("props") or {}
+            if not _props:
+                _record_divergence(
+                    "motion_graphic", {"type": _mt, "generation": "reedit"},
+                    "drop_empty_props",
+                    reason="empty props on re-edit — nothing to render (K7)")
+                _applied.append(("drop_mg_empty_props", _mt))
+                continue
+            # F5 text grounding
+            _bad = next((_t for _p, _t in _mg_iter_text_values(_mt, _props)
+                         if _mg_grounding_fraction(_t, _known_tokens) < _MG_GROUNDING_THRESHOLD),
+                        None)
+            if _bad is not None:
+                _record_divergence(
+                    "motion_graphic", {"type": _mt, "text": str(_bad)[:80],
+                                       "generation": "reedit"},
+                    "drop_ungrounded_text",
+                    reason="grounding below threshold on re-edit — card dropped (K7)")
+                _applied.append(("drop_mg_ungrounded", _mt))
+                continue
+            # F5.3 numbers (raise→drop under validate-only)
+            _bad_num = False
+            for _nf in _MG_NUMBER_FIELDS.get(_mt, ()):
+                _nv = _props.get(_nf)
+                if _nv is None:
+                    continue
+                try:
+                    if float(_nv) not in _known_numbers:
+                        _bad_num = True
+                        break
+                except (TypeError, ValueError):
+                    continue
+            if _bad_num:
+                _record_divergence(
+                    "motion_graphic", {"type": _mt, "generation": "reedit"},
+                    "drop_invented_number",
+                    reason="on-screen number not in the dialogue on re-edit — dropped (K7)")
+                _applied.append(("drop_mg_number", _mt))
+                continue
+            # F7 clear-region (raise→drop): needs source-time window
+            try:
+                _sw = int(_mg.get("start_word_index"))
+                _ew = int(_mg.get("end_word_index"))
+                _sw_s = float(_dg[_sw].get("start") or 0) if 0 <= _sw < len(_dg) else 0.0
+                _ew_s = float(_dg[_ew].get("end") or 0) if 0 <= _ew < len(_dg) else 0.0
+            except (TypeError, ValueError):
+                _sw_s = _ew_s = 0.0
+            if not _mg_clear_region_exists(_mt, _sw_s, _ew_s, face_traj,
+                                           burned_bands=_burned):
+                _record_divergence(
+                    "motion_graphic", {"type": _mt, "generation": "reedit"},
+                    "drop_no_clear_region",
+                    reason="no face-clear region on re-edit — card dropped (K7)")
+                _applied.append(("drop_mg_clear_region", _mt))
+                continue
+            _kept_mg.append(_mg)
+        if len(_kept_mg) != len(_raw_mg):
+            plan["motion_graphics"] = _kept_mg
+
+    # ── sound: the fixed-point derivation (idempotent; gate-pinned) ─────────
+    _raw_sfx = _reedit_normalize_raw_sfx(
+        plan.get("emphasis_moments"), plan.get("sound_effects"))
+    _valid_sounds = set(_SFX_CATEGORIES.keys())
+    _sfx_out = []
+    for _s in _raw_sfx:
+        _snd = str(_s.get("sound") or "").strip().lower()
+        if _snd not in _valid_sounds:
+            _applied.append(("drop_sfx_bad_name", _snd))
+            continue
+        try:
+            _wi = int(_s.get("word_index"))
+        except (TypeError, ValueError):
+            continue
+        if not (0 <= _wi < len(_dg)):
+            continue
+        _tw = _dg[_wi]
+        _sfx_out.append({"t": float(_tw.get("start") or 0.0), "sound": _snd,
+                         "word": str(_tw.get("word") or "").strip().lower(),
+                         "_word_idx": _wi,
+                         **({"why": _s["why"]} if isinstance(_s.get("why"), str) and _s.get("why") else {})})
+    plan["sound_effects"] = _sfx_out
+    plan["_parsed_sound_effects"] = _sfx_out
+
+    # THE ONE-PLAN MARKER: this plan carried the re-edit validation. The
+    # render-input boundary reads it — a re-edited plan reaching render
+    # without it is a ledgered alarm (the contract made observable).
+    plan["_reedit_revalidated"] = True
+    print(f"[reedit-revalidate] one-plan contract: {len(_applied)} correction(s) "
+          f"{[a[0] for a in _applied][:8]}", flush=True)
+    _record_divergence(
+        "reedit", {"corrections": len(_applied), "generation": "reedit"},
+        "reedit_revalidated", reason=str([a[0] for a in _applied])[:160])
+    return _applied
+
+
 def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None):
     """Call Gemini to produce a new plan from (old_plan, change_request).
 
@@ -25891,6 +26054,39 @@ def handler(job):
                         flush=True,
                     )
                     edit_plan[_arr_key] = _tr_keep
+
+        # ── TIER-3b ONE-PLAN CONTRACT: the re-edit rail re-validates ──────
+        # A tweak/render_only plan skipped the fresh-plan validation span
+        # (Step-0 conviction: re-edits could construct states fresh plans
+        # cannot). Run the same validator LOGIC (module-level predicate
+        # helpers) on the merged plan before it reaches render. Fresh
+        # renders (_skip_edit_gen False) never enter here — the span already
+        # ran for them. Additive + drop-mode: it only removes ops-introduced
+        # defects and marks the plan; it cannot make a valid plan invalid.
+        if _skip_edit_gen and isinstance(edit_plan, dict):
+            # dg words come from the resolved transcript (bound on every path);
+            # the analysis/face block above runs only for fresh (`not
+            # _skip_edit_gen`), so face trajectory is absent on render_only —
+            # F7 fail-opens on [] exactly as the fresh span does without face
+            # data. `locals().get` uses the trajectory if a future refactor
+            # binds it here.
+            _rv_dg = ((provided_transcript.get("words")
+                       if isinstance(provided_transcript, dict) else None)
+                      or edit_plan.get("_deepgram_words") or [])
+            _rv_face = locals().get("_smoothed_trajectory") or []
+            try:
+                _revalidate_reedit_plan(
+                    edit_plan, _rv_dg, _rv_face, vibe,
+                    source_duration, pre_analysis=_cached_analysis)
+            except Exception as _rv_err:
+                # never kill a re-edit on a revalidation bug — the render
+                # path's own gates remain; ledger and proceed.
+                print(f"[reedit-revalidate] skipped ({type(_rv_err).__name__}: "
+                      f"{str(_rv_err)[:120]}) — render path gates still apply",
+                      flush=True)
+                _record_divergence(
+                    "reedit", {"error": type(_rv_err).__name__},
+                    "reedit_revalidate_error", reason=str(_rv_err)[:160])
 
         # ── EditPolicy resolve · Step 1: await + log ONLY (no consumer) ──
         # resolve_edit_policy catches every error internally → default, so

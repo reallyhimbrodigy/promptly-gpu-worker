@@ -4910,8 +4910,10 @@ def _f5_verdict():
     _src = open("handler.py").read()
     assert "card text must be drawn" not in _src, \
         "the grounding raise is dead — a card can never cost the video"
-    assert _src.count('"drop_ungrounded_text"') == 3, \
-        "all three F5 sites (top-level MG, emphasis MG, sticky note) must drop+ledger"
+    assert _src.count('"drop_ungrounded_text"') == 4, \
+        "four F5 drop sites now: the three fresh-span sites (top-level MG, " \
+        "emphasis MG, sticky note) + the TIER-3b re-edit revalidation (same " \
+        "K7 semantics, one-source ledger action) — all drop+ledger, none raise"
 
 
 @check("split registry: _known is DERIVED from per-source registrations; unregistered split fires, registered stays silent (both directions); the stale word-matching guard stays deleted")
@@ -5052,6 +5054,55 @@ def _w1_w2_tier1():
     _j = _src.index('if _needs_deshake:')
     _k = _src.index('_vf_parts.append(_normalize_vf)')
     assert _k < _src.index("vidstabtransform=input="), "normalize must precede transform"
+
+
+@check("TIER-3b ONE-PLAN CONTRACT: the re-edit rail re-validates the merged plan through the fresh span's predicate helpers (drop-mode); ops-introduced defects are caught, not skipped")
+def _tier3b_one_plan_contract():
+    import handler as _h
+    _src = open("handler.py").read()
+    assert "def _revalidate_reedit_plan(" in _src, "the re-edit validation pass must exist"
+    # wired into the re-edit (render_only) path, guarded so fresh never enters
+    assert "if _skip_edit_gen and isinstance(edit_plan, dict):" in _src \
+        and "_revalidate_reedit_plan(" in _src, \
+        "the contract must be wired into the re-edit path (fresh renders excluded)"
+    # behavioral: an ops-added ungrounded MG + a bad sound get DROPPED (K7),
+    # the plan is marked, and a clean plan is untouched
+    _dg = [{"word": w, "start": i * 0.5, "end": i * 0.5 + 0.4}
+           for i, w in enumerate("we tested the product for thirty days and it worked".split())]
+    _plan = {
+        "caption_style": "CleanCut", "existing_caption_region": "none",
+        "video_identity": "a product test video",
+        "emphasis_moments": [{"word_indices": [3], "type": "statement",
+                              "intensity": "medium", "duration": 2.0,
+                              "viewer_feeling": "it lands", "sound": "boom"}],
+        "sound_effects": [],
+        "motion_graphics": [
+            {"type": "StatCard", "start_word_index": 5, "end_word_index": 6,
+             "anchor": "lower_third_safe",
+             "props": {"value": "30", "label": "DAYS"}},           # grounded (thirty/30, days)
+            {"type": "StatCard", "start_word_index": 2, "end_word_index": 3,
+             "anchor": "lower_third_safe",
+             "props": {"value": "9999", "label": "ZQXJ WORDS"}},   # invented number + ungrounded
+            {"type": "Stamp", "start_word_index": 4, "end_word_index": 4,
+             "anchor": "center", "props": {}},                     # empty props
+        ],
+    }
+    _applied = _h._revalidate_reedit_plan(_plan, _dg, [], "product demo", 20.0)
+    assert _plan.get("_reedit_revalidated") is True, "the plan must be marked as revalidated"
+    _kept_types = [m["type"] for m in _plan["motion_graphics"]]
+    assert _kept_types == ["StatCard"] and _plan["motion_graphics"][0]["props"]["value"] == "30", \
+        f"the grounded StatCard survives; the invented-number + empty-props MGs drop (got {_kept_types})"
+    # the sound derivation ran through the fixed-point normalizer (boom kept, derived shape)
+    assert [s["sound"] for s in _plan["sound_effects"]] == ["boom"] \
+        and _plan["sound_effects"][0].get("_word_idx") == 3, \
+        "the emphasis sound derives to the parsed shape on re-edit"
+    # idempotent: a SECOND revalidation pass changes nothing (derive²==derive end to end)
+    import copy as _cp
+    _snap = _cp.deepcopy(_plan)
+    _h._revalidate_reedit_plan(_plan, _dg, [], "product demo", 20.0)
+    assert _plan["motion_graphics"] == _snap["motion_graphics"] \
+        and _plan["sound_effects"] == _snap["sound_effects"], \
+        "the re-edit validation is idempotent (a re-run is a fixed point)"
 
 
 @check("TIER-3b sound derivation FIXED POINT: derive(derive(plan)) == derive(plan) — a re-edit re-runs the span without doubling or raising on the derived shape")
