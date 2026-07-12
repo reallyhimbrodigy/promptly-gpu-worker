@@ -18004,9 +18004,24 @@ def project_words_to_output(transcript, cuts, effective_durations, transition_du
                     local_e = _body_s_i
             elif _trans_tail_i > 0 and local_s >= (_eff_i - _trans_tail_i):
                 continue
+            # AUDIBLE-ONSET START (Zac 2026-07-12): captions used the raw Deepgram
+            # start while SFX/zoom/MG all key off the audible onset — the timing
+            # audit measured captions trailing the beat by ~80ms (5 frames). Emit
+            # the audible-onset-corrected output start so captions land ON the beat
+            # with everything else. Same silence-based correction, clamped to the
+            # plausible late range; speed is 1.0 so the source shift is the output
+            # shift. End unchanged — the word only appears earlier, stays as long.
+            _out_start_abs = float(_out_start_s + local_s)
+            try:
+                _aud_shift = ws - _audible_word_onset_s(words, word_idx)
+                if not (0.0 < _aud_shift <= 0.45):
+                    _aud_shift = 0.0
+            except Exception:
+                _aud_shift = 0.0
             # Preserve sub-millisecond precision for caption tokens.
             projected.append({
-                "start": float(_out_start_s + local_s),
+                "start": _out_start_abs,
+                "audible_start": max(float(_out_start_s), _out_start_abs - _aud_shift),
                 "end":   float(_out_start_s + local_e),
                 "word":  w.get("punctuated_word") or w.get("word") or "",
                 "punctuated_word": w.get("punctuated_word") or w.get("word") or "",
@@ -22517,7 +22532,10 @@ def _build_tiktok_pages_from_projected(projected_words, max_words_per_page=3, po
         return False
 
     for w in projected_words:
-        w_start = float(w.get("start") or 0)
+        # AUDIBLE-ONSET (Zac 2026-07-12): the word appears ON the beat (audible
+        # onset), aligned with its SFX/zoom/MG — not at the ~80ms-late Deepgram
+        # start. End is unchanged, so the word is only visible earlier + longer.
+        w_start = float(w.get("audible_start") or w.get("start") or 0)
         w_end = float(w.get("end") or w_start)
         w_text = w.get("punctuated_word") or w.get("word") or ""
         if not w_text.strip():

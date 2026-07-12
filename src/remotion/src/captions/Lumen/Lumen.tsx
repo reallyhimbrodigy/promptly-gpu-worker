@@ -61,6 +61,17 @@ const LumenWord: React.FC<{
     extrapolateRight: "clamp",
   });
 
+  // WS2 fast-but-present (Zac 2026-07-12, overriding the identity-exemption):
+  // opacity resolves quickly so the word lands ON the beat — was the slow
+  // overdamped spring, which faded in well after the word was spoken. The soft
+  // 0.95→1 scale stays (Lumen's character); only the fade is made fast.
+  const fastOpacity = hasAppeared
+    ? interpolate(elapsed, [0, Math.max(2, Math.round(fps * 0.06))], [0, 1], {
+        extrapolateLeft: "clamp",
+        extrapolateRight: "clamp",
+      })
+    : 0;
+
   // Lens flare sweep position — only for shine words
   const sweepPosition = hasShine && hasAppeared
     ? interpolate(elapsed, [0, sweepDuration], [-100, 200], {
@@ -124,7 +135,7 @@ const LumenWord: React.FC<{
         position: "relative",
         ...fontProps,
         color: hasAppeared ? color : "transparent",
-        opacity: entranceSpring,
+        opacity: fastOpacity,
         transform: `scale(${scale})`,
         transformOrigin: "center bottom",
         textShadow: hasAppeared

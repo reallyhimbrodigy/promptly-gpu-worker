@@ -4899,6 +4899,28 @@ def _rhythm_beats():
         "sfx-off must strip the rider surfaces (the enforcement hole stays closed)"
 
 
+@check("CAPTION ONSET (Zac 2026-07-12, timing audit): captions used the raw Deepgram start while SFX/zoom/MG key off the audible onset — measured ~80ms (5-frame) lag. project_words_to_output emits audible_start (= start − silence correction, clamped); the caption builder uses it so captions land ON the beat, end unchanged")
+def _caption_audible_onset():
+    import handler as _h
+    _src = open("handler.py").read()
+    assert '"audible_start":' in _src, "projected words must carry audible_start"
+    assert 'w.get("audible_start")' in _src, "the caption builder must consume audible_start"
+    # builder uses audible_start over raw start
+    _pw = [{"start": 1.60, "audible_start": 1.52, "end": 1.90, "word": "hi", "punctuated_word": "hi"}]
+    _pg = _h._build_tiktok_pages_from_projected(_pw, max_words_per_page=2)
+    assert _pg and _pg[0]["tokens"][0]["fromMs"] == 1520, "caption token fromMs must be the audible start (1520)"
+    assert _pg[0]["tokens"][0]["toMs"] == 1900, "word end unchanged — appears earlier, stays as long"
+    # projection emits audible_start = start − silence correction; mid-phrase unshifted
+    _h._LEVEL_SILENCES_LAST[:] = [(1.20, 1.52)]; _h._WITHIN_WORD_SILENCES_LAST[:] = []
+    _proj = _h.project_words_to_output(
+        {"words": [{"start": 1.0, "end": 1.3, "word": "a"}, {"start": 1.6, "end": 1.9, "word": "b"}]},
+        [{"source_start": 0.0, "source_end": 2.0, "speed": 1.0}], [2.0])
+    _b = [w for w in _proj if w.get("_word_index") == 1][0]
+    assert abs(_b["audible_start"] - 1.52) < 0.02 and abs(_b["start"] - 1.60) < 0.02, \
+        "post-silence word: audible_start pulled to the onset, raw start intact"
+    _h._LEVEL_SILENCES_LAST[:] = []; _h._WITHIN_WORD_SILENCES_LAST[:] = []
+
+
 @check("ITEM 2 MG entrance-arrival (Zac 2026-07-12): the measured MGAttackProbe attacks are wired into fromFrame (settle for pops, container-arrival min(hit,settle) for the 7 sequenced/count-up types) so an MG lands SETTLED on its anchor word — replacing the 0.25*duration guess; both placement sites shift fromFrame by _mg_attack_frames")
 def _item2_mg_attack_wiring():
     import handler as _h

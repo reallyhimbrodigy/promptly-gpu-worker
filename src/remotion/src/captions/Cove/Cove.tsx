@@ -141,6 +141,14 @@ export const Cove: React.FC<CoveProps> = ({
                           const isSpoken =
                             currentTimeMs >= token.fromMs;
 
+                          // WS2 fast-but-present (Zac 2026-07-12, overriding the
+                          // identity-exemption): the word fades in fast (~60ms)
+                          // instead of a hard cut, so it reads as landing ON the
+                          // beat rather than popping. Present, not slow.
+                          const wordOpacity = isSpoken
+                            ? Math.min(1, (currentTimeMs - token.fromMs) / 60)
+                            : 0;
+
                           const color = !isSpoken
                             ? "transparent"
                             : isSpecial
@@ -165,6 +173,7 @@ export const Cove: React.FC<CoveProps> = ({
                                   ? "-0.02em"
                                   : "normal",
                                 color,
+                                opacity: wordOpacity,
                                 lineHeight: isSpecial ? 0.8 : 1,
                                 whiteSpace: "nowrap",
                                 display: "inline-block",
