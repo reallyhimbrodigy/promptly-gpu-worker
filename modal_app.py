@@ -532,11 +532,30 @@ prewarm_volume = modal.Volume.from_name("promptly-prewarm-cache", create_if_miss
     # short-lived small-GPU function (so the long CPU render never holds a GPU).
     cpu=64,
     memory=131072,        # 128GB — Remotion overlay + Remotion micro-segments run in parallel here, plus per-cut numpy audio resampler, plus the big single-pass ffmpeg composite
-    region=["us-west", "us-east"],  # prefer us-west colocated with Supabase,
-                                     # fall back to us-east when Modal lacks
-                                     # 64-CPU/128GB capacity in us-west.
-                                     # Cross-region S3 download adds ~0.5-1s
-                                     # vs render never starting at all.
+    region="us",  # COST (Zac 2026-07-12, Tier 1.1): broad "us" is the 1.5x
+                  # multiplier tier; the old ["us-west","us-east"] narrow pin was
+                  # 1.75x (Modal: narrow=1.75x, broad=1.5x, no-pin=1.0x). Broad
+                  # "us" keeps US placement (S3/Supabase co-located — same download
+                  # latency as the narrow pin) AND widens capacity to every US
+                  # region (better than the 2-region pin) while shaving the region
+                  # tax 1.75x→1.5x. Pixel-identical: this only changes WHERE the
+                  # container runs. Dropping to no-pin (1.0x, −43%) needs a
+                  # cross-region S3 latency measurement first (could place EU →
+                  # slow download to the US bucket) — a separate deploy-test.
+    retries=2,        # RELIABILITY (Zac 2026-07-12, Tier 1.2): we run preemptible
+                      # (nonpreemptible=False default — the cheap tier), so Modal
+                      # CAN interrupt the container mid-render. Without retries a
+                      # preemption failed the job (frontend had to resubmit); with
+                      # retries=2 Modal re-runs the job from scratch on interruption
+                      # — invisible to the user. Pixel-identical: same input → a
+                      # valid render (a re-run makes a fresh Gemini plan, so it may
+                      # differ from the interrupted attempt, but it's a correct,
+                      # complete render). CAVEAT to verify in prod: run_job is a
+                      # SYNCHRONOUS fastapi_endpoint (blocks through the render), and
+                      # Modal's retry/auto-migration behavior for web endpoints on
+                      # preemption is not yet confirmed here — worst case this is a
+                      # harmless no-op; the fully-robust form spawns the render as a
+                      # retriable background function (a Tier-3-adjacent change).
     volumes={"/prewarm": prewarm_volume},
 )
 class PromptlyWorker:
