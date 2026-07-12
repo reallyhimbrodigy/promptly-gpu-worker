@@ -757,12 +757,19 @@ _SEMANTIC_ANCHOR = Literal[
 _TEXT_OVERLAY_VARIANTS = Literal[
     "sticky_note", "caption_match",
 ]
+# TOMBSTONE (Zac 2026-07-12): 'correct' REMOVED entirely (gunshot treatment,
+# no sharpening). It kept false-matching non-verification moments — the problem
+# was never timing (it survived every timing fix), it was the predicate: there
+# is no honest sharp form of "the moment of PROOF" the model can hold, so the
+# ding fired on first-mentions/reveals/introductions that had no verification in
+# them. File, key, enum, category, and attack-table entry all gone; do not
+# re-add without a predicate that ONLY matches true verification.
 _SFX_SOUNDS = Literal[
     # Keys are the EXACT filename stems in assets/sounds/ (normalize_sfx_style
     # does no aliasing → key must equal {stem}.mp3).
     "boom", "punchsfx", "swoosh-sound-effects", "woosh-professional",
     "transition-sfx", "camera-flash", "money-ching", "iphoneding",
-    "mouse-click-sound", "popsfx", "correct", "rizz",
+    "mouse-click-sound", "popsfx", "rizz",
     "shockingsfx", "awkward-moment", "wompwomp", "imposter",
 ]
 # THE SOUND DECISION (Zac ruling 2026-07-11, fourth verdict): the DECISION is
@@ -772,7 +779,7 @@ _SFX_SOUNDS = Literal[
 _SOUND_DECISION = Literal[
     "boom", "punchsfx", "swoosh-sound-effects", "woosh-professional",
     "transition-sfx", "camera-flash", "money-ching", "iphoneding",
-    "mouse-click-sound", "popsfx", "correct", "rizz",
+    "mouse-click-sound", "popsfx", "rizz",
     "shockingsfx", "awkward-moment", "wompwomp", "imposter",
     "voice",
 ]
@@ -4771,8 +4778,6 @@ THE 16 SOUNDS + THE BARE VOICE — each a defined moment
 **mouse-click-sound** — A clean tactile interface click. **THE MOMENT:** the speech names a single discrete digital action — "just upload it," "one tap," "hit publish" — where the action's simplicity is the point. It belongs on the spoken action word. **WHAT IT DOES:** the action feels physically performed; simplicity becomes tactile.
 
 **popsfx** — A tiny bright pop. **THE MOMENT:** the speaker stacks a light bonus on top of a point already made — the "oh, and it even does this" beat: small, pleasing, an extra rather than a headline. It belongs on the bonus's landing word. **WHAT IT DOES:** a small tick of delight; the extra feels like a gift being set on the pile.
-
-**correct** — A positive confirmation ding. **THE MOMENT:** it belongs at the moment of PROOF — something was claimed or attempted, and now it is shown true: the result checks out, the number is confirmed, the method visibly worked. A first mention, a reveal, or an introduction has no verification in it yet. **WHAT IT DOES:** the viewer gets the "that's right" signal at the exact moment of proof.
 
 **rizz** — A romantic-but-comedic flourish (a smooth, flirty sting played for laughs). **THE MOMENT:** the speaker plays charm for comedy — a flirty line, a self-aware flex, a "smooth move" recounted or performed with a wink ("and that's how you get their number"). It belongs where the charm lands. **WHAT IT DOES:** the wink becomes audible; the viewer is told, gently, that the confidence is a bit.
 
@@ -14948,7 +14953,6 @@ _SFX_CATEGORIES = {
     "iphoneding": "medium",
     "mouse-click-sound": "medium",
     "popsfx": "medium",
-    "correct": "medium",
     "rizz": "medium",
     "awkward-moment": "medium",
     "wompwomp": "medium",
@@ -14981,7 +14985,7 @@ _SFX_ATTACK_MS = {
     # mid / shutter snap
     "camera-flash": 127, "shockingsfx": 150,
     # swell — peak builds; the file starts earlier so the peak lands on the word
-    "boom": 287, "transition-sfx": 354, "correct": 362,
+    "boom": 287, "transition-sfx": 354,
     "money-ching": 551, "woosh-professional": 599, "wompwomp": 666, "imposter": 935,
 }
 
