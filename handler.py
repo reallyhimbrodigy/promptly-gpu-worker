@@ -9373,6 +9373,13 @@ def generate_edit_gemini(
                              or {}).get("frame_layout") or {})
                            .get("existing_overlays", {}).get("has_burned_captions"))
     if _f8_burned_fact:
+        # Observable belt (Zac W3 plumbing proof 2026-07-11): the injection
+        # is otherwise invisible (prompts aren't logged), so the fact block
+        # announces itself — production sees the belt fire, and the proof
+        # gets its direct line.
+        print("[analysis] MEASURED SOURCE FACT injected — analyzer reports "
+              "burned-in captions; the plan is told caption_style=none as given "
+              "(belt upstream, suspenders at F8)", flush=True)
         post_user += (
             "\n\n=== MEASURED SOURCE FACT (deterministic frame analysis) ===\n"
             "This source carries BURNED-IN word captions — its own caption layer "
