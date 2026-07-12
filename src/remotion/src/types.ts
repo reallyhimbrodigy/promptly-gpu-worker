@@ -315,7 +315,7 @@ export interface PromptlyRenderInput {
   /** Generated composed scenes (Phase E). Empty by default — `[]` means no
    *  behavior change vs the pre-GeneratedScene pipeline (mirrors tightCutOverlays). */
   generatedScenes?: GeneratedSceneSpec[];
-  caption: CaptionSpec;
+  caption?: CaptionSpec | null;   // W1: absent = caption-less render (first-class)
   textOverlays: TextOverlaySpec[];
   motionGraphics: MotionGraphicSpec[];
   /** Tight-cut overlay decorations. Empty by default — when Python emits no

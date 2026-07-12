@@ -20162,7 +20162,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # to the prior empty default; only premium jobs with injected scenes
         # (until Sub-step 5) build specs.
         "generatedScenes": _gs_out,
-        "caption": {
+        # W1 (Zac 2026-07-11): the prompt TEACHES caption_style "none"
+        # (burned-in captions Stage-0, "no captions" vibes) and EditPolicy
+        # sets it — the render side represents that as ABSENCE. Convicted on
+        # 929f9b48: style="none" failed CaptionStyle validation identically
+        # on every ladder rung → RENDER_FATAL, unrefunded.
+        "caption": None if str(_caption_style).strip().lower() == "none" else {
             "style": _caption_style,
             "pages": caption_pages,
             "keywords": _caption_keywords,
@@ -21551,6 +21556,7 @@ def _render_degrade_ladder(render_once, edit_plan, broll_clips, output_path):
     import copy as _copy_rl
     _pristine_cuts = _copy_rl.deepcopy(edit_plan["cuts"])
     _rung = 0
+    _prev_sig_rl = None
     while True:
         # (B) container-teardown fast-fail: if the interpreter has begun
         # finalizing (upstream-timeout container reclaim), no fresh thread pool
@@ -21613,6 +21619,16 @@ def _render_degrade_ladder(render_once, edit_plan, broll_clips, output_path):
                 raise ContainerTeardownError(
                     f"{type(_render_err).__name__} during render"
                 ) from _render_err
+            # W1 ledger: the SAME failure signature on consecutive rungs
+            # means the ladder is retrying an input-shape error it cannot
+            # fix (929f9b48: CaptionStyle validation failed identically on
+            # every rung). Observe-only — the weekly table names the class.
+            _sig_rl = f"{type(_render_err).__name__}: {str(_render_err)[:200]}"
+            if _prev_sig_rl is not None and _sig_rl == _prev_sig_rl:
+                _record_divergence(
+                    "render", {"rung": _rung},
+                    "ladder_identical_input_failure", reason=_sig_rl[:120])
+            _prev_sig_rl = _sig_rl
             if _rung >= 2:
                 raise RuntimeError(
                     f"RENDER_FATAL after full + retry + stripped renders: "
@@ -24399,6 +24415,21 @@ def handler(job):
                     "zscale=p=bt709,tonemap=reinhard,"
                     "zscale=t=bt709:m=bt709:r=tv,format=yuv420p"
                 )
+            # W2 (Zac 2026-07-11): SCALE BEFORE STABILIZE — both vidstab
+            # passes run at OUTPUT resolution (the 4K detect pass timed out
+            # twice on c8100661 and killed the job). The .trf stays frame-
+            # matched by construction: the detect pass runs the exact prefix
+            # chain (tone-map + normalize) the encode applies before the
+            # transform.
+            if _normalize_vf:
+                _vf_parts.append(_normalize_vf)
+            # explicit zero-inits: the tier vars are read by the second
+            # _needs_deshake block below (a failed detect flips the flag,
+            # so the reads are guarded — the inits make that provable).
+            _vs_tier = ""
+            _vs_shakiness = _vs_smoothing = _vs_zoom = 0
+            _stab_trf = ""
+            _stab_t0 = time.time()
             if _needs_deshake:
                 # vidstab two-pass auto-stabilization with CONTENT-ADAPTIVE
                 # parameters scaled by the measured shake intensity. The
@@ -24469,17 +24500,43 @@ def handler(job):
                     _vs_shakiness, _vs_smoothing, _vs_zoom = 10, 25, 0
                 _stab_trf = os.path.join(work_dir, "vidstab.trf")
                 _stab_t0 = time.time()
-                _stab_det = subprocess.run(
-                    ["ffmpeg", "-y", "-v", "error", "-threads", "0",
-                     "-i", _raw_source,
-                     "-vf", f"vidstabdetect=shakiness={_vs_shakiness}:accuracy=15:result={_stab_trf}",
-                     "-f", "null", "-"],
-                    capture_output=True, text=True, timeout=300,
-                )
-                if _stab_det.returncode != 0 or not os.path.exists(_stab_trf):
-                    raise RuntimeError(
-                        f"vidstabdetect failed: {(_stab_det.stderr or '')[-500:]}"
+                # Duration-aware ceiling (was flat 300s): at output
+                # resolution the pass is cheap; the ceiling scales with
+                # source length so long sources are never killed by a
+                # constant.
+                _vs_dur = probe_duration(_raw_source) or 60.0
+                _vs_timeout = int(max(300, 8.0 * _vs_dur))
+                _det_prefix = (",".join(_vf_parts) + ",") if _vf_parts else ""
+                _stab_ok = False
+                _stab_reason = ""
+                try:
+                    _stab_det = subprocess.run(
+                        ["ffmpeg", "-y", "-v", "error", "-threads", "0",
+                         "-i", _raw_source,
+                         "-vf", f"{_det_prefix}vidstabdetect=shakiness={_vs_shakiness}:accuracy=15:result={_stab_trf}",
+                         "-f", "null", "-"],
+                        capture_output=True, text=True, timeout=_vs_timeout,
                     )
+                    _stab_ok = (_stab_det.returncode == 0
+                                and os.path.exists(_stab_trf))
+                    if not _stab_ok:
+                        _stab_reason = (f"vidstabdetect failed: "
+                                        f"{(_stab_det.stderr or '')[-200:]}")
+                except subprocess.TimeoutExpired:
+                    _stab_reason = f"vidstabdetect timeout at {_vs_timeout}s"
+                if not _stab_ok:
+                    # W2: ENHANCEMENT NEVER KILLS — stabilization failing
+                    # ships the unstabilized video with its ledger line,
+                    # never a dead job (c8100661 died exactly here).
+                    _needs_deshake = False
+                    print(f"[fps-normalize] vidstab FALLBACK — {_stab_reason}"
+                          f" → shipping unstabilized (ledgered)", flush=True)
+                    _record_divergence(
+                        "render",
+                        {"stage": "vidstabdetect",
+                         "shake_score": round(_shake_score, 2)},
+                        "fps_normalize_fallback", reason=_stab_reason[:120])
+            if _needs_deshake:
                 print(
                     f"[fps-normalize] vidstab tier={_vs_tier} "
                     f"(shakiness={_vs_shakiness}, smoothing={_vs_smoothing}, "
@@ -24503,14 +24560,19 @@ def handler(job):
                 # Premium-only; gated on the dark-footage check above.
                 _vf_parts.append("eq=gamma=1.2:brightness=0.03:saturation=1.03")
             _vf_parts.append(f"fps={_target_fps:.6f}")
-            if _normalize_vf:
-                _vf_parts.append(_normalize_vf)
             _vf_combined = ",".join(_vf_parts)
 
-            _r_out = subprocess.run(
-                ["ffmpeg", "-y", "-v", "error", "-threads", "0",
-                 "-i", _raw_source,
-                 "-vf", _vf_combined,
+            # W2: duration-aware encode ceiling + `-preset fast` (was
+            # medium): at the SAME CRF the preset trades encode time and
+            # intermediate file size, not the quality target — the
+            # intermediate is transient disk; the 2x wall-clock matters.
+            _enc_timeout = int(max(240, 8.0 * (probe_duration(_raw_source) or 60.0)))
+
+            def _canonical_encode(_vf_chain):
+                return subprocess.run(
+                    ["ffmpeg", "-y", "-v", "error", "-threads", "0",
+                     "-i", _raw_source,
+                     "-vf", _vf_chain,
                  # CRF 15 (was 18) — this is the INTERMEDIATE that feeds every
                  # downstream step (per-cut renders, composite, HLS). Bumping
                  # 18→15 here costs ~30% more disk for the intermediate but
@@ -24518,44 +24580,67 @@ def handler(job):
                  # work with, so the final output retains more detail.
                  # iPhone HEVC sources transcoded to H.264 lose some quality
                  # at the codec switch; CRF 15 minimizes that loss.
-                 "-c:v", "libx264", "-preset", "medium", "-crf", "15",
-                 "-pix_fmt", "yuv420p",
-                 # Tag output as BT.709 SDR tv-range explicitly. After the
-                 # zscale tone-map above, the YUV samples are correct SDR
-                 # values; this just makes sure the container tag matches
-                 # what's actually inside, so iOS/Chrome decoders don't
-                 # try to apply HDR processing to already-SDR data. On
-                 # non-HDR sources these flags are no-ops vs default
-                 # behavior (HD content defaults to BT.709 anyway).
-                 "-color_primaries", "bt709",
-                 "-color_trc", "bt709",
-                 "-colorspace", "bt709",
-                 "-color_range", "tv",
-                 "-g", str(_gop_frames), "-keyint_min", str(_gop_frames),
-                 "-sc_threshold", "0",
-                 "-c:a", "copy",
-                 "-video_track_timescale", "90000",
-                 # +negative_cts_offsets — write B-frame reorder priming via
-                 # negative composition time offsets instead of via an MP4
-                 # edit list. Without this flag, libx264 + MP4 muxer writes
-                 # `edts/elst` that "skips first 33ms of priming." FFmpeg's
-                 # filtergraph respects the edit list when reading the file
-                 # back (frame index N becomes raw frame N+2). Remotion's
-                 # OffthreadVideo does not apply the edit list the same
-                 # way. The two renderers then extract DIFFERENT source
-                 # content at the same intended source_time, producing
-                 # variable per-clip video drift between FFmpeg-rendered
-                 # and Remotion-rendered clips. With negative_cts_offsets,
-                 # no edit list is written; both renderers see frame N as
-                 # raw frame N consistently.
-                 "-movflags", "+negative_cts_offsets",
-                 _norm_path],
-                capture_output=True, text=True, timeout=240,
-            )
-            if _r_out.returncode != 0 or not os.path.exists(_norm_path):
+                     "-c:v", "libx264", "-preset", "fast", "-crf", "15",
+                     "-pix_fmt", "yuv420p",
+                     # Tag output as BT.709 SDR tv-range explicitly. After the
+                     # zscale tone-map above, the YUV samples are correct SDR
+                     # values; this just makes sure the container tag matches
+                     # what's actually inside, so iOS/Chrome decoders don't
+                     # try to apply HDR processing to already-SDR data. On
+                     # non-HDR sources these flags are no-ops vs default
+                     # behavior (HD content defaults to BT.709 anyway).
+                     "-color_primaries", "bt709",
+                     "-color_trc", "bt709",
+                     "-colorspace", "bt709",
+                     "-color_range", "tv",
+                     "-g", str(_gop_frames), "-keyint_min", str(_gop_frames),
+                     "-sc_threshold", "0",
+                     "-c:a", "copy",
+                     "-video_track_timescale", "90000",
+                     # +negative_cts_offsets — write B-frame reorder priming via
+                     # negative composition time offsets instead of via an MP4
+                     # edit list. Without this flag, libx264 + MP4 muxer writes
+                     # `edts/elst` that "skips first 33ms of priming." FFmpeg's
+                     # filtergraph respects the edit list when reading the file
+                     # back (frame index N becomes raw frame N+2). Remotion's
+                     # OffthreadVideo does not apply the edit list the same
+                     # way. The two renderers then extract DIFFERENT source
+                     # content at the same intended source_time, producing
+                     # variable per-clip video drift between FFmpeg-rendered
+                     # and Remotion-rendered clips. With negative_cts_offsets,
+                     # no edit list is written; both renderers see frame N as
+                     # raw frame N consistently.
+                     "-movflags", "+negative_cts_offsets",
+                     _norm_path],
+                    capture_output=True, text=True, timeout=_enc_timeout,
+                )
+
+            try:
+                _r_out = _canonical_encode(_vf_combined)
+            except subprocess.TimeoutExpired:
+                _r_out = None
+            if ((_r_out is None or _r_out.returncode != 0
+                 or not os.path.exists(_norm_path))
+                    and "vidstabtransform" in _vf_combined):
+                # W2: the stabilize-carrying encode failed — the enhancement
+                # never kills; strip the transform, ledger, retry once.
+                _record_divergence(
+                    "render", {"stage": "vidstabtransform"},
+                    "fps_normalize_fallback",
+                    reason=("encode with vidstab failed: "
+                            + ((_r_out.stderr if _r_out else "timeout") or "")[-100:]))
+                print("[fps-normalize] vidstab FALLBACK — encode failed with "
+                      "transform → retry unstabilized (ledgered)", flush=True)
+                _vf_combined = ",".join(
+                    p for p in _vf_parts if not p.startswith("vidstabtransform"))
+                try:
+                    _r_out = _canonical_encode(_vf_combined)
+                except subprocess.TimeoutExpired:
+                    _r_out = None
+            if _r_out is None or _r_out.returncode != 0 or not os.path.exists(_norm_path):
                 raise RuntimeError(
                     f"Source canonicalize failed: "
-                    f"{(_r_out.stderr or '')[-500:]}"
+                    f"{(((_r_out.stderr if _r_out else None) or 'encode timeout'))[-500:]}"
                 )
 
             # ── DIAG PROBE 1: source vs canonical structural comparison ──

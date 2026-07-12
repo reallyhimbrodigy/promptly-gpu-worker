@@ -779,7 +779,7 @@ export const PromptlyOverlay: React.FC<PromptlyRenderProps> = ({ input }) => {
           dialogue legible on any residual clearing miss (wrapped/grown caption,
           edge overlap). Previously this layer sat UNDER text-overlays + MGs,
           contradicting this very comment. */}
-      <CaptionsLayer caption={caption} fps={fps} />
+      {caption ? <CaptionsLayer caption={caption} fps={fps} /> : null}
       {/* Tight-cut overlays render on TOP of every other layer. The flash /
           warm leak briefly washes through captions + MGs at the cut frame,
           masking the hard-cut discontinuity. Outside each 11-frame window

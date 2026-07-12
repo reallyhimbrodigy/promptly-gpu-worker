@@ -296,7 +296,12 @@ class PromptlyRenderInput(_RemotionModel):
     # array is no behavior change vs the pre-GeneratedScene pipeline (mirrors
     # tightCutOverlays). Inert until Sub-step 3 fills it.
     generatedScenes: List[GeneratedSceneSpec] = Field(default_factory=list)
-    caption: CaptionSpec
+    # W1 (Zac 2026-07-11): caption-less renders are FIRST-CLASS — absence is
+    # the representation. The upstream 'none' style (burned-in captions,
+    # "no captions" vibes, EditPolicy captions=off) never reaches this model;
+    # the builder emits caption=None instead. CaptionStyle keeps excluding
+    # "none" — the render side has no such style, it has NO CAPTION.
+    caption: Optional[CaptionSpec] = None
     textOverlays: List[TextOverlaySpec]
     motionGraphics: List[MotionGraphicSpec]
     # Tight-cut overlays sit on TIGHT BOUNDARIES (hard cuts with no handle

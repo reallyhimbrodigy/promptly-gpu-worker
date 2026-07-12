@@ -5012,6 +5012,44 @@ def _telemetry_pin():
 import re
 
 
+@check("W1+W2 (Zac tier-1): caption-less renders first-class (absence representable end-to-end; ladder identical-failure ledgered); fps-normalize never kills (scale-first, duration ceilings, unstabilized fallback ledgered)")
+def _w1_w2_tier1():
+    import render_schemas as _rs
+    from typing import get_args as _ga
+    _src = open("handler.py").read()
+    # W1: absence is the representation — schema optional, "none" still
+    # unrepresentable as a STYLE, builder emits None, Remotion guards.
+    assert not _rs.PromptlyRenderInput.model_fields["caption"].is_required(), \
+        "caption must be optional (absence = caption-less render)"
+    assert "none" not in _ga(_rs.CaptionStyle), \
+        "'none' stays out of CaptionStyle — the render has no such style, it has NO CAPTION"
+    assert '"caption": None if str(_caption_style).strip().lower() == "none"' in _src, \
+        "the builder must emit absence for style none"
+    _pt = open("src/remotion/src/PromptlyRender.tsx").read()
+    assert "{caption ? <CaptionsLayer caption={caption} fps={fps} /> : null}" in _pt, \
+        "Remotion must null-guard the captions layer"
+    _ts = open("src/remotion/src/types.ts").read()
+    assert "caption?: CaptionSpec | null;" in _ts, "TS type must allow absence"
+    assert '"ladder_identical_input_failure"' in _src, \
+        "the ladder must ledger identical-signature retries (input-shape errors)"
+    # W2: scale-first + never-kills fallback + duration-aware ceilings
+    _i = _src.index("vidstabdetect=shakiness=")
+    assert "_det_prefix" in _src[_i - 800:_i], \
+        "the detect pass must run the same prefix chain (scale BEFORE stabilize)"
+    assert _src.count('"fps_normalize_fallback"') >= 2, \
+        "both vidstab failure directions must ship unstabilized + ledger"
+    assert "_vs_timeout = int(max(300, 8.0 * _vs_dur))" in _src and \
+        "_enc_timeout = int(max(240, 8.0 * (probe_duration(_raw_source) or 60.0)))" in _src, \
+        "duration-aware ceilings on both passes"
+    assert '"-preset", "fast", "-crf", "15"' in _src and \
+        '"-preset", "medium", "-crf", "15"' not in _src, \
+        "the canonicalize encode runs -preset fast at the same CRF"
+    # order: normalize precedes the transform in the vf chain build
+    _j = _src.index('if _needs_deshake:')
+    _k = _src.index('_vf_parts.append(_normalize_vf)')
+    assert _k < _src.index("vidstabtransform=input="), "normalize must precede transform"
+
+
 @check("DEGENERATION RESPONSE (L1/L2/L3/R1): declared caps ENFORCED at the parse edge (Vertex does not enforce maxLength); repetition signature fires the tail instrument on completed responses; degen retries bounded +2 and ledgered; the three TCO drops ledgered")
 def _degeneration_response():
     import handler as _h
