@@ -5122,6 +5122,28 @@ def _vacuous_read_guard():
     assert _h._is_plan_echo_analysis(_real) is False, \
         "a real measurement must pass the intake gate"
     assert '"provided_analysis_rejected"' in _src, "the rejection must ledger"
+    # PRODUCER STAMP (Zac backend rider): additive-safety — a producer key
+    # does NOT change the echo match either way
+    _echo_stamped = dict(_echo, producer={"name": "x", "version": "1",
+                                           "model": "m", "measured_at": 1.0})
+    assert _h._is_plan_echo_analysis(_echo_stamped) is True, \
+        "additive-safe: a producer key must not break the echo signature match"
+    assert _h._is_plan_echo_analysis(dict(_real, producer={"name": "x"})) is False, \
+        "additive-safe: a producer key on a real blob must not create a false match"
+    # POSITIVE ID — a fully-stamped blob is trusted; partial stamp is not
+    assert _h._analysis_is_stamped(_real) is False, "unstamped real blob is not stamped"
+    assert _h._analysis_is_stamped(_echo_stamped) is True, "a full 4-field stamp is positive ID"
+    assert _h._analysis_is_stamped(dict(_real, producer={"name": "x"})) is False, \
+        "a partial stamp (missing fields) is NOT positive ID"
+    # the intake trusts stamped blobs and only signature-checks unstamped ones
+    assert "_analysis_is_stamped(provided_analysis)" in _src \
+        and "TRUSTED by producer stamp" in _src, \
+        "the intake must positively identify stamped blobs (signature is the legacy fallback)"
+    # the worker's own stamp carries the same 4-field schema
+    _ws = _h._worker_producer_stamp()
+    assert all(_ws.get(_k) for _k in ("name", "version", "model", "measured_at")) \
+        and _ws["name"] == "promptly-gpu-worker", \
+        "the worker producer stamp carries the full schema"
     # the structural root is DEAD (Zac ruling: the overwrite dies) — the
     # tombstone stays, the write does not, and no reader of the key survives
     assert "VACUOUS-READ LANDMINE" in _src, "the tombstone carries the knowledge"

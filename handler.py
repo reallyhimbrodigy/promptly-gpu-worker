@@ -2686,6 +2686,34 @@ def calculate_reframe_crop(face_positions, source_w, source_h, target_w=1080, ta
 
     return crops
 
+_PRODUCER_STAMP_FIELDS = ("name", "version", "model", "measured_at")
+
+
+def _analysis_is_stamped(a):
+    """PRODUCER STAMP (Zac backend rider 2026-07-11): a real analysis blob
+    carries producer:{name, version, model, measured_at} — POSITIVE identity.
+    A stamped blob is a measurement by attestation; the frozen-corpus echo
+    signature (_is_plan_echo_analysis) is the fallback for UNSTAMPED legacy
+    blobs only. The stamp is a NEW top-level key and is additive-safe: the
+    echo signature matches a canned compound of OTHER keys (audio/speech/
+    shots/metadata), so adding `producer` never changes a match either way
+    (gate-pinned)."""
+    if not isinstance(a, dict):
+        return False
+    _p = a.get("producer")
+    return isinstance(_p, dict) and all(_p.get(_k) for _k in _PRODUCER_STAMP_FIELDS)
+
+
+def _worker_producer_stamp():
+    """The worker's producer identity for any analysis blob it OWNS. Same
+    schema as the frontend's stamp so every blob in the system carries
+    positive provenance. measured_at is epoch seconds (Date-free)."""
+    return {"name": "promptly-gpu-worker",
+            "version": HANDLER_VERSION,
+            "model": GEMINI_EDITORIAL_MODEL,
+            "measured_at": time.time()}
+
+
 def _is_plan_echo_analysis(a):
     """POISONED WELL (Zac rider 2026-07-11): historical result.analysis_data
     rows persisted the PLAN-DERIVED echo (the overwrite, killed 2eb7196) —
@@ -23852,18 +23880,29 @@ def handler(job):
         provided_plan = input_data.get("edit_plan") if isinstance(input_data.get("edit_plan"), dict) else None
         provided_transcript = input_data.get("transcript") if isinstance(input_data.get("transcript"), dict) else None
         provided_analysis = input_data.get("analysis_data") if isinstance(input_data.get("analysis_data"), dict) else None
-        if provided_analysis is not None and _is_plan_echo_analysis(provided_analysis):
-            # the poisoned well: a stored echo is not a measurement — reject
-            # loud, proceed on real cached analysis / honest absence, never
-            # on replayed blindness.
-            print("[analysis] PROVIDED ANALYSIS REJECTED — stored plan echo "
-                  "(the pre-2eb7196 overwrite persisted it); proceeding "
+        # PRODUCER-STAMP intake (Zac backend rider 2026-07-11): POSITIVE
+        # identification. A stamped producer blob is trusted BY STAMP — no
+        # signature check. The frozen-corpus echo signature is the fallback
+        # for UNSTAMPED legacy blobs only (pre-stamp storage rows). This
+        # unblocks the frontend's producer-stamp deploy: once real analyses
+        # carry the stamp, they are authoritative regardless of shape.
+        if provided_analysis is not None and _analysis_is_stamped(provided_analysis):
+            _prod = provided_analysis.get("producer") or {}
+            print(f"[analysis] PROVIDED ANALYSIS TRUSTED by producer stamp "
+                  f"(name={_prod.get('name')!r} version={_prod.get('version')!r}) "
+                  f"— positive identity, signature check skipped", flush=True)
+        elif provided_analysis is not None and _is_plan_echo_analysis(provided_analysis):
+            # the poisoned well: an UNSTAMPED stored echo is not a measurement —
+            # reject loud, proceed on real cached analysis / honest absence,
+            # never on replayed blindness. (Stamped blobs never reach here.)
+            print("[analysis] PROVIDED ANALYSIS REJECTED — unstamped stored plan "
+                  "echo (the pre-2eb7196 overwrite persisted it); proceeding "
                   "without it", flush=True)
             _record_divergence(
                 "analysis", {"generation": "a1a2",
                              "keys": sorted(provided_analysis.keys())[:12]},
                 "provided_analysis_rejected",
-                reason="stored plan echo (poisoned well) — measurement semantics at intake")
+                reason="unstamped stored plan echo (poisoned well) — measurement semantics at intake")
             provided_analysis = None
         provided_broll = input_data.get("resolved_broll") if isinstance(input_data.get("resolved_broll"), list) else None
         provided_trend = input_data.get("trend_snapshot") if isinstance(input_data.get("trend_snapshot"), dict) else None
