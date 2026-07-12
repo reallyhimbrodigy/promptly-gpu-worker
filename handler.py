@@ -4798,7 +4798,7 @@ Most videos contain at least the two classic hits: the hook's grab and the line 
 
 Authoring shape: the emphasis's `sound` field (one of the names below) — timing derives from the beat's word; every sound is trimmed to a zero-silence onset; no offsets to compute. The beat's `viewer_feeling` doubles as the placement's why: it names what makes THIS beat one of the video's hits — why it earned treatment where the beats around it didn't — and the moment it matched. A why that can only name a category has answered "could"; the why answers "why this one".
 
-**Attack vs. the word's onset — the beat must be landable.** A PERCUSSIVE sound (punchsfx, popsfx, mouse-click-sound, iphoneding, camera-flash, shockingsfx, rizz, awkward-moment) peaks the instant it starts, so it must land on a word whose onset the ear can pin: a word that BEGINS AFTER A PAUSE (the start of a sentence, after a breath, after a held beat) or a hard stressed syllable set off by the delivery. On a word buried mid-sentence in continuous speech, the exact onset is soft and a percussive hit lands off it — audibly early or late. For those mid-phrase beats, choose a SWELL instead — boom, swoosh-sound-effects, woosh-professional, transition-sfx — whose attack ramps in and lands the peak on the beat even when the onset is imprecise. Match the sound's attack to whether the word has a clean start; a percussive sound with no pause in front of it is the wrong choice, not a louder one.
+**Attack vs. the word's onset — the beat must be landable.** A PERCUSSIVE sound (punchsfx, popsfx, mouse-click-sound, iphoneding, camera-flash, shockingsfx, rizz, awkward-moment) peaks the instant it starts, so it must land on a word whose onset the ear can pin: a word that begins after a pause, where the audible onset is precise. The transcript marks the rest: **a word tagged ⟨mid-phrase⟩ is buried in continuous speech and has NO clean onset** — its exact start is soft, so a percussive hit there lands audibly early or late and the pipeline DROPS it (the beat keeps its zoom/caption but loses the sound). On a ⟨mid-phrase⟩ word, choose a SWELL instead — boom, swoosh-sound-effects, woosh-professional, transition-sfx — whose attack ramps in and lands the peak on the beat even when the onset is imprecise. Untagged words start clean and take any sound. Match the sound's attack to the tag: a percussive sound on a ⟨mid-phrase⟩ word is the wrong choice, not a louder one — pick the swell so the beat KEEPS a sound instead of dropping to silent.
 
 ──────────────────────────────────────────
 THE 16 SOUNDS + THE BARE VOICE — each a defined moment
@@ -9622,14 +9622,31 @@ def generate_edit_gemini(
             (_w.get("punctuated_word") or _w.get("word") or "")
             for _w in kept_words
         )
+        # PER-WORD ONSET MEASURABILITY (Zac 2026-07-12): tag each mid-phrase word
+        # ⟨mid-phrase⟩ so the sound decision can SEE where a percussive sound can't
+        # land (no dB silence anchors the onset) and pick a swell there instead —
+        # the education Gemini couldn't act on without the data. Best-effort: read
+        # the source-time silences (populated by the mechanical-cuts pass) via the
+        # src index; if unavailable, tag nothing (no false constraint).
+        _mid_tags = {}
+        try:
+            for _ni in range(len(kept_words)):
+                _si = new_to_src[_ni] if _ni < len(new_to_src) else None
+                if _si is not None and not _sfx_onset_measurable(deepgram_words or [], _si):
+                    _mid_tags[_ni] = True
+        except Exception:
+            _mid_tags = {}
         kept_word_lines = []
         for new_idx, _w in enumerate(kept_words):
             word_text = _w.get("punctuated_word") or _w.get("word") or ""
             start = float(_w.get("start") or 0)
             end = float(_w.get("end") or 0)
             spk = int(_w.get("speaker") or 0)
-            kept_word_lines.append(f"  [{new_idx}] {start:.2f}-{end:.2f} spk{spk}: {word_text}")
+            _mid = " ⟨mid-phrase⟩" if _mid_tags.get(new_idx) else ""
+            kept_word_lines.append(f"  [{new_idx}] {start:.2f}-{end:.2f} spk{spk}: {word_text}{_mid}")
         kept_transcript_block = "\n".join(kept_word_lines)
+        print(f"[two-pass] onset measurability: {len(_mid_tags)}/{len(kept_words)} words "
+              f"tagged ⟨mid-phrase⟩ (a percussive sound can't land there)", flush=True)
 
         # Compute cut-boundary word indices in kept-only space. Two sources:
         #   1) dead_air removals — kept word followed by a removed range

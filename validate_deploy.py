@@ -4946,6 +4946,14 @@ def _sfx_measurability():
     assert _h._sfx_onset_measurable(_dg, 1) is True
     assert _h._sfx_may_fire("popsfx", _dg, 1) is True, "sharp fires on a measurable onset"
     _h._LEVEL_SILENCES_LAST[:] = []
+    # BUILD #1 (Zac 2026-07-12): the post-cuts transcript TAGS each mid-phrase word
+    # ⟨mid-phrase⟩ so Gemini can SEE where a percussive sound can't land and pick a
+    # swell — the enforcement-drop becomes the rare residual, not the norm.
+    assert "_sfx_onset_measurable(deepgram_words or [], _si)" in _src, \
+        "the kept-transcript must tag each word's onset measurability"
+    assert "⟨mid-phrase⟩" in _src, "the mid-phrase tag must be emitted into the transcript"
+    assert _src.count("⟨mid-phrase⟩") >= 2, \
+        "the sound-menu guidance must also NAME the ⟨mid-phrase⟩ tag so Gemini acts on it"
 
 
 @check("ITEM 3 WS2 caption fade-bound (Zac 2026-07-12): every fixed caption fade is capped at 25% of its on-screen window (shared/fadeTiming.boundedFade), the 5 fixed-duration styles wire it + faster bases, Gadzhi's fade resolves in the first quarter of its slide; the real node helper test passes")
