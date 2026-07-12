@@ -241,94 +241,14 @@ def _vibe_requests_captions(vibe):
     return True
 
 
-# ── ITEM 1: the SFX CORRECTION-HOLE close (Zac 2026-07-12) ──────────────────
-# _audible_word_onset_s corrected only words preceded by a detected SILENCE
-# (snap to the silence end). Mid-phrase continuous-speech words got NO correction
-# and landed up to +250ms late (spectral-flux measured: mean +111ms, max +259ms,
-# wildly non-uniform — Zac's "some audibly early, some late"). This closes the
-# hole: a per-word SPECTRAL-FLUX onset (the audio analog of the zoom motion-onset
-# detector) finds the true audible onset even where there is no energy dip, and
-# _audible_word_onset_s pulls the onset to it. Bounded to the plausible Deepgram-
-# late range so it can only move an onset EARLIER toward the true onset, never
-# over-correct. Best-effort: an empty registry = the prior silence-only behavior.
-_WORD_ONSET_LAST: dict = {}   # word_index -> true audible onset (s), per source
-
-
-def _spectral_word_onset(x, sr, dg_start_s, prev_end_s=None):
-    """The audio analog of the zoom motion-onset detector: a word's TRUE audible
-    onset from spectral flux (the phoneme attack), detectable mid-phrase where
-    there is no energy dip. Returns the onset time, or None when there is no
-    confident attack (steady sound) or the onset falls outside the plausible
-    Deepgram-late window [dg-0.30, dg-0.01]s. Bounded so it can only pull EARLIER
-    toward the true onset — never over-correct. Best-effort (never raises)."""
-    try:
-        import numpy as _np
-        _back = 0.30
-        _w0 = max(0, int(max(float(prev_end_s or 0.0), dg_start_s - _back) * sr))
-        _w1 = min(len(x), int((dg_start_s + 0.02) * sr))
-        if _w1 - _w0 < int(0.05 * sr):
-            return None
-        _seg = _np.asarray(x[_w0:_w1], dtype=_np.float64)
-        _n, _hop = 512, max(1, int(0.005 * sr))
-        if len(_seg) < _n + _hop:
-            return None
-        _win = _np.hanning(_n)
-        _starts = list(range(0, len(_seg) - _n + 1, _hop))
-        _M = _np.abs(_np.fft.rfft(_np.stack([_seg[i:i + _n] * _win for i in _starts]), axis=1))
-        if _M.shape[0] < 2:
-            return None
-        _flux = _np.sqrt(((_np.diff(_M, axis=0).clip(min=0)) ** 2).sum(axis=1))  # positive spectral flux
-        if _flux.max() < 1e-9:
-            return None
-        # SIGNIFICANCE GATE: a real word attack is a sharp flux PEAK (max >> the
-        # median); a steady sound (no onset) is flat (max ≈ median) → no correction.
-        if _flux.max() < 4.0 * (float(_np.median(_flux)) + 1e-9):
-            return None
-        _ft = _np.array([(_w0 + _starts[k + 1] + _n / 2) / sr for k in range(len(_flux))])
-        _above = _np.where(_flux >= 0.5 * _flux.max())[0]   # earliest strong rise = the attack
-        if _above.size == 0:
-            return None
-        _onset = float(_ft[_above[0]])
-        if not (dg_start_s - _back <= _onset <= dg_start_s - 0.01):
-            return None   # outside the plausible late range → leave the Deepgram start
-        return _onset
-    except Exception:
-        return None
-
-
-def _detect_word_onsets(source_path, words):
-    """Pre-compute per-word true audible onsets from the source audio and populate
-    _WORD_ONSET_LAST for _audible_word_onset_s. One ffmpeg decode + a spectral-flux
-    pass per word. Best-effort: any failure leaves the registry empty (the prior
-    silence-only behavior, no worse)."""
-    _WORD_ONSET_LAST.clear()
-    try:
-        import numpy as _np
-        _sr = 16000
-        _raw = subprocess.run(
-            ["ffmpeg", "-v", "error", "-i", source_path, "-ac", "1", "-ar", str(_sr),
-             "-f", "f32le", "-"], capture_output=True, timeout=60).stdout
-        _x = _np.frombuffer(_raw, dtype=_np.float32)
-        if _x.size < _sr // 2:
-            return
-        _n = 0
-        for _i, _w in enumerate(words or []):
-            _ds = float(_w.get("start") or 0.0)
-            if _ds <= 0.05:
-                continue
-            _prev = float(words[_i - 1].get("end") or 0.0) if _i > 0 else 0.0
-            _on = _spectral_word_onset(_x, _sr, _ds, prev_end_s=_prev)
-            if _on is not None:
-                _WORD_ONSET_LAST[_i] = _on
-                _n += 1
-        print(f"[word-onset] spectral onsets pre-computed for {_n}/{len(words or [])} "
-              f"words — closes the mid-phrase correction hole", flush=True)
-    except Exception as _wo_err:
-        _WORD_ONSET_LAST.clear()
-        print(f"[word-onset] pre-compute skipped ({type(_wo_err).__name__}) — "
-              f"onset correction falls back to silence-only", flush=True)
-
-
+# ── SFX onset: silence-anchored, honest about mid-phrase (Zac 2026-07-12) ────
+# Per-word audible-onset RE-DETECTION (spectral flux / energy) was built, then
+# MEASURED inadequate on a deterministic offline harness (sfx_onset_fixture.py):
+# 54-64ms median error vs the trusted silence-based onset — larger than the
+# 55-113ms lateness it was meant to fix, and it never corrected the words Zac's
+# ear caught. Removed. The onset stays silence-anchored (accurate where a dB
+# silence exists); mid-phrase words keep the Deepgram start, and SFX TIMING is
+# instead guarded by attack-matched-to-measurability (_sfx_may_fire below).
 def _audible_word_onset_s(dg_words, idx):
     """D1 (Zac's render verdict, 2026-07-11): Deepgram word STARTS run late
     vs the audible onset — measured +120..250ms on the rejected render and
@@ -352,16 +272,13 @@ def _audible_word_onset_s(dg_words, idx):
                 _best = _e0
     except Exception:
         return _ds
-    # HOLE-CLOSE (2026-07-12): the spectral-flux onset corrects MID-PHRASE words
-    # the silence pass can't see. Use it when it is earlier than the current best
-    # (silence-end or Deepgram start) — it was already bounded to the plausible
-    # late range at detection, so this only pulls toward the true audible onset.
-    try:
-        _sp = _WORD_ONSET_LAST.get(idx)
-        if _sp is not None and float(_sp) < _best:
-            _best = float(_sp)
-    except Exception:
-        pass
+    # MID-PHRASE words (no dB-located silence) keep the Deepgram start: per-word
+    # onset RE-DETECTION was measured NOT accurate enough to correct them (offline
+    # harness 2026-07-12: spectral-flux 64ms / energy 54ms median error vs the
+    # silence-based ground truth, > the 55-113ms lateness itself). Instead, SFX
+    # timing is guarded downstream by _sfx_may_fire — a sharp-attack sound only
+    # fires where the onset IS measurable; mid-phrase emphasis takes a soft sound
+    # whose attack ramp masks the imprecision. So `_best` here stays honest.
     if idx > 0:
         try:
             # never reach into the previous word's speech (its Deepgram end
@@ -370,6 +287,36 @@ def _audible_word_onset_s(dg_words, idx):
         except Exception:
             pass
     return _best
+
+
+# Attack-matched-to-measurability (Zac 2026-07-12): a SHARP-attack sound peaks ~on
+# its onset, so it exposes any onset-timing error; a SOFT (swell) sound ramps in
+# over its attack, masking ±error. Onset re-detection was measured inaccurate for
+# mid-phrase words, so a sharp transient may fire ONLY where the onset is
+# measurable (a dB silence anchors it); a soft sound fires anywhere. Gemini is
+# taught to pick soft sounds for mid-phrase emphasis (sound-decision prompt); this
+# is the physical guarantee if it doesn't — the emphasis keeps its zoom/caption.
+_SFX_SHARP_ATTACK_MS = 200   # attack below this = a transient exposed to onset error
+
+
+def _sfx_onset_measurable(dg_words, idx):
+    """True when a dB-located silence anchors this word's onset (post-silence) so
+    the beat is precise; False for a mid-phrase word (no silence) whose audible
+    onset the Deepgram start only approximates."""
+    try:
+        _dg = float(dg_words[idx].get("start") or 0.0)
+        return (_dg - _audible_word_onset_s(dg_words, idx)) > 0.001
+    except Exception:
+        return False
+
+
+def _sfx_may_fire(sound_style, dg_words, idx):
+    """A soft-attack sound (attack >= _SFX_SHARP_ATTACK_MS) fires anywhere; a sharp
+    one fires only on a measurable (post-silence) onset. Unknown sound → treated as
+    sharp (fire only when measurable) — conservative."""
+    if _SFX_ATTACK_MS.get(sound_style, 0) >= _SFX_SHARP_ATTACK_MS:
+        return True
+    return _sfx_onset_measurable(dg_words, idx)
 
 
 def _mg_norm_token(w):
@@ -4851,6 +4798,8 @@ Most videos contain at least the two classic hits: the hook's grab and the line 
 
 Authoring shape: the emphasis's `sound` field (one of the names below) — timing derives from the beat's word; every sound is trimmed to a zero-silence onset; no offsets to compute. The beat's `viewer_feeling` doubles as the placement's why: it names what makes THIS beat one of the video's hits — why it earned treatment where the beats around it didn't — and the moment it matched. A why that can only name a category has answered "could"; the why answers "why this one".
 
+**Attack vs. the word's onset — the beat must be landable.** A PERCUSSIVE sound (punchsfx, popsfx, mouse-click-sound, iphoneding, camera-flash, shockingsfx, rizz, awkward-moment) peaks the instant it starts, so it must land on a word whose onset the ear can pin: a word that BEGINS AFTER A PAUSE (the start of a sentence, after a breath, after a held beat) or a hard stressed syllable set off by the delivery. On a word buried mid-sentence in continuous speech, the exact onset is soft and a percussive hit lands off it — audibly early or late. For those mid-phrase beats, choose a SWELL instead — boom, swoosh-sound-effects, woosh-professional, transition-sfx — whose attack ramps in and lands the peak on the beat even when the onset is imprecise. Match the sound's attack to whether the word has a clean start; a percussive sound with no pause in front of it is the wrong choice, not a louder one.
+
 ──────────────────────────────────────────
 THE 16 SOUNDS + THE BARE VOICE — each a defined moment
 ──────────────────────────────────────────
@@ -6763,12 +6712,6 @@ def detect_dead_air(
     # dead air the ear catches, so LEVEL is the right locator signal. Flag-OFF
     # renders keep the VAD punctuation tiers below — bit-identical to before.
     _level_regions: list = []
-    # HOLE-CLOSE (Zac 2026-07-12): pre-compute per-word spectral-flux onsets so
-    # _audible_word_onset_s can correct MID-PHRASE words (the silence pass below
-    # only sees post-silence ones). Unconditional on source (independent of the
-    # dead-air flag) — mid-phrase words need onsets regardless. Best-effort.
-    if source_path and words:
-        _detect_word_onsets(source_path, words)
     if _WITHIN_CLIP_DEADAIR and source_path:
         # PROPORTIONAL (Zac 2026-07-09): thresholds sit at a PERCENTAGE of THIS source's
         # floor->speech range, not a hardcoded -25/-45 nor a fixed offset. between locates
@@ -20816,6 +20759,23 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                         _projected_t = max(0.0, _projected_t - _onset_shift)
                 except Exception:
                     pass
+                # ATTACK-MATCHED-TO-MEASURABILITY (Zac 2026-07-12): a sharp-attack
+                # transient may fire ONLY where the onset is measurable. On a
+                # mid-phrase word the exact onset is imprecise (re-detection was
+                # measured at 54-64ms error > the 55-113ms lateness), so a sharp
+                # sound would land off the beat — DROP it; the emphasis keeps its
+                # zoom/caption. Gemini is taught to pick a soft-attack sound here
+                # (sound-decision prompt), so this fires only on its residual misses.
+                _mf_words = (transcript or {}).get("words") or []
+                if not _sfx_may_fire(_sound_style, _mf_words, _sfx_wi):
+                    _record_divergence(
+                        "sfx",
+                        {"sound": _sound_style, "word": _sfx.get("word", ""),
+                         "attack_ms": _SFX_ATTACK_MS.get(_sound_style, 0)},
+                        "drop", reason="sharp_attack_on_unmeasurable_onset")
+                    print(f"[sfx] DROP sharp {_sound_style} on mid-phrase "
+                          f"'{_sfx.get('word','')}' — onset not measurable; visual emphasis kept", flush=True)
+                    continue
             else:
                 _sfx_word = _sfx.get("word", "")
                 print(f"[sfx] Skipping {_sound_style} on '{_sfx_word}' — word removed from output", flush=True)

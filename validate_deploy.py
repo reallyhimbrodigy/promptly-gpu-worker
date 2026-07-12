@@ -4899,35 +4899,32 @@ def _rhythm_beats():
         "sfx-off must strip the rider surfaces (the enforcement hole stays closed)"
 
 
-@check("ITEM 1 SFX HOLE-CLOSE (Zac 2026-07-12): the spectral-flux onset corrects MID-PHRASE words the silence pass can't see — bounded to the plausible Deepgram-late range so it only pulls EARLIER toward the true onset (never over-corrects), clamped to the prev-word tail; empty registry = the prior silence-only behavior")
-def _item1_sfx_hole_close():
+@check("SFX ATTACK-MATCHED-TO-MEASURABILITY (Zac 2026-07-12): per-word onset re-detection was measured inaccurate (54-64ms err > the lateness) and REMOVED; a sharp-attack sound fires only where the onset is measurable (a dB silence anchors it), a soft swell fires anywhere; the placement DROPS a sharp sound on a mid-phrase word and Gemini is taught to pick soft sounds there")
+def _sfx_measurability():
     import handler as _h
-    import numpy as _np
     _src = open("handler.py").read()
-    assert "def _spectral_word_onset(" in _src and "def _detect_word_onsets(" in _src, \
-        "the spectral onset detector + pre-compute must exist"
-    assert "_detect_word_onsets(source_path, words)" in _src, \
-        "the pre-compute must run during analysis (detect_dead_air)"
-    _sr = 16000
-    def _tone(f, d):
-        _t = _np.arange(int(d * _sr)) / _sr
-        return (0.3 * _np.sin(2 * _np.pi * f * _t)).astype(_np.float32)
-    # MID-PHRASE boundary (freq change, NO energy dip) → spectral flux finds it
-    _x = _np.concatenate([_tone(200, 0.30), _tone(500, 0.40)])
-    _on = _h._spectral_word_onset(_x, _sr, 0.42, prev_end_s=0.0)
-    assert _on is not None and abs(_on - 0.30) <= 0.04, f"mid-phrase onset ~0.30 (got {_on})"
-    # steady sound (no attack) → no spurious correction
-    assert _h._spectral_word_onset(_tone(300, 0.60), _sr, 0.55, prev_end_s=0.0) is None, \
-        "steady sound must not produce a correction"
-    # the registry closes the hole in _audible_word_onset_s, clamped to prev tail
-    _h._WORD_ONSET_LAST.clear(); _h._LEVEL_SILENCES_LAST[:] = []; _h._WITHIN_WORD_SILENCES_LAST[:] = []
-    _dg = [{"start": 1.0, "end": 1.3, "word": "a"}, {"start": 1.52, "end": 1.9, "word": "b"}]
-    assert abs(_h._audible_word_onset_s(_dg, 1) - 1.52) < 1e-6, "hole present without registry"
-    _h._WORD_ONSET_LAST[1] = 1.41
-    assert abs(_h._audible_word_onset_s(_dg, 1) - 1.41) < 1e-6, "registry onset closes the hole"
-    _h._WORD_ONSET_LAST[1] = 1.10   # absurdly early
-    assert _h._audible_word_onset_s(_dg, 1) >= 1.3 - 0.08 - 1e-6, "clamped to prev-word tail"
-    _h._WORD_ONSET_LAST.clear()
+    # the dead detector is fully gone — no wasted decode/FFT, no inert scaffolding
+    for _dead in ("_spectral_word_onset", "_detect_word_onsets", "_WORD_ONSET_LAST"):
+        assert not hasattr(_h, _dead) and f"def {_dead}" not in _src, f"{_dead} must be removed"
+    # the placement gate + its signed divergence + the prompt education must all exist
+    assert "_sfx_may_fire(_sound_style, _mf_words, _sfx_wi)" in _src, \
+        "the SFX placement must gate on _sfx_may_fire (else a sharp sound fires on a mid-phrase word)"
+    assert "sharp_attack_on_unmeasurable_onset" in _src, "the drop must sign a divergence"
+    assert "Attack vs. the word's onset — the beat must be landable" in _src, \
+        "Gemini must be TAUGHT to pick soft sounds for mid-phrase beats (educate, not only enforce)"
+    assert _h._SFX_SHARP_ATTACK_MS == 200
+    assert _h._SFX_ATTACK_MS["popsfx"] < 200 <= _h._SFX_ATTACK_MS["boom"], "the table splits sharp/soft at 200ms"
+    _dg = [{"start": 1.0, "end": 1.3, "word": "a"}, {"start": 1.6, "end": 1.9, "word": "easy"}]
+    # mid-phrase (no silence): sharp does NOT fire, soft DOES
+    _h._LEVEL_SILENCES_LAST[:] = []; _h._WITHIN_WORD_SILENCES_LAST[:] = []
+    assert _h._sfx_onset_measurable(_dg, 1) is False
+    assert _h._sfx_may_fire("popsfx", _dg, 1) is False, "sharp on mid-phrase must not fire"
+    assert _h._sfx_may_fire("boom", _dg, 1) is True, "soft swell fires anywhere"
+    # post-silence (a dB silence ends at 1.52 < the 1.6 start): sharp fires
+    _h._LEVEL_SILENCES_LAST[:] = [(1.2, 1.52)]
+    assert _h._sfx_onset_measurable(_dg, 1) is True
+    assert _h._sfx_may_fire("popsfx", _dg, 1) is True, "sharp fires on a measurable onset"
+    _h._LEVEL_SILENCES_LAST[:] = []
 
 
 @check("ITEM 3 WS2 caption fade-bound (Zac 2026-07-12): every fixed caption fade is capped at 25% of its on-screen window (shared/fadeTiming.boundedFade), the 5 fixed-duration styles wire it + faster bases, Gadzhi's fade resolves in the first quarter of its slide; the real node helper test passes")
