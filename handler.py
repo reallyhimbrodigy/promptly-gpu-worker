@@ -414,12 +414,22 @@ def _mg_reading_floor_s(content_words):
                _MG_READ_BASE_S + _MG_READ_PER_WORD_S * content_words)
 
 
-def _mg_clear_region_exists(mg_type, sw_s, ew_s, face_traj):
+def _mg_clear_region_exists(mg_type, sw_s, ew_s, face_traj, burned_bands=frozenset()):
     """F7 — does ANY anchor band clear the dense-face trajectory at this
     card's fitted size? Full-size classes are judged on band PAIRS (they
-    occupy more than one band). Fail-open (True) when face data is absent."""
+    occupy more than one band). Fail-open (True) when face data is absent.
+
+    W3: `burned_bands` (source_text_regions — bands the SOURCE's own text
+    occupies) are never candidates — the source's text owns them, exactly as
+    the teach says; a card with no un-burned clear band has no region."""
     try:
+        _burned = frozenset(burned_bands or ())
+        if len(_burned) >= 3:
+            return False        # every band burned — nothing is clear
         if not face_traj:
+            # fail-open on FACE data only; burned bands still bind below
+            # via the region filter when face data exists. With no face
+            # data at all, a fully-burned frame was caught above.
             return True
         _BANDS = {"top": (120.0, 640.0), "center": (640.0, 1280.0),
                   "bottom": (1280.0, 1800.0)}
@@ -439,9 +449,14 @@ def _mg_clear_region_exists(mg_type, sw_s, ew_s, face_traj):
             return cov / len(pts)
 
         if mg_type in _MG_FULLSIZE_TYPES:
-            regions = [(120.0, 1280.0), (640.0, 1800.0)]  # top+center · center+bottom
+            _pairs = {("top", "center"): (120.0, 1280.0),
+                      ("center", "bottom"): (640.0, 1800.0)}
+            regions = [_r for _bb, _r in _pairs.items()
+                       if not (set(_bb) & _burned)]
         else:
-            regions = list(_BANDS.values())
+            regions = [_r for _b, _r in _BANDS.items() if _b not in _burned]
+        if not regions:
+            return False
         return any(band_overlap(y0, y1, y1 - y0) <= _MG_FACE_CLEAR_THRESHOLD
                    for y0, y1 in regions)
     except Exception:
@@ -1101,6 +1116,13 @@ class PostCutPlan(BaseModel):
     # sampled moments — a watermark or a single title card is not a caption
     # track. Vertex omits the field when "none" (the schema default).
     existing_caption_region: Literal["none", "bottom", "top", "other"] = "none"
+    # W3 (Zac 2026-07-11): the plan DECLARES the source's burned-in text so
+    # the choice is auditable and the whys can cite it. Lean honest form:
+    # captions-burned is ALREADY declared by existing_caption_region (one
+    # source of truth); this field carries the NON-caption burned text —
+    # watermark, on-screen UI, existing overlays — as the bands they occupy.
+    # Omitted = the frame is clean (Vertex omits optionals).
+    source_text_regions: Optional[List[Literal["top", "center", "bottom"]]] = None
     # video_plan is the editorial scaffold Gemini fills BEFORE picking any
     # components. Forces moment-first reasoning: identify the dramatic shape
     # and the 2-4 strongest moments, then every component placed later
@@ -4106,6 +4128,8 @@ Emit the JSON in exactly this order, finishing each stage's reasoning before ope
 
 **Stage 0 — WHAT'S ALREADY ON THE FRAME.** Before judging anything else, look at the frame itself across several sampled moments: does the footage ALREADY show burned-in word captions — text that changes in sync with the speech? Report it in `existing_caption_region` ("bottom" / "top" / "other" — wherever the band sits; the exhibit class is white synced text mid-frame). A watermark or a single title card is not a caption track; synced dialogue text IS, even when it's small or center-frame. This is the first thing a human editor would notice, and everything downstream (caption layer, band placement) keys off it. When you report a region: caption_style becomes "none" (the video already has its caption layer), keyword emphasis lives in zooms and motion graphics, and the reported band is occupied space your layout respects.
 
+Some sources arrive already edited: burned-in captions, existing text overlays, a watermark. Read the frame for text that is already part of the picture. A source that already carries its own captions keeps them — the caption track takes none, and the video reads as one edit, not two. Screen regions the source already uses for text belong to the source: your overlays and graphics claim the clear regions. Beyond the caption band, report every band the source's own text occupies in `source_text_regions` ("top" / "center" / "bottom") — omit the field when the frame is clean.
+
 **Stage 1 — IDENTITY.** Decide what the video ISN'T before deciding what it is — run YOUR CUT PASS first, so every later judgment reads the footage that will actually render. Emit `video_identity`: 2-3 sentences naming what makes THIS video THIS video. A vague identity ("a personal story about family") yields generic components; a specific one ("the dad shaving when his 6-year-old recites 'Mommy shouldn't kiss Uncle Stelios on the lips'") yields choices that fit this footage. Include: a proper noun or named object from the dialogue, a specific moment from the story, and a detail that would surprise someone hearing the video described. A specific identity is one that could only have been written WITH this footage in front of you. (`existing_caption_region` was Stage 0 — carry that observation forward here.)
 
 **Stage 2 — VIDEO PLAN.** Emit `video_plan` IN FIELD ORDER: what_happens → hook_word_index → payoff_word_index → close_word_index → key_moments → story_shape → arc_segments → movements → editorial_vision. Each later field depends on the earlier ones — the movements fall out of the arc, and the editorial vision speaks to the movements.
@@ -4864,6 +4888,7 @@ Output is a bare JSON object — the response is JSON-parsed and the parser is t
 {{
   "video_identity": "<2-3 sentences: what makes this video specifically THIS video. Include a proper noun or named object from the dialogue, a specific moment from the story, and a detail that would surprise someone hearing it described. Phrase it as THIS video's specific identity — the concrete subject and stake; a genre-shaped phrasing ('a personal story about...') describes a thousand videos, and this field describes one.>",
   "existing_caption_region": "none" | "bottom" | "top" | "other",  ← "none" unless burned-in word captions are clearly visible as synced text across multiple sampled moments
+  "source_text_regions": ["top" | "center" | "bottom", ...],  ← bands the source's own NON-caption text occupies (watermark, UI, existing overlays); omit when the frame is clean
   "video_plan": {{
     "what_happens": "<1-2 sentences: literal narrative summary>",
     "hook_word_index": int,
@@ -11625,6 +11650,20 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                 )
                 edit_plan["caption_style"] = "none"
 
+            # W3: normalize the burned-text declaration + ledger it — the
+            # weekly table counts source_text_declared; F7 consumes the bands.
+            _str_raw = edit_plan.get("source_text_regions")
+            _str_bands = sorted({str(_b).strip().lower() for _b in _str_raw
+                                 if str(_b).strip().lower() in ("top", "center", "bottom")})                 if isinstance(_str_raw, list) else []
+            edit_plan["source_text_regions"] = _str_bands
+            if _ecr != "none" or _str_bands:
+                _record_divergence(
+                    "caption",
+                    {"captions_region": _ecr, "text_bands": _str_bands,
+                     "generation": "a1a2"},
+                    "source_text_declared",
+                    reason="source carries burned-in text — declared in-plan (W3)")
+
             # caption_keywords — required array of strings
             _ck_raw = edit_plan.get("caption_keywords")
             if not isinstance(_ck_raw, list):
@@ -11872,7 +11911,8 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                 # face-clear anchor at its fitted size cannot be placed.
                 # Fail-open when face data is absent (inside the helper).
                 if not _mg_clear_region_exists(
-                    _mg_type, _sw_start, _ew_end, _smoothed_trajectory
+                    _mg_type, _sw_start, _ew_end, _smoothed_trajectory,
+                    burned_bands=frozenset(edit_plan.get("source_text_regions") or ()),
                 ):
                     _mg_violations.append(
                         f"{_mg_type} at word {_sw}: no face-clear region exists for "

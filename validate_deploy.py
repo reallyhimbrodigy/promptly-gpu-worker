@@ -2790,7 +2790,7 @@ def _recipe_omittable_field_contract():
         # nothing" = cut every located silence (the dead-air default). Omission-safe.
         "PostCutPlan": {"cut_refinements", "existing_caption_region",
                         "generated_scenes", "notes",
-                        "preserved_silences"},
+                        "preserved_silences", "source_text_regions"},
         # B (Zac 2026-07-11): sound rides the beat — omission IS the default
         # ("most beats are carried by the voice"); the derivation .get()s it.
         "_EmphasisMoment": {"motion_graphic", "zoom_effect"},
@@ -5048,6 +5048,30 @@ def _w1_w2_tier1():
     _j = _src.index('if _needs_deshake:')
     _k = _src.index('_vf_parts.append(_normalize_vf)')
     assert _k < _src.index("vidstabtransform=input="), "normalize must precede transform"
+
+
+@check("W3 source-text awareness: the verbatim teach, the in-plan declaration, the source_text_declared ledger, F7 treats burned bands as never-clear")
+def _w3_source_text():
+    import handler as _h
+    _src = open("handler.py").read()
+    assert "Some sources arrive already edited: burned-in captions, existing text overlays, a watermark." in _src, \
+        "the W3 teach must be verbatim"
+    assert "source_text_regions" in _h.PostCutPlan.model_fields \
+        and not _h.PostCutPlan.model_fields["source_text_regions"].is_required(), \
+        "the declaration field must exist and be omittable (clean frame = omitted)"
+    assert '"source_text_declared"' in _src, "the declaration must ledger"
+    # behavioral: burned bands are never clear
+    _traj = [{"found": True, "t": 1.0, "cy": 960.0}]   # face mid-frame
+    assert _h._mg_clear_region_exists("StatCard", 0.5, 1.5, _traj), \
+        "with a mid-frame face, top or bottom clears (baseline)"
+    assert not _h._mg_clear_region_exists(
+        "StatCard", 0.5, 1.5, _traj, burned_bands={"top", "bottom"}), \
+        "burned top+bottom + face in center → NO clear region"
+    assert not _h._mg_clear_region_exists(
+        "StatCard", 0.5, 1.5, [], burned_bands={"top", "center", "bottom"}), \
+        "fully-burned frame → never clear, even without face data"
+    assert _h._mg_clear_region_exists("StatCard", 0.5, 1.5, [], burned_bands={"top"}), \
+        "no face data + partial burn → fail-open on the face axis"
 
 
 @check("DEGENERATION RESPONSE (L1/L2/L3/R1): declared caps ENFORCED at the parse edge (Vertex does not enforce maxLength); repetition signature fires the tail instrument on completed responses; degen retries bounded +2 and ledgered; the three TCO drops ledgered")
