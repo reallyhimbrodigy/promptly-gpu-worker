@@ -5197,10 +5197,12 @@ def build_analysis_from_gemini_recipe(edit_plan, duration):
     raw_frame_layout = edit_plan.get("frame_layout") or {}
     raw_existing = raw_frame_layout.get("existing_overlays") or {}
     raw_fq = edit_plan.get("footage_quality") or {}
-    has_burned_captions = infer_has_burned_captions(
-        edit_plan,
-        analysis_data={"frame_layout": {"existing_overlays": raw_existing}},
-    )
+    # measurement semantics (Zac ruling 2026-07-11): the RECIPE is not an
+    # analyzer — current plans never carry frame_layout (legacy-stripped),
+    # so passing it here was the vacuous-read class in miniature. The
+    # builder's inference derives from the plan's own honest signals
+    # (notes / caption_style-with-speech) inside infer_has_burned_captions.
+    has_burned_captions = infer_has_burned_captions(edit_plan, analysis_data=None)
 
     parsed = {
         "duration": duration,
@@ -13127,15 +13129,15 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                     flush=True,
                 )
 
-            # VACUOUS-READ LANDMINE (counted class, enumerated 2026-07-11):
-            # this OVERWRITES analysis_data with the PLAN-DERIVED dict —
-            # structurally complete but every value is a placeholder/echo,
-            # never a measurement. Consumers of REAL analyzer fields must
-            # read _pre_analysis/cached_analysis; a future reader of
-            # edit_plan["analysis_data"].frame_layout etc. gets placeholders
-            # silently. (In-file readers today: 18991 speech.segments —
-            # dead behind its primary; 26155 — dead assignment.)
-            edit_plan["analysis_data"] = analysis
+            # VACUOUS-READ LANDMINE — KILLED (Zac ruling 2026-07-11, by
+            # enumeration): the plan-derived dict no longer masquerades under
+            # a measurement name. Every reader of the key was vacuous or
+            # dead, and the persisted sibling result.analysis_data was
+            # feeding the ECHO back into the measurement channel
+            # (provided_analysis → _pre_analysis) on reinterpret — shadowing
+            # any real cached analysis. `analysis` stays span-local
+            # (duration + burned-caption inference); result.analysis_data
+            # now persists the REAL analyzer output or an honest None.
 
             # Floor telemetry (Part 3): the safe edit is the recipe FLOOR —
             # mark the plan so the terminal status write records it queryably.
@@ -18996,7 +18998,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     sfx_audio_labels = []
     sfx_timestamps = []
     _sfx_extra_idx = 0
-    _speech_segs = speech_segments or (edit_plan.get("analysis_data") or {}).get("speech", {}).get("segments") or []
+    # measurement semantics (Zac ruling 2026-07-11): no measurement is
+    # plumbed here — no render_multi_clip caller passes speech_segments, and
+    # the old analysis_data fallback read a plan echo whose segments were
+    # hardcoded []. Ducking is inactive BY CONSTRUCTION and says so, instead
+    # of pretending a source exists.
+    _speech_segs = speech_segments or []
 
     # ── Cut-partner re-anchor map ───────────────────────────────────────────
     # An SFX is anchored to its trigger WORD's start; a tight-cut overlay /
@@ -26160,7 +26167,8 @@ def handler(job):
         _timings["edit_recipe_faces"] = 0
         print(f"[pipeline] Pipeline init phase complete", flush=True)
 
-        analysis = edit_plan.get("analysis_data") or {}
+        # (dead plan-key analysis assignment removed with the overwrite
+        # kill — zero downstream readers, enumerated 2026-07-11.)
 
         # ── B-roll prefetch + verify ──────────────────────────────────────
         # Block here for fetches to complete and verify each downloaded asset
@@ -27024,7 +27032,9 @@ def handler(job):
             "thumbnail_timestamp": round(float(thumbnail_source_ts), 3),
             # ── Re-edit persistence fields ────────────────────────────────
             "transcript": transcript,
-            "analysis_data": edit_plan.get("analysis_data") or (_cached_analysis if isinstance(_cached_analysis, dict) else None),
+            # measurement semantics: REAL analyzer output or honest None —
+            # never the plan echo (the write died; see the landmine tombstone)
+            "analysis_data": _cached_analysis if isinstance(_cached_analysis, dict) else None,
             "resolved_broll": resolved_broll_out,
             "trend_snapshot": trend_used,
             "render_version": RENDER_VERSION,

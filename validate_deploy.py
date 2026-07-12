@@ -5075,9 +5075,15 @@ def _vacuous_read_guard():
     # MEASUREMENT absence semantics: present-but-fieldless is LOUD
     assert '"vacuous_measurement_read"' in _src, \
         "a present analyzer dict missing frame_layout must ledger, never default silently"
-    # the structural root is marked at its line
-    assert "VACUOUS-READ LANDMINE" in _src, \
-        "the analysis_data overwrite carries its knowledge line"
+    # the structural root is DEAD (Zac ruling: the overwrite dies) — the
+    # tombstone stays, the write does not, and no reader of the key survives
+    assert "VACUOUS-READ LANDMINE" in _src, "the tombstone carries the knowledge"
+    assert 'edit_plan["analysis_data"] = analysis' not in _src, \
+        "the plan-derived dict must never masquerade under a measurement name"
+    assert '"analysis_data": edit_plan.get("analysis_data")' not in _src, \
+        "the persisted sibling reads the REAL analyzer output or None — never the echo"
+    assert 'edit_plan.get("analysis_data")' not in _src, \
+        "no reader of the dead key survives (speech-ducking fallback included)"
 
 
 @check("W3 source-text awareness: the verbatim teach, the in-plan declaration, the source_text_declared ledger, F7 treats burned bands as never-clear")
