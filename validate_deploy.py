@@ -4899,6 +4899,37 @@ def _rhythm_beats():
         "sfx-off must strip the rider surfaces (the enforcement hole stays closed)"
 
 
+@check("ITEM 1 SFX HOLE-CLOSE (Zac 2026-07-12): the spectral-flux onset corrects MID-PHRASE words the silence pass can't see — bounded to the plausible Deepgram-late range so it only pulls EARLIER toward the true onset (never over-corrects), clamped to the prev-word tail; empty registry = the prior silence-only behavior")
+def _item1_sfx_hole_close():
+    import handler as _h
+    import numpy as _np
+    _src = open("handler.py").read()
+    assert "def _spectral_word_onset(" in _src and "def _detect_word_onsets(" in _src, \
+        "the spectral onset detector + pre-compute must exist"
+    assert "_detect_word_onsets(source_path, words)" in _src, \
+        "the pre-compute must run during analysis (detect_dead_air)"
+    _sr = 16000
+    def _tone(f, d):
+        _t = _np.arange(int(d * _sr)) / _sr
+        return (0.3 * _np.sin(2 * _np.pi * f * _t)).astype(_np.float32)
+    # MID-PHRASE boundary (freq change, NO energy dip) → spectral flux finds it
+    _x = _np.concatenate([_tone(200, 0.30), _tone(500, 0.40)])
+    _on = _h._spectral_word_onset(_x, _sr, 0.42, prev_end_s=0.0)
+    assert _on is not None and abs(_on - 0.30) <= 0.04, f"mid-phrase onset ~0.30 (got {_on})"
+    # steady sound (no attack) → no spurious correction
+    assert _h._spectral_word_onset(_tone(300, 0.60), _sr, 0.55, prev_end_s=0.0) is None, \
+        "steady sound must not produce a correction"
+    # the registry closes the hole in _audible_word_onset_s, clamped to prev tail
+    _h._WORD_ONSET_LAST.clear(); _h._LEVEL_SILENCES_LAST[:] = []; _h._WITHIN_WORD_SILENCES_LAST[:] = []
+    _dg = [{"start": 1.0, "end": 1.3, "word": "a"}, {"start": 1.52, "end": 1.9, "word": "b"}]
+    assert abs(_h._audible_word_onset_s(_dg, 1) - 1.52) < 1e-6, "hole present without registry"
+    _h._WORD_ONSET_LAST[1] = 1.41
+    assert abs(_h._audible_word_onset_s(_dg, 1) - 1.41) < 1e-6, "registry onset closes the hole"
+    _h._WORD_ONSET_LAST[1] = 1.10   # absurdly early
+    assert _h._audible_word_onset_s(_dg, 1) >= 1.3 - 0.08 - 1e-6, "clamped to prev-word tail"
+    _h._WORD_ONSET_LAST.clear()
+
+
 @check("D1 perceptual sync: ONE audible-onset derivation consumed by emphasis t + SFX + projected anchors; the projection reads the render_timeline arithmetic (frames cursor); D2 floors live")
 def _d1_perceptual_sync():
     import handler as _h
