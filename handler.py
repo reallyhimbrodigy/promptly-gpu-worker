@@ -15036,6 +15036,42 @@ _SFX_ATTACK_MS = {
     "money-ching": 551, "woosh-professional": 599, "wompwomp": 666, "imposter": 935,
 }
 
+# ── MG entrance-arrival table (WS1 peak-on-word, Zac 2026-07-12) ─────────────
+# Measured on the MGAttackProbe battery (src/remotion/measure_mg_attack.py):
+# hit = peak entrance velocity, settle = 90% of the entrance plateau. RULING
+# (Zac): use SETTLE for a simple pop (the whole thing arrives as one), and
+# CONTAINER-ARRIVAL = min(hit, settle) for a sequenced/count-up type (the frame
+# pops in fast while its content keeps building — land the container on the
+# beat, not the full count). fromFrame is shifted this many ms EARLIER so the MG
+# is SETTLED on its anchor word — the visual analog of the SFX peak-on-word.
+_MG_SEQUENCED = frozenset({  # content builds after the container arrives
+    "BarRace", "NumberTicker", "ProgressBar", "RankedList", "StatCard",
+    "Timeline", "TimelineRoadmap",
+})
+_MG_ATTACK_MS = {
+    # simple pops → settle
+    "AnnotationArrow": 267, "ChatThread": 167, "DropBanner": 217, "DropCard": 183,
+    "EditorialQuote": 483, "IMessageBubble": 50, "InstagramComment": 50,
+    "Notification": 167, "PillMarquee": 167, "PullQuote": 500, "RecordingFrame": 133,
+    "Reticle": 83, "SectionDivider": 167, "Stamp": 67, "StickyNotes": 150,
+    "StepDivider": 550, "TikTokComment": 50, "TweetBubble": 50,
+    # sequenced/count-up → container-arrival min(hit, settle)
+    "BarRace": 267, "NumberTicker": 200, "ProgressBar": 167, "RankedList": 533,
+    "StatCard": 83, "Timeline": 200, "TimelineRoadmap": 233,
+    # MouseDrag + PillCluster rendered blank in the battery (probe props wrong,
+    # not a production defect) — unmeasured; they take _MG_ATTACK_DEFAULT_MS.
+}
+_MG_ATTACK_DEFAULT_MS = 150   # median settle — unmeasured / unknown types
+
+
+def _mg_attack_frames(mg_type, fps):
+    """Frames the MG's entrance takes to ARRIVE (settle for pops; container-
+    arrival min(hit,settle) for sequenced types) — fromFrame is shifted this much
+    earlier so the MG lands settled ON the anchor word. Unknown/blank-prop types
+    fall back to the median settle."""
+    return int(round(_MG_ATTACK_MS.get(mg_type, _MG_ATTACK_DEFAULT_MS) / 1000.0 * float(fps or 30)))
+
+
 # RMS measurement cache — populated lazily, avoids re-measuring same file
 _SFX_RMS_CACHE = {}
 _SFX_TARGET_RMS = -18.0  # dBFS — reference level all SFX are normalized to
@@ -20086,7 +20122,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                     flush=True,
                 )
 
-        _from_frame = max(0, int(round(_out_start * source_fps)))
+        # WS1 peak-on-word: enter the MG its measured attack EARLIER so it lands
+        # SETTLED on the anchor word (was: start exactly on the anchor, so the
+        # entrance animation played AFTER the beat). The hold end (_to_frame) is
+        # unchanged — the window grows only at the front by the entrance time.
+        _mg_af = _mg_attack_frames(_mg.get("type"), source_fps)
+        _from_frame = max(0, int(round(_out_start * source_fps)) - _mg_af)
         _to_frame = min(total_output_frames, int(round(_out_end * source_fps)))
         if _to_frame <= _from_frame:
             # Window collapsed to zero output frames (anchor at the very tail of
@@ -20165,8 +20206,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # the speaker's face at this moment.
         if em["motion_graphic"]:
             _em_dur = float(em["duration"])
-            _mg_from_frame = max(0, _em_t_frame - int(round(_em_dur * source_fps * 0.25)))
-            _mg_dur_frames = int(round(_em_dur * source_fps))
+            # WS1 peak-on-word: enter the MG its MEASURED attack before the anchor
+            # so it arrives SETTLED on the beat (was a 0.25*duration GUESS), and
+            # hold the authored duration AFTER arrival (window grows by the pre-roll).
+            _em_af = _mg_attack_frames(em["motion_graphic"]["type"], source_fps)
+            _mg_from_frame = max(0, _em_t_frame - _em_af)
+            _mg_dur_frames = int(round(_em_dur * source_fps)) + (_em_t_frame - _mg_from_frame)
             # RULING (Zac 2026-07-09): authored anchor, never coerced (see MG site above).
             _em_mg_anchor = SEMANTIC_TO_MG_ANCHOR.get(em["motion_graphic"]["anchor"], "center")
             _em_mg_props = {**em["motion_graphic"]["props"], "anchor": _em_mg_anchor}

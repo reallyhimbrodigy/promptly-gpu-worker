@@ -4899,6 +4899,27 @@ def _rhythm_beats():
         "sfx-off must strip the rider surfaces (the enforcement hole stays closed)"
 
 
+@check("ITEM 2 MG entrance-arrival (Zac 2026-07-12): the measured MGAttackProbe attacks are wired into fromFrame (settle for pops, container-arrival min(hit,settle) for the 7 sequenced/count-up types) so an MG lands SETTLED on its anchor word — replacing the 0.25*duration guess; both placement sites shift fromFrame by _mg_attack_frames")
+def _item2_mg_attack_wiring():
+    import handler as _h
+    _src = open("handler.py").read()
+    # the table + helper exist and split pops (settle) from sequenced (min)
+    assert _h._MG_ATTACK_MS["BarRace"] == 267 and _h._MG_ATTACK_MS["NumberTicker"] == 200 \
+        and _h._MG_ATTACK_MS["StatCard"] == 83, "sequenced types carry container-arrival min(hit,settle)"
+    assert _h._MG_ATTACK_MS["IMessageBubble"] == 50 and _h._MG_ATTACK_MS["PullQuote"] == 500, \
+        "pop types carry settle"
+    assert _h._MG_SEQUENCED == frozenset({"BarRace", "NumberTicker", "ProgressBar", "RankedList",
+                                          "StatCard", "Timeline", "TimelineRoadmap"})
+    assert _h._mg_attack_frames("BarRace", 60) == 16 and _h._mg_attack_frames("MouseDrag", 60) == 9, \
+        "ms→frames at fps; unmeasured (MouseDrag/PillCluster) → default 150ms"
+    # BOTH placement sites shift fromFrame by the measured attack (the guess is gone)
+    assert "_from_frame = max(0, int(round(_out_start * source_fps)) - _mg_af)" in _src, \
+        "standalone MG must enter its attack earlier (settle on the anchor)"
+    assert "_mg_from_frame = max(0, _em_t_frame - _em_af)" in _src, \
+        "emphasis MG must use the measured attack, not the 0.25*duration guess"
+    assert "int(round(_em_dur * source_fps * 0.25))" not in _src, "the 0.25*duration guess must be gone"
+
+
 @check("SFX ATTACK-MATCHED-TO-MEASURABILITY (Zac 2026-07-12): per-word onset re-detection was measured inaccurate (54-64ms err > the lateness) and REMOVED; a sharp-attack sound fires only where the onset is measurable (a dB silence anchors it), a soft swell fires anywhere; the placement DROPS a sharp sound on a mid-phrase word and Gemini is taught to pick soft sounds there")
 def _sfx_measurability():
     import handler as _h
