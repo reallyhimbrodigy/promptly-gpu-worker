@@ -658,6 +658,95 @@ ZOOM_PEAK_REACH_MS = {
     "LetterboxPush":  490,   # 35% × 1400ms (ramp-in end)
     "DepthPull":      770,   # 35% × 2200ms (ramp-in end)
 }
+# ─── FINDING 3: the VISUAL REFRACTORY PERIOD (Zac 2026-07-12) ────────────────
+# Two hard visual moves landing within this window in OUTPUT time fight each
+# other and read as an accidental glitch ("right when a zoom happens, before you
+# can process it, another one happens"). After a hard move fires, the next needs
+# breathing room to read as intentional. This rebuilds the min-zoom-spacing that
+# was DELETED 2026-07-09 for BLUNT-dropping the @78 payoff push — but rank-based:
+# the higher arc-ranked beat keeps its zoom, the LOWER one downgrades (loses its
+# zoom, rides caption/sound). Structural + signed. Threshold is a single tunable
+# constant (Zac tunes by eye on the render). Belt: the prompt already teaches
+# "space peaks ≥2s in output time"; this is the suspenders — the floor enforced
+# after the plan so two hard moves can't stack BY CONSTRUCTION.
+_VISUAL_REFRACTORY_S = 2.0
+# Committed pushes (payoff/build register) outrank snaps (mid-peak) at equal
+# intensity — the deepest, slowest commit is the stronger beat.
+_ZOOM_COMMIT_TYPES = frozenset({"SmoothPush", "DepthPull", "LetterboxPush"})
+
+
+def _source_t_to_output_t(t, cuts):
+    """Project a SOURCE time to OUTPUT time across the kept clips (speed 1.0 by
+    doctrine) — a cut BETWEEN two beats tightens their output gap below their
+    source gap, which is exactly the spacing the viewer experiences. A t inside
+    a removed gap clamps to that gap's output edge."""
+    _acc = 0.0
+    for _c in (cuts or []):
+        _s = float(_c.get("source_start", 0.0)); _e = float(_c.get("source_end", 0.0))
+        if _e <= _s:
+            continue
+        if t < _s:
+            return _acc
+        if t <= _e:
+            return _acc + (t - _s)
+        _acc += (_e - _s)
+    return _acc
+
+
+def _zoom_refractory_rank(em):
+    """Arc rank for the refractory conflict: (intensity_weight, commit_weight).
+    Higher keeps its zoom; lower downgrades. Committed pushes outrank snaps."""
+    _i = str((em or {}).get("intensity") or "medium").strip().lower()
+    _iw = 2 if _i == "high" else 1
+    _zt = str((((em or {}).get("zoom_effect") or {}) or {}).get("type") or "")
+    return (_iw, 1 if _zt in _ZOOM_COMMIT_TYPES else 0)
+
+
+def _enforce_zoom_refractory(emphasis_moments, cuts, threshold_s):
+    """STRUCTURAL floor: no two zooms land within `threshold_s` in OUTPUT time.
+    Walks the zoom moments in output order; on a conflict the lower arc-ranked
+    beat DOWNGRADES (zoom_effect -> None, rides caption/sound), the higher keeps
+    its move. Mutates emphasis_moments in place; returns signed downgrade records
+    (also ledgered as visual_move_downgraded). Idempotent — a re-run sees the
+    already-resolved set and downgrades nothing more."""
+    _zooms = sorted(
+        ((em, _source_t_to_output_t(float(em.get("t") or 0.0), cuts))
+         for em in (emphasis_moments or [])
+         if isinstance(em, dict) and em.get("zoom_effect")),
+        key=lambda _p: _p[1])
+    _recs = []
+    _last = None  # (em, out_t) of the last KEPT hard move
+    for _em, _ot in _zooms:
+        if _last is not None and (_ot - _last[1]) < threshold_s:
+            _cur_rank = _zoom_refractory_rank(_em)
+            _last_rank = _zoom_refractory_rank(_last[0])
+            _gap = round(_ot - _last[1], 2)
+            if _cur_rank > _last_rank:
+                _loser, _lrank, _winner, _wrank = _last[0], _last_rank, _em, _cur_rank
+                _last = (_em, _ot)               # current becomes the kept move
+            else:
+                _loser, _lrank, _winner, _wrank = _em, _cur_rank, _last[0], _last_rank
+                # _last unchanged (the earlier, higher-or-equal beat holds)
+            _loser["zoom_effect"] = None         # DOWNGRADE — rides caption/sound
+            _rec = {"downgraded_word": str(_loser.get("word") or ""),
+                    "kept_word": str(_winner.get("word") or ""),
+                    "gap_s": _gap, "downgraded_rank": list(_lrank),
+                    "kept_rank": list(_wrank)}
+            _recs.append(_rec)
+            _record_divergence(
+                "visual_move",
+                {"downgraded": _rec["downgraded_word"], "kept": _rec["kept_word"],
+                 "gap_s": _gap, "threshold_s": threshold_s,
+                 "downgraded_rank": _rec["downgraded_rank"], "kept_rank": _rec["kept_rank"]},
+                "visual_move_downgraded",
+                reason=f"two hard visual moves {_gap}s apart (< {threshold_s}s refractory) "
+                       f"— lower-ranked '{_rec['downgraded_word']}' downgrades, "
+                       f"'{_rec['kept_word']}' keeps its zoom")
+        else:
+            _last = (_em, _ot)
+    return _recs
+
+
 _MG_TYPES = Literal[tuple(sorted(VALID_MG_TYPES))]
 _GENSCENE_BG_KINDS = Literal[tuple(sorted(VALID_GENSCENE_BACKGROUNDS))]
 _GENSCENE_ENTRANCES = Literal[tuple(sorted(VALID_GENSCENE_ENTRANCES))]
@@ -4194,7 +4283,7 @@ Some sources arrive already edited: burned-in captions, existing text overlays, 
   • **hook_word_index** — where the curiosity gap OPENS, not necessarily word 0. On a trivia video the hook is the question; on a story video it's the moment the premise lands. A hook grips — a claim, a stake, a reveal. "Hello, what's your name?" is exposition; the hook starts where the grip starts.
   • **payoff_word_index** — the single strongest moment. ONE peak only.
   • **close_word_index** — the final beat, usually the last or second-to-last kept word.
-  • **key_moments** — 3-5 true peaks for a typical 30s video; a flat even-energy stretch may have only 2-3 — the count follows the footage's real peaks, and a shorter honest list beats a padded one. Space peaks ≥2.0s apart in OUTPUT time — validation keeps only the higher-priority peak (payoff > mid_peak > other) of any pair landing within 2s, so the spacing you plan in this list is the spacing that survives. Each: word_index, what_lands, why_emphasis, what_i_saw, viewer_feeling. **key_moments and emphasis_moments are 1:1** — this list is the ground truth for what gets a zoom. To add a zoom, expand this list first; only zoom peaks you can justify here.
+  • **key_moments** — 3-5 true peaks for a typical 30s video; a flat even-energy stretch may have only 2-3 — the count follows the footage's real peaks, and a shorter honest list beats a padded one. Space peaks ≥2.0s apart in OUTPUT time — two hard visual moves landing closer than that FIGHT each other: the second lands before the eye has processed the first, and the pair reads as an accidental glitch rather than two directed beats. The refractory floor enforces this after the plan — of any two zooms within 2s, the higher arc-ranked beat (payoff > mid_peak > other) KEEPS its zoom and the lower one downgrades (it rides its caption and sound instead) — so the spacing you plan in this list is the spacing that survives, and a zoom you crowd against a stronger one is a zoom you spend for nothing. Each: word_index, what_lands, why_emphasis, what_i_saw, viewer_feeling. **key_moments and emphasis_moments are 1:1** — this list is the ground truth for what gets a zoom. To add a zoom, expand this list first; only zoom peaks you can justify here.
   • **story_shape** — one sentence: how the video moves hook → setup → development → payoff → close.
   • **arc_segments** — THE SPINE. Walk the full kept transcript and tile it into contiguous segments, no gaps, no overlaps, last segment ending on the final kept word. Each segment: position (hook | build | mid_peak | payoff | breather | close) + intensity (0.0-1.0). Component picks begin once this is complete — the committed arc is the frame every pick hangs on.
   • **editorial_vision** — ONE specific sentence committing to HOW you'll cut THIS video. ("I'm leaning into the absurdity with TwoTone captions, pop SFX on every receipt detail, and a slow LetterboxPush when he opens the bag.") Every component below flows from this sentence. The same sentence also names the LOOK the whole video shares — the one color world it lives in, read off the speaker's actual setting and register: a warm low-light confession, a bright clean product demo, a high-contrast hype cut. Once you've named that world, every layer below inherits it: the caption's emphasis color, the motion-graphic accents, and the B-roll's grade all belong to one palette, so the cut reads as a single designed piece rather than parts borrowed from different tools. One palette is not one texture. The movements still rise and fall, one dominant instrument still hands to the next — what holds steady across all of that is the visual FAMILY (the colors, the typographic voice); what moves is the intensity. The aim is one identity spoken LOUD in the hook and QUIET in the breather — the same world at different volumes — which is a different thing from the same look at the same level everywhere.
@@ -12441,14 +12530,20 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                 })
             emphasis_moments.sort(key=lambda x: x["t"])
 
-            # ── DELETED (Zac 2026-07-09): payoff-tail protection + min-zoom-spacing ──
-            # Both passes silently dropped Gemini emphases on timing overrules — the
-            # same mechanism, one block (mirrored the a95cfb2 transition safeguards).
-            # min-zoom-spacing's body: it ate the @78 SnapReframe 340ms before the
-            # payoff on Zac's own render (job 7013697d, [emphasis] DROP SnapReframe
-            # on word 78). The per-clip event budget taught in the prompt is the real
-            # physics; every emphasis Gemini emits now renders. Two of the 27
-            # overrules die here (drop_post_payoff, drop_too_close/min_zoom_spacing).
+            # ── FINDING 3 (Zac 2026-07-12): the VISUAL REFRACTORY PERIOD ──────────
+            # Rebuilds the min-zoom-spacing DELETED 2026-07-09 — but rank-based, so
+            # it fixes the reason it was deleted. The old blunt pass DROPPED the @78
+            # payoff push (the STRONGER beat) because it fired near another zoom;
+            # this keeps the higher arc-ranked beat and downgrades the LOWER one
+            # (loses its zoom, rides caption/sound), in OUTPUT time, signed. The
+            # payoff-tail protection stays deleted (that was a different overrule).
+            _refractory_recs = _enforce_zoom_refractory(
+                emphasis_moments, validated_cuts, _VISUAL_REFRACTORY_S)
+            if _refractory_recs:
+                print(f"[refractory] {len(_refractory_recs)} zoom(s) downgraded for "
+                      f"visual spacing (<{_VISUAL_REFRACTORY_S}s): "
+                      f"{[(r['downgraded_word'], r['gap_s']) for r in _refractory_recs][:6]}",
+                      flush=True)
 
             # ── PRE-PASS: split clips at zoom-type boundaries ─────────────────────
             # Multiple emphasis_moments can target the same clip; the Remotion

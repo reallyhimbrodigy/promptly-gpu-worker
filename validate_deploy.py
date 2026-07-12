@@ -5550,6 +5550,43 @@ def _ws1_sfx_attack_table():
         "the zoom peak-reach is the sibling derivation (one class)"
 
 
+@check("FINDING 3 VISUAL REFRACTORY (Zac 2026-07-12): two zooms within 2.0s of OUTPUT time can't stack — the lower arc-ranked beat downgrades (rides caption/sound), the higher keeps its zoom; rank-based (fixes the blunt min-zoom-spacing deleted 2026-07-09); output-time-driven; signed + idempotent; wired + Gemini-taught")
+def _finding3_visual_refractory():
+    import handler as _h
+    _src = open("handler.py").read()
+    assert abs(_h._VISUAL_REFRACTORY_S - 2.0) < 1e-9, "threshold must be the tunable 2.0s constant"
+    # output-time projection: a cut between beats tightens their output gap
+    _cuts = [{"source_start": 0.0, "source_end": 9.0}, {"source_start": 13.0, "source_end": 20.0}]
+    assert abs(_h._source_t_to_output_t(15.0, _cuts) - 11.0) < 1e-6, "output time must subtract removed spans"
+    # rank: committed push > snap at equal intensity; high > medium
+    _snap = {"intensity": "high", "zoom_effect": {"type": "SnapReframe"}}
+    _push = {"intensity": "high", "zoom_effect": {"type": "SmoothPush"}}
+    _med = {"intensity": "medium", "zoom_effect": {"type": "SmoothPush"}}
+    assert _h._zoom_refractory_rank(_push) > _h._zoom_refractory_rank(_snap) > _h._zoom_refractory_rank(_med), \
+        "rank must be (intensity, commit): push>snap, high>medium"
+    # THE GLITCH: @74 snap + @78 payoff-push ~0.9s apart → the SNAP downgrades, the PUSH keeps
+    _ems = [{"t": 17.4, "word": "w74", "intensity": "high", "zoom_effect": {"type": "SnapReframe"}},
+            {"t": 18.3, "word": "w78", "intensity": "high", "zoom_effect": {"type": "SmoothPush"}}]
+    _flat = [{"source_start": 0.0, "source_end": 30.0}]
+    _recs = _h._enforce_zoom_refractory(_ems, _flat, _h._VISUAL_REFRACTORY_S)
+    assert _ems[0]["zoom_effect"] is None and _ems[1]["zoom_effect"] is not None, \
+        "the lower-ranked snap downgrades; the payoff push keeps its zoom (NOT the old blunt drop of the stronger beat)"
+    assert len(_recs) == 1 and _recs[0]["downgraded_word"] == "w74" and _recs[0]["kept_word"] == "w78" \
+        and "gap_s" in _recs[0] and "downgraded_rank" in _recs[0], \
+        "the downgrade is signed with the two beats' ranks + the spacing"
+    # well-spaced beats keep both; idempotent
+    _ok = [{"t": 5.0, "word": "a", "intensity": "high", "zoom_effect": {"type": "SnapReframe"}},
+           {"t": 9.0, "word": "b", "intensity": "high", "zoom_effect": {"type": "SmoothPush"}}]
+    assert _h._enforce_zoom_refractory(_ok, _flat, _h._VISUAL_REFRACTORY_S) == [] \
+        and _ok[0]["zoom_effect"] and _ok[1]["zoom_effect"], "≥2s apart → no downgrade"
+    assert _h._enforce_zoom_refractory(_ems, _flat, _h._VISUAL_REFRACTORY_S) == [], "idempotent on a resolved set"
+    # WIRED after the emphasis sort, and the Gemini belt teaches the why
+    assert "_enforce_zoom_refractory(\n                emphasis_moments, validated_cuts" in _src, \
+        "the refractory must run on emphasis_moments in the plan"
+    assert "two hard visual moves landing closer than that FIGHT each other" in _src, \
+        "the prompt must teach the spacing intent (belt)"
+
+
 @check("NO-ADJUSTMENT ruling: SFX word is the ONE anchor (reanchor pass deleted); MG anchors authored, never coerced")
 def _no_adjustment_ruling():
     _src = open("handler.py").read()
