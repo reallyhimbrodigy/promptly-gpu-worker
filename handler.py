@@ -22470,6 +22470,25 @@ def _clip_cap_minutes_label():
     return "%g" % round(_MAX_SOURCE_DURATION_S / 60.0, 2)
 
 
+def _log_intake_reject(reason, source_s, cap_s=None):
+    """The ONE intake-rejection measurement (Zac ruling 2026-07-11, 120s cap:
+    make-it-honest + MEASURE-it). Emits a grep-stable [divergence] line AND a
+    structured _DIVERGENCE_LOG entry (flushed to S3 per job) so the count of
+    real uploads a named intake boundary turns away is QUERYABLE at scale —
+    the weekly-table data for whether the 2-minute limit should rise. Carries
+    the reason + the MEASURED source length. Best-effort: never raises into the
+    reject (a measurement must not kill an honest rejection)."""
+    try:
+        _payload = {"reason": str(reason),
+                    "source_s": round(float(source_s or 0.0), 1)}
+        if cap_s is not None:
+            _payload["cap_s"] = float(cap_s)
+        _record_divergence("intake", _payload, "intake_rejected", reason=str(reason))
+    except Exception as _ir_err:
+        print(f"[intake-reject] measurement failed ({type(_ir_err).__name__}) "
+              f"— reject proceeds", flush=True)
+
+
 def classify_error(e):
     """
     Convert a pipeline exception into structured error data for the iOS app.
@@ -24740,6 +24759,9 @@ def handler(job):
         # message is wrong for that case; reconcile the copy before
         # flag-on (ledgered in prefreeze_ships.md).
         if mode == "full" and source_duration > _MAX_SOURCE_DURATION_S:
+            # MEASURE before the reject: the weekly table counts how many real
+            # uploads the 2-minute limit turns away (Zac ruling 2026-07-11).
+            _log_intake_reject("CLIP_TOO_LONG", source_duration, _MAX_SOURCE_DURATION_S)
             raise RuntimeError(
                 f"CLIP_TOO_LONG: source is {source_duration:.1f}s; the intake cap "
                 f"is {_MAX_SOURCE_DURATION_S:.0f}s (boundary-probed editorial-path limit)."

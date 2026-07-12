@@ -4270,6 +4270,39 @@ def _compilation_copy():
     assert "CLIP_TOO_LONG" in handler._DESIGNED_REJECTION_CODES
 
 
+@check("120s cap MEASURE-IT (Zac 2026-07-11): every intake reject emits a grep-stable + S3-ledgered intake_rejected event (reason + measured source length) so the weekly table counts uploads the 2-min limit turns away; wired BEFORE the raise")
+def _intake_reject_measured():
+    import handler
+    import contextlib as _ctx
+    import io as _io
+    # the measurement emits reason + measured length + cap on a grep-stable line
+    _buf = _io.StringIO()
+    with _ctx.redirect_stdout(_buf):
+        handler._log_intake_reject("CLIP_TOO_LONG", 149.9, 120.0)
+    _out = _buf.getvalue()
+    assert "action=intake_rejected" in _out and "component=intake" in _out, _out
+    assert "reason=CLIP_TOO_LONG" in _out and "149.9" in _out and "120" in _out, _out
+    # and lands a structured S3-ledger entry (the weekly-table source at scale)
+    _before = len(handler._DIVERGENCE_LOG)
+    with _ctx.redirect_stdout(_io.StringIO()):
+        handler._log_intake_reject("CLIP_TOO_LONG", 200.0, 120.0)
+    assert len(handler._DIVERGENCE_LOG) == _before + 1, "measurement must ledger"
+    _last = handler._DIVERGENCE_LOG[-1]
+    assert _last.get("component") == "intake" and _last.get("action") == "intake_rejected" \
+        and (_last.get("original") or {}).get("source_s") == 200.0, _last
+    # never raises into the reject (fail-open on odd input)
+    with _ctx.redirect_stdout(_io.StringIO()):
+        handler._log_intake_reject("CLIP_TOO_LONG", None, None)
+    # WIRED at the 120s reject site, and the measurement PRECEDES the raise
+    _src = open("handler.py").read()
+    _seam = _src.split('if mode == "full" and source_duration > _MAX_SOURCE_DURATION_S:', 1)
+    assert len(_seam) == 2, "the 120s cap guard must be present"
+    _w = _seam[1][:400]
+    assert "_log_intake_reject(" in _w and "raise RuntimeError" in _w \
+        and _w.index("_log_intake_reject(") < _w.index("raise RuntimeError"), \
+        "measure THEN reject — the count is taken before the raise"
+
+
 @check("unification Slice 2: frame-domain truth CUT OVER — total/body/slots read from RenderTimeline, duplicates deleted")
 def _timeline_slice2_cutover():
     _src = open("handler.py").read()
