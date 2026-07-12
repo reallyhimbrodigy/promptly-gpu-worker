@@ -13619,6 +13619,94 @@ def _scope_entry_anchor_indices(entry):
     return idxs
 
 
+# ─── ITEM 2: the src↔kept SHAPE BRIDGE — the precise re-anchor Part 3 deferred ─
+# When a re-edit CHANGES cuts, an out-of-scope word-anchored layer is RE-ANCHORED
+# to the nearest surviving SOURCE word (content byte-identical, only the anchor
+# POSITION follows the cuts) instead of orphan-dropped. This generalizes the
+# broll inward-snap (handler.py ~11648: start snaps forward, end snaps backward,
+# drop only if the whole range is gone) to every word-anchored component. All
+# plan anchors are in SOURCE-index space post-translation; re-anchored anchors
+# land on kept words, so they survive the downstream drop validators (§5A/§5C)
+# by construction. Idempotent: an already-surviving anchor is unchanged.
+def _snap_forward(idx, kept_sorted):
+    """First surviving source index >= idx (a survivor snaps to itself); None if
+    nothing survives at or after idx."""
+    import bisect as _bisect
+    if not kept_sorted:
+        return None
+    _p = _bisect.bisect_left(kept_sorted, idx)
+    return kept_sorted[_p] if _p < len(kept_sorted) else None
+
+
+def _snap_backward(idx, kept_sorted):
+    """Last surviving source index <= idx (a survivor snaps to itself); None if
+    nothing survives at or before idx."""
+    import bisect as _bisect
+    if not kept_sorted:
+        return None
+    _p = _bisect.bisect_right(kept_sorted, idx)
+    return kept_sorted[_p - 1] if _p > 0 else None
+
+
+def _nearest_survivor(idx, kept_sorted):
+    """Nearest surviving source index to idx (forward-first on a tie)."""
+    _f = _snap_forward(idx, kept_sorted)
+    _b = _snap_backward(idx, kept_sorted)
+    if _f is None:
+        return _b
+    if _b is None:
+        return _f
+    return _f if (_f - idx) <= (idx - _b) else _b
+
+
+def _reanchor_entry_to_survivors(entry, kept_sorted):
+    """Re-anchor an out-of-scope word-anchored entry to the nearest surviving
+    SOURCE word after a cut change — CONTENT byte-identical, only the anchor
+    position follows the cuts. Range anchors (start+end) snap inward (start
+    forward, end backward — broll's proven pattern); a lone point anchor
+    (word_index / after_word_index / _word_idx / lone start|end) snaps to the
+    nearest survivor; a word_indices list snaps each member. Returns a
+    re-anchored COPY, or None ONLY when the entry is truly unanchorable (its
+    whole span is gone) — the single case a drop is still correct. Never mutates
+    the input. Idempotent: an already-surviving anchor is unchanged."""
+    if not isinstance(entry, dict) or not kept_sorted:
+        return entry
+    _e = dict(entry)
+    _has_start = isinstance(_e.get("start_word_index"), int) and not isinstance(_e.get("start_word_index"), bool)
+    _has_end = isinstance(_e.get("end_word_index"), int) and not isinstance(_e.get("end_word_index"), bool)
+    if _has_start and _has_end:
+        _s = _snap_forward(_e["start_word_index"], kept_sorted)
+        _t = _snap_backward(_e["end_word_index"], kept_sorted)
+        if _s is None or _t is None or _s > _t:
+            return None   # whole range gone → the one correct drop
+        _e["start_word_index"] = _s
+        _e["end_word_index"] = _t
+    else:
+        for _k in ("word_index", "after_word_index", "_word_idx",
+                   "start_word_index", "end_word_index"):
+            _v = _e.get(_k)
+            if isinstance(_v, int) and not isinstance(_v, bool):
+                _n = _nearest_survivor(_v, kept_sorted)
+                if _n is None:
+                    return None
+                _e[_k] = _n
+    _wis = _e.get("word_indices")
+    if isinstance(_wis, list) and _wis:
+        _new = []
+        for _wi in _wis:
+            if isinstance(_wi, int) and not isinstance(_wi, bool):
+                _n = _nearest_survivor(_wi, kept_sorted)
+                if _n is not None:
+                    _new.append(_n)
+            else:
+                _new.append(_wi)
+        _new = list(dict.fromkeys(_new))   # dedupe, preserve order
+        if not _new:
+            return None
+        _e["word_indices"] = _new
+    return _e
+
+
 def _scoped_copy_out_of_scope(new_plan, prior_plan, layers_in_scope, dg_words):
     """Overwrite every OUT-OF-SCOPE field of new_plan with prior_plan's value
     verbatim (byte-identical by construction); when the in-scope re-author
@@ -13655,23 +13743,40 @@ def _scoped_copy_out_of_scope(new_plan, prior_plan, layers_in_scope, dg_words):
             del new_plan[_f]
             _applied.append(("drop_added", _f))
 
-    # ── cut-dependency: re-derive out-of-scope word-anchored layers ─────────
+    # ── cut-dependency: RE-ANCHOR out-of-scope word-anchored layers (ITEM 2 ──
+    # shape bridge). When the in-scope re-author touched cuts, an out-of-scope
+    # entry whose anchor word the new cuts remove is re-anchored to the nearest
+    # surviving source word — content byte-identical, only position follows the
+    # cuts — NOT dropped when a survivor exists (drop only when the whole span
+    # is gone). Re-anchored anchors land on kept words, so they survive the
+    # downstream drop validators by construction. Idempotent.
     if "cuts" in scope:
         _removed = _remove_words_to_src_indices(
             new_plan.get("remove_words") or [], dg_words or [])
         if _removed:
+            _n_src = len(dg_words or [])
+            _kept_sorted = [_i for _i in range(_n_src) if _i not in _removed]
             for _f in _SCOPE_WORD_ANCHORED_LISTS:
                 if _f in _in_scope_fields:
                     continue   # in-scope layer already authored vs the new cuts
                 _lst = new_plan.get(_f)
                 if not isinstance(_lst, list):
                     continue
-                _kept = [_e for _e in _lst
-                         if not (_scope_entry_anchor_indices(_e) & _removed)]
-                if len(_kept) != len(_lst):
+                _out, _n_reanchored, _n_dropped = [], 0, 0
+                for _e in _lst:
+                    if not (_scope_entry_anchor_indices(_e) & _removed):
+                        _out.append(_e)                 # anchors survive → byte-identical
+                        continue
+                    _ra = _reanchor_entry_to_survivors(_e, _kept_sorted)
+                    if _ra is not None:
+                        _out.append(_ra)                # re-anchored, content preserved
+                        _n_reanchored += 1
+                    else:
+                        _n_dropped += 1                 # whole span gone → drop
+                if _n_reanchored or _n_dropped:
                     _applied.append(
-                        ("rederive_drop", f"{_f}:{len(_lst) - len(_kept)}"))
-                    new_plan[_f] = _kept
+                        ("reanchor", f"{_f}:+{_n_reanchored}/-{_n_dropped}"))
+                    new_plan[_f] = _out
 
     print(f"[scoped-copy] guided_redraft: in_scope={sorted(scope)} "
           f"{len(_applied)} action(s) {[a[0] for a in _applied][:8]}", flush=True)

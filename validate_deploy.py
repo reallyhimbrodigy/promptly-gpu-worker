@@ -5150,7 +5150,7 @@ def _tier3b_one_plan_contract():
         "the re-edit validation is idempotent (a re-run is a fixed point)"
 
 
-@check("TIER-3b PART 3 SCOPED-COPY: guided_redraft re-authors ONLY in-scope layers — out-of-scope layers are byte-identical to the prior plan; a cut-touching redraft RE-DERIVES (orphan-drops) out-of-scope word-anchored layers instead of corrupting them by verbatim copy; the merged plan runs the one-plan contract")
+@check("TIER-3b PART 3 + ITEM 2 SHAPE BRIDGE: guided_redraft re-authors ONLY in-scope layers — out-of-scope layers byte-identical; a cut-touching redraft RE-ANCHORS out-of-scope word-anchored layers to the nearest surviving word (content byte-identical, position follows cuts; drop ONLY when the whole span is gone), never corrupting by verbatim copy; the merged plan runs the one-plan contract")
 def _tier3b_part3_scoped_copy():
     import handler as _h
     import copy as _cp
@@ -5208,13 +5208,21 @@ def _tier3b_part3_scoped_copy():
         "out-of-scope broll + cuts byte-identical (cuts not in scope)"
     assert _r["pacing"] == "slow", "out-of-scope pacing byte-identical to prior"
 
-    # (b) CUT-TOUCHING redraft: new cut removes word 10 → orphan-drop, never copy
+    # (b) CUT-TOUCHING redraft: new cut removes word 10 → RE-ANCHOR to the
+    # nearest survivor (content byte-identical, position follows cuts), NOT drop.
     _r2 = _cp.deepcopy(_new); _r2["remove_words"] = [{"word_index": 10}]
     _h._scoped_copy_out_of_scope(_r2, _prior, ["emphasis", "cuts"], _DG)
     assert _r2["remove_words"] == [{"word_index": 10}], "cuts in scope → the redraft's cuts are kept"
-    _tags = sorted(m.get("tag") for m in _r2["motion_graphics"])
-    assert _tags == ["at20"], f"the MG anchored at removed word 10 drops; the survivor stays (got {_tags})"
-    assert _r2["broll_clips"] == [], "the broll whose endpoint word 10 is cut drops (never a stale copy)"
+    def _tag(_lst, _t): return next((x for x in _lst if x.get("tag") == _t), None)
+    _at10 = _tag(_r2["motion_graphics"], "at10")
+    assert _at10 is not None and _at10["start_word_index"] == 11 and _at10["end_word_index"] == 12 \
+        and _at10["props"] == {"v": 1}, \
+        f"the MG anchored at removed word 10 RE-ANCHORS (start→11), content preserved (got {_at10})"
+    assert _tag(_r2["motion_graphics"], "at20") == _prior["motion_graphics"][1], \
+        "the survivor MG is byte-identical"
+    _b10 = _tag(_r2["broll_clips"], "b10")
+    assert _b10 is not None and _b10["start_word_index"] == 11 and _b10["end_word_index"] == 13, \
+        f"the broll whose start word 10 is cut RE-ANCHORS (start→11), never dropped (got {_b10})"
     assert _r2["text_overlays"] == _prior["text_overlays"], "word 14 survives → its overlay byte-identical"
 
     def _anch(_e):
@@ -5227,13 +5235,25 @@ def _tier3b_part3_scoped_copy():
     assert all(10 not in _anch(_e) for _e in _surv), \
         "the corruption guard: NO surviving out-of-scope entry may anchor to a removed word"
 
-    # (c) pacing ⇒ cuts: pacing in scope keeps the redraft's cuts AND re-derives
+    # the ONE correct drop: an entry whose WHOLE span is the cut word
+    _prior_gone = _cp.deepcopy(_prior)
+    _prior_gone["motion_graphics"] = _prior["motion_graphics"] + \
+        [{"type": "Stamp", "start_word_index": 10, "end_word_index": 10, "props": {}, "tag": "gone"}]
+    _r2c = _cp.deepcopy(_new); _r2c["remove_words"] = [{"word_index": 10}]
+    _h._scoped_copy_out_of_scope(_r2c, _prior_gone, ["emphasis", "cuts"], _DG)
+    assert _tag(_r2c["motion_graphics"], "gone") is None, \
+        "an entry whose whole span is the cut word is dropped (the one correct drop)"
+    assert _tag(_r2c["motion_graphics"], "at10") is not None, \
+        "the re-anchorable entry still survives alongside the dropped one"
+
+    # (c) pacing ⇒ cuts: pacing in scope keeps the redraft's cuts AND re-anchors
     _r3 = _cp.deepcopy(_new); _r3["remove_words"] = [{"word_index": 10}]
     _h._scoped_copy_out_of_scope(_r3, _prior, ["pacing"], _DG)
     assert _r3["pacing"] == "fast" and _r3["remove_words"] == [{"word_index": 10}], \
         "pacing in scope keeps the redraft's pacing + cuts"
-    assert sorted(m.get("tag") for m in _r3["motion_graphics"]) == ["at20"], \
-        "pacing⇒cuts triggers the same orphan-drop on out-of-scope word-anchored layers"
+    _at10_c = _tag(_r3["motion_graphics"], "at10")
+    assert _at10_c is not None and _at10_c["start_word_index"] == 11, \
+        "pacing⇒cuts triggers the same re-anchor on out-of-scope word-anchored layers"
 
     # (d) idempotence: derive(derive(plan)) == derive(plan)
     _x = _cp.deepcopy(_new); _x["remove_words"] = [{"word_index": 10}]

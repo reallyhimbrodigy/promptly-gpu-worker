@@ -128,10 +128,13 @@ check("caption_style oos == prior", res["caption_style"] == P["caption_style"])
 # ─── C. CUT TOUCH → out-of-scope word-anchored layers re-derived, not copied ──
 print("\n=== C. scope=[emphasis,cuts], new cut removes word 10 → orphan-drop ===")
 P = prior_plan()
-# prior carries out-of-scope entries at word 10 (will be orphaned) AND survivors
+# prior carries out-of-scope entries anchored at word 10 (RE-ANCHORED, not
+# dropped, since a survivor exists) AND survivors untouched.
 P["motion_graphics"] = [
     {"type": "StatCard", "start_word_index": 10, "end_word_index": 12, "props": {"v": 1}, "tag": "mg_at_10"},
     {"type": "LowerThird", "start_word_index": 20, "end_word_index": 22, "props": {"v": 2}, "tag": "mg_at_20"},
+    # a StatCard whose WHOLE span is a single cut word → the one correct drop
+    {"type": "StatCard", "start_word_index": 10, "end_word_index": 10, "props": {"v": 9}, "tag": "mg_gone"},
 ]
 P["broll_clips"] = [
     {"start_word_index": 10, "end_word_index": 13, "tag": "broll_at_10"},
@@ -151,22 +154,35 @@ N["remove_words"] = [{"word_index": 10, "reason": "weak take"}]   # cuts in scop
 res = copy.deepcopy(N)
 applied = H._scoped_copy_out_of_scope(res, P, ["emphasis", "cuts"], DG)
 
+def _by_tag(lst, tag):
+    return next((x for x in lst if x.get("tag") == tag), None)
+
 check("cuts in scope: remove_words == redraft", res["remove_words"] == N["remove_words"])
 check("emphasis in scope: == redraft", res["emphasis_moments"] == N["emphasis_moments"])
-# orphaned entries (anchor word 10 removed) dropped
-check("mg_at_10 dropped (anchor word cut)",
-      [m for m in res["motion_graphics"] if m.get("tag") == "mg_at_10"] == [])
-check("mg_at_20 preserved (anchor survives)",
-      [m for m in res["motion_graphics"] if m.get("tag") == "mg_at_20"] != [])
-check("broll_at_10 dropped (endpoint cut)",
-      [b for b in res["broll_clips"] if b.get("tag") == "broll_at_10"] == [])
-check("broll_at_30 preserved", [b for b in res["broll_clips"] if b.get("tag") == "broll_at_30"] != [])
-check("cpc_10 dropped", [c for c in res["caption_position_changes"] if c.get("tag") == "cpc_10"] == [])
-check("cpc_5 preserved", [c for c in res["caption_position_changes"] if c.get("tag") == "cpc_5"] != [])
+# RE-ANCHORED (not dropped): anchor word 10 cut → start snaps forward to 11,
+# end (12, a survivor) unchanged, CONTENT byte-identical.
+_mg10 = _by_tag(res["motion_graphics"], "mg_at_10")
+check("mg_at_10 RE-ANCHORED not dropped (start 10→11, content preserved)",
+      _mg10 is not None and _mg10["start_word_index"] == 11 and _mg10["end_word_index"] == 12
+      and _mg10["props"] == {"v": 1} and _mg10["type"] == "StatCard", _mg10)
+check("mg_at_20 byte-identical (anchors survive)", _by_tag(res["motion_graphics"], "mg_at_20") == P["motion_graphics"][1])
+# the ONE correct drop: whole span is the cut word
+check("mg_gone dropped (whole span is the cut word — no survivor)",
+      _by_tag(res["motion_graphics"], "mg_gone") is None)
+# broll endpoint cut → start snaps forward, content preserved, NOT dropped
+_b10 = _by_tag(res["broll_clips"], "broll_at_10")
+check("broll_at_10 RE-ANCHORED (start 10→11), not dropped",
+      _b10 is not None and _b10["start_word_index"] == 11 and _b10["end_word_index"] == 13)
+check("broll_at_30 byte-identical", _by_tag(res["broll_clips"], "broll_at_30") == P["broll_clips"][1])
+# caption position change point-anchored at the cut word → re-anchored to 11
+_c10 = _by_tag(res["caption_position_changes"], "cpc_10")
+check("cpc_10 RE-ANCHORED (word 10→11), position preserved",
+      _c10 is not None and _c10["word_index"] == 11 and _c10["position"] == "top")
+check("cpc_5 byte-identical", _by_tag(res["caption_position_changes"], "cpc_5") == P["caption_position_changes"][1])
 # survivors whose words are NOT cut stay byte-identical to prior
-check("text_overlays preserved (word 14 survives)", res["text_overlays"] == P["text_overlays"])
-check("transitions preserved (word 6 survives)", res["transitions"] == P["transitions"])
-check("sound_effects preserved (word 9 survives, oos)", res["sound_effects"] == P["sound_effects"])
+check("text_overlays byte-identical (word 14 survives)", res["text_overlays"] == P["text_overlays"])
+check("transitions byte-identical (word 6 survives)", res["transitions"] == P["transitions"])
+check("sound_effects byte-identical (word 9 survives, oos)", res["sound_effects"] == P["sound_effects"])
 
 # THE CORRUPTION GUARD: no surviving out-of-scope entry anchors to a removed word
 R = {10}
@@ -182,7 +198,7 @@ def _anchors(entry):
     return idxs
 survivors = (res["motion_graphics"] + res["broll_clips"] + res["caption_position_changes"]
              + res["text_overlays"] + res["transitions"] + res["sound_effects"])
-check("NO surviving oos entry anchors to a removed word",
+check("NO surviving oos entry anchors to a removed word (all re-anchored to survivors)",
       all(not (_anchors(e) & R) for e in survivors),
       [e for e in survivors if _anchors(e) & R])
 
