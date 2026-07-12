@@ -2686,6 +2686,34 @@ def calculate_reframe_crop(face_positions, source_w, source_h, target_w=1080, ta
 
     return crops
 
+def _is_plan_echo_analysis(a):
+    """POISONED WELL (Zac rider 2026-07-11): historical result.analysis_data
+    rows persisted the PLAN-DERIVED echo (the overwrite, killed 2eb7196) —
+    a re-edit replaying one reopens the laundering loop from storage. This
+    is the echo's CANNED COMPOUND SIGNATURE from
+    build_analysis_from_gemini_recipe — matched whole, so a real analysis
+    (an external producer with actual speech/shots/audio content) can
+    never trip it. NOTE (fingerprint correction, reported): frame_layout
+    presence does NOT discriminate — the echo structurally carries an
+    all-defaults frame_layout; the canned tuple below is the honest test.
+    Convicted in production: 8004e7e6's stored analysis_data matches this
+    signature exactly (single 'Full video' shot + has_speech False on a
+    talking video)."""
+    try:
+        if not isinstance(a, dict):
+            return False
+        _sp = a.get("speech") or {}
+        _sh = a.get("shots") or []
+        return (a.get("audio") == {"speech_source": "none"}
+                and _sp.get("has_speech") is False
+                and (_sp.get("segments") or []) == []
+                and len(_sh) == 1
+                and str(_sh[0].get("description") or "") == "Full video"
+                and (a.get("metadata") or {}) == {})
+    except Exception:
+        return False
+
+
 def normalize_analysis(parsed):
     if not parsed.get("speech"):
         parsed["speech"] = {"has_speech": False, "segments": [], "sentence_boundaries": []}
@@ -23765,6 +23793,19 @@ def handler(job):
         provided_plan = input_data.get("edit_plan") if isinstance(input_data.get("edit_plan"), dict) else None
         provided_transcript = input_data.get("transcript") if isinstance(input_data.get("transcript"), dict) else None
         provided_analysis = input_data.get("analysis_data") if isinstance(input_data.get("analysis_data"), dict) else None
+        if provided_analysis is not None and _is_plan_echo_analysis(provided_analysis):
+            # the poisoned well: a stored echo is not a measurement — reject
+            # loud, proceed on real cached analysis / honest absence, never
+            # on replayed blindness.
+            print("[analysis] PROVIDED ANALYSIS REJECTED — stored plan echo "
+                  "(the pre-2eb7196 overwrite persisted it); proceeding "
+                  "without it", flush=True)
+            _record_divergence(
+                "analysis", {"generation": "a1a2",
+                             "keys": sorted(provided_analysis.keys())[:12]},
+                "provided_analysis_rejected",
+                reason="stored plan echo (poisoned well) — measurement semantics at intake")
+            provided_analysis = None
         provided_broll = input_data.get("resolved_broll") if isinstance(input_data.get("resolved_broll"), list) else None
         provided_trend = input_data.get("trend_snapshot") if isinstance(input_data.get("trend_snapshot"), dict) else None
         change_request = str(input_data.get("change_request") or "").strip()

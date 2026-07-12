@@ -5075,6 +5075,22 @@ def _vacuous_read_guard():
     # MEASUREMENT absence semantics: present-but-fieldless is LOUD
     assert '"vacuous_measurement_read"' in _src, \
         "a present analyzer dict missing frame_layout must ledger, never default silently"
+    # POISONED WELL intake gate: a stored echo is rejected; real passes
+    _echo = {"audio": {"speech_source": "none"},
+             "speech": {"has_speech": False, "segments": [], "sentence_boundaries": []},
+             "shots": [{"start": 0, "end": 20, "description": "Full video",
+                        "action": "Full video", "score": 0.5}],
+             "metadata": {}, "frame_layout": {"existing_overlays": {"has_burned_captions": False}}}
+    assert _h._is_plan_echo_analysis(_echo) is True, \
+        "the echo's canned signature must be rejected at intake"
+    _real = {"audio": {"speech_source": "voice", "music": False},
+             "speech": {"has_speech": True, "segments": [{"start": 0.0, "end": 2.0}]},
+             "shots": [{"start": 0, "end": 5, "description": "talking head"}],
+             "metadata": {"fps": 30},
+             "frame_layout": {"existing_overlays": {"has_burned_captions": True}}}
+    assert _h._is_plan_echo_analysis(_real) is False, \
+        "a real measurement must pass the intake gate"
+    assert '"provided_analysis_rejected"' in _src, "the rejection must ledger"
     # the structural root is DEAD (Zac ruling: the overwrite dies) — the
     # tombstone stays, the write does not, and no reader of the key survives
     assert "VACUOUS-READ LANDMINE" in _src, "the tombstone carries the knowledge"
