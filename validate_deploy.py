@@ -5105,6 +5105,99 @@ def _tier3b_one_plan_contract():
         "the re-edit validation is idempotent (a re-run is a fixed point)"
 
 
+@check("TIER-3b PART 3 SCOPED-COPY: guided_redraft re-authors ONLY in-scope layers — out-of-scope layers are byte-identical to the prior plan; a cut-touching redraft RE-DERIVES (orphan-drops) out-of-scope word-anchored layers instead of corrupting them by verbatim copy; the merged plan runs the one-plan contract")
+def _tier3b_part3_scoped_copy():
+    import handler as _h
+    import copy as _cp
+    _src = open("handler.py").read()
+    assert "def _scoped_copy_out_of_scope(" in _src, "the scoped-copy pass must exist"
+    # pinned ruling (Zac 2026-07-11): 'pacing' in scope ⇒ 'cuts' cut-touch
+    assert 'if "pacing" in scope:' in _src and 'scope.add("cuts")' in _src, \
+        "pacing must count as a cut-touch (drives cut aggression)"
+    # 'captions' binds all four caption fields as one unit
+    assert _h._SCOPE_LAYER_FIELDS["captions"] == {
+        "caption_style", "caption_keywords",
+        "caption_position_changes", "existing_caption_region"}, \
+        "'captions' must bind all four caption fields"
+    # WIRED into the guided_redraft seam, and the merged plan runs the one-plan
+    # contract AFTER scoped-copy (never a side door around validation)
+    assert 'mode == "guided_redraft"' in _src, "scoped-copy must be wired into guided_redraft"
+    # split on the seam-unique phrase (the function-def header also carries the
+    # "TIER-3b PART 3: guided_redraft SCOPED-COPY" title)
+    _seam = _src.split("SCOPED-COPY + ONE-PLAN CONTRACT", 1)
+    assert len(_seam) == 2, "the guided_redraft seam marker must be present"
+    _w = _seam[1][:2000]
+    assert ("_scoped_copy_out_of_scope(" in _w and "_revalidate_reedit_plan(" in _w
+            and _w.index("_scoped_copy_out_of_scope(") < _w.index("_revalidate_reedit_plan(")), \
+        "the seam must scoped-copy THEN run the one-plan contract on the merged plan"
+
+    _DG = [{"word": f"w{i}", "start": i * 0.1, "end": i * 0.1 + 0.05} for i in range(60)]
+    _prior = {
+        "caption_style": "karaoke", "caption_keywords": ["prior"],
+        "existing_caption_region": "none", "caption_position_changes": [],
+        "emphasis_moments": [{"word_indices": [7], "kind": "prior"}],
+        "sound_effects": [{"_word_idx": 9, "sound": "whoosh"}],
+        "motion_graphics": [
+            {"type": "StatCard", "start_word_index": 10, "end_word_index": 12, "props": {"v": 1}, "tag": "at10"},
+            {"type": "StatCard", "start_word_index": 20, "end_word_index": 22, "props": {"v": 2}, "tag": "at20"}],
+        "broll_clips": [{"start_word_index": 10, "end_word_index": 13, "tag": "b10"}],
+        "text_overlays": [{"word_index": 14, "text": "keep"}],
+        "remove_words": [{"word_index": 3}],
+        "pacing": "slow",
+    }
+    _new = _cp.deepcopy(_prior)
+    _new["caption_style"] = "bold"; _new["caption_keywords"] = ["new"]; _new["pacing"] = "fast"
+    _new["emphasis_moments"] = [{"word_indices": [40], "kind": "new"}]
+    _new["sound_effects"] = [{"_word_idx": 45, "sound": "boom"}]
+    _new["motion_graphics"] = [{"type": "LowerThird", "start_word_index": 30, "end_word_index": 31, "props": {}, "tag": "newmg"}]
+
+    # (a) NO cut change: out-of-scope byte-identical, in-scope from the redraft
+    _r = _cp.deepcopy(_new)
+    _h._scoped_copy_out_of_scope(_r, _prior, ["emphasis", "sounds"], _DG)
+    assert _r["emphasis_moments"] == _new["emphasis_moments"], "in-scope emphasis keeps the redraft"
+    assert _r["sound_effects"] == _new["sound_effects"], "in-scope sounds keep the redraft"
+    assert _r["caption_style"] == "karaoke" and _r["caption_keywords"] == ["prior"], \
+        "out-of-scope captions are byte-identical to prior"
+    assert _r["motion_graphics"] == _prior["motion_graphics"], "out-of-scope MG byte-identical"
+    assert _r["broll_clips"] == _prior["broll_clips"] and _r["remove_words"] == _prior["remove_words"], \
+        "out-of-scope broll + cuts byte-identical (cuts not in scope)"
+    assert _r["pacing"] == "slow", "out-of-scope pacing byte-identical to prior"
+
+    # (b) CUT-TOUCHING redraft: new cut removes word 10 → orphan-drop, never copy
+    _r2 = _cp.deepcopy(_new); _r2["remove_words"] = [{"word_index": 10}]
+    _h._scoped_copy_out_of_scope(_r2, _prior, ["emphasis", "cuts"], _DG)
+    assert _r2["remove_words"] == [{"word_index": 10}], "cuts in scope → the redraft's cuts are kept"
+    _tags = sorted(m.get("tag") for m in _r2["motion_graphics"])
+    assert _tags == ["at20"], f"the MG anchored at removed word 10 drops; the survivor stays (got {_tags})"
+    assert _r2["broll_clips"] == [], "the broll whose endpoint word 10 is cut drops (never a stale copy)"
+    assert _r2["text_overlays"] == _prior["text_overlays"], "word 14 survives → its overlay byte-identical"
+
+    def _anch(_e):
+        _s = set()
+        for _k in ("word_index", "start_word_index", "end_word_index", "after_word_index", "_word_idx"):
+            if isinstance(_e.get(_k), int) and not isinstance(_e.get(_k), bool):
+                _s.add(_e[_k])
+        return _s
+    _surv = _r2["motion_graphics"] + _r2["broll_clips"] + _r2["text_overlays"]
+    assert all(10 not in _anch(_e) for _e in _surv), \
+        "the corruption guard: NO surviving out-of-scope entry may anchor to a removed word"
+
+    # (c) pacing ⇒ cuts: pacing in scope keeps the redraft's cuts AND re-derives
+    _r3 = _cp.deepcopy(_new); _r3["remove_words"] = [{"word_index": 10}]
+    _h._scoped_copy_out_of_scope(_r3, _prior, ["pacing"], _DG)
+    assert _r3["pacing"] == "fast" and _r3["remove_words"] == [{"word_index": 10}], \
+        "pacing in scope keeps the redraft's pacing + cuts"
+    assert sorted(m.get("tag") for m in _r3["motion_graphics"]) == ["at20"], \
+        "pacing⇒cuts triggers the same orphan-drop on out-of-scope word-anchored layers"
+
+    # (d) idempotence: derive(derive(plan)) == derive(plan)
+    _x = _cp.deepcopy(_new); _x["remove_words"] = [{"word_index": 10}]
+    _h._scoped_copy_out_of_scope(_x, _prior, ["emphasis", "cuts"], _DG)
+    _y = _cp.deepcopy(_x)
+    _h._scoped_copy_out_of_scope(_y, _prior, ["emphasis", "cuts"], _DG)
+    assert _y == _x, "scoped-copy is idempotent (a re-run is a fixed point)"
+
+
 @check("TIER-3b sound derivation FIXED POINT: derive(derive(plan)) == derive(plan) — a re-edit re-runs the span without doubling or raising on the derived shape")
 def _tier3b_sound_fixed_point():
     import handler as _h

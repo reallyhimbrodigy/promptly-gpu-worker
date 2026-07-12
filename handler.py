@@ -13549,6 +13549,135 @@ def _deterministic_reedit(old_plan, change_request):
             "deterministic": True}
 
 
+# ─── TIER-3b PART 3: guided_redraft SCOPED-COPY (Zac 2026-07-11) ─────────────
+# A general/creative re-edit ("make it punchier") re-authors ONLY its in-scope
+# layers; every out-of-scope layer is byte-identical to the prior plan BY
+# CONSTRUCTION. The classifier emits layers_in_scope; this overwrites each
+# out-of-scope EditPlan field with the prior plan's value verbatim.
+#
+# THE CUT-DEPENDENCY (why Part 3 was staged separate): plan anchors live in a
+# word-index space keyed to the CUTS. The mechanical kept space is deterministic
+# per source (compute_mechanical_cuts: "Same input -> same cuts"), so a verbatim
+# copy is always coordinate-VALID — the ONE failure mode is an out-of-scope
+# entry whose anchor word the redraft's NEW cuts remove. So when the in-scope
+# re-author TOUCHES CUTS, out-of-scope word-anchored layers are RE-DERIVED
+# (orphan entries dropped against the new removed-source set, computed by the
+# SAME _remove_words_to_src_indices the render path uses at 10390) — never
+# corrupted by a stale verbatim copy. RULING (Zac 2026-07-11): 'pacing' in scope
+# ⇒ 'cuts' effectively in scope (pacing drives cut aggression); 'captions' binds
+# all four caption fields as one unit. The precise re-anchor-to-nearest-survivor
+# (instead of drop) is the deferred src↔kept SHAPE BRIDGE — Part 3 does explicit
+# orphan-drop, which is exactly what the render path already does on replay.
+#
+# Layer → EditPlan fields. A field is copied from prior iff its owning layer is
+# out of scope; unclaimed fields default to out-of-scope; notes is a rationale
+# for THIS edit and always stays the redraft's.
+_SCOPE_LAYER_FIELDS = {
+    "captions": {"caption_style", "caption_keywords",
+                 "caption_position_changes", "existing_caption_region"},
+    "cuts": {"remove_words"},
+    "emphasis": {"emphasis_moments"},
+    "sounds": {"sound_effects"},
+    "broll": {"broll_clips"},
+    "motion_graphics": {"motion_graphics"},
+    "text_overlays": {"text_overlays"},
+    "transitions": {"transitions"},
+    "pacing": {"pacing"},
+    "vibe": {"video_identity", "video_plan"},
+}
+# Out-of-scope by default (no layer claims them) — copied verbatim from prior.
+_SCOPE_UNCLAIMED_FIELDS = {
+    "thumbnail_word_index", "audio_denoise", "outro", "aspect_ratio",
+    "generated_scenes",
+}
+# Never copied — describes THIS edit, kept from the redraft.
+_SCOPE_ALWAYS_REDRAFT = {"notes"}
+_SCOPE_KNOWN_FIELDS = set().union(*_SCOPE_LAYER_FIELDS.values()) | _SCOPE_UNCLAIMED_FIELDS
+# List fields whose entries carry word anchors — subject to the cut re-derive.
+_SCOPE_WORD_ANCHORED_LISTS = (
+    "emphasis_moments", "sound_effects", "broll_clips", "motion_graphics",
+    "text_overlays", "transitions", "caption_position_changes",
+)
+
+
+def _scope_entry_anchor_indices(entry):
+    """Source-word indices an out-of-scope entry references — mirrors the render
+    path's anchored-index set (broll uses BOTH endpoints; sfx word_index;
+    transition after_word_index). Drop the entry iff this set meets the new
+    removed-source set. (bool is an int subclass — excluded explicitly.)"""
+    if not isinstance(entry, dict):
+        return set()
+    idxs = set()
+    for _k in ("word_index", "start_word_index", "end_word_index",
+               "after_word_index", "_word_idx"):
+        _v = entry.get(_k)
+        if isinstance(_v, int) and not isinstance(_v, bool):
+            idxs.add(_v)
+    for _v in (entry.get("word_indices") or []):
+        if isinstance(_v, int) and not isinstance(_v, bool):
+            idxs.add(_v)
+    return idxs
+
+
+def _scoped_copy_out_of_scope(new_plan, prior_plan, layers_in_scope, dg_words):
+    """Overwrite every OUT-OF-SCOPE field of new_plan with prior_plan's value
+    verbatim (byte-identical by construction); when the in-scope re-author
+    TOUCHES CUTS, re-derive out-of-scope word-anchored layers against the new
+    removed-source set (drop orphans) instead of trusting the stale copy.
+
+    Mutates new_plan in place; returns the list of (action, detail) applied.
+    prior_plan is never mutated. Absence is a legal plan CHOICE (standing law
+    #4): an out-of-scope field absent in prior becomes absent in new_plan.
+
+    Follows the ONE-PLAN CONTRACT: the caller runs _revalidate_reedit_plan on
+    the merged result — this only decides authorship, never skips validation.
+    """
+    import copy as _copy_sc
+    if not isinstance(new_plan, dict) or not isinstance(prior_plan, dict):
+        return []
+    _applied = []
+    scope = {str(_l).strip().lower() for _l in (layers_in_scope or [])}
+    if "pacing" in scope:
+        scope.add("cuts")   # RULING: pacing drives cut aggression → cut-touch
+    _in_scope_fields = set()
+    for _layer in scope:
+        _in_scope_fields |= _SCOPE_LAYER_FIELDS.get(_layer, set())
+    _oos_fields = (_SCOPE_KNOWN_FIELDS - _in_scope_fields) - _SCOPE_ALWAYS_REDRAFT
+
+    for _f in sorted(_oos_fields):
+        if _f in prior_plan:
+            _val = _copy_sc.deepcopy(prior_plan[_f])
+            if new_plan.get(_f) != _val:
+                _applied.append(("copy", _f))
+            new_plan[_f] = _val
+        elif _f in new_plan:
+            # prior chose absence — match it (plan absence is a legal choice).
+            del new_plan[_f]
+            _applied.append(("drop_added", _f))
+
+    # ── cut-dependency: re-derive out-of-scope word-anchored layers ─────────
+    if "cuts" in scope:
+        _removed = _remove_words_to_src_indices(
+            new_plan.get("remove_words") or [], dg_words or [])
+        if _removed:
+            for _f in _SCOPE_WORD_ANCHORED_LISTS:
+                if _f in _in_scope_fields:
+                    continue   # in-scope layer already authored vs the new cuts
+                _lst = new_plan.get(_f)
+                if not isinstance(_lst, list):
+                    continue
+                _kept = [_e for _e in _lst
+                         if not (_scope_entry_anchor_indices(_e) & _removed)]
+                if len(_kept) != len(_lst):
+                    _applied.append(
+                        ("rederive_drop", f"{_f}:{len(_lst) - len(_kept)}"))
+                    new_plan[_f] = _kept
+
+    print(f"[scoped-copy] guided_redraft: in_scope={sorted(scope)} "
+          f"{len(_applied)} action(s) {[a[0] for a in _applied][:8]}", flush=True)
+    return _applied
+
+
 def _revalidate_reedit_plan(plan, dg_words, face_traj, vibe, duration,
                             pre_analysis=None):
     """TIER-3b ONE-PLAN CONTRACT (Zac 2026-07-11): the re-edit rail's
@@ -24543,9 +24672,13 @@ def handler(job):
                 vibe = diff.get("fused_vibe") or f"{old_vibe or vibe} — {change_request}".strip(" —")
                 change_summary = diff.get("human_summary")
                 mode = "guided_redraft"
+                # PART 3: carry the classifier's scope to the post-recipe seam,
+                # where scoped-copy overwrites every OUT-OF-SCOPE layer with the
+                # prior plan verbatim (see the seam after edit_plan is ready).
+                _gr_layers_in_scope = diff.get("layers_in_scope") or []
                 print(
                     f"[plan-diff] Guided redraft — prior plan kept as soft default; "
-                    f"direction: {change_request[:160]}",
+                    f"in_scope={_gr_layers_in_scope}; direction: {change_request[:160]}",
                     flush=True,
                 )
             else:
@@ -25990,6 +26123,39 @@ def handler(job):
             edit_plan = _copy_mod.deepcopy(provided_plan)
             print("[pipeline] render_only mode — using provided edit_plan (skipped Gemini generate)", flush=True)
         print(f"[TIMING] edit_plan ready in {time.time() - _mega_t0:.1f}s (critical path)", flush=True)
+
+        # ── TIER-3b PART 3: guided_redraft SCOPED-COPY + ONE-PLAN CONTRACT ──
+        # generate_edit_gemini re-authored the WHOLE plan against a freshly
+        # regenerated (deterministic) kept space. Overwrite every OUT-OF-SCOPE
+        # layer with the prior plan verbatim (byte-identical by construction);
+        # when the in-scope re-author TOUCHED CUTS, out-of-scope word-anchored
+        # layers are re-derived (orphan-drop) against the new removed set rather
+        # than corrupted by a stale copy. Then run the SAME validation span the
+        # fresh path runs (_revalidate_reedit_plan — the Part-2 rail) on the
+        # merged plan: the one-plan contract holds, and the marker it stamps is
+        # what the render-input boundary checks. Fail-OPEN: a bug here never
+        # kills a redraft — the render path's own gates remain.
+        if (mode == "guided_redraft" and isinstance(edit_plan, dict)
+                and isinstance(provided_plan, dict) and provided_plan):
+            _gr_scope = locals().get("_gr_layers_in_scope") or []
+            _gr_dg = (edit_plan.get("_deepgram_words")
+                      or (provided_transcript.get("words")
+                          if isinstance(provided_transcript, dict) else None)
+                      or locals().get("_dg_words") or [])
+            try:
+                _scoped_copy_out_of_scope(
+                    edit_plan, provided_plan, _gr_scope, _gr_dg)
+                _revalidate_reedit_plan(
+                    edit_plan, _gr_dg,
+                    (locals().get("_smoothed_trajectory") or []),
+                    vibe, source_duration, pre_analysis=_cached_analysis)
+            except Exception as _sc_err:
+                print(f"[scoped-copy] guided_redraft skipped "
+                      f"({type(_sc_err).__name__}: {str(_sc_err)[:120]}) — "
+                      f"render path gates still apply", flush=True)
+                _record_divergence(
+                    "reedit", {"error": type(_sc_err).__name__},
+                    "scoped_copy_error", reason=str(_sc_err)[:160])
 
         # ── Defensive: strip motion_graphics the renderer no longer knows ──
         # A re-edit (render_only/tweak) replaying an OLD saved plan can carry a
