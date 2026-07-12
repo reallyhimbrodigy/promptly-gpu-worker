@@ -139,6 +139,6 @@ def main():
         fa=ex.submit(measure_rejected.remote); fb=ex.submit(diagnostic.remote)
         a,b=fa.result(),fb.result()
     open("/private/tmp/claude-501/-Users-zaclibman-promptly-gpu-worker-promptly-gpu-worker/"
-         "e9b63b3b-7849-46b2-befa-856527c74120/scratchpad/d1_result.json","w").write(
+         "0623ccac-66e9-4782-b62c-b235bcc403aa/scratchpad/d1_result.json","w").write(
         json.dumps({"rejected":json.loads(a),"diagnostic":json.loads(b)},indent=1))
     print("D1_DONE")
