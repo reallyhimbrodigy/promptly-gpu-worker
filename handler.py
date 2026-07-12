@@ -9321,6 +9321,23 @@ def generate_edit_gemini(
     # Append the kept-only transcript to the post-cuts call's user content.
     # Indices are NEW (kept-only space [0..M-1]); timestamps are still source-time.
     post_user = post_user_base
+    # F8 BELT (Zac rider 2026-07-11): the deterministic frame-analysis signal
+    # feeds UPSTREAM as a stated fact, so the PLAN agrees with reality — the
+    # declaration becomes given rather than hoped, the whys stay coherent,
+    # and the overlay half plans around the burned text instead of colliding
+    # while only the caption track is guarded. Suspenders stay at F8.
+    _f8_burned_fact = bool((((_pre_analysis if isinstance(_pre_analysis, dict) else {})
+                             or {}).get("frame_layout") or {})
+                           .get("existing_overlays", {}).get("has_burned_captions"))
+    if _f8_burned_fact:
+        post_user += (
+            "\n\n=== MEASURED SOURCE FACT (deterministic frame analysis) ===\n"
+            "This source carries BURNED-IN word captions — its own caption layer "
+            "is part of the picture. caption_style is \"none\" for this source; "
+            "report the band you see in existing_caption_region, declare any other "
+            "on-frame source text in source_text_regions, and plan the overlay/MG "
+            "layer around the occupied band. Keyword emphasis lives in zooms and "
+            "motion graphics.\n")
     # Boundary names pre-initialized: the block below skips entirely on empty
     # kept_words, and every downstream reader used to self-defend with
     # `except NameError`. Unconditional empties make boundness a LOCAL
@@ -11644,7 +11661,10 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
             # source (8004e7e6 + the W3 proof). Either signal engages the
             # coercion; the analysis signal fills the region as "bottom"
             # (the exhibit class) when the model reported none.
-            _ana_burned = bool(((analysis or {}).get("frame_layout") or {})
+            # the REAL analyzer output (_pre_analysis) carries frame_layout;
+            # the plan-derived `analysis` does not — read the analyzer's.
+            _ana_burned = bool((((_pre_analysis if isinstance(_pre_analysis, dict) else {})
+                                 or {}).get("frame_layout") or {})
                                .get("existing_overlays", {})
                                .get("has_burned_captions"))
             if _ecr == "none" and _ana_burned:
@@ -11657,8 +11677,10 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                     and not _vibe_requests_captions(vibe)):
                 _record_divergence(
                     "caption",
-                    {"style": edit_plan["caption_style"], "region": _ecr},
-                    "double_caption_prevented",
+                    {"style": edit_plan["caption_style"], "region": _ecr,
+                     "signal": ("analysis" if _ana_burned else "stage0"),
+                     "generation": "a1a2"},
+                    "burned_suppress",
                     final={"style": "none"},
                     reason="source_carries_burned_in_captions",
                 )
@@ -11830,8 +11852,9 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                 _ecr_band = _ECR_TO_SEMANTIC.get(_ecr)
                 if _ecr_band and _anchor == _ecr_band:
                     _record_divergence(
-                        "mg", {"type": _mg_type, "anchor": _anchor, "region": _ecr},
-                        "double_caption_prevented",
+                        "mg", {"type": _mg_type, "anchor": _anchor, "region": _ecr,
+                               "generation": "a1a2"},
+                        "burned_suppress",
                         final={"anchor": "center"},
                         reason="anchored_into_burned_in_caption_band",
                     )
@@ -12226,8 +12249,9 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                     _f8_band = _ECR_TO_SEMANTIC.get(_ecr)
                     if _f8_band and _anc == _f8_band:
                         _record_divergence(
-                            "mg", {"type": _mgt, "anchor": _anc, "region": _ecr},
-                            "double_caption_prevented",
+                            "mg", {"type": _mgt, "anchor": _anc, "region": _ecr,
+                                   "generation": "a1a2"},
+                            "burned_suppress",
                             final={"anchor": "center"},
                             reason="anchored_into_burned_in_caption_band",
                         )
@@ -12731,8 +12755,8 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                     if _ecr == "top" and _pos == "top":
                         _record_divergence(
                             "overlay", {"variant": "caption_match", "position": _pos,
-                                        "region": _ecr},
-                            "double_caption_prevented",
+                                        "region": _ecr, "generation": "a1a2"},
+                            "burned_suppress",
                             final={"position": "center"},
                             reason="anchored_into_burned_in_caption_band",
                         )
