@@ -11,6 +11,7 @@ import type { TikTokToken, TikTokPage } from "../shared/types";
 import type { PrimeProps } from "./types";
 import { CAPTION_FONTS } from "../shared/fonts";
 import { msToFrames } from "../shared/timing";
+import { boundedFade } from "../shared/fadeTiming";
 import { CAPTION_PADDING } from "../shared/captionPosition";
 import { fitScale, CHARWRAP_FALLBACK_STYLE, type ScaleFitItem } from "../shared/fit";
 
@@ -22,6 +23,7 @@ const PrimeWord: React.FC<{
   token: TikTokToken;
   pageStartMs: number;
   wordIndex: number;
+  windowMs: number;
   isLine2: boolean;
   isSpecial: boolean;
   line1Color: string;
@@ -40,6 +42,7 @@ const PrimeWord: React.FC<{
   token,
   pageStartMs,
   wordIndex,
+  windowMs,
   isLine2,
   isSpecial,
   line1Color,
@@ -58,13 +61,16 @@ const PrimeWord: React.FC<{
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
-  // Spring entrance per word
+  // Spring entrance per word — WS2 fade-bound: 160ms base (was 250), capped at
+  // 25% of this word's on-screen window so on fast speech the word finishes
+  // arriving before the next one starts, instead of a train of half-sprung
+  // words (shared/fadeTiming).
   const activateFrame = Math.round(((token.fromMs - pageStartMs) / 1000) * fps);
   const wordSpring = spring({
     frame: frame - activateFrame,
     fps,
     config: { damping: 200 },
-    durationInFrames: Math.round(fps * 0.25),
+    durationInFrames: Math.max(1, msToFrames(boundedFade(160, windowMs), fps)),
   });
 
   const slideY = interpolate(wordSpring, [0, 1], [20, 0]);
@@ -196,11 +202,13 @@ const PrimePage: React.FC<{
 
   if (frame < 0) return null;
 
-  // Fade out
+  // Fade out — bounded to 25% of the page window so a short final page doesn't
+  // spend a fifth of its life fading out (shared/fadeTiming).
   const pageLocalMs = (frame / fps) * 1000;
+  const pageFadeOutMs = boundedFade(120, page.durationMs);
   const fadeOut = interpolate(
     pageLocalMs,
-    [page.durationMs - 120, page.durationMs],
+    [page.durationMs - pageFadeOutMs, page.durationMs],
     [1, 0],
     { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
   );
@@ -236,12 +244,17 @@ const PrimePage: React.FC<{
             {line.tokens.map((token, idx) => {
               const wi = globalWordIdx++;
               const specialMul = line.hasSpecial ? 2 : 1;
+              // window = time until the next word arrives (page.tokens is flat,
+              // reading order), or page end for the last word — the WS2 bound.
+              const nextTok = page.tokens[wi + 1];
+              const windowMs = (nextTok ? nextTok.fromMs : page.startMs + page.durationMs) - token.fromMs;
               return (
                 <PrimeWord
                   key={idx}
                   token={token}
                   pageStartMs={page.startMs}
                   wordIndex={wi}
+                  windowMs={windowMs}
                   isLine2={isLine2}
                   isSpecial={line.hasSpecial}
                   {...wordProps}

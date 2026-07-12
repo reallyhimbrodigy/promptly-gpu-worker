@@ -115,7 +115,9 @@ const GadzhiStylePage: React.FC<{
               extrapolateRight: "clamp",
             });
 
-            const opacity = interpolate(slideProgress, [0, 0.4], [0, 1], {
+            // WS2: opacity resolves in the first quarter of the slide (was 0.4)
+            // so the word is legible early while the slide finishes settling.
+            const opacity = interpolate(slideProgress, [0, 0.25], [0, 1], {
               extrapolateLeft: "clamp",
               extrapolateRight: "clamp",
             });

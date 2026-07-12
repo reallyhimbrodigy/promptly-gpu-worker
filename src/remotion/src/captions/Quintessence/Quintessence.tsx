@@ -8,6 +8,7 @@ import {
 import type { TikTokToken, TikTokPage } from "../shared/types";
 import type { QuintessenceProps } from "./types";
 import { msToFrames } from "../shared/timing";
+import { boundedFade } from "../shared/fadeTiming";
 import { CAPTION_FONTS } from "../shared/fonts";
 import { getCaptionPositionStyle } from "../shared/captionPosition";
 import { fitScale, CHARWRAP_FALLBACK_STYLE } from "../shared/fit";
@@ -67,15 +68,19 @@ export const Quintessence: React.FC<QuintessenceProps> = ({
   const endFrame = msToFrames(activeSlot.endMs, fps);
   const elapsed = frame - startFrame;
 
+  // WS2 fade-bound: a slot's fade never eats more than 25% of the slot window,
+  // so fast-speech slots are legible ≥75% of their life (shared/fadeTiming).
+  const slotWinF = endFrame - startFrame;
+
   // Quick fade in
-  const fadeInFrames = 3;
+  const fadeInFrames = boundedFade(3, slotWinF);
   const fadeIn = interpolate(elapsed, [0, fadeInFrames], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
 
   // Quick fade out
-  const fadeOutFrames = 3;
+  const fadeOutFrames = boundedFade(3, slotWinF);
   const fadeOut = interpolate(
     frame,
     [endFrame - fadeOutFrames, endFrame],

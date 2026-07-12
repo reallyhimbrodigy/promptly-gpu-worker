@@ -11,6 +11,7 @@ import type { TypewriterRevealProps, TypewriterColorScheme } from "./types";
 import { TYPEWRITER_SCHEMES } from "./types";
 import { CAPTION_FONTS } from "../shared/fonts";
 import { msToFrames } from "../shared/timing";
+import { boundedFade } from "../shared/fadeTiming";
 import { getCaptionPositionStyle } from "../shared/captionPosition";
 import { fitScale, CHARWRAP_FALLBACK_STYLE } from "../shared/fit";
 
@@ -126,13 +127,16 @@ const TypewriterPage: React.FC<{
   );
   const fittedFontSize = fontSize * fit.scale;
 
-  // Page fade
+  // Page fade — WS2 fade-bound: each end capped at 25% of the page window so a
+  // short page isn't still fading in when it's already spoken (shared/fadeTiming).
   const pageLocalMs = (frame / fps) * 1000;
-  const fadeIn = interpolate(pageLocalMs, [0, fadeInDurationMs], [0, 1], {
+  const fadeInMs = boundedFade(fadeInDurationMs, page.durationMs);
+  const fadeOutMs = boundedFade(fadeOutDurationMs, page.durationMs);
+  const fadeIn = interpolate(pageLocalMs, [0, fadeInMs], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
-  const fadeOutStart = page.durationMs - fadeOutDurationMs;
+  const fadeOutStart = page.durationMs - fadeOutMs;
   const fadeOut = interpolate(
     pageLocalMs,
     [fadeOutStart, page.durationMs],
@@ -222,8 +226,8 @@ export const TypewriterReveal: React.FC<TypewriterRevealProps> = ({
   lowercase = true,
   letterSpacing = "0.03em",
   lineHeight = 1.4,
-  fadeInDurationMs = 150,
-  fadeOutDurationMs = 150,
+  fadeInDurationMs = 90, // WS2 faster base (was 150); further capped to 25% of the page window
+  fadeOutDurationMs = 90, // WS2 faster base (was 150)
   boxBorderRadius = 8,
   maxWidthPercent = 0.85,
 }) => {

@@ -11,6 +11,7 @@ import type {
 import { OverlayCutTest, type OverlayCutTestProps } from "./transitions/overlays/_OverlayCutTest";
 import { FitSpecimen } from "./FitSpecimen";
 import { MGAttackProbe } from "./MGAttackProbe";
+import { CaptionFadeProbe } from "./CaptionFadeProbe";
 
 /**
  * Remotion root — two production compositions:
@@ -154,6 +155,24 @@ export const RemotionRoot: React.FC = () => {
         defaultProps={{
           type: "StatCard",
           props: { value: 100000, label: "SUBSCRIBERS", anchor: "center" },
+        } as unknown as Record<string, unknown>}
+      />
+      {/* CaptionFadeProbe — STANDALONE WS2 fade-bound sample (not used in
+          production). One style on a fast-speech word track + a beat-pulse
+          metronome; render before/after the fade-bound to compare on Zac's eye.
+          Driven by caption-fade-battery.mjs. */}
+      <Composition
+        id="CaptionFadeProbe"
+        component={CaptionFadeProbe as unknown as React.FC<Record<string, unknown>>}
+        width={1080}
+        height={1920}
+        fps={60}
+        durationInFrames={220}
+        defaultProps={{
+          style: "CleanCut",
+          words: ["this", "is", "the", "fastest", "way", "to", "grow", "your", "account", "right", "now", "today"],
+          keywords: ["fastest", "grow"],
+          wordMs: 170,
         } as unknown as Record<string, unknown>}
       />
     </>

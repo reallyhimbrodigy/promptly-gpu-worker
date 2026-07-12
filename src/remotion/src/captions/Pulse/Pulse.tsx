@@ -7,6 +7,7 @@ import {
 } from "remotion";
 import type { PulseProps } from "./types";
 import { msToFrames } from "../shared/timing";
+import { boundedFade } from "../shared/fadeTiming";
 import { CAPTION_FONTS } from "../shared/fonts";
 import { getCaptionPositionStyle, CAPTION_PADDING } from "../shared/captionPosition";
 import { fitScale, CHARWRAP_FALLBACK_STYLE } from "../shared/fit";
@@ -119,19 +120,24 @@ export const Pulse: React.FC<PulseProps> = ({
 
   const activeStart = msToFrames(pages[activeIdx].startMs, fps);
 
+  // WS2 fade-bound: cap each slot's fade at 25% of that slot's on-screen window
+  // so a fast-speech page is legible for ≥75% of its life instead of still
+  // fading in when it's already spoken (shared/fadeTiming).
   const slot1Start = msToFrames(pages[slot1PageIdx].startMs, fps);
+  const slot1FadeF = boundedFade(fadeDurationFrames, msToFrames(pages[slot1PageIdx].durationMs, fps));
   let slot1Opacity = interpolate(
     frame,
-    [slot1Start, slot1Start + fadeDurationFrames],
+    [slot1Start, slot1Start + slot1FadeF],
     [0, 1],
     { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
   );
 
   let slot2Opacity = 0;
   if (hasSlot2) {
+    const slot2FadeF = boundedFade(fadeDurationFrames, msToFrames(pages[activeIdx].durationMs, fps));
     slot2Opacity = interpolate(
       frame,
-      [activeStart, activeStart + fadeDurationFrames],
+      [activeStart, activeStart + slot2FadeF],
       [0, 1],
       { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
     );
@@ -143,9 +149,10 @@ export const Pulse: React.FC<PulseProps> = ({
       pages[lastVisibleIdx].startMs + pages[lastVisibleIdx].durationMs,
       fps,
     );
+    const lastFadeF = boundedFade(fadeDurationFrames, msToFrames(pages[lastVisibleIdx].durationMs, fps));
     const fadeOut = interpolate(
       frame,
-      [activeEnd - fadeDurationFrames, activeEnd],
+      [activeEnd - lastFadeF, activeEnd],
       [1, 0],
       { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
     );

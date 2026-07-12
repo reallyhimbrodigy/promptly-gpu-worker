@@ -9,6 +9,7 @@ import type { TikTokPage } from "../shared/types";
 import type { CleanCutProps } from "./types";
 import { CAPTION_FONTS } from "../shared/fonts";
 import { msToFrames } from "../shared/timing";
+import { boundedFade } from "../shared/fadeTiming";
 import { getCaptionPositionStyle, CAPTION_PADDING } from "../shared/captionPosition";
 import { fitScale } from "../shared/fit";
 
@@ -69,8 +70,14 @@ const CleanCutPage: React.FC<{
   );
 
   const since = localMs - (token.fromMs - page.startMs);
-  // Crisp, quick entrance — a small rise + settle, no flair.
-  const opacity = interpolate(since, [0, 80], [0, 1], {
+  // Crisp, quick entrance — a small rise + settle, no flair. WS2 fade-bound:
+  // 55ms base (was 80), capped at 25% of this word's on-screen window (until the
+  // next word, or page end) so fast speech doesn't leave the word still fading
+  // in when it's already spoken (shared/fadeTiming).
+  const nextTok = page.tokens[activeIdx + 1];
+  const wordWindowMs = (nextTok ? nextTok.fromMs : page.startMs + page.durationMs) - token.fromMs;
+  const fadeInMs = boundedFade(55, wordWindowMs);
+  const opacity = interpolate(since, [0, fadeInMs], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
@@ -85,10 +92,12 @@ const CleanCutPage: React.FC<{
     easing: easeOutCubic,
   });
 
-  // Gentle fade at the very end of the page.
+  // Gentle fade at the very end of the page — bounded to 25% of the page window
+  // so a short final page doesn't spend half its life fading out (shared/fadeTiming).
+  const pageFadeOutMs = boundedFade(150, page.durationMs);
   const fadeOut = interpolate(
     localMs,
-    [page.durationMs - 150, page.durationMs],
+    [page.durationMs - pageFadeOutMs, page.durationMs],
     [1, 0],
     { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
   );

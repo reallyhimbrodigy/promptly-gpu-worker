@@ -4930,6 +4930,39 @@ def _item1_sfx_hole_close():
     _h._WORD_ONSET_LAST.clear()
 
 
+@check("ITEM 3 WS2 caption fade-bound (Zac 2026-07-12): every fixed caption fade is capped at 25% of its on-screen window (shared/fadeTiming.boundedFade), the 5 fixed-duration styles wire it + faster bases, Gadzhi's fade resolves in the first quarter of its slide; the real node helper test passes")
+def _item3_ws2_fade_bound():
+    import os as _os, subprocess as _sub
+    _cap = "src/remotion/src/captions"
+    _helper = _os.path.join(_cap, "shared", "fadeTiming.ts")
+    assert _os.path.exists(_helper), "shared/fadeTiming.ts (the WS2 fade-bound helper) must exist"
+    _hs = open(_helper).read()
+    assert "export function boundedFade(" in _hs and "FADE_WINDOW_FRACTION = 0.25" in _hs, \
+        "boundedFade + the 0.25 window fraction must be the contract"
+    # the 5 fixed-duration styles must import AND call the bound (not just import it)
+    for _st in ("Pulse/Pulse", "Quintessence/Quintessence", "CleanCut/CleanCut",
+                "TypewriterReveal/TypewriterReveal", "Prime/Prime"):
+        _src = open(_os.path.join(_cap, f"{_st}.tsx")).read()
+        assert 'from "../shared/fadeTiming"' in _src and "boundedFade(" in _src, \
+            f"{_st} must wire boundedFade (WS2 bound would silently regress otherwise)"
+    # faster bases: CleanCut 55ms word entrance, Prime 160ms spring, Typewriter 90ms
+    assert "boundedFade(55," in open(_os.path.join(_cap, "CleanCut/CleanCut.tsx")).read(), \
+        "CleanCut faster base 55ms (was 80)"
+    assert "boundedFade(160," in open(_os.path.join(_cap, "Prime/Prime.tsx")).read(), \
+        "Prime faster base 160ms (was fps*0.25 = 250ms)"
+    assert "fadeInDurationMs = 90" in open(_os.path.join(_cap, "TypewriterReveal/TypewriterReveal.tsx")).read(), \
+        "TypewriterReveal faster base 90ms (was 150)"
+    # Gadzhi: opacity resolves in the first quarter of the slide (was 0.4)
+    assert "interpolate(slideProgress, [0, 0.25]" in open(_os.path.join(_cap, "Gadzhi/Gadzhi.tsx")).read(), \
+        "Gadzhi fade fraction 0.25 (was 0.4)"
+    # run the REAL helper math (node strips the .ts types) — not a Python mirror.
+    # ESM relative imports resolve to the test file's location, so cwd is irrelevant.
+    _t = _os.path.join(_cap, "shared", "fadeTiming.test.ts")
+    _r = _sub.run(["node", _t], capture_output=True, text=True)
+    assert _r.returncode == 0 and "ALL FADE-BOUND CASES PASS" in _r.stdout, \
+        f"node fadeTiming.test.ts must pass ({_r.stdout[-200:]}{_r.stderr[-200:]})"
+
+
 @check("D1 perceptual sync: ONE audible-onset derivation consumed by emphasis t + SFX + projected anchors; the projection reads the render_timeline arithmetic (frames cursor); D2 floors live")
 def _d1_perceptual_sync():
     import handler as _h
