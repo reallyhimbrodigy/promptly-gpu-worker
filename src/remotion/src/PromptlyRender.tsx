@@ -761,9 +761,12 @@ export const PromptlyOverlay: React.FC<PromptlyRenderProps> = ({ input }) => {
       <GeneratedSceneLayer items={generatedScenes ?? []} fps={fps} />
       <TextOverlaysLayer
         overlays={textOverlays ?? []}
-        captionStyle={caption.style}
-        captionExtraProps={caption.extraProps}
-        captionKeywords={caption.keywords}
+        // W1: caption-less renders are first-class — caption may be absent.
+        // caption_match overlays mimic the caption style; with no caption
+        // track they fall back to CleanCut styling (never a crash).
+        captionStyle={caption?.style ?? "CleanCut"}
+        captionExtraProps={caption?.extraProps}
+        captionKeywords={caption?.keywords ?? []}
         fps={fps}
       />
       <MotionGraphicsLayer items={motionGraphics} fps={fps} />
