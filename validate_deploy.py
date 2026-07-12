@@ -5054,6 +5054,32 @@ def _w1_w2_tier1():
     assert _k < _src.index("vidstabtransform=input="), "normalize must precede transform"
 
 
+@check("VACUOUS-READ GUARD (counted class): analyzer-field consumers answer from a carrying fixture; belt+coercion read the REAL analyzer output; present-but-fieldless is loud")
+def _vacuous_read_guard():
+    import handler as _h
+    _src = open("handler.py").read()
+    # the reference fixture CARRIES the analyzer contract's consumed fields
+    _fix = {"frame_layout": {"existing_overlays": {"has_burned_captions": True}},
+            "peak_moments": [{"t": 1.0}], "safe_cut_points": [[0.0, 1.0]],
+            "video_profile": {"style": "x"}}
+    assert _h.infer_has_burned_captions({}, _fix) is True, \
+        "a consumer wired to a carrying source must answer (not pass vacuous)"
+    assert _h.infer_has_burned_captions({}, {"frame_layout": {"existing_overlays": {}}}) is False, \
+        "absent field on a carrying-shaped source reads False, never crashes"
+    # the F8 belt + W3.1 coercion read the REAL analyzer output — never the
+    # plan-derived `analysis` (the vacuous read this class was convicted on)
+    assert "_f8_burned_fact = bool((((_pre_analysis" in _src, \
+        "the belt must read _pre_analysis (the real analyzer output)"
+    assert "_ana_burned = bool((((_pre_analysis" in _src, \
+        "the W3.1 coercion must read _pre_analysis (the real analyzer output)"
+    # MEASUREMENT absence semantics: present-but-fieldless is LOUD
+    assert '"vacuous_measurement_read"' in _src, \
+        "a present analyzer dict missing frame_layout must ledger, never default silently"
+    # the structural root is marked at its line
+    assert "VACUOUS-READ LANDMINE" in _src, \
+        "the analysis_data overwrite carries its knowledge line"
+
+
 @check("W3 source-text awareness: the verbatim teach, the in-plan declaration, the source_text_declared ledger, F7 treats burned bands as never-clear")
 def _w3_source_text():
     import handler as _h

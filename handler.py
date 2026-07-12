@@ -9326,6 +9326,19 @@ def generate_edit_gemini(
     # declaration becomes given rather than hoped, the whys stay coherent,
     # and the overlay half plans around the burned text instead of colliding
     # while only the caption track is guarded. Suspenders stay at F8.
+    # ABSENCE SEMANTICS (Zac rider 2026-07-11): _pre_analysis is a
+    # MEASUREMENT — absence of the whole measurement is legitimate (fresh
+    # path without cached analysis: fail-open), but a PRESENT measurement
+    # missing its field is a WIRING ERROR and must be loud, never defaulted
+    # (third sighting of the vacuous-read class made it a counted class).
+    if isinstance(_pre_analysis, dict) and "frame_layout" not in _pre_analysis:
+        print("[analysis] VACUOUS-READ GUARD: analyzer dict present but "
+              "frame_layout ABSENT — producer contract drift; F8 belt is "
+              "blind this job", flush=True)
+        _record_divergence(
+            "analysis", {"present_keys": sorted(_pre_analysis.keys())[:12]},
+            "vacuous_measurement_read",
+            reason="frame_layout absent from a present analyzer output (wiring error)")
     _f8_burned_fact = bool((((_pre_analysis if isinstance(_pre_analysis, dict) else {})
                              or {}).get("frame_layout") or {})
                            .get("existing_overlays", {}).get("has_burned_captions"))
@@ -13114,6 +13127,14 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                     flush=True,
                 )
 
+            # VACUOUS-READ LANDMINE (counted class, enumerated 2026-07-11):
+            # this OVERWRITES analysis_data with the PLAN-DERIVED dict —
+            # structurally complete but every value is a placeholder/echo,
+            # never a measurement. Consumers of REAL analyzer fields must
+            # read _pre_analysis/cached_analysis; a future reader of
+            # edit_plan["analysis_data"].frame_layout etc. gets placeholders
+            # silently. (In-file readers today: 18991 speech.segments —
+            # dead behind its primary; 26155 — dead assignment.)
             edit_plan["analysis_data"] = analysis
 
             # Floor telemetry (Part 3): the safe edit is the recipe FLOOR —
