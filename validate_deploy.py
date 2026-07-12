@@ -5490,9 +5490,10 @@ def _camera_shutter_two_homes():
     # key = filename stem (the resolution seam); the deploy source file exists
     assert _h.normalize_sfx_style("camera-flash") == "camera-flash", "key must equal its stem"
     assert _os.path.exists("src/assets/sounds/camera-flash.mp3"), "the swapped file must exist at the deploy source"
-    # measured onset offset — a different file has a different envelope; not inherited
-    assert abs(_h._SFX_ONSET_OFFSETS.get("camera-flash", 0.0) - 0.076) < 1e-9, \
-        "the new shutter's 76ms leading silence must be the MEASURED onset offset (per-component measurement law)"
+    # measured attack (WS1) — a different file has a different envelope; not inherited.
+    # The 127ms peak-attack subsumes the 76ms leading silence (no double-compensation).
+    assert _h._SFX_ATTACK_MS.get("camera-flash") == 127, \
+        "the shutter's MEASURED peak-attack (127ms, 76ms silence inside it) must be in the WS1 table (per-component measurement law)"
     # HOME 1 — the diegetic emphasis beat
     assert "camera-flash" in _SFX and _h._SFX_CATEGORIES.get("camera-flash") == "medium", \
         "home 1: camera-flash on the emphasis-beat surface with a mix category"
@@ -5514,6 +5515,39 @@ def _camera_shutter_two_homes():
         "exactly ONE rider sound-enum, and it carries camera-flash (no third surface)"
     assert "DSLR shutter" in _src and "decisive cut" in _src, \
         "the transition scenario reads distinctly from the diegetic photo scenario (the discriminator)"
+
+
+@check("WS1 SFX ATTACK TABLE (Zac 2026-07-12): every SFX has an individually-measured envelope-peak attack; the mixer schedules at (placement − attack) so the COMPENSATED PEAK lands on the word (peak-on-word, unified with ZOOM_PEAK_REACH_MS); the attack subsumes the onset offset (no double-compensation)")
+def _ws1_sfx_attack_table():
+    import handler as _h
+    import typing as _ty
+    _src = open("handler.py").read()
+    _SFX = set(_ty.get_args(_h._SFX_SOUNDS))
+    # complete + individual coverage; the onset table is gone (subsumed)
+    assert _SFX <= set(_h._SFX_ATTACK_MS.keys()), \
+        f"every SFX must have a measured attack (missing: {_SFX - set(_h._SFX_ATTACK_MS.keys())})"
+    assert "_SFX_ONSET_OFFSETS" not in _src, \
+        "the onset-offset table must be replaced by the attack table (no double-compensation)"
+    # the derivation on BOTH homes: schedule at (placement − attack)
+    assert "_attack = _SFX_ATTACK_MS.get(_sound_style, 0) / 1000.0" in _src \
+        and "_ts = max(0.0, _projected_t - _attack)" in _src, \
+        "the emphasis-beat SFX must schedule peak-on-word"
+    assert "_rs_attack = _SFX_ATTACK_MS.get(_rs_style, 0) / 1000.0" in _src \
+        and "_rs_ts = max(0.0, _rs_t - _rs_attack)" in _src, \
+        "the transition-rider SFX must schedule peak-on-word"
+    # individually measured, not generalized: impulsive short, swell long
+    assert all(_h._SFX_ATTACK_MS[s] < 100 for s in
+               ("popsfx", "punchsfx", "mouse-click-sound", "iphoneding", "swoosh-sound-effects")), \
+        "impulsive sounds have short attacks"
+    assert all(_h._SFX_ATTACK_MS[s] > 250 for s in
+               ("boom", "money-ching", "woosh-professional", "wompwomp", "imposter")), \
+        "swell sounds have long attacks (start under preceding words — correct by derivation)"
+    assert _h._SFX_ATTACK_MS["camera-flash"] == 127, "the shutter peak-attack subsumes its 76ms silence"
+    assert all(isinstance(v, int) and 0 <= v <= 1500 for v in _h._SFX_ATTACK_MS.values()), \
+        "no attack value is absurd (0..1500ms)"
+    # same peak-on-word CLASS the zoom reach already implements
+    assert isinstance(_h.ZOOM_PEAK_REACH_MS, dict) and "ZOOM_PEAK_REACH_MS" in _src, \
+        "the zoom peak-reach is the sibling derivation (one class)"
 
 
 @check("NO-ADJUSTMENT ruling: SFX word is the ONE anchor (reanchor pass deleted); MG anchors authored, never coerced")

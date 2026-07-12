@@ -14864,30 +14864,30 @@ _SFX_CATEGORIES = {
     "transition-sfx": "quiet",
 }
 
-# Sound → onset offset (seconds). The "onset" is the time within the file at
-# which the meaningful moment of the sound occurs. When mixing, we schedule each
-# SFX to start at (placement_time - onset) so the perceived moment lands EXACTLY
-# on the word.
+# WS1 — SFX PERCEPTUAL ATTACK TABLE (Zac 2026-07-12). Sound -> ATTACK (ms): the
+# time from FILE START to the sound's ENVELOPE PEAK — its perceptually salient
+# moment. When mixing, each SFX is scheduled to start at (placement - ATTACK/1000)
+# so the COMPENSATED PEAK lands on the word — the same peak-on-word derivation
+# ZOOM_PEAK_REACH_MS already applies to zooms (one derivation per class:
+# anchor_start = audible_word_onset - ATTACK[component]).
 #
-# Every SFX in this set is pre-trimmed to ZERO leading silence — the audible onset
-# is at sample 0 — so every offset is 0.0 and the file starts right on the word.
-# (.get() below defaults to 0.0, so these explicit zeros just document the
-# pre-trim contract; a sound with a mid-file peak adds its measured offset here.)
-# camera-flash EXCEPTION (Zac swap 2026-07-12): the delivered DSLR shutter
-# (camera-shutter-dslrr.mp3) carries ~76ms of leading silence before the click
-# transient (measured: silence below −50 dB until 0.073s, audible onset 0.076s
-# across −50/−40/−30/−20 dB thresholds → a sharp, well-defined onset). Rather
-# than re-encode the delivered asset (no-quality-loss law), record the measured
-# onset so BOTH homes (emphasis path @ ~20616, transition-rider path @ ~20637)
-# schedule the file at (placement − 0.076) and the shutter SNAP lands on the
-# word. WS1 (attack table) must measure the perceptual peak FROM the audible
-# onset, not the file start, to avoid double-compensating this offset.
-_SFX_ONSET_OFFSETS = {
-    "boom": 0.0, "punchsfx": 0.0, "swoosh-sound-effects": 0.0,
-    "woosh-professional": 0.0, "transition-sfx": 0.0, "camera-flash": 0.076,
-    "money-ching": 0.0, "iphoneding": 0.0, "mouse-click-sound": 0.0,
-    "popsfx": 0.0, "correct": 0.0, "rizz": 0.0,
-    "shockingsfx": 0.0, "awkward-moment": 0.0, "wompwomp": 0.0, "imposter": 0.0,
+# INDIVIDUALLY MEASURED, never generalized (per-component law): each value is the
+# argmax of that file's own RMS envelope (5ms window), measured from its start.
+# This SUBSUMES the old onset offset — the attack already includes any leading
+# silence, so it is NOT applied on top of one (that would double-compensate; the
+# camera-flash 76ms leading silence lives INSIDE its 127ms attack). Long-swell
+# sounds (imposter 935, wompwomp 666, woosh 599) legitimately start under the
+# PRECEDING words so their peak lands on the target word — correct by derivation,
+# clamped at the clip head (max(0,...)); nothing to ledger.
+_SFX_ATTACK_MS = {
+    # impulsive — peak at/near the transient
+    "awkward-moment": 10, "iphoneding": 12, "mouse-click-sound": 30,
+    "popsfx": 32, "swoosh-sound-effects": 62, "punchsfx": 67, "rizz": 92,
+    # mid / shutter snap
+    "camera-flash": 127, "shockingsfx": 150,
+    # swell — peak builds; the file starts earlier so the peak lands on the word
+    "boom": 287, "transition-sfx": 354, "correct": 362,
+    "money-ching": 551, "woosh-professional": 599, "wompwomp": 666, "imposter": 935,
 }
 
 # RMS measurement cache — populated lazily, avoids re-measuring same file
@@ -20624,8 +20624,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             continue
         if _projected_t is None:
             continue
-        _onset = _SFX_ONSET_OFFSETS.get(_sound_style, 0.0)
-        _ts = max(0.0, _projected_t - _onset)
+        _attack = _SFX_ATTACK_MS.get(_sound_style, 0) / 1000.0   # WS1 peak-on-word
+        _ts = max(0.0, _projected_t - _attack)
         _offset_ms = round(_ts * 1000)
         _vol = get_sfx_volume(_sound_style, _ts, _speech_segs, is_text_overlay=False)
         sfx_input_args += ["-i", _sound_path]
@@ -20633,7 +20633,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         sfx_filter_strs.append(f"[{_sfx_extra_idx + 1}:a]volume={_vol:.3f},adelay={_offset_ms}|{_offset_ms}[timesfx{_i}]")
         sfx_timestamps.append(_ts)
         _sfx_src_t = float(_sfx.get("t") or 0.0)
-        print(f"[sfx] sound_effect: {_sound_style} vol={_vol:.3f} source={_sfx_src_t:.3f}s → output={_projected_t:.3f}s → onset_comp(-{_onset:.3f}s)={_ts:.3f}s", flush=True)
+        print(f"[sfx] sound_effect: {_sound_style} vol={_vol:.3f} source={_sfx_src_t:.3f}s → output={_projected_t:.3f}s → peak_attack(-{_attack:.3f}s)={_ts:.3f}s", flush=True)
         _sfx_extra_idx += 1
 
     # ── A1/A2 RIDER SOUNDS: fire at the transition's rendered slot frame ──
@@ -20645,8 +20645,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _rs_path = get_sfx_path(_rs_style) if _rs_style != "none" else None
         if not _rs_path:
             continue
-        _rs_onset = _SFX_ONSET_OFFSETS.get(_rs_style, 0.0)
-        _rs_ts = max(0.0, _rs_t - _rs_onset)
+        _rs_attack = _SFX_ATTACK_MS.get(_rs_style, 0) / 1000.0   # WS1 peak-on-word
+        _rs_ts = max(0.0, _rs_t - _rs_attack)
         _rs_ms = round(_rs_ts * 1000)
         _rs_vol = get_sfx_volume(_rs_style, _rs_ts, _speech_segs, is_text_overlay=False)
         sfx_input_args += ["-i", _rs_path]

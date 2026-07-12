@@ -29,10 +29,10 @@ check("the deploy source file exists (src/assets/sounds/camera-flash.mp3)",
 check("get_sfx_path builds the {stem}.mp3 candidate", "{normalized}.mp3" in
       open("handler.py").read().split("def get_sfx_path", 1)[1][:400])
 
-# ─── measured onset offset (76ms leading silence compensated on BOTH homes) ──
-check("onset offset = measured 0.076 (not the default 0.0)",
-      abs(H._SFX_ONSET_OFFSETS.get("camera-flash", 0.0) - 0.076) < 1e-9,
-      H._SFX_ONSET_OFFSETS.get("camera-flash"))
+# ─── measured attack (WS1): the shutter peak-attack subsumes its 76ms silence ─
+check("WS1 attack table carries the shutter's measured peak (127ms, 76ms silence inside it)",
+      H._SFX_ATTACK_MS.get("camera-flash") == 127,
+      H._SFX_ATTACK_MS.get("camera-flash"))
 
 # ─── HOME 1: the diegetic emphasis beat ─────────────────────────────────────
 check("home 1: camera-flash on the emphasis-beat surface (_SFX_SOUNDS)", "camera-flash" in _SFX)
