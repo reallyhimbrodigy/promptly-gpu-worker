@@ -4,8 +4,6 @@ import {
   Sequence,
   useCurrentFrame,
   useVideoConfig,
-  interpolate,
-  Easing,
 } from "remotion";
 import type { TikTokToken } from "../shared/types";
 import type { GadzhiStyleProps } from "./types";

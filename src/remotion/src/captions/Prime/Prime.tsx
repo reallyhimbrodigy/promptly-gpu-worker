@@ -66,17 +66,10 @@ const PrimeWord: React.FC<{
   // arriving before the next one starts, instead of a train of half-sprung
   // words (shared/fadeTiming).
   const activateFrame = Math.round(((token.fromMs - pageStartMs) / 1000) * fps);
-  const wordSpring = spring({
-    frame: frame - activateFrame,
-    fps,
-    config: { damping: 200 },
-    durationInFrames: Math.max(1, msToFrames(boundedFade(160, windowMs), fps)),
-  });
-
-  // FRAME-1-IS-FINAL ENTRANCE (Zac 2026-07-13, 4th pass): the word arrives in its FINAL
-  // position at FULL opacity — no slide, no fade. The old translateY 20→0 slide was the
-  // "float up". Prime's character is its two-tier hierarchy + keyword breakout, not a
-  // travelling entrance.
+  // FRAME-1-IS-FINAL ENTRANCE (Zac 2026-07-13, 4th/5th pass): the word SNAPS on — final
+  // position, full opacity, from frame 1. ZERO entrance animation of any kind (the old
+  // slide-spring is gone entirely, not just zeroed). Prime's character is its two-tier
+  // hierarchy + keyword breakout, which is static, not a travelling entrance.
   const slideY = 0;
   const wordOpacity = frame >= activateFrame ? 1 : 0;
 

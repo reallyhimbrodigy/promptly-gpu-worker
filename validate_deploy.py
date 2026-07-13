@@ -365,6 +365,14 @@ def _caption_crisp_entrance():
     for _st, _src in _srcs.items():
         assert ("CRISP ENTRANCE (Zac 2026-07-13)" in _src or "FRAME-1-IS-FINAL" in _src), \
             f"{_st} must carry the entrance conversion"
+    # ZERO ENTRANCE ANIMATION (Zac 2026-07-13, absolute spec): NO spring() in ANY style —
+    # springs were the entrance-motion drivers (slide/slam/scale); every one is removed.
+    # A caption SNAPS on (final position, full opacity, full scale, final color) from
+    # frame 1. This forbids re-adding a spring-driven entrance on ANY property.
+    for _st, _src in _srcs.items():
+        assert "spring(" not in _src, f"{_st}: NO entrance spring — the caption must snap on, not animate in"
+    # Gadzhi's gray→white color is INSTANT (final color frame 1), not a settle
+    assert "const color = finalColor;" in _srcs["Gadzhi"], "Gadzhi color is instant (no gray→white ramp)"
     # OPACITY ghosts gone (round 3)
     assert "interpolate(wordSpring, [0, 1], [0, 1])" not in _srcs["Prime"], "Prime opacity ramp gone"
     assert "(currentTimeMs - token.fromMs) / 60" not in _srcs["Cove"], "Cove opacity ramp gone"
