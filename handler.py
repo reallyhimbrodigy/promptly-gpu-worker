@@ -495,6 +495,35 @@ def _mg_clear_region_exists(mg_type, sw_s, ew_s, face_traj, burned_bands=frozens
         return True  # fail-open, like every face-data consumer
 
 
+_MG_FACE_BAND_YRANGES = {"top": (120.0, 640.0), "center": (640.0, 1280.0), "bottom": (1280.0, 1800.0)}
+
+
+def _face_occupied_bands(face_traj, t0_s, t1_s):
+    """The vertical band(s) the SUBJECT'S FACE occupies over [t0,t1] — the bands an
+    MG must NEVER cover (Zac 2026-07-12: a graphic never sits on the speaker's face,
+    the way an editor knows without thinking). Reuses _mg_clear_region_exists's 600px
+    face-window overlap vs _MG_FACE_CLEAR_THRESHOLD. Empty when face data is absent
+    (fail-open — an unknown face forces no avoidance). This turns the face from a
+    prompt hint + existence drop-gate into a first-class band OCCUPANT the composer
+    routes accents around."""
+    try:
+        pts = [p for p in (face_traj or [])
+               if p.get("found") and (t0_s - 0.5) <= float(p.get("t") or 0.0) <= (t1_s + 0.5)]
+        if not pts:
+            return set()
+        FH = 600.0
+        occ = set()
+        for _band, (y0, y1) in _MG_FACE_BAND_YRANGES.items():
+            cov = sum(max(0.0, min(y1, float(p.get("cy") or 960.0) + FH / 2.0)
+                          - max(y0, float(p.get("cy") or 960.0) - FH / 2.0)) / FH
+                      for p in pts) / len(pts)
+            if cov > _MG_FACE_CLEAR_THRESHOLD:
+                occ.add(_band)
+        return occ
+    except Exception:
+        return set()
+
+
 # ── Pydantic EditPlan schema ─────────────────────────────────────────────────
 # Gemini's response_json_schema enforces this at token-generation time — the
 # model cannot emit missing fields, wrong types, or out-of-enum values. Python
@@ -4570,9 +4599,9 @@ Component sizes:
 **Base layout — the three component types live in three different bands so the frame reads coherent, not scattered. This is the STANDARD; deviate only when a moment genuinely calls for it, and know it's a deliberate departure from the default:**
   • Captions live in the LOWER third (their resting home).
   • Text-overlays live in the UPPER third.
-  • Motion graphics take CENTER or UPPER, read from the frame: **center when the frame's center is clear** (the FACE VERTICAL ZONE reads upper or lower, so the face isn't there), **upper when the subject occupies center** (the common talking-head). Center is the graphic's home when the person isn't in it — it is NOT a forbidden zone.
+  • Motion graphics **NEVER cover the speaker's face** — a graphic on the face is the most obviously-amateur thing an edit can do. Place it in the EMPTY SPACE: the gap above the head (upper), or beside/below the subject. On the common talking-head the FACE FILLS THE CENTER BAND even when the head-TOP reads "upper" in the FACE VERTICAL ZONE (the zone tracks the top of the head, not the body) — so on a talking-head the default is **upper_third_safe**, the clear gap above the hair. Center is for a graphic ONLY when the subject genuinely isn't in the center band — a wide shot, the speaker off to one side, or an off-camera moment.
 
-Anchor preference for an MG: 1) **center** when FACE VERTICAL ZONE reads upper or lower (center is clear — the graphic's natural home, and it leaves captions lower + overlays upper untouched) · 2) **upper_third_safe** when the face owns center (the talking-head default) · 3) **lower_third_safe — LAST RESORT ONLY** (a bottom MG forces captions off their lower-third home to the top, which is exactly what makes a frame feel scattered; reach for it only for genuinely footer-like content when upper and center are both taken). MGs render horizontally centered — the anchor enum is vertical-only, so clearance comes from the vertical band you pick. Read the FACE VERTICAL ZONE signal you're given and pick the band the face isn't in; a smaller variant when space is tight, or a B-roll window when the frame is full. The clean speaker shot + a coherent three-band layout is the baseline the render protects.
+Anchor preference for an MG: 1) **upper_third_safe** — the default: the clear gap above the head on a talking-head · 2) **center** ONLY when the subject isn't in the center band (a wide/pulled-back shot, the speaker off to the side, off-camera) · 3) **lower_third_safe — LAST RESORT ONLY** (a bottom MG forces captions off their lower-third home to the top and scatters the frame; genuinely footer-like content only, when upper and center are both taken). MGs render horizontally centered — the anchor enum is vertical-only, so clearance comes from the vertical band you pick. **Covering a face is never acceptable, and the pipeline GUARANTEES it — a graphic whose band overlaps the face is relocated to the clear band, structurally. Your anchor is the authored intent; the enforcement is the floor.** A smaller variant when space is tight, or a B-roll window when the frame is full. The clean speaker shot + a coherent three-band layout is the baseline the render protects.
 
 ──────────────────────────────────────────
 THE {_n_mgs} COMPONENTS
@@ -5676,7 +5705,7 @@ _COMPOSER_TOP_PINNED_MG = frozenset({"Notification"})
 
 def _compose_band_occupancy(
     raw_caption_segments, motion_graphics, text_overlays, broll_frame_ranges,
-    shipped_caption=None, shadow=True,
+    shipped_caption=None, shadow=True, face_trajectory=None, source_fps=60.0,
 ):
     """DETERMINISTIC ZONE COMPOSER (ratified hybrid — Gemini owns what/when/why,
     the composer owns which vertical band × which frames). Generalizes
@@ -5777,6 +5806,15 @@ def _compose_band_occupancy(
         if a >= b:
             continue
         _active = [_c for _c in claims if _c["f0"] <= a and _c["f1"] >= b]
+        # FACE AVOIDANCE (Zac 2026-07-12): the subject's face is a RIGID band
+        # occupant — a graphic must NEVER cover it. Inject the face's occupied
+        # band(s) for this interval as rigid claims (id "face_*", kind "face") so
+        # the packer reserves them FIRST and relocates every accent off the face
+        # (move-not-drop). Fixes the talking-head case where zone=upper misled the
+        # anchor to center while the face BODY fills the center band.
+        for _fb in _face_occupied_bands(face_trajectory, a / float(source_fps or 30), b / float(source_fps or 30)):
+            _active.append({"id": f"face_{_fb}", "kind": "face", "band": _fb,
+                            "f0": a, "f1": b, "rigid": True})
         # P1: B-roll full-frame — exclusive ground, caption rides top.
         if any(_f <= a and _t >= b for _f, _t in broll_windows):
             composed_caption.append((a, b, "top"))
@@ -5784,10 +5822,11 @@ def _compose_band_occupancy(
                 element_bands.setdefault(_c["id"], []).append((a, b, "dropped_broll"))
             continue
         _free = set(_BANDS)
-        # P3: fixed-band accents reserve their mandated band (weight tiebreak
-        # unavailable at shadow v1 — order by start, then id, deterministic).
+        # P3: fixed-band accents reserve their mandated band. The FACE claims first
+        # (it can never yield — a graphic never covers the speaker), then other rigid
+        # accents; order by start, then id, deterministic.
         for _c in sorted([c for c in _active if c["rigid"]],
-                         key=lambda c: (c["f0"], c["id"])):
+                         key=lambda c: (0 if c["kind"] == "face" else 1, c["f0"], c["id"])):
             if _c["band"] in _free:
                 _free.discard(_c["band"])
                 element_bands.setdefault(_c["id"], []).append((a, b, _c["band"]))
@@ -21282,6 +21321,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _broll_ranges_for_caption_override,
             shipped_caption=caption_position_segments_out,
             shadow=not _composer_cutover,
+            face_trajectory=_face_trajectory,   # face-avoidance: never cover the speaker
+            source_fps=source_fps,
         )
         if _composer_cutover:
             # CUTOVER (flag ON, default OFF): the composer's caption track drives

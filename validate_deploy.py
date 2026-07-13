@@ -5042,8 +5042,10 @@ def _item3_ws2_fade_bound():
 def _findings_placement_and_content_cut():
     import handler as _h
     _src = open("handler.py").read()
-    # Finding 1 — MG base placement taught (not coerced)
-    assert "center when the frame's center is clear" in _src, "MG base = center-when-clear must be taught"
+    # Finding 1 — MG base placement taught (default upper on a talking-head; never the face)
+    assert "NEVER cover the speaker's face" in _src, "MG must be taught to never cover the face"
+    assert "the FACE FILLS THE CENTER BAND even when the head-TOP reads" in _src, \
+        "the zone=upper trap must be taught (face body fills center though head-top reads upper)"
     assert "lower_third_safe — LAST RESORT ONLY" in _src, "lower_third_safe demoted from the #2 default"
     # Finding 3 — content-word protection gate + prompt
     assert "def _gemini_cut_span_removable(" in _src, "the content-word predicate must exist"
@@ -5066,6 +5068,20 @@ def _findings_placement_and_content_cut():
         {"mg0": [(0, 60, "center")], "to0": [(0, 60, "top")]})
     assert _km[0]["props"]["anchor"] == "center" and _ko[0]["position"] == "top" and _mv == 1 and _dp == 0, \
         "collision: MG keeps its spot, overlay MOVES to its alternate (never a silent drop when a band is free)"
+    # Finding 1 — FACE AVOIDANCE (Zac 2026-07-12): a graphic never covers the speaker.
+    # The face is a rigid band occupant; an MG on the face band is relocated off it.
+    assert "def _face_occupied_bands(" in _src and 'kind": "face"' in _src, \
+        "the face must be a rigid band claim in the composer (not just a drop-gate)"
+    assert "face_trajectory=_face_trajectory" in _src, "the composer must receive the face trajectory"
+    assert _h._face_occupied_bands([{"found": True, "cy": 960, "t": 1.0}], 0.0, 2.0) == {"center"}, \
+        "a talking-head face (cy=960) occupies the center band"
+    _fc = _h._compose_band_occupancy(
+        [], [{"type": "StatCard", "fromFrame": 0, "durationInFrames": 120, "props": {"anchor": "center"}}],
+        [], [], shadow=False,
+        face_trajectory=[{"found": True, "cy": 960, "t": round(_j * 0.1, 2)} for _j in range(30)], source_fps=60.0)
+    _fb = {band for (_a, _b, band) in (_fc["element_bands"].get("mg0") or [])}
+    assert "center" not in _fb and _fb and _fb <= {"top", "bottom"}, \
+        "an MG authored on the face is relocated off it (never covers the speaker)"
 
 
 @check("D1 perceptual sync: ONE audible-onset derivation consumed by emphasis t + SFX + projected anchors; the projection reads the render_timeline arithmetic (frames cursor); D2 floors live")
