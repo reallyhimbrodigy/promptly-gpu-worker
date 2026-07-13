@@ -228,6 +228,94 @@ _F8_NEGATION = _f8_re.compile(
     r"\b(captions?|subtitles?)\b", _f8_re.IGNORECASE)
 
 
+# ── VIBE-AWARE COMPONENT PALETTES (Zac 2026-07-12) ───────────────────────────
+# The vibe is a DEFAULT toolkit Gemini picks FROM — below user instructions (the
+# obedience chain, supreme) and above Gemini's per-moment judgment. It narrows the
+# choice to the tonally-right components so every video is tailored. Free-text vibe
+# → one of four families by keyword; the palette is TAUGHT (prompt), never a hard
+# lock (a user override wins; a truly exceptional moment can reach just outside it).
+_VIBE_FAMILY_KEYWORDS = [
+    ("corporate", r"corporate|professional|business|polished|formal|b2b|b to b|sleek|refined|minimalist|minimalistic|understated|buttoned|enterprise|saas"),
+    ("educational", r"educational|explainer|explain|tutorial|how.?to|teach|lesson|informative|walkthrough|step.?by.?step|breakdown|guide|process|demo\b"),
+    ("story", r"story|storytime|aesthetic|cinematic|calm|elegant|emotional|personal|intimate|moody|vlog|journ(ey|al)|documentary|reflective|soft"),
+    ("viral", r"viral|punchy|hype|high.?energy|engag|kinetic|energetic|bold|tiktok|reel|hook|snappy|trendy|fun|hyped|chaotic|meme"),
+]
+_VIBE_PRECEDENCE = ("corporate", "educational", "story", "viral")
+
+# Palette per family: the prompt-facing tonal defaults. Enforcement stays with the
+# USER (obedience chain); the palette is Gemini's default menu, taught by vibe.
+_VIBE_PALETTES = {
+    "corporate": {
+        "label": "corporate / professional / polished",
+        "captions": "CleanCut (crisp, minimal, single-word) — Cove if a more premium serif fits",
+        "sfx": "QUIET only — swoosh-sound-effects, woosh-professional, transition-sfx; camera-flash for a clean screenshot/stat. NO booms, NO punch, NO money-ching, NO dings, and NEVER the comedic sounds (rizz, wompwomp, awkward-moment, imposter). Restraint is the tone; most beats carry NO sound.",
+        "transitions": "subtle only — CrossfadeZoom, SlideOver, StepPush",
+        "mgs": "restrained + structural — StatCard, RankedList, Timeline, ProgressBar; sparse",
+    },
+    "viral": {
+        "label": "viral / punchy / high-energy",
+        "captions": "the kinetic styles — Prime (blue slide), Pulse (coral pops), TwoTone (slam), Gadzhi (punchy uppercase)",
+        "sfx": "the FULL kit — boom, punchsfx, money-ching, shockingsfx (loud) · iphoneding, popsfx, camera-flash (accents) · rizz, wompwomp, awkward-moment, imposter (comedic). Density is welcome; the energy compounds.",
+        "transitions": "punchy — ZoomThrough, CardSwipe, ShutterFlash, Stack",
+        "mgs": "kinetic — social cards (TweetBubble, ChatThread, IMessageBubble, TikTokComment), NumberTicker, StatCard",
+    },
+    "educational": {
+        "label": "educational / explainer / how-to",
+        "captions": "readable — CleanCut, or TypewriterReveal for a technical/reveal feel",
+        "sfx": "CLEAN cues only — whooshes + mouse-click-sound ('tap/click'), iphoneding ('a notification'), popsfx (a point landing), camera-flash (a screenshot). NO booms, NO comedic. Informative, not hype.",
+        "transitions": "clean — SlideOver, StepPush, CrossfadeZoom",
+        "mgs": "structural — RankedList, Timeline, TimelineRoadmap, StickyNotes, DropBanner, AnnotationArrow, ProgressBar",
+    },
+    "story": {
+        "label": "story / aesthetic / cinematic",
+        "captions": "elegant — Cove (boxed serif), Lumen (soft glow), Quintessence (quiet elegance)",
+        "sfx": "SWELLS, sparingly — boom as the ONE cinematic weight, whooshes, transition-sfx. NO dings, NO comedic, NO rapid punch. Restraint is the tone.",
+        "transitions": "cinematic — CrossfadeZoom, DipToBlack, FilmStrip",
+        "mgs": "minimal — PullQuote, EditorialQuote; sparse",
+    },
+}
+
+
+def _classify_vibe(vibe):
+    """Free-text vibe → palette family. NO keyword match → 'viral' (the typical
+    UGC-creator default + fullest kit; the obedience chain catches exceptions).
+    MULTIPLE matches → the more restrained family wins (corporate>educational>story>
+    viral) so a mixed-signal vibe never gets jarring loud SFX. EVERY video gets a
+    coherent palette — none falls through to the whole toolbox."""
+    _t = str(vibe or "").lower()
+    _hits = {_fam for _fam, _pat in _VIBE_FAMILY_KEYWORDS if re.search(_pat, _t)}
+    if not _hits:
+        return "viral"
+    for _fam in _VIBE_PRECEDENCE:
+        if _fam in _hits:
+            return _fam
+    return "viral"
+
+
+def _vibe_palette_block(vibe):
+    """The prompt block that scopes the component toolbox to the vibe's family — a
+    DEFAULT menu, below the user's explicit instructions and above Gemini's per-moment
+    pick. A genuinely exceptional moment may reach just outside it; a user instruction
+    always overrides it."""
+    _fam = _classify_vibe(vibe)
+    _p = _VIBE_PALETTES[_fam]
+    return (
+        f"\n──────────────────────────────────────────\n"
+        f"YOUR PALETTE FOR THIS VIBE — {_p['label']}\n"
+        f"──────────────────────────────────────────\n"
+        f"This vibe reads as **{_fam}**. Pick your components FROM this palette by default — it is the "
+        f"tonally-right toolkit for this video. It is NOT a cage: a user's explicit instruction always "
+        f"overrides it, and a genuinely exceptional moment may reach just outside it when warranted. But "
+        f"the default menu is this:\n"
+        f"  • CAPTIONS: {_p['captions']}\n"
+        f"  • SOUND: {_p['sfx']}\n"
+        f"  • TRANSITIONS: {_p['transitions']}\n"
+        f"  • MOTION GRAPHICS: {_p['mgs']}\n"
+        f"A tonally-wrong pick — a boom in a corporate video, a slow elegant caption in a viral one — is a "
+        f"failed edit even when well-made. Match the toolkit to the vibe.\n"
+    )
+
+
 def _vibe_requests_captions(vibe):
     """F8 override — the instruction mappings win, as everywhere: an explicit
     captions-on ask in the vibe beats the double-caption coercion. Any
@@ -4238,6 +4326,7 @@ USER INSTRUCTIONS — READ FIRST, OBEY ABSOLUTELY
 ═══════════════════════════════════════════════════════════════════════════
 
 The user's vibe (in the USER message under "The user wants:") is your DIRECTOR speaking. Take it LITERALLY. Everything else in this prompt is fallback behavior for atmospheric vibes ("viral", "punchy", "story-driven"). The moment the vibe contains a SPECIFIC include/exclude instruction, that instruction OVERRIDES every default. A polished video that ignored the user's stated preferences is the worst possible outcome — far worse than a sparse video that did what they asked.
+{_vibe_palette_block(vibe)}
 
 Exact mappings:
 
@@ -10583,6 +10672,15 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                     f"kept=[{','.join(_ep_kept)}] mode={getattr(resolved_policy, 'mode', '?')}",
                     flush=True,
                 )
+            # USER OBEDIENCE: SPECIFIC-sound negatives ('no booms') suppress just that
+            # sound — a user negative wins even against the vibe palette (a boom in a
+            # viral vibe is dropped if the user said no; a requested boom in corporate
+            # survives because the palette is only a default). Always enforced.
+            _snd_neg = _parse_sound_negatives(vibe)
+            if _snd_neg:
+                _snn = _enforce_sound_negatives(edit_plan, _snd_neg)
+                print(f"[obedience] user suppressed sound(s) {sorted(_snd_neg)} — "
+                      f"{_snn} beat(s) cleared to voice/none", flush=True)
 
             # Surface video_plan — Gemini's editorial scaffold — in the render log
             # so it's auditable. If Gemini's component placements diverge from the
@@ -13869,6 +13967,65 @@ def _parse_off_features(text):
         if re.search(_verb + _pat, _t):
             _off.add(_feat)
     return _off
+
+
+# user-facing sound word -> internal SFX name(s), for SPECIFIC-sound negatives
+_SOUND_NEGATIVE_ALIASES = {
+    r"booms?": {"boom"},
+    r"punch(?:es)?|punchy? hits?": {"punchsfx"},
+    r"dings?|notifications?|text tones?|imessages?": {"iphoneding"},
+    r"whoosh(?:es)?|swoosh(?:es)?|wooshes?": {"swoosh-sound-effects", "woosh-professional"},
+    r"ching|cash registers?|cha-?ching|money sounds?": {"money-ching"},
+    r"clicks?|mouse clicks?": {"mouse-click-sound"},
+    r"pops?|pop sounds?": {"popsfx"},
+    r"shutters?|camera (?:flash(?:es)?|clicks?|sounds?)": {"camera-flash"},
+    r"shocks?|jolts?|stingers?": {"shockingsfx"},
+    r"rizz": {"rizz"},
+    r"womp ?womps?|sad trombones?|trombones?": {"wompwomp"},
+    r"sus|imposter|among us": {"imposter"},
+    r"awkward(?:[ -]moments?)?|cringe sounds?": {"awkward-moment"},
+    r"transition sounds?|sweeps?": {"transition-sfx"},
+}
+
+
+def _parse_sound_negatives(text):
+    """USER OBEDIENCE (Zac 2026-07-12): capture a SPECIFIC-sound negative — "no booms",
+    "no dings", "no whooshes" — from the ask, so a single sound is suppressed without
+    disabling all SFX ('no SFX' is the category-level _parse_off_features). "No booms"
+    wins even in a viral vibe; a user asking for a boom in a corporate video gets it
+    (the palette is only a default). Returns a set of internal SFX names to suppress."""
+    _off = set()
+    if not text:
+        return _off
+    _t = str(text).lower()
+    _verb = (r"(?:no|without|don'?t (?:add|use|include|want|put)|remove|drop|kill|"
+             r"turn off|disable|get rid of|skip|leave out|lose|not? any)\s+(?:the |all |any |my )?")
+    for _word, _sounds in _SOUND_NEGATIVE_ALIASES.items():
+        if re.search(_verb + r"(?:" + _word + r")\b", _t):
+            _off |= _sounds
+    return _off
+
+
+def _enforce_sound_negatives(edit_plan, sounds):
+    """Strip the user-suppressed SFX from the final plan deterministically: an
+    emphasis carrying that sound falls to 'voice'; a discrete sound_effect / transition
+    rider carrying it loses the sound. The other beats keep their (allowed) sounds."""
+    if not sounds:
+        return 0
+    _n = 0
+    for _m in edit_plan.get("emphasis_moments") or []:
+        if isinstance(_m, dict) and _m.get("sound") in sounds:
+            _m["sound"] = "voice"
+            _n += 1
+    _before = edit_plan.get("sound_effects") or []
+    edit_plan["sound_effects"] = [_s for _s in _before
+                                  if not (isinstance(_s, dict) and _s.get("sound") in sounds)]
+    _n += len(_before) - len(edit_plan["sound_effects"])
+    for _t in edit_plan.get("transitions") or []:
+        if isinstance(_t, dict) and _t.get("sound") in sounds:
+            _t.pop("sound", None)
+            _n += 1
+    return _n
 
 
 def _deterministic_reedit(old_plan, change_request):

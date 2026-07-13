@@ -174,6 +174,10 @@ def _system_instruction_format():
     assert start > 0, "system_instruction f-string not found"
     end = src.find('"""', start + 30)
     prompt = src[start + len('system_instruction = f"""'):end]
+    # Function-call interpolations (e.g. {_vibe_palette_block(vibe)}) are valid
+    # f-string expressions the compiler already validated (module imports cleanly);
+    # .format() can't model a call, so strip them before the JSON-brace simulation.
+    prompt = re.sub(r"\{[A-Za-z_]\w*\([^{}]*\)\}", "", prompt)
     # The .format() check catches unescaped { in JSON examples
     # (today's f-string bug pattern). The registry-derived interpolations
     # (enum lines + roster counts) are supplied as kwargs.
@@ -5133,6 +5137,35 @@ def _findings_placement_and_content_cut():
     _h._enforce_off_expressive_features(_np, {"sfx"})
     assert _np["sound_effects"] == [] and _np["emphasis_moments"][0].get("sound") == "voice", \
         "'no SFX' strips every SFX (discrete + emphasis rider)"
+
+
+@check("PART 2 (Zac 2026-07-12): vibe-aware component palettes — free-text vibe → one of four families (corporate/viral/educational/story), each a DEFAULT toolkit taught in the prompt (below user instructions, above Gemini's pick); no-match→viral, multi-match→restraint precedence; specific-sound negatives ('no booms') suppress one sound even against the palette; caption SPEED stays universal")
+def _part2_vibe_palettes():
+    import handler as _h
+    _src = open("handler.py").read()
+    assert "def _classify_vibe(" in _src and "def _vibe_palette_block(" in _src and "_VIBE_PALETTES" in _src, \
+        "the vibe classifier + palettes must exist"
+    assert "_vibe_palette_block(vibe)" in _src, "the palette block must be injected into the prompt (scoped by vibe)"
+    # classifier: precedence + fallback (every video gets a coherent palette)
+    assert _h._classify_vibe("a corporate explainer") == "corporate", "restraint precedence (corporate>educational)"
+    assert _h._classify_vibe("") == "viral" and _h._classify_vibe("just make it good") == "viral", \
+        "no-match defaults to viral — never falls through to the whole toolbox"
+    # tonal split: corporate = quiet/no-booms + CleanCut; viral = full kit + kinetic
+    _corp = _h._vibe_palette_block("corporate saas")
+    assert "QUIET only" in _corp and "NO booms" in _corp and "CleanCut" in _corp, "corporate = restrained"
+    assert "boom" in _h._vibe_palette_block("viral hype"), "viral = the full kit"
+    # specific-sound negative wins over the palette (user > vibe)
+    assert "def _parse_sound_negatives(" in _src and "_enforce_sound_negatives(edit_plan" in _src, \
+        "specific-sound negatives must be captured + enforced"
+    assert _h._parse_sound_negatives("viral but no booms") == {"boom"}, "'no booms' suppresses just boom"
+    assert _h._parse_sound_negatives("corporate add a boom") == set(), "a requested boom is not a negative"
+    _pl = {"emphasis_moments": [{"sound": "boom"}, {"sound": "punchsfx"}], "sound_effects": [{"sound": "boom"}]}
+    _h._enforce_sound_negatives(_pl, {"boom"})
+    assert _pl["emphasis_moments"][0]["sound"] == "voice" and _pl["emphasis_moments"][1]["sound"] == "punchsfx" \
+        and _pl["sound_effects"] == [], "'no booms' strips boom, keeps other sounds"
+    # caption SPEED is universal — the vibe sets style, never speed
+    assert "MAX_ENTRANCE_MS = 80" in open("src/remotion/src/captions/shared/fadeTiming.ts").read(), \
+        "the universal fast cap must exist (a 'cinematic' vibe can never reintroduce slow captions)"
 
 
 @check("D1 perceptual sync: ONE audible-onset derivation consumed by emphasis t + SFX + projected anchors; the projection reads the render_timeline arithmetic (frames cursor); D2 floors live")
