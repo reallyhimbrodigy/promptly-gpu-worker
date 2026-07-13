@@ -242,6 +242,64 @@ _F8_NEGATION = _f8_re.compile(
 # FIGHTS warns, but a real quoted tweet in a corporate video still uses TweetBubble.
 
 
+# ── USER B-ROLL REQUESTS (Zac 2026-07-13, Gap 3) — a HARD obedience signal ──────
+# A user naming b-roll they want ("show Ahmedabad", "use footage of X and Y") forces
+# the fetch. The old prompt told Gemini a named place over-narrows into NONE (lumped
+# with brand names + exact times) — backwards: a named real place/landmark has a
+# POPULATED stock pool (probe: Ahmedabad/Jaipur/Boise all return full 15-clip pools).
+# The broad-subject default cannot suppress a user request (user > default).
+_BROLL_MEDIA = r"(?:footage|pictures?|photos?|clips?|images?|videos?|b-?roll|shots?|scenes?|visuals?|stock)"
+_BROLL_REQ_RE = re.compile(
+    r"(?:" + _BROLL_MEDIA + r"\s+of\s+|\bshow\s+(?:me\s+)?)"
+    r"(?P<subj>[A-Za-z][\w'’.\-]*(?:\s+[A-Za-z][\w'’.\-]*){0,5})",
+    re.IGNORECASE)
+# bare 'show X' is a request only when X reads as a subject — never a pronoun/verb phrase
+_BROLL_STOP = {"them", "they", "me", "us", "you", "it", "this", "that", "how", "why",
+               "what", "where", "when", "who", "off", "here", "there", "up", "again"}
+_BROLL_ARTICLES = {"the", "a", "an", "some", "my", "your", "our", "their", "his", "her", "its"}
+
+
+def _parse_broll_requests(text):
+    """Positive user b-roll requests → the named subjects to FETCH, in order, deduped.
+    High precision: a media-of phrase ('footage of X', 'pictures of X') always counts;
+    bare 'show X' counts only when X reads as a real subject (its first non-article
+    word is not a pronoun/verb-phrase marker). Conjoined subjects split ('Tokyo and
+    Mumbai' → two). A negative ('no b-roll') never matches — there is no 'of'+subject
+    after it. This is the obedience-chain hard signal: the fetch is forced."""
+    _t = str(text or "")
+    out, seen = [], set()
+    for m in _BROLL_REQ_RE.finditer(_t):
+        for part in re.split(r"\s*(?:,|\band\b)\s*", m.group("subj").strip()):
+            p = part.strip().rstrip(".!?,;:")
+            if not p:
+                continue
+            _w = p.split()
+            _gi = 0
+            while _gi < len(_w) and _w[_gi].lower() in _BROLL_ARTICLES:
+                _gi += 1
+            if _gi >= len(_w) or _w[_gi].lower() in _BROLL_STOP:
+                continue
+            if p.lower() not in seen:
+                seen.add(p.lower()); out.append(p)
+    return out
+
+
+def _broll_request_directive(vibe):
+    """Prompt block naming the user's REQUIRED b-roll subjects — empty when none, so
+    it only ever adds text on an actual request. Overrides the broad-subject default."""
+    _reqs = _parse_broll_requests(vibe)
+    if not _reqs:
+        return ""
+    return (
+        f"\n**REQUIRED B-ROLL (user request — OBEY):** the user explicitly asked for footage of: "
+        f"{', '.join(_reqs)}. For EACH, emit a broll_clip at the moment the dialogue references it "
+        f"(or the most fitting moment), using the named subject itself as the keyword. A named real "
+        f"place/landmark/thing has a POPULATED stock pool — this OVERRIDES the broad-subject default; "
+        f"do NOT broaden it away or hold the speaker. If a specific one genuinely returns nothing, that "
+        f"is surfaced honestly to the user, never silently dropped.\n"
+    )
+
+
 def _vibe_requests_captions(vibe):
     """F8 override — the instruction mappings win, as everywhere: an explicit
     captions-on ask in the vibe beats the double-caption coercion. Any
@@ -4252,7 +4310,7 @@ USER INSTRUCTIONS — READ FIRST, OBEY ABSOLUTELY
 ═══════════════════════════════════════════════════════════════════════════
 
 The user's vibe (in the USER message under "The user wants:") is your DIRECTOR speaking. Take it LITERALLY. Everything else in this prompt is fallback behavior for atmospheric vibes ("viral", "punchy", "story-driven"). The moment the vibe contains a SPECIFIC include/exclude instruction, that instruction OVERRIDES every default. A polished video that ignored the user's stated preferences is the worst possible outcome — far worse than a sparse video that did what they asked.
-
+{_broll_request_directive(vibe)}
 Exact mappings:
 
   • **"no captions" / "don't add captions" / "without subtitles"** → `caption_style: "none"`, `caption_keywords: []`, `caption_position_changes: []`
@@ -4905,7 +4963,7 @@ Entry shape:
 
 **A cutaway also belongs by its LOOK.** Past relevance and the extend test, read the clip's color world against the speaker's: a cutaway that shares the shot's warmth, light level, and grade reads as part of the same piece, and the seam where the cut lands disappears. When the only available stock lives in a clashing world — a dark murky clip dropped against a bright warm shot — that seam shows, and the speaker's own footage holds the beat more cleanly than a cutaway the eye reads as imported. So weigh grade/light/color fit alongside relevance and extend when you choose: of two clips that both extend the moment, the one whose world matches the speaker's is the stronger cut. This is the same palette commitment from editorial_vision reaching the B-roll layer; the cutaway's energy and length still follow its arc position and register, this only sets which color world it should match.
 
-**The modes that DO emit — (1) and (3) — share these rules.** 13-18 words. Start from the VERB; add subject and setting (concrete noun + motion + mood + production tier); one subject doing one thing; context words only to disambiguate ("cinematic lighting" to filter cartoons). Each B-roll visually distinct from the others. **Production tier (applies ONLY when you are WRITING a keyword — you have already decided this beat emits, mode (1) or (3); it never reaches the hold modes).** On top of subject+action+mood, every keyword you emit carries a production-tier signal that biases Pexels toward professional footage. Production tier means WELL-SHOT, and well-shot has two registers — pick by subject: for a PRODUCT, INTERFACE, or OBJECT subject, go STUDIO — clean / minimal / studio or soft lighting / shallow depth of field / cinematic / high production; for an AUTHENTIC real-world subject (a home workshop, real hands, a doorstep, a lived-in room), go NATURALISTIC-but-well-shot — real hands, real available light, sharp focus, well-exposed, handheld documentary feel — the authenticity IS the production value there. These are LOOK adjectives only: they nudge Pexels RANKING toward polished clips without hard-filtering the pool, so add them freely. The stopwatch shows the contrast: for "five minutes" → countdown timer, the WEAK keyword "glowing digital stopwatch timer ticking down dark background" carries attributes (glowing, dark, ticking) but no tier and matched a grimy parking-garage "UP 00:25" timer; the STRONG keyword "sleek minimal countdown timer interface, clean studio product shot, soft lighting, shallow depth of field" pins the SAME subject to a premium look and biases the professional clip. Apply this pattern to EVERY emitting keyword — and keep the register honest: "I built it in my garage" wants "real hands building at a cluttered home workbench, natural window light, sharp documentary close-up" — the reason-field's content contract is what holds the picker to that register over a polished cinematic shop. This is a property of the keyword TEXT for a beat you are ALREADY emitting — the emit decision lives upstream, untouched, and mode (4) stays what it was: an abstract word ("quality," "value," "powerful," "easy," "simple") HOLDS on the speaker, same as ever; the register pattern styles keywords that already exist. Tier words are quality ADJECTIVES — they cannot empty the pool; what over-narrows into NONE is an over-specific SUBJECT — a brand name, an exact time, an exact place ("Rolex Submariner at 4:32pm on marble"). So keep the SUBJECT broad (a countdown timer, a hundred-dollar bill, a doorstep package) and pile the look/quality adjectives on top of it. Aim for the sweet spot: specific enough that a low-grade match can't surface, broad enough that the pool isn't empty — a populated premium pool, not a NONE. If a keyword does over-specify and returns nothing, NONE→speaker catches it as a clean safe hold — the downside of slightly-too-tight is a fallback, never a bad clip — but the GOAL is the premium pool, not the hold. **One-result specificity:** the keyword is pinned tightly enough that the single top stock result can only be the thing the speaker meant — and for concrete/demo dialogue, "the thing the speaker meant" is the literal action or object, not a vibe that rhymes with it. If you can name two other dialogues that would fit the same keyword, sharpen one more detail until you can't.
+**The modes that DO emit — (1) and (3) — share these rules.** 13-18 words. Start from the VERB; add subject and setting (concrete noun + motion + mood + production tier); one subject doing one thing; context words only to disambiguate ("cinematic lighting" to filter cartoons). Each B-roll visually distinct from the others. **Production tier (applies ONLY when you are WRITING a keyword — you have already decided this beat emits, mode (1) or (3); it never reaches the hold modes).** On top of subject+action+mood, every keyword you emit carries a production-tier signal that biases Pexels toward professional footage. Production tier means WELL-SHOT, and well-shot has two registers — pick by subject: for a PRODUCT, INTERFACE, or OBJECT subject, go STUDIO — clean / minimal / studio or soft lighting / shallow depth of field / cinematic / high production; for an AUTHENTIC real-world subject (a home workshop, real hands, a doorstep, a lived-in room), go NATURALISTIC-but-well-shot — real hands, real available light, sharp focus, well-exposed, handheld documentary feel — the authenticity IS the production value there. These are LOOK adjectives only: they nudge Pexels RANKING toward polished clips without hard-filtering the pool, so add them freely. The stopwatch shows the contrast: for "five minutes" → countdown timer, the WEAK keyword "glowing digital stopwatch timer ticking down dark background" carries attributes (glowing, dark, ticking) but no tier and matched a grimy parking-garage "UP 00:25" timer; the STRONG keyword "sleek minimal countdown timer interface, clean studio product shot, soft lighting, shallow depth of field" pins the SAME subject to a premium look and biases the professional clip. Apply this pattern to EVERY emitting keyword — and keep the register honest: "I built it in my garage" wants "real hands building at a cluttered home workbench, natural window light, sharp documentary close-up" — the reason-field's content contract is what holds the picker to that register over a polished cinematic shop. This is a property of the keyword TEXT for a beat you are ALREADY emitting — the emit decision lives upstream, untouched, and mode (4) stays what it was: an abstract word ("quality," "value," "powerful," "easy," "simple") HOLDS on the speaker, same as ever; the register pattern styles keywords that already exist. Tier words are quality ADJECTIVES — they cannot empty the pool; what over-narrows into NONE is an over-specific COMPOSITE subject — several constraints STACKED into one query (a brand AND an exact time AND a surface: "Rolex Submariner at 4:32pm on marble"). A SINGLE NAMED REAL ENTITY is the OPPOSITE of that trap: a named place, landmark, city, real object, or real event the dialogue points at ("Ahmedabad", "the Golden Gate Bridge", "Times Square", "a Rolex watch") is ONE searchable thing with a POPULATED stock pool — emit it PRECISELY, by name, and it is often the single most valuable cutaway in the video: the place behind the name, the object behind the claim, the landmark the story visits. Do NOT broaden a named real entity into a generic ("Ahmedabad" → "a busy Indian city" throws away the exact thing the viewer would gain). The name IS the precision, and the pool is full — the downstream picker + reason-contract still filters for relevance, so a named-place keyword is safe. The broadening rule applies ONLY to a GENERIC subject that has no name: keep THAT broad (a countdown timer, a hundred-dollar bill, a doorstep package — not "a glowing digital stopwatch at 00:25 in a parking garage") and pile the look/quality adjectives on top of it. Named real entity → emit as-is; unnamed generic → keep broad; composite stack of constraints → the real NONE trap, avoid. Aim for the sweet spot: specific enough that a low-grade match can't surface, broad enough that the pool isn't empty — a populated premium pool, not a NONE. If a keyword does over-specify and returns nothing, NONE→speaker catches it as a clean safe hold — the downside of slightly-too-tight is a fallback, never a bad clip — but the GOAL is the premium pool, not the hold. **One-result specificity:** the keyword is pinned tightly enough that the single top stock result can only be the thing the speaker meant — and for concrete/demo dialogue, "the thing the speaker meant" is the literal action or object, not a vibe that rhymes with it. If you can name two other dialogues that would fit the same keyword, sharpen one more detail until you can't.
 
 **Window:** the cutaway runs exactly the phrase's word span — first word to last word. One word if the referent is one verb, a full sentence if it's a scene. The dialogue at those indices should describe what's in the cutaway. The window matches the phrase — it opens where the phrase opens and closes where it closes, the full thought and only the thought.
 

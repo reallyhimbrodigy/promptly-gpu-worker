@@ -5184,6 +5184,26 @@ def _part2_component_fitness():
         "the universal fast cap must exist"
 
 
+@check("GAP 3 (Zac 2026-07-13): PHENOMENAL b-roll of named places — a named real entity (place/landmark/city/object) is a PRECISE high-value keyword with a populated pool, NOT the over-specific trap (the trap is a COMPOSITE stack of constraints); a positive USER b-roll request is a HARD signal that forces the fetch, overriding the broad-subject default")
+def _gap3_broll_place_fetch():
+    import handler as _h
+    _src = open("handler.py").read()
+    # BELT — the prompt now distinguishes a named real entity from composite over-specificity
+    assert "SINGLE NAMED REAL ENTITY" in _src and "COMPOSITE subject" in _src, \
+        "the prompt must carve the named entity out of the over-specific trap"
+    assert "POPULATED stock pool" in _src, "named places are taught as having a full pool (probe-confirmed)"
+    # OBEDIENCE — positive user b-roll requests parse to forced subjects
+    assert "def _parse_broll_requests(" in _src and "_broll_request_directive(vibe)" in _src, \
+        "the user-request parser + prompt directive must exist and be injected"
+    assert _h._parse_broll_requests("show Ahmedabad") == ["Ahmedabad"], "'show Ahmedabad' is a fetch signal"
+    assert _h._parse_broll_requests("use footage of Tokyo and Mumbai") == ["Tokyo", "Mumbai"], "conjoined subjects split"
+    assert _h._parse_broll_requests("no b-roll") == [] and _h._parse_broll_requests("show them how") == [], \
+        "a negative / a verb-phrase is NOT a positive request (no false fetch)"
+    _dir = _h._broll_request_directive("show Ahmedabad")
+    assert "Ahmedabad" in _dir and "REQUIRED" in _dir and "OVERRIDES" in _dir, "the directive forces the fetch"
+    assert _h._broll_request_directive("make it viral") == "", "no request → no injection"
+
+
 @check("D1 perceptual sync: ONE audible-onset derivation consumed by emphasis t + SFX + projected anchors; the projection reads the render_timeline arithmetic (frames cursor); D2 floors live")
 def _d1_perceptual_sync():
     import handler as _h
