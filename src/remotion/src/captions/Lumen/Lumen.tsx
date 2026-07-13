@@ -53,22 +53,11 @@ const LumenWord: React.FC<{
   const elapsed = frame - activateFrame;
   const hasAppeared = elapsed >= 0;
 
-  // WS2 universal fast cap: the scale spring settles within MAX_ENTRANCE_MS (was
-  // an unbounded damping:200 spring ≈ 1s — the slowest caption entrance).
-  const entranceSpring = hasAppeared
-    ? spring({ fps, frame: elapsed, config: { damping: 200 },
-               durationInFrames: Math.max(1, msToFrames(MAX_ENTRANCE_MS, fps)) })
-    : 0;
-
-  // Scale: 0.95 -> 1
-  const scale = interpolate(entranceSpring, [0, 1], [0.95, 1], {
-    extrapolateRight: "clamp",
-  });
-
-  // CRISP ENTRANCE (Zac 2026-07-13): full opacity from frame 1 — no 0→1 ramp (the
-  // ghost that made the word semi-transparent for a chunk of its life). The soft
-  // 0.95→1 scale-pop stays (Lumen's character) on a fully-VISIBLE word. The old
-  // fast-but-still-a-fade path is replaced by a hard step.
+  // FRAME-1-IS-FINAL ENTRANCE (Zac 2026-07-13, 4th pass): the word arrives at FULL
+  // scale + FULL opacity — no 0.95→1 grow-in, no fade. The scale-pop was entrance
+  // MOTION; Lumen's identity is the amber-gilded keyword treatment, which stays (final
+  // from frame 1). The word simply IS there.
+  const scale = 1;
   const fastOpacity = hasAppeared ? 1 : 0;
 
   // Lens flare sweep position — only for shine words

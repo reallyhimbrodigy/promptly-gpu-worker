@@ -73,9 +73,11 @@ const PrimeWord: React.FC<{
     durationInFrames: Math.max(1, msToFrames(boundedFade(160, windowMs), fps)),
   });
 
-  const slideY = interpolate(wordSpring, [0, 1], [20, 0]);
-  // CRISP ENTRANCE (Zac 2026-07-13): full opacity from frame 1 — no 0→1 ramp (the
-  // ghost). The kinetic slide (Prime's character) plays on a fully-VISIBLE word.
+  // FRAME-1-IS-FINAL ENTRANCE (Zac 2026-07-13, 4th pass): the word arrives in its FINAL
+  // position at FULL opacity — no slide, no fade. The old translateY 20→0 slide was the
+  // "float up". Prime's character is its two-tier hierarchy + keyword breakout, not a
+  // travelling entrance.
+  const slideY = 0;
   const wordOpacity = frame >= activateFrame ? 1 : 0;
 
   const color = isSpecial ? specialColor : line1Color;

@@ -109,30 +109,14 @@ const GadzhiStylePage: React.FC<{
             const wordEntryFrame = msToFrames(token.fromMs - pageStartMs, fps);
             const elapsed = frame - wordEntryFrame;
 
-            const slideProgress = interpolate(elapsed, [0, slideDuration], [0, 1], {
-              easing: Easing.out(Easing.cubic),
-              extrapolateLeft: "clamp",
-              extrapolateRight: "clamp",
-            });
-
-            const yOffset = interpolate(slideProgress, [0, 1], [slideDist, 0], {
-              extrapolateLeft: "clamp",
-              extrapolateRight: "clamp",
-            });
-
-            // CRISP ENTRANCE (Zac 2026-07-13): full opacity — no 0→1 ramp (the ghost).
-            // The word is fully VISIBLE the instant it's spoken (the outer isSpoken gate
-            // handles presence); the slide-up + gray→white settle (Gadzhi's character)
-            // play on top of a fully-visible word, never a visibility ramp.
+            // FRAME-1-IS-FINAL ENTRANCE (Zac 2026-07-13, 4th pass): the word arrives in
+            // its FINAL position, FULL opacity, FINAL color — instantly. The slide-up
+            // (translateY slideDist→0) WAS the "float up" Zac saw; the gray→white settle
+            // was another entrance channel. Both removed: no travel, no color-ramp. Gadzhi
+            // keeps its identity — uppercase, left-aligned, keywords in gold — all instant.
+            const yOffset = 0;
             const opacity = 1;
-
-            const colorProgress = interpolate(slideProgress, [0, 1], [0, 1], {
-              extrapolateLeft: "clamp",
-              extrapolateRight: "clamp",
-            });
-            const color = colorProgress >= 1
-              ? finalColor
-              : `color-mix(in srgb, #555555 ${Math.round((1 - colorProgress) * 100)}%, ${finalColor} ${Math.round(colorProgress * 100)}%)`;
+            const color = finalColor;
 
             return (
               <span

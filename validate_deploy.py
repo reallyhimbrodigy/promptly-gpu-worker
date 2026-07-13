@@ -354,23 +354,41 @@ def _caption_override_broll_forces_lower():
     assert _pos_at(_o2, 180) == "center", f"b-roll + MG-at-bottom → center, got: {_o2}"
 
 
-@check("CAPTION CRISP ENTRANCE (Zac 2026-07-13): every one of the 9 styles appears at FULL opacity from frame 1 — no 0→1 opacity RAMP (the ghost that made the word semi-transparent for a chunk of its life). The fade was made fast 3× (WS2, MAX_ENTRANCE_MS) but stayed a fade; this removes the fade CHARACTER. Non-opacity motion (slam/slide/scale-pop) stays; fade-OUT stays")
+@check("CAPTION ENTRANCE = FRAME-1-IS-FINAL (Zac 2026-07-13, 4th pass): every one of the 9 styles arrives at its FINAL position, FULL opacity, and FULL scale from frame 1 — the WHOLE entrance category is zeroed (opacity ramp AND position slide/'float up' AND scale grow/slam), not one channel at a time. The recurring bug: each prior fix hit one channel and the next surfaced. Ongoing style character (color pop, keyword treatment, per-char typing) stays; entrance MOTION does not")
 def _caption_crisp_entrance():
-    import os as _os
+    import os as _os, re as _re
     _base = "src/remotion/src/captions"
     _styles = ["Prime", "TypewriterReveal", "Cove", "Lumen", "Pulse",
                "Quintessence", "TwoTone", "CleanCut", "Gadzhi"]
-    for _st in _styles:
-        _src = open(_os.path.join(_base, _st, f"{_st}.tsx")).read()
-        assert "CRISP ENTRANCE (Zac 2026-07-13)" in _src, f"{_st} must have the crisp-entrance conversion"
-    # spot-check the specific old ghost ramps are GONE (not just commented)
-    _prime = open(_os.path.join(_base, "Prime", "Prime.tsx")).read()
-    assert "interpolate(wordSpring, [0, 1], [0, 1])" not in _prime, "Prime's opacity ramp must be gone"
-    _cove = open(_os.path.join(_base, "Cove", "Cove.tsx")).read()
-    assert "(currentTimeMs - token.fromMs) / 60" not in _cove, "Cove's 60ms opacity ramp must be gone"
-    _tt = open(_os.path.join(_base, "TwoTone", "TwoTone.tsx")).read()
-    assert "localFrame >= entry ? 1 : 0" in _tt, "TwoTone opacity is a hard step (slam stays)"
-    # the fade helper stays (fade-OUT still uses it; MAX_ENTRANCE_MS caps any residual)
+    _srcs = {_st: open(_os.path.join(_base, _st, f"{_st}.tsx")).read() for _st in _styles}
+    # each style carries a dated entrance-conversion marker (crisp or frame-1-final)
+    for _st, _src in _srcs.items():
+        assert ("CRISP ENTRANCE (Zac 2026-07-13)" in _src or "FRAME-1-IS-FINAL" in _src), \
+            f"{_st} must carry the entrance conversion"
+    # OPACITY ghosts gone (round 3)
+    assert "interpolate(wordSpring, [0, 1], [0, 1])" not in _srcs["Prime"], "Prime opacity ramp gone"
+    assert "(currentTimeMs - token.fromMs) / 60" not in _srcs["Cove"], "Cove opacity ramp gone"
+    # POSITION slides + SCALE grows gone (round 4 — the 'float up' + slam/grow):
+    assert "const slideY = 0;" in _srcs["Prime"], "Prime slide zeroed (final position frame 1)"
+    assert "const yOffset = 0;" in _srcs["Gadzhi"], "Gadzhi slide zeroed (the 'float up')"
+    assert "const floatY = 0;" in _srcs["Pulse"], "Pulse continuous bob zeroed"
+    assert "const scale = 1;" in _srcs["TwoTone"] and "const y = 0;" in _srcs["TwoTone"], "TwoTone slam+lift zeroed"
+    assert "const scale = 1;" in _srcs["CleanCut"] and "const y = 0;" in _srcs["CleanCut"], "CleanCut grow+lift zeroed"
+    assert "const scale = 1;" in _srcs["Lumen"], "Lumen scale grow-in zeroed"
+    # no style feeds an entrance spring/interpolate into a translate/scale transform.
+    # (interpolate is still allowed for fade-OUT + non-transform + the STATIC scaleY
+    # stretch; this catches an interpolate result placed straight into translate/scale.)
+    _bad = _re.compile(r"transform:[^;]*(translateY|scale)\(\$\{[A-Za-z_]\w*\}", _re.S)
+    for _st in ("Prime", "Gadzhi", "TwoTone", "CleanCut", "Lumen", "Pulse"):
+        for _m in _re.finditer(r"(translateY|scale)\(\$\{([A-Za-z_]\w*)", _srcs[_st]):
+            _var = _m.group(2)
+            # the fed variable must resolve to a literal 0/1, not an interpolate/spring/sin
+            _decl = _re.search(rf"const {_var}\s*=\s*([^;]+);", _srcs[_st])
+            if _decl:
+                _rhs = _decl.group(1)
+                assert not any(_k in _rhs for _k in ("interpolate", "spring", "Math.sin", "Easing")), \
+                    f"{_st}: entrance transform var '{_var}' still animates ({_rhs[:40]}) — frame-1 not final"
+    # the fade helper stays (fade-OUT still uses it)
     assert "MAX_ENTRANCE_MS = 80" in open(_os.path.join(_base, "shared", "fadeTiming.ts")).read()
 
 
@@ -5030,31 +5048,17 @@ def _item3_ws2_fade_bound():
     _hs = open(_helper).read()
     assert "export function boundedFade(" in _hs and "FADE_WINDOW_FRACTION = 0.25" in _hs, \
         "boundedFade + the 0.25 window fraction must be the contract"
-    # the 5 fixed-duration styles must import AND call the bound (not just import it)
-    for _st in ("Pulse/Pulse", "Quintessence/Quintessence", "CleanCut/CleanCut",
-                "TypewriterReveal/TypewriterReveal", "Prime/Prime"):
-        _src = open(_os.path.join(_cap, f"{_st}.tsx")).read()
-        assert 'from "../shared/fadeTiming"' in _src and "boundedFade(" in _src, \
-            f"{_st} must wire boundedFade (WS2 bound would silently regress otherwise)"
-    # Prime's spring duration still rides boundedFade(160) — that governs the SLIDE
-    # motion (the opacity ramp on that spring was removed; the kinetic slide stays).
-    assert "boundedFade(160," in open(_os.path.join(_cap, "Prime/Prime.tsx")).read(), \
-        "Prime's slide-spring duration stays bounded (motion, not opacity)"
-    # NOTE: the old fade-IN bases (CleanCut boundedFade(55,), Gadzhi's 0.25 opacity
-    # ramp) were REMOVED by the crisp-entrance fix — entrances no longer fade in.
-    # _caption_crisp_entrance asserts the ghost ramps are gone; here we only guard the
-    # fade-OUT + motion caps that survived.
-    # FINDING 2 (Zac 2026-07-12): UNIVERSAL ABSOLUTE CAP — every entrance ≤ MAX_ENTRANCE_MS,
-    # including the scale/slide/spring MOTION channels that bypassed boundedFade (Lumen ~1s,
-    # TwoTone ~330ms, Gadzhi 167ms, CleanCut 140ms) — the reason captions still read slow.
     assert "MAX_ENTRANCE_MS = 80" in _hs and "MAX_ENTRANCE_MS)" in _hs, \
         "boundedFade must fold in the absolute cap MAX_ENTRANCE_MS=80"
-    for _st, _needle in (("Lumen/Lumen", "durationInFrames: Math.max(1, msToFrames(MAX_ENTRANCE_MS"),
-                         ("TwoTone/TwoTone", "durationInFrames: Math.max(1, msToFrames(MAX_ENTRANCE_MS"),
-                         ("Gadzhi/Gadzhi", "msToFrames(MAX_ENTRANCE_MS"),
-                         ("CleanCut/CleanCut", "boundedFade(140,")):
-        assert _needle in open(_os.path.join(_cap, f"{_st}.tsx")).read(), \
-            f"{_st} motion channel must be capped to MAX_ENTRANCE_MS (else it still animates slow)"
+    # The per-style ENTRANCE assertions that used to live here (fade-in bases, scale/
+    # slide/spring MOTION caps) are all SUPERSEDED by the round-4 frame-1-is-final fix,
+    # which ZEROED every entrance channel — the very motion those caps bounded is gone
+    # (see _caption_crisp_entrance). boundedFade now serves fade-OUT only; the styles
+    # with a page fade-out still call it, which is all this check needs to guard here.
+    for _st in ("Pulse/Pulse", "Quintessence/Quintessence", "TypewriterReveal/TypewriterReveal"):
+        _src = open(_os.path.join(_cap, f"{_st}.tsx")).read()
+        assert 'from "../shared/fadeTiming"' in _src and "boundedFade(" in _src, \
+            f"{_st} still wires boundedFade for its fade-OUT"
     # run the REAL helper math (node strips the .ts types) — not a Python mirror.
     # ESM relative imports resolve to the test file's location, so cwd is irrelevant.
     _t = _os.path.join(_cap, "shared", "fadeTiming.test.ts")

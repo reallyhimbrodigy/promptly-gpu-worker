@@ -79,19 +79,11 @@ const CleanCutPage: React.FC<{
   // CRISP ENTRANCE (Zac 2026-07-13): full opacity from frame 1 — no 0→1 ramp (the
   // ghost). CleanCut's subtle scale+lift stays as the whisper on a fully-VISIBLE word.
   const opacity = since >= 0 ? 1 : 0;
-  // WS2 universal fast cap: the scale+lift motion is capped like the fade (was a
-  // fixed 140ms that bypassed the bound — the caption still read slow).
-  const _mms = boundedFade(140, wordWindowMs);
-  const scale = interpolate(since, [0, _mms], [1.04, 1], {
-    extrapolateLeft: "clamp",
-    extrapolateRight: "clamp",
-    easing: easeOutCubic,
-  });
-  const y = interpolate(since, [0, _mms], [7, 0], {
-    extrapolateLeft: "clamp",
-    extrapolateRight: "clamp",
-    easing: easeOutCubic,
-  });
+  // FRAME-1-IS-FINAL ENTRANCE (Zac 2026-07-13, 4th pass): the word arrives at FINAL
+  // position + FULL scale — no rise-and-settle. The scale 1.04→1 grow and 7px lift were
+  // entrance MOTION; CleanCut is the plain no-style style, so it just IS there, crisp.
+  const scale = 1;
+  const y = 0;
 
   // Gentle fade at the very end of the page — bounded to 25% of the page window
   // so a short final page doesn't spend half its life fading out (shared/fadeTiming).

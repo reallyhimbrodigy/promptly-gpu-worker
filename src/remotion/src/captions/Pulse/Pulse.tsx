@@ -152,7 +152,10 @@ export const Pulse: React.FC<PulseProps> = ({
   }
 
   const t = frame / fps;
-  const floatY = Math.sin(t * 1.2) * 14 + Math.sin(t * 1.8) * 7;
+  // FRAME-1-IS-FINAL (Zac 2026-07-13, 4th pass): the continuous sine-wave bob (±21px)
+  // was perpetual "floating" — killed. Pulse sits still; its rhythm is the paired stack
+  // + the top-line dim, not vertical drift.
+  const floatY = 0;
 
   // F4 width-fit guarantee: both visible pages share one uniform scale so
   // the pair reads as one block; rows flex-wrap, so the overflow unit is a

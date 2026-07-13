@@ -75,18 +75,12 @@ const TwoToneWord: React.FC<{
   const { fps } = useVideoConfig();
 
   const entry = msToFrames(token.fromMs - pageStartMs, fps) + globalIndex;
-  // WS2 universal fast cap: the slam settles within MAX_ENTRANCE_MS (was an
-  // unbounded SLAM_SPRING ≈ 330ms — a quick slam now, still present).
-  const s = spring({ fps, frame: localFrame - entry, config: SLAM_SPRING,
-                     durationInFrames: Math.max(1, msToFrames(MAX_ENTRANCE_MS, fps)) });
-  // Slam in: from slightly oversized + lifted, settling to rest.
-  const scale = interpolate(s, [0, 1], [1.18, 1], {
-    extrapolateRight: "clamp",
-  });
-  const y = interpolate(s, [0, 1], [18, 0], { extrapolateRight: "clamp" });
-  // CRISP ENTRANCE (Zac 2026-07-13): full opacity from frame 1 — no 0→1 ramp. The
-  // slam scale 1.18→1 + lift IS TwoTone's punchy entrance; it plays on a fully-VISIBLE
-  // word (a slam at full opacity reads intentional; a fade-up reads soft).
+  // FRAME-1-IS-FINAL ENTRANCE (Zac 2026-07-13, 4th pass): the word arrives at FINAL
+  // position + FULL scale + FULL opacity — no slam-in, no lift, no grow. The slam
+  // (scale 1.18→1) + lift (18→0) were entrance MOTION and had to go; TwoTone keeps its
+  // 3D-sticker LOOK (contour, extrude, two-tone color), just no longer slams IN.
+  const scale = 1;
+  const y = 0;
   const opacity = localFrame >= entry ? 1 : 0;
 
   return (
