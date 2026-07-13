@@ -52,3 +52,34 @@ export interface DepthPullProps extends BaseZoomProps {
   // Show decorative frame lines. Default true.
   frameLines?: boolean;
 }
+
+// ── StagedPush — the multi-stage emphasis zoom (2- or 3-part stepped push-in) ──
+export interface StagedPushStage {
+  // The emphasis word's audible onset (ms from composition start). The push into
+  // this stage COMPLETES exactly here — the peak lands on the word.
+  atMs: number;
+  // Cumulative scale AT this stage. Equal steps upstream (e.g. 1.08, 1.16, 1.24).
+  scale: number;
+}
+export interface StagedPushEvent {
+  // 2 or 3 building stages (consecutive emphasis words), in order.
+  stages: StagedPushStage[];
+  // Smooth-fast push duration into EACH stage (ms). Default 280. Back-timed so the
+  // push starts pushMs before the word and its peak lands ON the word.
+  pushMs?: number;
+  // Hold at full push after the FINAL word before releasing (ms). Default 260 — the
+  // payoff word lands and sits before any release.
+  holdMs?: number;
+  // Moderate ease-out duration back to baseline when the phrase CONTINUES (ms). Default 360.
+  releaseMs?: number;
+  // true → the phrase ends at a hard cut: NO release animation, hold at full push and
+  // let the cut reset the zoom (never step on the climax with a release).
+  cutTerminated?: boolean;
+  originX?: number;
+  originY?: number;
+}
+export interface StagedPushProps {
+  src: string;
+  events: StagedPushEvent[];
+  style?: CSSProperties;
+}

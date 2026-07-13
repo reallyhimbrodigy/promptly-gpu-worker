@@ -7,6 +7,9 @@ export type {
   StepZoomProps,
   LetterboxPushProps,
   DepthPullProps,
+  StagedPushStage,
+  StagedPushEvent,
+  StagedPushProps,
 } from "./types";
 
 export { SmoothPush } from "./SmoothPush";
@@ -15,3 +18,4 @@ export { FocusWindow } from "./FocusWindow";
 export { StepZoom } from "./StepZoom";
 export { LetterboxPush } from "./LetterboxPush";
 export { DepthPull } from "./DepthPull";
+export { StagedPush } from "./StagedPush/StagedPush";

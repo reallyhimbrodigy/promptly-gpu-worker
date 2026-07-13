@@ -12,6 +12,7 @@ import { OverlayCutTest, type OverlayCutTestProps } from "./transitions/overlays
 import { FitSpecimen } from "./FitSpecimen";
 import { MGAttackProbe } from "./MGAttackProbe";
 import { CaptionFadeProbe } from "./CaptionFadeProbe";
+import { StagedPushProbe } from "./StagedPushProbe";
 
 /**
  * Remotion root — two production compositions:
@@ -173,6 +174,29 @@ export const RemotionRoot: React.FC = () => {
           words: ["this", "is", "the", "fastest", "way", "to", "grow", "your", "account", "right", "now", "today"],
           keywords: ["fastest", "grow"],
           wordMs: 170,
+        } as unknown as Record<string, unknown>}
+      />
+      {/* StagedPushProbe — isolated LOOK test for the multi-stage emphasis zoom
+          (StagedPush). Renders the staged push-in on the sample talking-head clip;
+          driven by staged-push-battery.mjs. Not used in production. 300f@60 = 5s. */}
+      <Composition
+        id="StagedPushProbe"
+        component={StagedPushProbe as unknown as React.FC<Record<string, unknown>>}
+        width={1080}
+        height={1920}
+        fps={60}
+        durationInFrames={300}
+        defaultProps={{
+          events: [
+            {
+              stages: [
+                { atMs: 1000, scale: 1.08 },
+                { atMs: 1800, scale: 1.16 },
+                { atMs: 2600, scale: 1.24 },
+              ],
+              cutTerminated: false,
+            },
+          ],
         } as unknown as Record<string, unknown>}
       />
     </>
