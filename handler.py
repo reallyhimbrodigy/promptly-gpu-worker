@@ -16460,6 +16460,12 @@ def fetch_broll_clip(broll_entry, duration_needed, work_dir, dialogue_reason="",
                     # earlier this session, a weak/uncertain cutaway is
                     # strictly worse than no cutaway.
                     _why2 = "MALFORMED" if _status2 == "MALFORMED" else f"ERROR ({_raw2})"
+                    # TRANSIENT failure (429/quota/malformed) — NOT a coverage gap. Mark
+                    # the entry so the honesty mechanism does NOT cry "couldn't find
+                    # footage" for a user-requested subject that actually HAD a pool the
+                    # picker just couldn't evaluate (don't erode trust with a false gap).
+                    if isinstance(broll_entry, dict):
+                        broll_entry["_pick_transient_error"] = True
                     print(
                         f"[broll] Gemini visual pick (strict re-pick): {_why2} "
                         f"response='{_raw2[:80]}' for '{keyword}' — "
@@ -28501,11 +28507,19 @@ def handler(job):
         _requested_broll = _parse_broll_requests(vibe)
         if _requested_broll:
             _resolved_kw = " ".join(str(_e.get("keyword") or "") for _e in resolved_broll_out).lower()
+            # subjects whose fetch failed on a TRANSIENT picker error (429/quota), NOT a
+            # coverage gap — never surface a false "couldn't find" for these.
+            _transient_kw = " ".join(
+                str(_e.get("keyword") or "") for _e in (edit_plan.get("broll_clips") or [])
+                if isinstance(_e, dict) and _e.get("_pick_transient_error")).lower()
             for _subj in _requested_broll:
                 # fetched if the resolved keywords contain the subject's head word(s)
                 _subj_words = [_w for _w in re.findall(r"[a-z0-9]+", _subj.lower()) if _w not in _BROLL_ARTICLES]
-                if _subj_words and not any(_w in _resolved_kw for _w in _subj_words):
-                    _capability_notes.append(f"Couldn't find footage for \"{_subj}\" — the rest of your edit is done.")
+                if not _subj_words or any(_w in _resolved_kw for _w in _subj_words):
+                    continue  # landed
+                if any(_w in _transient_kw for _w in _subj_words):
+                    continue  # a transient picker error, not a coverage gap — stay silent, don't cry wolf
+                _capability_notes.append(f"Couldn't find footage for \"{_subj}\" — the rest of your edit is done.")
         if _capability_notes:
             print(f"[honesty] surfacing {len(_capability_notes)} capability note(s): {_capability_notes}", flush=True)
 

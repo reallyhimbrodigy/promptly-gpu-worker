@@ -5246,6 +5246,10 @@ def _gap3_honesty_mechanism():
     assert _src.count("capability_notes") >= 3, "capability_notes must be computed + on result_payload + in the status write"
     assert "_parse_broll_requests(vibe)" in _src and "Couldn't find footage" in _src, \
         "Item 1 part 3: a REQUIRED b-roll with no footage surfaces honestly (never silent)"
+    # transient-error guard: a 429/quota pick failure is NOT a coverage gap — never a
+    # false "couldn't find footage" for a subject whose pool the picker just couldn't rate
+    assert '_pick_transient_error' in _src and "_transient_kw" in _src, \
+        "the honest note must skip subjects that failed on a TRANSIENT picker error (don't cry wolf)"
 
 
 @check("D1 perceptual sync: ONE audible-onset derivation consumed by emphasis t + SFX + projected anchors; the projection reads the render_timeline arithmetic (frames cursor); D2 floors live")
