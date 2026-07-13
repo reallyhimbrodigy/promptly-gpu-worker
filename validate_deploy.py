@@ -5053,6 +5053,16 @@ def _findings_placement_and_content_cut():
     assert _h._gemini_cut_span_removable([_W("um"), _W("uh")], [_W("so")], _W("okay."), 0.0) is True, "filler removable"
     assert _h._gemini_cut_span_removable([_W("the"), _W("cat")], [_W("the"), _W("cat")], _W("and"), 0.0) is True, "verbatim restart removable"
     assert _h._gemini_cut_span_removable([_W("anyway")], [_W("so")], _W("done."), 0.85) is True, "dead-air-bounded removable"
+    # Finding 1 — cross-type collision MOVE-NOT-DROP (Zac ruled: relocation, a legibility invariant)
+    assert "def _apply_composed_accent_bands(" in _src, "the move-not-drop collision resolver must exist"
+    assert "_apply_composed_accent_bands(" in _src and "cross_type_collision_move" in _src, \
+        "it must be wired at the composer cutover (element_bands applied, not inert)"
+    _km, _ko, _mv, _dp = _h._apply_composed_accent_bands(
+        [{"type": "StatCard", "props": {"anchor": "center"}}],
+        [{"variant": "caption_match", "position": "center"}],
+        {"mg0": [(0, 60, "center")], "to0": [(0, 60, "top")]})
+    assert _km[0]["props"]["anchor"] == "center" and _ko[0]["position"] == "top" and _mv == 1 and _dp == 0, \
+        "collision: MG keeps its spot, overlay MOVES to its alternate (never a silent drop when a band is free)"
 
 
 @check("D1 perceptual sync: ONE audible-onset derivation consumed by emphasis t + SFX + projected anchors; the projection reads the render_timeline arithmetic (frames cursor); D2 floors live")

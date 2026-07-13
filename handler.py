@@ -5815,8 +5815,11 @@ def _compose_band_occupancy(
             else:
                 element_bands.setdefault(_c["id"], []).append((a, b, "dropped_collision"))
         # P4: flexible accents — honor the anchor, else re-band before drop.
+        # PRIORITY (Zac 2026-07-12): MG keeps its spot, the overlay moves to its
+        # alternate — MGs are the hero accent, overlays the secondary tag. So MG
+        # claims its band first; MG-vs-MG resolves by start then id (arc-rank proxy).
         for _c in sorted([c for c in _active if not c["rigid"]],
-                         key=lambda c: (c["f0"], c["id"])):
+                         key=lambda c: (0 if c["kind"] == "mg" else 1, c["f0"], c["id"])):
             _pref = _c["band"]
             _pick = None
             for _cand in [_pref] + [z for z in ("top", "bottom", "center") if z != _pref]:
@@ -5931,6 +5934,58 @@ def _compose_band_occupancy(
             print("[shadow-composer] parity: composed layout == shipped (no divergence)", flush=True)
 
     return {"caption_track": composed_caption, "element_bands": element_bands}
+
+
+def _apply_composed_accent_bands(mgs, overlays, element_bands):
+    """MOVE-NOT-DROP cross-type collision enforcement (Zac 2026-07-12): two accents
+    must never occupy the same pixels — a legibility INVARIANT (physics, like the
+    safe-zone clamp), not a taste call. _compose_band_occupancy already computes each
+    accent's disjoint band, re-banding a flexible accent to a free zone BEFORE any
+    drop and prioritizing MG-keeps-its-spot. APPLY it: override each accent's rendered
+    band (mg{i}→mgs[i].props.anchor, to{i}→overlays[i].position). An accent is only
+    DROPPED when every band it needs is genuinely taken (rigid top-pinned collision) —
+    relocation is preferred everywhere it's possible. Returns (kept_mgs, kept_overlays,
+    moved, dropped). Base-placement teaching keeps collisions RARE; this is the floor."""
+    def _dominant(_id):
+        _by = {}
+        for _a, _b, _band in (element_bands.get(_id) or []):
+            if _band in ("top", "center", "bottom"):
+                _by[_band] = _by.get(_band, 0) + (int(_b) - int(_a))
+        return max(_by.items(), key=lambda kv: kv[1])[0] if _by else None
+    _moved = _dropped = 0
+    _kmg = []
+    for _i, _mg in enumerate(mgs or []):
+        _band = _dominant(f"mg{_i}")
+        if _band is None:
+            _record_divergence("mg", {"type": str(_mg.get("type"))}, "drop",
+                               reason="cross_type_collision_no_free_band")
+            _dropped += 1
+            continue
+        _cur = str((_mg.get("props") or {}).get("anchor") or "center")
+        if _band != _cur:
+            _mg.setdefault("props", {})["anchor"] = _band
+            _record_divergence("mg", {"type": str(_mg.get("type")), "band": _cur},
+                               "reband", final={"band": _band}, reason="cross_type_collision_move")
+            _moved += 1
+        _kmg.append(_mg)
+    _kov = []
+    for _i, _to in enumerate(overlays or []):
+        _band = _dominant(f"to{_i}")
+        if _band is None:
+            _record_divergence("overlay", {"variant": str(_to.get("variant"))}, "drop",
+                               reason="cross_type_collision_no_free_band")
+            _dropped += 1
+            continue
+        if _band == "bottom":   # overlays never sit in the caption home
+            _band = "top"
+        _cur = str(_to.get("position") or "top")
+        if _band != _cur:
+            _to["position"] = _band
+            _record_divergence("overlay", {"variant": str(_to.get("variant")), "band": _cur},
+                               "reband", final={"band": _band}, reason="cross_type_collision_move")
+            _moved += 1
+        _kov.append(_to)
+    return _kmg, _kov, _moved, _dropped
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -21257,7 +21312,17 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 {"fromFrame": int(_a), "toFrame": int(_b), "position": _band}
                 for (_a, _b, _band) in _composed["caption_track"]
             ]
-            print("[shadow-composer] CUTOVER active — composer caption track drives", flush=True)
+            # MOVE-NOT-DROP cross-type collision (Zac 2026-07-12): apply the composer's
+            # disjoint accent bands so an MG and an overlay never stack — the loser
+            # RELOCATES to its alternate (MG keeps its spot), only dropping when no
+            # band is free. The legibility floor under the base-placement teaching.
+            motion_graphics_out, text_overlays_out, _cc_moved, _cc_dropped = \
+                _apply_composed_accent_bands(
+                    motion_graphics_out, text_overlays_out, _composed.get("element_bands") or {})
+            if _cc_moved or _cc_dropped:
+                print(f"[composer] cross-type collision resolved: moved {_cc_moved} accent(s) "
+                      f"to their alternate band, dropped {_cc_dropped} (no free band)", flush=True)
+            print("[shadow-composer] CUTOVER active — composer caption track + accent bands drive", flush=True)
     except Exception as _shadow_err:
         print(f"[shadow-composer] skipped ({type(_shadow_err).__name__}: {str(_shadow_err)[:120]})", flush=True)
 
