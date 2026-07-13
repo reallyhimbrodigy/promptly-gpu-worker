@@ -9548,6 +9548,12 @@ def generate_edit_gemini(
                 flush=True,
             )
             _ep_off = set()
+    # USER OBEDIENCE (Zac 2026-07-12): negatives in the user's ask ('no SFX', 'no
+    # zooms', 'without transitions') ALWAYS disable that component — merged into the
+    # off-set so the enforcement fires regardless of the EditPolicy flag (was gated
+    # off for plain jobs, so 'no SFX' was belt-only prompt text and could still fire).
+    # Deterministic, whole-video; a user negative is the highest authority.
+    _ep_off |= _parse_off_features(vibe)
     _filler_off = "filler_trim" in _ep_off        # Step 3: gates compute_mechanical_cuts
     _transitions_off = "transitions" in _ep_off    # Step 2 + scene-floor backfill gate
 
@@ -13844,6 +13850,25 @@ _REEDIT_OFF_PATTERNS = (
     ("text_overlays", r"(text overlays?|titles?|labels?)"),
     ("transitions", r"(transitions?)"),
 )
+
+
+def _parse_off_features(text):
+    """USER OBEDIENCE (Zac 2026-07-12): capture negative instructions — 'no SFX',
+    'no zooms', 'without transitions', "don't add captions" — from ANY request (even
+    a mixed one) as the set of DISABLED component keys, enforced deterministically on
+    the final plan via _enforce_off_expressive_features. A user negative is the
+    highest authority: that component type is OFF for the whole render, no exceptions.
+    (Was belt-only prompt text on plain jobs, gated behind the EditPolicy flag.)"""
+    _off = set()
+    if not text:
+        return _off
+    _t = str(text).lower()
+    _verb = (r"(?:no|without|don'?t (?:add|use|include|want|put)|remove|drop|kill|"
+             r"turn off|disable|get rid of|skip|leave out|lose)\s+(?:the |all |any |my )?")
+    for _feat, _pat in _REEDIT_OFF_PATTERNS:
+        if re.search(_verb + _pat, _t):
+            _off.add(_feat)
+    return _off
 
 
 def _deterministic_reedit(old_plan, change_request):

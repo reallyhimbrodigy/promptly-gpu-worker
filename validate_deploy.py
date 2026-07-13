@@ -5123,6 +5123,16 @@ def _findings_placement_and_content_cut():
     assert {b for (_a, _b, b) in _clock["caption_track"]} == {"bottom"}, "captions pinned to the locked band"
     assert "bottom" not in {b for (_a, _b, b) in (_clock["element_bands"].get("mg0") or [])}, \
         "an MG on the locked caption band relocates (caption never moves)"
+    # GAP 1C — NEGATIVES ALWAYS ENFORCE (Zac 2026-07-12): 'no SFX'/'no zooms' disable
+    # that component for the whole render, regardless of the EditPolicy flag.
+    assert "def _parse_off_features(" in _src and "_ep_off |= _parse_off_features(vibe)" in _src, \
+        "user negatives must always merge into the off-set (was gated behind EditPolicy)"
+    assert _h._parse_off_features("no SFX and make it punchier") == {"sfx"}, \
+        "a negative is captured even from a mixed request"
+    _np = {"sound_effects": [{"word_index": 1}], "emphasis_moments": [{"sound": "boom"}]}
+    _h._enforce_off_expressive_features(_np, {"sfx"})
+    assert _np["sound_effects"] == [] and _np["emphasis_moments"][0].get("sound") == "voice", \
+        "'no SFX' strips every SFX (discrete + emphasis rider)"
 
 
 @check("D1 perceptual sync: ONE audible-onset derivation consumed by emphasis t + SFX + projected anchors; the projection reads the render_timeline arithmetic (frames cursor); D2 floors live")
