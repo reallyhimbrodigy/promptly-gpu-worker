@@ -5091,6 +5091,21 @@ def _findings_placement_and_content_cut():
     assert _h._scrub_model_identity("AI model: Gemini") == "AI model: Promptly", "the real leak is scrubbed"
     assert _h._scrub_model_identity("Google's new Pixel phone review") == "Google's new Pixel phone review", \
         "a genuine content mention (no identity frame) is KEPT"
+    # GAP 1A — USER SPELLING OBEDIENCE (Zac 2026-07-12): "spell X as Y" is a LITERAL
+    # deterministic caption-text override — the user's instruction wins (a real request
+    # to spell "Blue filter" as "Blufilter" rendered "BLUE FILTER", ignored).
+    assert "def _parse_caption_text_overrides(" in _src and "def _apply_caption_text_overrides(" in _src, \
+        "the spelling-override capture + apply must exist"
+    assert 'edit_plan["_caption_text_overrides"] = _parse_caption_text_overrides(vibe)' in _src, \
+        "the override must be captured from the user's ask"
+    assert "_apply_caption_text_overrides(\n            _projected_words" in _src or \
+           "_caption_words = _apply_caption_text_overrides(" in _src, \
+        "the override must be applied to the caption word stream"
+    assert _h._parse_caption_text_overrides("spell Blue filter as Blufilter") == {("blue", "filter"): "Blufilter"}, \
+        "the real request is captured"
+    _sw = [{"word": w, "punctuated_word": w, "start": 0.0, "end": 1.0} for w in ("Blue", "filter", "is")]
+    assert [w["word"] for w in _h._apply_caption_text_overrides(_sw, {("blue", "filter"): "Blufilter"})] == ["Blufilter", "is"], \
+        "'Blue filter' renders as the exact user spelling 'Blufilter'"
 
 
 @check("D1 perceptual sync: ONE audible-onset derivation consumed by emphasis t + SFX + projected anchors; the projection reads the render_timeline arithmetic (frames cursor); D2 floors live")

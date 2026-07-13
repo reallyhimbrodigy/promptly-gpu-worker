@@ -19047,12 +19047,70 @@ def _assert_slot_integrity(pre_slots, post_transitions):
 # cannot deploy — silent replay loss is unconstructible for new fields.
 _RENDER_TRANSIENT_KEYS = {
     "_audio_stream_offset", "_broll_output_ranges", "_caption_band_luma",
+    "_caption_text_overrides",  # re-parsed from the vibe every render (user spelling)
     "_face_trajectory", "_generated_subjects", "_integrity_fullmg_ranges",
     "_integrity_slot_ranges", "_projected_words", "_render_clip_output_ranges",
     "_render_clip_time_maps", "_render_cuts", "_render_effective_durations",
     "_render_fps", "_render_timeline", "_render_total_output_frames",
     "_rendered_generated_scenes", "_source_loudness",
 }
+
+
+def _parse_caption_text_overrides(text):
+    """USER OBEDIENCE (Zac 2026-07-12): capture an explicit spelling/text instruction
+    — "spell X as Y", "write X as Y", 'change the caption "X" to "Y"' — as a LITERAL,
+    deterministic caption-text override (no Gemini interpretation, no drift). A real
+    request to spell "Blue filter" as "Blufilter" rendered "BLUE FILTER" — the
+    instruction was ignored entirely. Returns {(lowercased phrase word tuple): replacement}."""
+    _ov = {}
+    if not text:
+        return _ov
+    for _m in re.finditer(
+            r"(?:spell|respell|write|change|make)\s+"
+            r"(?:the\s+(?:word|words|caption|phrase|text)\s+)?"
+            r"[\"“'`]?(?P<x>[A-Za-z][A-Za-z '\-]*?)[\"”'`]?\s+"
+            r"(?:as|to|like)\s+"
+            r"[\"“'`]?(?P<y>[A-Za-z][A-Za-z'\-]*?)[\"”'`]?(?=[\s.,;!?)]|$)",
+            str(text), re.IGNORECASE):
+        _x = _m.group("x").strip().lower()
+        _y = _m.group("y").strip()
+        _key = tuple(_w for _w in re.split(r"\s+", _x) if _w)
+        if _key and _y:
+            _ov[_key] = _y
+    return _ov
+
+
+def _apply_caption_text_overrides(projected_words, overrides):
+    """Apply the user's literal spelling overrides to the caption word stream: each
+    specified phrase (1+ words) collapses to a single caption word carrying the exact
+    replacement text, spanning the phrase's full time. Deterministic — the user's
+    instruction wins over the transcript. Leaves the words untouched when no override."""
+    if not overrides or not projected_words:
+        return projected_words
+    def _norm(w):
+        return "".join(ch for ch in str((w or {}).get("word") or "").lower() if ch.isalnum())
+    _keys = {tuple("".join(ch for ch in _p if ch.isalnum()) for _p in _k): _v
+             for _k, _v in overrides.items()}
+    _out, _i, _n = [], 0, len(projected_words)
+    while _i < _n:
+        _hit = None
+        for _key, _val in _keys.items():
+            _L = len(_key)
+            if _L and _i + _L <= _n and tuple(_norm(projected_words[_i + _j]) for _j in range(_L)) == _key:
+                _hit = (_key, _val, _L)
+                break
+        if _hit is not None:
+            _key, _val, _L = _hit
+            _first = dict(projected_words[_i])
+            _first["word"] = _val
+            _first["punctuated_word"] = _val
+            _first["end"] = projected_words[_i + _L - 1].get("end", _first.get("end"))
+            _out.append(_first)
+            _i += _L
+        else:
+            _out.append(projected_words[_i])
+            _i += 1
+    return _out
 
 
 def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, work_dir, speech_segments=None,
@@ -20144,8 +20202,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # two words sit on one line if they fit, else one per line, never more.
         # Words RE-PAGINATE across more pages; nothing is clipped.
         _max_words_per_page = 2
+        # USER OBEDIENCE: apply the literal spelling override to the CAPTION word
+        # stream only (the user's instruction wins over the transcript spelling).
+        _caption_words = _apply_caption_text_overrides(
+            _projected_words, edit_plan.get("_caption_text_overrides") or {})
         caption_pages = _build_tiktok_pages_from_projected(
-            _projected_words,
+            _caption_words,
             max_words_per_page=_max_words_per_page,
             position_boundaries_sec=sorted(set(_position_boundaries_out_sec)),
             clip_boundaries_sec=sorted(set(_clip_boundaries_out_sec)),
@@ -27283,6 +27345,10 @@ def handler(job):
             print("[reframe] Source is native 9:16 — ingest only did fps + pix_fmt", flush=True)
 
         edit_plan["_user_vibe"] = vibe
+        # USER OBEDIENCE (Zac 2026-07-12): capture an explicit spelling instruction
+        # from the user's ask as a LITERAL caption-text override (the caption builder
+        # applies it deterministically — no Gemini drift). "spell Blue filter as Blufilter".
+        edit_plan["_caption_text_overrides"] = _parse_caption_text_overrides(vibe)
         edit_plan["_source_path"] = source_path
         # Record what reframe filter was applied at ingest for downstream
         # face-coordinate mapping. The render pipeline no longer reads this
