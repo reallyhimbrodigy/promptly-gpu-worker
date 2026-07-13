@@ -37,13 +37,15 @@ check("projected word b exists", bool(_b), proj)
 if _b:
     b = _b[0]
     check("b raw start ≈ 1.60 (output)", abs(b["start"] - 1.60) < 0.02, b["start"])
-    check("b audible_start ≈ 1.52 (pulled to the silence-anchored onset)",
-          abs(b["audible_start"] - 1.52) < 0.02, b["audible_start"])
-# a mid-phrase word (no silence) is NOT shifted → audible_start == start
+    # LEVER B (Zac 2026-07-12): the onset correction is REMOVED — audible_start ==
+    # raw start for EVERY word (one uniform clock, per-word variance impossible).
+    check("b audible_start == raw start 1.60 (Lever B: no correction)",
+          abs(b["audible_start"] - b["start"]) < 1e-6, b["audible_start"])
+# every word — including a post-silence one — is now on the raw clock (uniform)
 _a = [w for w in proj if w.get("_word_index") == 0]
 if _a:
     a = _a[0]
-    check("mid-phrase word a: audible_start == start (no correction)",
+    check("word a: audible_start == start (uniform raw clock)",
           abs(a["audible_start"] - a["start"]) < 1e-6, (a["audible_start"], a["start"]))
 
 H._LEVEL_SILENCES_LAST[:] = []

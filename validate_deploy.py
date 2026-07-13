@@ -4910,14 +4910,15 @@ def _caption_audible_onset():
     _pg = _h._build_tiktok_pages_from_projected(_pw, max_words_per_page=2)
     assert _pg and _pg[0]["tokens"][0]["fromMs"] == 1520, "caption token fromMs must be the audible start (1520)"
     assert _pg[0]["tokens"][0]["toMs"] == 1900, "word end unchanged — appears earlier, stays as long"
-    # projection emits audible_start = start − silence correction; mid-phrase unshifted
+    # LEVER B (Zac 2026-07-12): the onset correction is REMOVED — audible_start ==
+    # raw start for EVERY word (one uniform clock; per-word variance impossible).
     _h._LEVEL_SILENCES_LAST[:] = [(1.20, 1.52)]; _h._WITHIN_WORD_SILENCES_LAST[:] = []
     _proj = _h.project_words_to_output(
         {"words": [{"start": 1.0, "end": 1.3, "word": "a"}, {"start": 1.6, "end": 1.9, "word": "b"}]},
         [{"source_start": 0.0, "source_end": 2.0, "speed": 1.0}], [2.0])
     _b = [w for w in _proj if w.get("_word_index") == 1][0]
-    assert abs(_b["audible_start"] - 1.52) < 0.02 and abs(_b["start"] - 1.60) < 0.02, \
-        "post-silence word: audible_start pulled to the onset, raw start intact"
+    assert abs(_b["audible_start"] - _b["start"]) < 1e-6 and abs(_b["start"] - 1.60) < 0.02, \
+        "Lever B: audible_start == raw start (no correction, uniform clock)"
     _h._LEVEL_SILENCES_LAST[:] = []; _h._WITHIN_WORD_SILENCES_LAST[:] = []
     # ONE CLOCK (Zac 2026-07-12): EVERY word-anchored component reads the same
     # audible-onset reference — caption builder + text-overlay + MG + emphasis-MG
@@ -4972,14 +4973,16 @@ def _sfx_measurability():
     _h._LEVEL_SILENCES_LAST[:] = [(1.2, 1.52)]
     assert _h._sfx_onset_measurable(_dg, 1) is True
     assert _h._sfx_may_fire("popsfx", _dg, 1) is True, "sharp fires on a measurable onset"
-    # IMMEDIATE-PAUSE GATE (Zac 2026-07-12): a FAR silence (>0.15s before the word)
-    # must NOT correct — the ground-truth audit found the old 0.45s look-back grabbed
-    # far/spurious silences, pulling continuous words back a uniform ~80ms (the
-    # variable-timing artifact). Only an immediate pause corrects now.
-    _h._LEVEL_SILENCES_LAST[:] = [(1.1, 1.35)]   # ends 250ms before the 1.6 word
-    assert abs(_h._audible_word_onset_s(_dg, 1) - 1.6) < 1e-6, "FAR silence must NOT correct"
-    _h._LEVEL_SILENCES_LAST[:] = [(1.3, 1.52)]   # ends 80ms before → immediate pause
-    assert abs(_h._audible_word_onset_s(_dg, 1) - 1.52) < 1e-6, "IMMEDIATE pause must correct"
+    # LEVER B (Zac 2026-07-12): _audible_word_onset_s returns RAW for EVERY word — no
+    # timing correction, one uniform clock. Measurability (sound CHOICE) is decoupled:
+    # _sfx_onset_measurable reads the silences directly (a FAR silence is not a clean
+    # beat; an IMMEDIATE pause is), so sharp SFX still fire only on clean beats.
+    _h._LEVEL_SILENCES_LAST[:] = [(1.1, 1.35)]   # ends 250ms before the 1.6 word (far)
+    assert abs(_h._audible_word_onset_s(_dg, 1) - 1.6) < 1e-6, "Lever B: onset is always raw"
+    assert _h._sfx_onset_measurable(_dg, 1) is False, "FAR silence is not a clean beat"
+    _h._LEVEL_SILENCES_LAST[:] = [(1.3, 1.52)]   # ends 80ms before → immediate clean pause
+    assert abs(_h._audible_word_onset_s(_dg, 1) - 1.6) < 1e-6, "Lever B: onset is always raw"
+    assert _h._sfx_onset_measurable(_dg, 1) is True, "IMMEDIATE pause = a clean beat"
     _h._LEVEL_SILENCES_LAST[:] = []
     # BUILD #1 (Zac 2026-07-12): the post-cuts transcript TAGS each mid-phrase word
     # ⟨mid-phrase⟩ so Gemini can SEE where a percussive sound can't land and pick a
@@ -5074,16 +5077,18 @@ def _d1_perceptual_sync():
         "emphasis t, SFX, and projected anchors must all read the onset helper"
     assert "_use_frames" in _src and "trans_slot_frames=_trans_slot_frames" in _src, \
         "the projection must read the render_timeline arithmetic (int-frames cursor)"
-    # behavioral: a silence ending before the Deepgram stamp corrects the onset
+    # behavioral: LEVER B (Zac 2026-07-12) — the onset is the RAW Deepgram start for
+    # EVERY word, with or without a nearby silence (one uniform clock, variance
+    # unrepresentable). The correction was removed; measurability is decoupled.
     _h._LEVEL_SILENCES_LAST[:] = [(0.5, 1.30)]
     _h._WITHIN_WORD_SILENCES_LAST[:] = []
     try:
         _dg = [{"start": 0.1, "end": 0.45}, {"start": 1.44, "end": 1.9}]
         _on = _h._audible_word_onset_s(_dg, 1)
-        assert abs(_on - 1.30) < 1e-6, f"onset must snap to the silence end (1.30), got {_on}"
+        assert abs(_on - 1.44) < 1e-6, f"Lever B: onset is raw regardless of silence (1.44), got {_on}"
         _h._LEVEL_SILENCES_LAST[:] = []
         _on2 = _h._audible_word_onset_s(_dg, 1)
-        assert abs(_on2 - 1.44) < 1e-6, "no located silence → Deepgram start unchanged (replay-safe)"
+        assert abs(_on2 - 1.44) < 1e-6, "onset is always the raw Deepgram start (replay-safe)"
     finally:
         _h._LEVEL_SILENCES_LAST[:] = []
         _h._WITHIN_WORD_SILENCES_LAST[:] = []

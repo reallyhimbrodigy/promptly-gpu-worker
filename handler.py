@@ -250,51 +250,25 @@ def _vibe_requests_captions(vibe):
 # silence exists); mid-phrase words keep the Deepgram start, and SFX TIMING is
 # instead guarded by attack-matched-to-measurability (_sfx_may_fire below).
 def _audible_word_onset_s(dg_words, idx):
-    """D1 (Zac's render verdict, 2026-07-11): Deepgram word STARTS run late
-    vs the audible onset — measured +120..250ms on the rejected render and
-    +179ms on 'nothing' directly. When a dB-located silence ENDS shortly
-    before the Deepgram start, speech began at that silence's end. ONE
-    derivation: every component anchor (emphasis/zoom t, SFX fire, MG/broll/
-    overlay fromFrame) reads THIS; captions keep raw Deepgram spans (page
-    timing is span-based, not beat-based). On render_only replays the
-    silence registries are empty → returns the Deepgram start unchanged
-    (no correction, no risk)."""
+    """ONSET CORRECTION REMOVED — LEVER B (Zac 2026-07-12). Returns the RAW Deepgram
+    start for EVERY word, unconditionally. Every component anchor (emphasis/zoom t,
+    SFX fire, caption/MG/broll/overlay via audible_start) reads THIS, so all land on
+    ONE clock for every word.
+
+    History: the silence-based correction was inconsistent — a ground-truth audit
+    proved 50/60 'corrected' words had no real pause (a prev-tail clamp artifact),
+    and the true mid-phrase onset is PROVEN unmeasurable (4 detectors, 54-131ms err).
+    An inconsistent per-word correction is exactly what the ear catches as 'sometimes
+    early/late'. Since we can never correct mid-phrase words right, raw Deepgram is
+    the only UNIFORM reference: per-word timing variance is now UNREPRESENTABLE by
+    construction. A uniform bias reads as consistent/on-time; only VARIANCE reads as
+    off — and variance is now impossible. (Sound CHOICE still keys off real pauses
+    via _sfx_onset_measurable, which reads the silences directly — decoupled from
+    this timing derivation.)"""
     try:
-        _ds = float(dg_words[idx].get("start") or 0.0)
+        return float(dg_words[idx].get("start") or 0.0)
     except Exception:
         return 0.0
-    _best = _ds
-    try:
-        for _s0, _e0 in list(_LEVEL_SILENCES_LAST) + list(_WITHIN_WORD_SILENCES_LAST):
-            _e0 = float(_e0)
-            # IMMEDIATE-PAUSE GATE (Zac 2026-07-12): correct ONLY when a real
-            # silence ends RIGHT BEFORE the word — an actual inter-word pause the
-            # word starts out of. The old 0.45s look-back grabbed FAR/spurious
-            # silences: a ground-truth audit showed 50/60 "corrected" words had
-            # continuous speech before them (no real pause), pulled back a uniform
-            # ~80ms by the prev-tail clamp — an inconsistent artifact every
-            # component inherited (the variable "feels off"). 0.15s = the max
-            # plausible Deepgram-late on a genuine post-pause word; continuous
-            # words now keep the raw Deepgram start, ONE consistent reference.
-            if _ds - 0.15 <= _e0 <= _ds + 0.02 and _e0 < _best:
-                _best = _e0
-    except Exception:
-        return _ds
-    # MID-PHRASE words (no dB-located silence) keep the Deepgram start: per-word
-    # onset RE-DETECTION was measured NOT accurate enough to correct them (offline
-    # harness 2026-07-12: spectral-flux 64ms / energy 54ms median error vs the
-    # silence-based ground truth, > the 55-113ms lateness itself). Instead, SFX
-    # timing is guarded downstream by _sfx_may_fire — a sharp-attack sound only
-    # fires where the onset IS measurable; mid-phrase emphasis takes a soft sound
-    # whose attack ramp masks the imprecision. So `_best` here stays honest.
-    if idx > 0:
-        try:
-            # never reach into the previous word's speech (its Deepgram end
-            # may itself be loose-late — allow 80ms into its tail, no more)
-            _best = max(_best, float(dg_words[idx - 1].get("end") or 0.0) - 0.08)
-        except Exception:
-            pass
-    return _best
 
 
 # Attack-matched-to-measurability (Zac 2026-07-12): a SHARP-attack sound peaks ~on
@@ -308,12 +282,17 @@ _SFX_SHARP_ATTACK_MS = 200   # attack below this = a transient exposed to onset 
 
 
 def _sfx_onset_measurable(dg_words, idx):
-    """True when a dB-located silence anchors this word's onset (post-silence) so
-    the beat is precise; False for a mid-phrase word (no silence) whose audible
-    onset the Deepgram start only approximates."""
+    """True when a dB silence ends IMMEDIATELY before the word — a real inter-word
+    pause = a CLEAN, precise beat a sharp transient can land on; False for a
+    mid-phrase word buried in continuous speech (no clean onset). Reads the silences
+    DIRECTLY (not via _audible_word_onset_s) so it survives Lever B's timing removal:
+    measurability is about whether the beat is CLEAN, not about the timing value."""
     try:
-        _dg = float(dg_words[idx].get("start") or 0.0)
-        return (_dg - _audible_word_onset_s(dg_words, idx)) > 0.001
+        _ds = float(dg_words[idx].get("start") or 0.0)
+        for _s0, _e0 in list(_LEVEL_SILENCES_LAST) + list(_WITHIN_WORD_SILENCES_LAST):
+            if _ds - 0.15 <= float(_e0) <= _ds + 0.02:
+                return True
+        return False
     except Exception:
         return False
 
