@@ -5736,6 +5736,7 @@ def _scrub_model_identity(val):
 def _compose_band_occupancy(
     raw_caption_segments, motion_graphics, text_overlays, broll_frame_ranges,
     shipped_caption=None, shadow=True, face_trajectory=None, source_fps=60.0,
+    caption_lock=None,
 ):
     """DETERMINISTIC ZONE COMPOSER (ratified hybrid — Gemini owns what/when/why,
     the composer owns which vertical band × which frames). Generalizes
@@ -5845,13 +5846,20 @@ def _compose_band_occupancy(
         for _fb in _face_occupied_bands(face_trajectory, a / float(source_fps or 30), b / float(source_fps or 30)):
             _active.append({"id": f"face_{_fb}", "kind": "face", "band": _fb,
                             "f0": a, "f1": b, "rigid": True})
-        # P1: B-roll full-frame — exclusive ground, caption rides top.
+        # P1: B-roll full-frame — exclusive ground, caption rides top (or the USER's
+        # locked band, which overrides even the B-roll→top rule).
         if any(_f <= a and _t >= b for _f, _t in broll_windows):
-            composed_caption.append((a, b, "top"))
+            composed_caption.append((a, b, caption_lock or "top"))
             for _c in _active:
                 element_bands.setdefault(_c["id"], []).append((a, b, "dropped_broll"))
             continue
         _free = set(_BANDS)
+        # USER CAPTION LOCK (Zac 2026-07-12): an explicit "captions at the bottom" is
+        # the highest authority — reserve that band for captions so every accent
+        # AVOIDS it (an accent that wanted it relocates), and the caption is pinned
+        # there for the whole video, above the base default and the force-flip passes.
+        if caption_lock:
+            _free.discard(caption_lock)
         # P3: fixed-band accents reserve their mandated band. The FACE claims first
         # (it can never yield — a graphic never covers the speaker), then other rigid
         # accents; order by start, then id, deterministic.
@@ -5884,12 +5892,17 @@ def _compose_band_occupancy(
         # _force_caption_position_around_overlays, which keeps orig_pos outside
         # accent windows). Falls through bottom→top→center only when the authored
         # band is taken by an accent.
-        _auth_cap = _band_at(raw_caption_segments, a)
-        _cap = (_auth_cap if _auth_cap in _free
-                else "bottom" if "bottom" in _free
-                else "top" if "top" in _free
-                else "center" if "center" in _free
-                else (_auth_cap or "bottom"))   # fully squeezed — z-order floor backstops
+        # USER CAPTION LOCK wins outright — the caption is pinned to the locked band
+        # regardless of what Gemini authored or which accents are present.
+        if caption_lock:
+            _cap = caption_lock
+        else:
+            _auth_cap = _band_at(raw_caption_segments, a)
+            _cap = (_auth_cap if _auth_cap in _free
+                    else "bottom" if "bottom" in _free
+                    else "top" if "top" in _free
+                    else "center" if "center" in _free
+                    else (_auth_cap or "bottom"))   # fully squeezed — z-order floor backstops
         composed_caption.append((a, b, _cap))
 
     # ── Phase 3: coalesce the caption track ───────────────────────────────
@@ -19048,6 +19061,7 @@ def _assert_slot_integrity(pre_slots, post_transitions):
 _RENDER_TRANSIENT_KEYS = {
     "_audio_stream_offset", "_broll_output_ranges", "_caption_band_luma",
     "_caption_text_overrides",  # re-parsed from the vibe every render (user spelling)
+    "_caption_position_lock",   # re-parsed from the vibe every render (user position lock)
     "_face_trajectory", "_generated_subjects", "_integrity_fullmg_ranges",
     "_integrity_slot_ranges", "_projected_words", "_render_clip_output_ranges",
     "_render_clip_time_maps", "_render_cuts", "_render_effective_durations",
@@ -19078,6 +19092,32 @@ def _parse_caption_text_overrides(text):
         if _key and _y:
             _ov[_key] = _y
     return _ov
+
+
+def _parse_caption_position_lock(text):
+    """USER OBEDIENCE (Zac 2026-07-12): capture an explicit GLOBAL caption-position
+    instruction — "captions at the bottom", "keep captions on top", "captions bottom
+    middle" — as a HARD LOCK the whole video inherits, above the base default, above
+    Gemini's per-segment choices, AND above the overlay/B-roll force-flip + the
+    composer (an accent that would collide with a locked caption MOVES, the caption
+    does not). A real "captions at the bottom middle" still drifted to the top toward
+    the end. Returns "top"|"center"|"bottom" or None. ("middle"/"bottom middle" =
+    the bottom band; middle is horizontal, our bands are vertical.)"""
+    if not text:
+        return None
+    _t = str(text).lower()
+    _m = (re.search(r"(?:captions?|subtitles?)\b[^.!?]{0,45}?\b(bottom|top|center|centre|middle)\b", _t)
+          or re.search(r"\b(bottom|top|center|centre|middle)\b[^.!?]{0,25}?\b(?:captions?|subtitles?)\b", _t))
+    if not _m:
+        return None
+    _b = _m.group(1)
+    if _b in ("center", "centre", "middle"):
+        if re.search(r"\bbottom\b", _t):
+            return "bottom"
+        if re.search(r"\btop\b", _t):
+            return "top"
+        return "center"
+    return _b
 
 
 def _apply_caption_text_overrides(projected_words, overrides):
@@ -21421,6 +21461,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             shadow=not _composer_cutover,
             face_trajectory=_face_trajectory,   # face-avoidance: never cover the speaker
             source_fps=source_fps,
+            caption_lock=edit_plan.get("_caption_position_lock"),  # user obedience: hard position lock
         )
         if _composer_cutover:
             # CUTOVER (flag ON, default OFF): the composer's caption track drives
@@ -21443,6 +21484,18 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             print("[shadow-composer] CUTOVER active — composer caption track + accent bands drive", flush=True)
     except Exception as _shadow_err:
         print(f"[shadow-composer] skipped ({type(_shadow_err).__name__}: {str(_shadow_err)[:120]})", flush=True)
+
+    # USER CAPTION LOCK — the absolute floor (Zac 2026-07-12): after every caption
+    # pass, an explicit user lock pins EVERY caption to its band for the whole video,
+    # one full-duration segment. The composer already relocated accents off this band,
+    # so it is collision-free; this holds the lock regardless of the composer cutover
+    # flag or any force-flip — the drift the user saw "toward the end" is impossible.
+    _cap_lock = edit_plan.get("_caption_position_lock")
+    if _cap_lock:
+        caption_position_segments_out = [
+            {"fromFrame": 0, "toFrame": int(total_output_frames), "position": _cap_lock}]
+        print(f"[captions] USER LOCK: every caption pinned {_cap_lock} for the whole video "
+              f"(above the default, Gemini, and every force-flip)", flush=True)
 
     # ── Integrity-gate designed-window stash ────────────────────────────────
     # The gate (post-assembly, pre-upload) masks DESIGNED stillness/black/
@@ -27349,6 +27402,10 @@ def handler(job):
         # from the user's ask as a LITERAL caption-text override (the caption builder
         # applies it deterministically — no Gemini drift). "spell Blue filter as Blufilter".
         edit_plan["_caption_text_overrides"] = _parse_caption_text_overrides(vibe)
+        # USER OBEDIENCE: an explicit "captions at the bottom" is a HARD position lock
+        # every caption inherits for the whole video (above the default, Gemini, AND
+        # the overlay/composer force-flips — the drift the user saw "toward the end").
+        edit_plan["_caption_position_lock"] = _parse_caption_position_lock(vibe)
         edit_plan["_source_path"] = source_path
         # Record what reframe filter was applied at ingest for downstream
         # face-coordinate mapping. The render pipeline no longer reads this

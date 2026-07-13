@@ -5106,6 +5106,23 @@ def _findings_placement_and_content_cut():
     _sw = [{"word": w, "punctuated_word": w, "start": 0.0, "end": 1.0} for w in ("Blue", "filter", "is")]
     assert [w["word"] for w in _h._apply_caption_text_overrides(_sw, {("blue", "filter"): "Blufilter"})] == ["Blufilter", "is"], \
         "'Blue filter' renders as the exact user spelling 'Blufilter'"
+    # GAP 1B — USER CAPTION-POSITION LOCK (Zac 2026-07-12): "captions at the bottom" is
+    # a hard lock — every caption pinned that band the whole video (a real one drifted
+    # top "toward the end"); a colliding accent relocates, the caption never moves.
+    assert "def _parse_caption_position_lock(" in _src, "the position-lock capture must exist"
+    assert 'edit_plan["_caption_position_lock"] = _parse_caption_position_lock(vibe)' in _src, \
+        "the lock must be captured from the user's ask"
+    assert "caption_lock=edit_plan.get(\"_caption_position_lock\")" in _src, \
+        "the lock must thread into the composer (accents avoid the locked band)"
+    assert 'USER LOCK: every caption pinned' in _src, "the absolute lock floor must run after every caption pass"
+    assert _h._parse_caption_position_lock("captions at the bottom middle") == "bottom", "the real request is captured"
+    _clock = _h._compose_band_occupancy(
+        [{"fromFrame": 0, "toFrame": 120, "position": "top"}],
+        [{"type": "StatCard", "fromFrame": 0, "durationInFrames": 120, "props": {"anchor": "bottom"}}],
+        [], [], shadow=False, caption_lock="bottom")
+    assert {b for (_a, _b, b) in _clock["caption_track"]} == {"bottom"}, "captions pinned to the locked band"
+    assert "bottom" not in {b for (_a, _b, b) in (_clock["element_bands"].get("mg0") or [])}, \
+        "an MG on the locked caption band relocates (caption never moves)"
 
 
 @check("D1 perceptual sync: ONE audible-onset derivation consumed by emphasis t + SFX + projected anchors; the projection reads the render_timeline arithmetic (frames cursor); D2 floors live")
