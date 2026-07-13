@@ -3,7 +3,7 @@
 // speech a longer fade is still resolving when the word is already spoken, so it
 // reads as lag instead of landing on the beat. Pure, unit-agnostic (caller keeps
 // base + window in the same unit — frames or ms). Run: `node fadeTiming.test.ts`.
-import { boundedFade, FADE_WINDOW_FRACTION } from "./fadeTiming.ts";
+import { boundedFade, FADE_WINDOW_FRACTION, MAX_ENTRANCE_MS } from "./fadeTiming.ts";
 
 let pass = 0;
 const fails: string[] = [];
@@ -41,6 +41,13 @@ check("negative window returns 0 (guard)", boundedFade(80, -5) === 0, String(bou
 
 // never returns more than the base even on a huge window (bound is a ceiling only).
 check("bound never inflates the fade above base", boundedFade(10, 100000) === 10, String(boundedFade(10, 100000)));
+
+// UNIVERSAL ABSOLUTE CAP (Zac 2026-07-12): no entrance exceeds MAX_ENTRANCE_MS,
+// even on a long window where the 25% bound wouldn't bite — the slow-base bug.
+check("MAX_ENTRANCE_MS is 80", MAX_ENTRANCE_MS === 80, String(MAX_ENTRANCE_MS));
+check("Prime base 160 on a 1000ms window caps to 80 (was 160)", boundedFade(160, 1000) === 80, String(boundedFade(160, 1000)));
+check("Typewriter base 90 on a 2000ms page caps to 80 (was 90)", boundedFade(90, 2000) === 80, String(boundedFade(90, 2000)));
+check("fast-speech still wins when tighter than the cap", boundedFade(160, 200) === 50, String(boundedFade(160, 200)));
 
 console.log(`\n=== RESULT: ${pass} passed, ${fails.length} failed ===`);
 if (fails.length) { console.log("FAILURES:", fails); process.exit(1); }

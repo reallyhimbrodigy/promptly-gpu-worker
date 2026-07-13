@@ -81,12 +81,15 @@ const CleanCutPage: React.FC<{
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
-  const scale = interpolate(since, [0, 140], [1.04, 1], {
+  // WS2 universal fast cap: the scale+lift motion is capped like the fade (was a
+  // fixed 140ms that bypassed the bound — the caption still read slow).
+  const _mms = boundedFade(140, wordWindowMs);
+  const scale = interpolate(since, [0, _mms], [1.04, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
     easing: easeOutCubic,
   });
-  const y = interpolate(since, [0, 140], [7, 0], {
+  const y = interpolate(since, [0, _mms], [7, 0], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
     easing: easeOutCubic,

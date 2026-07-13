@@ -10,6 +10,7 @@ import {
 import type { TikTokToken } from "../shared/types";
 import type { LumenProps } from "./types";
 import { msToFrames } from "../shared/timing";
+import { MAX_ENTRANCE_MS } from "../shared/fadeTiming";
 import { CAPTION_FONTS } from "../shared/fonts";
 import { getCaptionPositionStyle, CAPTION_PADDING } from "../shared/captionPosition";
 import { fitScale, CHARWRAP_FALLBACK_STYLE } from "../shared/fit";
@@ -52,8 +53,11 @@ const LumenWord: React.FC<{
   const elapsed = frame - activateFrame;
   const hasAppeared = elapsed >= 0;
 
+  // WS2 universal fast cap: the scale spring settles within MAX_ENTRANCE_MS (was
+  // an unbounded damping:200 spring ≈ 1s — the slowest caption entrance).
   const entranceSpring = hasAppeared
-    ? spring({ fps, frame: elapsed, config: { damping: 200 } })
+    ? spring({ fps, frame: elapsed, config: { damping: 200 },
+               durationInFrames: Math.max(1, msToFrames(MAX_ENTRANCE_MS, fps)) })
     : 0;
 
   // Scale: 0.95 -> 1

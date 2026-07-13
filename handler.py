@@ -4320,9 +4320,10 @@ You watched the footage — cut what a lean edit cuts. Emit `cut_refinements`: K
   (a) **Phrasal restarts and abandoned starts** — 'so I was— I was going': keep the completed take, cut the abandoned words.
   (b) **Retakes** — when the speaker delivers the same line twice, keep the stronger delivery and name which in `reason`.
   (c) **Filler and dead weight** the detectors' punctuation rules missed — a 'like' or 'you know' the commas hid.
-  (d) **Drags** — a stretch that adds no information and no charisma.
 
-Rules: ranges are KEPT indices from the transcript below. Protected words (hook / payoff / close / key_moments) are never cut. Under a cleanup-request vibe this pass works HARDEST; under 'keep every pause / don't cut anything' emit []. When unsure whether a pause is dead or dramatic, keep it — the mechanical pass already took the measured silence.
+This pass removes only the speaker's own STRUCTURAL REDUNDANCY — the restarts, retakes, and filler above. It does NOT tighten real speech. A complete, meaningful phrase delivered once and fluently is CONTENT, not a drag — never cut it for 'leanness' or pace. "It took five minutes to edit. I did nothing." is not a stretch that drags; "to edit" is the sentence. Leanness comes from the mechanical cuts + these three redundancy classes, never from shortening a fluent sentence.
+
+Rules: ranges are KEPT indices from the transcript below. Protected words (hook / payoff / close / key_moments) are never cut. **Content words in a flowing sentence are never removable — the pipeline enforces this: a cut_refinement that is not filler, a verbatim restart, or bounded by real dead air (a sentence-final boundary with a ≥0.70s pause) is rejected and the words are kept.** Under a cleanup-request vibe this pass works HARDEST on the three redundancy classes; under 'keep every pause / don't cut anything' emit []. When unsure whether a pause is dead or dramatic, keep it — the mechanical pass already took the measured silence.
 
 ═══════════════════════════════════════════════════════════════════════════
 
@@ -4587,7 +4588,12 @@ Component sizes:
   • SMALL — AnnotationArrow, ProgressBar, NumberTicker, Reticle, PillCluster: <20% canvas. Any anchor; upper_third_safe is safe by construction.
   • FULL-WIDTH — PillMarquee: an edge-to-edge scrolling band; it rides the upper or lower band (emit upper_third_safe or lower_third_safe) and stays clear of the face like every other anchor.
 
-Anchor preference: 1) upper_third_safe (default — above the face, clear of bottom captions) · 2) lower_third_safe (requires captions moved to top for the window; good for footer-like content) · 3) center (ONLY when the speaker is off-camera or the face is confirmed in the lower band — on a visible talking-head, center lands on the face). MGs render horizontally centered — the anchor enum is vertical-only, so clearance comes from the vertical band you pick. Anchors resolve clear of the face — the render keeps the person visible; pick the vertical band that frames them, a smaller variant when space is tight, or a B-roll window when the frame is full. The clean speaker shot is the baseline the render protects.
+**Base layout — the three component types live in three different bands so the frame reads coherent, not scattered. This is the STANDARD; deviate only when a moment genuinely calls for it, and know it's a deliberate departure from the default:**
+  • Captions live in the LOWER third (their resting home).
+  • Text-overlays live in the UPPER third.
+  • Motion graphics take CENTER or UPPER, read from the frame: **center when the frame's center is clear** (the FACE VERTICAL ZONE reads upper or lower, so the face isn't there), **upper when the subject occupies center** (the common talking-head). Center is the graphic's home when the person isn't in it — it is NOT a forbidden zone.
+
+Anchor preference for an MG: 1) **center** when FACE VERTICAL ZONE reads upper or lower (center is clear — the graphic's natural home, and it leaves captions lower + overlays upper untouched) · 2) **upper_third_safe** when the face owns center (the talking-head default) · 3) **lower_third_safe — LAST RESORT ONLY** (a bottom MG forces captions off their lower-third home to the top, which is exactly what makes a frame feel scattered; reach for it only for genuinely footer-like content when upper and center are both taken). MGs render horizontally centered — the anchor enum is vertical-only, so clearance comes from the vertical band you pick. Read the FACE VERTICAL ZONE signal you're given and pick the band the face isn't in; a smaller variant when space is tight, or a B-roll window when the frame is full. The clean speaker shot + a coherent three-band layout is the baseline the render protects.
 
 ──────────────────────────────────────────
 THE {_n_mgs} COMPONENTS
@@ -6110,6 +6116,39 @@ def _sentence_final_word(w):
     _t = str((w or {}).get("punctuated_word") or (w or {}).get("word") or "")
     _t = _t.rstrip().rstrip('"\')]”’')
     return _t.endswith((".", "?", "!", "…"))
+
+
+def _cut_lemma(w):
+    return "".join(ch for ch in str((w or {}).get("word") or "").lower() if ch.isalnum())
+
+
+def _gemini_cut_span_removable(span_words, following_words, prev_word, silence_before_s):
+    """CONTENT-WORD PROTECTION (Zac 2026-07-12): a Gemini cut_refinement ('YOUR CUT
+    PASS') removed the content phrase "to edit" from "It took five minutes to edit.
+    I did nothing." — a subjective 'drag/tighten' judgment nothing validated. A
+    gemini_cut span may ONLY be removed if it OBJECTIVELY qualifies:
+      (i)  every word is filler/hesitation (um/uh/like/you know…), OR
+      (ii) it is a verbatim RESTART — its lemmas prefix the following words (an
+           abandoned start the speaker re-did), OR
+      (iii) it sits on a real dead-air boundary — the prior word is sentence-final
+            AND a >= _MIDSENTENCE_STALL_S (0.70s) pause precedes the span.
+    A mid-sentence CONTENT span with none of these is a WRONG cut → return False so
+    the words are kept. Content words in a flowing sentence are never removable."""
+    if not span_words:
+        return True
+    # (i) all filler / hesitation
+    if all(_FILLER_HESITATION_REGEX.match(_cut_lemma(w)) or _cut_lemma(w) in _PAREN_FILLER_SINGLE
+           for w in span_words):
+        return True
+    # (ii) verbatim restart: span lemmas prefix the immediately-following words
+    _span = [_cut_lemma(w) for w in span_words]
+    _foll = [_cut_lemma(w) for w in (following_words or [])][:len(_span)]
+    if _span and _span == _foll:
+        return True
+    # (iii) true dead air on a sentence-final boundary
+    if _sentence_final_word(prev_word) and (silence_before_s or 0.0) >= _MIDSENTENCE_STALL_S:
+        return True
+    return False
 
 
 _SPAN_SPLIT_MIN_S = 0.12       # SPAN-SPLIT (Zac 2026-07-09): an interior sub-audible run at
@@ -10341,6 +10380,32 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                     "enforce": _CUT_REFINE_CAP_ENFORCE,
                 }, default=str), flush=True)
                 for _ra, _rb, _rr in _ranges:
+                    # CONTENT-WORD PROTECTION (Zac 2026-07-12): a cut_refinement may
+                    # only remove filler / a verbatim restart / a dead-air-bounded
+                    # span — never content words in a flowing sentence ("to edit").
+                    _cw_src = [int(new_to_src[_ki]) for _ki in range(_ra, _rb + 1)
+                               if 0 <= _ki < len(new_to_src)]
+                    _cw_span = [deepgram_words[_si] for _si in _cw_src
+                                if 0 <= _si < len(deepgram_words)]
+                    _cw_foll = [deepgram_words[int(new_to_src[_ki])]
+                                for _ki in range(_rb + 1, min(_rb + 4, len(new_to_src)))
+                                if 0 <= int(new_to_src[_ki]) < len(deepgram_words)]
+                    _cw_prev = (deepgram_words[_cw_src[0] - 1]
+                                if _cw_src and _cw_src[0] > 0 else None)
+                    _cw_gap = ((float(_cw_span[0].get("start") or 0.0)
+                                - float((_cw_prev or {}).get("end") or 0.0))
+                               if (_cw_span and _cw_prev) else 0.0)
+                    if not _gemini_cut_span_removable(_cw_span, _cw_foll, _cw_prev, _cw_gap):
+                        _record_divergence(
+                            "cut_boundary",
+                            {"kept_range": [_ra, _rb], "reason": _rr,
+                             "words": " ".join(str(w.get("word") or "") for w in _cw_span)},
+                            "drop_content_word_cut",
+                            reason="gemini_cut of content words in a flowing sentence (not filler/restart/dead-air)")
+                        print(f"[cut-refine] REJECTED kept=[{_ra}-{_rb}] "
+                              f"'{' '.join(str(w.get('word') or '') for w in _cw_span)}' — "
+                              f"content words in a flowing sentence, KEPT", flush=True)
+                        continue
                     for _ki in range(_ra, _rb + 1):
                         if 0 <= _ki < len(new_to_src):
                             edit_plan["remove_words"].append(

@@ -10,6 +10,7 @@ import {
 import type { TikTokToken } from "../shared/types";
 import type { GadzhiStyleProps } from "./types";
 import { msToFrames, getCurrentTimeMs } from "../shared/timing";
+import { MAX_ENTRANCE_MS } from "../shared/fadeTiming";
 import { CAPTION_FONTS } from "../shared/fonts";
 import { buildKeywordSet, isKeyword } from "../shared/keywords";
 import { CAPTION_PADDING } from "../shared/captionPosition";
@@ -99,7 +100,11 @@ const GadzhiStylePage: React.FC<{
             const isKw = isKeyword(token.text, keywordSet);
             const finalColor = isKw ? highlightColor : textColor;
 
-            const slideDuration = isKw ? SLIDE_FRAMES_KEYWORD : SLIDE_FRAMES_NORMAL;
+            // WS2 universal fast cap: the slide finishes within MAX_ENTRANCE_MS
+            // (was a fixed 10f/16f = 167/267ms that bypassed the bound).
+            const slideDuration = Math.min(
+              isKw ? SLIDE_FRAMES_KEYWORD : SLIDE_FRAMES_NORMAL,
+              Math.max(1, msToFrames(MAX_ENTRANCE_MS, fps)));
             const slideDist = isKw ? SLIDE_DISTANCE_KEYWORD : SLIDE_DISTANCE_NORMAL;
             const wordEntryFrame = msToFrames(token.fromMs - pageStartMs, fps);
             const elapsed = frame - wordEntryFrame;

@@ -11,6 +11,7 @@ import type { TikTokToken, TikTokPage } from "../shared/types";
 import type { TwoToneProps } from "./types";
 import { CAPTION_FONTS } from "../shared/fonts";
 import { msToFrames } from "../shared/timing";
+import { MAX_ENTRANCE_MS } from "../shared/fadeTiming";
 import { getCaptionPositionStyle } from "../shared/captionPosition";
 import { fitScale, CHARWRAP_FALLBACK_STYLE } from "../shared/fit";
 
@@ -74,7 +75,10 @@ const TwoToneWord: React.FC<{
   const { fps } = useVideoConfig();
 
   const entry = msToFrames(token.fromMs - pageStartMs, fps) + globalIndex;
-  const s = spring({ fps, frame: localFrame - entry, config: SLAM_SPRING });
+  // WS2 universal fast cap: the slam settles within MAX_ENTRANCE_MS (was an
+  // unbounded SLAM_SPRING ≈ 330ms — a quick slam now, still present).
+  const s = spring({ fps, frame: localFrame - entry, config: SLAM_SPRING,
+                     durationInFrames: Math.max(1, msToFrames(MAX_ENTRANCE_MS, fps)) });
   // Slam in: from slightly oversized + lifted, settling to rest.
   const scale = interpolate(s, [0, 1], [1.18, 1], {
     extrapolateRight: "clamp",

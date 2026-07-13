@@ -5016,12 +5016,43 @@ def _item3_ws2_fade_bound():
     # Gadzhi: opacity resolves in the first quarter of the slide (was 0.4)
     assert "interpolate(slideProgress, [0, 0.25]" in open(_os.path.join(_cap, "Gadzhi/Gadzhi.tsx")).read(), \
         "Gadzhi fade fraction 0.25 (was 0.4)"
+    # FINDING 2 (Zac 2026-07-12): UNIVERSAL ABSOLUTE CAP — every entrance ≤ MAX_ENTRANCE_MS,
+    # including the scale/slide/spring MOTION channels that bypassed boundedFade (Lumen ~1s,
+    # TwoTone ~330ms, Gadzhi 167ms, CleanCut 140ms) — the reason captions still read slow.
+    assert "MAX_ENTRANCE_MS = 80" in _hs and "MAX_ENTRANCE_MS)" in _hs, \
+        "boundedFade must fold in the absolute cap MAX_ENTRANCE_MS=80"
+    for _st, _needle in (("Lumen/Lumen", "durationInFrames: Math.max(1, msToFrames(MAX_ENTRANCE_MS"),
+                         ("TwoTone/TwoTone", "durationInFrames: Math.max(1, msToFrames(MAX_ENTRANCE_MS"),
+                         ("Gadzhi/Gadzhi", "msToFrames(MAX_ENTRANCE_MS"),
+                         ("CleanCut/CleanCut", "boundedFade(140,")):
+        assert _needle in open(_os.path.join(_cap, f"{_st}.tsx")).read(), \
+            f"{_st} motion channel must be capped to MAX_ENTRANCE_MS (else it still animates slow)"
     # run the REAL helper math (node strips the .ts types) — not a Python mirror.
     # ESM relative imports resolve to the test file's location, so cwd is irrelevant.
     _t = _os.path.join(_cap, "shared", "fadeTiming.test.ts")
     _r = _sub.run(["node", _t], capture_output=True, text=True)
     assert _r.returncode == 0 and "ALL FADE-BOUND CASES PASS" in _r.stdout, \
         f"node fadeTiming.test.ts must pass ({_r.stdout[-200:]}{_r.stderr[-200:]})"
+
+
+@check("FINDINGS 1+3 (Zac 2026-07-12): MG base placement teaches center-when-clear/upper + demotes lower_third_safe (kills the caption force-flip cascade that scattered the frame); cut_refinements CONTENT-WORD PROTECTION — a gemini_cut of content words in a flowing sentence is rejected (only filler / verbatim restart / dead-air-bounded spans are removable)")
+def _findings_placement_and_content_cut():
+    import handler as _h
+    _src = open("handler.py").read()
+    # Finding 1 — MG base placement taught (not coerced)
+    assert "center when the frame's center is clear" in _src, "MG base = center-when-clear must be taught"
+    assert "lower_third_safe — LAST RESORT ONLY" in _src, "lower_third_safe demoted from the #2 default"
+    # Finding 3 — content-word protection gate + prompt
+    assert "def _gemini_cut_span_removable(" in _src, "the content-word predicate must exist"
+    assert "_gemini_cut_span_removable(_cw_span" in _src, "the cut_refinements union must gate on it"
+    assert "drop_content_word_cut" in _src, "a rejected content cut signs a divergence"
+    assert "Content words in a flowing sentence are never removable" in _src, "the prompt must teach it too"
+    _W = lambda w, s=0.0, e=0.0: {"word": w, "punctuated_word": w, "start": s, "end": e}
+    assert _h._gemini_cut_span_removable([_W("to"), _W("edit.")], [_W("I"), _W("did")], _W("minutes"), 0.02) is False, \
+        "'to edit' in a flowing sentence must be KEPT (the bug)"
+    assert _h._gemini_cut_span_removable([_W("um"), _W("uh")], [_W("so")], _W("okay."), 0.0) is True, "filler removable"
+    assert _h._gemini_cut_span_removable([_W("the"), _W("cat")], [_W("the"), _W("cat")], _W("and"), 0.0) is True, "verbatim restart removable"
+    assert _h._gemini_cut_span_removable([_W("anyway")], [_W("so")], _W("done."), 0.85) is True, "dead-air-bounded removable"
 
 
 @check("D1 perceptual sync: ONE audible-onset derivation consumed by emphasis t + SFX + projected anchors; the projection reads the render_timeline arithmetic (frames cursor); D2 floors live")
