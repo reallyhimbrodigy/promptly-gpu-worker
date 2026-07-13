@@ -23009,7 +23009,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 # that produced three DipToBlack production crashes.
 
 
-def _build_tiktok_pages_from_projected(projected_words, max_words_per_page=3, position_boundaries_sec=None, clip_boundaries_sec=None):
+def _build_tiktok_pages_from_projected(projected_words, max_words_per_page=3, position_boundaries_sec=None, clip_boundaries_sec=None, fps=60.0):
     """Convert projected Deepgram words into TikTokPage[] structured for the
     @remotion/captions types consumed by the pack caption components.
 
@@ -23105,12 +23105,23 @@ def _build_tiktok_pages_from_projected(projected_words, max_words_per_page=3, po
         # absolute coordinate system. Page-relative tokens broke every
         # component that does (token.fromMs - pageStartMs) because the
         # subtraction yielded a huge negative number.
-        token_from_ms = int(round(w_start * 1000))
-        token_to_ms = int(round(w_end * 1000))
+        # CAPTION LATENESS FIX (Zac 2026-07-13): a caption reveals at the first frame
+        # whose time reaches fromMs — the reveal condition is `(frame/fps)*1000 >= fromMs`,
+        # i.e. ceil(start*fps). But EVERY other component (SFX/zoom/MG/broll) fires at
+        # round(start*fps) (int(round(start*fps)) in render_timeline). So a caption lands
+        # 0-1 frame LATER than the components on the SAME word — a systematic, caption-only
+        # lateness (~7ms avg, up to 16.7ms). The fade used to ease over it; the hard snap
+        # lands squarely on the late frame and exposes it. Shifting fromMs earlier by HALF
+        # A FRAME makes ceil(start*fps - 0.5) == round(start*fps): the caption now reveals
+        # on the IDENTICAL frame the components fire. Sub-ms float precision is preserved
+        # (caption tokens support it) so the alignment is exact, not re-quantized to int-ms.
+        _half_frame_ms = 500.0 / float(fps or 60.0)
+        token_from_ms = w_start * 1000.0 - _half_frame_ms
+        token_to_ms = w_end * 1000.0 - _half_frame_ms
         current_tokens.append({
             "text": w_text,
             "fromMs": token_from_ms,
-            "toMs": max(token_from_ms + 1, token_to_ms),
+            "toMs": max(token_from_ms + 1.0, token_to_ms),
         })
         current_text_parts.append(w_text)
         last_word_end = w_end
