@@ -127,15 +127,11 @@ const TypewriterPage: React.FC<{
   );
   const fittedFontSize = fontSize * fit.scale;
 
-  // Page fade — WS2 fade-bound: each end capped at 25% of the page window so a
-  // short page isn't still fading in when it's already spoken (shared/fadeTiming).
+  // CRISP ENTRANCE (Zac 2026-07-13): the page is at FULL opacity from frame 1 — no
+  // fade-in ramp (the ghost). TypewriterReveal's identity IS the per-character typing
+  // (chars hard-appear as they're "typed", never fade); the page fade-OUT stays.
   const pageLocalMs = (frame / fps) * 1000;
-  const fadeInMs = boundedFade(fadeInDurationMs, page.durationMs);
   const fadeOutMs = boundedFade(fadeOutDurationMs, page.durationMs);
-  const fadeIn = interpolate(pageLocalMs, [0, fadeInMs], [0, 1], {
-    extrapolateLeft: "clamp",
-    extrapolateRight: "clamp",
-  });
   const fadeOutStart = page.durationMs - fadeOutMs;
   const fadeOut = interpolate(
     pageLocalMs,
@@ -143,7 +139,7 @@ const TypewriterPage: React.FC<{
     [1, 0],
     { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
   );
-  const pageOpacity = Math.min(fadeIn, fadeOut);
+  const pageOpacity = fadeOut;
 
   // Find last revealed character
   let lastRevealedIdx = -1;

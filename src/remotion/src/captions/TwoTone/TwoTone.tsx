@@ -84,13 +84,10 @@ const TwoToneWord: React.FC<{
     extrapolateRight: "clamp",
   });
   const y = interpolate(s, [0, 1], [18, 0], { extrapolateRight: "clamp" });
-  // WS2 fast-but-present (Zac 2026-07-12, overriding the identity-exemption):
-  // opacity fades fast and DECOUPLED from the slam spring so the word lands ON
-  // the beat; the slam scale/lift (TwoTone's character) stays on the spring.
-  const opacity = interpolate(localFrame - entry, [0, Math.max(2, Math.round(fps * 0.06))], [0, 1], {
-    extrapolateLeft: "clamp",
-    extrapolateRight: "clamp",
-  });
+  // CRISP ENTRANCE (Zac 2026-07-13): full opacity from frame 1 — no 0→1 ramp. The
+  // slam scale 1.18→1 + lift IS TwoTone's punchy entrance; it plays on a fully-VISIBLE
+  // word (a slam at full opacity reads intentional; a fade-up reads soft).
+  const opacity = localFrame >= entry ? 1 : 0;
 
   return (
     <span

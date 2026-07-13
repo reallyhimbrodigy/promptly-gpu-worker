@@ -120,27 +120,15 @@ export const Pulse: React.FC<PulseProps> = ({
 
   const activeStart = msToFrames(pages[activeIdx].startMs, fps);
 
-  // WS2 fade-bound: cap each slot's fade at 25% of that slot's on-screen window
-  // so a fast-speech page is legible for ≥75% of its life instead of still
-  // fading in when it's already spoken (shared/fadeTiming).
+  // CRISP ENTRANCE (Zac 2026-07-13): each paired slot appears at FULL opacity the
+  // instant it starts — no 0→1 ramp (the ghost). Pulse's rhythm lives in the paired
+  // stack + the top-line dim, not a fade-up; the fade-OUT below stays.
   const slot1Start = msToFrames(pages[slot1PageIdx].startMs, fps);
-  const slot1FadeF = boundedFade(fadeDurationFrames, msToFrames(pages[slot1PageIdx].durationMs, fps));
-  let slot1Opacity = interpolate(
-    frame,
-    [slot1Start, slot1Start + slot1FadeF],
-    [0, 1],
-    { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
-  );
+  let slot1Opacity = frame >= slot1Start ? 1 : 0;
 
   let slot2Opacity = 0;
   if (hasSlot2) {
-    const slot2FadeF = boundedFade(fadeDurationFrames, msToFrames(pages[activeIdx].durationMs, fps));
-    slot2Opacity = interpolate(
-      frame,
-      [activeStart, activeStart + slot2FadeF],
-      [0, 1],
-      { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
-    );
+    slot2Opacity = frame >= activeStart ? 1 : 0;
   }
 
   const lastVisibleIdx = hasSlot2 ? slot2PageIdx : slot1PageIdx;

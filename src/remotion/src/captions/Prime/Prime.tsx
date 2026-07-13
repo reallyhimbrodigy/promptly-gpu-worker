@@ -74,7 +74,9 @@ const PrimeWord: React.FC<{
   });
 
   const slideY = interpolate(wordSpring, [0, 1], [20, 0]);
-  const wordOpacity = interpolate(wordSpring, [0, 1], [0, 1]);
+  // CRISP ENTRANCE (Zac 2026-07-13): full opacity from frame 1 — no 0→1 ramp (the
+  // ghost). The kinetic slide (Prime's character) plays on a fully-VISIBLE word.
+  const wordOpacity = frame >= activateFrame ? 1 : 0;
 
   const color = isSpecial ? specialColor : line1Color;
   const fontSize = isSpecial ? line2FontSize : (isLine2 ? line2FontSize : line1FontSize);

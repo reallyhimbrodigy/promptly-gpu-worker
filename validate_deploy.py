@@ -354,6 +354,26 @@ def _caption_override_broll_forces_lower():
     assert _pos_at(_o2, 180) == "center", f"b-roll + MG-at-bottom → center, got: {_o2}"
 
 
+@check("CAPTION CRISP ENTRANCE (Zac 2026-07-13): every one of the 9 styles appears at FULL opacity from frame 1 — no 0→1 opacity RAMP (the ghost that made the word semi-transparent for a chunk of its life). The fade was made fast 3× (WS2, MAX_ENTRANCE_MS) but stayed a fade; this removes the fade CHARACTER. Non-opacity motion (slam/slide/scale-pop) stays; fade-OUT stays")
+def _caption_crisp_entrance():
+    import os as _os
+    _base = "src/remotion/src/captions"
+    _styles = ["Prime", "TypewriterReveal", "Cove", "Lumen", "Pulse",
+               "Quintessence", "TwoTone", "CleanCut", "Gadzhi"]
+    for _st in _styles:
+        _src = open(_os.path.join(_base, _st, f"{_st}.tsx")).read()
+        assert "CRISP ENTRANCE (Zac 2026-07-13)" in _src, f"{_st} must have the crisp-entrance conversion"
+    # spot-check the specific old ghost ramps are GONE (not just commented)
+    _prime = open(_os.path.join(_base, "Prime", "Prime.tsx")).read()
+    assert "interpolate(wordSpring, [0, 1], [0, 1])" not in _prime, "Prime's opacity ramp must be gone"
+    _cove = open(_os.path.join(_base, "Cove", "Cove.tsx")).read()
+    assert "(currentTimeMs - token.fromMs) / 60" not in _cove, "Cove's 60ms opacity ramp must be gone"
+    _tt = open(_os.path.join(_base, "TwoTone", "TwoTone.tsx")).read()
+    assert "localFrame >= entry ? 1 : 0" in _tt, "TwoTone opacity is a hard step (slam stays)"
+    # the fade helper stays (fade-OUT still uses it; MAX_ENTRANCE_MS caps any residual)
+    assert "MAX_ENTRANCE_MS = 80" in open(_os.path.join(_base, "shared", "fadeTiming.ts")).read()
+
+
 # ─── 3b. ZOOM-ORIGIN FACE-LOCK ────────────────────────────────────────
 # These tests cover audit Tier-1 #3: the zoom-origin face-lock that the
 # prompt promises Gemini. They exercise _resolve_zoom_origin, the same
@@ -5001,7 +5021,7 @@ def _sfx_measurability():
         "the sound-menu guidance must also NAME the ⟨mid-phrase⟩ tag so Gemini acts on it"
 
 
-@check("ITEM 3 WS2 caption fade-bound (Zac 2026-07-12): every fixed caption fade is capped at 25% of its on-screen window (shared/fadeTiming.boundedFade), the 5 fixed-duration styles wire it + faster bases, Gadzhi's fade resolves in the first quarter of its slide; the real node helper test passes")
+@check("WS2 caption fade helper (Zac 2026-07-12, entrance SUPERSEDED by crisp-entrance 2026-07-13): boundedFade + the 0.25/MAX_ENTRANCE_MS caps stay for fade-OUT and the non-opacity motion channels (slam/slide/scale springs); the fade-IN ramp is GONE (see _caption_crisp_entrance); the real node helper math test still passes")
 def _item3_ws2_fade_bound():
     import os as _os, subprocess as _sub
     _cap = "src/remotion/src/captions"
@@ -5016,16 +5036,14 @@ def _item3_ws2_fade_bound():
         _src = open(_os.path.join(_cap, f"{_st}.tsx")).read()
         assert 'from "../shared/fadeTiming"' in _src and "boundedFade(" in _src, \
             f"{_st} must wire boundedFade (WS2 bound would silently regress otherwise)"
-    # faster bases: CleanCut 55ms word entrance, Prime 160ms spring, Typewriter 90ms
-    assert "boundedFade(55," in open(_os.path.join(_cap, "CleanCut/CleanCut.tsx")).read(), \
-        "CleanCut faster base 55ms (was 80)"
+    # Prime's spring duration still rides boundedFade(160) — that governs the SLIDE
+    # motion (the opacity ramp on that spring was removed; the kinetic slide stays).
     assert "boundedFade(160," in open(_os.path.join(_cap, "Prime/Prime.tsx")).read(), \
-        "Prime faster base 160ms (was fps*0.25 = 250ms)"
-    assert "fadeInDurationMs = 90" in open(_os.path.join(_cap, "TypewriterReveal/TypewriterReveal.tsx")).read(), \
-        "TypewriterReveal faster base 90ms (was 150)"
-    # Gadzhi: opacity resolves in the first quarter of the slide (was 0.4)
-    assert "interpolate(slideProgress, [0, 0.25]" in open(_os.path.join(_cap, "Gadzhi/Gadzhi.tsx")).read(), \
-        "Gadzhi fade fraction 0.25 (was 0.4)"
+        "Prime's slide-spring duration stays bounded (motion, not opacity)"
+    # NOTE: the old fade-IN bases (CleanCut boundedFade(55,), Gadzhi's 0.25 opacity
+    # ramp) were REMOVED by the crisp-entrance fix — entrances no longer fade in.
+    # _caption_crisp_entrance asserts the ghost ramps are gone; here we only guard the
+    # fade-OUT + motion caps that survived.
     # FINDING 2 (Zac 2026-07-12): UNIVERSAL ABSOLUTE CAP — every entrance ≤ MAX_ENTRANCE_MS,
     # including the scale/slide/spring MOTION channels that bypassed boundedFade (Lumen ~1s,
     # TwoTone ~330ms, Gadzhi 167ms, CleanCut 140ms) — the reason captions still read slow.

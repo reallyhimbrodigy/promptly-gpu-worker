@@ -145,9 +145,10 @@ export const Cove: React.FC<CoveProps> = ({
                           // identity-exemption): the word fades in fast (~60ms)
                           // instead of a hard cut, so it reads as landing ON the
                           // beat rather than popping. Present, not slow.
-                          const wordOpacity = isSpoken
-                            ? Math.min(1, (currentTimeMs - token.fromMs) / 60)
-                            : 0;
+                          // CRISP ENTRANCE (Zac 2026-07-13): full opacity the instant
+                          // the word is spoken — no 60ms ramp (the ghost). Cove's
+                          // serif/glow character lives in its ongoing look, not a fade.
+                          const wordOpacity = isSpoken ? 1 : 0;
 
                           const color = !isSpoken
                             ? "transparent"

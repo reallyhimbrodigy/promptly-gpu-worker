@@ -72,14 +72,12 @@ export const Quintessence: React.FC<QuintessenceProps> = ({
   // so fast-speech slots are legible ≥75% of their life (shared/fadeTiming).
   const slotWinF = endFrame - startFrame;
 
-  // Quick fade in
-  const fadeInFrames = boundedFade(3, slotWinF);
-  const fadeIn = interpolate(elapsed, [0, fadeInFrames], [0, 1], {
-    extrapolateLeft: "clamp",
-    extrapolateRight: "clamp",
-  });
+  // CRISP ENTRANCE (Zac 2026-07-13): the word appears at FULL opacity the instant
+  // its slot is active — no fade-in ramp (the ghost). Its character is the monumental
+  // scaleY stretch + one-word frame, not a soft fade. `elapsed >= 0` gates presence.
+  const enteredOpacity = elapsed >= 0 ? 1 : 0;
 
-  // Quick fade out
+  // Quick fade out (kept — the exit is not the entrance ghost)
   const fadeOutFrames = boundedFade(3, slotWinF);
   const fadeOut = interpolate(
     frame,
@@ -88,7 +86,7 @@ export const Quintessence: React.FC<QuintessenceProps> = ({
     { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
   );
 
-  const opacity = fadeIn * fadeOut;
+  const opacity = enteredOpacity * fadeOut;
 
   // F4 width-fit guarantee: one 160px Playfair word, nowrap — the worst
   // single-word overflow risk of the pack. Uniform scale to the margins;

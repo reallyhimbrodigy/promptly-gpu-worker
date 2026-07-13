@@ -120,12 +120,11 @@ const GadzhiStylePage: React.FC<{
               extrapolateRight: "clamp",
             });
 
-            // WS2: opacity resolves in the first quarter of the slide (was 0.4)
-            // so the word is legible early while the slide finishes settling.
-            const opacity = interpolate(slideProgress, [0, 0.25], [0, 1], {
-              extrapolateLeft: "clamp",
-              extrapolateRight: "clamp",
-            });
+            // CRISP ENTRANCE (Zac 2026-07-13): full opacity — no 0→1 ramp (the ghost).
+            // The word is fully VISIBLE the instant it's spoken (the outer isSpoken gate
+            // handles presence); the slide-up + gray→white settle (Gadzhi's character)
+            // play on top of a fully-visible word, never a visibility ramp.
+            const opacity = 1;
 
             const colorProgress = interpolate(slideProgress, [0, 1], [0, 1], {
               extrapolateLeft: "clamp",

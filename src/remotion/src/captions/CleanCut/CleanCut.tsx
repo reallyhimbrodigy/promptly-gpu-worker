@@ -76,11 +76,9 @@ const CleanCutPage: React.FC<{
   // in when it's already spoken (shared/fadeTiming).
   const nextTok = page.tokens[activeIdx + 1];
   const wordWindowMs = (nextTok ? nextTok.fromMs : page.startMs + page.durationMs) - token.fromMs;
-  const fadeInMs = boundedFade(55, wordWindowMs);
-  const opacity = interpolate(since, [0, fadeInMs], [0, 1], {
-    extrapolateLeft: "clamp",
-    extrapolateRight: "clamp",
-  });
+  // CRISP ENTRANCE (Zac 2026-07-13): full opacity from frame 1 — no 0→1 ramp (the
+  // ghost). CleanCut's subtle scale+lift stays as the whisper on a fully-VISIBLE word.
+  const opacity = since >= 0 ? 1 : 0;
   // WS2 universal fast cap: the scale+lift motion is capped like the fade (was a
   // fixed 140ms that bypassed the bound — the caption still read slow).
   const _mms = boundedFade(140, wordWindowMs);

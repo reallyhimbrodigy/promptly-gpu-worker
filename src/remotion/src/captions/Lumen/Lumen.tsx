@@ -65,16 +65,11 @@ const LumenWord: React.FC<{
     extrapolateRight: "clamp",
   });
 
-  // WS2 fast-but-present (Zac 2026-07-12, overriding the identity-exemption):
-  // opacity resolves quickly so the word lands ON the beat — was the slow
-  // overdamped spring, which faded in well after the word was spoken. The soft
-  // 0.95→1 scale stays (Lumen's character); only the fade is made fast.
-  const fastOpacity = hasAppeared
-    ? interpolate(elapsed, [0, Math.max(2, Math.round(fps * 0.06))], [0, 1], {
-        extrapolateLeft: "clamp",
-        extrapolateRight: "clamp",
-      })
-    : 0;
+  // CRISP ENTRANCE (Zac 2026-07-13): full opacity from frame 1 — no 0→1 ramp (the
+  // ghost that made the word semi-transparent for a chunk of its life). The soft
+  // 0.95→1 scale-pop stays (Lumen's character) on a fully-VISIBLE word. The old
+  // fast-but-still-a-fade path is replaced by a hard step.
+  const fastOpacity = hasAppeared ? 1 : 0;
 
   // Lens flare sweep position — only for shine words
   const sweepPosition = hasShine && hasAppeared
