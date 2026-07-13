@@ -267,8 +267,16 @@ def _audible_word_onset_s(dg_words, idx):
     try:
         for _s0, _e0 in list(_LEVEL_SILENCES_LAST) + list(_WITHIN_WORD_SILENCES_LAST):
             _e0 = float(_e0)
-            # silence ended just before Deepgram's stamp → speech onset = its end
-            if _ds - 0.45 <= _e0 <= _ds + 0.02 and _e0 < _best:
+            # IMMEDIATE-PAUSE GATE (Zac 2026-07-12): correct ONLY when a real
+            # silence ends RIGHT BEFORE the word — an actual inter-word pause the
+            # word starts out of. The old 0.45s look-back grabbed FAR/spurious
+            # silences: a ground-truth audit showed 50/60 "corrected" words had
+            # continuous speech before them (no real pause), pulled back a uniform
+            # ~80ms by the prev-tail clamp — an inconsistent artifact every
+            # component inherited (the variable "feels off"). 0.15s = the max
+            # plausible Deepgram-late on a genuine post-pause word; continuous
+            # words now keep the raw Deepgram start, ONE consistent reference.
+            if _ds - 0.15 <= _e0 <= _ds + 0.02 and _e0 < _best:
                 _best = _e0
     except Exception:
         return _ds

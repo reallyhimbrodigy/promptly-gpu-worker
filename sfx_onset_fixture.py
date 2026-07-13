@@ -57,7 +57,6 @@ def build_fixture():
     words = r.json()["results"]["channels"][0]["alternatives"][0].get("words") or []
 
     # 3. TRUSTED silence-based onsets — the exact handler ground-truth path
-    H._WORD_ONSET_LAST.clear()  # ensure NO spectral correction contaminates the ground truth
     spans = [(float(w.get("start") or 0.0), float(w.get("end") or 0.0)) for w in words]
     floor, speech, rng = H._compute_floor_speech_range(src, spans)
     tap = {"floor": floor, "speech": speech, "range": rng,

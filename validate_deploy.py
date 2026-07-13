@@ -4967,6 +4967,14 @@ def _sfx_measurability():
     _h._LEVEL_SILENCES_LAST[:] = [(1.2, 1.52)]
     assert _h._sfx_onset_measurable(_dg, 1) is True
     assert _h._sfx_may_fire("popsfx", _dg, 1) is True, "sharp fires on a measurable onset"
+    # IMMEDIATE-PAUSE GATE (Zac 2026-07-12): a FAR silence (>0.15s before the word)
+    # must NOT correct — the ground-truth audit found the old 0.45s look-back grabbed
+    # far/spurious silences, pulling continuous words back a uniform ~80ms (the
+    # variable-timing artifact). Only an immediate pause corrects now.
+    _h._LEVEL_SILENCES_LAST[:] = [(1.1, 1.35)]   # ends 250ms before the 1.6 word
+    assert abs(_h._audible_word_onset_s(_dg, 1) - 1.6) < 1e-6, "FAR silence must NOT correct"
+    _h._LEVEL_SILENCES_LAST[:] = [(1.3, 1.52)]   # ends 80ms before → immediate pause
+    assert abs(_h._audible_word_onset_s(_dg, 1) - 1.52) < 1e-6, "IMMEDIATE pause must correct"
     _h._LEVEL_SILENCES_LAST[:] = []
     # BUILD #1 (Zac 2026-07-12): the post-cuts transcript TAGS each mid-phrase word
     # ⟨mid-phrase⟩ so Gemini can SEE where a percussive sound can't land and pick a
