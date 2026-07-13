@@ -300,6 +300,48 @@ def _broll_request_directive(vibe):
     )
 
 
+# ── THE HONESTY MECHANISM (Zac 2026-07-13, Gap 3 Item 2) — never silent-drop ──────
+# When the user asks for a capability the pipeline UNDERSTANDS but genuinely can't do
+# yet, surface it ("Promptly doesn't support X yet") instead of silently dropping it.
+# The user always knows: done, or explicitly can't-yet. Extends the human_summary
+# surfacing channel (re-edit + ambiguity only) to the INITIAL render path. High
+# precision — a supported ask (a vibe, a caption style, real b-roll, a negative)
+# surfaces nothing. AI place-gen is premium (Lumen), not on Flare; real b-roll of a
+# named place (Item 1) is the SUPPORTED path and is NOT flagged here.
+_UNSUPPORTED_CAPABILITIES = [
+    ("color grading", re.compile(
+        r"\b(colou?r[\s-]?grad\w*|colou?r[\s-]?correct\w*|\bLUT\b|teal and orange|cinematic colou?r|film emulation)\b", re.I)),
+    ("background music", re.compile(
+        r"\b(?:add|include|put|overlay|with|lay|drop|throw)\s+(?:in\s+|on\s+)?(?:some\s+|a\s+|the\s+|background\s+)*"
+        r"(?:music|soundtrack|song|beat|score)\b|\bbackground music\b", re.I)),
+    ("voiceover / AI narration", re.compile(
+        r"\b(voice[\s-]?over|ai voice|add (?:a )?narrat\w*|text[\s-]?to[\s-]?speech|\bTTS\b|"
+        r"read (?:it|this|the script|the text) (?:out|aloud))\b", re.I)),
+    ("changing the aspect ratio (videos render vertical 9:16)", re.compile(
+        r"\b(16[:x]9|4[:x]3|aspect[\s-]?ratio|make it (?:horizontal|landscape|square|widescreen)|"
+        r"(?:horizontal|landscape|widescreen)\s+(?:format|orientation|version)|square\s+(?:format|video|aspect))\b", re.I)),
+    ("adding a logo or watermark", re.compile(
+        r"\b(?:add|put|include|place|overlay|slap|use|want|stick)\s+(?:in\s+|on\s+)?(?:my |a |the |our )?"
+        r"(?:logo|watermark|brand mark)\b|\b(?:my|our)\s+(?:logo|watermark)\b", re.I)),
+    ("AI-generated images or scenes", re.compile(
+        r"\b(generat\w*\s+(?:an?\s+|the\s+)?(?:ai\s+)?(?:image|images|picture|scene|photo|visual)|"
+        r"ai[\s-]?generat\w*|create an image of|dream up (?:a|the)|imagine a scene|midjourney|dall[\s-]?e)\b", re.I)),
+]
+
+
+def _parse_unsupported_requests(text):
+    """User asks the pipeline understands but can't fulfill YET → honest surfacing
+    strings, deduped in order. The trust fix: the user always knows done-or-can't,
+    never a silent drop. Supported asks surface nothing."""
+    _t = str(text or "")
+    out, seen = [], set()
+    for _cap, _re in _UNSUPPORTED_CAPABILITIES:
+        if _cap not in seen and _re.search(_t):
+            seen.add(_cap)
+            out.append(f"Promptly doesn't support {_cap} yet.")
+    return out
+
+
 def _vibe_requests_captions(vibe):
     """F8 override — the instruction mappings win, as everywhere: an explicit
     captions-on ask in the vibe beats the double-caption coercion. Any
@@ -28435,6 +28477,22 @@ def handler(job):
             except Exception as _eg_err:
                 _enhancement_guard("user_style_profile", _eg_err, _floor_state['enhancements_dropped'])
 
+        # ── THE HONESTY MECHANISM (Gap 3 Item 2): surface what we understood but
+        # couldn't do, instead of a silent drop. (a) unsupported-but-understood
+        # capabilities in the vibe; (b) a REQUIRED user b-roll subject (Item 1) that
+        # got no footage after a real attempt. The user always knows done-or-can't.
+        _capability_notes = _parse_unsupported_requests(vibe)
+        _requested_broll = _parse_broll_requests(vibe)
+        if _requested_broll:
+            _resolved_kw = " ".join(str(_e.get("keyword") or "") for _e in resolved_broll_out).lower()
+            for _subj in _requested_broll:
+                # fetched if the resolved keywords contain the subject's head word(s)
+                _subj_words = [_w for _w in re.findall(r"[a-z0-9]+", _subj.lower()) if _w not in _BROLL_ARTICLES]
+                if _subj_words and not any(_w in _resolved_kw for _w in _subj_words):
+                    _capability_notes.append(f"Couldn't find footage for \"{_subj}\" — the rest of your edit is done.")
+        if _capability_notes:
+            print(f"[honesty] surfacing {len(_capability_notes)} capability note(s): {_capability_notes}", flush=True)
+
         result_payload = {
             "status": "success",
             "job_id": job_id,
@@ -28455,6 +28513,8 @@ def handler(job):
         }
         if change_summary:
             result_payload["change_summary"] = change_summary
+        if _capability_notes:
+            result_payload["capability_notes"] = _capability_notes
         # Include CDN video URL if available (direct S3 upload path)
         if edit_plan.get("_rendered_video_url"):
             result_payload["video_url"] = edit_plan["_rendered_video_url"]
@@ -28478,6 +28538,10 @@ def handler(job):
                 # edit's vocabulary — complete writes only (a failed job
                 # delivered no vocabulary).
                 "vocab": _vocab_markers(edit_plan),
+                # THE HONESTY MECHANISM (Gap 3 Item 2): the frontend reads the
+                # completion row — carry the honest capability notes here so the
+                # user is told what we couldn't do, never a silent drop.
+                "capability_notes": _capability_notes,
             },
         )
         return result_payload

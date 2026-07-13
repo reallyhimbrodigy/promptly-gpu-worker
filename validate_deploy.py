@@ -5204,6 +5204,29 @@ def _gap3_broll_place_fetch():
     assert _h._broll_request_directive("make it viral") == "", "no request → no injection"
 
 
+@check("GAP 3 Item 2 (Zac 2026-07-13): THE HONESTY MECHANISM — an unsupported-but-understood ask (color grade, music, voiceover, aspect-ratio, logo, AI-gen) is SURFACED ('Promptly doesn't support X yet') on the INITIAL render path via capability_notes, never silent-dropped; a REQUIRED user b-roll that got no footage after a real attempt surfaces honestly too; supported asks surface nothing")
+def _gap3_honesty_mechanism():
+    import handler as _h
+    _src = open("handler.py").read()
+    assert "def _parse_unsupported_requests(" in _src, "the unsupported-capability parser must exist"
+    # each capability class is detected + surfaced honestly
+    for _ask, _needle in [("color grade this", "color grad"), ("add background music", "music"),
+                          ("add a voiceover", "voice"), ("make it 16:9", "aspect"),
+                          ("put my logo on it", "logo"), ("generate an ai image of a city", "generat")]:
+        _n = _h._parse_unsupported_requests(_ask)
+        assert any(_needle in _m.lower() for _m in _n), f"'{_ask}' must surface a note"
+        assert all("Promptly" in _m and "yet" in _m.lower() for _m in _n), "notes are honest 'Promptly … yet'"
+    # NO false positives — supported asks stay silent (incl. real b-roll of a place)
+    assert _h._parse_unsupported_requests("make it punchy, show Ahmedabad, no zooms") == [], \
+        "a supported vibe + real b-roll + a negative surface nothing"
+    assert _h._parse_unsupported_requests("keep it vertical 9:16") == [], "vertical 9:16 is the supported format"
+    assert _h._parse_unsupported_requests("a video about music theory") == [], "a topic mention is not a music-add ask"
+    # the channel is extended to the INITIAL render path: surfaced on result + completion write
+    assert _src.count("capability_notes") >= 3, "capability_notes must be computed + on result_payload + in the status write"
+    assert "_parse_broll_requests(vibe)" in _src and "Couldn't find footage" in _src, \
+        "Item 1 part 3: a REQUIRED b-roll with no footage surfaces honestly (never silent)"
+
+
 @check("D1 perceptual sync: ONE audible-onset derivation consumed by emphasis t + SFX + projected anchors; the projection reads the render_timeline arithmetic (frames cursor); D2 floors live")
 def _d1_perceptual_sync():
     import handler as _h
