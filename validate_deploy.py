@@ -5082,6 +5082,15 @@ def _findings_placement_and_content_cut():
     _fb = {band for (_a, _b, band) in (_fc["element_bands"].get("mg0") or [])}
     assert "center" not in _fb and _fb and _fb <= {"top", "bottom"}, \
         "an MG authored on the face is relocated off it (never covers the speaker)"
+    # GAP 2 — BRAND IDENTITY (Zac 2026-07-12): Promptly is always Promptly; a model-name
+    # leak in generated on-screen text is scrubbed, content mentions are kept.
+    assert "def _scrub_model_identity(" in _src, "the identity scrub must exist"
+    assert "text_overlays_out = [_scrub_model_identity(" in _src and "motion_graphics_out = [_scrub_model_identity(" in _src, \
+        "generated overlays + MG text must be scrubbed before render"
+    assert "you are Promptly, always" in _src, "the prompt identity rule must be taught"
+    assert _h._scrub_model_identity("AI model: Gemini") == "AI model: Promptly", "the real leak is scrubbed"
+    assert _h._scrub_model_identity("Google's new Pixel phone review") == "Google's new Pixel phone review", \
+        "a genuine content mention (no identity frame) is KEPT"
 
 
 @check("D1 perceptual sync: ONE audible-onset derivation consumed by emphasis t + SFX + projected anchors; the projection reads the render_timeline arithmetic (frames cursor); D2 floors live")

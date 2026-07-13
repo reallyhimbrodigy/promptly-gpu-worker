@@ -4184,6 +4184,8 @@ SPEAKER POSITIONS (where each speaker sits in frame, by diarization + face detec
     system_instruction = f"""=== YOUR JOB ===
 You are the editor inside Promptly. Every video you will ever receive is UGC — one real person talking to a phone camera for TikTok, Reels, or Shorts: pitches, storytimes, teach-downs, rants, demos. The whole genre lives on a phone screen held eighteen inches from a face, and the person who hit record is handing you their take; what you return is the version they wish they'd made.
 
+**YOUR IDENTITY — you are Promptly, always. You are NOT Gemini, Google, or any other model, and you never name one in anything you generate. If a user asks what you are, what AI or model you are, who made this, or who edited it, the answer is "Promptly" — every time, no exception. Any text you author (an overlay, a caption, a graphic label) that would name Gemini or any underlying model names Promptly instead. Promptly is the product and the only identity that ever appears on screen.**
+
 Elite UGC has one grammar. It is LEAN — every second earns its place, the dead weight is cut, and the run of clean jump cuts IS the pace. It is FAST — captions ride the voice word for word and the energy compounds toward the payoff. And it is INTENTIONAL — an element is on screen because a specific moment asked for it, and density is welcome, even heavy, exactly as far as every piece can name its moment. Viewers couldn't recite this grammar, but they feel every break in it: they leave when it drags (THIN), when the person gets buried (STACKED), and when the screen is busy yet hollow (DECORATED).
 
 DONE looks like this: the take is tighter than the human left it, the hook lands inside two seconds, every component survives the question "which moment asked for you?", the payoff is the loudest thing in the edit, and the person stays the star throughout. You are the taste this footage was waiting for — each video gets the edit its own moments ask for.
@@ -5701,6 +5703,34 @@ def _force_caption_position_around_overlays(
 # DropCard are candidate top-pins pending a renderer-behavior confirmation —
 # adding them is a post-cutover refinement, not a parity baseline.
 _COMPOSER_TOP_PINNED_MG = frozenset({"Notification"})
+
+
+_MODEL_NAME_RE = re.compile(
+    r"\b(gemini|google(?:'s)?|bard|gpt-?[0-9.]*|openai|chatgpt|claude|anthropic|llama|mistral|copilot|deepmind)\b",
+    re.IGNORECASE)
+_IDENTITY_FRAME_RE = re.compile(
+    r"\b(ai|a\.i\.|model|assistant|editor|edited|edits|editing|made|built|powered|created|creates|created by|"
+    r"version|engine|llm|which model|what model|what ai|who made|behind|running on|based on|tech|technology|brain)\b",
+    re.IGNORECASE)
+
+
+def _scrub_model_identity(val):
+    """BRAND IDENTITY (Zac 2026-07-12): Promptly is ALWAYS Promptly — Gemini (or any
+    underlying model) must NEVER appear in GENERATED on-screen text where it names the
+    product or itself (a real render leaked 'AI model: Gemini'). Recursively scrubs
+    strings: when a string carries an IDENTITY FRAME (ai/model/made/powered/who/what…)
+    alongside a model name, the model name → 'Promptly'. Genuine CONTENT mentions (a
+    review of Google's phone, with no identity frame) are left untouched — only
+    self-reference leaks are replaced. Belt-and-suspenders to the prompt identity rule."""
+    if isinstance(val, str):
+        if _MODEL_NAME_RE.search(val) and _IDENTITY_FRAME_RE.search(val):
+            return _MODEL_NAME_RE.sub("Promptly", val)
+        return val
+    if isinstance(val, dict):
+        return {_k: _scrub_model_identity(_v) for _k, _v in val.items()}
+    if isinstance(val, list):
+        return [_scrub_model_identity(_v) for _v in val]
+    return val
 
 
 def _compose_band_occupancy(
@@ -21289,6 +21319,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # caption_position_segments_out is sent to the Remotion overlay input.
     # Every reposition is logged via _record_divergence — grep
     # [divergence] component=caption_position for the exact frames.
+    # BRAND IDENTITY (Zac 2026-07-12): scrub any Gemini / underlying-model-name leak
+    # from GENERATED on-screen text (overlays + MG labels) — Promptly is always
+    # Promptly. A real render leaked "AI model: Gemini". Captions are the user's own
+    # speech (untouched); this only touches text the pipeline authored.
+    text_overlays_out = [_scrub_model_identity(_ov) for _ov in text_overlays_out]
+    motion_graphics_out = [_scrub_model_identity(_mg) for _mg in motion_graphics_out]
     _broll_ranges_for_caption_override = [
         (int(_b.get("fromFrame") or 0),
          int(_b.get("fromFrame") or 0) + int(_b.get("durationInFrames") or 0))
