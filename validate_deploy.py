@@ -5139,33 +5139,49 @@ def _findings_placement_and_content_cut():
         "'no SFX' strips every SFX (discrete + emphasis rider)"
 
 
-@check("PART 2 (Zac 2026-07-12): vibe-aware component palettes — free-text vibe → one of four families (corporate/viral/educational/story), each a DEFAULT toolkit taught in the prompt (below user instructions, above Gemini's pick); no-match→viral, multi-match→restraint precedence; specific-sound negatives ('no booms') suppress one sound even against the palette; caption SPEED stays universal")
-def _part2_vibe_palettes():
+@check("PART 2 REFRAME (Zac 2026-07-13): vibe-appropriate selection is EMERGENT from per-component fitness — every SFX/transition/zoom/MG carries its OWN **FITS:**/**FIGHTS:** clause (the caption standard); the 4-bucket _VIBE_PALETTES table is RETIRED (it leaked); vibe stays as context; the user obedience floor (_enforce_sound_negatives) stays deterministic; content-gated components DISCOURAGE not suppress")
+def _part2_component_fitness():
     import handler as _h
     _src = open("handler.py").read()
-    assert "def _classify_vibe(" in _src and "def _vibe_palette_block(" in _src and "_VIBE_PALETTES" in _src, \
-        "the vibe classifier + palettes must exist"
-    assert "_vibe_palette_block(vibe)" in _src, "the palette block must be injected into the prompt (scoped by vibe)"
-    # classifier: precedence + fallback (every video gets a coherent palette)
-    assert _h._classify_vibe("a corporate explainer") == "corporate", "restraint precedence (corporate>educational)"
-    assert _h._classify_vibe("") == "viral" and _h._classify_vibe("just make it good") == "viral", \
-        "no-match defaults to viral — never falls through to the whole toolbox"
-    # tonal split: corporate = quiet/no-booms + CleanCut; viral = full kit + kinetic
-    _corp = _h._vibe_palette_block("corporate saas")
-    assert "QUIET only" in _corp and "NO booms" in _corp and "CleanCut" in _corp, "corporate = restrained"
-    assert "boom" in _h._vibe_palette_block("viral hype"), "viral = the full kit"
-    # specific-sound negative wins over the palette (user > vibe)
+    # the palette table is GONE — no definition, no classifier, no palette block, no injection
+    # (the retirement comment may still NAME _VIBE_PALETTES; what must be gone is the DEFINITION)
+    assert "_VIBE_PALETTES = {" not in _src and "def _classify_vibe(" not in _src \
+        and "def _vibe_palette_block(" not in _src, "the leaky palette table must be retired"
+    assert "_vibe_palette_block(vibe)" not in _src, "the palette block must no longer be injected"
+    # every component now carries its own fitness — 59 (15 SFX + 6 zoom + 9 transition
+    # + 2 overlay + 27 MG); if one is missing the count drops below the floor
+    assert _src.count("**FITS:**") >= 59 and _src.count("**FIGHTS:**") >= 59, \
+        f"all 59 components must self-describe fitness (got FITS={_src.count('**FITS:**')})"
+    # RULING 1 — boom is viral/punchy ONLY; cinematic/story is now a FIGHT (it punches, a climax swells)
+    _boom = _src[_src.index("**boom** —"):_src.index("**boom** —") + 700]
+    assert "**FITS:** viral, punchy" in _boom and "corporate" in _boom.split("**FIGHTS:**")[1][:200] \
+        and "cinematic" in _boom.split("**FIGHTS:**")[1][:200], "boom Fights corporate AND cinematic (the corporate fix + Ruling 1)"
+    # CHANGE 1 — money-ching widened past SMMA; CHANGE 2 — PullQuote reclassified loud, not universal
+    assert "**FITS:** viral, casual, product, hustle" in _src, "money-ching widened"
+    assert "**FITS:** viral, punchy, motivational, bold" in _src, "PullQuote is loud, not universal"
+    # RULING 2 / CHANGE 3 — content-gated DISCOURAGES: a real tweet fits ANY vibe, the lean only warns
+    _tweet = _src[_src.index("**TweetBubble**"):_src.index("**TweetBubble**") + 900]
+    assert "**FITS:** any vibe" in _tweet and "discourage" in _tweet.lower(), \
+        "content-gated components fit any vibe when content is present; the tonal lean only discourages"
+    # CHANGE 4 — SmoothPush gains the frenetic-viral drag note
+    assert "very fast/frenetic viral" in _src, "SmoothPush warns it drags in a frenetic edit"
+    # CHANGE 5 — the 4 drifted caption descriptions corrected to match the renderer
+    assert "cyan tint (#5ED4E8)" in _src and "keywords go coral (#FF6B4A)" in _src \
+        and "gold shine sweep" in _src and "gold (#E8D44D), quick fade in/out" in _src, \
+        "the 4 caption descriptions now match what the renderer actually does"
+    assert "blue tint (#3BA5FF)" not in _src and "keywords go cyan (#00BFFF)" not in _src, "stale caption colors removed"
+    # the USER obedience floor is UNTOUCHED — 'no booms' still strips deterministically
     assert "def _parse_sound_negatives(" in _src and "_enforce_sound_negatives(edit_plan" in _src, \
-        "specific-sound negatives must be captured + enforced"
-    assert _h._parse_sound_negatives("viral but no booms") == {"boom"}, "'no booms' suppresses just boom"
+        "the specific-sound obedience floor must stay"
+    assert _h._parse_sound_negatives("viral but no booms") == {"boom"}, "'no booms' still suppresses boom"
     assert _h._parse_sound_negatives("corporate add a boom") == set(), "a requested boom is not a negative"
     _pl = {"emphasis_moments": [{"sound": "boom"}, {"sound": "punchsfx"}], "sound_effects": [{"sound": "boom"}]}
     _h._enforce_sound_negatives(_pl, {"boom"})
     assert _pl["emphasis_moments"][0]["sound"] == "voice" and _pl["emphasis_moments"][1]["sound"] == "punchsfx" \
         and _pl["sound_effects"] == [], "'no booms' strips boom, keeps other sounds"
-    # caption SPEED is universal — the vibe sets style, never speed
+    # caption SPEED stays universal — a vibe sets style, never speed
     assert "MAX_ENTRANCE_MS = 80" in open("src/remotion/src/captions/shared/fadeTiming.ts").read(), \
-        "the universal fast cap must exist (a 'cinematic' vibe can never reintroduce slow captions)"
+        "the universal fast cap must exist"
 
 
 @check("D1 perceptual sync: ONE audible-onset derivation consumed by emphasis t + SFX + projected anchors; the projection reads the render_timeline arithmetic (frames cursor); D2 floors live")
