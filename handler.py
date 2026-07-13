@@ -4626,7 +4626,7 @@ CAPTION POSITION — collision procedure
 
 caption_position_changes entries: {{"word_index": int, "position": "top" | "center" | "bottom"}} — captions move at that word and stay until the next change. Default is bottom at word 0; bottom is the resting state, and every move away from it gets a matching move back when the trigger ends. Each position holds ≥1.5s (≈4-6 words); shorter reads as flicker.
 
-**The pipeline owns caption position during MG and B-roll windows** — it force-flips captions away from any motion graphic's zone and to the top during B-roll, frame-precisely. The pipeline's force-flip owns those windows and handles them frame-precisely — caption_position_changes apply everywhere else on the timeline. You emit manual changes for exactly TWO cases:
+**The pipeline owns caption position during MG and B-roll windows** — it force-flips captions away from any motion graphic's zone, and to the lower third during B-roll (clear of the b-roll subject, whose face sits upper-center), frame-precisely. The pipeline's force-flip owns those windows and handles them frame-precisely — caption_position_changes apply everywhere else on the timeline. You emit manual changes for exactly TWO cases:
 
 1. **text_overlay windows.** The pipeline does not auto-resolve text_overlay/caption collisions. sticky_note occupies the upper third, caption_match its position prop. Captions default to bottom, so most overlay placements need no change — but if anything has moved captions to top or center, return them to bottom for the overlay's word range, or place the overlay at a different time.
 2. **Face-position windows.** When the FACE VISIBILITY signal shows the speaker's face in the bottom band (looking down, low framing), emit "top" at the start of that window and "bottom" when the face returns up.
@@ -5654,10 +5654,14 @@ def _force_caption_position_around_overlays(
 
     Per-frame zone-occupancy rule:
 
-      B-roll alone               → captions forced to TOP
-        B-roll is a full-canvas cutaway. "bottom" sits near the platform
-        UI rail; "center" lands on the focal subject of the cutaway.
-        "top" is the readable safe zone.
+      B-roll alone               → captions forced to LOWER third (bottom)
+        B-roll is a full-canvas cutaway and the pipeline is BLIND to its
+        content (face detection runs only on the source speaker). Portrait
+        Pexels clips of people/places put the SUBJECT'S FACE at the top —
+        so "top" lands on it. The lower third is the clear zone for the
+        overwhelming majority of portrait subjects; that is the base
+        position. Only if an MG already holds the bottom do we step to
+        center. Never top over b-roll (Zac 2026-07-13).
 
       MG occupies TOP only       → captions forced to BOTTOM
         Notification always renders top (drop-down animation), and any
@@ -5750,8 +5754,20 @@ def _force_caption_position_around_overlays(
         forced = None
         reason = None
         if in_broll:
-            forced = "top"
-            reason = "broll_window"
+            # B-roll subjects (portrait Pexels clips of people/places) sit UPPER /
+            # upper-center — the FACE is at the TOP. The lower third is the clear zone.
+            # (Zac 2026-07-13: a caption force-flipped to top landed squarely on the
+            # b-roll subject's face while the middle/lower sat empty.) The pipeline is
+            # blind to b-roll content — no face detection runs on the fetched clip — so
+            # we default to the base LOWER third, which is clear for the overwhelming
+            # majority of portrait subjects. Step to center only if an MG already holds
+            # the bottom here. NEVER top — that is exactly where the b-roll subject is.
+            if "bottom" in zones_occupied:
+                forced = "center"
+                reason = "broll_window_bottom_mg"
+            else:
+                forced = "bottom"
+                reason = "broll_window"
         elif zones_occupied == {"top", "bottom"}:
             forced = "center"
             reason = "mg_top_and_bottom_both_occupied"

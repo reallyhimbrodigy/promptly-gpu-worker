@@ -331,24 +331,27 @@ def _caption_override_both_zones_occupied():
     assert _pos_at(out, 400) == "bottom"
 
 
-@check("caption override forces TOP during B-roll windows")
-def _caption_override_broll_forces_top():
-    """B-roll is full-canvas. Captions forced to top regardless of Gemini's choice."""
+@check("caption override forces the LOWER THIRD during B-roll (never top — the b-roll subject's face is upper-center; Zac 2026-07-13)")
+def _caption_override_broll_forces_lower():
+    """B-roll is full-canvas and the pipeline is blind to its content. Portrait
+    subjects sit upper-center → the lower third is clear. Captions default LOWER over
+    b-roll, never top (which lands on the b-roll subject's face)."""
     segments = [
-        {"fromFrame": 0,   "toFrame": 200, "position": "bottom"},
-        {"fromFrame": 200, "toFrame": 500, "position": "center"},
-        {"fromFrame": 500, "toFrame": 800, "position": "bottom"},
+        {"fromFrame": 0,   "toFrame": 200, "position": "top"},
+        {"fromFrame": 200, "toFrame": 500, "position": "top"},
+        {"fromFrame": 500, "toFrame": 800, "position": "top"},
     ]
     broll_ranges = [(150, 250), (550, 650)]
     out = handler._force_caption_position_around_overlays(segments, [], broll_ranges)
-    # Inside B-roll: top.
-    assert _pos_at(out, 180) == "top",  f"inside first B-roll window, expected top, got: {out}"
-    assert _pos_at(out, 220) == "top",  f"inside first B-roll (crossing orig boundary), expected top, got: {out}"
-    assert _pos_at(out, 600) == "top",  f"inside second B-roll window, expected top, got: {out}"
-    # Outside B-roll: Gemini's original choice preserved.
-    assert _pos_at(out, 100) == "bottom"
-    assert _pos_at(out, 400) == "center"
-    assert _pos_at(out, 700) == "bottom"
+    # Inside B-roll: LOWER (bottom), NEVER top — even when Gemini authored top.
+    assert _pos_at(out, 180) == "bottom", f"inside first B-roll window, expected bottom, got: {out}"
+    assert _pos_at(out, 220) == "bottom", f"inside first B-roll (crossing boundary), expected bottom, got: {out}"
+    assert _pos_at(out, 600) == "bottom", f"inside second B-roll window, expected bottom, got: {out}"
+    assert all(s["position"] != "top" for s in out if 150 <= int(s["fromFrame"]) < 250), "b-roll never forces top"
+    # B-roll + an MG holding the bottom → center (bottom taken), still never top.
+    _mgb = [{"type": "StatCard", "fromFrame": 150, "durationInFrames": 100, "props": {"anchor": "bottom"}}]
+    _o2 = handler._force_caption_position_around_overlays(segments, _mgb, [(150, 250)])
+    assert _pos_at(_o2, 180) == "center", f"b-roll + MG-at-bottom → center, got: {_o2}"
 
 
 # ─── 3b. ZOOM-ORIGIN FACE-LOCK ────────────────────────────────────────
