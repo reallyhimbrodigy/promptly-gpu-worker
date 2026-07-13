@@ -19836,7 +19836,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 "projection_miss_drop",
                 reason="anchor word not on output timeline (transition-tail/refinement)")
             continue
-        _out_start = float(_pw["start"])
+        # ONE CLOCK (Zac 2026-07-12): every word-anchored component reads the SAME
+        # audible-onset reference (audible_start) — SFX/zoom/caption already do.
+        # Placing on raw _pw["start"] put overlays/MGs/b-roll on a different clock,
+        # ~correction-late vs the SFX/zoom on the same word (split-clock timing).
+        _out_start = float(_pw.get("audible_start") or _pw["start"])
         _entry = {
             "variant": _ov["variant"],
             "fromFrame": int(round(_out_start * source_fps)),
@@ -20111,7 +20115,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 "projection_miss_drop",
                 reason="anchor word not on output timeline (transition-tail/refinement)")
             continue
-        _out_start = float(_pw_start["start"])
+        # ONE CLOCK (Zac 2026-07-12): the MG arrives on the SAME audible onset as
+        # the SFX/zoom on its word (was raw _pw["start"] = a different clock).
+        _out_start = float(_pw_start.get("audible_start") or _pw_start["start"])
         _out_end = float(_pw_end["end"])
         # Preserve _sw_source / _ew_source for the diagnostics print at the
         # bottom of the loop.
@@ -20231,7 +20237,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 "projection_miss_drop",
                 reason="anchor word not on output timeline (transition-tail/refinement)")
             continue
-        _em_t_out = float(_em_pw["start"])
+        # ONE CLOCK (Zac 2026-07-12): the emphasis MG shares the audible onset with
+        # its zoom (both on this emphasis) — was raw _pw["start"] = a split clock.
+        _em_t_out = float(_em_pw.get("audible_start") or _em_pw["start"])
         _em_t_frame = int(round(_em_t_out * source_fps))
 
         # Zoom is already attached to validated_cuts during the validation
@@ -20479,7 +20487,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _pw_end = _pw_by_idx.get(_br_ew)
         if not _pw_start or not _pw_end:
             continue
-        _out_start = float(_pw_start["start"])
+        # ONE CLOCK (Zac 2026-07-12): b-roll enters on the same audible onset as
+        # every other word-anchored component (was raw _pw["start"]).
+        _out_start = float(_pw_start.get("audible_start") or _pw_start["start"])
         _out_end = float(_pw_end["end"])
         if _out_start >= total_output_duration or _out_end <= _out_start:
             continue

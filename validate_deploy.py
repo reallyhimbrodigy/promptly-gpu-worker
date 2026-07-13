@@ -4919,6 +4919,11 @@ def _caption_audible_onset():
     assert abs(_b["audible_start"] - 1.52) < 0.02 and abs(_b["start"] - 1.60) < 0.02, \
         "post-silence word: audible_start pulled to the onset, raw start intact"
     _h._LEVEL_SILENCES_LAST[:] = []; _h._WITHIN_WORD_SILENCES_LAST[:] = []
+    # ONE CLOCK (Zac 2026-07-12): EVERY word-anchored component reads the same
+    # audible-onset reference — caption builder + text-overlay + MG + emphasis-MG
+    # + b-roll all consume audible_start (was raw _pw["start"] = a split clock).
+    assert _src.count('.get("audible_start")') >= 5, \
+        "all word-anchored placements (overlay/MG/emphasis-MG/broll/caption) must read audible_start — one clock"
 
 
 @check("ITEM 2 MG entrance-arrival (Zac 2026-07-12): the measured MGAttackProbe attacks are wired into fromFrame (settle for pops, container-arrival min(hit,settle) for the 7 sequenced/count-up types) so an MG lands SETTLED on its anchor word — replacing the 0.25*duration guess; both placement sites shift fromFrame by _mg_attack_frames")
