@@ -165,7 +165,6 @@ _MG_STOPWORDS = frozenset(
 # "list[]", "list[].field", "obj.field". Enum/color/numeric knobs are not text.
 _MG_TEXT_FIELDS = {
     "StatCard": ("label", "prefix", "suffix"),
-    "NumberTicker": ("prefix", "suffix"),
     "ProgressBar": ("label",),
     "BarRace": ("bars[].label",),
     "RankedList": ("items[].label", "items[].value", "items[].rank"),
@@ -200,7 +199,6 @@ _MG_TEXT_FIELDS = {
 # transcript's numerals (spelled or digit form; vibe/identity numerals count).
 _MG_NUMBER_FIELDS = {
     "StatCard": ("value", "fromValue"),
-    "NumberTicker": ("value", "fromValue"),
 }
 
 _MG_WORD_NUMBERS = {
@@ -4487,7 +4485,7 @@ The plan reads the video's phases and sets each phase's energy from the footage:
 
   • **hook** (opens at hook_word_index, 1-5 words, intensity 0.7-1.0) — the viewer's thumb is hovering over the swipe-away. Feeling: "wait, what is this?" Treatment: instant grip in the first 2s, optionally one opening text_overlay landing the curiosity gap. The face carries the hook — B-roll and heavy MGs enter after it (exception: when the hook IS a visual claim — "look at this thing in my backyard" — the B-roll is the hook).
 
-  • **build** (the bulk of the runtime, intensity 0.2-0.5) — the viewer committed attention and wants to be rewarded for it. Feeling: "they're SHOWING me the world, not narrating at me." Treatment: this is where the carrier layer lives — B-roll on the concrete nouns, MGs on the off-camera referents, the process instruments on their beats (a Timeline or StepDivider marking stages, a RankedList or DropCard carrying an enumerated framework, a NumberTicker tracking a running value); boundaries inside build usually play straight, and a transition there marks a genuine turn. Zooms belong to peaks — build stretches run flat, and that flatness is the contrast a peak's zoom lands against.
+  • **build** (the bulk of the runtime, intensity 0.2-0.5) — the viewer committed attention and wants to be rewarded for it. Feeling: "they're SHOWING me the world, not narrating at me." Treatment: this is where the carrier layer lives — B-roll on the concrete nouns, MGs on the off-camera referents, the process instruments on their beats (a Timeline or StepDivider marking stages, a RankedList or DropCard carrying an enumerated framework, a ProgressBar tracking a value toward a target); boundaries inside build usually play straight, and a transition there marks a genuine turn. Zooms belong to peaks — build stretches run flat, and that flatness is the contrast a peak's zoom lands against.
 
   • **mid_peak** (1-4 per video, each a key_moments entry, intensity 0.6-0.85) — a beat lands: a fact, a reaction, a punchline mid-arc. Feeling: a small "oh!" registered in the body. Treatment: punctuation — quick in, quick out; a hit/pop/ding when this peak is one of the video's hits, the voice when it isn't — read the moment, not the safe side. Match the size of the moment exactly; this is a real peak but not THE peak.
 
@@ -4709,7 +4707,7 @@ Component sizes:
   • TOP-PINNED — Notification, StickyNotes, DropBanner, DropCard: ALWAYS render in the top band regardless of anchor (the metaphor depends on it). Emit anchor "upper_third_safe" so your spec matches reality.
   • LARGE — IMessageBubble, ChatThread, RecordingFrame, PullQuote, EditorialQuote, SectionDivider, StepDivider: ≥half canvas height (the divider/quote cards are full-frame takeover moments — captions rest for their window). LARGE MGs resolve clear of the visible face — the render keeps the person visible; a B-roll window where the face is gone gives them the full upper third, and a smaller variant fits alongside a face that stays.
   • MEDIUM — TweetBubble, InstagramComment, TikTokComment, StatCard, RankedList, Timeline, TimelineRoadmap, Stamp, BarRace, MouseDrag: 25-40% canvas height. upper_third_safe works when the face is clearly center-or-lower; if the card would touch the face from above, use lower_third_safe with captions flipped to top, or a B-roll window.
-  • SMALL — AnnotationArrow, ProgressBar, NumberTicker, Reticle, PillCluster: <20% canvas. Any anchor; upper_third_safe is safe by construction.
+  • SMALL — AnnotationArrow, ProgressBar, Reticle, PillCluster: <20% canvas. Any anchor; upper_third_safe is safe by construction.
   • FULL-WIDTH — PillMarquee: an edge-to-edge scrolling band; it rides the upper or lower band (emit upper_third_safe or lower_third_safe) and stays clear of the face like every other anchor.
 
 **Base layout — the three component types live in three different bands so the frame reads coherent, not scattered. This is the STANDARD; deviate only when a moment genuinely calls for it, and know it's a deliberate departure from the default:**
@@ -4733,11 +4731,8 @@ Each entry carries a generic `props` dict — fill it from the shape shown — a
 
 ── WHEN A NUMBER LANDS ──
 
-**StatCard** (MEDIUM) — hero number (~120-180pt, white) counting up digit-by-digit from 0 (or fromValue) to target; accent divider drawing in; caps label below; optional prefix/suffix. No card background — the number floats over the footage. Claim: "The HEADLINE NUMBER the speaker just stated, full size." The check before placing: can you quote the dialogue line where the speaker says THAT number as the moment's headline? "We hit a hundred thousand subscribers" → value=100000, label="SUBSCRIBERS". A StatCard is a quoted line — the number or claim comes verbatim from the dialogue. A number that should itself MOVE is NumberTicker; numbers racing each other are BarRace. **FITS:** any vibe — a quoted headline number lands anywhere; the clean floating figure leans professional/business/educational. **FIGHTS:** nothing tonally — only wrong without a real quoted number.
+**StatCard** (MEDIUM) — hero number (~120-180pt, white) counting up digit-by-digit from 0 (or fromValue) to target; accent divider drawing in; caps label below; optional prefix/suffix. No card background — the number floats over the footage. Claim: "The HEADLINE NUMBER the speaker just stated, full size." The check before placing: can you quote the dialogue line where the speaker says THAT number as the moment's headline? "We hit a hundred thousand subscribers" → value=100000, label="SUBSCRIBERS". A StatCard is a quoted line — the number or claim comes verbatim from the dialogue. Numbers racing each other are BarRace. **FITS:** any vibe — a quoted headline number lands anywhere; the clean floating figure leans professional/business/educational. **FIGHTS:** nothing tonally — only wrong without a real quoted number.
 Props: {{ "value": 100000, "label": "SUBSCRIBERS", "prefix"?: "$", "suffix"?: "%" | "K" | "M" | "+", "fromValue"?: number, "decimals"?: int, "accentColor"?: "#hex" }}
-
-**NumberTicker** (SMALL) — a compact counter, corner- or edge-anchored, that springs in and rolls from fromValue up to value with steady tabular digits; optional prefix/suffix and a pulsing "live" dot. No divider, no caps label, no card — the rolling number is the whole graphic. Claim: "this number is climbing live." Use when the dialogue tracks a value in motion or a running tally the speaker keeps coming back to — a follower count ticking up, "we're at twelve thousand and rising." The headline number stated full-size and center → StatCard; a value advancing toward a known target → ProgressBar. **FITS:** any vibe, leans business/hustle/social — a live/running number. **FIGHTS:** nothing tonally; needs a value genuinely in motion.
-Props: {{ "value": 12000, "fromValue"?: 0, "prefix"?: "$", "suffix"?: "+"|"%"|"K"|"M", "decimals"?: int, "live"?: true, "accentColor"?: "#hex", "anchor"?: "upper_third_safe"|"center"|"lower_third_safe" }}
 
 **ProgressBar** (SMALL) — horizontal bar, gray track, white fill, optional gold eyebrow label (#D4A12A); fill expands 0 → target with the number counting up; milestone ticks light as crossed. Claim: "Here is the quantitative ARC — watch it advance." Use when the dialogue gives a current value, a target, and motion between them ($47K of $100K). Static numbers → StatCard. Dated beats are Timeline; a plan with stages is TimelineRoadmap. **FITS:** educational, corporate, business — a quantitative arc. **FIGHTS:** cinematic, story — a UI bar breaks the mood; needs a real value + target.
 Props (value mode): {{ "value": 47000, "total": 100000, "label"?: "FUNDRAISING GOAL", "fillColor"?: "#hex", "accentColor"?: "#hex" }}
@@ -5059,7 +5054,7 @@ Caption style: Pulse — rapid-fire quiz energy in paired coral pops, one beat p
 EXAMPLE 2 — mid-arc teach-down, three-point listicle
 ──────────────────────────────────────────
 
-Caption style: TwoTone — structured teaching reads cleanest in a two-color system. A RankedList builds as the speaker enumerates ("the dialogue counts, the list renders the counting"), point two's figure rides a NumberTicker inside a StepZoom ("the number itself should move"), and a ding lands each item. The third point's window stayed speaker-only — the gesture carried it.
+Caption style: TwoTone — structured teaching reads cleanest in a two-color system. A RankedList builds as the speaker enumerates ("the dialogue counts, the list renders the counting"), point two's figure lands on a StatCard inside a StepZoom ("the number counts up as the point lands"), and a ding lands each item. The third point's window stayed speaker-only — the gesture carried it.
 
 ──────────────────────────────────────────
 EXAMPLE 3 — storytime payoff
@@ -12544,8 +12539,8 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                         reason="grounding below threshold after predicate v2 — "
                                "card dropped, plan survives (K7)")
                     continue
-                # F5.3: StatCard/NumberTicker values validate against the
-                # transcript's numerals (spelled or digit; vibe/identity count).
+                # F5.3: StatCard values validate against the transcript's
+                # numerals (spelled or digit; vibe/identity count).
                 for _f5_nf in _MG_NUMBER_FIELDS.get(_mg_type, ()):
                     _f5_nv = _props.get(_f5_nf)
                     if _f5_nv is None:
@@ -15474,7 +15469,7 @@ _SFX_ATTACK_MS = {
 # beat, not the full count). fromFrame is shifted this many ms EARLIER so the MG
 # is SETTLED on its anchor word — the visual analog of the SFX peak-on-word.
 _MG_SEQUENCED = frozenset({  # content builds after the container arrives
-    "BarRace", "NumberTicker", "ProgressBar", "RankedList", "StatCard",
+    "BarRace", "ProgressBar", "RankedList", "StatCard",
     "Timeline", "TimelineRoadmap",
 })
 _MG_ATTACK_MS = {
@@ -15485,7 +15480,7 @@ _MG_ATTACK_MS = {
     "Reticle": 83, "SectionDivider": 167, "Stamp": 67, "StickyNotes": 150,
     "StepDivider": 550, "TikTokComment": 50, "TweetBubble": 50,
     # sequenced/count-up → container-arrival min(hit, settle)
-    "BarRace": 267, "NumberTicker": 200, "ProgressBar": 167, "RankedList": 533,
+    "BarRace": 267, "ProgressBar": 167, "RankedList": 533,
     "StatCard": 83, "Timeline": 200, "TimelineRoadmap": 233,
     # MouseDrag + PillCluster rendered blank in the battery (probe props wrong,
     # not a production defect) — unmeasured; they take _MG_ATTACK_DEFAULT_MS.

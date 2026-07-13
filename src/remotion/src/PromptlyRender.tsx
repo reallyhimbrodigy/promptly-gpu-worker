@@ -79,7 +79,7 @@ import {
   StickyNotes, RecordingFrame,
   TweetBubble, InstagramComment, IMessageBubble, TikTokComment,
   // Batch 2 (16 net-new)
-  NumberTicker, Timeline, Reticle, RankedList, PullQuote,
+  Timeline, Reticle, RankedList, PullQuote,
   PillCluster, Stamp, BarRace, SectionDivider, EditorialQuote, StepDivider,
   DropBanner, DropCard, PillMarquee, TimelineRoadmap, MouseDrag,
 } from "./motion-graphics";
@@ -110,7 +110,7 @@ export const MG_MAP: Record<string, React.FC<any>> = {
   StickyNotes, RecordingFrame,
   TweetBubble, InstagramComment, IMessageBubble, TikTokComment,
   // Batch 2 (16 net-new) — canonical type names = export names.
-  NumberTicker, Timeline, Reticle, RankedList, PullQuote,
+  Timeline, Reticle, RankedList, PullQuote,
   PillCluster, Stamp, BarRace, SectionDivider, EditorialQuote, StepDivider,
   DropBanner, DropCard, PillMarquee, TimelineRoadmap, MouseDrag,
 };

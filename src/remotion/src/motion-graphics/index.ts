@@ -43,7 +43,6 @@ export type {
 } from "./RecordingFrame";
 
 // ── Batch 2 — 16 net-new motion graphics (additive; same shared/ interface) ──
-export { NumberTicker } from "./NumberTicker";
 export { Timeline } from "./Timeline";
 export { Reticle } from "./Reticle";
 export { RankedList } from "./RankedList";

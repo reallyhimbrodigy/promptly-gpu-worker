@@ -110,7 +110,7 @@ VALID_MG_TYPES = frozenset({
     # `props` dict, so adding the type here is the whole schema seam: the
     # Pydantic + render Literals derive from this frozenset; render_schemas /
     # PostCutPlan / EditPlan accept the new types automatically.
-    "NumberTicker", "Timeline", "Reticle", "RankedList",
+    "Timeline", "Reticle", "RankedList",
     "PullQuote", "PillCluster", "Stamp", "BarRace", "SectionDivider",
     "EditorialQuote", "StepDivider", "DropBanner", "DropCard", "PillMarquee",
     "TimelineRoadmap", "MouseDrag",

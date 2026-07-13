@@ -56,10 +56,36 @@ def probe():
         rows=list(ex.map(one, PLACES))
     return json.dumps(rows)
 
+@app.function(timeout=180)
+def relevance(place):
+    """Dump the ACTUAL clips Pexels returns for a named place — url slug + who shot it
+    + duration — so relevance (not just raw count) is judgeable. Pexels pads to
+    per_page with loosely-related clips; the raw count hides that."""
+    import os, requests, json
+    key=os.environ.get("PEXELS_API_KEY")
+    r=requests.get("https://api.pexels.com/videos/search",
+        headers={"Authorization":key},params={"query":place,"per_page":10,"orientation":"portrait"},timeout=25)
+    vids=r.json().get("videos") or []
+    out=[]
+    for v in vids:
+        slug=(v.get("url") or "").rstrip("/").split("/")[-1]
+        out.append({"slug":slug,"user":(v.get("user") or {}).get("name"),"dur":v.get("duration")})
+    return json.dumps({"place":place,"clips":out})
+
+
 @app.local_entrypoint()
 def main():
     import json
-    rows=json.loads(probe.remote())
+    print("\n=== RELEVANCE: what Pexels ACTUALLY returns for 'Ahmedabad' (slug = the clip's own title) ===")
+    _rel=json.loads(relevance.remote("Ahmedabad"))
+    for c in _rel["clips"]:
+        print(f"  · {c['slug'][:70]:<72} by {c['user']}  ({c['dur']}s)")
+    print("\n=== (for contrast) 'Eiffel Tower' ===")
+    _rel2=json.loads(relevance.remote("Eiffel Tower"))
+    for c in _rel2["clips"]:
+        print(f"  · {c['slug'][:70]:<72} by {c['user']}  ({c['dur']}s)")
+    import json as _j
+    rows=_j.loads(probe.remote())
     print("\n=== PEXELS PLACE COVERAGE (portrait_usable = passes fetch_broll_clip's h>w,h>=720 filter) ===")
     print(f"{'PLACE':<26}{'PORTRAIT_USABLE':>16}{'PORTRAIT_RET':>14}{'ANY_ORIENT':>12}")
     for r in rows:

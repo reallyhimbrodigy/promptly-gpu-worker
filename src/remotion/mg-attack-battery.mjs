@@ -28,7 +28,6 @@ const TYPES = {
   InstagramComment: { username: "jane", comment: "obsessed with this", likes: 1200, ...A },
   IMessageBubble: { text: "Delivered", messageType: "incoming", ...A },
   TikTokComment: { username: "jane", comment: "no way this is real", likes: 1200, ...A },
-  NumberTicker: { value: 47, suffix: "%", ...A },
   Timeline: { items: [{ label: "Start" }, { label: "Mid" }, { label: "End" }], ...A },
   Reticle: { ...A },
   RankedList: { items: [{ label: "Focus" }, { label: "Discipline" }, { label: "Consistency" }], ...A },

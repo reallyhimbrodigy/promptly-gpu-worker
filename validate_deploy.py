@@ -5008,11 +5008,11 @@ def _item2_mg_attack_wiring():
     import handler as _h
     _src = open("handler.py").read()
     # the table + helper exist and split pops (settle) from sequenced (min)
-    assert _h._MG_ATTACK_MS["BarRace"] == 267 and _h._MG_ATTACK_MS["NumberTicker"] == 200 \
+    assert _h._MG_ATTACK_MS["BarRace"] == 267 \
         and _h._MG_ATTACK_MS["StatCard"] == 83, "sequenced types carry container-arrival min(hit,settle)"
     assert _h._MG_ATTACK_MS["IMessageBubble"] == 50 and _h._MG_ATTACK_MS["PullQuote"] == 500, \
         "pop types carry settle"
-    assert _h._MG_SEQUENCED == frozenset({"BarRace", "NumberTicker", "ProgressBar", "RankedList",
+    assert _h._MG_SEQUENCED == frozenset({"BarRace", "ProgressBar", "RankedList",
                                           "StatCard", "Timeline", "TimelineRoadmap"})
     assert _h._mg_attack_frames("BarRace", 60) == 16 and _h._mg_attack_frames("MouseDrag", 60) == 9, \
         "ms→frames at fps; unmeasured (MouseDrag/PillCluster) → default 150ms"

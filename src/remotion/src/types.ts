@@ -249,7 +249,6 @@ export type MotionGraphicType =
   | "InstagramComment"
   | "IMessageBubble"
   | "TikTokComment"
-  | "NumberTicker"
   | "Timeline"
   | "Reticle"
   | "RankedList"

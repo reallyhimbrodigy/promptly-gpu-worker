@@ -15,13 +15,12 @@ for _fn in ("_MG_ATTACK_MS", "_mg_attack_frames", "_MG_SEQUENCED", "_MG_ATTACK_D
         print(f"  FAIL  {_fn} not implemented yet (RED)")
         print("\n=== RESULT: 0 passed, 1 failed ==="); sys.exit(1)
 
-# the 7 sequenced/count-up types carry container-arrival = min(hit, settle):
-# BarRace min(267,483)=267, NumberTicker min(583,200)=200, StatCard min(83,400)=83
+# the 6 sequenced/count-up types carry container-arrival = min(hit, settle):
+# BarRace min(267,483)=267, StatCard min(83,400)=83
 check("BarRace is sequenced, attack = min(hit,settle) = 267", H._MG_ATTACK_MS["BarRace"] == 267)
-check("NumberTicker sequenced, attack = min(583,200) = 200", H._MG_ATTACK_MS["NumberTicker"] == 200)
 check("StatCard sequenced, attack = min(83,400) = 83", H._MG_ATTACK_MS["StatCard"] == 83)
-check("the 7 sequenced types are all in _MG_SEQUENCED",
-      H._MG_SEQUENCED == frozenset({"BarRace","NumberTicker","ProgressBar","RankedList","StatCard","Timeline","TimelineRoadmap"}))
+check("the 6 sequenced types are all in _MG_SEQUENCED",
+      H._MG_SEQUENCED == frozenset({"BarRace","ProgressBar","RankedList","StatCard","Timeline","TimelineRoadmap"}))
 
 # simple pops carry SETTLE (the whole thing arrives as one)
 check("IMessageBubble pop, attack = settle = 50", H._MG_ATTACK_MS["IMessageBubble"] == 50)

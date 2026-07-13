@@ -37,13 +37,16 @@ def render_vibe(vibe, tag):
     def _rmc(source_path,cuts,edit_plan,*a,**k):
         r=_orig_rmc(source_path,cuts,edit_plan,*a,**k)
         try:
-            # tonal fingerprint — what the palette actually produced
+            # tonal fingerprint — what the emergent per-component fitness actually produced
             tap["sfx"]=sorted([x.get("sound") for x in (edit_plan.get("_parsed_sound_effects") or []) if x.get("sound")])
-            tap["emphasis_sounds"]=sorted([m.get("sound") for m in (edit_plan.get("_emphasis_moments") or []) if m.get("sound") and m.get("sound")!="voice"])
-            tap["caption_styles"]=sorted({(c.get("caption_style") or "?") for c in cuts})
+            _em=edit_plan.get("emphasis_moments") or edit_plan.get("_emphasis_moments") or []
+            tap["emphasis_sounds"]=sorted([m.get("sound") for m in _em if m.get("sound") and m.get("sound")!="voice"])
+            tap["caption_style"]=edit_plan.get("caption_style")  # top-level single value
             tap["mg_types"]=sorted([m.get("type") for m in (edit_plan.get("motion_graphics") or []) if m.get("type")])
             tap["n_cuts"]=len(cuts)
-            tap["transitions"]=sorted({(c.get("transition_out") or "cut") for c in cuts})
+            tap["transitions"]=sorted([(c.get("transition_out")) for c in cuts if c.get("transition_out")])
+            tap["zooms"]=sorted([((m.get("zoom_effect") or {}) or {}).get("type") for m in _em if (m.get("zoom_effect") or {}).get("type")])
+            tap["boom_present"]=any("boom" in str(x.get("sound","")) for x in (edit_plan.get("_parsed_sound_effects") or []))
         except Exception as e:
             tap["tap_err"]=str(e)[:200]
         return r
@@ -79,10 +82,12 @@ def main():
     print("TWO_VIBE_DONE")
     for k in ("corporate","viral"):
         r=out[k]; t=r.get("tap",{})
-        print(f"\n=== {k.upper()} ({r.get('vibe')}) family={t.get('family')} err={r.get('err')}")
+        print(f"\n=== {k.upper()} ({r.get('vibe')}) err={r.get('err')}")
         print(f"  url: {r.get('url')}")
+        print(f"  BOOM PRESENT: {t.get('boom_present')}   <-- corporate MUST be False")
         print(f"  sfx: {t.get('sfx')}")
         print(f"  emphasis_sounds: {t.get('emphasis_sounds')}")
-        print(f"  caption_styles: {t.get('caption_styles')}")
+        print(f"  caption_style: {t.get('caption_style')}")
+        print(f"  zooms: {t.get('zooms')}")
         print(f"  mg_types: {t.get('mg_types')}")
         print(f"  transitions: {t.get('transitions')}  n_cuts={t.get('n_cuts')}")
